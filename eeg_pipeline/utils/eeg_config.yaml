@@ -1,0 +1,407 @@
+# EEG Pipeline Configuration
+
+###################################################################
+# Project Definition
+###################################################################
+project:
+  root: "."
+  task: "thermalactive"
+  subjects:
+    - "0000"
+    - "0001"
+  bids_root: "bids_output"
+  source_root: "source_data"
+
+paths:
+  project_root: "."
+  bids_root: "../bids_output"
+  deriv_root: "../bids_output/derivatives"
+  source_data: "../source_data"
+
+###################################################################
+# Event Columns and Alignment
+###################################################################
+event_columns:
+  temperature:
+    - "stimulus_temp"
+    - "stimulus_temperature"
+    - "temp"
+    - "temperature"
+  rating:
+    - "vas_final_coded_rating"
+    - "vas_final_rating"
+    - "vas_rating"
+    - "pain_intensity"
+    - "pain_rating"
+    - "rating"
+  pain_binary:
+    - "pain_binary_coded"
+    - "pain_binary"
+    - "pain"
+
+alignment:
+  allow_misaligned_trim: false
+  min_alignment_samples: 5
+
+###################################################################
+# Frequency and ROI Templates
+###################################################################
+frequency_bands: &frequency_bands
+  delta: [1.0, 3.9]
+  theta: [4.0, 7.9]
+  alpha: [8.0, 12.9]
+  beta: [13.0, 30.0]
+  gamma: [30.1, 80.0]
+
+###################################################################
+# Foundational ERP Analysis
+###################################################################
+foundational_analysis:
+  erp:
+    picks: "eeg"
+    combine: "gfp"
+    include_tmax_in_crop: false
+    default_crop_tmin: null
+    default_crop_tmax: null
+    pain_color: "crimson"
+    nonpain_color: "navy"
+    plots_subdir: "01_erp_contrast_analysis"
+    counts_file_name: "counts_pain.tsv"
+    baseline_window: [-0.2, 0.0]
+    output_files:
+      pain_gfp: "erp_pain_binary_gfp.png"
+      pain_butterfly: "erp_pain_binary_butterfly.png"
+      temp_gfp: "erp_by_temperature_gfp.png"
+      temp_butterfly: "erp_by_temperature_butterfly.png"
+      temp_butterfly_template: "erp_by_temperature_butterfly_{label}.png"
+
+###################################################################
+# Time-Frequency Analysis
+###################################################################
+time_frequency_analysis:
+  baseline_window: [-5.0, -0.01]
+  plateau_window: [3.0, 10.5]
+  bands: *frequency_bands
+  tfr: &tfr_defaults
+    freq_min: 1.0
+    freq_max: 100.0
+    n_freqs: 40
+    n_cycles_factor: 2.0
+    decim: 4
+    picks: "eeg"
+  rois: &roi_definitions
+    Frontal:
+      - "^(Fpz|Fp[12]|AFz|AF[3-8]|Fz|F[1-8])$"
+    Central:
+      - "^(Cz|C[1-6])$"
+    Parietal:
+      - "^(Pz|P[1-8])$"
+    Occipital:
+      - "^(Oz|O[12]|POz|PO[3-8])$"
+    Temporal:
+      - "^(T7|T8|TP7|TP8|TP9|TP10|FT7|FT8|FT9|FT10)$"
+    Sensorimotor:
+      - "^(FC[1-6]|FCz)$"
+      - "^(C[1-6]|Cz)$"
+      - "^(CP[1-6]|CPz)$"
+    S1_R:
+      - "^(C4|C6|CP4|CP6)$"
+    M1_R:
+      - "^(FC4|C4|CP4)$"
+    PeriRolandic_R:
+      - "^(FC4|C4|C6|CP4|CP6)$"
+    S1_L:
+      - "^(C3|C5|CP3|CP5)$"
+    M1_L:
+      - "^(FC3|C3|CP3)$"
+    PeriRolandic_L:
+      - "^(FC3|C3|C5|CP3|CP5)$"
+    S2_R:
+      - "^(T8|TP8|FT8|CP6)$"
+    S2_L:
+      - "^(T7|TP7|FT7|CP5)$"
+    MCC_ACC:
+      - "^(FCz|Cz|Fz)$"
+    Parietal_R:
+      - "^(P2|P4|P6|PO4|PO8)$"
+    Parietal_L:
+      - "^(P1|P3|P5|PO3|PO7)$"
+    Temporal_R:
+      - "^(T8|TP8|TP10|FT8|FT10)$"
+    Temporal_L:
+      - "^(T7|TP7|TP9|FT7|FT9)$"
+    PainCore_R:
+      - "^(FC4|C4|C6|CP4|CP6|T8|TP8|FT8)$"
+    PainCore_L:
+      - "^(FC3|C3|C5|CP3|CP5|T7|TP7|FT7)$"
+  roi_mask_params:
+    marker: "o"
+    markerfacecolor: "w"
+    markeredgecolor: "k"
+    linewidth: 0.5
+    markersize: 4
+  roi_highlight_enabled: false
+  min_baseline_samples: 5
+  topo_contours: 6
+  topo_cmap: "RdBu_r"
+  colorbar_fraction: 0.03
+  colorbar_pad: 0.02
+  plot_styling:
+    contour_lines: 6
+    colormap: "RdBu_r"
+    footer:
+      fontsize: 8
+      alpha: 0.8
+      position: [0.01, 0.01]
+      template: "Units: log10(power/baseline) | Baseline: [{baseline_start:.2f}, {baseline_end:.2f}] s"
+  sig_mask_params:
+    marker: "o"
+    markerfacecolor: "none"
+    markeredgecolor: "k"
+    linewidth: 1.0
+    markersize: 5
+
+tfr_topography_pipeline:
+  baseline_window: [-5.0, -0.01]
+  plateau_window: [3.0, 10.5]
+  min_baseline_samples: 5
+  temperature_strategy: "pooled"
+  bands: *frequency_bands
+  tfr:
+    <<: *tfr_defaults
+    workers: -1
+  plot_styling:
+    footer:
+      fontsize: 8
+      alpha: 0.8
+      position: [0.01, 0.01]
+      template: "Units: log10(power/baseline) | Baseline: [{baseline_start:.2f}, {baseline_end:.2f}] s"
+
+###################################################################
+# Feature Engineering
+###################################################################
+feature_engineering:
+  enable_plots: true
+  save_tfr_with_sidecar: true
+  features:
+    plateau_start: 3.0
+    plateau_end: 10.5
+    temporal_bins:
+      - start: 3.0
+        end: 5.0
+        label: "early"
+      - start: 5.0
+        end: 7.5
+        label: "mid"
+      - start: 7.5
+        end: 10.5
+        label: "late"
+  tfr_processing:
+    baseline_mode: "logratio"
+    save_individual_bands: true
+  microstates:
+    n_states: 4
+    min_peak_distance_ms: 20.0
+    peaks_per_epoch: 5
+
+features:
+  frequency_bands:
+    - "delta"
+    - "theta"
+    - "alpha"
+    - "beta"
+    - "gamma"
+
+###################################################################
+# Raw Data Conversion
+###################################################################
+raw_to_bids:
+  default_montage: "easycap-M1"
+  default_line_freq: 60.0
+
+###################################################################
+# Behavior Analysis
+###################################################################
+behavior_analysis:
+  time_frequency_heatmap:
+    time_resolution: 0.1
+    freq_resolution: 2.0
+    time_window: [0.0, 10.5]
+    freq_range: [1.0, 80.0]
+    alpha: 0.05
+    roi_selection: null
+    n_cycles_factor: 2.0
+    decim: 4
+  statistics:
+    correlation_method: "spearman"
+    fdr_alpha: 0.05
+    n_permutations: 0
+    partial_covariates: []
+  predictors:
+    top_n: 20
+  visualization:
+    smoothing_sigma: 2.0
+    scatter_plot_size: 30
+    scatter_plot_alpha: 0.7
+
+###################################################################
+# Visualization Helpers
+###################################################################
+visualization:
+  dpi: 300
+  band_colors:
+    delta: "#4169e1"
+    theta: "purple"
+    alpha: "green"
+    beta: "orange"
+    gamma: "red"
+  footer_templates:
+    erp_complete: "Units: EEG amplitude (V) | ERP Baseline: {baseline} s | Combine: {method}"
+    erp_baseline: "ERP Baseline: {baseline} s"
+    tfr_baseline: "TFR Baseline: {baseline} s"
+    behavior_fdr: "Significance: BH-FDR α={fdr_alpha}"
+    behavior_baseline: "Baseline: {baseline} s"
+    combine_method: "Combine: {method}"
+
+###################################################################
+# Power Analysis
+###################################################################
+power:
+  bands_to_use:
+    - "delta"
+    - "theta"
+    - "alpha"
+    - "beta"
+    - "gamma"
+
+###################################################################
+# Decoding Analysis
+###################################################################
+decoding:
+  cv:
+    inner_splits: 5
+  models:
+    elasticnet:
+      max_iter: 200000
+      tol: 0.001
+      selection: "random"
+      grid:
+        alpha: [0.001, 0.01, 0.1, 1, 10, 100]
+        l1_ratio: [0.2, 0.5, 0.8]
+    random_forest:
+      n_estimators: 500
+      estimator_n_jobs: -1
+      bootstrap: true
+      grid:
+        max_depth: [null, 8, 16, 32]
+        max_features: ["sqrt", 0.2, 0.5, 1.0]
+        min_samples_leaf: [1, 5, 10]
+    temperature_only:
+      ridge_alpha_grid: [0.0, 0.001, 0.01, 0.1, 1, 10]
+  analysis:
+    n_perm_quick: 1000
+    n_perm_refit: 500
+    perm_refit_n_jobs: 1
+    perm_refit_use_nested_cv: false
+    rf_perm_importance_repeats: 20
+    bootstrap_n: 1000
+  riemann:
+    plateau_window: [3.0, 10.5]
+    min_channels_for_fold: 32
+    bands:
+      - [1.0, 4.0]
+      - [4.0, 8.0]
+      - [8.0, 13.0]
+      - [13.0, 30.0]
+      - [30.0, 45.0]
+    sliding_window:
+      window_len: 0.75
+      step: 0.25
+  paths:
+    results_subdir: "decoding"
+    plots_subdir: "plots"
+    best_params:
+      elasticnet_loso: "decoding/best_params/elasticnet_loso.jsonl"
+      rf_loso: "decoding/best_params/rf_loso.jsonl"
+      elasticnet_within: "decoding/best_params/elasticnet_within.jsonl"
+      rf_within: "decoding/best_params/rf_within.jsonl"
+      riemann_loso: "decoding/best_params/riemann_loso.jsonl"
+      riemann_band_template: "decoding/best_params/riemann_{label}_loso.jsonl"
+      temperature_only: "decoding/best_params/temperature_only.jsonl"
+    predictions:
+      elasticnet_loso: "decoding/predictions/elasticnet_loso.tsv"
+      elasticnet_within: "decoding/predictions/elasticnet_within.tsv"
+      rf_loso: "decoding/predictions/rf_loso.tsv"
+      rf_within: "decoding/predictions/rf_within.tsv"
+      riemann_loso: "decoding/predictions/riemann_loso.tsv"
+      riemann_band_template: "decoding/predictions/riemann_{label}_loso.tsv"
+      temperature_only: "decoding/predictions/temperature_only.tsv"
+      baseline_global: "decoding/predictions/baseline_global.tsv"
+    per_subject_metrics:
+      elasticnet_loso: "decoding/metrics/elasticnet_loso_per_subject.tsv"
+      elasticnet_within: "decoding/metrics/elasticnet_within_per_subject.tsv"
+      rf_loso: "decoding/metrics/rf_loso_per_subject.tsv"
+      rf_within: "decoding/metrics/rf_within_per_subject.tsv"
+      riemann_loso: "decoding/metrics/riemann_loso_per_subject.tsv"
+      temperature_only: "decoding/metrics/temperature_only_per_subject.tsv"
+      baseline_global: "decoding/metrics/baseline_global_per_subject.tsv"
+    indices:
+      elasticnet_loso: "decoding/indices/elasticnet_loso_indices.tsv"
+      elasticnet_within: "decoding/indices/elasticnet_within_indices.tsv"
+      rf_loso: "decoding/indices/rf_loso_indices.tsv"
+      rf_within: "decoding/indices/rf_within_indices.tsv"
+      riemann_loso: "decoding/indices/riemann_loso_indices.tsv"
+      riemann_band_template: "decoding/indices/riemann_{label}_loso_indices.tsv"
+      temperature_only: "decoding/indices/temperature_only_indices.tsv"
+      baseline_global: "decoding/indices/baseline_global_indices.tsv"
+    summaries:
+      riemann_bands: "decoding/summaries/riemann_bands.json"
+      riemann_sliding_window: "decoding/summaries/riemann_sliding_window.json"
+      permutation_refit_null_rs: "decoding/summaries/permutation_refit_null_rs.txt"
+      permutation_refit_summary: "decoding/summaries/permutation_refit_summary.json"
+      all_metrics_wide: "decoding/summaries/all_metrics_wide.tsv"
+      summary: "decoding/summaries/summary.json"
+      incremental: "decoding/summaries/incremental_validity.json"
+  flags:
+    run_within_subject_kfold: true
+    run_riemann: true
+    run_shap: true
+
+###################################################################
+# Global Settings
+###################################################################
+analysis:
+  strict_mode: true
+
+statistics:
+  use_spearman_default: true
+  sig_alpha: 0.05
+  cluster_n_perm: 1024
+  cluster_report_size: false
+  cluster_report_mass: false
+
+random:
+  seed: 42
+
+logging:
+  file_names:
+    foundational: "01_erp_contrast_analysis.log"
+    feature_engineering: "02_feature_extraction.log"
+    time_frequency: "03_tfr_topography_pipeline.log"
+    behavior_analysis: "04_behavior_correlation_analysis.log"
+    decoding: "05_pain_decoding_models.log"
+
+output:
+  log_file_name: "behavior_analysis.log"
+  fig_dpi: 300
+  pad_inches: 0.02
+  bbox_inches: "tight"
+  save_formats:
+    - "svg"
+
+environment:
+  thread_limits:
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
