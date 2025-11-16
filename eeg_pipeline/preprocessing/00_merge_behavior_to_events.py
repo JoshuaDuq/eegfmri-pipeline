@@ -16,7 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from eeg_pipeline.utils.config_loader import EEGConfig
-from eeg_pipeline.utils.io_utils import trim_behavioral_to_events_strict
+from eeg_pipeline.utils.data_loading import trim_behavioral_to_events_strict
 
 config = EEGConfig()
 PROJECT_ROOT = config.project.root
@@ -31,6 +31,39 @@ TASK = config.project.task
 
 def _norm_trial_type(s: str) -> str:
     return re.sub(r"\s+", " ", str(s)).strip()
+
+
+def _normalize_event_filters(filters: Optional[List[str]]) -> Optional[List[str]]:
+    if filters in (None, [], [None]):
+        return None
+    normalized = [_norm_trial_type(f) for f in filters if str(f).strip() != ""]
+    return normalized if normalized else None
+
+
+def _create_event_mask(
+    normalized_trial_types: pd.Series,
+    prefixes: Optional[List[str]],
+    types: Optional[List[str]]
+) -> pd.Series:
+    mask = pd.Series(False, index=normalized_trial_types.index)
+    if prefixes:
+        for prefix in prefixes:
+            mask = mask | normalized_trial_types.str.startswith(prefix)
+    if types:
+        mask = mask | normalized_trial_types.isin(types)
+    return mask
+
+
+def _format_selection_criteria(
+    prefixes: Optional[List[str]],
+    types: Optional[List[str]]
+) -> str:
+    criteria_parts = []
+    if prefixes:
+        criteria_parts.append(f"prefixes={prefixes}")
+    if types:
+        criteria_parts.append(f"types={types}")
+    return "; ".join(criteria_parts) if criteria_parts else "<none>"
 
 
 def _extract_run_number_from_path(p: Path) -> Optional[int]:
@@ -117,62 +150,50 @@ def merge_one_subject_events(
         print(f"[warn] 'trial_type' column missing in events: {events_tsv}")
         return False
 
-    norm_tt = ev_df["trial_type"].map(_norm_trial_type)
-    prefixes = None if event_prefixes in (None, [], [None]) else [
-        _norm_trial_type(p) for p in event_prefixes if str(p).strip() != ""
-    ]
-    types = None if event_types in (None, [], [None]) else [
-        _norm_trial_type(t) for t in event_types if str(t).strip() != ""
-    ]
-    if not prefixes and not types:
-        prefixes = ["Trig_therm/T  1"]
+    normalized_trial_types = ev_df["trial_type"].map(_norm_trial_type)
+    
+    normalized_prefixes = _normalize_event_filters(event_prefixes)
+    normalized_types = _normalize_event_filters(event_types)
+    
+    if not normalized_prefixes and not normalized_types:
+        normalized_prefixes = [_norm_trial_type("Trig_therm/T  1")]
 
-    mask = pd.Series(False, index=ev_df.index)
-    if prefixes:
-        for p in prefixes:
-            mask = mask | norm_tt.str.startswith(p)
-    if types:
-        mask = mask | norm_tt.isin(types)
-
-    target_idx = ev_df.index[mask].tolist()
-    if len(target_idx) == 0:
-        sel_desc = []
-        if prefixes:
-            sel_desc.append(f"prefixes={prefixes}")
-        if types:
-            sel_desc.append(f"types={types}")
-        crit = "; ".join(sel_desc) if sel_desc else "<none>"
-        print(f"[warn] No target events in: {events_tsv} (criteria: {crit})")
+    event_mask = _create_event_mask(normalized_trial_types, normalized_prefixes, normalized_types)
+    target_indices = ev_df.index[event_mask].tolist()
+    
+    if len(target_indices) == 0:
+        criteria_description = _format_selection_criteria(normalized_prefixes, normalized_types)
+        print(f"[warn] No target events in: {events_tsv} (criteria: {criteria_description})")
         return False
 
-    ev_target_df = ev_df.iloc[target_idx].copy()
+    target_events_df = ev_df.iloc[target_indices].copy()
     try:
-        beh_sub = trim_behavioral_to_events_strict(beh_df, ev_target_df)
+        behavioral_subset = trim_behavioral_to_events_strict(beh_df, target_events_df)
     except ValueError as e:
-        run_txt = f"run-{run_num} " if run_num is not None else ""
-        print(f"[error] Behavioral/events mismatch for sub-{sub_label} {run_txt}: {e}")
+        run_text = f"run-{run_num} " if run_num is not None else ""
+        print(f"[error] Behavioral/events mismatch for sub-{sub_label} {run_text}: {e}")
         return False
 
-    n = len(beh_sub)
-    ev_target_rows = target_idx[:n]
+    n_matched = len(behavioral_subset)
+    event_rows_to_update = target_indices[:n_matched]
 
-    for col in beh_sub.columns:
-        if col not in ev_df.columns:
-            ev_df[col] = pd.NA
-        ev_df.loc[ev_target_rows, col] = beh_sub[col].values
+    for column in behavioral_subset.columns:
+        if column not in ev_df.columns:
+            ev_df[column] = pd.NA
+        ev_df.loc[event_rows_to_update, column] = behavioral_subset[column].values
 
     if dry_run:
         print(
-            f"[dry-run] Would update: {events_tsv} with columns: {list(beh_sub.columns)} "
+            f"[dry-run] Would update: {events_tsv} with columns: {list(behavioral_subset.columns)} "
             f"from {beh_csv.name}"
         )
         return True
 
     try:
         ev_df.to_csv(events_tsv, sep="\t", index=False)
-        run_txt = f" run-{run_num}" if run_num is not None else ""
+        run_text = f" run-{run_num}" if run_num is not None else ""
         print(
-            f"[ok] Merged behavior -> events for sub-{sub_label}{run_txt}: {events_tsv} "
+            f"[ok] Merged behavior -> events for sub-{sub_label}{run_text}: {events_tsv} "
             f"using {beh_csv.name}"
         )
         return True
@@ -181,63 +202,112 @@ def merge_one_subject_events(
         return False
 
 
+def _load_run_files(run_files: List[Path]) -> List[tuple[int, pd.DataFrame, Path]]:
+    frames = []
+    for file_path in run_files:
+        run_number = _extract_run_number_from_path(file_path)
+        if run_number is None:
+            continue
+        try:
+            dataframe = pd.read_csv(file_path, sep="\t")
+        except Exception as e:
+            print(f"[warn] Skipping run file due to read error: {file_path} -> {e}")
+            continue
+        if "onset" in dataframe.columns:
+            dataframe = dataframe.sort_values("onset", kind="mergesort")
+        frames.append((run_number, dataframe, file_path))
+    return frames
+
+
+def _get_union_columns(frames: List[tuple[int, pd.DataFrame, Path]]) -> List[str]:
+    union_columns = []
+    for _, dataframe, _ in frames:
+        for column in dataframe.columns:
+            if column not in union_columns:
+                union_columns.append(column)
+    return union_columns
+
+
+def _add_run_id_column(dataframe: pd.DataFrame, run_number: int) -> None:
+    if "run_id" not in dataframe.columns and "run" not in dataframe.columns:
+        dataframe.insert(0, "run_id", run_number)
+    elif "run_id" in dataframe.columns and dataframe["run_id"].isna().any():
+        dataframe["run_id"] = dataframe["run_id"].fillna(run_number)
+    elif "run" in dataframe.columns and "run_id" not in dataframe.columns:
+        if dataframe["run"].isna().any():
+            dataframe["run"] = dataframe["run"].fillna(run_number)
+
+
+def _update_sample_indices(dataframe: pd.DataFrame, cumulative_offset: int) -> int:
+    if "sample" not in dataframe.columns:
+        return cumulative_offset
+    
+    sample_numeric = pd.to_numeric(dataframe["sample"], errors="coerce")
+    if sample_numeric.notna().any():
+        if cumulative_offset > 0:
+            dataframe["sample"] = sample_numeric + cumulative_offset
+        max_sample = int(sample_numeric.max()) if cumulative_offset == 0 else int((sample_numeric + cumulative_offset).max())
+        return max_sample + 1
+    
+    if "onset" in dataframe.columns:
+        onset_numeric = pd.to_numeric(dataframe["onset"], errors="coerce")
+        if onset_numeric.notna().any():
+            max_onset = float(onset_numeric.max())
+            sample_numeric = pd.to_numeric(dataframe["sample"], errors="coerce")
+            if sample_numeric.notna().any() and onset_numeric.notna().any() and max_onset > 0:
+                sampling_rate_estimate = float(sample_numeric.max() / max_onset)
+                if sampling_rate_estimate > 0:
+                    return int(max_onset * sampling_rate_estimate) + 1
+    
+    return cumulative_offset
+
+
+def _get_sort_columns(combined_df: pd.DataFrame) -> List[str]:
+    if "onset" in combined_df.columns:
+        if "run_id" in combined_df.columns:
+            return ["run_id", "onset"]
+        if "run" in combined_df.columns:
+            return ["run", "onset"]
+        return ["onset"]
+    
+    if "run_id" in combined_df.columns:
+        return ["run_id"]
+    if "run" in combined_df.columns:
+        return ["run"]
+    return []
+
+
 def _combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
     run_files = sorted(sub_eeg_dir.glob(f"*_task-{task}_run-*_events.tsv"))
     if not run_files:
         return None
 
-    frames: List[tuple[int, pd.DataFrame, Path]] = []
-    for p in run_files:
-        r = _extract_run_number_from_path(p)
-        if r is None:
-            continue
-        try:
-            df = pd.read_csv(p, sep="\t")
-        except Exception as e:
-            print(f"[warn] Skipping run file due to read error: {p} -> {e}")
-            continue
-        if "onset" in df.columns:
-            df = df.sort_values("onset", kind="mergesort")
-        frames.append((r, df, p))
-
+    frames = _load_run_files(run_files)
     if not frames:
         return None
 
     frames.sort(key=lambda t: t[0])
-    run_set = {r for r, _, _ in frames}
-    n_runs = len(run_set)
+    n_runs = len({r for r, _, _ in frames})
+    union_columns = _get_union_columns(frames)
 
-    union_cols: List[str] = []
-    for _, df, _ in frames:
-        for c in list(df.columns):
-            if c not in union_cols:
-                union_cols.append(c)
-
-    dfs: List[pd.DataFrame] = []
-    for r, df, _ in frames:
-        for c in union_cols:
-            if c not in df.columns:
-                df[c] = pd.NA
-        df = df[union_cols]
+    dataframes = []
+    cumulative_sample_offset = 0
+    
+    for run_number, dataframe, _ in frames:
+        for column in union_columns:
+            if column not in dataframe.columns:
+                dataframe[column] = pd.NA
+        dataframe = dataframe[union_columns]
         
-        if "run_id" not in df.columns and "run" not in df.columns:
-            df.insert(0, "run_id", r)
-        elif "run_id" in df.columns and df["run_id"].isna().any():
-            df["run_id"] = df["run_id"].fillna(r)
-        elif "run" in df.columns and "run_id" not in df.columns:
-            if df["run"].isna().any():
-                df["run"] = df["run"].fillna(r)
+        _add_run_id_column(dataframe, run_number)
+        cumulative_sample_offset = _update_sample_indices(dataframe, cumulative_sample_offset)
         
-        dfs.append(df)
+        dataframes.append(dataframe)
 
-    combined = pd.concat(dfs, axis=0, ignore_index=True)
-    if "onset" in combined.columns:
-        sort_by = ["run_id", "onset"] if "run_id" in combined.columns else ["run", "onset"] if "run" in combined.columns else ["onset"]
-        combined = combined.sort_values(sort_by, kind="mergesort").reset_index(drop=True)
-    else:
-        sort_by = ["run_id"] if "run_id" in combined.columns else ["run"] if "run" in combined.columns else []
-        if sort_by:
-            combined = combined.sort_values(sort_by, kind="mergesort").reset_index(drop=True)
+    combined = pd.concat(dataframes, axis=0, ignore_index=True)
+    sort_columns = _get_sort_columns(combined)
+    if sort_columns:
+        combined = combined.sort_values(sort_columns, kind="mergesort").reset_index(drop=True)
 
     sub_prefix = sub_eeg_dir.parent.name
     out_path = sub_eeg_dir / f"{sub_prefix}_task-{task}_events.tsv"
