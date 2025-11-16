@@ -1,18 +1,52 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Any
 from dataclasses import dataclass
+import logging
 
 import numpy as np
 import pandas as pd
 import mne
 from sklearn.cluster import KMeans
-from scipy import stats
 from scipy.signal import find_peaks
 
-from eeg_pipeline.utils.tfr_utils import time_mask, freq_mask
-from eeg_pipeline.utils.io_utils import find_first
+from eeg_pipeline.utils.tfr_utils import (
+    time_mask,
+    freq_mask,
+    extract_tfr_object,
+    extract_band_power,
+    process_temporal_bin,
+)
+from eeg_pipeline.utils.io_utils import (
+    get_column_from_config,
+    get_pain_column_from_config,
+    find_connectivity_arrays,
+    load_connectivity_labels,
+)
+from eeg_pipeline.utils.stats_utils import (
+    compute_correlation_for_metric_state,
+    compute_duration_p_value,
+    fit_aperiodic_to_all_epochs,
+    compute_residuals,
+    extract_pain_masks,
+    extract_duration_data,
+)
+from eeg_pipeline.utils.data_loading import (
+    flatten_lower_triangles,
+    align_feature_blocks,
+    extract_epoch_data,
+)
+from eeg_pipeline.utils.config_loader import (
+    get_config_value,
+    get_config_int,
+    get_config_float,
+    get_frequency_bands,
+    parse_temporal_bin_config,
+    get_default_frequency_bands,
+    get_frequency_bands_for_aperiodic,
+    load_settings,
+)
 
 
 ###################################################################
@@ -20,70 +54,161 @@ from eeg_pipeline.utils.io_utils import find_first
 ###################################################################
 
 
-def zscore_maps(X: np.ndarray, axis: int = 1, eps: float = 1e-12) -> np.ndarray:
-    mu = np.mean(X, axis=axis, keepdims=True)
-    sd = np.std(X, axis=axis, keepdims=True)
+def zscore_maps(maps: np.ndarray, axis: int = 1, eps: Optional[float] = None) -> np.ndarray:
+    if maps.size == 0:
+        return maps
+    
+    if eps is None:
+        config_local = load_settings()
+        eps = config_local.get("feature_engineering.constants.epsilon_std", 1e-12)
+        eps = float(eps)
+    
+    if axis < 0 or axis >= maps.ndim:
+        raise ValueError(f"Invalid axis {axis} for array with {maps.ndim} dimensions")
+    
+    mu = np.mean(maps, axis=axis, keepdims=True)
+    sd = np.std(maps, axis=axis, keepdims=True)
     sd = np.where(sd < eps, eps, sd)
-    return (X - mu) / sd
+    return (maps - mu) / sd
 
 
 def compute_gfp(data: np.ndarray) -> np.ndarray:
+    if data.size == 0:
+        return np.array([])
+    if data.ndim < 2:
+        raise ValueError(f"compute_gfp requires at least 2D array, got shape {data.shape}")
     return np.std(data, axis=0)
 
 
-def corr_maps(A: np.ndarray, B: np.ndarray) -> np.ndarray:
-    return (A @ B.T) / (A.shape[1] - 1)
+def corr_maps(maps_a: np.ndarray, maps_b: np.ndarray) -> np.ndarray:
+    if maps_a.size == 0 or maps_b.size == 0:
+        raise ValueError("corr_maps requires non-empty arrays")
+    
+    if maps_a.ndim != 2 or maps_b.ndim != 2:
+        raise ValueError(f"corr_maps requires 2D arrays, got shapes {maps_a.shape} and {maps_b.shape}")
+    
+    if maps_a.shape[1] != maps_b.shape[1]:
+        raise ValueError(
+            f"corr_maps requires matching second dimension, got {maps_a.shape[1]} and {maps_b.shape[1]}"
+        )
+    
+    n_samples = maps_a.shape[1]
+    if n_samples <= 1:
+        raise ValueError(f"corr_maps requires at least 2 samples, got {n_samples}")
+    
+    return (maps_a @ maps_b.T) / (n_samples - 1)
 
 
-def label_timecourse(Xch: np.ndarray, templates: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    Zt = zscore_maps(Xch.T, axis=1)
-    C = corr_maps(Zt, templates)
-    idx = np.argmax(np.abs(C), axis=1)
-    corr_assigned = C[np.arange(C.shape[0]), idx]
-    return idx.astype(int), corr_assigned.astype(float)
+def label_timecourse(channel_data: np.ndarray, templates: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    if channel_data.size == 0:
+        return np.array([], dtype=int), np.array([], dtype=float)
+    
+    if templates.size == 0 or templates.shape[0] == 0:
+        raise ValueError("label_timecourse requires non-empty templates")
+    
+    if channel_data.ndim != 2:
+        raise ValueError(f"channel_data must be 2D, got shape {channel_data.shape}")
+    
+    if templates.ndim != 2:
+        raise ValueError(f"templates must be 2D, got shape {templates.shape}")
+    
+    if channel_data.shape[0] != templates.shape[1]:
+        raise ValueError(
+            f"Dimension mismatch: channel_data has {channel_data.shape[0]} channels, "
+            f"but templates expect {templates.shape[1]} channels"
+        )
+    
+    zscored = zscore_maps(channel_data.T, axis=1)
+    correlations = corr_maps(zscored, templates)
+    state_indices = np.argmax(np.abs(correlations), axis=1)
+    assigned_correlations = correlations[np.arange(correlations.shape[0]), state_indices]
+    return state_indices.astype(int), assigned_correlations.astype(float)
+
+
+def _extract_peak_maps_from_epoch(
+    epoch: np.ndarray,
+    min_dist_samples: int,
+    peaks_per_epoch: int,
+) -> Optional[np.ndarray]:
+    if epoch.size == 0:
+        return None
+    
+    if epoch.ndim != 2:
+        return None
+    
+    if min_dist_samples < 1:
+        min_dist_samples = 1
+    
+    if peaks_per_epoch < 1:
+        return None
+    
+    gfp = compute_gfp(epoch)
+    if gfp.size == 0 or np.allclose(gfp, 0):
+        return None
+    
+    peaks, _ = find_peaks(gfp, distance=min_dist_samples)
+    if peaks.size == 0:
+        return None
+    
+    sorted_indices = np.argsort(gfp[peaks])[::-1]
+    n_select = min(peaks_per_epoch, peaks.size)
+    selected_peaks = peaks[sorted_indices[:n_select]]
+    epoch_maps = epoch[:, selected_peaks].T
+    return zscore_maps(epoch_maps, axis=1)
 
 
 def extract_templates_from_trials(
-    X: np.ndarray,
+    trial_data: np.ndarray,
     sfreq: float,
     n_states: int,
-    config,
+    config: Any,
 ) -> Optional[np.ndarray]:
-    min_peak_distance_ms = float(
-        config.get("feature_engineering.microstates.min_peak_distance_ms", 20.0)
-    ) if config else 20.0
-    peaks_per_epoch = int(
-        config.get("feature_engineering.microstates.peaks_per_epoch", 5)
-    ) if config else 5
-    microstate_random_state = int(config.get("random.seed", 42) if config else 42)
+    if n_states <= 0:
+        raise ValueError(f"Number of states must be positive, got {n_states}")
+    
+    min_peak_distance_ms = get_config_float(
+        config, "feature_engineering.microstates.min_peak_distance_ms", 20.0
+    )
+    peaks_per_epoch = get_config_int(
+        config, "feature_engineering.microstates.peaks_per_epoch", 5
+    )
+    random_state = get_config_int(config, "random.seed", 42)
 
+    min_dist_samples = max(1, int((min_peak_distance_ms / 1000.0) * sfreq))
     peak_maps: List[np.ndarray] = []
-    min_dist = max(1, int((min_peak_distance_ms / 1000.0) * sfreq))
-    for ep in X:
-        gfp = compute_gfp(ep)
-        if np.allclose(gfp, 0):
-            continue
-        peaks, _ = find_peaks(gfp, distance=min_dist)
-        if peaks.size == 0:
-            continue
-        order = np.argsort(gfp[peaks])[::-1]
-        sel = peaks[order[:peaks_per_epoch]]
-        maps = ep[:, sel].T
-        maps = zscore_maps(maps, axis=1)
-        peak_maps.append(maps)
+    
+    for epoch in trial_data:
+        epoch_maps = _extract_peak_maps_from_epoch(epoch, min_dist_samples, peaks_per_epoch)
+        if epoch_maps is not None:
+            peak_maps.append(epoch_maps)
+    
     if not peak_maps:
         return None
-    M = np.vstack(peak_maps)
-
-    kmeans = KMeans(n_clusters=int(n_states), n_init=20, random_state=microstate_random_state)
-    kmeans.fit(M)
+    
+    all_peak_maps = np.vstack(peak_maps)
+    if all_peak_maps.shape[0] < n_states:
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            f"Insufficient peak maps ({all_peak_maps.shape[0]}) for requested number of states ({n_states}); "
+            "cannot fit KMeans. Returning None."
+        )
+        return None
+    
+    kmeans_n_init = get_config_int(config, "feature_engineering.constants.kmeans_n_init", 20)
+    kmeans = KMeans(n_clusters=int(n_states), n_init=kmeans_n_init, random_state=random_state)
+    kmeans.fit(all_peak_maps)
     templates = kmeans.cluster_centers_
-    templates = zscore_maps(templates, axis=1)
-    return templates
+    return zscore_maps(templates, axis=1)
 
 
-def _state_labels(n_states: int) -> List[str]:
-    return [chr(65 + i) for i in range(n_states)]
+def _state_labels(n_states: int, config: Any = None) -> List[str]:
+    if config is None:
+        config = load_settings()
+    ascii_uppercase_a = config.get("feature_engineering.constants.ascii_uppercase_a", 65)
+    max_ascii = 127
+    if ascii_uppercase_a + n_states > max_ascii:
+        return [f"State_{i}" for i in range(n_states)]
+    return [chr(ascii_uppercase_a + i) for i in range(n_states)]
 
 
 @dataclass
@@ -101,11 +226,21 @@ class MicrostateDurationStat:
     p_value: float
 
 
+def _detect_number_of_states(ms_df: pd.DataFrame) -> int:
+    state_indices = (
+        int(col.split("_")[-1])
+        for col in ms_df.columns
+        if col.startswith("ms_") and col.rsplit("_", 1)[-1].isdigit()
+    )
+    max_idx = max(state_indices, default=-1)
+    return max_idx + 1 if max_idx >= 0 else 0
+
+
 def compute_microstate_metric_correlations(
     ms_df: pd.DataFrame,
     events_df: pd.DataFrame,
     *,
-    config,
+    config: Any,
     metrics: Optional[List[str]] = None,
     metric_labels: Optional[Dict[str, str]] = None,
     method: str = "spearman",
@@ -113,20 +248,13 @@ def compute_microstate_metric_correlations(
     if ms_df is None or ms_df.empty or events_df is None or events_df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    rating_col = None
-    if config is not None:
-        rating_col = next(
-            (col for col in config.get("event_columns.rating", []) if col in events_df.columns),
-            None,
-        )
-    if rating_col is None:
-        numeric_cols = events_df.select_dtypes(include=[np.number]).columns
-        rating_col = numeric_cols[0] if len(numeric_cols) else None
+    rating_col = get_column_from_config(config, "event_columns.rating", events_df)
     if rating_col is None:
         return pd.DataFrame(), pd.DataFrame()
 
     ratings = pd.to_numeric(events_df[rating_col], errors="coerce")
-    if ratings.notna().sum() < 5:
+    min_correlation_samples = config.get("feature_engineering.constants.min_correlation_samples", 5)
+    if ratings.notna().sum() < min_correlation_samples:
         return pd.DataFrame(), pd.DataFrame()
 
     metrics = metrics or ["coverage", "duration", "occurrence", "gev"]
@@ -137,15 +265,8 @@ def compute_microstate_metric_correlations(
         "gev": "GEV",
     }
 
-    n_states_detected = max(
-        (
-            int(col.split("_")[-1])
-            for col in ms_df.columns
-            if col.startswith("ms_") and col.rsplit("_", 1)[-1].isdigit()
-        ),
-        default=-1,
-    ) + 1
-    state_labels = _state_labels(n_states_detected) if n_states_detected > 0 else []
+    n_states_detected = _detect_number_of_states(ms_df)
+    state_labels = _state_labels(n_states_detected, config) if n_states_detected > 0 else []
 
     corr = pd.DataFrame(
         np.nan,
@@ -160,22 +281,21 @@ def compute_microstate_metric_correlations(
             col = f"ms_{metric}_{state_idx}"
             if col not in ms_df.columns:
                 continue
+            
             metric_vals = pd.to_numeric(ms_df[col], errors="coerce")
-            valid_mask = metric_vals.notna() & ratings.notna()
-            if valid_mask.sum() < 5:
-                continue
-            x = metric_vals[valid_mask].to_numpy()
-            y = ratings[valid_mask].to_numpy()
-            if np.std(x) <= 0 or np.std(y) <= 0:
-                continue
-            if method == "pearson":
-                r, p = stats.pearsonr(x, y)
-            else:
-                r, p = stats.spearmanr(x, y)
-            corr.at[metric_label, state_label] = float(r)
-            pvals.at[metric_label, state_label] = float(p)
+            result = compute_correlation_for_metric_state(metric_vals, ratings, method)
+            if result is not None:
+                r, p = result
+                corr.at[metric_label, state_label] = r
+                pvals.at[metric_label, state_label] = p
 
     return corr, pvals
+
+
+def _compute_transition_mean(trans_vals: pd.Series, mask: np.ndarray) -> float:
+    data = trans_vals[mask].to_numpy(dtype=float)
+    finite_data = data[np.isfinite(data)]
+    return np.mean(finite_data) if finite_data.size > 0 else 0.0
 
 
 def compute_microstate_transition_stats(
@@ -183,25 +303,21 @@ def compute_microstate_transition_stats(
     events_df: pd.DataFrame,
     *,
     n_states: int,
-    config,
+    config: Any,
 ) -> MicrostateTransitionStats:
     trans_nonpain = np.zeros((n_states, n_states), dtype=float)
     trans_pain = np.zeros((n_states, n_states), dtype=float)
+    state_labels = _state_labels(n_states, config)
 
     if ms_df is None or ms_df.empty or events_df is None or events_df.empty:
-        return MicrostateTransitionStats(trans_nonpain, trans_pain, _state_labels(n_states))
+        return MicrostateTransitionStats(trans_nonpain, trans_pain, state_labels)
 
-    pain_col = None
-    if config is not None:
-        pain_col = next(
-            (col for col in config.get("event_columns.pain_binary", []) if col in events_df.columns),
-            None,
-        )
+    pain_col = get_pain_column_from_config(config, events_df)
     if pain_col is None:
-        return MicrostateTransitionStats(trans_nonpain, trans_pain, _state_labels(n_states))
+        return MicrostateTransitionStats(trans_nonpain, trans_pain, state_labels)
 
     pain_vals = pd.to_numeric(events_df[pain_col], errors="coerce")
-    valid_mask = pain_vals.notna()
+    nonpain_mask, pain_mask = extract_pain_masks(pain_vals)
 
     for i in range(n_states):
         for j in range(n_states):
@@ -210,20 +326,12 @@ def compute_microstate_transition_stats(
             col = f"ms_trans_{i}_to_{j}"
             if col not in ms_df.columns:
                 continue
+            
             trans_vals = pd.to_numeric(ms_df[col], errors="coerce")
-            nonpain_mask = valid_mask & (pain_vals == 0)
-            pain_mask = valid_mask & (pain_vals == 1)
+            trans_nonpain[i, j] = _compute_transition_mean(trans_vals, nonpain_mask)
+            trans_pain[i, j] = _compute_transition_mean(trans_vals, pain_mask)
 
-            nonpain_data = trans_vals[nonpain_mask].to_numpy(dtype=float)
-            pain_data = trans_vals[pain_mask].to_numpy(dtype=float)
-
-            nonpain_data = nonpain_data[np.isfinite(nonpain_data)]
-            pain_data = pain_data[np.isfinite(pain_data)]
-
-            trans_nonpain[i, j] = np.mean(nonpain_data) if nonpain_data.size else 0.0
-            trans_pain[i, j] = np.mean(pain_data) if pain_data.size else 0.0
-
-    return MicrostateTransitionStats(trans_nonpain, trans_pain, _state_labels(n_states))
+    return MicrostateTransitionStats(trans_nonpain, trans_pain, state_labels)
 
 
 def compute_microstate_duration_stats(
@@ -231,52 +339,35 @@ def compute_microstate_duration_stats(
     events_df: pd.DataFrame,
     *,
     n_states: int,
-    config,
+    config: Any,
 ) -> List[MicrostateDurationStat]:
-    stats_list: List[MicrostateDurationStat] = []
-
     if ms_df is None or ms_df.empty or events_df is None or events_df.empty:
-        return stats_list
+        return []
 
-    pain_col = None
-    if config is not None:
-        pain_col = next(
-            (col for col in config.get("event_columns.pain_binary", []) if col in events_df.columns),
-            None,
-        )
+    pain_col = get_pain_column_from_config(config, events_df)
     if pain_col is None:
-        return stats_list
+        return []
 
     pain_vals = pd.to_numeric(events_df[pain_col], errors="coerce")
-    valid_mask = pain_vals.notna()
+    nonpain_mask, pain_mask = extract_pain_masks(pain_vals)
+    stats_list: List[MicrostateDurationStat] = []
 
-    for idx, state_label in enumerate(_state_labels(n_states)):
+    for idx, state_label in enumerate(_state_labels(n_states, config)):
         col = f"ms_duration_{idx}"
         if col not in ms_df.columns:
             continue
+        
         durations = pd.to_numeric(ms_df[col], errors="coerce")
-        nonpain_mask = valid_mask & (pain_vals == 0)
-        pain_mask = valid_mask & (pain_vals == 1)
-
-        nonpain_data = durations[nonpain_mask].to_numpy(dtype=float)
-        pain_data = durations[pain_mask].to_numpy(dtype=float)
-
-        nonpain_data = nonpain_data[np.isfinite(nonpain_data)]
-        pain_data = pain_data[np.isfinite(pain_data)]
-
-        p_val = np.nan
-        if nonpain_data.size and pain_data.size:
-            try:
-                _, p_val = stats.mannwhitneyu(nonpain_data, pain_data, alternative="two-sided")
-            except ValueError:
-                p_val = np.nan
+        nonpain_data = extract_duration_data(durations, nonpain_mask)
+        pain_data = extract_duration_data(durations, pain_mask)
+        p_value = compute_duration_p_value(nonpain_data, pain_data)
 
         stats_list.append(
             MicrostateDurationStat(
                 state=state_label,
                 nonpain=nonpain_data,
                 pain=pain_data,
-                p_value=float(p_val) if np.isfinite(p_val) else np.nan,
+                p_value=p_value,
             )
         )
 
@@ -284,216 +375,167 @@ def compute_microstate_duration_stats(
 
 
 ###################################################################
-# Helper Functions
-###################################################################
-
-def _fit_aperiodic(logf: np.ndarray, logpsd: np.ndarray) -> Tuple[float, float]:
-    try:
-        b, a = np.polyfit(logf, logpsd, 1)
-        return float(a), float(b)
-    except Exception:
-        return float("nan"), float("nan")
-
-
-def _find_connectivity_arrays(subject: str, task: str, band: str, deriv_root: Path):
-    def _find_measure(measure: str) -> Optional[Path]:
-        patterns = [
-            f"sub-{subject}/eeg/sub-{subject}_task-{task}_*connectivity_{measure}_{band}*_all_trials.npy",
-            f"sub-{subject}/eeg/sub-{subject}_task-{task}_connectivity_{measure}_{band}*_all_trials.npy",
-        ]
-        for pattern in patterns:
-            path = find_first(str((deriv_root / pattern).as_posix()))
-            if path:
-                return path
-        return None
-    
-    return _find_measure("aec"), _find_measure("wpli")
-
-
-def _load_labels(subject: str, task: str, deriv_root: Path) -> Optional[np.ndarray]:
-    patterns = [
-        f"sub-{subject}/eeg/sub-{subject}_task-{task}_*connectivity_labels*.npy",
-        f"sub-{subject}/eeg/sub-{subject}_task-{task}_connectivity_labels*.npy",
-    ]
-    for pattern in patterns:
-        path = find_first(str((deriv_root / pattern).as_posix()))
-        if path:
-            return np.load(path, allow_pickle=True)
-    return None
-
-
-def _flatten_lower_triangles(conn_trials, labels, prefix):
-    if conn_trials.ndim != 3:
-        raise ValueError("Connectivity array must be 3D (trials, nodes, nodes)")
-    n_trials, n_nodes, _ = conn_trials.shape
-    idx_i, idx_j = np.tril_indices(n_nodes, k=-1)
-    out = conn_trials[:, idx_i, idx_j]
-
-    if labels is not None and len(labels) == n_nodes:
-        pair_names = [f"{labels[i]}__{labels[j]}" for i, j in zip(idx_i, idx_j)]
-    else:
-        pair_names = [f"n{i}_n{j}" for i, j in zip(idx_i, idx_j)]
-    cols = [f"{prefix}_{p}" for p in pair_names]
-    return pd.DataFrame(out), cols
-
-
-def align_feature_blocks(blocks: List[pd.DataFrame]) -> List[pd.DataFrame]:
-    if not blocks:
-        return []
-    
-    n_trials_ref = None
-    aligned_blocks = []
-    
-    for block in blocks:
-        if block is None or block.empty:
-            continue
-        
-        if n_trials_ref is None:
-            n_trials_ref = len(block)
-            aligned_blocks.append(block)
-        else:
-            min_n = min(n_trials_ref, len(block))
-            aligned_blocks.append(block.iloc[:min_n, :])
-            aligned_blocks = [b.iloc[:min_n, :] for b in aligned_blocks]
-            n_trials_ref = min_n
-    
-    return aligned_blocks
-
-
-###################################################################
 # Feature Extraction Functions
 ###################################################################
 
-def extract_baseline_power_features(tfr, bands, baseline_window, config, logger):
-    if tfr is None or (isinstance(tfr, list) and len(tfr) == 0):
-        return pd.DataFrame(), []
 
-    tfr_obj = tfr[0] if isinstance(tfr, list) else tfr
-    data = tfr_obj.data
-    if data.ndim != 4:
+def _prepare_tfr_power_inputs(tfr: Any, config: Any, logger: Any) -> Optional[Tuple[Any, np.ndarray, np.ndarray, np.ndarray, List[str]]]:
+    tfr_obj = extract_tfr_object(tfr)
+    if tfr_obj is None:
+        return None
+
+    tfr_data = tfr_obj.data
+    if tfr_data.ndim != 4:
         raise RuntimeError("TFR data must have 4D shape (epochs, channels, freqs, times)")
 
-    b_start, b_end = baseline_window
+    freqs = tfr_obj.freqs
     times = tfr_obj.times
-    ch_names = tfr_obj.info["ch_names"]
+    channel_names = tfr_obj.info["ch_names"]
     
-    baseline_mask = time_mask(times, b_start, b_end)
+    return tfr_obj, tfr_data, freqs, times, channel_names
+
+
+def extract_baseline_power_features(
+    tfr: Any, bands: List[str], baseline_window: Tuple[float, float], config: Any, logger: Any
+) -> Tuple[pd.DataFrame, List[str]]:
+    if not bands:
+        return pd.DataFrame(), []
+    
+    result = _prepare_tfr_power_inputs(tfr, config, logger)
+    if result is None:
+        return pd.DataFrame(), []
+    
+    tfr_obj, tfr_data, freqs, times, channel_names = result
+    
+    baseline_start, baseline_end = baseline_window
+    baseline_mask = time_mask(times, baseline_start, baseline_end)
     if not np.any(baseline_mask):
-        logger.warning(f"No time points in baseline window ({b_start}, {b_end})")
+        logger.warning(f"No time points in baseline window ({baseline_start}, {baseline_end})")
         return pd.DataFrame(), []
     
-    features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
-    features = []
-    colnames = []
+    frequency_bands = get_frequency_bands(config)
+    feature_arrays = []
+    column_names = []
     
     for band in bands:
-        if band not in features_freq_bands:
+        if band not in frequency_bands:
             continue
         
-        fmin, fmax = features_freq_bands[band]
-        freq_mask_idx = freq_mask(tfr_obj.freqs, fmin, fmax)
-        if not np.any(freq_mask_idx):
+        fmin, fmax = frequency_bands[band]
+        band_power = extract_band_power(tfr_data, freqs, fmin, fmax, baseline_mask)
+        if band_power is None:
             continue
         
-        band_power = data[:, :, freq_mask_idx, :][:, :, :, baseline_mask].mean(axis=(2, 3))
-        features.append(band_power)
-        colnames.extend([f"baseline_{band}_{ch}" for ch in ch_names])
+        feature_arrays.append(band_power)
+        column_names.extend([f"baseline_{band}_{ch}" for ch in channel_names])
 
-    if not features:
+    if not feature_arrays:
         return pd.DataFrame(), []
 
-    return pd.DataFrame(np.concatenate(features, axis=1)), colnames
+    return pd.DataFrame(np.concatenate(feature_arrays, axis=1)), column_names
 
 
-def extract_band_power_features(tfr, bands, config, logger):
-    if tfr is None or (isinstance(tfr, list) and len(tfr) == 0):
+def extract_band_power_features(
+    tfr: Any, bands: List[str], config: Any, logger: Any
+) -> Tuple[pd.DataFrame, List[str]]:
+    if not bands:
         return pd.DataFrame(), []
-
-    tfr_obj = tfr[0] if isinstance(tfr, list) else tfr
-    data = tfr_obj.data
-    if data.ndim != 4:
-        raise RuntimeError("TFR data must have 4D shape (epochs, channels, freqs, times)")
-
-    times = tfr_obj.times
-    ch_names = tfr_obj.info["ch_names"]
     
-    features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
-    features = []
-    colnames = []
+    result = _prepare_tfr_power_inputs(tfr, config, logger)
+    if result is None:
+        return pd.DataFrame(), []
+    
+    tfr_obj, tfr_data, freqs, times, channel_names = result
+    
+    frequency_bands = get_frequency_bands(config)
+    temporal_bins = get_config_value(config, "feature_engineering.features.temporal_bins", [])
+    feature_arrays = []
+    column_names = []
     
     for band in bands:
-        if band not in features_freq_bands:
+        if band not in frequency_bands:
             logger.warning(f"Band '{band}' not defined in config; skipping")
             continue
         
-        fmin, fmax = features_freq_bands[band]
-        freq_mask_idx = freq_mask(tfr_obj.freqs, fmin, fmax)
-        if not np.any(freq_mask_idx):
+        fmin, fmax = frequency_bands[band]
+        freq_mask_indices = freq_mask(freqs, fmin, fmax)
+        if not np.any(freq_mask_indices):
             logger.warning(f"TFR freqs contain no points in band '{band}' ({fmin}-{fmax} Hz); skipping")
             continue
         
-        bins = config.get("feature_engineering.features.temporal_bins", [])
-        for bin_config in bins:
-            if isinstance(bin_config, dict):
-                t_start = float(bin_config.get("start", 0.0))
-                t_end = float(bin_config.get("end", 0.0))
-                t_label = str(bin_config.get("label", "unknown"))
-            elif isinstance(bin_config, (list, tuple)) and len(bin_config) >= 3:
-                t_start = float(bin_config[0])
-                t_end = float(bin_config[1])
-                t_label = str(bin_config[2])
-            else:
+        for bin_config in temporal_bins:
+            bin_params = parse_temporal_bin_config(bin_config)
+            if bin_params is None:
                 logger.warning(f"Invalid temporal bin configuration: {bin_config}; skipping")
                 continue
             
-            time_mask_arr = time_mask(times, t_start, t_end)
-            if not np.any(time_mask_arr):
-                logger.warning(f"No time points in bin {t_label} ({t_start}-{t_end}s) for band '{band}'")
-                continue
-            
-            band_power = data[:, :, freq_mask_idx, :][:, :, :, time_mask_arr].mean(axis=(2, 3))
-            features.append(band_power)
-            colnames.extend([f"pow_{band}_{ch}_{t_label}" for ch in ch_names])
+            time_start, time_end, time_label = bin_params
+            result = process_temporal_bin(
+                tfr_data, freqs, times, channel_names,
+                band, fmin, fmax, time_start, time_end, time_label, logger
+            )
+            if result is not None:
+                band_power, cols = result
+                feature_arrays.append(band_power)
+                column_names.extend(cols)
 
-    if not features:
+    if not feature_arrays:
         return pd.DataFrame(), []
 
-    return pd.DataFrame(np.concatenate(features, axis=1)), colnames
+    return pd.DataFrame(np.concatenate(feature_arrays, axis=1)), column_names
 
 
-def extract_connectivity_features(subject: str, task: str, bands, deriv_root, logger):
+def _load_connectivity_block(
+    path: Optional[Path],
+    labels: Optional[np.ndarray],
+    prefix: str,
+    logger: Any,
+) -> Optional[Tuple[pd.DataFrame, List[str]]]:
+    if path is None or not path.exists():
+        logger.debug(f"Connectivity file missing for {prefix}: {path}")
+        return None
+    
+    try:
+        arr = np.load(path)
+    except (OSError, ValueError) as e:
+        logger.warning(f"Failed to load connectivity file {path}: {e}")
+        return None
+    
+    if arr.ndim != 3:
+        logger.warning(f"Unexpected connectivity shape at {path}: {arr.shape}")
+        return None
+    
+    df_flat, cols = flatten_lower_triangles(arr, labels, prefix=prefix)
+    return df_flat, cols
+
+
+def extract_connectivity_features(
+    subject: str, task: str, bands: List[str], deriv_root: Path, logger: Any
+) -> Tuple[pd.DataFrame, List[str]]:
     subj_dir = deriv_root / f"sub-{subject}" / "eeg"
     if not subj_dir.exists():
         return pd.DataFrame(), []
 
-    labels = _load_labels(subject, task, deriv_root)
+    labels = load_connectivity_labels(subject, task, deriv_root)
     all_blocks: List[pd.DataFrame] = []
     all_cols: List[str] = []
+    missing_files: List[str] = []
 
     for band in bands:
-        aec_path, wpli_path = _find_connectivity_arrays(subject, task, band, deriv_root)
+        aec_path, wpli_path = find_connectivity_arrays(subject, task, band, deriv_root)
         
         for measure, path in (("aec", aec_path), ("wpli", wpli_path)):
-            if path is None or not path.exists():
-                logger.warning(f"Connectivity file missing for {measure} {band}: {path}")
-                continue
-            
-            try:
-                arr = np.load(path)
-            except (OSError, IOError, ValueError) as e:
-                logger.warning(f"Failed to load connectivity file {path}: {e}")
-                continue
-            
-            if arr.ndim != 3:
-                logger.warning(f"Unexpected connectivity shape at {path}: {arr.shape}")
-                continue
-            
-            df_flat, cols = _flatten_lower_triangles(arr, labels, prefix=f"{measure}_{band}")
-            
-            all_blocks.append(df_flat)
-            all_cols.extend(cols)
+            result = _load_connectivity_block(path, labels, f"{measure}_{band}", logger)
+            if result is not None:
+                df_flat, cols = result
+                all_blocks.append(df_flat)
+                all_cols.extend(cols)
+            else:
+                missing_files.append(f"{measure}_{band}")
 
     if not all_blocks:
+        if missing_files:
+            logger.debug(f"No connectivity files found for subject {subject}, task {task}. Missing: {', '.join(missing_files)}")
         return pd.DataFrame(), []
 
     aligned_blocks = align_feature_blocks(all_blocks)
@@ -501,124 +543,285 @@ def extract_connectivity_features(subject: str, task: str, bands, deriv_root, lo
         return pd.DataFrame(), []
 
     combined_df = pd.concat(aligned_blocks, axis=1)
+    if len(combined_df.columns) != len(all_cols):
+        logger.warning(
+            f"Column count mismatch: DataFrame has {len(combined_df.columns)} columns "
+            f"but {len(all_cols)} column names provided. Using DataFrame column names."
+        )
+        return combined_df, list(combined_df.columns)
+    
     combined_df.columns = all_cols
     return combined_df, all_cols
 
 
-def extract_microstate_features(epochs, n_states, config, logger):
+def _build_microstate_column_names(n_states: int) -> List[str]:
+    column_names = []
+    metrics = ("coverage", "duration", "occurrence", "gev")
+    for metric in metrics:
+        for state_idx in range(n_states):
+            column_names.append(f"ms_{metric}_{state_idx}")
+    for i in range(n_states):
+        for j in range(n_states):
+            if i != j:
+                column_names.append(f"ms_trans_{i}_to_{j}")
+    return column_names
+
+
+def _compute_coverage_metrics(state_labels: np.ndarray, n_states: int, record: Dict[str, float]) -> None:
+    state_counts = np.bincount(state_labels, minlength=n_states).astype(float)
+    coverage = state_counts / float(state_labels.size) if state_labels.size > 0 else np.zeros(n_states, dtype=float)
+    for state_idx in range(n_states):
+        record[f"ms_coverage_{state_idx}"] = float(coverage[state_idx])
+
+
+def _compute_transition_metrics(
+    state_labels: np.ndarray,
+    sfreq: float,
+    n_states: int,
+    record: Dict[str, float],
+) -> Tuple[np.ndarray, np.ndarray]:
+    if state_labels.size == 0:
+        return np.zeros(n_states, dtype=float), np.zeros(n_states, dtype=float)
+    
+    if sfreq <= 0:
+        raise ValueError(f"Sampling frequency must be positive, got {sfreq}")
+    
+    valid_mask = (state_labels >= 0) & (state_labels < n_states)
+    if not np.all(valid_mask):
+        invalid_count = np.sum(~valid_mask)
+        logging.getLogger(__name__).warning(
+            f"Found {invalid_count} invalid state labels (out of range [0, {n_states})). "
+            "Clipping to valid range."
+        )
+        state_labels = np.clip(state_labels, 0, n_states - 1)
+    
+    occurrences = np.zeros(n_states, dtype=float)
+    dwell_times = np.zeros(n_states, dtype=float)
+    prev_state = int(state_labels[0])
+    run_length = 1
+
+    for sample_idx in range(1, state_labels.size):
+        current_state = int(state_labels[sample_idx])
+        if current_state == prev_state:
+            run_length += 1
+            continue
+        
+        occurrences[prev_state] += 1.0
+        dwell_times[prev_state] += run_length / sfreq
+        trans_key = f"ms_trans_{prev_state}_to_{current_state}"
+        if trans_key in record:
+            record[trans_key] += 1.0
+        prev_state = current_state
+        run_length = 1
+    
+    occurrences[prev_state] += 1.0
+    dwell_times[prev_state] += run_length / sfreq
+    return occurrences, dwell_times
+
+
+def _compute_duration_occurrence_metrics(
+    occurrences: np.ndarray,
+    dwell_times: np.ndarray,
+    n_states: int,
+    record: Dict[str, float],
+) -> None:
+    for state_idx in range(n_states):
+        occurrence_count = occurrences[state_idx]
+        record[f"ms_occurrence_{state_idx}"] = float(occurrence_count)
+        record[f"ms_duration_{state_idx}"] = float(dwell_times[state_idx] / occurrence_count) if occurrence_count > 0 else 0.0
+
+
+def _compute_gev_metrics(
+    state_labels: np.ndarray,
+    correlation_values: np.ndarray,
+    gfp: np.ndarray,
+    gfp_energy: float,
+    n_states: int,
+    record: Dict[str, float],
+) -> None:
+    for state_idx in range(n_states):
+        state_mask = state_labels == state_idx
+        if not np.any(state_mask):
+            record[f"ms_gev_{state_idx}"] = 0.0
+            continue
+        gev_numerator = np.sum((correlation_values[state_mask] ** 2) * (gfp[state_mask] ** 2))
+        record[f"ms_gev_{state_idx}"] = float(gev_numerator / gfp_energy)
+
+
+def _compute_microstate_metrics_for_trial(
+    trial_data: np.ndarray,
+    templates: np.ndarray,
+    sfreq: float,
+    n_states: int,
+    column_names: List[str],
+    logger: Any = None,
+    trial_id: Optional[str] = None,
+) -> Dict[str, float]:
+    record = {col: 0.0 for col in column_names}
+    state_labels, correlation_values = label_timecourse(trial_data, templates)
+    
+    if state_labels.size == 0:
+        return record
+
+    gfp = compute_gfp(trial_data)
+    gfp_energy = float(np.sum(gfp ** 2))
+    
+    gfp_energy_valid = np.isfinite(gfp_energy) and gfp_energy > 0
+    if not gfp_energy_valid:
+        trial_info = f" (trial: {trial_id})" if trial_id else ""
+        log_msg = (
+            f"Invalid GFP energy ({gfp_energy}) for microstate metrics{trial_info}; "
+            "skipping GEV computation (coverage/duration still computed)."
+        )
+        if logger:
+            logger.warning(log_msg)
+        else:
+            logging.getLogger(__name__).warning(log_msg)
+        gfp_energy = 0.0
+
+    _compute_coverage_metrics(state_labels, n_states, record)
+    occurrences, dwell_times = _compute_transition_metrics(state_labels, sfreq, n_states, record)
+    _compute_duration_occurrence_metrics(occurrences, dwell_times, n_states, record)
+    
+    if gfp_energy_valid:
+        _compute_gev_metrics(state_labels, correlation_values, gfp, gfp_energy, n_states, record)
+    else:
+        for state_idx in range(n_states):
+            record[f"ms_gev_{state_idx}"] = 0.0
+
+    return record
+
+
+def extract_microstate_features(
+    epochs: Any, n_states: int, config: Any, logger: Any
+) -> Tuple[pd.DataFrame, List[str], Optional[np.ndarray]]:
+    if n_states <= 0:
+        logger.warning(f"Invalid number of states ({n_states}); must be positive. Returning empty features.")
+        return pd.DataFrame(), [], None
+    
     picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     if len(picks) == 0:
         logger.warning("No EEG channels available for microstate feature extraction")
         return pd.DataFrame(), [], None
 
-    try:
-        data = epochs.get_data(picks=picks)
-    except TypeError:
-        data = epochs.get_data()[:, picks, :]
-
-    if data.size == 0:
+    epoch_data = extract_epoch_data(epochs, picks)
+    if epoch_data.size == 0:
         logger.warning("Epoch data empty after picking EEG channels; skipping microstate features")
         return pd.DataFrame(), [], None
 
     sfreq = float(epochs.info.get("sfreq", 1.0))
-    templates = extract_templates_from_trials(data, sfreq, n_states, config)
-    if templates is None or len(templates) == 0:
+    templates = extract_templates_from_trials(epoch_data, sfreq, n_states, config)
+    if templates is None or templates.shape[0] == 0:
         logger.warning("Failed to derive microstate templates; skipping microstate features")
         return pd.DataFrame(), [], None
 
-    column_order = []
-    metrics = ("coverage", "duration", "occurrence", "gev")
-    for metric in metrics:
-        for state_idx in range(n_states):
-            column_order.append(f"ms_{metric}_{state_idx}")
-    for i in range(n_states):
-        for j in range(n_states):
-            if i == j:
-                continue
-            column_order.append(f"ms_trans_{i}_to_{j}")
-
+    column_names = _build_microstate_column_names(n_states)
     feature_rows = []
-    for trial_idx, trial in enumerate(data):
-        record = {col: 0.0 for col in column_order}
-        labels, corr_vals = label_timecourse(trial, templates)
-        if labels.size == 0:
-            feature_rows.append(record)
-            continue
-
-        gfp = compute_gfp(trial)
-        gfp_energy = float(np.sum(gfp ** 2))
-        if not np.isfinite(gfp_energy) or gfp_energy <= 0:
-            gfp_energy = 1e-12
-
-        counts = np.bincount(labels, minlength=n_states).astype(float)
-        coverage = counts / float(labels.size) if labels.size > 0 else np.zeros(n_states, dtype=float)
-        for state_idx in range(n_states):
-            record[f"ms_coverage_{state_idx}"] = float(coverage[state_idx])
-
-        occurrences = np.zeros(n_states, dtype=float)
-        dwell_time = np.zeros(n_states, dtype=float)
-
-        prev_state = int(labels[0])
-        run_len = 1
-        for sample_idx in range(1, labels.size):
-            state = int(labels[sample_idx])
-            if state == prev_state:
-                run_len += 1
-                continue
-            occurrences[prev_state] += 1.0
-            dwell_time[prev_state] += run_len / sfreq
-            record[f"ms_trans_{prev_state}_to_{state}"] += 1.0
-            prev_state = state
-            run_len = 1
-        occurrences[prev_state] += 1.0
-        dwell_time[prev_state] += run_len / sfreq
-
-        for state_idx in range(n_states):
-            occ = occurrences[state_idx]
-            record[f"ms_occurrence_{state_idx}"] = float(occ)
-            record[f"ms_duration_{state_idx}"] = float(dwell_time[state_idx] / occ) if occ > 0 else 0.0
-
-        for state_idx in range(n_states):
-            mask = labels == state_idx
-            if not np.any(mask):
-                record[f"ms_gev_{state_idx}"] = 0.0
-                continue
-            gev_num = np.sum((corr_vals[mask] ** 2) * (gfp[mask] ** 2))
-            record[f"ms_gev_{state_idx}"] = float(gev_num / gfp_energy)
-
+    
+    for trial_idx, trial in enumerate(epoch_data):
+        record = _compute_microstate_metrics_for_trial(
+            trial, templates, sfreq, n_states, column_names, logger=logger, trial_id=str(trial_idx)
+        )
         feature_rows.append(record)
 
-    ms_df = pd.DataFrame.from_records(feature_rows, columns=column_order)
-    return ms_df, column_order, templates
+    ms_df = pd.DataFrame.from_records(feature_rows, columns=column_names)
+    return ms_df, column_names, templates
 
 
-def extract_aperiodic_features(epochs, baseline_window, bands, config, logger, fmin: float = 2.0, fmax: float = 40.0, n_fft: Optional[int] = None):
+def _build_aperiodic_feature_records(
+    offsets: np.ndarray,
+    slopes: np.ndarray,
+    residuals: np.ndarray,
+    freqs: np.ndarray,
+    channel_names: List[str],
+    bands: List[str],
+    freq_bands: Dict[str, List[float]],
+) -> List[Dict[str, float]]:
+    if offsets.shape[0] == 0:
+        return []
+    
+    if offsets.shape[0] != slopes.shape[0] or offsets.shape[0] != residuals.shape[0]:
+        raise ValueError(
+            f"Shape mismatch: offsets={offsets.shape[0]}, slopes={slopes.shape[0]}, "
+            f"residuals={residuals.shape[0]} epochs"
+        )
+    
+    if offsets.shape[1] != len(channel_names) or slopes.shape[1] != len(channel_names):
+        raise ValueError(
+            f"Channel count mismatch: offsets/slopes have {offsets.shape[1]} channels, "
+            f"but {len(channel_names)} channel names provided"
+        )
+    
+    if residuals.ndim != 3 or residuals.shape[1] != len(channel_names):
+        raise ValueError(
+            f"Residuals shape mismatch: expected (n_epochs, n_channels, n_freqs), "
+            f"got {residuals.shape}"
+        )
+    
+    band_masks = {}
+    for band in bands:
+        if band in freq_bands:
+            fmin, fmax = freq_bands[band]
+            band_masks[band] = (freqs >= fmin) & (freqs <= fmax)
+    
+    n_epochs = offsets.shape[0]
+    feature_records = []
+    
+    for epoch_idx in range(n_epochs):
+        record = {}
+        for channel_idx, channel_name in enumerate(channel_names):
+            record[f"aper_slope_{channel_name}"] = float(slopes[epoch_idx, channel_idx])
+            record[f"aper_offset_{channel_name}"] = float(offsets[epoch_idx, channel_idx])
+        
+        for band, mask in band_masks.items():
+            if not np.any(mask):
+                for channel_name in channel_names:
+                    record[f"powcorr_{band}_{channel_name}"] = np.nan
+            else:
+                for channel_idx, channel_name in enumerate(channel_names):
+                    band_residual_mean = np.mean(residuals[epoch_idx, channel_idx, mask])
+                    record[f"powcorr_{band}_{channel_name}"] = float(band_residual_mean)
+        
+        feature_records.append(record)
+    
+    return feature_records
+
+
+def _adjust_baseline_end(baseline_end: float) -> float:
+    return 0.0 if baseline_end > 0 else baseline_end
+
+
+def extract_aperiodic_features(
+    epochs: Any,
+    baseline_window: Tuple[float, float],
+    bands: List[str],
+    config: Any,
+    logger: Any,
+    fmin: Optional[float] = None,
+    fmax: Optional[float] = None,
+    n_fft: Optional[int] = None,
+) -> Tuple[pd.DataFrame, List[str]]:
     picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     if len(picks) == 0:
         logger.warning("No EEG channels available for aperiodic feature extraction")
         return pd.DataFrame(), []
     
-    b_start, b_end = baseline_window
-    if b_end > 0:
-        b_end = 0.0
+    baseline_start, baseline_end = baseline_window
+    baseline_end = _adjust_baseline_end(baseline_end)
+    freq_bands = get_frequency_bands_for_aperiodic(config)
     
-    freq_bands = config.get("time_frequency_analysis.bands") or {}
-    if not freq_bands:
-        freq_bands = {
-            "delta": [1.0, 3.9],
-            "theta": [4.0, 7.9],
-            "alpha": [8.0, 12.9],
-            "beta": [13.0, 30.0],
-            "gamma": [30.1, 80.0],
-        }
+    if fmin is None:
+        fmin = config.get("feature_engineering.constants.aperiodic_fmin", 2.0)
+    if fmax is None:
+        fmax = config.get("feature_engineering.constants.aperiodic_fmax", 40.0)
     
     psds, freqs = mne.time_frequency.psd_welch(
         epochs,
         picks=picks,
         fmin=float(fmin),
         fmax=float(fmax),
-        tmin=b_start,
-        tmax=b_end,
+        tmin=baseline_start,
+        tmax=baseline_end,
         n_fft=n_fft,
         n_overlap=None,
         average='mean',
@@ -629,49 +832,20 @@ def extract_aperiodic_features(epochs, baseline_window, bands, config, logger, f
         logger.error(f"Unexpected PSD shape: {psds.shape}")
         return pd.DataFrame(), []
     
-    eps = 1e-20
-    logf = np.log10(freqs)
-    logpsd = np.log10(np.maximum(psds, eps))
+    log_freqs = np.log10(freqs)
+    epsilon_psd = config.get("feature_engineering.constants.epsilon_psd", 1e-20)
+    epsilon_psd = float(epsilon_psd)
+    log_psd = np.log10(np.maximum(psds, epsilon_psd))
     
-    n_ep, n_ch, n_fr = logpsd.shape
+    offsets, slopes = fit_aperiodic_to_all_epochs(log_freqs, log_psd)
+    residuals = compute_residuals(log_freqs, log_psd, offsets, slopes)
     
-    offset = np.full((n_ep, n_ch), np.nan)
-    slope = np.full((n_ep, n_ch), np.nan)
-    for i in range(n_ep):
-        for j in range(n_ch):
-            a, b = _fit_aperiodic(logf, logpsd[i, j, :])
-            offset[i, j] = a
-            slope[i, j] = b
+    channel_names = [epochs.info["ch_names"][p] for p in picks]
+    feature_records = _build_aperiodic_feature_records(
+        offsets, slopes, residuals, freqs, channel_names, bands, freq_bands
+    )
     
-    resid = np.empty_like(logpsd)
-    for i in range(n_ep):
-        for j in range(n_ch):
-            resid[i, j, :] = logpsd[i, j, :] - (offset[i, j] + slope[i, j] * logf)
-    
-    band_masks = {}
-    for band in bands:
-        if band in freq_bands:
-            lo, hi = freq_bands[band]
-            band_masks[band] = (freqs >= lo) & (freqs <= hi)
-    
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
-    rows = []
-    for i in range(n_ep):
-        rec = {}
-        for j, ch in enumerate(ch_names):
-            rec[f"aper_slope_{ch}"] = float(slope[i, j])
-            rec[f"aper_offset_{ch}"] = float(offset[i, j])
-        
-        for b, mask in band_masks.items():
-            if not np.any(mask):
-                for j, ch in enumerate(ch_names):
-                    rec[f"powcorr_{b}_{ch}"] = np.nan
-            else:
-                for j, ch in enumerate(ch_names):
-                    rec[f"powcorr_{b}_{ch}"] = float(np.mean(resid[i, j, mask]))
-        rows.append(rec)
-    
-    feat_df = pd.DataFrame(rows)
-    colnames = list(feat_df.columns)
-    return feat_df, colnames
+    feature_df = pd.DataFrame(feature_records)
+    column_names = list(feature_df.columns)
+    return feature_df, column_names
 
