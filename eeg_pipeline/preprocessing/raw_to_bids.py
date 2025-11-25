@@ -16,7 +16,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from eeg_pipeline.utils.config_loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings
 
 config = load_settings(script_name=Path(__file__).name)
 

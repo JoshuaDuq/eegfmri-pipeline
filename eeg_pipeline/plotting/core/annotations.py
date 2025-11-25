@@ -1,0 +1,356 @@
+"""
+Core annotation utilities.
+
+Significance markers, ROI annotation helpers, and p-value formatting functions.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from ..config import get_plot_config
+from ...utils.analysis.stats import fdr_bh_values as _fdr_bh_values
+from .utils import get_font_sizes
+
+
+###################################################################
+# Significance Formatting
+###################################################################
+
+
+def format_cluster_significance_info(
+    roi_sig_chs: List[str],
+    roi_sig_indices: List[int],
+    p_ch: Optional[np.ndarray],
+    cluster_p_min: float,
+    cluster_k: Optional[int],
+) -> str:
+    """Format cluster significance information string.
+    
+    Args:
+        roi_sig_chs: List of significant channel names
+        roi_sig_indices: List of indices for significant channels
+        p_ch: Optional array of per-channel p-values
+        cluster_p_min: Minimum cluster p-value
+        cluster_k: Optional cluster size
+    
+    Returns:
+        Formatted significance information string
+    """
+    sig_parts = []
+    cluster_info = f"Cluster: p={cluster_p_min:.3f}"
+    if cluster_k is not None:
+        cluster_info += f", k={cluster_k}"
+    sig_parts.append(cluster_info)
+    sig_parts.append(f"Channels: {', '.join(roi_sig_chs)}")
+    if p_ch is not None:
+        roi_p_vals = [p_ch[i] for i in roi_sig_indices]
+        p_str = ', '.join([f"{p:.3f}" for p in roi_p_vals])
+        sig_parts.append(f"p-values: {p_str}")
+    return " | ".join(sig_parts)
+
+
+def format_ttest_significance_info(
+    roi_sig_chs: List[str],
+    roi_sig_indices: List[int],
+    p_ch: np.ndarray,
+) -> str:
+    """Format t-test significance information string.
+    
+    Args:
+        roi_sig_chs: List of significant channel names
+        roi_sig_indices: List of indices for significant channels
+        p_ch: Array of per-channel p-values
+    
+    Returns:
+        Formatted significance information string
+    """
+    sig_parts = ["T-Test:"]
+    roi_p_vals = [p_ch[i] for i in roi_sig_indices]
+    for ch, p_val in zip(roi_sig_chs, roi_p_vals):
+        sig_parts.append(f"{ch}: {p_val:.3f}")
+    return " | ".join(sig_parts)
+
+
+def build_significance_info(
+    roi_sig_chs: List[str],
+    roi_sig_indices: List[int],
+    p_ch: Optional[np.ndarray],
+    is_cluster: bool,
+    cluster_p_min: Optional[float],
+    cluster_k: Optional[int],
+) -> Optional[str]:
+    """Build significance information string.
+    
+    Args:
+        roi_sig_chs: List of significant channel names
+        roi_sig_indices: List of indices for significant channels
+        p_ch: Optional array of per-channel p-values
+        is_cluster: Whether cluster test was used
+        cluster_p_min: Optional minimum cluster p-value
+        cluster_k: Optional cluster size
+    
+    Returns:
+        Formatted significance information string, or None if no significant channels
+    """
+    if not roi_sig_chs:
+        return None
+    
+    if is_cluster and cluster_p_min is not None:
+        return format_cluster_significance_info(
+            roi_sig_chs, roi_sig_indices, p_ch, cluster_p_min, cluster_k
+        )
+    
+    if p_ch is not None:
+        return format_ttest_significance_info(roi_sig_chs, roi_sig_indices, p_ch)
+    
+    return None
+
+
+###################################################################
+# P-value Processing
+###################################################################
+
+
+def extract_valid_pvalues(
+    roi_pvalues_raw: Dict[str, Optional[float]]
+) -> Tuple[List[float], Dict[str, int]]:
+    """Extract valid p-values from dictionary.
+    
+    Args:
+        roi_pvalues_raw: Dictionary mapping ROI names to p-values (may be None)
+    
+    Returns:
+        Tuple of (list of valid p-values, mapping from ROI name to index in list)
+    """
+    p_vals_list = []
+    roi_to_idx_map = {}
+    
+    for roi, p_val in roi_pvalues_raw.items():
+        if p_val is not None and np.isfinite(p_val):
+            roi_to_idx_map[roi] = len(p_vals_list)
+            p_vals_list.append(p_val)
+    
+    return p_vals_list, roi_to_idx_map
+
+
+def apply_fdr_correction_to_roi_pvalues(
+    roi_pvalues_raw: Dict[str, Optional[float]],
+    apply_fdr_correction: bool,
+    fdr_alpha: float,
+    plot_cfg=None,
+) -> Dict[str, Optional[float]]:
+    """Apply FDR correction to ROI p-values.
+    
+    Args:
+        roi_pvalues_raw: Dictionary mapping ROI names to raw p-values
+        apply_fdr_correction: Whether to apply FDR correction
+        fdr_alpha: FDR alpha threshold
+        plot_cfg: Optional PlotConfig instance
+    
+    Returns:
+        Dictionary mapping ROI names to corrected p-values (or original if not corrected)
+    """
+    if plot_cfg is None:
+        plot_cfg = get_plot_config(None)
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
+    min_rois_for_fdr = plot_cfg.validation.get("min_rois_for_fdr", 1)
+    min_pvalues_for_fdr = plot_cfg.validation.get("min_pvalues_for_fdr", 1)
+    
+    if not apply_fdr_correction or len(roi_pvalues_raw) <= min_rois_for_fdr:
+        return roi_pvalues_raw.copy()
+    
+    p_vals_list, roi_to_idx_map = extract_valid_pvalues(roi_pvalues_raw)
+    
+    if len(p_vals_list) <= min_pvalues_for_fdr:
+        return roi_pvalues_raw.copy()
+    
+    p_vals_array = np.array(p_vals_list)
+    _, q_values = _fdr_bh_values(p_vals_array, alpha=fdr_alpha)
+    
+    if q_values is None:
+        return roi_pvalues_raw.copy()
+    
+    roi_pvalues_corrected = roi_pvalues_raw.copy()
+    for roi, idx in roi_to_idx_map.items():
+        roi_pvalues_corrected[roi] = float(q_values[idx])
+    
+    return roi_pvalues_corrected
+
+
+###################################################################
+# Annotation Positioning
+###################################################################
+
+
+def find_annotation_x_position(ax: plt.Axes, plot_cfg=None) -> float:
+    """Find x position for annotations, avoiding overlap with adjacent axes.
+    
+    Args:
+        ax: Matplotlib axes to place annotations on
+        plot_cfg: Optional PlotConfig instance
+    
+    Returns:
+        X position in axes coordinates (0-1)
+    """
+    if plot_cfg is None:
+        plot_cfg = get_plot_config(None)
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
+    y_center_tolerance = tfr_config.get("y_center_tolerance", 0.1)
+    x_min_distance = tfr_config.get("x_min_distance", 0.01)
+    default_x_position = tfr_config.get("default_x_position", 0.95)
+    max_x_position = tfr_config.get("max_x_position", 1.08)
+    x_offset = tfr_config.get("x_offset", 0.02)
+    
+    fig = ax.figure
+    ax_bbox = ax.get_position()
+    ax_x1 = ax_bbox.x1
+    ax_y_center = (ax_bbox.y0 + ax_bbox.y1) / 2.0
+    
+    right_neighbor_x0 = None
+    for other_ax in fig.get_axes():
+        if other_ax == ax:
+            continue
+        other_bbox = other_ax.get_position()
+        other_y_center = (other_bbox.y0 + other_bbox.y1) / 2.0
+        is_same_row = abs(other_y_center - ax_y_center) < y_center_tolerance
+        is_right_of_current = other_bbox.x0 > ax_x1 + x_min_distance
+        if is_same_row and is_right_of_current:
+            if right_neighbor_x0 is None or other_bbox.x0 < right_neighbor_x0:
+                right_neighbor_x0 = other_bbox.x0
+    
+    if right_neighbor_x0 is None:
+        return default_x_position
+    
+    ax_width = ax_bbox.x1 - ax_bbox.x0
+    max_x_fig = (right_neighbor_x0 - ax_bbox.x0) / ax_width
+    return min(max_x_position, max_x_fig - x_offset)
+
+
+###################################################################
+# Annotation Label Building
+###################################################################
+
+
+def build_roi_annotation_label(
+    roi: str,
+    pct: float,
+    roi_pvalue: Optional[float],
+    sig_info: Optional[str],
+    use_fdr: bool,
+    paired: bool = False,
+) -> str:
+    """Build ROI annotation label string.
+    
+    Args:
+        roi: ROI name
+        pct: Percentage change value
+        roi_pvalue: Optional p-value or q-value
+        sig_info: Optional significance information string
+        use_fdr: Whether FDR correction was applied
+        paired: Whether paired test was used
+    
+    Returns:
+        Formatted annotation label string
+    """
+    label = f"{roi}: {pct:+.1f}%"
+    if roi_pvalue is not None and np.isfinite(roi_pvalue):
+        test_type = "paired t-test" if paired else "t-test"
+        if use_fdr:
+            label += f" (FDR-BH {test_type}: q={roi_pvalue:.3f})"
+        else:
+            label += f" ({test_type}: p={roi_pvalue:.3f})"
+    if sig_info:
+        label += f" ({sig_info})"
+    return label
+
+
+###################################################################
+# Annotation Rendering
+###################################################################
+
+
+def render_roi_annotations(
+    ax: plt.Axes,
+    annotations: List[Tuple[str, float, Optional[str], Optional[float]]],
+    apply_fdr_correction: bool,
+    paired: bool = False,
+    plot_cfg=None,
+) -> None:
+    """Render ROI annotations on axes.
+    
+    Args:
+        ax: Matplotlib axes to render annotations on
+        annotations: List of (roi, pct, sig_info, roi_pvalue) tuples
+        apply_fdr_correction: Whether FDR correction was applied
+        paired: Whether paired test was used
+        plot_cfg: Optional PlotConfig instance
+    """
+    if plot_cfg is None:
+        plot_cfg = get_plot_config(None)
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
+    font_sizes = get_font_sizes(plot_cfg)
+    annotation_fontsize = font_sizes["annotation"]
+    
+    x_pos_ax = find_annotation_x_position(ax, plot_cfg)
+    annotation_y_start = tfr_config.get("annotation_y_start", 0.98)
+    y_pos_ax = annotation_y_start
+    
+    num_rois_with_pvals = sum(
+        1 for _, _, _, pval in annotations
+        if pval is not None and np.isfinite(pval)
+    )
+    min_rois_for_fdr = plot_cfg.validation.get("min_rois_for_fdr", 1)
+    use_fdr = apply_fdr_correction and num_rois_with_pvals > min_rois_for_fdr
+    
+    annotation_line_height = tfr_config.get("annotation_line_height", 0.045)
+    annotation_min_spacing = tfr_config.get("annotation_min_spacing", 0.03)
+    annotation_spacing_multiplier = tfr_config.get("annotation_spacing_multiplier", 0.3)
+    
+    for i, annotation in enumerate(annotations):
+        roi, pct, sig_info, roi_pvalue = annotation
+        label = build_roi_annotation_label(roi, pct, roi_pvalue, sig_info, use_fdr, paired)
+        
+        ax.text(
+            x_pos_ax, y_pos_ax, label,
+            transform=ax.transAxes,
+            ha="left", va="top",
+            fontsize=annotation_fontsize
+        )
+        
+        if i < len(annotations) - 1:
+            spacing_ax = annotation_min_spacing + (annotation_line_height * annotation_spacing_multiplier)
+            y_pos_ax -= (annotation_line_height + spacing_ax)
+
+
+###################################################################
+# Significance Marker Text
+###################################################################
+
+
+def get_sig_marker_text(config=None) -> str:
+    """Get significance marker text for figure titles.
+    
+    Args:
+        config: Optional configuration dictionary
+    
+    Returns:
+        Significance marker text string, or empty string if diff_annotation_enabled is False
+    """
+    from ...utils.io.general import get_viz_params
+    
+    viz_params = get_viz_params(config)
+    if not viz_params["diff_annotation_enabled"]:
+        return ""
+    
+    plot_cfg = get_plot_config(config) if config else None
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
+    default_sig_alpha = tfr_config.get("default_significance_alpha", 0.05) if plot_cfg else 0.05
+    default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", 5000) if plot_cfg else 5000
+    alpha = config.get("statistics.sig_alpha", default_sig_alpha) if config else default_sig_alpha
+    n_perm = config.get("statistics.cluster_n_perm", default_cluster_n_perm) if config else default_cluster_n_perm
+    method = f"cluster permutation (n={n_perm})"
+    return f" | Green markers: p < {alpha:.2f} ({method})"

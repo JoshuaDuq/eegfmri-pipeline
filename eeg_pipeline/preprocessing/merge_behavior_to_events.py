@@ -15,8 +15,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from eeg_pipeline.utils.config_loader import EEGConfig
-from eeg_pipeline.utils.data_loading import trim_behavioral_to_events_strict
+from eeg_pipeline.utils.config.loader import EEGConfig
+from eeg_pipeline.utils.data.loading import trim_behavioral_to_events_strict
 
 config = EEGConfig()
 PROJECT_ROOT = config.project.root
