@@ -5,7 +5,7 @@ scipy>=1.7.0,<2.0.0
 pyarrow>=10.0.0,<16.0.0
 h5io>=0.1.0
 
-# EEG/MEG analysis
+# EEG analysis
 mne>=1.0.0,<2.0.0
 mne-bids>=0.10.0,<1.0.0
 mne-connectivity>=0.3.0,<1.0.0
