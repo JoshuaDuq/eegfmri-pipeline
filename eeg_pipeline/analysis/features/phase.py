@@ -345,6 +345,24 @@ def compute_pac_comodulograms(
     total_combinations = n_rois * n_phase_freqs * n_amp_freqs
     processed = 0
 
+    max_surrogate_iters = int(pac_cfg.get("max_surrogate_iterations", 200000))
+    n_surrogates = max(0, n_surrogates)
+    effective_surrogates = n_surrogates
+    if max_surrogate_iters > 0 and total_combinations > 0:
+        est_iters = total_combinations * max(1, n_surrogates)
+        if est_iters > max_surrogate_iters:
+            effective_surrogates = max(1, max_surrogate_iters // total_combinations)
+            logger.warning(
+                "Reducing PAC surrogates from %d to %d to cap total iterations (%d) "
+                "across %d ROI/phase/amp combinations.",
+                n_surrogates,
+                effective_surrogates,
+                max_surrogate_iters,
+                total_combinations,
+            )
+
+    surrogate_perms = [rng.permutation(n_epochs) for _ in range(effective_surrogates)] if effective_surrogates > 0 else []
+
     for roi_idx, (roi, chs) in enumerate(roi_map.items()):
         chs_available = [ch for ch in chs if ch in tfr_ch_names]
         if len(chs_available) == 0:
@@ -407,18 +425,17 @@ def compute_pac_comodulograms(
                 pac_val = np.abs(pac_roi_complex)
 
                 p_perm = np.nan
-                if n_surrogates > 0:
+                if effective_surrogates > 0:
                     phase_plateau_all = np.stack([phase_plateau_by_ch[ch] for ch in picks], axis=0)
                     amp_norm_all = np.stack([amp_norm_by_ch_freq[ch][f_amp] for ch in picks], axis=0)
                     n_channels, n_epochs, n_time = phase_plateau_all.shape
 
-                    null = np.zeros(n_surrogates, dtype=float)
+                    null = np.zeros(effective_surrogates, dtype=float)
 
-                    for s_idx in range(n_surrogates):
+                    for s_idx, trial_perm in enumerate(surrogate_perms):
                         # Trial-shuffle surrogate: shuffle trial order for amplitude
                         # while keeping phase fixed. This breaks PAC while preserving
                         # within-trial temporal structure (more valid than time-shift).
-                        trial_perm = rng.permutation(n_epochs)
                         amp_shuffled = amp_norm_all[:, trial_perm, :, :]
                         z_null = amp_shuffled * np.exp(1j * phase_plateau_all[:, :, np.newaxis, :])
                         pac_null_ch = np.nanmean(z_null, axis=(1, 2, 3))
@@ -427,7 +444,7 @@ def compute_pac_comodulograms(
 
                     # Use >= for consistent permutation p-value calculation
                     # (includes observed value in null distribution per Phipson & Smyth 2010)
-                    p_perm = (1 + np.sum(null >= pac_val)) / (n_surrogates + 1)
+                    p_perm = (1 + np.sum(null >= pac_val)) / (effective_surrogates + 1)
 
                 rows.append(
                     {
@@ -436,7 +453,7 @@ def compute_pac_comodulograms(
                         "amp_freq": float(f_amp),
                         "pac": float(pac_val),
                         "p_perm": float(p_perm) if np.isfinite(p_perm) else np.nan,
-                        "n_surrogates": n_surrogates,
+                        "n_surrogates": effective_surrogates,
                     }
                 )
 

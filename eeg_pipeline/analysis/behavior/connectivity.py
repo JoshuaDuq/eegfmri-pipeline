@@ -674,7 +674,7 @@ def correlate_connectivity_heatmaps(subject: str, task: Optional[str] = None, us
         logger,
         use_spearman,
     )
-
+    
     try:
         compute_connectivity_condition_effects(
             subject=subject,
@@ -685,8 +685,8 @@ def correlate_connectivity_heatmaps(subject: str, task: Optional[str] = None, us
             connectivity_df=connectivity_dataframe,
             plots_dir=plots_dir,
         )
-    except Exception as exc:
-        logger.warning("Connectivity condition effects failed for sub-%s: %s", subject, exc)
+    except Exception:
+        logger.exception("Connectivity condition effects failed for sub-%s", subject)
 
 
 def _process_connectivity_prefix(

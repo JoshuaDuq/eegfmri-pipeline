@@ -224,9 +224,20 @@ def _compute_graph_metrics_block(
             drop_negative=drop_negative,
             use_abs_for_threshold=use_abs_for_threshold,
         )
+        adj = np.asarray(adj, dtype=float)
+        adj[~np.isfinite(adj)] = 0.0
+        np.fill_diagonal(adj, 0.0)
+
         adj_abs = np.abs(adj)
-        if not np.isfinite(adj_abs).any():
-            records.append({f"{measure}_{band}_geff": np.nan})
+        if not np.isfinite(adj_abs).any() or np.all(adj_abs == 0):
+            records.append(
+                {
+                    f"{measure}_{band}_geff": np.nan,
+                    f"{measure}_{band}_clust": np.nan,
+                    f"{measure}_{band}_pc": np.nan,
+                    f"{measure}_{band}_smallworld": np.nan,
+                }
+            )
             continue
         record: Dict[str, float] = {}
 
@@ -734,4 +745,3 @@ def compute_sliding_connectivity_features(
     edges_df = pd.concat(edge_blocks, axis=1)
     graph_df = pd.concat(graph_blocks, axis=1) if graph_blocks else pd.DataFrame()
     return edges_df, edge_cols_all, graph_df, graph_cols_all
-

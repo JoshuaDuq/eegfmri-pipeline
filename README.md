@@ -2,6 +2,30 @@
 
 ## Installation
 
+### Python environment (recommended)
+
+Use a dedicated virtual environment with Python 3.11 for this project:
+
+```bash
+cd /Users/joduq24/Desktop/EEG_fMRI_Pipeline
+
+# create the environment (only once)
+/opt/homebrew/bin/python3.11 -m venv .venv311
+
+# activate the environment (every new shell)
+source .venv311/bin/activate
+
+# upgrade pip and install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Make sure you have `python3.11` installed via Homebrew:
+
+```bash
+brew install python@3.11
+```
+
 ```bash
 pip install -r requirements.txt
 ```

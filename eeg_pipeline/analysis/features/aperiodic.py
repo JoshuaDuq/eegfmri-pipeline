@@ -102,24 +102,31 @@ def extract_aperiodic_features(
     baseline_end = _adjust_baseline_end(baseline_end)
     default_psd_window = (baseline_start, baseline_end)
     aper_cfg = config.get("feature_engineering.aperiodic", {})
-    psd_window = aper_cfg.get("psd_window", config.get("time_frequency_analysis.plateau_window", default_psd_window))
+    psd_window_cfg = aper_cfg.get("psd_window", None)
+    psd_window = psd_window_cfg if psd_window_cfg is not None else default_psd_window
+
     try:
         psd_start, psd_end = float(psd_window[0]), float(psd_window[1])
     except (TypeError, ValueError, IndexError):
         psd_start, psd_end = default_psd_window
         logger.warning("Invalid aperiodic PSD window in config; defaulting to baseline window.")
+
+    if psd_end > 0:
+        logger.warning(
+            "Aperiodic PSD window must end at or before 0 s (pre-stimulus); got [%.3f, %.3f]. "
+            "Clamping end to 0 and reusing baseline start (%.3f).",
+            psd_start, psd_end, baseline_start,
+        )
+        psd_end = 0.0
+        if psd_start >= psd_end:
+            psd_start = baseline_start
+
     if psd_start >= psd_end:
         logger.warning(
             "Aperiodic PSD window start (%.3f) must be < end (%.3f); defaulting to baseline window.",
             psd_start, psd_end,
         )
         psd_start, psd_end = default_psd_window
-    if psd_end > 0:
-        logger.error(
-            "Aperiodic PSD window must end at or before 0 s (pre-stimulus); got [%.3f, %.3f]. Aborting aperiodic extraction.",
-            psd_start, psd_end,
-        )
-        return pd.DataFrame(), [], {}
     # Validate PSD window has enough pre-stimulus samples
     try:
         validate_baseline_indices(
