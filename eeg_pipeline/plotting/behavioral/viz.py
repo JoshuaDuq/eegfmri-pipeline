@@ -25,7 +25,6 @@ from .temporal import (
     plot_temporal_correlation_topomaps_by_pain,
     plot_pain_nonpain_clusters,
     plot_pac_behavior_correlations,
-    plot_behavior_reliability,
 )
 from .temporal_group import (
     plot_group_temporal_topomaps,
@@ -54,7 +53,6 @@ def visualize_subject_behavior(
     - Temporal correlation topomaps
     - PAC-behavior correlations
     - ITPC-rating scatter grids
-    - Reliability diagnostics
     - Pain/non-pain clusters
     
     Args:
@@ -98,13 +96,6 @@ def visualize_subject_behavior(
             logger=logger,
         ),
         "pain_clusters": lambda: plot_pain_nonpain_clusters(
-            subject=subject,
-            stats_dir=stats_dir,
-            plots_dir=plots_dir,
-            config=config,
-            logger=logger,
-        ),
-        "reliability": lambda: plot_behavior_reliability(
             subject=subject,
             stats_dir=stats_dir,
             plots_dir=plots_dir,
@@ -168,10 +159,6 @@ def visualize_subject_behavior(
     if "pain_clusters" in plots_to_run:
         logger.info("Plotting pain vs. non-pain clusters...")
         all_plots["pain_clusters"]()
-    
-    if "reliability" in plots_to_run:
-        logger.info("Plotting reliability diagnostics...")
-        all_plots["reliability"]()
     
     logger.info(f"Behavioral visualizations saved to {plots_dir}")
 

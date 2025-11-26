@@ -598,7 +598,8 @@ def _process_pac_correlations(
         return
 
     rating = pd.to_numeric(events_df[rating_col], errors="coerce")
-    if len(rating) != len(pac_trials_df):
+    n_trials = pac_trials_df["trial"].nunique() if "trial" in pac_trials_df.columns else 0
+    if n_trials == 0 or len(rating) != n_trials:
         return
 
     min_samples = analysis_cfg.min_samples_roi
@@ -606,11 +607,13 @@ def _process_pac_correlations(
     temp_records: List[Dict[str, Any]] = []
 
     for (roi, phase_f, amp_f), df_sub in pac_trials_df.groupby(["roi", "phase_freq", "amp_freq"]):
-        pac_vals = pd.to_numeric(df_sub["pac"], errors="coerce")
+        df_sub_sorted = df_sub.sort_values("trial")
+        pac_vals = pd.to_numeric(df_sub_sorted["pac"], errors="coerce")
+        pac_vals.index = df_sub_sorted["trial"].values
         context = f"PAC {roi} {phase_f:.1f}-{amp_f:.1f}"
         x_aligned, y_aligned, cov_aligned, _, _ = prepare_aligned_data(
             pac_vals,
-            rating,
+            rating.reset_index(drop=True),
             covariates_df,
             min_samples=min_samples,
             logger=analysis_cfg.logger,

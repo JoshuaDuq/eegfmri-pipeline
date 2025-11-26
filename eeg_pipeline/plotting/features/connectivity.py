@@ -109,10 +109,12 @@ def plot_connectivity_circle_for_band(
         log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
         return
         
+    n_trials = len(features_df)
     mean_conn = features_df[cols].mean(axis=0).values
     
     node_names = sorted(list(set([ch for edge in edges for ch in edge])))
     n_nodes = len(node_names)
+    n_edges = len(edges)
     node_indices = {name: i for i, name in enumerate(node_names)}
     
     con_matrix = np.zeros((n_nodes, n_nodes))
@@ -158,6 +160,14 @@ def plot_connectivity_circle_for_band(
         log_if_present(logger, "error", f"Failed to plot connectivity circle: {e}")
         plt.close(fig)
         return
+
+    footer_text = f"n={n_trials} trials | {n_nodes} nodes | {n_edges} edges"
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
 
     output_name = f"sub-{subject}_connectivity_{measure}_{band}_circle"
     save_fig(
@@ -242,15 +252,19 @@ def plot_sliding_connectivity_trajectories(
         alpha=0.2,
     )
 
+    n_trials = mat.shape[1]
+    n_windows = len(window_indices)
+    
     pain_mask = _extract_pain_mask(aligned_events)
     if pain_mask is not None and len(pain_mask) == mat.shape[1]:
         for mask_val, label, color in [(False, "Non-pain", plot_cfg.get_color("nonpain")), (True, "Pain", plot_cfg.get_color("pain"))]:
             m = mat[:, pain_mask.to_numpy() == mask_val]
+            n_cond = m.shape[1]
             if m.size == 0:
                 continue
             mean_cond = np.nanmean(m, axis=1)
             sem_cond = np.nanstd(m, axis=1) / np.sqrt(np.maximum(1, np.sum(np.isfinite(m), axis=1)))
-            ax.plot(window_centers[:len(mean_cond)], mean_cond, label=label, color=color)
+            ax.plot(window_centers[:len(mean_cond)], mean_cond, label=f"{label} (n={n_cond})", color=color)
             ax.fill_between(
                 window_centers[:len(mean_cond)],
                 mean_cond - sem_cond,
@@ -264,6 +278,16 @@ def plot_sliding_connectivity_trajectories(
     ax.set_title(f"Sliding connectivity trajectories (sub-{subject})")
     ax.grid(alpha=0.3)
     ax.legend(frameon=False)
+    
+    footer_text = f"n={n_trials} trials | {n_windows} time windows"
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     save_fig(
         fig,
         plots_dir / f"sub-{subject}_sliding_connectivity_trajectories",

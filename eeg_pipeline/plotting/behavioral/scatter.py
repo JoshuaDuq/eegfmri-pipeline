@@ -525,11 +525,10 @@ def _plot_distribution_histogram(
         warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
         fig.tight_layout()
     
-    save_formats = plot_cfg.formats if plot_cfg.formats else config.get("output.save_formats", ["svg"])
     save_fig(
         fig,
         output_path,
-        formats=save_formats,
+        formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
@@ -823,15 +822,17 @@ def plot_behavioral_response_patterns(
     config=None,
 ) -> None:
     config = config or _get_default_config()
+    plot_cfg = get_plot_config(config)
     fig, ax = _create_rating_distribution_plot(y, config)
     
     plt.tight_layout()
-    save_formats = config.get("output.save_formats", ["svg"])
     save_fig(
         fig,
         save_dir / f'sub-{subject}_rating_distribution',
-        formats=save_formats,
-        bbox_inches="tight",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config)
     )
     plt.close(fig)
@@ -993,8 +994,9 @@ def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alp
     plt.tight_layout()
     
     output_path = plots_dir / f'sub-{subject}_top_{top_n}_behavioral_predictors'
-    save_formats = config.get("output.save_formats", ["svg"])
-    save_fig(fig, output_path, formats=save_formats, bbox_inches="tight", footer=_get_behavior_footer(config))
+    if plot_cfg is None:
+        plot_cfg = get_plot_config(config)
+    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches, footer=_get_behavior_footer(config))
     plt.close(fig)
     
     logger.info(f"Saved top {top_n} behavioral predictors plot: {output_path}.png")

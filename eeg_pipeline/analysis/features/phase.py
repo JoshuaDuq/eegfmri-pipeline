@@ -144,8 +144,10 @@ def extract_trialwise_itpc_features(
     if epochs is None or len(epochs) < 2 or not bands:
         return pd.DataFrame(), []
 
-    # Require minimum 3 training epochs for reliable leave-one-out ITPC
-    min_epochs_for_loo = 3
+    # Require minimum 15 training epochs for reliable leave-one-out ITPC.
+    # With fewer epochs, leaving one out results in too few remaining trials
+    # for stable phase coherence estimation (e.g., with 3 epochs, LOO uses only 2).
+    min_epochs_for_loo = 15
     if len(epochs) < min_epochs_for_loo:
         logger.warning(
             f"Need at least {min_epochs_for_loo} epochs for reliable leave-one-out ITPC "
@@ -281,8 +283,22 @@ def compute_pac_comodulograms(
     """
     Compute ROI-level PAC comodulograms using amplitude-weighted phase locking.
     Returns (pac_df_long, phase_freqs, amp_freqs, pac_trial_df, pac_time_df).
+    
+    Requires minimum 20 epochs for reliable PAC estimation with surrogate testing.
     """
     if tfr_complex is None:
+        return pd.DataFrame(), np.array([]), np.array([]), pd.DataFrame(), pd.DataFrame()
+    
+    # Validate minimum epochs for reliable PAC estimation
+    # PAC with surrogate testing requires sufficient trials to avoid spurious coupling
+    min_epochs_pac = int(config.get("pac_analysis.min_epochs", 20))
+    n_epochs = tfr_complex.data.shape[0] if hasattr(tfr_complex, 'data') else 0
+    if n_epochs < min_epochs_pac:
+        logger.warning(
+            f"Insufficient epochs for reliable PAC estimation: {n_epochs} < {min_epochs_pac} minimum. "
+            f"PAC results with fewer epochs are unreliable due to insufficient surrogate distribution sampling. "
+            f"Skipping PAC computation."
+        )
         return pd.DataFrame(), np.array([]), np.array([]), pd.DataFrame(), pd.DataFrame()
 
     pac_cfg = config.get("pac_analysis", {})

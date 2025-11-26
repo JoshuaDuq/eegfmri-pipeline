@@ -442,17 +442,15 @@ def process_subject(
 
     logger.info("Building plateau features and aligning all feature dataframes...")
     plateau_df, plateau_cols = build_plateau_features(
-        epochs, aligned_events, subject, task, config, logger
+        pow_df, pow_cols, baseline_df, baseline_cols, tfr, power_bands, logger
     )
 
-    pow_df_aligned, conn_df_aligned, y_aligned = align_feature_dataframes(
-        pow_df, conn_df, y, config, logger
+    pow_df_aligned, baseline_df_aligned, conn_df_aligned, ms_df_aligned, aper_df_aligned, y_aligned, retention_stats = align_feature_dataframes(
+        pow_df, baseline_df, conn_df, ms_df, aper_df, y, aligned_events, features_dir, logger, config
     )
-    ms_df_aligned = ms_df
-    aper_df_aligned = aper_df
 
     combined_df = save_all_features(
-        subject, task, features_dir, pow_df_aligned, pow_cols, conn_df_aligned, conn_cols,
+        pow_df_aligned, pow_cols, baseline_df_aligned, baseline_cols, conn_df_aligned, conn_cols,
         ms_df_aligned, ms_cols, aper_df_aligned, aper_cols, itpc_df, itpc_cols,
         features.get("pac_df"), features.get("pac_trials_df"), features.get("pac_time_df"),
         features.get("aper_qc"),

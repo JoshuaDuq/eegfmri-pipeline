@@ -1,6 +1,7 @@
 import sys
+import traceback
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any
 import argparse
 
 _project_root = Path(__file__).parent.parent.parent.resolve()
@@ -9,6 +10,50 @@ if str(_project_root) not in sys.path:
 
 from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.utils.data.loading import parse_subject_args
+
+
+###################################################################
+# Constants
+###################################################################
+
+DEFAULT_TASK_KEY = "project.task"
+DEFAULT_TASK_VALUE = "thermalactive"
+MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
+DEFAULT_MIN_SUBJECTS = 2
+MIN_SUBJECTS_FOR_DECODING = 2
+DEFAULT_RNG_SEED = 42
+POOLING_STRATEGY_KEY = "behavior_analysis.pooling_strategy"
+DEFAULT_POOLING_STRATEGY = "within_subject_centered"
+FEATURE_CATEGORIES = ["power", "connectivity", "microstates", "aperiodic", "itpc", "pac"]
+
+
+###################################################################
+# Shared Utilities
+###################################################################
+
+def resolve_task(task: Optional[str], config: Any) -> str:
+    return task or config.get(DEFAULT_TASK_KEY, DEFAULT_TASK_VALUE)
+
+
+def validate_subjects_not_empty(subjects: List[str], operation: str) -> None:
+    if not subjects:
+        raise ValueError(f"No subjects specified for {operation}")
+
+
+def validate_min_subjects(
+    subjects: List[str],
+    min_count: int,
+    operation: str
+) -> None:
+    if len(subjects) < min_count:
+        raise ValueError(
+            f"{operation} requires at least {min_count} subjects, "
+            f"got {len(subjects)}"
+        )
+
+
+def get_deriv_root(config: Any) -> Path:
+    return Path(config.deriv_root)
 
 
 ###################################################################
@@ -73,8 +118,8 @@ def setup_behavior_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Number of permutations (default from config)"
     )
     compute_group.add_argument(
-        "--rng-seed", type=int, default=42,
-        help="Random seed (default: 42)"
+        "--rng-seed", type=int, default=DEFAULT_RNG_SEED,
+        help=f"Random seed (default: {DEFAULT_RNG_SEED})"
     )
     
     visualize_group = parser.add_argument_group("Visualize mode options")
@@ -98,7 +143,7 @@ def setup_behavior_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def run_behavior(args, subjects: List[str]) -> None:
+def run_behavior(args, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.utils.pipelines.behavior import compute_behavior_correlations_for_subjects
     from eeg_pipeline.plotting.behavioral.viz import visualize_behavior_for_subjects
     from eeg_pipeline.analysis.group import aggregate_behavior_correlations
@@ -115,8 +160,7 @@ def run_behavior(args, subjects: List[str]) -> None:
             rng_seed=args.rng_seed,
         )
     elif args.mode == "visualize":
-        config = load_settings()
-        task = args.task or config.get("project.task", "thermalactive")
+        task = resolve_task(args.task, config)
         visualize_behavior_for_subjects(
             subjects=subjects,
             task=task,
@@ -126,15 +170,11 @@ def run_behavior(args, subjects: List[str]) -> None:
             group=args.do_group,
         )
     elif args.mode == "aggregate":
-        config = load_settings()
-        deriv_root = Path(config.deriv_root)
+        deriv_root = get_deriv_root(config)
+        validate_subjects_not_empty(subjects, "behavior aggregation")
         
-        if not subjects:
-            raise ValueError("No subjects specified")
-        
-        min_subjects = config.get("analysis.min_subjects_for_group", 2)
-        if len(subjects) < min_subjects:
-            raise ValueError(f"Behavior aggregation requires at least {min_subjects} subjects, got {len(subjects)}")
+        min_subjects = config.get(MIN_SUBJECTS_KEY, DEFAULT_MIN_SUBJECTS)
+        validate_min_subjects(subjects, min_subjects, "Behavior aggregation")
         
         logger = get_logger("behavior_aggregation")
         logger.info(f"Starting behavior aggregation: {len(subjects)} subjects")
@@ -144,7 +184,7 @@ def run_behavior(args, subjects: List[str]) -> None:
             task=args.task,
             deriv_root=deriv_root,
             config=config,
-            pooling_strategy=config.get("behavior_analysis.pooling_strategy", "within_subject_centered")
+            pooling_strategy=config.get(POOLING_STRATEGY_KEY, DEFAULT_POOLING_STRATEGY)
         )
         
         logger.info("Behavior aggregation complete")
@@ -176,9 +216,15 @@ def setup_features_parser(subparsers: argparse._SubParsersAction) -> None:
         "--fixed-templates", type=str,
         help="Path to .npz file containing fixed microstate templates"
     )
+    parser.add_argument(
+        "--feature-categories", nargs="+",
+        choices=FEATURE_CATEGORIES,
+        default=None,
+        help=f"Specific feature categories to compute (default: all). Choices: {', '.join(FEATURE_CATEGORIES)}"
+    )
 
 
-def run_features(args, subjects: List[str]) -> None:
+def run_features(args, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.utils.pipelines.features import extract_features_for_subjects
     from eeg_pipeline.plotting.features import visualize_features_for_subjects
     from eeg_pipeline.analysis.group import aggregate_feature_stats
@@ -189,19 +235,16 @@ def run_features(args, subjects: List[str]) -> None:
             subjects=subjects,
             task=args.task,
             fixed_templates_path=Path(args.fixed_templates) if args.fixed_templates else None,
+            feature_categories=args.feature_categories,
         )
     elif args.mode == "visualize":
         visualize_features_for_subjects(subjects=subjects, task=args.task)
     elif args.mode == "aggregate":
-        config = load_settings()
-        deriv_root = Path(config.deriv_root)
+        deriv_root = get_deriv_root(config)
+        validate_subjects_not_empty(subjects, "feature aggregation")
         
-        if not subjects:
-            raise ValueError("No subjects specified")
-        
-        min_subjects = config.get("analysis.min_subjects_for_group", 2)
-        if len(subjects) < min_subjects:
-            raise ValueError(f"Feature aggregation requires at least {min_subjects} subjects, got {len(subjects)}")
+        min_subjects = config.get(MIN_SUBJECTS_KEY, DEFAULT_MIN_SUBJECTS)
+        validate_min_subjects(subjects, min_subjects, "Feature aggregation")
         
         logger = get_logger("feature_aggregation")
         logger.info(f"Starting feature aggregation: {len(subjects)} subjects")
@@ -243,7 +286,7 @@ def setup_erp_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def run_erp(args, subjects: List[str]) -> None:
+def run_erp(args, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.utils.pipelines.erp import extract_erp_stats_for_subjects
     from eeg_pipeline.plotting.erp import visualize_erp_for_subjects
     
@@ -299,7 +342,7 @@ def setup_tfr_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def run_tfr(args, subjects: List[str]) -> None:
+def run_tfr(args, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.plotting.tfr import visualize_tfr_for_subjects
     
     if args.mode == "visualize":
@@ -341,8 +384,8 @@ def setup_decoding_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Parallel LOSO folds"
     )
     parser.add_argument(
-        "--rng-seed", type=int, default=42,
-        help="Random seed"
+        "--rng-seed", type=int, default=DEFAULT_RNG_SEED,
+        help=f"Random seed (default: {DEFAULT_RNG_SEED})"
     )
     parser.add_argument(
         "--skip-time-gen", action="store_true",
@@ -350,23 +393,19 @@ def setup_decoding_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def run_decoding(args, subjects: List[str]) -> None:
+def run_decoding(args, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.utils.pipelines.decoding import (
         run_regression_decoding,
         run_time_generalization,
     )
     from eeg_pipeline.utils.io.general import get_logger
     
-    config = load_settings()
-    task = args.task or config.get("project.task", "thermalactive")
+    validate_subjects_not_empty(subjects, "decoding")
+    validate_min_subjects(subjects, MIN_SUBJECTS_FOR_DECODING, "Decoding")
     
-    if not subjects:
-        raise ValueError("No subjects specified.")
-    if len(subjects) < 2:
-        raise ValueError("Decoding requires at least 2 subjects for LOSO.")
-    
+    task = resolve_task(args.task, config)
     logger = get_logger(__name__)
-    deriv_root = Path(config.deriv_root)
+    deriv_root = get_deriv_root(config)
     results_root = deriv_root / "decoding"
     
     logger.info(
@@ -448,33 +487,33 @@ For detailed help on each subcommand:
         return 1
     
     config = load_settings()
-    deriv_root = Path(config.deriv_root)
-    
+    deriv_root = get_deriv_root(config)
     subjects = parse_subject_args(args, config, task=args.task, deriv_root=deriv_root)
     
     if not subjects:
         print("No subjects provided. Use --group all|A,B,C, or --subject (repeatable), or --all-subjects.")
         return 2
     
-    for subcommand_name, subcommand_func in [
-        ("behavior", run_behavior),
-        ("features", run_features),
-        ("erp", run_erp),
-        ("tfr", run_tfr),
-        ("decoding", run_decoding),
-    ]:
-        if args.command == subcommand_name:
-            try:
-                subcommand_func(args, subjects)
-                return 0
-            except Exception as e:
-                print(f"Error running {subcommand_name}: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc()
-                return 1
+    command_handlers = {
+        "behavior": run_behavior,
+        "features": run_features,
+        "erp": run_erp,
+        "tfr": run_tfr,
+        "decoding": run_decoding,
+    }
     
-    print(f"Unknown command: {args.command}", file=sys.stderr)
-    return 1
+    handler = command_handlers.get(args.command)
+    if not handler:
+        print(f"Unknown command: {args.command}", file=sys.stderr)
+        return 1
+    
+    try:
+        handler(args, subjects, config)
+        return 0
+    except Exception as e:
+        print(f"Error running {args.command}: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return 1
 
 
 if __name__ == "__main__":

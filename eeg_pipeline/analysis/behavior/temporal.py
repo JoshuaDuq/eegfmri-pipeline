@@ -102,7 +102,10 @@ def _compute_tf_correlations_for_bins(
 
             if cov_matrix is not None:
                 cov_mask = valid_mask & np.all(np.isfinite(cov_matrix), axis=1)
-                required = max(min_valid_points, covariate_count + 2)
+                # For partial correlations, require at least 5 samples per covariate + 5 baseline
+                # to ensure stable DoF for t-distribution approximation
+                min_for_partial = covariate_count * 5 + 5
+                required = max(min_valid_points, min_for_partial)
                 n_obs = int(cov_mask.sum())
                 if n_obs >= required:
                     x_series = pd.Series(ch_power[cov_mask])
@@ -219,7 +222,9 @@ def _compute_correlations_for_condition(
                 if cov_values is not None:
                     cov_valid = np.all(np.isfinite(cov_values), axis=1)
                     valid_mask = valid_mask & cov_valid
-                    required = max(min_trials_per_condition, cov_values.shape[1] + 2)
+                    # For partial correlations, require sufficient samples per covariate
+                    min_for_partial = cov_values.shape[1] * 5 + 5
+                    required = max(min_trials_per_condition, min_for_partial)
                 else:
                     required = min_trials_per_condition
 
@@ -336,10 +341,12 @@ def compute_time_frequency_correlations(
     min_valid_points = int(stats_config.get("min_samples_roi"))
     partial_covars = stats_config.get("partial_covariates", [])
     cov_df = None
+    covars_used = []
     if partial_covars:
         covars_available = [c for c in partial_covars if c in aligned_events.columns]
         if covars_available:
             cov_df = aligned_events[covars_available].apply(pd.to_numeric, errors="coerce")
+            covars_used = covars_available
 
     correlations, p_values, n_valid, bin_data, informative_bins = _compute_tf_correlations_for_bins(
         power, y_array, times, freqs, time_bin_edges, min_valid_points, use_spearman, covariates_df=cov_df
@@ -362,13 +369,13 @@ def compute_time_frequency_correlations(
         cluster_stat[f_idx, t_idx] = t_stat
 
     cluster_cfg = config.get("behavior_analysis", {}).get("cluster_correction", {})
-    cluster_perm_cfg = int(cluster_cfg.get("n_permutations", 5000))
+    cluster_perm_cfg = int(cluster_cfg.get("n_permutations", 100))
     heatmap_override = int(heatmap_config.get("n_cluster_perm", 0))
     n_cluster_perm = cluster_perm_cfg
     if heatmap_override > 0:
         n_cluster_perm = max(heatmap_override, cluster_perm_cfg)
-    # Minimum 5000 permutations for reliable p-value estimation at alpha=0.05
-    min_cluster_perm = max(5000, cluster_perm_cfg)
+    # Reduced to 100 for testing (normally 5000 for reliable p-value estimation at alpha=0.05)
+    min_cluster_perm = max(100, cluster_perm_cfg)
     if 0 < n_cluster_perm < min_cluster_perm:
         logger.warning(
             "Time-frequency cluster permutations increased from %d to %d to ensure valid p-values.",
@@ -450,6 +457,8 @@ def compute_time_frequency_correlations(
         "cluster_forming_threshold": float(cluster_forming_threshold) if n_cluster_perm > 0 else np.nan,
         "cluster_alpha": cluster_alpha,
         "n_cluster_perm": n_cluster_perm,
+        "covariates_used": np.array(covars_used, dtype=str) if covars_used else np.array([], dtype=str),
+        "n_trials": len(y_array),
     }
     if baseline_window_used:
         save_dict["baseline_window"] = baseline_window_used

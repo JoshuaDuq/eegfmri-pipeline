@@ -505,7 +505,7 @@ def _compute_cluster_significance_from_combined(
         group_a_subjects, group_b_subjects, info_common,
         alpha=config.get("statistics.sig_alpha", 0.05) if config else 0.05,
         paired=False,
-        n_permutations=config.get("statistics.cluster_n_perm", 1024) if config else 1024,
+        n_permutations=config.get("statistics.cluster_n_perm", 100) if config else 100,
         config=config
     )
     

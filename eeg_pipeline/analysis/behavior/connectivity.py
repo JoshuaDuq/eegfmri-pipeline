@@ -46,6 +46,7 @@ from eeg_pipeline.utils.analysis.stats import (
     compute_fisher_transformed_mean,
     _safe_float,
     fdr_bh,
+    perm_pval_simple,
 )
 from eeg_pipeline.utils.analysis.tfr import build_rois_from_info as _build_rois, get_summary_type
 from eeg_pipeline.utils.io.general import build_partial_covars_string
@@ -426,7 +427,9 @@ def _correlate_sliding_connectivity(
         corr_res = compute_correlation(mean_conn, ratings, use_spearman=use_spearman)
         if corr_res is None:
             continue
-        r_val, p_val, n_val = corr_res
+        r_val, p_val = corr_res
+        valid_mask = pd.notna(mean_conn) & pd.notna(ratings)
+        n_val = int(valid_mask.sum())
         records.append(
             {
                 "window": int(win),
@@ -447,6 +450,7 @@ def _correlate_sliding_connectivity(
         stats_dir / "corr_stats_sliding_conn_vs_rating.tsv",
         config,
         logger,
+        use_permutation_p=False,
     )
 
 
@@ -747,6 +751,12 @@ def _correlate_connectivity_graph_metrics(
     if not metric_cols:
         return
 
+    stats_cfg = config.get("behavior_analysis", {}).get("statistics", {})
+    n_perm = int(stats_cfg.get("n_permutations", 100))
+    rng_seed = config.get("random.seed", 42)
+    rng = np.random.default_rng(rng_seed)
+    method = "spearman" if use_spearman else "pearson"
+
     records: List[Dict[str, Any]] = []
     for col in metric_cols:
         vals = pd.to_numeric(connectivity_dataframe[col], errors="coerce")
@@ -756,13 +766,27 @@ def _correlate_connectivity_graph_metrics(
         r, p = corr_result
         valid_mask = pd.notna(vals) & pd.notna(target_values)
         n = int(valid_mask.sum())
+        
+        vals_aligned = vals[valid_mask]
+        target_aligned = target_values[valid_mask]
+        
+        p_perm = perm_pval_simple(
+            vals_aligned,
+            target_aligned,
+            method,
+            n_perm,
+            rng,
+            config=config,
+        ) if n_perm > 0 else np.nan
+        
         records.append(
             {
                 "predictor": col,
                 "r": r,
                 "p": p,
+                "p_perm": p_perm,
                 "n": n,
-                "method": "spearman" if use_spearman else "pearson",
+                "method": method,
             }
         )
 

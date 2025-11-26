@@ -39,3 +39,5 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Data folder
+eeg_pipeline/data/

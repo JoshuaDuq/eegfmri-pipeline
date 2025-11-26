@@ -131,7 +131,7 @@ def _global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> float:
         return np.nan
 
 
-def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 10) -> float:
+def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100) -> float:
     G = nx.from_numpy_array(adj_bin)
     if nx.number_of_nodes(G) < 3 or nx.number_of_edges(G) == 0:
         return np.nan

@@ -116,7 +116,7 @@ def _aggregate_temporal_across_subjects(
     if not aggregated:
         return None
 
-    n_perm = int(config.get("behavior_analysis.statistics.group_temporal_n_perm", 2000))
+    n_perm = int(config.get("behavior_analysis.statistics.group_temporal_n_perm", 100))
     alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", config.get("statistics.sig_alpha", 0.05)))
 
     out = {}
@@ -347,7 +347,7 @@ def _render_group_temporal_topomaps(
             fontsize=font_sizes["suptitle"], y=0.995
         )
         filename = f"group_temporal_correlations_{title_prefix.replace(' ', '_').lower()}_{band_name}.png"
-        save_fig(fig, plots_dir / filename, formats=config.get("output.save_formats", ["svg"]), bbox_inches="tight", footer=_get_behavior_footer(config))
+        save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
         plt.close(fig)
 
 

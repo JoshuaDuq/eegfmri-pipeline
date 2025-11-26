@@ -409,6 +409,9 @@ def plot_power_time_courses(
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
     plot_cfg = get_plot_config(config)
     
+    n_epochs = tfr_raw.data.shape[0]
+    n_channels = tfr_raw.data.shape[1]
+    
     fig, ax = plt.subplots(1, 1, figsize=(12, 5))
     
     for band in bands:
@@ -438,7 +441,18 @@ def plot_power_time_courses(
     ax.grid(True, alpha=plot_cfg.style.alpha_grid)
     ax.legend(fontsize=plot_cfg.font.small, loc='best')
     
-    plt.tight_layout()
+    footer_text = (
+        f"n={n_epochs} trials, {n_channels} channels | "
+        f"Baseline: [{b_start:.2f}, {b_end:.2f}]s (logratio)"
+    )
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_time_courses_all_bands'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
@@ -484,10 +498,13 @@ def _plot_psd_by_temperature(
     plateau_window = _get_plateau_window(config)
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
     
+    trial_counts = []
     for idx, temp in enumerate(unique_temps):
         temp_mask = (temps == temp).to_numpy()
-        if temp_mask.sum() < 1:
+        n_trials_temp = int(temp_mask.sum())
+        if n_trials_temp < 1:
             continue
+        trial_counts.append(f"{temp:.0f}°C: n={n_trials_temp}")
             
         tfr_temp_avg = tfr_epochs[temp_mask].average()
         apply_baseline_and_crop(tfr_temp_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
@@ -505,7 +522,7 @@ def _plot_psd_by_temperature(
         ax.plot(
             tfr_temp_win.freqs, psd_avg,
             color=temp_colors[idx], linewidth=1.5,
-            label=f'{temp:.0f}°C', alpha=0.9
+            label=f'{temp:.0f}°C (n={n_trials_temp})', alpha=0.9
         )
     
     ax.axhline(0, color=plot_cfg.style.colors.gray, 
@@ -518,7 +535,19 @@ def _plot_psd_by_temperature(
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
     
-    plt.tight_layout()
+    footer_text = (
+        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
+        f"Plateau: [{plateau_window[0]:.1f}, {plateau_window[1]:.1f}]s | "
+        f"Total: n={len(tfr_epochs)} trials"
+    )
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_temperature'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
@@ -677,13 +706,16 @@ def plot_power_spectral_density_by_pain(
         logger.warning("Insufficient trials for pain comparison")
         return
     
+    n_nonpain = int(nonpain_mask.sum())
+    n_pain = int(pain_mask.sum())
+    
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
-    for mask, label, color in [
-        (nonpain_mask, 'Non-pain', 'steelblue'),
-        (pain_mask, 'Pain', 'orangered')
+    for mask, label, color, n_trials in [
+        (nonpain_mask, 'Non-pain', 'steelblue', n_nonpain),
+        (pain_mask, 'Pain', 'orangered', n_pain)
     ]:
         if mask.sum() < 1:
             continue
@@ -703,7 +735,7 @@ def plot_power_spectral_density_by_pain(
             
         ax.plot(
             tfr_cond_win.freqs, psd_mean,
-            color=color, linewidth=1.5, label=label, alpha=0.9
+            color=color, linewidth=1.5, label=f'{label} (n={n_trials})', alpha=0.9
         )
     
     ax.axhline(0, color=plot_cfg.style.colors.gray, 
@@ -716,7 +748,19 @@ def plot_power_spectral_density_by_pain(
     ax.spines['right'].set_visible(False)
     ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
     
-    plt.tight_layout()
+    footer_text = (
+        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
+        f"Plateau: [{plateau_window[0]:.1f}, {plateau_window[1]:.1f}]s | "
+        f"Total: n={len(tfr)} trials"
+    )
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_power_spectral_density_by_pain'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
@@ -760,10 +804,13 @@ def plot_power_time_course_by_temperature(
     fig, ax = plt.subplots(figsize=(10, 5))
     
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
+    freq_bands = config.get("time_frequency_analysis.bands") or config.get("frequency_bands", {})
+    band_range = freq_bands.get(band, [None, None])
     
     for idx, temp in enumerate(unique_temps):
         temp_mask = (temps == temp).to_numpy()
-        if temp_mask.sum() < 1:
+        n_trials_temp = int(temp_mask.sum())
+        if n_trials_temp < 1:
             continue
         
         tfr_temp_avg = tfr[temp_mask].average()
@@ -774,7 +821,7 @@ def plot_power_time_course_by_temperature(
         ax.plot(
             tfr_temp_avg.times, band_power,
             color=colors[idx], linewidth=1.8, alpha=0.9,
-            label=f"{temp:.0f}°C"
+            label=f"{temp:.0f}°C (n={n_trials_temp})"
         )
     
     plot_cfg = get_plot_config(config)
@@ -782,11 +829,25 @@ def plot_power_time_course_by_temperature(
                linewidth=plot_cfg.style.line.width_standard, 
                alpha=plot_cfg.style.line.alpha_dim, linestyle='--')
     ax.set_xlabel("Time (s)", fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel(f"{band.capitalize()} power (log10 ratio)", fontsize=plot_cfg.font.ylabel)
+    band_label = f"{band.capitalize()}"
+    if band_range[0] is not None and band_range[1] is not None:
+        band_label += f" ({band_range[0]:.0f}-{band_range[1]:.0f} Hz)"
+    ax.set_ylabel(f"{band_label} power (log10 ratio)", fontsize=plot_cfg.font.ylabel)
     ax.legend(loc='upper left', fontsize=plot_cfg.font.title, frameon=False)
     ax.grid(True, alpha=plot_cfg.style.alpha_grid, linestyle=':', linewidth=0.5)
     
-    plt.tight_layout()
+    footer_text = (
+        f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
+        f"Total: n={len(tfr)} trials"
+    )
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     output_path = save_dir / f'sub-{subject}_time_course_by_temperature_{band}'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
@@ -799,6 +860,7 @@ def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, confi
     behavioral_config = plot_cfg.get_behavioral_config()
     power_prefix = behavioral_config.get("power_prefix", "pow_")
     n_bands = len(bands)
+    n_trials = len(pow_df)
     fig, axes = plt.subplots(n_bands, 1, figsize=(12, 3 * n_bands))
     if n_bands == 1:
         axes = [axes]
@@ -809,6 +871,7 @@ def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, confi
         if not band_cols:
             continue
         
+        n_channels = len(band_cols)
         band_power_trials = pow_df[band_cols].mean(axis=1)
         trial_numbers = range(1, len(band_power_trials) + 1)
         band_color = get_band_color(band_str, config)
@@ -833,14 +896,23 @@ def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, confi
         )
         axes[i].set_ylabel(f'{band_str.capitalize()}\nlog10(power/baseline)')
         axes[i].set_title(
-            f'{band_str.capitalize()} Band Power Variability (CV = {coefficient_of_variation:.3f})'
+            f'{band_str.capitalize()} Band Power Variability (n={n_trials} trials, {n_channels} channels, CV={coefficient_of_variation:.3f})'
         )
         axes[i].grid(True, alpha=0.3)
         axes[i].legend()
     
     plot_cfg = get_plot_config(config)
     axes[-1].set_xlabel('Trial Number', fontsize=plot_cfg.font.label)
-    plt.tight_layout()
+    
+    footer_text = f"n={n_trials} trials | Units: log10(power/baseline)"
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.02, 1, 1])
     save_fig(
         fig, save_dir / f'sub-{subject}_trial_power_variability',
         formats=plot_cfg.formats, dpi=plot_cfg.dpi,

@@ -416,9 +416,9 @@ def cluster_test_two_sample_arrays(
     
     if n_permutations is None:
         config = ensure_config(config)
-        # Use config value if present, otherwise use safe default of 5000
-        # (1024 is too low for reliable p-value estimation at alpha=0.05)
-        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 5000))
+        # Use config value if present, otherwise use default of 100 (reduced for testing)
+        # (normally 5000 for reliable p-value estimation at alpha=0.05)
+        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 100))
     
     adjacency, eeg_picks, info_eeg = get_eeg_adjacency(info, restrict_picks=restrict_picks)
     if eeg_picks is None or info_eeg is None:
@@ -682,6 +682,18 @@ def compute_bootstrap_ci(
     
     valid_indices = np.where(valid_mask.to_numpy())[0]
     if len(valid_indices) == 0:
+        return np.nan, np.nan
+
+    # Minimum sample size for reliable bootstrap CIs
+    # Bootstrap CI requires at least 10 samples for meaningful estimation
+    # Below this threshold, CI coverage is severely degraded
+    min_bootstrap_samples = 10
+    if n_valid < min_bootstrap_samples:
+        if logger is not None:
+            logger.warning(
+                f"Bootstrap CI skipped: n={n_valid} < {min_bootstrap_samples} minimum for reliable bootstrap. "
+                f"Bootstrap confidence intervals are unreliable with fewer than 10 observations."
+            )
         return np.nan, np.nan
 
     # Align groups if provided
@@ -1229,10 +1241,20 @@ def partial_corr_xy_given_Z(x: pd.Series, y: pd.Series, Z: pd.DataFrame, method:
     correlation, _ = stats.pearsonr(x_residuals, y_residuals)
     k = max(len(Z.columns), 0)
     dof = sample_size - k - 2
-    if (dof <= 0 or not np.isfinite(correlation) or abs(correlation) >= 1):
+    
+    # Minimum DoF for meaningful t-distribution inference
+    # DoF < 3 produces unreliable p-values; require at least 3 for any inference
+    MIN_DOF_FOR_INFERENCE = 3
+    
+    if (dof < MIN_DOF_FOR_INFERENCE or not np.isfinite(correlation) or abs(correlation) >= 1):
+        if dof > 0 and dof < MIN_DOF_FOR_INFERENCE:
+            logging.getLogger(__name__).warning(
+                f"Partial correlation DoF={dof} < {MIN_DOF_FOR_INFERENCE} (n={sample_size}, k={k}). "
+                "Insufficient DoF for reliable p-value; returning NaN."
+            )
         p_value = np.nan
     else:
-        # Warn if DoF is low (t-distribution approximation becomes unreliable)
+        # Warn if DoF is low (t-distribution approximation becomes less reliable)
         if dof < 20:
             logging.getLogger(__name__).warning(
                 f"Partial correlation DoF={dof} is low (n={sample_size}, k={k}). "

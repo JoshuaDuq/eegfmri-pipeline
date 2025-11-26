@@ -953,15 +953,30 @@ def bootstrap_pooled_metrics_by_subject(pred_df: pd.DataFrame, n_boot: Optional[
             return float("nan"), float("nan")
         
         tdot = float(np.mean(jk_vals))
+        
+        # Check for degenerate case where jackknife values have no variance
+        jk_var = np.var(jk_vals)
+        if jk_var < 1e-15:
+            # Fall back to percentile method when BCa acceleration is undefined
+            lo, hi = np.percentile(thetas, [alpha_low * 100, alpha_high * 100]).tolist()
+            return float(lo), float(hi)
+        
         num = np.sum((tdot - jk_vals) ** 3)
         den = 6.0 * (np.sum((tdot - jk_vals) ** 2) ** 1.5 + 1e-12)
         a = float(num / den) if np.isfinite(num) and np.isfinite(den) and den != 0 else 0.0
+        
+        # Bound acceleration parameter to prevent extreme adjustments
+        a = float(np.clip(a, -0.5, 0.5))
         
         z0 = float(norm.ppf((np.sum(thetas < theta0) + 1e-12) / (len(thetas) + 2e-12)))
         
         def _adj(alpha: float) -> float:
             zalpha = float(norm.ppf(alpha))
-            adj = z0 + (z0 + zalpha) / max(1e-12, (1 - a * (z0 + zalpha)))
+            denom = 1 - a * (z0 + zalpha)
+            # Prevent division by zero or extreme values
+            if abs(denom) < 1e-6:
+                return alpha
+            adj = z0 + (z0 + zalpha) / denom
             return float(norm.cdf(adj))
         
         a1 = _adj(alpha_low)

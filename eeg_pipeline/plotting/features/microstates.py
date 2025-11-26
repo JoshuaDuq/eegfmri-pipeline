@@ -560,11 +560,13 @@ def plot_microstate_templates_by_pain(
     pain_vals = pd.to_numeric(aligned_events[pain_col], errors="coerce")
     nonpain_mask = (pain_vals == 0).to_numpy()
     pain_mask = (pain_vals == 1).to_numpy()
+    n_nonpain = int(nonpain_mask.sum())
+    n_pain = int(pain_mask.sum())
     
     plot_cfg = get_plot_config(config)
     min_trials_for_templates = plot_cfg.validation.get("min_trials_for_templates", 5)
-    if (nonpain_mask.sum() < min_trials_for_templates or
-            pain_mask.sum() < min_trials_for_templates):
+    if (n_nonpain < min_trials_for_templates or
+            n_pain < min_trials_for_templates):
         _log_if_present(logger, "warning", "Insufficient trials for pain-specific templates")
         return
     
@@ -610,12 +612,12 @@ def plot_microstate_templates_by_pain(
     label_x_offset = microstate_config.get("label_offset_x", -0.3)
     label_y_position = microstate_config.get("label_y_position", 0.5)
     axes[0, 0].text(
-        label_x_offset, label_y_position, "Non-pain",
+        label_x_offset, label_y_position, f"Non-pain (n={n_nonpain})",
         transform=axes[0, 0].transAxes,
         fontsize=plot_cfg.font.large, rotation=90, va='center', weight='bold'
     )
     axes[1, 0].text(
-        label_x_offset, label_y_position, "Pain",
+        label_x_offset, label_y_position, f"Pain (n={n_pain})",
         transform=axes[1, 0].transAxes,
         fontsize=plot_cfg.font.large, rotation=90, va='center', weight='bold'
     )
@@ -795,6 +797,8 @@ def plot_microstate_coverage_by_pain(
     valid_mask = pain_values.notna()
     nonpain_mask = valid_mask & (pain_values == 0)
     pain_mask = valid_mask & (pain_values == 1)
+    n_nonpain = int(nonpain_mask.sum())
+    n_pain = int(pain_mask.sum())
     state_letters = _create_state_letters(n_states)
     means_nonpain, means_pain, sems_nonpain, sems_pain = [], [], [], []
     
@@ -826,12 +830,12 @@ def plot_microstate_coverage_by_pain(
     
     ax.bar(
         x_positions - plot_cfg.style.bar.width/2, means_nonpain, plot_cfg.style.bar.width, 
-        yerr=sems_nonpain, label='Non-pain', color=nonpain_color, 
+        yerr=sems_nonpain, label=f'Non-pain (n={n_nonpain})', color=nonpain_color, 
         alpha=plot_cfg.style.bar.alpha, capsize=plot_cfg.style.bar.capsize
     )
     ax.bar(
         x_positions + plot_cfg.style.bar.width/2, means_pain, plot_cfg.style.bar.width, 
-        yerr=sems_pain, label='Pain', color=pain_color, 
+        yerr=sems_pain, label=f'Pain (n={n_pain})', color=pain_color, 
         alpha=plot_cfg.style.bar.alpha, capsize=plot_cfg.style.bar.capsize
     )
     ax.set_xticks(x_positions)
@@ -841,7 +845,16 @@ def plot_microstate_coverage_by_pain(
     ax.set_title("Microstate Coverage by Pain Condition", fontsize=plot_cfg.font.figure_title)
     ax.legend(fontsize=plot_cfg.font.title)
     ax.grid(True, alpha=plot_cfg.style.alpha_grid, axis='y')
-    plt.tight_layout()
+    
+    footer_text = f"K={n_states} states | n={len(ms_df)} total trials"
+    fig.text(
+        0.99, 0.01, footer_text,
+        ha='right', va='bottom',
+        fontsize=plot_cfg.font.small,
+        color='gray', alpha=0.8
+    )
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 1])
     save_fig(
         fig,
         save_dir / f"sub-{subject}_microstate_coverage_by_pain",
@@ -1259,7 +1272,9 @@ def plot_microstate_transition_network(
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
-    config: Any
+    config: Any,
+    n_nonpain: Optional[int] = None,
+    n_pain: Optional[int] = None,
 ) -> None:
     """Plot microstate transition network matrices.
     
@@ -1269,6 +1284,8 @@ def plot_microstate_transition_network(
         save_dir: Directory to save plot
         logger: Logger instance
         config: Configuration object
+        n_nonpain: Optional number of non-pain trials
+        n_pain: Optional number of pain trials
     """
     if transitions is None:
         _log_if_present(logger, "warning", "No microstate transition data provided; skipping plot")
@@ -1288,7 +1305,11 @@ def plot_microstate_transition_network(
     cmap = plt.cm.get_cmap("YlOrRd")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    for ax, matrix, title in zip(axes, [trans_nonpain, trans_pain], ["Non-pain", "Pain"]):
+    condition_titles = [
+        f"Non-pain (n={n_nonpain})" if n_nonpain else "Non-pain",
+        f"Pain (n={n_pain})" if n_pain else "Pain"
+    ]
+    for ax, matrix, title in zip(axes, [trans_nonpain, trans_pain], condition_titles):
         im = ax.imshow(matrix, cmap="YlOrRd", vmin=0, vmax=vmax, aspect="auto")
         ax.set_xticks(np.arange(n_states))
         ax.set_yticks(np.arange(n_states))
@@ -1318,7 +1339,18 @@ def plot_microstate_transition_network(
     plot_cfg = get_plot_config(config)
     suffix = " (q<alpha shown)" if q_mat is not None else ""
     plt.suptitle(f"Microstate Transition Probabilities by Condition{suffix}", fontsize=plot_cfg.font.figure_title)
-    plt.tight_layout(rect=[0, 0.02, 1, 0.95])
+    
+    total_trials = (n_nonpain or 0) + (n_pain or 0)
+    if total_trials > 0:
+        footer_text = f"K={n_states} states | n={total_trials} total trials"
+        fig.text(
+            0.99, 0.01, footer_text,
+            ha='right', va='bottom',
+            fontsize=plot_cfg.font.small,
+            color='gray', alpha=0.8
+        )
+    
+    plt.tight_layout(rect=[0, 0.04, 1, 0.95])
     save_fig(
         fig,
         save_dir / f"sub-{subject}_microstate_transitions",
@@ -1334,7 +1366,9 @@ def plot_microstate_duration_distributions(
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
-    config: Any
+    config: Any,
+    n_nonpain: Optional[int] = None,
+    n_pain: Optional[int] = None,
 ) -> None:
     """Plot microstate duration distributions by pain condition.
     
@@ -1344,6 +1378,8 @@ def plot_microstate_duration_distributions(
         save_dir: Directory to save plot
         logger: Logger instance
         config: Configuration object
+        n_nonpain: Optional number of non-pain trials
+        n_pain: Optional number of pain trials
     """
     if not duration_stats:
         _log_if_present(logger, "warning", "No microstate duration statistics provided; skipping violin plot")
@@ -1367,11 +1403,13 @@ def plot_microstate_duration_distributions(
 
         if nonpain_data.size:
             data_to_plot.append(nonpain_data)
-            labels.append("Non-pain")
+            n_label = f" (n={n_nonpain})" if n_nonpain else ""
+            labels.append(f"Non-pain{n_label}")
             colors_to_use.append("steelblue")
         if pain_data.size:
             data_to_plot.append(pain_data)
-            labels.append("Pain")
+            n_label = f" (n={n_pain})" if n_pain else ""
+            labels.append(f"Pain{n_label}")
             colors_to_use.append("orangered")
 
         if data_to_plot:
@@ -1399,7 +1437,18 @@ def plot_microstate_duration_distributions(
 
     plot_cfg = get_plot_config(config)
     plt.suptitle("Microstate Duration Distributions by Pain Condition", fontsize=plot_cfg.font.figure_title)
-    plt.tight_layout(rect=[0, 0.02, 1, 0.96])
+    
+    total_trials = (n_nonpain or 0) + (n_pain or 0)
+    if total_trials > 0:
+        footer_text = f"K={n_states} states | n={total_trials} total trials"
+        fig.text(
+            0.99, 0.01, footer_text,
+            ha='right', va='bottom',
+            fontsize=plot_cfg.font.small,
+            color='gray', alpha=0.8
+        )
+    
+    plt.tight_layout(rect=[0, 0.04, 1, 0.96])
     save_fig(
         fig,
         save_dir / f"sub-{subject}_microstate_duration_distributions",
@@ -1408,62 +1457,6 @@ def plot_microstate_duration_distributions(
     )
     plt.close(fig)
     _log_if_present(logger, "info", "Saved microstate duration distributions")
-
-
-def plot_microstate_transition_heatmaps(
-    transitions: MicrostateTransitionStats,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot microstate transition heatmaps with significance masking.
-    
-    Args:
-        transitions: MicrostateTransitionStats object
-        subject: Subject identifier
-        save_dir: Directory to save plot
-        logger: Logger instance
-        config: Configuration object
-    """
-    if transitions is None:
-        _log_if_present(logger, "warning", "No microstate transition data provided; skipping heatmaps")
-        return
-    state_labels = transitions.state_labels
-    n_states = len(state_labels)
-    if n_states == 0:
-        return
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
-    q_mat = getattr(transitions, "q_values", None)
-    vmax = float(max(np.nanmax(transitions.nonpain), np.nanmax(transitions.pain), 1e-6))
-    norm = plt.Normalize(vmin=0.0, vmax=vmax)
-    cmap = "YlOrRd"
-
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for ax, matrix, title in zip(axes, [transitions.nonpain, transitions.pain], ["Non-pain", "Pain"]):
-        sig_mask = None
-        if q_mat is not None:
-            sig_mask = np.isfinite(q_mat) & (q_mat < alpha)
-        im = ax.imshow(matrix, cmap=cmap, norm=norm, aspect="auto")
-        if sig_mask is not None:
-            ax.contour(sig_mask, levels=[0.5], colors="k", linewidths=0.8)
-        ax.set_xticks(np.arange(n_states))
-        ax.set_yticks(np.arange(n_states))
-        ax.set_xticklabels(state_labels)
-        ax.set_yticklabels(state_labels)
-        ax.set_xlabel("To State")
-        ax.set_ylabel("From State")
-        ax.set_title(title)
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), shrink=0.8, pad=0.02)
-    cbar.set_label("Transition rate (per s)")
-    output_path = save_dir / f"sub-{subject}_microstate_transition_heatmaps"
-    plot_cfg = get_plot_config(config)
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-    plt.close(fig)
-    _log_if_present(logger, "info", "Saved microstate transition heatmaps")
 
 
 ###################################################################

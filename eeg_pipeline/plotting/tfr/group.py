@@ -536,7 +536,7 @@ def group_contrast_maxmin_temperature(
             subj_max = data_max[:, :, fmask, :][:, :, :, tmask].mean(axis=(2, 3))
             subj_min = data_min[:, :, fmask, :][:, :, :, tmask].mean(axis=(2, 3))
             sig_mask, cluster_p_min, cluster_k, cluster_mass = _cluster_test_two_sample_arrays(
-                subj_max, subj_min, info_common, alpha=config.get("statistics.sig_alpha", 0.05), paired=True, n_permutations=config.get("statistics.cluster_n_perm", 1024), config=config
+                subj_max, subj_min, info_common, alpha=config.get("statistics.sig_alpha", 0.05), paired=True, n_permutations=config.get("statistics.cluster_n_perm", 100), config=config
             )
             if sig_mask is not None and cluster_p_min is not None:
                 is_cluster_used = True

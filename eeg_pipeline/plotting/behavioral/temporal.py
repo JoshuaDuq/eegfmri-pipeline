@@ -397,7 +397,7 @@ def plot_temporal_correlation_topomaps_by_temperature(
         )
         
         filename = f"sub-{subject}_temporal_correlations_by_temperature_{band_name}.png"
-        save_fig(fig, plots_dir / filename, formats=config.get("output.save_formats", ["svg"]), bbox_inches="tight", footer=_get_behavior_footer(config))
+        save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
         plt.close(fig)
     
     logger.info(f"Created temporal correlation topomaps by temperature for {len(band_names)} bands")
@@ -579,7 +579,7 @@ def plot_temporal_correlation_topomaps_by_pain(
         )
         
         filename = f"sub-{subject}_temporal_correlations_by_pain_{band_name}.png"
-        save_fig(fig, plots_dir / filename, formats=config.get("output.save_formats", ["svg"]), bbox_inches="tight", footer=_get_behavior_footer(config))
+        save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
         plt.close(fig)
     
     logger.info(f"Created temporal correlation topomaps by pain for {len(band_names)} bands")
@@ -659,7 +659,7 @@ def plot_temporal_correlation_topomaps_by_pain(
     )
     
     filename = f"sub-{subject}_temporal_correlations_by_pain_allbands.png"
-    save_fig(fig, plots_dir / filename, formats=config.get("output.save_formats", ["svg"]), bbox_inches="tight", footer=_get_behavior_footer(config))
+    save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
     plt.close(fig)
     
     logger.info("Created combined temporal correlation topomap with all bands")
@@ -728,7 +728,7 @@ def plot_temporal_correlation_topomaps_by_pain(
     )
     
     filename = f"sub-{subject}_temporal_correlations_by_pain_allbands_combined.png"
-    save_fig(fig, plots_dir / filename, formats=config.get("output.save_formats", ["svg"]), bbox_inches="tight", footer=_get_behavior_footer(config))
+    save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
     plt.close(fig)
     
     logger.info("Created combined temporal correlation topomap with all bands averaged")
@@ -1165,63 +1165,6 @@ def plot_itpc_rating_scatter_grid(
     _log_if_present(logger, "info", f"Saved ITPC scatter grid to {out_path}")
 
 
-def plot_behavior_reliability(
-    subject: str,
-    stats_dir: Path,
-    plots_dir: Path,
-    config: Any,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Forest plot of split-half reliability for behavioral correlations."""
-    logger = logger or _get_default_logger()
-    rel_path = stats_dir / "behavior_reliability.tsv"
-    if not rel_path.exists():
-        _log_if_present(logger, "warning", f"Reliability file not found: {rel_path}")
-        return
-    df = read_tsv(rel_path)
-    if df is None or df.empty:
-        _log_if_present(logger, "warning", "Reliability file empty; skipping plot.")
-        return
-
-    df = df.dropna(subset=["median"])
-    if df.empty:
-        return
-
-    plot_cfg = get_plot_config(config)
-    ensure_dir(plots_dir)
-
-    labels_map = {
-        "power_corr_split_half": "Power ROI corr",
-        "tf_corr_split_half": "TF corr map",
-    }
-    df["label"] = df["metric"].map(labels_map).fillna(df["metric"])
-    df = df.sort_values("median", ascending=True)
-
-    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("standard", plot_type="behavioral"))
-    y_pos = np.arange(len(df))
-    ax.errorbar(df["median"], y_pos, xerr=[df["median"] - df["ci_low"], df["ci_high"] - df["median"]],
-                fmt="o", color=plot_cfg.get_color("blue"), ecolor=plot_cfg.get_color("gray"),
-                elinewidth=plot_cfg.style.line.width_standard, capsize=3)
-    ax.axvline(0, color=plot_cfg.get_color("gray"), linestyle="--", linewidth=plot_cfg.style.line.width_thin)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(df["label"])
-    ax.set_xlabel("Split-half reliability (Spearman-Brown)")
-    ax.set_title(f"Reliability diagnostics (sub-{subject})")
-    ax.set_xlim(-0.1, 1.05)
-    ax.grid(alpha=0.2, axis="x")
-
-    save_fig(
-        fig,
-        plots_dir / f"sub-{subject}_behavior_reliability",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    _log_if_present(logger, "info", "Saved behavior reliability plot")
-
-
 ###################################################################
 # Significant Correlations Topomap
 ###################################################################
@@ -1372,13 +1315,14 @@ def plot_significant_correlations_topomap(
     
     _add_colorbar(fig, axes, successful_plots, config)
     
-    save_formats = config.get("output.save_formats", ["svg"])
     tight_layout_rect = topomap_config.get("tight_layout_rect", [0, 0.15, 1, 1])
     save_fig(
         fig,
         save_dir / f'sub-{subject}_significant_correlations_topomap',
-        formats=save_formats,
-        bbox_inches="tight",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config),
         tight_layout_rect=tight_layout_rect
     )
@@ -1496,12 +1440,13 @@ def _plot_connectivity_network(
     ax.axis('off')
     
     plt.tight_layout()
-    save_formats = config.get("output.save_formats", ["svg"])
     save_fig(
         fig,
         save_dir / f'sub-{subject}_connectivity_network_{measure}_{band}',
-        formats=save_formats,
-        bbox_inches="tight",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
         footer=_get_behavior_footer(config)
     )
     plt.close(fig)
@@ -1593,6 +1538,9 @@ def _load_tf_correlation_data(data_path: Path, config) -> Dict[str, Any]:
         if method is None:
             method = "spearman" if data.get("use_spearman", True) else "pearson"
         
+        covariates_raw = data.get("covariates_used", np.array([], dtype=str))
+        covariates_used = list(covariates_raw) if covariates_raw.size > 0 else []
+        
         return {
             "correlations": correlations,
             "p_values": data["p_values"],
@@ -1613,6 +1561,8 @@ def _load_tf_correlation_data(data_path: Path, config) -> Dict[str, Any]:
             "cluster_alpha": float(data.get("cluster_alpha", data.get("alpha", config.get("behavior_analysis.statistics.fdr_alpha", 0.05)))),
             "cluster_n_perm": int(data.get("cluster_n_perm", 0)),
             "method": str(method),
+            "covariates_used": covariates_used,
+            "n_trials": int(data.get("n_trials", 0)),
         }
 
 
@@ -1913,13 +1863,24 @@ def plot_time_frequency_correlation_heatmap(
 
     plt.tight_layout()
     fig_name = f"time_frequency_correlation_heatmap{roi_suffix}{method_suffix}"
-    save_formats = config.get("output.save_formats", ["svg"])
+    
+    footer_text = _get_behavior_footer(config)
+    n_trials = tf_data.get("n_trials", 0)
+    covariates_used = tf_data.get("covariates_used", [])
+    if n_trials > 0:
+        footer_text = f"{footer_text} | n={n_trials} trials"
+    if covariates_used:
+        covar_str = ", ".join(covariates_used)
+        footer_text = f"{footer_text} | Partial corr. controlling: {covar_str}"
+    
     save_fig(
         fig,
         plots_dir / fig_name,
-        formats=save_formats,
-        bbox_inches="tight",
-        footer=_get_behavior_footer(config),
+        formats=plot_cfg.formats if plot_cfg else ["png", "svg"],
+        dpi=plot_cfg.dpi if plot_cfg else None,
+        bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight",
+        pad_inches=plot_cfg.pad_inches if plot_cfg else None,
+        footer=footer_text,
     )
     plt.close(fig)
 

@@ -260,7 +260,7 @@ def correlate_power_topomaps(
     alpha = get_fdr_alpha_from_config(config)
     
     cluster_cfg = config.get("behavior_analysis.cluster_correction", {})
-    cluster_n_perm_config = cluster_cfg.get("n_permutations", 1024)
+    cluster_n_perm_config = cluster_cfg.get("n_permutations", 100)
     cluster_params = {
         "alpha": float(alpha),
         "cluster_alpha": float(cluster_cfg.get("alpha", alpha)),

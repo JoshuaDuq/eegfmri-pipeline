@@ -166,10 +166,15 @@ def time_generalization_regression(
                 times = first_epochs.times
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
             
+            # Minimum samples per window for reliable regression and correlation
+            min_samples_per_window = config_local.get(
+                "decoding.analysis.time_generalization.min_samples_per_window", 15
+            )
+            
             for i in range(n_windows):
                 train_feat_i = train_feats[:, i, :]
                 finite_mask_train = np.isfinite(train_feat_i).any(axis=1)
-                if np.sum(finite_mask_train) < 5:
+                if np.sum(finite_mask_train) < min_samples_per_window:
                     continue
                 
                 train_feat_i_clean = train_feat_i[finite_mask_train].copy()
@@ -190,7 +195,7 @@ def time_generalization_regression(
                 for j in range(n_windows):
                     test_feat_j = test_feats[:, j, :]
                     finite_mask_test = np.isfinite(test_feat_j).any(axis=1)
-                    if np.sum(finite_mask_test) < 5:
+                    if np.sum(finite_mask_test) < min_samples_per_window:
                         continue
                     
                     test_feat_j_clean = test_feat_j[finite_mask_test].copy()
@@ -200,14 +205,16 @@ def time_generalization_regression(
                     try:
                         y_pred = model.predict(test_feat_j_clean)
                         finite_mask_pred = np.isfinite(y_pred) & np.isfinite(y_test[finite_mask_test])
-                        if np.sum(finite_mask_pred) < 5:
+                        if np.sum(finite_mask_pred) < min_samples_per_window:
                             continue
                         y_test_finite = y_test[finite_mask_test][finite_mask_pred]
                         y_pred_finite = y_pred[finite_mask_pred]
                         n_valid = len(y_test_finite)
                         
-                        # Require minimum 10 samples for reliable correlation estimation
-                        min_samples_for_corr = 10
+                        # Configurable minimum samples for reliable correlation estimation
+                        min_samples_for_corr = config_local.get(
+                            "decoding.analysis.time_generalization.min_samples_for_corr", 10
+                        )
                         if n_valid >= min_samples_for_corr:
                             r_val = np.corrcoef(y_test_finite, y_pred_finite)[0, 1] if n_valid > 1 else np.nan
                             r2_val = r2_score(y_test_finite, y_pred_finite) if n_valid > 1 else np.nan
@@ -253,7 +260,10 @@ def time_generalization_regression(
         tg_r2 = np.full_like(tg_r, np.nan)
         coverage_map = np.zeros_like(tg_r, dtype=int)
         
-        min_count_per_cell = 5
+        # Minimum total samples across folds for reliable Fisher z-averaging
+        min_count_per_cell = config_local.get(
+            "decoding.analysis.time_generalization.min_count_per_cell", 15
+        )
         
         for i in range(n_windows):
             for j in range(n_windows):

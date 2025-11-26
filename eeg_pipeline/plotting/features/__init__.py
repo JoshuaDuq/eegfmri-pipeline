@@ -29,7 +29,6 @@ from .microstates import (
     plot_microstate_gfp_by_temporal_bins,
     plot_microstate_transition_network,
     plot_microstate_duration_distributions,
-    plot_microstate_transition_heatmaps,
     plot_group_microstate_template_stability,
     plot_group_microstate_transition_summary,
 )
@@ -93,7 +92,6 @@ __all__ = [
     "plot_microstate_gfp_by_temporal_bins",
     "plot_microstate_transition_network",
     "plot_microstate_duration_distributions",
-    "plot_microstate_transition_heatmaps",
     "plot_group_microstate_template_stability",
     "plot_group_microstate_transition_summary",
     # Connectivity plotting

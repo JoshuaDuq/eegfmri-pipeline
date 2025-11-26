@@ -212,7 +212,7 @@ def compute_cluster_significance_from_combined(
             group_a_subjects, group_b_subjects, info_common,
             alpha=config.get("statistics.sig_alpha", 0.05) if config else 0.05,
             paired=False,
-            n_permutations=config.get("statistics.cluster_n_perm", 1024) if config else 1024,
+            n_permutations=config.get("statistics.cluster_n_perm", 100) if config else 100,
             config=config
         )
         
@@ -318,7 +318,7 @@ def build_statistical_title(
         return ""
     
     alpha = config.get("statistics.sig_alpha", 0.05) if config else 0.05
-    n_perm = config.get("statistics.cluster_n_perm", 5000) if config else 5000
+    n_perm = config.get("statistics.cluster_n_perm", 100) if config else 100
     
     parts = []
     

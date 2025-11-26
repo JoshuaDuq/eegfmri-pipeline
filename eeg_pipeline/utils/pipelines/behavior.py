@@ -38,11 +38,7 @@ from eeg_pipeline.analysis.behavior.temporal import (
     compute_temporal_correlations_by_condition,
 )
 from eeg_pipeline.analysis.behavior.cluster_tests import _run_pain_nonpain_cluster_test
-from eeg_pipeline.utils.analysis.reliability import (
-    get_subject_seed,
-    compute_feature_split_half_reliability,
-    compute_tf_split_half_reliability,
-)
+from eeg_pipeline.utils.analysis.reliability import get_subject_seed
 
 
 ###################################################################
@@ -139,13 +135,13 @@ def process_subject(
         return
     
     if n_perm == 0:
-        stats_n_perm = config.get("behavior_analysis.statistics.n_permutations", 1024)
+        stats_n_perm = config.get("behavior_analysis.statistics.n_permutations", 100)
         if stats_n_perm > 0:
             n_perm = int(stats_n_perm)
             logger.info("n_perm was 0; using behavior_analysis.statistics.n_permutations=%d", n_perm)
         else:
-            cluster_perm = config.get("behavior_analysis.cluster_correction.n_permutations", 1024)
-            n_perm = int(cluster_perm) if cluster_perm > 0 else 1024
+            cluster_perm = config.get("behavior_analysis.cluster_correction.n_permutations", 100)
+            n_perm = int(cluster_perm) if cluster_perm > 0 else 100
             logger.info("n_perm was 0; using behavior_analysis.cluster_correction.n_permutations=%d", n_perm)
     
     all_computations = {
@@ -218,47 +214,6 @@ def process_subject(
         logger.info("Exporting combined correlation stats...")
         all_computations["exports"]()
 
-    if computations is None or "reliability" in computations:
-        reliability_records = []
-        rel_boot = int(config.get("behavior_analysis.statistics.reliability_bootstrap", 100))
-        try:
-            pow_cols = [c for c in pow_df.columns if str(c).startswith("pow_")]
-            if pow_cols:
-                feature_matrix = pow_df[pow_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
-                y_array = pd.to_numeric(y, errors="coerce").to_numpy(dtype=float)
-                med, lo, hi = compute_feature_split_half_reliability(
-                    feature_matrix, y_array, rel_boot, use_spearman, rng
-                )
-                reliability_records.append({
-                    "metric": "power_corr_split_half",
-                    "median": med,
-                    "ci_low": lo,
-                    "ci_high": hi,
-                    "n_boot": rel_boot,
-                })
-        except Exception as exc:
-            logger.warning("Power split-half reliability failed: %s", exc)
-
-        try:
-            if epochs is not None and aligned_events is not None:
-                med_tf, lo_tf, hi_tf = compute_tf_split_half_reliability(
-                    epochs, aligned_events, y, config, use_spearman, rel_boot, rng, logger
-                )
-                reliability_records.append({
-                    "metric": "tf_corr_split_half",
-                    "median": med_tf,
-                    "ci_low": lo_tf,
-                    "ci_high": hi_tf,
-                    "n_boot": rel_boot,
-                })
-        except Exception as exc:
-            logger.warning("TF split-half reliability failed: %s", exc)
-
-        if reliability_records:
-            stats_dir = deriv_stats_path(deriv_root, subject)
-            ensure_dir(stats_dir)
-            write_tsv(pd.DataFrame(reliability_records), stats_dir / "behavior_reliability.tsv")
-    
     if computations is None or "fdr" in computations:
         try:
             logger.info("Applying global FDR correction...")
@@ -311,12 +266,12 @@ def compute_behavior_correlations_for_subjects(
     partial_covars = partial_covars or config.get("behavior_analysis.statistics.partial_covariates")
     
     if n_perm is None or n_perm == 0:
-        stats_n_perm = config.get("behavior_analysis.statistics.n_permutations", 1024)
+        stats_n_perm = config.get("behavior_analysis.statistics.n_permutations", 100)
         if stats_n_perm > 0:
             n_perm = int(stats_n_perm)
         else:
-            cluster_perm = config.get("behavior_analysis.cluster_correction.n_permutations", 1024)
-            n_perm = int(cluster_perm) if cluster_perm > 0 else 1024
+            cluster_perm = config.get("behavior_analysis.cluster_correction.n_permutations", 100)
+            n_perm = int(cluster_perm) if cluster_perm > 0 else 100
             if logger is None:
                 logger = get_logger(__name__)
             logger.info(

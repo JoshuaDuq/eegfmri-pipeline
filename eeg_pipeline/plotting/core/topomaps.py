@@ -54,7 +54,7 @@ def build_topomap_diff_label(
         if config:
             plot_cfg = get_plot_config(config)
             tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", 5000) if tfr_config else 5000
+        default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", 100) if tfr_config else 100
         n_perm = config.get("statistics.cluster_n_perm", default_cluster_n_perm) if config else default_cluster_n_perm
         cl_txt = format_cluster_ann(cluster_p_min, cluster_k, cluster_mass, config=config)
         if cl_txt:

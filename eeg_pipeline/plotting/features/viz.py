@@ -39,9 +39,7 @@ from .microstates import (
     plot_microstate_gfp_by_temporal_bins,
     plot_microstate_pain_correlation_heatmap,
     plot_microstate_transition_network,
-    plot_microstate_transition_heatmaps,
     plot_microstate_duration_distributions,
-    plot_group_microstate_template_stability,
 )
 from .aperiodic import (
     plot_aperiodic_topomaps,
@@ -283,16 +281,10 @@ def visualize_subject_features(
                     logger.info("Computing and plotting microstate transitions...")
                     trans_stats = compute_microstate_transition_stats(ms_df, aligned_events, n_states=n_microstates, config=config)
                     plot_microstate_transition_network(trans_stats, subject, plots_dir, logger, config)
-                    plot_microstate_transition_heatmaps(trans_stats, subject, plots_dir, logger, config)
                     
                     logger.info("Computing and plotting microstate durations...")
                     dur_stats = compute_microstate_duration_stats(ms_df, aligned_events, n_states=n_microstates, config=config)
                     plot_microstate_duration_distributions(dur_stats, subject, plots_dir, logger, config)
-                    
-                    group_path = config.deriv_root / "group" / "eeg" / "stats" / f"microstates_templates_group_K{n_microstates}.npz"
-                    if group_path.exists():
-                        logger.info("Plotting group microstate template stability...")
-                        plot_group_microstate_template_stability(group_path, plots_dir, logger, config)
                 except Exception as e:
                     logger.error(f"Error plotting microstates for sub-{subject}: {e}")
     

@@ -80,9 +80,10 @@ def corr_maps(maps_a: np.ndarray, maps_b: np.ndarray) -> np.ndarray:
     if n_samples <= 1:
         raise ValueError(f"corr_maps requires at least 2 samples, got {n_samples}")
     
-    # For z-scored maps, correlation = dot product / n_samples
-    # (not n_samples - 1, since z-scoring already uses sample std)
-    return (maps_a @ maps_b.T) / n_samples
+    # For z-scored maps (mean=0, std=1), correlation = dot product / (n_samples - 1)
+    # Using n_samples - 1 (Bessel's correction) provides unbiased correlation estimate
+    # since zscore_maps uses ddof=0 (population std) for standardization
+    return (maps_a @ maps_b.T) / (n_samples - 1)
 
 
 def label_timecourse(channel_data: np.ndarray, templates: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:

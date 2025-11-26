@@ -260,21 +260,25 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     n_cluster_perm: 10  # Number of cluster permutation tests (quick check)
   cluster_correction:  # Cluster-based permutation test parameters (used in cluster correction)
     alpha: 0.05  # Cluster significance threshold
-    n_permutations: 1024  # Number of permutations for cluster correction
+    n_permutations: 1000  # Number of permutations for cluster correction. Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
+    min_permutations: 1000  # Minimum permutations for reliable cluster test p-values at alpha=0.05
     rng_seed: 42  # Random seed for permutation tests
   temporal_correlation_topomaps:  # Temporal correlation topomap parameters (used in compute_temporal_correlations_by_condition)
     window_size_ms: 500.0  # Window size [ms] for temporal binning
     min_trials_per_condition: 5  # Minimum trials required per condition (temperature/pain) for correlation computation
+  sliding_states:  # Sliding state analysis parameters (used in connectivity.py)
+    n_clusters: 3  # Number of clusters for sliding state analysis (used in compute_sliding_state_metrics)
   statistics:  # Statistical analysis parameters (used in _compute_correlation_statistics, compute_power_roi_stats)
     correlation_method: "spearman"  # Correlation method: "spearman" (rank) or "pearson" (linear)
     fdr_alpha: 0.05  # False discovery rate threshold (Benjamini-Hochberg correction, used in apply_global_fdr)
-    n_permutations: 1024  # Number of permutation tests (used in compute_permutation_pvalues, ROI stats, topomap correlations)
+    n_permutations: 1000  # Number of permutation tests (used in compute_permutation_pvalues, ROI stats, topomap correlations). Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
     partial_covariates: ["temperature", "block"]  # Covariates for partial correlation (e.g., ["temperature", "block"])
     bootstrap_ci_percentiles: [2.5, 97.5]  # Bootstrap confidence interval percentiles (used in compute_bootstrap_ci)
     min_nodes_for_heatmap: 3  # Minimum nodes/channels required for heatmap computation
     min_channels_for_adjacency: 2  # Minimum channels required for adjacency matrix construction
     min_samples_roi: 5  # Minimum samples required for ROI-level statistics (used in _compute_roi_correlation_stats)
     min_samples_channel: 10  # Minimum samples required for channel-level statistics
+    edge_bootstrap_n: 1000  # Number of bootstrap samples for edge-level statistics (used in connectivity.py)
     connectivity_min_correlation: 0.3  # Minimum correlation threshold for connectivity correlations (used in compute_connectivity_correlations)
     connectivity_max_pvalue: 0.05  # Maximum p-value threshold for connectivity correlations (used in compute_connectivity_correlations)
   predictors:  # Top predictor selection parameters
@@ -350,8 +354,8 @@ decoding:  # Decoding/regression analysis parameters (used in 05_decoding.py, de
       ridge_alpha_grid: [0.0, 0.001, 0.01, 0.1, 1, 10]  # Ridge regression alpha grid
       ridge_alpha_default: 1.0  # Default ridge alpha if grid search fails
   analysis:  # Decoding analysis parameters
-    n_perm_quick: 1024  # Number of permutations for quick permutation tests
-    n_perm_refit: 1024  # Number of permutations for refitted model permutation tests
+    n_perm_quick: 100  # Number of permutations for quick permutation tests (reduced for testing)
+    n_perm_refit: 100  # Number of permutations for refitted model permutation tests (reduced for testing)
     perm_refit_n_jobs: 1  # Number of parallel jobs for permutation refitting
     perm_refit_use_nested_cv: false  # Whether to use nested CV in permutation refitting
     rf_perm_importance_repeats: 20  # Number of repeats for random forest permutation importance
@@ -384,7 +388,7 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
   use_spearman_default: true  # Default to Spearman (rank) correlation instead of Pearson
   sig_alpha: 0.05  # Significance threshold for statistical tests
   fdr_alpha: 0.05  # False discovery rate threshold (Benjamini-Hochberg correction)
-  cluster_n_perm: 1024  # Number of permutations for cluster-based permutation tests
+  cluster_n_perm: 100  # Number of permutations for cluster-based permutation tests (reduced for testing)
   cluster_n_jobs: -1  # Number of parallel jobs for cluster tests (-1 = all CPUs)
   cluster_report_size: false  # Whether to report cluster size in results
   cluster_report_mass: false  # Whether to report cluster mass in results
@@ -578,7 +582,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       log_base: 10.0  # Logarithm base for TFR power display (log10)
       percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
       percent_detection_threshold: 5.0  # Minimum percentage change to display in annotations [%]
-      default_cluster_n_perm: 1024  # Default number of permutations for cluster tests
+      default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
       default_significance_alpha: 0.05  # Default significance threshold
       default_fdr_alpha: 0.05  # Default FDR threshold
       default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots
@@ -845,7 +849,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       log_base: 10.0  # Logarithm base for TFR power display (log10)
       percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
       percent_detection_threshold: 5.0  # Minimum percentage change to display in annotations [%]
-      default_cluster_n_perm: 1024  # Default number of permutations for cluster tests
+      default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
       default_significance_alpha: 0.05  # Default significance threshold
       default_fdr_alpha: 0.05  # Default FDR threshold
       default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots
@@ -936,7 +940,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       log_base: 10.0  # Logarithm base for TFR power display (log10)
       percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
       percent_detection_threshold: 5.0  # Minimum percentage change to display [%]
-      default_cluster_n_perm: 1024  # Default number of permutations for cluster tests
+      default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
       default_significance_alpha: 0.05  # Default significance threshold
       default_fdr_alpha: 0.05  # Default FDR threshold
       default_max_freq: 80.0  # Default maximum frequency [Hz]

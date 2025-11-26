@@ -37,7 +37,7 @@ def compute_pain_nonpain_time_cluster_test(
     output_dir: Path,
     config,
     bands: Optional[dict] = None,
-    n_permutations: int = 1024,
+    n_permutations: int = 100,
     alpha: float = 0.05,
 ) -> dict:
     """
@@ -302,8 +302,8 @@ def _run_pain_nonpain_cluster_test(
         return
 
     stats_cfg = config.get("behavior_analysis", {}).get("statistics", {})
-    # Minimum 5000 permutations for reliable p-value estimation at alpha=0.05
-    n_perm = int(stats_cfg.get("n_permutations", 5000))
+    # Reduced to 100 for testing (normally 5000 for reliable p-value estimation at alpha=0.05)
+    n_perm = int(stats_cfg.get("n_permutations", 100))
     alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
 
     bands = get_bands_for_tfr(

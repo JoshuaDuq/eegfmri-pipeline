@@ -28,18 +28,49 @@ def compute_feature_split_half_reliability(
     n_boot: int,
     use_spearman: bool,
     rng: np.random.Generator,
+    min_samples_per_split: int = 10,
 ) -> Tuple[float, float, float]:
-    """Split-half reliability across feature-level correlations."""
+    """Split-half reliability across feature-level correlations.
+    
+    Parameters
+    ----------
+    feature_matrix : np.ndarray
+        Feature matrix of shape (n_trials, n_features)
+    ratings : np.ndarray
+        Target values of shape (n_trials,)
+    n_boot : int
+        Number of bootstrap iterations
+    use_spearman : bool
+        Whether to use Spearman correlation
+    rng : np.random.Generator
+        Random number generator
+    min_samples_per_split : int
+        Minimum samples required per split for valid correlation estimation.
+        Default is 10 to ensure stable correlation estimates.
+    
+    Returns
+    -------
+    Tuple[float, float, float]
+        (median reliability, 2.5th percentile, 97.5th percentile)
+    """
     if feature_matrix.size == 0 or ratings.size == 0:
         return np.nan, np.nan, np.nan
     n_trials = feature_matrix.shape[0]
-    if n_trials < 4:
+    
+    # Require at least 2 * min_samples_per_split trials total
+    min_total_samples = 2 * min_samples_per_split
+    if n_trials < min_total_samples:
         return np.nan, np.nan, np.nan
 
     rel_values = []
     for _ in range(int(n_boot)):
         idx = rng.permutation(n_trials)
         half = n_trials // 2
+        
+        # Ensure each split has sufficient samples
+        if half < min_samples_per_split:
+            continue
+            
         idx_a, idx_b = idx[:half], idx[half:]
         Xa, Xb = feature_matrix[idx_a], feature_matrix[idx_b]
         ya, yb = ratings[idx_a], ratings[idx_b]
@@ -86,8 +117,16 @@ def compute_tf_split_half_reliability(
     n_boot: int,
     rng: np.random.Generator,
     logger: logging.Logger,
+    min_samples_per_split: int = 15,
 ) -> Tuple[float, float, float]:
-    """Split-half reliability for time-frequency correlation map using a single TFR computation."""
+    """Split-half reliability for time-frequency correlation map using a single TFR computation.
+    
+    Parameters
+    ----------
+    min_samples_per_split : int
+        Minimum samples required per split. Default 15 for TF analysis where
+        each bin requires sufficient samples for stable correlation estimation.
+    """
     from eeg_pipeline.analysis.behavior.temporal import _compute_tf_correlations_for_bins
     from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi, apply_baseline_to_tfr
 
@@ -130,12 +169,23 @@ def compute_tf_split_half_reliability(
     stats_config = config.get("behavior_analysis", {}).get("statistics", {})
     min_valid_points = int(stats_config.get("min_samples_roi"))
 
+    # Use the more stringent of min_valid_points and min_samples_per_split
+    min_per_split = max(min_valid_points, min_samples_per_split)
+    
+    # Early exit if insufficient total samples
+    if len(y_array) < 2 * min_per_split:
+        logger.warning(
+            "Insufficient samples (%d) for split-half TF reliability (need >= %d)",
+            len(y_array), 2 * min_per_split
+        )
+        return np.nan, np.nan, np.nan
+    
     rel_values = []
     for _ in range(int(n_boot)):
         idx = rng.permutation(len(y_array))
         half = len(idx) // 2
         idx_a, idx_b = idx[:half], idx[half:]
-        if len(idx_a) < min_valid_points or len(idx_b) < min_valid_points:
+        if len(idx_a) < min_per_split or len(idx_b) < min_per_split:
             continue
         corr_a, _, _, _, info_a = _compute_tf_correlations_for_bins(
             power[idx_a], y_array[idx_a], times, freq_vec, time_bin_edges,

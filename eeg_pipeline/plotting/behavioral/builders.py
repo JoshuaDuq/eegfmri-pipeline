@@ -329,9 +329,8 @@ def generate_correlation_scatter(
         warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
         fig.tight_layout()
 
-    save_formats = plot_cfg.formats if plot_cfg.formats else config.get("output.save_formats", ["svg"])
     _log_plot_details(logger, title_prefix, roi_channels)
-    save_fig(fig, output_path, formats=save_formats, dpi=plot_cfg.dpi, 
+    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, 
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches,
              footer=_get_behavior_footer(config), logger=logger)
     plt.close(fig)
@@ -436,11 +435,10 @@ def plot_residual_qc(
                  fontweight="bold", y=plot_cfg.text_position.residual_qc_title_y)
     fig.tight_layout()
 
-    save_formats = plot_cfg.formats if plot_cfg.formats else config.get("output.save_formats", ["svg"])
     save_fig(
         fig,
         output_path,
-        formats=save_formats,
+        formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
@@ -521,11 +519,10 @@ def plot_regression_residual_diagnostics(
     fig.suptitle(f"{title_prefix} — Residual Diagnostics", fontsize=plot_cfg.font.figure_title, fontweight="bold")
     fig.tight_layout(rect=[0, 0.02, 1, 0.97])
 
-    save_formats = plot_cfg.formats if plot_cfg.formats else config.get("output.save_formats", ["svg"])
     save_fig(
         fig,
         output_path,
-        formats=save_formats,
+        formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,

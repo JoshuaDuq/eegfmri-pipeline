@@ -298,7 +298,6 @@ def group_tf_correlation(
     cb1.set_label("r")
     plt.tight_layout()
     _annotate_tf_correlation_figure(fig1, config, alpha)
-    save_formats = config.get("output.save_formats", ["png"]) if config else ["png"]
     _save_fig(
         fig1,
         plots_dir,
@@ -306,7 +305,7 @@ def group_tf_correlation(
         config,
         logger=logger,
     )
-    for ext in save_formats:
+    for ext in plot_cfg_small.formats:
         figure_paths.append(
             plots_dir / f"tf_corr_group_rmean{roi_suffix}{method_suffix}.{ext}"
         )
@@ -330,7 +329,6 @@ def group_tf_correlation(
     cb2.set_label("r (significant)")
     plt.tight_layout()
     _annotate_tf_correlation_figure(fig2, config, alpha)
-    save_formats = config.get("output.save_formats", ["png"]) if config else ["png"]
     _save_fig(
         fig2,
         plots_dir,
@@ -338,7 +336,7 @@ def group_tf_correlation(
         config,
         logger=logger,
     )
-    for ext in save_formats:
+    for ext in plot_cfg_small.formats:
         figure_paths.append(
             plots_dir / f"tf_corr_group_sig{roi_suffix}{method_suffix}.{ext}"
         )

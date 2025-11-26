@@ -40,6 +40,7 @@ from eeg_pipeline.plotting.features import (
     plot_group_power_plots,
     plot_group_band_power_time_courses,
     plot_group_microstate_transition_summary,
+    plot_group_microstate_template_stability,
 )
 from eeg_pipeline.analysis.features.microstates import (
     compute_microstate_transition_stats,
@@ -351,13 +352,34 @@ def aggregate_microstate_transition_stats(
                 continue
             diff_vals = pain_stack[:, i, j] - nonpain_stack[:, i, j]
             finite_mask = np.isfinite(diff_vals)
-            if np.sum(finite_mask) < min_subjects:
+            n_finite = np.sum(finite_mask)
+            if n_finite < min_subjects:
                 continue
-            try:
-                stat = stats.wilcoxon(diff_vals[finite_mask], zero_method="wilcox", alternative="two-sided")
-                p_val = float(stat.pvalue) if np.isfinite(stat.pvalue) else np.nan
-            except ValueError:
-                p_val = np.nan
+            
+            diff_finite = diff_vals[finite_mask]
+            
+            # Check for all-zero differences (Wilcoxon cannot handle this)
+            nonzero_mask = np.abs(diff_finite) > 1e-15
+            n_nonzero = np.sum(nonzero_mask)
+            
+            if n_nonzero < 2:
+                # All differences are effectively zero - no significant effect
+                p_val = 1.0
+            else:
+                try:
+                    stat = stats.wilcoxon(diff_finite, zero_method="wilcox", alternative="two-sided")
+                    p_val = float(stat.pvalue) if np.isfinite(stat.pvalue) else np.nan
+                except ValueError:
+                    # Fallback: if Wilcoxon fails, use sign test via binomial
+                    n_pos = np.sum(diff_finite > 0)
+                    n_neg = np.sum(diff_finite < 0)
+                    n_total = n_pos + n_neg
+                    if n_total >= 2:
+                        # Use binomtest (scipy >= 1.7) for sign test
+                        p_val = float(stats.binomtest(n_pos, n_total, 0.5, alternative="two-sided").pvalue)
+                    else:
+                        p_val = np.nan
+                        
             p_mat[i, j] = p_val
             if np.isfinite(p_val):
                 p_values_flat.append(p_val)
@@ -811,6 +833,12 @@ def aggregate_feature_stats(subjects: List[str], task: str, deriv_root: Path, co
         logger.info("Saved microstate transition summary to %s", group_stats / transition_filename)
     if transitions is not None:
         plot_group_microstate_transition_summary(transitions, group_plots, logger, config)
+    
+    n_states = int(config.get("feature_engineering.microstates.n_states", 4))
+    group_template_path = deriv_root / "group" / "eeg" / "stats" / f"microstates_templates_group_K{n_states}.npz"
+    if group_template_path.exists():
+        logger.info("Plotting group microstate template stability...")
+        plot_group_microstate_template_stability(group_template_path, group_plots, logger, config)
     
     connectivity_summary = aggregate_connectivity_features(subjects, deriv_root, logger, config)
     _save_summary(connectivity_summary, "connectivity_summary", "connectivity summary", config, group_stats, logger)

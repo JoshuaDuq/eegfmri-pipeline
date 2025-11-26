@@ -60,7 +60,8 @@ def _find_pain_column(epochs: mne.Epochs, config) -> Optional[str]:
 
 
 def _save_erp_figure(
-    figure, output_path: Path, config, baseline_str: str, method: str, logger
+    figure, output_path: Path, config, baseline_str: str, method: str, logger,
+    n_epochs_info: Optional[str] = None
 ) -> None:
     """Save ERP figure with footer and formatting.
     
@@ -71,9 +72,12 @@ def _save_erp_figure(
         baseline_str: Baseline string for footer
         method: ERP combination method
         logger: Optional logger instance
+        n_epochs_info: Optional string with epoch counts (e.g., "Pain: n=30, Non-pain: n=45")
     """
     plot_cfg = get_plot_config(config)
     footer_text = build_footer("erp_complete", config=config, baseline=baseline_str, method=method)
+    if n_epochs_info:
+        footer_text = f"{footer_text} | {n_epochs_info}"
     ensure_dir(output_path.parent)
     save_fig(
         _unwrap_figure(figure),
@@ -157,7 +161,9 @@ def erp_contrast_pain(
     epochs_baselined = _apply_baseline_correction(epochs, baseline_window)
     epochs_pain = select_epochs_by_value(epochs_baselined, pain_column, 1)
     epochs_nonpain = select_epochs_by_value(epochs_baselined, pain_column, 0)
-    if len(epochs_pain) == 0 or len(epochs_nonpain) == 0:
+    n_pain = len(epochs_pain)
+    n_nonpain = len(epochs_nonpain)
+    if n_pain == 0 or n_nonpain == 0:
         _log_if_present(logger, "warning", "ERP pain contrast: one of the groups has zero trials.")
         return
 
@@ -167,13 +173,14 @@ def erp_contrast_pain(
     
     subject_prefix = f"sub-{subject}_" if subject else ""
     baseline_str = _format_baseline_string(baseline_window)
+    n_epochs_info = f"Pain: n={n_pain}, Non-pain: n={n_nonpain}"
     
     butterfly_name = erp_output_files.get("pain_butterfly", "erp_pain_binary_butterfly.png")
     butterfly_name = subject_prefix + butterfly_name.replace(".png", ".svg")
     evokeds_dict = {"painful": evoked_pain, "non-painful": evoked_nonpain}
     figure = _create_evoked_comparison_plot(evokeds_dict, erp_picks, None, colors)
     output_path = output_dir / butterfly_name
-    _save_erp_figure(figure, output_path, config, baseline_str, erp_combine, logger)
+    _save_erp_figure(figure, output_path, config, baseline_str, erp_combine, logger, n_epochs_info)
 
 
 def group_erp_contrast_pain(
@@ -207,6 +214,8 @@ def group_erp_contrast_pain(
     
     pain_evokeds: List[mne.Evoked] = []
     nonpain_evokeds: List[mne.Evoked] = []
+    total_pain_trials = 0
+    total_nonpain_trials = 0
     for epochs in all_epochs:
         if not validate_epochs_for_plotting(epochs, logger):
             continue
@@ -217,13 +226,16 @@ def group_erp_contrast_pain(
         epochs_nonpain = select_epochs_by_value(epochs, pain_column, 0)
         if len(epochs_pain) > 0:
             pain_evokeds.append(epochs_pain.average(picks=erp_picks))
+            total_pain_trials += len(epochs_pain)
         if len(epochs_nonpain) > 0:
             nonpain_evokeds.append(epochs_nonpain.average(picks=erp_picks))
+            total_nonpain_trials += len(epochs_nonpain)
     
     if not pain_evokeds or not nonpain_evokeds:
         _log_if_present(logger, "warning", "Group ERP pain contrast: insufficient data across subjects")
         return
     
+    n_subjects = len(pain_evokeds)
     grand_average_pain = mne.grand_average(pain_evokeds, interpolate_bads=True)
     grand_average_nonpain = mne.grand_average(nonpain_evokeds, interpolate_bads=True)
     colors = {"painful": pain_color, "non-painful": nonpain_color}
@@ -232,13 +244,14 @@ def group_erp_contrast_pain(
         (None, erp_output_files.get("pain_butterfly", "erp_pain_binary_butterfly.png")),
     ]
     baseline_str = _format_baseline_string(baseline_window)
+    n_epochs_info = f"N={n_subjects} subjects | Pain: {total_pain_trials} trials, Non-pain: {total_nonpain_trials} trials"
     
     for combine_method, output_name in plot_configs:
         evokeds_dict = {"painful": grand_average_pain, "non-painful": grand_average_nonpain}
         figure = _create_evoked_comparison_plot(evokeds_dict, erp_picks, combine_method, colors)
         figure = _unwrap_figure(figure)
         figure.suptitle(
-            f"Group ERP: Pain vs Non-Pain (N={len(pain_evokeds)} subjects)",
+            f"Group ERP: Pain vs Non-Pain (N={n_subjects} subjects)",
             fontsize=14,
             fontweight='bold'
         )
@@ -248,6 +261,7 @@ def group_erp_contrast_pain(
         footer_text = build_footer(
             "erp_complete", config=config, baseline=baseline_str, method=erp_combine
         )
+        footer_text = f"{footer_text} | {n_epochs_info}"
         ensure_dir(output_path.parent)
         save_fig(
             figure,
