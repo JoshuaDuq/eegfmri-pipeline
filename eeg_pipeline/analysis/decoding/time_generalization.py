@@ -21,7 +21,7 @@ from eeg_pipeline.utils.data.loading import (
     prepare_trial_records_from_epochs,
     load_epochs_with_targets,
 )
-from eeg_pipeline.utils.analysis.decoding import (
+from eeg_pipeline.analysis.decoding.cv import (
     get_min_channels_required,
 )
 from eeg_pipeline.utils.config.loader import load_settings
@@ -131,7 +131,7 @@ def time_generalization_regression(
             
             if config_dict is None:
                 config_dict = config_local
-            min_channels_required = get_min_channels_required(config_dict, config=config_local)
+            min_channels_required = get_min_channels_required(config_local)
             if len(common_chs) < min_channels_required:
                 logger.warning(
                     f"Fold {fold}: Common channels ({len(common_chs)}) < minimum required "

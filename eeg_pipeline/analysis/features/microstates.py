@@ -53,13 +53,32 @@ def zscore_maps(maps: np.ndarray, axis: int = 1, eps: Optional[float] = None) ->
     return (maps - mu) / sd
 
 
-def compute_gfp(data: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+def compute_gfp_with_floor(data: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """
+    Compute Global Field Power with epsilon floor for microstate analysis.
+    
+    This version adds an epsilon floor to prevent division by zero
+    in microstate template matching. For general GFP computation, use
+    `eeg_pipeline.analysis.features.core.compute_gfp`.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Shape (channels, times) - single epoch
+    eps : float
+        Epsilon floor value
+        
+    Returns
+    -------
+    np.ndarray
+        GFP values with shape (times,)
+    """
     if data.size == 0:
         return np.array([])
     if data.ndim < 2:
-        raise ValueError(f"compute_gfp requires at least 2D array, got shape {data.shape}")
+        raise ValueError(f"compute_gfp_with_floor requires at least 2D array, got shape {data.shape}")
     gfp = np.std(data, axis=0)
-    # Prevent division by zero in downstream computations
+    # Prevent division by zero in downstream template matching
     gfp = np.where(gfp < eps, eps, gfp)
     return gfp
 
@@ -83,7 +102,8 @@ def corr_maps(maps_a: np.ndarray, maps_b: np.ndarray) -> np.ndarray:
     # For z-scored maps (mean=0, std=1), correlation = dot product / (n_samples - 1)
     # Using n_samples - 1 (Bessel's correction) provides unbiased correlation estimate
     # since zscore_maps uses ddof=0 (population std) for standardization
-    return (maps_a @ maps_b.T) / (n_samples - 1)
+    denominator = max(n_samples - 1, 1)
+    return (maps_a @ maps_b.T) / denominator
 
 
 def label_timecourse(channel_data: np.ndarray, templates: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -129,7 +149,7 @@ def _extract_peak_maps_from_epoch(
     if peaks_per_epoch < 1:
         return None
     
-    gfp = compute_gfp(epoch)
+    gfp = compute_gfp_with_floor(epoch)
     if gfp.size == 0 or np.allclose(gfp, 0):
         return None
     
@@ -690,7 +710,7 @@ def _compute_microstate_metrics_for_trial(
     config_local = config or load_settings()
     corr_min = float(config_local.get("feature_engineering.microstates.min_correlation", 0.25))
     gfp_percentile = float(config_local.get("feature_engineering.microstates.gfp_min_percentile", 25.0))
-    gfp_full = compute_gfp(trial_data)
+    gfp_full = compute_gfp_with_floor(trial_data)
     gfp_threshold = float(np.nanpercentile(gfp_full, gfp_percentile)) if gfp_full.size else 0.0
     valid_mask = (np.abs(correlation_values_full) >= corr_min) & (gfp_full >= gfp_threshold)
     if not np.any(valid_mask):
@@ -807,12 +827,12 @@ def extract_microstate_features(
     """
     if n_states <= 0:
         logger.warning(f"Invalid number of states ({n_states}); must be positive. Returning empty features.")
-        return None, [], None
+        return pd.DataFrame(), [], None
     
     picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     if len(picks) == 0:
         logger.warning("No EEG channels available for microstate feature extraction")
-        return None, [], None
+        return pd.DataFrame(), [], None
 
     # Enforce average reference for microstate analysis (standard practice)
     # Use a copy to avoid side-effects on the main processing pipeline
@@ -824,7 +844,7 @@ def extract_microstate_features(
     epoch_data = extract_epoch_data(epochs_micro, picks)
     if epoch_data.size == 0:
         logger.warning("Epoch data empty after picking EEG channels; skipping microstate features")
-        return None, [], None
+        return pd.DataFrame(), [], None
 
     sfreq = float(epochs.info.get("sfreq", 1.0))
     
@@ -832,12 +852,12 @@ def extract_microstate_features(
         logger.info("Using provided fixed microstate templates (skipping individual clustering).")
         if fixed_template_ch_names is None:
             logger.error("Fixed templates provided without channel names; cannot ensure alignment. Skipping microstate features.")
-            return None, [], None
+            return pd.DataFrame(), [], None
         aligned_templates = _reorder_templates_to_picks(
             fixed_templates, list(fixed_template_ch_names), picks, epochs.info, logger
         )
         if aligned_templates is None:
-            return None, [], None
+            return pd.DataFrame(), [], None
         templates = aligned_templates
     else:
         logger.info(f"Computing individual microstate templates (k={n_states}) via K-Means...")
@@ -852,7 +872,7 @@ def extract_microstate_features(
 
     if templates is None or templates.shape[0] == 0:
         logger.warning("Failed to derive microstate templates; skipping microstate features")
-        return None, [], None
+        return pd.DataFrame(), [], None
 
     column_names = _build_microstate_column_names(n_states)
     feature_rows = []

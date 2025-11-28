@@ -41,7 +41,7 @@ def _load_schaefer_rsn_lookup() -> Dict[str, str]:
         return {}
     try:
         df = pd.read_csv(csv_path)
-    except Exception:
+    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError):
         return {}
     lookup = {}
     for _, row in df.iterrows():
@@ -125,13 +125,16 @@ def _global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> float:
                     if np.isfinite(d) and d > 0:
                         inv_dist.append(1.0 / d)
             return float((2.0 / (n * (n - 1))) * np.sum(inv_dist)) if inv_dist else np.nan
-        except Exception:
+        except (nx.NetworkXError, ValueError, KeyError):
             return np.nan
     except ZeroDivisionError:
         return np.nan
 
 
-def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100) -> float:
+def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100, config: Any = None) -> float:
+    if config is not None:
+        n_rand = int(config.get("feature_engineering.connectivity.small_world_n_rand", n_rand))
+    
     G = nx.from_numpy_array(adj_bin)
     if nx.number_of_nodes(G) < 3 or nx.number_of_edges(G) == 0:
         return np.nan
@@ -140,7 +143,7 @@ def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100) -> float:
     try:
         C = nx.average_clustering(G)
         L = nx.average_shortest_path_length(G)
-    except Exception:
+    except (nx.NetworkXError, ZeroDivisionError, ValueError):
         return np.nan
     if C == 0 or L == 0:
         return np.nan
@@ -158,7 +161,7 @@ def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100) -> float:
         try:
             C_rand_list.append(nx.average_clustering(Gr))
             L_rand_list.append(nx.average_shortest_path_length(Gr))
-        except Exception:
+        except (nx.NetworkXError, ZeroDivisionError, ValueError):
             continue
     if not C_rand_list or not L_rand_list:
         return np.nan
@@ -246,7 +249,7 @@ def _compute_graph_metrics_block(
         try:
             clust_vals = nx.clustering(nx.from_numpy_array(adj_abs), weight="weight")
             record[f"{measure}_{band}_clust"] = float(np.mean(list(clust_vals.values())))
-        except Exception:
+        except (nx.NetworkXError, ValueError, ZeroDivisionError):
             record[f"{measure}_{band}_clust"] = np.nan
 
         pc_vals = _participation_coeff(adj_abs, labels, community_map)
@@ -347,6 +350,66 @@ def _compute_wpli_matrices(analytic: np.ndarray) -> np.ndarray:
     return wpli_mats
 
 
+def _compute_imcoh_matrices(analytic: np.ndarray, epsilon: float = 1e-12) -> np.ndarray:
+    """
+    Compute imaginary coherence (imCoh) matrices.
+    
+    Imaginary coherence is robust to volume conduction artifacts because
+    zero-lag (instantaneous) connections have zero imaginary part.
+    Only true lagged connectivity contributes to imCoh.
+    
+    Reference: Nolte et al. (2004) Clinical Neurophysiology
+    """
+    n_epochs, n_channels, n_times = analytic.shape
+    if n_times < 2:
+        raise ValueError("Cannot compute imCoh with fewer than 2 samples in the window.")
+
+    imcoh_mats = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+    for epoch_idx in range(n_epochs):
+        epoch_data = analytic[epoch_idx]
+        cross = epoch_data[:, None, :] * np.conj(epoch_data[None, :, :])
+        cross_mean = np.mean(cross, axis=-1)
+        
+        power_i = np.mean(np.abs(epoch_data) ** 2, axis=-1)
+        power_j = power_i[:, np.newaxis]
+        power_ij = np.sqrt(power_i[:, np.newaxis] * power_j.T) + epsilon
+        
+        coh = cross_mean / power_ij
+        imcoh = np.abs(np.imag(coh))
+        
+        imcoh = 0.5 * (imcoh + imcoh.T)
+        np.fill_diagonal(imcoh, 0.0)
+        imcoh_mats[epoch_idx] = imcoh
+    return imcoh_mats
+
+
+def _compute_pli_matrices(analytic: np.ndarray) -> np.ndarray:
+    """
+    Compute Phase Lag Index (PLI) matrices.
+    
+    PLI measures the asymmetry of the phase difference distribution.
+    Like wPLI, it is insensitive to volume conduction but may be
+    more susceptible to noise.
+    
+    Reference: Stam et al. (2007) Human Brain Mapping
+    """
+    n_epochs, n_channels, n_times = analytic.shape
+    if n_times < 2:
+        raise ValueError("Cannot compute PLI with fewer than 2 samples in the window.")
+
+    pli_mats = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+    for epoch_idx in range(n_epochs):
+        epoch_data = analytic[epoch_idx]
+        cross = epoch_data[:, None, :] * np.conj(epoch_data[None, :, :])
+        imag_cross = np.imag(cross)
+        
+        pli = np.abs(np.mean(np.sign(imag_cross), axis=-1))
+        pli = 0.5 * (pli + pli.T)
+        np.fill_diagonal(pli, 0.0)
+        pli_mats[epoch_idx] = pli
+    return pli_mats
+
+
 def _compute_aec_matrices(analytic: np.ndarray, epsilon: float) -> np.ndarray:
     envelopes = np.abs(analytic)
     n_epochs, n_channels, n_times = envelopes.shape
@@ -417,7 +480,7 @@ def _compute_aec_orth_matrices(analytic: np.ndarray, epsilon: float) -> np.ndarr
                     env_j = (env_j - env_j.mean()) / std_j
                     try:
                         r = float(np.corrcoef(env_i, env_j)[0, 1])
-                    except Exception:
+                    except (ValueError, FloatingPointError, RuntimeWarning):
                         r = np.nan
                 ep_aec[i, j] = ep_aec[j, i] = r
         aec_mats[ep] = ep_aec
@@ -501,6 +564,8 @@ def extract_connectivity_features(
     epsilon_std = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
     aec_mode = str(config.get("feature_engineering.connectivity.aec_mode", "orth")).lower()
     enable_aec = aec_mode in {"orth", "standard"}
+    enable_imcoh = bool(config.get("feature_engineering.connectivity.enable_imcoh", False))
+    enable_pli = bool(config.get("feature_engineering.connectivity.enable_pli", False))
     graph_top_prop = float(config.get("feature_engineering.connectivity.graph_top_prop", 0.1))
 
     for band in bands:
@@ -516,12 +581,18 @@ def extract_connectivity_features(
         analytic = analytic_full[..., time_mask]
         try:
             aec_mats = None
+            imcoh_mats = None
+            pli_mats = None
             if enable_aec:
                 if aec_mode == "orth":
                     aec_mats = _compute_aec_orth_matrices(analytic, epsilon_std)
                 elif aec_mode == "standard":
                     aec_mats = _compute_aec_matrices(analytic, epsilon_std)
             wpli_mats = _compute_wpli_matrices(analytic)
+            if enable_imcoh:
+                imcoh_mats = _compute_imcoh_matrices(analytic, epsilon_std)
+            if enable_pli:
+                pli_mats = _compute_pli_matrices(analytic)
         except ValueError as exc:
             logger.error("Skipping connectivity for band %s: %s", band, exc)
             continue
@@ -533,11 +604,17 @@ def extract_connectivity_features(
             if aec_mats is not None:
                 np.save(aec_path, aec_mats.astype(np.float32))
             np.save(wpli_path, wpli_mats.astype(np.float32))
+            if imcoh_mats is not None:
+                imcoh_path = output_dir / f"sub-{subject}_task-{task}_connectivity_imcoh_{band}_all_trials.npy"
+                np.save(imcoh_path, imcoh_mats.astype(np.float32))
+            if pli_mats is not None:
+                pli_path = output_dir / f"sub-{subject}_task-{task}_connectivity_pli_{band}_all_trials.npy"
+                np.save(pli_path, pli_mats.astype(np.float32))
             logger.info("Saved connectivity arrays for band %s to %s", band, output_dir)
         except OSError as exc:
             logger.warning("Failed to save connectivity arrays for %s: %s", band, exc)
 
-        for measure, arr in (("aec", aec_mats), ("wpli", wpli_mats)):
+        for measure, arr in (("aec", aec_mats), ("wpli", wpli_mats), ("imcoh", imcoh_mats), ("pli", pli_mats)):
             if arr is None:
                 continue
             result = _flatten_connectivity_data(arr, labels, f"{measure}_{band}", logger)
@@ -731,7 +808,7 @@ def compute_sliding_connectivity_features(
                 else:
                     comms = nx.algorithms.community.greedy_modularity_communities(G, weight="weight")
                     mod_records.append(nx.algorithms.community.modularity(G, comms, weight="weight"))
-            except Exception:
+            except (nx.NetworkXError, ValueError, ZeroDivisionError):
                 mod_records.append(np.nan)
 
         deg_df = pd.DataFrame(deg_records, columns=[f"sw{win_idx}corr_all_deg_{ch}" for ch in ch_names])

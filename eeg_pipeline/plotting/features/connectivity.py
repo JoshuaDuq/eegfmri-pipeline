@@ -748,7 +748,8 @@ def plot_connectivity_network(
     fig, ax = plt.subplots(figsize=(6, 5))
     edges = G.edges()
     colors = [G[u][v]["weight"] for u, v in edges]
-    nx.draw_networkx_nodes(G, pos, node_size=120, node_color="#87CEEB", alpha=0.8, ax=ax)
+    node_color = plot_cfg.get_color("network_node")
+    nx.draw_networkx_nodes(G, pos, node_size=120, node_color=node_color, alpha=0.8, ax=ax)
     nx.draw_networkx_edges(
         G,
         pos,

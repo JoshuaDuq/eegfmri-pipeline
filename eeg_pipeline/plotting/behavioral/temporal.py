@@ -1776,7 +1776,7 @@ def plot_time_frequency_correlation_heatmap(
 ) -> None:
     config = load_settings()
     if task is None:
-        task = config.task
+        task = config.get("project.task", "thermalactive")
 
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)

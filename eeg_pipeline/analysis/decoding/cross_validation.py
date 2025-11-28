@@ -10,8 +10,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
 
-from eeg_pipeline.utils.analysis.decoding import (
-    create_elasticnet_pipeline,
+from eeg_pipeline.analysis.decoding.cv import (
     compute_metrics,
     create_loso_folds,
     create_within_subject_folds,
@@ -23,11 +22,14 @@ from eeg_pipeline.utils.analysis.decoding import (
     determine_inner_n_jobs,
     execute_folds_parallel,
     grid_search_with_warning_logging,
+    _save_best_params,
+    create_inner_cv,
+    fit_with_warning_logging,
     _fit_with_inner_cv,
     _fit_default_pipeline,
     _predict_and_log,
-    _save_best_params,
 )
+from eeg_pipeline.analysis.decoding.pipelines import create_elasticnet_pipeline
 from eeg_pipeline.utils.analysis.tfr import (
     find_common_channels_train_test,
 )
@@ -75,7 +77,7 @@ def nested_loso_predictions(
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
 
-    min_channels_required = get_min_channels_required(config_dict, config=config_local)
+    min_channels_required = get_min_channels_required(config_local)
 
     pipe = create_elasticnet_pipeline(seed=seed)
     param_grid = {
@@ -140,13 +142,13 @@ def nested_loso_predictions(
         train_groups = groups_arr[train_idx_f]
 
         inner_n_jobs = determine_inner_n_jobs(outer_jobs, n_jobs)
-        best_estimator, cv_results = _fit_with_inner_cv(
+        best_estimator, cv_results, gs = _fit_with_inner_cv(
             pipe, X_train, y_train, train_groups, config_dict, fold, inner_n_jobs, logger, seed + fold, inner_splits
         )
 
         y_pred = _predict_and_log(best_estimator, X_test, y_test, fold, logger)
 
-        best_params_rec = create_best_params_record("ElasticNet", fold, cv_results, best_estimator) if cv_results is not None else None
+        best_params_rec = create_best_params_record("ElasticNet", fold, cv_results, gs) if cv_results is not None and gs is not None else None
 
         return {
             "fold": fold,
@@ -237,7 +239,7 @@ def nested_loso_predictions(
             "trial_index": test_indices_order,
         }), results_dir / predictions_path)
 
-        write_tsv(per_subj, results_dir / metrics_path)
+        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
 
         idx_df = pd.DataFrame({
             "subject_id": np.asarray(groups_ordered),
@@ -255,7 +257,8 @@ def nested_loso_predictions(
                 config=config_local,
                 title="LOSO null (r)",
             )
-            plot_residual_diagnostics(y_true, y_pred, results_dir / "decoding" / "plots" / "elasticnet_loso_residuals.png", config=config_local)
+            pred_df_for_plot = pd.DataFrame({"y_true": y_true, "y_pred": y_pred})
+            plot_residual_diagnostics(pred_df_for_plot, "elasticnet_loso", results_dir / "decoding" / "plots" / "elasticnet_loso_residuals.png", config=config_local)
 
     return y_true, y_pred, pooled, per_subj
 
@@ -276,7 +279,8 @@ def _fit_within_subject_fold(
     
     if blocks_train is not None:
         n_unique_blocks = len(np.unique(blocks_train))
-        n_splits_inner = get_inner_cv_splits(config_dict, n_unique_blocks, config=config_local)
+        default_splits = config_local.get("decoding.cv.default_n_splits", 5) if config_local else 5
+        n_splits_inner = get_inner_cv_splits(n_unique_blocks, default_splits)
         n_splits_inner = max(2, min(n_unique_blocks, n_splits_inner))
         
         if n_splits_inner < 2:
@@ -328,7 +332,7 @@ def within_subject_kfold_predictions(
     config_local = load_settings()
     if config_dict is None:
         config_dict = config_local
-    min_channels_required = get_min_channels_required(config_dict, config=config_local)
+    min_channels_required = get_min_channels_required(config_local)
 
     pipe = create_elasticnet_pipeline(seed=seed)
     param_grid = {
@@ -516,7 +520,7 @@ def within_subject_kfold_predictions(
             "group": groups_all,
         }), results_dir / predictions_path)
 
-        write_tsv(per_subj, results_dir / metrics_path)
+        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
 
     return y_true_all, y_pred_all, pooled, per_subj
 
@@ -577,7 +581,7 @@ def loso_baseline_predictions(
             "trial_index": test_indices_all,
         }), results_dir / predictions_path)
 
-        write_tsv(per_subj, results_dir / metrics_path)
+        write_tsv(pd.DataFrame(per_subj), results_dir / metrics_path)
 
         idx_df = pd.DataFrame({
             "subject_id": groups_all,

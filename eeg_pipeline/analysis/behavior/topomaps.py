@@ -1,7 +1,11 @@
+"""Power topomap correlations with temperature and cluster correction."""
+
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -30,6 +34,9 @@ from eeg_pipeline.utils.analysis.stats import (
     _safe_float,
 )
 from eeg_pipeline.analysis.behavior.correlations import AnalysisConfig
+
+if TYPE_CHECKING:
+    from eeg_pipeline.analysis.behavior.core import BehaviorContext
 
 
 def _build_channel_record(
@@ -213,7 +220,7 @@ def correlate_power_topomaps(
     logger.info(f"Computing power topomap correlations with temperature for sub-{subject}")
 
     if task is None:
-        task = config.task
+        task = config.get("project.task", "thermalactive")
 
     deriv_root = Path(config.deriv_root)
     stats_dir = deriv_stats_path(deriv_root, subject)
@@ -324,3 +331,94 @@ def correlate_power_topomaps(
         json.dump(cluster_summary, fh, indent=2)
     logger.info(f"Saved topomap temperature correlation metadata to {meta_path}")
 
+
+def correlate_power_topomaps_from_context(ctx: "BehaviorContext") -> None:
+    """Compute power topomap correlations using pre-loaded data from context."""
+    logger = ctx.logger
+    config = ctx.config
+    subject = ctx.subject
+    
+    logger.info(f"Computing power topomap correlations with temperature for sub-{subject}")
+    
+    pow_df = ctx.power_df
+    info = ctx.epochs_info
+    temp_series = ctx.temperature
+    
+    if pow_df is None or pow_df.empty:
+        logger.warning("No power features in context; skipping topomap correlations")
+        return
+    
+    if temp_series is None or temp_series.isna().all():
+        logger.warning("No temperature data in context; skipping topomap correlations")
+        return
+    
+    if info is None:
+        logger.warning("No epochs info in context; skipping topomap correlations")
+        return
+    
+    adjacency, eeg_picks, _ = get_eeg_adjacency(info)
+    if adjacency is None or eeg_picks is None:
+        logger.warning("Could not compute EEG adjacency; skipping cluster-corrected topomap correlations")
+        return
+    
+    power_bands = config.get("features.frequency_bands", ["delta", "theta", "alpha", "beta", "gamma"])
+    alpha = get_fdr_alpha_from_config(config)
+    
+    cluster_cfg = config.get("behavior_analysis.cluster_correction", {})
+    cluster_n_perm_config = cluster_cfg.get("n_permutations", 100)
+    cluster_params = {
+        "alpha": float(alpha),
+        "cluster_alpha": float(cluster_cfg.get("alpha", alpha)),
+        "n_cluster_perm": int(cluster_n_perm_config) if cluster_n_perm_config > 0 else 0,
+        "cluster_rng": ctx.rng or np.random.default_rng(config.get("random.seed", 42)),
+        "min_channels_for_adjacency": config.get("behavior_analysis.statistics.min_channels_for_adjacency", 2)
+    }
+    
+    method = get_correlation_method(ctx.use_spearman)
+    
+    analysis_cfg = AnalysisConfig(
+        subject=subject,
+        config=config,
+        logger=logger,
+        rng=ctx.rng,
+        stats_dir=ctx.stats_dir,
+        bootstrap=ctx.bootstrap,
+        n_perm=ctx.n_perm,
+        use_spearman=ctx.use_spearman,
+        method=method,
+        min_samples_roi=ctx.min_samples_roi
+    )
+    
+    eeg_info = {"info": info, "adjacency": adjacency, "picks": eeg_picks}
+    all_records: List[Dict[str, Any]] = []
+    
+    for band in power_bands:
+        band_records = _process_single_topomap_band(band, pow_df, temp_series, analysis_cfg, cluster_params, eeg_info)
+        all_records.extend(band_records)
+    
+    if not all_records:
+        logger.warning(f"No topomap correlation records generated for sub-{subject}")
+        return
+    
+    df_results = pd.DataFrame(all_records)
+    method_suffix = "_spearman" if ctx.use_spearman else "_pearson"
+    stats_file = ctx.stats_dir / f"power_topomap_temperature_correlations{method_suffix}.tsv"
+    write_tsv(df_results, stats_file)
+    logger.info(f"Saved {len(df_results)} topomap temperature correlation records to {stats_file}")
+    
+    cluster_summary = {
+        "subject": subject,
+        "task": ctx.task,
+        "method": method,
+        "n_bands": len(power_bands),
+        "n_channels_total": len(set(df_results["channel"])),
+        "alpha_bh": cluster_params["alpha"],
+        "cluster_alpha": cluster_params["cluster_alpha"],
+        "n_cluster_permutations": cluster_params["n_cluster_perm"],
+        "n_bh_significant_channels": int(df_results["significant"].sum()),
+        "n_cluster_significant_channels": int(df_results["cluster_significant"].sum()),
+    }
+    meta_path = ctx.stats_dir / f"power_topomap_temperature_meta{method_suffix}.json"
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(cluster_summary, fh, indent=2)
+    logger.info(f"Saved topomap temperature correlation metadata to {meta_path}")

@@ -626,7 +626,7 @@ def _prepare_figure_footer(
         from ..config.loader import load_settings
         cfg = load_settings()
         return build_footer(footer_template_name, cfg, **(footer_kwargs or {}))
-    except Exception:
+    except (ImportError, KeyError, ValueError, AttributeError):
         return None
 
 
@@ -1262,10 +1262,9 @@ def get_correlation_type_labels(correlation_type: str) -> Tuple[str, str]:
 
 
 def format_temperature_label(val: Union[float, str]) -> str:
-    import re
     try:
         return f"{float(val):.1f}".replace(".", "p")
-    except Exception:
+    except (ValueError, TypeError):
         return sanitize_label(str(val))
 
 

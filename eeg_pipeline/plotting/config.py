@@ -99,6 +99,7 @@ class ColorPalette:
     nonsignificant: str = "#666666"
     pain: str = "crimson"
     nonpain: str = "navy"
+    network_node: str = "#87CEEB"
 
 
 @dataclass
@@ -291,6 +292,7 @@ class PlotConfig:
             nonsignificant=colors_dict.get("nonsignificant", "#666666"),
             pain=colors_dict.get("pain", "crimson"),
             nonpain=colors_dict.get("nonpain", "navy"),
+            network_node=colors_dict.get("network_node", "#87CEEB"),
         )
         
         alpha_dict = styling.get("alpha", {})
@@ -418,6 +420,7 @@ class PlotConfig:
             "nonsignificant": self.style.colors.nonsignificant,
             "pain": self.style.colors.pain,
             "nonpain": self.style.colors.nonpain,
+            "network_node": self.style.colors.network_node,
         }
         return color_map.get(color_name, self.style.colors.gray)
     

@@ -1,5 +1,23 @@
+"""Unified EEG Pipeline CLI.
+
+Usage:
+    python run_pipeline.py <command> <mode> [options]
+
+Commands:
+    behavior    Brain-behavior correlation analysis
+    features    Feature extraction from epochs
+    erp         Event-related potential analysis
+    tfr         Time-frequency visualization
+    decoding    ML-based prediction
+
+Examples:
+    python run_pipeline.py features compute --subject 0001
+    python run_pipeline.py behavior compute --all-subjects
+    python run_pipeline.py decoding --subject 0001 --subject 0002
+"""
+
 import sys
-import traceback
+import logging
 from pathlib import Path
 from typing import List, Optional, Any
 import argparse
@@ -24,7 +42,12 @@ MIN_SUBJECTS_FOR_DECODING = 2
 DEFAULT_RNG_SEED = 42
 POOLING_STRATEGY_KEY = "behavior_analysis.pooling_strategy"
 DEFAULT_POOLING_STRATEGY = "within_subject_centered"
-FEATURE_CATEGORIES = ["power", "connectivity", "microstates", "aperiodic", "itpc", "pac"]
+FEATURE_CATEGORIES = ["power", "connectivity", "microstates", "aperiodic", "itpc", "pac", "precomputed"]
+BEHAVIOR_COMPUTATIONS = [
+    "power_roi", "connectivity_roi", "connectivity_heatmaps", "sliding_connectivity",
+    "time_frequency", "temporal_correlations", "cluster_test", 
+    "precomputed_correlations", "condition_correlations", "exports"
+]
 
 
 ###################################################################
@@ -60,7 +83,9 @@ def get_deriv_root(config: Any) -> Path:
 # Shared Argument Parsing Utilities
 ###################################################################
 
+
 def add_common_subject_args(parser: argparse.ArgumentParser) -> None:
+    """Add standard subject selection arguments."""
     subject_group = parser.add_mutually_exclusive_group()
     subject_group.add_argument(
         "--group", type=str,
@@ -77,6 +102,7 @@ def add_common_subject_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_task_arg(parser: argparse.ArgumentParser) -> None:
+    """Add standard task argument."""
     parser.add_argument(
         "--task", "-t", type=str, default=None,
         help="Task label (default from config)"
@@ -121,6 +147,12 @@ def setup_behavior_parser(subparsers: argparse._SubParsersAction) -> None:
         "--rng-seed", type=int, default=DEFAULT_RNG_SEED,
         help=f"Random seed (default: {DEFAULT_RNG_SEED})"
     )
+    compute_group.add_argument(
+        "--computations", nargs="+",
+        choices=BEHAVIOR_COMPUTATIONS,
+        default=None,
+        help=f"Specific behavior computations to run (default: all). Choices: {', '.join(BEHAVIOR_COMPUTATIONS)}"
+    )
     
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
@@ -144,7 +176,7 @@ def setup_behavior_parser(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_behavior(args, subjects: List[str], config: Any) -> None:
-    from eeg_pipeline.utils.pipelines.behavior import compute_behavior_correlations_for_subjects
+    from eeg_pipeline.pipelines.behavior import compute_behavior_correlations_for_subjects
     from eeg_pipeline.plotting.behavioral.viz import visualize_behavior_for_subjects
     from eeg_pipeline.analysis.group import aggregate_behavior_correlations
     from eeg_pipeline.utils.io.general import get_logger
@@ -154,10 +186,10 @@ def run_behavior(args, subjects: List[str], config: Any) -> None:
             subjects=subjects,
             task=args.task,
             correlation_method=args.correlation_method,
-            partial_covars=None,
             bootstrap=args.bootstrap,
             n_perm=args.n_perm,
             rng_seed=args.rng_seed,
+            computations=args.computations,
         )
     elif args.mode == "visualize":
         task = resolve_task(args.task, config)
@@ -225,7 +257,7 @@ def setup_features_parser(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_features(args, subjects: List[str], config: Any) -> None:
-    from eeg_pipeline.utils.pipelines.features import extract_features_for_subjects
+    from eeg_pipeline.pipelines.features import extract_features_for_subjects
     from eeg_pipeline.plotting.features import visualize_features_for_subjects
     from eeg_pipeline.analysis.group import aggregate_feature_stats
     from eeg_pipeline.utils.io.general import get_logger
@@ -287,7 +319,7 @@ def setup_erp_parser(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_erp(args, subjects: List[str], config: Any) -> None:
-    from eeg_pipeline.utils.pipelines.erp import extract_erp_stats_for_subjects
+    from eeg_pipeline.pipelines.erp import extract_erp_stats_for_subjects
     from eeg_pipeline.plotting.erp import visualize_erp_for_subjects
     
     if args.mode == "compute":
@@ -394,7 +426,7 @@ def setup_decoding_parser(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_decoding(args, subjects: List[str], config: Any) -> None:
-    from eeg_pipeline.utils.pipelines.decoding import (
+    from eeg_pipeline.pipelines.decoding import (
         run_regression_decoding,
         run_time_generalization,
     )
@@ -446,6 +478,12 @@ def run_decoding(args, subjects: List[str], config: Any) -> None:
 ###################################################################
 
 def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    
     parser = argparse.ArgumentParser(
         description="Unified EEG Pipeline Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -491,7 +529,7 @@ For detailed help on each subcommand:
     subjects = parse_subject_args(args, config, task=args.task, deriv_root=deriv_root)
     
     if not subjects:
-        print("No subjects provided. Use --group all|A,B,C, or --subject (repeatable), or --all-subjects.")
+        logging.error("No subjects provided. Use --group all|A,B,C, or --subject (repeatable), or --all-subjects.")
         return 2
     
     command_handlers = {
@@ -504,15 +542,14 @@ For detailed help on each subcommand:
     
     handler = command_handlers.get(args.command)
     if not handler:
-        print(f"Unknown command: {args.command}", file=sys.stderr)
+        logging.error("Unknown command: %s", args.command)
         return 1
     
     try:
         handler(args, subjects, config)
         return 0
     except Exception as e:
-        print(f"Error running {args.command}: {e}", file=sys.stderr)
-        traceback.print_exc()
+        logging.error("Error running %s: %s", args.command, e, exc_info=True)
         return 1
 
 

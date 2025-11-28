@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import logging
 from pathlib import Path
 from typing import Optional, List
 import pandas as pd
@@ -15,14 +16,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from eeg_pipeline.utils.config.loader import EEGConfig
+from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.utils.data.loading import trim_behavioral_to_events_strict
 
-config = EEGConfig()
-PROJECT_ROOT = config.project.root
-BIDS_ROOT = config.project.bids_root
-SOURCE_ROOT = config.project.source_root
-TASK = config.project.task
+logger = logging.getLogger(__name__)
+
+config = load_settings()
+BIDS_ROOT = config.bids_root
+SOURCE_ROOT = Path(config.get("paths.source_data", "data/source_data"))
+TASK = config.get("project.task", "thermalactive")
 
 
 ###################################################################
@@ -114,7 +116,7 @@ def merge_one_subject_events(
 ) -> bool:
     m = re.search(r"sub-([A-Za-z0-9]+)", str(events_tsv))
     if not m:
-        print(f"[skip] Could not parse subject from: {events_tsv}")
+        logger.warning("Could not parse subject from: %s", events_tsv)
         return False
     sub_label = m.group(1)
 
@@ -123,31 +125,31 @@ def merge_one_subject_events(
 
     if not beh_csv or not beh_csv.exists():
         if run_num is None:
-            print(
-                f"[warn] No TrialSummary.csv found for sub-{sub_label} under "
-                f"{source_root}/sub-{sub_label}/PsychoPy_Data"
+            logger.warning(
+                "No TrialSummary.csv found for sub-%s under %s/sub-%s/PsychoPy_Data",
+                sub_label, source_root, sub_label
             )
         else:
-            print(
-                f"[warn] No TrialSummary.csv matching run {run_num} found for sub-{sub_label} under "
-                f"{source_root}/sub-{sub_label}/PsychoPy_Data"
+            logger.warning(
+                "No TrialSummary.csv matching run %d found for sub-%s under %s/sub-%s/PsychoPy_Data",
+                run_num, sub_label, source_root, sub_label
             )
         return False
 
     try:
         ev_df = pd.read_csv(events_tsv, sep="\t")
-    except Exception as e:
-        print(f"[error] Failed reading events: {events_tsv} -> {e}")
+    except (pd.errors.ParserError, OSError) as e:
+        logger.error("Failed reading events: %s -> %s", events_tsv, e)
         return False
 
     try:
         beh_df = pd.read_csv(beh_csv)
-    except Exception as e:
-        print(f"[error] Failed reading behavior: {beh_csv} -> {e}")
+    except (pd.errors.ParserError, OSError) as e:
+        logger.error("Failed reading behavior: %s -> %s", beh_csv, e)
         return False
 
     if "trial_type" not in ev_df.columns:
-        print(f"[warn] 'trial_type' column missing in events: {events_tsv}")
+        logger.warning("'trial_type' column missing in events: %s", events_tsv)
         return False
 
     normalized_trial_types = ev_df["trial_type"].map(_norm_trial_type)
@@ -163,7 +165,7 @@ def merge_one_subject_events(
     
     if len(target_indices) == 0:
         criteria_description = _format_selection_criteria(normalized_prefixes, normalized_types)
-        print(f"[warn] No target events in: {events_tsv} (criteria: {criteria_description})")
+        logger.warning("No target events in: %s (criteria: %s)", events_tsv, criteria_description)
         return False
 
     target_events_df = ev_df.iloc[target_indices].copy()
@@ -171,7 +173,7 @@ def merge_one_subject_events(
         behavioral_subset = trim_behavioral_to_events_strict(beh_df, target_events_df)
     except ValueError as e:
         run_text = f"run-{run_num} " if run_num is not None else ""
-        print(f"[error] Behavioral/events mismatch for sub-{sub_label} {run_text}: {e}")
+        logger.error("Behavioral/events mismatch for sub-%s %s: %s", sub_label, run_text, e)
         return False
 
     n_matched = len(behavioral_subset)
@@ -183,22 +185,22 @@ def merge_one_subject_events(
         ev_df.loc[event_rows_to_update, column] = behavioral_subset[column].values
 
     if dry_run:
-        print(
-            f"[dry-run] Would update: {events_tsv} with columns: {list(behavioral_subset.columns)} "
-            f"from {beh_csv.name}"
+        logger.info(
+            "[dry-run] Would update: %s with columns: %s from %s",
+            events_tsv, list(behavioral_subset.columns), beh_csv.name
         )
         return True
 
     try:
         ev_df.to_csv(events_tsv, sep="\t", index=False)
         run_text = f" run-{run_num}" if run_num is not None else ""
-        print(
-            f"[ok] Merged behavior -> events for sub-{sub_label}{run_text}: {events_tsv} "
-            f"using {beh_csv.name}"
+        logger.info(
+            "Merged behavior -> events for sub-%s%s: %s using %s",
+            sub_label, run_text, events_tsv, beh_csv.name
         )
         return True
-    except Exception as e:
-        print(f"[error] Failed writing events: {events_tsv} -> {e}")
+    except OSError as e:
+        logger.error("Failed writing events: %s -> %s", events_tsv, e)
         return False
 
 
@@ -210,8 +212,8 @@ def _load_run_files(run_files: List[Path]) -> List[tuple[int, pd.DataFrame, Path
             continue
         try:
             dataframe = pd.read_csv(file_path, sep="\t")
-        except Exception as e:
-            print(f"[warn] Skipping run file due to read error: {file_path} -> {e}")
+        except (pd.errors.ParserError, OSError) as e:
+            logger.warning("Skipping run file due to read error: %s -> %s", file_path, e)
             continue
         if "onset" in dataframe.columns:
             dataframe = dataframe.sort_values("onset", kind="mergesort")
@@ -314,10 +316,10 @@ def _combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 
     try:
         combined.to_csv(out_path, sep="\t", index=False)
-        print(f"[ok] Wrote combined events ({n_runs} run(s), {len(combined)} rows): {out_path}")
+        logger.info("Wrote combined events (%d run(s), %d rows): %s", n_runs, len(combined), out_path)
         return out_path
-    except Exception as e:
-        print(f"[error] Failed writing combined events for {sub_prefix}: {e}")
+    except OSError as e:
+        logger.error("Failed writing combined events for %s: %s", sub_prefix, e)
         return None
 
 
@@ -327,6 +329,12 @@ def _combine_runs_for_subject(sub_eeg_dir: Path, task: str) -> Optional[Path]:
 
 def main():
     import argparse
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     bids_root = BIDS_ROOT
     source_root = SOURCE_ROOT
@@ -384,9 +392,9 @@ def main():
         pattern = f"sub-*/eeg/*_task-{task}_events.tsv"
         ev_paths = sorted(bids_root.glob(pattern))
         if not ev_paths:
-            print(
-                f"[info] No events found under {bids_root} for task '{task}' "
-                f"with patterns {pattern_run} or {pattern}"
+            logger.info(
+                "No events found under %s for task '%s' with patterns %s or %s",
+                bids_root, task, pattern_run, pattern
             )
             sys.exit(0)
 
@@ -411,7 +419,7 @@ def main():
             seen.add(d)
             _combine_runs_for_subject(d, task=task)
 
-    print(f"Done. Processed {len(ev_paths)} event file(s), merged successfully: {n_ok}.")
+    logger.info("Done. Processed %d event file(s), merged successfully: %d.", len(ev_paths), n_ok)
 
 
 if __name__ == "__main__":

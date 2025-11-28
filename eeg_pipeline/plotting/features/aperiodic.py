@@ -73,7 +73,7 @@ def _load_aperiodic_qc(subject: str, config: Any, logger: logging.Logger):
     try:
         stats_dir = deriv_stats_path(config.deriv_root, subject)
         qc_path = stats_dir / "aperiodic_qc.npz"
-    except Exception:
+    except (AttributeError, TypeError):
         qc_path = None
     if qc_path is None or not qc_path.exists():
         log_if_present(logger, "warning", "Aperiodic QC sidecar not found; skipping QC plots")

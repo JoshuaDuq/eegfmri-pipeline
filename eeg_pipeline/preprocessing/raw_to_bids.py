@@ -3,6 +3,7 @@ import re
 import sys
 import argparse
 import inspect
+import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 import numpy as np
@@ -18,11 +19,13 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from eeg_pipeline.utils.config.loader import load_settings
 
+logger = logging.getLogger(__name__)
+
 config = load_settings(script_name=Path(__file__).name)
 
 PROJECT_ROOT = config.project_root
 BIDS_ROOT = config.bids_root
-TASK = config.task
+TASK = config.get("project.task", "thermalactive")
 MONTAGE_NAME = config.get("raw_to_bids.default_montage", "easycap-M1")
 LINE_FREQ = float(config.get("raw_to_bids.default_line_freq", 60.0))
 
@@ -93,10 +96,11 @@ def _infer_run_number(vhdr_path: Path) -> Optional[int]:
     if len(all_runs) <= 1:
         return None
     inferred_run = all_runs.index(vhdr_path) + 1
-    print(
-        f"Warning: No explicit run found in filename '{vhdr_path.name}'. "
-        f"Inferring run={inferred_run} by alphabetical order among {len(all_runs)} files. "
-        f"Prefer 'run-01' style filenames to guarantee correct run IDs."
+    logger.warning(
+        "No explicit run found in filename '%s'. "
+        "Inferring run=%d by alphabetical order among %d files. "
+        "Prefer 'run-01' style filenames to guarantee correct run IDs.",
+        vhdr_path.name, inferred_run, len(all_runs)
     )
     return inferred_run
 
@@ -152,9 +156,9 @@ def _trim_to_first_volume(raw: mne.io.BaseRaw) -> bool:
     if first_volume_time is None:
         return False
     
-    print(
-        f"Trimming raw to first volume trigger at {first_volume_time:.3f}s "
-        f"relative to recording start."
+    logger.info(
+        "Trimming raw to first volume trigger at %.3fs relative to recording start.",
+        first_volume_time
     )
     raw.crop(tmin=first_volume_time, tmax=None)
     return True
@@ -197,11 +201,11 @@ def _filter_annotations(
     keep_indices = _filter_annotations_by_prefixes(raw.annotations, normalized_prefixes)
     
     if not keep_indices:
-        print(
-            "Warning: No annotations matched provided prefixes. "
-            f"Prefixes={normalized_prefixes}. Found {len(raw.annotations)} annotations "
-            "but will drop all, resulting in no events.tsv. "
-            "Use --keep_all_annotations or adjust --event_prefix to keep the desired events."
+        logger.warning(
+            "No annotations matched provided prefixes. "
+            "Prefixes=%s. Found %d annotations but will drop all, resulting in no events.tsv. "
+            "Use --keep_all_annotations or adjust --event_prefix to keep the desired events.",
+            normalized_prefixes, len(raw.annotations)
         )
         raw.set_annotations(mne.Annotations([], [], [], orig_time=raw.annotations.orig_time))
         return
@@ -502,6 +506,12 @@ def _fix_channels_file(bids_path: BIDSPath) -> None:
 ###################################################################
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    
     parser = argparse.ArgumentParser(
         description="Convert BrainVision EEG to BIDS using MNE-BIDS"
     )
@@ -580,17 +590,17 @@ def main():
     task = args.task
     montage_name = args.montage if args.montage else None
 
-    print(f"Scanning for BrainVision files in: {source_root}")
+    logger.info("Scanning for BrainVision files in: %s", source_root)
     vhdrs = find_brainvision_vhdrs(source_root)
     if not vhdrs:
-        print("No .vhdr files found under sub-*/eeg/. Nothing to convert.")
+        logger.error("No .vhdr files found under sub-*/eeg/. Nothing to convert.")
         sys.exit(1)
 
     if args.subjects:
         subj_set = set(args.subjects)
         vhdrs = [p for p in vhdrs if parse_subject_id(p) in subj_set]
         if not vhdrs:
-            print(f"No matching .vhdr files for subjects: {sorted(subj_set)}")
+            logger.error("No matching .vhdr files for subjects: %s", sorted(subj_set))
             sys.exit(1)
 
     ensure_dataset_description(bids_root, name=f"{task} EEG")
@@ -614,7 +624,7 @@ def main():
             str(bp.fpath).replace(str(bids_root) + os.sep, "")
             if bp.fpath else str(bp)
         )
-        print(f"[{i}/{len(vhdrs)}] Wrote: {rel}")
+        logger.info("[%d/%d] Wrote: %s", i, len(vhdrs), rel)
 
     by_sub = {}
     for bp in written:
@@ -629,9 +639,9 @@ def main():
         subj_eeg = bids_root / f"sub-{s}" / "eeg"
         integ = subj_eeg / f"sub-{s}_task-{task}_events_integrity.tsv"
         if integ.exists():
-            print(f"Integrity summary for sub-{s}: {integ}")
+            logger.info("Integrity summary for sub-%s: %s", s, integ)
 
-    print(f"Done. Converted {len(written)} file(s) to BIDS in: {bids_root}")
+    logger.info("Done. Converted %d file(s) to BIDS in: %s", len(written), bids_root)
 
 
 if __name__ == "__main__":

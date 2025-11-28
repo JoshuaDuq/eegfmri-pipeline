@@ -1,6 +1,10 @@
+"""Cluster permutation tests for pain vs. non-pain conditions."""
+
+from __future__ import annotations
+
 import logging
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -29,6 +33,9 @@ from eeg_pipeline.utils.analysis.tfr import (
     get_tfr_config,
 )
 
+if TYPE_CHECKING:
+    from eeg_pipeline.analysis.behavior.core import BehaviorContext
+
 
 def compute_pain_nonpain_time_cluster_test(
     subject: str,
@@ -40,12 +47,7 @@ def compute_pain_nonpain_time_cluster_test(
     n_permutations: int = 100,
     alpha: float = 0.05,
 ) -> dict:
-    """
-    Time-domain cluster permutation test contrasting pain vs. non-pain trials.
-
-    Uses the pipeline's TFR parameters (Morlet; average=False) and applies the
-    standard baseline before testing. Tests from time 0 onwards. Results are saved per-band as TSVs.
-    """
+    """Time-domain cluster permutation test for pain vs. non-pain trials."""
     from eeg_pipeline.utils.analysis.tfr import apply_baseline_to_tfr
     
     logger = logging.getLogger(__name__)
@@ -239,6 +241,77 @@ def compute_pain_nonpain_time_cluster_test(
     return results
 
 
+def _run_cluster_test_core(
+    subject: str,
+    epochs: mne.Epochs,
+    aligned_events: pd.DataFrame,
+    output_dir: Path,
+    config,
+    logger: logging.Logger,
+    n_perm: int,
+) -> None:
+    """Core implementation for pain vs. non-pain cluster test."""
+    from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi
+    
+    if epochs is None or aligned_events is None:
+        logger.warning("Cannot run pain vs. non-pain cluster test: epochs or events unavailable.")
+        return
+    
+    if not epochs.preload:
+        epochs.load_data()
+    
+    heatmap_config = config.get("behavior_analysis", {}).get("time_frequency_heatmap", {})
+    roi_selection = heatmap_config.get("roi_selection")
+    epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
+    
+    pain_col = get_pain_column_from_config(config, aligned_events)
+    if pain_col is None or pain_col not in aligned_events.columns:
+        logger.warning("Pain column not found; skipping pain vs. non-pain cluster test.")
+        return
+    
+    pain_series = pd.to_numeric(aligned_events[pain_col], errors="coerce")
+    valid_pain_mask = pain_series.isin([0, 1])
+    invalid_trials = int((~valid_pain_mask).sum())
+    if invalid_trials > 0:
+        logger.warning(f"Pain column {pain_col} contains {invalid_trials} invalid/NaN entries; dropping.")
+        pain_series = pain_series[valid_pain_mask]
+        epochs_roi = epochs_roi[valid_pain_mask.to_numpy()]
+        aligned_events = aligned_events.loc[valid_pain_mask].reset_index(drop=True)
+    
+    if len(pain_series) == 0:
+        logger.warning("No valid pain trials remain; skipping cluster test.")
+        return
+    
+    try:
+        pain_values, _ = validate_pain_binary_values(pain_series, pain_col, logger=logger)
+    except ValueError as exc:
+        logger.error(f"Pain column validation failed: {exc}")
+        return
+    
+    pain_mask = np.asarray(pain_values == 1, dtype=bool)
+    nonpain_mask = np.asarray(pain_values == 0, dtype=bool)
+    
+    if pain_mask.sum() < 2 or nonpain_mask.sum() < 2:
+        logger.warning(f"Insufficient trials (pain={int(pain_mask.sum())}, non-pain={int(nonpain_mask.sum())}); skipping.")
+        return
+    
+    stats_cfg = config.get("behavior_analysis", {}).get("statistics", {})
+    n_perm = n_perm if n_perm > 0 else int(stats_cfg.get("n_permutations", 100))
+    alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
+    bands = get_bands_for_tfr(max_freq_available=get_tfr_config(config)[1], config=config)
+    
+    compute_pain_nonpain_time_cluster_test(
+        subject=subject,
+        pain_epochs=epochs_roi[pain_mask],
+        nonpain_epochs=epochs_roi[nonpain_mask],
+        output_dir=output_dir,
+        config=config,
+        bands=bands,
+        n_permutations=n_perm,
+        alpha=alpha,
+    )
+
+
 def _run_pain_nonpain_cluster_test(
     subject: str,
     task: str,
@@ -246,79 +319,21 @@ def _run_pain_nonpain_cluster_test(
     config,
     logger: logging.Logger,
 ) -> None:
-    """
-    Wrapper to compute pain vs. non-pain time clusters using configured ROI and bands.
-    Executes only when a pain column is available and both conditions have >=2 trials.
-    """
-    from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi
-    
+    """Compute pain vs. non-pain time clusters by loading data from disk."""
     epochs, aligned_events = load_epochs_for_analysis(
         subject, task, align="strict", preload=True,
         deriv_root=deriv_root, bids_root=config.bids_root,
         config=config, logger=logger
     )
-    if epochs is None or aligned_events is None:
-        logger.warning("Cannot run pain vs. non-pain cluster test: epochs or events unavailable.")
-        return
-
-    heatmap_config = config.get("behavior_analysis", {}).get("time_frequency_heatmap", {})
-    roi_selection = heatmap_config.get("roi_selection")
-    epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
-
-    pain_col = get_pain_column_from_config(config, aligned_events)
-    if pain_col is None or pain_col not in aligned_events.columns:
-        logger.warning("Pain column not found; skipping pain vs. non-pain cluster test.")
-        return
-
-    pain_series = pd.to_numeric(aligned_events[pain_col], errors="coerce")
-    valid_pain_mask = pain_series.isin([0, 1])
-    invalid_trials = int((~valid_pain_mask).sum())
-    if invalid_trials > 0:
-        logger.error(
-            "Pain column %s contains %d invalid/NaN entries; dropping those trials for pain vs. non-pain cluster test.",
-            pain_col, invalid_trials,
-        )
-        pain_series = pain_series[valid_pain_mask]
-        epochs_roi = epochs_roi[valid_pain_mask.to_numpy()]
-        aligned_events = aligned_events.loc[valid_pain_mask].reset_index(drop=True)
-    if len(pain_series) == 0:
-        logger.warning("No valid pain trials remain after filtering; skipping pain vs. non-pain cluster test.")
-        return
-
-    try:
-        pain_values, _ = validate_pain_binary_values(pain_series, pain_col, logger=logger)
-    except ValueError as exc:
-        logger.error("Pain column validation failed: %s", exc)
-        return
-
-    pain_mask = np.asarray(pain_values == 1, dtype=bool)
-    nonpain_mask = np.asarray(pain_values == 0, dtype=bool)
-
-    if pain_mask.sum() < 2 or nonpain_mask.sum() < 2:
-        logger.warning(
-            "Insufficient pain/non-pain trials (pain=%d, non-pain=%d); skipping pain cluster test.",
-            int(pain_mask.sum()), int(nonpain_mask.sum())
-        )
-        return
-
-    stats_cfg = config.get("behavior_analysis", {}).get("statistics", {})
-    # Reduced to 100 for testing (normally 5000 for reliable p-value estimation at alpha=0.05)
-    n_perm = int(stats_cfg.get("n_permutations", 100))
-    alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
-
-    bands = get_bands_for_tfr(
-        max_freq_available=get_tfr_config(config)[1],
-        config=config
+    _run_cluster_test_core(
+        subject, epochs, aligned_events,
+        deriv_stats_path(deriv_root, subject), config, logger, n_perm=0
     )
 
-    compute_pain_nonpain_time_cluster_test(
-        subject=subject,
-        pain_epochs=epochs_roi[pain_mask],
-        nonpain_epochs=epochs_roi[nonpain_mask],
-        output_dir=deriv_stats_path(deriv_root, subject),
-        config=config,
-        bands=bands,
-        n_permutations=n_perm,
-        alpha=alpha,
-    )
 
+def run_cluster_test_from_context(ctx: "BehaviorContext") -> None:
+    """Run pain vs. non-pain cluster test using pre-loaded data from context."""
+    _run_cluster_test_core(
+        ctx.subject, ctx.epochs, ctx.aligned_events,
+        ctx.stats_dir, ctx.config, ctx.logger, ctx.n_perm
+    )

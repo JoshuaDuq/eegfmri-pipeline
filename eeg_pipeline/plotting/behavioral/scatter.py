@@ -693,7 +693,7 @@ def plot_power_roi_scatter(
     ensure_dir(plots_dir)
 
     if task is None:
-        task = config.task
+        task = config.get("project.task", "thermalactive")
 
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
@@ -954,7 +954,7 @@ def _export_top_predictors(df_top: pd.DataFrame, stats_dir: Path, top_n: int, lo
 def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alpha: float = None, top_n: int = None, plots_dir: Optional[Path] = None) -> None:
     config = load_settings()
     if task is None:
-        task = config.task
+        task = config.get("project.task", "thermalactive")
     
     alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha", 0.05)
     top_n = top_n or int(config.get("behavior_analysis.predictors.top_n", 20))

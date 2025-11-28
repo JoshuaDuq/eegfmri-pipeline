@@ -12,7 +12,6 @@ from typing import List, Optional
 import logging
 
 from ...utils.io.general import deriv_plots_path, ensure_dir, get_logger
-from ...utils.pipelines.erp import get_erp_config, load_and_prepare_epochs
 from .contrasts import erp_contrast_pain, group_erp_contrast_pain
 from .temperature import erp_by_temperature, group_erp_by_temperature
 
@@ -48,6 +47,8 @@ def visualize_subject_erp(
     
     plots_dir = deriv_plots_path(config.deriv_root, subject, subdir="erp")
     ensure_dir(plots_dir)
+    
+    from eeg_pipeline.pipelines.erp import get_erp_config, load_and_prepare_epochs
     
     erp_cfg = get_erp_config(config)
     
@@ -109,6 +110,8 @@ def visualize_group_erp(
     
     group_dir = config.deriv_root / "group" / "eeg" / "plots" / "erp"
     ensure_dir(group_dir)
+    
+    from eeg_pipeline.pipelines.erp import get_erp_config, load_and_prepare_epochs
     
     erp_cfg = get_erp_config(config)
     

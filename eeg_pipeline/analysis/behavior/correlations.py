@@ -61,7 +61,7 @@ def _align_groups_to_series(
                 return None
             aligned = pd.Series(arr, index=series.index)
         return aligned.to_numpy()
-    except Exception:
+    except (KeyError, IndexError, ValueError, TypeError):
         return None
 
 
@@ -139,46 +139,6 @@ def _prepare_mixedlm_data(x: pd.Series, y: pd.Series, groups: pd.Series, covars:
     return df.dropna()
 
 
-def _build_base_correlation_record(
-    identifier: str,
-    identifier_key: str,
-    band: str,
-    correlation: float,
-    p_value: float,
-    n_valid: int,
-    method: str,
-    ci_low: float = np.nan,
-    ci_high: float = np.nan,
-    r_partial: float = np.nan,
-    p_partial: float = np.nan,
-    n_partial: int = 0,
-    p_perm: float = np.nan,
-    p_partial_perm: float = np.nan,
-    **extra_fields,
-) -> Dict[str, Any]:
-    record = {
-        identifier_key: identifier,
-        "band": band,
-        "r": correlation,
-        "p": p_value,
-        "n": n_valid,
-        "method": method,
-        "r_partial": _safe_float(r_partial),
-        "p_partial": _safe_float(p_partial),
-        "n_partial": n_partial,
-        "p_perm": _safe_float(p_perm),
-        "p_partial_perm": _safe_float(p_partial_perm),
-    }
-    
-    if identifier_key == "channel":
-        record["ci_lo"] = ci_low
-        record["ci_hi"] = ci_high
-    else:
-        record["r_ci_low"] = ci_low
-        record["r_ci_high"] = ci_high
-    
-    record.update(extra_fields)
-    return record
 
 
 def _build_temp_record_unified(
@@ -211,8 +171,12 @@ def _build_temp_record_unified(
     group_source = groups if groups is not None else analysis_cfg.groups
     groups_aligned = _align_groups_to_series(x_aligned, group_source)
     
-    correlation_temp, p_value_temp = compute_correlation(
-        x_aligned, temp_aligned, analysis_cfg.use_spearman
+    # Use standardized safe_correlation instead of compute_correlation
+    from eeg_pipeline.analysis.behavior.core import safe_correlation
+    correlation_temp, p_value_temp, _ = safe_correlation(
+        x_aligned, temp_aligned, 
+        method=analysis_cfg.method,
+        min_samples=analysis_cfg.min_samples_channel if identifier_key == "channel" else analysis_cfg.min_samples_roi
     )
     
     ci_low = ci_high = np.nan
@@ -231,21 +195,23 @@ def _build_temp_record_unified(
             analysis_cfg.n_perm, analysis_cfg.rng, band, identifier, analysis_cfg.logger, groups=groups_aligned
         )
     
-    record = _build_base_correlation_record(
+    from eeg_pipeline.analysis.behavior.core import build_correlation_record
+    
+    record = build_correlation_record(
         identifier=identifier,
-        identifier_key=identifier_key,
         band=band,
-        correlation=correlation_temp,
-        p_value=p_value_temp,
-        n_valid=int(len(x_aligned)),
+        r=correlation_temp,
+        p=p_value_temp,
+        n=int(len(x_aligned)),
         method=analysis_cfg.method,
         ci_low=ci_low,
         ci_high=ci_high,
         p_perm=p_perm_temp,
+        identifier_type=identifier_key,
         **extra_fields,
     )
     
-    return record
+    return record.to_dict()
 
 
 def _compute_correlation_statistics(

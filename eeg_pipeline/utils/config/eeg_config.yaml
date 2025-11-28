@@ -84,6 +84,9 @@ rois: &roi_definitions  # Region of interest definitions: regex patterns matchin
 ###################################################################
 # DATA PROCESSING
 ###################################################################
+preprocessing:  # Preprocessing parameters
+  resample_freq: 500  # Target sampling frequency [Hz] for resampling (used in validation)
+
 raw_to_bids:  # Raw data to BIDS conversion parameters
   default_montage: "easycap-M1"  # Default MNE montage name for channel positions
   default_line_freq: 60.0  # Line noise frequency [Hz] for notch filtering
@@ -187,6 +190,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
   features:  # Feature extraction window definitions
     plateau_start: 3.0  # Start time [s] of thermal plateau period for feature extraction
     plateau_end: 10.5  # End time [s] of thermal plateau period for feature extraction
+    min_valid_band_fraction: 0.0  # Minimum fraction of valid bands required for feature extraction (0.0 = no requirement)
     temporal_bins:  # Temporal bins for time-resolved feature extraction (used in extract_features)
       - start: 3.0  # Early plateau bin start [s]
         end: 5.0  # Early plateau bin end [s]
@@ -220,9 +224,54 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     aperiodic_fmin: 2.0  # Minimum frequency [Hz] for aperiodic component fitting
     aperiodic_fmax: 40.0  # Maximum frequency [Hz] for aperiodic component fitting
     pac_epsilon_amp: 1e-9  # Small epsilon for PAC amplitude normalization
+    itpc_epsilon_amp: 1e-12  # Small epsilon for ITPC amplitude normalization
   connectivity:  # Connectivity feature parameters
     sliding_window_len: 1.0  # Sliding window length [s] during plateau for dynamic connectivity
     sliding_window_step: 0.5  # Sliding window step [s]
+    enable_imcoh: false  # Enable imaginary coherence computation (robust to volume conduction)
+    enable_pli: false  # Enable Phase Lag Index computation
+    aec_mode: "orth"  # Amplitude Envelope Correlation mode: "orth" (orthogonalized) or "standard"
+    graph_top_prop: 0.1  # Top proportion of edges to keep for graph metrics (0.1 = top 10%)
+    small_world_n_rand: 100  # Number of random graphs for small-world sigma calculation
+  complexity:  # Complexity feature parameters
+    pe_order: 3  # Permutation entropy embedding dimension
+    pe_delay: 1  # Permutation entropy time delay
+    sampen_m: 2  # Sample entropy embedding dimension
+    sampen_r_mult: 0.2  # Sample entropy tolerance (as fraction of std)
+    include_sample_entropy: false  # Disable sample entropy by default (computationally expensive)
+  temporal:  # Time-domain feature parameters
+    include_percentiles: false  # Include percentile features
+    include_derivatives: true  # Include derivative-based features
+  erds:  # ERD/ERS feature parameters
+    n_temporal_windows: 5  # Number of temporal windows during plateau for windowed ERD/ERS
+  gfp:  # Global Field Power feature parameters
+    min_peak_distance_samples: 10  # Minimum distance between GFP peaks
+  roi_features:  # ROI-averaged feature parameters
+    pain_rois:  # ROIs for pain-specific feature extraction (subset of full ROI list)
+      - "Sensorimotor_Contra_R"
+      - "Sensorimotor_Ipsi_L"
+      - "Frontal"
+      - "Midline_ACC_MCC"
+    asymmetry_pairs:  # Channel pairs for hemispheric asymmetry features
+      - ["F3", "F4"]
+      - ["C3", "C4"]
+      - ["P3", "P4"]
+      - ["O1", "O2"]
+  precomputed_groups:  # Feature groups to extract with efficient precomputed pipeline
+    - "erds"  # ERD/ERS features (alpha/beta desync correlates with BOLD)
+    - "spectral"  # Spectral features (IAF, relative power, band ratios, entropy)
+    - "gfp"  # Global Field Power features
+    - "roi"  # ROI-averaged features (maps to fMRI brain regions)
+    - "temporal"  # Time-domain features (variance, RMS, etc.)
+    - "complexity"  # Complexity features (permutation entropy, Hjorth)
+    - "ratios"  # Band power ratios (theta/beta, alpha/theta)
+    - "asymmetry"  # Hemispheric asymmetry features
+  condition_features:  # Condition-specific feature types (pain vs non-pain)
+    - "spectral"  # Spectral features by condition
+    - "complexity"  # Complexity features by condition
+    - "temporal"  # Temporal features by condition
+    - "erds"  # ERD/ERS features by condition
+    - "global"  # Global features by condition
 
 pac_analysis:  # Phase-amplitude coupling parameters
   phase_range: [4.0, 8.0]  # Phase-frequency range [Hz] (e.g., theta)
@@ -230,6 +279,7 @@ pac_analysis:  # Phase-amplitude coupling parameters
   phase_step_hz: 1.0  # Step size for phase frequencies [Hz]
   amp_step_hz: 5.0  # Step size for amplitude frequencies [Hz]
   plateau_window: [3.0, 10.5]  # Time window [s] to compute PAC (defaults to TFR plateau if unset)
+  min_epochs: 20  # Minimum number of epochs required for PAC computation
 
 features:  # Feature extraction band selection
   frequency_bands:  # Frequency bands to extract features for (used in feature extraction, behavior analysis)
@@ -248,6 +298,7 @@ power:  # Power analysis band selection
     - "gamma"
 
 behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_behavioral_correlations.py, behavior.py)
+  pooling_strategy: "within_subject_centered"  # Pooling strategy for group aggregation: "within_subject_centered" (z-score within subject) or "pooled" (raw pooling)
   time_frequency_heatmap:  # Time-frequency correlation heatmap parameters (used in correlate_power_topomaps)
     time_resolution: 0.1  # Temporal bin size [s] for heatmap
     freq_resolution: 2.0  # Frequency bin size [Hz] for heatmap
@@ -301,6 +352,7 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
       significant_predictors: "group_significant_predictors.tsv"  # Filename for significant predictors
 
 feature_aggregation:  # Feature aggregation parameters (used in aggregate_features.py)
+  power_bin: "plateau"  # Power bin label for feature aggregation (used in group/features.py)
   input_filenames:  # Input feature filenames (used in aggregate_features.py)
     power: "features_eeg_plateau.tsv"  # Power feature filename
     microstates: "features_microstates.tsv"  # Microstate feature filename
@@ -392,6 +444,8 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
   cluster_n_jobs: -1  # Number of parallel jobs for cluster tests (-1 = all CPUs)
   cluster_report_size: false  # Whether to report cluster size in results
   cluster_report_mass: false  # Whether to report cluster mass in results
+  min_samples_per_channel: 5  # Minimum samples required per channel for statistical tests
+  min_channels_for_aperiodic_corr: 10  # Minimum channels required for aperiodic correlation analysis
   constants:  # Statistical constants (used in _load_statistics_constants, stats_utils.py)
     fisher_z_clip_min: -0.999999  # Lower clipping bound for Fisher z-transform (prevents -inf)
     fisher_z_clip_max: 0.999999  # Upper clipping bound for Fisher z-transform (prevents +inf)
@@ -550,6 +604,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       nonsignificant: "#666666"  # Non-significant result color
       pain: "crimson"  # Pain condition color
       nonpain: "navy"  # Non-pain condition color
+      network_node: "#87CEEB"  # Network graph node color (light sky blue)
     alpha:  # Transparency values for various plot elements
       grid: 0.3  # Grid line transparency
       fill: 0.6  # Fill area transparency
@@ -813,6 +868,8 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       cmap: "magma"  # Colormap for PAC comodulograms
       vmin: 0.0  # Minimum PAC value
       vmax: 0.5  # Maximum PAC value (clip values above for color scaling)
+    aperiodic:  # Aperiodic plot configuration (used in plot_features/aperiodic.py)
+      n_perm: 1000  # Number of permutations for aperiodic correlation analysis
     features:  # Feature plot configuration (used in plot_features.py)
       figure_size: "standard"  # Figure size preset name
       correlation:  # Correlation plot parameters
@@ -824,176 +881,9 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         vmin: null  # Minimum power value for colormap (null = compute from data)
         vmax: null  # Maximum power value for colormap (null = compute from data)
       heatmap_text_threshold: 200  # Maximum number of cells before hiding text in heatmaps
-  plot_types:  # Legacy plot type configurations (for backward compatibility)
-    erp:  # ERP plot configuration
-      figure_size: "standard"  # Figure size preset name
-      colors:  # ERP condition colors
-        pain: "crimson"  # Pain condition color
-        nonpain: "navy"  # Non-pain condition color
-      line_width: "standard"  # Line width preset name
-      scatter_marker_size: "large"  # Scatter marker size preset name
-    decoding:  # Decoding plot configuration
-      figure_size: "square"  # Figure size preset name
-      scatter_marker_size: "small"  # Scatter marker size preset name
-      line_width: "standard"  # Line width preset name
-      colors:  # Decoding result colors
-        significant: "#C42847"  # Significant result color
-        nonsignificant: "#666666"  # Non-significant result color
-    behavioral:  # Behavioral correlation plot configuration
-      figure_size: "standard"  # Figure size preset name
-      scatter_marker_size: "large"  # Scatter marker size preset name
-      line_width: "bold"  # Line width preset name
-      histogram_bins: "behavioral"  # Histogram bins preset name
-    tfr:  # TFR plot configuration (duplicate/legacy section, used in plot_tfr.py)
-      figure_size: "standard"  # Figure size preset name
-      log_base: 10.0  # Logarithm base for TFR power display (log10)
-      percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
-      percent_detection_threshold: 5.0  # Minimum percentage change to display in annotations [%]
-      default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
-      default_significance_alpha: 0.05  # Default significance threshold
-      default_fdr_alpha: 0.05  # Default FDR threshold
-      default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots
-      gamma_lower_bound: 30.1  # Lower bound of gamma band [Hz]
-      default_baseline_start: -5.0  # Default baseline start time [s]
-      default_baseline_end: -0.01  # Default baseline end time [s]
-      default_nave: 1  # Default number of averages (1 = single trial)
-      annotation_y_start: 0.98  # Starting y-position for annotations (figure coordinates)
-      annotation_line_height: 0.045  # Height per annotation line (figure coordinates)
-      annotation_min_spacing: 0.03  # Minimum spacing between annotations (figure coordinates)
-      annotation_spacing_multiplier: 0.3  # Multiplier for annotation spacing
-      y_center_tolerance: 0.1  # Tolerance for centering annotations vertically
-      x_min_distance: 0.01  # Minimum x-distance between annotation elements
-      default_x_position: 0.95  # Default x-position for annotations (figure coordinates)
-      max_x_position: 1.08  # Maximum x-position allowed (figure coordinates)
-      x_offset: 0.02  # X-offset for annotation positioning
-      label_x_position: 0.5  # X-position for labels (figure coordinates)
-      label_y_position: 1.02  # Y-position for labels above plot (figure coordinates)
-      label_y_position_bottom: 1.08  # Y-position for labels below plot (figure coordinates)
-      topomap:  # Topomap-specific TFR plot parameters
-        fig_size_per_col: 7.0  # Figure width per column [inches]
-        fig_size_per_row: 7.0  # Figure height per row [inches]
-        wspace: 1.2  # Width spacing between subplots
-        hspace: 0.25  # Height spacing between subplots
-        subplots_right: 0.75  # Right edge of subplots (figure coordinates)
-        title_pad: 4  # Title padding [points]
-        title_y: 1.04  # Title y-position (figure coordinates)
-        default_diff_abs: 0.0  # Default absolute difference threshold for topomaps
-        n_rows: 3  # Number of rows in topomap grid
-      colorbar:  # Colorbar parameters for TFR plots
-        fraction: 0.045  # Colorbar size as fraction of figure
-        pad: 0.06  # Colorbar padding from axes
-        shrink: 0.9  # Colorbar shrink factor
-        multiplier: 8.0  # Colorbar size multiplier
-      qc:  # Quality control plot parameters
-        epsilon_for_division: 0.00000000000000000001  # Small epsilon to prevent division by zero (1e-20)
-        fig_width: 8  # QC figure width [inches]
-        fig_height: 3  # QC figure height [inches]
-        histogram_bins: 50  # Number of bins for QC histograms
-        histogram_alpha: 0.8  # Histogram transparency
-      temperature:  # Temperature-related TFR plot parameters
-        rounding_decimals: 1  # Number of decimal places for temperature labels
-        min_temperatures_required: 2  # Minimum temperature levels for temperature-stratified plots
-      histogram_bins: "tfr"  # Histogram bins preset name
-    microstate:  # Microstate plot configuration (used in plot_features.py)
-      figure_size: "standard"  # Figure size preset name
-      label_offset_x: -0.3  # X-offset for microstate labels (figure coordinates)
-      label_y_position: 0.5  # Y-position for labels (figure coordinates)
-      temperature_label_x: -0.35  # X-position for temperature labels (figure coordinates)
-      gfp_scale_factor: 1e6  # Scaling factor for GFP display (converts V to µV)
-      stimulus_start_time: 0.0  # Stimulus onset time [s] for alignment
-      tight_rect_microstate: [0, 0.02, 1, 0.96]  # Tight layout rectangle for microstate plots [left, bottom, right, top]
-    features:  # Feature plot configuration
-      figure_size: "standard"  # Figure size preset name
-      correlation:  # Correlation plot parameters
-        vmin: -0.6  # Minimum correlation value for colormap
-        vmax: 0.6  # Maximum correlation value for colormap
-        threshold_text: 0.4  # Correlation threshold for displaying text annotations
-        threshold_color: 0.5  # Correlation threshold for color highlighting
-      power:  # Power plot parameters
-        vmin: null  # Minimum power value for colormap (null = compute from data)
-        vmax: null  # Maximum power value for colormap (null = compute from data)
-      heatmap_text_threshold: 200  # Maximum number of cells before hiding text in heatmaps
-    decoding:  # Decoding plot configuration (used in plot_decoding.py)
-      scatter_alpha: 0.4  # Scatter plot marker transparency
-      axis_margin_factor: 0.05  # Margin factor for axis limits (5% padding)
-      y_lim_padding_factor: 1.1  # Y-axis limit padding factor (10% padding)
-      fit_points: 100  # Number of points for regression fit line
-      ridge_plot_max_channels: 30  # Maximum channels to display in ridge plots
-      ridge_kde_points: 200  # Number of points for KDE in ridge plots
-      ridge_plot_height_per_channel: 0.4  # Height per channel in ridge plots [inches]
-      ridge_plot_min_height: 4  # Minimum ridge plot height [inches]
-      ridge_plot_y_offset: 0.2  # Y-offset between ridge plots
-      violin_plot_width_per_channel: 0.3  # Width per channel in violin plots [inches]
-      violin_plot_min_width: 8  # Minimum violin plot width [inches]
-      violin_plot_height: 5  # Violin plot height [inches]
-      violin_width: 0.7  # Violin width (relative to bin width)
-      feature_plot_max_height: 6  # Maximum feature plot height [inches]
-      feature_plot_height_per_feature: 0.3  # Height per feature [inches]
-      quantile_min: 0.01  # Minimum quantile for outlier clipping (1st percentile)
-      quantile_max: 0.99  # Maximum quantile for outlier clipping (99th percentile)
-      savefig_pad_inches: 0.05  # Padding around saved figures [inches]
-      pdf_font_type: 42  # PDF font type (42 = TrueType, ensures text is selectable)
-      ps_font_type: 42  # PostScript font type (42 = TrueType)
-      ridge_text_x: 0.5  # Ridge plot text x-position (figure coordinates)
-      ridge_text_y: 0.5  # Ridge plot text y-position (figure coordinates)
-    tfr:  # TFR plot parameters (duplicate/legacy section, used in plot_tfr.py)
-      log_base: 10.0  # Logarithm base for TFR power display (log10)
-      percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
-      percent_detection_threshold: 5.0  # Minimum percentage change to display [%]
-      default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
-      default_significance_alpha: 0.05  # Default significance threshold
-      default_fdr_alpha: 0.05  # Default FDR threshold
-      default_max_freq: 80.0  # Default maximum frequency [Hz]
-      gamma_lower_bound: 30.1  # Lower bound of gamma band [Hz]
-      default_baseline_start: -5.0  # Default baseline start time [s]
-      default_baseline_end: -0.01  # Default baseline end time [s]
-      default_nave: 1  # Default number of averages
-      annotation_y_start: 0.98  # Starting y-position for annotations (figure coordinates)
-      annotation_line_height: 0.045  # Height per annotation line (figure coordinates)
-      annotation_min_spacing: 0.03  # Minimum spacing between annotations (figure coordinates)
-      annotation_spacing_multiplier: 0.3  # Multiplier for annotation spacing
-      y_center_tolerance: 0.1  # Tolerance for centering annotations vertically
-      x_min_distance: 0.01  # Minimum x-distance between annotation elements
-      default_x_position: 0.95  # Default x-position for annotations (figure coordinates)
-      max_x_position: 1.08  # Maximum x-position allowed (figure coordinates)
-      x_offset: 0.02  # X-offset for annotation positioning
-      label_x_position: 0.5  # X-position for labels (figure coordinates)
-      label_y_position: 1.02  # Y-position for labels above plot (figure coordinates)
-      label_y_position_bottom: 1.08  # Y-position for labels below plot (figure coordinates)
-      topo_default_diff_abs: 0.0  # Default absolute difference threshold for topomaps
-      qc_fig_width: 8  # QC figure width [inches]
-      qc_fig_height: 3  # QC figure height [inches]
-      histogram_bins: 50  # Number of bins for histograms
-      histogram_alpha: 0.8  # Histogram transparency
-      temperature_rounding_decimals: 1  # Number of decimal places for temperature labels
-      epsilon_for_division: 0.00000000000000000001  # Small epsilon to prevent division by zero (1e-20)
-    microstate:  # Microstate plot layout parameters (used in plot_features.py)
-      grid_height_ratio_topomap: 1.0  # Height ratio for topomap subplot
-      grid_height_ratio_gfp: 1.5  # Height ratio for GFP subplot
-      grid_hspace: 0.15  # Horizontal spacing between subplots
-      grid_wspace: 0.3  # Vertical spacing between subplots
-    behavioral:  # Behavioral correlation plot configuration (used in plot_behavioral.py)
-      plot_subdir: "04_behavior_correlations"  # Subdirectory for behavioral plots
-      significance_threshold: 0.05  # Significance threshold for behavioral plots
-      correlation_ci_level: 95  # Confidence interval level [%]
-      time_labels: ["early", "mid", "late"]  # Labels for temporal bins
-      overall_roi_keys: ["overall", "all", "global"]  # Keys identifying overall/global ROI
-      target_rating: "rating"  # Target variable name for rating correlations
-      target_temperature: "temperature"  # Target variable name for temperature correlations
-      method_spearman: "spearman"  # Default correlation method
-      power_prefix: "pow_"  # Prefix for power feature column names
-      scatter_figsize: [8, 6]  # Scatter plot figure size [width, height] [inches]
-      residual_hist_bins: 20  # Number of bins for residual histograms
-      residual_scatter_size: 25  # Marker size for residual scatter plots [points]
-      residual_qc_figsize: [12, 5]  # Residual QC figure size [width, height] [inches]
-      diagnostics_figsize: [10, 8]  # Diagnostics figure size [width, height] [inches]
-      stats_fontsize: 10  # Statistics text font size [points]
-      channel_annotation_fontsize: 8  # Channel annotation font size [points]
-      max_channels_to_display: 10  # Maximum channels to display in channel-level plots
-      percentage_axis_fontsize: 9  # Font size for percentage axes [points]
-      percentage_axis_nbins: 7  # Number of bins for percentage axis
-      percentage_axis_minor_divisor: 2  # Divisor for minor ticks on percentage axis
-      default_rng_seed: 42  # Default random seed for behavioral analysis
+  # NOTE: plot_types section has been removed to eliminate duplication.
+  # All plot-type-specific configuration is now in the 'plots' section above.
+  # The plotting/config.py loader handles backward compatibility automatically.
   validation:  # Validation thresholds for plotting (used in plotting validation functions)
     min_samples_for_plot: 5  # Minimum samples required to generate plot
     min_samples_for_kde: 3  # Minimum samples required for KDE estimation
@@ -1031,6 +921,11 @@ logging:  # Logging configuration
 ###################################################################
 # SYSTEM & ENVIRONMENT
 ###################################################################
+validation:  # Data validation parameters (used in validation.py)
+  min_epochs: 20  # Minimum number of epochs required for analysis
+  min_channels: 10  # Minimum number of channels required for analysis
+  max_amplitude_uv: 500  # Maximum amplitude threshold [µV] for artifact detection
+
 analysis:  # Analysis pipeline configuration
   strict_mode: true  # Whether to enforce strict validation (fail on errors vs warnings)
   min_subjects_for_group: 2  # Minimum subjects required for group-level analysis (used in nested_loso_predictions)

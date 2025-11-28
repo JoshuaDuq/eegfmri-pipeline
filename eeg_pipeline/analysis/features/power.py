@@ -34,6 +34,20 @@ def _prepare_tfr_power_inputs(tfr: Any, config: Any, logger: Any) -> Optional[Tu
     if tfr_data.ndim != 4:
         raise RuntimeError("TFR data must have 4D shape (epochs, channels, freqs, times)")
 
+    n_nan = np.sum(~np.isfinite(tfr_data))
+    if n_nan > 0:
+        nan_fraction = n_nan / tfr_data.size
+        max_nan_fraction = float(config.get("analysis.data_quality.max_nan_fraction", 0.1))
+        if nan_fraction > max_nan_fraction:
+            logger.error(
+                f"TFR data contains {nan_fraction:.1%} non-finite values (max allowed: {max_nan_fraction:.1%})"
+            )
+            return None
+        logger.warning(
+            f"TFR data contains {n_nan} non-finite values ({nan_fraction:.2%}); "
+            "these will propagate as NaN in features"
+        )
+
     freqs = tfr_obj.freqs
     times = tfr_obj.times
     channel_names = tfr_obj.info["ch_names"]
@@ -95,6 +109,14 @@ def extract_band_power_features(
     
     frequency_bands = get_frequency_bands(config)
     temporal_bins = get_config_value(config, "feature_engineering.features.temporal_bins", [])
+    
+    if not temporal_bins:
+        logger.warning(
+            "No temporal bins configured in 'feature_engineering.features.temporal_bins'. "
+            "Power features will be empty. Check your configuration."
+        )
+        return pd.DataFrame(), []
+    
     feature_arrays = []
     column_names = []
     

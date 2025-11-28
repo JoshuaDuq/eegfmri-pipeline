@@ -1,4 +1,5 @@
 import logging
+import pickle
 import re
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
@@ -10,8 +11,6 @@ from scipy.stats import spearmanr
 from sklearn.cluster import KMeans
 
 from eeg_pipeline.utils.data.loading import (
-    load_epochs_for_analysis,
-    extract_temperature_data,
     build_covariate_matrix,
     build_covariates_without_temp,
     extract_measure_prefixes,
@@ -19,7 +18,6 @@ from eeg_pipeline.utils.data.loading import (
     build_summary_map_for_prefix,
 )
 from eeg_pipeline.utils.io.general import (
-    deriv_features_path,
     deriv_stats_path,
     deriv_plots_path,
     ensure_dir,
@@ -27,11 +25,9 @@ from eeg_pipeline.utils.io.general import (
     get_column_from_config,
     get_pain_column_from_config,
     get_temperature_column_from_config,
-    read_tsv,
     write_tsv,
 )
 from eeg_pipeline.utils.analysis.stats import (
-    apply_fdr_correction_and_save,
     should_apply_fisher_transform,
     get_correlation_method,
     compute_correlation,
@@ -48,9 +44,11 @@ from eeg_pipeline.utils.analysis.stats import (
     fdr_bh,
     perm_pval_simple,
 )
+from eeg_pipeline.analysis.behavior.core import save_correlation_results
 from eeg_pipeline.utils.analysis.tfr import build_rois_from_info as _build_rois, get_summary_type
 from eeg_pipeline.utils.io.general import build_partial_covars_string
-from eeg_pipeline.analysis.behavior.correlations import _build_base_correlation_record
+from eeg_pipeline.analysis.behavior.core import build_correlation_record
+from eeg_pipeline.analysis.behavior.core import MIN_SAMPLES_DEFAULT, MIN_SAMPLES_EDGE
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.plotting.features import (
     plot_sliding_state_centroids,
@@ -62,11 +60,6 @@ from eeg_pipeline.plotting.features import (
     plot_graph_metric_distributions,
 )
 from eeg_pipeline.utils.io.general import build_connectivity_heatmap_records
-
-
-###################################################################
-# Connectivity Record Builders
-###################################################################
 
 
 def _build_roi_pair_rating_record(
@@ -88,59 +81,14 @@ def _build_roi_pair_rating_record(
     p_partial_perm: float,
     n_perm: int,
 ) -> Dict[str, Any]:
-    """
-    Build correlation record for ROI pair connectivity analysis.
-    
-    Parameters
-    ----------
-    measure_band : str
-        Measure and band identifier
-    roi_i : str
-        First ROI name
-    roi_j : str
-        Second ROI name
-    n_edges : int
-        Number of edges in the ROI pair
-    correlation : float
-        Correlation coefficient
-    p_value : float
-        P-value
-    n_eff : int
-        Effective sample size
-    method : str
-        Correlation method used
-    ci_low : float
-        Lower confidence interval bound
-    ci_high : float
-        Upper confidence interval bound
-    r_partial : float
-        Partial correlation coefficient
-    p_partial : float
-        Partial correlation p-value
-    n_partial : int
-        Sample size for partial correlation
-    covariates_df : Optional[pd.DataFrame]
-        Covariates dataframe
-    p_perm : float
-        Permutation p-value
-    p_partial_perm : float
-        Permutation p-value for partial correlation
-    n_perm : int
-        Number of permutations
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Correlation record dictionary
-    """
+    """Build correlation record for ROI pair connectivity analysis."""
     partial_covars_str = build_partial_covars_string(covariates_df)
-    return _build_base_correlation_record(
+    record = build_correlation_record(
         identifier=f"{roi_i}_{roi_j}",
-        identifier_key="roi_pair",
         band=measure_band,
-        correlation=correlation,
-        p_value=p_value,
-        n_valid=n_eff,
+        r=correlation,
+        p=p_value,
+        n=n_eff,
         method=method,
         ci_low=ci_low,
         ci_high=ci_high,
@@ -149,6 +97,8 @@ def _build_roi_pair_rating_record(
         n_partial=n_partial,
         p_perm=p_perm,
         p_partial_perm=p_partial_perm,
+        identifier_type="roi_pair",
+        analysis_type="connectivity",
         measure_band=measure_band,
         roi_i=roi_i,
         roi_j=roi_j,
@@ -157,33 +107,9 @@ def _build_roi_pair_rating_record(
         partial_covars=partial_covars_str,
         n_perm=n_perm,
     )
+    return record.to_dict()
 
 
-###################################################################
-# Connectivity Data Loading
-###################################################################
-
-
-def _load_connectivity_data(
-    subject: str,
-    deriv_root: Path,
-) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
-    feats_dir = deriv_features_path(deriv_root, subject)
-    conn_path = feats_dir / "features_connectivity.tsv"
-    y_path = feats_dir / "target_vas_ratings.tsv"
-    
-    if not conn_path.exists() or not y_path.exists():
-        return None, None
-    
-    connectivity_df = read_tsv(conn_path)
-    target_df = read_tsv(y_path)
-    
-    if connectivity_df is None or target_df is None or target_df.empty:
-        return None, None
-    
-    target_values = pd.to_numeric(target_df.iloc[:, 0], errors="coerce")
-    
-    return connectivity_df, target_values
 
 
 def _extract_sliding_windows(conn_df: Optional[pd.DataFrame]) -> Tuple[Dict[int, List[str]], List[Tuple[str, str]]]:
@@ -322,7 +248,7 @@ def compute_sliding_state_metrics(
     if labels_path.exists():
         try:
             ch_names = np.load(labels_path, allow_pickle=True).tolist()
-        except Exception:
+        except (OSError, ValueError, pickle.UnpicklingError):
             ch_names = None
     plot_sliding_state_centroids(centroids, edge_pairs, ch_names, plots_dir, logger, config)
     all_centers = sliding_window_centers(config, max(window_indices) + 1)
@@ -445,12 +371,14 @@ def _correlate_sliding_connectivity(
         return
 
     df = pd.DataFrame(records)
-    apply_fdr_correction_and_save(
+    save_correlation_results(
         df,
         stats_dir / "corr_stats_sliding_conn_vs_rating.tsv",
-        config,
-        logger,
+        apply_fdr=True,
+        config=config,
+        logger=logger,
         use_permutation_p=False,
+        add_fdr_reject=True,
     )
 
 
@@ -463,7 +391,8 @@ def correlate_connectivity_roi_summaries(
     n_perm: int = 0,
     rng: Optional[np.random.Generator] = None
 ) -> None:
-    from eeg_pipeline.utils.pipelines.behavior import initialize_analysis_context
+    from eeg_pipeline.pipelines.behavior import initialize_analysis_context
+    from eeg_pipeline.analysis.behavior.core import BehaviorContext
     
     try:
         config, task, deriv_root, stats_dir, logger = initialize_analysis_context(
@@ -475,29 +404,35 @@ def correlate_connectivity_roi_summaries(
     rng_seed = config.get("random.seed", 42)
     rng = rng or np.random.default_rng(rng_seed)
 
-    X, y = _load_connectivity_data(subject, deriv_root)
-    if X is None or y is None:
-        return
-
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject,
-        task,
-        align="strict",
-        preload=False,
-        deriv_root=deriv_root,
-        bids_root=config.bids_root,
+    ctx = BehaviorContext(
+        subject=subject,
+        task=task,
         config=config,
         logger=logger,
+        deriv_root=deriv_root,
+        stats_dir=stats_dir,
+        use_spearman=use_spearman,
+        bootstrap=bootstrap,
+        n_perm=n_perm,
+        rng=rng,
+        partial_covars=partial_covars,
     )
-    if epochs is None:
-        return
-    info = epochs.info
-    roi_map = _build_rois(info, config=config)
     
-    temp_series, temp_col = extract_temperature_data(aligned_events, config)
-
-    covariates_df = build_covariate_matrix(aligned_events, partial_covars, config)
-    covariates_without_temp_df = build_covariates_without_temp(covariates_df, temp_col)
+    if not ctx.load_data():
+        return
+    
+    X = ctx.connectivity_df
+    y = ctx.targets
+    if X is None or X.empty or y is None:
+        return
+    
+    info = ctx.epochs_info
+    roi_map = _build_rois(info, config=config) if info else {}
+    
+    temp_series = ctx.temperature
+    temp_col = ctx.temperature_column
+    covariates_df = ctx.covariates_df
+    covariates_without_temp_df = ctx.covariates_without_temp_df
 
     prefixes = extract_measure_prefixes(X.columns)
     
@@ -611,25 +546,31 @@ def correlate_connectivity_roi_summaries(
 
         if recs:
             df = pd.DataFrame(recs)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 df,
                 stats_dir / f"corr_stats_conn_roi_summary_{sanitize_label(prefix)}_vs_rating.tsv",
-                config,
-                logger,
+                apply_fdr=True,
+                config=config,
+                logger=logger,
+                use_permutation_p=True,
+                add_fdr_reject=True,
             )
 
         if recs_temp:
             df_t = pd.DataFrame(recs_temp)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 df_t,
                 stats_dir / f"corr_stats_conn_roi_summary_{sanitize_label(prefix)}_vs_temp.tsv",
-                config,
-                logger,
+                apply_fdr=True,
+                config=config,
+                logger=logger,
+                use_permutation_p=False,
+                add_fdr_reject=True,
             )
 
 
 def correlate_connectivity_heatmaps(subject: str, task: Optional[str] = None, use_spearman: bool = True) -> None:
-    from eeg_pipeline.utils.pipelines.behavior import initialize_analysis_context
+    from eeg_pipeline.pipelines.behavior import initialize_analysis_context
     
     try:
         config, task, deriv_root, stats_dir, logger = initialize_analysis_context(
@@ -643,8 +584,28 @@ def correlate_connectivity_heatmaps(subject: str, task: Optional[str] = None, us
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     ensure_dir(plots_dir)
 
-    connectivity_dataframe, target_values = _load_connectivity_data(subject, deriv_root)
-    if connectivity_dataframe is None or target_values is None:
+    from eeg_pipeline.analysis.behavior.core import BehaviorContext
+    
+    ctx = BehaviorContext(
+        subject=subject,
+        task=task,
+        config=config,
+        logger=logger,
+        deriv_root=deriv_root,
+        stats_dir=stats_dir,
+        use_spearman=use_spearman,
+    )
+    
+    if not ctx.load_data():
+        logger.warning(
+            f"Failed to load data for sub-{subject}; "
+            f"skipping connectivity correlations."
+        )
+        return
+    
+    connectivity_dataframe = ctx.connectivity_df
+    target_values = ctx.targets
+    if connectivity_dataframe is None or connectivity_dataframe.empty or target_values is None:
         logger.warning(
             f"Connectivity features or targets missing for sub-{subject}; "
             f"skipping connectivity correlations."
@@ -685,8 +646,8 @@ def correlate_connectivity_heatmaps(subject: str, task: Optional[str] = None, us
             connectivity_df=connectivity_dataframe,
             plots_dir=plots_dir,
         )
-    except Exception:
-        logger.exception("Connectivity condition effects failed for sub-%s", subject)
+    except (ValueError, KeyError, RuntimeError) as exc:
+        logger.warning("Connectivity condition effects failed for sub-%s: %s", subject, exc)
 
 
 def _process_connectivity_prefix(
@@ -794,11 +755,14 @@ def _correlate_connectivity_graph_metrics(
         return
 
     df = pd.DataFrame(records)
-    apply_fdr_correction_and_save(
+    save_correlation_results(
         df,
         stats_dir / "corr_stats_conn_graph_vs_rating.tsv",
-        config,
-        logger,
+        apply_fdr=True,
+        config=config,
+        logger=logger,
+        use_permutation_p=True,
+        add_fdr_reject=True,
     )
 
 
@@ -865,13 +829,13 @@ def compute_connectivity_condition_effects(
         for col, ch1, ch2 in edges:
             vals = pd.to_numeric(connectivity_df[col], errors="coerce").to_numpy(dtype=float)
             valid_mask = np.isfinite(vals)
-            if valid_mask.sum() < 4:
+            if valid_mask.sum() < MIN_SAMPLES_DEFAULT:
                 continue
 
             if pain_vals is not None:
                 pain_mask = (pain_vals == 1) & valid_mask
                 nonpain_mask = (pain_vals == 0) & valid_mask
-                if pain_mask.sum() >= 3 and nonpain_mask.sum() >= 3:
+                if pain_mask.sum() >= MIN_SAMPLES_DEFAULT and nonpain_mask.sum() >= MIN_SAMPLES_DEFAULT:
                     try:
                         _, p_val = stats.mannwhitneyu(vals[nonpain_mask], vals[pain_mask], alternative="two-sided")
                     except ValueError:
@@ -890,7 +854,7 @@ def compute_connectivity_condition_effects(
             if temp_vals is not None and temp_vals.notna().any():
                 try:
                     r_temp, p_temp = spearmanr(vals[valid_mask], temp_vals[valid_mask], nan_policy="omit")
-                except Exception:
+                except (ValueError, RuntimeWarning, FloatingPointError):
                     r_temp, p_temp = np.nan, np.nan
                 temp_records.append(
                     {
@@ -901,19 +865,144 @@ def compute_connectivity_condition_effects(
                     }
                 )
 
+        from eeg_pipeline.analysis.behavior.core import save_correlation_results
+        
         if stats_records:
             df_pain = pd.DataFrame(stats_records)
-            df_pain["q"] = fdr_bh(df_pain["p"].to_numpy(dtype=float), config=config)
             out_path = stats_dir / f"corr_stats_edges_{sanitize_label(prefix)}_pain.tsv"
-            write_tsv(df_pain, out_path)
-            sig_edges = set(df_pain.loc[df_pain["q"] < alpha, "edge"])
+            save_correlation_results(df_pain, out_path, apply_fdr=True, config=config, logger=logger)
+            sig_edges = set(df_pain.loc[df_pain["q"] < alpha, "edge"]) if "q" in df_pain.columns else set()
             plot_edge_significance_circle_from_stats(df_pain, prefix, plots_dir, logger, config, sig_edges)
 
         if temp_records:
             df_temp = pd.DataFrame(temp_records)
-            df_temp["q"] = fdr_bh(df_temp["p"].to_numpy(dtype=float), config=config)
             out_temp = stats_dir / f"corr_stats_edges_{sanitize_label(prefix)}_temp.tsv"
-            write_tsv(df_temp, out_temp)
+            save_correlation_results(df_temp, out_temp, apply_fdr=True, config=config, logger=logger)
 
     plot_graph_metric_distributions(connectivity_df, events, plots_dir, logger, config)
+
+
+def correlate_connectivity_roi_from_context(ctx: "BehaviorContext") -> None:
+    """Compute connectivity ROI correlations using pre-loaded data from context."""
+    subject = ctx.subject
+    task = ctx.task
+    logger = ctx.logger
+    config = ctx.config
+    deriv_root = ctx.deriv_root
+    stats_dir = ctx.stats_dir
+    
+    logger.info(f"Computing connectivity ROI correlations for sub-{subject}")
+    
+    X = ctx.connectivity_df
+    y = ctx.targets
+    
+    if X is None or X.empty or y is None:
+        logger.warning("No connectivity features or targets in context")
+        return
+    
+    info = ctx.epochs_info
+    roi_map = _build_rois(info, config=config) if info else {}
+    
+    temp_series = ctx.temperature
+    temp_col = ctx.temperature_column
+    covariates_df = ctx.covariates_df
+    covariates_without_temp_df = ctx.covariates_without_temp_df
+    
+    prefixes = extract_measure_prefixes(X.columns)
+    
+    for prefix in prefixes:
+        prefix_columns = [c for c in X.columns if c.startswith(prefix + "_")]
+        if not prefix_columns:
+            continue
+        
+        summary_map = build_summary_map_for_prefix(prefix, prefix_columns, roi_map)
+        if not summary_map:
+            continue
+        
+        apply_fisher_transform = should_apply_fisher_transform(prefix)
+        
+        recs: List[Dict[str, object]] = []
+        recs_temp: List[Dict[str, object]] = []
+        method = get_correlation_method(ctx.use_spearman)
+        
+        for (roi_i, roi_j), cols_list in summary_map.items():
+            edge_df = X[cols_list].apply(pd.to_numeric, errors="coerce")
+            xi = (
+                compute_fisher_transformed_mean(edge_df)
+                if apply_fisher_transform
+                else edge_df.mean(axis=1)
+            )
+            
+            mask = joint_valid_mask(xi, y)
+            n_eff = int(mask.sum())
+            min_samples_roi = config.get("behavior_analysis.statistics.min_samples_roi", 5)
+            if n_eff < min_samples_roi:
+                continue
+            
+            xi_masked = xi.iloc[mask]
+            y_masked = y.iloc[mask]
+            
+            edge_rs: List[float] = []
+            for edge_col in cols_list:
+                edge_series = pd.to_numeric(edge_df[edge_col], errors="coerce")
+                edge_mask = joint_valid_mask(edge_series, y)
+                if edge_mask.sum() < min_samples_roi:
+                    continue
+                r_edge, _ = compute_correlation(edge_series[edge_mask], y[edge_mask], ctx.use_spearman)
+                if np.isfinite(r_edge):
+                    edge_rs.append(float(r_edge))
+            
+            if edge_rs:
+                edge_rs_arr = np.asarray(edge_rs, dtype=float)
+                edge_rs_arr = np.clip(edge_rs_arr, -0.999999, 0.999999)
+                z_mean = np.nanmean(np.arctanh(edge_rs_arr))
+                correlation = float(np.tanh(z_mean))
+            else:
+                correlation, _ = compute_correlation(xi_masked, y_masked, ctx.use_spearman)
+            
+            p_value = compute_correlation_pvalue(correlation, n_eff, ctx.use_spearman)
+            
+            ci_low, ci_high = (np.nan, np.nan)
+            if ctx.bootstrap > 0:
+                ci_low, ci_high = compute_bootstrap_ci(xi_masked, y_masked, ctx.bootstrap, ctx.use_spearman)
+            
+            r_partial, p_partial, n_partial = compute_partial_correlation_for_roi_pair(
+                xi_masked, y_masked, covariates_df, ctx.use_spearman, min_samples_roi
+            )
+            
+            p_perm, p_partial_perm = compute_permutation_pvalues_for_roi_pair(
+                xi_masked, y_masked, covariates_df, ctx.use_spearman, min_samples_roi, ctx.n_perm, ctx.rng
+            )
+            
+            r_temp, p_temp, n_temp, p_temp_perm = compute_temp_correlation_for_roi_pair(
+                xi_masked, y_masked, temp_series, covariates_without_temp_df, ctx.use_spearman, min_samples_roi, ctx.n_perm, ctx.rng
+            )
+            
+            rec = _build_roi_pair_rating_record(
+                prefix, roi_i, roi_j, len(cols_list), correlation, p_value, n_eff, method,
+                ci_low, ci_high, r_partial, p_partial, n_partial, r_temp, p_temp, n_temp,
+                p_perm, p_partial_perm, p_temp_perm, ctx.n_perm,
+            )
+            recs.append(rec)
+            
+            if temp_series is not None:
+                rec_temp = _build_roi_pair_temp_record(
+                    prefix, roi_i, roi_j, len(cols_list), xi_masked, temp_series, 
+                    covariates_without_temp_df, ctx.use_spearman, min_samples_roi
+                )
+                if rec_temp:
+                    recs_temp.append(rec_temp)
+        
+        from eeg_pipeline.analysis.behavior.core import save_correlation_results
+        
+        if recs:
+            df_rating = pd.DataFrame(recs)
+            out_path = stats_dir / f"corr_stats_conn_roi_summary_{prefix}_vs_rating.tsv"
+            save_correlation_results(df_rating, out_path, apply_fdr=True, config=config, logger=logger)
+            logger.info(f"Saved {len(recs)} ROI pair records for {prefix}")
+        
+        if recs_temp:
+            df_temp = pd.DataFrame(recs_temp)
+            out_temp = stats_dir / f"corr_stats_conn_roi_summary_{prefix}_vs_temp.tsv"
+            save_correlation_results(df_temp, out_temp, apply_fdr=True, config=config, logger=logger)
 

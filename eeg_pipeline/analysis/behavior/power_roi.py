@@ -9,9 +9,6 @@ import mne
 
 from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.utils.data.loading import (
-    _load_features_and_targets,
-    load_epochs_for_analysis,
-    extract_temperature_data,
     extract_roi_columns,
     build_covariate_matrix,
     build_covariates_without_temp,
@@ -26,12 +23,12 @@ from eeg_pipeline.utils.io.general import (
     read_tsv,
 )
 from eeg_pipeline.utils.analysis.stats import (
-    apply_fdr_correction_and_save,
     get_correlation_method,
     compute_temp_correlations_for_roi,
     _safe_float,
     compute_channel_rating_correlations,
 )
+from eeg_pipeline.analysis.behavior.core import save_correlation_results
 from eeg_pipeline.utils.analysis.tfr import (
     build_rois_from_info as _build_rois,
     get_summary_type,
@@ -40,57 +37,16 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 from eeg_pipeline.analysis.behavior.correlations import (
     AnalysisConfig,
     _align_groups_to_series,
-    _build_base_correlation_record,
     _build_temp_record_unified,
     _compute_roi_correlation_stats,
 )
+from eeg_pipeline.analysis.behavior.core import build_correlation_record
 from eeg_pipeline.utils.analysis.stats import (
     prepare_aligned_data,
 )
 from eeg_pipeline.utils.io.general import build_partial_covars_string
 
 
-def _load_analysis_data(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    logger: Any,
-) -> Tuple[
-    Optional[pd.DataFrame],  # power_df
-    Optional[pd.DataFrame],  # conn_df
-    Optional[pd.Series],
-    Optional[mne.Info],
-    Optional[pd.DataFrame],
-    Optional[pd.Series],
-    Optional[str],
-]:
-    if not subject or not task:
-        logger.error("Subject and task must be provided")
-        return None, None, None, None, None, None, None
-    
-    _, power_df, conn_df, target_values, info = _load_features_and_targets(
-        subject, task, deriv_root, config
-    )
-    target_values = pd.to_numeric(target_values, errors="coerce")
-
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject,
-        task,
-        align="strict",
-        preload=False,
-        deriv_root=deriv_root,
-        bids_root=config.bids_root,
-        config=config,
-        logger=logger,
-    )
-    if epochs is None:
-        logger.error(f"Could not find epochs for ROI correlations: sub-{subject}")
-        return None, None, None, None, None, None, None
-
-    temp_series, temp_col = extract_temperature_data(aligned_events, config)
-
-    return power_df, conn_df, target_values, info, aligned_events, temp_series, temp_col
 
 
 def _build_roi_rating_record(
@@ -115,13 +71,12 @@ def _build_roi_rating_record(
     p_partial_temp_perm: float,
     n_perm: int,
 ) -> Dict[str, Any]:
-    return _build_base_correlation_record(
+    record = build_correlation_record(
         identifier=roi,
-        identifier_key="roi",
         band=band,
-        correlation=correlation,
-        p_value=p_value,
-        n_valid=n_eff,
+        r=correlation,
+        p=p_value,
+        n=n_eff,
         method=method,
         ci_low=ci_low,
         ci_high=ci_high,
@@ -130,14 +85,17 @@ def _build_roi_rating_record(
         n_partial=n_part,
         p_perm=p_perm,
         p_partial_perm=p_partial_perm,
+        r_partial_temp=r_part_temp,
+        p_partial_temp=p_part_temp,
+        n_partial_temp=n_part_temp,
+        p_partial_temp_perm=p_partial_temp_perm,
+        identifier_type="roi",
+        analysis_type="power",
         band_range=band_range_str,
         partial_covars=partial_covars_str,
-        r_partial_given_temp=_safe_float(r_part_temp),
-        p_partial_given_temp=_safe_float(p_part_temp),
-        n_partial_given_temp=n_part_temp,
-        p_partial_given_temp_perm=_safe_float(p_partial_temp_perm),
         n_perm=n_perm,
     )
+    return record.to_dict()
 
 
 def _build_temp_record_for_roi(
@@ -252,20 +210,41 @@ def _save_roi_results(
             "Saving ROI stats. NOTE: These files use local FDR correction. "
             "Refer to group_aggregation outputs for Global FDR corrected results."
         )
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             df_rating,
             analysis_cfg.stats_dir / "corr_stats_pow_roi_vs_rating.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+            use_permutation_p=True,
+            add_fdr_reject=True,
         )
-        write_tsv(df_rating, analysis_cfg.stats_dir / "corr_stats_pow_combined_vs_rating.tsv")
+        save_correlation_results(
+            df_rating,
+            analysis_cfg.stats_dir / "corr_stats_pow_combined_vs_rating.tsv",
+            apply_fdr=False,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+        )
 
     if recs_temp:
         df_temp = pd.DataFrame(recs_temp)
-        apply_fdr_correction_and_save(
-            df_temp, analysis_cfg.stats_dir / "corr_stats_pow_roi_vs_temp.tsv", analysis_cfg.config, analysis_cfg.logger
+        save_correlation_results(
+            df_temp,
+            analysis_cfg.stats_dir / "corr_stats_pow_roi_vs_temp.tsv",
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+            use_permutation_p=False,
+            add_fdr_reject=True,
         )
-        write_tsv(df_temp, analysis_cfg.stats_dir / "corr_stats_pow_combined_vs_temp.tsv")
+        save_correlation_results(
+            df_temp,
+            analysis_cfg.stats_dir / "corr_stats_pow_combined_vs_temp.tsv",
+            apply_fdr=False,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+        )
 
 
 def _save_mixed_effects_results(
@@ -302,50 +281,13 @@ def _build_channel_rating_record(
     n_valid: int,
     method: str,
 ) -> Dict[str, Any]:
-    """
-    Build correlation record for channel-level power analysis.
-    
-    Parameters
-    ----------
-    channel : str
-        Channel name
-    band : str
-        Frequency band
-    correlation : float
-        Correlation coefficient
-    p_value : float
-        P-value
-    ci_low : float
-        Lower confidence interval bound
-    ci_high : float
-        Upper confidence interval bound
-    r_partial : float
-        Partial correlation coefficient
-    p_partial : float
-        Partial correlation p-value
-    n_partial : int
-        Sample size for partial correlation
-    p_perm : float
-        Permutation p-value
-    p_partial_perm : float
-        Permutation p-value for partial correlation
-    n_valid : int
-        Number of valid samples
-    method : str
-        Correlation method used
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Correlation record dictionary
-    """
-    return _build_base_correlation_record(
+    """Build correlation record for channel-level power analysis."""
+    record = build_correlation_record(
         identifier=channel,
-        identifier_key="channel",
         band=band,
-        correlation=correlation,
-        p_value=p_value,
-        n_valid=n_valid,
+        r=correlation,
+        p=p_value,
+        n=n_valid,
         method=method,
         ci_low=ci_low,
         ci_high=ci_high,
@@ -354,7 +296,10 @@ def _build_channel_rating_record(
         n_partial=n_partial,
         p_perm=p_perm,
         p_partial_perm=p_partial_perm,
+        identifier_type="channel",
+        analysis_type="power",
     )
+    return record.to_dict()
 
 
 def _build_temp_record_for_channel(
@@ -366,31 +311,7 @@ def _build_temp_record_for_channel(
     analysis_cfg: AnalysisConfig,
     groups: Optional[np.ndarray],
 ) -> Optional[Dict[str, Any]]:
-    """
-    Build temperature correlation record for channel-level power.
-    
-    Parameters
-    ----------
-    channel_name : str
-        Channel name
-    band : str
-        Frequency band
-    channel_values : pd.Series
-        Channel power values
-    temp_series : Optional[pd.Series]
-        Temperature series
-    covariates_without_temp_df : Optional[pd.DataFrame]
-        Covariates excluding temperature
-    analysis_cfg : AnalysisConfig
-        Analysis configuration
-    groups : Optional[np.ndarray]
-        Grouping variable for mixed-effects
-        
-    Returns
-    -------
-    Optional[Dict[str, Any]]
-        Temperature correlation record, or None if temp_series is None
-    """
+    """Build temperature correlation record for channel-level power."""
     return _build_temp_record_unified(
         x_values=channel_values,
         temp_series=temp_series,
@@ -413,33 +334,7 @@ def _process_single_channel_for_band(
     covariates_without_temp_df: Optional[pd.DataFrame],
     analysis_cfg: AnalysisConfig,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """
-    Process correlations for a single channel within a frequency band.
-    
-    Parameters
-    ----------
-    column_name : str
-        Column name in power_df (e.g., "pow_alpha_Cz")
-    band : str
-        Frequency band name
-    power_df : pd.DataFrame
-        Power features dataframe
-    target_values : pd.Series
-        Target variable (rating)
-    temp_series : Optional[pd.Series]
-        Temperature series
-    covariates_df : Optional[pd.DataFrame]
-        Covariates dataframe
-    covariates_without_temp_df : Optional[pd.DataFrame]
-        Covariates excluding temperature
-    analysis_cfg : AnalysisConfig
-        Analysis configuration
-        
-    Returns
-    -------
-    Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]
-        (rating_record, temp_record) tuple
-    """
+    """Process correlations for a single channel within a frequency band."""
     channel_name = column_name.replace(f"pow_{band}_", "")
     channel_values = pd.to_numeric(power_df[column_name], errors="coerce")
     context = f"channel {channel_name} ({band})"
@@ -520,29 +415,7 @@ def _process_channel_level_correlations(
     covariates_without_temp_df: Optional[pd.DataFrame],
     analysis_cfg: AnalysisConfig,
 ) -> None:
-    """
-    Process channel-level power correlations for all bands.
-    
-    Computes correlations between channel-level power and rating/temperature,
-    applies FDR correction, and saves results per band.
-    
-    Parameters
-    ----------
-    power_bands : List[str]
-        List of frequency bands to process
-    power_df : pd.DataFrame
-        Power features dataframe
-    target_values : pd.Series
-        Target variable (rating)
-    covariates_df : Optional[pd.DataFrame]
-        Covariates dataframe
-    temp_series : Optional[pd.Series]
-        Temperature series
-    covariates_without_temp_df : Optional[pd.DataFrame]
-        Covariates excluding temperature
-    analysis_cfg : AnalysisConfig
-        Analysis configuration
-    """
+    """Process channel-level power correlations for all bands."""
     for band in power_bands:
         band_columns = [
             col for col in power_df.columns if col.startswith(f"pow_{band}_")
@@ -572,34 +445,51 @@ def _process_channel_level_correlations(
 
         if rating_records:
             rating_df = pd.DataFrame(rating_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 rating_df,
                 analysis_cfg.stats_dir / f"corr_stats_pow_{band}_vs_rating.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
+                use_permutation_p=True,
+                add_fdr_reject=True,
             )
 
         if temp_records:
             temp_df = pd.DataFrame(temp_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 temp_df,
                 analysis_cfg.stats_dir / f"corr_stats_pow_{band}_vs_temp.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
                 use_permutation_p=False,
+                add_fdr_reject=True,
             )
 
 
-def compute_power_roi_stats(
+def _run_power_roi_correlations(
     subject: str,
+    task: str,
+    config: Any,
+    logger: Any,
     deriv_root: Path,
-    task: Optional[str] = None,
-    use_spearman: bool = True,
-    partial_covars: Optional[List[str]] = None,
-    bootstrap: int = 0,
-    n_perm: int = 0,
-    rng: Optional[np.random.Generator] = None,
+    stats_dir: Path,
+    pow_df: pd.DataFrame,
+    conn_df: Optional[pd.DataFrame],
+    y: pd.Series,
+    info: Optional[mne.Info],
+    aligned_events: Optional[pd.DataFrame],
+    temp_series: Optional[pd.Series],
+    temp_col: Optional[str],
+    covariates_df: Optional[pd.DataFrame],
+    covariates_without_temp_df: Optional[pd.DataFrame],
+    use_spearman: bool,
+    bootstrap: int,
+    n_perm: int,
+    rng: np.random.Generator,
 ) -> None:
+    """Core implementation for power ROI correlations."""
     from eeg_pipeline.analysis.behavior.connectivity import compute_sliding_state_metrics
     from eeg_pipeline.analysis.behavior.specialized_features import (
         _process_itpc_correlations,
@@ -607,41 +497,26 @@ def compute_power_roi_stats(
         _process_pac_correlations,
     )
     
-    if not subject:
+    logger.info(f"Starting ROI power correlation analysis for sub-{subject}")
+    ensure_dir(stats_dir)
+    
+    if pow_df is None or y is None:
+        logger.warning("No power features or targets")
         return
     
-    config = load_settings()
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
-    logger.info(f"Starting ROI power correlation analysis for sub-{subject}")
-
-    stats_dir = deriv_stats_path(deriv_root, subject)
-    ensure_dir(stats_dir)
-
-    if task is None:
-        task = config.task
-
-    rng_seed = config.get("random.seed", 42)
-    rng = rng or np.random.default_rng(rng_seed)
-
-    pow_df, conn_df, y, info, aligned_events, temp_series, temp_col = _load_analysis_data(
-        subject, task, deriv_root, config, logger
-    )
-    if pow_df is None or y is None:
-        return
-
-    itpc_columns = [c for c in pow_df.columns if str(c).startswith("itpc_")]
-    itpc_df = pow_df[itpc_columns].copy() if itpc_columns else pd.DataFrame()
-
-    aper_columns = [c for c in pow_df.columns if str(c).startswith(("aper_slope_", "aper_offset_", "powcorr_"))]
-    aper_df = pow_df[aper_columns].copy() if aper_columns else pd.DataFrame()
-
+    # Extract sub-dataframes
+    itpc_cols = [c for c in pow_df.columns if str(c).startswith("itpc_")]
+    itpc_df = pow_df[itpc_cols].copy() if itpc_cols else pd.DataFrame()
+    
+    aper_cols = [c for c in pow_df.columns if str(c).startswith(("aper_slope_", "aper_offset_", "powcorr_"))]
+    aper_df = pow_df[aper_cols].copy() if aper_cols else pd.DataFrame()
+    
     pow_df = pow_df[[c for c in pow_df.columns if str(c).startswith("pow_")]]
     
+    # Get groups for mixed effects
     group_col = next((c for c in ("run_id", "run", "block") if aligned_events is not None and c in aligned_events.columns), None)
     groups = aligned_events[group_col] if group_col else None
     
-    method = get_correlation_method(use_spearman)
     analysis_cfg = AnalysisConfig(
         subject=subject,
         config=config,
@@ -650,37 +525,30 @@ def compute_power_roi_stats(
         bootstrap=bootstrap,
         n_perm=n_perm,
         use_spearman=use_spearman,
-        method=method,
+        method=get_correlation_method(use_spearman),
         min_samples_channel=config.get("behavior_analysis.statistics.min_samples_channel", 10),
         min_samples_roi=config.get("behavior_analysis.statistics.min_samples_roi", 20),
         groups=groups,
     )
     analysis_cfg.stats_dir = stats_dir
-
-    roi_map = _build_rois(info, config=config)
+    
+    roi_map = _build_rois(info, config=config) if info else {}
     if not roi_map:
         logger.warning(f"No ROI definitions found; skipping ROI stats for sub-{subject}")
-        roi_map = {}
-
-    covariates_df = build_covariate_matrix(aligned_events, partial_covars, config)
-    covariates_without_temp_df = build_covariates_without_temp(covariates_df, temp_col)
-
+    
     power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
     freq_bands = config.get("time_frequency_analysis.bands", {})
     freq_bands_aper = get_frequency_bands_for_aperiodic(config)
-
-    rating_records: List[Dict[str, Any]] = []
-    temp_records: List[Dict[str, Any]] = []
+    
+    rating_records, temp_records, mixed_effects_records = [], [], []
     missing_roi_by_band: Dict[str, List[str]] = defaultdict(list)
-    mixed_effects_records: List[Dict[str, Any]] = []
-
+    
     for band in power_bands:
         band_columns = {col for col in pow_df.columns if col.startswith(f"pow_{band}_")}
         if not band_columns:
             continue
-
         band_range_str = format_band_range(band, freq_bands)
-
+        
         for roi, channels in roi_map.items():
             rating_record, temp_record = _process_single_roi_for_band(
                 roi, channels, band, band_columns, pow_df, y, temp_series,
@@ -693,67 +561,81 @@ def compute_power_roi_stats(
             rating_records.append(rating_record)
             if temp_record is not None:
                 temp_records.append(temp_record)
-
+    
     if missing_roi_by_band:
-        detail_str = "; ".join(
-            f"{band}: {', '.join(sorted(set(rois)))}" for band, rois in missing_roi_by_band.items()
-        )
-        logger.warning(
-            "Skipped ROI statistics for missing channel groups (band -> ROI list): %s",
-            detail_str,
-        )
-
+        detail = "; ".join(f"{b}: {', '.join(sorted(set(r)))}" for b, r in missing_roi_by_band.items())
+        logger.warning(f"Skipped ROI statistics for missing channel groups: {detail}")
+    
     _save_roi_results(rating_records, temp_records, analysis_cfg)
     _save_mixed_effects_results(mixed_effects_records, analysis_cfg)
-
-    _process_channel_level_correlations(
-        power_bands,
-        pow_df,
-        y,
-        covariates_df,
-        temp_series,
-        covariates_without_temp_df,
-        analysis_cfg,
-    )
-
-    _process_itpc_correlations(
-        itpc_df,
-        y,
-        covariates_df,
-        temp_series,
-        covariates_without_temp_df,
-        analysis_cfg,
-    )
-
-    _process_aperiodic_correlations(
-        aper_df,
-        roi_map,
-        y,
-        temp_series,
-        covariates_df,
-        covariates_without_temp_df,
-        freq_bands_aper,
-        analysis_cfg,
-    )
-
+    _process_channel_level_correlations(power_bands, pow_df, y, covariates_df, temp_series, covariates_without_temp_df, analysis_cfg)
+    _process_itpc_correlations(itpc_df, y, covariates_df, temp_series, covariates_without_temp_df, analysis_cfg)
+    _process_aperiodic_correlations(aper_df, roi_map, y, temp_series, covariates_df, covariates_without_temp_df, freq_bands_aper, analysis_cfg)
+    
     pac_path = deriv_features_path(deriv_root, subject) / "features_pac_trials.tsv"
     pac_trials_df = read_tsv(pac_path) if pac_path.exists() else None
-    _process_pac_correlations(
-        pac_trials_df,
-        aligned_events,
-        analysis_cfg,
-        temp_series,
-        covariates_df,
-        covariates_without_temp_df,
+    _process_pac_correlations(pac_trials_df, aligned_events, analysis_cfg, temp_series, covariates_df, covariates_without_temp_df)
+    
+    compute_sliding_state_metrics(
+        subject=subject, task=task, conn_df=conn_df, aligned_events=aligned_events,
+        deriv_root=deriv_root, config=config, logger=logger,
     )
 
-    compute_sliding_state_metrics(
+
+def compute_power_roi_stats(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str] = None,
+    use_spearman: bool = True,
+    partial_covars: Optional[List[str]] = None,
+    bootstrap: int = 0,
+    n_perm: int = 0,
+    rng: Optional[np.random.Generator] = None,
+) -> None:
+    """Compute ROI power correlations using BehaviorContext for data loading."""
+    from eeg_pipeline.pipelines.behavior import initialize_analysis_context
+    from eeg_pipeline.analysis.behavior.core import BehaviorContext
+    
+    if not subject:
+        return
+    
+    try:
+        config, task, deriv_root, stats_dir, logger = initialize_analysis_context(
+            subject, task, None
+        )
+    except ValueError:
+        return
+    
+    rng_seed = config.get("random.seed", 42)
+    rng = rng or np.random.default_rng(rng_seed)
+    
+    ctx = BehaviorContext(
         subject=subject,
         task=task,
-        conn_df=conn_df,
-        aligned_events=aligned_events,
-        deriv_root=deriv_root,
         config=config,
         logger=logger,
+        deriv_root=deriv_root,
+        stats_dir=stats_dir,
+        use_spearman=use_spearman,
+        bootstrap=bootstrap,
+        n_perm=n_perm,
+        rng=rng,
+        partial_covars=partial_covars,
+    )
+    
+    if not ctx.load_data():
+        return
+    
+    compute_power_roi_stats_from_context(ctx)
+
+
+def compute_power_roi_stats_from_context(ctx: "BehaviorContext") -> None:
+    """Compute ROI power correlations using pre-loaded data from context."""
+    _run_power_roi_correlations(
+        ctx.subject, ctx.task, ctx.config, ctx.logger, ctx.deriv_root, ctx.stats_dir,
+        ctx.power_df, ctx.connectivity_df, ctx.targets, ctx.epochs_info,
+        ctx.aligned_events, ctx.temperature, ctx.temperature_column,
+        ctx.covariates_df, ctx.covariates_without_temp_df,
+        ctx.use_spearman, ctx.bootstrap, ctx.n_perm, ctx.rng,
     )
 

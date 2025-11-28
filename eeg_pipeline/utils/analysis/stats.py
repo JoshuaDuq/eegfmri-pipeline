@@ -3515,9 +3515,31 @@ def compute_kde_scale(
     return 1.0
 
 
-def compute_correlation_vmax(bands_with_data: List[Dict]) -> float:
+def compute_correlation_vmax(data: Union[np.ndarray, List[Dict]]) -> float:
+    """
+    Compute symmetric vmax for correlation heatmaps.
+    
+    Parameters
+    ----------
+    data : np.ndarray or List[Dict]
+        Either a 2D array of correlation values, or a list of dicts with
+        'correlations' and 'significant_mask' keys.
+    
+    Returns
+    -------
+    float
+        Symmetric vmax value for colorbar scaling.
+    """
+    # Handle numpy array input (simple case)
+    if isinstance(data, np.ndarray):
+        finite_vals = data[np.isfinite(data)]
+        if len(finite_vals) == 0:
+            return 0.5
+        return max(abs(np.min(finite_vals)), abs(np.max(finite_vals)))
+    
+    # Handle list of dicts with band data
     all_significant_correlations = []
-    for band_data in bands_with_data:
+    for band_data in data:
         significant_correlations = band_data['correlations'][band_data['significant_mask']]
         all_significant_correlations.extend(significant_correlations[np.isfinite(significant_correlations)])
     
@@ -3525,7 +3547,7 @@ def compute_correlation_vmax(bands_with_data: List[Dict]) -> float:
         return max(abs(np.min(all_significant_correlations)), abs(np.max(all_significant_correlations)))
     
     all_correlations = []
-    for band_data in bands_with_data:
+    for band_data in data:
         all_correlations.extend(band_data['correlations'][np.isfinite(band_data['correlations'])])
     return max(abs(np.min(all_correlations)), abs(np.max(all_correlations))) if all_correlations else 0.5
 

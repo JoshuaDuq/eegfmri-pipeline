@@ -13,38 +13,21 @@ from eeg_pipeline.utils.io.general import (
     get_column_from_config,
 )
 from eeg_pipeline.utils.analysis.stats import (
-    apply_fdr_correction_and_save,
     prepare_aligned_data,
     compute_channel_rating_correlations,
 )
+from eeg_pipeline.analysis.behavior.core import save_correlation_results
 from eeg_pipeline.analysis.behavior.correlations import (
     AnalysisConfig,
     _align_groups_to_series,
-    _build_base_correlation_record,
     _build_temp_record_unified,
     _compute_roi_correlation_stats,
 )
-
-
-###################################################################
-# Aperiodic Feature Processing
-###################################################################
+from eeg_pipeline.analysis.behavior.core import build_correlation_record
 
 
 def _parse_powcorr_column(col: str) -> Optional[Tuple[str, str]]:
-    """
-    Parse aperiodic power correlation column name to extract band and channel.
-    
-    Parameters
-    ----------
-    col : str
-        Column name (e.g., "powcorr_alpha_Cz")
-        
-    Returns
-    -------
-    Optional[Tuple[str, str]]
-        (band, channel) tuple if valid, None otherwise
-    """
+    """Parse aperiodic power correlation column name to extract band and channel."""
     if not isinstance(col, str) or not col.startswith("powcorr_"):
         return None
     parts = col.split("_")
@@ -65,12 +48,7 @@ def _process_aperiodic_correlations(
     freq_bands: Dict[str, List[float]],
     analysis_cfg: AnalysisConfig,
 ) -> None:
-    """
-    Process aperiodic feature correlations (slope, offset, powcorr) with behavioral data.
-    
-    Processes channel-level and ROI-level aperiodic features, computing correlations
-    with rating and temperature, applying FDR correction, and saving results.
-    """
+    """Process aperiodic feature correlations with behavioral data."""
     if aper_df is None or aper_df.empty:
         return
 
@@ -156,20 +134,25 @@ def _process_aperiodic_correlations(
 
         if rating_records:
             rating_df = pd.DataFrame(rating_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 rating_df,
                 analysis_cfg.stats_dir / f"corr_stats_{metric}_vs_rating.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
+                use_permutation_p=True,
+                add_fdr_reject=True,
             )
         if temp_records:
             temp_df = pd.DataFrame(temp_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 temp_df,
                 analysis_cfg.stats_dir / f"corr_stats_{metric}_vs_temp.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
                 use_permutation_p=False,
+                add_fdr_reject=True,
             )
 
     # Channel-level residual bands
@@ -247,20 +230,25 @@ def _process_aperiodic_correlations(
 
     if rating_records:
         rating_df = pd.DataFrame(rating_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             rating_df,
             analysis_cfg.stats_dir / "corr_stats_powcorr_vs_rating.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+            use_permutation_p=True,
+            add_fdr_reject=True,
         )
     if temp_records:
         temp_df = pd.DataFrame(temp_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             temp_df,
             analysis_cfg.stats_dir / "corr_stats_powcorr_vs_temp.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
             use_permutation_p=False,
+            add_fdr_reject=True,
         )
 
     # ROI-level residual bands
@@ -307,42 +295,30 @@ def _process_aperiodic_correlations(
 
         if rating_roi_records:
             rating_df = pd.DataFrame(rating_roi_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 rating_df,
                 analysis_cfg.stats_dir / "corr_stats_powcorr_roi_vs_rating.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
+                use_permutation_p=True,
+                add_fdr_reject=True,
             )
         if temp_roi_records:
             temp_df = pd.DataFrame(temp_roi_records)
-            apply_fdr_correction_and_save(
+            save_correlation_results(
                 temp_df,
                 analysis_cfg.stats_dir / "corr_stats_powcorr_roi_vs_temp.tsv",
-                analysis_cfg.config,
-                analysis_cfg.logger,
+                apply_fdr=True,
+                config=analysis_cfg.config,
+                logger=analysis_cfg.logger,
                 use_permutation_p=False,
+                add_fdr_reject=True,
             )
 
 
-###################################################################
-# ITPC Feature Processing
-###################################################################
-
-
 def _parse_itpc_column(col: str) -> Optional[Tuple[str, str, str]]:
-    """
-    Parse ITPC column name to extract band, time bin, and channel.
-    
-    Parameters
-    ----------
-    col : str
-        Column name (e.g., "itpc_alpha_pre_Cz")
-        
-    Returns
-    -------
-    Optional[Tuple[str, str, str]]
-        (band, time_bin, channel) tuple if valid, None otherwise
-    """
+    """Parse ITPC column name to extract band, time bin, and channel."""
     if not isinstance(col, str) or not col.startswith("itpc_"):
         return None
     parts = col.split("_")
@@ -370,52 +346,13 @@ def _build_itpc_rating_record(
     n_valid: int,
     method: str,
 ) -> Dict[str, Any]:
-    """
-    Build correlation record for ITPC feature.
-    
-    Parameters
-    ----------
-    channel : str
-        Channel name
-    band : str
-        Frequency band
-    time_bin : str
-        Time bin identifier
-    correlation : float
-        Correlation coefficient
-    p_value : float
-        P-value
-    ci_low : float
-        Lower confidence interval bound
-    ci_high : float
-        Upper confidence interval bound
-    r_partial : float
-        Partial correlation coefficient
-    p_partial : float
-        Partial correlation p-value
-    n_partial : int
-        Sample size for partial correlation
-    p_perm : float
-        Permutation p-value
-    p_partial_perm : float
-        Permutation p-value for partial correlation
-    n_valid : int
-        Number of valid samples
-    method : str
-        Correlation method used
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Correlation record dictionary
-    """
-    return _build_base_correlation_record(
+    """Build correlation record for ITPC feature."""
+    record = build_correlation_record(
         identifier=channel,
-        identifier_key="channel",
         band=band,
-        correlation=correlation,
-        p_value=p_value,
-        n_valid=n_valid,
+        r=correlation,
+        p=p_value,
+        n=n_valid,
         method=method,
         ci_low=ci_low,
         ci_high=ci_high,
@@ -424,8 +361,11 @@ def _build_itpc_rating_record(
         n_partial=n_partial,
         p_perm=p_perm,
         p_partial_perm=p_partial_perm,
+        identifier_type="channel",
+        analysis_type="itpc",
         time_bin=time_bin,
     )
+    return record.to_dict()
 
 
 def _process_itpc_correlations(
@@ -436,12 +376,7 @@ def _process_itpc_correlations(
     covariates_without_temp_df: Optional[pd.DataFrame],
     analysis_cfg: AnalysisConfig,
 ) -> None:
-    """
-    Process ITPC (Inter-Trial Phase Coherence) correlations with behavioral data.
-    
-    Computes correlations between ITPC features and rating/temperature, applies
-    FDR correction, and saves results.
-    """
+    """Process ITPC correlations with behavioral data."""
     if itpc_df is None or itpc_df.empty:
         return
 
@@ -528,51 +463,37 @@ def _process_itpc_correlations(
 
     if rating_records:
         rating_df = pd.DataFrame(rating_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             rating_df,
             analysis_cfg.stats_dir / "corr_stats_itpc_vs_rating.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+            use_permutation_p=True,
+            add_fdr_reject=True,
         )
 
     if temp_records:
         temp_df = pd.DataFrame(temp_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             temp_df,
             analysis_cfg.stats_dir / "corr_stats_itpc_vs_temp.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
             use_permutation_p=False,
+            add_fdr_reject=True,
         )
 
 
-###################################################################
-# PAC Feature Processing
-###################################################################
-
-
 def _load_pac_trials(subject: str, deriv_root: Path) -> Optional[pd.DataFrame]:
-    """
-    Load PAC (Phase-Amplitude Coupling) trial-level features.
-    
-    Parameters
-    ----------
-    subject : str
-        Subject identifier (without 'sub-' prefix)
-    deriv_root : Path
-        Derivatives root directory
-        
-    Returns
-    -------
-    Optional[pd.DataFrame]
-        PAC features dataframe, or None if file not found
-    """
+    """Load PAC trial-level features."""
     pac_path = deriv_features_path(deriv_root, subject) / "features_pac_trials.tsv"
     if not pac_path.exists():
         return None
     try:
         return read_tsv(pac_path)
-    except Exception:
+    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError):
         return None
 
 
@@ -584,12 +505,7 @@ def _process_pac_correlations(
     covariates_df: Optional[pd.DataFrame],
     covariates_without_temp_df: Optional[pd.DataFrame],
 ) -> None:
-    """
-    Process PAC (Phase-Amplitude Coupling) correlations with behavioral data.
-    
-    Computes correlations between PAC features and rating/temperature, applies
-    FDR correction, and saves results.
-    """
+    """Process PAC correlations with behavioral data."""
     if pac_trials_df is None or pac_trials_df.empty or events_df is None or events_df.empty:
         return
 
@@ -647,26 +563,26 @@ def _process_pac_correlations(
             groups=groups_aligned,
         )
 
-        rating_records.append(
-            _build_base_correlation_record(
-                identifier=roi,
-                identifier_key="roi",
-                band=f"pac_{phase_f:.1f}_{amp_f:.1f}",
-                correlation=correlation,
-                p_value=p_value,
-                n_valid=int(len(x_aligned)),
-                method=analysis_cfg.method,
-                ci_low=ci_low,
-                ci_high=ci_high,
-                r_partial=r_partial,
-                p_partial=p_partial,
-                n_partial=n_partial,
-                p_perm=p_perm,
-                p_partial_perm=p_partial_perm,
-                phase_freq=float(phase_f),
-                amp_freq=float(amp_f),
-            )
+        record = build_correlation_record(
+            identifier=roi,
+            band=f"pac_{phase_f:.1f}_{amp_f:.1f}",
+            r=correlation,
+            p=p_value,
+            n=int(len(x_aligned)),
+            method=analysis_cfg.method,
+            ci_low=ci_low,
+            ci_high=ci_high,
+            r_partial=r_partial,
+            p_partial=p_partial,
+            n_partial=n_partial,
+            p_perm=p_perm,
+            p_partial_perm=p_partial_perm,
+            identifier_type="roi",
+            analysis_type="pac",
+            phase_freq=float(phase_f),
+            amp_freq=float(amp_f),
         )
+        rating_records.append(record.to_dict())
 
         temp_record = _build_temp_record_unified(
             x_values=pac_vals,
@@ -685,20 +601,25 @@ def _process_pac_correlations(
 
     if rating_records:
         rating_df = pd.DataFrame(rating_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             rating_df,
             analysis_cfg.stats_dir / "corr_stats_pac_vs_rating.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
+            use_permutation_p=True,
+            add_fdr_reject=True,
         )
 
     if temp_records:
         temp_df = pd.DataFrame(temp_records)
-        apply_fdr_correction_and_save(
+        save_correlation_results(
             temp_df,
             analysis_cfg.stats_dir / "corr_stats_pac_vs_temp.tsv",
-            analysis_cfg.config,
-            analysis_cfg.logger,
+            apply_fdr=True,
+            config=analysis_cfg.config,
+            logger=analysis_cfg.logger,
             use_permutation_p=False,
+            add_fdr_reject=True,
         )
 

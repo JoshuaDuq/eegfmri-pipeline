@@ -9,7 +9,7 @@ from sklearn.model_selection import LeaveOneGroupOut, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
 
-from eeg_pipeline.utils.analysis.decoding import (
+from eeg_pipeline.analysis.decoding.cv import (
     create_inner_cv,
     create_block_aware_inner_cv,
     create_scoring_dict,

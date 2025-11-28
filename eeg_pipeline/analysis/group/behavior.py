@@ -1182,7 +1182,7 @@ def aggregate_behavior_correlations(
         config = load_settings()
     
     if task is None:
-        task = config.task
+        task = config.get("project.task", "thermalactive")
     if deriv_root is None:
         deriv_root = Path(config.deriv_root)
     

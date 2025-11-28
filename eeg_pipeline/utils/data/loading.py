@@ -36,6 +36,15 @@ def _align_by_selection(events_df: pd.DataFrame, epochs: mne.Epochs, logger: log
     if min_sel < 0:
         raise ValueError(f"Invalid epochs.selection: contains negative indices (min={min_sel})")
     
+    # Check if events_df was already filtered to match epochs length
+    # This happens when events file was saved after epoch rejection
+    if len(events_df) == len(epochs) and max_sel >= len(events_df):
+        logger.info(
+            f"Events already filtered to match epochs ({len(events_df)} rows). "
+            f"Using direct row alignment instead of selection indices."
+        )
+        return events_df.reset_index(drop=True)
+    
     if max_sel >= len(events_df):
         raise ValueError(f"epochs.selection out of bounds: max={max_sel}, events_len={len(events_df)}")
     
@@ -550,8 +559,9 @@ def _canonical_covariate_name(name: Optional[str], config=None) -> Optional[str]
     if config is None:
         try:
             config = load_settings()
-        except Exception:
-            pass
+        except (OSError, ValueError):
+            # Config file not found or invalid - use defaults
+            config = None
     
     temp_aliases = {"stimulus_temp", "stimulus_temperature", "temp", "temperature"}
     trial_aliases = {"trial", "trial_number", "trial_index", "run", "block"}
@@ -660,7 +670,8 @@ def _build_covariate_matrices(
     if config is None:
         try:
             config = load_settings()
-        except Exception:
+        except (OSError, ValueError):
+            # Config file not found or invalid - proceed without config-based covariate resolution
             config = None
 
     covariate_columns, column_name_map = _resolve_covariate_columns(df_events, partial_covars, config)
@@ -1658,7 +1669,7 @@ def load_feature_bundle_for_subject(
 
     try:
         pow_df = read_tsv(power_path)
-    except Exception as exc:
+    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
         logger.error("Failed to read power features from %s: %s", power_path, exc)
         return None, None, None, None, None, None, None, None
 
@@ -1667,7 +1678,7 @@ def load_feature_bundle_for_subject(
             return None
         try:
             return read_tsv(path)
-        except Exception as exc:
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
             logger.warning("Failed to read %s: %s", path, exc)
             return None
 
@@ -1730,7 +1741,7 @@ def load_feature_dfs_for_subjects(
                 continue
             df.insert(0, "subject", subject)
             all_dfs.append(df)
-        except Exception as e:
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as e:
             logger.warning(f"Failed to read features for sub-{subject} at {file_path}: {e}")
             continue
     
@@ -1777,13 +1788,13 @@ def load_behavior_stats_files(stats_dir: Path, logger: logging.Logger) -> tuple[
     if rating_path.exists():
         try:
             rating_stats = read_tsv(rating_path)
-        except Exception as exc:
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
             logger.warning("Failed to read rating stats: %s", exc)
 
     if temp_path.exists():
         try:
             temp_stats = read_tsv(temp_path)
-        except Exception as exc:
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
             logger.warning("Failed to read temp stats: %s", exc)
 
     return rating_stats, temp_stats

@@ -67,30 +67,7 @@ def _apply_fdr_updates_to_files(
 
 
 def apply_global_fdr(subject: str, alpha: float = None) -> None:
-    """
-    Apply global FDR correction across ALL analysis types for valid statistical inference.
-    
-    This function is CRITICAL for maintaining statistical validity. It applies Benjamini-Hochberg
-    FDR correction across all tests from different analysis types (power ROI correlations,
-    connectivity ROI summaries, connectivity edges, etc.) to control the false discovery rate
-    across all tests.
-    
-    Per-analysis-type FDR correction (applied in _apply_fdr_correction_and_save) is insufficient
-    when interpreting results across multiple analysis types, as it inflates the false positive rate.
-    
-    The global FDR correction adds columns to each stats file:
-    - p_used_for_global_fdr: The p-value used in global FDR correction
-    - q_fdr_global: The FDR-adjusted q-value from global correction
-    - fdr_reject_global: Boolean indicating rejection at global FDR level
-    - fdr_crit_p_global: The critical p-value threshold for global FDR
-    
-    Parameters
-    ----------
-    subject : str
-        Subject identifier (without 'sub-' prefix)
-    alpha : float, optional
-        FDR significance level (default: from config behavior_analysis.statistics.fdr_alpha, or 0.05)
-    """
+    """Apply global FDR correction across all analysis types."""
     if not subject:
         return
     
@@ -103,22 +80,55 @@ def apply_global_fdr(subject: str, alpha: float = None) -> None:
     stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(stats_dir)
 
-    logger.info(
-        f"Applying GLOBAL FDR correction (alpha={alpha}) across all analysis types. "
-        f"This is CRITICAL for valid statistical inference when interpreting results across "
-        f"multiple analysis types (power ROI, connectivity ROI, edges, etc.)."
-    )
+    logger.info(f"Applying global FDR correction (alpha={alpha}) across all analysis types")
 
     patterns = [
+        # Power ROI correlations
         "corr_stats_pow_roi_vs_rating.tsv",
         "corr_stats_pow_roi_vs_temp.tsv", 
+        # Connectivity correlations
         "corr_stats_conn_roi_summary_*_vs_rating.tsv",
         "corr_stats_conn_roi_summary_*_vs_temp.tsv",
         "corr_stats_edges_*_vs_rating.tsv",
         "corr_stats_edges_*_vs_temp.tsv",
+        # Time-frequency correlations
         "corr_stats_tf_clusters_*.tsv",
         "corr_stats_temporal_*.tsv",
         "pain_nonpain_time_clusters_*.tsv",
+        # Precomputed feature correlations
+        "corr_stats_precomputed_*.tsv",
+        "corr_stats_microstates_*.tsv",
+        "corr_stats_erds_*.tsv",
+        "corr_stats_complexity_*.tsv",
+        "corr_stats_spectral_*.tsv",
+        "corr_stats_temporal_stat_*.tsv",
+        "corr_stats_gfp_*.tsv",
+        "corr_stats_roi_*.tsv",
+        # Condition-specific correlations (pain vs non-pain)
+        "corr_stats_power_pain*.tsv",
+        "corr_stats_power_nonpain*.tsv",
+        "corr_stats_connectivity_pain*.tsv",
+        "corr_stats_connectivity_nonpain*.tsv",
+        "corr_stats_precomputed_pain*.tsv",
+        "corr_stats_precomputed_nonpain*.tsv",
+        "corr_stats_microstates_pain*.tsv",
+        "corr_stats_microstates_nonpain*.tsv",
+        "corr_stats_all_pain*.tsv",
+        "corr_stats_all_nonpain*.tsv",
+        # Precomputed vs temperature
+        "corr_stats_precomputed_vs_temp*.tsv",
+        "corr_stats_precomputed_vs_rating*.tsv",
+        "corr_stats_microstates_vs_temp*.tsv",
+        "corr_stats_microstates_vs_rating*.tsv",
+        "corr_stats_*_vs_temp*.tsv",
+        "corr_stats_*_vs_rating*.tsv",
+        # Condition-specific temperature correlations
+        "corr_stats_power_vs_temp_pain*.tsv",
+        "corr_stats_power_vs_temp_nonpain*.tsv",
+        "corr_stats_precomputed_vs_temp_pain*.tsv",
+        "corr_stats_precomputed_vs_temp_nonpain*.tsv",
+        "corr_stats_all_vs_temp_pain*.tsv",
+        "corr_stats_all_vs_temp_nonpain*.tsv",
     ]
     
     files = [f for pat in patterns for f in sorted(stats_dir.glob(pat))]

@@ -36,7 +36,7 @@ from ...utils.analysis.stats import (
     format_correlation_text,
 )
 from ...analysis.features.microstates import (
-    compute_gfp as _compute_gfp,
+    compute_gfp_with_floor as _compute_gfp,
     label_timecourse as _label_timecourse,
     extract_templates_from_trials as _extract_templates_from_trials,
     MicrostateDurationStat,
@@ -125,14 +125,33 @@ def _compute_gfp_and_labels_for_condition(
     
     Args:
         epoch_data_condition: Epoch data for condition (n_epochs, n_channels, n_times)
-        templates: Microstate templates array
-        time_mask: Boolean mask for time points
+        templates: Microstate templates array (n_states, n_channels)
+        time_mask: Boolean mask for time points (n_times,)
     
     Returns:
         Tuple of (list of GFP arrays, list of label arrays)
     """
     gfp_all_trials = []
     labels_all_trials = []
+    
+    # Validate shapes before processing
+    if epoch_data_condition.ndim != 3:
+        raise ValueError(f"epoch_data_condition must be 3D, got shape {epoch_data_condition.shape}")
+    
+    n_epochs, n_channels, n_times = epoch_data_condition.shape
+    n_states, n_template_channels = templates.shape
+    
+    if n_channels != n_template_channels:
+        raise ValueError(
+            f"Channel mismatch: epoch data has {n_channels} channels, "
+            f"templates have {n_template_channels} channels"
+        )
+    
+    if len(time_mask) != n_times:
+        raise ValueError(
+            f"Time mask length ({len(time_mask)}) does not match epoch time points ({n_times})"
+        )
+    
     for epoch in epoch_data_condition:
         gfp = _compute_gfp(epoch)
         state_labels, _ = _label_timecourse(epoch, templates)
@@ -998,6 +1017,18 @@ def plot_microstate_temporal_evolution(
         return
     
     epoch_data = epochs.get_data()[:, picks, :]
+    
+    # Validate templates match epoch channel count
+    n_epoch_channels = epoch_data.shape[1]
+    n_template_channels = templates.shape[1]
+    if n_epoch_channels != n_template_channels:
+        _log_if_present(
+            logger, "warning",
+            f"Channel mismatch: epoch data has {n_epoch_channels} channels, "
+            f"templates have {n_template_channels}. Skipping temporal evolution plot."
+        )
+        return
+    
     times = epochs.times
     pain_values = pd.to_numeric(aligned_events[pain_col], errors="coerce")
     nonpain_mask = (pain_values == 0).to_numpy()
@@ -1106,6 +1137,17 @@ def plot_microstate_gfp_colored_by_state(
     epoch_data, times_stimulus, nonpain_mask, pain_mask, plateau_window = result
     
     picks = extract_eeg_picks(epochs)
+    
+    # Validate templates match epoch channel count
+    n_epoch_channels = epoch_data.shape[1]
+    n_template_channels = templates.shape[1]
+    if n_epoch_channels != n_template_channels:
+        _log_if_present(
+            logger, "warning",
+            f"Channel mismatch: epoch data has {n_epoch_channels} channels, "
+            f"templates have {n_template_channels}. Skipping GFP colored plot."
+        )
+        return
     info_eeg = mne.pick_info(epochs.info, picks)
     state_letters = _create_state_letters(n_states)
     colors = plt.cm.Set2(np.linspace(0, 1, n_states))
@@ -1204,6 +1246,18 @@ def plot_microstate_gfp_by_temporal_bins(
     
     pain_values = pd.to_numeric(aligned_events[pain_col], errors="coerce")
     epoch_data = epochs.get_data()[:, picks, :]
+    
+    # Validate templates match epoch channel count
+    n_epoch_channels = epoch_data.shape[1]
+    n_template_channels = templates.shape[1]
+    if n_epoch_channels != n_template_channels:
+        _log_if_present(
+            logger, "warning",
+            f"Channel mismatch: epoch data has {n_epoch_channels} channels, "
+            f"templates have {n_template_channels}. Skipping temporal bin GFP plot."
+        )
+        return
+    
     times = epochs.times
     nonpain_mask = (pain_values == 0).to_numpy()
     pain_mask = (pain_values == 1).to_numpy()

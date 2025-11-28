@@ -204,7 +204,7 @@ def extract_trialwise_itpc_features(
         train_mask = np.zeros(n_epochs, dtype=bool)
         try:
             train_mask[np.asarray(train_indices, dtype=int)] = True
-        except Exception:
+        except (IndexError, ValueError, TypeError):
             logger.warning("Invalid train_indices for ITPC trialwise features; falling back to all epochs.")
             train_mask[:] = True
     else:
@@ -399,12 +399,20 @@ def compute_pac_comodulograms(
             for f_amp_idx, f_amp in enumerate(amp_freqs):
                 if f_amp <= f_phase * 1.5:
                     continue
-                if f_amp not in amp_norm_by_ch_freq.get(picks[0], {}):
+                # Check if f_amp exists for all channels in picks
+                if not all(f_amp in amp_norm_by_ch_freq.get(ch, {}) for ch in picks):
                     continue
 
                 processed += 1
-                if processed % 10 == 0:
-                    logger.info(f"PAC progress: {processed}/{total_combinations} frequency pairs processed...")
+                progress_pct = (processed / total_combinations) * 100
+                if processed == 1 or progress_pct >= 25 and (processed - 1) / total_combinations * 100 < 25:
+                    logger.info(f"PAC progress: {progress_pct:.0f}% ({processed}/{total_combinations})")
+                elif progress_pct >= 50 and (processed - 1) / total_combinations * 100 < 50:
+                    logger.info(f"PAC progress: {progress_pct:.0f}% ({processed}/{total_combinations})")
+                elif progress_pct >= 75 and (processed - 1) / total_combinations * 100 < 75:
+                    logger.info(f"PAC progress: {progress_pct:.0f}% ({processed}/{total_combinations})")
+                elif processed == total_combinations:
+                    logger.info(f"PAC progress: 100% ({processed}/{total_combinations})")
 
                 pac_complex_by_ch: List[complex] = []
                 pac_trial_by_ch: List[np.ndarray] = []

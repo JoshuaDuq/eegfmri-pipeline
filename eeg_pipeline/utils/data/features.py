@@ -115,18 +115,32 @@ def align_feature_dataframes(
             drop_mask = combined_mask
 
     if drop_mask is not None:
-        if pow_df is not None:
-            pow_df = pow_df.loc[drop_mask].reset_index(drop=True)
-        if baseline_df is not None and not getattr(baseline_df, "empty", False):
-            baseline_df = baseline_df.loc[drop_mask].reset_index(drop=True)
-        if conn_df is not None and not getattr(conn_df, "empty", False):
-            conn_df = conn_df.loc[drop_mask].reset_index(drop=True)
-        if ms_df is not None and not getattr(ms_df, "empty", False) and len(ms_df) == len(drop_mask):
-            ms_df = ms_df.loc[drop_mask].reset_index(drop=True)
-        if aper_df is not None and not getattr(aper_df, "empty", False):
-            aper_df = aper_df.loc[drop_mask].reset_index(drop=True)
-        if y is not None:
+        n_mask = len(drop_mask)
+        
+        def _safe_mask_apply(df, name: str):
+            """Apply mask only if DataFrame length matches mask length."""
+            if df is None or getattr(df, "empty", False):
+                return df
+            if len(df) != n_mask:
+                logger.warning(
+                    f"Length mismatch for {name}: DataFrame has {len(df)} rows but mask has {n_mask}. "
+                    f"Skipping mask application to avoid misalignment."
+                )
+                return df
+            return df.loc[drop_mask].reset_index(drop=True)
+        
+        pow_df = _safe_mask_apply(pow_df, "power")
+        baseline_df = _safe_mask_apply(baseline_df, "baseline")
+        conn_df = _safe_mask_apply(conn_df, "connectivity")
+        ms_df = _safe_mask_apply(ms_df, "microstates")
+        aper_df = _safe_mask_apply(aper_df, "aperiodic")
+        if y is not None and len(y) == n_mask:
             y = y.loc[drop_mask].reset_index(drop=True)
+        elif y is not None:
+            logger.warning(
+                f"Length mismatch for target: Series has {len(y)} rows but mask has {n_mask}. "
+                f"Skipping mask application to avoid misalignment."
+            )
 
     block_registry: Dict[str, pd.DataFrame] = {}
     before_lengths: Dict[str, int] = {}
@@ -309,7 +323,7 @@ def save_all_features(
                 run_labels=aper_qc.get("run_labels"),
             )
             logger.info("Saved aperiodic QC sidecar to %s", qc_path)
-        except Exception as exc:
+        except (OSError, IOError, TypeError, KeyError) as exc:
             logger.warning("Failed to save aperiodic QC npz: %s", exc)
 
     direct_df = pd.concat(direct_blocks, axis=1)
@@ -373,7 +387,7 @@ def _extract_onset_duration(aligned_events: pd.DataFrame, logger: logging.Logger
         logger.warning("Onset column missing; using 0..n-1 as placeholder onsets for regressors.")
     if duration is None:
         duration = pd.Series(np.zeros(n_trials, dtype=float))
-    onset = onset.fillna(method="ffill").fillna(method="bfill").fillna(0.0).astype(float)
+    onset = onset.ffill().bfill().fillna(0.0).astype(float)
     duration = duration.fillna(0.0).astype(float)
     return onset.to_numpy(), duration.to_numpy()
 
@@ -517,7 +531,7 @@ def load_group_microstate_templates(
             return None, None
         logger.info("Loaded group microstate templates from %s", group_path)
         return templates, list(ch_names)
-    except Exception as exc:
+    except (OSError, IOError, ValueError, KeyError) as exc:
         logger.warning("Failed to load group microstate templates from %s: %s", group_path, exc)
         return None, None
 
@@ -544,7 +558,7 @@ def compute_group_microstate_templates(
                 continue
             templates_list.append((templ, list(chs)))
             channel_sets.append(set(chs.tolist()))
-        except Exception as exc:
+        except (OSError, IOError, ValueError, KeyError) as exc:
             logger.warning("Skipping template file %s: %s", f, exc)
             continue
 
