@@ -2,7 +2,7 @@
 
 This pipeline is still under development.
 
-A comprehensive EEG analysis pipeline for thermal pain studies, designed for reproducibility and scientific rigor.
+A comprehensive EEG analysis pipeline for thermal pain studies.
 
 ## Overview
 
