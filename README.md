@@ -25,7 +25,6 @@ Raw EEG Data → BIDS Conversion → Feature Extraction → Behavioral Correlati
 eeg_pipeline/
 ├── __init__.py                  # Package entry, exports types
 ├── types.py                     # Type definitions and protocols
-├── py.typed                     # PEP 561 marker for type checking
 │
 ├── pipelines/                   # High-level pipeline orchestration
 │   ├── behavior.py              # Brain-behavior correlations
