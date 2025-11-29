@@ -13,13 +13,14 @@ from eeg_pipeline.analysis.decoding.cv import (
     create_inner_cv,
     create_block_aware_inner_cv,
     create_scoring_dict,
+    safe_pearsonr,
 )
 from eeg_pipeline.utils.data.loading import (
     load_kept_indices,
 )
-from eeg_pipeline.utils.io.general import read_tsv
+from eeg_pipeline.utils.io.general import read_tsv, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 ###################################################################
@@ -135,9 +136,45 @@ def _compute_permutation_importance_for_feature(
     seed: int,
     logger: logging.Logger,
 ) -> float:
+    # Drop samples with non-finite targets to avoid failures in CV/regression
+    valid_y_mask = np.isfinite(y)
+    if not np.any(valid_y_mask):
+        logger.warning("All targets are non-finite; permutation importance undefined.")
+        return np.nan
+    if np.sum(valid_y_mask) < 3:
+        logger.warning("Fewer than 3 finite targets after filtering; permutation importance undefined.")
+        return np.nan
+
+    X = X[valid_y_mask]
+    y = y[valid_y_mask]
+    groups = groups[valid_y_mask]
+    if blocks is not None:
+        blocks = blocks[valid_y_mask]
+
+    # Need at least two groups for Leave-One-Group-Out
+    if len(np.unique(groups)) < 2:
+        logger.warning("Permutation importance requires at least two groups; only one group present.")
+        return np.nan
+
     rng = np.random.default_rng(seed)
-    original_scores = []
-    permuted_scores = []
+    # Skip features with no variation to avoid undefined correlations
+    feat_values_all = X[:, feature_idx]
+    if not np.any(np.isfinite(feat_values_all)) or np.nanstd(feat_values_all) < 1e-12:
+        logger.warning("Feature %d has near-zero variance across all samples; skipping permutation importance.", feature_idx)
+        return np.nan
+    if blocks is not None:
+        const_mask = _is_feature_constant_within_blocks(X[:, [feature_idx]], blocks, threshold=1e-10)
+        if const_mask[0]:
+            logger.warning(
+                "Feature %d is effectively constant within blocks; permutation importance is undefined. Returning NaN.",
+                feature_idx,
+            )
+            return np.nan
+
+    orig_z_vals = []
+    orig_weights = []
+    perm_z_vals = []
+    perm_weights = []
     
     logo = LeaveOneGroupOut()
     folds = list(logo.split(np.arange(len(y)), groups=groups))
@@ -205,10 +242,15 @@ def _compute_permutation_importance_for_feature(
                 pipe_fitted.fit(X_train, y_train)
         
         y_pred_orig = pipe_fitted.predict(X_test)
-        r_orig = np.corrcoef(y_test, y_pred_orig)[0, 1] if len(y_test) > 1 else np.nan
-        if np.isfinite(r_orig):
-            original_scores.append(r_orig)
-        
+        valid_mask_orig = np.isfinite(y_test) & np.isfinite(y_pred_orig)
+        n_valid_orig = int(valid_mask_orig.sum())
+        if n_valid_orig >= 3:
+            r_orig, _ = safe_pearsonr(y_test[valid_mask_orig], y_pred_orig[valid_mask_orig])
+            if np.isfinite(r_orig):
+                weight_orig = max(n_valid_orig - 3.0, 1.0)
+                orig_z_vals.append(np.arctanh(np.clip(r_orig, -0.999999, 0.999999)))
+                orig_weights.append(weight_orig)
+    
         groups_test = groups[test_idx] if groups is not None else None
         blocks_test = blocks[test_idx] if blocks is not None else None
         
@@ -238,12 +280,32 @@ def _compute_permutation_importance_for_feature(
             
             X_test_perm[:, feature_idx] = feature_values
             y_pred_perm = pipe_fitted.predict(X_test_perm)
-            r_perm = np.corrcoef(y_test, y_pred_perm)[0, 1] if len(y_test) > 1 else np.nan
-            if np.isfinite(r_perm):
-                permuted_scores.append(r_perm)
+            valid_mask_perm = np.isfinite(y_test) & np.isfinite(y_pred_perm)
+            n_valid_perm = int(valid_mask_perm.sum())
+            if n_valid_perm >= 3:
+                r_perm, _ = safe_pearsonr(y_test[valid_mask_perm], y_pred_perm[valid_mask_perm])
+                if np.isfinite(r_perm):
+                    weight_perm = max(n_valid_perm - 3.0, 1.0)
+                    perm_z_vals.append(np.arctanh(np.clip(r_perm, -0.999999, 0.999999)))
+                    perm_weights.append(weight_perm)
     
-    if not original_scores or not permuted_scores:
+    if not orig_z_vals or not perm_z_vals:
         return np.nan
     
-    delta = np.mean(original_scores) - np.mean(permuted_scores)
+    def _weighted_mean_z(z_list, w_list):
+        w = np.asarray(w_list, dtype=float)
+        z = np.asarray(z_list, dtype=float)
+        w = np.where(np.isfinite(w), w, 0.0)
+        z = np.where(np.isfinite(z), z, 0.0)
+        if np.sum(w) <= 0:
+            return np.nan
+        return float(np.sum(z * w) / np.sum(w))
+    
+    z_orig_mean = _weighted_mean_z(orig_z_vals, orig_weights)
+    z_perm_mean = _weighted_mean_z(perm_z_vals, perm_weights)
+    
+    if not np.isfinite(z_orig_mean) or not np.isfinite(z_perm_mean):
+        return np.nan
+    
+    delta = np.tanh(z_orig_mean) - np.tanh(z_perm_mean)
     return float(delta)

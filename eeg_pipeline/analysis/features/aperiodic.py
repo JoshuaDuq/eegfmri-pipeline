@@ -1,3 +1,15 @@
+"""
+Aperiodic (1/f) Feature Extraction
+===================================
+
+Extracts aperiodic spectral features using FOOOF-like fitting:
+- Slope: 1/f exponent (related to E/I balance)
+- Offset: Broadband power level
+- Power-corrected band power: Ratio of observed to 1/f background power within band
+
+These features separate oscillatory from aperiodic neural activity.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
@@ -14,9 +26,9 @@ from eeg_pipeline.utils.analysis.stats import (
 from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 
 
-###################################################################
-# Aperiodic Feature Extraction
-###################################################################
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 
 def _adjust_baseline_end(baseline_end: float) -> float:
@@ -73,9 +85,33 @@ def _build_aperiodic_feature_records(
                 for channel_name in channel_names:
                     record[f"powcorr_{band}_{channel_name}"] = np.nan
             else:
+                freq_subset = freqs[mask]
+                if freq_subset.size < 2:
+                    for channel_name in channel_names:
+                        record[f"powcorr_{band}_{channel_name}"] = np.nan
+                    continue
+                bandwidth = float(freq_subset[-1] - freq_subset[0])
+                if bandwidth <= 0:
+                    for channel_name in channel_names:
+                        record[f"powcorr_{band}_{channel_name}"] = np.nan
+                    continue
+
                 for channel_idx, channel_name in enumerate(channel_names):
-                    band_residual_mean = np.mean(residuals[epoch_idx, channel_idx, mask])
-                    record[f"powcorr_{band}_{channel_name}"] = float(band_residual_mean)
+                    band_residual = residuals[epoch_idx, channel_idx, mask]
+                    if band_residual.size == 0 or not np.any(np.isfinite(band_residual)):
+                        record[f"powcorr_{band}_{channel_name}"] = np.nan
+                        continue
+
+                    # Convert log10 residuals to linear ratio (PSD / aperiodic fit) and average
+                    band_residual_clean = np.power(10.0, band_residual)
+                    if not np.any(np.isfinite(band_residual_clean)):
+                        record[f"powcorr_{band}_{channel_name}"] = np.nan
+                        continue
+
+                    # Frequency-weighted average ratio to avoid bias from non-uniform bins
+                    band_ratio_area = np.trapz(band_residual_clean, freq_subset)
+                    band_ratio = band_ratio_area / bandwidth if bandwidth > 0 else np.nan
+                    record[f"powcorr_{band}_{channel_name}"] = float(band_ratio)
         
         feature_records.append(record)
     
@@ -146,6 +182,7 @@ def extract_aperiodic_features(
 
     peak_rejection_z = float(aper_cfg.get("peak_rejection_z", 3.5))
     min_fit_points = int(aper_cfg.get("min_fit_points", 5))
+    min_r2 = float(aper_cfg.get("min_r2", 0.5))
 
     logger.info(
         "Computing aperiodic PSD in window [%.3f, %.3f] s (fmin=%.1f, fmax=%.1f, robust peak rejection z=%.1f)",
@@ -208,6 +245,25 @@ def extract_aperiodic_features(
     feature_records = _build_aperiodic_feature_records(
         offsets, slopes, residuals, freqs, channel_names, bands, freq_bands
     )
+
+    # Invalidate poorly fit channels to avoid propagating unreliable slopes/offsets/powcorr
+    n_bad = 0
+    for epoch_idx in range(len(epochs)):
+        for ch_idx, ch in enumerate(channel_names):
+            if not np.isfinite(r2[epoch_idx, ch_idx]) or r2[epoch_idx, ch_idx] < min_r2:
+                n_bad += 1
+                feature_records[epoch_idx][f"aper_slope_{ch}"] = np.nan
+                feature_records[epoch_idx][f"aper_offset_{ch}"] = np.nan
+                for band in bands:
+                    key = f"powcorr_{band}_{ch}"
+                    if key in feature_records[epoch_idx]:
+                        feature_records[epoch_idx][key] = np.nan
+    if n_bad > 0:
+        logger.warning(
+            "Aperiodic fits: %d epoch-channel combinations fell below min_r2=%.2f and were set to NaN.",
+            n_bad,
+            min_r2,
+        )
 
     # Add QC metrics (r2 and residual RMS per epoch/channel)
     for epoch_idx in range(len(epochs)):

@@ -41,13 +41,13 @@ from eeg_pipeline.utils.data.loading import (
     load_epochs_with_targets,
 )
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.io.general import read_tsv, write_tsv
+from eeg_pipeline.utils.io.general import read_tsv, write_tsv, get_logger
 from eeg_pipeline.plotting.decoding import (
     plot_decoding_null_hist,
     plot_residual_diagnostics,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 ###################################################################
@@ -308,7 +308,7 @@ def _fit_within_subject_fold(
             gs = grid_search_with_warning_logging(
                 gs, X_train, y_train,
                 fold_info=f"within-subject fold {fold} (subject {subject_id})",
-                logger=logger,
+                log=logger,
                 groups=blocks_train
             )
             return gs.best_estimator_

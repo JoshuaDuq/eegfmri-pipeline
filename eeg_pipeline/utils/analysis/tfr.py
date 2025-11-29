@@ -2105,8 +2105,15 @@ def extract_band_power(
     if not np.any(freq_mask_indices):
         return None
     
-    band_power = tfr_data[:, :, freq_mask_indices, :][:, :, :, time_mask_array].mean(axis=(2, 3))
-    return band_power
+    # Integrate power over frequency (accounts for non-uniform spacing) then
+    # average over the selected time window to avoid bandwidth bias.
+    band_data = tfr_data[:, :, freq_mask_indices, :][:, :, :, time_mask_array]
+    freqs_band = freqs[freq_mask_indices]
+    if freqs_band.size < 2:
+        return None
+    
+    band_power_freq_int = np.trapz(band_data, freqs_band, axis=2)  # (epochs, channels, times)
+    return band_power_freq_int.mean(axis=2)  # (epochs, channels)
 
 
 def process_temporal_bin(

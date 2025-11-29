@@ -15,6 +15,7 @@ from .annotations import (
     find_annotation_x_position,
     build_roi_annotation_label,
     render_roi_annotations,
+    add_roi_annotations,
     get_sig_marker_text,
 )
 from .colorbars import (
@@ -48,6 +49,7 @@ __all__ = [
     "find_annotation_x_position",
     "build_roi_annotation_label",
     "render_roi_annotations",
+    "add_roi_annotations",
     "get_sig_marker_text",
     "add_normalized_colorbar",
     "create_difference_colorbar",

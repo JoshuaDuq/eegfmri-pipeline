@@ -67,6 +67,7 @@ def __getattr__(name: str):
         "find_annotation_x_position": "core",
         "build_roi_annotation_label": "core",
         "render_roi_annotations": "core",
+        "add_roi_annotations": "core",
         "add_normalized_colorbar": "core",
         "create_difference_colorbar": "core",
         "add_diff_colorbar": "core",

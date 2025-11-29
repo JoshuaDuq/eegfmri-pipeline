@@ -12,6 +12,7 @@ from eeg_pipeline.analysis.features.core import (
     match_channels_to_pattern,
     build_roi_map,
 )
+from eeg_pipeline.utils.analysis.signal_metrics import compute_band_power as _compute_band_power
 
 
 ###################################################################
@@ -164,14 +165,15 @@ def extract_roi_power_features(
                             freqs, psd = welch(ch_data, fs=sfreq, nperseg=nperseg)
                             band_mask = (freqs >= fmin) & (freqs <= fmax)
                             if np.any(band_mask):
-                                band_power = np.mean(psd[band_mask])
+                                band_power = _compute_band_power(freqs, psd, fmin, fmax)
                                 roi_powers.append(band_power)
                         except (ValueError, RuntimeError):
                             continue
                     
-                    if roi_powers:
-                        record[f"roi_pow_{band}_{roi_name}_mean"] = float(np.mean(roi_powers))
-                        record[f"roi_pow_{band}_{roi_name}_std"] = float(np.std(roi_powers)) if len(roi_powers) > 1 else 0.0
+                    valid_powers = [p for p in roi_powers if np.isfinite(p)]
+                    if valid_powers:
+                        record[f"roi_pow_{band}_{roi_name}_mean"] = float(np.mean(valid_powers))
+                        record[f"roi_pow_{band}_{roi_name}_std"] = float(np.std(valid_powers)) if len(valid_powers) > 1 else 0.0
                     else:
                         record[f"roi_pow_{band}_{roi_name}_mean"] = np.nan
                         record[f"roi_pow_{band}_{roi_name}_std"] = np.nan
@@ -261,11 +263,12 @@ def extract_roi_asymmetry_features(
                         freqs, psd = welch(ch_data, fs=sfreq, nperseg=nperseg)
                         band_mask = (freqs >= fmin) & (freqs <= fmax)
                         if np.any(band_mask):
-                            powers.append(np.mean(psd[band_mask]))
+                            powers.append(_compute_band_power(freqs, psd, fmin, fmax))
                     except (ValueError, RuntimeError):
                         continue
-                if powers:
-                    roi_powers[roi_name] = float(np.mean(powers))
+                valid_powers = [p for p in powers if np.isfinite(p)]
+                if valid_powers:
+                    roi_powers[roi_name] = float(np.mean(valid_powers))
 
             for pair in asymmetry_pairs:
                 left_roi = pair.get("left", "")
@@ -457,4 +460,3 @@ def extract_pain_roi_features(
         return pd.DataFrame(), []
 
     return roi_df[pain_cols], pain_cols
-

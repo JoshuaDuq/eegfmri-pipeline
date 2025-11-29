@@ -20,7 +20,9 @@ import scipy.stats
 from sklearn.model_selection import GroupKFold, StratifiedKFold, LeaveOneGroupOut, GridSearchCV
 from sklearn.exceptions import ConvergenceWarning
 
-logger = logging.getLogger(__name__)
+from eeg_pipeline.utils.io.general import get_logger
+
+logger = get_logger(__name__)
 
 
 ###################################################################
@@ -540,7 +542,8 @@ def compute_metrics(
         "n": int(mask.sum()),
     }
 
-    per_subject = []
+    per_subject: List[Dict] = []
+
     if groups is not None:
         gm = groups[mask] if len(groups) == len(y_true) else groups
         for subj in np.unique(gm):
@@ -556,10 +559,21 @@ def compute_metrics(
             })
 
         # Compute average Fisher-z transformed r
-        valid_rs = [p["r"] for p in per_subject if np.isfinite(p["r"])]
-        if valid_rs:
-            fisher_z = [np.arctanh(np.clip(r, -0.999, 0.999)) for r in valid_rs]
-            pooled["avg_subject_r_fisher_z"] = float(np.mean(fisher_z))
+        valid_entries = [
+            (p["r"], p["n"])
+            for p in per_subject
+            if np.isfinite(p["r"]) and p.get("n", 0) >= 2
+        ]
+        if valid_entries:
+            r_vals, n_vals = zip(*valid_entries)
+            fisher_z = np.arctanh(
+                np.clip(np.asarray(r_vals, dtype=float), -0.999999, 0.999999)
+            )
+            weights = np.maximum(np.asarray(n_vals, dtype=float) - 3.0, 1.0)
+            weight_sum = np.sum(weights)
+            pooled["avg_subject_r_fisher_z"] = (
+                float(np.sum(fisher_z * weights) / weight_sum) if weight_sum > 0 else np.nan
+            )
         else:
             pooled["avg_subject_r_fisher_z"] = np.nan
     else:

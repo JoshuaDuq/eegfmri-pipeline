@@ -74,15 +74,35 @@ def _resolve_log_dir(config: Optional[EEGConfig] = None) -> Optional[Path]:
     return None
 
 
+# Track which loggers have been configured to prevent duplicate handlers
+_configured_loggers: set = set()
+
+
 def _configure_logger_handlers(
     logger: logging.Logger,
     log_file_path: Optional[Path] = None
 ) -> None:
-    if logger.handlers:
+    """
+    Configure handlers for a logger, preventing duplicates.
+    
+    This function:
+    1. Tracks configured loggers to prevent duplicate handler setup
+    2. Disables propagation to prevent duplicate messages from parent loggers
+    3. Uses a consistent format across all loggers
+    """
+    # Skip if already configured
+    if logger.name in _configured_loggers:
         return
     
+    # Clear any existing handlers to prevent duplicates
+    logger.handlers.clear()
+    
+    # Disable propagation to parent loggers to prevent duplicate messages
+    logger.propagate = False
+    
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
     
     console_handler = logging.StreamHandler()
@@ -96,26 +116,53 @@ def _configure_logger_handlers(
         logger.addHandler(file_handler)
     
     logger.setLevel(logging.INFO)
+    _configured_loggers.add(logger.name)
 
 
 def get_logger(
     name: str,
     log_file_path: Optional[Path] = None
 ) -> logging.Logger:
+    """
+    Get or create a logger with the given name.
+    
+    Ensures no duplicate handlers are added and propagation is disabled.
+    """
     logger = logging.getLogger(name)
     _configure_logger_handlers(logger, log_file_path)
     return logger
 
 
 def get_module_logger(logger: Optional[logging.Logger] = None, module_name: Optional[str] = None) -> logging.Logger:
+    """
+    Get a logger for a module, using provided logger if available.
+    
+    This is the preferred way to get a logger within functions that accept
+    an optional logger parameter.
+    """
     if logger is not None:
         return logger
-    return logging.getLogger(module_name or __name__)
+    return get_logger(module_name or __name__)
 
 
 def log_and_raise_error(logger: logging.Logger, error_msg: str, exception_class=ValueError) -> None:
     logger.error(error_msg)
     raise exception_class(error_msg)
+
+
+def reset_logging() -> None:
+    """
+    Reset the logging configuration.
+    
+    Clears all configured loggers and their handlers. Useful for testing
+    or when reconfiguring logging at runtime.
+    """
+    global _configured_loggers
+    for name in list(_configured_loggers):
+        logger = logging.getLogger(name)
+        logger.handlers.clear()
+        logger.propagate = True
+    _configured_loggers.clear()
 
 
 def _get_log_file_path(logger_name: str, log_file_name: Optional[str], config: Optional[EEGConfig]) -> Optional[Path]:

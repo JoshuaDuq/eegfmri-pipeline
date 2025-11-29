@@ -1,3 +1,16 @@
+"""
+Phase Feature Extraction
+=========================
+
+Phase-based features for EEG analysis:
+- ITPC: Inter-Trial Phase Coherence (phase locking across trials)
+- PAC: Phase-Amplitude Coupling (cross-frequency coupling)
+
+ITPC measures stimulus-locked phase consistency, relevant for
+evoked responses and attention. PAC measures coupling between
+low-frequency phase and high-frequency amplitude.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
@@ -24,9 +37,9 @@ from eeg_pipeline.utils.config.loader import (
 )
 
 
-###################################################################
-# Phase Feature Extraction (ITPC and PAC)
-###################################################################
+# =============================================================================
+# ITPC Features
+# =============================================================================
 
 
 def extract_itpc_features(

@@ -1,3 +1,15 @@
+"""
+Time-Domain Feature Extraction
+===============================
+
+Statistical and waveform features computed directly in the time domain:
+- Statistical: mean, variance, skewness, kurtosis
+- Amplitude: RMS, peak-to-peak, MAD
+- Waveform: zero crossings, line length, nonlinear energy
+
+All features can be computed on raw or band-filtered signals.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
@@ -8,51 +20,14 @@ import mne
 from scipy import stats as scipy_stats
 
 from eeg_pipeline.utils.config.loader import get_frequency_bands
-
-
-###################################################################
-# Time-Domain Feature Extraction
-###################################################################
-
-
-def _compute_zero_crossings(x: np.ndarray) -> int:
-    if len(x) < 2:
-        return 0
-    signs = np.sign(x)
-    signs[signs == 0] = 1
-    crossings = np.sum(np.diff(signs) != 0)
-    return int(crossings)
-
-
-def _compute_mean_absolute_deviation(x: np.ndarray) -> float:
-    if len(x) == 0:
-        return np.nan
-    return float(np.mean(np.abs(x - np.mean(x))))
-
-
-def _compute_rms(x: np.ndarray) -> float:
-    if len(x) == 0:
-        return np.nan
-    return float(np.sqrt(np.mean(x ** 2)))
-
-
-def _compute_peak_to_peak(x: np.ndarray) -> float:
-    if len(x) == 0:
-        return np.nan
-    return float(np.max(x) - np.min(x))
-
-
-def _compute_line_length(x: np.ndarray) -> float:
-    if len(x) < 2:
-        return np.nan
-    return float(np.sum(np.abs(np.diff(x))))
-
-
-def _compute_nonlinear_energy(x: np.ndarray) -> float:
-    if len(x) < 3:
-        return np.nan
-    nle = x[1:-1] ** 2 - x[:-2] * x[2:]
-    return float(np.mean(nle))
+from eeg_pipeline.utils.analysis.signal_metrics import (
+    compute_zero_crossings as _compute_zero_crossings,
+    compute_rms as _compute_rms,
+    compute_peak_to_peak as _compute_peak_to_peak,
+    compute_line_length as _compute_line_length,
+    compute_mean_absolute_deviation as _compute_mean_absolute_deviation,
+    compute_nonlinear_energy as _compute_nonlinear_energy,
+)
 
 
 def extract_statistical_features(
@@ -96,8 +71,8 @@ def extract_statistical_features(
             record[f"mean_{ch_name}"] = float(np.mean(ch_data))
             record[f"var_{ch_name}"] = float(np.var(ch_data, ddof=1)) if len(ch_data) > 1 else np.nan
             record[f"std_{ch_name}"] = float(np.std(ch_data, ddof=1)) if len(ch_data) > 1 else np.nan
-            record[f"skew_{ch_name}"] = float(scipy_stats.skew(ch_data, nan_policy='omit'))
-            record[f"kurt_{ch_name}"] = float(scipy_stats.kurtosis(ch_data, nan_policy='omit'))
+            record[f"skew_{ch_name}"] = float(scipy_stats.skew(ch_data, nan_policy='omit', bias=False))
+            record[f"kurt_{ch_name}"] = float(scipy_stats.kurtosis(ch_data, nan_policy='omit', bias=False))
             record[f"median_{ch_name}"] = float(np.median(ch_data))
             record[f"iqr_{ch_name}"] = float(scipy_stats.iqr(ch_data))
 
@@ -200,17 +175,20 @@ def extract_waveform_features(
         for ch_idx, ch_name in enumerate(ch_names):
             ch_data = epoch[ch_idx]
 
-            zc = _compute_zero_crossings(ch_data)
+            ch_data_centered = ch_data - np.mean(ch_data) if len(ch_data) > 0 else ch_data
+
+            zc = _compute_zero_crossings(ch_data_centered)
             record[f"zerocross_{ch_name}"] = float(zc)
             
             duration = len(ch_data) / sfreq if sfreq > 0 else 1.0
             record[f"zerocross_rate_{ch_name}"] = float(zc / duration) if duration > 0 else np.nan
 
-            record[f"linelen_{ch_name}"] = _compute_line_length(ch_data)
+            linelen_val = _compute_line_length(ch_data_centered)
+            record[f"linelen_{ch_name}"] = linelen_val
             
-            record[f"linelen_norm_{ch_name}"] = float(_compute_line_length(ch_data) / len(ch_data)) if len(ch_data) > 1 else np.nan
+            record[f"linelen_norm_{ch_name}"] = float(linelen_val / len(ch_data)) if len(ch_data) > 1 else np.nan
 
-            record[f"nle_{ch_name}"] = _compute_nonlinear_energy(ch_data)
+            record[f"nle_{ch_name}"] = _compute_nonlinear_energy(ch_data_centered)
 
         feature_records.append(record)
 
@@ -325,7 +303,7 @@ def extract_derivative_features(
                 continue
 
             d1 = np.diff(ch_data) * sfreq
-            record[f"d1_var_{ch_name}"] = float(np.var(d1))
+            record[f"d1_var_{ch_name}"] = float(np.var(d1, ddof=1)) if len(d1) > 1 else np.nan
             record[f"d1_max_{ch_name}"] = float(np.max(np.abs(d1)))
             record[f"d1_mean_{ch_name}"] = float(np.mean(np.abs(d1)))
 
@@ -336,7 +314,7 @@ def extract_derivative_features(
                 continue
 
             d2 = np.diff(d1) * sfreq
-            record[f"d2_var_{ch_name}"] = float(np.var(d2))
+            record[f"d2_var_{ch_name}"] = float(np.var(d2, ddof=1)) if len(d2) > 1 else np.nan
             record[f"d2_max_{ch_name}"] = float(np.max(np.abs(d2)))
             record[f"d2_mean_{ch_name}"] = float(np.mean(np.abs(d2)))
 
@@ -484,8 +462,8 @@ def extract_band_statistical_features(
 
                 record[f"var_{band}_{ch_name}"] = float(np.var(ch_data, ddof=1)) if len(ch_data) > 1 else np.nan
                 record[f"std_{band}_{ch_name}"] = float(np.std(ch_data, ddof=1)) if len(ch_data) > 1 else np.nan
-                record[f"skew_{band}_{ch_name}"] = float(scipy_stats.skew(ch_data, nan_policy='omit'))
-                record[f"kurt_{band}_{ch_name}"] = float(scipy_stats.kurtosis(ch_data, nan_policy='omit'))
+                record[f"skew_{band}_{ch_name}"] = float(scipy_stats.skew(ch_data, nan_policy='omit', bias=False))
+                record[f"kurt_{band}_{ch_name}"] = float(scipy_stats.kurtosis(ch_data, nan_policy='omit', bias=False))
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -620,14 +598,17 @@ def extract_band_waveform_features(
             for ch_idx, ch_name in enumerate(ch_names):
                 ch_data = epoch[ch_idx]
 
-                zc = _compute_zero_crossings(ch_data)
+                ch_data_centered = ch_data - np.mean(ch_data) if len(ch_data) > 0 else ch_data
+
+                zc = _compute_zero_crossings(ch_data_centered)
                 record[f"zerocross_{band}_{ch_name}"] = float(zc)
 
                 duration = len(ch_data) / sfreq if sfreq > 0 else 1.0
                 record[f"zerocross_rate_{band}_{ch_name}"] = float(zc / duration) if duration > 0 else np.nan
 
-                record[f"linelen_{band}_{ch_name}"] = _compute_line_length(ch_data)
-                record[f"nle_{band}_{ch_name}"] = _compute_nonlinear_energy(ch_data)
+                linelen_val = _compute_line_length(ch_data_centered)
+                record[f"linelen_{band}_{ch_name}"] = linelen_val
+                record[f"nle_{band}_{ch_name}"] = _compute_nonlinear_energy(ch_data_centered)
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -683,4 +664,3 @@ def extract_all_band_temporal_features(
 
     combined = pd.concat(all_dfs, axis=1)
     return combined, all_cols
-

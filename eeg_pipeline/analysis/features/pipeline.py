@@ -202,21 +202,23 @@ def _extract_erds_from_precomputed(
     Negative = ERD (desynchronization), Positive = ERS (synchronization)
     
     Features extracted per channel/band:
-    - Mean ERD/ERS over active period
-    - ERD/ERS per temporal window
-    - Temporal dynamics: slope, onset latency, peak latency
-    - Statistics: std, min, max, range across time
-    - Percentiles: 10th, 25th, 50th, 75th, 90th
+    - Mean ERD/ERS over full active period
+    - ERD/ERS per coarse temporal window (early, mid, late)
+    - ERD/ERS per fine temporal window (t1-t7) for HRF modeling
+    - Temporal dynamics: slope, onset latency, peak latency, early-late diff
+    - ERD vs ERS separation (magnitude of negative vs positive values)
+    - Global (cross-channel) statistics per band
     """
     if not precomputed.band_data or precomputed.windows is None:
         return pd.DataFrame(), []
     
     epsilon = EPSILON_STD
+    windows = precomputed.windows
     
     records: List[Dict[str, float]] = []
     n_epochs = precomputed.data.shape[0]
     times = precomputed.times
-    active_times = times[precomputed.windows.active_mask]
+    active_times = times[windows.active_mask]
     
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
@@ -226,91 +228,223 @@ def _extract_erds_from_precomputed(
                 continue
             
             power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
-            
-            # Collect all channel ERD/ERS for global stats
-            all_erds_mean = []
+            all_erds_full = []
             
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                baseline_power = np.mean(power[ch_idx, precomputed.windows.baseline_mask])
-                baseline_std = np.std(power[ch_idx, precomputed.windows.baseline_mask])
-                active_power_trace = power[ch_idx, precomputed.windows.active_mask]
+                baseline_power = np.mean(power[ch_idx, windows.baseline_mask])
+                baseline_std = np.std(power[ch_idx, windows.baseline_mask])
+                active_power_trace = power[ch_idx, windows.active_mask]
                 active_power_mean = np.mean(active_power_trace)
                 
                 if baseline_power > epsilon:
-                    # Mean ERD/ERS
-                    erds = ((active_power_mean - baseline_power) / baseline_power) * 100
-                    # Full ERD/ERS time course
+                    erds_full = ((active_power_mean - baseline_power) / baseline_power) * 100
                     erds_trace = ((active_power_trace - baseline_power) / baseline_power) * 100
                 else:
-                    erds = np.nan
+                    erds_full = np.nan
                     erds_trace = np.full_like(active_power_trace, np.nan)
                 
-                record[f"erds_{band}_{ch_name}"] = float(erds)
-                all_erds_mean.append(erds)
+                # Full period ERD/ERS
+                record[f"erds_{band}_{ch_name}_full_percent"] = float(erds_full)
+                all_erds_full.append(erds_full)
                 
-                # === Temporal statistics ===
-                if np.any(np.isfinite(erds_trace)):
-                    record[f"erds_{band}_{ch_name}_std"] = float(np.nanstd(erds_trace))
-                    record[f"erds_{band}_{ch_name}_min"] = float(np.nanmin(erds_trace))
-                    record[f"erds_{band}_{ch_name}_max"] = float(np.nanmax(erds_trace))
-                    record[f"erds_{band}_{ch_name}_range"] = float(np.nanmax(erds_trace) - np.nanmin(erds_trace))
-                    
-                    # Percentiles
-                    for pct in [10, 25, 50, 75, 90]:
-                        record[f"erds_{band}_{ch_name}_p{pct}"] = float(np.nanpercentile(erds_trace, pct))
-                    
-                    # Temporal dynamics
-                    if len(active_times) > 1 and len(erds_trace) > 1:
-                        # Slope (linear trend)
-                        valid_mask = np.isfinite(erds_trace)
-                        if np.sum(valid_mask) > 2:
-                            slope, _ = np.polyfit(active_times[valid_mask], erds_trace[valid_mask], 1)
-                            record[f"erds_{band}_{ch_name}_slope"] = float(slope)
-                        else:
-                            record[f"erds_{band}_{ch_name}_slope"] = np.nan
-                        
-                        # Peak latency (time of max absolute ERD/ERS)
-                        peak_idx = np.nanargmax(np.abs(erds_trace))
-                        record[f"erds_{band}_{ch_name}_peak_latency"] = float(active_times[peak_idx])
-                        
-                        # Onset latency (first time ERD/ERS exceeds 1 std from baseline)
-                        threshold = baseline_std / baseline_power * 100 if baseline_power > epsilon else np.inf
-                        onset_mask = np.abs(erds_trace) > threshold
-                        if np.any(onset_mask):
-                            onset_idx = np.argmax(onset_mask)
-                            record[f"erds_{band}_{ch_name}_onset_latency"] = float(active_times[onset_idx])
-                        else:
-                            record[f"erds_{band}_{ch_name}_onset_latency"] = np.nan
-                else:
-                    for suffix in ["_std", "_min", "_max", "_range", "_slope", "_peak_latency", "_onset_latency"]:
-                        record[f"erds_{band}_{ch_name}{suffix}"] = np.nan
-                    for pct in [10, 25, 50, 75, 90]:
-                        record[f"erds_{band}_{ch_name}_p{pct}"] = np.nan
-                
-                # === Temporal windows ===
-                for win_idx, (win_mask, win_label) in enumerate(
-                    zip(precomputed.windows.plateau_masks, precomputed.windows.window_labels)
-                ):
+                # === Coarse temporal bins (early, mid, late) ===
+                coarse_values = {}
+                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if np.any(win_mask):
                         win_power = np.mean(power[ch_idx, win_mask])
-                        win_power_std = np.std(power[ch_idx, win_mask])
                         if baseline_power > epsilon:
                             erds_win = ((win_power - baseline_power) / baseline_power) * 100
-                            erds_win_std = (win_power_std / baseline_power) * 100
                         else:
                             erds_win = np.nan
-                            erds_win_std = np.nan
-                        record[f"erds_{band}_{ch_name}_{win_label}"] = float(erds_win)
-                        record[f"erds_{band}_{ch_name}_{win_label}_std"] = float(erds_win_std)
+                        record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                        coarse_values[win_label] = erds_win
+                
+                # === Fine temporal bins (t1-t7) for HRF modeling ===
+                for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
+                    if np.any(win_mask):
+                        win_power = np.mean(power[ch_idx, win_mask])
+                        if baseline_power > epsilon:
+                            erds_win = ((win_power - baseline_power) / baseline_power) * 100
+                        else:
+                            erds_win = np.nan
+                        record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                
+                # === Temporal dynamics ===
+                if np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
+                    valid_mask = np.isfinite(erds_trace)
+                    
+                    # Slope (linear trend over plateau)
+                    if np.sum(valid_mask) > 2:
+                        slope, _ = np.polyfit(active_times[valid_mask], erds_trace[valid_mask], 1)
+                        record[f"erds_{band}_{ch_name}_slope"] = float(slope)
+                    else:
+                        record[f"erds_{band}_{ch_name}_slope"] = np.nan
+                    
+                    # Early-late difference
+                    if "early" in coarse_values and "late" in coarse_values:
+                        diff = coarse_values["late"] - coarse_values["early"]
+                        record[f"erds_{band}_{ch_name}_early_late_diff"] = float(diff)
+                    
+                    # Peak latency
+                    peak_idx = np.nanargmax(np.abs(erds_trace))
+                    record[f"erds_{band}_{ch_name}_peak_latency"] = float(active_times[peak_idx])
+                    
+                    # Onset latency
+                    threshold = baseline_std / baseline_power * 100 if baseline_power > epsilon else np.inf
+                    onset_mask = np.abs(erds_trace) > threshold
+                    if np.any(onset_mask):
+                        onset_idx = np.argmax(onset_mask)
+                        record[f"erds_{band}_{ch_name}_onset_latency"] = float(active_times[onset_idx])
+                    else:
+                        record[f"erds_{band}_{ch_name}_onset_latency"] = np.nan
+                    
+                    # === ERD vs ERS separation ===
+                    erd_vals = erds_trace[erds_trace < 0]
+                    ers_vals = erds_trace[erds_trace > 0]
+                    
+                    if len(erd_vals) > 0:
+                        record[f"erds_{band}_{ch_name}_erd_magnitude"] = float(np.mean(np.abs(erd_vals)))
+                        record[f"erds_{band}_{ch_name}_erd_duration"] = float(len(erd_vals) / precomputed.sfreq)
+                    else:
+                        record[f"erds_{band}_{ch_name}_erd_magnitude"] = 0.0
+                        record[f"erds_{band}_{ch_name}_erd_duration"] = 0.0
+                    
+                    if len(ers_vals) > 0:
+                        record[f"erds_{band}_{ch_name}_ers_magnitude"] = float(np.mean(ers_vals))
+                        record[f"erds_{band}_{ch_name}_ers_duration"] = float(len(ers_vals) / precomputed.sfreq)
+                    else:
+                        record[f"erds_{band}_{ch_name}_ers_magnitude"] = 0.0
+                        record[f"erds_{band}_{ch_name}_ers_duration"] = 0.0
             
-            # === Global (cross-channel) statistics per band ===
-            valid_erds = [e for e in all_erds_mean if np.isfinite(e)]
+            # === Global statistics per band ===
+            valid_erds = [e for e in all_erds_full if np.isfinite(e)]
             if valid_erds:
-                record[f"erds_{band}_global_mean"] = float(np.mean(valid_erds))
-                record[f"erds_{band}_global_std"] = float(np.std(valid_erds))
-                record[f"erds_{band}_global_min"] = float(np.min(valid_erds))
-                record[f"erds_{band}_global_max"] = float(np.max(valid_erds))
-                record[f"erds_{band}_global_range"] = float(np.max(valid_erds) - np.min(valid_erds))
+                record[f"erds_{band}_global_full_mean"] = float(np.mean(valid_erds))
+                record[f"erds_{band}_global_full_std"] = float(np.std(valid_erds))
+                
+                # Global per coarse bin
+                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+                    if np.any(win_mask):
+                        win_erds = []
+                        for ch_idx in range(len(precomputed.ch_names)):
+                            bp = np.mean(power[ch_idx, windows.baseline_mask])
+                            if bp > epsilon:
+                                wp = np.mean(power[ch_idx, win_mask])
+                                win_erds.append(((wp - bp) / bp) * 100)
+                        if win_erds:
+                            record[f"erds_{band}_global_{win_label}_mean"] = float(np.mean(win_erds))
+        
+        records.append(record)
+    
+    columns = list(records[0].keys()) if records else []
+    return pd.DataFrame(records), columns
+
+
+def _extract_power_from_precomputed(
+    precomputed: PrecomputedData,
+    bands: List[str],
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Extract time-resolved band power features using precomputed band data.
+    
+    Features extracted per channel/band:
+    - Power per coarse temporal window (early, mid, late)
+    - Power per fine temporal window (t1-t7) for HRF modeling
+    - Temporal dynamics: slope, early-late diff
+    - Baseline-normalized power (log-ratio)
+    - Global (cross-channel) statistics per band
+    """
+    if not precomputed.band_data or precomputed.windows is None:
+        return pd.DataFrame(), []
+    
+    epsilon = EPSILON_STD
+    windows = precomputed.windows
+    
+    records: List[Dict[str, float]] = []
+    n_epochs = precomputed.data.shape[0]
+    times = precomputed.times
+    active_times = times[windows.active_mask]
+    
+    for ep_idx in range(n_epochs):
+        record: Dict[str, float] = {}
+        
+        for band in bands:
+            if band not in precomputed.band_data:
+                continue
+            
+            power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
+            all_power_full = []
+            
+            for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                baseline_power = np.mean(power[ch_idx, windows.baseline_mask])
+                active_power = np.mean(power[ch_idx, windows.active_mask])
+                
+                # Full period power (log-ratio normalized)
+                if baseline_power > epsilon:
+                    logratio = np.log10(active_power / baseline_power)
+                else:
+                    logratio = np.nan
+                record[f"power_{band}_{ch_name}_full_logratio"] = float(logratio)
+                all_power_full.append(logratio)
+                
+                # === Coarse temporal bins (early, mid, late) ===
+                coarse_values = {}
+                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+                    if np.any(win_mask):
+                        win_power = np.mean(power[ch_idx, win_mask])
+                        if baseline_power > epsilon:
+                            win_logratio = np.log10(win_power / baseline_power)
+                        else:
+                            win_logratio = np.nan
+                        record[f"power_{band}_{ch_name}_{win_label}_logratio"] = float(win_logratio)
+                        coarse_values[win_label] = win_logratio
+                
+                # === Fine temporal bins (t1-t7) for HRF modeling ===
+                for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
+                    if np.any(win_mask):
+                        win_power = np.mean(power[ch_idx, win_mask])
+                        if baseline_power > epsilon:
+                            win_logratio = np.log10(win_power / baseline_power)
+                        else:
+                            win_logratio = np.nan
+                        record[f"power_{band}_{ch_name}_{win_label}_logratio"] = float(win_logratio)
+                
+                # === Temporal dynamics ===
+                if len(active_times) > 2:
+                    active_power_trace = power[ch_idx, windows.active_mask]
+                    if baseline_power > epsilon:
+                        logratio_trace = np.log10(active_power_trace / baseline_power)
+                        valid_mask = np.isfinite(logratio_trace)
+                        if np.sum(valid_mask) > 2:
+                            slope, _ = np.polyfit(active_times[valid_mask], logratio_trace[valid_mask], 1)
+                            record[f"power_{band}_{ch_name}_slope"] = float(slope)
+                        else:
+                            record[f"power_{band}_{ch_name}_slope"] = np.nan
+                    else:
+                        record[f"power_{band}_{ch_name}_slope"] = np.nan
+                    
+                    # Early-late difference
+                    if "early" in coarse_values and "late" in coarse_values:
+                        diff = coarse_values["late"] - coarse_values["early"]
+                        record[f"power_{band}_{ch_name}_early_late_diff"] = float(diff)
+            
+            # === Global statistics per band ===
+            valid_power = [p for p in all_power_full if np.isfinite(p)]
+            if valid_power:
+                record[f"power_{band}_global_full_mean"] = float(np.mean(valid_power))
+                record[f"power_{band}_global_full_std"] = float(np.std(valid_power))
+                
+                # Global per coarse bin
+                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+                    if np.any(win_mask):
+                        win_powers = []
+                        for ch_idx in range(len(precomputed.ch_names)):
+                            bp = np.mean(power[ch_idx, windows.baseline_mask])
+                            if bp > epsilon:
+                                wp = np.mean(power[ch_idx, win_mask])
+                                win_powers.append(np.log10(wp / bp))
+                        if win_powers:
+                            record[f"power_{band}_global_{win_label}_mean"] = float(np.mean(win_powers))
         
         records.append(record)
     
@@ -346,7 +480,7 @@ def _extract_spectral_from_precomputed(
     n_epochs = psd.shape[0]
     
     # Total power for relative calculations
-    total_power = np.sum(psd, axis=2)  # (epochs, channels)
+    total_power = np.trapz(psd, freqs, axis=2)  # (epochs, channels)
     epsilon = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
     
     for ep_idx in range(n_epochs):
@@ -370,67 +504,96 @@ def _extract_spectral_from_precomputed(
             
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
                 band_psd = psd[ep_idx, ch_idx, freq_mask]
-                band_power_mean = np.mean(band_psd)
-                band_power_sum = np.sum(band_psd)
-                
-                band_powers_per_ch[ch_name][band] = band_power_mean
-                all_band_power.append(band_power_mean)
+                finite_mask = np.isfinite(band_psd) & np.isfinite(band_freqs)
+
+                if not np.any(finite_mask):
+                    record[f"pow_{band}_{ch_name}"] = np.nan
+                    record[f"pow_{band}_{ch_name}_sum"] = np.nan
+                    record[f"pow_{band}_{ch_name}_std"] = np.nan
+                    record[f"pow_{band}_{ch_name}_median"] = np.nan
+                    record[f"pow_{band}_{ch_name}_max"] = np.nan
+                    record[f"logpow_{band}_{ch_name}"] = np.nan
+                    record[f"relpow_{band}_{ch_name}"] = np.nan
+                    record[f"peakfreq_{band}_{ch_name}"] = np.nan
+                    record[f"peakpow_{band}_{ch_name}"] = np.nan
+                    record[f"peakprom_{band}_{ch_name}"] = np.nan
+                    record[f"se_{band}_{ch_name}"] = np.nan
+                    record[f"slope_{band}_{ch_name}"] = np.nan
+                    for edge_pct in [50, 75, 90, 95]:
+                        record[f"sef{edge_pct}_{band}_{ch_name}"] = np.nan
+                    continue
+
+                band_freqs_clean = band_freqs[finite_mask]
+                band_psd_clean = band_psd[finite_mask]
+
+                band_power_area = float(np.trapz(band_psd_clean, band_freqs_clean))
+                band_power_mean_psd = float(np.mean(band_psd_clean))
+
+                band_powers_per_ch[ch_name][band] = band_power_area
+                all_band_power.append(band_power_area)
                 
                 # === Absolute power statistics ===
-                record[f"pow_{band}_{ch_name}"] = float(band_power_mean)
-                record[f"pow_{band}_{ch_name}_sum"] = float(band_power_sum)
-                record[f"pow_{band}_{ch_name}_std"] = float(np.std(band_psd))
-                record[f"pow_{band}_{ch_name}_median"] = float(np.median(band_psd))
-                record[f"pow_{band}_{ch_name}_max"] = float(np.max(band_psd))
+                record[f"pow_{band}_{ch_name}"] = band_power_area
+                record[f"pow_{band}_{ch_name}_sum"] = band_power_area
+                record[f"pow_{band}_{ch_name}_std"] = float(np.std(band_psd_clean))
+                record[f"pow_{band}_{ch_name}_median"] = float(np.median(band_psd_clean))
+                record[f"pow_{band}_{ch_name}_max"] = float(np.max(band_psd_clean))
                 
                 # Log power (often more normally distributed)
-                record[f"logpow_{band}_{ch_name}"] = float(np.log10(band_power_mean + epsilon))
+                record[f"logpow_{band}_{ch_name}"] = float(np.log10(band_power_area + epsilon))
                 
                 # === Relative power ===
                 if total_power[ep_idx, ch_idx] > epsilon:
-                    rel_power = band_power_mean / total_power[ep_idx, ch_idx]
+                    rel_power = band_power_area / total_power[ep_idx, ch_idx]
                 else:
                     rel_power = np.nan
                 record[f"relpow_{band}_{ch_name}"] = float(rel_power)
                 
                 # === Peak frequency and power ===
-                peak_idx = np.argmax(band_psd)
-                record[f"peakfreq_{band}_{ch_name}"] = float(band_freqs[peak_idx])
-                record[f"peakpow_{band}_{ch_name}"] = float(band_psd[peak_idx])
+                peak_idx = int(np.nanargmax(band_psd_clean))
+                record[f"peakfreq_{band}_{ch_name}"] = float(band_freqs_clean[peak_idx])
+                record[f"peakpow_{band}_{ch_name}"] = float(band_psd_clean[peak_idx])
                 
-                # Peak prominence (peak / mean)
-                if band_power_mean > epsilon:
-                    record[f"peakprom_{band}_{ch_name}"] = float(band_psd[peak_idx] / band_power_mean)
+                # Peak prominence (peak / mean PSD)
+                if band_power_mean_psd > epsilon:
+                    record[f"peakprom_{band}_{ch_name}"] = float(band_psd_clean[peak_idx] / band_power_mean_psd)
                 else:
                     record[f"peakprom_{band}_{ch_name}"] = np.nan
                 
-                # === Spectral entropy (within band) ===
-                psd_norm = band_psd / (band_power_sum + epsilon)
-                psd_norm = psd_norm[psd_norm > 0]
-                if psd_norm.size > 0:
-                    se = -np.sum(psd_norm * np.log2(psd_norm + epsilon))
-                    se_norm = se / np.log2(len(band_psd)) if len(band_psd) > 1 else se
+                # === Spectral entropy (within band), frequency-weighted ===
+                freq_weights = np.gradient(band_freqs_clean)
+                power_weights = band_psd_clean * freq_weights
+                total_band_area = float(np.nansum(power_weights))
+                if np.isfinite(total_band_area) and total_band_area > 0:
+                    p = power_weights / total_band_area
+                    p = p[p > 0]
+                    if p.size > 0:
+                        se = -np.sum(p * np.log2(p))
+                        se_norm = se / np.log2(p.size) if p.size > 1 else se
+                    else:
+                        se_norm = np.nan
                 else:
                     se_norm = np.nan
                 record[f"se_{band}_{ch_name}"] = float(se_norm)
                 
                 # === Spectral edge frequencies ===
-                cumsum = np.cumsum(band_psd)
-                total_band = cumsum[-1] if len(cumsum) > 0 else 0
-                if total_band > 0:
+                # Use the same frequency-weighted power used for spectral entropy
+                band_area = power_weights
+                if total_band_area > 0 and band_area.size > 0:
+                    cumsum = np.cumsum(band_area)
                     for edge_pct in [50, 75, 90, 95]:
-                        threshold = total_band * (edge_pct / 100.0)
+                        threshold = total_band_area * (edge_pct / 100.0)
                         edge_idx = np.searchsorted(cumsum, threshold)
-                        edge_idx = min(edge_idx, len(band_freqs) - 1)
-                        record[f"sef{edge_pct}_{band}_{ch_name}"] = float(band_freqs[edge_idx])
+                        edge_idx = min(edge_idx, len(band_freqs_clean) - 1)
+                        record[f"sef{edge_pct}_{band}_{ch_name}"] = float(band_freqs_clean[edge_idx])
                 else:
                     for edge_pct in [50, 75, 90, 95]:
                         record[f"sef{edge_pct}_{band}_{ch_name}"] = np.nan
                 
                 # === Spectral slope within band ===
-                if len(band_freqs) > 2:
-                    log_freqs = np.log10(band_freqs + epsilon)
-                    log_psd = np.log10(band_psd + epsilon)
+                if len(band_freqs_clean) > 2:
+                    log_freqs = np.log10(band_freqs_clean + epsilon)
+                    log_psd = np.log10(band_psd_clean + epsilon)
                     try:
                         slope, intercept = np.polyfit(log_freqs, log_psd, 1)
                         record[f"slope_{band}_{ch_name}"] = float(slope)
@@ -474,14 +637,23 @@ def _extract_spectral_from_precomputed(
             all_iaf = []
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
                 alpha_psd = psd[ep_idx, ch_idx, alpha_mask]
-                psd_sum = np.sum(alpha_psd)
-                if psd_sum > 0:
-                    # Center of gravity (CoG) IAF
-                    iaf_cog = np.sum(alpha_freqs * alpha_psd) / psd_sum
-                    # Peak IAF
-                    iaf_peak = alpha_freqs[np.argmax(alpha_psd)]
-                    # Alpha power at IAF
-                    iaf_power = np.max(alpha_psd)
+                finite_mask = np.isfinite(alpha_psd) & np.isfinite(alpha_freqs)
+                if np.any(finite_mask):
+                    alpha_freqs_clean = alpha_freqs[finite_mask]
+                    alpha_psd_clean = alpha_psd[finite_mask]
+                    freq_weights = np.gradient(alpha_freqs_clean)
+                    alpha_area = np.nansum(alpha_psd_clean * freq_weights)
+                    if alpha_area > 0:
+                        iaf_cog = float(
+                            np.nansum(alpha_freqs_clean * alpha_psd_clean * freq_weights) / alpha_area
+                        )
+                        iaf_peak_idx = int(np.nanargmax(alpha_psd_clean))
+                        iaf_peak = float(alpha_freqs_clean[iaf_peak_idx])
+                        iaf_power = float(alpha_psd_clean[iaf_peak_idx])
+                    else:
+                        iaf_cog = np.nan
+                        iaf_peak = np.nan
+                        iaf_power = np.nan
                 else:
                     iaf_cog = np.nan
                     iaf_peak = np.nan
@@ -588,15 +760,22 @@ def _extract_gfp_from_precomputed(
             record["gfp_first_peak_latency"] = np.nan
             record["gfp_max_peak_latency"] = np.nan
         
-        # Per-window GFP
-        for win_idx, (win_mask, win_label) in enumerate(
-            zip(precomputed.windows.plateau_masks, precomputed.windows.window_labels)
+        # Per-window GFP (coarse bins)
+        for win_mask, win_label in zip(
+            precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
         ):
             if np.any(win_mask):
                 gfp_win = gfp[win_mask]
                 record[f"gfp_{win_label}_mean"] = float(np.mean(gfp_win))
                 record[f"gfp_{win_label}_std"] = float(np.std(gfp_win))
-                record[f"gfp_{win_label}_max"] = float(np.max(gfp_win))
+        
+        # Per-window GFP (fine bins for HRF)
+        for win_mask, win_label in zip(
+            precomputed.windows.fine_masks, precomputed.windows.fine_labels
+        ):
+            if np.any(win_mask):
+                gfp_win = gfp[win_mask]
+                record[f"gfp_{win_label}_mean"] = float(np.mean(gfp_win))
         
         # === Band-specific GFP ===
         for band in bands:
@@ -625,9 +804,17 @@ def _extract_gfp_from_precomputed(
             for pct in [25, 50, 75]:
                 record[f"gfp_{band}_p{pct}"] = float(np.percentile(gfp_band_active, pct))
             
-            # Per-window band GFP
-            for win_idx, (win_mask, win_label) in enumerate(
-                zip(precomputed.windows.plateau_masks, precomputed.windows.window_labels)
+            # Per-window band GFP (coarse bins)
+            for win_mask, win_label in zip(
+                precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
+            ):
+                if np.any(win_mask):
+                    gfp_band_win = gfp_band[win_mask]
+                    record[f"gfp_{band}_{win_label}_mean"] = float(np.mean(gfp_band_win))
+            
+            # Per-window band GFP (fine bins for HRF)
+            for win_mask, win_label in zip(
+                precomputed.windows.fine_masks, precomputed.windows.fine_labels
             ):
                 if np.any(win_mask):
                     gfp_band_win = gfp_band[win_mask]
@@ -744,29 +931,52 @@ def _extract_connectivity_from_precomputed(
             record[f"graph_{band}_wpli_density"] = float(np.mean(wpli_values > threshold))
             record[f"graph_{band}_plv_density"] = float(np.mean(plv_values > threshold))
             
-            # === Per-window connectivity ===
-            for win_idx, (win_mask, win_label) in enumerate(
-                zip(precomputed.windows.plateau_masks, precomputed.windows.window_labels)
+            # === Per-window connectivity (coarse bins) ===
+            def _compute_window_conn(win_mask):
+                """Helper to compute wPLI and PLV for a time window."""
+                phases_win = precomputed.band_data[band].phase[ep_idx, :, win_mask]
+                phase_diff_win = phases_win[:, None, :] - phases_win[None, :, :]
+                plv_win = np.abs(np.mean(np.exp(1j * phase_diff_win), axis=-1))
+                plv_win_values = plv_win[triu_idx]
+                
+                analytic_win = analytic[:, win_mask]
+                cross_win = analytic_win[:, None, :] * np.conj(analytic_win[None, :, :])
+                imag_cross_win = np.imag(cross_win)
+                denom_win = np.mean(np.abs(imag_cross_win), axis=-1)
+                numer_win = np.abs(np.mean(imag_cross_win, axis=-1))
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    wpli_win = np.where(denom_win > 0, numer_win / denom_win, 0.0)
+                wpli_win = 0.5 * (wpli_win + wpli_win.T)
+                np.fill_diagonal(wpli_win, 0.0)
+                wpli_win_values = wpli_win[triu_idx]
+                return np.mean(plv_win_values), np.mean(wpli_win_values)
+            
+            for win_mask, win_label in zip(
+                precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
             ):
                 if np.any(win_mask):
-                    phases_win = precomputed.band_data[band].phase[ep_idx, :, win_mask]
-                    phase_diff_win = phases_win[:, None, :] - phases_win[None, :, :]
-                    plv_win = np.abs(np.mean(np.exp(1j * phase_diff_win), axis=-1))
-                    plv_win_values = plv_win[triu_idx]
-                    
-                    record[f"plv_{band}_{win_label}_mean"] = float(np.mean(plv_win_values))
-                    # Compute window-specific wPLI
-                    analytic_win = analytic[:, win_mask]
-                    cross_win = analytic_win[:, None, :] * np.conj(analytic_win[None, :, :])
-                    imag_cross_win = np.imag(cross_win)
-                    denom_win = np.mean(np.abs(imag_cross_win), axis=-1)
-                    numer_win = np.abs(np.mean(imag_cross_win, axis=-1))
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        wpli_win = np.where(denom_win > 0, numer_win / denom_win, 0.0)
-                    wpli_win = 0.5 * (wpli_win + wpli_win.T)
-                    np.fill_diagonal(wpli_win, 0.0)
-                    wpli_win_values = wpli_win[triu_idx]
-                    record[f"wpli_{band}_{win_label}_mean"] = float(np.mean(wpli_win_values))
+                    plv_mean, wpli_mean = _compute_window_conn(win_mask)
+                    record[f"conn_plv_{band}_{win_label}_mean"] = float(plv_mean)
+                    record[f"conn_wpli_{band}_{win_label}_mean"] = float(wpli_mean)
+            
+            # === Per-window connectivity (fine bins for HRF) ===
+            for win_mask, win_label in zip(
+                precomputed.windows.fine_masks, precomputed.windows.fine_labels
+            ):
+                if np.any(win_mask):
+                    plv_mean, wpli_mean = _compute_window_conn(win_mask)
+                    record[f"conn_plv_{band}_{win_label}_mean"] = float(plv_mean)
+                    record[f"conn_wpli_{band}_{win_label}_mean"] = float(wpli_mean)
+            
+            # === Temporal dynamics ===
+            if len(precomputed.windows.coarse_masks) >= 2:
+                # Early-late connectivity difference
+                early_mask = precomputed.windows.coarse_masks[0]
+                late_mask = precomputed.windows.coarse_masks[-1]
+                if np.any(early_mask) and np.any(late_mask):
+                    _, wpli_early = _compute_window_conn(early_mask)
+                    _, wpli_late = _compute_window_conn(late_mask)
+                    record[f"conn_wpli_{band}_early_late_diff"] = float(wpli_late - wpli_early)
         
         records.append(record)
     
@@ -778,7 +988,14 @@ def _extract_roi_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """Extract ROI-averaged features from precomputed data."""
+    """
+    Extract ROI-averaged features from precomputed data.
+    
+    Features per ROI per band:
+    - Power (log-ratio normalized) for full period and each time bin
+    - ERD/ERS (percent) for full period and each time bin
+    - Temporal dynamics (slope, early-late diff)
+    """
     from eeg_pipeline.analysis.features.core import build_roi_map
     
     config = precomputed.config
@@ -789,7 +1006,6 @@ def _extract_roi_from_precomputed(
     if not roi_definitions:
         return pd.DataFrame(), []
     
-    # Build ROI channel map using shared utility
     roi_map = build_roi_map(precomputed.ch_names, roi_definitions)
     
     if not roi_map:
@@ -797,7 +1013,7 @@ def _extract_roi_from_precomputed(
     
     records: List[Dict[str, float]] = []
     n_epochs = precomputed.data.shape[0]
-    freq_bands = get_frequency_bands(config)
+    windows = precomputed.windows
     epsilon = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
     
     for ep_idx in range(n_epochs):
@@ -808,20 +1024,53 @@ def _extract_roi_from_precomputed(
                 continue
             
             power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
-            baseline_power = np.mean(power[:, precomputed.windows.baseline_mask], axis=1)
-            active_power = np.mean(power[:, precomputed.windows.active_mask], axis=1)
             
             for roi_name, ch_indices in roi_map.items():
-                roi_baseline = np.mean(baseline_power[ch_indices])
-                roi_active = np.mean(active_power[ch_indices])
+                # ROI-averaged power across channels
+                roi_power = np.mean(power[ch_indices], axis=0)  # (times,)
+                roi_baseline = np.mean(roi_power[windows.baseline_mask])
+                roi_active = np.mean(roi_power[windows.active_mask])
                 
-                record[f"roi_pow_{band}_{roi_name}"] = float(roi_active)
-                
+                # Full period features
                 if roi_baseline > epsilon:
+                    roi_logratio = np.log10(roi_active / roi_baseline)
                     roi_erds = ((roi_active - roi_baseline) / roi_baseline) * 100
                 else:
+                    roi_logratio = np.nan
                     roi_erds = np.nan
-                record[f"roi_erds_{band}_{roi_name}"] = float(roi_erds)
+                
+                record[f"roi_power_{band}_{roi_name}_full_logratio"] = float(roi_logratio)
+                record[f"roi_erds_{band}_{roi_name}_full_percent"] = float(roi_erds)
+                
+                # Coarse temporal bins
+                coarse_values = {}
+                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+                    if np.any(win_mask):
+                        roi_win = np.mean(roi_power[win_mask])
+                        if roi_baseline > epsilon:
+                            win_logratio = np.log10(roi_win / roi_baseline)
+                            win_erds = ((roi_win - roi_baseline) / roi_baseline) * 100
+                        else:
+                            win_logratio = np.nan
+                            win_erds = np.nan
+                        record[f"roi_power_{band}_{roi_name}_{win_label}_logratio"] = float(win_logratio)
+                        record[f"roi_erds_{band}_{roi_name}_{win_label}_percent"] = float(win_erds)
+                        coarse_values[win_label] = win_erds
+                
+                # Fine temporal bins
+                for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
+                    if np.any(win_mask):
+                        roi_win = np.mean(roi_power[win_mask])
+                        if roi_baseline > epsilon:
+                            win_logratio = np.log10(roi_win / roi_baseline)
+                        else:
+                            win_logratio = np.nan
+                        record[f"roi_power_{band}_{roi_name}_{win_label}_logratio"] = float(win_logratio)
+                
+                # Temporal dynamics
+                if "early" in coarse_values and "late" in coarse_values:
+                    diff = coarse_values["late"] - coarse_values["early"]
+                    record[f"roi_erds_{band}_{roi_name}_early_late_diff"] = float(diff)
         
         records.append(record)
     
@@ -916,22 +1165,42 @@ def _extract_temporal_from_precomputed(
                 else:
                     record[f"nle_{band}_{ch_name}"] = np.nan
                 
-                # === Per-window features ===
+                # Update naming for consistency
+                record[f"temp_var_{band}_{ch_name}_full"] = record.pop(f"var_{band}_{ch_name}", np.nan)
+                record[f"temp_rms_{band}_{ch_name}_full"] = record.pop(f"rms_{band}_{ch_name}", np.nan)
+                record[f"temp_ptp_{band}_{ch_name}_full"] = record.pop(f"ptp_{band}_{ch_name}", np.nan)
+                record[f"temp_mad_{band}_{ch_name}_full"] = record.pop(f"mad_{band}_{ch_name}", np.nan)
+                record[f"temp_zerocross_{band}_{ch_name}_full"] = record.pop(f"zerocross_{band}_{ch_name}", np.nan)
+                record[f"temp_zerocross_rate_{band}_{ch_name}_full"] = record.pop(f"zerocross_rate_{band}_{ch_name}", np.nan)
+                record[f"temp_linelen_{band}_{ch_name}_full"] = record.pop(f"linelen_{band}_{ch_name}", np.nan)
+                record[f"temp_nle_{band}_{ch_name}_full"] = record.pop(f"nle_{band}_{ch_name}", np.nan)
+                record[f"temp_skew_{band}_{ch_name}_full"] = record.pop(f"skew_{band}_{ch_name}", np.nan)
+                record[f"temp_kurt_{band}_{ch_name}_full"] = record.pop(f"kurt_{band}_{ch_name}", np.nan)
+                
+                # === Per-window features (coarse bins) ===
                 for win_mask, win_label in zip(
-                    precomputed.windows.plateau_masks, precomputed.windows.window_labels
+                    precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
                 ):
                     if np.any(win_mask):
                         ch_win = band_filtered[ch_idx, win_mask]
-                        record[f"var_{band}_{ch_name}_{win_label}"] = float(np.var(ch_win))
-                        record[f"rms_{band}_{ch_name}_{win_label}"] = float(np.sqrt(np.mean(ch_win ** 2)))
+                        record[f"temp_var_{band}_{ch_name}_{win_label}"] = float(np.var(ch_win))
+                        record[f"temp_rms_{band}_{ch_name}_{win_label}"] = float(np.sqrt(np.mean(ch_win ** 2)))
+                
+                # === Per-window features (fine bins for HRF) ===
+                for win_mask, win_label in zip(
+                    precomputed.windows.fine_masks, precomputed.windows.fine_labels
+                ):
+                    if np.any(win_mask):
+                        ch_win = band_filtered[ch_idx, win_mask]
+                        record[f"temp_var_{band}_{ch_name}_{win_label}"] = float(np.var(ch_win))
             
             # === Global statistics per band ===
-            record[f"var_{band}_global_mean"] = float(np.mean(all_var))
-            record[f"var_{band}_global_std"] = float(np.std(all_var))
-            record[f"rms_{band}_global_mean"] = float(np.mean(all_rms))
-            record[f"rms_{band}_global_std"] = float(np.std(all_rms))
-            record[f"skew_{band}_global_mean"] = float(np.mean(all_skew))
-            record[f"kurt_{band}_global_mean"] = float(np.mean(all_kurt))
+            record[f"temp_var_{band}_global_full_mean"] = float(np.mean(all_var))
+            record[f"temp_var_{band}_global_full_std"] = float(np.std(all_var))
+            record[f"temp_rms_{band}_global_full_mean"] = float(np.mean(all_rms))
+            record[f"temp_rms_{band}_global_full_std"] = float(np.std(all_rms))
+            record[f"temp_skew_{band}_global_full_mean"] = float(np.mean(all_skew))
+            record[f"temp_kurt_{band}_global_full_mean"] = float(np.mean(all_kurt))
         
         records.append(record)
     
@@ -1007,27 +1276,42 @@ def _extract_complexity_from_data(
                 
                 # === Lempel-Ziv Complexity ===
                 lz = _lempel_ziv_complexity(ch_data)
-                record[f"lzc_{band}_{ch_name}"] = float(lz) if np.isfinite(lz) else np.nan
+                record[f"comp_lzc_{band}_{ch_name}_full"] = float(lz) if np.isfinite(lz) else np.nan
                 if np.isfinite(lz):
                     lz_vals.append(lz)
                 
-                # === Per-window complexity ===
+                # Update naming for consistency
+                record[f"comp_pe_{band}_{ch_name}_full"] = record.pop(f"pe_{band}_{ch_name}", np.nan)
+                record[f"comp_hjorth_act_{band}_{ch_name}_full"] = record.pop(f"hjorth_activity_{band}_{ch_name}", np.nan)
+                record[f"comp_hjorth_mob_{band}_{ch_name}_full"] = record.pop(f"hjorth_mobility_{band}_{ch_name}", np.nan)
+                record[f"comp_hjorth_comp_{band}_{ch_name}_full"] = record.pop(f"hjorth_complexity_{band}_{ch_name}", np.nan)
+                
+                # === Per-window complexity (coarse bins) ===
                 for win_mask, win_label in zip(
-                    precomputed.windows.plateau_masks, precomputed.windows.window_labels
+                    precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
                 ):
                     if np.any(win_mask):
                         ch_win = band_filtered[ch_idx, win_mask]
                         pe_win = _permutation_entropy(ch_win, order=3, delay=1, normalize=True)
-                        record[f"pe_{band}_{ch_name}_{win_label}"] = float(pe_win) if np.isfinite(pe_win) else np.nan
+                        record[f"comp_pe_{band}_{ch_name}_{win_label}"] = float(pe_win) if np.isfinite(pe_win) else np.nan
+                
+                # === Per-window complexity (fine bins for HRF) ===
+                for win_mask, win_label in zip(
+                    precomputed.windows.fine_masks, precomputed.windows.fine_labels
+                ):
+                    if np.any(win_mask):
+                        ch_win = band_filtered[ch_idx, win_mask]
+                        pe_win = _permutation_entropy(ch_win, order=3, delay=1, normalize=True)
+                        record[f"comp_pe_{band}_{ch_name}_{win_label}"] = float(pe_win) if np.isfinite(pe_win) else np.nan
             
             # === Global summaries per band ===
-            record[f"pe_{band}_global_mean"] = float(np.mean(pe_vals)) if pe_vals else np.nan
-            record[f"pe_{band}_global_std"] = float(np.std(pe_vals)) if len(pe_vals) > 1 else np.nan
-            record[f"hjorth_activity_{band}_global"] = float(np.mean(act_vals)) if act_vals else np.nan
-            record[f"hjorth_mobility_{band}_global"] = float(np.mean(mob_vals)) if mob_vals else np.nan
-            record[f"hjorth_complexity_{band}_global"] = float(np.mean(comp_vals)) if comp_vals else np.nan
-            record[f"lzc_{band}_global_mean"] = float(np.mean(lz_vals)) if lz_vals else np.nan
-            record[f"lzc_{band}_global_std"] = float(np.std(lz_vals)) if len(lz_vals) > 1 else np.nan
+            record[f"comp_pe_{band}_global_full_mean"] = float(np.mean(pe_vals)) if pe_vals else np.nan
+            record[f"comp_pe_{band}_global_full_std"] = float(np.std(pe_vals)) if len(pe_vals) > 1 else np.nan
+            record[f"comp_hjorth_act_{band}_global_full_mean"] = float(np.mean(act_vals)) if act_vals else np.nan
+            record[f"comp_hjorth_mob_{band}_global_full_mean"] = float(np.mean(mob_vals)) if mob_vals else np.nan
+            record[f"comp_hjorth_comp_{band}_global_full_mean"] = float(np.mean(comp_vals)) if comp_vals else np.nan
+            record[f"comp_lzc_{band}_global_full_mean"] = float(np.mean(lz_vals)) if lz_vals else np.nan
+            record[f"comp_lzc_{band}_global_full_std"] = float(np.std(lz_vals)) if len(lz_vals) > 1 else np.nan
         
         records.append(record)
     
@@ -1172,15 +1456,34 @@ def _extract_asymmetry_from_precomputed(
     if not roi_definitions:
         roi_definitions = config.get("time_frequency_analysis", {}).get("rois", {})
     
-    # Find left-right pairs
-    asymmetry_pairs = config.get("feature_engineering.roi_features.asymmetry_pairs", [
-        {"left": "Sensorimotor_Ipsi_L", "right": "Sensorimotor_Contra_R", "name": "sensorimotor"},
-        {"left": "Temporal_Ipsi_L", "right": "Temporal_Contra_R", "name": "temporal"},
-        {"left": "ParOccipital_Ipsi_L", "right": "ParOccipital_Contra_R", "name": "paroccipital"},
+    # Find left-right pairs - support both formats:
+    # 1. Simple channel pairs: [["F3", "F4"], ["C3", "C4"], ...]
+    # 2. ROI-based dicts: [{"left": "ROI_L", "right": "ROI_R", "name": "roi"}, ...]
+    raw_pairs = config.get("feature_engineering.roi_features.asymmetry_pairs", [
+        ["F3", "F4"], ["C3", "C4"], ["P3", "P4"], ["O1", "O2"]
     ])
     
-    # Build ROI channel map using shared utility
+    # Normalize to list of dicts
+    asymmetry_pairs = []
+    for pair in raw_pairs:
+        if isinstance(pair, dict):
+            # Already in dict format
+            asymmetry_pairs.append(pair)
+        elif isinstance(pair, (list, tuple)) and len(pair) == 2:
+            # Simple channel pair format: ["F3", "F4"]
+            left_ch, right_ch = pair
+            asymmetry_pairs.append({
+                "left": left_ch,
+                "right": right_ch,
+                "name": f"{left_ch}_{right_ch}",
+                "is_channel": True,  # Flag to indicate direct channel lookup
+            })
+    
+    # Build ROI channel map using shared utility (for ROI-based pairs)
     roi_map = build_roi_map(precomputed.ch_names, roi_definitions)
+    
+    # Build channel name to index map (for direct channel pairs)
+    ch_to_idx = {ch: idx for idx, ch in enumerate(precomputed.ch_names)}
     
     records: List[Dict[str, float]] = []
     n_epochs = precomputed.data.shape[0]
@@ -1193,20 +1496,27 @@ def _extract_asymmetry_from_precomputed(
                 continue
             
             power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
-            active_power = np.mean(power[:, precomputed.windows.active_mask], axis=1)
             
             for pair in asymmetry_pairs:
-                left_roi = pair.get("left", "")
-                right_roi = pair.get("right", "")
-                pair_name = pair.get("name", f"{left_roi}_{right_roi}")
+                left_key = pair.get("left", "")
+                right_key = pair.get("right", "")
+                pair_name = pair.get("name", f"{left_key}_{right_key}")
+                is_channel = pair.get("is_channel", False)
                 
-                left_indices = roi_map.get(left_roi, [])
-                right_indices = roi_map.get(right_roi, [])
+                # Get indices based on whether this is a channel or ROI pair
+                if is_channel:
+                    left_indices = [ch_to_idx[left_key]] if left_key in ch_to_idx else []
+                    right_indices = [ch_to_idx[right_key]] if right_key in ch_to_idx else []
+                else:
+                    left_indices = roi_map.get(left_key, [])
+                    right_indices = roi_map.get(right_key, [])
                 
                 if not left_indices or not right_indices:
-                    record[f"asym_{band}_{pair_name}"] = np.nan
+                    record[f"asym_{band}_{pair_name}_full_index"] = np.nan
                     continue
                 
+                # Full period asymmetry
+                active_power = np.mean(power[:, precomputed.windows.active_mask], axis=1)
                 left_power = np.mean(active_power[left_indices])
                 right_power = np.mean(active_power[right_indices])
                 
@@ -1216,7 +1526,45 @@ def _extract_asymmetry_from_precomputed(
                 else:
                     asymmetry = np.nan
                 
-                record[f"asym_{band}_{pair_name}"] = float(asymmetry)
+                record[f"asym_{band}_{pair_name}_full_index"] = float(asymmetry)
+                
+                # Coarse temporal bins
+                coarse_asym = {}
+                for win_mask, win_label in zip(
+                    precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
+                ):
+                    if np.any(win_mask):
+                        win_power = np.mean(power[:, win_mask], axis=1)
+                        left_win = np.mean(win_power[left_indices])
+                        right_win = np.mean(win_power[right_indices])
+                        denom_win = left_win + right_win
+                        if denom_win > epsilon:
+                            asym_win = (right_win - left_win) / denom_win
+                        else:
+                            asym_win = np.nan
+                        record[f"asym_{band}_{pair_name}_{win_label}_index"] = float(asym_win)
+                        coarse_asym[win_label] = asym_win
+                
+                # Fine temporal bins
+                for win_mask, win_label in zip(
+                    precomputed.windows.fine_masks, precomputed.windows.fine_labels
+                ):
+                    if np.any(win_mask):
+                        win_power = np.mean(power[:, win_mask], axis=1)
+                        left_win = np.mean(win_power[left_indices])
+                        right_win = np.mean(win_power[right_indices])
+                        denom_win = left_win + right_win
+                        if denom_win > epsilon:
+                            asym_win = (right_win - left_win) / denom_win
+                        else:
+                            asym_win = np.nan
+                        record[f"asym_{band}_{pair_name}_{win_label}_index"] = float(asym_win)
+                
+                # Temporal dynamics
+                if "early" in coarse_asym and "late" in coarse_asym:
+                    if np.isfinite(coarse_asym["early"]) and np.isfinite(coarse_asym["late"]):
+                        diff = coarse_asym["late"] - coarse_asym["early"]
+                        record[f"asym_{band}_{pair_name}_early_late_diff"] = float(diff)
         
         records.append(record)
     
@@ -1228,18 +1576,29 @@ def _extract_itpc_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """Extract Inter-Trial Phase Coherence from precomputed phase data."""
+    """
+    Extract Inter-Trial Phase Coherence from precomputed phase data.
+    
+    Features per channel/band:
+    - ITPC for full active period
+    - ITPC per coarse temporal window (early, mid, late)
+    - ITPC per fine temporal window (t1-t7) for HRF modeling
+    - Temporal dynamics: early-late diff, peak time
+    - Global (cross-channel) statistics
+    """
     if not precomputed.band_data or precomputed.windows is None:
         return pd.DataFrame(), []
     
     n_epochs = precomputed.data.shape[0]
     if n_epochs < 5:
-        # Need multiple trials for ITPC
         return pd.DataFrame(), []
+    
+    windows = precomputed.windows
+    times = precomputed.times
+    active_times = times[windows.active_mask]
     
     records: List[Dict[str, float]] = []
     
-    # For trial-level features, use leave-one-out ITPC
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
         
@@ -1248,27 +1607,63 @@ def _extract_itpc_from_precomputed(
                 continue
             
             phase = precomputed.band_data[band].phase  # (epochs, channels, times)
-            phase_active = phase[:, :, precomputed.windows.active_mask]
             
-            # Leave-one-out: mean of all other trials
+            # Leave-one-out mask
             mask = np.ones(n_epochs, dtype=bool)
             mask[ep_idx] = False
-            other_phases = phase_active[mask]
             
-            if other_phases.shape[0] < 2:
-                for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                    record[f"itpc_{band}_{ch_name}"] = np.nan
-                record[f"itpc_{band}_global"] = np.nan
+            if mask.sum() < 2:
                 continue
             
+            # Full active period ITPC
+            phase_active = phase[:, :, windows.active_mask]
+            other_phases = phase_active[mask]
             unit_vectors = np.exp(1j * other_phases)
-            itpc_loo = np.abs(np.mean(unit_vectors, axis=0))  # (channels, times)
-            itpc_ch = np.mean(itpc_loo, axis=1)  # (channels,)
+            itpc_full = np.abs(np.mean(unit_vectors, axis=0))  # (channels, times)
+            itpc_ch_full = np.mean(itpc_full, axis=1)  # (channels,)
             
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                record[f"itpc_{band}_{ch_name}"] = float(itpc_ch[ch_idx])
+                record[f"phase_itpc_{band}_{ch_name}_full_mean"] = float(itpc_ch_full[ch_idx])
             
-            record[f"itpc_{band}_global"] = float(np.mean(itpc_ch))
+            record[f"phase_itpc_{band}_global_full_mean"] = float(np.mean(itpc_ch_full))
+            
+            # Coarse temporal bins
+            coarse_itpc = {}
+            for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+                if np.any(win_mask):
+                    phase_win = phase[:, :, win_mask]
+                    other_phases_win = phase_win[mask]
+                    unit_vectors_win = np.exp(1j * other_phases_win)
+                    itpc_win = np.abs(np.mean(unit_vectors_win, axis=0))
+                    itpc_ch_win = np.mean(itpc_win, axis=1)
+                    
+                    for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                        record[f"phase_itpc_{band}_{ch_name}_{win_label}_mean"] = float(itpc_ch_win[ch_idx])
+                    
+                    coarse_itpc[win_label] = np.mean(itpc_ch_win)
+                    record[f"phase_itpc_{band}_global_{win_label}_mean"] = float(coarse_itpc[win_label])
+            
+            # Fine temporal bins
+            for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
+                if np.any(win_mask):
+                    phase_win = phase[:, :, win_mask]
+                    other_phases_win = phase_win[mask]
+                    unit_vectors_win = np.exp(1j * other_phases_win)
+                    itpc_win = np.abs(np.mean(unit_vectors_win, axis=0))
+                    itpc_ch_win = np.mean(itpc_win, axis=1)
+                    
+                    record[f"phase_itpc_{band}_global_{win_label}_mean"] = float(np.mean(itpc_ch_win))
+            
+            # Temporal dynamics
+            if "early" in coarse_itpc and "late" in coarse_itpc:
+                diff = coarse_itpc["late"] - coarse_itpc["early"]
+                record[f"phase_itpc_{band}_global_early_late_diff"] = float(diff)
+            
+            # Peak ITPC time (from full time course)
+            if len(active_times) > 0:
+                itpc_time_course = np.mean(itpc_full, axis=0)  # (times,)
+                peak_idx = np.argmax(itpc_time_course)
+                record[f"phase_itpc_{band}_peak_latency"] = float(active_times[peak_idx])
         
         records.append(record)
     
@@ -1324,7 +1719,7 @@ def extract_precomputed_features(
         - result.get_feature_group_df("erds") - specific feature group
     """
     all_groups = [
-        "erds", "spectral", "gfp", "connectivity", "roi", 
+        "power", "erds", "spectral", "gfp", "connectivity", "roi", 
         "temporal", "complexity", "aperiodic", "ratios", "asymmetry", "itpc"
     ]
     if feature_groups is None:
@@ -1359,7 +1754,7 @@ def extract_precomputed_features(
     
     # Determine what needs to be precomputed
     needs_bands = any(g in feature_groups for g in [
-        "erds", "connectivity", "roi", "gfp", "ratios", "asymmetry", "itpc"
+        "power", "erds", "connectivity", "roi", "gfp", "ratios", "asymmetry", "itpc"
     ])
     needs_psd = any(g in feature_groups for g in ["spectral", "aperiodic"])
     
@@ -1375,6 +1770,12 @@ def extract_precomputed_features(
     result = ExtractionResult(precomputed=precomputed, condition=condition)
     
     # Extract each feature group
+    if "power" in feature_groups:
+        logger.info("Extracting time-resolved power features...")
+        df, cols = _extract_power_from_precomputed(precomputed, bands)
+        if not df.empty:
+            result.features["power"] = FeatureSet(df, cols, "power")
+    
     if "erds" in feature_groups:
         logger.info("Extracting ERD/ERS features...")
         df, cols = _extract_erds_from_precomputed(precomputed, bands)
@@ -1546,4 +1947,3 @@ def get_feature_groups_for_ml() -> Dict[str, List[str]]:
         # Time-resolved (windowed features for HRF modeling)
         "temporal": ["erds", "roi", "gfp", "temporal"],
     }
-

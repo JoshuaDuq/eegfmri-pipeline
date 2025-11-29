@@ -31,7 +31,6 @@ from ...utils.analysis.tfr import (
     apply_baseline_and_average,
     apply_baseline_and_crop,
     create_tfr_subset,
-    get_bands_for_tfr,
     create_time_mask_strict,
     create_time_mask_loose,
 )
@@ -348,8 +347,7 @@ def plot_channels_all_trials(
 ) -> None:
     """Plot TFR for multiple channels with baseline correction.
     
-    Creates plots for all specified channels (or all channels if None) and generates
-    frequency band-specific plots for each channel.
+    Creates plots for all specified channels (or all channels if None).
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
@@ -375,36 +373,12 @@ def plot_channels_all_trials(
     ch_dir = out_dir / "channels"
     ch_dir.mkdir(parents=True, exist_ok=True)
 
-    fmax_available = float(np.max(tfr_avg.freqs))
-    bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-
     for ch in ch_names:
         _plot_single_tfr_figure(
             tfr_avg, ch, None, f"{ch} — all trials (baseline logratio)",
             f"tfr_{ch}_all_trials.png", ch_dir, config, logger, baseline_used,
             subject=subject, task=task
         )
-
-        for band, (fmin, fmax) in bands.items():
-            fmax_eff = min(fmax, fmax_available)
-            if fmin >= fmax_eff:
-                continue
-            band_dir = ch_dir / band
-            band_dir.mkdir(parents=True, exist_ok=True)
-
-            tfr_band = tfr_avg.copy()
-            freq_mask = (np.asarray(tfr_band.freqs) >= fmin) & (np.asarray(tfr_band.freqs) <= fmax_eff)
-            if not freq_mask.any():
-                continue
-            
-            fig = unwrap_figure(tfr_band.plot(picks=ch, fmin=fmin, fmax=fmax_eff, show=False))
-            font_sizes = get_font_sizes()
-            fig.suptitle(f"{ch} — {band} band (baseline logratio)", fontsize=font_sizes["figure_title"])
-            _save_fig(
-                fig, band_dir, f"tfr_{ch}_{band}_all_trials.png",
-                config=config, logger=logger, baseline_used=baseline_used,
-                subject=subject, task=task, band=band
-            )
 
 
 def contrast_channels_pain_nonpain(
@@ -420,7 +394,7 @@ def contrast_channels_pain_nonpain(
     """Plot channel-level TFR contrast between pain and non-pain conditions.
     
     Creates plots for each channel showing pain condition, non-pain condition,
-    and their difference, with optional frequency band-specific plots.
+    and their difference.
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
@@ -460,22 +434,8 @@ def contrast_channels_pain_nonpain(
     ch_dir = out_dir / "channels"
     ch_dir.mkdir(parents=True, exist_ok=True)
 
-    fmax_available = float(np.max(tfr_pain.freqs))
-    bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-
     for ch in ch_names:
         _plot_single_tfr_figure(tfr_pain, ch, None, f"{ch} — Painful (baseline logratio)", f"tfr_{ch}_painful_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
         _plot_single_tfr_figure(tfr_non, ch, None, f"{ch} — Non-pain (baseline logratio)", f"tfr_{ch}_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
         _plot_single_tfr_figure(tfr_diff, ch, None, f"{ch} — Pain minus Non-pain (baseline logratio)", f"tfr_{ch}_pain_minus_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
-
-        for band, (fmin, fmax) in bands.items():
-            fmax_eff = min(fmax, fmax_available)
-            if fmin >= fmax_eff:
-                continue
-            band_dir = ch_dir / band
-            band_dir.mkdir(parents=True, exist_ok=True)
-
-            _plot_single_tfr_figure(tfr_pain, ch, None, f"{ch} — {band} Painful (baseline logratio)", f"tfr_{ch}_{band}_painful_bl.png", band_dir, config, logger, baseline_used, subject=subject, band=band)
-            _plot_single_tfr_figure(tfr_non, ch, None, f"{ch} — {band} Non-pain (baseline logratio)", f"tfr_{ch}_{band}_nonpain_bl.png", band_dir, config, logger, baseline_used, subject=subject, band=band)
-            _plot_single_tfr_figure(tfr_diff, ch, None, f"{ch} — {band} Pain minus Non-pain (baseline logratio)", f"tfr_{ch}_{band}_pain_minus_nonpain_bl.png", band_dir, config, logger, baseline_used, subject=subject, band=band)
 

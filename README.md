@@ -39,6 +39,10 @@ eeg_pipeline/
 │   │   ├── temporal.py          # Time-frequency correlations
 │   │   ├── precomputed_correlations.py
 │   │   ├── condition_correlations.py
+│   │   ├── specialized_features.py  # Specialized feature correlations
+│   │   ├── correlations.py      # Generic correlation utilities
+│   │   ├── cluster_tests.py     # Cluster permutation tests
+│   │   ├── topomaps.py          # Topographic map correlations
 │   │   ├── fdr_correction.py    # Global FDR correction
 │   │   └── exports.py           # Export significant predictors
 │   ├── decoding/                # ML-based prediction
@@ -46,6 +50,7 @@ eeg_pipeline/
 │   │   ├── pipelines.py         # ML pipeline factories
 │   │   ├── data.py              # Data loading for decoding
 │   │   ├── cross_validation.py  # LOSO, within-subject CV
+│   │   ├── permutation.py       # Permutation testing
 │   │   └── time_generalization.py
 │   ├── features/                # Feature extraction
 │   │   ├── core.py              # PrecomputedData, shared utilities
@@ -59,14 +64,27 @@ eeg_pipeline/
 │   │   ├── spectral.py          # IAF, entropy, ratios
 │   │   ├── temporal.py          # Statistical moments
 │   │   ├── complexity.py        # PE, Hjorth, LZC
-│   │   └── condition_features.py
+│   │   ├── global_features.py   # GFP, global synchrony
+│   │   ├── roi_features.py      # ROI-averaged features
+│   │   └── plateau.py           # Plateau-averaged features
 │   └── group/                   # Group-level statistics
+│       ├── behavior.py          # Group behavior analysis
+│       ├── features.py          # Group feature aggregation
+│       └── statistics.py        # Group statistical tests
 │
 ├── plotting/                    # Visualization (lazy imports)
+│   ├── config.py                # Plot configuration
 │   ├── behavioral/              # Correlation plots
+│   ├── core/                    # Core plotting utilities
 │   ├── decoding/                # Performance plots
 │   ├── erp/                     # ERP plots
 │   ├── features/                # Feature distributions
+│   │   ├── power.py, power_group.py
+│   │   ├── connectivity.py
+│   │   ├── microstates.py
+│   │   ├── aperiodic.py
+│   │   ├── phase.py
+│   │   └── viz.py               # General feature viz
 │   └── tfr/                     # Time-frequency plots
 │
 ├── preprocessing/               # Data preprocessing
@@ -78,9 +96,21 @@ eeg_pipeline/
 │
 └── utils/                       # Shared utilities only
     ├── config/                  # Configuration loading
+    │   ├── loader.py            # Config loader
+    │   └── eeg_config.yaml      # Main configuration
     ├── data/                    # Data loading
+    │   ├── loading.py           # Data loaders
+    │   └── features.py          # Feature data utilities
     ├── io/                      # File I/O
-    └── analysis/                # Stats, TFR helpers
+    │   ├── general.py           # General I/O utilities
+    │   └── decoding.py          # Decoding I/O
+    ├── analysis/                # Stats, TFR helpers
+    │   ├── stats.py             # Statistical utilities
+    │   ├── tfr.py               # Time-frequency utilities
+    │   ├── reliability.py       # Reliability analysis
+    │   └── windowing.py         # Time windowing
+    ├── progress.py              # Progress tracking utilities
+    └── validation.py            # Data validation utilities
 ```
 
 ## Data Flow
@@ -132,7 +162,7 @@ eeg_pipeline/
 ```
 run_pipeline.py features compute --subject 0001
 │
-└── extract_all_features()                    [utils/pipelines/features.py]
+└── extract_all_features()                    [pipelines/features.py]
     │
     ├── LOAD DATA
     │   ├── Load cleaned epochs               → derivatives/preprocessed/sub-*/eeg/*-epo.fif
@@ -301,7 +331,7 @@ derivatives/sub-{subject}/eeg/features/
 ```
 run_pipeline.py behavior compute --subject 0001
 │
-└── process_subject()                         [utils/pipelines/behavior.py]
+└── process_subject()                         [pipelines/behavior.py]
     │
     ├── LOAD DATA ONCE (BehaviorContext)      [analysis/behavior/core.py]
     │   ├── Load epochs + epochs_info
@@ -816,13 +846,13 @@ Decoding uses nested leave-one-subject-out (LOSO) cross-validation with inner Gr
 ### Adding New Features
 
 1. Create extraction function in `analysis/features/`
-2. Register in `utils/pipelines/features.py`
+2. Register in `pipelines/features.py`
 3. Add to `FEATURE_CATEGORIES` in `scripts/run_pipeline.py`
 
 ### Adding New Analyses
 
 1. Create analysis module in `analysis/`
-2. Create pipeline wrapper in `utils/pipelines/`
+2. Create pipeline wrapper in `pipelines/`
 3. Add subcommand in `scripts/run_pipeline.py`
 
 ## Troubleshooting

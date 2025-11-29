@@ -18,11 +18,12 @@ from ..io.general import (
     deriv_stats_path,
     _find_clean_epochs_path,
     fdr_bh,
+    get_logger,
 )
 from ..config.loader import load_settings
 from ..data.loading import resolve_columns
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _BEST_PARAMS_LOGGED: set = set()
 _handler_lock = threading.Lock()
@@ -82,8 +83,14 @@ def create_run_manifest(results_dir: Path, cli_args: dict, config: dict, run_id:
         json.dump(manifest, f, indent=2)
 
 def setup_file_logging(results_dir: Path, run_id: Optional[str] = None, logger_name: str = "decode_pain") -> Path:
+    """
+    Add a file handler to a logger for run-specific logging.
+    
+    This adds a file handler while preserving the centralized logging setup.
+    The file handler is tracked to prevent duplicates.
+    """
     global _FILE_LOG_HANDLER
-    logger_instance = logging.getLogger(logger_name)
+    logger_instance = get_logger(logger_name)
     
     with _handler_lock:
         log_dir = results_dir / "logs"
@@ -92,16 +99,15 @@ def setup_file_logging(results_dir: Path, run_id: Optional[str] = None, logger_n
         suffix = f"_{run_id}" if run_id else ""
         log_path = log_dir / f"{logger_name}_{ts}{suffix}.log"
         
+        # Remove previous file handler if exists
         if _FILE_LOG_HANDLER is not None:
             logger_instance.removeHandler(_FILE_LOG_HANDLER)
             _FILE_LOG_HANDLER.close()
         
-        existing_file_handlers = [
-            h for h in logger_instance.handlers
-            if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path)
-        ]
-        if existing_file_handlers:
-            return log_path
+        # Check if this exact file handler already exists
+        for h in logger_instance.handlers:
+            if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path):
+                return log_path
         
         fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
         fh.setLevel(logging.INFO)

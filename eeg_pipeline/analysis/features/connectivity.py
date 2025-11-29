@@ -1,3 +1,15 @@
+"""
+Connectivity Feature Extraction
+================================
+
+Computes functional connectivity features from EEG data:
+- Phase-based: wPLI, PLI, imCoh
+- Amplitude-based: AEC, AEC-orth (orthogonalized)
+- Graph metrics: clustering, efficiency, participation, small-world
+
+All measures are computed per frequency band and trial.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,20 +26,18 @@ import networkx as nx
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.utils.data.loading import flatten_lower_triangles
+from eeg_pipeline.utils.analysis.graph_metrics import (
+    symmetrize_adjacency as _symmetrize_and_clip,
+    compute_global_efficiency_weighted as _global_efficiency_weighted,
+    compute_small_world_sigma,
+    threshold_adjacency as _threshold_adjacency_util,
+)
 
 
-###################################################################
-# Connectivity Feature Extraction
-###################################################################
-
-
-def _symmetrize_and_clip(adj: np.ndarray) -> np.ndarray:
-    adj = np.asarray(adj, dtype=float)
-    if adj.ndim != 2 or adj.shape[0] != adj.shape[1]:
-        raise ValueError(f"Adjacency must be square; got shape {adj.shape}")
-    adj = 0.5 * (adj + adj.T)
-    np.fill_diagonal(adj, 0.0)
-    return adj
+# =============================================================================
+# Constants
+# =============================================================================
+_EPSILON = 1e-12
 
 
 @lru_cache(maxsize=1)
@@ -102,36 +112,8 @@ def _participation_coeff(adj: np.ndarray, labels: np.ndarray, community_map: Dic
     return pc
 
 
-def _global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> float:
-    G = nx.from_numpy_array(adj)
-    lengths = {}
-    for u, v, data in G.edges(data=True):
-        w = abs(data.get("weight", 0.0))
-        lengths[(u, v)] = 1.0 / (w + eps)
-    nx.set_edge_attributes(G, lengths, "length")
-    try:
-        return float(nx.global_efficiency(G, weight="length"))
-    except TypeError:
-        # networkx versions without weighted global_efficiency support
-        try:
-            sp_lengths = dict(nx.all_pairs_dijkstra_path_length(G, weight="length"))
-            n = G.number_of_nodes()
-            if n <= 1:
-                return np.nan
-            inv_dist = []
-            for i in range(n):
-                for j in range(i + 1, n):
-                    d = sp_lengths.get(i, {}).get(j, np.inf)
-                    if np.isfinite(d) and d > 0:
-                        inv_dist.append(1.0 / d)
-            return float((2.0 / (n * (n - 1))) * np.sum(inv_dist)) if inv_dist else np.nan
-        except (nx.NetworkXError, ValueError, KeyError):
-            return np.nan
-    except ZeroDivisionError:
-        return np.nan
-
-
 def _small_world_sigma(adj_bin: np.ndarray, n_rand: int = 100, config: Any = None) -> float:
+    """Wrapper around utils function with config support."""
     if config is not None:
         n_rand = int(config.get("feature_engineering.connectivity.small_world_n_rand", n_rand))
     
@@ -303,34 +285,27 @@ def _get_connectivity_time_mask(
 
 
 def _bandpass_hilbert_trials(
-    data: np.ndarray,
-    sfreq: float,
-    fmin: float,
-    fmax: float,
-    logger: Any,
+    data: np.ndarray, sfreq: float, fmin: float, fmax: float, logger: Any
 ) -> Optional[np.ndarray]:
+    """Band-pass filter and compute analytic signal via Hilbert transform."""
     try:
         filtered = mne.filter.filter_data(
-            data.reshape(-1, data.shape[-1]),
-            sfreq,
-            l_freq=fmin,
-            h_freq=fmax,
-            n_jobs=1,
-            verbose=False,
+            data.reshape(-1, data.shape[-1]), sfreq,
+            l_freq=fmin, h_freq=fmax, n_jobs=1, verbose=False,
         )
         analytic = hilbert(filtered, axis=-1)
-    except Exception as exc:  # pragma: no cover - numeric exceptions depend on data
-        logger.error(
-            "Failed to band-pass/Hilbert filter data for %.1f-%.1f Hz connectivity: %s",
-            fmin,
-            fmax,
-            exc,
-        )
+    except Exception as exc:
+        logger.error("Hilbert filter failed for %.1f-%.1f Hz: %s", fmin, fmax, exc)
         return None
     return analytic.reshape(data.shape)
 
 
+# =============================================================================
+# Connectivity Measures
+# =============================================================================
+
 def _compute_wpli_matrices(analytic: np.ndarray) -> np.ndarray:
+    """Compute weighted Phase Lag Index (wPLI) matrices."""
     n_epochs, n_channels, n_times = analytic.shape
     if n_times < 2:
         raise ValueError("Cannot compute wPLI with fewer than 2 samples in the window.")
@@ -521,6 +496,10 @@ def _flatten_connectivity_data(
     return flatten_lower_triangles(arr, labels, prefix=prefix)
 
 
+# =============================================================================
+# Public API
+# =============================================================================
+
 def extract_connectivity_features(
     epochs: mne.Epochs,
     subject: str,
@@ -530,6 +509,19 @@ def extract_connectivity_features(
     config: Any,
     logger: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Extract connectivity features for all frequency bands.
+    
+    Computes wPLI (always), plus optionally AEC, imCoh, PLI based on config.
+    Also computes graph metrics (clustering, efficiency, participation).
+    
+    Returns
+    -------
+    df : pd.DataFrame
+        Connectivity features (epochs x features)
+    columns : List[str]
+        Feature column names
+    """
     picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     if len(picks) == 0:
         logger.warning("No EEG channels available for connectivity computation")

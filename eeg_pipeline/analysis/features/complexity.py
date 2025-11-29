@@ -1,190 +1,32 @@
+"""
+Complexity Feature Extraction
+==============================
+
+Nonlinear dynamics features for EEG analysis:
+- Permutation Entropy (PE): Ordinal pattern complexity
+- Hjorth Parameters: Activity, mobility, complexity
+- Lempel-Ziv Complexity (LZC): Algorithmic complexity
+- Sample Entropy: Regularity measure
+
+All features can be computed on raw or band-filtered signals.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
-from math import factorial
 
 import numpy as np
 import pandas as pd
 import mne
 
+from eeg_pipeline.analysis.features.core import MIN_SAMPLES_FOR_ENTROPY
 from eeg_pipeline.utils.config.loader import get_frequency_bands
-
-
-###################################################################
-# Complexity Feature Extraction
-###################################################################
-
-
-def _embed_time_series(x: np.ndarray, order: int, delay: int) -> np.ndarray:
-    n = len(x)
-    if n < (order - 1) * delay + 1:
-        return np.array([])
-    
-    n_vectors = n - (order - 1) * delay
-    embedded = np.zeros((n_vectors, order))
-    
-    for i in range(n_vectors):
-        for j in range(order):
-            embedded[i, j] = x[i + j * delay]
-    
-    return embedded
-
-
-def _permutation_entropy(
-    x: np.ndarray,
-    order: int = 3,
-    delay: int = 1,
-    normalize: bool = True,
-) -> float:
-    if len(x) < (order - 1) * delay + 1:
-        return np.nan
-    
-    embedded = _embed_time_series(x, order, delay)
-    if embedded.size == 0:
-        return np.nan
-    
-    n_vectors = embedded.shape[0]
-    perm_counts: Dict[tuple, int] = {}
-    
-    for i in range(n_vectors):
-        pattern = tuple(np.argsort(embedded[i]))
-        perm_counts[pattern] = perm_counts.get(pattern, 0) + 1
-    
-    probs = np.array(list(perm_counts.values())) / n_vectors
-    probs = probs[probs > 0]
-    pe = -np.sum(probs * np.log2(probs))
-    
-    if normalize:
-        max_entropy = np.log2(factorial(order))
-        if max_entropy > 0:
-            pe = pe / max_entropy
-    
-    return float(pe)
-
-
-def _sample_entropy(
-    x: np.ndarray,
-    m: int = 2,
-    r: Optional[float] = None,
-    r_multiplier: float = 0.2,
-) -> float:
-    """
-    Compute sample entropy using vectorized Chebyshev distance.
-    
-    Optimized to avoid O(n²) nested Python loops by using NumPy broadcasting.
-    """
-    n = len(x)
-    if n < m + 2:
-        return np.nan
-    
-    if r is None:
-        std = np.std(x, ddof=1)
-        if std == 0:
-            return np.nan
-        r = r_multiplier * std
-    
-    def count_matches_vectorized(template_length: int) -> int:
-        """Count template matches using vectorized Chebyshev distance."""
-        n_templates = n - template_length
-        if n_templates < 2:
-            return 0
-        
-        # Build template matrix: (n_templates, template_length)
-        templates = np.array([x[i:i + template_length] for i in range(n_templates)])
-        
-        # Compute pairwise Chebyshev distances using broadcasting
-        # diff[i, j, k] = templates[i, k] - templates[j, k]
-        diff = templates[:, np.newaxis, :] - templates[np.newaxis, :, :]  # (n, n, m)
-        chebyshev = np.max(np.abs(diff), axis=2)  # (n, n)
-        
-        # Count pairs where distance < r (upper triangle only, excluding diagonal)
-        triu_idx = np.triu_indices(n_templates, k=1)
-        matches = np.sum(chebyshev[triu_idx] < r)
-        return int(matches)
-    
-    a = count_matches_vectorized(m + 1)
-    b = count_matches_vectorized(m)
-    
-    if b == 0:
-        return np.nan
-    
-    return float(-np.log(a / b)) if a > 0 else np.nan
-
-
-def _hjorth_parameters(x: np.ndarray) -> Tuple[float, float, float]:
-    if len(x) < 3:
-        return np.nan, np.nan, np.nan
-    
-    diff1 = np.diff(x)
-    diff2 = np.diff(diff1)
-    
-    var_x = np.var(x)
-    var_d1 = np.var(diff1)
-    var_d2 = np.var(diff2)
-    
-    if var_x == 0:
-        return np.nan, np.nan, np.nan
-    
-    activity = float(var_x)
-    
-    if var_x > 0:
-        mobility = float(np.sqrt(var_d1 / var_x))
-    else:
-        mobility = np.nan
-    
-    if var_d1 > 0 and mobility > 0:
-        complexity = float(np.sqrt(var_d2 / var_d1) / mobility)
-    else:
-        complexity = np.nan
-    
-    return activity, mobility, complexity
-
-
-def _lempel_ziv_complexity(
-    x: np.ndarray,
-    threshold: Optional[float] = None,
-    normalize: bool = True,
-) -> float:
-    if len(x) < 2:
-        return np.nan
-    
-    if threshold is None:
-        threshold = np.median(x)
-    
-    binary = (x > threshold).astype(int)
-    s = "".join(map(str, binary))
-    n = len(s)
-    
-    if n == 0:
-        return np.nan
-    
-    i = 0
-    c = 1
-    l = 1
-    k = 1
-    k_max = 1
-    
-    while i + k <= n:
-        if s[i:i + k] in s[:i + l - 1]:
-            k += 1
-            k_max = max(k, k_max)
-        else:
-            c += 1
-            i += k_max
-            l = 1
-            k = 1
-            k_max = 1
-        
-        if i + k > n:
-            break
-    
-    lzc = float(c)
-    
-    if normalize and n > 1:
-        b = n / np.log2(n)
-        lzc = lzc / b
-    
-    return lzc
+from eeg_pipeline.utils.analysis.signal_metrics import (
+    compute_permutation_entropy as _permutation_entropy,
+    compute_sample_entropy as _sample_entropy,
+    compute_hjorth_parameters as _hjorth_parameters,
+    compute_lempel_ziv_complexity as _lempel_ziv_complexity,
+)
 
 
 def extract_permutation_entropy_features(
@@ -234,17 +76,25 @@ def extract_permutation_entropy_features(
 
     order = int(config.get("feature_engineering.complexity.pe_order", order))
     delay = int(config.get("feature_engineering.complexity.pe_delay", delay))
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
+    if (order - 1) * delay + 1 > min_samples:
+        min_samples = (order - 1) * delay + 1
 
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
+    n_too_short = 0
 
     for epoch in data:
         record: Dict[str, float] = {}
 
         for ch_idx, ch_name in enumerate(ch_names):
             ch_data = epoch[ch_idx]
+            if len(ch_data) < min_samples:
+                record[f"pe_{ch_name}"] = np.nan
+                n_too_short += 1
+                continue
             pe = _permutation_entropy(ch_data, order=order, delay=delay, normalize=normalize)
             record[f"pe_{ch_name}"] = pe
 
@@ -253,6 +103,13 @@ def extract_permutation_entropy_features(
         record["pe_global_std"] = float(np.std(pe_vals)) if len(pe_vals) > 1 else np.nan
 
         feature_records.append(record)
+
+    if n_too_short > 0:
+        logger.warning(
+            "Permutation entropy: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -265,6 +122,7 @@ def extract_sample_entropy_features(
     *,
     m: int = 2,
     r_multiplier: float = 0.2,
+    max_samples: int = 500,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Extract sample entropy for each epoch and channel.
@@ -300,22 +158,35 @@ def extract_sample_entropy_features(
 
     m = int(config.get("feature_engineering.complexity.sampen_m", m))
     r_multiplier = float(config.get("feature_engineering.complexity.sampen_r_mult", r_multiplier))
+    max_samples = int(config.get("feature_engineering.complexity.sampen_max_samples", max_samples))
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
+    if m + 2 > min_samples:
+        min_samples = m + 2
 
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
+    n_too_short = 0
 
     for epoch_idx, epoch in enumerate(data):
         record: Dict[str, float] = {}
 
         for ch_idx, ch_name in enumerate(ch_names):
             ch_data = epoch[ch_idx]
-            
-            if len(ch_data) > 500:
-                ch_data = ch_data[:500]
+            if len(ch_data) < min_samples:
+                record[f"sampen_{ch_name}"] = np.nan
+                n_too_short += 1
+                continue
+            if len(ch_data) > max_samples:
+                sample_idx = np.linspace(0, len(ch_data) - 1, num=max_samples, dtype=int)
+                sample_idx = np.unique(sample_idx)  # avoid duplicate indices when len ~ max_samples
+                ch_data = ch_data[sample_idx]
                 if epoch_idx == 0 and ch_idx == 0:
-                    logger.info("Truncating data to 500 samples for sample entropy (computational efficiency)")
+                    logger.info(
+                        "Downsampled channel data to %d samples for sample entropy (uniform coverage, computational efficiency)",
+                        len(ch_data),
+                    )
             
             sampen = _sample_entropy(ch_data, m=m, r_multiplier=r_multiplier)
             record[f"sampen_{ch_name}"] = sampen
@@ -324,6 +195,13 @@ def extract_sample_entropy_features(
         record["sampen_global_mean"] = float(np.mean(sampen_vals)) if sampen_vals else np.nan
 
         feature_records.append(record)
+
+    if n_too_short > 0:
+        logger.warning(
+            "Sample entropy: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -425,16 +303,22 @@ def extract_lempel_ziv_complexity(
         logger.warning("No EEG channels available for Lempel-Ziv complexity extraction")
         return pd.DataFrame(), []
 
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
+    n_too_short = 0
 
     for epoch in data:
         record: Dict[str, float] = {}
 
         for ch_idx, ch_name in enumerate(ch_names):
             ch_data = epoch[ch_idx]
+            if len(ch_data) < min_samples:
+                record[f"lzc_{ch_name}"] = np.nan
+                n_too_short += 1
+                continue
             lzc = _lempel_ziv_complexity(ch_data, normalize=normalize)
             record[f"lzc_{ch_name}"] = lzc
 
@@ -442,6 +326,13 @@ def extract_lempel_ziv_complexity(
         record["lzc_global_mean"] = float(np.mean(lzc_vals)) if lzc_vals else np.nan
 
         feature_records.append(record)
+
+    if n_too_short > 0:
+        logger.warning(
+            "Lempel-Ziv complexity: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -563,12 +454,16 @@ def extract_band_permutation_entropy_features(
     freq_bands = get_frequency_bands(config)
     order = int(config.get("feature_engineering.complexity.pe_order", order))
     delay = int(config.get("feature_engineering.complexity.pe_delay", delay))
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
+    if (order - 1) * delay + 1 > min_samples:
+        min_samples = (order - 1) * delay + 1
 
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 
     feature_records: List[Dict[str, float]] = []
+    n_too_short = 0
 
     for band in bands:
         if band not in freq_bands:
@@ -589,6 +484,10 @@ def extract_band_permutation_entropy_features(
             pe_vals = []
             for ch_idx, ch_name in enumerate(ch_names):
                 ch_data = epoch[ch_idx]
+                if len(ch_data) < min_samples:
+                    record[f"pe_{band}_{ch_name}"] = np.nan
+                    n_too_short += 1
+                    continue
                 pe = _permutation_entropy(ch_data, order=order, delay=delay, normalize=normalize)
                 record[f"pe_{band}_{ch_name}"] = pe
                 if np.isfinite(pe):
@@ -596,6 +495,13 @@ def extract_band_permutation_entropy_features(
 
             record[f"pe_{band}_global_mean"] = float(np.mean(pe_vals)) if pe_vals else np.nan
             record[f"pe_{band}_global_std"] = float(np.std(pe_vals)) if len(pe_vals) > 1 else np.nan
+
+    if n_too_short > 0:
+        logger.warning(
+            "Band permutation entropy: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -643,6 +549,8 @@ def extract_band_hjorth_parameters(
     sfreq = float(epochs.info["sfreq"])
 
     feature_records: List[Dict[str, float]] = []
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
+    n_too_short = 0
 
     for band in bands:
         if band not in freq_bands:
@@ -661,6 +569,12 @@ def extract_band_hjorth_parameters(
             act_vals, mob_vals, comp_vals = [], [], []
             for ch_idx, ch_name in enumerate(ch_names):
                 ch_data = epoch[ch_idx]
+                if len(ch_data) < min_samples:
+                    record[f"hjorth_activity_{band}_{ch_name}"] = np.nan
+                    record[f"hjorth_mobility_{band}_{ch_name}"] = np.nan
+                    record[f"hjorth_complexity_{band}_{ch_name}"] = np.nan
+                    n_too_short += 1
+                    continue
                 activity, mobility, complexity = _hjorth_parameters(ch_data)
 
                 record[f"hjorth_activity_{band}_{ch_name}"] = activity
@@ -677,6 +591,13 @@ def extract_band_hjorth_parameters(
             record[f"hjorth_activity_{band}_global"] = float(np.mean(act_vals)) if act_vals else np.nan
             record[f"hjorth_mobility_{band}_global"] = float(np.mean(mob_vals)) if mob_vals else np.nan
             record[f"hjorth_complexity_{band}_global"] = float(np.mean(comp_vals)) if comp_vals else np.nan
+
+    if n_too_short > 0:
+        logger.warning(
+            "Band Hjorth parameters: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -718,12 +639,14 @@ def extract_band_lempel_ziv_complexity(
         logger.warning("No EEG channels available for band LZC extraction")
         return pd.DataFrame(), []
 
+    min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
     freq_bands = get_frequency_bands(config)
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 
     feature_records: List[Dict[str, float]] = []
+    n_too_short = 0
 
     for band in bands:
         if band not in freq_bands:
@@ -742,6 +665,10 @@ def extract_band_lempel_ziv_complexity(
             lzc_vals = []
             for ch_idx, ch_name in enumerate(ch_names):
                 ch_data = epoch[ch_idx]
+                if len(ch_data) < min_samples:
+                    record[f"lzc_{band}_{ch_name}"] = np.nan
+                    n_too_short += 1
+                    continue
                 lzc = _lempel_ziv_complexity(ch_data)
                 record[f"lzc_{band}_{ch_name}"] = lzc
                 if np.isfinite(lzc):
@@ -749,6 +676,13 @@ def extract_band_lempel_ziv_complexity(
 
             record[f"lzc_{band}_global_mean"] = float(np.mean(lzc_vals)) if lzc_vals else np.nan
             record[f"lzc_{band}_global_std"] = float(np.std(lzc_vals)) if len(lzc_vals) > 1 else np.nan
+
+    if n_too_short > 0:
+        logger.warning(
+            "Band Lempel-Ziv complexity: %d channel-epochs shorter than min_samples=%d; returning NaN for those entries.",
+            n_too_short,
+            min_samples,
+        )
 
     column_names = list(feature_records[0].keys()) if feature_records else []
     return pd.DataFrame(feature_records), column_names
@@ -805,4 +739,3 @@ def extract_all_band_complexity_features(
 
     combined = pd.concat(all_dfs, axis=1)
     return combined, all_cols
-

@@ -27,7 +27,9 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 
-logger = logging.getLogger(__name__)
+from eeg_pipeline.utils.io.general import get_logger
+
+logger = get_logger(__name__)
 
 
 ###################################################################

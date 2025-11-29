@@ -13,7 +13,9 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from eeg_pipeline.utils.io.general import get_logger
+
+logger = get_logger(__name__)
 
 
 def load_plateau_matrix(

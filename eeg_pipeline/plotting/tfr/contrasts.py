@@ -49,7 +49,7 @@ from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode, compute_cluster_significance
 from ..core.colorbars import add_normalized_colorbar, add_diff_colorbar
 from ..core.topomaps import build_topomap_diff_label
-from ..core.annotations import render_roi_annotations, get_sig_marker_text
+from ..core.annotations import add_roi_annotations, get_sig_marker_text
 
 
 ###################################################################
@@ -137,7 +137,7 @@ def _plot_topomap_with_label(
     label_x_position = tfr_config.get("label_x_position", 0.5) if plot_cfg else 0.5
     label_y_position = tfr_config.get("label_y_position", 1.02) if plot_cfg else 1.02
     plot_topomap_on_ax(ax, data, info, vmin=vmin, vmax=vmax, config=config)
-    render_roi_annotations(ax, data, info, config=config)
+    add_roi_annotations(ax, data, info, config=config)
     ax.text(label_x_position, label_y_position, label_text, transform=ax.transAxes, ha="center", va="top", fontsize=font_sizes["title"])
 
 
@@ -204,7 +204,7 @@ def _plot_topomap_with_diff_label(
         config=config,
     )
     is_cluster = sig_mask is not None and cluster_info.get("cluster_p_min") is not None
-    render_roi_annotations(
+    add_roi_annotations(
         ax, diff_data, info, config=config,
         sig_mask=sig_mask,
         cluster_p_min=cluster_info.get("cluster_p_min"),
@@ -292,7 +292,7 @@ def _plot_diff_topomap_with_label(
         vmax=vmax,
         config=config,
     )
-    render_roi_annotations(
+    add_roi_annotations(
         ax, diff_data, info, config=config,
         sig_mask=(sig_mask if viz_params["diff_annotation_enabled"] else None),
         cluster_p_min=cluster_p_min, cluster_k=cluster_k, cluster_mass=cluster_mass,

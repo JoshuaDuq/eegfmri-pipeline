@@ -65,6 +65,7 @@ from ..core.topomaps import build_topomap_percentage_label, build_topomap_diff_l
 from matplotlib.cm import ScalarMappable
 import matplotlib.colors as mcolors
 from ..core.annotations import (
+    add_roi_annotations,
     apply_fdr_correction_to_roi_pvalues,
     build_significance_info,
     render_roi_annotations,
@@ -82,7 +83,7 @@ from .contrasts import (
 )
 from .channels import _save_fig, _plot_single_tfr_figure
 from .scalpmean import _plot_scalpmean_tfr
-from .topomaps import _add_roi_annotations, _plot_temporal_topomaps_for_bands
+from .topomaps import _plot_temporal_topomaps_for_bands
 
 
 ###################################################################

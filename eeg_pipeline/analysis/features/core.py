@@ -86,9 +86,16 @@ class PSDData:
 
 @dataclass 
 class TimeWindows:
-    """Pre-computed time window masks."""
+    """Pre-computed time window masks for feature extraction."""
     baseline_mask: np.ndarray
     active_mask: np.ndarray
+    # Coarse temporal bins (early, mid, late)
+    coarse_masks: List[np.ndarray] = field(default_factory=list)
+    coarse_labels: List[str] = field(default_factory=list)
+    # Fine temporal bins (t1-t7 for HRF modeling)
+    fine_masks: List[np.ndarray] = field(default_factory=list)
+    fine_labels: List[str] = field(default_factory=list)
+    # Legacy compatibility
     plateau_masks: List[np.ndarray] = field(default_factory=list)
     window_labels: List[str] = field(default_factory=list)
 
@@ -287,18 +294,59 @@ def compute_time_windows(
     config: Any,
     n_plateau_windows: int = 5,
 ) -> TimeWindows:
-    """Compute all time window masks once."""
+    """
+    Compute all time window masks once.
+    
+    Creates both coarse (early/mid/late) and fine (t1-t7) temporal bins
+    based on config settings.
+    """
     tf_cfg = config.get("time_frequency_analysis", {})
+    fe_cfg = config.get("feature_engineering", {}).get("features", {})
+    
     baseline_window = tf_cfg.get("baseline_window", [-5.0, -0.01])
     plateau_window = tf_cfg.get("plateau_window", [3.0, 10.5])
     
     baseline_mask = time_mask(times, baseline_window[0], baseline_window[1])
     active_mask = time_mask(times, plateau_window[0], plateau_window[1])
     
-    # Compute plateau sub-windows
+    # Coarse temporal bins from config
+    coarse_bins = fe_cfg.get("temporal_bins", [
+        {"start": 3.0, "end": 5.0, "label": "early"},
+        {"start": 5.0, "end": 7.5, "label": "mid"},
+        {"start": 7.5, "end": 10.5, "label": "late"},
+    ])
+    coarse_masks = []
+    coarse_labels = []
+    for bin_def in coarse_bins:
+        mask = time_mask(times, bin_def["start"], bin_def["end"])
+        coarse_masks.append(mask)
+        coarse_labels.append(bin_def["label"])
+    
+    # Fine temporal bins from config (for HRF modeling)
+    fine_masks = []
+    fine_labels = []
+    use_fine = fe_cfg.get("use_fine_temporal_bins", True)
+    if use_fine:
+        fine_bins = fe_cfg.get("temporal_bins_fine", [])
+        if not fine_bins:
+            # Generate default fine bins (7 bins of ~1s each)
+            plateau_start, plateau_end = plateau_window
+            n_fine = 7
+            duration = (plateau_end - plateau_start) / n_fine
+            fine_bins = [
+                {"start": plateau_start + i * duration, 
+                 "end": plateau_start + (i + 1) * duration, 
+                 "label": f"t{i+1}"}
+                for i in range(n_fine)
+            ]
+        for bin_def in fine_bins:
+            mask = time_mask(times, bin_def["start"], bin_def["end"])
+            fine_masks.append(mask)
+            fine_labels.append(bin_def["label"])
+    
+    # Legacy plateau windows (for backward compatibility)
     plateau_start, plateau_end = plateau_window
     window_duration = (plateau_end - plateau_start) / n_plateau_windows
-    
     plateau_masks = []
     window_labels = []
     for i in range(n_plateau_windows):
@@ -311,6 +359,10 @@ def compute_time_windows(
     return TimeWindows(
         baseline_mask=baseline_mask,
         active_mask=active_mask,
+        coarse_masks=coarse_masks,
+        coarse_labels=coarse_labels,
+        fine_masks=fine_masks,
+        fine_labels=fine_labels,
         plateau_masks=plateau_masks,
         window_labels=window_labels,
     )
@@ -546,7 +598,12 @@ def get_psd_band_power(
     if not np.any(freq_mask):
         return None
     
-    return np.mean(psd[:, :, freq_mask], axis=2)
+    freq_subset = freqs[freq_mask]
+    psd_subset = psd[:, :, freq_mask]
+    if freq_subset.size < 2:
+        return None
+    
+    return np.trapz(psd_subset, freq_subset, axis=2)
 
 
 ###################################################################
@@ -855,4 +912,3 @@ def build_roi_map(
         if indices:
             roi_map[roi_name] = indices
     return roi_map
-

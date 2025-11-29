@@ -354,3 +354,143 @@ def get_sig_marker_text(config=None) -> str:
     n_perm = config.get("statistics.cluster_n_perm", default_cluster_n_perm) if config else default_cluster_n_perm
     method = f"cluster permutation (n={n_perm})"
     return f" | Green markers: p < {alpha:.2f} ({method})"
+
+
+###################################################################
+# High-Level ROI Annotation (from raw data)
+###################################################################
+
+
+def add_roi_annotations(
+    ax: "plt.Axes",
+    data: np.ndarray,
+    info: "mne.Info",
+    config=None,
+    roi_map=None,
+    sig_mask: Optional[np.ndarray] = None,
+    p_ch: Optional[np.ndarray] = None,
+    cluster_p_min: Optional[float] = None,
+    cluster_k: Optional[int] = None,
+    cluster_mass: Optional[float] = None,
+    is_cluster: Optional[bool] = None,
+    data_format: Optional[str] = None,
+    data_group_a: Optional[np.ndarray] = None,
+    data_group_b: Optional[np.ndarray] = None,
+    paired: bool = False,
+    apply_fdr_correction: bool = True,
+    fdr_alpha: Optional[float] = None,
+) -> None:
+    """Add ROI annotations to topomap axes from raw data.
+    
+    This is a high-level function that processes raw data and calls
+    render_roi_annotations with the appropriate annotation tuples.
+    
+    Args:
+        ax: Matplotlib axes
+        data: Topomap data array
+        info: MNE Info object
+        config: Optional configuration object
+        roi_map: Optional ROI map dictionary
+        sig_mask: Optional significance mask
+        p_ch: Optional per-channel p-values
+        cluster_p_min: Optional minimum cluster p-value
+        cluster_k: Optional cluster size
+        cluster_mass: Optional cluster mass
+        is_cluster: Whether cluster test was used
+        data_format: Optional data format string
+        data_group_a: Optional data for group A
+        data_group_b: Optional data for group B
+        paired: Whether paired test was used
+        apply_fdr_correction: Whether to apply FDR correction
+        fdr_alpha: Optional FDR alpha threshold
+    """
+    from ...utils.io.general import detect_data_format as _detect_data_format
+    
+    if config is None and roi_map is None:
+        return
+    
+    if roi_map is None and config is not None:
+        from ...utils.analysis.tfr import build_rois_from_info
+        roi_map = build_rois_from_info(info, config=config)
+    if not roi_map:
+        return
+    
+    ch_names = info["ch_names"]
+    if len(data) != len(ch_names):
+        return
+    
+    data_finite = data[np.isfinite(data)]
+    if data_finite.size == 0:
+        return
+    
+    has_valid_groups = data_group_a is not None and data_group_b is not None
+    if has_valid_groups:
+        group_a_valid = data_group_a.shape[1] == len(ch_names)
+        group_b_valid = data_group_b.shape[1] == len(ch_names)
+        if not group_a_valid or not group_b_valid:
+            data_group_a = None
+            data_group_b = None
+    
+    plot_cfg = get_plot_config(config) if config else None
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
+    
+    if fdr_alpha is None:
+        default_fdr_alpha = tfr_config.get("default_fdr_alpha", 0.05) if plot_cfg else 0.05
+        fdr_alpha = config.get("statistics.sig_alpha", default_fdr_alpha) if config else default_fdr_alpha
+    
+    percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0) if plot_cfg else 5.0
+    is_percent_format = _detect_data_format(data, data_format, percent_threshold=percent_detection_threshold)
+    
+    from ...utils.analysis.tfr import (
+        build_roi_channel_mask,
+        extract_significant_roi_channels,
+    )
+    from ...utils.analysis.stats import (
+        compute_roi_percentage_change,
+        compute_roi_pvalue,
+    )
+    
+    has_sig_info = sig_mask is not None and sig_mask.any()
+    
+    roi_pvalues_raw = {}
+    roi_data_dict = {}
+    
+    for roi, roi_chs in roi_map.items():
+        mask_vec = build_roi_channel_mask(ch_names, roi_chs)
+        if not mask_vec.any():
+            continue
+        
+        roi_data = data[mask_vec]
+        pct = compute_roi_percentage_change(roi_data, is_percent_format)
+        roi_data_dict[roi] = (pct, mask_vec)
+        
+        roi_pvalue = compute_roi_pvalue(
+            mask_vec, ch_names, p_ch, sig_mask, is_cluster, cluster_p_min,
+            data_group_a, data_group_b, paired, min_samples=None, config=config
+        )
+        roi_pvalues_raw[roi] = roi_pvalue
+    
+    roi_pvalues_corrected = apply_fdr_correction_to_roi_pvalues(
+        roi_pvalues_raw, apply_fdr_correction, fdr_alpha, plot_cfg
+    )
+    
+    annotations = []
+    for roi, roi_chs in roi_map.items():
+        if roi not in roi_data_dict:
+            continue
+        
+        pct, mask_vec = roi_data_dict[roi]
+        roi_pvalue = roi_pvalues_corrected.get(roi)
+        
+        sig_info = None
+        if has_sig_info:
+            roi_sig_indices, roi_sig_chs = extract_significant_roi_channels(ch_names, mask_vec, sig_mask)
+            sig_info = build_significance_info(
+                roi_sig_chs, roi_sig_indices, p_ch, is_cluster, 
+                cluster_p_min, cluster_k
+            )
+        
+        annotations.append((roi, pct, sig_info, roi_pvalue))
+    
+    if annotations:
+        render_roi_annotations(ax, annotations, apply_fdr_correction, paired, plot_cfg)

@@ -23,13 +23,15 @@ from eeg_pipeline.utils.data.loading import (
 )
 from eeg_pipeline.analysis.decoding.cv import (
     get_min_channels_required,
+    safe_pearsonr,
 )
 from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.plotting.decoding import (
     plot_time_generalization_with_null,
 )
+from eeg_pipeline.utils.io.general import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 ###################################################################
@@ -95,7 +97,7 @@ def time_generalization_regression(
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = load_settings()
+    config_local = config_dict or load_settings()
     min_subjects_for_loso = config_local.get("analysis.min_subjects_for_group", 2)
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
@@ -115,6 +117,7 @@ def time_generalization_regression(
     n_folds_total = len(list(logo.split(np.arange(len(trial_records)), groups=groups_arr)))
     
     def _run_time_gen(y_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        cfg = config_local
         fold_mats_r = []
         fold_mats_r2 = []
         fold_counts = []
@@ -129,9 +132,7 @@ def time_generalization_regression(
             if not common_chs:
                 continue
             
-            if config_dict is None:
-                config_dict = config_local
-            min_channels_required = get_min_channels_required(config_local)
+            min_channels_required = get_min_channels_required(cfg)
             if len(common_chs) < min_channels_required:
                 logger.warning(
                     f"Fold {fold}: Common channels ({len(common_chs)}) < minimum required "
@@ -167,7 +168,7 @@ def time_generalization_regression(
                 window_centers_out = np.array([(w_start + w_end) / 2 for w_start, w_end in windows])
             
             # Minimum samples per window for reliable regression and correlation
-            min_samples_per_window = config_local.get(
+            min_samples_per_window = cfg.get(
                 "decoding.analysis.time_generalization.min_samples_per_window", 15
             )
             
@@ -212,11 +213,11 @@ def time_generalization_regression(
                         n_valid = len(y_test_finite)
                         
                         # Configurable minimum samples for reliable correlation estimation
-                        min_samples_for_corr = config_local.get(
+                        min_samples_for_corr = cfg.get(
                             "decoding.analysis.time_generalization.min_samples_for_corr", 10
                         )
                         if n_valid >= min_samples_for_corr:
-                            r_val = np.corrcoef(y_test_finite, y_pred_finite)[0, 1] if n_valid > 1 else np.nan
+                            r_val, _ = safe_pearsonr(y_test_finite, y_pred_finite)
                             r2_val = r2_score(y_test_finite, y_pred_finite) if n_valid > 1 else np.nan
                             if np.isfinite(r_val) and np.isfinite(r2_val):
                                 r_mat[i, j] = r_val
@@ -261,7 +262,7 @@ def time_generalization_regression(
         coverage_map = np.zeros_like(tg_r, dtype=int)
         
         # Minimum total samples across folds for reliable Fisher z-averaging
-        min_count_per_cell = config_local.get(
+        min_count_per_cell = cfg.get(
             "decoding.analysis.time_generalization.min_count_per_cell", 15
         )
         

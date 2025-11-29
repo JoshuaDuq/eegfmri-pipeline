@@ -27,7 +27,6 @@ from eeg_pipeline.utils.io.general import (
 from eeg_pipeline.utils.analysis.stats import (
     compute_correlation,
     compute_partial_corr,
-    fdr_bh_values,
     _safe_float,
 )
 from eeg_pipeline.utils.analysis.tfr import (
@@ -42,7 +41,21 @@ if TYPE_CHECKING:
     from eeg_pipeline.analysis.behavior.core import BehaviorContext
 
 
-def _create_temperature_masks(temp_series, min_trials_per_condition: int, logger: logging.Logger) -> dict:
+###################################################################
+# Threshold constants
+###################################################################
+
+# Minimum additional samples required per covariate when computing partial
+# correlations, on top of a small base number of trials.
+_MIN_SAMPLES_PER_COVARIATE = 5
+_PARTIAL_CORR_BASE_SAMPLES = 5
+
+
+def _create_temperature_masks(
+    temp_series: Optional[pd.Series],
+    min_trials_per_condition: int,
+    logger: logging.Logger,
+) -> Dict[str, np.ndarray]:
     if temp_series is None:
         return {}
 
@@ -53,7 +66,7 @@ def _create_temperature_masks(temp_series, min_trials_per_condition: int, logger
     unique_temps = np.unique(temp_array[np.isfinite(temp_array)])
     logger.info(f"Found temperature values: {unique_temps.tolist()}")
 
-    temp_masks = {}
+    temp_masks: Dict[str, np.ndarray] = {}
     for temp_val in unique_temps:
         temp_mask = (temp_array == temp_val)
         n_trials = temp_mask.sum()
@@ -109,9 +122,14 @@ def _compute_tf_correlations_for_bins(
 
             if cov_matrix is not None:
                 cov_mask = valid_mask & np.all(np.isfinite(cov_matrix), axis=1)
-                # For partial correlations, require at least 5 samples per covariate + 5 baseline
-                # to ensure stable DoF for t-distribution approximation
-                min_for_partial = covariate_count * 5 + 5
+                # For partial correlations, require at least a small number of
+                # samples per covariate plus a baseline number of trials to
+                # ensure stable degrees of freedom for the t-distribution
+                # approximation.
+                min_for_partial = (
+                    covariate_count * _MIN_SAMPLES_PER_COVARIATE
+                    + _PARTIAL_CORR_BASE_SAMPLES
+                )
                 required = max(min_valid_points, min_for_partial)
                 n_obs = int(cov_mask.sum())
                 if n_obs >= required:
@@ -150,7 +168,7 @@ def _compute_tf_correlations_for_bins(
 
 
 def _save_temporal_correlations(
-    results: dict,
+    results: Dict[str, Any],
     output_path: Path,
     times: np.ndarray,
     baseline_applied: bool,
@@ -180,7 +198,7 @@ def _compute_correlations_for_condition(
     y_array: np.ndarray,
     condition_mask: np.ndarray,
     condition_name: str,
-    bands_dict: dict,
+    bands_dict: Dict[str, Tuple[float, float]],
     window_starts: np.ndarray,
     window_ends: np.ndarray,
     fmax_available: float,
@@ -189,7 +207,7 @@ def _compute_correlations_for_condition(
     sig_alpha: float,
     logger: logging.Logger,
     covariates_df: Optional[pd.DataFrame] = None,
-) -> Optional[dict]:
+) -> Optional[Dict[str, Any]]:
     if condition_mask is None or condition_mask.sum() < min_trials_per_condition:
         return None
 
@@ -229,8 +247,12 @@ def _compute_correlations_for_condition(
                 if cov_values is not None:
                     cov_valid = np.all(np.isfinite(cov_values), axis=1)
                     valid_mask = valid_mask & cov_valid
-                    # For partial correlations, require sufficient samples per covariate
-                    min_for_partial = cov_values.shape[1] * 5 + 5
+                    # For partial correlations, require sufficient samples per
+                    # covariate as well as a baseline number of trials.
+                    min_for_partial = (
+                        cov_values.shape[1] * _MIN_SAMPLES_PER_COVARIATE
+                        + _PARTIAL_CORR_BASE_SAMPLES
+                    )
                     required = max(min_trials_per_condition, min_for_partial)
                 else:
                     required = min_trials_per_condition
@@ -279,11 +301,11 @@ def _compute_correlations_for_condition(
 
 def _run_tf_correlations_core(
     subject: str,
-    epochs,
+    epochs: Any,
     aligned_events: pd.DataFrame,
     y: pd.Series,
     stats_dir: Path,
-    config,
+    config: Any,
     use_spearman: bool,
     cov_df: Optional[pd.DataFrame],
     logger: logging.Logger,
@@ -453,7 +475,7 @@ def compute_time_frequency_correlations(
     subject: str,
     task: str,
     deriv_root: Path,
-    config,
+    config: Any,
     use_spearman: bool,
     logger: logging.Logger,
 ) -> None:
@@ -483,7 +505,7 @@ def compute_temporal_correlations_by_condition(
     subject: str,
     task: str,
     deriv_root: Path,
-    config,
+    config: Any,
     use_spearman: bool,
     logger: logging.Logger,
 ) -> None:

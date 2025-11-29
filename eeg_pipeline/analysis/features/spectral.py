@@ -1,3 +1,17 @@
+"""
+Spectral Feature Extraction
+============================
+
+PSD-based features computed via Welch's method:
+- Peak frequency (IAF for alpha band)
+- Relative/absolute band power
+- Spectral entropy
+- Band power ratios (theta/beta, alpha/beta, etc.)
+- Spectral edge frequencies
+
+These features characterize the frequency content of EEG signals.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
@@ -6,90 +20,14 @@ import numpy as np
 import pandas as pd
 import mne
 from scipy.signal import welch
-from scipy.stats import entropy
 
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.analysis.features.core import pick_eeg_channels
-
-
-###################################################################
-# Spectral Feature Extraction
-###################################################################
-
-
-def _find_peak_frequency(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: float,
-    fmax: float,
-    min_prominence: float = 0.1,
-) -> Tuple[float, float]:
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(band_mask):
-        return np.nan, np.nan
-
-    band_freqs = freqs[band_mask]
-    band_psd = psd[band_mask]
-
-    if band_psd.size == 0 or not np.any(np.isfinite(band_psd)):
-        return np.nan, np.nan
-
-    peak_idx = np.nanargmax(band_psd)
-    peak_freq = float(band_freqs[peak_idx])
-    peak_power = float(band_psd[peak_idx])
-
-    psd_range = np.nanmax(band_psd) - np.nanmin(band_psd)
-    if psd_range > 0:
-        prominence = (peak_power - np.nanmin(band_psd)) / psd_range
-        if prominence < min_prominence:
-            return np.nan, np.nan
-
-    return peak_freq, peak_power
-
-
-def _compute_band_power(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: float,
-    fmax: float,
-) -> float:
-    band_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(band_mask):
-        return np.nan
-    return float(np.nanmean(psd[band_mask]))
-
-
-def _compute_spectral_entropy(
-    freqs: np.ndarray,
-    psd: np.ndarray,
-    fmin: Optional[float] = None,
-    fmax: Optional[float] = None,
-    normalize: bool = True,
-) -> float:
-    if fmin is not None and fmax is not None:
-        mask = (freqs >= fmin) & (freqs <= fmax)
-        psd = psd[mask]
-
-    if psd.size == 0 or not np.any(np.isfinite(psd)):
-        return np.nan
-
-    psd = np.maximum(psd, 0)
-    psd_sum = np.nansum(psd)
-    if psd_sum <= 0:
-        return np.nan
-
-    psd_norm = psd / psd_sum
-    psd_norm = psd_norm[psd_norm > 0]
-
-    if psd_norm.size == 0:
-        return np.nan
-
-    se = float(entropy(psd_norm, base=2))
-
-    if normalize and psd_norm.size > 1:
-        se = se / np.log2(psd_norm.size)
-
-    return se
+from eeg_pipeline.utils.analysis.signal_metrics import (
+    compute_peak_frequency as _find_peak_frequency,
+    compute_band_power as _compute_band_power,
+    compute_spectral_entropy as _compute_spectral_entropy,
+)
 
 
 def extract_individual_alpha_frequency(

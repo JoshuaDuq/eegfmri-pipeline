@@ -191,7 +191,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     plateau_start: 3.0  # Start time [s] of thermal plateau period for feature extraction
     plateau_end: 10.5  # End time [s] of thermal plateau period for feature extraction
     min_valid_band_fraction: 0.0  # Minimum fraction of valid bands required for feature extraction (0.0 = no requirement)
-    temporal_bins:  # Temporal bins for time-resolved feature extraction (used in extract_features)
+    temporal_bins:  # Coarse temporal bins for time-resolved feature extraction
       - start: 3.0  # Early plateau bin start [s]
         end: 5.0  # Early plateau bin end [s]
         label: "early"  # Bin label
@@ -201,6 +201,29 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
       - start: 7.5  # Late plateau bin start [s]
         end: 10.5  # Late plateau bin end [s]
         label: "late"  # Bin label
+    temporal_bins_fine:  # Fine temporal bins for HRF modeling (~1s resolution)
+      - start: 3.0
+        end: 4.07
+        label: "t1"
+      - start: 4.07
+        end: 5.14
+        label: "t2"
+      - start: 5.14
+        end: 6.21
+        label: "t3"
+      - start: 6.21
+        end: 7.28
+        label: "t4"
+      - start: 7.28
+        end: 8.35
+        label: "t5"
+      - start: 8.35
+        end: 9.42
+        label: "t6"
+      - start: 9.42
+        end: 10.5
+        label: "t7"
+    use_fine_temporal_bins: true  # Whether to use fine temporal bins in addition to coarse
   tfr_processing:  # TFR processing parameters for feature extraction
     baseline_mode: "logratio"  # Baseline correction mode: "logratio" (log10(power/baseline)) or "percent" or "zscore"
   microstates:  # EEG microstate extraction parameters (used in extract_microstate_features)
