@@ -856,27 +856,4 @@ Decoding uses nested leave-one-subject-out (LOSO) cross-validation with inner Gr
 2. Create pipeline wrapper in `pipelines/`
 3. Add subcommand in `scripts/run_pipeline.py`
 
-## Troubleshooting
 
-### Common Issues
-
-**"No epochs found"**: Ensure preprocessing completed successfully and epochs files exist in `derivatives/preprocessed/`.
-
-**Memory errors**: Reduce `n_jobs` or `workers` in config, or process fewer subjects at once.
-
-**Alignment errors**: Check that behavioral data matches EEG trials. Use `--dry_run` with merge script first.
-
-## Help
-
-For detailed options on any command:
-```bash
-python eeg_pipeline/scripts/run_pipeline.py <command> --help
-```
-
-## License
-
-[Specify your license here]
-
-## Citation
-
-[Add citation information if applicable]
