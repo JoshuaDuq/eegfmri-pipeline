@@ -2,7 +2,7 @@
 
 This pipeline is still under development.
 
-A comprehensive EEG analysis pipeline for thermal pain studies.
+A EEG analysis pipeline for thermal pain studies.
 
 ## Overview
 
@@ -11,13 +11,6 @@ This pipeline processes EEG data through a complete analysis workflow:
 ```
 Raw EEG Data → BIDS Conversion → Feature Extraction → Behavioral Correlations → Decoding
 ```
-
-### Key Features
-
-- **BIDS-Compliant**: Standardized data organization following Brain Imaging Data Structure
-- **Reproducible**: Configuration-driven with seeded randomness
-- **Statistically Rigorous**: FDR correction, permutation testing, nested cross-validation
-- **Modular Design**: Independent analysis modules for flexibility
 
 ## Architecture
 
