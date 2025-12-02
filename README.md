@@ -1,14 +1,7 @@
 # EEG Pipeline
 
-<<<<<<< HEAD
+
 This pipeline is still under development.
-
-A EEG analysis pipeline for thermal pain studies.
-=======
-This pipeline is still under development
-
-A comprehensive EEG analysis pipeline for thermal pain studies, designed for reproducibility and scientific rigor.
->>>>>>> cad687c (Sync local EEG pipeline updates with Thermal Pain repo)
 
 ## Overview
 
