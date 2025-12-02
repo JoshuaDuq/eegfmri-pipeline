@@ -236,26 +236,93 @@ def compute_participation_coefficient(
 
 
 def compute_clustering_coefficient(adj: np.ndarray, weighted: bool = True) -> np.ndarray:
-    """
-    Compute clustering coefficient for each node.
-    
-    Parameters
-    ----------
-    adj : np.ndarray
-        Adjacency matrix
-    weighted : bool
-        If True, compute weighted clustering
-    
-    Returns
-    -------
-    np.ndarray
-        Clustering coefficient for each node
-    """
+    """Compute clustering coefficient per node."""
     G = nx.from_numpy_array(adj)
-    
-    if weighted:
-        cc_dict = nx.clustering(G, weight="weight")
-    else:
-        cc_dict = nx.clustering(G)
-    
+    weight = "weight" if weighted else None
+    cc_dict = nx.clustering(G, weight=weight)
     return np.array([cc_dict.get(i, np.nan) for i in range(adj.shape[0])])
+
+
+def compute_betweenness_centrality(adj: np.ndarray) -> np.ndarray:
+    """Compute betweenness centrality per node."""
+    G = nx.from_numpy_array(adj)
+    if G.number_of_edges() == 0:
+        return np.full(adj.shape[0], np.nan)
+    try:
+        bc = nx.betweenness_centrality(G, weight="weight")
+        return np.array([bc.get(i, np.nan) for i in range(adj.shape[0])])
+    except (nx.NetworkXError, ValueError, ZeroDivisionError):
+        return np.full(adj.shape[0], np.nan)
+
+
+def compute_eigenvector_centrality(adj: np.ndarray, max_iter: int = 100) -> np.ndarray:
+    """Compute eigenvector centrality per node."""
+    G = nx.from_numpy_array(adj)
+    if G.number_of_edges() == 0:
+        return np.full(adj.shape[0], np.nan)
+    try:
+        ec = nx.eigenvector_centrality_numpy(G, weight="weight")
+        return np.array([ec.get(i, np.nan) for i in range(adj.shape[0])])
+    except (nx.NetworkXError, ValueError, np.linalg.LinAlgError):
+        return np.full(adj.shape[0], np.nan)
+
+
+def compute_rich_club_coefficient(adj: np.ndarray, k: int = None) -> float:
+    """Compute rich club coefficient (tendency of high-degree nodes to connect)."""
+    G = nx.from_numpy_array(adj > 0)  # Binary graph
+    if G.number_of_edges() == 0:
+        return np.nan
+    try:
+        rc = nx.rich_club_coefficient(G, normalized=False)
+        if not rc:
+            return np.nan
+        if k is not None and k in rc:
+            return float(rc[k])
+        degrees = [d for _, d in G.degree()]
+        if not degrees:
+            return np.nan
+        median_k = int(np.median(degrees))
+        return float(rc.get(median_k, np.nan))
+    except (nx.NetworkXError, ValueError, ZeroDivisionError, KeyError):
+        return np.nan
+
+
+def compute_characteristic_path_length(adj: np.ndarray) -> float:
+    """Compute characteristic path length (average shortest path)."""
+    G = nx.from_numpy_array(adj)
+    if G.number_of_edges() == 0:
+        return np.nan
+    if not nx.is_connected(G):
+        G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
+    if G.number_of_nodes() < 2:
+        return np.nan
+    try:
+        return float(nx.average_shortest_path_length(G, weight=None))
+    except (nx.NetworkXError, ValueError, ZeroDivisionError):
+        return np.nan
+
+
+def compute_network_segregation_integration(
+    adj: np.ndarray, community_map: dict, labels: np.ndarray
+) -> tuple:
+    """Compute network segregation and integration. Returns (segregation, integration)."""
+    from typing import Tuple
+    if not community_map or adj.size == 0:
+        return np.nan, np.nan
+    comms = [community_map.get(str(l), None) for l in labels]
+    n_nodes = adj.shape[0]
+    within_sum = between_sum = total_sum = 0.0
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            w = abs(adj[i, j])
+            if not np.isfinite(w):
+                continue
+            total_sum += w
+            if comms[i] is not None and comms[j] is not None:
+                if comms[i] == comms[j]:
+                    within_sum += w
+                else:
+                    between_sum += w
+    if total_sum == 0:
+        return np.nan, np.nan
+    return float(within_sum / total_sum), float(between_sum / total_sum)

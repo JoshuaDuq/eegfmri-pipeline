@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,453 +9,250 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.io.general import (
-    deriv_features_path,
-    read_tsv,
-)
-from eeg_pipeline.utils.analysis.stats import (
-    prepare_aligned_data,
-)
+from eeg_pipeline.utils.io.general import deriv_features_path, read_tsv
 from eeg_pipeline.analysis.behavior.core import (
-    BehaviorContext,
-    ComputationResult,
-    ComputationStatus,
-    CorrelationRecord,
-    build_correlation_record,
-    safe_correlation,
-    MIN_SAMPLES_DEFAULT,
+    BehaviorContext, ComputationResult, ComputationStatus, CorrelationRecord,
+    build_correlation_record, safe_correlation, save_correlation_results,
+    correlate_features_loop, MIN_SAMPLES_DEFAULT,
 )
 
 
 FEATURE_PATTERNS = {
-    # ERD/ERS features: erds_{band}_{channel} or erds_{band}_{channel}_{window}
     "erds": re.compile(r"^erds_(\w+)_(.+)$"),
-    
-    # Spectral features
-    "iaf": re.compile(r"^iaf_(.+)$"),  # Individual alpha frequency
+    "erds_windowed": re.compile(r"^erds_(\w+)_(\w+)_(early|mid|late|t\d+)$"),
+    "iaf": re.compile(r"^iaf_(.+)$"),
+    "iaf_power": re.compile(r"^iaf_power_(.+)$"),
     "relative_power": re.compile(r"^relative_(\w+)_(.+)$"),
     "band_ratio": re.compile(r"^ratio_(\w+)_(\w+)_(.+)$"),
     "spectral_entropy": re.compile(r"^spectral_entropy_(.+)$"),
+    "spectral_edge": re.compile(r"^spectral_edge_(\d+)_(.+)$"),
     "peak_freq": re.compile(r"^peak_freq_(\w+)_(.+)$"),
-    
-    # Temporal/time-domain features
+    "bandwidth": re.compile(r"^bandwidth_(\w+)_(.+)$"),
     "temporal_stat": re.compile(r"^(mean|var|std|skew|kurt|median|iqr)_(.+)$"),
     "amplitude": re.compile(r"^(rms|p2p|line_length|nle)_(.+)$"),
     "zero_cross": re.compile(r"^zero_cross_(.+)$"),
-    
-    # Complexity features
+    "slope": re.compile(r"^slope_(.+)$"),
     "permutation_entropy": re.compile(r"^pe_(.+)$"),
     "sample_entropy": re.compile(r"^sampen_(.+)$"),
     "hjorth": re.compile(r"^hjorth_(activity|mobility|complexity)_(.+)$"),
     "lzc": re.compile(r"^lzc_(.+)$"),
-    
-    # Global features
-    "gfp": re.compile(r"^gfp_(.+)$"),
+    "hurst": re.compile(r"^hurst_(.+)$"),
+    "dfa": re.compile(r"^dfa_(.+)$"),
+    "gfp": re.compile(r"^gfp_(mean|std|max|peak_count|peak_rate)$"),
     "global_plv": re.compile(r"^global_plv_(\w+)$"),
     "variance_explained": re.compile(r"^var_explained_(.+)$"),
-    
-    # ROI features
     "roi_power": re.compile(r"^roi_pow_(\w+)_(.+)$"),
     "roi_asymmetry": re.compile(r"^asymmetry_(\w+)_(.+)$"),
     "roi_erds": re.compile(r"^roi_erds_(\w+)_(.+)$"),
-    
-    # Microstate features
+    "roi_laterality": re.compile(r"^laterality_(\w+)_(.+)$"),
     "ms_coverage": re.compile(r"^ms_coverage_(\w+)$"),
     "ms_duration": re.compile(r"^ms_duration_(\w+)$"),
     "ms_occurrence": re.compile(r"^ms_occurrence_(\w+)$"),
     "ms_transition": re.compile(r"^ms_transition_(\w+)_(\w+)$"),
     "ms_gev": re.compile(r"^ms_gev_(\w+)$"),
+    "ms_entropy": re.compile(r"^ms_entropy$"),
+    "itpc": re.compile(r"^itpc_(\w+)_(.+)_(\w+)$"),
+    "plv": re.compile(r"^plv_(\w+)_(.+)_(.+)$"),
+    "pac": re.compile(r"^pac_(.+)$"),
+    "aperiodic": re.compile(r"^aper_(slope|offset|knee)_(.+)$"),
+    "powcorr": re.compile(r"^powcorr_(\w+)_(.+)$"),
+    "conn_graph": re.compile(r"^(wpli|aec|imcoh|pli)_(\w+)_(geff|clust|pc|smallworld)$"),
 }
 
 
 def classify_feature(column_name: str) -> Tuple[str, Dict[str, str]]:
-    """Classify a feature column name into its type and extract metadata."""
-    for feature_type, pattern in FEATURE_PATTERNS.items():
-        match = pattern.match(column_name)
-        if match:
-            groups = match.groups()
-            
-            # Build metadata based on feature type
-            if feature_type == "erds":
-                return feature_type, {"band": groups[0], "identifier": groups[1]}
-            elif feature_type == "relative_power":
-                return feature_type, {"band": groups[0], "channel": groups[1]}
-            elif feature_type == "band_ratio":
-                return feature_type, {"band1": groups[0], "band2": groups[1], "channel": groups[2]}
-            elif feature_type in ("temporal_stat", "amplitude"):
-                return feature_type, {"stat": groups[0], "channel": groups[1]}
-            elif feature_type == "hjorth":
-                return feature_type, {"param": groups[0], "channel": groups[1]}
-            elif feature_type == "roi_power":
-                return feature_type, {"band": groups[0], "roi": groups[1]}
-            elif feature_type == "roi_asymmetry":
-                return feature_type, {"band": groups[0], "pair": groups[1]}
-            elif feature_type == "ms_transition":
-                return feature_type, {"from_state": groups[0], "to_state": groups[1]}
-            else:
-                # Simple single-group patterns
-                return feature_type, {"identifier": groups[0] if groups else column_name}
-    
-    # Unknown feature type
-    return "unknown", {"identifier": column_name}
+    """Classify feature column into type and metadata."""
+    for ftype, pattern in FEATURE_PATTERNS.items():
+        m = pattern.match(column_name)
+        if not m:
+            continue
+        g = m.groups()
+        
+        if ftype == "erds":
+            return ftype, {"band": g[0], "identifier": g[1], "channel": g[1]}
+        elif ftype == "erds_windowed":
+            return "erds", {"band": g[0], "channel": g[1], "window": g[2], "identifier": f"{g[1]}_{g[2]}"}
+        elif ftype == "relative_power":
+            return ftype, {"band": g[0], "channel": g[1], "identifier": g[1]}
+        elif ftype == "band_ratio":
+            return ftype, {"band": f"{g[0]}/{g[1]}", "channel": g[2], "identifier": g[2]}
+        elif ftype in ("temporal_stat", "amplitude"):
+            return ftype, {"stat": g[0], "channel": g[1], "identifier": g[1], "band": "N/A"}
+        elif ftype == "hjorth":
+            return ftype, {"param": g[0], "channel": g[1], "identifier": g[1], "band": "N/A"}
+        elif ftype == "roi_power":
+            return ftype, {"band": g[0], "roi": g[1], "identifier": g[1]}
+        elif ftype in ("roi_asymmetry", "roi_laterality"):
+            return ftype, {"band": g[0], "pair": g[1], "identifier": g[1]}
+        elif ftype == "ms_transition":
+            return "microstate", {"from_state": g[0], "to_state": g[1], "identifier": f"{g[0]}->{g[1]}", "band": "N/A"}
+        elif ftype.startswith("ms_"):
+            return "microstate", {"state": g[0], "identifier": g[0], "band": "N/A"}
+        elif ftype == "itpc":
+            return ftype, {"band": g[0], "channel": g[1], "time_bin": g[2], "identifier": g[1]}
+        elif ftype == "aperiodic":
+            return ftype, {"param": g[0], "channel": g[1], "identifier": g[1], "band": "aperiodic"}
+        elif ftype == "powcorr":
+            return ftype, {"band": g[0], "channel": g[1], "identifier": g[1]}
+        elif ftype == "conn_graph":
+            return "connectivity", {"measure": g[0], "band": g[1], "metric": g[2], "identifier": f"{g[0]}_{g[2]}"}
+        elif ftype == "gfp":
+            return ftype, {"metric": g[0], "identifier": g[0], "band": "global"}
+        else:
+            return ftype, {"identifier": g[0] if g else column_name, "band": "N/A"}
+
+    # Fallback for pow_* columns
+    if column_name.startswith("pow_"):
+        parts = column_name.split("_")
+        if len(parts) >= 3:
+            return "power", {"band": parts[1], "channel": "_".join(parts[2:]), "identifier": "_".join(parts[2:])}
+    return "unknown", {"identifier": column_name, "band": "N/A"}
 
 
-def correlate_feature_with_behavior(
-    feature_values: np.ndarray,
-    target_values: np.ndarray,
-    feature_name: str,
-    feature_type: str,
-    metadata: Dict[str, str],
-    method: str = "spearman",
-    min_samples: int = MIN_SAMPLES_DEFAULT,
-) -> Optional[CorrelationRecord]:
-    """Compute correlation between a feature and target variable."""
-    r, p, n = safe_correlation(feature_values, target_values, method, min_samples)
-    
-    if not np.isfinite(r):
-        return None
-    
-    # Determine identifier and band from metadata
-    identifier = metadata.get("identifier", metadata.get("channel", feature_name))
-    band = metadata.get("band", "N/A")
-    
-    return build_correlation_record(
-        identifier=identifier,
-        band=band,
-        r=r,
-        p=p,
-        n=n,
-        method=method,
-        identifier_type=feature_type,
-        analysis_type=feature_type,
-    )
+def _correlate_df(df: pd.DataFrame, target: pd.Series, config: Any, logger, use_spearman: bool,
+                  source: str) -> Tuple[pd.DataFrame, List[CorrelationRecord]]:
+    """Correlate all columns with target."""
+    method = "spearman" if use_spearman else "pearson"
+    min_samples = int(config.get("behavior_analysis.statistics.min_samples_channel", MIN_SAMPLES_DEFAULT))
+    # Coerce to numeric to avoid type issues in correlation (non-numeric -> NaN)
+    df_numeric = df.apply(pd.to_numeric, errors="coerce")
+    records, df_out = correlate_features_loop(df_numeric, target, method, min_samples, logger,
+                                   identifier_type="feature", analysis_type=source,
+                                   feature_classifier=classify_feature)
+    if not df_out.empty:
+        # Rename correlation/p columns for plotting compatibility
+        df_out = df_out.rename(columns={"r": "correlation", "p": "p_value"})
+    return df_out, records
 
 
-def _correlate_dataframe_features(
-    feature_df: pd.DataFrame,
-    target_values: pd.Series,
-    config: Any,
-    logger: logging.Logger,
-    *,
-    use_spearman: bool = True,
-    feature_source: str = "unknown",
-) -> Tuple[pd.DataFrame, List[CorrelationRecord]]:
-    """Correlate all columns in a feature DataFrame with target values."""
-    from eeg_pipeline.analysis.behavior.core import correlate_features_loop
+def correlate_precomputed_features(subject: str, deriv_root: Path, target: pd.Series,
+                                   config: Any, logger, use_spearman: bool = True) -> Tuple[pd.DataFrame, List]:
+    """Correlate precomputed features with behavior."""
+    path = deriv_features_path(deriv_root, subject) / "features_precomputed.tsv"
+    if not path.exists():
+        return pd.DataFrame(), []
+    df = read_tsv(path)
+    if df.empty:
+        return pd.DataFrame(), []
+    
+    n = min(len(df), len(target))
+    df, target = df.iloc[:n], target.iloc[:n]
     
     method = "spearman" if use_spearman else "pearson"
     min_samples = int(config.get("behavior_analysis.statistics.min_samples_channel", MIN_SAMPLES_DEFAULT))
+    target_arr = target.to_numpy()
+    records = []
     
-    records, results_df = correlate_features_loop(
-        feature_df=feature_df,
-        target_values=target_values,
-        method=method,
-        min_samples=min_samples,
-        logger=logger,
-        identifier_type="feature",
-        analysis_type=feature_source,
-        feature_classifier=classify_feature,
-    )
+    logger.info(f"Correlating {len(df.columns)} precomputed features...")
+    for col in df.columns:
+        ftype, meta = classify_feature(col)
+        r, p, n_val = safe_correlation(df[col].to_numpy(), target_arr, method, min_samples)
+        try:
+            r_float = float(r) if r is not None else np.nan
+        except (ValueError, TypeError):
+            r_float = np.nan
+        if np.isfinite(r_float):
+            records.append(build_correlation_record(
+                meta.get("identifier", col), meta.get("band", "N/A"), r_float, p, n_val, method,
+                identifier_type=ftype, analysis_type=ftype
+            ))
     
-    return results_df, records
+    logger.info(f"  {len(records)} features, {sum(1 for r in records if r.is_significant)} sig")
+    return pd.DataFrame([r.to_dict() for r in records]) if records else pd.DataFrame(), records
 
 
-def correlate_precomputed_features(
-    subject: str,
-    deriv_root: Path,
-    target_values: pd.Series,
-    config: Any,
-    logger: logging.Logger,
-    *,
-    use_spearman: bool = True,
-) -> Tuple[pd.DataFrame, List[CorrelationRecord]]:
-    """Correlate all precomputed features with behavior."""
-    features_dir = deriv_features_path(deriv_root, subject)
-    precomputed_path = features_dir / "features_precomputed.tsv"
-    
-    if not precomputed_path.exists():
-        logger.warning(f"Precomputed features not found: {precomputed_path}")
-        return pd.DataFrame(), []
-    
-    precomputed_df = read_tsv(precomputed_path)
-    
-    if precomputed_df.empty:
-        logger.warning("Precomputed features file is empty")
-        return pd.DataFrame(), []
-    
-    method = "spearman" if use_spearman else "pearson"
-    min_samples = int(config.get("behavior_analysis.statistics.min_samples_channel", MIN_SAMPLES_DEFAULT))
-    
-    # Align target with features
-    n_features = len(precomputed_df)
-    n_targets = len(target_values)
-    
-    if n_features != n_targets:
-        logger.warning(
-            f"Length mismatch: precomputed={n_features}, targets={n_targets}. "
-            "Using minimum length."
-        )
-        n_use = min(n_features, n_targets)
-        precomputed_df = precomputed_df.iloc[:n_use]
-        target_values = target_values.iloc[:n_use]
-    
-    target_arr = target_values.to_numpy()
-    records: List[CorrelationRecord] = []
-    
-    logger.info(f"Correlating {len(precomputed_df.columns)} precomputed features...")
-    
-    # Group features by type for organized output
-    feature_groups: Dict[str, List[CorrelationRecord]] = {}
-    
-    for col in precomputed_df.columns:
-        feature_values = precomputed_df[col].to_numpy()
-        feature_type, metadata = classify_feature(col)
-        
-        record = correlate_feature_with_behavior(
-            feature_values=feature_values,
-            target_values=target_arr,
-            feature_name=col,
-            feature_type=feature_type,
-            metadata=metadata,
-            method=method,
-            min_samples=min_samples,
-        )
-        
-        if record is not None:
-            records.append(record)
-            
-            if feature_type not in feature_groups:
-                feature_groups[feature_type] = []
-            feature_groups[feature_type].append(record)
-    
-    # Log summary by feature type
-    for ftype, recs in feature_groups.items():
-        n_sig = sum(1 for r in recs if r.is_significant)
-        logger.info(f"  {ftype}: {len(recs)} features, {n_sig} significant (p<0.05)")
-    
-    # Convert to DataFrame
-    if not records:
-        return pd.DataFrame(), []
-    
-    results_df = pd.DataFrame([r.to_dict() for r in records])
-    
-    return results_df, records
-
-
-def correlate_microstate_features(
-    subject: str,
-    deriv_root: Path,
-    target_values: pd.Series,
-    config: Any,
-    logger: logging.Logger,
-    *,
-    use_spearman: bool = True,
-) -> Tuple[pd.DataFrame, List[CorrelationRecord]]:
+def correlate_microstate_features(subject: str, deriv_root: Path, target: pd.Series,
+                                  config: Any, logger, use_spearman: bool = True) -> Tuple[pd.DataFrame, List]:
     """Correlate microstate features with behavior."""
-    features_dir = deriv_features_path(deriv_root, subject)
-    ms_path = features_dir / "features_microstates.tsv"
-    
-    if not ms_path.exists():
-        logger.warning(f"Microstate features not found: {ms_path}")
+    path = deriv_features_path(deriv_root, subject) / "features_microstates.tsv"
+    if not path.exists():
+        return pd.DataFrame(), []
+    df = read_tsv(path)
+    if df.empty:
         return pd.DataFrame(), []
     
-    ms_df = read_tsv(ms_path)
-    
-    if ms_df.empty:
-        logger.warning("Microstate features file is empty")
-        return pd.DataFrame(), []
+    n = min(len(df), len(target))
+    df, target = df.iloc[:n], target.iloc[:n]
     
     method = "spearman" if use_spearman else "pearson"
     min_samples = int(config.get("behavior_analysis.statistics.min_samples_channel", MIN_SAMPLES_DEFAULT))
+    target_arr = target.to_numpy()
+    records = []
     
-    # Align
-    n_ms = len(ms_df)
-    n_targets = len(target_values)
+    for col in df.columns:
+        ftype, meta = classify_feature(col)
+        r, p, n_val = safe_correlation(df[col].to_numpy(), target_arr, method, min_samples)
+        try:
+            r_float = float(r) if r is not None else np.nan
+        except (ValueError, TypeError):
+            r_float = np.nan
+        if np.isfinite(r_float):
+            records.append(build_correlation_record(
+                meta.get("identifier", col), meta.get("band", "N/A"), r_float, p, n_val, method,
+                identifier_type="microstate", analysis_type="microstate"
+            ))
     
-    if n_ms != n_targets:
-        logger.warning(f"Length mismatch: microstates={n_ms}, targets={n_targets}")
-        n_use = min(n_ms, n_targets)
-        ms_df = ms_df.iloc[:n_use]
-        target_values = target_values.iloc[:n_use]
-    
-    target_arr = target_values.to_numpy()
-    records: List[CorrelationRecord] = []
-    
-    logger.info(f"Correlating {len(ms_df.columns)} microstate features...")
-    
-    for col in ms_df.columns:
-        feature_values = ms_df[col].to_numpy()
-        feature_type, metadata = classify_feature(col)
-        
-        # Override type to microstate
-        if not feature_type.startswith("ms_"):
-            feature_type = "microstate"
-        
-        record = correlate_feature_with_behavior(
-            feature_values=feature_values,
-            target_values=target_arr,
-            feature_name=col,
-            feature_type=feature_type,
-            metadata=metadata,
-            method=method,
-            min_samples=min_samples,
-        )
-        
-        if record is not None:
-            records.append(record)
-    
-    n_sig = sum(1 for r in records if r.is_significant)
-    logger.info(f"  Microstates: {len(records)} features, {n_sig} significant")
-    
-    if not records:
-        return pd.DataFrame(), []
-    
-    results_df = pd.DataFrame([r.to_dict() for r in records])
-    return results_df, records
+    logger.info(f"  Microstates: {len(records)} features, {sum(1 for r in records if r.is_significant)} sig")
+    return pd.DataFrame([r.to_dict() for r in records]) if records else pd.DataFrame(), records
 
 
-def compute_precomputed_correlations(
-    ctx: BehaviorContext,
-) -> ComputationResult:
+def compute_precomputed_correlations(ctx: BehaviorContext) -> ComputationResult:
     """Compute correlations for all precomputed features."""
     if ctx.targets is None:
-        return ComputationResult(
-            name="precomputed_correlations",
-            status=ComputationStatus.SKIPPED,
-            metadata={"reason": "No target variable"},
-        )
+        return ComputationResult(name="precomputed", status=ComputationStatus.SKIPPED,
+                                 metadata={"reason": "No target"})
     
     method_suffix = "_spearman" if ctx.use_spearman else "_pearson"
     
     try:
-        # Use precomputed_df from context if available (avoids re-reading file)
-        precomp_df_result = pd.DataFrame()
-        precomp_records: List[CorrelationRecord] = []
-        
+        # Precomputed features
         if ctx.precomputed_df is not None and not ctx.precomputed_df.empty:
-            precomp_df_result, precomp_records = _correlate_dataframe_features(
-                feature_df=ctx.precomputed_df,
-                target_values=ctx.targets,
-                config=ctx.config,
-                logger=ctx.logger,
-                use_spearman=ctx.use_spearman,
-                feature_source="precomputed",
-            )
+            precomp_df, precomp_recs = _correlate_df(ctx.precomputed_df, ctx.targets, ctx.config,
+                                                      ctx.logger, ctx.use_spearman, "precomputed")
         else:
-            # Fallback to file loading if not in context
-            precomp_df_result, precomp_records = correlate_precomputed_features(
-                subject=ctx.subject,
-                deriv_root=ctx.deriv_root,
-                target_values=ctx.targets,
-                config=ctx.config,
-                logger=ctx.logger,
-                use_spearman=ctx.use_spearman,
-            )
+            precomp_df, precomp_recs = correlate_precomputed_features(
+                ctx.subject, ctx.deriv_root, ctx.targets, ctx.config, ctx.logger, ctx.use_spearman)
         
-        # Use microstates_df from context if available
-        ms_df_result = pd.DataFrame()
-        ms_records: List[CorrelationRecord] = []
-        
+        # Microstates
         if ctx.microstates_df is not None and not ctx.microstates_df.empty:
-            ms_df_result, ms_records = _correlate_dataframe_features(
-                feature_df=ctx.microstates_df,
-                target_values=ctx.targets,
-                config=ctx.config,
-                logger=ctx.logger,
-                use_spearman=ctx.use_spearman,
-                feature_source="microstates",
-            )
+            ms_df, ms_recs = _correlate_df(ctx.microstates_df, ctx.targets, ctx.config,
+                                           ctx.logger, ctx.use_spearman, "microstates")
         else:
-            # Fallback to file loading
-            ms_df_result, ms_records = correlate_microstate_features(
-                subject=ctx.subject,
-                deriv_root=ctx.deriv_root,
-                target_values=ctx.targets,
-                config=ctx.config,
-                logger=ctx.logger,
-                use_spearman=ctx.use_spearman,
-            )
+            ms_df, ms_recs = correlate_microstate_features(
+                ctx.subject, ctx.deriv_root, ctx.targets, ctx.config, ctx.logger, ctx.use_spearman)
         
-        precomp_df = precomp_df_result
-        ms_df = ms_df_result
-        
-        all_records = precomp_records + ms_records
-        
-        # Save rating correlations using standardized function
-        from eeg_pipeline.analysis.behavior.core import save_correlation_results
-        
-        if not precomp_df.empty:
-            output_path = ctx.stats_dir / f"corr_stats_precomputed_vs_rating{method_suffix}.tsv"
-            save_correlation_results(precomp_df, output_path, apply_fdr=True, config=ctx.config, logger=ctx.logger)
-            
-            # Also save by feature type
-            for ftype in precomp_df["analysis"].unique():
-                ftype_df = precomp_df[precomp_df["analysis"] == ftype].copy()
-                ftype_path = ctx.stats_dir / f"corr_stats_{ftype}_vs_rating{method_suffix}.tsv"
-                save_correlation_results(ftype_df, ftype_path, apply_fdr=True, config=ctx.config, logger=ctx.logger)
-        
+        # Save
+        if precomp_df is not None and not precomp_df.empty:
+            save_correlation_results(precomp_df, ctx.stats_dir / f"corr_stats_precomputed_vs_rating{method_suffix}.tsv",
+                                    apply_fdr=True, config=ctx.config, logger=ctx.logger, use_permutation_p=False)
         if not ms_df.empty:
-            ms_output = ctx.stats_dir / f"corr_stats_microstates_vs_rating{method_suffix}.tsv"
-            save_correlation_results(ms_df, ms_output, apply_fdr=True, config=ctx.config, logger=ctx.logger)
+            save_correlation_results(ms_df, ctx.stats_dir / f"corr_stats_microstates_vs_rating{method_suffix}.tsv",
+                                    apply_fdr=True, config=ctx.config, logger=ctx.logger)
         
-        # Temperature correlations
-        temp_precomp_df = pd.DataFrame()
-        temp_ms_df = pd.DataFrame()
-        
+        # Temperature
         if ctx.temperature is not None and len(ctx.temperature.dropna()) >= MIN_SAMPLES_DEFAULT:
-            ctx.logger.info("Computing temperature correlations for precomputed features...")
-            
+            ctx.logger.info("Computing temperature correlations...")
             if ctx.precomputed_df is not None and not ctx.precomputed_df.empty:
-                temp_precomp_df, _ = _correlate_dataframe_features(
-                    feature_df=ctx.precomputed_df,
-                    target_values=ctx.temperature,
-                    config=ctx.config,
-                    logger=ctx.logger,
-                    use_spearman=ctx.use_spearman,
-                    feature_source="precomputed",
-                )
-            
+                temp_df, _ = _correlate_df(ctx.precomputed_df, ctx.temperature, ctx.config,
+                                           ctx.logger, ctx.use_spearman, "precomputed")
+                if temp_df is not None and not temp_df.empty:
+                    save_correlation_results(temp_df, ctx.stats_dir / f"corr_stats_precomputed_vs_temp{method_suffix}.tsv",
+                                            apply_fdr=True, config=ctx.config, logger=ctx.logger, use_permutation_p=False)
             if ctx.microstates_df is not None and not ctx.microstates_df.empty:
-                temp_ms_df, _ = _correlate_dataframe_features(
-                    feature_df=ctx.microstates_df,
-                    target_values=ctx.temperature,
-                    config=ctx.config,
-                    logger=ctx.logger,
-                    use_spearman=ctx.use_spearman,
-                    feature_source="microstates",
-                )
-            
-            # Save temperature correlations using standardized function
-            if not temp_precomp_df.empty:
-                temp_output = ctx.stats_dir / f"corr_stats_precomputed_vs_temp{method_suffix}.tsv"
-                save_correlation_results(temp_precomp_df, temp_output, apply_fdr=True, config=ctx.config, logger=ctx.logger)
-                
-                # By feature type
-                for ftype in temp_precomp_df["analysis"].unique():
-                    ftype_df = temp_precomp_df[temp_precomp_df["analysis"] == ftype].copy()
-                    ftype_path = ctx.stats_dir / f"corr_stats_{ftype}_vs_temp{method_suffix}.tsv"
-                    save_correlation_results(ftype_df, ftype_path, apply_fdr=True, config=ctx.config, logger=ctx.logger)
-            
-            if not temp_ms_df.empty:
-                temp_ms_output = ctx.stats_dir / f"corr_stats_microstates_vs_temp{method_suffix}.tsv"
-                save_correlation_results(temp_ms_df, temp_ms_output, apply_fdr=True, config=ctx.config, logger=ctx.logger)
+                temp_ms_df, _ = _correlate_df(ctx.microstates_df, ctx.temperature, ctx.config,
+                                              ctx.logger, ctx.use_spearman, "microstates")
+                if not temp_ms_df.empty:
+                    save_correlation_results(temp_ms_df, ctx.stats_dir / f"corr_stats_microstates_vs_temp{method_suffix}.tsv",
+                                            apply_fdr=True, config=ctx.config, logger=ctx.logger)
+        
+        all_records = precomp_recs + ms_recs
+        combined_parts = [df for df in (precomp_df, ms_df) if df is not None and not df.empty]
+        combined = pd.concat(combined_parts, ignore_index=True) if combined_parts else pd.DataFrame()
         
         return ComputationResult(
-            name="precomputed_correlations",
-            status=ComputationStatus.SUCCESS,
-            records=all_records,
-            dataframe=pd.concat([precomp_df, ms_df], ignore_index=True) if not precomp_df.empty or not ms_df.empty else pd.DataFrame(),
-            metadata={
-                "n_precomputed": len(precomp_records),
-                "n_microstates": len(ms_records),
-                "has_temp_correlations": ctx.temperature is not None,
-            },
+            name="precomputed", status=ComputationStatus.SUCCESS, records=all_records, dataframe=combined,
+            metadata={"n_precomputed": len(precomp_recs), "n_microstates": len(ms_recs)}
         )
-        
-    except Exception as exc:
-        ctx.logger.error(f"precomputed_correlations failed: {exc}")
-        return ComputationResult(
-            name="precomputed_correlations",
-            status=ComputationStatus.FAILED,
-            error=str(exc),
-        )
+    except Exception as e:
+        ctx.logger.error(f"precomputed failed: {e}")
+        return ComputationResult(name="precomputed", status=ComputationStatus.FAILED, error=str(e))

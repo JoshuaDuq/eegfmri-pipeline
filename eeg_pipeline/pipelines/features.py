@@ -38,6 +38,9 @@ FEATURE_CATEGORIES = [
     "itpc",
     "pac",
     "precomputed",
+    "cfc",
+    "dynamics_advanced",
+    "quality",
 ]
 
 
@@ -114,7 +117,8 @@ def extract_all_features(
     from eeg_pipeline.utils.data.features import load_group_microstate_templates
 
     # Configuration
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    from eeg_pipeline.utils.config.loader import get_frequency_band_names
+    power_bands = get_frequency_band_names(config)
     n_microstates = int(config.get("feature_engineering.microstates.n_states", 4))
     expected_n_trials = len(epochs)
 
@@ -158,6 +162,12 @@ def extract_all_features(
         "pac_time_df": None,
         "precomputed_df": None,
         "precomputed_cols": [],
+        "cfc_df": None,
+        "cfc_cols": [],
+        "dynamics_df": None,
+        "dynamics_cols": [],
+        "quality_df": None,
+        "quality_cols": [],
     }
 
     # Compute TFR (always needed)
@@ -330,6 +340,57 @@ def extract_all_features(
         except Exception as exc:
             logger.error(f"Precomputed extraction failed: {exc}")
 
+    # Cross-frequency coupling features
+    if "cfc" in categories:
+        progress.step(message="Extracting CFC features...")
+        try:
+            cfc_result = extract_precomputed_features(
+                epochs, power_bands, config, logger,
+                feature_groups=["cfc"],
+                events_df=aligned_events,
+            )
+            cfc_df = cfc_result.get_combined_df()
+            if cfc_df is not None and not cfc_df.empty:
+                results["cfc_df"] = cfc_df
+                results["cfc_cols"] = cfc_result.get_all_columns()
+                logger.info(f"Extracted {len(results['cfc_cols'])} CFC features")
+        except Exception as exc:
+            logger.warning(f"CFC extraction failed: {exc}")
+
+    # Advanced temporal dynamics features
+    if "dynamics_advanced" in categories:
+        progress.step(message="Extracting advanced dynamics features...")
+        try:
+            dyn_result = extract_precomputed_features(
+                epochs, power_bands, config, logger,
+                feature_groups=["dynamics_advanced"],
+                events_df=aligned_events,
+            )
+            dyn_df = dyn_result.get_combined_df()
+            if dyn_df is not None and not dyn_df.empty:
+                results["dynamics_df"] = dyn_df
+                results["dynamics_cols"] = dyn_result.get_all_columns()
+                logger.info(f"Extracted {len(results['dynamics_cols'])} dynamics features")
+        except Exception as exc:
+            logger.warning(f"Dynamics extraction failed: {exc}")
+
+    # Quality metrics
+    if "quality" in categories:
+        progress.step(message="Computing trial quality metrics...")
+        try:
+            qual_result = extract_precomputed_features(
+                epochs, power_bands, config, logger,
+                feature_groups=["quality"],
+                events_df=aligned_events,
+            )
+            qual_df = qual_result.get_combined_df()
+            if qual_df is not None and not qual_df.empty:
+                results["quality_df"] = qual_df
+                results["quality_cols"] = qual_result.get_all_columns()
+                logger.info(f"Computed {len(results['quality_cols'])} quality metrics")
+        except Exception as exc:
+            logger.warning(f"Quality metrics failed: {exc}")
+
     progress.finish()
     return results
 
@@ -345,7 +406,7 @@ def _compute_complex_tfr(epochs: mne.Epochs, config: Any, logger: logging.Logger
     freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
-    workers = resolve_tfr_workers(int(config.get("tfr_topography_pipeline.tfr.workers", -1)))
+    workers = resolve_tfr_workers(int(config.get("time_frequency_analysis.tfr.workers", -1)))
 
     logger.info("Computing complex TFR for phase-based metrics...")
     try:
@@ -497,7 +558,8 @@ def process_subject(
         pow_cols.extend(itpc_trial_cols)
 
     # Save microstate templates
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    from eeg_pipeline.utils.config.loader import get_frequency_band_names
+    power_bands = get_frequency_band_names(config)
     n_microstates = int(config.get("feature_engineering.microstates.n_states", 4))
     save_microstate_templates(epochs, ms_templates, subject, n_microstates, deriv_root, logger)
 

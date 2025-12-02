@@ -82,6 +82,7 @@ class FeatureResult:
     df: pd.DataFrame
     columns: List[str]
     name: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.df)
@@ -91,37 +92,8 @@ class FeatureResult:
         return self.df.empty
 
 
-@dataclass
-class ValidationResult:
-    """Result of data validation."""
-
-    valid: bool
-    issues: List[str] = field(default_factory=list)
-    critical: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def __bool__(self) -> bool:
-        return self.valid
-    
-    def log_issues(self, logger) -> None:
-        """Log all issues and warnings."""
-        for issue in self.critical:
-            logger.critical(f"Validation critical: {issue}")
-        for issue in self.issues:
-            logger.error(f"Validation error: {issue}")
-        for warning in self.warnings:
-            logger.warning(f"Validation warning: {warning}")
-    
-    @classmethod
-    def success(cls, **metadata) -> "ValidationResult":
-        """Create a successful validation result."""
-        return cls(valid=True, metadata=metadata)
-    
-    @classmethod
-    def failure(cls, issues: List[str], **metadata) -> "ValidationResult":
-        """Create a failed validation result."""
-        return cls(valid=False, issues=issues, metadata=metadata)
+# Re-export ValidationResult from utils.validation to avoid duplication
+from eeg_pipeline.utils.validation import ValidationResult
 
 
 ###################################################################

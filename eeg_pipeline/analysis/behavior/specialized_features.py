@@ -1,625 +1,218 @@
-import logging
+"""Specialized feature correlations: ITPC, aperiodic, PAC."""
+
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.io.general import (
-    deriv_features_path,
-    read_tsv,
-    build_partial_covars_string,
-    format_band_range,
-    get_column_from_config,
-)
-from eeg_pipeline.utils.analysis.stats import (
-    prepare_aligned_data,
-    compute_channel_rating_correlations,
-)
-from eeg_pipeline.analysis.behavior.core import save_correlation_results
-from eeg_pipeline.analysis.behavior.correlations import (
-    AnalysisConfig,
-    _align_groups_to_series,
-    _build_temp_record_unified,
-    _compute_roi_correlation_stats,
-)
-from eeg_pipeline.analysis.behavior.core import build_correlation_record
+from eeg_pipeline.utils.io.general import deriv_features_path, read_tsv, build_partial_covars_string, format_band_range, get_column_from_config
+from eeg_pipeline.utils.analysis.stats import prepare_aligned_data, compute_channel_rating_correlations
+from eeg_pipeline.analysis.behavior.core import save_correlation_results, build_correlation_record
+from eeg_pipeline.analysis.behavior.correlations import AnalysisConfig, _align_groups_to_series, _build_temp_record_unified, _compute_roi_correlation_stats
 
 
 def _parse_powcorr_column(col: str) -> Optional[Tuple[str, str]]:
-    """Parse aperiodic power correlation column name to extract band and channel."""
     if not isinstance(col, str) or not col.startswith("powcorr_"):
         return None
     parts = col.split("_")
-    if len(parts) < 3:
+    return (parts[1], "_".join(parts[2:])) if len(parts) >= 3 else None
+
+
+def _parse_itpc_column(col: str) -> Optional[Tuple[str, str, str]]:
+    if not isinstance(col, str) or not col.startswith("itpc_"):
         return None
-    band = parts[1]
-    channel = "_".join(parts[2:])
-    return band, channel
+    parts = col.split("_")
+    return (parts[1], parts[-1], "_".join(parts[2:-1])) if len(parts) >= 4 else None
 
 
-def _process_aperiodic_correlations(
-    aper_df: pd.DataFrame,
-    roi_map: Dict[str, List[str]],
-    target_values: pd.Series,
-    temp_series: Optional[pd.Series],
-    covariates_df: Optional[pd.DataFrame],
-    covariates_without_temp_df: Optional[pd.DataFrame],
-    freq_bands: Dict[str, List[float]],
-    analysis_cfg: AnalysisConfig,
-) -> None:
-    """Process aperiodic feature correlations with behavioral data."""
+def _build_channel_rec(ch: str, band: str, r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm, n, method, **extra):
+    return build_correlation_record(ch, band, r, p, n, method, ci_low=ci_lo, ci_high=ci_hi,
+                                    r_partial=r_p, p_partial=p_p, n_partial=n_p,
+                                    p_perm=p_perm, p_partial_perm=p_p_perm,
+                                    identifier_type="channel", analysis_type=extra.get("analysis", "power"), **extra).to_dict()
+
+
+def _process_aperiodic_correlations(aper_df, roi_map, target, temp_series, cov_df, cov_no_temp, freq_bands, cfg):
     if aper_df is None or aper_df.empty:
         return
 
-    from eeg_pipeline.analysis.behavior.power_roi import _build_channel_rating_record
-    from eeg_pipeline.analysis.behavior.power_roi import (
-        _build_roi_rating_record,
-        _build_temp_record_for_roi,
-    )
+    from eeg_pipeline.analysis.behavior.power_roi import _build_roi_rating_record, _build_temp_record_for_roi
 
     # Channel-level slopes/offsets
     for metric in ("aper_slope", "aper_offset"):
         cols = [c for c in aper_df.columns if str(c).startswith(f"{metric}_")]
         if not cols:
             continue
-
-        rating_records: List[Dict[str, Any]] = []
-        temp_records: List[Dict[str, Any]] = []
-
+        rating_recs, temp_recs = [], []
         for col in cols:
-            channel = col.replace(f"{metric}_", "")
-            values = pd.to_numeric(aper_df[col], errors="coerce")
-            context = f"{metric} {channel}"
-            x_aligned, y_aligned, cov_aligned, _, _ = prepare_aligned_data(
-                values, target_values, covariates_df,
-                min_samples=analysis_cfg.min_samples_channel, logger=analysis_cfg.logger, context=context,
-            )
-            if x_aligned is None or y_aligned is None:
+            ch = col.replace(f"{metric}_", "")
+            vals = pd.to_numeric(aper_df[col], errors="coerce")
+            x, y, cov, _, _ = prepare_aligned_data(vals, target, cov_df)
+            if len(x) == 0 or len(y) == 0:
                 continue
-            groups_aligned = _align_groups_to_series(x_aligned, analysis_cfg.groups)
-            (
-                correlation,
-                p_value,
-                ci_low,
-                ci_high,
-                r_partial,
-                p_partial,
-                n_partial,
-                p_perm,
-                p_partial_perm,
-            ) = compute_channel_rating_correlations(
-                x_aligned,
-                y_aligned,
-                cov_aligned,
-                analysis_cfg.bootstrap,
-                analysis_cfg.n_perm,
-                analysis_cfg.use_spearman,
-                analysis_cfg.method,
-                analysis_cfg.rng,
-                logger=analysis_cfg.logger,
-                config=analysis_cfg.config,
-                groups=groups_aligned,
+            groups = _align_groups_to_series(x, cfg.groups)
+            r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm = compute_channel_rating_correlations(
+                x, y, cov, cfg.bootstrap, cfg.n_perm, cfg.use_spearman, cfg.method, cfg.rng,
+                logger=cfg.logger, config=cfg.config, groups=groups,
             )
-            rating_records.append(
-                _build_channel_rating_record(
-                    channel,
-                    metric,
-                    correlation,
-                    p_value,
-                    ci_low,
-                    ci_high,
-                    r_partial,
-                    p_partial,
-                    n_partial,
-                    p_perm,
-                    p_partial_perm,
-                    int(len(x_aligned)),
-                    analysis_cfg.method,
-                )
-            )
+            rating_recs.append(_build_channel_rec(ch, metric, r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm, len(x), cfg.method))
+            tr = _build_temp_record_unified(vals, temp_series, cov_no_temp, ch, "channel", metric, cfg, groups)
+            if tr:
+                temp_recs.append(tr)
+        
+        if rating_recs:
+            save_correlation_results(pd.DataFrame(rating_recs), cfg.stats_dir / f"corr_stats_{metric}_vs_rating.tsv",
+                                    apply_fdr=True, config=cfg.config, logger=cfg.logger, use_permutation_p=True)
+        if temp_recs:
+            save_correlation_results(pd.DataFrame(temp_recs), cfg.stats_dir / f"corr_stats_{metric}_vs_temp.tsv",
+                                    apply_fdr=True, config=cfg.config, logger=cfg.logger)
 
-            temp_record = _build_temp_record_unified(
-                x_values=values,
-                temp_series=temp_series,
-                covariates_without_temp_df=covariates_without_temp_df,
-                identifier=channel,
-                identifier_key="channel",
-                band=metric,
-                analysis_cfg=analysis_cfg,
-                groups=groups_aligned,
-            )
-            if temp_record is not None:
-                temp_records.append(temp_record)
-
-        if rating_records:
-            rating_df = pd.DataFrame(rating_records)
-            save_correlation_results(
-                rating_df,
-                analysis_cfg.stats_dir / f"corr_stats_{metric}_vs_rating.tsv",
-                apply_fdr=True,
-                config=analysis_cfg.config,
-                logger=analysis_cfg.logger,
-                use_permutation_p=True,
-                add_fdr_reject=True,
-            )
-        if temp_records:
-            temp_df = pd.DataFrame(temp_records)
-            save_correlation_results(
-                temp_df,
-                analysis_cfg.stats_dir / f"corr_stats_{metric}_vs_temp.tsv",
-                apply_fdr=True,
-                config=analysis_cfg.config,
-                logger=analysis_cfg.logger,
-                use_permutation_p=False,
-                add_fdr_reject=True,
-            )
-
-    # Channel-level residual bands
+    # Channel-level residual bands (powcorr)
     powcorr_cols = [c for c in aper_df.columns if str(c).startswith("powcorr_")]
-    bands_available = {b for b, _ in (_parse_powcorr_column(c) or (None, None) for c in powcorr_cols) if b}
-    rating_records: List[Dict[str, Any]] = []
-    temp_records: List[Dict[str, Any]] = []
-
+    bands_avail = {b for b, _ in (_parse_powcorr_column(c) or (None, None) for c in powcorr_cols) if b}
+    rating_recs, temp_recs = [], []
+    
     for col in powcorr_cols:
         parsed = _parse_powcorr_column(col)
-        if parsed is None:
+        if not parsed:
             continue
-        band, channel = parsed
-        values = pd.to_numeric(aper_df[col], errors="coerce")
-        context = f"powcorr {band} {channel}"
-        x_aligned, y_aligned, cov_aligned, _, _ = prepare_aligned_data(
-            values, target_values, covariates_df,
-            min_samples=analysis_cfg.min_samples_channel, logger=analysis_cfg.logger, context=context,
-        )
-        if x_aligned is None or y_aligned is None:
+        band, ch = parsed
+        vals = pd.to_numeric(aper_df[col], errors="coerce")
+        x, y, cov, _, _ = prepare_aligned_data(vals, target, cov_df)
+        if len(x) == 0 or len(y) == 0:
             continue
-        groups_aligned = _align_groups_to_series(x_aligned, analysis_cfg.groups)
-        (
-            correlation,
-            p_value,
-            ci_low,
-            ci_high,
-            r_partial,
-            p_partial,
-            n_partial,
-            p_perm,
-            p_partial_perm,
-        ) = compute_channel_rating_correlations(
-            x_aligned,
-            y_aligned,
-            cov_aligned,
-            analysis_cfg.bootstrap,
-            analysis_cfg.n_perm,
-            analysis_cfg.use_spearman,
-            analysis_cfg.method,
-            analysis_cfg.rng,
-            logger=analysis_cfg.logger,
-            config=analysis_cfg.config,
-            groups=groups_aligned,
+        groups = _align_groups_to_series(x, cfg.groups)
+        r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm = compute_channel_rating_correlations(
+            x, y, cov, cfg.bootstrap, cfg.n_perm, cfg.use_spearman, cfg.method, cfg.rng,
+            logger=cfg.logger, config=cfg.config, groups=groups,
         )
-        rating_records.append(
-            _build_channel_rating_record(
-                channel,
-                f"powcorr_{band}",
-                correlation,
-                p_value,
-                ci_low,
-                ci_high,
-                r_partial,
-                p_partial,
-                n_partial,
-                p_perm,
-                p_partial_perm,
-                int(len(x_aligned)),
-                analysis_cfg.method,
-            )
-        )
-        temp_record = _build_temp_record_unified(
-            x_values=values,
-            temp_series=temp_series,
-            covariates_without_temp_df=covariates_without_temp_df,
-            identifier=channel,
-            identifier_key="channel",
-            band=f"powcorr_{band}",
-            analysis_cfg=analysis_cfg,
-            groups=groups_aligned,
-        )
-        if temp_record is not None:
-            temp_records.append(temp_record)
-
-    if rating_records:
-        rating_df = pd.DataFrame(rating_records)
-        save_correlation_results(
-            rating_df,
-            analysis_cfg.stats_dir / "corr_stats_powcorr_vs_rating.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=True,
-            add_fdr_reject=True,
-        )
-    if temp_records:
-        temp_df = pd.DataFrame(temp_records)
-        save_correlation_results(
-            temp_df,
-            analysis_cfg.stats_dir / "corr_stats_powcorr_vs_temp.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=False,
-            add_fdr_reject=True,
-        )
+        rating_recs.append(_build_channel_rec(ch, f"powcorr_{band}", r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm, len(x), cfg.method))
+        tr = _build_temp_record_unified(vals, temp_series, cov_no_temp, ch, "channel", f"powcorr_{band}", cfg, groups)
+        if tr:
+            temp_recs.append(tr)
+    
+    if rating_recs:
+        save_correlation_results(pd.DataFrame(rating_recs), cfg.stats_dir / "corr_stats_powcorr_vs_rating.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger, use_permutation_p=True)
+    if temp_recs:
+        save_correlation_results(pd.DataFrame(temp_recs), cfg.stats_dir / "corr_stats_powcorr_vs_temp.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger)
 
     # ROI-level residual bands
     if roi_map:
-        freq_bands_labels = freq_bands or {}
-        rating_roi_records: List[Dict[str, Any]] = []
-        temp_roi_records: List[Dict[str, Any]] = []
-        for band in sorted(bands_available):
-            band_range_str = format_band_range(band, freq_bands_labels)
+        rating_recs, temp_recs = [], []
+        for band in sorted(bands_avail):
+            band_range_str = format_band_range(band, freq_bands or {})
             for roi, channels in roi_map.items():
                 roi_cols = [f"powcorr_{band}_{ch}" for ch in channels if f"powcorr_{band}_{ch}" in aper_df.columns]
                 if not roi_cols:
                     continue
-                roi_values = aper_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                context = f"powcorr {band} ROI {roi}"
-                x_aligned, y_aligned, cov_aligned, _, n_eff = prepare_aligned_data(
-                    roi_values, target_values, covariates_df,
-                    min_samples=analysis_cfg.min_samples_roi, logger=analysis_cfg.logger, context=context,
-                )
-                if x_aligned is None or y_aligned is None:
+                roi_vals = aper_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                x, y, cov, _, n = prepare_aligned_data(roi_vals, target, cov_df)
+                if len(x) == 0 or len(y) == 0:
                     continue
-                groups_aligned = _align_groups_to_series(x_aligned, analysis_cfg.groups)
-                stats = _compute_roi_correlation_stats(
-                    x_aligned, y_aligned, x_aligned, y_aligned,
-                    cov_aligned, temp_series, n_eff, band, roi, context, analysis_cfg,
-                    groups=groups_aligned,
-                )
-                partial_covars_str = build_partial_covars_string(covariates_df)
-                rating_roi_records.append(
-                    _build_roi_rating_record(
-                        roi, band, band_range_str,
-                        stats.correlation, stats.p_value, n_eff, analysis_cfg.method,
-                        stats.ci_low, stats.ci_high, stats.r_partial, stats.p_partial, stats.n_partial, partial_covars_str,
-                        stats.r_partial_temp, stats.p_partial_temp, stats.n_partial_temp,
-                        stats.p_perm, stats.p_partial_perm, stats.p_partial_temp_perm, analysis_cfg.n_perm,
-                    )
-                )
-                temp_record = _build_temp_record_for_roi(
-                    roi_values, temp_series, covariates_without_temp_df,
-                    band, roi, band_range_str, analysis_cfg, groups=groups_aligned,
-                )
-                if temp_record is not None:
-                    temp_roi_records.append(temp_record)
-
-        if rating_roi_records:
-            rating_df = pd.DataFrame(rating_roi_records)
-            save_correlation_results(
-                rating_df,
-                analysis_cfg.stats_dir / "corr_stats_powcorr_roi_vs_rating.tsv",
-                apply_fdr=True,
-                config=analysis_cfg.config,
-                logger=analysis_cfg.logger,
-                use_permutation_p=True,
-                add_fdr_reject=True,
-            )
-        if temp_roi_records:
-            temp_df = pd.DataFrame(temp_roi_records)
-            save_correlation_results(
-                temp_df,
-                analysis_cfg.stats_dir / "corr_stats_powcorr_roi_vs_temp.tsv",
-                apply_fdr=True,
-                config=analysis_cfg.config,
-                logger=analysis_cfg.logger,
-                use_permutation_p=False,
-                add_fdr_reject=True,
-            )
+                groups = _align_groups_to_series(x, cfg.groups)
+                stats = _compute_roi_correlation_stats(x, y, x, y, cov, temp_series, n, band, roi,
+                                                       f"powcorr {band} ROI {roi}", cfg, groups=groups)
+                rating_recs.append(_build_roi_rating_record(
+                    roi, band, band_range_str, stats.correlation, stats.p_value, n, cfg.method,
+                    stats.ci_low, stats.ci_high, stats.r_partial, stats.p_partial, stats.n_partial,
+                    build_partial_covars_string(cov_df), stats.r_partial_temp, stats.p_partial_temp,
+                    stats.n_partial_temp, stats.p_perm, stats.p_partial_perm, stats.p_partial_temp_perm, cfg.n_perm,
+                ))
+                tr = _build_temp_record_for_roi(roi_vals, temp_series, cov_no_temp, band, roi, band_range_str, cfg, groups)
+                if tr:
+                    temp_recs.append(tr)
+        
+        if rating_recs:
+            save_correlation_results(pd.DataFrame(rating_recs), cfg.stats_dir / "corr_stats_powcorr_roi_vs_rating.tsv",
+                                    apply_fdr=True, config=cfg.config, logger=cfg.logger, use_permutation_p=True)
+        if temp_recs:
+            save_correlation_results(pd.DataFrame(temp_recs), cfg.stats_dir / "corr_stats_powcorr_roi_vs_temp.tsv",
+                                    apply_fdr=True, config=cfg.config, logger=cfg.logger)
 
 
-def _parse_itpc_column(col: str) -> Optional[Tuple[str, str, str]]:
-    """Parse ITPC column name to extract band, time bin, and channel."""
-    if not isinstance(col, str) or not col.startswith("itpc_"):
-        return None
-    parts = col.split("_")
-    if len(parts) < 4:
-        return None
-    band = parts[1]
-    time_bin = parts[-1]
-    channel = "_".join(parts[2:-1])
-    return band, time_bin, channel
-
-
-def _build_itpc_rating_record(
-    channel: str,
-    band: str,
-    time_bin: str,
-    correlation: float,
-    p_value: float,
-    ci_low: float,
-    ci_high: float,
-    r_partial: float,
-    p_partial: float,
-    n_partial: int,
-    p_perm: float,
-    p_partial_perm: float,
-    n_valid: int,
-    method: str,
-) -> Dict[str, Any]:
-    """Build correlation record for ITPC feature."""
-    record = build_correlation_record(
-        identifier=channel,
-        band=band,
-        r=correlation,
-        p=p_value,
-        n=n_valid,
-        method=method,
-        ci_low=ci_low,
-        ci_high=ci_high,
-        r_partial=r_partial,
-        p_partial=p_partial,
-        n_partial=n_partial,
-        p_perm=p_perm,
-        p_partial_perm=p_partial_perm,
-        identifier_type="channel",
-        analysis_type="itpc",
-        time_bin=time_bin,
-    )
-    return record.to_dict()
-
-
-def _process_itpc_correlations(
-    itpc_df: pd.DataFrame,
-    target_values: pd.Series,
-    covariates_df: Optional[pd.DataFrame],
-    temp_series: Optional[pd.Series],
-    covariates_without_temp_df: Optional[pd.DataFrame],
-    analysis_cfg: AnalysisConfig,
-) -> None:
-    """Process ITPC correlations with behavioral data."""
+def _process_itpc_correlations(itpc_df, target, cov_df, temp_series, cov_no_temp, cfg):
     if itpc_df is None or itpc_df.empty:
         return
-
-    rating_records: List[Dict[str, Any]] = []
-    temp_records: List[Dict[str, Any]] = []
-
+    
+    rating_recs, temp_recs = [], []
     for col in itpc_df.columns:
         parsed = _parse_itpc_column(str(col))
-        if parsed is None:
+        if not parsed:
             continue
-        band, time_bin, channel_name = parsed
-        channel_values = pd.to_numeric(itpc_df[col], errors="coerce")
-        context = f"ITPC {channel_name} ({band}, {time_bin})"
-
-        x_aligned, y_aligned, covariates_aligned, _, _ = prepare_aligned_data(
-            channel_values,
-            target_values,
-            covariates_df,
-            min_samples=analysis_cfg.min_samples_channel,
-            logger=analysis_cfg.logger,
-            context=context,
-        )
-        if x_aligned is None or y_aligned is None:
+        band, time_bin, ch = parsed
+        vals = pd.to_numeric(itpc_df[col], errors="coerce")
+        x, y, cov, _, _ = prepare_aligned_data(vals, target, cov_df)
+        if len(x) == 0 or len(y) == 0:
             continue
-
-        groups_aligned = _align_groups_to_series(x_aligned, analysis_cfg.groups)
-
-        (
-            correlation,
-            p_value,
-            ci_low,
-            ci_high,
-            r_partial,
-            p_partial,
-            n_partial,
-            p_perm,
-            p_partial_perm,
-        ) = compute_channel_rating_correlations(
-            x_aligned,
-            y_aligned,
-            covariates_aligned,
-            analysis_cfg.bootstrap,
-            analysis_cfg.n_perm,
-            analysis_cfg.use_spearman,
-            analysis_cfg.method,
-            analysis_cfg.rng,
-            logger=analysis_cfg.logger,
-            config=analysis_cfg.config,
-            groups=groups_aligned,
+        groups = _align_groups_to_series(x, cfg.groups)
+        r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm = compute_channel_rating_correlations(
+            x, y, cov, cfg.bootstrap, cfg.n_perm, cfg.use_spearman, cfg.method, cfg.rng,
+            logger=cfg.logger, config=cfg.config, groups=groups,
         )
-
-        rating_records.append(
-            _build_itpc_rating_record(
-                channel_name,
-                band,
-                time_bin,
-                correlation,
-                p_value,
-                ci_low,
-                ci_high,
-                r_partial,
-                p_partial,
-                n_partial,
-                p_perm,
-                p_partial_perm,
-                int(len(x_aligned)),
-                analysis_cfg.method,
-            )
-        )
-
-        temp_record = _build_temp_record_unified(
-            x_values=channel_values,
-            temp_series=temp_series,
-            covariates_without_temp_df=covariates_without_temp_df,
-            identifier=channel_name,
-            identifier_key="channel",
-            band=band,
-            analysis_cfg=analysis_cfg,
-            groups=groups_aligned,
-            time_bin=time_bin,
-        )
-        if temp_record is not None:
-            temp_records.append(temp_record)
-
-    if rating_records:
-        rating_df = pd.DataFrame(rating_records)
-        save_correlation_results(
-            rating_df,
-            analysis_cfg.stats_dir / "corr_stats_itpc_vs_rating.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=True,
-            add_fdr_reject=True,
-        )
-
-    if temp_records:
-        temp_df = pd.DataFrame(temp_records)
-        save_correlation_results(
-            temp_df,
-            analysis_cfg.stats_dir / "corr_stats_itpc_vs_temp.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=False,
-            add_fdr_reject=True,
-        )
+        rec = build_correlation_record(
+            ch, band, r, p, len(x), cfg.method, ci_low=ci_lo, ci_high=ci_hi,
+            r_partial=r_p, p_partial=p_p, n_partial=n_p, p_perm=p_perm, p_partial_perm=p_p_perm,
+            identifier_type="channel", analysis_type="itpc", time_bin=time_bin,
+        ).to_dict()
+        rating_recs.append(rec)
+        tr = _build_temp_record_unified(vals, temp_series, cov_no_temp, ch, "channel", band, cfg, groups, time_bin=time_bin)
+        if tr:
+            temp_recs.append(tr)
+    
+    if rating_recs:
+        save_correlation_results(pd.DataFrame(rating_recs), cfg.stats_dir / "corr_stats_itpc_vs_rating.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger, use_permutation_p=True)
+    if temp_recs:
+        save_correlation_results(pd.DataFrame(temp_recs), cfg.stats_dir / "corr_stats_itpc_vs_temp.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger)
 
 
-def _load_pac_trials(subject: str, deriv_root: Path) -> Optional[pd.DataFrame]:
-    """Load PAC trial-level features."""
-    pac_path = deriv_features_path(deriv_root, subject) / "features_pac_trials.tsv"
-    if not pac_path.exists():
-        return None
-    try:
-        return read_tsv(pac_path)
-    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError):
-        return None
-
-
-def _process_pac_correlations(
-    pac_trials_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    analysis_cfg: AnalysisConfig,
-    temp_series: Optional[pd.Series],
-    covariates_df: Optional[pd.DataFrame],
-    covariates_without_temp_df: Optional[pd.DataFrame],
-) -> None:
-    """Process PAC correlations with behavioral data."""
-    if pac_trials_df is None or pac_trials_df.empty or events_df is None or events_df.empty:
+def _process_pac_correlations(pac_df, events_df, cfg, temp_series, cov_df, cov_no_temp):
+    if pac_df is None or pac_df.empty or events_df is None or events_df.empty:
         return
-
-    rating_col = get_column_from_config(analysis_cfg.config, "event_columns.rating", events_df)
+    
+    rating_col = get_column_from_config(cfg.config, "event_columns.rating", events_df)
     if rating_col is None or rating_col not in events_df.columns:
         return
-
+    
     rating = pd.to_numeric(events_df[rating_col], errors="coerce")
-    n_trials = pac_trials_df["trial"].nunique() if "trial" in pac_trials_df.columns else 0
+    n_trials = pac_df["trial"].nunique() if "trial" in pac_df.columns else 0
     if n_trials == 0 or len(rating) != n_trials:
         return
-
-    min_samples = analysis_cfg.min_samples_roi
-    rating_records: List[Dict[str, Any]] = []
-    temp_records: List[Dict[str, Any]] = []
-
-    for (roi, phase_f, amp_f), df_sub in pac_trials_df.groupby(["roi", "phase_freq", "amp_freq"]):
-        df_sub_sorted = df_sub.sort_values("trial")
-        pac_vals = pd.to_numeric(df_sub_sorted["pac"], errors="coerce")
-        pac_vals.index = df_sub_sorted["trial"].values
-        context = f"PAC {roi} {phase_f:.1f}-{amp_f:.1f}"
-        x_aligned, y_aligned, cov_aligned, _, _ = prepare_aligned_data(
-            pac_vals,
-            rating.reset_index(drop=True),
-            covariates_df,
-            min_samples=min_samples,
-            logger=analysis_cfg.logger,
-            context=context,
-        )
-        if x_aligned is None or y_aligned is None:
+    
+    rating_recs, temp_recs = [], []
+    for (roi, phase_f, amp_f), df_sub in pac_df.groupby(["roi", "phase_freq", "amp_freq"]):
+        df_sub = df_sub.sort_values("trial")
+        pac_vals = pd.to_numeric(df_sub["pac"], errors="coerce")
+        pac_vals.index = df_sub["trial"].values
+        
+        x, y, cov, _, _ = prepare_aligned_data(pac_vals, rating.reset_index(drop=True), cov_df)
+        if len(x) == 0 or len(y) == 0:
             continue
-
-        groups_aligned = _align_groups_to_series(x_aligned, analysis_cfg.groups)
-        (
-            correlation,
-            p_value,
-            ci_low,
-            ci_high,
-            r_partial,
-            p_partial,
-            n_partial,
-            p_perm,
-            p_partial_perm,
-        ) = compute_channel_rating_correlations(
-            x_aligned,
-            y_aligned,
-            cov_aligned,
-            analysis_cfg.bootstrap,
-            analysis_cfg.n_perm,
-            analysis_cfg.use_spearman,
-            analysis_cfg.method,
-            analysis_cfg.rng,
-            logger=analysis_cfg.logger,
-            config=analysis_cfg.config,
-            groups=groups_aligned,
+        groups = _align_groups_to_series(x, cfg.groups)
+        r, p, ci_lo, ci_hi, r_p, p_p, n_p, p_perm, p_p_perm = compute_channel_rating_correlations(
+            x, y, cov, cfg.bootstrap, cfg.n_perm, cfg.use_spearman, cfg.method, cfg.rng,
+            logger=cfg.logger, config=cfg.config, groups=groups,
         )
-
-        record = build_correlation_record(
-            identifier=roi,
-            band=f"pac_{phase_f:.1f}_{amp_f:.1f}",
-            r=correlation,
-            p=p_value,
-            n=int(len(x_aligned)),
-            method=analysis_cfg.method,
-            ci_low=ci_low,
-            ci_high=ci_high,
-            r_partial=r_partial,
-            p_partial=p_partial,
-            n_partial=n_partial,
-            p_perm=p_perm,
-            p_partial_perm=p_partial_perm,
-            identifier_type="roi",
-            analysis_type="pac",
-            phase_freq=float(phase_f),
-            amp_freq=float(amp_f),
-        )
-        rating_records.append(record.to_dict())
-
-        temp_record = _build_temp_record_unified(
-            x_values=pac_vals,
-            temp_series=temp_series,
-            covariates_without_temp_df=covariates_without_temp_df,
-            identifier=roi,
-            identifier_key="roi",
-            band=f"pac_{phase_f:.1f}_{amp_f:.1f}",
-            analysis_cfg=analysis_cfg,
-            groups=groups_aligned,
-            phase_freq=float(phase_f),
-            amp_freq=float(amp_f),
-        )
-        if temp_record is not None:
-            temp_records.append(temp_record)
-
-    if rating_records:
-        rating_df = pd.DataFrame(rating_records)
-        save_correlation_results(
-            rating_df,
-            analysis_cfg.stats_dir / "corr_stats_pac_vs_rating.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=True,
-            add_fdr_reject=True,
-        )
-
-    if temp_records:
-        temp_df = pd.DataFrame(temp_records)
-        save_correlation_results(
-            temp_df,
-            analysis_cfg.stats_dir / "corr_stats_pac_vs_temp.tsv",
-            apply_fdr=True,
-            config=analysis_cfg.config,
-            logger=analysis_cfg.logger,
-            use_permutation_p=False,
-            add_fdr_reject=True,
-        )
-
+        rec = build_correlation_record(
+            roi, f"pac_{phase_f:.1f}_{amp_f:.1f}", r, p, len(x), cfg.method,
+            ci_low=ci_lo, ci_high=ci_hi, r_partial=r_p, p_partial=p_p, n_partial=n_p,
+            p_perm=p_perm, p_partial_perm=p_p_perm, identifier_type="roi", analysis_type="pac",
+            phase_freq=float(phase_f), amp_freq=float(amp_f),
+        ).to_dict()
+        rating_recs.append(rec)
+        tr = _build_temp_record_unified(pac_vals, temp_series, cov_no_temp, roi, "roi",
+                                        f"pac_{phase_f:.1f}_{amp_f:.1f}", cfg, groups,
+                                        phase_freq=float(phase_f), amp_freq=float(amp_f))
+        if tr:
+            temp_recs.append(tr)
+    
+    if rating_recs:
+        save_correlation_results(pd.DataFrame(rating_recs), cfg.stats_dir / "corr_stats_pac_vs_rating.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger, use_permutation_p=True)
+    if temp_recs:
+        save_correlation_results(pd.DataFrame(temp_recs), cfg.stats_dir / "corr_stats_pac_vs_temp.tsv",
+                                apply_fdr=True, config=cfg.config, logger=cfg.logger)

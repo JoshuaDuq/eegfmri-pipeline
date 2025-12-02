@@ -324,7 +324,7 @@ def plot_aperiodic_topomaps(
                     continue
 
                 p_vals = []
-                min_samples = int(config.get("statistics.min_samples_per_channel", 5)) if hasattr(config, "get") else 5
+                min_samples = int(config.get("statistics.min_samples_per_channel", 5))
                 for ch in common_chs:
                     series = pd.to_numeric(features_df[f"aper_{metric}_{ch}"], errors="coerce")
                     if run_col:
@@ -366,7 +366,7 @@ def plot_aperiodic_topomaps(
                     q_vals.append(np.nan)
             per_metric_qvals[metric] = np.array(q_vals, dtype=float)
 
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
+    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
     
     metrics = list(per_metric_common.keys())
     if not metrics:
@@ -486,7 +486,7 @@ def plot_aperiodic_vs_pain(
 
     rating_col = None
     potential_cols = ["rating", "vas", "pain_rating", "response"]
-    config_rating = config.get("event_columns.rating") if hasattr(config, "get") else None
+    config_rating = config.get("event_columns.rating")
     
     if config_rating:
         if isinstance(config_rating, list):
@@ -527,7 +527,7 @@ def plot_aperiodic_vs_pain(
                 col for col in slope_cols
                 if pd.to_numeric(features_df[col], errors="coerce").notna().all()
             ]
-        min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10)) if hasattr(config, "get") else 10
+        min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10))
         if len(common_chs) < min_ch:
             log_if_present(logger, "warning", f"Insufficient common aperiodic channels across conditions ({len(common_chs)}<{min_ch}); skipping slope vs pain plot")
             return
@@ -550,7 +550,7 @@ def plot_aperiodic_vs_pain(
         vals = pd.to_numeric(features_df[col], errors="coerce").loc[valid_mask]
         if vals.notna().all():
             good_chs.append(col)
-    min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10)) if hasattr(config, "get") else 10
+    min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10))
     if len(good_chs) < min_ch:
         log_if_present(logger, "warning", f"Insufficient common aperiodic channels ({len(good_chs)}<{min_ch}); skipping slope vs pain plot")
         return
@@ -575,8 +575,8 @@ def plot_aperiodic_vs_pain(
 
     r_val, _ = stats.spearmanr(ratings_agg, slopes_agg)
 
-    n_perm = int(config.get("plotting.aperiodic.n_perm", 1000)) if hasattr(config, "get") else 1000
-    rng = np.random.default_rng(int(config.get("project.random_state", 42)) if hasattr(config, "get") else None)
+    n_perm = int(config.get("plotting.plots.aperiodic.n_perm", 1000))
+    rng = np.random.default_rng(int(config.get("project.random_state", 42)))
     observed = abs(r_val)
     perm_ge = 0
     ratings_arr = ratings_agg.to_numpy()

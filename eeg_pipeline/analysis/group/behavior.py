@@ -10,7 +10,7 @@ import seaborn as sns
 import mne
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
 from eeg_pipeline.utils.data.loading import (
     get_available_subjects,
     load_subject_data_for_summary,
@@ -184,7 +184,7 @@ def plot_roi_correlations(df: pd.DataFrame, output_path: Path, config) -> None:
             warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
             fig.tight_layout()
         
-        save_formats = config.get("output.save_formats", ["svg"])
+        save_formats = config.get("plotting.defaults.formats", ["svg"])
         save_fig(
             fig, output_path / f"group_roi_power_vs_rating_{sanitize_label(band)}",
             formats=save_formats, bbox_inches="tight", footer=_get_behavior_footer(config)
@@ -822,7 +822,7 @@ def plot_channel_correlations(df: pd.DataFrame, band: str, output_path: Path,
     )
     
     plt.tight_layout()
-    save_formats = config.get("output.save_formats", ["svg"])
+    save_formats = config.get("plotting.defaults.formats", ["svg"])
     save_fig(
         fig, output_path / f"group_power_{filename_suffix}_correlation_{sanitize_label(band)}",
         formats=save_formats, bbox_inches="tight", footer=_get_behavior_footer(config)
@@ -872,7 +872,7 @@ def plot_top_predictors(df_sig: pd.DataFrame, top_n: int, output_path: Path,
     ax.set_axisbelow(True)
     plt.tight_layout()
     
-    save_formats = config.get("output.save_formats", ["svg"])
+    save_formats = config.get("plotting.defaults.formats", ["svg"])
     filename_suffix = f"{filename_suffix}al" if correlation_type == "rating" else filename_suffix
     save_fig(
         fig, output_path / f"group_top_{top_n}_{filename_suffix}_predictors",
@@ -962,7 +962,7 @@ def plot_group_topomap(bands_data: List[Dict], subjects: List[str], task: str,
         cbar.set_label('Correlation (ρ)', fontweight='bold', fontsize=11)
         cbar.ax.tick_params(pad=2, labelsize=9)
     
-    save_formats = config.get("output.save_formats", ["svg"])
+    save_formats = config.get("plotting.defaults.formats", ["svg"])
     save_fig(fig, output_path / f"group_significant_correlations_topomap_{filename_suffix}",
             formats=save_formats, bbox_inches="tight", footer=_get_behavior_footer(config))
     plt.close(fig)
@@ -1005,7 +1005,7 @@ def aggregate_channel_level_visuals(subjects: List[str], task: str, logger: logg
     ensure_dir(group_stats)
     ensure_dir(group_plots)
     
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands = get_frequency_band_names(config)
     bands = list(power_bands)
     
     bands_to_df_rating = aggregate_channel_statistics(subjects, bands, deriv_root, group_stats, config, "rating")
@@ -1061,7 +1061,7 @@ def plot_band_correlation(subject_r: List[float], band: str,
         p_group = np.nan
 
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
-    jitter = (np.random.default_rng(int(config.get("random.seed", 42))).random(r_vals.size) - 0.5) * 0.15
+    jitter = (np.random.default_rng(int(config.get("project.random_state", 42))).random(r_vals.size) - 0.5) * 0.15
     ax.scatter(np.zeros_like(r_vals) + jitter, r_vals, color=_get_band_color(band, config), alpha=0.7, edgecolor="white", linewidth=0.5)
     ax.axhline(group_r, color="black", linestyle="--", linewidth=1.2, label=f"group r={group_r:.3f}")
     ax.axhline(0, color="gray", linestyle="-", linewidth=0.8)
@@ -1082,7 +1082,7 @@ def plot_band_correlation(subject_r: List[float], band: str,
     ax.legend(loc="lower right")
     plt.tight_layout()
 
-    save_formats = config.get("output.save_formats", ["svg"])
+    save_formats = config.get("plotting.defaults.formats", ["svg"])
     save_fig(
         fig, output_path, formats=save_formats, bbox_inches="tight",
         footer=_get_behavior_footer(config)
@@ -1147,7 +1147,7 @@ def aggregate_overall_band_summary(subjects: List[str], task: str, pooling_strat
         subjects, task, deriv_root, config
     )
     
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands = get_frequency_band_names(config)
     plot_subdir = config.get("plotting.behavioral.plot_subdir", "04_behavior_correlations")
     group_plots = deriv_group_plots_path(deriv_root, subdir=plot_subdir)
     
@@ -1159,6 +1159,138 @@ def aggregate_overall_band_summary(subjects: List[str], task: str, pooling_strat
         plot_band_correlations_for_type(
             temp_x, temp_y, power_bands, group_plots, pooling_strategy, config, "temperature"
         )
+
+
+###################################################################
+# Condition Effect Sizes Aggregation
+###################################################################
+
+
+def aggregate_condition_effect_sizes(
+    subjects: List[str],
+    deriv_root: Path,
+    group_stats: Path,
+    config,
+    logger: logging.Logger,
+) -> None:
+    """
+    Aggregate condition effect sizes (pain vs nonpain) across subjects.
+    
+    Loads effect_sizes_all_pain_vs_nonpain.tsv from each subject and computes
+    group-level statistics.
+    """
+    all_dfs = []
+    
+    for subj in subjects:
+        stats_dir = deriv_stats_path(deriv_root, subj)
+        effect_file = stats_dir / "effect_sizes_all_pain_vs_nonpain.tsv"
+        
+        if effect_file.exists():
+            try:
+                df = read_tsv(effect_file)
+                df["subject"] = subj
+                all_dfs.append(df)
+            except Exception as e:
+                logger.warning(f"Failed to load effect sizes for {subj}: {e}")
+    
+    if not all_dfs:
+        logger.info("No condition effect sizes found to aggregate")
+        return
+    
+    combined = pd.concat(all_dfs, ignore_index=True)
+    logger.info(f"Aggregating condition effect sizes from {len(all_dfs)} subjects, {len(combined)} total")
+    
+    # Group by feature and compute statistics
+    if "feature" in combined.columns and "hedges_g" in combined.columns:
+        grouped = combined.groupby("feature").agg({
+            "hedges_g": ["mean", "std", "count"],
+            "cohens_d": ["mean", "std"],
+            "p_ttest": ["mean", "min"],
+        }).reset_index()
+        grouped.columns = ["feature", "hedges_g_mean", "hedges_g_std", "n_subjects",
+                          "cohens_d_mean", "cohens_d_std", "p_mean", "p_min"]
+        
+        # Sort by absolute effect size
+        grouped["abs_g"] = grouped["hedges_g_mean"].abs()
+        grouped = grouped.sort_values("abs_g", ascending=False).drop(columns=["abs_g"])
+        
+        # Save
+        out_path = group_stats / "group_effect_sizes_pain_vs_nonpain.tsv"
+        write_tsv(grouped, out_path)
+        logger.info(f"Saved group effect sizes to {out_path}")
+        
+        # Summary
+        n_large = (grouped["hedges_g_mean"].abs() >= 0.8).sum()
+        n_medium = ((grouped["hedges_g_mean"].abs() >= 0.5) & (grouped["hedges_g_mean"].abs() < 0.8)).sum()
+        logger.info(f"  Group effect sizes: {n_large} large, {n_medium} medium")
+    
+    # Save combined raw data
+    write_tsv(combined, group_stats / "group_effect_sizes_all_subjects.tsv")
+
+
+def aggregate_partial_correlations(
+    subjects: List[str],
+    deriv_root: Path,
+    group_stats: Path,
+    config,
+    logger: logging.Logger,
+) -> None:
+    """
+    Aggregate partial correlations (controlling for temperature) across subjects.
+    """
+    all_dfs = []
+    
+    for subj in subjects:
+        stats_dir = deriv_stats_path(deriv_root, subj)
+        # Try both spearman and pearson
+        for method in ["spearman", "pearson"]:
+            partial_file = stats_dir / f"partial_corr_controlling_temp_{method}.tsv"
+            if partial_file.exists():
+                try:
+                    df = read_tsv(partial_file)
+                    df["subject"] = subj
+                    all_dfs.append(df)
+                    break  # Found one, don't need both
+                except Exception as e:
+                    logger.warning(f"Failed to load partial correlations for {subj}: {e}")
+    
+    if not all_dfs:
+        logger.info("No partial correlations found to aggregate")
+        return
+    
+    combined = pd.concat(all_dfs, ignore_index=True)
+    logger.info(f"Aggregating partial correlations from {len(all_dfs)} subjects")
+    
+    # Group by feature and condition
+    if "feature" in combined.columns and "r_partial_temp" in combined.columns:
+        grouped = combined.groupby(["feature", "condition"]).agg({
+            "r": ["mean", "std"],
+            "r_partial_temp": ["mean", "std"],
+            "r_change_temp": ["mean", "std"],
+            "temp_mediated": ["sum", "count"],
+        }).reset_index()
+        grouped.columns = ["feature", "condition", "r_mean", "r_std",
+                          "r_partial_mean", "r_partial_std",
+                          "r_change_mean", "r_change_std",
+                          "n_mediated", "n_subjects"]
+        
+        # Compute proportion mediated
+        grouped["prop_mediated"] = grouped["n_mediated"] / grouped["n_subjects"]
+        
+        # Sort by proportion mediated
+        grouped = grouped.sort_values("prop_mediated", ascending=False)
+        
+        # Save
+        out_path = group_stats / "group_partial_correlations_temp.tsv"
+        write_tsv(grouped, out_path)
+        logger.info(f"Saved group partial correlations to {out_path}")
+        
+        # Summary
+        n_mediated = (grouped["prop_mediated"] > 0.5).sum()
+        logger.info(f"  Features mediated by temperature in >50% subjects: {n_mediated}")
+    
+    # Save combined raw data
+    write_tsv(combined, group_stats / "group_partial_correlations_all_subjects.tsv")
 
 
 ###################################################################
@@ -1195,7 +1327,7 @@ def aggregate_behavior_correlations(
     ensure_dir(group_stats)
     ensure_dir(group_plots)
     
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_group_logger("behavior_analysis", log_name, config=config)
     logger.info(f"Starting group aggregation for {len(subjects)} subjects (task={task})")
     
@@ -1205,6 +1337,10 @@ def aggregate_behavior_correlations(
     aggregate_aperiodic_correlations(subjects, task, deriv_root, group_stats, group_plots, config, logger)
     aggregate_aperiodic_run_drift(subjects, deriv_root, group_plots, config, logger)
     aggregate_pac_statistics(subjects, deriv_root, group_stats, group_plots, config, logger)
+    
+    # Aggregate condition-specific analyses
+    aggregate_condition_effect_sizes(subjects, deriv_root, group_stats, config, logger)
+    aggregate_partial_correlations(subjects, deriv_root, group_stats, config, logger)
     
     logger.info("Generating pooled ROI scatters across subjects…")
     partial_covars = config.get("behavior_analysis.statistics.partial_covariates", [])

@@ -70,7 +70,7 @@ def qc_baseline_plateau_power(
     freqs = np.asarray(tfr.freqs)
     times = np.asarray(tfr.times)
 
-    min_baseline_samples = config.get("tfr_topography_pipeline.min_baseline_samples", 5) if config else 5
+    min_baseline_samples = config.get("time_frequency_analysis.min_baseline_samples", 5) if config else 5
     b_start, b_end, tmask_base_idx = validate_baseline_indices(times, baseline, min_samples=min_baseline_samples, logger=logger)
     tmask_base = np.zeros(len(times), dtype=bool)
     tmask_base[tmask_base_idx] = True

@@ -13,7 +13,7 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 
 from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
 from eeg_pipeline.plotting.behavioral.builders import (
     generate_correlation_scatter,
     plot_residual_qc,
@@ -572,7 +572,7 @@ def _load_subject_data(
 
 
 def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> None:
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
@@ -623,7 +623,7 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
         rating_valid = rating[valid_mask]
         
         method_code = behavioral_config.get("method_spearman", "spearman")
-        default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+        default_rng_seed = config.get("project.random_state", 42)
         rng = np.random.default_rng(default_rng_seed)
         
         x_label = "Temperature (°C)"
@@ -680,7 +680,7 @@ def plot_power_roi_scatter(
     config=None,
 ) -> None:
     config = config or _get_default_config()
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting ROI power scatter plotting for sub-{subject}")
     
@@ -695,7 +695,7 @@ def plot_power_roi_scatter(
     if task is None:
         task = config.get("project.task", "thermalactive")
 
-    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    default_rng_seed = config.get("project.random_state", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
     
     temporal_df, pow_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map = _load_subject_data(
@@ -720,7 +720,7 @@ def plot_power_roi_scatter(
     overall_roi_keys = behavioral_config.get("overall_roi_keys", ["overall", "all", "global"])
     target_rating = behavioral_config.get("target_rating", "rating")
     target_temperature = behavioral_config.get("target_temperature", "temperature")
-    power_bands_to_use = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands_to_use = get_frequency_band_names(config)
     
     for band in power_bands_to_use:
         band_cols = {c for c in pow_df.columns if c.startswith(f"{power_prefix}{band}_")}
@@ -956,9 +956,9 @@ def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alp
     if task is None:
         task = config.get("project.task", "thermalactive")
     
-    alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha", 0.05)
+    alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha") or config.get("statistics.fdr_alpha", 0.05)
     top_n = top_n or int(config.get("behavior_analysis.predictors.top_n", 20))
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Creating top {top_n} behavioral predictors plot for sub-{subject}")
     

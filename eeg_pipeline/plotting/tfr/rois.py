@@ -82,13 +82,13 @@ def compute_roi_tfrs(
             metadata=epochs.metadata,
             verbose=False,
         )
-        workers_default = int(config.get("tfr_topography_pipeline.tfr.workers", -1)) if config else -1
+        workers_default = int(config.get("time_frequency_analysis.tfr.workers", -1)) if config else -1
         workers = resolve_tfr_workers(workers_default=workers_default)
         power = epo_roi.compute_tfr(
             method="morlet",
             freqs=freqs,
             n_cycles=n_cycles,
-            decim=config.get("tfr_topography_pipeline.tfr.decim", 4) if config else 4,
+            decim=config.get("time_frequency_analysis.tfr.decim", 4) if config else 4,
             picks="eeg",
             use_fft=True,
             return_itc=False,

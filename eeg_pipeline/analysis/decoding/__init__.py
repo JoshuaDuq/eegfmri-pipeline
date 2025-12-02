@@ -64,6 +64,41 @@ from eeg_pipeline.analysis.decoding.time_generalization import (
     time_generalization_regression,
 )
 
+# Classification
+from eeg_pipeline.analysis.decoding.classification import (
+    create_svm_pipeline,
+    create_logistic_pipeline,
+    create_rf_classification_pipeline,
+    create_ensemble_pipeline,
+    decode_pain_binary,
+    nested_loso_classification,
+    ClassificationResult,
+    save_classification_results,
+)
+
+# SHAP feature importance
+from eeg_pipeline.analysis.decoding.shap_importance import (
+    compute_shap_values,
+    compute_shap_importance,
+    compute_shap_for_cv_folds,
+    compute_shap_interactions,
+    SHAPResult,
+    plot_shap_summary,
+    plot_shap_bar,
+    save_shap_results,
+)
+
+# Uncertainty quantification
+from eeg_pipeline.analysis.decoding.uncertainty import (
+    compute_prediction_intervals,
+    calibrate_classifier,
+    PredictionIntervalResult,
+    CalibrationResult,
+    plot_prediction_intervals,
+    plot_reliability_diagram,
+    save_prediction_intervals,
+)
+
 __all__ = [
     # CV utilities
     "create_loso_folds",
@@ -104,5 +139,31 @@ __all__ = [
     "loso_baseline_predictions",
     # Time generalization
     "time_generalization_regression",
+    # Classification
+    "create_svm_pipeline",
+    "create_logistic_pipeline",
+    "create_rf_classification_pipeline",
+    "create_ensemble_pipeline",
+    "decode_pain_binary",
+    "nested_loso_classification",
+    "ClassificationResult",
+    "save_classification_results",
+    # SHAP
+    "compute_shap_values",
+    "compute_shap_importance",
+    "compute_shap_for_cv_folds",
+    "compute_shap_interactions",
+    "SHAPResult",
+    "plot_shap_summary",
+    "plot_shap_bar",
+    "save_shap_results",
+    # Uncertainty
+    "compute_prediction_intervals",
+    "calibrate_classifier",
+    "PredictionIntervalResult",
+    "CalibrationResult",
+    "plot_prediction_intervals",
+    "plot_reliability_diagram",
+    "save_prediction_intervals",
 ]
 

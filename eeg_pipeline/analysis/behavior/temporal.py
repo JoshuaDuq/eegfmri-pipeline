@@ -9,815 +9,425 @@ from typing import Optional, List, Tuple, Dict, Any, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr, pearsonr
+from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.data.loading import (
-    _load_features_and_targets,
-    load_epochs_for_analysis,
-    compute_aligned_data_length,
-    extract_pain_vector_array,
-    extract_temperature_series,
+    _load_features_and_targets, load_epochs_for_analysis, compute_aligned_data_length,
+    extract_pain_vector_array, extract_temperature_series,
 )
 from eeg_pipeline.utils.io.general import (
-    deriv_stats_path,
-    ensure_dir,
-    get_pain_column_from_config,
-    get_temperature_column_from_config,
-    write_tsv,
+    deriv_stats_path, ensure_dir, get_pain_column_from_config,
+    get_temperature_column_from_config, write_tsv,
 )
-from eeg_pipeline.utils.analysis.stats import (
-    compute_correlation,
-    compute_partial_corr,
-    _safe_float,
-)
+from eeg_pipeline.utils.analysis.stats import compute_correlation, compute_partial_corr, _safe_float
 from eeg_pipeline.utils.analysis.tfr import (
-    compute_tfr_morlet,
-    extract_trial_band_power,
-    get_bands_for_tfr,
-    clip_time_range,
-    create_time_windows_fixed_size,
+    compute_tfr_morlet, extract_trial_band_power, get_bands_for_tfr,
+    clip_time_range, create_time_windows_fixed_size,
 )
 
 if TYPE_CHECKING:
     from eeg_pipeline.analysis.behavior.core import BehaviorContext
 
-
-###################################################################
-# Threshold constants
-###################################################################
-
-# Minimum additional samples required per covariate when computing partial
-# correlations, on top of a small base number of trials.
 _MIN_SAMPLES_PER_COVARIATE = 5
 _PARTIAL_CORR_BASE_SAMPLES = 5
 
 
-def _create_temperature_masks(
-    temp_series: Optional[pd.Series],
-    min_trials_per_condition: int,
-    logger: logging.Logger,
-) -> Dict[str, np.ndarray]:
+def _create_temperature_masks(temp_series: Optional[pd.Series], min_trials: int, logger) -> Dict[str, np.ndarray]:
     if temp_series is None:
         return {}
-
-    temp_array = temp_series.values if isinstance(temp_series, pd.Series) else np.asarray(temp_series)
-    if temp_array.size == 0:
+    temp_arr = temp_series.values if isinstance(temp_series, pd.Series) else np.asarray(temp_series)
+    if temp_arr.size == 0:
         return {}
+    masks = {}
+    for t in np.unique(temp_arr[np.isfinite(temp_arr)]):
+        m = (temp_arr == t)
+        if m.sum() >= min_trials:
+            masks[f"{t:.1f}".replace(".", "_")] = m
+            logger.info(f"Temp {t:.1f}°C: {m.sum()} trials")
+    return masks
 
-    unique_temps = np.unique(temp_array[np.isfinite(temp_array)])
-    logger.info(f"Found temperature values: {unique_temps.tolist()}")
 
-    temp_masks: Dict[str, np.ndarray] = {}
-    for temp_val in unique_temps:
-        temp_mask = (temp_array == temp_val)
-        n_trials = temp_mask.sum()
-
-        if n_trials >= min_trials_per_condition:
-            temp_str = f"{temp_val:.1f}".replace(".", "_")
-            temp_masks[temp_str] = temp_mask
-            logger.info(f"Temperature {temp_val:.1f}°C: {n_trials} trials")
-        else:
-            logger.debug(f"Temperature {temp_val:.1f}°C: {n_trials} trials (insufficient, need >= {min_trials_per_condition})")
-
-    return temp_masks
+def _compute_single_bin_correlation(
+    f_i: int, t_i: int, power: np.ndarray, y: np.ndarray, times: np.ndarray,
+    time_edges: np.ndarray, min_pts: int, use_spearman: bool,
+    cov_mat: Optional[np.ndarray], cov_df: Optional[pd.DataFrame], n_cov: int
+) -> Tuple[int, int, np.ndarray, float, float, int, bool]:
+    """Compute correlation for a single frequency-time bin. Returns (f_i, t_i, bin_data, r, p, n_obs, is_valid)."""
+    t_mask = (times >= time_edges[t_i]) & (times < time_edges[t_i + 1])
+    bin_vals = np.full(len(y), np.nan)
+    if t_mask.any():
+        bin_vals = power[:, f_i, t_mask].mean(axis=1)
+    
+    valid = np.isfinite(bin_vals) & np.isfinite(y)
+    n_obs = int(valid.sum())
+    r, p = np.nan, np.nan
+    
+    if cov_mat is not None:
+        cov_valid = valid & np.all(np.isfinite(cov_mat), axis=1)
+        req = max(min_pts, n_cov * _MIN_SAMPLES_PER_COVARIATE + _PARTIAL_CORR_BASE_SAMPLES)
+        n_obs = int(cov_valid.sum())
+        if n_obs >= req:
+            try:
+                r, p, n_obs = compute_partial_corr(
+                    pd.Series(bin_vals[cov_valid]), pd.Series(y[cov_valid]),
+                    pd.DataFrame(cov_mat[cov_valid], columns=list(cov_df.columns)),
+                    method="spearman" if use_spearman else "pearson"
+                )
+            except Exception:
+                pass
+    elif n_obs >= min_pts:
+        r, p = compute_correlation(bin_vals[valid], y[valid], "spearman" if use_spearman else "pearson")
+    
+    dof = n_obs - n_cov - 2
+    is_valid = np.isfinite(r) and np.isfinite(p) and dof >= 2 and abs(r) < 1
+    
+    return f_i, t_i, bin_vals, r, p, n_obs, is_valid
 
 
 def _compute_tf_correlations_for_bins(
-    power: np.ndarray,
-    y_array: np.ndarray,
-    times: np.ndarray,
-    freqs: np.ndarray,
-    time_bin_edges: np.ndarray,
-    min_valid_points: int,
-    use_spearman: bool,
-    covariates_df: Optional[pd.DataFrame] = None,
+    power: np.ndarray, y: np.ndarray, times: np.ndarray, freqs: np.ndarray,
+    time_edges: np.ndarray, min_pts: int, use_spearman: bool, cov_df: Optional[pd.DataFrame] = None,
+    n_jobs: int = 1,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]]]:
-    n_time_bins = len(time_bin_edges) - 1
-    correlations = np.full((len(freqs), n_time_bins), np.nan)
-    p_values = np.full_like(correlations, np.nan)
-    n_valid = np.zeros_like(correlations, dtype=int)
-    bin_data = np.full((len(freqs), n_time_bins, len(y_array)), np.nan, dtype=float)
-    informative_bins: List[Tuple[int, int]] = []
-    cov_matrix: Optional[np.ndarray] = None
-    covariate_columns: List[str] = []
-    covariate_count: int = 0
-    if covariates_df is not None and not covariates_df.empty:
-        covariate_columns = list(covariates_df.columns)
-        cov_matrix = covariates_df.apply(pd.to_numeric, errors="coerce").to_numpy()
-        covariate_count = cov_matrix.shape[1]
+    n_bins = len(time_edges) - 1
+    corrs = np.full((len(freqs), n_bins), np.nan)
+    pvals = np.full_like(corrs, np.nan)
+    n_valid = np.zeros_like(corrs, dtype=int)
+    bin_data = np.full((len(freqs), n_bins, len(y)), np.nan)
+    info_bins = []
+    
+    cov_mat, n_cov = None, 0
+    if cov_df is not None and not cov_df.empty:
+        cov_mat = cov_df.apply(pd.to_numeric, errors="coerce").to_numpy()
+        n_cov = cov_mat.shape[1]
 
-    for f_idx, freq in enumerate(freqs):
-        for t_idx in range(n_time_bins):
-            t_start, t_end = time_bin_edges[t_idx], time_bin_edges[t_idx + 1]
-            time_mask = (times >= t_start) & (times < t_end)
-            if np.any(time_mask):
-                vals = power[:, f_idx, time_mask].mean(axis=1)
-                bin_data[f_idx, t_idx, :] = vals
-            
-            ch_power = bin_data[f_idx, t_idx, :]
-            valid_mask = np.isfinite(ch_power) & np.isfinite(y_array)
-            n_obs = int(valid_mask.sum())
+    # Create list of all (frequency, time_bin) pairs to process
+    tasks = [(f_i, t_i) for f_i in range(len(freqs)) for t_i in range(n_bins)]
+    
+    # Process in parallel if n_jobs > 1, otherwise sequential
+    if n_jobs == 1:
+        results = [
+            _compute_single_bin_correlation(
+                f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
+                cov_mat, cov_df, n_cov
+            )
+            for f_i, t_i in tasks
+        ]
+    else:
+        results = Parallel(n_jobs=n_jobs, backend='threading')(
+            delayed(_compute_single_bin_correlation)(
+                f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
+                cov_mat, cov_df, n_cov
+            )
+            for f_i, t_i in tasks
+        )
+    
+    # Aggregate results
+    for f_i, t_i, bin_vals, r, p, n_obs, is_valid in results:
+        bin_data[f_i, t_i, :] = bin_vals
+        n_valid[f_i, t_i] = n_obs
+        if is_valid:
+            corrs[f_i, t_i] = r
+            pvals[f_i, t_i] = p
+            info_bins.append((f_i, t_i))
 
-            correlation: Optional[float] = None
-            p_value: Optional[float] = None
-
-            if cov_matrix is not None:
-                cov_mask = valid_mask & np.all(np.isfinite(cov_matrix), axis=1)
-                # For partial correlations, require at least a small number of
-                # samples per covariate plus a baseline number of trials to
-                # ensure stable degrees of freedom for the t-distribution
-                # approximation.
-                min_for_partial = (
-                    covariate_count * _MIN_SAMPLES_PER_COVARIATE
-                    + _PARTIAL_CORR_BASE_SAMPLES
-                )
-                required = max(min_valid_points, min_for_partial)
-                n_obs = int(cov_mask.sum())
-                if n_obs >= required:
-                    x_series = pd.Series(ch_power[cov_mask])
-                    y_series = pd.Series(y_array[cov_mask])
-                    cov_df_local = pd.DataFrame(cov_matrix[cov_mask], columns=covariate_columns)
-                    try:
-                        correlation, p_value, n_partial = compute_partial_corr(
-                            x_series, y_series, cov_df_local,
-                            method="spearman" if use_spearman else "pearson"
-                        )
-                    except (ValueError, RuntimeError, np.linalg.LinAlgError):
-                        correlation, p_value, n_partial = np.nan, np.nan, 0
-                    n_obs = n_partial
-            else:
-                required = min_valid_points
-                if n_obs >= required:
-                    correlation, p_value = compute_correlation(ch_power[valid_mask], y_array[valid_mask], use_spearman)
-
-            n_valid[f_idx, t_idx] = n_obs
-            dof = n_obs - covariate_count - 2
-            if (
-                correlation is not None
-                and p_value is not None
-                and np.isfinite(correlation)
-                and np.isfinite(p_value)
-                and n_obs >= required
-                and dof >= 2  # Require DoF >= 2 for meaningful t-distribution approximation
-                and abs(correlation) < 1
-            ):
-                correlations[f_idx, t_idx] = correlation
-                p_values[f_idx, t_idx] = p_value
-                informative_bins.append((f_idx, t_idx))
-
-    return correlations, p_values, n_valid, bin_data, informative_bins
-
-
-def _save_temporal_correlations(
-    results: Dict[str, Any],
-    output_path: Path,
-    times: np.ndarray,
-    baseline_applied: bool,
-    baseline_window_used: Optional[tuple],
-    use_spearman: bool,
-    ch_names: List[str],
-    info,
-    logger: logging.Logger,
-) -> None:
-    save_dict = {
-        **results,
-        "times": times,
-        "baseline_applied": baseline_applied,
-        "use_spearman": use_spearman,
-        "ch_names": ch_names,
-        "info": info,
-    }
-    if baseline_window_used:
-        save_dict["baseline_window"] = baseline_window_used
-
-    np.savez_compressed(output_path, **save_dict)
-    logger.info(f"Saved temporal correlations to {output_path}")
+    return corrs, pvals, n_valid, bin_data, info_bins
 
 
 def _compute_correlations_for_condition(
-    tfr,
-    y_array: np.ndarray,
-    condition_mask: np.ndarray,
-    condition_name: str,
-    bands_dict: Dict[str, Tuple[float, float]],
-    window_starts: np.ndarray,
-    window_ends: np.ndarray,
-    fmax_available: float,
-    min_trials_per_condition: int,
-    correlation_func,
-    sig_alpha: float,
-    logger: logging.Logger,
-    covariates_df: Optional[pd.DataFrame] = None,
+    tfr, y: np.ndarray, mask: np.ndarray, name: str, bands: Dict, win_s: np.ndarray, win_e: np.ndarray,
+    fmax: float, min_trials: int, corr_fn, alpha: float, logger, cov_df: Optional[pd.DataFrame] = None,
 ) -> Optional[Dict[str, Any]]:
-    if condition_mask is None or condition_mask.sum() < min_trials_per_condition:
+    if mask is None or mask.sum() < min_trials:
         return None
+    
+    # Convert boolean mask to integer indices for MNE object indexing
+    idx = np.where(mask)[0] if mask.dtype == bool else mask
+    tfr_c, y_c = tfr[idx], y[mask]
+    method = "spearman" if corr_fn == spearmanr else "pearson"
+    cov_vals = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce").to_numpy() if cov_df is not None and not cov_df.empty else None
+    
+    n_ch, n_b, n_w = len(tfr.ch_names), len(bands), len(win_s)
+    corrs = np.full((n_b, n_w, n_ch), np.nan)
+    pvals = np.full_like(corrs, np.nan)
+    n_valid = np.zeros_like(corrs, dtype=int)
 
-    tfr_condition = tfr[condition_mask]
-    y_condition = y_array[condition_mask]
-    method = "spearman" if correlation_func == spearmanr else "pearson"
-    cov_values = None
-    if covariates_df is not None and not covariates_df.empty:
-        cov_columns = list(covariates_df.columns)
-        cov_values = (
-            covariates_df.loc[condition_mask, cov_columns]
-            .apply(pd.to_numeric, errors="coerce")
-            .to_numpy()
-        )
-
-    n_channels = len(tfr.ch_names)
-    n_bands = len(bands_dict)
-    n_windows = len(window_starts)
-
-    correlations = np.full((n_bands, n_windows, n_channels), np.nan)
-    p_values = np.full((n_bands, n_windows, n_channels), np.nan)
-    n_valid = np.zeros((n_bands, n_windows, n_channels), dtype=int)
-
-    for band_idx, (band_name, (fmin, fmax)) in enumerate(bands_dict.items()):
-        fmax_eff = min(fmax, fmax_available)
+    for b_i, (bn, (fmin, fmax_b)) in enumerate(bands.items()):
+        fmax_eff = min(fmax_b, fmax)
         if fmin >= fmax_eff:
             continue
-
-        for win_idx, (tmin_win, tmax_win) in enumerate(zip(window_starts, window_ends)):
-            band_power = extract_trial_band_power(tfr_condition, fmin, fmax_eff, tmin_win, tmax_win)
-            if band_power is None:
+        for w_i, (t0, t1) in enumerate(zip(win_s, win_e)):
+            bp = extract_trial_band_power(tfr_c, fmin, fmax_eff, t0, t1)
+            if bp is None:
                 continue
-
-            for ch_idx in range(n_channels):
-                ch_power = band_power[:, ch_idx]
-                valid_mask = np.isfinite(ch_power) & np.isfinite(y_condition)
-                if cov_values is not None:
-                    cov_valid = np.all(np.isfinite(cov_values), axis=1)
-                    valid_mask = valid_mask & cov_valid
-                    # For partial correlations, require sufficient samples per
-                    # covariate as well as a baseline number of trials.
-                    min_for_partial = (
-                        cov_values.shape[1] * _MIN_SAMPLES_PER_COVARIATE
-                        + _PARTIAL_CORR_BASE_SAMPLES
-                    )
-                    required = max(min_trials_per_condition, min_for_partial)
+            for c_i in range(n_ch):
+                ch_p = bp[:, c_i]
+                valid = np.isfinite(ch_p) & np.isfinite(y_c)
+                if cov_vals is not None:
+                    valid &= np.all(np.isfinite(cov_vals), axis=1)
+                    req = max(min_trials, cov_vals.shape[1] * _MIN_SAMPLES_PER_COVARIATE + _PARTIAL_CORR_BASE_SAMPLES)
                 else:
-                    required = min_trials_per_condition
-
-                n_valid_trials = valid_mask.sum()
-                if n_valid_trials < required:
+                    req = min_trials
+                if valid.sum() < req:
                     continue
-
                 try:
-                    if cov_values is not None and cov_values.shape[1] > 0:
-                        cov_df_local = pd.DataFrame(cov_values[valid_mask], columns=cov_columns)
-                        corr, pval, n_partial = compute_partial_corr(
-                            pd.Series(ch_power[valid_mask]),
-                            pd.Series(y_condition[valid_mask]),
-                            cov_df_local,
-                            method=method,
+                    if cov_vals is not None and cov_vals.shape[1] > 0:
+                        r, p, n = compute_partial_corr(
+                            pd.Series(ch_p[valid]), pd.Series(y_c[valid]),
+                            pd.DataFrame(cov_vals[valid]), method=method
                         )
-                        n_valid_trials = n_partial
-                        if n_valid_trials < required or not np.isfinite(corr) or not np.isfinite(pval):
+                        if n < req:
                             continue
                     else:
-                        corr, pval = correlation_func(ch_power[valid_mask], y_condition[valid_mask])
-                        if not np.isfinite(corr) or not np.isfinite(pval):
-                            continue
-                    correlations[band_idx, win_idx, ch_idx] = corr
-                    p_values[band_idx, win_idx, ch_idx] = pval
-                    n_valid[band_idx, win_idx, ch_idx] = n_valid_trials
-                except (ValueError, RuntimeError, np.linalg.LinAlgError) as e:
-                    logger.debug(f"Correlation failed: {condition_name}, {band_name}, win{win_idx}, ch{ch_idx}: {e}")
-
-    # No local FDR correction - global FDR is applied across all analyses
-    # via fdr_correction.apply_global_fdr() after all stats files are generated
+                        r, p = corr_fn(ch_p[valid], y_c[valid])
+                    if np.isfinite(r) and np.isfinite(p):
+                        corrs[b_i, w_i, c_i], pvals[b_i, w_i, c_i] = r, p
+                        n_valid[b_i, w_i, c_i] = int(valid.sum())
+                except Exception:
+                    pass
 
     return {
-        "correlations": correlations,
-        "p_values": p_values,
-        "p_corrected": np.full_like(p_values, np.nan),  # Placeholder; filled by global FDR
-        "n_valid": n_valid,
-        "band_names": list(bands_dict.keys()),
-        "band_ranges": [(fmin, min(fmax, fmax_available)) for fmin, fmax in bands_dict.values()],
-        "window_starts": window_starts,
-        "window_ends": window_ends,
-        "condition_name": condition_name,
+        "correlations": corrs, "p_values": pvals, "p_corrected": np.full_like(pvals, np.nan),
+        "n_valid": n_valid, "band_names": list(bands.keys()),
+        "band_ranges": [(fmin, min(fmax_b, fmax)) for fmin, fmax_b in bands.values()],
+        "window_starts": win_s, "window_ends": win_e, "condition_name": name,
     }
 
 
-def _run_tf_correlations_core(
-    subject: str,
-    epochs: Any,
-    aligned_events: pd.DataFrame,
-    y: pd.Series,
-    stats_dir: Path,
-    config: Any,
-    use_spearman: bool,
-    cov_df: Optional[pd.DataFrame],
-    logger: logging.Logger,
-) -> None:
-    """Core implementation for time-frequency correlations."""
+def _run_tf_correlations_core(subject: str, epochs, events: pd.DataFrame, y: pd.Series,
+                               stats_dir: Path, config, use_spearman: bool, cov_df, logger) -> None:
     from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi, apply_baseline_to_tfr
     from eeg_pipeline.utils.analysis.stats import compute_cluster_correction_2d
     
     logger.info("Computing time-frequency correlations...")
-    
-    if epochs is None or aligned_events is None or y is None:
-        logger.warning("Cannot compute TF correlations: epochs, events, or target variable not found")
+    if epochs is None or events is None or y is None:
         return
-    
     if not epochs.preload:
         epochs.load_data()
     
-    heatmap_config = config.get("behavior_analysis", {}).get("time_frequency_heatmap", {})
-    roi_selection = heatmap_config.get("roi_selection")
-    epochs_for_tfr = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
-    
-    tfr = compute_tfr_morlet(epochs_for_tfr, config, logger=logger)
+    hm_cfg = config.get("behavior_analysis.time_frequency_heatmap", {})
+    epochs_tfr = restrict_epochs_to_roi(epochs, hm_cfg.get("roi_selection"), config, logger)
+    tfr = compute_tfr_morlet(epochs_tfr, config, logger=logger)
     if tfr is None:
-        logger.warning("TFR computation failed")
         return
     
-    baseline_applied, baseline_window_used = apply_baseline_to_tfr(tfr, config, logger)
-    power = tfr.data.mean(axis=1)
-    times = tfr.times
-    freqs = tfr.freqs
-    y_array = y.to_numpy()
+    baseline_applied, baseline_window = apply_baseline_to_tfr(tfr, config, logger)
+    power, times, freqs = tfr.data.mean(axis=1), tfr.times, tfr.freqs
+    y_arr = y.to_numpy()
     
-    # Apply time/freq windowing
-    time_window = heatmap_config.get("time_window")
-    if time_window is not None:
-        t_start, t_end = float(time_window[0]), float(time_window[1])
-        time_mask = (times >= t_start) & (times <= t_end)
-        if not np.any(time_mask):
-            logger.warning(f"Time window [{t_start}, {t_end}] s has no samples; skipping.")
+    # Apply windowing
+    tw = hm_cfg.get("time_window")
+    if tw:
+        tm = (times >= float(tw[0])) & (times <= float(tw[1]))
+        if not tm.any():
             return
-        times, power = times[time_mask], power[:, :, time_mask]
-    
-    freq_range = heatmap_config.get("freq_range")
-    if freq_range is not None:
-        f_min, f_max = float(freq_range[0]), float(freq_range[1])
-        freq_mask = (freqs >= f_min) & (freqs <= f_max)
-        if not np.any(freq_mask):
-            logger.warning(f"Freq range [{f_min}, {f_max}] Hz has no bins; skipping.")
+        times, power = times[tm], power[:, :, tm]
+    fr = hm_cfg.get("freq_range")
+    if fr:
+        fm = (freqs >= float(fr[0])) & (freqs <= float(fr[1]))
+        if not fm.any():
             return
-        freqs, power = freqs[freq_mask], power[:, freq_mask, :]
+        freqs, power = freqs[fm], power[:, fm, :]
     
-    time_bin_width = float(heatmap_config.get("time_resolution"))
-    time_bin_edges = np.arange(times[0], times[-1] + time_bin_width, time_bin_width)
-    stats_config = config.get("behavior_analysis", {}).get("statistics", {})
-    min_valid_points = int(stats_config.get("min_samples_roi", 20))
+    time_edges = np.arange(times[0], times[-1] + float(hm_cfg.get("time_resolution")), float(hm_cfg.get("time_resolution")))
+    min_pts = int(config.get("behavior_analysis.statistics.min_samples_roi", 20))
     
-    correlations, p_values, n_valid, bin_data, informative_bins = _compute_tf_correlations_for_bins(
-        power, y_array, times, freqs, time_bin_edges, min_valid_points, use_spearman, covariates_df=cov_df
+    # Get number of parallel jobs for correlation computation (default: 1 for safety)
+    n_jobs_corr = int(config.get("behavior_analysis.time_frequency_heatmap.n_jobs", 1))
+    
+    corrs, pvals, n_valid, bin_data, info_bins = _compute_tf_correlations_for_bins(
+        power, y_arr, times, freqs, time_edges, min_pts, use_spearman, cov_df, n_jobs=n_jobs_corr
     )
     
-    # Compute cluster statistics
-    covariate_count = cov_df.shape[1] if cov_df is not None and not cov_df.empty else 0
-    cluster_stat = np.full_like(correlations, np.nan, dtype=float)
-    for f_idx, t_idx in informative_bins:
-        r_val = correlations[f_idx, t_idx]
-        n_obs = int(n_valid[f_idx, t_idx])
-        if not np.isfinite(r_val):
-            continue
-        dof = n_obs - covariate_count - 2
-        if dof > 0 and abs(r_val) < 1:
-            cluster_stat[f_idx, t_idx] = r_val * np.sqrt(dof / max(1e-15, 1.0 - r_val**2))
+    # Cluster correction
+    n_cov = cov_df.shape[1] if cov_df is not None and not cov_df.empty else 0
+    cluster_stat = np.full_like(corrs, np.nan)
+    for f_i, t_i in info_bins:
+        r, n = corrs[f_i, t_i], int(n_valid[f_i, t_i])
+        dof = n - n_cov - 2
+        if np.isfinite(r) and dof > 0 and abs(r) < 1:
+            cluster_stat[f_i, t_i] = r * np.sqrt(dof / max(1e-15, 1.0 - r**2))
     
-    # Cluster correction setup
-    cluster_cfg = config.get("behavior_analysis", {}).get("cluster_correction", {})
-    n_cluster_perm = max(int(cluster_cfg.get("n_permutations", 100)), int(heatmap_config.get("n_cluster_perm", 0)))
-    cluster_alpha = float(cluster_cfg.get("alpha", config.get("statistics.sig_alpha", 0.05)))
-    cluster_rng = np.random.default_rng(int(cluster_cfg.get("rng_seed", config.get("random.seed", 42))))
-    cov_matrix = cov_df.to_numpy() if cov_df is not None and not cov_df.empty else None
+    cluster_cfg = config.get("behavior_analysis.cluster_correction", {})
+    n_perm = max(int(cluster_cfg.get("n_permutations", 100)), int(hm_cfg.get("n_cluster_perm", 0)))
+    c_alpha = float(cluster_cfg.get("alpha", config.get("statistics.sig_alpha", 0.05)))
+    rng = np.random.default_rng(int(config.get("project.random_state", 42)))
+    cov_mat = cov_df.to_numpy() if cov_df is not None and not cov_df.empty else None
     
-    cluster_labels = np.zeros_like(correlations, dtype=int)
-    cluster_pvals = np.full_like(correlations, np.nan)
-    cluster_sig_mask = np.zeros_like(correlations, dtype=bool)
-    cluster_records, perm_max_masses = [], []
-    cluster_forming_threshold = np.nan
-    
-    if n_cluster_perm > 0:
-        cluster_labels, cluster_pvals, cluster_sig_mask, cluster_records, perm_max_masses, cluster_forming_threshold = compute_cluster_correction_2d(
-            correlations=cluster_stat, p_values=p_values, bin_data=bin_data,
-            informative_bins=informative_bins, y_array=y_array, cluster_alpha=cluster_alpha,
-            n_cluster_perm=n_cluster_perm, alpha=cluster_alpha, min_valid_points=min_valid_points,
-            use_spearman=use_spearman, cluster_rng=cluster_rng, covariates_matrix=cov_matrix,
-            groups=aligned_events["run_id"].to_numpy() if "run_id" in aligned_events.columns else None,
+    c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = np.zeros_like(corrs, dtype=int), np.full_like(corrs, np.nan), np.zeros_like(corrs, dtype=bool), [], [], np.nan
+    if n_perm > 0:
+        c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = compute_cluster_correction_2d(
+            correlations=cluster_stat, p_values=pvals, bin_data=bin_data,
+            informative_bins=info_bins, y_array=y_arr, cluster_alpha=c_alpha,
+            n_cluster_perm=n_perm, alpha=c_alpha, min_valid_points=min_pts,
+            use_spearman=use_spearman, cluster_rng=rng, covariates_matrix=cov_mat,
+            groups=events["run_id"].to_numpy() if "run_id" in events.columns else None,
         )
     
-    p_used = np.where(np.isfinite(cluster_pvals), cluster_pvals, p_values) if n_cluster_perm > 0 else p_values
+    p_used = np.where(np.isfinite(c_pvals), c_pvals, pvals) if n_perm > 0 else pvals
     ensure_dir(stats_dir)
     
-    # Save results
-    use_spearman_suffix = "_spearman" if use_spearman else "_pearson"
-    roi_suffix = f"_{roi_selection.lower()}" if roi_selection and roi_selection != "null" else ""
-    roi_label = roi_selection if roi_selection else "all"
+    sfx = "_spearman" if use_spearman else "_pearson"
+    roi = hm_cfg.get("roi_selection")
+    roi_sfx = f"_{roi.lower()}" if roi and roi != "null" else ""
+    roi_label = roi or "all"
     
     np.savez_compressed(
-        stats_dir / f"time_frequency_correlation_data{roi_suffix}{use_spearman_suffix}.npz",
-        correlations=correlations, p_values_raw=p_values, p_values_cluster=cluster_pvals,
-        p_values_used=p_used, p_values=p_used, n_valid=n_valid, bin_data=bin_data,
-        times=times, freqs=freqs, time_bin_edges=time_bin_edges,
-        informative_bins=np.array(informative_bins), baseline_applied=baseline_applied,
-        roi_selection=roi_label, use_spearman=use_spearman, cluster_labels=cluster_labels,
-        cluster_sig_mask=cluster_sig_mask, cluster_records=cluster_records,
-        cluster_perm_max_masses=perm_max_masses,
-        cluster_forming_threshold=float(cluster_forming_threshold) if n_cluster_perm > 0 else np.nan,
-        cluster_alpha=cluster_alpha, n_cluster_perm=n_cluster_perm, n_trials=len(y_array),
-        **(dict(baseline_window=baseline_window_used) if baseline_window_used else {}),
+        stats_dir / f"time_frequency_correlation_data{roi_sfx}{sfx}.npz",
+        correlations=corrs, p_values_raw=pvals, p_values_cluster=c_pvals, p_values=p_used,
+        n_valid=n_valid, bin_data=bin_data, times=times, freqs=freqs, time_bin_edges=time_edges,
+        informative_bins=np.array(info_bins), baseline_applied=baseline_applied,
+        roi_selection=roi_label, use_spearman=use_spearman, cluster_labels=c_labels,
+        cluster_sig_mask=c_sig, cluster_records=c_recs, cluster_perm_max_masses=perm_masses,
+        cluster_forming_threshold=float(c_thresh) if n_perm > 0 else np.nan,
+        cluster_alpha=c_alpha, n_cluster_perm=n_perm, n_trials=len(y_arr),
+        **({"baseline_window": baseline_window} if baseline_window else {}),
     )
     
-    # Save TSV records
-    tf_records = []
-    n_time_bins = len(time_bin_edges) - 1
-    for f_idx, freq in enumerate(freqs):
-        for t_idx in range(n_time_bins):
-            p_raw = p_values[f_idx, t_idx]
-            p_cluster = cluster_pvals[f_idx, t_idx] if n_cluster_perm > 0 else np.nan
-            if not (np.isfinite(p_raw) or np.isfinite(p_cluster)):
+    # Save TSV
+    recs = []
+    for f_i, freq in enumerate(freqs):
+        for t_i in range(len(time_edges) - 1):
+            p_raw, p_c = pvals[f_i, t_i], c_pvals[f_i, t_i] if n_perm > 0 else np.nan
+            if not (np.isfinite(p_raw) or np.isfinite(p_c)):
                 continue
-            tf_records.append({
-                "roi": roi_label, "freq": float(freq),
-                "time_start": float(time_bin_edges[t_idx]), "time_end": float(time_bin_edges[t_idx+1]),
-                "r": float(correlations[f_idx, t_idx]),
+            recs.append({
+                "roi": roi_label, "freq": float(freq), "time_start": float(time_edges[t_i]),
+                "time_end": float(time_edges[t_i+1]), "r": float(corrs[f_i, t_i]),
                 "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
-                "p_cluster": float(p_cluster) if np.isfinite(p_cluster) else np.nan,
-                "cluster_id": int(cluster_labels[f_idx, t_idx]) if n_cluster_perm > 0 else 0,
-                "cluster_significant": bool(cluster_sig_mask[f_idx, t_idx]) if n_cluster_perm > 0 else False,
-                "n": int(n_valid[f_idx, t_idx]), "method": "spearman" if use_spearman else "pearson",
+                "p_cluster": float(p_c) if np.isfinite(p_c) else np.nan,
+                "cluster_id": int(c_labels[f_i, t_i]) if n_perm > 0 else 0,
+                "cluster_significant": bool(c_sig[f_i, t_i]) if n_perm > 0 else False,
+                "n": int(n_valid[f_i, t_i]), "method": "spearman" if use_spearman else "pearson",
             })
+    if recs:
+        write_tsv(pd.DataFrame(recs), stats_dir / f"corr_stats_tf_{roi_label.lower()}{sfx}.tsv")
     
-    if tf_records:
-        write_tsv(pd.DataFrame(tf_records), stats_dir / f"corr_stats_tf_{roi_label.lower()}{use_spearman_suffix}.tsv")
-    
-    # Save cluster summary
-    if n_cluster_perm > 0 and cluster_records:
-        cluster_map = {rec.get("cluster_id", idx + 1): rec for idx, rec in enumerate(cluster_records)}
-        cluster_rows = []
-        for cid in sorted(np.unique(cluster_labels[cluster_labels > 0])):
-            region = (cluster_labels == cid)
-            freq_inds, time_inds = np.where(region.any(axis=1))[0], np.where(region.any(axis=0))[0]
-            if freq_inds.size == 0 or time_inds.size == 0:
-                continue
-            rec = cluster_map.get(int(cid), {})
-            cluster_rows.append({
-                "roi": roi_label, "cluster_id": int(cid),
-                "p": _safe_float(rec.get("p_value", np.nan)), "mass": _safe_float(rec.get("mass", np.nan)),
-                "size": int(rec.get("size", region.sum())),
-                "freq_min": float(freqs[freq_inds.min()]), "freq_max": float(freqs[freq_inds.max()]),
-                "time_start": float(time_bin_edges[time_inds.min()]),
-                "time_end": float(time_bin_edges[time_inds.max() + 1]),
-                "cluster_forming_threshold": float(cluster_forming_threshold),
-                "method": "spearman" if use_spearman else "pearson",
-            })
-        if cluster_rows:
-            write_tsv(pd.DataFrame(cluster_rows), stats_dir / f"corr_stats_tf_clusters_{roi_label.lower()}{use_spearman_suffix}.tsv")
-    
-    logger.info(f"Saved TF correlations: shape={correlations.shape}, informative_bins={len(informative_bins)}")
+    logger.info(f"Saved TF correlations: shape={corrs.shape}, info_bins={len(info_bins)}")
 
 
-def compute_time_frequency_correlations(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    use_spearman: bool,
-    logger: logging.Logger,
-) -> None:
-    """Compute time-frequency correlations by loading data from disk."""
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=True,
-        deriv_root=deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger
-    )
+def compute_time_frequency_correlations(subject: str, task: str, deriv_root: Path,
+                                        config, use_spearman: bool, logger) -> None:
+    epochs, events = load_epochs_for_analysis(subject, task, align="strict", preload=True,
+                                              deriv_root=deriv_root, bids_root=config.bids_root,
+                                              config=config, logger=logger)
     _, _, _, y, _ = _load_features_and_targets(subject, task, deriv_root, config, epochs=epochs)
     
-    stats_config = config.get("behavior_analysis", {}).get("statistics", {})
-    partial_covars = stats_config.get("partial_covariates", [])
+    stats_cfg = config.get("behavior_analysis.statistics", {})
+    partial_covars = stats_cfg.get("partial_covariates", [])
     cov_df = None
-    if partial_covars and aligned_events is not None:
-        covars_available = [c for c in partial_covars if c in aligned_events.columns]
-        if covars_available:
-            cov_df = aligned_events[covars_available].apply(pd.to_numeric, errors="coerce")
+    if partial_covars and events is not None:
+        avail = [c for c in partial_covars if c in events.columns]
+        if avail:
+            cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
     
-    _run_tf_correlations_core(
-        subject, epochs, aligned_events, y,
-        deriv_stats_path(deriv_root, subject), config, use_spearman, cov_df, logger
-    )
+    _run_tf_correlations_core(subject, epochs, events, y, deriv_stats_path(deriv_root, subject),
+                              config, use_spearman, cov_df, logger)
 
 
-def compute_temporal_correlations_by_condition(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    use_spearman: bool,
-    logger: logging.Logger,
-) -> None:
+def _run_temporal_by_condition_core(epochs, events, y, stats_dir: Path, config, use_spearman: bool, cov_df, logger) -> None:
+    """Core implementation for temporal correlations by condition."""
     from eeg_pipeline.utils.analysis.tfr import apply_baseline_to_tfr
     
-    logger.info("Computing temporal correlations by condition...")
-
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=True,
-        deriv_root=deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger
-    )
-
-    _, _, _, y, info = _load_features_and_targets(subject, task, deriv_root, config, epochs=epochs)
-    if epochs is None or aligned_events is None or y is None:
-        logger.warning("Cannot compute temporal correlations: epochs, events, or target variable not found")
+    if epochs is None or events is None or y is None:
         return
-
-    topomap_config = config.get("behavior_analysis", {}).get("temporal_correlation_topomaps", {})
-    window_size_ms = float(topomap_config.get("window_size_ms", 100.0))
-    min_trials_per_condition = int(topomap_config.get("min_trials_per_condition", 5))
-    plateau_window = tuple(config.get("time_frequency_analysis.plateau_window"))
-
-    tfr = compute_tfr_morlet(epochs, config, logger=logger)
-
-    if tfr is None:
-        logger.warning("TFR computation failed")
-        return
-
-    baseline_applied, baseline_window_used = apply_baseline_to_tfr(tfr, config, logger)
-
-    times = np.asarray(tfr.times)
-    tmin_req, tmax_req = plateau_window
-    clipped = clip_time_range(times, tmin_req, tmax_req)
-    if clipped is None:
-        logger.warning(f"No valid time interval within data range; skipping temporal correlations (available [{times.min():.2f}, {times.max():.2f}] s).")
-        return
-    tmin_clip, tmax_clip = clipped
-
-    window_starts, window_ends = create_time_windows_fixed_size(tmin_clip, tmax_clip, window_size_ms)
-    n_windows = len(window_starts)
-
-    if n_windows == 0:
-        logger.warning("No valid windows created; skipping temporal correlations.")
-        return
-
-    logger.info(f"Computing correlations for {n_windows} time windows from {tmin_clip:.2f} to {tmax_clip:.2f} s")
-
-    y_array = y.to_numpy()
-    stats_config = config.get("behavior_analysis", {}).get("statistics", {})
-    partial_covars = stats_config.get("partial_covariates", [])
-    cov_df = None
-    if partial_covars:
-        covars_available = [c for c in partial_covars if c in aligned_events.columns]
-        if covars_available:
-            cov_df = aligned_events[covars_available].apply(pd.to_numeric, errors="coerce")
-
-    n = compute_aligned_data_length(tfr, aligned_events)
-    pain_col = get_pain_column_from_config(config, aligned_events)
-    temp_col = get_temperature_column_from_config(config, aligned_events)
-
-    pain_vec = extract_pain_vector_array(tfr, aligned_events, pain_col, n) if pain_col else None
-    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, n) if temp_col else None
-
-    pain_mask, non_mask = None, None
-    if pain_vec is not None:
-        pain_mask = np.asarray(pain_vec == 1, dtype=bool)
-        non_mask = np.asarray(pain_vec == 0, dtype=bool)
-
-    temp_masks = _create_temperature_masks(temp_series, min_trials_per_condition, logger)
-
-    fmax_available = float(np.max(tfr.freqs))
-    bands_dict = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-
-    correlation_func = spearmanr if use_spearman else pearsonr
-    sig_alpha = config.get("statistics.sig_alpha")
-    if sig_alpha is None:
-        raise ValueError("sig_alpha not found in config: statistics.sig_alpha")
-    sig_alpha = float(sig_alpha)
-
-    results_by_temp = {}
-    for temp_str, temp_mask in temp_masks.items():
-        result = _compute_correlations_for_condition(
-            tfr, y_array, temp_mask, f"temp_{temp_str}",
-            bands_dict, window_starts, window_ends, fmax_available,
-            min_trials_per_condition, correlation_func, sig_alpha, logger,
-            covariates_df=cov_df,
-        )
-        if result is not None:
-            results_by_temp[temp_str] = result
-
-    results_by_pain = {}
-    if pain_mask is not None and non_mask is not None:
-        for condition_name, mask in [("pain", pain_mask), ("non_pain", non_mask)]:
-            result = _compute_correlations_for_condition(
-                tfr, y_array, mask, condition_name,
-                bands_dict, window_starts, window_ends, fmax_available,
-                min_trials_per_condition, correlation_func, sig_alpha, logger,
-                covariates_df=cov_df,
-            )
-            if result is not None:
-                results_by_pain[condition_name] = result
-
-    stats_dir = deriv_stats_path(deriv_root, subject)
-    ensure_dir(stats_dir)
-
-    use_spearman_suffix = "_spearman" if use_spearman else "_pearson"
-
-    all_temporal_records = []
-
-    if results_by_temp:
-        output_path = stats_dir / f"temporal_correlations_by_temperature{use_spearman_suffix}.npz"
-        _save_temporal_correlations(
-            {f"temp_{k}": v for k, v in results_by_temp.items()},
-            output_path, times, baseline_applied, baseline_window_used,
-            use_spearman, tfr.ch_names, tfr.info, logger
-        )
-
-        for cond_name, res in results_by_temp.items():
-            p_vals = res["p_values"]
-            corrs = res["correlations"]
-            n_vals = res["n_valid"]
-            band_names = res["band_names"]
-            starts = res["window_starts"]
-            ends = res["window_ends"]
-
-            for b_idx, band in enumerate(band_names):
-                for w_idx, (t_start, t_end) in enumerate(zip(starts, ends)):
-                    for ch_idx, ch_name in enumerate(tfr.ch_names):
-                        p_raw = p_vals[b_idx, w_idx, ch_idx]
-                        if np.isfinite(p_raw):
-                            all_temporal_records.append({
-                                "condition": cond_name,
-                                "band": band,
-                                "time_start": float(t_start),
-                                "time_end": float(t_end),
-                                "channel": ch_name,
-                                "r": float(corrs[b_idx, w_idx, ch_idx]),
-                                "p": float(p_raw),
-                                "n": int(n_vals[b_idx, w_idx, ch_idx]),
-                                "method": "spearman" if use_spearman else "pearson"
-                            })
-
-    if results_by_pain:
-        output_path = stats_dir / f"temporal_correlations_by_pain{use_spearman_suffix}.npz"
-        _save_temporal_correlations(
-            results_by_pain,
-            output_path, times, baseline_applied, baseline_window_used,
-            use_spearman, tfr.ch_names, tfr.info, logger
-        )
-
-        for cond_name, res in results_by_pain.items():
-            p_vals = res["p_values"]
-            corrs = res["correlations"]
-            n_vals = res["n_valid"]
-            band_names = res["band_names"]
-            starts = res["window_starts"]
-            ends = res["window_ends"]
-
-            for b_idx, band in enumerate(band_names):
-                for w_idx, (t_start, t_end) in enumerate(zip(starts, ends)):
-                    for ch_idx, ch_name in enumerate(tfr.ch_names):
-                        p_raw = p_vals[b_idx, w_idx, ch_idx]
-                        if np.isfinite(p_raw):
-                            all_temporal_records.append({
-                                "condition": cond_name,
-                                "band": band,
-                                "time_start": float(t_start),
-                                "time_end": float(t_end),
-                                "channel": ch_name,
-                                "r": float(corrs[b_idx, w_idx, ch_idx]),
-                                "p": float(p_raw),
-                                "n": int(n_vals[b_idx, w_idx, ch_idx]),
-                                "method": "spearman" if use_spearman else "pearson"
-                            })
-
-    if all_temporal_records:
-        df_all = pd.DataFrame(all_temporal_records)
-        write_tsv(df_all, stats_dir / f"corr_stats_temporal_all{use_spearman_suffix}.tsv")
-        logger.info(f"Exported {len(all_temporal_records)} temporal correlation records to consolidated TSV")
-
-
-def compute_time_frequency_from_context(ctx: "BehaviorContext") -> None:
-    """Compute time-frequency correlations using pre-loaded data from context."""
-    _run_tf_correlations_core(
-        ctx.subject, ctx.epochs, ctx.aligned_events, ctx.targets,
-        ctx.stats_dir, ctx.config, ctx.use_spearman, ctx.covariates_df, ctx.logger
-    )
-
-
-def compute_temporal_from_context(ctx: "BehaviorContext") -> None:
-    """Compute temporal correlations by condition using pre-loaded data from context."""
-    from eeg_pipeline.utils.analysis.tfr import apply_baseline_to_tfr
-    
-    logger = ctx.logger
-    config = ctx.config
-    
-    logger.info("Computing temporal correlations by condition...")
-    
-    epochs = ctx.epochs
-    aligned_events = ctx.aligned_events
-    y = ctx.targets
-    
-    if epochs is None or aligned_events is None or y is None:
-        logger.warning("Cannot compute temporal correlations: epochs, events, or target variable not found in context")
-        return
-    
-    # Need to preload epochs for TFR
     if not epochs.preload:
         epochs.load_data()
     
-    topomap_config = config.get("behavior_analysis", {}).get("temporal_correlation_topomaps", {})
-    window_size_ms = float(topomap_config.get("window_size_ms", 100.0))
-    min_trials_per_condition = int(topomap_config.get("min_trials_per_condition", 5))
-    plateau_window = tuple(config.get("time_frequency_analysis.plateau_window"))
+    topo_cfg = config.get("behavior_analysis.temporal_correlation_topomaps", {})
+    win_ms = float(topo_cfg.get("window_size_ms", 100.0))
+    min_trials = int(topo_cfg.get("min_trials_per_condition", 5))
+    plateau = tuple(config.get("time_frequency_analysis.plateau_window"))
     
     tfr = compute_tfr_morlet(epochs, config, logger=logger)
-    
     if tfr is None:
-        logger.warning("TFR computation failed")
         return
-    
-    baseline_applied, baseline_window_used = apply_baseline_to_tfr(tfr, config, logger)
+    apply_baseline_to_tfr(tfr, config, logger)
     
     times = np.asarray(tfr.times)
-    tmin_req, tmax_req = plateau_window
-    clipped = clip_time_range(times, tmin_req, tmax_req)
+    clipped = clip_time_range(times, plateau[0], plateau[1])
     if clipped is None:
-        logger.warning(f"No valid time interval within data range; skipping temporal correlations.")
         return
-    tmin_clip, tmax_clip = clipped
-    
-    window_starts, window_ends = create_time_windows_fixed_size(tmin_clip, tmax_clip, window_size_ms)
-    n_windows = len(window_starts)
-    
-    if n_windows == 0:
-        logger.warning("No valid windows created; skipping temporal correlations.")
+    win_s, win_e = create_time_windows_fixed_size(clipped[0], clipped[1], win_ms)
+    if len(win_s) == 0:
         return
     
-    logger.info(f"Computing correlations for {n_windows} time windows from {tmin_clip:.2f} to {tmax_clip:.2f} s")
+    y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
+    n = compute_aligned_data_length(tfr, events)
+    pain_col = get_pain_column_from_config(config, events)
+    temp_col = get_temperature_column_from_config(config, events)
+    pain_vec = extract_pain_vector_array(tfr, events, pain_col, n) if pain_col else None
+    temp_series = extract_temperature_series(tfr, events, temp_col, n) if temp_col else None
     
-    y_array = y.to_numpy()
+    pain_m, non_m = ((pain_vec == 1), (pain_vec == 0)) if pain_vec is not None else (None, None)
+    temp_masks = _create_temperature_masks(temp_series, min_trials, logger)
     
-    # Use covariates from context
-    cov_df = ctx.covariates_df
+    fmax = float(np.max(tfr.freqs))
+    bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
+    corr_fn = spearmanr if use_spearman else pearsonr
+    alpha = float(config.get("statistics.sig_alpha", 0.05))
+    sfx = "_spearman" if use_spearman else "_pearson"
+    ensure_dir(stats_dir)
     
-    n = compute_aligned_data_length(tfr, aligned_events)
-    pain_col = get_pain_column_from_config(config, aligned_events)
-    temp_col = get_temperature_column_from_config(config, aligned_events)
+    # Save temperature data in combined file (for plotting function)
+    temp_results = {}
+    info_dict = {"ch_names": tfr.ch_names}
+    if hasattr(tfr, "info"):
+        info_dict["info"] = tfr.info
     
-    pain_vec = extract_pain_vector_array(tfr, aligned_events, pain_col, n) if pain_col else None
-    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, n) if temp_col else None
+    for t_str, t_mask in temp_masks.items():
+        res = _compute_correlations_for_condition(tfr, y_arr, t_mask, f"temp_{t_str}", bands, win_s, win_e, fmax, min_trials, corr_fn, alpha, logger, cov_df)
+        if res:
+            # Store in combined dict for single file (use temp_ prefix as expected by plotting function)
+            temp_results[f"temp_{t_str}"] = np.array([res], dtype=object)  # Wrap in array for npz compatibility
+            # Also save individual file for backwards compatibility
+            np.savez_compressed(stats_dir / f"temporal_correlations_temp_{t_str}{sfx}.npz", **res, times=times, ch_names=tfr.ch_names)
     
-    pain_mask, non_mask = None, None
-    if pain_vec is not None:
-        pain_mask = np.asarray(pain_vec == 1, dtype=bool)
-        non_mask = np.asarray(pain_vec == 0, dtype=bool)
+    # Save combined temperature file if we have any temperature data
+    if temp_results:
+        # Unwrap the results for the combined file
+        combined_temp_data = {}
+        for key, res_array in temp_results.items():
+            combined_temp_data[key] = res_array.item()  # Unwrap from array
+        combined_temp_data.update(info_dict)
+        combined_temp_data["times"] = times
+        np.savez_compressed(stats_dir / f"temporal_correlations_by_temperature{sfx}.npz", **combined_temp_data)
+        logger.info(f"Saved combined temperature temporal correlations: {len(temp_results)} temperature levels")
     
-    temp_masks = _create_temperature_masks(temp_series, min_trials_per_condition, logger)
-    
-    fmax_available = float(np.max(tfr.freqs))
-    bands_dict = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
-    
-    correlation_func = spearmanr if ctx.use_spearman else pearsonr
-    sig_alpha = float(config.get("statistics.sig_alpha", 0.05))
-    
-    use_spearman_suffix = "_spearman" if ctx.use_spearman else "_pearson"
-    stats_dir = ctx.stats_dir
-    all_temporal_records = []
-    
-    # Temperature conditions
-    results_by_temp = {}
-    for temp_str, temp_mask in temp_masks.items():
-        result = _compute_correlations_for_condition(
-            tfr, y_array, temp_mask, f"temp_{temp_str}",
-            bands_dict, window_starts, window_ends, fmax_available,
-            min_trials_per_condition, correlation_func, sig_alpha, logger,
-            covariates_df=cov_df,
-        )
-        if result is not None:
-            results_by_temp[temp_str] = result
-    
-    # Pain conditions
-    results_by_pain = {}
-    if pain_mask is not None and non_mask is not None:
-        for condition_name, mask in [("pain", pain_mask), ("non_pain", non_mask)]:
-            result = _compute_correlations_for_condition(
-                tfr, y_array, mask, condition_name,
-                bands_dict, window_starts, window_ends, fmax_available,
-                min_trials_per_condition, correlation_func, sig_alpha, logger,
-                covariates_df=cov_df,
-            )
-            if result is not None:
-                results_by_pain[condition_name] = result
-    
-    # Save results
-    if results_by_temp:
-        output_path = stats_dir / f"temporal_correlations_by_temperature{use_spearman_suffix}.npz"
-        # Add temp_ prefix to keys so plotting code can find them
-        _save_temporal_correlations(
-            {f"temp_{k}": v for k, v in results_by_temp.items()},
-            output_path, times, baseline_applied, baseline_window_used,
-            ctx.use_spearman, tfr.ch_names, tfr.info, logger
-        )
-    
-    if results_by_pain:
-        output_path = stats_dir / f"temporal_correlations_by_pain{use_spearman_suffix}.npz"
-        _save_temporal_correlations(
-            results_by_pain,
-            output_path, times, baseline_applied, baseline_window_used,
-            ctx.use_spearman, tfr.ch_names, tfr.info, logger
-        )
+    for name, mask in [("pain", pain_m), ("non_pain", non_m)]:
+        if mask is None:
+            continue
+        res = _compute_correlations_for_condition(tfr, y_arr, mask, name, bands, win_s, win_e, fmax, min_trials, corr_fn, alpha, logger, cov_df)
+        if res:
+            np.savez_compressed(stats_dir / f"temporal_correlations_{name}{sfx}.npz", **res, times=times, ch_names=tfr.ch_names)
     
     logger.info("Temporal correlations by condition completed")
 
+
+def compute_temporal_correlations_by_condition(subject: str, task: str, deriv_root: Path,
+                                               config, use_spearman: bool, logger) -> None:
+    """Compute temporal correlations by condition by loading data from disk."""
+    logger.info("Computing temporal correlations by condition...")
+    epochs, events = load_epochs_for_analysis(subject, task, align="strict", preload=True,
+                                              deriv_root=deriv_root, bids_root=config.bids_root,
+                                              config=config, logger=logger)
+    _, _, _, y, _ = _load_features_and_targets(subject, task, deriv_root, config, epochs=epochs)
+    stats_cfg = config.get("behavior_analysis.statistics", {})
+    partial_covars = stats_cfg.get("partial_covariates", [])
+    cov_df = None
+    if partial_covars and events is not None:
+        avail = [c for c in partial_covars if c in events.columns]
+        if avail:
+            cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
+    _run_temporal_by_condition_core(epochs, events, y, deriv_stats_path(deriv_root, subject), config, use_spearman, cov_df, logger)
+
+
+def compute_time_frequency_from_context(ctx: "BehaviorContext") -> None:
+    _run_tf_correlations_core(ctx.subject, ctx.epochs, ctx.aligned_events, ctx.targets,
+                              ctx.stats_dir, ctx.config, ctx.use_spearman, ctx.covariates_df, ctx.logger)
+
+
+def compute_temporal_from_context(ctx: "BehaviorContext") -> None:
+    """Compute temporal correlations by condition using pre-loaded data."""
+    _run_temporal_by_condition_core(ctx.epochs, ctx.aligned_events, ctx.targets, ctx.stats_dir,
+                                    ctx.config, ctx.use_spearman, ctx.covariates_df, ctx.logger)

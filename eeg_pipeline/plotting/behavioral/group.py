@@ -242,7 +242,7 @@ def _save_group_stats(
         return
     
     df = pd.DataFrame(records)
-    fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha", 0.05)
+    fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha") or config.get("statistics.fdr_alpha", 0.05)
     rej, crit = fdr_bh_reject(df["p_group"].to_numpy(), alpha=fdr_alpha)
     df["fdr_reject"] = rej
     df["fdr_crit_p"] = crit
@@ -435,7 +435,7 @@ def plot_group_power_roi_scatter(
     config = config or _get_default_config()
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
-    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    default_rng_seed = config.get("project.random_state", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
 
     deriv_root = Path(config.deriv_root)
@@ -445,7 +445,7 @@ def plot_group_power_roi_scatter(
     ensure_dir(plots_dir)
     ensure_dir(stats_dir)
 
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_group_logger("behavior_analysis", log_name, config=config)
 
     inputs = _extract_scatter_inputs(scatter_inputs, do_temp)

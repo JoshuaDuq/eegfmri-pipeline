@@ -435,8 +435,7 @@ def add_roi_annotations(
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
     
     if fdr_alpha is None:
-        default_fdr_alpha = tfr_config.get("default_fdr_alpha", 0.05) if plot_cfg else 0.05
-        fdr_alpha = config.get("statistics.sig_alpha", default_fdr_alpha) if config else default_fdr_alpha
+        fdr_alpha = config.get("statistics.sig_alpha", config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if config else 0.05
     
     percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0) if plot_cfg else 5.0
     is_percent_format = _detect_data_format(data, data_format, percent_threshold=percent_detection_threshold)

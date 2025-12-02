@@ -71,8 +71,9 @@ def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optio
         return baseline
     plot_cfg = get_plot_config(config) if config else None
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    default_baseline_start = tfr_config.get("default_baseline_start", -5.0) if plot_cfg else -5.0
-    default_baseline_end = tfr_config.get("default_baseline_end", -0.01) if plot_cfg else -0.01
+    baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]) if config else [-5.0, -0.01]
+    default_baseline_start = baseline_window[0]
+    default_baseline_end = baseline_window[1]
     default_baseline_window = [default_baseline_start, default_baseline_end]
     return tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window)) if config else tuple(default_baseline_window)
 
@@ -547,8 +548,9 @@ def _save_fig(
     if baseline_used is None:
         plot_cfg = get_plot_config(config)
         tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        default_baseline_start = tfr_config.get("default_baseline_start", -5.0)
-        default_baseline_end = tfr_config.get("default_baseline_end", -0.01)
+        baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
+        default_baseline_start = baseline_window[0]
+        default_baseline_end = baseline_window[1]
         default_baseline_window = [default_baseline_start, default_baseline_end]
         baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window))
 
@@ -564,13 +566,12 @@ def _save_fig(
     default_footer_template = "tfr_baseline"
     baseline_decimal_places = 2
     footer_text = None
-    if hasattr(config, "get"):
-        template_name = config.get("output.tfr_footer_template", default_footer_template)
-        footer_kwargs = {
-            "baseline_window": baseline_used,
-            "baseline": f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s",
-        }
-        footer_text = build_footer(template_name, config, **footer_kwargs)
+    template_name = config.get("output.tfr_footer_template", default_footer_template)
+    footer_kwargs = {
+        "baseline_window": baseline_used,
+        "baseline": f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s",
+    }
+    footer_text = build_footer(template_name, config, **footer_kwargs)
 
     for i, f in enumerate(figs):
         out_name = f"{stem}.{exts[0]}" if i == 0 else f"{stem}_{i+1}.{exts[0]}"

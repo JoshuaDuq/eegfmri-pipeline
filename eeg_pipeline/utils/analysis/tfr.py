@@ -11,7 +11,7 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import load_settings, get_constants, get_config_value, ensure_config
+from ..config.loader import load_settings, get_constants, get_config_value, ensure_config, get_frequency_band_names
 
 
 ###################################################################
@@ -35,10 +35,7 @@ def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, li
     Returns:
         tuple: (freq_min, freq_max, n_freqs, n_cycles_factor, decim, picks)
     """
-    # Try different config locations or defaults
-    tfr_config = config.get("time_frequency_analysis", {}).get("tfr", {})
-    if not tfr_config:
-         tfr_config = config.get("tfr_topography_pipeline", {}).get("tfr", {})
+    tfr_config = config.get("time_frequency_analysis.tfr", {})
 
     freq_min = float(tfr_config.get("freq_min", 1.0))
     freq_max = float(tfr_config.get("freq_max", 100.0))
@@ -100,6 +97,9 @@ def compute_tfr_morlet(
     
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
     
+    # Get number of workers from config or environment
+    workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
+    
     power = epochs.compute_tfr(
         method="morlet",
         freqs=freqs,
@@ -108,6 +108,7 @@ def compute_tfr_morlet(
         picks=picks,
         use_fft=True,
         return_itc=False,
+        n_jobs=workers,
     )
     
     return power
@@ -191,10 +192,10 @@ def compute_tfr_for_subject(
     tfr_analysis = config.get("time_frequency_analysis", {})
     tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
-    min_baseline_samples = int(config.get("tfr_topography_pipeline.min_baseline_samples", 5))
+    min_baseline_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5))
     b_start, b_end, _ = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
 
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands = get_frequency_band_names(config)
 
     tfr_comment = getattr(tfr, "comment", None)
     if isinstance(tfr_comment, str) and "BASELINED:" in tfr_comment:
@@ -548,13 +549,10 @@ def compute_adaptive_n_cycles(
     max_cycles: Optional[float] = None,
     config: Optional[Any] = None
 ) -> np.ndarray:
-    constants = _get_tfr_constants(config)
     if cycles_factor is None:
-        cycles_factor = constants["default_cycles_factor"]
+        cycles_factor = _get_config_float(config, "time_frequency_analysis.tfr.n_cycles_factor", 2.0)
     if min_cycles is None:
-        min_cycles = _get_config_float(
-            config, "time_frequency_analysis.tfr.min_cycles", constants["default_min_cycles"]
-        )
+        min_cycles = _get_config_float(config, "time_frequency_analysis.tfr.min_cycles", 3.0)
     
     freqs = np.asarray(freqs, dtype=float)
     base_cycles = freqs / cycles_factor
@@ -610,9 +608,8 @@ def validate_tfr_parameters(
     logger = _get_logger(logger)
     issues = []
     
-    constants = _get_tfr_constants(config)
     min_cycles_check = _get_config_float(
-        config, "time_frequency_analysis.tfr.min_cycles_check", constants["default_min_cycles_check"]
+        config, "time_frequency_analysis.tfr.min_cycles_check", 2.0
     )
     if np.any(n_cycles < min_cycles_check):
         issues.append(f"n_cycles too low: min={n_cycles.min():.1f}")
@@ -644,12 +641,10 @@ def _get_time_res_threshold(min_freq: float, config: Optional[Any]) -> float:
     constants = _get_tfr_constants(config)
     if min_freq <= constants["freq_threshold_for_time_res"]:
         return _get_config_float(
-            config, "time_frequency_analysis.tfr.time_res_threshold_low_freq",
-            constants["default_time_res_threshold_low_freq"]
+            config, "time_frequency_analysis.tfr.time_res_threshold_low_freq", 5.0
         )
     return _get_config_float(
-        config, "time_frequency_analysis.tfr.time_res_threshold_high_freq",
-        constants["default_time_res_threshold_high_freq"]
+        config, "time_frequency_analysis.tfr.time_res_threshold_high_freq", 2.0
     )
 
 
@@ -684,12 +679,7 @@ def get_bands_for_tfr(
         
         config_bands = get_frequency_bands(config)
         if not config_bands:
-            config_bands = config.get("tfr_topography_pipeline.bands", {})
-        if not config_bands:
-            config_bands = config.get("time_frequency_analysis.bands", {})
-        
-        if not config_bands:
-            raise ValueError("No frequency bands found in config. Check time_frequency_analysis.bands or tfr_topography_pipeline.bands")
+            raise ValueError("No frequency bands found in config. Check time_frequency_analysis.bands")
         
         band_bounds = {
             k: (v[0], v[1] if v[1] is not None else None)
@@ -959,7 +949,7 @@ def save_tfr_with_sidecar(
     
     if mode is None:
         config = ensure_config(config)
-        mode = str(config.get("tfr_processing.baseline_mode"))
+        mode = str(config.get("time_frequency_analysis.baseline_mode"))
 
     path = Path(out_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1258,7 +1248,7 @@ def apply_baseline_safe(
     config = ensure_config(config)
 
     if mode is None:
-        mode = str(config.get("tfr_processing.baseline_mode"))
+        mode = str(config.get("time_frequency_analysis.baseline_mode"))
 
     if _check_baseline_already_applied(tfr_obj, force, logger):
         return True

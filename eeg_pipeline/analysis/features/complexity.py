@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import mne
 
-from eeg_pipeline.analysis.features.core import MIN_SAMPLES_FOR_ENTROPY
+from eeg_pipeline.analysis.features.core import MIN_SAMPLES_FOR_ENTROPY, pick_eeg_channels
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_permutation_entropy as _permutation_entropy,
@@ -30,46 +30,10 @@ from eeg_pipeline.utils.analysis.signal_metrics import (
 
 
 def extract_permutation_entropy_features(
-    epochs: mne.Epochs,
-    config: Any,
-    logger: Any,
-    *,
-    order: int = 3,
-    delay: int = 1,
-    normalize: bool = True,
+    epochs: mne.Epochs, config: Any, logger: Any, *, order: int = 3, delay: int = 1, normalize: bool = True
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Extract permutation entropy for each epoch and channel.
-
-    Permutation entropy measures the complexity/irregularity of time series
-    based on the ordinal patterns of consecutive values. It is robust to noise
-    and computational efficient.
-
-    Lower PE = more regular/predictable signal
-    Higher PE = more complex/irregular signal
-
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs to extract features from
-    config : Any
-        Configuration object
-    logger : Any
-        Logger instance
-    order : int
-        Embedding dimension (pattern length). Default 3.
-        Higher values capture longer-range patterns but need more data.
-    delay : int
-        Time delay between samples in pattern. Default 1.
-    normalize : bool
-        If True, normalize to [0, 1]. Default True.
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, List[str]]
-        DataFrame with PE features and column names
-    """
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    """Extract permutation entropy per epoch/channel. Lower PE = more regular."""
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for permutation entropy extraction")
         return pd.DataFrame(), []
@@ -79,8 +43,6 @@ def extract_permutation_entropy_features(
     min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
     if (order - 1) * delay + 1 > min_samples:
         min_samples = (order - 1) * delay + 1
-
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
@@ -116,42 +78,10 @@ def extract_permutation_entropy_features(
 
 
 def extract_sample_entropy_features(
-    epochs: mne.Epochs,
-    config: Any,
-    logger: Any,
-    *,
-    m: int = 2,
-    r_multiplier: float = 0.2,
-    max_samples: int = 500,
+    epochs: mne.Epochs, config: Any, logger: Any, *, m: int = 2, r_multiplier: float = 0.2, max_samples: int = 500
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Extract sample entropy for each epoch and channel.
-
-    Sample entropy measures time series regularity/predictability.
-    More robust than approximate entropy for short time series.
-
-    Lower SampEn = more regular (e.g., sine wave)
-    Higher SampEn = more irregular/complex
-
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs to extract features from
-    config : Any
-        Configuration object
-    logger : Any
-        Logger instance
-    m : int
-        Embedding dimension. Default 2.
-    r_multiplier : float
-        Tolerance as fraction of std. Default 0.2 (i.e., r = 0.2 * std)
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, List[str]]
-        DataFrame with SampEn features and column names
-    """
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    """Extract sample entropy per epoch/channel. Lower = more regular."""
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for sample entropy extraction")
         return pd.DataFrame(), []
@@ -163,7 +93,6 @@ def extract_sample_entropy_features(
     if m + 2 > min_samples:
         min_samples = m + 2
 
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
@@ -207,38 +136,12 @@ def extract_sample_entropy_features(
     return pd.DataFrame(feature_records), column_names
 
 
-def extract_hjorth_parameters(
-    epochs: mne.Epochs,
-    config: Any,
-    logger: Any,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Extract Hjorth parameters (Activity, Mobility, Complexity) for each epoch.
-
-    Activity: Variance of the signal (related to power)
-    Mobility: Mean frequency (std of derivative / std of signal)
-    Complexity: Bandwidth (change in frequency)
-
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs to extract features from
-    config : Any
-        Configuration object
-    logger : Any
-        Logger instance
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, List[str]]
-        DataFrame with Hjorth parameters and column names
-    """
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+def extract_hjorth_parameters(epochs: mne.Epochs, config: Any, logger: Any) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract Hjorth parameters (Activity, Mobility, Complexity) per epoch."""
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for Hjorth parameter extraction")
         return pd.DataFrame(), []
-
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
@@ -268,43 +171,14 @@ def extract_hjorth_parameters(
     return pd.DataFrame(feature_records), column_names
 
 
-def extract_lempel_ziv_complexity(
-    epochs: mne.Epochs,
-    config: Any,
-    logger: Any,
-    *,
-    normalize: bool = True,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Extract Lempel-Ziv complexity for each epoch and channel.
-
-    LZC measures the number of distinct patterns in a binarized signal.
-    Higher complexity = more unique patterns = more random/complex.
-    Lower complexity = more repetitive patterns.
-
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Epochs to extract features from
-    config : Any
-        Configuration object
-    logger : Any
-        Logger instance
-    normalize : bool
-        If True, normalize by theoretical maximum. Default True.
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, List[str]]
-        DataFrame with LZC features and column names
-    """
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+def extract_lempel_ziv_complexity(epochs: mne.Epochs, config: Any, logger: Any, *, normalize: bool = True) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract Lempel-Ziv complexity per epoch/channel. Higher = more random."""
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for Lempel-Ziv complexity extraction")
         return pd.DataFrame(), []
 
     min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
 
     feature_records: List[Dict[str, float]] = []
@@ -446,7 +320,7 @@ def extract_band_permutation_entropy_features(
     if not bands:
         return pd.DataFrame(), []
 
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for band PE extraction")
         return pd.DataFrame(), []
@@ -458,7 +332,6 @@ def extract_band_permutation_entropy_features(
     if (order - 1) * delay + 1 > min_samples:
         min_samples = (order - 1) * delay + 1
 
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 
@@ -538,13 +411,12 @@ def extract_band_hjorth_parameters(
     if not bands:
         return pd.DataFrame(), []
 
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for band Hjorth extraction")
         return pd.DataFrame(), []
 
     freq_bands = get_frequency_bands(config)
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 
@@ -634,14 +506,13 @@ def extract_band_lempel_ziv_complexity(
     if not bands:
         return pd.DataFrame(), []
 
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for band LZC extraction")
         return pd.DataFrame(), []
 
     min_samples = int(config.get("feature_engineering.complexity.min_samples_for_entropy", MIN_SAMPLES_FOR_ENTROPY))
     freq_bands = get_frequency_bands(config)
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 

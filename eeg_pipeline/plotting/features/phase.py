@@ -150,7 +150,7 @@ def plot_itpc_topomaps(
         topomap_data[(band, time_bin)] = (values_ordered, info_subset)
         all_values.extend([v for v in values_ordered if np.isfinite(v)])
     
-    shared_colorbar = bool(config.get("plotting.itpc.shared_colorbar", True)) if hasattr(config, "get") else True
+    shared_colorbar = bool(config.get("plotting.plots.itpc.shared_colorbar", True))
     if all_values and shared_colorbar:
         vmin = np.percentile(all_values, 5)
         vmax = np.percentile(all_values, 95)
@@ -532,10 +532,10 @@ def plot_pac_behavior_scatter(
         return
 
     ratings = pd.to_numeric(events_df[rating_col], errors="coerce")
-    temp_col = get_column_from_config(config, "event_columns.temperature", events_df) if hasattr(config, "get") else None
+    temp_col = get_column_from_config(config, "event_columns.temperature", events_df)
     temps = pd.to_numeric(events_df[temp_col], errors="coerce") if temp_col and temp_col in events_df.columns else None
 
-    pac_plot_cfg = config.get("pac_analysis", {}) if hasattr(config, "get") else {}
+    pac_plot_cfg = config.get("feature_engineering.pac", {})
     target_phase = pac_plot_cfg.get("plot_target_phase_hz")
     target_amp = pac_plot_cfg.get("plot_target_amp_hz")
 
@@ -544,8 +544,17 @@ def plot_pac_behavior_scatter(
         return
 
     if target_phase is None or target_amp is None:
-        log_if_present(logger, "warning", "PAC-behavior scatter requires plot_target_phase_hz and plot_target_amp_hz; skipping.")
-        return
+        # Auto-select most common pair to still produce a plot
+        pair_counts = pac_trials_df.groupby(["phase_freq", "amp_freq"]).size().reset_index(name="count")
+        top_pair = pair_counts.sort_values("count", ascending=False).iloc[0]
+        target_phase, target_amp = float(top_pair["phase_freq"]), float(top_pair["amp_freq"])
+        log_if_present(
+            logger,
+            "info",
+            f"PAC-behavior scatter: using most frequent pair ({target_phase}->{target_amp} Hz) "
+            "because plot_target_phase_hz/plot_target_amp_hz not set.",
+        )
+
     target_pair = pd.Series({"phase_freq": float(target_phase), "amp_freq": float(target_amp)})
     mask_pair = (
         (pac_trials_df["phase_freq"] == target_pair["phase_freq"])
@@ -606,4 +615,3 @@ def plot_pac_behavior_scatter(
     )
     plt.close(fig)
     log_if_present(logger, "info", "Saved PAC-behavior scatter")
-

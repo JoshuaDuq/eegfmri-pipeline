@@ -604,12 +604,11 @@ def resolve_montage(montage_opt: Optional[str], deriv_root: Path, subjects: Opti
 ###################################################################
 
 def prepare_config_dict(cfg) -> tuple:
-    config_dict = cfg.to_legacy_dict()
-    
-    results_subdir = config_dict.get("decoding", {}).get("paths", {}).get("results_subdir")
+    results_subdir = cfg.get("decoding.paths.results_subdir")
     if results_subdir is None:
         raise ValueError("decoding.paths.results_subdir not found in config")
     
+    config_dict = dict(cfg)
     _paths = config_dict.setdefault("paths", {})
     
     _best = _paths.setdefault("best_params", {})

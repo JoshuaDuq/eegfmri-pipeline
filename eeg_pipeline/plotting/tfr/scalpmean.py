@@ -172,8 +172,9 @@ def _save_fig(
     if baseline_used is None:
         plot_cfg = get_plot_config(config)
         tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        default_baseline_start = tfr_config.get("default_baseline_start", -5.0)
-        default_baseline_end = tfr_config.get("default_baseline_end", -0.01)
+        baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
+        default_baseline_start = baseline_window[0]
+        default_baseline_end = baseline_window[1]
         default_baseline_window = [default_baseline_start, default_baseline_end]
         baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window))
 

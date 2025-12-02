@@ -19,12 +19,13 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple, Protocol, runtime_checkable
+from typing import Optional, List, Dict, Any, Tuple, Protocol, runtime_checkable, Callable, Union
 
 import numpy as np
 import pandas as pd
 import mne
-from scipy.signal import hilbert, welch, find_peaks
+from mne.time_frequency import psd_array_welch
+from scipy.signal import hilbert, find_peaks
 
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.utils.analysis.tfr import time_mask
@@ -60,6 +61,29 @@ DEFAULT_PE_DELAY = 1
 
 
 ###################################################################
+# Type Protocols
+###################################################################
+
+
+@runtime_checkable
+class ConfigLike(Protocol):
+    """Protocol for configuration objects with dict-like access."""
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a configuration value by dot-separated key."""
+        ...
+
+
+# Progress callback type: receives (stage_name, fraction_complete 0-1)
+ProgressCallback = Callable[[str, float], None]
+
+
+def null_progress(stage: str, fraction: float) -> None:
+    """No-op progress callback for when progress reporting is disabled."""
+    pass
+
+
+###################################################################
 # Core Module - Single Source of Truth for Shared Computations
 ###################################################################
 
@@ -89,6 +113,11 @@ class TimeWindows:
     """Pre-computed time window masks for feature extraction."""
     baseline_mask: np.ndarray
     active_mask: np.ndarray
+    baseline_range: Tuple[float, float] = (np.nan, np.nan)
+    active_range: Tuple[float, float] = (np.nan, np.nan)
+    clamped: bool = False
+    valid: bool = True
+    errors: List[str] = field(default_factory=list)
     # Coarse temporal bins (early, mid, late)
     coarse_masks: List[np.ndarray] = field(default_factory=list)
     coarse_labels: List[str] = field(default_factory=list)
@@ -98,6 +127,37 @@ class TimeWindows:
     # Legacy compatibility
     plateau_masks: List[np.ndarray] = field(default_factory=list)
     window_labels: List[str] = field(default_factory=list)
+
+
+@dataclass
+class PrecomputedQC:
+    """Lightweight QC summary for precomputed intermediates."""
+
+    data_finite_fraction: float = np.nan
+    n_epochs: int = 0
+    n_channels: int = 0
+    n_times: int = 0
+    sfreq: float = np.nan
+    time_windows: Dict[str, Any] = field(default_factory=dict)
+    psd: Dict[str, Any] = field(default_factory=dict)
+    bands: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    gfp: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert QC to a JSON-serializable dictionary."""
+        return {
+            "data_finite_fraction": self.data_finite_fraction,
+            "n_epochs": self.n_epochs,
+            "n_channels": self.n_channels,
+            "n_times": self.n_times,
+            "sfreq": self.sfreq,
+            "time_windows": self.time_windows,
+            "psd": self.psd,
+            "bands": self.bands,
+            "gfp": self.gfp,
+            "errors": list(self.errors),
+        }
 
 
 @dataclass
@@ -127,6 +187,7 @@ class PrecomputedData:
     # Configuration
     config: Any = None
     logger: Any = None
+    qc: PrecomputedQC = field(default_factory=PrecomputedQC)
 
 
 ###################################################################
@@ -247,7 +308,8 @@ class FeatureExtractionContext:
         
         self.logger.info("Computing shared intermediate data...")
         # Get bands from config for precomputation
-        bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+        from eeg_pipeline.utils.config.loader import get_frequency_band_names
+        bands = get_frequency_band_names(self.config)
         self.precomputed = precompute_data(
             self.epochs, bands, self.config, self.logger
         )
@@ -293,6 +355,9 @@ def compute_time_windows(
     times: np.ndarray,
     config: Any,
     n_plateau_windows: int = 5,
+    *,
+    logger: Any = None,
+    strict: bool = True,
 ) -> TimeWindows:
     """
     Compute all time window masks once.
@@ -300,14 +365,67 @@ def compute_time_windows(
     Creates both coarse (early/mid/late) and fine (t1-t7) temporal bins
     based on config settings.
     """
+    errors: List[str] = []
     tf_cfg = config.get("time_frequency_analysis", {})
-    fe_cfg = config.get("feature_engineering", {}).get("features", {})
-    
     baseline_window = tf_cfg.get("baseline_window", [-5.0, -0.01])
+    fe_cfg = config.get("feature_engineering.features", {})
     plateau_window = tf_cfg.get("plateau_window", [3.0, 10.5])
-    
-    baseline_mask = time_mask(times, baseline_window[0], baseline_window[1])
-    active_mask = time_mask(times, plateau_window[0], plateau_window[1])
+    available_range = (
+        (float(times[0]), float(times[-1])) if times.size > 0 else (np.nan, np.nan)
+    )
+
+    def _build_mask(start: float, end: float, label: str) -> Tuple[np.ndarray, Tuple[float, float], bool]:
+        mask = time_mask(times, start, end)
+        if np.any(mask):
+            return mask, (start, end), False
+
+        # Clamp to available time range to avoid empty masks
+        if times.size == 0:
+            if logger:
+                logger.warning("Time vector is empty; mask '%s' will be empty.", label)
+            return np.zeros_like(times, dtype=bool), (start, end), True
+
+        clamped_start = max(start, float(times[0]))
+        clamped_end = min(end, float(times[-1]))
+        clamped = time_mask(times, clamped_start, clamped_end)
+        if np.any(clamped):
+            if logger:
+                logger.warning(
+                    "Clamped %s window from [%.3f, %.3f] to available range [%.3f, %.3f].",
+                    label,
+                    start,
+                    end,
+                    clamped_start,
+                    clamped_end,
+                )
+            return clamped, (clamped_start, clamped_end), True
+
+        if logger:
+            logger.warning(
+                "No samples found for %s window [%.3f, %.3f]; features using this window will be NaN.",
+                label,
+                start,
+                end,
+            )
+        return clamped, (clamped_start, clamped_end), True
+
+    baseline_mask, (baseline_start, baseline_end), baseline_clamped = _build_mask(
+        baseline_window[0], baseline_window[1], "baseline"
+    )
+    active_mask, (plateau_start, plateau_end), active_clamped = _build_mask(
+        plateau_window[0], plateau_window[1], "plateau"
+    )
+    clamped_any = baseline_clamped or active_clamped
+    if not np.any(baseline_mask):
+        errors.append(
+            f"Baseline window [{baseline_start:.3f}, {baseline_end:.3f}] is empty; "
+            f"available time range: [{available_range[0]:.3f}, {available_range[1]:.3f}]"
+        )
+    if not np.any(active_mask):
+        errors.append(
+            f"Active/plateau window [{plateau_start:.3f}, {plateau_end:.3f}] is empty; "
+            f"available time range: [{available_range[0]:.3f}, {available_range[1]:.3f}]"
+        )
     
     # Coarse temporal bins from config
     coarse_bins = fe_cfg.get("temporal_bins", [
@@ -318,7 +436,7 @@ def compute_time_windows(
     coarse_masks = []
     coarse_labels = []
     for bin_def in coarse_bins:
-        mask = time_mask(times, bin_def["start"], bin_def["end"])
+        mask, _, _ = _build_mask(bin_def["start"], bin_def["end"], f"coarse-{bin_def['label']}")
         coarse_masks.append(mask)
         coarse_labels.append(bin_def["label"])
     
@@ -330,7 +448,6 @@ def compute_time_windows(
         fine_bins = fe_cfg.get("temporal_bins_fine", [])
         if not fine_bins:
             # Generate default fine bins (7 bins of ~1s each)
-            plateau_start, plateau_end = plateau_window
             n_fine = 7
             duration = (plateau_end - plateau_start) / n_fine
             fine_bins = [
@@ -340,25 +457,39 @@ def compute_time_windows(
                 for i in range(n_fine)
             ]
         for bin_def in fine_bins:
-            mask = time_mask(times, bin_def["start"], bin_def["end"])
+            label = bin_def["label"]
+            mask, _, _ = _build_mask(bin_def["start"], bin_def["end"], f"fine-{label}")
             fine_masks.append(mask)
-            fine_labels.append(bin_def["label"])
+            fine_labels.append(label)
     
     # Legacy plateau windows (for backward compatibility)
-    plateau_start, plateau_end = plateau_window
-    window_duration = (plateau_end - plateau_start) / n_plateau_windows
     plateau_masks = []
     window_labels = []
-    for i in range(n_plateau_windows):
-        win_start = plateau_start + i * window_duration
-        win_end = win_start + window_duration
-        mask = time_mask(times, win_start, win_end)
-        plateau_masks.append(mask)
-        window_labels.append(f"w{i}")
+    if n_plateau_windows > 0:
+        window_duration = (plateau_end - plateau_start) / n_plateau_windows
+        for i in range(n_plateau_windows):
+            win_start = plateau_start + i * window_duration
+            win_end = win_start + window_duration
+            mask, _, _ = _build_mask(win_start, win_end, f"plateau-w{i}")
+            plateau_masks.append(mask)
+            window_labels.append(f"w{i}")
     
+    # Explicitly warn when masks are empty after clamping so downstream code can bail early
+    if errors:
+        if logger:
+            logger_method = logger.error if strict else logger.warning
+            logger_method("Time window validation failed: %s", "; ".join(errors))
+        if strict:
+            raise ValueError("; ".join(errors))
+
     return TimeWindows(
         baseline_mask=baseline_mask,
         active_mask=active_mask,
+        baseline_range=(baseline_start, baseline_end),
+        active_range=(plateau_start, plateau_end),
+        clamped=clamped_any,
+        valid=not errors,
+        errors=errors,
         coarse_masks=coarse_masks,
         coarse_labels=coarse_labels,
         fine_masks=fine_masks,
@@ -422,31 +553,49 @@ def compute_band_data(
 def compute_psd(
     data: np.ndarray,
     sfreq: float,
-    fmin: float = 1.0,
-    fmax: float = 80.0,
+    *,
+    config: Any = None,
+    logger: Any = None,
 ) -> Optional[PSDData]:
-    """Compute PSD for all epochs and channels once."""
+    """Compute PSD for all epochs and channels once with config-aware parameters."""
     n_epochs, n_channels, n_times = data.shape
-    nperseg = min(n_times, int(2 * sfreq))
-    
-    try:
-        # Compute for first channel to get freq array
-        freqs, _ = welch(data[0, 0], fs=sfreq, nperseg=nperseg)
-        freq_mask = (freqs >= fmin) & (freqs <= fmax)
-        freqs = freqs[freq_mask]
-        
-        # Compute for all
-        psd_all = np.zeros((n_epochs, n_channels, len(freqs)))
-        
-        for ep in range(n_epochs):
-            for ch in range(n_channels):
-                _, psd = welch(data[ep, ch], fs=sfreq, nperseg=nperseg)
-                psd_all[ep, ch] = psd[freq_mask]
-        
-        return PSDData(freqs=freqs, psd=psd_all)
-        
-    except (ValueError, IndexError, RuntimeError):
+
+    if n_times < MIN_SAMPLES_FOR_PSD:
+        if logger:
+            logger.warning(
+                "PSD skipped: only %d samples (< MIN_SAMPLES_FOR_PSD=%d).",
+                n_times,
+                MIN_SAMPLES_FOR_PSD,
+            )
         return None
+
+    psd_cfg = (config or {}).get("feature_engineering", {}).get("psd", {})
+    fmin = float(psd_cfg.get("fmin", 1.0))
+    fmax = float(psd_cfg.get("fmax", min(80.0, sfreq / 2.0 - 0.5)))
+    n_fft = int(psd_cfg.get("n_fft", min(n_times, int(2 * sfreq))))
+    n_overlap = int(psd_cfg.get("n_overlap", 0))
+    window = psd_cfg.get("window", "hann")
+    n_jobs = int(psd_cfg.get("n_jobs", 1))
+
+    try:
+        psd_all, freqs = psd_array_welch(
+            data,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            n_fft=n_fft,
+            n_overlap=n_overlap,
+            window=window,
+            n_jobs=n_jobs,
+            verbose=False,
+        )
+    except (ValueError, IndexError, RuntimeError) as exc:
+        if logger:
+            logger.error("PSD computation failed: %s", exc)
+        return None
+
+    # psd_array_welch returns (epochs, channels, freqs)
+    return PSDData(freqs=freqs, psd=psd_all)
 
 
 def compute_gfp(data: np.ndarray) -> np.ndarray:
@@ -520,37 +669,128 @@ def precompute_data(
         config=config,
         logger=logger,
     )
+
+    # Lightweight QC for downstream inspection
+    if data.size > 0:
+        precomputed.qc.data_finite_fraction = float(np.isfinite(data).sum() / data.size)
+        precomputed.qc.n_epochs = data.shape[0]
+        precomputed.qc.n_channels = data.shape[1]
+        precomputed.qc.n_times = data.shape[2]
+        precomputed.qc.sfreq = sfreq
     
     # Compute time windows
-    precomputed.windows = compute_time_windows(times, config, n_plateau_windows)
+    try:
+        precomputed.windows = compute_time_windows(
+            times, config, n_plateau_windows, logger=logger, strict=True
+        )
+        precomputed.qc.time_windows = {
+            "baseline_samples": int(np.sum(precomputed.windows.baseline_mask)),
+            "active_samples": int(np.sum(precomputed.windows.active_mask)),
+            "baseline_range": getattr(precomputed.windows, "baseline_range", (np.nan, np.nan)),
+            "active_range": getattr(precomputed.windows, "active_range", (np.nan, np.nan)),
+            "clamped": getattr(precomputed.windows, "clamped", False),
+            "errors": list(getattr(precomputed.windows, "errors", [])),
+        }
+        if logger and precomputed.windows:
+            logger.info(
+                "Using time windows baseline=%s, active=%s (clamped=%s)",
+                getattr(precomputed.windows, "baseline_range", None),
+                getattr(precomputed.windows, "active_range", None),
+                getattr(precomputed.windows, "clamped", False),
+            )
+    except ValueError as exc:
+        precomputed.windows = None
+        precomputed.qc.time_windows = {
+            "baseline_samples": 0,
+            "active_samples": 0,
+            "baseline_range": (np.nan, np.nan),
+            "active_range": (np.nan, np.nan),
+            "clamped": False,
+            "errors": [str(exc)],
+        }
+        precomputed.qc.errors.append(f"time_windows: {exc}")
+        if logger:
+            logger.error("Time window computation failed; downstream features will be skipped: %s", exc)
     
     # Compute GFP
     precomputed.gfp = compute_gfp(data)
+    if precomputed.gfp.size > 0:
+        finite_fraction = float(np.isfinite(precomputed.gfp).sum() / precomputed.gfp.size)
+        precomputed.qc.gfp = {
+            "finite_fraction": finite_fraction,
+            "median": float(np.nanmedian(precomputed.gfp)),
+        }
     
-    # Compute band data
+    # Compute band data (optionally in parallel)
     if compute_bands and bands:
         freq_bands = get_frequency_bands(config)
-        
-        for band in bands:
-            if band not in freq_bands:
-                logger.warning(f"Band '{band}' not in config, skipping")
-                continue
-            
-            fmin, fmax = freq_bands[band]
-            band_data = compute_band_data(data, sfreq, band, fmin, fmax, logger)
-            
-            if band_data is not None:
-                precomputed.band_data[band] = band_data
-                # Also compute band-specific GFP
-                precomputed.gfp_band[band] = compute_gfp(band_data.filtered)
-        
-        logger.info(f"Precomputed band data for: {list(precomputed.band_data.keys())}")
+        band_defs = [(band, freq_bands[band]) for band in bands if band in freq_bands]
+        if not band_defs and logger:
+            logger.warning("No valid bands found in config; skipping band precomputation.")
+        else:
+            n_jobs_bands = int(config.get("feature_engineering.parallel.n_jobs_bands", 1))
+
+            def _compute_single_band(band_name: str, fmin: float, fmax: float):
+                bd = compute_band_data(data, sfreq, band_name, fmin, fmax, logger)
+                if bd is None:
+                    return None
+                gfp_band = compute_gfp(bd.filtered)
+                band_power = bd.power
+                qc_entry = {}
+                if band_power.size > 0:
+                    qc_entry = {
+                        "finite_fraction": float(np.isfinite(band_power).sum() / band_power.size),
+                        "median_power": float(np.nanmedian(band_power)),
+                        "fmin": fmin,
+                        "fmax": fmax,
+                    }
+                return band_name, bd, gfp_band, qc_entry
+
+            results = []
+            if n_jobs_bands > 1:
+                try:
+                    from joblib import Parallel, delayed
+
+                    results = Parallel(n_jobs=n_jobs_bands, prefer="processes")(
+                        delayed(_compute_single_band)(band, fmin, fmax) for band, (fmin, fmax) in band_defs
+                    )
+                except Exception as exc:  # pragma: no cover - defensive fallback
+                    if logger:
+                        logger.warning(
+                            "Parallel band computation failed (%s); falling back to sequential.", exc
+                        )
+                    n_jobs_bands = 1
+
+            if n_jobs_bands == 1:
+                results = [_compute_single_band(band, fmin, fmax) for band, (fmin, fmax) in band_defs]
+
+            for res in results:
+                if res is None:
+                    continue
+                band_name, bd, gfp_band, qc_entry = res
+                precomputed.band_data[band_name] = bd
+                precomputed.gfp_band[band_name] = gfp_band
+                if qc_entry:
+                    precomputed.qc.bands[band_name] = qc_entry
+
+            logger.info(f"Precomputed band data for: {list(precomputed.band_data.keys())}")
     
     # Compute PSD
     if compute_psd_data:
-        precomputed.psd_data = compute_psd(data, sfreq)
+        precomputed.psd_data = compute_psd(data, sfreq, config=config, logger=logger)
         if precomputed.psd_data is not None:
             logger.info(f"Precomputed PSD: {len(precomputed.psd_data.freqs)} freq bins")
+            psd_arr = precomputed.psd_data.psd
+            precomputed.qc.psd = {
+                "n_freq_bins": int(len(precomputed.psd_data.freqs)),
+                "finite_fraction": float(np.isfinite(psd_arr).sum() / psd_arr.size),
+                "freq_range": (
+                    float(precomputed.psd_data.freqs[0]),
+                    float(precomputed.psd_data.freqs[-1]),
+                )
+                if len(precomputed.psd_data.freqs) > 1
+                else (np.nan, np.nan),
+            }
     
     return precomputed
 
@@ -612,51 +852,26 @@ def get_psd_band_power(
 
 
 def pick_eeg_channels(epochs: mne.Epochs) -> Tuple[np.ndarray, List[str]]:
-    """
-    Pick EEG channels from epochs.
-    
-    This is the SINGLE implementation - other modules should import this.
-    
-    Parameters
-    ----------
-    epochs : mne.Epochs
-        Input epochs
-        
-    Returns
-    -------
-    Tuple[np.ndarray, List[str]]
-        (picks array, channel names list)
-    """
+    """Pick EEG channels from epochs. Returns (picks array, channel names list)."""
     picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
     ch_names = [epochs.info["ch_names"][p] for p in picks]
     return picks, ch_names
 
 
+def get_eeg_data(epochs: mne.Epochs, logger: Any = None, context: str = "") -> Optional[Tuple[np.ndarray, List[str], np.ndarray]]:
+    """Get EEG data with channel picking and validation. Returns None if no channels."""
+    picks, ch_names = pick_eeg_channels(epochs)
+    if len(picks) == 0:
+        if logger:
+            logger.warning(f"No EEG channels available{' for ' + context if context else ''}")
+        return None
+    return epochs.get_data(picks=picks), ch_names, picks
+
+
 def bandpass_filter_epochs(
-    data: np.ndarray,
-    sfreq: float,
-    fmin: float,
-    fmax: float,
+    data: np.ndarray, sfreq: float, fmin: float, fmax: float
 ) -> Optional[np.ndarray]:
-    """
-    Bandpass filter epoch data.
-    
-    This is the SINGLE implementation - other modules should import this.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input data, shape (epochs, channels, times) or (channels, times)
-    sfreq : float
-        Sampling frequency
-    fmin, fmax : float
-        Band limits
-        
-    Returns
-    -------
-    np.ndarray or None
-        Filtered data with same shape as input
-    """
+    """Bandpass filter data (2D or 3D). Returns None on error."""
     try:
         original_shape = data.shape
         
@@ -681,25 +896,8 @@ def bandpass_filter_epochs(
         return None
 
 
-def compute_gfp_with_peaks(
-    data: np.ndarray,
-    min_peak_distance: int = 10,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute GFP and find peaks.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Shape (channels, times) or (epochs, channels, times)
-    min_peak_distance : int
-        Minimum distance between peaks in samples
-        
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        (gfp, peak_indices)
-    """
+def compute_gfp_with_peaks(data: np.ndarray, min_peak_distance: int = 10) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute GFP and find peaks. Returns (gfp, peak_indices)."""
     if data.ndim == 2:
         gfp = np.std(data, axis=0)
     else:
@@ -714,31 +912,8 @@ def compute_gfp_with_peaks(
     return gfp, peaks
 
 
-def compute_band_envelope_fast(
-    data: np.ndarray,
-    sfreq: float,
-    fmin: float,
-    fmax: float,
-) -> Optional[np.ndarray]:
-    """
-    Compute band-limited envelope (amplitude) using Hilbert transform.
-    
-    This is the SINGLE implementation - other modules should import this.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input data. Shape can be (times,), (channels, times), or (epochs, channels, times)
-    sfreq : float
-        Sampling frequency
-    fmin, fmax : float
-        Band limits
-        
-    Returns
-    -------
-    np.ndarray or None
-        Envelope with same shape as input
-    """
+def compute_band_envelope_fast(data: np.ndarray, sfreq: float, fmin: float, fmax: float) -> Optional[np.ndarray]:
+    """Compute band-limited envelope via Hilbert transform. Returns None on error."""
     try:
         original_shape = data.shape
         
@@ -771,29 +946,8 @@ def compute_band_envelope_fast(
         return None
 
 
-def compute_band_phase_fast(
-    data: np.ndarray,
-    sfreq: float,
-    fmin: float,
-    fmax: float,
-) -> Optional[np.ndarray]:
-    """
-    Compute band-limited instantaneous phase using Hilbert transform.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input data
-    sfreq : float
-        Sampling frequency
-    fmin, fmax : float
-        Band limits
-        
-    Returns
-    -------
-    np.ndarray or None
-        Phase with same shape as input
-    """
+def compute_band_phase_fast(data: np.ndarray, sfreq: float, fmin: float, fmax: float) -> Optional[np.ndarray]:
+    """Compute band-limited instantaneous phase via Hilbert. Returns None on error."""
     try:
         original_shape = data.shape
         
@@ -827,21 +981,8 @@ def compute_band_phase_fast(
 # Feature Result Types
 ###################################################################
 
-
-@dataclass
-class FeatureResult:
-    """Standard result type for feature extraction functions."""
-    df: pd.DataFrame
-    columns: List[str]
-    name: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    @property
-    def empty(self) -> bool:
-        return self.df.empty
-    
-    def __len__(self) -> int:
-        return len(self.df)
+# Import from types to avoid duplication
+from eeg_pipeline.types import FeatureResult
 
 
 @runtime_checkable

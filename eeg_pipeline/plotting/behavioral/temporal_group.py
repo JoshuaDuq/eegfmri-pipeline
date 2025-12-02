@@ -412,7 +412,7 @@ def plot_group_temporal_topomaps(
                     for ch_idx, ch in enumerate(ch_names or []):
                         p_val = p_vals[b_idx, w_idx, ch_idx] if p_vals is not None else np.nan
                         q_val = q_vals[b_idx, w_idx, ch_idx] if q_vals is not None else np.nan
-                        fdr_reject = bool(np.isfinite(q_val) and q_val < float(config.get('behavior_analysis', {}).get('statistics', {}).get('fdr_alpha', config.get('statistics.sig_alpha', 0.05))))
+                        fdr_reject = bool(np.isfinite(q_val) and q_val < float(config.get('behavior_analysis.statistics.fdr_alpha', config.get('statistics.sig_alpha', 0.05))))
                         rows.append({
                             "condition": cond_key,
                             "band": band,
@@ -435,7 +435,7 @@ def plot_group_temporal_topomaps(
                 if "p_perm" in df.columns:
                     p_vals = pd.to_numeric(df["p_perm"], errors="coerce")
                     mask = np.isfinite(p_vals)
-                    alpha = float(config.get("behavior_analysis", {}).get("statistics", {}).get("fdr_alpha", config.get("statistics.sig_alpha", 0.05)))
+                    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", config.get("statistics.sig_alpha", 0.05)))
                     rejections, crit_p = fdr_bh_reject(p_vals[mask].to_numpy(), alpha=alpha)
                     df.loc[mask, "q_fdr_global"] = np.nan
                     df.loc[mask, "fdr_reject_global"] = False

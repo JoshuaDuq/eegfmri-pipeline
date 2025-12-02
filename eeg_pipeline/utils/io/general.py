@@ -63,7 +63,7 @@ def _resolve_log_dir(config: Optional[EEGConfig] = None) -> Optional[Path]:
     if config is None:
         return None
     
-    log_dir = config.get("output.log_dir")
+    log_dir = config.get("logging.log_dir")
     if log_dir:
         return Path(log_dir)
     
@@ -809,10 +809,10 @@ def save_fig(
     if constants is not None:
         _get_plot_constants(constants=constants)
     
-    formats = formats or _PLOT_DEFAULT_FORMATS
-    dpi = dpi if dpi is not None else _PLOT_DEFAULT_DPI
-    bbox_inches = bbox_inches or _PLOT_DEFAULT_BBOX
-    pad_inches = pad_inches if pad_inches is not None else _PLOT_DEFAULT_PAD
+    formats = formats or _PLOT_DEFAULT_FORMATS or ("png",)
+    dpi = dpi if dpi is not None else (_PLOT_DEFAULT_DPI or 150)
+    bbox_inches = bbox_inches or (_PLOT_DEFAULT_BBOX or "tight")
+    pad_inches = pad_inches if pad_inches is not None else (_PLOT_DEFAULT_PAD or 0.1)
 
     footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs, constants)
     _prepare_figure_layout(fig, footer, tight_layout_rect)
@@ -837,14 +837,15 @@ _PLOT_DEFAULT_PAD = None
 
 
 @dataclass
-class PlotConfig:
+class SaveFigConfig:
+    """Configuration for saving figures (dpi, formats, etc.)."""
     dpi: int = 300
     formats: Tuple[str, ...] = ("png",)
     bbox_inches: str = "tight"
     pad_inches: float = 0.02
     
     @classmethod
-    def from_constants(cls, constants: Dict[str, Any]) -> "PlotConfig":
+    def from_constants(cls, constants: Dict[str, Any]) -> "SaveFigConfig":
         if "FIG_DPI" not in constants:
             raise ValueError("FIG_DPI not found in constants")
         if "SAVE_FORMATS" not in constants:
@@ -862,8 +863,12 @@ class PlotConfig:
         )
     
     @classmethod
-    def get_defaults(cls) -> "PlotConfig":
+    def get_defaults(cls) -> "SaveFigConfig":
         return cls()
+
+
+# Backward compatibility alias
+PlotConfig = SaveFigConfig
 
 
 def _get_plot_constants(constants=None):
@@ -871,7 +876,7 @@ def _get_plot_constants(constants=None):
     if _PLOT_DEFAULT_DPI is None:
         if constants is None:
             raise ValueError("constants is required for _get_plot_constants")
-        plot_config = PlotConfig.from_constants(constants)
+        plot_config = SaveFigConfig.from_constants(constants)
         _PLOT_DEFAULT_DPI = plot_config.dpi
         _PLOT_DEFAULT_FORMATS = plot_config.formats
         _PLOT_DEFAULT_BBOX = plot_config.bbox_inches
@@ -903,14 +908,48 @@ def get_behavior_footer(config) -> str:
 
 
 def get_band_color(band: str, config=None) -> str:
-    if config is None:
-        raise ValueError("config is required for get_band_color")
-    colors = config.get("visualization.band_colors")
-    if colors is None:
-        raise ValueError("visualization.band_colors not found in config")
-    if band in colors:
-        return str(colors[band])
-    raise ValueError(f"Band '{band}' not found in visualization.band_colors config")
+    """Get color for frequency band.
+    
+    Parameters
+    ----------
+    band : str
+        Frequency band name (delta, theta, alpha, etc.)
+    config : Any, optional
+        Configuration object
+    
+    Returns
+    -------
+    str
+        Hex color string
+    """
+    # Default colors if config not available
+    DEFAULT_BAND_COLORS = {
+        "delta": "#1E40AF",
+        "theta": "#059669",
+        "alpha": "#D97706",
+        "beta": "#DC2626",
+        "gamma": "#7C3AED",
+        "broadband": "#6B7280",
+    }
+    
+    # Try config colors first
+    if config is not None:
+        colors = config.get("visualization.band_colors")
+        if colors is not None and band in colors:
+            return str(colors[band])
+    
+    # Fall back to defaults
+    band_lower = band.lower() if band else ""
+    if band_lower in DEFAULT_BAND_COLORS:
+        return DEFAULT_BAND_COLORS[band_lower]
+    
+    # Check for partial match (e.g., "alpha_low" -> "alpha")
+    for key in DEFAULT_BAND_COLORS:
+        if key in band_lower:
+            return DEFAULT_BAND_COLORS[key]
+    
+    # Return gray as ultimate fallback
+    return "#6B7280"
 
 
 def logratio_to_pct(v):
@@ -946,7 +985,7 @@ def get_viz_params(config=None):
         "markersize": 3,
     }
     
-    topomap_config = config.get("plotting.topomap") or config.get("plotting.plots.topomap", {})
+    topomap_config = config.get("plotting.plots.topomap", {})
     
     return {
         "topo_contours": topomap_config.get("contours"),
@@ -1042,7 +1081,7 @@ def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:
     dpi = 300
     if config is not None:
         from ..config.loader import get_nested_value
-        dpi = get_nested_value(config, "visualization.dpi", 300)
+        dpi = get_nested_value(config, "plotting.defaults.savefig_dpi", 300)
 
     sns.set_theme(context="paper", style="white", font_scale=1.05)
     plt.rcParams.update({
@@ -1064,9 +1103,6 @@ def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:
 
 @functools.lru_cache(maxsize=None)
 def _get_io_constants(config=None):
-    if get_constants is not None:
-        return get_constants("io", config)
-    
     if config is None:
         if load_settings is not None:
             config = load_settings()
@@ -1074,13 +1110,10 @@ def _get_io_constants(config=None):
     if config is None:
         raise ValueError("Config is required. Cannot load IO constants without config.")
     
-    constants = config.get("io.constants")
-    if constants is None:
-        raise ValueError("io.constants not found in config.")
-    
+    event_columns = config.get("event_columns", {})
     return {
-        "temperature_column_names": constants["temperature_column_names"],
-        "pain_column_names": constants["pain_column_names"],
+        "temperature_column_names": event_columns.get("temperature", []),
+        "pain_column_names": event_columns.get("pain_binary", []),
     }
 
 
@@ -1182,10 +1215,10 @@ def extract_plotting_constants(config, save_formats: Optional[List[str]] = None)
         raise ValueError("config is required for extract_plotting_constants")
     
     return {
-        "FIG_DPI": int(config.get("output.fig_dpi")),
-        "SAVE_FORMATS": save_formats or list(config.get("output.save_formats")),
-        "output.bbox_inches": config.get("output.bbox_inches"),
-        "output.pad_inches": float(config.get("output.pad_inches")),
+        "FIG_DPI": int(config.get("plotting.defaults.savefig_dpi", 300)),
+        "SAVE_FORMATS": save_formats or list(config.get("plotting.defaults.formats", ["svg"])),
+        "output.bbox_inches": config.get("plotting.defaults.bbox_inches", "tight"),
+        "output.pad_inches": float(config.get("plotting.defaults.pad_inches", 0.02)),
     }
 
 
@@ -1554,13 +1587,16 @@ def build_predictor_column_mapping(predictor_type: str) -> Dict[str, str]:
         "predictor_type": "type",
         "target": "target",
     }
-    region_col = "roi" if predictor_type == "ROI" else "channel"
+    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
     base_cols[region_col] = "region"
     return base_cols
 
 def build_predictor_name(df: pd.DataFrame, predictor_type: str) -> pd.Series:
-    region_col = "roi" if predictor_type == "ROI" else "channel"
-    return df[region_col] + " (" + df["band"] + ")"
+    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
+    if region_col not in df.columns:
+        # Fallback: use whichever region column exists
+        region_col = "roi" if "roi" in df.columns else "channel" if "channel" in df.columns else df.columns[0]
+    return df[region_col].astype(str) + " (" + df["band"].astype(str) + ")"
 
 def build_connectivity_heatmap_records(
     n_nodes: int,

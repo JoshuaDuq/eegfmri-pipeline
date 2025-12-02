@@ -130,7 +130,7 @@ def compute_tf_split_half_reliability(
     from eeg_pipeline.analysis.behavior.temporal import _compute_tf_correlations_for_bins
     from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi, apply_baseline_to_tfr
 
-    heatmap_config = config.get("behavior_analysis", {}).get("time_frequency_heatmap", {})
+    heatmap_config = config.get("behavior_analysis.time_frequency_heatmap", {})
     roi_selection = heatmap_config.get("roi_selection")
 
     epochs_for_tfr = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
@@ -166,7 +166,7 @@ def compute_tf_split_half_reliability(
 
     time_bin_width = float(heatmap_config.get("time_resolution"))
     time_bin_edges = np.arange(times[0], times[-1] + time_bin_width, time_bin_width)
-    stats_config = config.get("behavior_analysis", {}).get("statistics", {})
+    stats_config = config.get("behavior_analysis.statistics", {})
     min_valid_points = int(stats_config.get("min_samples_roi"))
 
     # Use the more stringent of min_valid_points and min_samples_per_split

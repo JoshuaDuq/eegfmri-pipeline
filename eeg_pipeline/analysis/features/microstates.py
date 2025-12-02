@@ -22,6 +22,7 @@ from eeg_pipeline.utils.analysis.stats import (
     extract_duration_data,
     fdr_bh,
 )
+from eeg_pipeline.analysis.features.core import pick_eeg_channels
 from eeg_pipeline.utils.data.loading import extract_epoch_data
 from eeg_pipeline.utils.config.loader import (
     get_config_int,
@@ -179,7 +180,7 @@ def extract_templates_from_trials(
     peaks_per_epoch = get_config_int(
         config, "feature_engineering.microstates.peaks_per_epoch", 5
     )
-    random_state = get_config_int(config, "random.seed", 42)
+    random_state = get_config_int(config, "project.random_state", 42)
 
     min_dist_samples = max(1, int((min_peak_distance_ms / 1000.0) * sfreq))
     peak_maps: List[np.ndarray] = []
@@ -441,7 +442,7 @@ def compute_microstate_transition_stats(
     trans_pain = np.zeros((n_states, n_states), dtype=float)
     p_mat = np.full((n_states, n_states), np.nan, dtype=float)
     state_labels = _state_labels(n_states, config)
-    min_trials = int(config.get("behavior_analysis.statistics.min_transition_samples", 5)) if hasattr(config, "get") else 5
+    min_trials = int(config.get("behavior_analysis.statistics.min_transition_samples", 5))
 
     if ms_df is None or ms_df.empty or events_df is None or events_df.empty:
         return MicrostateTransitionStats(trans_nonpain, trans_pain, state_labels, p_mat, p_mat)
@@ -829,7 +830,7 @@ def extract_microstate_features(
         logger.warning(f"Invalid number of states ({n_states}); must be positive. Returning empty features.")
         return pd.DataFrame(), [], None
     
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for microstate feature extraction")
         return pd.DataFrame(), [], None

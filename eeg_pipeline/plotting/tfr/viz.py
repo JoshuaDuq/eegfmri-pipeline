@@ -109,7 +109,6 @@ def visualize_subject_tfr(
     
     power = compute_tfr_for_visualization(epochs, config, logger)
     
-    topomap_windows_config = config.get("foundational_analysis", {}).get("topomap_windows", {})
     
     plots_to_run = plots if plots is not None else (
         ["rois", "rois_contrast"] if tfr_roi_only else
@@ -153,13 +152,13 @@ def visualize_subject_tfr(
                 plateau_window=plateau_window, logger=logger
             )
             
-            window_size_ms = topomap_windows_config.get("pain_nonpain_temporal_diff_allbands", {}).get("window_size_ms", 100.0)
+            window_size_ms = topomap_windows_config.get("pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
             plot_pain_nonpain_temporal_topomaps_diff_allbands(
                 power, events_df, plots_dir, config=config, baseline=baseline_window,
                 plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
             )
             
-            window_count = topomap_windows_config.get("temporal_allbands_plateau", {}).get("window_count", 5)
+            window_count = topomap_windows_config.get("temporal_allbands_plateau.window_count", 5)
             plot_temporal_topomaps_allbands_plateau(
                 power, events_df, plots_dir, config=config, baseline=baseline_window,
                 plateau_window=plateau_window, window_count=window_count, logger=logger
@@ -222,13 +221,13 @@ def visualize_subject_tfr(
             plateau_window=plateau_window, logger=logger
         )
         
-        window_size_ms = topomap_windows_config.get("pain_nonpain_temporal_diff_allbands", {}).get("window_size_ms", 100.0)
+        window_size_ms = config.get("erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
         plot_pain_nonpain_temporal_topomaps_diff_allbands(
             power, events_df, plots_dir, config=config, baseline=baseline_window,
             plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
         )
         
-        window_count = topomap_windows_config.get("temporal_allbands_plateau", {}).get("window_count", 5)
+        window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5)
         plot_temporal_topomaps_allbands_plateau(
             power, events_df, plots_dir, config=config, baseline=baseline_window,
             plateau_window=plateau_window, window_count=window_count, logger=logger
@@ -317,14 +316,13 @@ def visualize_group_tfr(
             plateau_window=plateau_window, logger=logger
         )
         
-        topomap_windows_config = config.get("foundational_analysis", {}).get("topomap_windows", {})
-        window_size_ms = topomap_windows_config.get("pain_nonpain_temporal_diff_allbands", {}).get("window_size_ms", 100.0)
+        window_size_ms = config.get("erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
         group_plot_pain_nonpain_temporal_topomaps_diff_allbands(
             all_powers, all_events, group_dir, config=config, baseline=baseline_window,
             plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
         )
         
-        window_count = topomap_windows_config.get("temporal_allbands_plateau", {}).get("window_count", 5)
+        window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5)
         group_plot_temporal_topomaps_allbands_plateau(
             all_powers, all_events, group_dir, config=config, baseline=baseline_window,
             plateau_window=plateau_window, window_count=window_count, logger=logger

@@ -624,7 +624,7 @@ def _compute_significance_mask(
         return None
     q_vals = np.full_like(p_values, np.nan, dtype=float)
     q_vals[finite_mask] = fdr_bh(p_values[finite_mask], config=config)
-    sig_edges = {edge_map[i] for i, q in enumerate(q_vals) if np.isfinite(q) and q < float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05))}
+    sig_edges = {edge_map[i] for i, q in enumerate(q_vals) if np.isfinite(q) and q < float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)}
     if not sig_edges:
         return None
     return sig_edges
@@ -1000,7 +1000,7 @@ def plot_sliding_state_lagged_correlation_surfaces(
     state_labels = state_labels or [f"S{idx}" for idx in range(n_states)]
     vmax = float(np.nanmax(np.abs(corr_r))) if np.isfinite(corr_r).any() else 1.0
     vmax = vmax if vmax > 0 else 1.0
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
+    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
 
     fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("sliding", plot_type="connectivity"))
     im = ax.imshow(

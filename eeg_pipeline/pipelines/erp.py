@@ -32,7 +32,7 @@ def get_erp_config(config=None) -> dict:
     if config is None:
         config = load_settings()
 
-    erp = config.get("foundational_analysis", {}).get("erp", {})
+    erp = config.get("erp_analysis.erp", {})
 
     return {
         "baseline_window": tuple(erp.get("baseline_window", [-0.2, 0.0])),
@@ -150,7 +150,8 @@ def extract_erp_stats(
     # Save stats
     stats_dir = deriv_stats_path(config.deriv_root, subject)
     ensure_dir(stats_dir)
-    stats_path = stats_dir / "erp_trial_counts.tsv"
+    counts_file_name = config.get("erp_analysis.erp.output_files.counts_file_name", "erp_trial_counts.tsv")
+    stats_path = stats_dir / counts_file_name
 
     try:
         write_tsv(

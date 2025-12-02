@@ -190,7 +190,7 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
         logger.warning("Config is required to get band frequency mask")
         return None
         
-    freq_bands = config.get("time_frequency_analysis.bands") or config.get("frequency_bands")
+    freq_bands = config.get("time_frequency_analysis.bands")
     if not freq_bands:
         freq_bands = {
             "delta": [1.0, 3.9],
@@ -804,7 +804,7 @@ def plot_power_time_course_by_temperature(
     fig, ax = plt.subplots(figsize=(10, 5))
     
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
-    freq_bands = config.get("time_frequency_analysis.bands") or config.get("frequency_bands", {})
+    freq_bands = config.get("time_frequency_analysis.bands", {})
     band_range = freq_bands.get(band, [None, None])
     
     for idx, temp in enumerate(unique_temps):

@@ -34,13 +34,14 @@ from eeg_pipeline.analysis.behavior.core import (
 ALL_COMPUTATIONS = [
     "power_roi",
     "connectivity_roi",
-    "connectivity_heatmaps",
-    "sliding_connectivity",
     "time_frequency",
     "temporal_correlations",
     "cluster_test",
     "precomputed_correlations",
     "condition_correlations",
+    "mixed_effects",
+    "mediation",
+    "quality_report",
     "exports",
 ]
 
@@ -69,8 +70,6 @@ def _get_computation_registry() -> Dict[str, Callable[[BehaviorContext], Computa
     from eeg_pipeline.analysis.behavior.power_roi import compute_power_roi_stats_from_context
     from eeg_pipeline.analysis.behavior.connectivity import (
         correlate_connectivity_roi_from_context,
-        correlate_connectivity_heatmaps,
-        _correlate_sliding_connectivity,
     )
     from eeg_pipeline.analysis.behavior.temporal import (
         compute_time_frequency_from_context,
@@ -81,34 +80,126 @@ def _get_computation_registry() -> Dict[str, Callable[[BehaviorContext], Computa
     from eeg_pipeline.analysis.behavior.condition_correlations import compute_condition_correlations
     from eeg_pipeline.analysis.behavior.exports import export_combined_power_corr_stats
 
-    def _sliding_connectivity(ctx: BehaviorContext) -> None:
-        if ctx.connectivity_df is None:
-            return
-        _correlate_sliding_connectivity(
-            conn_df=ctx.connectivity_df,
-            ratings=ctx.targets,
-            config=ctx.config,
-            stats_dir=ctx.stats_dir,
-            logger=ctx.logger,
-            use_spearman=ctx.use_spearman,
-        )
-
-    def _connectivity_heatmaps(ctx: BehaviorContext) -> None:
-        correlate_connectivity_heatmaps(ctx.subject, ctx.task, use_spearman=ctx.use_spearman)
-
     def _exports(ctx: BehaviorContext) -> None:
         export_combined_power_corr_stats(ctx.subject)
+
+    def _mixed_effects(ctx: BehaviorContext) -> None:
+        """Run mixed-effects analysis if enabled."""
+        me_cfg = ctx.config.get("behavior_analysis.mixed_effects", {})
+        if not me_cfg.get("enabled", False):
+            ctx.logger.info("Mixed-effects analysis disabled in config")
+            return
+        
+        from eeg_pipeline.analysis.behavior.mixed_effects import run_multilevel_correlation_analysis
+        
+        if ctx.precomputed_df is None:
+            ctx.logger.warning("No precomputed features for mixed-effects analysis")
+            return
+        
+        feature_cols = [c for c in ctx.precomputed_df.columns 
+                       if c not in ["subject", "epoch", "trial", "condition"]]
+        
+        target_col = ctx.config.get("event_columns.rating", ["rating"])[0]
+        if target_col not in ctx.precomputed_df.columns:
+            ctx.logger.warning(f"Target column {target_col} not found")
+            return
+        
+        results_df = run_multilevel_correlation_analysis(
+            ctx.precomputed_df,
+            feature_cols[:100],  # Limit for speed
+            target_col,
+            subject_col="subject",
+        )
+        
+        if not results_df.empty:
+            out_path = ctx.stats_dir / "mixed_effects_results.tsv"
+            results_df.to_csv(out_path, sep="\t", index=False)
+            ctx.logger.info(f"Saved mixed-effects results to {out_path}")
+
+    def _mediation(ctx: BehaviorContext) -> None:
+        """Run mediation analysis if enabled."""
+        med_cfg = ctx.config.get("behavior_analysis.mediation", {})
+        if not med_cfg.get("enabled", False):
+            ctx.logger.info("Mediation analysis disabled in config")
+            return
+        
+        from eeg_pipeline.analysis.behavior.mediation import run_mediation_analysis
+        
+        if ctx.precomputed_df is None:
+            ctx.logger.warning("No precomputed features for mediation analysis")
+            return
+        
+        x_col = med_cfg.get("independent_variable", "temperature")
+        y_col = med_cfg.get("dependent_variable", "rating")
+        mediators = med_cfg.get("mediators", [])
+        
+        if not mediators:
+            # Auto-select top features by variance
+            feature_cols = [c for c in ctx.precomputed_df.columns 
+                           if c not in ["subject", "epoch", "trial", "condition", x_col, y_col]]
+            if feature_cols:
+                variances = ctx.precomputed_df[feature_cols].var()
+                mediators = variances.nlargest(20).index.tolist()
+        
+        if x_col not in ctx.precomputed_df.columns or y_col not in ctx.precomputed_df.columns:
+            ctx.logger.warning(f"X ({x_col}) or Y ({y_col}) column not found")
+            return
+        
+        n_boot = med_cfg.get("n_bootstrap", 1000)
+        results_df = run_mediation_analysis(
+            ctx.precomputed_df, x_col, mediators, y_col, n_bootstrap=n_boot
+        )
+        
+        if not results_df.empty:
+            out_path = ctx.stats_dir / "mediation_results.tsv"
+            results_df.to_csv(out_path, sep="\t", index=False)
+            ctx.logger.info(f"Saved mediation results to {out_path}")
+
+    def _quality_report(ctx: BehaviorContext) -> None:
+        """Generate quality report for features."""
+        from eeg_pipeline.analysis.features.quality import generate_quality_report
+        import json
+        
+        if ctx.precomputed_df is None:
+            return
+        
+        report = generate_quality_report(
+            ctx.precomputed_df,
+            subject_col="subject" if "subject" in ctx.precomputed_df.columns else None,
+        )
+        
+        # Save report
+        report_path = ctx.stats_dir / "feature_quality_report.json"
+        
+        # Convert numpy types for JSON
+        def convert(obj):
+            if isinstance(obj, (np.integer, np.floating)):
+                return float(obj)
+            if isinstance(obj, (np.bool_, bool)):
+                return bool(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, dict):
+                return {k: convert(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [convert(v) for v in obj]
+            return obj
+        
+        with open(report_path, "w") as f:
+            json.dump(convert(report), f, indent=2)
+        ctx.logger.info(f"Saved quality report to {report_path}")
 
     return {
         "power_roi": _make_computation("power_roi", compute_power_roi_stats_from_context),
         "connectivity_roi": _make_computation("connectivity_roi", correlate_connectivity_roi_from_context),
-        "connectivity_heatmaps": _make_computation("connectivity_heatmaps", _connectivity_heatmaps),
-        "sliding_connectivity": _make_computation("sliding_connectivity", _sliding_connectivity),
         "time_frequency": _make_computation("time_frequency", compute_time_frequency_from_context),
         "temporal_correlations": _make_computation("temporal_correlations", compute_temporal_from_context),
         "cluster_test": _make_computation("cluster_test", run_cluster_test_from_context, critical=False),
         "precomputed_correlations": lambda ctx: compute_precomputed_correlations(ctx),
         "condition_correlations": lambda ctx: compute_condition_correlations(ctx),
+        "mixed_effects": _make_computation("mixed_effects", _mixed_effects, critical=False),
+        "mediation": _make_computation("mediation", _mediation, critical=False),
+        "quality_report": _make_computation("quality_report", _quality_report, critical=False),
         "exports": _make_computation("exports", _exports),
     }
 
@@ -139,11 +230,15 @@ def initialize_analysis_context(
 
     if task is None:
         task = config.get("project.task", "thermalactive")
-
+    
+    log_file = (
+        config.get("logging.file_names.behavior_analysis", None)
+        or config.get("logging.log_file_name", "behavior_analysis.log")
+    )
     logger = get_subject_logger(
         "behavior_analysis",
         subject,
-        config.get("output.log_file_name", "behavior_analysis.log"),
+        log_file,
         config=config,
     )
 
@@ -263,10 +358,14 @@ def process_subject(
         raise ValueError(f"subject and task required, got: {subject=}, {task=}")
 
     if logger is None:
+        log_file = (
+            config.get("logging.file_names.behavior_analysis", None)
+            or config.get("logging.log_file_name", "behavior_analysis.log")
+        )
         logger = get_subject_logger(
             "behavior_analysis",
             subject,
-            config.get("output.log_file_name", "behavior_analysis.log"),
+            log_file,
             config=config,
         )
 

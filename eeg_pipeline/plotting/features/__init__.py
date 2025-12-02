@@ -63,6 +63,28 @@ from .aperiodic import (
     plot_aperiodic_topomaps,
     plot_aperiodic_vs_pain,
 )
+from .cfc import (
+    plot_pac_comodulogram,
+    plot_pac_comodulogram_grid,
+    plot_mi_pac_topomaps,
+    plot_phase_phase_coupling_matrix,
+    plot_cfc_behavior_correlation,
+)
+from .dynamics import (
+    plot_autocorrelation_decay,
+    plot_dfa_scaling,
+    plot_mse_complexity_curves,
+    plot_neural_timescale_comparison,
+    plot_dynamics_behavior_grid,
+)
+from .quality import (
+    plot_feature_distribution_grid,
+    plot_outlier_trials_heatmap,
+    plot_snr_distribution,
+    plot_missing_data_matrix,
+    plot_reliability_summary,
+    plot_quality_summary_dashboard,
+)
 from .viz import (
     visualize_subject_features,
     visualize_features_for_subjects,
@@ -125,4 +147,23 @@ __all__ = [
     # Visualization orchestration
     "visualize_subject_features",
     "visualize_features_for_subjects",
+    # CFC visualizations
+    "plot_pac_comodulogram",
+    "plot_pac_comodulogram_grid",
+    "plot_mi_pac_topomaps",
+    "plot_phase_phase_coupling_matrix",
+    "plot_cfc_behavior_correlation",
+    # Dynamics visualizations
+    "plot_autocorrelation_decay",
+    "plot_dfa_scaling",
+    "plot_mse_complexity_curves",
+    "plot_neural_timescale_comparison",
+    "plot_dynamics_behavior_grid",
+    # Quality visualizations
+    "plot_feature_distribution_grid",
+    "plot_outlier_trials_heatmap",
+    "plot_snr_distribution",
+    "plot_missing_data_matrix",
+    "plot_reliability_summary",
+    "plot_quality_summary_dashboard",
 ]

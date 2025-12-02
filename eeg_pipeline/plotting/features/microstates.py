@@ -1355,7 +1355,7 @@ def plot_microstate_transition_network(
     trans_pain = transitions.pain
     vmax = max(float(np.max(trans_nonpain)), float(np.max(trans_pain)), 1e-6)
     q_mat = getattr(transitions, "q_values", None)
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
+    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
     cmap = plt.cm.get_cmap("YlOrRd")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -1478,7 +1478,7 @@ def plot_microstate_duration_distributions(
         ax.grid(True, alpha=0.3, axis='y')
 
         q_val = getattr(stat, "q_value", np.nan)
-        alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
+        alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
         if nonpain_data.size and pain_data.size and np.isfinite(q_val):
             if q_val < alpha:
                 y_min, y_max = ax.get_ylim()
@@ -1587,7 +1587,7 @@ def plot_group_microstate_transition_summary(
 
     ensure_dir(save_dir)
     plot_cfg = get_plot_config(config)
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if hasattr(config, "get") else 0.05
+    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
     q_mat = getattr(transitions, "q_values", None)
     sig_mask = (np.isfinite(q_mat) & (q_mat < alpha)) if q_mat is not None else None
 

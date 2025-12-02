@@ -156,7 +156,7 @@ def _plot_subject_scatter(
         if config is None:
             rng_seed = 42
         else:
-            rng_seed = config.get("random.seed", 42)
+            rng_seed = config.get("project.random_state", 42)
         rng = np.random.default_rng(rng_seed)
     
     jitter_range = 0.2
@@ -276,7 +276,7 @@ def _add_baseline_region_to_axis(ax: plt.Axes, times: np.ndarray, config: Option
         config: Optional configuration object
     """
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]) if config else [-2.0, 0.0])
-    min_baseline_samples = int(config.get("tfr_topography_pipeline.min_baseline_samples", 5) if config else 5)
+    min_baseline_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5) if config else 5)
     b_start, b_end, _ = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
     baseline_start = max(float(times.min()), float(b_start))
     baseline_end = min(float(times.max()), float(b_end))

@@ -1,8 +1,14 @@
 # EEG Pipeline
 
+<<<<<<< HEAD
 This pipeline is still under development.
 
 A EEG analysis pipeline for thermal pain studies.
+=======
+This pipeline is still under development
+
+A comprehensive EEG analysis pipeline for thermal pain studies, designed for reproducibility and scientific rigor.
+>>>>>>> cad687c (Sync local EEG pipeline updates with Thermal Pain repo)
 
 ## Overview
 
@@ -67,8 +73,20 @@ eeg_pipeline/
 │       └── statistics.py        # Group statistical tests
 │
 ├── plotting/                    # Visualization (lazy imports)
-│   ├── config.py                # Plot configuration
-│   ├── behavioral/              # Correlation plots
+│   ├── config.py                # Plot configuration (PlotConfig dataclass)
+│   ├── behavioral/              # Brain-behavior correlation plots
+│   │   ├── builders.py          # Low-level scatter builders
+│   │   ├── scatter.py           # Power-behavior scatter plots
+│   │   ├── temporal.py          # Temporal correlation topomaps
+│   │   ├── group.py             # Group-level aggregation plots
+│   │   ├── effect_sizes.py      # Forest plots, effect size heatmaps
+│   │   ├── mediation.py         # Mediation path diagrams
+│   │   ├── mixed_effects.py     # ICC, variance decomposition
+│   │   ├── robust.py            # Sensitivity analysis, outliers
+│   │   ├── distributions.py     # Feature distribution plots (NEW)
+│   │   ├── summary.py           # Dashboard visualizations (NEW)
+│   │   ├── registry.py          # Plot registration system (NEW)
+│   │   └── viz.py               # Orchestration
 │   ├── core/                    # Core plotting utilities
 │   ├── decoding/                # Performance plots
 │   ├── erp/                     # ERP plots
@@ -581,6 +599,40 @@ derivatives/sub-{subject}/eeg/stats/
 └── Summary
     ├── significant_predictors.tsv
     └── significant_predictors_summary.tsv
+
+derivatives/sub-{subject}/eeg/plots/behavior/
+│
+├── Scatter Plots
+│   ├── psychometrics/                 # Rating vs temperature
+│   ├── overall/                       # Overall power vs behavior
+│   └── roi_scatters/{roi}/            # ROI-specific scatters
+│
+├── Topomaps
+│   ├── sub-*_temporal_correlations_by_temperature_*.png
+│   ├── sub-*_temporal_correlations_by_pain_*.png
+│   └── sub-*_pain_nonpain_cluster_*.png
+│
+├── Heatmaps
+│   ├── sub-*_pac_comod_*.png          # PAC comodulograms
+│   └── sub-*_feature_correlation_matrix.png  # (NEW)
+│
+├── Forest Plots
+│   ├── effect_size_forest.png
+│   ├── mixed_effects_forest.png
+│   └── bootstrap_ci_comparison.png
+│
+├── Distribution Plots (NEW)
+│   ├── sub-*_feature_distributions.png    # Violin plots
+│   ├── sub-*_behavioral_summary.png       # Rating/temp summary
+│   └── sub-*_features_by_condition.png    # Condition comparison
+│
+├── Dashboards (NEW)
+│   ├── sub-*_analysis_dashboard.png       # 4-panel summary
+│   └── sub-*_quality_overview.png         # Quality metrics
+│
+└── Diagnostic
+    ├── residual_qc_*.png              # Regression diagnostics
+    └── residual_diagnostics_*.png
 ```
 
 ---
@@ -746,12 +798,39 @@ python eeg_pipeline/scripts/run_pipeline.py behavior compute \
 #   time_frequency, temporal_correlations, cluster_test, 
 #   precomputed_correlations, condition_correlations, exports
 
-# Visualize results
+# Visualize results (all plots)
 python eeg_pipeline/scripts/run_pipeline.py behavior visualize --subject 0001
+
+# Visualize specific plots only
+python eeg_pipeline/scripts/run_pipeline.py behavior visualize --subject 0001 \
+    --plots psychometrics dashboard feature_distributions
+
+# Quick scatter plots only
+python eeg_pipeline/scripts/run_pipeline.py behavior visualize --subject 0001 --scatter-only
 
 # Aggregate across subjects
 python eeg_pipeline/scripts/run_pipeline.py behavior aggregate --all-subjects
 ```
+
+**Available visualization plots:**
+
+| Plot | Category | Description |
+|------|----------|-------------|
+| `psychometrics` | scatter | Temperature vs rating psychometric curve |
+| `power_roi_scatter` | scatter | Power-behavior scatter by ROI/band |
+| `temporal_topomaps_temp` | topomap | Temporal correlations by temperature |
+| `temporal_topomaps_pain` | topomap | Temporal correlations by pain condition |
+| `pac_behavior` | heatmap | Phase-amplitude coupling correlations |
+| `pain_clusters` | topomap | Pain vs non-pain cluster visualization |
+| `effect_size_forest` | forest | Effect sizes with 95% CI |
+| `mediation` | diagram | Mediation analysis path diagrams |
+| `mixed_effects` | forest | Mixed-effects model results |
+| `bootstrap_ci` | forest | Bootstrap CI comparison |
+| `feature_distributions` | distribution | Feature violin plots (NEW) |
+| `feature_correlations` | heatmap | Feature correlation matrix (NEW) |
+| `condition_comparison` | comparison | Features by condition (NEW) |
+| `dashboard` | summary | Comprehensive 4-panel dashboard (NEW) |
+| `quality_overview` | summary | Feature quality metrics (NEW) |
 
 **Condition-specific correlations (`condition_correlations`):**
 
@@ -849,4 +928,51 @@ Decoding uses nested leave-one-subject-out (LOSO) cross-validation with inner Gr
 2. Create pipeline wrapper in `pipelines/`
 3. Add subcommand in `scripts/run_pipeline.py`
 
+<<<<<<< HEAD
+=======
+### Adding New Visualizations
+
+The behavioral plotting module uses a registry pattern for extensibility:
+
+```python
+from eeg_pipeline.plotting.behavioral import (
+    visualize_subject_behavior,
+    AVAILABLE_PLOTS,
+    PlotRegistry,
+    plot_registry,
+)
+
+# List all available plot types
+print(list(AVAILABLE_PLOTS.keys()))
+
+# Run specific plots programmatically
+visualize_subject_behavior(
+    subject="0001",
+    task="thermalactive",
+    config=config,
+    logger=logger,
+    plots=["dashboard", "feature_distributions", "effect_size_forest"],
+)
+
+# Create custom visualizations using low-level builders
+from eeg_pipeline.plotting.behavioral import (
+    plot_feature_distributions,
+    plot_analysis_dashboard,
+    plot_correlation_forest,
+)
+```
+
+**Key visualization modules:**
+
+| Module | Functions |
+|--------|-----------|
+| `distributions` | `plot_feature_distributions`, `plot_raincloud`, `plot_behavioral_summary`, `plot_feature_by_condition`, `plot_feature_correlation_matrix` |
+| `summary` | `plot_analysis_dashboard`, `plot_group_summary_dashboard`, `plot_quality_overview` |
+| `effect_sizes` | `plot_correlation_forest`, `plot_effect_size_comparison`, `plot_effect_size_heatmap` |
+| `mediation` | `plot_mediation_diagram`, `plot_mediation_summary`, `plot_mediation_paths_grid` |
+| `mixed_effects` | `plot_icc_bar_chart`, `plot_variance_decomposition`, `plot_mixed_effects_forest` |
+| `robust` | `plot_outlier_influence`, `plot_bootstrap_ci_comparison`, `plot_sensitivity_analysis` |
+
+## Troubleshooting
+>>>>>>> cad687c (Sync local EEG pipeline updates with Thermal Pain repo)
 

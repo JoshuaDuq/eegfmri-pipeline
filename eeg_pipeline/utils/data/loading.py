@@ -16,7 +16,7 @@ from ..io.general import (
     deriv_features_path,
     read_tsv,
 )
-from ..config.loader import load_settings, ConfigDict, get_config_value, ensure_config
+from ..config.loader import load_settings, ConfigDict, get_config_value, ensure_config, get_frequency_band_names
 
 EEGConfig = ConfigDict
 
@@ -1773,7 +1773,7 @@ def load_behavior_plot_features(
         logger.error("Features or targets not found for sub-%s", subject)
         return None, None, None, None
 
-    power_bands = config.get("features.frequency_bands")
+    power_bands = get_frequency_band_names(config)
     return pow_df, y, info, power_bands
 
 
@@ -1867,7 +1867,7 @@ def load_subject_data_for_summary(subjects: List[str], task: str, deriv_root: Pa
                 temperature = pd.to_numeric(aligned[temp_col], errors="coerce")
                 has_temperature = True
         
-        power_bands = config.get("power.bands_to_use")
+        power_bands = get_frequency_band_names(config)
         for band in power_bands:
             power_cols = [col for col in power_df.columns if col.startswith(f"pow_{band}_")]
             if not power_cols:
@@ -2657,7 +2657,7 @@ def create_temperature_masks(
     
     if temperature_rounding_decimals is None or min_temperatures_required is None:
         config = ensure_config(config)
-        temperature_rounding_decimals = temperature_rounding_decimals or int(get_config_value(config, "plotting.tfr.temperature_rounding_decimals", 1))
+        temperature_rounding_decimals = temperature_rounding_decimals or int(get_config_value(config, "plotting.tfr.temperature.rounding_decimals", 1))
         min_temperatures_required = min_temperatures_required or int(get_config_value(config, "plotting.validation.min_temperatures_required", 2))
     
     s_round = pd.to_numeric(temp_series, errors="coerce").round(temperature_rounding_decimals)
@@ -2682,7 +2682,7 @@ def get_temperature_range(
     
     if temperature_rounding_decimals is None or min_temperatures_required is None:
         config = ensure_config(config)
-        temperature_rounding_decimals = temperature_rounding_decimals or int(get_config_value(config, "plotting.tfr.temperature_rounding_decimals", 1))
+        temperature_rounding_decimals = temperature_rounding_decimals or int(get_config_value(config, "plotting.tfr.temperature.rounding_decimals", 1))
         min_temperatures_required = min_temperatures_required or int(get_config_value(config, "plotting.validation.min_temperatures_required", 2))
     
     s_round = pd.to_numeric(temp_series, errors="coerce").round(temperature_rounding_decimals)
@@ -2706,7 +2706,7 @@ def create_temperature_masks_from_range(
     
     if temperature_rounding_decimals is None:
         config = ensure_config(config)
-        temperature_rounding_decimals = int(get_config_value(config, "plotting.tfr.temperature_rounding_decimals", 1))
+        temperature_rounding_decimals = int(get_config_value(config, "plotting.tfr.temperature.rounding_decimals", 1))
     
     s_round = pd.to_numeric(temp_series, errors="coerce").round(temperature_rounding_decimals)
     mask_min = np.asarray(s_round == round(t_min, temperature_rounding_decimals), dtype=bool)

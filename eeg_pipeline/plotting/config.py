@@ -405,10 +405,25 @@ class PlotConfig:
         return width_map.get(width_name, self.style.line.width_standard)
     
     def get_color(self, color_name: str, plot_type: Optional[str] = None) -> str:
+        """Get color value, ensuring it's a valid hex string."""
+        import matplotlib.colors as mcolors
+        
         if plot_type and plot_type in self.plot_type_configs:
             colors = self.plot_type_configs[plot_type].get("colors", {})
             if color_name in colors:
-                return colors[color_name]
+                color_val = colors[color_name]
+                if color_val is None:
+                    return "#666666"
+                color_str = str(color_val)
+                # Convert to hex if needed
+                try:
+                    if color_str.startswith("#"):
+                        return color_str
+                    # Convert named color to hex
+                    rgba = mcolors.to_rgba(color_str)
+                    return mcolors.to_hex(rgba)
+                except (ValueError, TypeError):
+                    return "#666666"
         
         color_map = {
             "gray": self.style.colors.gray,
@@ -422,7 +437,20 @@ class PlotConfig:
             "nonpain": self.style.colors.nonpain,
             "network_node": self.style.colors.network_node,
         }
-        return color_map.get(color_name, self.style.colors.gray)
+        color_val = color_map.get(color_name, self.style.colors.gray)
+        if color_val is None:
+            return "#666666"
+        color_str = str(color_val)
+        
+        # Convert to hex if not already
+        try:
+            if color_str.startswith("#"):
+                return color_str
+            # Convert named color (crimson, navy, k, etc.) to hex
+            rgba = mcolors.to_rgba(color_str)
+            return mcolors.to_hex(rgba)
+        except (ValueError, TypeError):
+            return "#666666"  # Fallback
     
     def get_histogram_bins(self, plot_type: Optional[str] = None) -> int:
         """Get histogram bins based on plot type.

@@ -86,23 +86,14 @@ class ConfigDict(dict):
     def get(self, key: str, default: Any = None) -> Any:
         return get_nested_value(self, key, default)
     
-    def to_legacy_dict(self) -> Dict[str, Any]:
-        result = dict(self)
-        
-        if "decoding" in result:
-            decoding = result["decoding"]
-            for key in ["analysis", "models", "cv", "flags"]:
-                if key in decoding:
-                    result[key] = decoding[key]
-            
-            if "paths" in decoding:
-                if "paths" not in result:
-                    result["paths"] = {}
-                result["paths"].update(decoding["paths"])
-        
-        return result
-    
     def __getattr__(self, key: str) -> Any:
+        """Attribute-style access for config values.
+
+        Resolution order:
+        1. Top-level key in the config dict
+        2. Nested under ``paths.<key>`` (returned as ``Path`` when string)
+        3. Nested under ``project.<key>`` (for metadata like subjects/task)
+        """
         if key.startswith('_'):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
         
@@ -113,6 +104,10 @@ class ConfigDict(dict):
         paths_value = get_nested_value(self, f"paths.{key}", None)
         if paths_value is not None:
             return Path(paths_value) if isinstance(paths_value, str) else paths_value
+        
+        project_value = get_nested_value(self, f"project.{key}", None)
+        if project_value is not None:
+            return project_value
         
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
 
@@ -253,6 +248,7 @@ def get_config_float(config: Any, key: str, default: float) -> float:
 
 
 def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
+    """Get frequency band definitions (ranges) from config."""
     if config is None:
         return {}
     
@@ -269,6 +265,20 @@ def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
         return config.frequency_bands
     
     return {}
+
+
+def get_frequency_band_names(config: Any) -> List[str]:
+    """Get frequency band names (list of strings) from config.
+    
+    Derives band names from frequency_bands keys. Replaces the old
+    features.frequency_bands config path.
+    """
+    freq_bands = get_frequency_bands(config)
+    if freq_bands:
+        return list(freq_bands.keys())
+    
+    # Fallback to default bands if config not available
+    return ["delta", "theta", "alpha", "beta", "gamma"]
 
 
 def parse_temporal_bin_config(bin_config: Any) -> Optional[Tuple[float, float, str]]:

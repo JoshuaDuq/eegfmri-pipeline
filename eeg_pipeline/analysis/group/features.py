@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import mne
 
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
 from eeg_pipeline.utils.data.loading import (
     load_subject_features,
     load_feature_dfs_for_subjects,
@@ -105,10 +105,7 @@ def aggregate_power_features(
     if combined.empty:
         return pd.DataFrame()
     
-    power_bands = config.get("features.frequency_bands")
-    if not power_bands:
-        logger.error("features.frequency_bands not found in config")
-        return pd.DataFrame()
+    power_bands = get_frequency_band_names(config)
     
     summary_rows = []
     
@@ -575,7 +572,7 @@ def plot_band_power_distributions(means_df: pd.DataFrame, bands_present: List[st
     
     ax.errorbar(x_positions, summary_df["group_mean"], yerr=yerr, fmt='none', ecolor='k', capsize=3)
     
-    rng_seed = config.get("random.seed", 42)
+    rng_seed = config.get("project.random_state", 42)
     rng = np.random.default_rng(rng_seed)
     
     for idx, band in enumerate(bands_present):
@@ -599,12 +596,12 @@ def plot_band_power_distributions(means_df: pd.DataFrame, bands_present: List[st
     ax.axhline(0, color='k', linewidth=0.8)
     plt.tight_layout()
     
-    formats = config.get("output.save_formats", ["png"])
+    formats = config.get("plotting.defaults.formats", ["png"])
     constants = {
-        "FIG_DPI": int(config.get("output.fig_dpi", 300)),
+        "FIG_DPI": int(config.get("plotting.defaults.savefig_dpi", 300)),
         "SAVE_FORMATS": list(formats),
-        "output.bbox_inches": config.get("output.bbox_inches", "tight"),
-        "output.pad_inches": float(config.get("output.pad_inches", 0.02)),
+        "output.bbox_inches": config.get("plotting.defaults.bbox_inches", "tight"),
+        "output.pad_inches": float(config.get("plotting.defaults.pad_inches", 0.02)),
     }
     save_fig(
         fig, output_path, formats=tuple(formats), dpi=constants["FIG_DPI"],
@@ -632,7 +629,7 @@ def compute_avg_tfr_for_subject(subject: str, task: str, deriv_root: Path,
         frequencies = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     
     n_cycles = compute_adaptive_n_cycles(frequencies, cycles_factor=n_cycles_factor, config=config)
-    workers_default = int(config.get("tfr_topography_pipeline.tfr.workers", -1))
+    workers_default = int(config.get("time_frequency_analysis.tfr.workers", -1))
     workers = resolve_tfr_workers(workers_default=workers_default)
 
     tfr_epochs = epochs.compute_tfr(
@@ -852,7 +849,7 @@ def aggregate_feature_stats(subjects: List[str], task: str, deriv_root: Path, co
         )
         return
     
-    power_bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands = get_frequency_band_names(config)
     bands = list(power_bands)
     
     plot_group_power_plots(subject_features, bands, group_plots, group_stats, config, logger)

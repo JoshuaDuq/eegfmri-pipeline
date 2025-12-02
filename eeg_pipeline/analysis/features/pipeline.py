@@ -43,7 +43,8 @@ df = result.get_combined_df()
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING, Union
 
 import numpy as np
 import pandas as pd
@@ -53,10 +54,138 @@ if TYPE_CHECKING:
 
 from eeg_pipeline.analysis.features.core import (
     PrecomputedData,
+    FeatureExtractionContext,
     precompute_data,
     EPSILON_STD,
+    MIN_CHANNELS_FOR_CONNECTIVITY,
+    MIN_VALID_FRACTION,
+    MIN_EPOCHS_FOR_FEATURES,
+    MIN_EPOCHS_FOR_PLV,
+    MIN_EDGE_SAMPLES,
+    compute_psd,
 )
+from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_features
+from eeg_pipeline.analysis.features.manifest import generate_manifest, save_features_organized
+from eeg_pipeline.analysis.features.naming import make_power_name
 from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.analysis.arrays import (
+    safe_nanmean,
+    safe_nanstd,
+    safe_divide,
+    mask_valid,
+    count_valid,
+)
+
+
+###################################################################
+# Internal helpers
+###################################################################
+
+# Empty result constants for cleaner returns
+_EMPTY_RESULT = (pd.DataFrame(), [])
+_EMPTY_RESULT_WITH_QC = (pd.DataFrame(), [], {})
+
+
+def _validate_window_masks(
+    precomputed: PrecomputedData,
+    logger: Any = None,
+    *,
+    require_baseline: bool = True,
+    require_active: bool = True,
+) -> bool:
+    """
+    Ensure baseline/active masks exist and contain samples.
+
+    Returns False and logs a warning when masks are missing or empty so that
+    feature extractors can fail fast instead of producing all-NaN outputs.
+    """
+    windows = precomputed.windows
+    if windows is None:
+        if logger:
+            logger.warning("Time windows are missing; skipping feature extraction.")
+        return False
+
+    if require_baseline:
+        baseline_mask = getattr(windows, "baseline_mask", None)
+        if baseline_mask is None or not np.any(baseline_mask):
+            if logger:
+                logger.warning(
+                    "Baseline window is empty; configured/used range: %s. Skipping feature extraction.",
+                    getattr(windows, "baseline_range", None),
+                )
+            return False
+
+    if require_active:
+        active_mask = getattr(windows, "active_mask", None)
+        if active_mask is None or not np.any(active_mask):
+            if logger:
+                logger.warning(
+                    "Active window is empty; configured/used range: %s. Skipping feature extraction.",
+                    getattr(windows, "active_range", None),
+                )
+            return False
+
+    return True
+
+
+def _nanmean_with_fraction(data: np.ndarray, mask: np.ndarray) -> Tuple[float, float, int, int]:
+    """Compute NaN-safe mean inside a mask and report finite fractions."""
+    masked = data[mask]
+    total = int(masked.size)
+    finite_mask = np.isfinite(masked)
+    valid = int(np.sum(finite_mask))
+    mean_val = float(np.nanmean(masked)) if valid > 0 else np.nan
+    frac = float(valid / total) if total > 0 else 0.0
+    return mean_val, frac, valid, total
+
+
+def _validate_precomputed_for_extraction(
+    precomputed: PrecomputedData,
+    *,
+    require_bands: bool = True,
+    require_baseline: bool = True,
+    require_active: bool = True,
+    min_epochs: int = 1,
+    context: str = "",
+) -> Optional[str]:
+    """
+    Validate precomputed data for feature extraction.
+    
+    Returns None if valid, or an error message string if invalid.
+    """
+    if precomputed is None:
+        return f"{context}: precomputed data is None"
+    
+    if precomputed.data.size == 0:
+        return f"{context}: empty data"
+    
+    n_epochs = precomputed.data.shape[0]
+    if n_epochs < min_epochs:
+        return f"{context}: only {n_epochs} epochs (min={min_epochs})"
+    
+    if require_bands and not precomputed.band_data:
+        return f"{context}: no band data available"
+    
+    if precomputed.windows is None:
+        return f"{context}: time windows missing"
+    
+    if require_baseline:
+        if precomputed.windows.baseline_mask is None or not np.any(precomputed.windows.baseline_mask):
+            return f"{context}: baseline window empty"
+    
+    if require_active:
+        if precomputed.windows.active_mask is None or not np.any(precomputed.windows.active_mask):
+            return f"{context}: active window empty"
+    
+    return None
+
+
+def _build_records_to_df(records: List[Dict[str, float]]) -> Tuple[pd.DataFrame, List[str]]:
+    """Convert list of feature records to DataFrame with sorted columns."""
+    if not records:
+        return pd.DataFrame(), []
+    columns = sorted(records[0].keys())
+    return pd.DataFrame(records)[columns], columns
 
 
 ###################################################################
@@ -104,6 +233,7 @@ class ExtractionResult:
     features: Dict[str, FeatureSet] = field(default_factory=dict)
     precomputed: Optional[PrecomputedData] = None
     condition: Optional[np.ndarray] = None
+    qc: Dict[str, Any] = field(default_factory=dict)
     
     def get_combined_df(self, include_condition: bool = True) -> pd.DataFrame:
         """
@@ -133,7 +263,10 @@ class ExtractionResult:
         if include_condition and self.condition is not None:
             combined.insert(0, "condition", self.condition)
         
-        return combined
+        # Stable column order for reproducibility (condition first, then sorted)
+        fixed_cols = ["condition"] if "condition" in combined.columns else []
+        other_cols = sorted([c for c in combined.columns if c not in fixed_cols])
+        return combined[fixed_cols + other_cols] if fixed_cols else combined[other_cols]
     
     def get_feature_group_df(self, group: str, include_condition: bool = True) -> pd.DataFrame:
         """Get DataFrame for a specific feature group."""
@@ -185,6 +318,67 @@ class ExtractionResult:
             condition_str = ""
         return f"ExtractionResult({self.n_epochs} epochs, {n_features} features from {groups}{condition_str})"
 
+    def get_qc_summary(self) -> Dict[str, Any]:
+        """
+        Return aggregated QC metrics across all feature groups.
+        
+        Returns
+        -------
+        Dict[str, Any]
+            Summary including:
+            - n_feature_groups: number of successfully extracted groups
+            - total_features: total feature count
+            - groups_with_issues: list of groups that had QC issues or were skipped
+            - per_group_status: dict mapping group name to success/skip status
+        """
+        summary: Dict[str, Any] = {
+            "n_feature_groups": len(self.features),
+            "total_features": sum(len(fs.columns) for fs in self.features.values()),
+            "n_epochs": self.n_epochs,
+            "groups_extracted": list(self.features.keys()),
+            "groups_with_issues": [],
+            "per_group_status": {},
+        }
+        
+        for name, qc_data in self.qc.items():
+            if name == "precomputed":
+                continue
+            if isinstance(qc_data, dict):
+                if qc_data.get("skipped_reason"):
+                    summary["groups_with_issues"].append(name)
+                    summary["per_group_status"][name] = f"skipped: {qc_data['skipped_reason']}"
+                elif qc_data.get("error"):
+                    summary["groups_with_issues"].append(name)
+                    summary["per_group_status"][name] = f"error: {qc_data['error']}"
+                else:
+                    summary["per_group_status"][name] = "ok"
+        
+        # Add condition summary if available
+        if self.condition is not None:
+            summary["n_pain"] = self.n_pain
+            summary["n_nonpain"] = self.n_nonpain
+        
+        return summary
+
+    def build_manifest(self, config: Any = None, subject: Optional[str] = None, task: Optional[str] = None) -> Dict[str, Any]:
+        """Generate manifest for current feature columns."""
+        feature_cols = [c for c in self.get_combined_df(include_condition=False).columns]
+        return generate_manifest(feature_cols, config=config, subject=subject, task=task, qc=self.qc or None)
+
+    def save_with_manifest(
+        self,
+        output_dir: Union[str, Path],
+        subject: str,
+        task: str,
+        config: Any = None,
+        include_condition: bool = True,
+    ) -> Dict[str, Path]:
+        """
+        Save combined features and manifest in a reproducible, organized structure.
+        """
+        df = self.get_combined_df(include_condition=include_condition)
+        return save_features_organized(df, Path(output_dir), subject, task, config=config, qc=self.qc or None)
+
 
 ###################################################################
 # Feature Extractors (Using Precomputed Data)
@@ -194,7 +388,7 @@ class ExtractionResult:
 def _extract_erds_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """
     Extract comprehensive ERD/ERS features using precomputed band power.
     
@@ -210,12 +404,39 @@ def _extract_erds_from_precomputed(
     - Global (cross-channel) statistics per band
     """
     if not precomputed.band_data or precomputed.windows is None:
-        return pd.DataFrame(), []
-    
+        return pd.DataFrame(), [], {}
+
+    # Early bail: enforce minimum epoch count for stable ERDS estimation
+    n_epochs = precomputed.data.shape[0]
+    if n_epochs < MIN_EPOCHS_FOR_FEATURES:
+        if precomputed.logger:
+            precomputed.logger.warning(
+                "ERDS extraction skipped: only %d epochs available (min=%d). "
+                "Insufficient trials for stable ERD/ERS estimation.",
+                n_epochs,
+                MIN_EPOCHS_FOR_FEATURES,
+            )
+        return pd.DataFrame(), [], {"skipped_reason": "insufficient_epochs", "n_epochs": n_epochs}
+
+    if not _validate_window_masks(precomputed, precomputed.logger):
+        return pd.DataFrame(), [], {}
+
     epsilon = EPSILON_STD
+    config = precomputed.config or {}
+    erds_cfg = config.get("feature_engineering.erds", {})
+    min_baseline_power = float(
+        erds_cfg.get(
+            "min_baseline_power",
+            config.get("feature_engineering.features.min_baseline_power", epsilon),
+        )
+    )
+    min_active_power = float(erds_cfg.get("min_active_power", epsilon))
+    use_log_ratio = bool(erds_cfg.get("use_log_ratio", False))
+    clamped_baselines = 0
     windows = precomputed.windows
     
     records: List[Dict[str, float]] = []
+    qc_payload: Dict[str, Dict[str, Any]] = {}
     n_epochs = precomputed.data.shape[0]
     times = precomputed.times
     active_times = times[windows.active_mask]
@@ -229,47 +450,83 @@ def _extract_erds_from_precomputed(
             
             power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
             all_erds_full = []
+            all_log_full = []
+            clamped_channels_for_band = 0
+            baseline_valid_count = 0  # Track how many channels have valid baselines
+            n_channels = len(precomputed.ch_names)
             
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                baseline_power = np.mean(power[ch_idx, windows.baseline_mask])
-                baseline_std = np.std(power[ch_idx, windows.baseline_mask])
+                baseline_power, baseline_frac, _, baseline_total = _nanmean_with_fraction(
+                    power[ch_idx], windows.baseline_mask
+                )
+                baseline_std = float(np.nanstd(power[ch_idx, windows.baseline_mask]))
+                baseline_ref = baseline_power if baseline_power >= min_baseline_power else min_baseline_power
+                if baseline_power < min_baseline_power:
+                    clamped_baselines += 1
+                    clamped_channels_for_band += 1
+                baseline_valid = baseline_ref > epsilon and baseline_frac >= MIN_VALID_FRACTION and baseline_total > 0
+                if baseline_valid:
+                    baseline_valid_count += 1
                 active_power_trace = power[ch_idx, windows.active_mask]
-                active_power_mean = np.mean(active_power_trace)
+                active_power_mean, active_frac, _, _ = _nanmean_with_fraction(power[ch_idx], windows.active_mask)
+                safe_active_trace = np.maximum(active_power_trace, min_active_power)
+                safe_active_mean = float(active_power_mean) if np.isfinite(active_power_mean) else min_active_power
                 
-                if baseline_power > epsilon:
-                    erds_full = ((active_power_mean - baseline_power) / baseline_power) * 100
-                    erds_trace = ((active_power_trace - baseline_power) / baseline_power) * 100
+                if baseline_valid:
+                    erds_full = ((active_power_mean - baseline_ref) / baseline_ref) * 100
+                    erds_trace = ((active_power_trace - baseline_ref) / baseline_ref) * 100
+                    erds_full_db = 10 * np.log10(safe_active_mean / baseline_ref)
+                    erds_trace_db = 10 * np.log10(safe_active_trace / baseline_ref)
                 else:
                     erds_full = np.nan
                     erds_trace = np.full_like(active_power_trace, np.nan)
+                    erds_full_db = np.nan
+                    erds_trace_db = np.full_like(active_power_trace, np.nan)
                 
                 # Full period ERD/ERS
                 record[f"erds_{band}_{ch_name}_full_percent"] = float(erds_full)
+                if use_log_ratio:
+                    record[f"erds_{band}_{ch_name}_full_db"] = float(erds_full_db)
                 all_erds_full.append(erds_full)
+                all_log_full.append(erds_full_db)
                 
                 # === Coarse temporal bins (early, mid, late) ===
                 coarse_values = {}
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if np.any(win_mask):
                         win_power = np.mean(power[ch_idx, win_mask])
-                        if baseline_power > epsilon:
-                            erds_win = ((win_power - baseline_power) / baseline_power) * 100
+                        if baseline_valid:
+                            erds_win = ((win_power - baseline_ref) / baseline_ref) * 100
+                            erds_win_db = 10 * np.log10(max(win_power, min_active_power) / baseline_ref)
                         else:
                             erds_win = np.nan
+                            erds_win_db = np.nan
                         record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                        if use_log_ratio:
+                            record[f"erds_{band}_{ch_name}_{win_label}_db"] = float(erds_win_db)
                         coarse_values[win_label] = erds_win
                 
                 # === Fine temporal bins (t1-t7) for HRF modeling ===
                 for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
                     if np.any(win_mask):
                         win_power = np.mean(power[ch_idx, win_mask])
-                        if baseline_power > epsilon:
-                            erds_win = ((win_power - baseline_power) / baseline_power) * 100
+                        if baseline_valid:
+                            erds_win = ((win_power - baseline_ref) / baseline_ref) * 100
+                            erds_win_db = 10 * np.log10(max(win_power, min_active_power) / baseline_ref)
                         else:
                             erds_win = np.nan
+                            erds_win_db = np.nan
                         record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                        if use_log_ratio:
+                            record[f"erds_{band}_{ch_name}_{win_label}_db"] = float(erds_win_db)
                 
                 # === Temporal dynamics ===
+                # Default ERD/ERS separation metrics to NaN for invalid baselines
+                record[f"erds_{band}_{ch_name}_erd_magnitude"] = np.nan
+                record[f"erds_{band}_{ch_name}_erd_duration"] = np.nan
+                record[f"erds_{band}_{ch_name}_ers_magnitude"] = np.nan
+                record[f"erds_{band}_{ch_name}_ers_duration"] = np.nan
+                
                 if np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
                     valid_mask = np.isfinite(erds_trace)
                     
@@ -288,9 +545,9 @@ def _extract_erds_from_precomputed(
                     # Peak latency
                     peak_idx = np.nanargmax(np.abs(erds_trace))
                     record[f"erds_{band}_{ch_name}_peak_latency"] = float(active_times[peak_idx])
-                    
+
                     # Onset latency
-                    threshold = baseline_std / baseline_power * 100 if baseline_power > epsilon else np.inf
+                    threshold = baseline_std / baseline_ref * 100 if baseline_ref > epsilon else np.inf
                     onset_mask = np.abs(erds_trace) > threshold
                     if np.any(onset_mask):
                         onset_idx = np.argmax(onset_mask)
@@ -302,48 +559,113 @@ def _extract_erds_from_precomputed(
                     erd_vals = erds_trace[erds_trace < 0]
                     ers_vals = erds_trace[erds_trace > 0]
                     
-                    if len(erd_vals) > 0:
-                        record[f"erds_{band}_{ch_name}_erd_magnitude"] = float(np.mean(np.abs(erd_vals)))
-                        record[f"erds_{band}_{ch_name}_erd_duration"] = float(len(erd_vals) / precomputed.sfreq)
-                    else:
-                        record[f"erds_{band}_{ch_name}_erd_magnitude"] = 0.0
-                        record[f"erds_{band}_{ch_name}_erd_duration"] = 0.0
-                    
-                    if len(ers_vals) > 0:
-                        record[f"erds_{band}_{ch_name}_ers_magnitude"] = float(np.mean(ers_vals))
-                        record[f"erds_{band}_{ch_name}_ers_duration"] = float(len(ers_vals) / precomputed.sfreq)
-                    else:
-                        record[f"erds_{band}_{ch_name}_ers_magnitude"] = 0.0
-                        record[f"erds_{band}_{ch_name}_ers_duration"] = 0.0
+                    if baseline_valid:
+                        if len(erd_vals) > 0:
+                            record[f"erds_{band}_{ch_name}_erd_magnitude"] = float(np.mean(np.abs(erd_vals)))
+                            record[f"erds_{band}_{ch_name}_erd_duration"] = float(len(erd_vals) / precomputed.sfreq)
+                        else:
+                            record[f"erds_{band}_{ch_name}_erd_magnitude"] = 0.0
+                            record[f"erds_{band}_{ch_name}_erd_duration"] = 0.0
+                        
+                        if len(ers_vals) > 0:
+                            record[f"erds_{band}_{ch_name}_ers_magnitude"] = float(np.mean(ers_vals))
+                            record[f"erds_{band}_{ch_name}_ers_duration"] = float(len(ers_vals) / precomputed.sfreq)
+                        else:
+                            record[f"erds_{band}_{ch_name}_ers_magnitude"] = 0.0
+                            record[f"erds_{band}_{ch_name}_ers_duration"] = 0.0
             
             # === Global statistics per band ===
             valid_erds = [e for e in all_erds_full if np.isfinite(e)]
-            if valid_erds:
+            valid_log = [e for e in all_log_full if np.isfinite(e)]
+            record[f"erds_{band}_baseline_clamped_channels"] = int(clamped_channels_for_band)
+            record[f"erds_{band}_baseline_valid_channels"] = int(baseline_valid_count)
+            baseline_valid_fraction = baseline_valid_count / n_channels if n_channels > 0 else 0.0
+            record[f"erds_{band}_baseline_valid_fraction"] = float(baseline_valid_fraction)
+            
+            if band not in qc_payload:
+                qc_payload[band] = {"clamped_channels": [], "baseline_min_power": min_baseline_power, "valid_fractions": []}
+            qc_payload[band]["clamped_channels"].append(int(clamped_channels_for_band))
+            qc_payload[band]["valid_fractions"].append(float(baseline_valid_fraction))
+            
+            # Skip global summaries when baseline-valid fraction is too low to avoid mixing valid/invalid channels
+            if baseline_valid_fraction < MIN_VALID_FRACTION:
+                record[f"erds_{band}_global_full_mean"] = np.nan
+                record[f"erds_{band}_global_full_std"] = np.nan
+                for win_label in windows.coarse_labels:
+                    record[f"erds_{band}_global_{win_label}_mean"] = np.nan
+                    if use_log_ratio:
+                        record[f"erds_{band}_global_{win_label}_db_mean"] = np.nan
+                if use_log_ratio:
+                    record[f"erds_{band}_global_full_db_mean"] = np.nan
+                    record[f"erds_{band}_global_full_db_std"] = np.nan
+            elif valid_erds:
                 record[f"erds_{band}_global_full_mean"] = float(np.mean(valid_erds))
                 record[f"erds_{band}_global_full_std"] = float(np.std(valid_erds))
-                
                 # Global per coarse bin
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if np.any(win_mask):
                         win_erds = []
+                        win_log = []
                         for ch_idx in range(len(precomputed.ch_names)):
                             bp = np.mean(power[ch_idx, windows.baseline_mask])
-                            if bp > epsilon:
+                            bp_ref = bp if bp >= min_baseline_power else min_baseline_power
+                            if bp_ref > epsilon:
                                 wp = np.mean(power[ch_idx, win_mask])
-                                win_erds.append(((wp - bp) / bp) * 100)
+                                win_erds.append(((wp - bp_ref) / bp_ref) * 100)
+                                if use_log_ratio:
+                                    win_log.append(10 * np.log10(max(wp, min_active_power) / bp_ref))
                         if win_erds:
                             record[f"erds_{band}_global_{win_label}_mean"] = float(np.mean(win_erds))
-        
+                        if use_log_ratio and win_log:
+                            record[f"erds_{band}_global_{win_label}_db_mean"] = float(np.mean(win_log))
+                if use_log_ratio and valid_log:
+                    record[f"erds_{band}_global_full_db_mean"] = float(np.mean(valid_log))
+                    record[f"erds_{band}_global_full_db_std"] = float(np.std(valid_log))
+
         records.append(record)
+
+    if clamped_baselines > 0 and precomputed.logger:
+        precomputed.logger.info(
+            "Clamped %d baseline power values below min_baseline_power=%.3e to stabilize ERD/ERS ratios (use_log_ratio=%s).",
+            clamped_baselines,
+            min_baseline_power,
+            use_log_ratio,
+        )
     
+    # QC summary per band
+    qc_summary: Dict[str, Any] = {}
+    for band, stats in qc_payload.items():
+        clamp_list = stats.get("clamped_channels", [])
+        valid_frac_list = stats.get("valid_fractions", [])
+        qc_summary[band] = {
+            "median_clamped_channels": float(np.median(clamp_list)) if clamp_list else 0.0,
+            "max_clamped_channels": int(np.max(clamp_list)) if clamp_list else 0,
+            "min_baseline_power": float(stats.get("baseline_min_power", min_baseline_power)),
+            "median_baseline_valid_fraction": float(np.median(valid_frac_list)) if valid_frac_list else 0.0,
+            "min_baseline_valid_fraction": float(np.min(valid_frac_list)) if valid_frac_list else 0.0,
+            "n_epochs_low_validity": int(sum(1 for f in valid_frac_list if f < MIN_VALID_FRACTION)),
+        }
+    
+    # Log warning if many epochs have low baseline validity
+    for band, stats in qc_summary.items():
+        if stats["n_epochs_low_validity"] > 0 and precomputed.logger:
+            precomputed.logger.warning(
+                "ERDS band '%s': %d/%d epochs had baseline_valid_fraction < %.1f%%; "
+                "global summaries set to NaN for these epochs.",
+                band,
+                stats["n_epochs_low_validity"],
+                n_epochs,
+                MIN_VALID_FRACTION * 100,
+            )
+
     columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return pd.DataFrame(records), columns, qc_summary
 
 
 def _extract_power_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """
     Extract time-resolved band power features using precomputed band data.
     
@@ -355,12 +677,28 @@ def _extract_power_from_precomputed(
     - Global (cross-channel) statistics per band
     """
     if not precomputed.band_data or precomputed.windows is None:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], {}
+
+    # Early bail: enforce minimum epoch count for stable power estimation
+    n_epochs = precomputed.data.shape[0]
+    if n_epochs < MIN_EPOCHS_FOR_FEATURES:
+        if precomputed.logger:
+            precomputed.logger.warning(
+                "Power extraction skipped: only %d epochs available (min=%d). "
+                "Insufficient trials for stable power estimation.",
+                n_epochs,
+                MIN_EPOCHS_FOR_FEATURES,
+            )
+        return pd.DataFrame(), [], {"skipped_reason": "insufficient_epochs", "n_epochs": n_epochs}
+
+    if not _validate_window_masks(precomputed, precomputed.logger):
+        return pd.DataFrame(), [], {}
     
     epsilon = EPSILON_STD
     windows = precomputed.windows
     
     records: List[Dict[str, float]] = []
+    qc_payload: Dict[str, Dict[str, Any]] = {}
     n_epochs = precomputed.data.shape[0]
     times = precomputed.times
     active_times = times[windows.active_mask]
@@ -373,14 +711,23 @@ def _extract_power_from_precomputed(
                 continue
             
             power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
+            baseline_valid_count = 0
+            total_channels = len(precomputed.ch_names)
             all_power_full = []
             
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                baseline_power = np.mean(power[ch_idx, windows.baseline_mask])
-                active_power = np.mean(power[ch_idx, windows.active_mask])
+                baseline_power, baseline_frac, _, baseline_total = _nanmean_with_fraction(
+                    power[ch_idx], windows.baseline_mask
+                )
+                active_power, active_frac, _, _ = _nanmean_with_fraction(
+                    power[ch_idx], windows.active_mask
+                )
+                baseline_valid = baseline_power > epsilon and baseline_frac >= MIN_VALID_FRACTION and baseline_total > 0
+                if baseline_valid:
+                    baseline_valid_count += 1
                 
                 # Full period power (log-ratio normalized)
-                if baseline_power > epsilon:
+                if baseline_valid:
                     logratio = np.log10(active_power / baseline_power)
                 else:
                     logratio = np.nan
@@ -391,8 +738,8 @@ def _extract_power_from_precomputed(
                 coarse_values = {}
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if np.any(win_mask):
-                        win_power = np.mean(power[ch_idx, win_mask])
-                        if baseline_power > epsilon:
+                        win_power, win_frac, _, _ = _nanmean_with_fraction(power[ch_idx], win_mask)
+                        if baseline_valid and win_frac >= MIN_VALID_FRACTION:
                             win_logratio = np.log10(win_power / baseline_power)
                         else:
                             win_logratio = np.nan
@@ -402,8 +749,8 @@ def _extract_power_from_precomputed(
                 # === Fine temporal bins (t1-t7) for HRF modeling ===
                 for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
                     if np.any(win_mask):
-                        win_power = np.mean(power[ch_idx, win_mask])
-                        if baseline_power > epsilon:
+                        win_power, win_frac, _, _ = _nanmean_with_fraction(power[ch_idx], win_mask)
+                        if baseline_valid and win_frac >= MIN_VALID_FRACTION:
                             win_logratio = np.log10(win_power / baseline_power)
                         else:
                             win_logratio = np.nan
@@ -412,7 +759,7 @@ def _extract_power_from_precomputed(
                 # === Temporal dynamics ===
                 if len(active_times) > 2:
                     active_power_trace = power[ch_idx, windows.active_mask]
-                    if baseline_power > epsilon:
+                    if baseline_valid:
                         logratio_trace = np.log10(active_power_trace / baseline_power)
                         valid_mask = np.isfinite(logratio_trace)
                         if np.sum(valid_mask) > 2:
@@ -430,7 +777,16 @@ def _extract_power_from_precomputed(
             
             # === Global statistics per band ===
             valid_power = [p for p in all_power_full if np.isfinite(p)]
-            if valid_power:
+            baseline_valid_fraction = baseline_valid_count / total_channels if total_channels > 0 else 0.0
+            record[f"power_{band}_baseline_valid_fraction"] = float(baseline_valid_fraction)
+            
+            # Skip global summaries when baseline-valid fraction is too low
+            if baseline_valid_fraction < MIN_VALID_FRACTION:
+                record[f"power_{band}_global_full_mean"] = np.nan
+                record[f"power_{band}_global_full_std"] = np.nan
+                for win_label in windows.coarse_labels:
+                    record[f"power_{band}_global_{win_label}_mean"] = np.nan
+            elif valid_power:
                 record[f"power_{band}_global_full_mean"] = float(np.mean(valid_power))
                 record[f"power_{band}_global_full_std"] = float(np.std(valid_power))
                 
@@ -439,17 +795,46 @@ def _extract_power_from_precomputed(
                     if np.any(win_mask):
                         win_powers = []
                         for ch_idx in range(len(precomputed.ch_names)):
-                            bp = np.mean(power[ch_idx, windows.baseline_mask])
-                            if bp > epsilon:
-                                wp = np.mean(power[ch_idx, win_mask])
-                                win_powers.append(np.log10(wp / bp))
+                            bp, bp_frac, _, bp_total = _nanmean_with_fraction(power[ch_idx], windows.baseline_mask)
+                            if bp > epsilon and bp_frac >= MIN_VALID_FRACTION and bp_total > 0:
+                                wp, wp_frac, _, _ = _nanmean_with_fraction(power[ch_idx], win_mask)
+                                if wp_frac >= MIN_VALID_FRACTION:
+                                    win_powers.append(np.log10(wp / bp))
                         if win_powers:
                             record[f"power_{band}_global_{win_label}_mean"] = float(np.mean(win_powers))
+            
+            # QC tracking per band
+            if band not in qc_payload:
+                qc_payload[band] = {"baseline_valid_fraction": [], "n_epochs_low_validity": 0}
+            qc_payload[band]["baseline_valid_fraction"].append(float(baseline_valid_fraction))
+            if baseline_valid_fraction < MIN_VALID_FRACTION:
+                qc_payload[band]["n_epochs_low_validity"] += 1
         
         records.append(record)
     
+    # Aggregate QC summaries per band
+    qc_summary: Dict[str, Any] = {}
+    for band, stats in qc_payload.items():
+        baseline_vals = stats["baseline_valid_fraction"]
+        n_low = stats.get("n_epochs_low_validity", 0)
+        qc_summary[band] = {
+            "baseline_valid_fraction_median": float(np.nanmedian(baseline_vals)) if baseline_vals else np.nan,
+            "baseline_valid_fraction_min": float(np.nanmin(baseline_vals)) if baseline_vals else np.nan,
+            "n_epochs_low_validity": n_low,
+        }
+        # Log warning if many epochs have low baseline validity
+        if n_low > 0 and precomputed.logger:
+            precomputed.logger.warning(
+                "Power band '%s': %d/%d epochs had baseline_valid_fraction < %.1f%%; "
+                "global summaries set to NaN for these epochs.",
+                band,
+                n_low,
+                n_epochs,
+                MIN_VALID_FRACTION * 100,
+            )
+    
     columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return pd.DataFrame(records), columns, qc_summary
 
 
 def _extract_spectral_from_precomputed(
@@ -469,18 +854,34 @@ def _extract_spectral_from_precomputed(
     - Cross-band ratios (for ML discriminability)
     """
     if precomputed.psd_data is None:
-        return pd.DataFrame(), []
+        if precomputed.data.size > 0:
+            precomputed.logger and precomputed.logger.warning(
+                "PSD data missing for spectral features; computing PSD on the fly."
+            )
+            precomputed.psd_data = compute_psd(
+                precomputed.data, precomputed.sfreq, config=precomputed.config, logger=precomputed.logger
+            )
+        if precomputed.psd_data is None:
+            precomputed.logger and precomputed.logger.error(
+                "PSD computation unavailable; skipping spectral features."
+            )
+            return pd.DataFrame(), []
     
     config = precomputed.config
     freq_bands = get_frequency_bands(config)
     freqs = precomputed.psd_data.freqs
     psd = precomputed.psd_data.psd  # (epochs, channels, freqs)
+    missing_band_warned = set()
     
     records: List[Dict[str, float]] = []
     n_epochs = psd.shape[0]
     
-    # Total power for relative calculations
-    total_power = np.trapz(psd, freqs, axis=2)  # (epochs, channels)
+    # Total power for relative calculations (ignore NaNs instead of zeroing entire epoch/channel)
+    finite_mask = np.isfinite(psd) & np.isfinite(freqs)[None, None, :]
+    psd_clean = np.where(finite_mask, psd, 0.0)
+    total_power = np.trapz(psd_clean, freqs, axis=2)  # (epochs, channels)
+    valid_bins = np.sum(finite_mask, axis=2)
+    total_power = np.where(valid_bins >= 2, total_power, np.nan)
     epsilon = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
     
     for ep_idx in range(n_epochs):
@@ -497,6 +898,14 @@ def _extract_spectral_from_precomputed(
             freq_mask = (freqs >= fmin) & (freqs <= fmax)
             
             if not np.any(freq_mask):
+                if band not in missing_band_warned and precomputed.logger:
+                    precomputed.logger.warning(
+                        "Spectral band '%s' is outside PSD frequency grid [%.2f, %.2f]; skipping.",
+                        band,
+                        float(freqs.min()),
+                        float(freqs.max()),
+                    )
+                    missing_band_warned.add(band)
                 continue
             
             band_freqs = freqs[freq_mask]
@@ -623,11 +1032,11 @@ def _extract_spectral_from_precomputed(
                     num = band_powers_per_ch[ch_name][num_band]
                     denom = band_powers_per_ch[ch_name][denom_band]
                     if denom > epsilon:
-                        record[f"ratio_{num_band}_{denom_band}_{ch_name}"] = float(num / denom)
-                        record[f"logratio_{num_band}_{denom_band}_{ch_name}"] = float(np.log10((num + epsilon) / (denom + epsilon)))
+                        record[f"spec_ratio_{num_band}_{denom_band}_{ch_name}"] = float(num / denom)
+                        record[f"spec_logratio_{num_band}_{denom_band}_{ch_name}"] = float(np.log10((num + epsilon) / (denom + epsilon)))
                     else:
-                        record[f"ratio_{num_band}_{denom_band}_{ch_name}"] = np.nan
-                        record[f"logratio_{num_band}_{denom_band}_{ch_name}"] = np.nan
+                        record[f"spec_ratio_{num_band}_{denom_band}_{ch_name}"] = np.nan
+                        record[f"spec_logratio_{num_band}_{denom_band}_{ch_name}"] = np.nan
         
         # === IAF (Individual Alpha Frequency) with additional metrics ===
         alpha_range = freq_bands.get("alpha", (8.0, 13.0))
@@ -672,8 +1081,7 @@ def _extract_spectral_from_precomputed(
         
         records.append(record)
     
-    columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return _build_records_to_df(records)
 
 
 def _extract_gfp_from_precomputed(
@@ -681,18 +1089,19 @@ def _extract_gfp_from_precomputed(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
-    Extract comprehensive GFP (Global Field Power) features.
-    
-    GFP measures the spatial standard deviation across channels at each time point,
-    reflecting overall brain activity level. Features include:
-    - Basic statistics (mean, std, min, max, range)
-    - Temporal dynamics (slope, peak count, peak latency)
-    - Percentiles for robust statistics
-    - Baseline-normalized metrics
-    - Per-window features for temporal resolution
+    Extract GFP (Global Field Power) features: statistics, temporal dynamics,
+    percentiles, baseline-normalized metrics, per-window features.
     """
-    if precomputed.gfp is None or precomputed.windows is None:
-        return pd.DataFrame(), []
+    if precomputed.gfp is None:
+        return _EMPTY_RESULT
+    
+    err = _validate_precomputed_for_extraction(
+        precomputed, require_bands=False, context="GFP"
+    )
+    if err:
+        if precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT
     
     from scipy.signal import find_peaks
     
@@ -700,7 +1109,7 @@ def _extract_gfp_from_precomputed(
     n_epochs = precomputed.gfp.shape[0]
     times = precomputed.times
     active_times = times[precomputed.windows.active_mask]
-    epsilon = 1e-12
+    epsilon = EPSILON_STD
     
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
@@ -822,166 +1231,316 @@ def _extract_gfp_from_precomputed(
         
         records.append(record)
     
-    columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return _build_records_to_df(records)
 
 
 def _extract_connectivity_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """
-    Extract comprehensive connectivity features using precomputed analytic signal.
-    
-    Features include:
-    - wPLI (weighted Phase Lag Index): robust to volume conduction
-    - PLV (Phase Locking Value): overall phase synchronization
-    - AEC (Amplitude Envelope Correlation): amplitude-based connectivity
-    - Graph metrics: mean degree, clustering coefficient, network efficiency
-    - Statistics: mean, std, max, percentiles across all pairs
-    - Per-window connectivity for temporal dynamics
+    Extract connectivity features: wPLI, PLV, AEC, graph metrics (degree, density),
+    statistics across channel pairs, per-window connectivity.
     """
-    if not precomputed.band_data or precomputed.windows is None:
-        return pd.DataFrame(), []
+    err = _validate_precomputed_for_extraction(
+        precomputed, require_baseline=False, min_epochs=MIN_EPOCHS_FOR_PLV, context="Connectivity"
+    )
+    if err:
+        if precomputed and precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT_WITH_QC
     
-    records: List[Dict[str, float]] = []
-    n_epochs = precomputed.data.shape[0]
+    # Additional connectivity-specific checks
+    active_samples = int(np.sum(precomputed.windows.active_mask))
+    if active_samples < MIN_EDGE_SAMPLES:
+        if precomputed.logger:
+            precomputed.logger.warning(
+                "Connectivity extraction skipped: only %d samples in active window (min=%d). "
+                "Insufficient samples for stable phase/envelope correlation.",
+                active_samples,
+                MIN_EDGE_SAMPLES,
+            )
+        return pd.DataFrame(), [], {"skipped_reason": "insufficient_samples", "active_samples": active_samples}
+    
     n_channels = len(precomputed.ch_names)
-    triu_idx = np.triu_indices(n_channels, k=1)
-    n_pairs = len(triu_idx[0])
-    epsilon = 1e-12
+    if n_channels < MIN_CHANNELS_FOR_CONNECTIVITY:
+        if precomputed.logger:
+            precomputed.logger.warning(
+                "Connectivity features skipped: need at least %d channels, found %d.",
+                MIN_CHANNELS_FOR_CONNECTIVITY,
+                n_channels,
+            )
+        return pd.DataFrame(), [], {}
     
-    for ep_idx in range(n_epochs):
+    n_epochs = precomputed.data.shape[0]
+    epsilon = 1e-12
+    n_jobs_connectivity = int((precomputed.config or {}).get("feature_engineering.parallel.n_jobs_connectivity", 1))
+
+    def _compute_connectivity_for_epoch(ep_idx: int) -> Tuple[Dict[str, float], Dict[str, Dict[str, List[float]]]]:
+        """Compute connectivity metrics for a single epoch."""
         record: Dict[str, float] = {}
-        
+        band_qc_epoch: Dict[str, Dict[str, List[float]]] = {}
+
         for band in bands:
             if band not in precomputed.band_data:
                 continue
-            
+
             analytic = precomputed.band_data[band].analytic[ep_idx]  # (channels, times)
-            analytic_active = analytic[:, precomputed.windows.active_mask]
             envelope = precomputed.band_data[band].envelope[ep_idx]
-            envelope_active = envelope[:, precomputed.windows.active_mask]
-            phases = precomputed.band_data[band].phase[ep_idx, :, precomputed.windows.active_mask]
-            
-            # === wPLI computation ===
+            phases_full = precomputed.band_data[band].phase[ep_idx]  # (channels, times)
+
+            active_mask = precomputed.windows.active_mask
+            analytic_active_full = analytic[:, active_mask]
+            envelope_active_full = envelope[:, active_mask]
+            phases_active_full = phases_full[:, active_mask]
+
+            # Per-channel validity to avoid penalizing all channels for a single bad sensor
+            channel_valid = (
+                np.isfinite(analytic_active_full)
+                & np.isfinite(envelope_active_full)
+                & np.isfinite(phases_active_full)
+            )
+            channel_valid_fraction = np.mean(channel_valid, axis=1)
+            keep_channels = channel_valid_fraction >= MIN_VALID_FRACTION
+            if np.sum(keep_channels) < MIN_CHANNELS_FOR_CONNECTIVITY:
+                if precomputed.logger:
+                    precomputed.logger.warning(
+                        "Connectivity: insufficient valid channels for band '%s' (kept %d/%d) in epoch %d; skipping.",
+                        band,
+                        int(np.sum(keep_channels)),
+                        n_channels,
+                        ep_idx,
+                    )
+                continue
+
+            analytic_active = analytic_active_full[keep_channels]
+            envelope_active = envelope_active_full[keep_channels]
+            phases_active = phases_active_full[keep_channels]
+            kept_ch_names = [name for idx, name in enumerate(precomputed.ch_names) if keep_channels[idx]]
+
+            channel_valid = channel_valid[keep_channels]
+            valid_pairs = channel_valid[:, None, :] & channel_valid[None, :, :]
+            pair_counts = np.sum(valid_pairs, axis=2)
+
+            record[f"conn_{band}_n_pairs"] = int(len(kept_ch_names) * (len(kept_ch_names) - 1) / 2)
+            record[f"conn_{band}_median_pair_valid_samples"] = float(np.nanmedian(pair_counts))
+            record[f"conn_{band}_min_pair_valid_samples"] = float(np.nanmin(pair_counts))
+            band_qc_epoch.setdefault(band, {
+                "n_channels": [],
+                "median_pair_valid_samples": [],
+                "min_pair_valid_samples": [],
+                "median_pair_valid_fraction": [],
+            })
+            band_qc_epoch[band]["n_channels"].append(len(kept_ch_names))
+            n_time = float(analytic_active.shape[1])
+            pair_valid_fraction = np.where(n_time > 0, pair_counts / n_time, np.nan)
+            band_qc_epoch[band]["median_pair_valid_samples"].append(float(np.nanmedian(pair_counts)))
+            band_qc_epoch[band]["min_pair_valid_samples"].append(float(np.nanmin(pair_counts)))
+            band_qc_epoch[band]["median_pair_valid_fraction"].append(float(np.nanmedian(pair_valid_fraction)))
+
+            # === wPLI computation with per-pair masking ===
             cross = analytic_active[:, None, :] * np.conj(analytic_active[None, :, :])
-            imag_cross = np.imag(cross)
-            denom = np.mean(np.abs(imag_cross), axis=-1)
-            numer = np.abs(np.mean(imag_cross, axis=-1))
-            
+            cross_masked = np.where(valid_pairs, cross, np.nan)
+            imag_cross = np.imag(cross_masked)
+            denom = np.nanmean(np.abs(imag_cross), axis=-1)
+            numer = np.abs(np.nanmean(imag_cross, axis=-1))
+
             with np.errstate(divide="ignore", invalid="ignore"):
-                wpli = np.where(denom > 0, numer / denom, 0.0)
+                wpli = np.where(denom > 0, numer / denom, np.nan)
             wpli = 0.5 * (wpli + wpli.T)
             np.fill_diagonal(wpli, 0.0)
-            wpli_values = wpli[triu_idx]
-            
+            triu_idx_epoch = np.triu_indices(len(kept_ch_names), k=1)
+            wpli_values = wpli[triu_idx_epoch]
+            wpli_valid = wpli_values[np.isfinite(wpli_values)]
+
             # wPLI statistics
-            record[f"wpli_{band}_mean"] = float(np.mean(wpli_values))
-            record[f"wpli_{band}_std"] = float(np.std(wpli_values))
-            record[f"wpli_{band}_max"] = float(np.max(wpli_values))
-            record[f"wpli_{band}_min"] = float(np.min(wpli_values))
-            record[f"wpli_{band}_median"] = float(np.median(wpli_values))
+            record[f"wpli_{band}_mean"] = float(np.nanmean(wpli_valid)) if wpli_valid.size else np.nan
+            record[f"wpli_{band}_std"] = float(np.nanstd(wpli_valid)) if wpli_valid.size else np.nan
+            record[f"wpli_{band}_max"] = float(np.nanmax(wpli_valid)) if wpli_valid.size else np.nan
+            record[f"wpli_{band}_min"] = float(np.nanmin(wpli_valid)) if wpli_valid.size else np.nan
+            record[f"wpli_{band}_median"] = float(np.nanmedian(wpli_valid)) if wpli_valid.size else np.nan
             for pct in [25, 75, 90]:
-                record[f"wpli_{band}_p{pct}"] = float(np.percentile(wpli_values, pct))
-            
-            # === PLV computation (vectorized) ===
-            phase_diff = phases[:, None, :] - phases[None, :, :]
-            plv_matrix = np.abs(np.mean(np.exp(1j * phase_diff), axis=-1))
-            plv_values = plv_matrix[triu_idx]
-            
+                record[f"wpli_{band}_p{pct}"] = float(np.nanpercentile(wpli_valid, pct)) if wpli_valid.size else np.nan
+
+            # === PLV computation (vectorized with masking) ===
+            phase_diff = phases_active[:, None, :] - phases_active[None, :, :]
+            phase_diff_masked = np.where(valid_pairs, np.exp(1j * phase_diff), np.nan)
+            plv_matrix = np.abs(np.nanmean(phase_diff_masked, axis=-1))
+            plv_values = plv_matrix[triu_idx_epoch]
+            plv_valid = plv_values[np.isfinite(plv_values)]
+
             # PLV statistics
-            record[f"plv_{band}_mean"] = float(np.mean(plv_values))
-            record[f"plv_{band}_std"] = float(np.std(plv_values))
-            record[f"plv_{band}_max"] = float(np.max(plv_values))
-            record[f"plv_{band}_median"] = float(np.median(plv_values))
+            record[f"plv_{band}_mean"] = float(np.nanmean(plv_valid)) if plv_valid.size else np.nan
+            record[f"plv_{band}_std"] = float(np.nanstd(plv_valid)) if plv_valid.size else np.nan
+            record[f"plv_{band}_max"] = float(np.nanmax(plv_valid)) if plv_valid.size else np.nan
+            record[f"plv_{band}_median"] = float(np.nanmedian(plv_valid)) if plv_valid.size else np.nan
             for pct in [25, 75, 90]:
-                record[f"plv_{band}_p{pct}"] = float(np.percentile(plv_values, pct))
-            
+                record[f"plv_{band}_p{pct}"] = float(np.nanpercentile(plv_valid, pct)) if plv_valid.size else np.nan
+
             # === AEC (Amplitude Envelope Correlation) ===
-            # Orthogonalized AEC to reduce volume conduction effects
-            env_centered = envelope_active - np.mean(envelope_active, axis=1, keepdims=True)
-            env_std = np.std(envelope_active, axis=1, keepdims=True)
-            env_std = np.where(env_std < epsilon, epsilon, env_std)
-            env_norm = env_centered / env_std
-            
-            # Compute correlation matrix
-            aec_matrix = np.corrcoef(env_norm)
+            n_kept = len(kept_ch_names)
+            aec_matrix = np.full((n_kept, n_kept), np.nan)
+
+            for i in range(n_kept):
+                for j in range(i + 1, n_kept):
+                    pair_mask = valid_pairs[i, j, :]
+                    n_valid = np.sum(pair_mask)
+
+                    if n_valid < 3:
+                        continue
+
+                    env_i = envelope_active[i, pair_mask]
+                    env_j = envelope_active[j, pair_mask]
+
+                    env_i_centered = env_i - np.mean(env_i)
+                    env_j_centered = env_j - np.mean(env_j)
+                    std_i = np.std(env_i)
+                    std_j = np.std(env_j)
+
+                    if std_i < epsilon or std_j < epsilon:
+                        continue
+
+                    corr = np.mean(env_i_centered * env_j_centered) / (std_i * std_j)
+                    aec_matrix[i, j] = np.clip(corr, -1, 1)
+                    aec_matrix[j, i] = aec_matrix[i, j]
+
             np.fill_diagonal(aec_matrix, 0.0)
-            aec_values = aec_matrix[triu_idx]
-            aec_values = np.clip(aec_values, -1, 1)  # Ensure valid correlation range
-            
+            aec_values = aec_matrix[triu_idx_epoch]
+            aec_values = np.clip(aec_values, -1, 1)
+
             # AEC statistics
-            record[f"aec_{band}_mean"] = float(np.nanmean(aec_values))
-            record[f"aec_{band}_std"] = float(np.nanstd(aec_values))
-            record[f"aec_{band}_max"] = float(np.nanmax(aec_values))
-            record[f"aec_{band}_abs_mean"] = float(np.nanmean(np.abs(aec_values)))
-            
+            record[f"aec_{band}_mean"] = float(np.nanmean(aec_values)) if np.isfinite(aec_values).any() else np.nan
+            record[f"aec_{band}_std"] = float(np.nanstd(aec_values)) if np.isfinite(aec_values).any() else np.nan
+            record[f"aec_{band}_max"] = float(np.nanmax(aec_values)) if np.isfinite(aec_values).any() else np.nan
+            record[f"aec_{band}_abs_mean"] = float(np.nanmean(np.abs(aec_values))) if np.isfinite(aec_values).any() else np.nan
+
             # === Graph metrics ===
-            # Mean degree (average connectivity strength per node)
-            node_strength_wpli = np.sum(wpli, axis=1) / (n_channels - 1)
-            node_strength_plv = np.sum(plv_matrix, axis=1) / (n_channels - 1)
-            
-            record[f"graph_{band}_wpli_mean_degree"] = float(np.mean(node_strength_wpli))
-            record[f"graph_{band}_wpli_std_degree"] = float(np.std(node_strength_wpli))
-            record[f"graph_{band}_plv_mean_degree"] = float(np.mean(node_strength_plv))
-            
+            wpli_finite_counts = np.sum(np.isfinite(wpli), axis=1)
+            plv_finite_counts = np.sum(np.isfinite(plv_matrix), axis=1)
+            node_strength_wpli = np.where(
+                wpli_finite_counts > 0,
+                np.nansum(wpli, axis=1) / wpli_finite_counts,
+                np.nan,
+            )
+            node_strength_plv = np.where(
+                plv_finite_counts > 0,
+                np.nansum(plv_matrix, axis=1) / plv_finite_counts,
+                np.nan,
+            )
+
+            record[f"graph_{band}_wpli_mean_degree"] = float(np.nanmean(node_strength_wpli))
+            record[f"graph_{band}_wpli_std_degree"] = float(np.nanstd(node_strength_wpli))
+            record[f"graph_{band}_plv_mean_degree"] = float(np.nanmean(node_strength_plv))
+
             # Network density (proportion of strong connections)
             threshold = 0.3  # Common threshold for significant connectivity
-            record[f"graph_{band}_wpli_density"] = float(np.mean(wpli_values > threshold))
-            record[f"graph_{band}_plv_density"] = float(np.mean(plv_values > threshold))
-            
+            record[f"graph_{band}_wpli_density"] = float(np.nanmean(wpli_valid > threshold)) if wpli_valid.size else np.nan
+            record[f"graph_{band}_plv_density"] = float(np.nanmean(plv_valid > threshold)) if plv_valid.size else np.nan
+
             # === Per-window connectivity (coarse bins) ===
-            def _compute_window_conn(win_mask):
-                """Helper to compute wPLI and PLV for a time window."""
-                phases_win = precomputed.band_data[band].phase[ep_idx, :, win_mask]
+            def _active_window_mask(win_mask: np.ndarray) -> Optional[np.ndarray]:
+                """Mask window to valid, active samples only."""
+                win_active = win_mask[active_mask]
+                if win_active.shape[0] != valid_pairs.shape[2]:
+                    return None
+                return win_active
+
+            def _compute_window_conn(win_mask_active: np.ndarray):
+                """Helper to compute wPLI and PLV for a time window using cleaned data."""
+                if win_mask_active is None or not np.any(win_mask_active):
+                    return np.nan, np.nan
+
+                valid_pairs_win = valid_pairs[:, :, win_mask_active]
+                if not np.any(valid_pairs_win):
+                    return np.nan, np.nan
+
+                phases_win = phases_active[:, win_mask_active]
                 phase_diff_win = phases_win[:, None, :] - phases_win[None, :, :]
-                plv_win = np.abs(np.mean(np.exp(1j * phase_diff_win), axis=-1))
-                plv_win_values = plv_win[triu_idx]
-                
-                analytic_win = analytic[:, win_mask]
+                phase_diff_win_masked = np.where(valid_pairs_win, np.exp(1j * phase_diff_win), np.nan)
+                plv_win = np.abs(np.nanmean(phase_diff_win_masked, axis=-1))
+                plv_win_values = plv_win[triu_idx_epoch]
+
+                analytic_win = analytic_active[:, win_mask_active]
                 cross_win = analytic_win[:, None, :] * np.conj(analytic_win[None, :, :])
-                imag_cross_win = np.imag(cross_win)
-                denom_win = np.mean(np.abs(imag_cross_win), axis=-1)
-                numer_win = np.abs(np.mean(imag_cross_win, axis=-1))
+                cross_win_masked = np.where(valid_pairs_win, cross_win, np.nan)
+                imag_cross_win = np.imag(cross_win_masked)
+                denom_win = np.nanmean(np.abs(imag_cross_win), axis=-1)
+                numer_win = np.abs(np.nanmean(imag_cross_win, axis=-1))
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    wpli_win = np.where(denom_win > 0, numer_win / denom_win, 0.0)
+                    wpli_win = np.where(denom_win > 0, numer_win / denom_win, np.nan)
                 wpli_win = 0.5 * (wpli_win + wpli_win.T)
                 np.fill_diagonal(wpli_win, 0.0)
-                wpli_win_values = wpli_win[triu_idx]
-                return np.mean(plv_win_values), np.mean(wpli_win_values)
-            
+                wpli_win_values = wpli_win[triu_idx_epoch]
+                return np.nanmean(plv_win_values), np.nanmean(wpli_win_values)
+
             for win_mask, win_label in zip(
                 precomputed.windows.coarse_masks, precomputed.windows.coarse_labels
             ):
-                if np.any(win_mask):
-                    plv_mean, wpli_mean = _compute_window_conn(win_mask)
+                win_mask_active = _active_window_mask(win_mask)
+                if win_mask_active is not None and np.any(win_mask_active):
+                    plv_mean, wpli_mean = _compute_window_conn(win_mask_active)
                     record[f"conn_plv_{band}_{win_label}_mean"] = float(plv_mean)
                     record[f"conn_wpli_{band}_{win_label}_mean"] = float(wpli_mean)
-            
+
             # === Per-window connectivity (fine bins for HRF) ===
             for win_mask, win_label in zip(
                 precomputed.windows.fine_masks, precomputed.windows.fine_labels
             ):
-                if np.any(win_mask):
-                    plv_mean, wpli_mean = _compute_window_conn(win_mask)
+                win_mask_active = _active_window_mask(win_mask)
+                if win_mask_active is not None and np.any(win_mask_active):
+                    plv_mean, wpli_mean = _compute_window_conn(win_mask_active)
                     record[f"conn_plv_{band}_{win_label}_mean"] = float(plv_mean)
                     record[f"conn_wpli_{band}_{win_label}_mean"] = float(wpli_mean)
-            
+
             # === Temporal dynamics ===
             if len(precomputed.windows.coarse_masks) >= 2:
-                # Early-late connectivity difference
                 early_mask = precomputed.windows.coarse_masks[0]
                 late_mask = precomputed.windows.coarse_masks[-1]
                 if np.any(early_mask) and np.any(late_mask):
-                    _, wpli_early = _compute_window_conn(early_mask)
-                    _, wpli_late = _compute_window_conn(late_mask)
+                    early_active = _active_window_mask(early_mask)
+                    late_active = _active_window_mask(late_mask)
+                    _, wpli_early = _compute_window_conn(early_active if early_active is not None else np.array([]))
+                    _, wpli_late = _compute_window_conn(late_active if late_active is not None else np.array([]))
                     record[f"conn_wpli_{band}_early_late_diff"] = float(wpli_late - wpli_early)
-        
-        records.append(record)
+
+        return record, band_qc_epoch
+
+    try:
+        if n_jobs_connectivity > 1:
+            from joblib import Parallel, delayed
+            results = Parallel(n_jobs=n_jobs_connectivity, prefer="processes")(
+                delayed(_compute_connectivity_for_epoch)(ep_idx) for ep_idx in range(n_epochs)
+            )
+        else:
+            results = [_compute_connectivity_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
+    except Exception as exc:  # pragma: no cover - defensive
+        if precomputed.logger:
+            precomputed.logger.warning(
+                "Parallel connectivity extraction failed (%s); falling back to sequential.", exc
+            )
+        results = [_compute_connectivity_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
+
+    records: List[Dict[str, float]] = [rec for rec, _ in results]
+    band_qc: Dict[str, Dict[str, List[float]]] = {}
+    for _, qc_epoch in results:
+        for band, stats in qc_epoch.items():
+            if band not in band_qc:
+                band_qc[band] = {k: [] for k in stats.keys()}
+            for key, vals in stats.items():
+                band_qc[band][key].extend(vals)
     
     columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    qc_payload: Dict[str, Any] = {}
+    for band, stats in band_qc.items():
+        qc_payload[band] = {
+            "median_channels_used": float(np.nanmedian(stats["n_channels"])) if stats["n_channels"] else np.nan,
+            "min_channels_used": float(np.nanmin(stats["n_channels"])) if stats["n_channels"] else np.nan,
+            "median_pair_valid_samples": float(np.nanmedian(stats["median_pair_valid_samples"])) if stats["median_pair_valid_samples"] else np.nan,
+            "min_pair_valid_samples": float(np.nanmin(stats["min_pair_valid_samples"])) if stats["min_pair_valid_samples"] else np.nan,
+            "median_pair_valid_fraction": float(np.nanmedian(stats["median_pair_valid_fraction"])) if stats["median_pair_valid_fraction"] else np.nan,
+        }
+
+    return pd.DataFrame(records), columns, qc_payload
 
 
 def _extract_roi_from_precomputed(
@@ -1001,7 +1560,7 @@ def _extract_roi_from_precomputed(
     config = precomputed.config
     roi_definitions = config.get("rois", {})
     if not roi_definitions:
-        roi_definitions = config.get("time_frequency_analysis", {}).get("rois", {})
+        roi_definitions = config.get("time_frequency_analysis.rois", {})
     
     if not roi_definitions:
         return pd.DataFrame(), []
@@ -1074,8 +1633,7 @@ def _extract_roi_from_precomputed(
         
         records.append(record)
     
-    columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return _build_records_to_df(records)
 
 
 def _extract_temporal_from_precomputed(
@@ -1083,36 +1641,31 @@ def _extract_temporal_from_precomputed(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
-    Extract comprehensive time-domain features from precomputed data.
+    Extract time-domain features from precomputed band-filtered data.
     
-    Features are computed per frequency band using precomputed band-filtered data.
-    
-    Features include:
-    - Statistical moments (var, std, skew, kurtosis) per band
-    - Amplitude features (RMS, peak-to-peak, MAD) per band
-    - Waveform features (zero-crossings, line length, nonlinear energy) per band
-    - Per-window temporal features per band
+    Features: var, std, skew, kurtosis, RMS, peak-to-peak, MAD,
+    zero-crossings, line length, nonlinear energy per band/channel.
     """
-    if precomputed.windows is None or not precomputed.band_data:
-        return pd.DataFrame(), []
+    err = _validate_precomputed_for_extraction(
+        precomputed, require_baseline=False, context="Temporal"
+    )
+    if err:
+        if precomputed and precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT
     
     from scipy import stats as scipy_stats
     
-    records: List[Dict[str, float]] = []
-    n_epochs = precomputed.data.shape[0]
-    sfreq = precomputed.sfreq
-    
-    for ep_idx in range(n_epochs):
+    def _compute_temporal_for_epoch(ep_idx: int) -> Dict[str, float]:
+        """Compute temporal features for a single epoch."""
         record: Dict[str, float] = {}
         
         for band in bands:
             if band not in precomputed.band_data:
                 continue
             
-            # Use precomputed band-filtered data
             band_filtered = precomputed.band_data[band].filtered[ep_idx]  # (channels, times)
             
-            # Collect for global stats per band
             all_var = []
             all_rms = []
             all_skew = []
@@ -1195,17 +1748,41 @@ def _extract_temporal_from_precomputed(
                         record[f"temp_var_{band}_{ch_name}_{win_label}"] = float(np.var(ch_win))
             
             # === Global statistics per band ===
-            record[f"temp_var_{band}_global_full_mean"] = float(np.mean(all_var))
-            record[f"temp_var_{band}_global_full_std"] = float(np.std(all_var))
-            record[f"temp_rms_{band}_global_full_mean"] = float(np.mean(all_rms))
-            record[f"temp_rms_{band}_global_full_std"] = float(np.std(all_rms))
-            record[f"temp_skew_{band}_global_full_mean"] = float(np.mean(all_skew))
-            record[f"temp_kurt_{band}_global_full_mean"] = float(np.mean(all_kurt))
+            valid_var = [v for v in all_var if np.isfinite(v)]
+            valid_rms = [v for v in all_rms if np.isfinite(v)]
+            valid_skew = [v for v in all_skew if np.isfinite(v)]
+            valid_kurt = [v for v in all_kurt if np.isfinite(v)]
+
+            record[f"temp_var_{band}_global_full_mean"] = float(np.mean(valid_var)) if valid_var else np.nan
+            record[f"temp_var_{band}_global_full_std"] = float(np.std(valid_var)) if len(valid_var) > 1 else np.nan
+            record[f"temp_rms_{band}_global_full_mean"] = float(np.mean(valid_rms)) if valid_rms else np.nan
+            record[f"temp_rms_{band}_global_full_std"] = float(np.std(valid_rms)) if len(valid_rms) > 1 else np.nan
+            record[f"temp_skew_{band}_global_full_mean"] = float(np.mean(valid_skew)) if valid_skew else np.nan
+            record[f"temp_kurt_{band}_global_full_mean"] = float(np.mean(valid_kurt)) if valid_kurt else np.nan
         
-        records.append(record)
+        return record
     
-    columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    n_epochs = precomputed.data.shape[0]
+    sfreq = precomputed.sfreq
+    config = precomputed.config or {}
+    n_jobs_temporal = int(config.get("feature_engineering.parallel.n_jobs_temporal", 1))
+    
+    if n_jobs_temporal > 1:
+        try:
+            from joblib import Parallel, delayed
+            if precomputed.logger:
+                precomputed.logger.debug(f"Parallel temporal extraction: {n_epochs} epochs with {n_jobs_temporal} workers")
+            records = Parallel(n_jobs=n_jobs_temporal, prefer="processes")(
+                delayed(_compute_temporal_for_epoch)(ep_idx) for ep_idx in range(n_epochs)
+            )
+        except Exception as exc:
+            if precomputed.logger:
+                precomputed.logger.warning(f"Parallel temporal extraction failed ({exc}); falling back to sequential.")
+            records = [_compute_temporal_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
+    else:
+        records = [_compute_temporal_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
+    
+    return _build_records_to_df(records)
 
 
 def _extract_complexity_from_data(
@@ -1213,37 +1790,32 @@ def _extract_complexity_from_data(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
-    Extract comprehensive complexity features per frequency band.
-    
-    Features are computed per frequency band using precomputed band-filtered data.
-    
-    Features include:
-    - Permutation entropy per band
-    - Hjorth parameters (activity, mobility, complexity) per band
-    - Lempel-Ziv complexity per band
-    - Per-window complexity for temporal dynamics per band
+    Extract complexity features: permutation entropy, Hjorth parameters,
+    Lempel-Ziv complexity per band/channel.
     """
-    if precomputed.windows is None or not precomputed.band_data:
-        return pd.DataFrame(), []
+    err = _validate_precomputed_for_extraction(
+        precomputed, require_baseline=False, context="Complexity"
+    )
+    if err:
+        if precomputed and precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT
     
-    # Import from complexity module to avoid code duplication
+    # Import from complexity module
     from eeg_pipeline.analysis.features.complexity import (
         _permutation_entropy,
         _hjorth_parameters,
         _lempel_ziv_complexity,
     )
     
-    records: List[Dict[str, float]] = []
-    n_epochs = precomputed.data.shape[0]
-    
-    for ep_idx in range(n_epochs):
+    def _compute_complexity_for_epoch(ep_idx: int) -> Dict[str, float]:
+        """Compute complexity features for a single epoch."""
         record: Dict[str, float] = {}
         
         for band in bands:
             if band not in precomputed.band_data:
                 continue
             
-            # Use precomputed band-filtered data
             band_filtered = precomputed.band_data[band].filtered[ep_idx]  # (channels, times)
             
             pe_vals = []
@@ -1313,7 +1885,26 @@ def _extract_complexity_from_data(
             record[f"comp_lzc_{band}_global_full_mean"] = float(np.mean(lz_vals)) if lz_vals else np.nan
             record[f"comp_lzc_{band}_global_full_std"] = float(np.std(lz_vals)) if len(lz_vals) > 1 else np.nan
         
-        records.append(record)
+        return record
+    
+    n_epochs = precomputed.data.shape[0]
+    config = precomputed.config or {}
+    n_jobs_complexity = int(config.get("feature_engineering.parallel.n_jobs_complexity", 1))
+    
+    if n_jobs_complexity > 1:
+        try:
+            from joblib import Parallel, delayed
+            if precomputed.logger:
+                precomputed.logger.debug(f"Parallel complexity extraction: {n_epochs} epochs with {n_jobs_complexity} workers")
+            records = Parallel(n_jobs=n_jobs_complexity, prefer="processes")(
+                delayed(_compute_complexity_for_epoch)(ep_idx) for ep_idx in range(n_epochs)
+            )
+        except Exception as exc:
+            if precomputed.logger:
+                precomputed.logger.warning(f"Parallel complexity extraction failed ({exc}); falling back to sequential.")
+            records = [_compute_complexity_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
+    else:
+        records = [_compute_complexity_for_epoch(ep_idx) for ep_idx in range(n_epochs)]
     
     columns = list(records[0].keys()) if records else []
     return pd.DataFrame(records), columns
@@ -1321,59 +1912,36 @@ def _extract_complexity_from_data(
 
 def _extract_aperiodic_from_precomputed(
     precomputed: PrecomputedData,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """Extract aperiodic (1/f) features from precomputed PSD."""
-    if precomputed.psd_data is None or precomputed.windows is None:
-        return pd.DataFrame(), []
+    epochs: "mne.Epochs",
+    bands: List[str],
+    events_df: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    """
+    Extract aperiodic (1/f) features using the robust fitter with peak rejection and QC.
+    """
+    if precomputed.windows is None or epochs is None:
+        if precomputed.logger:
+            precomputed.logger.warning("Aperiodic extraction skipped: missing windows or epochs.")
+        return pd.DataFrame(), [], {}
     
-    config = precomputed.config
-    freqs = precomputed.psd_data.freqs
-    psd = precomputed.psd_data.psd  # (epochs, channels, freqs)
+    cfg = precomputed.config or {}
+    tf_cfg = cfg.get("time_frequency_analysis", {})
+    try:
+        baseline_window = tuple(
+            float(x) for x in tf_cfg.get("baseline_window", (-5.0, -0.01))[:2]
+        )
+    except Exception:
+        baseline_window = (-5.0, -0.01)
     
-    # Fit range
-    fmin = float(config.get("feature_engineering.constants.aperiodic_fmin", 2.0))
-    fmax = float(config.get("feature_engineering.constants.aperiodic_fmax", 40.0))
-    freq_mask = (freqs >= fmin) & (freqs <= fmax)
-    
-    if not np.any(freq_mask):
-        return pd.DataFrame(), []
-    
-    fit_freqs = freqs[freq_mask]
-    log_freqs = np.log10(fit_freqs)
-    epsilon = float(config.get("feature_engineering.constants.epsilon_psd", 1e-20))
-    
-    records: List[Dict[str, float]] = []
-    n_epochs = psd.shape[0]
-    
-    for ep_idx in range(n_epochs):
-        record: Dict[str, float] = {}
-        
-        slopes = []
-        offsets = []
-        
-        for ch_idx, ch_name in enumerate(precomputed.ch_names):
-            fit_psd = psd[ep_idx, ch_idx, freq_mask]
-            log_psd = np.log10(np.maximum(fit_psd, epsilon))
-            
-            # Simple linear fit (log-log space = 1/f slope)
-            try:
-                slope, offset = np.polyfit(log_freqs, log_psd, 1)
-                record[f"aperiodic_slope_{ch_name}"] = float(slope)
-                record[f"aperiodic_offset_{ch_name}"] = float(offset)
-                slopes.append(slope)
-                offsets.append(offset)
-            except (np.linalg.LinAlgError, ValueError, RuntimeError):
-                record[f"aperiodic_slope_{ch_name}"] = np.nan
-                record[f"aperiodic_offset_{ch_name}"] = np.nan
-        
-        # Global summaries
-        record["aperiodic_slope_global"] = float(np.mean(slopes)) if slopes else np.nan
-        record["aperiodic_offset_global"] = float(np.mean(offsets)) if offsets else np.nan
-        
-        records.append(record)
-    
-    columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    df, cols, qc_payload = extract_aperiodic_features(
+        epochs=epochs,
+        baseline_window=baseline_window,
+        bands=bands,
+        config=cfg,
+        logger=precomputed.logger,
+        events_df=events_df,
+    )
+    return df, cols, qc_payload
 
 
 def _extract_ratios_from_precomputed(
@@ -1381,11 +1949,15 @@ def _extract_ratios_from_precomputed(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract band power ratios from precomputed data."""
-    if not precomputed.band_data or precomputed.windows is None:
-        return pd.DataFrame(), []
+    err = _validate_precomputed_for_extraction(
+        precomputed, require_baseline=False, context="Ratios"
+    )
+    if err:
+        if precomputed and precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT
     
-    config = precomputed.config
-    epsilon = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
+    epsilon = EPSILON_STD
     
     # Define ratio pairs
     ratio_pairs = [
@@ -1407,7 +1979,12 @@ def _extract_ratios_from_precomputed(
         for band in bands:
             if band in precomputed.band_data:
                 power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
-                band_powers[band] = np.mean(power[:, precomputed.windows.active_mask], axis=1)
+                active_mask = precomputed.windows.active_mask
+                means = []
+                for ch_idx in range(len(precomputed.ch_names)):
+                    mean_val, frac, _, _ = _nanmean_with_fraction(power[ch_idx], active_mask)
+                    means.append(mean_val if frac >= MIN_VALID_FRACTION else np.nan)
+                band_powers[band] = np.array(means)
         
         # Compute ratios
         for num_band, denom_band in ratio_pairs:
@@ -1425,8 +2002,8 @@ def _extract_ratios_from_precomputed(
                 record[f"ratio_{num_band}_{denom_band}_{ch_name}"] = float(ratio)
             
             # Global ratio
-            num_mean = np.mean(num_power)
-            denom_mean = np.mean(denom_power)
+            num_mean = float(np.nanmean(num_power))
+            denom_mean = float(np.nanmean(denom_power))
             if denom_mean > epsilon:
                 record[f"ratio_{num_band}_{denom_band}_global"] = float(num_mean / denom_mean)
             else:
@@ -1434,8 +2011,85 @@ def _extract_ratios_from_precomputed(
         
         records.append(record)
     
+    return _build_records_to_df(records)
+
+
+def _extract_effectsizes_from_precomputed(
+    precomputed: PrecomputedData,
+    bands: List[str],
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    """Compute baseline-vs-active effect sizes (Cohen's d) and log-ratios per band/channel."""
+    err = _validate_precomputed_for_extraction(precomputed, context="EffectSizes")
+    if err:
+        if precomputed and precomputed.logger:
+            precomputed.logger.debug(err)
+        return _EMPTY_RESULT_WITH_QC
+
+    records: List[Dict[str, float]] = []
+    qc_payload: Dict[str, Dict[str, Any]] = {}
+    epsilon = EPSILON_STD
+    n_epochs = precomputed.data.shape[0]
+
+    for ep_idx in range(n_epochs):
+        record: Dict[str, float] = {}
+        for band in bands:
+            if band not in precomputed.band_data:
+                continue
+            power = precomputed.band_data[band].power[ep_idx]  # (channels, times)
+            baseline_std_zero = 0
+            for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                baseline_vals = power[ch_idx, precomputed.windows.baseline_mask]
+                active_vals = power[ch_idx, precomputed.windows.active_mask]
+                logratio_name = make_power_name(band, ch_name, "full", "logratioES")
+                cohend_name = make_power_name(band, ch_name, "full", "cohend")
+                if baseline_vals.size == 0 or active_vals.size == 0:
+                    record[logratio_name] = np.nan
+                    record[cohend_name] = np.nan
+                    continue
+
+                baseline_mean = float(np.nanmean(baseline_vals))
+                active_mean = float(np.nanmean(active_vals))
+                baseline_std = float(np.nanstd(baseline_vals, ddof=1)) if baseline_vals.size > 1 else 0.0
+                active_std = float(np.nanstd(active_vals, ddof=1)) if active_vals.size > 1 else 0.0
+                baseline_finite = int(np.sum(np.isfinite(baseline_vals)))
+                active_finite = int(np.sum(np.isfinite(active_vals)))
+                if baseline_finite < max(1, int(MIN_VALID_FRACTION * max(1, baseline_vals.size))) or active_finite < max(1, int(MIN_VALID_FRACTION * max(1, active_vals.size))):
+                    record[logratio_name] = np.nan
+                    record[cohend_name] = np.nan
+                    baseline_std_zero += 1
+                    continue
+                pooled_sd = np.sqrt(
+                    ((baseline_finite - 1) * baseline_std ** 2 + (active_finite - 1) * active_std ** 2)
+                    / max(baseline_finite + active_finite - 2, 1)
+                )
+                if pooled_sd < epsilon:
+                    baseline_std_zero += 1
+                    cohen_d = np.nan
+                else:
+                    cohen_d = (active_mean - baseline_mean) / pooled_sd
+
+                logratio = np.nan
+                if baseline_mean > epsilon:
+                    logratio = np.log10(max(active_mean, epsilon) / baseline_mean)
+
+                record[logratio_name] = float(logratio)
+                record[cohend_name] = float(cohen_d)
+
+            qc_payload.setdefault(band, {"baseline_zero_std_channels": []})
+            qc_payload[band]["baseline_zero_std_channels"].append(baseline_std_zero)
+
+        records.append(record)
+
+    qc_summary: Dict[str, Any] = {}
+    for band, stats in qc_payload.items():
+        zeros = stats["baseline_zero_std_channels"]
+        qc_summary[band] = {
+            "median_zero_std_channels": float(np.median(zeros)) if zeros else 0.0,
+            "max_zero_std_channels": int(np.max(zeros)) if zeros else 0,
+        }
+
     columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return pd.DataFrame(records), columns, qc_summary
 
 
 def _extract_asymmetry_from_precomputed(
@@ -1454,7 +2108,7 @@ def _extract_asymmetry_from_precomputed(
     # Get ROI definitions
     roi_definitions = config.get("rois", {})
     if not roi_definitions:
-        roi_definitions = config.get("time_frequency_analysis", {}).get("rois", {})
+        roi_definitions = config.get("time_frequency_analysis.rois", {})
     
     # Find left-right pairs - support both formats:
     # 1. Simple channel pairs: [["F3", "F4"], ["C3", "C4"], ...]
@@ -1588,6 +2242,9 @@ def _extract_itpc_from_precomputed(
     """
     if not precomputed.band_data or precomputed.windows is None:
         return pd.DataFrame(), []
+
+    if not _validate_window_masks(precomputed, precomputed.logger, require_baseline=False):
+        return pd.DataFrame(), []
     
     n_epochs = precomputed.data.shape[0]
     if n_epochs < 5:
@@ -1597,82 +2254,288 @@ def _extract_itpc_from_precomputed(
     times = precomputed.times
     active_times = times[windows.active_mask]
     
+    if not np.any(windows.active_mask):
+        return pd.DataFrame(), []
+
+    records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+
+    for band in bands:
+        if band not in precomputed.band_data:
+            continue
+
+        phase = precomputed.band_data[band].phase  # (epochs, channels, times)
+        if phase.shape[0] < 2:
+            continue
+
+        # Use unit vectors; mask non-finite values so they don't bias means
+        unit_vectors = np.exp(1j * phase)
+        unit_vectors = np.where(np.isfinite(unit_vectors), unit_vectors, np.nan)
+
+        def _compute_window_itpc(win_mask: np.ndarray):
+            if not np.any(win_mask):
+                return None
+            uv_win = unit_vectors[:, :, win_mask]  # (epochs, channels, times_win)
+            valid = np.isfinite(uv_win)
+            if not np.any(valid):
+                return None
+            sum_all = np.nansum(uv_win, axis=0)       # (channels, times_win)
+            count_all = np.sum(valid, axis=0)         # (channels, times_win)
+            per_epoch = []
+            for ep_idx in range(n_epochs):
+                sum_others = sum_all - np.where(valid[ep_idx], uv_win[ep_idx], 0.0)
+                count_others = count_all - valid[ep_idx]
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    mean_others = np.where(count_others > 0, sum_others / count_others, np.nan)
+                itpc = np.abs(mean_others)  # (channels, times_win)
+                itpc_ch = np.nanmean(itpc, axis=1)  # (channels,)
+                per_epoch.append((itpc, itpc_ch))
+            return per_epoch
+
+        # Full active window
+        active_itpc = _compute_window_itpc(windows.active_mask)
+        if active_itpc is None:
+            continue
+
+        for ep_idx, (itpc_mat, itpc_ch_mean) in enumerate(active_itpc):
+            rec = records[ep_idx]
+            for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                rec[f"phase_itpc_{band}_{ch_name}_full_mean"] = float(itpc_ch_mean[ch_idx])
+            rec[f"phase_itpc_{band}_global_full_mean"] = float(np.nanmean(itpc_ch_mean))
+
+            # Peak latency from per-epoch time course (mean over channels)
+            if itpc_mat.shape[1] > 0:
+                time_course = np.nanmean(itpc_mat, axis=0)
+                if np.any(np.isfinite(time_course)):
+                    peak_idx = int(np.nanargmax(time_course))
+                    rec[f"phase_itpc_{band}_peak_latency"] = float(active_times[peak_idx])
+                else:
+                    rec[f"phase_itpc_{band}_peak_latency"] = np.nan
+            else:
+                rec[f"phase_itpc_{band}_peak_latency"] = np.nan
+
+        # Coarse windows
+        coarse_vals: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+        for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
+            win_itpc = _compute_window_itpc(win_mask)
+            if win_itpc is None:
+                continue
+            for ep_idx, (_, itpc_ch_mean) in enumerate(win_itpc):
+                rec = records[ep_idx]
+                for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                    rec[f"phase_itpc_{band}_{ch_name}_{win_label}_mean"] = float(itpc_ch_mean[ch_idx])
+                coarse_vals[ep_idx][win_label] = float(np.nanmean(itpc_ch_mean))
+                rec[f"phase_itpc_{band}_global_{win_label}_mean"] = coarse_vals[ep_idx][win_label]
+
+        # Fine windows (global only)
+        for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
+            win_itpc = _compute_window_itpc(win_mask)
+            if win_itpc is None:
+                continue
+            for ep_idx, (_, itpc_ch_mean) in enumerate(win_itpc):
+                records[ep_idx][f"phase_itpc_{band}_global_{win_label}_mean"] = float(np.nanmean(itpc_ch_mean))
+
+        # Temporal dynamics: early-late difference per epoch
+        for ep_idx in range(n_epochs):
+            if "early" in coarse_vals[ep_idx] and "late" in coarse_vals[ep_idx]:
+                diff = coarse_vals[ep_idx]["late"] - coarse_vals[ep_idx]["early"]
+                records[ep_idx][f"phase_itpc_{band}_global_early_late_diff"] = float(diff)
+
+    if not records or all(len(r) == 0 for r in records):
+        return pd.DataFrame(), []
+
+    columns = sorted({k for r in records for k in r.keys()})
+    df = pd.DataFrame(records)
+    return df, columns
+
+
+def _extract_pac_from_precomputed(
+    precomputed: PrecomputedData,
+    bands: List[str],
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    """
+    Extract simple phase–amplitude coupling features (MVL-based) per channel.
+    """
+    if not precomputed.band_data or precomputed.windows is None:
+        return pd.DataFrame(), [], {}
+
+    cfg = precomputed.config or {}
+    pac_cfg = cfg.get("feature_engineering", {}).get("pac", {})
+    default_pairs = [("theta", "gamma"), ("alpha", "gamma")]
+    band_pairs = pac_cfg.get("pairs", default_pairs)
+
     records: List[Dict[str, float]] = []
-    
+    qc_payload: Dict[str, Dict[str, Any]] = {}
+    active_mask = precomputed.windows.active_mask
+    n_epochs = precomputed.data.shape[0]
+
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
-        
-        for band in bands:
-            if band not in precomputed.band_data:
+        for pair in band_pairs:
+            if len(pair) != 2:
                 continue
-            
-            phase = precomputed.band_data[band].phase  # (epochs, channels, times)
-            
-            # Leave-one-out mask
-            mask = np.ones(n_epochs, dtype=bool)
-            mask[ep_idx] = False
-            
-            if mask.sum() < 2:
+            phase_band, amp_band = pair
+            if phase_band not in precomputed.band_data or amp_band not in precomputed.band_data:
                 continue
-            
-            # Full active period ITPC
-            phase_active = phase[:, :, windows.active_mask]
-            other_phases = phase_active[mask]
-            unit_vectors = np.exp(1j * other_phases)
-            itpc_full = np.abs(np.mean(unit_vectors, axis=0))  # (channels, times)
-            itpc_ch_full = np.mean(itpc_full, axis=1)  # (channels,)
-            
+
+            phase_data = precomputed.band_data[phase_band].phase[ep_idx]  # (channels, times)
+            amp_env = precomputed.band_data[amp_band].envelope[ep_idx]
+
+            valid_samples_per_ch = []
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                record[f"phase_itpc_{band}_{ch_name}_full_mean"] = float(itpc_ch_full[ch_idx])
-            
-            record[f"phase_itpc_{band}_global_full_mean"] = float(np.mean(itpc_ch_full))
-            
-            # Coarse temporal bins
-            coarse_itpc = {}
-            for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
-                if np.any(win_mask):
-                    phase_win = phase[:, :, win_mask]
-                    other_phases_win = phase_win[mask]
-                    unit_vectors_win = np.exp(1j * other_phases_win)
-                    itpc_win = np.abs(np.mean(unit_vectors_win, axis=0))
-                    itpc_ch_win = np.mean(itpc_win, axis=1)
-                    
-                    for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                        record[f"phase_itpc_{band}_{ch_name}_{win_label}_mean"] = float(itpc_ch_win[ch_idx])
-                    
-                    coarse_itpc[win_label] = np.mean(itpc_ch_win)
-                    record[f"phase_itpc_{band}_global_{win_label}_mean"] = float(coarse_itpc[win_label])
-            
-            # Fine temporal bins
-            for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
-                if np.any(win_mask):
-                    phase_win = phase[:, :, win_mask]
-                    other_phases_win = phase_win[mask]
-                    unit_vectors_win = np.exp(1j * other_phases_win)
-                    itpc_win = np.abs(np.mean(unit_vectors_win, axis=0))
-                    itpc_ch_win = np.mean(itpc_win, axis=1)
-                    
-                    record[f"phase_itpc_{band}_global_{win_label}_mean"] = float(np.mean(itpc_ch_win))
-            
-            # Temporal dynamics
-            if "early" in coarse_itpc and "late" in coarse_itpc:
-                diff = coarse_itpc["late"] - coarse_itpc["early"]
-                record[f"phase_itpc_{band}_global_early_late_diff"] = float(diff)
-            
-            # Peak ITPC time (from full time course)
-            if len(active_times) > 0:
-                itpc_time_course = np.mean(itpc_full, axis=0)  # (times,)
-                peak_idx = np.argmax(itpc_time_course)
-                record[f"phase_itpc_{band}_peak_latency"] = float(active_times[peak_idx])
-        
+                phase_ch = phase_data[ch_idx, active_mask]
+                amp_ch = amp_env[ch_idx, active_mask]
+                valid_mask = np.isfinite(phase_ch) & np.isfinite(amp_ch)
+                valid_samples_per_ch.append(int(np.sum(valid_mask)))
+                if not np.any(valid_mask):
+                    record[f"pac_mvl_{phase_band}_{amp_band}_{ch_name}"] = np.nan
+                    continue
+                phase_valid = phase_ch[valid_mask]
+                amp_valid = amp_ch[valid_mask]
+                amp_norm = amp_valid / (np.mean(amp_valid) + 1e-12)
+                mvl = np.abs(np.mean(amp_norm * np.exp(1j * phase_valid)))
+                record[f"pac_mvl_{phase_band}_{amp_band}_{ch_name}"] = float(mvl)
+
+            qc_payload.setdefault(f"{phase_band}->{amp_band}", {"median_valid_samples": [], "min_valid_samples": []})
+            qc_payload[f"{phase_band}->{amp_band}"]["median_valid_samples"].append(float(np.median(valid_samples_per_ch)))
+            qc_payload[f"{phase_band}->{amp_band}"]["min_valid_samples"].append(float(np.min(valid_samples_per_ch)))
+
         records.append(record)
-    
+
+    qc_summary: Dict[str, Any] = {}
+    for pair_name, stats in qc_payload.items():
+        qc_summary[pair_name] = {
+            "median_valid_samples": float(np.nanmedian(stats["median_valid_samples"])) if stats["median_valid_samples"] else np.nan,
+            "min_valid_samples": float(np.nanmin(stats["min_valid_samples"])) if stats["min_valid_samples"] else np.nan,
+        }
+
     columns = list(records[0].keys()) if records else []
-    return pd.DataFrame(records), columns
+    return pd.DataFrame(records), columns, qc_summary
+
+
+def _extract_cfc_features(
+    precomputed: PrecomputedData,
+    bands: List[str],
+    epochs: "mne.Epochs" = None,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract cross-frequency coupling features (MI-PAC, PPC)."""
+    if epochs is None and precomputed is not None:
+        # Cannot run CFC without epochs object for filtering
+        return pd.DataFrame(), []
+    
+    from eeg_pipeline.analysis.features.cfc import (
+        extract_modulation_index_pac,
+        extract_phase_phase_coupling,
+    )
+    
+    cfg = precomputed.config if precomputed else {}
+    cfc_cfg = cfg.get("feature_engineering", {}).get("cross_frequency", {})
+    
+    phase_bands = cfc_cfg.get("phase_bands", ["theta", "alpha"])
+    amp_bands = cfc_cfg.get("amp_bands", ["gamma"])
+    ppc_pairs = cfc_cfg.get("phase_phase_pairs", [["theta", "alpha", 1, 2]])
+    
+    logger = precomputed.logger if precomputed else None
+    all_dfs = []
+    all_cols = []
+    
+    # MI-PAC
+    if phase_bands and amp_bands:
+        try:
+            mi_df, mi_cols = extract_modulation_index_pac(
+                epochs, phase_bands, amp_bands, cfg, logger
+            )
+            if not mi_df.empty:
+                all_dfs.append(mi_df)
+                all_cols.extend(mi_cols)
+        except Exception:
+            pass
+    
+    # Phase-phase coupling
+    if ppc_pairs:
+        try:
+            ppc_tuples = [(p[0], p[1], p[2], p[3]) for p in ppc_pairs if len(p) == 4]
+            ppc_df, ppc_cols = extract_phase_phase_coupling(
+                epochs, ppc_tuples, cfg, logger
+            )
+            if not ppc_df.empty:
+                all_dfs.append(ppc_df)
+                all_cols.extend(ppc_cols)
+        except Exception:
+            pass
+    
+    if not all_dfs:
+        return pd.DataFrame(), []
+    
+    combined = pd.concat(all_dfs, axis=1)
+    return combined, all_cols
+
+
+def _extract_microstates_features(
+    precomputed: PrecomputedData,
+    epochs: "mne.Epochs",
+    config: Any,
+    logger: Any,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Extract microstate features (coverage, duration, transitions, GEV).
+    
+    Microstates are quasi-stable topographic patterns that capture
+    global brain state dynamics. Features include:
+    - Coverage: fraction of time in each state
+    - Duration: mean duration of each state
+    - Occurrence: rate of state occurrences
+    - GEV: global explained variance per state
+    - Transitions: state transition probabilities
+    """
+    if epochs is None:
+        if logger:
+            logger.info("Microstates: skipped (no epochs provided)")
+        return pd.DataFrame(), []
+    
+    from eeg_pipeline.analysis.features.microstates import extract_microstate_features
+    
+    cfg = config if config else (precomputed.config if precomputed else {})
+    n_states = int(cfg.get("feature_engineering.microstates.n_states", 4))
+    
+    try:
+        ms_df, ms_cols, templates = extract_microstate_features(
+            epochs, n_states, cfg, logger
+        )
+        if ms_df.empty:
+            if logger:
+                logger.info("Microstates: returned empty DataFrame")
+        return ms_df, ms_cols
+    except Exception as exc:
+        if logger:
+            logger.warning(f"Microstates extraction failed: {exc}")
+        return pd.DataFrame(), []
+
+
+def _extract_quality_features(
+    precomputed: PrecomputedData,
+    epochs: "mne.Epochs" = None,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract trial quality metrics."""
+    if epochs is None:
+        return pd.DataFrame(), []
+    
+    from eeg_pipeline.analysis.features.quality import compute_trial_quality_metrics
+    
+    cfg = precomputed.config if precomputed else {}
+    logger = precomputed.logger if precomputed else None
+    
+    try:
+        quality_df = compute_trial_quality_metrics(epochs, cfg, logger)
+        if quality_df.empty:
+            return pd.DataFrame(), []
+        cols = [c for c in quality_df.columns if c != "epoch"]
+        return quality_df[cols], cols
+    except Exception:
+        return pd.DataFrame(), []
 
 
 def extract_precomputed_features(
-    epochs: mne.Epochs,
+    epochs_or_ctx: Union["mne.Epochs", FeatureExtractionContext, PrecomputedData],
     bands: List[str],
     config: Any,
     logger: Any,
@@ -1693,18 +2556,19 @@ def extract_precomputed_features(
     
     Parameters
     ----------
-    epochs : mne.Epochs
-        Input epochs
+    epochs_or_ctx : mne.Epochs | FeatureExtractionContext | PrecomputedData
+        Input epochs or a pre-built FeatureExtractionContext/PrecomputedData to reuse preprocessing
     bands : List[str]
         Frequency bands (e.g., ["delta", "theta", "alpha", "beta", "gamma"])
     config : Any
         Configuration object
     logger : Any
         Logger instance
-    feature_groups : Optional[List[str]]
-        Which feature groups to extract. Default: all.
-        Options: "erds", "spectral", "gfp", "connectivity", "roi", "temporal", 
-                 "complexity", "aperiodic", "ratios", "asymmetry", "itpc"
+        feature_groups : Optional[List[str]]
+            Which feature groups to extract. Default: all.
+            Options: "erds", "spectral", "gfp", "connectivity", "roi", "temporal", 
+                     "complexity", "aperiodic", "ratios", "asymmetry", "itpc",
+                     "effectsize", "pac"
     n_plateau_windows : int
         Number of temporal windows for windowed features
     events_df : Optional[pd.DataFrame]
@@ -1718,18 +2582,50 @@ def extract_precomputed_features(
         - result.get_combined_df() - all features with condition column
         - result.get_feature_group_df("erds") - specific feature group
     """
+    ctx: Optional[FeatureExtractionContext] = None
+    epochs: Optional["mne.Epochs"] = None
+    precomputed: Optional[PrecomputedData] = None
+
+    if isinstance(epochs_or_ctx, FeatureExtractionContext):
+        ctx = epochs_or_ctx
+        epochs = ctx.epochs
+        config = ctx.config or config
+        logger = ctx.logger or logger
+        if not ctx.ensure_precomputed():
+            logger.error("FeatureExtractionContext did not provide precomputed data; aborting extraction.")
+            return ExtractionResult()
+        precomputed = ctx.precomputed
+    elif isinstance(epochs_or_ctx, PrecomputedData):
+        precomputed = epochs_or_ctx
+    else:
+        epochs = epochs_or_ctx
+
     all_groups = [
         "power", "erds", "spectral", "gfp", "connectivity", "roi", 
-        "temporal", "complexity", "aperiodic", "ratios", "asymmetry", "itpc"
+        "temporal", "complexity", "aperiodic", "ratios", "asymmetry", "itpc",
+        "effectsize", "pac", "cfc", "microstates", "quality",
     ]
     if feature_groups is None:
         feature_groups = all_groups
+    else:
+        unsupported = set(feature_groups) - set(all_groups)
+        if unsupported:
+            logger.warning(
+                "The following feature groups are not supported in the precomputed pipeline and will be ignored as legacy: %s",
+                sorted(unsupported),
+            )
+            feature_groups = [g for g in feature_groups if g in all_groups]
     
     logger.info(f"Extracting feature groups: {feature_groups}")
     
     # === Get condition labels from events (if provided) ===
     condition: Optional[np.ndarray] = None
-    if events_df is not None and not events_df.empty:
+    n_epochs_total = (
+        len(epochs)
+        if epochs is not None
+        else (precomputed.data.shape[0] if precomputed is not None and precomputed.data.size > 0 else 0)
+    )
+    if events_df is not None and not events_df.empty and n_epochs_total > 0:
         from eeg_pipeline.utils.io.general import get_pain_column_from_config
         
         pain_col = get_pain_column_from_config(config, events_df)
@@ -1737,10 +2633,9 @@ def extract_precomputed_features(
             pain_values = pd.to_numeric(events_df[pain_col], errors="coerce")
             pain_mask = (pain_values > 0).values
             
-            n_epochs = len(epochs)
-            if len(pain_mask) != n_epochs:
+            if len(pain_mask) != n_epochs_total:
                 logger.warning(
-                    f"Events length ({len(pain_mask)}) doesn't match epochs ({n_epochs}); "
+                    f"Events length ({len(pain_mask)}) doesn't match epochs ({n_epochs_total}); "
                     "condition column will not be added"
                 )
             else:
@@ -1754,93 +2649,96 @@ def extract_precomputed_features(
     
     # Determine what needs to be precomputed
     needs_bands = any(g in feature_groups for g in [
-        "power", "erds", "connectivity", "roi", "gfp", "ratios", "asymmetry", "itpc"
+        "power", "erds", "connectivity", "roi", "gfp", "ratios", "asymmetry", "itpc", "effectsize", "pac"
     ])
     needs_psd = any(g in feature_groups for g in ["spectral", "aperiodic"])
     
     # Precompute all expensive intermediates ONCE
-    logger.info("Precomputing intermediates (filtering, PSD, GFP)...")
-    precomputed = precompute_data(
-        epochs, bands, config, logger,
-        compute_bands=needs_bands,
-        compute_psd_data=needs_psd,
-        n_plateau_windows=n_plateau_windows,
+    if precomputed is None:
+        if epochs is None:
+            raise ValueError("Either epochs or FeatureExtractionContext/PrecomputedData must be provided.")
+        logger.info("Precomputing intermediates (filtering, PSD, GFP)...")
+        precomputed = precompute_data(
+            epochs, bands, config, logger,
+            compute_bands=needs_bands,
+            compute_psd_data=needs_psd,
+            n_plateau_windows=n_plateau_windows,
+        )
+    result = ExtractionResult(
+        precomputed=precomputed,
+        condition=condition,
+        qc={"precomputed": precomputed.qc.as_dict() if precomputed is not None else {}},
     )
     
-    result = ExtractionResult(precomputed=precomputed, condition=condition)
+    # Extractor registry: (name, extractor_func, args_builder, has_qc)
+    _EXTRACTORS = [
+        ("power", _extract_power_from_precomputed, lambda: (precomputed, bands), True),
+        ("erds", _extract_erds_from_precomputed, lambda: (precomputed, bands), True),
+        ("spectral", _extract_spectral_from_precomputed, lambda: (precomputed, bands), False),
+        ("gfp", _extract_gfp_from_precomputed, lambda: (precomputed, bands), False),
+        ("connectivity", _extract_connectivity_from_precomputed, lambda: (precomputed, bands), True),
+        ("roi", _extract_roi_from_precomputed, lambda: (precomputed, bands), False),
+        ("temporal", _extract_temporal_from_precomputed, lambda: (precomputed, bands), False),
+        ("complexity", _extract_complexity_from_data, lambda: (precomputed, bands), False),
+        ("aperiodic", _extract_aperiodic_from_precomputed, lambda: (precomputed, epochs, bands, events_df), True),
+        ("ratios", _extract_ratios_from_precomputed, lambda: (precomputed, bands), False),
+        ("effectsize", _extract_effectsizes_from_precomputed, lambda: (precomputed, bands), True),
+        ("asymmetry", _extract_asymmetry_from_precomputed, lambda: (precomputed, bands), False),
+        ("itpc", _extract_itpc_from_precomputed, lambda: (precomputed, bands), False),
+        ("pac", _extract_pac_from_precomputed, lambda: (precomputed, bands), True),
+        ("cfc", _extract_cfc_features, lambda: (precomputed, bands, epochs), False),
+        ("microstates", _extract_microstates_features, lambda: (precomputed, epochs, config, logger), False),
+        ("quality", _extract_quality_features, lambda: (precomputed, epochs), False),
+    ]
     
-    # Extract each feature group
-    if "power" in feature_groups:
-        logger.info("Extracting time-resolved power features...")
-        df, cols = _extract_power_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["power"] = FeatureSet(df, cols, "power")
-    
-    if "erds" in feature_groups:
-        logger.info("Extracting ERD/ERS features...")
-        df, cols = _extract_erds_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["erds"] = FeatureSet(df, cols, "erds")
-    
-    if "spectral" in feature_groups:
-        logger.info("Extracting spectral features...")
-        df, cols = _extract_spectral_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["spectral"] = FeatureSet(df, cols, "spectral")
-    
-    if "gfp" in feature_groups:
-        logger.info("Extracting GFP features...")
-        df, cols = _extract_gfp_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["gfp"] = FeatureSet(df, cols, "gfp")
-    
-    if "connectivity" in feature_groups:
-        logger.info("Extracting connectivity features...")
-        df, cols = _extract_connectivity_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["connectivity"] = FeatureSet(df, cols, "connectivity")
-    
-    if "roi" in feature_groups:
-        logger.info("Extracting ROI features...")
-        df, cols = _extract_roi_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["roi"] = FeatureSet(df, cols, "roi")
-    
-    if "temporal" in feature_groups:
-        logger.info("Extracting temporal features...")
-        df, cols = _extract_temporal_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["temporal"] = FeatureSet(df, cols, "temporal")
-    
-    if "complexity" in feature_groups:
-        logger.info("Extracting complexity features...")
-        df, cols = _extract_complexity_from_data(precomputed, bands)
-        if not df.empty:
-            result.features["complexity"] = FeatureSet(df, cols, "complexity")
-    
-    if "aperiodic" in feature_groups:
-        logger.info("Extracting aperiodic (1/f) features...")
-        df, cols = _extract_aperiodic_from_precomputed(precomputed)
-        if not df.empty:
-            result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")
-    
-    if "ratios" in feature_groups:
-        logger.info("Extracting band power ratio features...")
-        df, cols = _extract_ratios_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["ratios"] = FeatureSet(df, cols, "ratios")
-    
-    if "asymmetry" in feature_groups:
-        logger.info("Extracting hemispheric asymmetry features...")
-        df, cols = _extract_asymmetry_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["asymmetry"] = FeatureSet(df, cols, "asymmetry")
-    
-    if "itpc" in feature_groups:
-        logger.info("Extracting ITPC features...")
-        df, cols = _extract_itpc_from_precomputed(precomputed, bands)
-        if not df.empty:
-            result.features["itpc"] = FeatureSet(df, cols, "itpc")
+    requested = [(name, extractor, args_builder, has_qc) for name, extractor, args_builder, has_qc in _EXTRACTORS if name in feature_groups]
+    n_jobs_groups = int(config.get("feature_engineering.parallel.n_jobs_feature_groups", 1))
+
+    def _run_extractor(task):
+        name, extractor, args_builder, has_qc = task
+        logger.info(f"Extracting {name} features...")
+        try:
+            output = extractor(*args_builder())
+            if has_qc:
+                df, cols, qc_payload = output
+            else:
+                df, cols = output[:2]
+                qc_payload = {}
+            return {"name": name, "df": df, "cols": cols, "qc": qc_payload, "error": None}
+        except Exception as exc:
+            logger.warning(f"Extractor '{name}' failed: {exc}")
+            return {"name": name, "df": pd.DataFrame(), "cols": [], "qc": {}, "error": str(exc)}
+
+    if requested:
+        if n_jobs_groups > 1:
+            try:
+                from joblib import Parallel, delayed
+                results_list = Parallel(n_jobs=n_jobs_groups, prefer="processes")(
+                    delayed(_run_extractor)(task) for task in requested
+                )
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                logger.warning(
+                    "Parallel extractor execution failed (%s); falling back to sequential.", exc
+                )
+                results_list = [_run_extractor(task) for task in requested]
+        else:
+            results_list = [_run_extractor(task) for task in requested]
+
+        for res in results_list:
+            if res["error"]:
+                result.qc[res["name"]] = {"error": res["error"]}
+                logger.debug(f"Extractor '{res['name']}' failed: {res['error']}")
+                continue
+            if res["qc"]:
+                result.qc[res["name"]] = res["qc"]
+            if not res["df"].empty:
+                result.features[res["name"]] = FeatureSet(res["df"], res["cols"], res["name"])
+                logger.debug(f"Extractor '{res['name']}': {len(res['cols'])} features extracted")
+            else:
+                logger.info(f"Extractor '{res['name']}' returned empty DataFrame (no features extracted)")
+                result.qc[res["name"]] = result.qc.get(res["name"], {})
+                if isinstance(result.qc[res["name"]], dict):
+                    result.qc[res["name"]]["empty"] = True
     
     total_features = sum(len(fs.columns) for fs in result.features.values())
     logger.info(f"Extraction complete: {total_features} features from {len(result.features)} groups")
@@ -1935,7 +2833,8 @@ def get_feature_groups_for_ml() -> Dict[str, List[str]]:
         # Full set for comprehensive analysis
         "comprehensive": [
             "erds", "spectral", "gfp", "connectivity", "roi",
-            "temporal", "complexity", "aperiodic", "ratios", "asymmetry", "itpc"
+            "temporal", "complexity", "aperiodic", "ratios", "asymmetry", "itpc",
+            "effectsize", "pac", "microstates",
         ],
         
         # Connectivity-focused
@@ -1946,4 +2845,7 @@ def get_feature_groups_for_ml() -> Dict[str, List[str]]:
         
         # Time-resolved (windowed features for HRF modeling)
         "temporal": ["erds", "roi", "gfp", "temporal"],
+        
+        # Microstate-focused (global brain state dynamics)
+        "microstates": ["microstates", "gfp", "complexity"],
     }

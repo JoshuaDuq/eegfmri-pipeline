@@ -23,6 +23,7 @@ import mne
 from scipy.signal import hilbert
 import networkx as nx
 
+from eeg_pipeline.analysis.features.core import pick_eeg_channels
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.utils.data.loading import flatten_lower_triangles
@@ -31,6 +32,11 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
     compute_global_efficiency_weighted as _global_efficiency_weighted,
     compute_small_world_sigma,
     threshold_adjacency as _threshold_adjacency_util,
+    compute_betweenness_centrality as _betweenness_centrality,
+    compute_eigenvector_centrality as _eigenvector_centrality,
+    compute_rich_club_coefficient as _rich_club_coefficient,
+    compute_characteristic_path_length as _characteristic_path_length,
+    compute_network_segregation_integration as _network_segregation_integration,
 )
 
 
@@ -522,7 +528,7 @@ def extract_connectivity_features(
     columns : List[str]
         Feature column names
     """
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for connectivity computation")
         return pd.DataFrame(), []
@@ -531,8 +537,13 @@ def extract_connectivity_features(
     feat_cfg = config.get("feature_engineering.features", {})
     tf_cfg = config.get("time_frequency_analysis", {})
     plateau_default = tf_cfg.get("plateau_window", [epochs.times[0], epochs.times[-1]])
-    window_start = float(feat_cfg.get("plateau_start", plateau_default[0]))
-    window_end = float(feat_cfg.get("plateau_end", plateau_default[1]))
+    plateau_window = feat_cfg.get("plateau_window", plateau_default)
+    if isinstance(plateau_window, (list, tuple)) and len(plateau_window) >= 2:
+        window_start = float(plateau_window[0])
+        window_end = float(plateau_window[1])
+    else:
+        window_start = float(plateau_default[0])
+        window_end = float(plateau_default[1])
     time_mask = _get_connectivity_time_mask(np.asarray(epochs.times), (window_start, window_end), logger)
     if time_mask is None:
         return pd.DataFrame(), []
@@ -665,21 +676,25 @@ def compute_sliding_connectivity_features(
     if epochs is None or len(epochs) == 0:
         return pd.DataFrame(), [], pd.DataFrame(), []
 
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+    picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("No EEG channels available for sliding connectivity")
         return pd.DataFrame(), [], pd.DataFrame(), []
 
     data = epochs.get_data(picks=picks)
     times = epochs.times
-    ch_names = [epochs.info["ch_names"][p] for p in picks]
     community_map = _infer_community_map(np.array(ch_names))
 
     plateau_cfg = config.get("feature_engineering.features", {})
     tf_cfg = config.get("time_frequency_analysis", {})
     plateau_default = tf_cfg.get("plateau_window", [times[0], times[-1]])
-    plateau_start = float(plateau_cfg.get("plateau_start", plateau_default[0]))
-    plateau_end = float(plateau_cfg.get("plateau_end", plateau_default[1]))
+    plateau_window = plateau_cfg.get("plateau_window", plateau_default)
+    if isinstance(plateau_window, (list, tuple)) and len(plateau_window) >= 2:
+        plateau_start = float(plateau_window[0])
+        plateau_end = float(plateau_window[1])
+    else:
+        plateau_start = float(plateau_default[0])
+        plateau_end = float(plateau_default[1])
 
     conn_cfg = config.get("feature_engineering.connectivity", {})
     win_len = float(conn_cfg.get("sliding_window_len", 1.0))
@@ -700,7 +715,7 @@ def compute_sliding_connectivity_features(
     edge_cols_all: List[str] = []
     graph_cols_all: List[str] = []
 
-    corr_threshold = float(config.get("behavior_analysis.statistics.connectivity_min_correlation", 0.3)) if hasattr(config, "get") else 0.3
+    corr_threshold = float(config.get("behavior_analysis.statistics.connectivity_min_correlation", 0.3))
     graph_top_prop = float(
         config.get(
             "feature_engineering.connectivity.sliding_graph_top_prop",
@@ -814,3 +829,135 @@ def compute_sliding_connectivity_features(
     edges_df = pd.concat(edge_blocks, axis=1)
     graph_df = pd.concat(graph_blocks, axis=1) if graph_blocks else pd.DataFrame()
     return edges_df, edge_cols_all, graph_df, graph_cols_all
+
+
+# =============================================================================
+# Enhanced Network Features
+# =============================================================================
+
+
+def extract_enhanced_network_features(
+    connectivity_matrices: np.ndarray,
+    labels: np.ndarray,
+    band: str,
+    measure: str,
+    config: Any,
+    logger: Any,
+    *,
+    threshold_prop: float = 0.1,
+    threshold_abs: float = 0.0,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Extract enhanced network/graph features from connectivity matrices.
+    
+    Features include:
+    - Hub centrality (betweenness, eigenvector)
+    - Rich club coefficient
+    - Characteristic path length
+    - Network segregation/integration ratio
+    - Node strength distribution statistics
+    
+    Parameters
+    ----------
+    connectivity_matrices : np.ndarray
+        Shape (n_epochs, n_channels, n_channels)
+    labels : np.ndarray
+        Channel labels
+    band : str
+        Frequency band name
+    measure : str
+        Connectivity measure name (e.g., "wpli", "aec")
+    config : Any
+        Configuration object
+    logger : Any
+        Logger instance
+    threshold_prop : float
+        Proportional threshold for graph construction
+    threshold_abs : float
+        Absolute threshold for graph construction
+    
+    Returns
+    -------
+    Tuple[pd.DataFrame, List[str]]
+        DataFrame with network features and column names
+    """
+    if connectivity_matrices.ndim != 3:
+        logger.warning(f"Expected 3D connectivity array, got shape {connectivity_matrices.shape}")
+        return pd.DataFrame(), []
+    
+    n_epochs, n_nodes, _ = connectivity_matrices.shape
+    if n_nodes < 3:
+        logger.warning("Insufficient nodes for network analysis")
+        return pd.DataFrame(), []
+    
+    community_map = _infer_community_map(labels)
+    
+    feature_records: List[Dict[str, float]] = []
+    prefix = f"net_{measure}_{band}"
+    
+    for ep_idx in range(n_epochs):
+        record: Dict[str, float] = {}
+        
+        # Threshold and prepare adjacency
+        adj = _threshold_adjacency(
+            connectivity_matrices[ep_idx],
+            proportional_keep=threshold_prop,
+            min_abs_weight=threshold_abs,
+            drop_negative=False,
+            use_abs_for_threshold=True,
+        )
+        adj_abs = np.abs(adj)
+        adj_abs[~np.isfinite(adj_abs)] = 0.0
+        
+        # Node strength
+        strength = adj_abs.sum(axis=1)
+        record[f"{prefix}_strength_mean"] = float(np.mean(strength))
+        record[f"{prefix}_strength_std"] = float(np.std(strength))
+        record[f"{prefix}_strength_max"] = float(np.max(strength))
+        record[f"{prefix}_strength_skew"] = float(
+            (np.mean((strength - np.mean(strength))**3) / 
+             (np.std(strength)**3 + 1e-12))
+        )
+        
+        # Betweenness centrality
+        bc = _betweenness_centrality(adj_abs)
+        if np.any(np.isfinite(bc)):
+            record[f"{prefix}_bc_mean"] = float(np.nanmean(bc))
+            record[f"{prefix}_bc_max"] = float(np.nanmax(bc))
+            record[f"{prefix}_bc_std"] = float(np.nanstd(bc))
+        else:
+            record[f"{prefix}_bc_mean"] = np.nan
+            record[f"{prefix}_bc_max"] = np.nan
+            record[f"{prefix}_bc_std"] = np.nan
+        
+        # Eigenvector centrality
+        ec = _eigenvector_centrality(adj_abs)
+        if np.any(np.isfinite(ec)):
+            record[f"{prefix}_ec_mean"] = float(np.nanmean(ec))
+            record[f"{prefix}_ec_max"] = float(np.nanmax(ec))
+        else:
+            record[f"{prefix}_ec_mean"] = np.nan
+            record[f"{prefix}_ec_max"] = np.nan
+        
+        # Rich club coefficient
+        record[f"{prefix}_rich_club"] = _rich_club_coefficient(adj_abs)
+        
+        # Characteristic path length
+        record[f"{prefix}_char_path"] = _characteristic_path_length(adj_abs)
+        
+        # Segregation / Integration
+        segregation, integration = _network_segregation_integration(
+            adj_abs, community_map, labels
+        )
+        record[f"{prefix}_segregation"] = segregation
+        record[f"{prefix}_integration"] = integration
+        
+        if np.isfinite(segregation) and np.isfinite(integration) and integration > 0:
+            record[f"{prefix}_seg_int_ratio"] = segregation / integration
+        else:
+            record[f"{prefix}_seg_int_ratio"] = np.nan
+        
+        feature_records.append(record)
+    
+    column_names = list(feature_records[0].keys()) if feature_records else []
+    return pd.DataFrame(feature_records), column_names

@@ -1,18 +1,26 @@
 # EEG Pipeline Configuration
 # Focused on clarity, reproducibility, and scientific rigor.
+#
+# Configuration Structure:
+#   1. PROJECT & PATHS - Project metadata and file paths
+#   2. SHARED DEFINITIONS & ANCHORS - Reusable values (frequency_bands, windows, ROIs)
+#   3. DATA STRUCTURE & METADATA - Event columns, alignment parameters
+#   4. DATA PROCESSING - Preprocessing, I/O, validation
+#   5. VALIDATION & QUALITY CONTROL - Data quality thresholds
+#   6. ANALYSIS SECTIONS - ERP, TFR, Features, Behavior, Decoding, Statistics
+#   7. VISUALIZATION & PLOTTING - Plot configuration and styling
+#   8. OUTPUT & LOGGING - File output and logging settings
+#   9. SYSTEM & ENVIRONMENT - System-level configuration
 
 ###################################################################
 # PROJECT & PATHS
 ###################################################################
 project:
-  root: "."  # Project root directory (resolved relative to config file)
   task: "thermalactive"  # Task name used in BIDS paths and file naming
-  random_state: 42  # Random seed for reproducible analyses (used in decoding, ML models)
+  random_state: 42  # Random seed for reproducible analyses (used in decoding, ML models, behavior analysis, phase features)
   subjects:  # List of subject IDs (without 'sub-' prefix) for batch processing
     - "0000"
     - "0001"
-  bids_root: "data/bids_output"  # BIDS-formatted data directory
-  source_root: "data/source_data"  # Raw source data directory
 
 paths:
   project_root: "."  # Base project directory path
@@ -21,29 +29,10 @@ paths:
   source_data: "../../data/source_data"  # Raw source data directory
 
 ###################################################################
-# DATA STRUCTURE & DEFINITIONS
+# SHARED DEFINITIONS & ANCHORS
 ###################################################################
-event_columns:  # Column name candidates searched in event/metadata DataFrames (first match used)
-  temperature:  # Thermal stimulus temperature column names (used in pick_event_columns, extract_temperature_data)
-    - "stimulus_temp"
-    - "stimulus_temperature"
-    - "temp"
-    - "temperature"
-  rating:  # Pain rating/VAS column names (used in pick_event_columns, resolve_columns)
-    - "vas_final_coded_rating"
-    - "vas_final_rating"
-    - "vas_rating"
-    - "pain_intensity"
-    - "pain_rating"
-    - "rating"
-  pain_binary:  # Binary pain classification column names (used in ERP analysis, pick_event_columns)
-    - "pain_binary_coded"
-    - "pain_binary"
-    - "pain"
-
-alignment:  # Epoch-event alignment parameters
-  allow_misaligned_trim: false  # Whether to allow trimming misaligned epochs (used in data loading)
-  min_alignment_samples: 5  # Maximum tolerable mismatch (diff) for trimming when allow_misaligned_trim=True. Mismatches <= this value will be trimmed; larger mismatches will error.
+# These definitions are referenced throughout the config using YAML anchors (& and *)
+# to ensure consistency and avoid duplication.
 
 frequency_bands: &frequency_bands  # Standard EEG frequency band definitions [Hz] (used throughout TFR/feature analysis)
   delta: [1.0, 3.9]  # Delta band range
@@ -51,6 +40,9 @@ frequency_bands: &frequency_bands  # Standard EEG frequency band definitions [Hz
   alpha: [8.0, 12.9]  # Alpha band range
   beta: [13.0, 30.0]  # Beta band range
   gamma: [30.1, 80.0]  # Gamma band range
+
+plateau_window: &plateau_window [3.0, 10.5]  # Thermal plateau period [s] for feature extraction (used throughout analysis)
+baseline_window_tfr: &baseline_window_tfr [-3.0, -0.5]  # TFR baseline correction window [s] relative to stimulus (shortened to avoid filter edge effects)
 
 rois: &roi_definitions  # Region of interest definitions: regex patterns matching channel names
   Frontal:  # Prefrontal + frontal (bilateral)
@@ -80,6 +72,30 @@ rois: &roi_definitions  # Region of interest definitions: regex patterns matchin
   Midline_ACC_MCC:  # Midline cingulate/medial sensorimotor approximation
     - "^(Fz|Cz|CPz)$"
 
+###################################################################
+# DATA STRUCTURE & METADATA
+###################################################################
+event_columns:  # Column name candidates searched in event/metadata DataFrames (first match used)
+  temperature:  # Thermal stimulus temperature column names (used in pick_event_columns, extract_temperature_data)
+    - "stimulus_temp"
+    - "stimulus_temperature"
+    - "temp"
+    - "temperature"
+  rating:  # Pain rating/VAS column names (used in pick_event_columns, resolve_columns)
+    - "vas_final_coded_rating"
+    - "vas_final_rating"
+    - "vas_rating"
+    - "pain_intensity"
+    - "pain_rating"
+    - "rating"
+  pain_binary:  # Binary pain classification column names (used in ERP analysis, pick_event_columns)
+    - "pain_binary_coded"
+    - "pain_binary"
+    - "pain"
+
+alignment:  # Epoch-event alignment parameters
+  allow_misaligned_trim: false  # Whether to allow trimming misaligned epochs (used in data loading)
+  min_alignment_samples: 5  # Maximum tolerable mismatch (diff) for trimming when allow_misaligned_trim=True. Mismatches <= this value will be trimmed; larger mismatches will error.
 
 ###################################################################
 # DATA PROCESSING
@@ -92,25 +108,31 @@ raw_to_bids:  # Raw data to BIDS conversion parameters
   default_line_freq: 60.0  # Line noise frequency [Hz] for notch filtering
 
 io:  # I/O utility constants
-  constants:  # Column name lists used in _find_column_unified, find_column_in_events
-    temperature_column_names:  # Temperature column candidates for I/O operations
-      - "stimulus_temp"
-      - "temperature"
-      - "thermode_temperature"
-    pain_column_names:  # Pain binary column candidates for I/O operations
-      - "pain_binary_coded"
-      - "pain_binary"
-      - "pain"
+  constants:  # Validation thresholds and I/O parameters
     percent_threshold: 5.0  # Threshold for detecting percent format data (used in detect_data_format)
-    max_channels_to_display: 10  # Maximum channels to display in channel lists (used in format_channel_list_for_display)
     temperature_min: 35.0  # Minimum valid temperature [°C] (used in validate_temperature_values)
     temperature_max: 55.0  # Maximum valid temperature [°C] (used in validate_temperature_values)
     max_missing_fraction: 0.5  # Maximum fraction of missing channels allowed for interpolation (used in align_epochs_to_pivot_chs)
 
 ###################################################################
-# ANALYSIS PARAMETERS
+# VALIDATION & QUALITY CONTROL
 ###################################################################
-foundational_analysis:  # Foundational ERP analysis parameters (used in 01_erp_analysis.py)
+validation:  # Data validation parameters (used in validation.py)
+  min_epochs: 20  # Minimum number of epochs required for analysis
+  min_channels: 10  # Minimum number of channels required for analysis
+  max_amplitude_uv: 500  # Maximum amplitude threshold [µV] for artifact detection
+
+analysis:  # General analysis parameters (used across multiple analysis modules)
+  min_subjects_for_group: 2  # Minimum number of subjects required for group-level analysis (used in decoding cross-validation, group feature aggregation)
+  strict_mode: true  # Whether to enforce strict validation (fail on errors vs warnings)
+  min_subjects_for_topomaps: 3  # Minimum subjects required for group topomaps
+  data_quality:  # Data quality thresholds
+    max_nan_fraction: 0.1  # Maximum fraction of NaN values allowed (0.1 = 10%)
+
+###################################################################
+# ERP ANALYSIS
+###################################################################
+erp_analysis:  # ERP analysis parameters (used in 01_erp_analysis.py)
   erp:  # Event-related potential analysis settings
     picks: "eeg"  # Channel type selector for MNE (used in _extract_erp_config)
     combine: "gfp"  # Channel combination method: "gfp" (global field power) or "mean" (used in ERP plotting)
@@ -119,8 +141,6 @@ foundational_analysis:  # Foundational ERP analysis parameters (used in 01_erp_a
     default_crop_tmax: null  # Default epoch end time [s] (null = use full epoch)
     pain_color: "crimson"  # Color for pain condition in ERP plots (used in _extract_erp_config)
     nonpain_color: "navy"  # Color for non-pain condition in ERP plots (used in _extract_erp_config)
-    plots_subdir: "01_erp_analysis"  # Subdirectory name for ERP plots
-    counts_file_name: "counts_pain.tsv"  # Filename for trial count statistics
     baseline_window: [-0.2, 0.0]  # ERP baseline correction window [s] relative to stimulus onset
     output_files:  # ERP plot output filenames
       pain_gfp: "erp_pain_binary_gfp.svg"  # Pain/non-pain GFP comparison plot
@@ -128,78 +148,57 @@ foundational_analysis:  # Foundational ERP analysis parameters (used in 01_erp_a
       temp_gfp: "erp_by_temperature_gfp.svg"  # Temperature-stratified GFP plot
       temp_butterfly: "erp_by_temperature_butterfly.svg"  # Temperature-stratified butterfly plot
       temp_butterfly_template: "erp_by_temperature_butterfly_{label}.svg"  # Template for temperature-specific plots
-  topomap_windows:  # Topographic map temporal window definitions
-    pain_nonpain_temporal:  # Pain vs non-pain temporal topomaps
-      window_count: 5  # Number of time windows to create
-    pain_nonpain_temporal_allbands:  # Pain vs non-pain temporal topomaps across bands
-      window_size_ms: 100.0  # Window size [ms] for temporal binning
-    pain_nonpain_temporal_diff_allbands:  # Difference maps (pain - non-pain) across bands
-      window_size_ms: 100.0  # Window size [ms] for temporal binning
-    temporal_allbands_plateau:  # Plateau period temporal topomaps
-      window_count: 5  # Number of time windows during plateau period
-    group_pain_nonpain_temporal_diff_allbands:  # Group-level difference maps
-      window_size_ms: 100.0  # Window size [ms] for temporal binning
-    group_temporal_allbands_plateau:  # Group-level plateau temporal topomaps
-      window_count: 5  # Number of time windows during plateau period
+      counts_file_name: "erp_trial_counts.tsv"  # Filename for trial count statistics (used in extract_erp_stats)
 
+###################################################################
+# TIME-FREQUENCY ANALYSIS
+###################################################################
 time_frequency_analysis:  # Time-frequency analysis parameters (used in 02_tfr_analysis.py, 03_feature_extraction.py)
-  baseline_window: [-5.0, -0.01]  # TFR baseline correction window [s] relative to stimulus (used in apply_baseline_safe, validate_baseline_window_pre_stimulus)
-  plateau_window: [3.0, 10.5]  # Thermal plateau period [s] for feature extraction (used in feature extraction, ML alignment)
+  baseline_mode: "logratio"  # Baseline correction mode: "logratio" (log10(power/baseline)) or "percent" or "zscore" (used in save_tfr_with_sidecar, apply_baseline_safe)
+  baseline_window: *baseline_window_tfr  # TFR baseline correction window [s] relative to stimulus (used in apply_baseline_safe, validate_baseline_window_pre_stimulus)
+  plateau_window: *plateau_window  # Thermal plateau period [s] for feature extraction (used in feature extraction, ML alignment)
   bands: *frequency_bands  # Frequency band definitions (reference to frequency_bands anchor)
   tfr: &tfr_defaults  # Time-frequency representation parameters (used in compute_tfr, compute_adaptive_n_cycles)
-    freq_min: 1.0  # Minimum frequency [Hz] for TFR computation (logspace start)
+    freq_min: 1.0  # Minimum frequency [Hz] for TFR computation (logspace start, same as frequency_bands.delta[0])
     freq_max: 100.0  # Maximum frequency [Hz] for TFR computation (logspace end)
     n_freqs: 40  # Number of frequency bins (logarithmically spaced)
+    custom_freqs: null  # Custom frequency array (null = use logspace, used in group/features.py)
+    min_cycles: 3.0  # Minimum number of cycles for Morlet wavelets (used in compute_adaptive_n_cycles)
+    min_cycles_check: 2.0  # Minimum cycles threshold for validation (used in compute_adaptive_n_cycles)
     n_cycles_factor: 2.0  # Multiplier for adaptive cycle calculation: n_cycles = freq / factor (used in compute_adaptive_n_cycles)
-    min_cycles: 3.0  # Minimum wavelet cycles (prevents too few cycles at low frequencies)
-    min_cycles_check: 2.0  # Threshold for low-cycle warnings [cycles]
-    decim: 4  # Temporal decimation factor (downsampling: 1=no decim, 4=1/4 samples)
-    picks: "eeg"  # Channel type selector for MNE TFR computation
     time_res_threshold_low_freq: 5.0  # Time resolution threshold [ms] for low frequencies (quality check)
     time_res_threshold_high_freq: 2.0  # Time resolution threshold [ms] for high frequencies (quality check)
+    workers: -1  # Number of parallel workers for TFR computation (-1 = all CPUs, same pattern as statistics.cluster_n_jobs and decoding.analysis.perm_refit_n_jobs, used in compute_tfr)
   constants:  # TFR processing constants (used in tfr_utils.py)
     baseline_sentinel: "BASELINED:"  # String marker in TFR comment indicating baseline correction applied
     min_log_value: 1e-20  # Minimum value for log10 operations (prevents log(0))
     min_divisor: 1e-12  # Minimum divisor for division operations (prevents division by zero)
-    min_samples_for_stats: 2  # Minimum samples required for statistical tests
-    default_min_cycles: 3.0  # Default minimum wavelet cycles
-    default_min_cycles_check: 2.0  # Default threshold for cycle count warnings
+    min_samples_for_stats: 2  # Minimum samples required for statistical tests (shared minimum threshold)
     low_freq_threshold: 8.0  # Frequency threshold [Hz] below which cycles are checked (used in log_tfr_resolution)
     low_cycles_warning_threshold: 2.5  # Cycle count threshold triggering warnings for low frequencies
     freq_threshold_for_time_res: 2.0  # Frequency threshold [Hz] for time resolution checks
-    default_time_res_threshold_low_freq: 5.0  # Default time resolution threshold [ms] for low frequencies
-    default_time_res_threshold_high_freq: 2.0  # Default time resolution threshold [ms] for high frequencies
-    default_cycles_factor: 2.0  # Default cycles factor for adaptive cycle calculation
     mad_scaling_factor: 1.4826  # Median absolute deviation scaling (converts MAD to SD: MAD * 1.4826 ≈ SD)
   rois: *roi_definitions  # ROI definitions (reference to roi_definitions anchor)
   min_baseline_samples: 5  # Minimum samples required in baseline window (used in validate_baseline_indices)
+  min_channels_for_group: 4  # Minimum channels required for group-level TFR aggregation (used in load_tfr_data)
 
-tfr_topography_pipeline:  # TFR topography analysis pipeline parameters (used in 02_tfr_analysis.py)
-  baseline_window: [-5.0, -0.01]  # Baseline window [s] for topography pipeline (used in _extract_tfr_config)
-  plateau_window: [3.0, 10.5]  # Plateau window [s] for topography analysis (used in _extract_tfr_config)
-  min_baseline_samples: 5  # Minimum samples in baseline window (used in validate_baseline_indices)
-  temperature_strategy: "pooled"  # Temperature grouping strategy: "pooled" (all temps) or "stratified" (by temp)
-  bands: *frequency_bands  # Frequency band definitions (reference to frequency_bands anchor)
-  tfr:  # TFR computation parameters (inherits from tfr_defaults anchor)
-    <<: *tfr_defaults  # Merge tfr_defaults parameters
-    workers: -1  # Number of parallel workers for TFR computation (-1 = all CPUs, used in compute_tfr)
-
+###################################################################
+# FEATURE EXTRACTION
+###################################################################
 feature_engineering:  # Feature extraction parameters (used in 03_feature_extraction.py)
-  enable_plots: true  # Whether to generate feature extraction plots
   save_tfr_with_sidecar: true  # Whether to save TFR files with BIDS sidecar JSON metadata
   features:  # Feature extraction window definitions
-    plateau_start: 3.0  # Start time [s] of thermal plateau period for feature extraction
-    plateau_end: 10.5  # End time [s] of thermal plateau period for feature extraction
+    plateau_window: *plateau_window  # Thermal plateau period [s] for feature extraction (reference to plateau_window anchor)
     min_valid_band_fraction: 0.0  # Minimum fraction of valid bands required for feature extraction (0.0 = no requirement)
-    temporal_bins:  # Coarse temporal bins for time-resolved feature extraction
-      - start: 3.0  # Early plateau bin start [s]
+    temporal_bins:  # Coarse temporal bins for time-resolved feature extraction (bins span plateau_window: 3.0-10.5s)
+      - start: 3.0  # Early plateau bin start [s] (matches plateau_window start)
         end: 5.0  # Early plateau bin end [s]
         label: "early"  # Bin label
       - start: 5.0  # Mid plateau bin start [s]
         end: 7.5  # Mid plateau bin end [s]
         label: "mid"  # Bin label
       - start: 7.5  # Late plateau bin start [s]
-        end: 10.5  # Late plateau bin end [s]
+        end: 10.5  # Late plateau bin end [s] (matches plateau_window end)
         label: "late"  # Bin label
     temporal_bins_fine:  # Fine temporal bins for HRF modeling (~1s resolution)
       - start: 3.0
@@ -223,44 +222,59 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
       - start: 9.42
         end: 10.5
         label: "t7"
-    use_fine_temporal_bins: true  # Whether to use fine temporal bins in addition to coarse
-  tfr_processing:  # TFR processing parameters for feature extraction
-    baseline_mode: "logratio"  # Baseline correction mode: "logratio" (log10(power/baseline)) or "percent" or "zscore"
   microstates:  # EEG microstate extraction parameters (used in extract_microstate_features)
     n_states: 4  # Number of microstate clusters to extract
-    min_peak_distance_ms: 20.0  # Minimum distance [ms] between GFP peaks for microstate segmentation
-    peaks_per_epoch: 5  # Number of GFP peaks to extract per epoch
+    min_peak_distance_ms: 20.0  # Minimum distance [ms] between GFP peaks for microstate segmentation (used in extract_templates_from_trials)
+    peaks_per_epoch: 5  # Number of GFP peaks to extract per epoch (used in extract_templates_from_trials)
+    min_correlation: 0.25  # Minimum correlation threshold for microstate assignment (used in _compute_microstate_metrics_for_trial)
+    gfp_min_percentile: 25.0  # Minimum GFP percentile threshold for valid samples (used in _compute_microstate_metrics_for_trial)
+    min_valid_fraction: 0.5  # Minimum fraction of valid samples required per trial (used in _compute_microstate_metrics_for_trial)
+    min_run_ms: 10.0  # Minimum microstate run duration [ms] for valid state transitions (used in _compute_microstate_metrics_for_trial)
+    polarity_invariant_kmeans: false  # Whether to use polarity-invariant KMeans clustering (experimental, used in extract_templates_from_trials)
     use_fixed_templates: false  # Use per-subject clustering unless templates are supplied
     use_group_templates: true  # If true, attempt to load group-level templates before per-subject clustering
     build_group_templates: true  # If true, aggregate subject templates into a group template (requires multiple subjects processed)
   aperiodic:  # Aperiodic component extraction parameters (used in extract_aperiodic_features)
-    psd_window: [-5.0, -0.01]  # Time window [s] for PSD computation (must be pre-stimulus, ≤ 0)
+    psd_window: *baseline_window_tfr  # Time window [s] for PSD computation (must be pre-stimulus, ≤ 0) - uses TFR baseline window
     peak_rejection_z: 3.5  # Z-score threshold for robust peak rejection during aperiodic fitting
     min_fit_points: 5  # Minimum frequency points required for valid aperiodic fit
     min_samples: 5  # Minimum time samples required in PSD window
   constants:  # Feature extraction constants
-    epsilon_std: 1e-12  # Small epsilon for standard deviation calculations (prevents division by zero)
-    epsilon_psd: 1e-20  # Small epsilon for power spectral density calculations (prevents log(0))
+    epsilon_std: 1e-12  # Small epsilon for standard deviation calculations (prevents division by zero, same as time_frequency_analysis.constants.min_divisor and plotting.plots.tfr.epsilon_for_division)
+    epsilon_psd: 1e-20  # Small epsilon for power spectral density calculations (prevents log(0), same as time_frequency_analysis.constants.min_log_value)
     ascii_uppercase_a: 65  # ASCII code for 'A' (used in microstate labeling)
     min_correlation_samples: 5  # Minimum samples required for correlation calculations
     kmeans_n_init: 20  # Number of k-means initializations for microstate clustering
     aperiodic_fmin: 2.0  # Minimum frequency [Hz] for aperiodic component fitting
     aperiodic_fmax: 40.0  # Maximum frequency [Hz] for aperiodic component fitting
     pac_epsilon_amp: 1e-9  # Small epsilon for PAC amplitude normalization
-    itpc_epsilon_amp: 1e-12  # Small epsilon for ITPC amplitude normalization
+    itpc_epsilon_amp: 1e-12  # Small epsilon for ITPC amplitude normalization (same as epsilon_std and time_frequency_analysis.constants.min_divisor)
+  parallel:  # Parallel processing parameters (used in precompute_data, aperiodic fitting, complexity/temporal features, PAC, connectivity, feature group execution)
+    n_jobs_bands: -1  # Number of parallel jobs for band computation (1 = sequential, >1 = parallel, same pattern as time_frequency_analysis.tfr.workers and statistics.cluster_n_jobs, used in core.py)
+    n_jobs_aperiodic: -1  # Number of parallel jobs for aperiodic fitting (epoch×channel parallelization, used in aperiodic.py)
+    n_jobs_complexity: -1  # Number of parallel jobs for complexity feature extraction (epoch parallelization, used in pipeline.py)
+    n_jobs_temporal: -1  # Number of parallel jobs for temporal feature extraction (epoch parallelization, used in pipeline.py)
+    n_jobs_pac: -1  # Number of parallel jobs for PAC computation (ROI×phase×amp combination parallelization, used in phase.py)
+    n_jobs_connectivity: -1  # Number of parallel jobs for connectivity computation (per-band parallelization, used in connectivity.py)
+    n_jobs_feature_groups: -1  # Number of parallel jobs for running independent feature extractors (used in pipeline.py); keep low to limit memory
   connectivity:  # Connectivity feature parameters
-    sliding_window_len: 1.0  # Sliding window length [s] during plateau for dynamic connectivity
-    sliding_window_step: 0.5  # Sliding window step [s]
     enable_imcoh: false  # Enable imaginary coherence computation (robust to volume conduction)
     enable_pli: false  # Enable Phase Lag Index computation
     aec_mode: "orth"  # Amplitude Envelope Correlation mode: "orth" (orthogonalized) or "standard"
     graph_top_prop: 0.1  # Top proportion of edges to keep for graph metrics (0.1 = top 10%)
     small_world_n_rand: 100  # Number of random graphs for small-world sigma calculation
+    sliding_window_len: 1.0  # Sliding window length [s] for dynamic connectivity (used in compute_sliding_connectivity_features)
+    sliding_window_step: 0.5  # Sliding window step size [s] for dynamic connectivity (used in compute_sliding_connectivity_features)
+    sliding_graph_top_prop: 0.1  # Top proportion of edges for sliding window graph metrics (falls back to graph_top_prop if not set, used in compute_sliding_connectivity_features)
+    sliding_highpass_hz: null  # Highpass filter [Hz] for sliding connectivity (falls back to highpass_hz if not set, used in compute_sliding_connectivity_features)
+    sliding_lowpass_hz: null  # Lowpass filter [Hz] for sliding connectivity (falls back to lowpass_hz if not set, used in compute_sliding_connectivity_features)
   complexity:  # Complexity feature parameters
     pe_order: 3  # Permutation entropy embedding dimension
     pe_delay: 1  # Permutation entropy time delay
     sampen_m: 2  # Sample entropy embedding dimension
     sampen_r_mult: 0.2  # Sample entropy tolerance (as fraction of std)
+    sampen_max_samples: 500  # Maximum samples to use for sample entropy computation (used in extract_sample_entropy_features)
+    min_samples_for_entropy: 100  # Minimum samples required for entropy calculations (used in extract_permutation_entropy_features, extract_sample_entropy_features)
     include_sample_entropy: false  # Disable sample entropy by default (computationally expensive)
   temporal:  # Time-domain feature parameters
     include_percentiles: false  # Include percentile features
@@ -295,104 +309,173 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     - "temporal"  # Temporal features by condition
     - "erds"  # ERD/ERS features by condition
     - "global"  # Global features by condition
+  pac:  # Phase-amplitude coupling parameters (used in phase.py)
+    phase_range: [4.0, 8.0]  # Phase-frequency range [Hz] (e.g., theta, used in compute_pac_comodulograms)
+    amp_range: [30.0, 80.0]  # Amplitude-frequency range [Hz] (e.g., gamma, used in compute_pac_comodulograms, approximately matches frequency_bands.gamma)
+    phase_step_hz: 1.0  # Step size for phase frequencies [Hz] (used in compute_pac_comodulograms)
+    amp_step_hz: 5.0  # Step size for amplitude frequencies [Hz] (used in compute_pac_comodulograms)
+    plateau_window: *plateau_window  # Time window [s] to compute PAC (defaults to TFR plateau if unset, used in compute_pac_comodulograms)
+    min_epochs: 20  # Minimum number of epochs required for PAC computation (used in compute_pac_comodulograms, same as validation.min_epochs)
+    n_surrogates: 200  # Number of surrogate tests for PAC significance (used in compute_pac_comodulograms)
+  cross_frequency:  # Cross-frequency coupling parameters (used in cfc.py)
+    methods: ["mi"]  # PAC methods: "mi" (modulation index), "glm", "mvl"
+    phase_bands: ["theta", "alpha"]  # Bands for phase signal
+    amp_bands: ["gamma"]  # Bands for amplitude signal
+    n_bins: 18  # Number of phase bins for MI calculation
+    phase_phase_pairs:  # n:m phase locking pairs: [band1, band2, n, m]
+      - ["theta", "alpha", 1, 2]
+      - ["theta", "beta", 1, 4]
+    extract_bicoherence: false  # Extract bicoherence features (slow)
+    bicoherence_fmax: 50.0  # Max frequency for bicoherence
+  temporal_dynamics:  # Advanced temporal dynamics features (used in dynamics.py)
+    extract_autocorrelation: true  # Extract autocorrelation features
+    autocorr_max_lag_sec: 2.0  # Maximum lag for autocorrelation [s]
+    extract_dfa: true  # Extract Detrended Fluctuation Analysis
+    dfa_scales: [4, 8, 16, 32, 64, 128, 256]  # Scales for DFA
+    extract_mse: false  # Extract Multiscale Entropy (slow)
+    mse_scales: [1, 2, 4, 8, 16, 32]  # Scales for MSE
+    mse_m: 2  # Embedding dimension for MSE
+    mse_r_mult: 0.15  # Tolerance multiplier for MSE
+  source_features:  # Source-level feature parameters (used in source.py)
+    enabled: false  # Enable source-level features (requires forward model)
+    method: "dSPM"  # Source estimation method: "dSPM", "MNE", "sLORETA"
+    lambda2: 0.1111  # Regularization (1/SNR²)
+    conn_method: "wpli"  # Source connectivity method: "wpli", "plv", "aec"
+  quality:  # Feature quality and validation parameters
+    min_snr_db: 3.0  # Minimum signal-to-noise ratio [dB] for valid trials
+    max_muscle_power_ratio: 0.3  # Maximum high-frequency (>30Hz) power ratio
+    variance_threshold: 0.01  # Minimum variance for valid features
+    correlation_threshold: 0.95  # Threshold for identifying redundant features
+    compute_icc: false  # Compute intraclass correlation for reliability
+    outlier_z_threshold: 3.0  # Z-score threshold for outlier detection
 
-pac_analysis:  # Phase-amplitude coupling parameters
-  phase_range: [4.0, 8.0]  # Phase-frequency range [Hz] (e.g., theta)
-  amp_range: [30.0, 80.0]  # Amplitude-frequency range [Hz] (e.g., gamma)
-  phase_step_hz: 1.0  # Step size for phase frequencies [Hz]
-  amp_step_hz: 5.0  # Step size for amplitude frequencies [Hz]
-  plateau_window: [3.0, 10.5]  # Time window [s] to compute PAC (defaults to TFR plateau if unset)
-  min_epochs: 20  # Minimum number of epochs required for PAC computation
 
-features:  # Feature extraction band selection
-  frequency_bands:  # Frequency bands to extract features for (used in feature extraction, behavior analysis)
-    - "delta"
-    - "theta"
-    - "alpha"
-    - "beta"
-    - "gamma"
-
-power:  # Power analysis band selection
-  bands_to_use:  # Frequency bands for power analysis (used in _prepare_tfr_with_baseline, power feature extraction)
-    - "delta"
-    - "theta"
-    - "alpha"
-    - "beta"
-    - "gamma"
-
+###################################################################
+# BEHAVIORAL ANALYSIS
+###################################################################
 behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_behavioral_correlations.py, behavior.py)
   pooling_strategy: "within_subject_centered"  # Pooling strategy for group aggregation: "within_subject_centered" (z-score within subject) or "pooled" (raw pooling)
+  min_samples:  # Minimum samples for correlation validity (centralized thresholds)
+    channel: 10  # Per-channel correlations
+    roi: 20  # ROI-level correlations (more stringent for aggregated data)
+    default: 5  # Fallback minimum
+    edge: 30  # Connectivity edge correlations
+    temporal: 15  # Temporal window analysis
+  min_trials:  # Trial count thresholds
+    per_condition: 15  # For condition-wise (pain/nonpain) analysis
+    for_tfr: 20  # For time-frequency analysis
+  effect_size:  # Effect size reporting
+    compute_cohens_d: true  # Compute Cohen's d for condition comparisons
+    compute_eta_squared: false  # Compute eta-squared (ANOVA-style effect size)
   time_frequency_heatmap:  # Time-frequency correlation heatmap parameters (used in correlate_power_topomaps)
     time_resolution: 0.1  # Temporal bin size [s] for heatmap
     freq_resolution: 2.0  # Frequency bin size [Hz] for heatmap
     time_window: [0.0, 10.5]  # Time window [s] for heatmap analysis
-    freq_range: [1.0, 80.0]  # Frequency range [Hz] for heatmap analysis
+    freq_range: [1.0, 80.0]  # Frequency range [Hz] for heatmap analysis (matches frequency_bands: delta[0] to gamma[1])
     alpha: 0.05  # Significance threshold for heatmap
     roi_selection: null  # ROI to restrict analysis to (null = all channels)
-    n_cycles_factor: 2.0  # Cycles factor for TFR computation in heatmap
+    n_cycles_factor: 2.0  # Cycles factor for TFR computation in heatmap (same as time_frequency_analysis.tfr.n_cycles_factor)
     decim: 4  # Temporal decimation factor for heatmap TFR
     n_cluster_perm: 10  # Number of cluster permutation tests (quick check)
   cluster_correction:  # Cluster-based permutation test parameters (used in cluster correction)
-    alpha: 0.05  # Cluster significance threshold
-    n_permutations: 1000  # Number of permutations for cluster correction. Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
-    min_permutations: 1000  # Minimum permutations for reliable cluster test p-values at alpha=0.05
-    rng_seed: 42  # Random seed for permutation tests
+    alpha: 0.05  # Cluster significance threshold (same as statistics.sig_alpha)
+    n_permutations: 1000  # Number of permutations for cluster correction (same as behavior_analysis.statistics.n_permutations, minimum 1000 recommended for reliable p-value estimation at alpha=0.05)
+    min_permutations: 1000  # Minimum permutations for reliable cluster test p-values at alpha=0.05 (same as n_permutations)
   temporal_correlation_topomaps:  # Temporal correlation topomap parameters (used in compute_temporal_correlations_by_condition)
     window_size_ms: 500.0  # Window size [ms] for temporal binning
     min_trials_per_condition: 5  # Minimum trials required per condition (temperature/pain) for correlation computation
   sliding_states:  # Sliding state analysis parameters (used in connectivity.py)
     n_clusters: 3  # Number of clusters for sliding state analysis (used in compute_sliding_state_metrics)
   statistics:  # Statistical analysis parameters (used in _compute_correlation_statistics, compute_power_roi_stats)
-    correlation_method: "spearman"  # Correlation method: "spearman" (rank) or "pearson" (linear)
-    fdr_alpha: 0.05  # False discovery rate threshold (Benjamini-Hochberg correction, used in apply_global_fdr)
+    correlation_method: "spearman"  # Correlation method: "spearman" (rank) or "pearson" (linear, used in pipelines/behavior.py, same default as statistics.use_spearman_default)
+    fdr_alpha: null  # False discovery rate threshold (null = use statistics.fdr_alpha, used in apply_global_fdr)
     n_permutations: 1000  # Number of permutation tests (used in compute_permutation_pvalues, ROI stats, topomap correlations). Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
     partial_covariates: ["temperature", "block"]  # Covariates for partial correlation (e.g., ["temperature", "block"])
-    bootstrap_ci_percentiles: [2.5, 97.5]  # Bootstrap confidence interval percentiles (used in compute_bootstrap_ci)
+    bootstrap_ci_percentiles: [2.5, 97.5]  # Bootstrap confidence interval percentiles (used in compute_bootstrap_ci, same as statistics.constants.ci_percentile_low/high)
+    bootstrap_use_fisher_z: false  # Whether to use Fisher z-transform for bootstrap correlations (used in stats.py)
+    bootstrap_bias_correction: true  # Whether to apply bias correction to bootstrap correlations (used in stats.py)
     min_nodes_for_heatmap: 3  # Minimum nodes/channels required for heatmap computation
-    min_channels_for_adjacency: 2  # Minimum channels required for adjacency matrix construction
-    min_samples_roi: 5  # Minimum samples required for ROI-level statistics (used in _compute_roi_correlation_stats)
-    min_samples_channel: 10  # Minimum samples required for channel-level statistics
+    min_channels_for_adjacency: 2  # Minimum channels required for adjacency matrix construction (used with statistics.constants.k_neighbors_adjacency)
+    min_samples_roi: 5  # Minimum samples required for ROI-level statistics (used in _compute_roi_correlation_stats, same as statistics.min_samples_per_channel)
+    min_samples_channel: 10  # Minimum samples required for channel-level statistics (same as statistics.min_samples_per_channel * 2)
     edge_bootstrap_n: 1000  # Number of bootstrap samples for edge-level statistics (used in connectivity.py)
+    max_edges_to_correlate: 500  # Maximum number of edges to correlate (samples if exceeded to reduce computation)
     connectivity_min_correlation: 0.3  # Minimum correlation threshold for connectivity correlations (used in compute_connectivity_correlations)
     connectivity_max_pvalue: 0.05  # Maximum p-value threshold for connectivity correlations (used in compute_connectivity_correlations)
+  # Advanced statistical options
+  compute_bayes_factors: false  # Compute Bayes Factor for each correlation (JZS prior, BF>3 = moderate evidence)
+  robust_correlation: null  # Robust correlation method: null (standard), "percentage_bend", "winsorized", "shepherd"
+  loso_stability: false  # Compute leave-one-subject-out correlation stability check
+  reliability_check: false  # Compute split-half reliability for correlations
+  targets:  # Behavioral targets to correlate with EEG features
+    - "pain_rating"  # Primary target: pain intensity rating
+    - "temperature"  # Secondary target: stimulus temperature (dose-response)
+    - "pain_binary"  # Binary pain classification
   predictors:  # Top predictor selection parameters
     top_n: 20  # Number of top predictors to display/export
+  output_files:  # Standardized output file naming patterns (used in save_correlation_results)
+    # Pattern: corr_stats_{analysis}_{level}_vs_{target}[_{method}].tsv
+    # analysis: pow, conn, precomputed, microstates, itpc, pac, aperiodic, erds, etc.
+    # level: roi, channel, edge, etc.
+    # target: rating, temp
+    # method: spearman, pearson (optional, omitted for default method)
+    prefix: "corr_stats"  # File name prefix
+    separator: "_"  # Field separator
+    extension: ".tsv"  # File extension
+    include_method_suffix: true  # Whether to append correlation method to filename
   group_aggregation:  # Group-level aggregation parameters (used in group_aggregation.py, aggregate_behavior.py)
-    min_samples_for_stats: 2  # Minimum samples per subject for group statistics
-    correlation_clip_low: -0.999999  # Lower clipping bound for correlations (prevents -1.0 for Fisher z-transform)
-    correlation_clip_high: 0.999999  # Upper clipping bound for correlations (prevents 1.0 for Fisher z-transform)
-    ci_multiplier: 1.96  # Multiplier for 95% CI (1.96 = 1.96 * SE)
-    topomap_default_vmax: 0.5  # Default maximum value for topomap colorbar
+    min_samples_for_stats: 2  # Minimum samples per subject for group statistics (shared minimum threshold, same as time_frequency_analysis.constants.min_samples_for_stats and statistics.constants.min_samples_for_stats)
+    correlation_clip_low: -0.999999  # Lower clipping bound for correlations (prevents -1.0 for Fisher z-transform, same as statistics.constants.fisher_z_clip_min)
+    correlation_clip_high: 0.999999  # Upper clipping bound for correlations (prevents 1.0 for Fisher z-transform, same as statistics.constants.fisher_z_clip_max)
+    topomap_default_vmax: 0.5  # Default maximum value for topomap colorbar (used in plot_group_topomap)
     jitter_range: 0.2  # Jitter range for scatter plots (reduces overplotting)
     scatter_alpha: 0.6  # Transparency for group scatter plots
     scatter_size: 12  # Marker size for group scatter plots
-    summary_grouping_columns: ["target", "band", "roi"]  # Columns to group by for summary statistics (used in aggregate_behavior.py)
-    output_dir: "group/eeg/stats"  # Output directory relative to deriv_root (used in aggregate_behavior.py)
-    filenames:  # Output filenames for aggregated behavior statistics (used in aggregate_behavior.py)
-      combined_correlations: "group_behavior_correlations.tsv"  # Filename for combined correlation statistics
-      fdr_corrected: "group_behavior_correlations_fdr.tsv"  # Filename for FDR-corrected correlations
-      summary: "group_behavior_summary.tsv"  # Filename for group summary statistics
-      significant_predictors: "group_significant_predictors.tsv"  # Filename for significant predictors
+  robust_statistics:  # Robust statistical methods for behavior analysis
+    use_robust_correlation: false  # Use robust (outlier-resistant) correlation methods
+    robust_method: "percentage_bend"  # Method: "percentage_bend", "winsorized", "shepherd"
+    use_partial_correlation: false  # Control for covariates in correlations
+    partial_covariates: []  # Covariates for partial correlation (e.g., ["age", "motion"])
+    bootstrap_n_iterations: 5000  # Bootstrap iterations for confidence intervals
+    bootstrap_ci_method: "BCa"  # CI method: "BCa" (bias-corrected accelerated) or "percentile"
+    bootstrap_ci_level: 0.95  # Confidence interval level
+  mixed_effects:  # Mixed-effects modeling for repeated measures
+    enabled: false  # Use mixed-effects models for correlations
+    random_effects: "intercept"  # Random effect structure: "intercept", "slope", "both"
+    subject_column: "subject"  # Column name for subject grouping
+    report_icc: true  # Report intraclass correlation coefficient
+  mediation:  # Mediation analysis parameters
+    enabled: false  # Run mediation analysis
+    n_bootstrap: 5000  # Bootstrap iterations for indirect effect CI
+    independent_variable: "temperature"  # X variable (stimulus)
+    dependent_variable: "rating"  # Y variable (outcome)
+    mediators: []  # List of feature columns to test as mediators
 
+###################################################################
+# GROUP AGGREGATION
+###################################################################
 feature_aggregation:  # Feature aggregation parameters (used in aggregate_features.py)
   power_bin: "plateau"  # Power bin label for feature aggregation (used in group/features.py)
   input_filenames:  # Input feature filenames (used in aggregate_features.py)
     power: "features_eeg_plateau.tsv"  # Power feature filename
     microstates: "features_microstates.tsv"  # Microstate feature filename
     connectivity: "features_connectivity.tsv"  # Connectivity feature filename
-  output_dir: "group/eeg/stats"  # Output directory relative to deriv_root (used in aggregate_features.py)
   filenames:  # Output filenames for aggregated feature statistics (used in aggregate_features.py)
     power_summary: "group_power_summary.tsv"  # Filename for power summary statistics
     microstate_summary: "group_microstate_summary.tsv"  # Filename for microstate summary statistics
     connectivity_summary: "group_connectivity_summary.tsv"  # Filename for connectivity summary statistics
+    microstate_transitions: "aggregated_microstate_transitions.tsv"  # Filename for microstate transition summary (used in aggregate_feature_stats)
 
+###################################################################
+# DECODING & MACHINE LEARNING
+###################################################################
 decoding:  # Decoding/regression analysis parameters (used in 05_decoding.py, decoding.py)
   cv:  # Cross-validation parameters (used in nested_loso_predictions, within_subject_kfold_predictions)
     inner_splits: 5  # Number of inner CV folds for hyperparameter tuning (used in _fit_with_inner_cv, create_inner_cv)
     min_trials_for_inner_cv: 3  # Minimum trials required to run inner CV (used in _fit_within_subject_fold)
     min_trials_for_within_subject: 2  # Minimum trials per subject for within-subject CV (used in create_within_subject_folds)
     default_n_splits: 5  # Default number of CV splits (used in create_stratified_cv_by_binned_targets, create_block_aware_cv_for_within_subject)
-    default_n_bins: 5  # Default number of bins for stratified CV (used in create_stratified_cv_by_binned_targets)
+    default_n_bins: 5  # Default number of bins for stratified CV (used in create_stratified_cv_by_binned_targets, same value as default_n_splits for consistency)
   constants:  # Decoding constants (used in riemann_export_cov_bins, get_min_channels_required)
     min_channels_for_riemann_absolute: 8  # Absolute minimum channels required for Riemannian geometry methods
     percentile_low: 33.3  # Lower percentile for rating binning (low pain bin, used in riemann_export_cov_bins)
@@ -400,11 +483,11 @@ decoding:  # Decoding/regression analysis parameters (used in 05_decoding.py, de
     min_trials_for_binning: 4  # Minimum trials required for rating binning
     min_trials_per_bin: 2  # Minimum trials required per bin after binning
     variance_threshold: 0.0  # Variance threshold for VarianceThreshold preprocessing (used in create_base_preprocessing_pipeline)
-    min_variance_for_correlation: 1e-12  # Minimum variance threshold for correlation calculations (used in safe_pearsonr)
+    min_variance_for_correlation: 1e-12  # Minimum variance threshold for correlation calculations (used in safe_pearsonr, same as feature_engineering.constants.epsilon_std)
     bca_ci_min_samples: 10  # Minimum samples required for BCA CI calculation (used in _bca_ci)
     bca_ci_min_jackknife: 3  # Minimum jackknife samples required for BCA CI calculation (used in _bca_ci)
-    bootstrap_ci_alpha_low: 0.025  # Lower alpha for bootstrap confidence intervals (used in _bca_ci)
-    bootstrap_ci_alpha_high: 0.975  # Upper alpha for bootstrap confidence intervals (used in _bca_ci)
+    bootstrap_ci_alpha_low: 0.025  # Lower alpha for bootstrap confidence intervals (used in _bca_ci, corresponds to statistics.constants.ci_percentile_low/100)
+    bootstrap_ci_alpha_high: 0.975  # Upper alpha for bootstrap confidence intervals (used in _bca_ci, corresponds to statistics.constants.ci_percentile_high/100)
   preprocessing:  # Preprocessing pipeline parameters (used in create_base_preprocessing_pipeline, create_elasticnet_pipeline, create_rf_pipeline)
     imputer_strategy: "median"  # Strategy for SimpleImputer (used in create_base_preprocessing_pipeline, create_rf_pipeline)
     power_transformer_method: "yeo-johnson"  # Method for PowerTransformer (used in create_elasticnet_pipeline)
@@ -414,47 +497,30 @@ decoding:  # Decoding/regression analysis parameters (used in 05_decoding.py, de
       max_iter: 200000  # Maximum iterations for elastic net solver
       tol: 0.001  # Convergence tolerance for elastic net
       selection: "random"  # Feature selection method: "random" or "cyclic"
-      grid:  # Hyperparameter grid for GridSearchCV
-        alpha: [0.001, 0.01, 0.1, 1, 10, 100]  # Regularization strength (L1+L2)
-        l1_ratio: [0.2, 0.5, 0.8]  # L1/L2 mixing (0.2=more L2, 0.8=more L1)
+      alpha_grid: [0.001, 0.01, 0.1, 1, 10, 100]  # Regularization strength grid (L1+L2, used in _get_decoding_config)
+      l1_ratio_grid: [0.2, 0.5, 0.8]  # L1/L2 mixing grid (0.2=more L2, 0.8=more L1, used in _get_decoding_config)
     random_forest:  # Random forest regression parameters
       n_estimators: 500  # Number of trees in forest
-      estimator_n_jobs: -1  # Number of parallel jobs for tree construction (-1 = all CPUs)
       bootstrap: true  # Whether to use bootstrap sampling
-      grid:  # Hyperparameter grid for GridSearchCV
-        max_depth: [null, 8, 16, 32]  # Maximum tree depth (null = unlimited)
-        max_features: ["sqrt", 0.2, 0.5, 1.0]  # Features per split ("sqrt" = sqrt(n_features))
-        min_samples_leaf: [1, 5, 10]  # Minimum samples per leaf node
     temperature_only:  # Temperature-only baseline model parameters
       ridge_alpha_grid: [0.0, 0.001, 0.01, 0.1, 1, 10]  # Ridge regression alpha grid
       ridge_alpha_default: 1.0  # Default ridge alpha if grid search fails
   analysis:  # Decoding analysis parameters
     n_perm_quick: 100  # Number of permutations for quick permutation tests (reduced for testing)
     n_perm_refit: 100  # Number of permutations for refitted model permutation tests (reduced for testing)
-    perm_refit_n_jobs: 1  # Number of parallel jobs for permutation refitting
+    perm_refit_n_jobs: 1  # Number of parallel jobs for permutation refitting (same pattern as time_frequency_analysis.tfr.workers and statistics.cluster_n_jobs, but set to 1 for refitting)
     perm_refit_use_nested_cv: false  # Whether to use nested CV in permutation refitting
     rf_perm_importance_repeats: 20  # Number of repeats for random forest permutation importance
-    bootstrap_n: 1000  # Number of bootstrap samples for confidence intervals
-    top_n_features: 20  # Number of top features to report/visualize
-    riemann:  # Riemannian geometry decoding parameters (used in run_riemann_band_limited_decoding, run_riemann_sliding_window)
-      plateau_window: [3.0, 10.5]  # Time window [s] for Riemannian covariance extraction (used in riemann_export_cov_bins)
-      min_channels_for_fold: 32  # Minimum channels required per CV fold for Riemannian methods
-      bands:  # Frequency bands for band-limited Riemannian analysis [Hz]
-        - [1.0, 4.0]  # Delta band
-        - [4.0, 8.0]  # Theta band
-        - [8.0, 13.0]  # Alpha band
-        - [13.0, 30.0]  # Beta band
-        - [30.0, 45.0]  # Low gamma band
-      sliding_window:  # Sliding window parameters for time-resolved Riemannian analysis
-        window_len: 0.75  # Window length [s] for sliding window (used in run_riemann_sliding_window)
-        step: 0.25  # Step size [s] between windows (used in run_riemann_sliding_window)
-  paths:  # Decoding output paths
-    results_subdir: "decoding"  # Subdirectory for decoding results
-    plots_subdir: "plots"  # Subdirectory for decoding plots
-  flags:  # Feature flags for decoding pipeline
-    run_within_subject_kfold: true  # Whether to run within-subject KFold analysis
-    run_riemann: true  # Whether to run Riemannian geometry analysis
-    run_shap: true  # Whether to compute SHAP values for feature importance
+    time_generalization:  # Time generalization analysis parameters (used in time_generalization.py)plateau_window: *plateau_window  # Time window [s] for time generalization analysis (used in compute_time_generalization)
+      window_len: 0.75  # Window length [s] for sliding window analysis (used in compute_time_generalization)
+      step: 0.25  # Step size [s] between windows (used in compute_time_generalization)
+      min_samples_per_window: 15  # Minimum samples required per time window (used in compute_time_generalization)
+      min_samples_for_corr: 10  # Minimum samples required for correlation computation (used in compute_time_generalization)
+      min_count_per_cell: 15  # Minimum count per cell for contingency table analysis (used in compute_time_generalization)
+    riemann:  # Riemannian geometry decoding parameters
+      min_channels_for_fold: 32  # Minimum channels required per CV fold for Riemannian methods (used in cv.py)
+  paths:  # Decoding output paths (sub-paths like best_params, predictions, etc. are created dynamically in io/decoding.py if not present)
+    results_subdir: "decoding"  # Subdirectory for decoding results (used in io/decoding.py)
 
 ###################################################################
 # STATISTICAL ANALYSIS
@@ -464,7 +530,7 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
   sig_alpha: 0.05  # Significance threshold for statistical tests
   fdr_alpha: 0.05  # False discovery rate threshold (Benjamini-Hochberg correction)
   cluster_n_perm: 100  # Number of permutations for cluster-based permutation tests (reduced for testing)
-  cluster_n_jobs: -1  # Number of parallel jobs for cluster tests (-1 = all CPUs)
+  cluster_n_jobs: -1  # Number of parallel jobs for cluster tests (-1 = all CPUs, same pattern as time_frequency_analysis.tfr.workers)
   cluster_report_size: false  # Whether to report cluster size in results
   cluster_report_mass: false  # Whether to report cluster mass in results
   min_samples_per_channel: 5  # Minimum samples required per channel for statistical tests
@@ -473,27 +539,21 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
     fisher_z_clip_min: -0.999999  # Lower clipping bound for Fisher z-transform (prevents -inf)
     fisher_z_clip_max: 0.999999  # Upper clipping bound for Fisher z-transform (prevents +inf)
     ci_multiplier_95: 1.96  # Multiplier for 95% confidence intervals (1.96 * SE)
-    ci_percentile_low: 2.5  # Lower percentile for bootstrap CI (2.5th percentile)
-    ci_percentile_high: 97.5  # Upper percentile for bootstrap CI (97.5th percentile)
-    t_critical_alpha_05: 0.975  # Critical t-value quantile for alpha=0.05 (two-tailed)
-    min_samples_for_stats: 2  # Minimum samples required for statistical tests
+    ci_percentile_low: 2.5  # Lower percentile for bootstrap CI (2.5th percentile, same as behavior_analysis.statistics.bootstrap_ci_percentiles[0])
+    ci_percentile_high: 97.5  # Upper percentile for bootstrap CI (97.5th percentile, same as behavior_analysis.statistics.bootstrap_ci_percentiles[1])
+    t_critical_alpha_05: 0.975  # Critical t-value quantile for alpha=0.05 (two-tailed, same as decoding.constants.bootstrap_ci_alpha_high and plotting.plots.tfr.annotations.title_y)
+    min_samples_for_stats: 2  # Minimum samples required for statistical tests (shared minimum threshold across analysis modules, same as time_frequency_analysis.constants.min_samples_for_stats and behavior_analysis.group_aggregation.min_samples_for_stats)
     min_samples_for_correlation: 5  # Minimum samples required for correlation calculations
     min_samples_for_bootstrap_warning: 20  # Minimum samples before warning about bootstrap reliability
-    default_fdr_alpha: 0.05  # Default FDR threshold
-    default_baseline_start: -5.0  # Default baseline start time [s]
-    default_baseline_end: 0.0  # Default baseline end time [s]
     k_neighbors_adjacency: 3  # Number of nearest neighbors for adjacency matrix construction
-    default_min_samples_roi: 5  # Default minimum samples for ROI-level statistics
-    default_min_samples_channel: 10  # Default minimum samples for channel-level statistics
-    log_base: 10.0  # Base for logarithm calculations (log10)
-    percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
+    log_base: 10.0  # Base for logarithm calculations (log10, same as plotting.plots.tfr.log_base)
+    percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages (same as plotting.plots.tfr.percentage_multiplier)
     cluster_structure_2d: [[0, 1, 0], [1, 1, 1], [0, 1, 0]]  # 2D cluster connectivity structure (3x3 cross pattern)
 
 ###################################################################
 # VISUALIZATION & PLOTTING
 ###################################################################
 visualization:  # Global visualization parameters (used in plotting modules)
-  dpi: 300  # Dots per inch for figure display
   robust_vlim:  # Robust symmetric value limit computation parameters (used in robust_sym_vlim)
     q_low: 0.01  # Lower quantile for robust value limit computation (1st percentile)
     q_high: 0.99  # Upper quantile for robust value limit computation (99th percentile)
@@ -657,16 +717,13 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       scatter_marker_size: "large"  # Scatter marker size preset name
     tfr:  # TFR plot configuration (used in plot_tfr.py)
       figure_size: "standard"  # Figure size preset name
-      log_base: 10.0  # Logarithm base for TFR power display (log10)
-      percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages
+      log_base: 10.0  # Logarithm base for TFR power display (log10, same as statistics.constants.log_base)
+      percentage_multiplier: 100.0  # Multiplier to convert proportions to percentages (same as statistics.constants.percentage_multiplier)
       percent_detection_threshold: 5.0  # Minimum percentage change to display in annotations [%]
       default_cluster_n_perm: 100  # Default number of permutations for cluster tests (reduced for testing)
       default_significance_alpha: 0.05  # Default significance threshold
-      default_fdr_alpha: 0.05  # Default FDR threshold
-      default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots
-      gamma_lower_bound: 30.1  # Lower bound of gamma band [Hz]
-      default_baseline_start: -5.0  # Default baseline start time [s]
-      default_baseline_end: -0.01  # Default baseline end time [s]
+      default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots (same as frequency_bands.gamma[1])
+      gamma_lower_bound: 30.1  # Lower bound of gamma band [Hz] (same as frequency_bands.gamma[0])
       default_nave: 1  # Default number of averages (1 = single trial)
       annotation_y_start: 0.98  # Starting y-position for annotations (figure coordinates)
       annotation_line_height: 0.045  # Height per annotation line (figure coordinates)
@@ -682,13 +739,13 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       label_y_position_bottom: 1.08  # Y-position for labels below plot (figure coordinates)
       histogram_bins: "tfr"  # Histogram bins preset name
       qc:  # Quality control plot parameters
-        epsilon_for_division: 0.00000000000000000001  # Small epsilon to prevent division by zero (1e-20)
+        epsilon_for_division: 1e-20  # Small epsilon to prevent division by zero (same as time_frequency_analysis.constants.min_log_value and feature_engineering.constants.epsilon_psd)
         fig_width: 8  # QC figure width [inches]
         fig_height: 3  # QC figure height [inches]
         histogram_bins: 50  # Number of bins for QC histograms
         histogram_alpha: 0.8  # Histogram transparency
       temperature:  # Temperature-related TFR plot parameters
-        rounding_decimals: 1  # Number of decimal places for temperature labels
+        rounding_decimals: 1  # Number of decimal places for temperature labels (accessed as plotting.tfr.temperature_rounding_decimals in loading.py)
         min_temperatures_required: 2  # Minimum temperature levels for temperature-stratified plots
     topomap:  # Topomap plot configuration (used in plot_tfr.py, plot_erp.py)
       contours: 6  # Number of contour lines on topomaps
@@ -738,6 +795,9 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         position: [0.01, 0.01]  # Footer position [x, y] in figure coordinates
         template: "Units: log10(power/baseline) | Baseline: [{baseline_start:.2f}, {baseline_end:.2f}] s"  # Footer text template
     microstate:  # Microstate plot configuration (used in plot_features.py)
+      validation:  # Validation parameters for microstate plots
+        min_trials_for_comparison: 1  # Minimum trials required for microstate comparison plots (used in plotting/features/microstates.py)
+        min_trials_for_templates: 5  # Minimum trials required for microstate template plots (used in plotting/features/microstates.py)
       figure_size: "standard"  # Figure size preset name
       label_offset_x: -0.3  # X-offset for microstate labels (figure coordinates)
       label_y_position: 0.5  # Y-position for labels (figure coordinates)
@@ -750,12 +810,28 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         grid_height_ratio_gfp: 1.5  # Height ratio for GFP subplot
         grid_hspace: 0.15  # Horizontal spacing between subplots
         grid_wspace: 0.3  # Vertical spacing between subplots
-    behavioral:  # Behavioral correlation plot configuration (used in plot_behavioral.py)
+  validation:  # Plot validation parameters (used in plotting modules)
+    min_rois_for_fdr: 1  # Minimum ROIs required for FDR correction (used in plotting/core/annotations.py)
+    min_pvalues_for_fdr: 1  # Minimum p-values required for FDR correction (used in plotting/core/annotations.py)
+    min_temperatures_required: 2  # Minimum temperature levels required for temperature-stratified plots (used in utils/data/loading.py)
+    min_samples_for_plot: 5  # Minimum samples required for plotting (used in group/behavior.py)
+    min_samples_for_kde: 3  # Minimum samples required for KDE estimation
+    min_samples_for_fit: 2  # Minimum samples required for regression fit
+    min_samples_for_calibration: 10  # Minimum samples required for calibration plots
+    min_samples_for_ttest: 2  # Minimum samples required for t-test
+    min_trials_for_templates: 5  # Minimum trials required for template generation
+    min_trials_for_comparison: 1  # Minimum trials required for comparison plots
+    min_baseline_samples: 5  # Minimum samples required in baseline window
+    min_bins_for_calibration: 3  # Minimum bins required for calibration
+    max_bins_for_calibration: 10  # Maximum bins allowed for calibration
+    samples_per_bin: 10  # Target samples per bin for calibration
+  behavioral:  # Behavioral correlation plot configuration (used in plot_behavioral.py, accessed as plotting.behavioral)
+      plot_subdir: "04_behavior_correlations"  # Subdirectory for behavioral plots (used in connectivity.py, group/behavior.py)
+      max_channels_to_display: 10  # Maximum channels to display in channel lists (used in format_channel_list_for_display)
       figure_size: "standard"  # Figure size preset name
       scatter_marker_size: "large"  # Scatter marker size preset name
       line_width: "bold"  # Line width preset name
       histogram_bins: "behavioral"  # Histogram bins preset name
-      plot_subdir: "04_behavior_correlations"  # Subdirectory for behavioral plots
       significance_threshold: 0.05  # Significance threshold for behavioral plots
       correlation_ci_level: 95  # Confidence interval level [%]
       time_labels: ["early", "mid", "late"]  # Labels for temporal bins
@@ -765,7 +841,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       method_spearman: "spearman"  # Default correlation method
       power_prefix: "pow_"  # Prefix for power feature column names
       scatter_figsize: [8, 6]  # Scatter plot figure size [width, height] [inches]
-      residual_hist_bins: 20  # Number of bins for residual histograms
+      residual_hist_bins: 20  # Number of bins for residual histograms (different from default 30 for finer resolution)
       residual_scatter_size: 25  # Marker size for residual scatter plots [points]
       residual_qc_figsize: [12, 5]  # Residual QC figure size [width, height] [inches]
       diagnostics_figsize: [10, 8]  # Diagnostics figure size [width, height] [inches]
@@ -775,7 +851,6 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       percentage_axis_fontsize: 9  # Font size for percentage axes [points]
       percentage_axis_nbins: 7  # Number of bins for percentage axis
       percentage_axis_minor_divisor: 2  # Divisor for minor ticks on percentage axis
-      default_rng_seed: 42  # Default random seed for behavioral analysis
       colorbar:  # Colorbar parameters for topomap plots
         width_fraction: 0.55  # Colorbar width as fraction of axes span
         left_offset_fraction: 0.225  # Colorbar left offset as fraction of span
@@ -839,7 +914,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         grid_alpha: 0.3  # Grid transparency
         grid_linestyle: "-"  # Grid line style
         grid_linewidth: 0.5  # Grid line width
-      histogram_default_bins: 30  # Default number of bins for histograms when not specified
+      histogram_default_bins: 30  # Default number of bins for histograms when not specified (same as plotting.defaults.histogram.bins) (same as plotting.defaults.bins)
       time_frequency_heatmap:  # Time-frequency correlation heatmap parameters
         title_fontsize: 14  # Title font size
         zero_line_color: "black"  # Color for zero reference line
@@ -856,43 +931,41 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         scatter_plot_size: 30  # Marker size for scatter plots
         scatter_plot_alpha: 0.7  # Transparency for scatter plot markers
         evolution_window_size: 20  # Window size for correlation evolution plots
-    decoding:  # Decoding plot configuration (used in plot_decoding.py)
-      figure_size: "square"  # Figure size preset name
-      scatter_marker_size: "small"  # Scatter marker size preset name
-      line_width: "standard"  # Line width preset name
-      colors:  # Decoding result colors
-        significant: "#C42847"  # Significant result color
-        nonsignificant: "#666666"  # Non-significant result color
-      scatter_alpha: 0.4  # Scatter plot marker transparency
-      axis_margin_factor: 0.05  # Margin factor for axis limits (5% padding)
-      y_lim_padding_factor: 1.1  # Y-axis limit padding factor (10% padding)
-      fit_points: 100  # Number of points for regression fit line
-      ridge_plot_max_channels: 30  # Maximum channels to display in ridge plots
-      ridge_kde_points: 200  # Number of points for KDE in ridge plots
-      ridge_plot_height_per_channel: 0.4  # Height per channel in ridge plots [inches]
-      ridge_plot_min_height: 4  # Minimum ridge plot height [inches]
-      ridge_plot_y_offset: 0.2  # Y-offset between ridge plots
-      violin_plot_width_per_channel: 0.3  # Width per channel in violin plots [inches]
-      violin_plot_min_width: 8  # Minimum violin plot width [inches]
-      violin_plot_height: 5  # Violin plot height [inches]
-      violin_width: 0.7  # Violin width (relative to bin width)
-      feature_plot_max_height: 6  # Maximum feature plot height [inches]
-      feature_plot_height_per_feature: 0.3  # Height per feature [inches]
-      quantile_min: 0.01  # Minimum quantile for outlier clipping (1st percentile)
-      quantile_max: 0.99  # Maximum quantile for outlier clipping (99th percentile)
-      savefig_pad_inches: 0.05  # Padding around saved figures [inches]
-      pdf_font_type: 42  # PDF font type (42 = TrueType, ensures text is selectable)
-      ps_font_type: 42  # PostScript font type (42 = TrueType)
-      ridge_text_x: 0.5  # Ridge plot text x-position (figure coordinates)
-      ridge_text_y: 0.5  # Ridge plot text y-position (figure coordinates)
-      top_n_features: 20  # Number of top features to display in plots
+  decoding:  # Decoding plot configuration (used in plot_decoding.py)
+    figure_size: "square"  # Figure size preset name
+    scatter_marker_size: "small"  # Scatter marker size preset name
+    line_width: "standard"  # Line width preset name
+    colors:  # Decoding result colors
+      significant: "#C42847"  # Significant result color
+      nonsignificant: "#666666"  # Non-significant result color
+    scatter_alpha: 0.4  # Scatter plot marker transparency
+    axis_margin_factor: 0.05  # Margin factor for axis limits (5% padding)
+    y_lim_padding_factor: 1.1  # Y-axis limit padding factor (10% padding)
+    fit_points: 100  # Number of points for regression fit line
+    ridge_plot_max_channels: 30  # Maximum channels to display in ridge plots
+    ridge_kde_points: 200  # Number of points for KDE in ridge plots
+    ridge_plot_height_per_channel: 0.4  # Height per channel in ridge plots [inches]
+    ridge_plot_min_height: 4  # Minimum ridge plot height [inches]
+    ridge_plot_y_offset: 0.2  # Y-offset between ridge plots
+    violin_plot_width_per_channel: 0.3  # Width per channel in violin plots [inches]
+    violin_plot_min_width: 8  # Minimum violin plot width [inches]
+    violin_plot_height: 5  # Violin plot height [inches]
+    violin_width: 0.7  # Violin width (relative to bin width)
+    feature_plot_max_height: 6  # Maximum feature plot height [inches]
+    feature_plot_height_per_feature: 0.3  # Height per feature [inches]
+    quantile_min: 0.01  # Minimum quantile for outlier clipping (1st percentile)
+    quantile_max: 0.99  # Maximum quantile for outlier clipping (99th percentile)
+    savefig_pad_inches: 0.05  # Padding around saved figures [inches]
+    pdf_font_type: 42  # PDF font type (42 = TrueType, ensures text is selectable)
+    ps_font_type: 42  # PostScript font type (42 = TrueType)
+    ridge_text_x: 0.5  # Ridge plot text x-position (figure coordinates)
+    ridge_text_y: 0.5  # Ridge plot text y-position (figure coordinates)
+    top_n_features: 20  # Number of top features to display in plots
     pac:  # PAC plot configuration
       figure_size: "standard"  # Figure size preset name
       cmap: "magma"  # Colormap for PAC comodulograms
       vmin: 0.0  # Minimum PAC value
       vmax: 0.5  # Maximum PAC value (clip values above for color scaling)
-    aperiodic:  # Aperiodic plot configuration (used in plot_features/aperiodic.py)
-      n_perm: 1000  # Number of permutations for aperiodic correlation analysis
     features:  # Feature plot configuration (used in plot_features.py)
       figure_size: "standard"  # Figure size preset name
       correlation:  # Correlation plot parameters
@@ -904,61 +977,29 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         vmin: null  # Minimum power value for colormap (null = compute from data)
         vmax: null  # Maximum power value for colormap (null = compute from data)
       heatmap_text_threshold: 200  # Maximum number of cells before hiding text in heatmaps
-  # NOTE: plot_types section has been removed to eliminate duplication.
-  # All plot-type-specific configuration is now in the 'plots' section above.
-  # The plotting/config.py loader handles backward compatibility automatically.
-  validation:  # Validation thresholds for plotting (used in plotting validation functions)
-    min_samples_for_plot: 5  # Minimum samples required to generate plot
-    min_samples_for_kde: 3  # Minimum samples required for KDE estimation
-    min_samples_for_fit: 2  # Minimum samples required for regression fit
-    min_samples_for_calibration: 10  # Minimum samples required for calibration plots
-    min_samples_for_ttest: 2  # Minimum samples required for t-test
-    min_rois_for_fdr: 1  # Minimum ROIs required for FDR correction
-    min_pvalues_for_fdr: 1  # Minimum p-values required for FDR correction
-    min_trials_for_templates: 5  # Minimum trials required for template generation
-    min_trials_for_comparison: 1  # Minimum trials required for comparison plots
-    min_baseline_samples: 5  # Minimum samples required in baseline window
-    min_bins_for_calibration: 3  # Minimum bins required for calibration
-    max_bins_for_calibration: 10  # Maximum bins allowed for calibration
-    samples_per_bin: 10  # Target samples per bin for calibration
-    min_temperatures_required: 2  # Minimum temperature levels required for temperature-stratified plots
+    itpc:  # ITPC plot configuration (used in plotting/features/phase.py)
+      shared_colorbar: true  # Whether to use shared colorbar across ITPC subplots
+    aperiodic:  # Aperiodic plot configuration (used in plotting/features/aperiodic.py)
+      n_perm: 1000  # Number of permutations for aperiodic permutation tests
 
 ###################################################################
 # OUTPUT & LOGGING
 ###################################################################
-output:  # Output configuration (used in io_utils.py, save_fig)
-  log_file_name: "behavior_analysis.log"  # Default log filename
-  fig_dpi: 300  # Figure DPI for output
-  pad_inches: 0.02  # Padding around saved figures [inches]
-  bbox_inches: "tight"  # Bounding box mode for saved figures
-  tfr_footer_template: "tfr_baseline"  # Footer template name for TFR plots
-  save_formats:  # File formats for saving figures
-    - "svg"  # SVG format (vector graphics)
+output:  # Output configuration (unique settings not in plotting.defaults)
+  log_dir: "logs"  # Directory for log files (used in io_utils.py)
+  log_file_name: "behavior_analysis.log"  # Default log file name (used in behavior analysis pipelines)
+  tfr_footer_template: "tfr_baseline"  # Footer template name for TFR plots (used in plotting/tfr/contrasts.py, channels.py)
 
 logging:  # Logging configuration
+  log_file_name: "behavior_analysis.log"  # Default log filename (used in pipelines, plotting, analysis modules)
+  log_dir: null  # Log directory path (null = use default, used in get_subject_logger)
   file_names:  # Log filenames for each analysis step
-    feature_engineering: "03_feature_extraction.log"  # Feature extraction log filename
-    time_frequency: "02_tfr_analysis.log"  # TFR analysis log filename
-    behavior_analysis: "04_behavioral_correlations.log"  # Behavioral analysis log filename
+    feature_engineering: "feature_extraction.log"  # Feature extraction log filename (used in pipelines/features.py)
+    behavior_analysis: "behavioral_correlations.log"  # Behavioral analysis log filename (used in pipelines/behavior.py)
 
 ###################################################################
 # SYSTEM & ENVIRONMENT
 ###################################################################
-validation:  # Data validation parameters (used in validation.py)
-  min_epochs: 20  # Minimum number of epochs required for analysis
-  min_channels: 10  # Minimum number of channels required for analysis
-  max_amplitude_uv: 500  # Maximum amplitude threshold [µV] for artifact detection
-
-analysis:  # Analysis pipeline configuration
-  strict_mode: true  # Whether to enforce strict validation (fail on errors vs warnings)
-  min_subjects_for_group: 2  # Minimum subjects required for group-level analysis (used in nested_loso_predictions)
-  min_subjects_for_topomaps: 3  # Minimum subjects required for group topomaps
-  data_quality:  # Data quality thresholds
-    max_nan_fraction: 0.1  # Maximum fraction of NaN values allowed (0.1 = 10%)
-
-random:  # Random number generation configuration
-  seed: 42  # Random seed for reproducibility (used in permutation tests, CV splits, ML models)
-
 environment:  # Environment variable configuration (applied in _apply_thread_limits)
   thread_limits:  # Thread limits for numerical libraries (prevents oversubscription)
     OMP_NUM_THREADS: "1"  # OpenMP thread limit

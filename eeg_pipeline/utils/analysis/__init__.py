@@ -29,6 +29,18 @@ from .graph_metrics import (
     compute_participation_coefficient,
     compute_clustering_coefficient,
 )
+from .arrays import (
+    safe_nanmean,
+    safe_nanstd,
+    safe_divide,
+    mask_valid,
+    get_valid,
+    count_valid,
+    zscore,
+    robust_zscore,
+    clip_outliers,
+    validate_array,
+)
 
 __all__ = [
     # Core TFR utilities
@@ -53,4 +65,15 @@ __all__ = [
     "compute_small_world_sigma",
     "compute_participation_coefficient",
     "compute_clustering_coefficient",
+    # Array utilities
+    "safe_nanmean",
+    "safe_nanstd",
+    "safe_divide",
+    "mask_valid",
+    "get_valid",
+    "count_valid",
+    "zscore",
+    "robust_zscore",
+    "clip_outliers",
+    "validate_array",
 ]

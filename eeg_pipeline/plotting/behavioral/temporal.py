@@ -37,7 +37,7 @@ from eeg_pipeline.utils.io.general import (
     get_default_config as _get_default_config,
     log_if_present as _log_if_present,
 )
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
 from eeg_pipeline.utils.analysis.stats import (
     compute_correlation_vmax,
     compute_band_correlations,
@@ -258,7 +258,7 @@ def plot_temporal_correlation_topomaps_by_temperature(
     
     temp_keys = [k for k in data.keys() if k.startswith("temp_")]
     if not temp_keys:
-        logger.warning("No temperature data found in file")
+        logger.info("No temperature data found in temporal correlation file; skipping temperature topomaps.")
         return
     
     info_ch_names = info["ch_names"]
@@ -396,8 +396,10 @@ def plot_temporal_correlation_topomaps_by_temperature(
             fontsize=font_sizes["suptitle"], y=0.995
         )
         
+        topomap_dir = plots_dir / "topomaps"
+        ensure_dir(topomap_dir)
         filename = f"sub-{subject}_temporal_correlations_by_temperature_{band_name}.png"
-        save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
+        save_fig(fig, topomap_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
         plt.close(fig)
     
     logger.info(f"Created temporal correlation topomaps by temperature for {len(band_names)} bands")
@@ -578,8 +580,10 @@ def plot_temporal_correlation_topomaps_by_pain(
             fontsize=font_sizes["suptitle"], y=0.995
         )
         
+        topomap_dir = plots_dir / "topomaps"
+        ensure_dir(topomap_dir)
         filename = f"sub-{subject}_temporal_correlations_by_pain_{band_name}.png"
-        save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
+        save_fig(fig, topomap_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
         plt.close(fig)
     
     logger.info(f"Created temporal correlation topomaps by pain for {len(band_names)} bands")
@@ -658,8 +662,10 @@ def plot_temporal_correlation_topomaps_by_pain(
         fontsize=font_sizes["suptitle"], y=0.995
     )
     
+    topomap_dir = plots_dir / "topomaps"
+    ensure_dir(topomap_dir)
     filename = f"sub-{subject}_temporal_correlations_by_pain_allbands.png"
-    save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
+    save_fig(fig, topomap_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
     plt.close(fig)
     
     logger.info("Created combined temporal correlation topomap with all bands")
@@ -727,8 +733,10 @@ def plot_temporal_correlation_topomaps_by_pain(
         fontsize=font_sizes["suptitle"], y=0.995
     )
     
+    topomap_dir = plots_dir / "topomaps"
+    ensure_dir(topomap_dir)
     filename = f"sub-{subject}_temporal_correlations_by_pain_allbands_combined.png"
-    save_fig(fig, plots_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
+    save_fig(fig, topomap_dir / filename, formats=plot_cfg.formats if plot_cfg else ["png", "svg"], dpi=plot_cfg.dpi if plot_cfg else None, bbox_inches=plot_cfg.bbox_inches if plot_cfg else "tight", pad_inches=plot_cfg.pad_inches if plot_cfg else None, footer=_get_behavior_footer(config))
     plt.close(fig)
     
     logger.info("Created combined temporal correlation topomap with all bands averaged")
@@ -753,7 +761,17 @@ def plot_pain_nonpain_clusters(
     logger = logger or _get_default_logger()
     plot_cfg = get_plot_config(config)
     ensure_dir(plots_dir)
-    alpha_used = float(alpha if alpha is not None else config.get("behavior_analysis.statistics.fdr_alpha", config.get("statistics.sig_alpha", 0.05)))
+    # Get alpha value safely
+    if alpha is not None:
+        alpha_used = float(alpha)
+    else:
+        try:
+            alpha_used = float(config.get("behavior_analysis.statistics.fdr_alpha", config.get("statistics.sig_alpha", 0.05)))
+        except (ValueError, TypeError):
+            alpha_used = 0.05
+    
+    if not np.isfinite(alpha_used) or alpha_used <= 0:
+        alpha_used = 0.05
 
     files = sorted(stats_dir.glob("pain_nonpain_time_clusters_*.tsv"))
     if not files:
@@ -787,11 +805,13 @@ def plot_pain_nonpain_clusters(
         _log_if_present(logger, "warning", "No significant pain vs. non-pain clusters to plot.")
         return
 
-    sig_out = plots_dir / "pain_nonpain_clusters_significant.tsv"
+    topomap_dir = plots_dir / "topomaps"
+    ensure_dir(topomap_dir)
+    sig_out = topomap_dir / "pain_nonpain_clusters_significant.tsv"
     sig_clusters.to_csv(sig_out, sep="\t", index=False)
     _log_if_present(logger, "info", f"Saved significant cluster table to {sig_out}")
 
-    band_order = config.get("power.bands_to_use", [])
+    band_order = get_frequency_band_names(config)
     if not band_order:
         band_order = sorted(all_clusters["band"].unique())
     band_order = [b for b in band_order if not all_clusters[all_clusters["band"] == b].empty]
@@ -804,13 +824,34 @@ def plot_pain_nonpain_clusters(
         band_df = all_clusters[all_clusters["band"] == band]
         if band_df.empty:
             continue
-        ax.hlines(idx, band_df["t_start"].min(), band_df["t_end"].max(), colors=plot_cfg.get_color("light_gray"), linestyles="--", linewidth=0.5, alpha=0.5)
+        t_start_min = band_df["t_start"].dropna().min() if not band_df["t_start"].dropna().empty else 0
+        t_end_max = band_df["t_end"].dropna().max() if not band_df["t_end"].dropna().empty else 0
+        if np.isfinite(t_start_min) and np.isfinite(t_end_max):
+            ax.hlines(idx, t_start_min, t_end_max, colors=plot_cfg.get_color("light_gray"), linestyles="--", linewidth=0.5, alpha=0.5)
+        
         for _, row in band_df.iterrows():
-            width = float(row["t_end"] - row["t_start"])
-            if not np.isfinite(width) or width <= 0:
+            t_start_val = row.get("t_start")
+            t_end_val = row.get("t_end")
+            
+            # Check for None/NaN values
+            if pd.isna(t_start_val) or pd.isna(t_end_val):
                 continue
-            color = plot_cfg.get_color("significant") if row["significant"] else plot_cfg.get_color("nonsignificant")
-            ax.broken_barh([(row["t_start"], width)], (idx - 0.35, 0.7), facecolors=color, edgecolors="none", alpha=0.8)
+            
+            try:
+                t_start = float(t_start_val)
+                t_end = float(t_end_val)
+            except (ValueError, TypeError):
+                continue
+            
+            if not np.isfinite(t_start) or not np.isfinite(t_end):
+                continue
+            
+            width = t_end - t_start
+            if width <= 0:
+                continue
+            
+            color = plot_cfg.get_color("significant") if row.get("significant", False) else plot_cfg.get_color("nonsignificant")
+            ax.broken_barh([(t_start, width)], (idx - 0.35, 0.7), facecolors=color, edgecolors="none", alpha=0.8)
 
     ax.set_yticks(range(len(band_order)))
     ax.set_yticklabels(band_order)
@@ -823,15 +864,29 @@ def plot_pain_nonpain_clusters(
     ]
     ax.legend(handles=legend_patches, loc="upper right", frameon=False)
     plt.tight_layout()
-    save_fig(fig, plots_dir / f"sub-{subject}_pain_nonpain_cluster_ribbons", formats=plot_cfg.formats, dpi=plot_cfg.dpi, bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+    topomap_dir = plots_dir / "topomaps"
+    ensure_dir(topomap_dir)
+    save_fig(fig, topomap_dir / f"sub-{subject}_pain_nonpain_cluster_ribbons", formats=plot_cfg.formats, dpi=plot_cfg.dpi, bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
 
     for band in band_order:
         band_df = sig_clusters[sig_clusters["band"] == band]
         if band_df.empty:
             continue
-        t_min = band_df["t_start"].min()
-        t_max = band_df["t_end"].max()
+        
+        # Get t_min and t_max safely
+        t_start_vals = band_df["t_start"].dropna()
+        t_end_vals = band_df["t_end"].dropna()
+        
+        if t_start_vals.empty or t_end_vals.empty:
+            continue
+        
+        try:
+            t_min = float(t_start_vals.min())
+            t_max = float(t_end_vals.max())
+        except (ValueError, TypeError):
+            continue
+        
         if not np.isfinite(t_min) or not np.isfinite(t_max) or t_max <= t_min:
             continue
         time_grid = np.linspace(t_min, t_max, 200)
@@ -849,8 +904,20 @@ def plot_pain_nonpain_clusters(
             if pd.isna(ch_list):
                 continue
             row_channels = [ch.strip() for ch in str(ch_list).split(",") if ch.strip()]
-            t_start = float(row["t_start"])
-            t_end = float(row["t_end"])
+            
+            t_start_val = row.get("t_start")
+            t_end_val = row.get("t_end")
+            
+            # Check for None/NaN values
+            if pd.isna(t_start_val) or pd.isna(t_end_val):
+                continue
+            
+            try:
+                t_start = float(t_start_val)
+                t_end = float(t_end_val)
+            except (ValueError, TypeError):
+                continue
+            
             if not np.isfinite(t_start) or not np.isfinite(t_end):
                 continue
             overlaps = (time_grid[:-1] < t_end) & (time_grid[1:] > t_start)
@@ -873,7 +940,9 @@ def plot_pain_nonpain_clusters(
         cbar = fig.colorbar(mesh, ax=ax, pad=0.02)
         cbar.set_label("Significant cluster coverage")
         plt.tight_layout()
-        save_fig(fig, plots_dir / f"sub-{subject}_pain_nonpain_cluster_mask_{band}", formats=plot_cfg.formats, dpi=plot_cfg.dpi, bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+        topomap_dir = plots_dir / "topomaps"
+        ensure_dir(topomap_dir)
+        save_fig(fig, topomap_dir / f"sub-{subject}_pain_nonpain_cluster_mask_{band}", formats=plot_cfg.formats, dpi=plot_cfg.dpi, bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
         plt.close(fig)
 
 
@@ -1050,7 +1119,9 @@ def plot_pac_behavior_correlations(
         ax.set_ylabel("Amplitude frequency (Hz)")
         ax.set_title(f"PAC vs rating (ROI: {roi}, sub-{subject})")
         plt.tight_layout()
-        out_path = plots_dir / f"sub-{subject}_pac_comod_{roi}.png"
+        pac_dir = plots_dir / "topomaps"
+        ensure_dir(pac_dir)
+        out_path = pac_dir / f"sub-{subject}_pac_comod_{roi}.png"
         save_fig(
             fig,
             out_path,
@@ -1152,7 +1223,9 @@ def plot_itpc_rating_scatter_grid(
 
     fig.suptitle(f"ITPC vs rating (sub-{subject})", fontsize=plot_cfg.font.figure_title)
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    out_path = plots_dir / f"sub-{subject}_itpc_rating_scatter.png"
+    scatter_dir = plots_dir / "scatter"
+    ensure_dir(scatter_dir)
+    out_path = scatter_dir / f"sub-{subject}_itpc_rating_scatter.png"
     save_fig(
         fig,
         out_path,
@@ -1316,9 +1389,11 @@ def plot_significant_correlations_topomap(
     _add_colorbar(fig, axes, successful_plots, config)
     
     tight_layout_rect = topomap_config.get("tight_layout_rect", [0, 0.15, 1, 1])
+    topomap_dir = save_dir / "topomaps"
+    ensure_dir(topomap_dir)
     save_fig(
         fig,
-        save_dir / f'sub-{subject}_significant_correlations_topomap',
+        topomap_dir / f'sub-{subject}_significant_correlations_topomap',
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
@@ -1386,7 +1461,7 @@ def _plot_connectivity_network(
 ) -> None:
     import networkx as nx
     
-    base_seed = config.get("random.seed", 42)
+    base_seed = config.get("project.random_state", 42)
     layout_key = f"{subject}_{measure}_{band}"
     layout_bytes = layout_key.encode('utf-8')
     layout_hash = int(hashlib.md5(layout_bytes).hexdigest()[:8], 16) & 0x7FFFFFFF
@@ -1475,7 +1550,7 @@ def plot_behavior_modulated_connectivity(
     if measure is None:
         return
     
-    bands = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    bands = get_frequency_band_names(config)
     
     for band in bands:
         measure_cols = [col for col in conn_df.columns if f'{measure}_{band}' in col]
@@ -1778,7 +1853,7 @@ def plot_time_frequency_correlation_heatmap(
     if task is None:
         task = config.get("project.task", "thermalactive")
 
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Rendering time-frequency correlation heatmap for sub-{subject}")
 
@@ -1914,4 +1989,3 @@ def plot_time_frequency_correlation_heatmap(
         tf_data["cluster_n_perm"],
         logger,
     )
-

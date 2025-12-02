@@ -25,7 +25,7 @@ from eeg_pipeline.utils.analysis.stats import (
     get_eeg_adjacency,
     validate_pain_binary_values,
     fdr_bh_values,
-    _resolve_cluster_n_jobs,
+    resolve_cluster_n_jobs,
 )
 from eeg_pipeline.utils.analysis.tfr import (
     compute_tfr_morlet,
@@ -57,7 +57,7 @@ def compute_pain_nonpain_time_cluster_test(
     if bands is None:
         bands = get_bands_for_tfr(max_freq_available=freq_max, config=config)
 
-    n_jobs = _resolve_cluster_n_jobs(config=config)
+    n_jobs = resolve_cluster_n_jobs(config=config)
     results: dict = {}
 
     for band_name, (fmin, fmax) in bands.items():
@@ -260,7 +260,7 @@ def _run_cluster_test_core(
     if not epochs.preload:
         epochs.load_data()
     
-    heatmap_config = config.get("behavior_analysis", {}).get("time_frequency_heatmap", {})
+    heatmap_config = config.get("behavior_analysis.time_frequency_heatmap", {})
     roi_selection = heatmap_config.get("roi_selection")
     epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
     
@@ -295,7 +295,7 @@ def _run_cluster_test_core(
         logger.warning(f"Insufficient trials (pain={int(pain_mask.sum())}, non-pain={int(nonpain_mask.sum())}); skipping.")
         return
     
-    stats_cfg = config.get("behavior_analysis", {}).get("statistics", {})
+    stats_cfg = config.get("behavior_analysis.statistics", {})
     n_perm = n_perm if n_perm > 0 else int(stats_cfg.get("n_permutations", 100))
     alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
     bands = get_bands_for_tfr(max_freq_available=get_tfr_config(config)[1], config=config)
