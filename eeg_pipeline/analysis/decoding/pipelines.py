@@ -47,6 +47,7 @@ def _get_decoding_config(config: Any) -> Dict[str, Any]:
         "imputer_strategy": preprocessing.get("imputer_strategy", "median"),
         "power_transformer_method": preprocessing.get("power_transformer_method", "yeo-johnson"),
         "power_transformer_standardize": preprocessing.get("power_transformer_standardize", True),
+        "variance_threshold_grid": preprocessing.get("variance_threshold_grid", [0.0, 0.01, 0.1]),
         # ElasticNet
         "elasticnet_max_iter": elasticnet.get("max_iter", 10000),
         "elasticnet_tol": elasticnet.get("tol", 1e-4),
@@ -56,6 +57,9 @@ def _get_decoding_config(config: Any) -> Dict[str, Any]:
         # Random Forest
         "rf_n_estimators": rf.get("n_estimators", 100),
         "rf_bootstrap": rf.get("bootstrap", True),
+        "rf_max_depth_grid": rf.get("max_depth_grid", [5, 10, 20, None]),
+        "rf_min_samples_split_grid": rf.get("min_samples_split_grid", [2, 5, 10]),
+        "rf_min_samples_leaf_grid": rf.get("min_samples_leaf_grid", [1, 2, 4]),
     }
 
 
@@ -143,19 +147,27 @@ def create_rf_pipeline(
 
 
 def build_elasticnet_param_grid(config: Any = None) -> dict:
-    """Build hyperparameter grid for ElasticNet."""
+    """Build hyperparameter grid for ElasticNet including variance threshold."""
     cfg = _get_decoding_config(config)
 
-    return {
+    param_grid = {
         "regressor__regressor__alpha": cfg["elasticnet_alpha_grid"],
         "regressor__regressor__l1_ratio": cfg["elasticnet_l1_ratio_grid"],
     }
+    
+    # Add variance threshold grid if available
+    if "variance_threshold_grid" in cfg:
+        param_grid["var__threshold"] = cfg["variance_threshold_grid"]
+    
+    return param_grid
 
 
 def build_rf_param_grid(config: Any = None) -> dict:
     """Build hyperparameter grid for Random Forest."""
+    cfg = _get_decoding_config(config)
+    
     return {
-        "rf__max_depth": [5, 10, 20, None],
-        "rf__min_samples_split": [2, 5, 10],
-        "rf__min_samples_leaf": [1, 2, 4],
+        "rf__max_depth": cfg["rf_max_depth_grid"],
+        "rf__min_samples_split": cfg["rf_min_samples_split_grid"],
+        "rf__min_samples_leaf": cfg["rf_min_samples_leaf_grid"],
     }

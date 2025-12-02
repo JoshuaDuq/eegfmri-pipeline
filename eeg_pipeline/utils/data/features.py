@@ -39,6 +39,8 @@ def align_feature_dataframes(
     logger: logging.Logger,
     config,
     initial_trial_count: Optional[int] = None,
+    critical_features: Optional[List[str]] = None,
+    extra_blocks: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -154,12 +156,16 @@ def align_feature_dataframes(
     register_feature_block("microstates", _is_valid_df(ms_df), block_registry, before_lengths)
     register_feature_block("aperiodic", _is_valid_df(aper_df), block_registry, before_lengths)
     register_feature_block("target", y, block_registry, before_lengths)
+    
+    if extra_blocks:
+        for block_name, block_df in extra_blocks.items():
+            register_feature_block(block_name, _is_valid_df(block_df), block_registry, before_lengths)
 
     if not block_registry:
         logger.warning("No features extracted; skipping save")
         return None, None, None, None, None, None, None
 
-    validate_feature_block_lengths(before_lengths, logger)
+    validate_feature_block_lengths(before_lengths, logger, critical_features=critical_features)
 
     if aligned_events is not None and len(aligned_events) > 0:
         validate_trial_alignment_manifest(aligned_events, features_dir, logger)
@@ -210,17 +216,28 @@ def align_feature_dataframes(
         "target": _get_length(y_aligned),
     }
 
+    extra_aligned: Dict[str, Optional[pd.DataFrame]] = {}
+    if extra_blocks:
+        for block_name in extra_blocks.keys():
+            block = block_registry.get(block_name)
+            if block is not None:
+                block = block.reset_index(drop=True)
+            extra_aligned[block_name] = block
+            after_lengths[block_name] = _get_length(block)
+
     retention_stats = {
         "initial_trial_count": initial_trial_count,
         "before_alignment": before_lengths,
         "after_alignment": after_lengths,
+        "mask": drop_mask,
+        "extra_aligned": extra_aligned,
     }
 
     return pow_df_aligned, baseline_df_aligned, conn_df_aligned, ms_df_aligned, aper_df_aligned, y_aligned, retention_stats
 
 
-# Plateau features are now in eeg_pipeline.analysis.features.plateau
-from eeg_pipeline.analysis.features.plateau import build_plateau_features
+# Plateau features are now in eeg_pipeline.utils.data.manipulation
+from .manipulation import build_plateau_features
 
 
 def save_all_features(
@@ -240,20 +257,34 @@ def save_all_features(
     pac_trials_df: Optional[pd.DataFrame],
     pac_time_df: Optional[pd.DataFrame],
     aper_qc: Optional[Dict[str, Any]],
-    plateau_df: pd.DataFrame,
-    plateau_cols: List[str],
+    plateau_df: Optional[pd.DataFrame],
+    plateau_cols: Optional[List[str]],
     y: pd.Series,
     features_dir: Path,
     logger: logging.Logger,
     config,
+    # New features
+    comp_df: Optional[pd.DataFrame] = None,
+    comp_cols: List[str] = None,
+    dynamics_df: Optional[pd.DataFrame] = None,
+    dynamics_cols: List[str] = None,
+    cfc_df: Optional[pd.DataFrame] = None,
+    cfc_cols: List[str] = None,
 ) -> pd.DataFrame:
     """Save all aligned feature blocks to disk and return combined features."""
-    direct_blocks = [pow_df]
-    if len(pow_cols) == len(pow_df.columns):
-        pow_df.columns = pow_cols
-    else:
-        logger.warning("Power column mismatch: %d names vs %d columns. Using DataFrame names.", len(pow_cols), len(pow_df.columns))
-    direct_cols = list(pow_df.columns)
+    import json
+    from eeg_pipeline.utils.analysis.features.metadata import generate_feature_sidecar
+
+    direct_blocks = []
+    direct_cols = []
+    
+    if pow_df is not None:
+        direct_blocks.append(pow_df)
+        if len(pow_cols) == len(pow_df.columns):
+            pow_df.columns = pow_cols
+        else:
+            logger.warning("Power column mismatch: %d names vs %d columns. Using DataFrame names.", len(pow_cols), len(pow_df.columns))
+        direct_cols.extend(list(pow_df.columns))
 
     if not baseline_df.empty:
         direct_blocks.append(baseline_df)
@@ -284,12 +315,18 @@ def save_all_features(
             else:
                 logger.warning("Aperiodic column mismatch: %d names vs %d columns. Using DataFrame names.", len(aper_cols), len(aper_df.columns))
         direct_cols.extend(aper_df.columns)
+        aper_path = features_dir / "features_aperiodic.tsv"
+        logger.info("Saving aperiodic features: %s", aper_path)
+        write_tsv(aper_df, aper_path)
 
     if itpc_df is not None and not itpc_df.empty:
         if itpc_cols and len(itpc_cols) == len(itpc_df.columns):
             itpc_df.columns = itpc_cols
+        # Add ITPC to direct blocks so it's included in features_all.tsv
+        direct_blocks.append(itpc_df)
+        direct_cols.extend(itpc_df.columns)
         itpc_path = features_dir / "features_itpc.tsv"
-        logger.info("Saving ITPC features (channel x band x bin): %s", itpc_path)
+        logger.info("Saving ITPC features (channel x band x segment): %s", itpc_path)
         write_tsv(itpc_df, itpc_path)
 
     if pac_df is not None and not pac_df.empty:
@@ -304,6 +341,41 @@ def save_all_features(
         pac_time_path = features_dir / "features_pac_time.tsv"
         logger.info("Saving PAC time-resolved values: %s", pac_time_path)
         write_tsv(pac_time_df, pac_time_path)
+
+    # Complexity features
+    if comp_df is not None and not comp_df.empty:
+        direct_blocks.append(comp_df)
+        if comp_cols:
+            if len(comp_cols) == len(comp_df.columns):
+                comp_df.columns = comp_cols
+        direct_cols.extend(comp_df.columns)
+        comp_path = features_dir / "features_complexity.tsv"
+        logger.info("Saving complexity features: %s", comp_path)
+        write_tsv(comp_df, comp_path)
+
+    # Dynamics features
+    if dynamics_df is not None and not dynamics_df.empty:
+        # direct_blocks.append(dynamics_df)  # Assuming trial-wise
+        # Wait, extract_precomputed_features returns trial-wise? Yes.
+        direct_blocks.append(dynamics_df)
+        if dynamics_cols:
+            if len(dynamics_cols) == len(dynamics_df.columns):
+                dynamics_df.columns = dynamics_cols
+        direct_cols.extend(dynamics_df.columns)
+        dyn_path = features_dir / "features_dynamics.tsv"
+        logger.info("Saving dynamics features: %s", dyn_path)
+        write_tsv(dynamics_df, dyn_path)
+
+    # CFC features
+    if cfc_df is not None and not cfc_df.empty:
+        direct_blocks.append(cfc_df)
+        if cfc_cols:
+            if len(cfc_cols) == len(cfc_df.columns):
+                cfc_df.columns = cfc_cols
+        direct_cols.extend(cfc_df.columns)
+        cfc_path = features_dir / "features_cfc.tsv"
+        logger.info("Saving CFC features: %s", cfc_path)
+        write_tsv(cfc_df, cfc_path)
 
     if aper_qc:
         try:
@@ -326,20 +398,25 @@ def save_all_features(
         except (OSError, IOError, TypeError, KeyError) as exc:
             logger.warning("Failed to save aperiodic QC npz: %s", exc)
 
-    direct_df = pd.concat(direct_blocks, axis=1)
+    if direct_blocks:
+        direct_df = pd.concat(direct_blocks, axis=1)
+    else:
+        direct_df = pd.DataFrame()
+        logger.info("No direct feature blocks to concatenate (connectivity/precomputed-only run)")
 
-    eeg_direct_path = features_dir / "features_eeg_direct.tsv"
-    eeg_direct_cols_path = features_dir / "features_eeg_direct_columns.tsv"
-    logger.info("Saving direct EEG features: %s", eeg_direct_path)
-    write_tsv(direct_df, eeg_direct_path)
-    write_tsv(pd.Series(direct_cols, name="feature").to_frame(), eeg_direct_cols_path)
+    if not direct_df.empty:
+        eeg_direct_path = features_dir / "features_eeg_direct.tsv"
+        eeg_direct_cols_path = features_dir / "features_eeg_direct_columns.tsv"
+        logger.info("Saving direct EEG features: %s", eeg_direct_path)
+        write_tsv(direct_df, eeg_direct_path)
+        write_tsv(pd.Series(direct_cols, name="feature").to_frame(), eeg_direct_cols_path)
 
-    if not plateau_df.empty:
+    if plateau_df is not None and not plateau_df.empty:
         plateau_path = features_dir / "features_eeg_plateau.tsv"
         plateau_cols_path = features_dir / "features_eeg_plateau_columns.tsv"
         logger.info("Saving plateau-averaged EEG features: %s", plateau_path)
         write_tsv(plateau_df, plateau_path)
-        write_tsv(pd.Series(plateau_cols, name="feature").to_frame(), plateau_cols_path)
+        write_tsv(pd.Series(plateau_cols or [], name="feature").to_frame(), plateau_cols_path)
 
     if conn_df is not None and not conn_df.empty:
         if conn_cols:
@@ -352,17 +429,40 @@ def save_all_features(
         logger.info("Saving connectivity features: %s", conn_path)
         write_tsv(conn_df, conn_path)
 
-    blocks = [direct_df]
-    cols_all = list(direct_df.columns)
+    blocks = []
+    cols_all = []
+    if not direct_df.empty:
+        blocks.append(direct_df)
+        cols_all.extend(direct_df.columns)
     if conn_df is not None and not conn_df.empty:
         blocks.append(conn_df)
         cols_all.extend(conn_df.columns)
 
-    combined_df = pd.concat(blocks, axis=1)
+    if blocks:
+        combined_df = pd.concat(blocks, axis=1)
+    else:
+        combined_df = pd.DataFrame()
+        logger.warning("No feature blocks available for combined output")
 
     combined_path = features_dir / "features_all.tsv"
     logger.info("Saving combined features: %s", combined_path)
     write_tsv(combined_df, combined_path)
+
+    # --- Generate JSON Sidecar ---
+    try:
+        subject_str = features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
+        sidecar = generate_feature_sidecar(
+            feature_df_columns=list(combined_df.columns),
+            description="Combined EEG Features including Power, Connectivity, Microstates, and Aperiodic metrics.",
+            subject=subject_str,
+            additional_metadata={"CreationTime": pd.Timestamp.now().isoformat()}
+        )
+        sidecar_path = features_dir / "features.json"
+        with open(sidecar_path, 'w') as f:
+            json.dump(sidecar, f, indent=2)
+        logger.info("Saved feature metadata sidecar: %s", sidecar_path)
+    except Exception as e:
+        logger.warning(f"Failed to generate feature sidecar: {e}")
 
     y_path = features_dir / "target_vas_ratings.tsv"
     rating_columns = config.get("event_columns.rating", ["vas_rating"])
@@ -624,6 +724,19 @@ def save_trial_alignment_manifest(
 
     write_tsv(manifest, manifest_path)
     logger.info("Saved trial alignment manifest with %d trials to %s", len(manifest), manifest_path)
+
+
+def iterate_feature_columns(
+    feature_df: pd.DataFrame,
+    col_prefix: Optional[str] = None,
+) -> Tuple[List[str], pd.DataFrame]:
+    """Get filtered feature columns by prefix."""
+    if feature_df is None or feature_df.empty:
+        return [], pd.DataFrame()
+    if col_prefix:
+        cols = [c for c in feature_df.columns if str(c).startswith(col_prefix)]
+        return (cols, feature_df[cols]) if cols else ([], pd.DataFrame())
+    return list(feature_df.columns), feature_df
 
 
 def save_dropped_trials_log(

@@ -63,9 +63,8 @@ def compute_subject_band_correlation_matrix(
 
 def fisher_z_transform_mean(r_values: np.ndarray, config: Optional[Any] = None) -> float:
     """Compute Fisher z-transformed mean of correlations."""
-    constants = get_statistics_constants(config)
-    clip_min = constants.get("fisher_z_clip_min", -0.9999)
-    clip_max = constants.get("fisher_z_clip_max", 0.9999)
+    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
+    clip_min, clip_max = get_fisher_z_clip_values(config)
     r_clipped = np.clip(r_values, clip_min, clip_max)
     z_scores = np.arctanh(r_clipped)
     return float(np.tanh(np.mean(z_scores)))
@@ -113,8 +112,11 @@ def compute_inter_band_correlation_statistics(
     per_subject_correlations: List[np.ndarray],
     band_names: List[str],
     ci_multiplier: float = 1.96,
+    config: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Compute inter-band correlation statistics across subjects."""
+    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
+    clip_min, clip_max = get_fisher_z_clip_values(config)
     rows = []
     n_bands = len(band_names)
     
@@ -125,7 +127,7 @@ def compute_inter_band_correlation_statistics(
             if r_vals.size == 0:
                 continue
             
-            z_scores = np.arctanh(np.clip(r_vals, -0.9999, 0.9999))
+            z_scores = np.arctanh(np.clip(r_vals, clip_min, clip_max))
             z_mean = float(np.mean(z_scores))
             n = len(z_scores)
             se = float(np.std(z_scores, ddof=1) / np.sqrt(n)) if n > 1 else np.nan
@@ -272,6 +274,7 @@ def compute_partial_residuals_stats(
         ci = bootstrap_corr_ci(x_res, y_res, method_code, n_boot=bootstrap_ci, rng=rng)
     
     return float(r_resid), float(p_resid), n_partial, ci
+
 
 
 

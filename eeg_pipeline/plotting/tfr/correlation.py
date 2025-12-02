@@ -27,6 +27,7 @@ from ...utils.data.loading import (
 from ...utils.analysis.stats import (
     fdr_bh_values as _fdr_bh_values,
 )
+from ...utils.config.loader import get_fisher_z_clip_values, get_config_value
 from ..config import get_plot_config
 from ..core.utils import log
 from .channels import _save_fig
@@ -87,7 +88,7 @@ def _annotate_tf_correlation_figure(fig: plt.Figure, config, alpha: float) -> No
         alpha: Significance threshold (FDR alpha)
     """
     try:
-        default_baseline = [-0.5, -0.01]
+        default_baseline = config.get("plotting.tfr.default_baseline_window", [-0.5, -0.01]) if config else [-0.5, -0.01]
         bwin = config.get("time_frequency_analysis.baseline_window", default_baseline) if config else default_baseline
         corr_txt = f"FDR BH α={alpha}"
         text = (
@@ -170,13 +171,15 @@ def group_tf_correlation(
         Tuple of (output_tsv_path, figure_paths) or None if skipped
     """
     if alpha is None:
-        plot_cfg_alpha = get_plot_config(config) if config else None
+        from ...utils.config.loader import ensure_config
+        config = ensure_config(config)
+        plot_cfg_alpha = get_plot_config(config)
         if plot_cfg_alpha:
             tfr_config_alpha = plot_cfg_alpha.plot_type_configs.get("tfr", {})
-            default_significance_alpha = tfr_config_alpha.get("default_significance_alpha", 0.05)
+            default_significance_alpha = tfr_config_alpha.get("default_significance_alpha", get_config_value(config, "statistics.sig_alpha", 0.05))
         else:
-            default_significance_alpha = 0.05
-        alpha = config.get("statistics.sig_alpha", default_significance_alpha) if config else default_significance_alpha
+            default_significance_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+        alpha = default_significance_alpha
     if min_subjects is None:
         min_subjects = int(config.get("analysis.min_subjects_for_topomaps", 3)) if config else 3
     
@@ -222,7 +225,8 @@ def group_tf_correlation(
         pivot = pivot.reindex(index=f_common, columns=t_common)
         mats.append(pivot.to_numpy())
 
-    Z = np.stack([np.arctanh(np.clip(m, -0.999999, 0.999999)) for m in mats], axis=0)
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    Z = np.stack([np.arctanh(np.clip(m, clip_min, clip_max)) for m in mats], axis=0)
     z_mean = np.nanmean(Z, axis=0)
     z_sd = np.nanstd(Z, axis=0, ddof=1)
     n = np.sum(np.isfinite(Z), axis=0)

@@ -8,13 +8,17 @@ Correlation computation, partial correlations, and Fisher aggregation.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 from .base import get_ci_level, get_config_value
+from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
+
+from pathlib import Path
 
 
 def get_correlation_method(use_spearman: bool) -> str:
@@ -52,9 +56,214 @@ def compute_correlation(
     return float(r), float(p)
 
 
-def fisher_z(r: float) -> float:
-    """Fisher z-transform of correlation coefficient."""
-    r = np.clip(r, -0.9999, 0.9999)
+@dataclass
+class CorrelationRecord:
+    """Standard record for a single correlation result."""
+    identifier: str
+    band: str
+    correlation: float
+    p_value: float
+    n_valid: int
+    method: str
+    ci_low: float = np.nan
+    ci_high: float = np.nan
+    p_perm: float = np.nan
+    q_value: float = np.nan
+    r_partial: float = np.nan
+    p_partial: float = np.nan
+    n_partial: int = 0
+    p_partial_perm: float = np.nan
+    r_partial_temp: float = np.nan
+    p_partial_temp: float = np.nan
+    n_partial_temp: int = 0
+    p_partial_temp_perm: float = np.nan
+    identifier_type: str = "channel"
+    analysis_type: str = "power"
+    extra_fields: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_stats(cls, identifier: str, band: str, stats: Any, n_valid: int,
+                   method: str, identifier_type: str = "channel",
+                   analysis_type: str = "power", **extra) -> "CorrelationRecord":
+        """Create from CorrelationStats object."""
+        def safe_float(v): return float(v) if np.isfinite(v) else np.nan
+        return cls(
+            identifier=identifier, band=band,
+            correlation=safe_float(stats.correlation),
+            p_value=safe_float(stats.p_value), n_valid=n_valid, method=method,
+            ci_low=safe_float(stats.ci_low), ci_high=safe_float(stats.ci_high),
+            p_perm=safe_float(stats.p_perm),
+            r_partial=safe_float(stats.r_partial),
+            p_partial=safe_float(stats.p_partial),
+            n_partial=int(getattr(stats, 'n_partial', 0)),
+            p_partial_perm=safe_float(stats.p_partial_perm),
+            r_partial_temp=safe_float(stats.r_partial_temp),
+            p_partial_temp=safe_float(stats.p_partial_temp),
+            n_partial_temp=int(getattr(stats, 'n_partial_temp', 0)),
+            p_partial_temp_perm=safe_float(stats.p_partial_temp_perm),
+            identifier_type=identifier_type, analysis_type=analysis_type,
+            extra_fields=extra,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dict for DataFrame."""
+        d = {
+            self.identifier_type: self.identifier, "band": self.band,
+            "r": self.correlation, "p": self.p_value, "n": self.n_valid,
+            "method": self.method, "ci_low": self.ci_low, "ci_high": self.ci_high,
+            "p_perm": self.p_perm, "q": self.q_value, "analysis": self.analysis_type,
+        }
+        if np.isfinite(self.r_partial): d["r_partial"] = self.r_partial
+        if np.isfinite(self.p_partial): d["p_partial"] = self.p_partial
+        if self.n_partial > 0: d["n_partial"] = self.n_partial
+        if np.isfinite(self.r_partial_temp): d["r_partial_given_temp"] = self.r_partial_temp
+        if np.isfinite(self.p_partial_temp): d["p_partial_given_temp"] = self.p_partial_temp
+        d.update(self.extra_fields)
+        return d
+
+    @property
+    def is_significant(self) -> bool:
+        return self.p_value < 0.05
+
+
+def build_correlation_record(identifier: str, band: str, r: float, p: float, n: int,
+                              method: str = "spearman", *, ci_low: float = np.nan,
+                              ci_high: float = np.nan, p_perm: float = np.nan,
+                              r_partial: float = np.nan, p_partial: float = np.nan,
+                              n_partial: int = 0, p_partial_perm: float = np.nan,
+                              r_partial_temp: float = np.nan, p_partial_temp: float = np.nan,
+                              n_partial_temp: int = 0, p_partial_temp_perm: float = np.nan,
+                              identifier_type: str = "channel", analysis_type: str = "power",
+                              **extra) -> CorrelationRecord:
+    """Build standardized correlation record."""
+    def sf(v): return float(v) if np.isfinite(v) else np.nan
+    return CorrelationRecord(
+        identifier=identifier, band=band, correlation=sf(r), p_value=sf(p),
+        n_valid=int(n), method=method, ci_low=sf(ci_low), ci_high=sf(ci_high),
+        p_perm=sf(p_perm), r_partial=sf(r_partial), p_partial=sf(p_partial),
+        n_partial=int(n_partial), p_partial_perm=sf(p_partial_perm),
+        r_partial_temp=sf(r_partial_temp), p_partial_temp=sf(p_partial_temp),
+        n_partial_temp=int(n_partial_temp), p_partial_temp_perm=sf(p_partial_temp_perm),
+        identifier_type=identifier_type, analysis_type=analysis_type, extra_fields=extra,
+    )
+
+
+def correlate_features_loop(
+    feature_df: pd.DataFrame,
+    target_values: Union[pd.Series, np.ndarray],
+    method: str = "spearman",
+    min_samples: Optional[int] = None,
+    logger: Optional[Any] = None,
+    condition_mask: Optional[np.ndarray] = None,
+    identifier_type: str = "feature",
+    analysis_type: str = "unknown",
+    feature_classifier: Optional[Any] = None,
+    robust_method: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[List[CorrelationRecord], pd.DataFrame]:
+    """Correlate all features with target values."""
+    if min_samples is None:
+        from .base import ensure_config
+        config = ensure_config(config)
+        min_samples = int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+    
+    if feature_df.empty:
+        return [], pd.DataFrame()
+
+    target_arr = target_values.values if isinstance(target_values, pd.Series) else np.asarray(target_values)
+    if condition_mask is not None:
+        if hasattr(condition_mask, 'dtype') and condition_mask.dtype == bool:
+            idx = np.where(condition_mask)[0]
+        else:
+            idx = condition_mask
+        feature_df = feature_df.iloc[idx]
+        target_arr = target_arr[condition_mask]
+
+    n_f, n_t = len(feature_df), len(target_arr)
+    if n_f != n_t:
+        n_use = min(n_f, n_t)
+        feature_df, target_arr = feature_df.iloc[:n_use], target_arr[:n_use]
+
+    records = []
+    for col in feature_df.columns:
+        vals = pd.to_numeric(feature_df[col], errors="coerce").to_numpy()
+        if feature_classifier:
+            ft, subtype, meta = feature_classifier(col)
+            ident = meta.get("identifier", col)
+            band = meta.get("band", "N/A")
+        else:
+            ft, ident, band = analysis_type, col, "N/A"
+
+        r, p, n = safe_correlation(vals, target_arr, method, min_samples, robust_method=robust_method)
+        if np.isfinite(r):
+            records.append(build_correlation_record(
+                ident, band, r, p, n, method, identifier_type=identifier_type, analysis_type=ft
+            ))
+
+    if logger:
+        logger.info(f"  {len(records)} features, {sum(1 for r in records if r.is_significant)} sig")
+    return records, pd.DataFrame([r.to_dict() for r in records]) if records else pd.DataFrame()
+
+
+def safe_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    method: str = "spearman",
+    min_samples: Optional[int] = None,
+    robust_method: Optional[str] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float, int]:
+    """
+    Compute correlation with validation. Returns (r, p, n_valid).
+    
+    If robust_method is specified, uses robust correlation.
+    Options: "percentage_bend", "winsorized", "shepherd"
+    """
+    if min_samples is None:
+        from .base import ensure_config
+        config = ensure_config(config)
+        min_samples = int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+    
+    x = np.asarray(x).ravel()
+    y = np.asarray(y).ravel()
+
+    if x.size != y.size:
+        return np.nan, np.nan, 0
+
+    mask = np.isfinite(x) & np.isfinite(y)
+    n_valid = int(mask.sum())
+    
+    if n_valid < min_samples:
+        return np.nan, np.nan, n_valid
+
+    x_c, y_c = x[mask], y[mask]
+    
+    if np.std(x_c) == 0 or np.std(y_c) == 0:
+        return np.nan, np.nan, n_valid
+
+    try:
+        if robust_method:
+            r, p = compute_robust_correlation(x_c, y_c, method=robust_method)
+        elif method == "spearman":
+            r, p = stats.spearmanr(x_c, y_c, nan_policy="omit")
+        else:
+            r, p = stats.pearsonr(x_c, y_c)
+            
+        return (float(r) if np.isfinite(r) else np.nan,
+                float(p) if np.isfinite(p) else np.nan, n_valid)
+    except Exception:
+        return np.nan, np.nan, n_valid
+
+
+def fisher_z(r: float, config: Optional[Any] = None) -> float:
+    """Fisher z-transform of correlation coefficient.
+    
+    Args:
+        r: Correlation coefficient to transform
+        config: Optional config object for clipping bounds (defaults to config values)
+    """
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    r = np.clip(r, clip_min, clip_max)
     return 0.5 * np.log((1 + r) / (1 - r))
 
 
@@ -74,7 +283,7 @@ def fisher_ci(
     if n < 4 or not np.isfinite(r):
         return np.nan, np.nan
 
-    z = fisher_z(r)
+    z = fisher_z(r, config)
     se = 1.0 / np.sqrt(n - 3)
     z_crit = stats.norm.ppf((1 + ci_level) / 2)
 
@@ -101,7 +310,7 @@ def fisher_aggregate(
         return np.nan, np.nan, np.nan, 0
 
     rs_v = rs_arr[valid]
-    zs = np.array([fisher_z(r) for r in rs_v])
+    zs = np.array([fisher_z(r, config) for r in rs_v])
 
     z_mean = np.mean(zs)
     r_mean = inverse_fisher_z(z_mean)
@@ -440,7 +649,10 @@ def _percentage_bend_correlation(x: np.ndarray, y: np.ndarray, beta: float = 0.2
     r, _ = stats.pearsonr(x_pb, y_pb)
     
     # Approximate p-value using t-distribution
-    t = r * np.sqrt((n - 2) / (1 - r**2 + 1e-12))
+    from .base import ensure_config
+    config = ensure_config(None)
+    epsilon = float(get_config_value(config, "statistics.constants.correlation_epsilon", 1e-12))
+    t = r * np.sqrt((n - 2) / (1 - r**2 + epsilon))
     p = 2 * (1 - stats.t.cdf(np.abs(t), df=n - 2))
     
     return float(r), float(p)
@@ -663,4 +875,24 @@ def _spearman_brown(r: float) -> float:
     if not np.isfinite(r) or abs(r) >= 1:
         return np.nan
     return (2 * r) / (1 + abs(r))
+
+
+def save_correlation_results(
+    df: pd.DataFrame,
+    output_path: Union[str, Path],
+    sep: str = "\t",
+    index: bool = False,
+) -> None:
+    """Save correlation results to file."""
+    if df.empty:
+        return
+    
+    # Ensure directory exists
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Format floats
+    float_format = "%.6f"
+    
+    df.to_csv(path, sep=sep, index=index, float_format=float_format)
 

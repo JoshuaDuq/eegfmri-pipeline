@@ -65,6 +65,7 @@ from .cluster import (
     cluster_mask_from_clusters,
     resolve_cluster_n_jobs,
     cluster_test_two_sample,
+    cluster_test_epochs,
 )
 
 from .cluster_2d import (
@@ -133,6 +134,9 @@ from .formatting import (
     format_fdr_ann,
     format_correlation_stats_text,
     _safe_float,
+    _compute_fisher_z_ci,
+    _compute_bf10_correlation,
+    _interpret_bayes_factor,
 )
 
 from .aggregation import (
@@ -232,15 +236,66 @@ from .partial import (
     prepare_aligned_data,
 )
 
-from .group import (
-    compute_group_corr_stats,
-    compute_channel_rating_correlations,
-    compute_temp_correlations_for_roi,
-    compute_temp_correlation_for_roi_pair,
-    compute_correlation_for_time_freq_bin,
-    compute_correlation_from_vectors,
-    cluster_test_epochs,
-    _get_ttest_pvalue,
+
+from .meta_analysis import (
+    MetaAnalysisResult,
+    fisher_z as meta_fisher_z,
+    inverse_fisher_z as meta_inverse_fisher_z,
+    correlation_se,
+    compute_heterogeneity,
+    fixed_effects_meta,
+    random_effects_meta,
+    leave_one_out_meta,
+    permutation_null_distribution,
+    bootstrap_correlation_ci,
+    ensure_bootstrap_ci,
+    bayes_factor_correlation,
+    equivalence_test_correlation,
+)
+
+from .reliability import (
+    compute_icc,
+    compute_split_half_reliability,
+    compute_feature_reliability,
+    hierarchical_fdr,
+    compute_hierarchical_fdr_summary,
+    cross_validated_prediction,
+    compute_calibration_curve,
+    compute_required_n_for_correlation,
+    assess_statistical_power,
+    is_underpowered,
+)
+
+from .validation import (
+    AssumptionCheckResult,
+    ValidationReport,
+    check_normality_shapiro,
+    check_normality_dagostino,
+    compute_qq_data,
+    check_variance_levene,
+    check_variance_bartlett,
+    validate_permutation_distribution,
+    check_randomization_balance,
+    compute_fwer_bonferroni,
+    compute_fwer_holm,
+    compute_fwer_sidak,
+    validate_fwer_control,
+    validate_behavioral_contrast,
+)
+
+from .visualization import (
+    compute_permutation_distribution_data,
+    compute_cluster_mass_histogram_data,
+    compute_pp_plot_data,
+    compute_qq_plot_data,
+    compute_effect_size_distribution_data,
+    compute_bootstrap_distribution_data,
+    compute_raincloud_data,
+    compute_spaghetti_plot_data,
+    compute_correction_comparison_data,
+    create_provenance_block,
+    format_provenance_text,
+    save_stats_for_plot,
 )
 
 # Aliases
@@ -413,12 +468,57 @@ __all__ = [
     "compute_partial_correlation_with_covariates",
     "compute_partial_correlations",
     "compute_partial_correlation_for_roi_pair",
-    # Group
-    "compute_group_corr_stats",
-    "compute_channel_rating_correlations",
-    "compute_temp_correlations_for_roi",
-    "compute_temp_correlation_for_roi_pair",
-    "compute_correlation_for_time_freq_bin",
-    "compute_correlation_from_vectors",
-    "_get_ttest_pvalue",
+    # Meta-analysis
+    "MetaAnalysisResult",
+    "meta_fisher_z",
+    "meta_inverse_fisher_z",
+    "correlation_se",
+    "compute_heterogeneity",
+    "fixed_effects_meta",
+    "random_effects_meta",
+    "leave_one_out_meta",
+    "permutation_null_distribution",
+    "bootstrap_correlation_ci",
+    "ensure_bootstrap_ci",
+    "bayes_factor_correlation",
+    "equivalence_test_correlation",
+    # Validation
+    "AssumptionCheckResult",
+    "ValidationReport",
+    "check_normality_shapiro",
+    "check_normality_dagostino",
+    "compute_qq_data",
+    "check_variance_levene",
+    "check_variance_bartlett",
+    "validate_permutation_distribution",
+    "check_randomization_balance",
+    "compute_fwer_bonferroni",
+    "compute_fwer_holm",
+    "compute_fwer_sidak",
+    "validate_fwer_control",
+    "validate_behavioral_contrast",
+    # Visualization diagnostics
+    "compute_permutation_distribution_data",
+    "compute_cluster_mass_histogram_data",
+    "compute_pp_plot_data",
+    "compute_qq_plot_data",
+    "compute_effect_size_distribution_data",
+    "compute_bootstrap_distribution_data",
+    "compute_raincloud_data",
+    "compute_spaghetti_plot_data",
+    "compute_correction_comparison_data",
+    "create_provenance_block",
+    "format_provenance_text",
+    "save_stats_for_plot",
+    # Reliability and validity
+    "compute_icc",
+    "compute_split_half_reliability",
+    "compute_feature_reliability",
+    "hierarchical_fdr",
+    "compute_hierarchical_fdr_summary",
+    "cross_validated_prediction",
+    "compute_calibration_curve",
+    "compute_required_n_for_correlation",
+    "assess_statistical_power",
+    "is_underpowered",
 ]

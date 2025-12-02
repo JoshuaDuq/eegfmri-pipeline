@@ -531,4 +531,3 @@ def plot_regression_residual_diagnostics(
     )
     plt.close(fig)
     logger.info(f"Residual diagnostics saved to {output_path}")
-

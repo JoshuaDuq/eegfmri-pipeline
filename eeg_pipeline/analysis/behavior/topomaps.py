@@ -17,10 +17,10 @@ from eeg_pipeline.utils.analysis.stats import (
     compute_cluster_masses_1d, compute_topomap_permutation_masses, compute_cluster_pvalues_1d,
     bh_adjust as _bh_adjust, _safe_float,
 )
-from eeg_pipeline.analysis.behavior.correlations import AnalysisConfig
+from eeg_pipeline.context.behavior import AnalysisConfig
 
 if TYPE_CHECKING:
-    from eeg_pipeline.analysis.behavior.core import BehaviorContext
+    from eeg_pipeline.context.behavior import BehaviorContext
 
 
 def _process_band(band: str, pow_df: pd.DataFrame, temp: pd.Series, cfg: AnalysisConfig,
@@ -55,7 +55,9 @@ def _process_band(band: str, pow_df: pd.DataFrame, temp: pd.Series, cfg: Analysi
     c_labels, c_pvals, c_sig = np.zeros(n_ch, dtype=int), np.full(n_ch, np.nan), np.zeros(n_ch, dtype=bool)
     
     eeg_names = [eeg_info["info"]['ch_names'][i] for i in eeg_info["picks"]]
-    ch_map = {i: eeg_names.index(n) for i, n in enumerate(ch_names) if n in eeg_names}
+    # Use dict for O(1) lookup instead of O(n) list.index()
+    eeg_name_to_idx = {name: idx for idx, name in enumerate(eeg_names)}
+    ch_map = {i: eeg_name_to_idx[n] for i, n in enumerate(ch_names) if n in eeg_name_to_idx}
     
     if len(ch_map) >= cluster_params["min_channels_for_adjacency"]:
         labels, masses = compute_cluster_masses_1d(corrs, pvals, cluster_params["cluster_alpha"],

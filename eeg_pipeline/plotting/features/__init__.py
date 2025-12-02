@@ -5,7 +5,6 @@ Power, microstates, connectivity, phase, and aperiodic feature visualizations.
 """
 
 from .power import (
-    plot_power_distributions,
     plot_channel_power_heatmap,
     plot_power_time_courses,
     plot_power_spectral_density,
@@ -13,27 +12,33 @@ from .power import (
     plot_power_time_course_by_temperature,
     plot_trial_power_variability,
     plot_inter_band_spatial_power_correlation,
+    plot_power_variability_comprehensive,
+    plot_cross_frequency_power_correlation,
+    plot_feature_stability_heatmap,
+    plot_temporal_autocorrelation,
+    plot_feature_redundancy_matrix,
+    plot_band_power_topomaps,
+    plot_spectral_slope_topomap,
+    plot_feature_importance_ranking,
 )
-from .power_group import (
-    plot_group_power_plots,
-    plot_group_band_power_time_courses,
+from .dynamics import (
+    plot_autocorrelation_decay,
 )
 from .microstates import (
     plot_microstate_templates,
     plot_microstate_templates_by_pain,
     plot_microstate_templates_by_temperature,
     plot_microstate_coverage_by_pain,
-    plot_microstate_pain_correlation_heatmap,
     plot_microstate_temporal_evolution,
     plot_microstate_gfp_colored_by_state,
     plot_microstate_gfp_by_temporal_bins,
     plot_microstate_transition_network,
     plot_microstate_duration_distributions,
-    plot_group_microstate_template_stability,
-    plot_group_microstate_transition_summary,
+)
+from .phase import (
+    plot_pac_summary,
 )
 from .connectivity import (
-    plot_connectivity_circle_for_band,
     plot_sliding_connectivity_trajectories,
     plot_sliding_degree_heatmap,
     plot_edge_significance_circle_from_stats,
@@ -51,28 +56,18 @@ from .connectivity import (
 from .phase import (
     plot_itpc_heatmap,
     plot_itpc_topomaps,
-    plot_itpc_behavior_scatter,
     plot_pac_comodulograms,
     plot_pac_time_ribbons,
-    plot_pac_behavior_scatter,
 )
 from .aperiodic import (
-    plot_aperiodic_r2_histogram,
     plot_aperiodic_residual_spectra,
     plot_aperiodic_run_trajectories,
     plot_aperiodic_topomaps,
     plot_aperiodic_vs_pain,
 )
-from .cfc import (
-    plot_pac_comodulogram,
-    plot_pac_comodulogram_grid,
-    plot_mi_pac_topomaps,
-    plot_phase_phase_coupling_matrix,
-    plot_cfc_behavior_correlation,
-)
+
 from .dynamics import (
     plot_autocorrelation_decay,
-    plot_dfa_scaling,
     plot_mse_complexity_curves,
     plot_neural_timescale_comparison,
     plot_dynamics_behavior_grid,
@@ -85,14 +80,34 @@ from .quality import (
     plot_reliability_summary,
     plot_quality_summary_dashboard,
 )
-from .viz import (
-    visualize_subject_features,
+from .complexity import (
+    plot_hjorth_by_band,
+    plot_complexity_by_condition,
+)
+from .erds import (
+    plot_erds_temporal_evolution,
+    plot_erds_latency_distribution,
+    plot_erds_erd_ers_separation,
+    plot_erds_global_summary,
+)
+from .burst import (
+    plot_burst_duration_distribution,
+    plot_burst_amplitude_distribution,
+    plot_burst_summary_by_band,
+    plot_gfp_by_band,
+    plot_power_fano_factor,
+    plot_power_logratio,
+    plot_gamma_ramp_bursts,
+    plot_dynamics_by_condition,
+)
+from .visualize import (
+    visualize_features,
     visualize_features_for_subjects,
+    FeaturePlotContext,
 )
 
 __all__ = [
     # Power plotting
-    "plot_power_distributions",
     "plot_channel_power_heatmap",
     "plot_power_time_courses",
     "plot_power_spectral_density",
@@ -100,24 +115,27 @@ __all__ = [
     "plot_power_time_course_by_temperature",
     "plot_trial_power_variability",
     "plot_inter_band_spatial_power_correlation",
-    # Group power plotting
-    "plot_group_power_plots",
-    "plot_group_band_power_time_courses",
+    "plot_power_variability_comprehensive",
+    "plot_cross_frequency_power_correlation",
+    "plot_feature_stability_heatmap",
+    "plot_temporal_autocorrelation",
+    "plot_feature_redundancy_matrix",
+    "plot_band_power_topomaps",
+    "plot_spectral_slope_topomap",
+    "plot_feature_importance_ranking",
     # Microstate plotting
     "plot_microstate_templates",
     "plot_microstate_templates_by_pain",
     "plot_microstate_templates_by_temperature",
     "plot_microstate_coverage_by_pain",
-    "plot_microstate_pain_correlation_heatmap",
     "plot_microstate_temporal_evolution",
     "plot_microstate_gfp_colored_by_state",
     "plot_microstate_gfp_by_temporal_bins",
     "plot_microstate_transition_network",
     "plot_microstate_duration_distributions",
-    "plot_group_microstate_template_stability",
-    "plot_group_microstate_transition_summary",
+    # PAC plotting
+    "plot_pac_summary",
     # Connectivity plotting
-    "plot_connectivity_circle_for_band",
     "plot_sliding_connectivity_trajectories",
     "plot_sliding_degree_heatmap",
     "plot_edge_significance_circle_from_stats",
@@ -134,28 +152,21 @@ __all__ = [
     # Phase plotting
     "plot_itpc_heatmap",
     "plot_itpc_topomaps",
-    "plot_itpc_behavior_scatter",
     "plot_pac_comodulograms",
     "plot_pac_time_ribbons",
-    "plot_pac_behavior_scatter",
     # Aperiodic plotting
-    "plot_aperiodic_r2_histogram",
     "plot_aperiodic_residual_spectra",
     "plot_aperiodic_run_trajectories",
     "plot_aperiodic_topomaps",
     "plot_aperiodic_vs_pain",
     # Visualization orchestration
-    "visualize_subject_features",
     "visualize_features_for_subjects",
+    "visualize_features",
+    "FeaturePlotContext",
     # CFC visualizations
-    "plot_pac_comodulogram",
-    "plot_pac_comodulogram_grid",
-    "plot_mi_pac_topomaps",
-    "plot_phase_phase_coupling_matrix",
-    "plot_cfc_behavior_correlation",
+
     # Dynamics visualizations
     "plot_autocorrelation_decay",
-    "plot_dfa_scaling",
     "plot_mse_complexity_curves",
     "plot_neural_timescale_comparison",
     "plot_dynamics_behavior_grid",
@@ -166,4 +177,21 @@ __all__ = [
     "plot_missing_data_matrix",
     "plot_reliability_summary",
     "plot_quality_summary_dashboard",
+    # Complexity visualizations (new)
+    "plot_hjorth_by_band",
+    "plot_complexity_by_condition",
+    # ERDS visualizations
+    "plot_erds_temporal_evolution",
+    "plot_erds_latency_distribution",
+    "plot_erds_erd_ers_separation",
+    "plot_erds_global_summary",
+    # Burst/Dynamics visualizations (new)
+    "plot_burst_duration_distribution",
+    "plot_burst_amplitude_distribution",
+    "plot_burst_summary_by_band",
+    "plot_gfp_by_band",
+    "plot_power_fano_factor",
+    "plot_power_logratio",
+    "plot_gamma_ramp_bursts",
+    "plot_dynamics_by_condition",
 ]

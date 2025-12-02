@@ -26,6 +26,7 @@ from ...utils.io.general import (
 )
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
+from .utils import get_condition_colors
 
 
 def _extract_aperiodic_data(
@@ -50,11 +51,17 @@ def _extract_aperiodic_data(
     df_masked = features_df if mask is None else features_df[mask]
     
     for ch_name in info.ch_names:
-        col = f"aper_{metric}_{ch_name}"
+        # Try new naming convention first: aperiodic_plateau_broadband_ch_{ch}_{metric}
+        col_new = f"aperiodic_plateau_broadband_ch_{ch_name}_{metric}"
+        # Fallback to old naming: aper_{metric}_{ch}
+        col_old = f"aper_{metric}_{ch_name}"
+        
+        col = col_new if col_new in df_masked.columns else col_old
         if col in df_masked.columns:
             val = df_masked[col].mean()
-            data.append(val)
-            found_chs.append(ch_name)
+            if not np.isnan(val):
+                data.append(val)
+                found_chs.append(ch_name)
             
     return np.array(data), found_chs
 
@@ -83,48 +90,6 @@ def _load_aperiodic_qc(subject: str, config: Any, logger: logging.Logger):
     except Exception as exc:
         log_if_present(logger, "warning", f"Failed to load aperiodic QC npz: {exc}")
         return None
-
-
-def plot_aperiodic_r2_histogram(
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Plot histogram of aperiodic fit R² values.
-    
-    Args:
-        subject: Subject identifier
-        save_dir: Directory to save plot
-        logger: Logger instance
-        config: Configuration object
-    """
-    qc = _load_aperiodic_qc(subject, config, logger)
-    if qc is None or "r2" not in qc:
-        return
-
-    r2 = qc["r2"]
-    r2_flat = r2[np.isfinite(r2)]
-    if r2_flat.size == 0:
-        return
-
-    plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.hist(r2_flat, bins=30, color="steelblue", alpha=0.8, edgecolor="black")
-    median = np.nanmedian(r2_flat)
-    low_thresh = 0.8
-    frac_low = np.mean(r2_flat < low_thresh)
-    ax.axvline(median, color="red", linestyle="--", label=f"Median={median:.2f}")
-    ax.axvline(low_thresh, color="orange", linestyle=":", label=f"Threshold={low_thresh}")
-    ax.set_xlabel("Aperiodic fit R²")
-    ax.set_ylabel("Count")
-    ax.set_title(f"Aperiodic R² distribution (sub-{subject})\n{frac_low*100:.1f}% below {low_thresh}")
-    ax.legend()
-    output = save_dir / f"sub-{subject}_aperiodic_r2_hist"
-    save_fig(fig, output, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved aperiodic R² histogram")
 
 
 def plot_aperiodic_residual_spectra(
@@ -326,7 +291,14 @@ def plot_aperiodic_topomaps(
                 p_vals = []
                 min_samples = int(config.get("statistics.min_samples_per_channel", 5))
                 for ch in common_chs:
-                    series = pd.to_numeric(features_df[f"aper_{metric}_{ch}"], errors="coerce")
+                    # Try new naming first
+                    col_new = f"aperiodic_plateau_broadband_ch_{ch}_{metric}"
+                    col_old = f"aper_{metric}_{ch}"
+                    col = col_new if col_new in features_df.columns else col_old
+                    if col not in features_df.columns:
+                        p_vals.append(np.nan)
+                        continue
+                    series = pd.to_numeric(features_df[col], errors="coerce")
                     if run_col:
                         runs = events_df[run_col]
                         vals_pain = series[pain_mask].groupby(runs[pain_mask]).mean().dropna()
@@ -346,10 +318,16 @@ def plot_aperiodic_topomaps(
 
                 per_metric_pvals[metric] = p_vals
                 all_pvals.extend([p for p in p_vals if np.isfinite(p)])
+                
+                def get_col(ch, metric):
+                    c_new = f"aperiodic_plateau_broadband_ch_{ch}_{metric}"
+                    c_old = f"aper_{metric}_{ch}"
+                    return c_new if c_new in features_df.columns else c_old
+                
                 per_metric_common[metric]["pair_data"] = {
                     "common_chs": common_chs,
-                    "data_nonpain": np.array([features_df.loc[nonpain_mask, f"aper_{metric}_{ch}"].mean() for ch in common_chs]),
-                    "data_pain": np.array([features_df.loc[pain_mask, f"aper_{metric}_{ch}"].mean() for ch in common_chs]),
+                    "data_nonpain": np.array([features_df.loc[nonpain_mask, get_col(ch, metric)].mean() for ch in common_chs]),
+                    "data_pain": np.array([features_df.loc[pain_mask, get_col(ch, metric)].mean() for ch in common_chs]),
                 }
 
     per_metric_qvals: Dict[str, np.ndarray] = {}
@@ -366,7 +344,8 @@ def plot_aperiodic_topomaps(
                     q_vals.append(np.nan)
             per_metric_qvals[metric] = np.array(q_vals, dtype=float)
 
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
+    from eeg_pipeline.utils.config.loader import get_config_value
+    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
     
     metrics = list(per_metric_common.keys())
     if not metrics:
@@ -575,7 +554,7 @@ def plot_aperiodic_vs_pain(
 
     r_val, _ = stats.spearmanr(ratings_agg, slopes_agg)
 
-    n_perm = int(config.get("plotting.plots.aperiodic.n_perm", 1000))
+    n_perm = int(get_config_value(config, "plotting.plots.aperiodic.n_perm", get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)))
     rng = np.random.default_rng(int(config.get("project.random_state", 42)))
     observed = abs(r_val)
     perm_ge = 0
@@ -645,3 +624,169 @@ def plot_aperiodic_vs_pain(
     plt.close(fig)
     log_if_present(logger, "info", "Saved aperiodic slope vs pain scatter")
 
+
+def plot_aperiodic_by_condition(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> None:
+    """Compare aperiodic slope and offset between conditions using box+strip.
+    
+    Statistical improvements:
+    - Shows both raw p-value and FDR-corrected q-value
+    - Includes bootstrap 95% CI for mean difference
+    - Reports Cohen's d effect size
+    - Footer shows total tests and correction method
+    """
+    if features_df is None or features_df.empty or events_df is None:
+        return
+
+    from eeg_pipeline.utils.analysis.events import extract_pain_mask
+    from eeg_pipeline.plotting.features.utils import (
+        compute_condition_stats,
+        apply_fdr_correction,
+        format_stats_annotation,
+        format_footer_annotation,
+    )
+    
+    pain_mask = extract_pain_mask(events_df, config)
+    if pain_mask is None:
+        return
+    
+    condition_colors = get_condition_colors(config)
+    plot_cfg = get_plot_config(config)
+    
+    slope_cols = [c for c in features_df.columns if c.startswith("aper_slope_")]
+    offset_cols = [c for c in features_df.columns if c.startswith("aper_offset_")]
+    
+    if not slope_cols and not offset_cols:
+        return
+    
+    all_stats = []
+    all_pvals = []
+    metric_data = {}
+    
+    for metric, cols in [("Slope", slope_cols), ("Offset", offset_cols)]:
+        if not cols:
+            metric_data[metric] = None
+            continue
+        
+        mean_vals = features_df[cols].mean(axis=1)
+        vals_pain = mean_vals[pain_mask].dropna().values
+        vals_nonpain = mean_vals[~pain_mask].dropna().values
+        
+        if len(vals_pain) >= 3 and len(vals_nonpain) >= 3:
+            stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
+            all_stats.append(stats_result)
+            all_pvals.append(stats_result["p_raw"])
+            metric_data[metric] = {
+                "vals_nonpain": vals_nonpain,
+                "vals_pain": vals_pain,
+                "stats": stats_result,
+                "stats_idx": len(all_stats) - 1,
+            }
+        else:
+            metric_data[metric] = {
+                "vals_nonpain": vals_nonpain,
+                "vals_pain": vals_pain,
+                "stats": None,
+            }
+    
+    if all_pvals:
+        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
+        if valid_pvals:
+            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
+            q_idx = 0
+            for i, p in enumerate(all_pvals):
+                if np.isfinite(p):
+                    all_stats[i]["q_fdr"] = qvals[q_idx]
+                    all_stats[i]["fdr_significant"] = rejected[q_idx]
+                    q_idx += 1
+                else:
+                    all_stats[i]["q_fdr"] = np.nan
+                    all_stats[i]["fdr_significant"] = False
+            n_significant = int(np.sum(rejected))
+        else:
+            n_significant = 0
+    else:
+        n_significant = 0
+    
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    
+    for ax, metric in zip(axes, ["Slope", "Offset"]):
+        data = metric_data.get(metric)
+        
+        if data is None:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            continue
+        
+        vals_nonpain = data["vals_nonpain"]
+        vals_pain = data["vals_pain"]
+        
+        if len(vals_pain) < 3 or len(vals_nonpain) < 3:
+            ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center", transform=ax.transAxes)
+            continue
+        
+        bp = ax.boxplot([vals_nonpain, vals_pain], positions=[0, 1], widths=0.4, patch_artist=True)
+        bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+        bp["boxes"][0].set_alpha(0.6)
+        bp["boxes"][1].set_facecolor(condition_colors["pain"])
+        bp["boxes"][1].set_alpha(0.6)
+        
+        ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
+                  vals_nonpain, c=condition_colors["nonpain"], alpha=0.4, s=12)
+        ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
+                  vals_pain, c=condition_colors["pain"], alpha=0.4, s=12)
+        
+        if data.get("stats") is not None:
+            s = data["stats"]
+            annotation = format_stats_annotation(
+                p_raw=s["p_raw"],
+                q_fdr=s.get("q_fdr"),
+                cohens_d=s["cohens_d"],
+                ci_low=s["ci_low"],
+                ci_high=s["ci_high"],
+                compact=True,
+            )
+            text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+            ax.text(0.5, 0.98, annotation, ha="center", va="top", 
+                   transform=ax.transAxes, fontsize=7, color=text_color,
+                   bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
+        
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["NP", "P"])
+        ax.set_ylabel(f"Mean {metric}")
+        ax.set_title(f"Aperiodic {metric}", fontweight="bold")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    
+    n_pain = int(pain_mask.sum())
+    n_nonpain = int((~pain_mask).sum())
+    fig.suptitle(f"Aperiodic Features by Condition (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P", 
+                fontsize=12, fontweight="bold", y=1.02)
+    
+    n_tests = len([p for p in all_pvals if np.isfinite(p)])
+    footer = format_footer_annotation(
+        n_tests=n_tests,
+        correction_method="FDR-BH",
+        alpha=0.05,
+        n_significant=n_significant,
+        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
+    )
+    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+    ensure_dir(save_dir)
+    save_fig(
+        fig,
+        save_dir / f"sub-{subject}_aperiodic_by_condition",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches
+    )
+    plt.close(fig)
+    log_if_present(logger, "info", f"Saved aperiodic by condition ({n_significant}/{n_tests} FDR significant)")

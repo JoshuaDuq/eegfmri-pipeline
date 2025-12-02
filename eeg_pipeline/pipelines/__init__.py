@@ -1,65 +1,81 @@
-"""
-Pipeline orchestration modules.
+"""Pipeline orchestration modules.
 
-This package provides high-level pipeline functions for running
+This package provides high-level pipeline classes for running
 complete analysis workflows on EEG data.
 
-Pipelines:
-- behavior: Brain-behavior correlation analysis
-- features: Feature extraction from epochs
-- decoding: Machine learning decoding
-- erp: Event-related potential analysis
+Pipeline Classes:
+- FeaturePipeline: Feature extraction (TFR-based and precomputed)
+- BehaviorPipeline: EEG-behavior correlation analysis
+- DecodingPipeline: ML-based prediction (LOSO, time-generalization)
+- ErpPipeline: Event-related potential analysis
+
+Preprocessing Functions:
+- run_raw_to_bids: Convert raw BrainVision to BIDS
+- run_merge_behavior: Merge behavioral data into events
 """
 
-from eeg_pipeline.pipelines.behavior import (
-    process_subject as process_behavior_subject,
-    compute_behavior_correlations_for_subjects,
-    create_context as create_behavior_context,
-    run_computations as run_behavior_computations,
-    apply_fdr_and_export,
-    initialize_analysis_context,
-    ALL_COMPUTATIONS as BEHAVIOR_COMPUTATIONS,
+from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.preprocessing import (
+    run_raw_to_bids,
+    run_merge_behavior,
 )
-
-from eeg_pipeline.pipelines.features import (
-    extract_all_features,
-    process_subject as process_features_subject,
-    extract_features_for_subjects,
-)
-
 from eeg_pipeline.pipelines.erp import (
+    ErpPipeline,
     get_erp_config,
     load_and_prepare_epochs,
     extract_erp_stats,
     extract_erp_stats_for_subjects,
 )
-
+from eeg_pipeline.pipelines.features import (
+    FeaturePipeline,
+    extract_all_features,
+    extract_precomputed_features,
+    extract_fmri_prediction_features,
+    extract_features_for_subjects,
+    process_subject,
+)
+from eeg_pipeline.pipelines.behavior import (
+    BehaviorPipeline,
+    BehaviorPipelineConfig,
+    BehaviorPipelineResults,
+    run_pipeline as run_behavior_pipeline,
+    run_pipeline_batch as run_behavior_pipeline_batch,
+    compute_behavior_correlations_for_subjects,
+)
 from eeg_pipeline.pipelines.decoding import (
-    nested_loso_predictions,
+    DecodingPipeline,
     run_regression_decoding,
     run_time_generalization,
 )
 
 __all__ = [
-    # Behavior
-    "process_behavior_subject",
-    "compute_behavior_correlations_for_subjects",
-    "create_behavior_context",
-    "run_behavior_computations",
-    "apply_fdr_and_export",
-    "initialize_analysis_context",
-    "BEHAVIOR_COMPUTATIONS",
-    # Features
-    "extract_all_features",
-    "process_features_subject",
-    "extract_features_for_subjects",
+    # Base
+    "PipelineBase",
+    # Preprocessing
+    "run_raw_to_bids",
+    "run_merge_behavior",
     # ERP
+    "ErpPipeline",
     "get_erp_config",
     "load_and_prepare_epochs",
     "extract_erp_stats",
     "extract_erp_stats_for_subjects",
+    # Features
+    "FeaturePipeline",
+    "extract_all_features",
+    "extract_precomputed_features",
+    "extract_fmri_prediction_features",
+    "extract_features_for_subjects",
+    "process_subject",
+    # Behavior
+    "BehaviorPipeline",
+    "BehaviorPipelineConfig",
+    "BehaviorPipelineResults",
+    "run_behavior_pipeline",
+    "run_behavior_pipeline_batch",
+    "compute_behavior_correlations_for_subjects",
     # Decoding
-    "nested_loso_predictions",
+    "DecodingPipeline",
     "run_regression_decoding",
     "run_time_generalization",
 ]

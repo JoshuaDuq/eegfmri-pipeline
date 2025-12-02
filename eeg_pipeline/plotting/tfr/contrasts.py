@@ -27,6 +27,7 @@ from ...utils.io.general import (
     get_viz_params,
     plot_topomap_on_ax,
 )
+from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     create_tfr_subset,
@@ -504,9 +505,9 @@ def _compute_cluster_significance_from_combined(
     
     sig_mask_full, cluster_p_min, cluster_k, cluster_mass = _cluster_test_two_sample_arrays(
         group_a_subjects, group_b_subjects, info_common,
-        alpha=config.get("statistics.sig_alpha", 0.05) if config else 0.05,
+        alpha=get_config_value(ensure_config(config), "statistics.sig_alpha", 0.05),
         paired=False,
-        n_permutations=config.get("statistics.cluster_n_perm", 100) if config else 100,
+        n_permutations=get_config_value(ensure_config(config), "statistics.cluster_n_perm", 100),
         config=config
     )
     
@@ -717,16 +718,12 @@ def contrast_maxmin_temperature(
         vabs_pn = robust_sym_vlim([max_data, min_data])
         diff_abs = robust_sym_vlim(diff_data) if np.isfinite(diff_data).any() else 0.0
 
-        max_pct = logratio_to_pct(max_mu)
-        _plot_topomap_with_label(
-            axes[r, 0], max_data, tfr_max.info, -vabs_pn, +vabs_pn,
-            f"%Δ={max_pct:+.1f}%", config
+        _plot_topomap_with_percentage_label(
+            axes[r, 0], max_data, tfr_max.info, -vabs_pn, +vabs_pn, config
         )
 
-        min_pct = logratio_to_pct(min_mu)
-        _plot_topomap_with_label(
-            axes[r, 1], min_data, tfr_min.info, -vabs_pn, +vabs_pn,
-            f"%Δ={min_pct:+.1f}%", config
+        _plot_topomap_with_percentage_label(
+            axes[r, 1], min_data, tfr_min.info, -vabs_pn, +vabs_pn, config
         )
 
         axes[r, 2].axis("off")

@@ -179,7 +179,7 @@ def cluster_test_two_sample(
     if alpha is None:
         alpha = get_fdr_alpha(config)
     if n_permutations is None:
-        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", 100))
+        n_permutations = int(get_config_value(config, "statistics.cluster_n_perm", get_config_value(config, "statistics.cluster_n_perm", 100)))
 
     adjacency, eeg_picks, info_eeg = get_eeg_adjacency(info, restrict_picks=restrict_picks)
     if eeg_picks is None:
@@ -219,4 +219,79 @@ def cluster_test_two_sample(
     mass = float(np.nansum(np.abs(t_stat[best_idx]))) if best_idx.size > 0 else 0.0
 
     return sig_full, p, size, mass
+
+
+def cluster_test_epochs(
+    tfr_epochs: "mne.time_frequency.EpochsTFR",
+    group_a_mask: np.ndarray,
+    group_b_mask: np.ndarray,
+    fmin: float,
+    fmax: float,
+    tmin: float,
+    tmax: float,
+    paired: bool = False,
+    alpha: Optional[float] = None,
+    n_permutations: Optional[int] = None,
+    restrict_picks: Optional[np.ndarray] = None,
+    n_jobs: Optional[int] = None,
+    config: Any = None,
+    logger: Optional[logging.Logger] = None,
+) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
+    """Cluster test on EpochsTFR data.
+    
+    Args:
+        tfr_epochs: MNE EpochsTFR object
+        group_a_mask: Boolean mask for first group
+        group_b_mask: Boolean mask for second group
+        fmin: Minimum frequency
+        fmax: Maximum frequency
+        tmin: Minimum time
+        tmax: Maximum time
+        paired: Whether to use paired test
+        alpha: Significance threshold
+        n_permutations: Number of permutations
+        restrict_picks: Optional channel restriction
+        n_jobs: Number of parallel jobs
+        config: Configuration object
+        logger: Optional logger
+    
+    Returns:
+        Tuple of (significance_mask, cluster_p_min, cluster_k, cluster_mass)
+    """
+    import mne
+    
+    info = tfr_epochs.info
+    eeg_picks = mne.pick_types(info, eeg=True, exclude=[])
+    if len(eeg_picks) == 0:
+        if logger:
+            logger.warning("No EEG channels found")
+        return None, None, None, None
+    
+    freqs = np.asarray(tfr_epochs.freqs)
+    times = np.asarray(tfr_epochs.times)
+    f_mask = (freqs >= fmin) & (freqs <= fmax)
+    t_mask = (times >= tmin) & (times < tmax)
+    
+    if f_mask.sum() == 0 or t_mask.sum() == 0:
+        return None, None, None, None
+    
+    data = np.asarray(tfr_epochs.data)[:, :, f_mask, :][:, :, :, t_mask]
+    ch_power = data.mean(axis=(2, 3))
+    
+    if ch_power.shape[1] != len(info["ch_names"]):
+        if logger:
+            logger.error("Channel dimension mismatch")
+        return None, None, None, None
+    
+    group_a = ch_power[np.asarray(group_a_mask, dtype=bool), :]
+    group_b = ch_power[np.asarray(group_b_mask, dtype=bool), :]
+    
+    if group_a.shape[0] < 2 or group_b.shape[0] < 2:
+        return None, None, None, None
+    
+    return cluster_test_two_sample(
+        group_a, group_b, info, alpha=alpha, paired=paired,
+        n_permutations=n_permutations, restrict_picks=restrict_picks,
+        n_jobs=n_jobs, config=config
+    )
 

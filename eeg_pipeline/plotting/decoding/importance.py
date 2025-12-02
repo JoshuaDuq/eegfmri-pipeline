@@ -21,20 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 ###################################################################
-# Helper Functions
+# Helper Functions (imported from helpers module)
 ###################################################################
 
-def _despine(ax) -> None:
-    sns.despine(ax=ax, trim=True)
-
-
-def _add_zero_reference_line(ax, plot_cfg, linewidth: Optional[float] = None, 
-                             linestyle: str = '--', alpha: Optional[float] = None) -> None:
-    if linewidth is None:
-        linewidth = plot_cfg.style.line.width_thin
-    if alpha is None:
-        alpha = plot_cfg.style.line.alpha_zero
-    ax.axhline(0, color=plot_cfg.style.colors.black, linewidth=linewidth, linestyle=linestyle, alpha=alpha)
+from eeg_pipeline.plotting.decoding.helpers import (
+    _despine,
+    _add_zero_reference_line,
+)
 
 
 ###################################################################

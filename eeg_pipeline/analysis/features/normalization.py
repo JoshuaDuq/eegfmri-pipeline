@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.analysis.features.core import EPSILON_STD
+from eeg_pipeline.utils.config.loader import get_feature_constant
 
 
 NormMethod = Literal["zscore", "robust", "minmax", "rank", "log", "none"]
@@ -29,7 +29,7 @@ def zscore_normalize(
     values: np.ndarray,
     *,
     reference_values: Optional[np.ndarray] = None,
-    epsilon: float = EPSILON_STD,
+    epsilon: Optional[float] = None,
 ) -> np.ndarray:
     """
     Z-score normalization: (x - mean) / std.
@@ -56,6 +56,14 @@ def zscore_normalize(
     
     mean = np.mean(ref_finite)
     std = np.std(ref_finite, ddof=1)
+    if epsilon is None:
+        # Get epsilon from config if available
+        try:
+            from eeg_pipeline.utils.config.loader import load_settings, get_config_value
+            config = load_settings()
+            epsilon = get_config_value(config, "feature_engineering.constants.epsilon_normalization", 1e-12)
+        except Exception:
+            epsilon = 1e-12  # Fallback default epsilon
     std = max(std, epsilon)
     
     return (values - mean) / std
@@ -65,7 +73,7 @@ def robust_normalize(
     values: np.ndarray,
     *,
     reference_values: Optional[np.ndarray] = None,
-    epsilon: float = EPSILON_STD,
+    epsilon: Optional[float] = None,
 ) -> np.ndarray:
     """
     Robust normalization using median and MAD.
@@ -94,6 +102,8 @@ def robust_normalize(
     
     median = np.median(ref_finite)
     mad = stats.median_abs_deviation(ref_finite, scale="normal")
+    if epsilon is None:
+        epsilon = 1e-12  # Default epsilon
     mad = max(mad, epsilon)
     
     return (values - median) / mad
@@ -180,7 +190,7 @@ def rank_normalize(
 def log_normalize(
     values: np.ndarray,
     *,
-    epsilon: float = EPSILON_STD,
+    epsilon: Optional[float] = None,
     base: float = np.e,
 ) -> np.ndarray:
     """
@@ -200,6 +210,8 @@ def log_normalize(
     np.ndarray
         Log-transformed values
     """
+    if epsilon is None:
+        epsilon = 1e-12  # Default epsilon
     safe_values = np.maximum(values, epsilon)
     if base == np.e:
         return np.log(safe_values)
@@ -418,13 +430,13 @@ class FeatureNormalizer:
                 self.params_[col] = {
                     "valid": True,
                     "mean": float(np.mean(finite)),
-                    "std": float(max(np.std(finite, ddof=1), EPSILON_STD)),
+                    "std": float(max(np.std(finite, ddof=1), 1e-12)),  # Default epsilon_std
                 }
             elif self.method == "robust":
                 self.params_[col] = {
                     "valid": True,
                     "median": float(np.median(finite)),
-                    "mad": float(max(stats.median_abs_deviation(finite, scale="normal"), EPSILON_STD)),
+                    "mad": float(max(stats.median_abs_deviation(finite, scale="normal"), 1e-12)),  # Default epsilon_std
                 }
             elif self.method == "minmax":
                 self.params_[col] = {

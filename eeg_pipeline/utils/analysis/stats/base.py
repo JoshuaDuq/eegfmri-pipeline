@@ -85,7 +85,7 @@ def get_statistics_constants(config=None):
 
 def get_fdr_alpha(config: Optional[Any] = None) -> float:
     """Get FDR alpha from config."""
-    return float(get_config_value(config, "statistics.fdr_alpha", 0.05))
+    return float(get_config_value(config, "statistics.fdr_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)))
 
 
 def get_ci_level(config: Optional[Any] = None) -> float:

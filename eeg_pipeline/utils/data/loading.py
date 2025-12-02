@@ -22,437 +22,22 @@ EEGConfig = ConfigDict
 
 
 ###################################################################
-# Event / Epoch Alignment
+# Imports from submodule refactor
 ###################################################################
 
-def _align_by_selection(events_df: pd.DataFrame, epochs: mne.Epochs, logger: logging.Logger) -> Optional[pd.DataFrame]:
-    if not hasattr(epochs, "selection") or epochs.selection is None:
-        return None
-    
-    sel_arr = np.asarray(epochs.selection, dtype=int)
-    min_sel = int(np.min(sel_arr))
-    max_sel = int(np.max(sel_arr))
-    
-    if min_sel < 0:
-        raise ValueError(f"Invalid epochs.selection: contains negative indices (min={min_sel})")
-    
-    # Check if events_df was already filtered to match epochs length
-    # This happens when events file was saved after epoch rejection
-    if len(events_df) == len(epochs) and max_sel >= len(events_df):
-        logger.info(
-            f"Events already filtered to match epochs ({len(events_df)} rows). "
-            f"Using direct row alignment instead of selection indices."
-        )
-        return events_df.reset_index(drop=True)
-    
-    if max_sel >= len(events_df):
-        raise ValueError(f"epochs.selection out of bounds: max={max_sel}, events_len={len(events_df)}")
-    
-    if len(sel_arr) != len(epochs):
-        raise ValueError(
-            f"epochs.selection length mismatch: selection={len(sel_arr)}, epochs={len(epochs)}"
-        )
-    
-    aligned = events_df.iloc[sel_arr].reset_index(drop=True)
-    logger.info(f"Successfully aligned using epochs.selection ({len(sel_arr)} epochs)")
-    return aligned
-
-
-def _align_by_sample(events_df: pd.DataFrame, epochs: mne.Epochs, logger: logging.Logger) -> Optional[pd.DataFrame]:
-    if "sample" not in events_df.columns:
-        return None
-    
-    if not hasattr(epochs, "events") or epochs.events is None:
-        return None
-    
-    epoch_samples = epochs.events[:, 0]
-    events_indexed = events_df.set_index("sample")
-    aligned = events_indexed.reindex(epoch_samples)
-    
-    if len(aligned) != len(epochs):
-        return None
-    
-    if aligned.isna().all(axis=1).any():
-        nan_count = aligned.isna().all(axis=1).sum()
-        raise ValueError(f"Sample-based alignment failed: {nan_count} NaN rows")
-    
-    aligned_reset = aligned.reset_index()
-    logger.info(f"Successfully aligned using sample column ({len(aligned)} epochs)")
-    return aligned_reset
-
-
-def align_events_to_epochs(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[pd.DataFrame]:
-    logger = logger or logging.getLogger(__name__)
-
-    if events_df is None or len(events_df) == 0:
-        logger.debug("No events DataFrame provided")
-        return None
-
-    if len(epochs) == 0:
-        logger.debug("No epochs provided")
-        return pd.DataFrame()
-
-    logger.info(f"Attempting alignment: {len(events_df)} events to {len(epochs)} epochs")
-
-    aligned = _align_by_selection(events_df, epochs, logger)
-    if aligned is not None:
-        return aligned
-    
-    aligned = _align_by_sample(events_df, epochs, logger)
-    if aligned is not None:
-        return aligned
-
-    error_msg = (
-        f"Cannot guarantee events-to-epochs alignment for reliable analysis. "
-        f"Events DataFrame ({len(events_df)} rows) cannot be reliably aligned to "
-        f"epochs ({len(epochs)} epochs). Explicit alignment is required:\n"
-        f"1. Ensure epochs.selection is properly set during epoching, OR\n"
-        f"2. Include 'sample' column in events with matching sample indices, OR\n"
-        f"3. Use trial_alignment.manifest.tsv created by 03_feature_extraction.py and align via load_epochs_for_analysis."
-    )
-    logger.error(error_msg)
-    raise ValueError(error_msg)
-
-
-def trim_behavioral_to_events_strict(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    logger = logger or logging.getLogger(__name__)
-
-    matched = _match_behavioral_to_events(behavioral_df, events_df, logger)
-    if matched is not None:
-        return matched
-
-    behavioral_len = len(behavioral_df)
-    events_len = len(events_df)
-
-    if behavioral_len == events_len:
-        logger.warning(
-            "Lengths match but could not verify alignment by identifiers. "
-            "Using row-order alignment (assumes perfect sequential match)."
-        )
-        return behavioral_df.reset_index(drop=True)
-
-    if behavioral_len > events_len:
-        error_msg = (
-            f"Behavioral data longer than events ({behavioral_len} > {events_len}). "
-            f"Could not match by identifiers. In strict mode, cannot safely trim "
-            f"behavioral data as extra rows may not be at the end, which would cause "
-            f"misalignment between behavioral ratings and EEG trials. "
-            f"Please verify data alignment or use a non-strict trimming function."
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    error_msg = (
-        f"Behavioral data ({behavioral_len} rows) is shorter than events "
-        f"({events_len} rows). This indicates missing behavioral trials "
-        f"that cannot be safely recovered. Check data collection/preprocessing."
-    )
-    logger.critical(f"CRITICAL: Behavioral data shorter than events. Behavioral: {behavioral_len}, Events: {events_len}. This indicates missing behavioral trials.")
-    raise ValueError(error_msg)
-
-
-def _match_by_trial_identifiers(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: logging.Logger,
-) -> Optional[pd.DataFrame]:
-    trial_cols_behavioral = ["trial", "trial_number", "trial_index", "Trial", "TrialNumber"]
-    trial_cols_events = ["trial", "trial_number", "trial_index"]
-    
-    behavioral_trial_col = _pick_first_column(behavioral_df, trial_cols_behavioral)
-    events_trial_col = _pick_first_column(events_df, trial_cols_events)
-    
-    if not behavioral_trial_col or not events_trial_col:
-        return None
-    
-    try:
-        beh_trials = pd.to_numeric(behavioral_df[behavioral_trial_col], errors="coerce")
-        ev_trials = pd.to_numeric(events_df[events_trial_col], errors="coerce")
-        
-        if beh_trials.notna().sum() == 0 or ev_trials.notna().sum() == 0:
-            return None
-        
-        ev_trial_set = set(ev_trials[ev_trials.notna()].astype(int))
-        matched_indices = []
-        for beh_idx, beh_trial in enumerate(beh_trials):
-            if pd.isna(beh_trial):
-                continue
-            beh_trial_int = int(beh_trial)
-            if beh_trial_int in ev_trial_set:
-                ev_matches = events_df.index[ev_trials == beh_trial_int].tolist()
-                if ev_matches:
-                    matched_indices.append(beh_idx)
-        
-        if len(matched_indices) == len(events_df):
-            matched = behavioral_df.iloc[matched_indices].reset_index(drop=True)
-            logger.info(
-                f"Matched {len(matched)} behavioral trials to events using trial identifiers "
-                f"({behavioral_trial_col} <-> {events_trial_col})"
-            )
-            return matched
-    except Exception as e:
-        logger.debug(f"Trial-based matching failed: {e}")
-    
-    return None
-
-
-def _match_by_temperature(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: logging.Logger,
-) -> Optional[pd.DataFrame]:
-    temp_cols_behavioral = ["stimulus_temp", "temperature", "thermode_temperature", "Temp", "Temperature"]
-    temp_cols_events = ["stimulus_temp", "temperature", "thermode_temperature"]
-    onset_cols_events = ["onset", "Onset"]
-    
-    behavioral_temp_col = _pick_first_column(behavioral_df, temp_cols_behavioral)
-    events_temp_col = _pick_first_column(events_df, temp_cols_events)
-    events_onset_col = _pick_first_column(events_df, onset_cols_events)
-    
-    if not behavioral_temp_col or not events_temp_col or not events_onset_col:
-        return None
-    
-    try:
-        beh_temp = pd.to_numeric(behavioral_df[behavioral_temp_col], errors="coerce")
-        ev_temp = pd.to_numeric(events_df[events_temp_col], errors="coerce")
-        ev_onset = pd.to_numeric(events_df[events_onset_col], errors="coerce")
-        
-        valid_mask = beh_temp.notna() & ev_temp.notna() & ev_onset.notna()
-        if valid_mask.sum() == 0:
-            return None
-        
-        matched_indices = []
-        ev_temp_onset_pairs = list(zip(ev_temp[valid_mask], ev_onset[valid_mask]))
-        
-        for beh_idx, beh_t in enumerate(beh_temp):
-            if pd.isna(beh_t):
-                continue
-            matches = [
-                i for i, (ev_t, _) in enumerate(ev_temp_onset_pairs)
-                if abs(float(ev_t) - float(beh_t)) < 0.1
-            ]
-            if matches:
-                matched_indices.append(beh_idx)
-        
-        if len(matched_indices) == len(events_df):
-            matched = behavioral_df.iloc[matched_indices].reset_index(drop=True)
-            logger.info(
-                f"Matched {len(matched)} behavioral trials to events using temperature "
-                f"({behavioral_temp_col} <-> {events_temp_col})"
-            )
-            return matched
-    except Exception as e:
-        logger.debug(f"Temperature-based matching failed: {e}")
-    
-    return None
-
-
-def _match_behavioral_to_events(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[pd.DataFrame]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    matched = _match_by_trial_identifiers(behavioral_df, events_df, logger)
-    if matched is not None:
-        return matched
-    
-    return _match_by_temperature(behavioral_df, events_df, logger)
-
-
-def align_events_to_epochs_strict(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[pd.DataFrame]:
-    return align_events_to_epochs(events_df, epochs, logger=logger)
-
-
-def align_events_with_policy(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    config,
-    logger: Optional[logging.Logger] = None,
-) -> Optional[pd.DataFrame]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    if config is None:
-        raise ValueError("config is required for align_events_with_policy")
-
-    allow_trim = bool(config.get("alignment.allow_misaligned_trim"))
-    min_samples = int(config.get("alignment.min_alignment_samples"))
-
-    if events_df is None or len(events_df) == 0:
-        logger.debug("No events DataFrame provided")
-        return None
-
-    if len(epochs) == 0:
-        logger.debug("No epochs provided")
-        return pd.DataFrame()
-
-    n_events = len(events_df)
-    n_epochs = len(epochs)
-
-    aligned = align_events_to_epochs(events_df, epochs, logger=logger)
-
-    if aligned is None:
-        error_msg = f"Alignment failed: could not align {n_events} events to {n_epochs} epochs"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    if len(aligned) != n_epochs:
-        diff = abs(len(aligned) - n_epochs)
-        if allow_trim and diff <= min_samples:
-            n_keep = min(len(aligned), n_epochs)
-            logger.warning(
-                f"Alignment length mismatch (events={len(aligned)}, epochs={n_epochs}, diff={diff}). "
-                f"Trimming to {n_keep} samples (allow_misaligned_trim=True, max_tolerable_mismatch={min_samples})"
-            )
-            if len(aligned) > n_epochs:
-                aligned = aligned.iloc[:n_epochs].reset_index(drop=True)
-            else:
-                error_msg = f"Cannot trim: aligned has {len(aligned)} rows, epochs has {n_epochs}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-        else:
-            reason = "allow_misaligned_trim=False" if not allow_trim else f"mismatch ({diff}) exceeds max_tolerable_mismatch ({min_samples})"
-            error_msg = (
-                f"Alignment length mismatch (events={len(aligned)}, epochs={n_epochs}, diff={diff}). "
-                f"Cannot proceed: {reason}"
-            )
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-
-    return aligned
-
-
-def _handle_validation_error(msg: str, strict: bool, logger: logging.Logger) -> bool:
-    if strict:
-        raise ValueError(msg)
-    logger.error(msg)
-    return False
-
-
-def validate_alignment(
-    aligned_events: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    logger: Optional[logging.Logger] = None,
-    strict: bool = True,
-    config: Optional[Any] = None,
-) -> bool:
-    logger = logger or logging.getLogger(__name__)
-
-    if aligned_events is None:
-        if strict:
-            raise ValueError("aligned_events is None; cannot validate alignment")
-        return False
-
-    if len(aligned_events) != len(epochs):
-        return _handle_validation_error(
-            f"Length mismatch: events={len(aligned_events)}, epochs={len(epochs)}",
-            strict, logger
-        )
-
-    nan_fraction = aligned_events.isna().all(axis=1).mean()
-    if config is None:
-        raise ValueError("config is required for max_nan_fraction")
-    max_nan_fraction = float(config.get("analysis.data_quality.max_nan_fraction"))
-    if nan_fraction > max_nan_fraction:
-        return _handle_validation_error(
-            f"High NaN fraction in aligned events: {nan_fraction:.1%}",
-            strict, logger
-        )
-
-    logger.info(
-        f"Alignment validation passed: {len(aligned_events)} rows, "
-        f"{nan_fraction:.1%} NaN fraction"
-    )
-    return True
-
-
-def align_or_raise(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    config,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    aligned = align_events_with_policy(events_df, epochs, config=config, logger=logger)
-    if aligned is None or len(aligned) == 0:
-        raise ValueError("Alignment produced empty events DataFrame")
-    validate_alignment(aligned, epochs, logger=logger, strict=True, config=config)
-    return aligned
-
-
-def get_aligned_events(
-    epochs: mne.Epochs,
-    subject: str,
-    task: str,
-    *,
-    strict: bool = True,
-    logger: Optional[logging.Logger] = None,
-    bids_root: Optional[Path] = None,
-    config=None,
-    constants=None,
-) -> Optional[pd.DataFrame]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    if config is None:
-        raise ValueError("config is required for get_aligned_events")
-
-    events_df = _load_events_df(subject, task, bids_root=bids_root, config=config, constants=constants)
-    if events_df is None:
-        if strict:
-            raise ValueError(f"Events TSV not found for sub-{subject}, task-{task}. Required when strict=True")
-        logger.warning(f"Events TSV not found for sub-{subject}, task-{task}")
-        return None
-
-    try:
-        aligned_events = align_events_to_epochs(events_df, epochs, logger=logger)
-    except ValueError as err:
-        if strict:
-            raise ValueError(
-                f"Alignment failed for sub-{subject}, task-{task} in strict mode: {err}"
-            ) from err
-        logger.warning(f"Alignment failed for sub-{subject}, task-{task}: {err}")
-        return None
-
-    if aligned_events is None:
-        if strict:
-            raise ValueError(
-                f"Could not align events to epochs for sub-{subject}, task-{task}. "
-                f"This is required when strict=True."
-            )
-        return None
-
-    if len(aligned_events) != len(epochs):
-        msg = (
-            f"Alignment length mismatch for sub-{subject}, task-{task}: "
-            f"aligned_events ({len(aligned_events)} rows) != epochs ({len(epochs)} epochs)"
-        )
-        if strict:
-            raise ValueError(msg)
-        logger.warning(msg)
-
-    validate_alignment(aligned_events, epochs, logger, strict=strict, config=config)
-
-    return aligned_events
+from .alignment import (
+    align_events_to_epochs,
+    align_events_to_epochs_strict,
+    align_events_with_policy,
+    get_aligned_events,
+    validate_alignment,
+)
 
 
 ###################################################################
 # Typed Return Values
 ###################################################################
+
 
 @dataclass
 class DecodingDataResult:
@@ -501,200 +86,29 @@ def _load_trial_alignment_manifest(manifest_path: Path, logger: Optional[logging
     return manifest
 
 
-def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
-    if not bids_root.exists():
-        return []
-    subjects = []
-    for sub_dir in sorted(bids_root.glob("sub-*")):
-        if sub_dir.is_dir():
-            subjects.append(sub_dir.name[4:])
-    return subjects
 
 
-def _collect_subjects_from_derivatives_epochs(deriv_root: Path, task: str, config: Optional[EEGConfig] = None, constants: Optional[Dict[str, Any]] = None) -> List[str]:
-    if not deriv_root.exists():
-        return []
-    from ..io.general import _find_clean_epochs_path
-    subjects = []
-    for sub_dir in sorted(deriv_root.glob("sub-*")):
-        if not sub_dir.is_dir():
-            continue
-        sub_id = sub_dir.name[4:]
-        epo_path = _find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
-        if epo_path is not None and epo_path.exists():
-            subjects.append(sub_id)
-    return subjects
+from .discovery import (
+    get_available_subjects,
+    _collect_subjects_from_bids,
+    _collect_subjects_from_derivatives_epochs,
+    _collect_subjects_from_features,
+    _collect_subject_ids_with_features,
+)
+from .covariates import (
+    extract_temperature_data,
+    extract_default_covariates,
+    _canonical_covariate_name,
+    _resolve_covariate_columns,
+    _build_covariate_matrices,
+    _pick_first_column,
+)
+from .stats import (
+    load_precomputed_correlations,
+    get_precomputed_stats_for_roi_band,
+    load_subject_scatter_data,
+)
 
-
-def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
-    if not deriv_root.exists():
-        return []
-    subjects = []
-    for sub_dir in sorted(deriv_root.glob("sub-*/eeg/features")):
-        eeg_feat = sub_dir / "features_eeg_direct.tsv"
-        y_tsv = sub_dir / "target_vas_ratings.tsv"
-        if eeg_feat.exists() and y_tsv.exists():
-            sub_id = sub_dir.parts[-3].replace("sub-", "")
-            subjects.append(sub_id)
-    return subjects
-
-
-def _collect_subject_ids_with_features(deriv_root: Path) -> List[str]:
-    return _collect_subjects_from_features(deriv_root)
-
-
-def _pick_first_column(df: Optional[pd.DataFrame], candidates: List[str]) -> Optional[str]:
-    if df is None:
-        return None
-    from ..io.general import _find_column_in_dataframe
-    return _find_column_in_dataframe(df, candidates)
-
-
-def _canonical_covariate_name(name: Optional[str], config=None) -> Optional[str]:
-    if name is None:
-        return None
-    
-    n = str(name).lower()
-    
-    if config is None:
-        try:
-            config = load_settings()
-        except (OSError, ValueError):
-            # Config file not found or invalid - use defaults
-            config = None
-    
-    temp_aliases = {"stimulus_temp", "stimulus_temperature", "temp", "temperature"}
-    trial_aliases = {"trial", "trial_number", "trial_index", "run", "block"}
-    
-    if config is not None:
-        temp_cols = config.get("event_columns.temperature", [])
-        temp_aliases.update(str(c).lower() for c in temp_cols)
-    
-    if n in temp_aliases:
-        return "temperature"
-    if n in trial_aliases:
-        return "trial"
-    
-    return n
-
-
-def extract_default_covariates(events_df: pd.DataFrame, config) -> List[str]:
-    covariates = []
-    
-    temperature_columns = config.get("event_columns.temperature")
-    temperature_column = _pick_first_column(events_df, temperature_columns)
-    if temperature_column:
-        covariates.append(temperature_column)
-    
-    trial_column_candidates = ["trial", "trial_number", "trial_index", "run", "block"]
-    trial_col = _pick_first_column(events_df, trial_column_candidates)
-    if trial_col:
-        covariates.append(trial_col)
-    
-    return covariates
-
-
-def extract_temperature_data(
-    aligned_events: Optional[pd.DataFrame],
-    config,
-) -> Tuple[Optional[pd.Series], Optional[str]]:
-    if aligned_events is None:
-        return None, None
-    
-    psych_temp_columns = config.get("event_columns.temperature")
-    temp_col = _pick_first_column(aligned_events, psych_temp_columns)
-    if not temp_col:
-        return None, None
-    
-    temp_series = pd.to_numeric(aligned_events[temp_col], errors="coerce")
-    return temp_series, temp_col
-
-
-def _add_covariate_column(
-    covariate_columns: List[str],
-    column_name_map: Dict[str, str],
-    col_name: str,
-    canonical_name: str
-) -> None:
-    covariate_columns.append(col_name)
-    column_name_map[col_name] = canonical_name
-
-
-def _resolve_covariate_columns(
-    df_events: pd.DataFrame,
-    partial_covars: Optional[List[str]],
-    config: Optional[Any],
-) -> Tuple[List[str], Dict[str, str]]:
-    covariate_columns: List[str] = []
-    column_name_map: Dict[str, str] = {}
-    if config is None:
-        raise ValueError("config is required")
-    temperature_candidates = config.get("event_columns.temperature")
-
-    if partial_covars:
-        for covariate in partial_covars:
-            if covariate in df_events.columns:
-                canonical_name = _canonical_covariate_name(covariate, config=config) or covariate
-                _add_covariate_column(covariate_columns, column_name_map, covariate, canonical_name)
-                continue
-            
-            canonical_name = _canonical_covariate_name(covariate, config=config)
-            if canonical_name == "temperature":
-                temp_column = _pick_first_column(df_events, temperature_candidates)
-                if temp_column:
-                    _add_covariate_column(covariate_columns, column_name_map, temp_column, canonical_name)
-    else:
-        temp_column = _pick_first_column(df_events, temperature_candidates)
-        if temp_column:
-            _add_covariate_column(covariate_columns, column_name_map, temp_column, "temperature")
-        
-        trial_candidates = ["trial", "trial_number", "trial_index", "run", "block"]
-        for candidate in trial_candidates:
-            if candidate in df_events.columns:
-                canonical_name = _canonical_covariate_name(candidate, config=config) or candidate
-                _add_covariate_column(covariate_columns, column_name_map, candidate, canonical_name)
-                break
-
-    return covariate_columns, column_name_map
-
-
-def _build_covariate_matrices(
-    df_events: Optional[pd.DataFrame],
-    partial_covars: Optional[List[str]],
-    temp_col: Optional[str],
-    config: Optional[Any] = None,
-) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    if df_events is None:
-        return None, None
-
-    if config is None:
-        try:
-            config = load_settings()
-        except (OSError, ValueError):
-            # Config file not found or invalid - proceed without config-based covariate resolution
-            config = None
-
-    covariate_columns, column_name_map = _resolve_covariate_columns(df_events, partial_covars, config)
-    
-    if not covariate_columns:
-        return None, None
-
-    covariates_df = pd.DataFrame()
-    for covariate in covariate_columns:
-        if covariate in df_events.columns:
-            canonical_name = column_name_map.get(covariate, covariate)
-            covariates_df[canonical_name] = pd.to_numeric(df_events[covariate], errors="coerce")
-
-    if covariates_df.empty:
-        return None, None
-
-    temp_canonical = _canonical_covariate_name(temp_col, config=config) if temp_col else None
-    covariates_without_temp = covariates_df.drop(columns=[temp_canonical], errors="ignore") if temp_canonical else covariates_df.copy()
-    
-    if covariates_without_temp.shape[1] == 0:
-        covariates_without_temp = None
-
-    return covariates_df, covariates_without_temp
 
 
 def _load_features_and_targets(
@@ -710,11 +124,12 @@ def _load_features_and_targets(
     conn_path = feats_dir / "features_connectivity.tsv"
     y_path = feats_dir / "target_vas_ratings.tsv"
 
-    if not plateau_path.exists() or not y_path.exists():
+    power_path = plateau_path if plateau_path.exists() else temporal_path
+    if not power_path.exists() or not y_path.exists():
         raise FileNotFoundError(f"Missing features or targets for sub-{subject}. Expected at {feats_dir}")
 
     temporal_df = pd.read_csv(temporal_path, sep="\t") if temporal_path.exists() else None
-    plateau_df = pd.read_csv(plateau_path, sep="\t")
+    plateau_df = pd.read_csv(power_path, sep="\t")
     conn_df = pd.read_csv(conn_path, sep="\t") if conn_path.exists() else None
     y_df = pd.read_csv(y_path, sep="\t")
 
@@ -759,6 +174,7 @@ def _load_features_and_targets(
         )
 
     return temporal_df, plateau_df, conn_df, y, epochs.info
+
 
 def _resolve_subjects_with_policy(
     subjects_from_files: List[str],
@@ -1777,6 +1193,28 @@ def load_behavior_plot_features(
     return pow_df, y, info, power_bands
 
 
+def load_stats_file_with_fallbacks(
+    stats_dir: Path,
+    patterns: List[str],
+) -> Optional[pd.DataFrame]:
+    """Try loading a stats file from multiple possible patterns.
+    
+    Args:
+        stats_dir: Directory containing stats files
+        patterns: List of filename patterns to try in order
+    
+    Returns:
+        DataFrame if found, None otherwise
+    """
+    for pattern in patterns:
+        filepath = stats_dir / pattern
+        if filepath.exists():
+            df = read_tsv(filepath)
+            if df is not None and not df.empty:
+                return df
+    return None
+
+
 def load_behavior_stats_files(stats_dir: Path, logger: logging.Logger) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Load rating and temperature correlation stats if available."""
     rating_stats = None
@@ -2294,7 +1732,6 @@ def extract_rating_array_for_tf(
     config,
     logger,
 ) -> Optional[np.ndarray]:
-    from ..io.general import _pick_first_column
     rating_col = _pick_first_column(aligned_events, config.get("event_columns.rating"))
     if rating_col is None:
         logger.error("No rating column found for TF correlation computation")
@@ -2896,6 +2333,221 @@ def prepare_topomap_correlation_data(band_data: Dict, info: mne.Info) -> Tuple[n
     return topo_data, topo_mask
 
 
+###################################################################
+# Decoding Data Loaders
+###################################################################
+
+
+def load_plateau_matrix(
+    subjects: List[str],
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    log: Optional[logging.Logger] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], pd.DataFrame]:
+    """
+    Load plateau features and targets for multiple subjects.
+
+    Parameters
+    ----------
+    subjects : List[str]
+        Subject IDs to load
+    task : str
+        Task name
+    deriv_root : Path
+        Derivatives directory
+    config : Any
+        Configuration object
+    log : logging.Logger, optional
+        Logger instance
+
+    Returns
+    -------
+    X : np.ndarray
+        Feature matrix (n_samples, n_features)
+    y : np.ndarray
+        Target vector (n_samples,)
+    groups : np.ndarray
+        Subject IDs for each sample
+    feature_cols : List[str]
+        Feature column names
+    meta : pd.DataFrame
+        Metadata with subject_id and trial_id
+    """
+    if log is None:
+        log = logging.getLogger(__name__)
+
+    X_blocks = []
+    y_blocks = []
+    groups = []
+    trial_ids = []
+    feature_cols: Optional[List[str]] = None
+
+    for sub in subjects:
+        _, plateau_df, _, y, _ = _load_features_and_targets(sub, task, deriv_root, config)
+
+        if plateau_df is None or plateau_df.empty:
+            log.warning(f"No plateau features for sub-{sub}; skipping")
+            continue
+
+        if feature_cols is None:
+            feature_cols = plateau_df.columns.tolist()
+        else:
+            missing = set(feature_cols) - set(plateau_df.columns)
+            if missing:
+                raise ValueError(f"Feature mismatch for sub-{sub}; missing: {sorted(missing)}")
+
+        X_block = plateau_df.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
+        y_block = pd.to_numeric(y, errors="coerce").to_numpy(dtype=float)
+
+        X_blocks.append(X_block)
+        y_blocks.append(y_block)
+        groups.extend([sub] * len(y_block))
+        trial_ids.extend(list(range(len(y_block))))
+
+    if not X_blocks:
+        raise RuntimeError("No subjects with usable plateau features")
+
+    X = np.vstack(X_blocks)
+    y_all = np.concatenate(y_blocks)
+    groups_arr = np.asarray(groups)
+    meta = pd.DataFrame({"subject_id": groups_arr, "trial_id": trial_ids})
+
+    finite_mask = np.isfinite(y_all)
+    if not np.all(finite_mask):
+        n_dropped = np.sum(~finite_mask)
+        log.info(f"Dropping {n_dropped} non-finite targets out of {len(y_all)}")
+        X = X[finite_mask]
+        y_all = y_all[finite_mask]
+        groups_arr = groups_arr[finite_mask]
+        meta = meta.loc[finite_mask].reset_index(drop=True)
+
+    return X, y_all, groups_arr, feature_cols or [], meta
+
+
+def load_epoch_windows(
+    subjects: List[str],
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    window_size: float = 0.5,
+    window_step: float = 0.25,
+    log: Optional[logging.Logger] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
+    """
+    Load epoch data windowed for time-generalization analysis.
+
+    Parameters
+    ----------
+    subjects : List[str]
+        Subject IDs
+    task : str
+        Task name
+    deriv_root : Path
+        Derivatives directory
+    config : Any
+        Configuration object
+    window_size : float
+        Window size in seconds
+    window_step : float
+        Step between windows in seconds
+    log : logging.Logger, optional
+        Logger instance
+
+    Returns
+    -------
+    X_windows : np.ndarray
+        Windowed features (n_samples, n_windows, n_features)
+    y : np.ndarray
+        Target vector
+    groups : np.ndarray
+        Subject IDs
+    window_centers : np.ndarray
+        Center times of each window
+    meta : pd.DataFrame
+        Metadata
+    """
+    if log is None:
+        log = logging.getLogger(__name__)
+
+    X_blocks = []
+    y_blocks = []
+    groups = []
+    window_centers = None
+
+    for sub in subjects:
+        epochs, aligned_events = load_epochs_for_analysis(
+            sub, task,
+            align="strict",
+            preload=True,
+            deriv_root=deriv_root,
+            config=config,
+            logger=log,
+        )
+
+        if epochs is None or aligned_events is None:
+            log.warning(f"No epochs for sub-{sub}; skipping")
+            continue
+
+        target_cols = config.get("event_columns.rating", [])
+        target_col = None
+        for col in target_cols:
+            if col in aligned_events.columns:
+                target_col = col
+                break
+
+        if target_col is None:
+            log.warning(f"No target column for sub-{sub}; skipping")
+            continue
+
+        y_sub = pd.to_numeric(aligned_events[target_col], errors="coerce").to_numpy()
+
+        data = epochs.get_data()
+        times = epochs.times
+        sfreq = epochs.info["sfreq"]
+
+        window_samples = int(window_size * sfreq)
+        step_samples = int(window_step * sfreq)
+
+        n_windows = (len(times) - window_samples) // step_samples + 1
+        if n_windows < 1:
+            log.warning(f"Epochs too short for windowing in sub-{sub}")
+            continue
+
+        if window_centers is None:
+            window_centers = np.array([
+                times[i * step_samples + window_samples // 2]
+                for i in range(n_windows)
+            ])
+
+        X_sub = np.zeros((len(data), n_windows, data.shape[1]))
+        for w in range(n_windows):
+            start = w * step_samples
+            end = start + window_samples
+            X_sub[:, w, :] = np.mean(data[:, :, start:end] ** 2, axis=2)
+
+        X_blocks.append(X_sub)
+        y_blocks.append(y_sub)
+        groups.extend([sub] * len(y_sub))
+
+    if not X_blocks:
+        raise RuntimeError("No subjects with usable epoch data")
+
+    X_windows = np.vstack(X_blocks)
+    y_all = np.concatenate(y_blocks)
+    groups_arr = np.asarray(groups)
+    meta = pd.DataFrame({"subject_id": groups_arr})
+
+    finite_mask = np.isfinite(y_all)
+    if not np.all(finite_mask):
+        X_windows = X_windows[finite_mask]
+        y_all = y_all[finite_mask]
+        groups_arr = groups_arr[finite_mask]
+        meta = meta.loc[finite_mask].reset_index(drop=True)
+
+    return X_windows, y_all, groups_arr, window_centers, meta
+
+
 __all__ = [
     "load_decoding_data",
     "load_multiple_subjects_decoding_data",
@@ -2950,6 +2602,7 @@ __all__ = [
     # File loading
     "load_channel_correlations",
     "load_connectivity_files",
+    "load_stats_file_with_fallbacks",
     # Data extraction utilities
     "extract_channel_importance_from_coefficients",
     "extract_band_channel_vectors",
@@ -2977,4 +2630,7 @@ __all__ = [
     "validate_sufficient_subjects",
     "validate_feature_block_lengths",
     "register_feature_block",
+    # Decoding data loaders
+    "load_plateau_matrix",
+    "load_epoch_windows",
 ]

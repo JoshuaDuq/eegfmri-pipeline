@@ -96,6 +96,106 @@ def fdr_bh_reject(
     return reject, crit
 
 
+def fdr_correction(p_values: np.ndarray, alpha: float = 0.05):
+    """Apply Benjamini-Hochberg FDR correction.
+    
+    Returns:
+        q_values: Adjusted p-values
+        reject: Boolean mask of rejected hypotheses
+        critical_p: Critical p-value threshold
+    """
+    q_values = fdr_bh(p_values, alpha=alpha)
+    reject, critical_p = fdr_bh_reject(p_values, alpha)
+    return q_values, reject, critical_p
+
+
+def apply_global_fdr(
+    stats_dir: "Path",
+    alpha: float = 0.05,
+    logger: Optional[logging.Logger] = None,
+) -> Dict[str, Any]:
+    """Apply global FDR correction across all correlation files."""
+    from pathlib import Path
+    from eeg_pipeline.utils.io.general import read_tsv, write_tsv
+    
+    stats_dir = Path(stats_dir)
+    files = list(stats_dir.glob("*.tsv"))
+    if not files:
+        if logger:
+            logger.warning(f"No TSV files found in {stats_dir}")
+        return {"n_tests": 0, "n_rejected": 0}
+    
+    all_p = []
+    file_refs = []
+    
+    for fpath in files:
+        df = read_tsv(fpath)
+        if df is None or df.empty:
+            continue
+        
+        p_col = None
+        for col in ["p_primary", "p_partial_temp", "p_raw", "p_value", "p"]:
+            if col in df.columns:
+                p_col = col
+                break
+        
+        if p_col is None:
+            continue
+        
+        p_series = pd.to_numeric(df[p_col], errors="coerce")
+        valid_mask = p_series.notna()
+        valid_indices = np.where(valid_mask)[0]
+        
+        for i in valid_indices:
+            all_p.append(float(p_series.iloc[i]))
+            file_refs.append((fpath, i, p_col))
+    
+    if not all_p:
+        if logger:
+            logger.warning("No valid p-values found for FDR correction")
+        return {"n_tests": 0, "n_rejected": 0}
+    
+    p_arr = np.array(all_p)
+    q_arr, reject, critical_p = fdr_correction(p_arr, alpha)
+    
+    n_rejected = int(reject.sum())
+    
+    if logger:
+        logger.info(f"Global FDR: {n_rejected}/{len(p_arr)} rejected at alpha={alpha}")
+    
+    file_updates = {}
+    for (fpath, idx, p_col), q, rej in zip(file_refs, q_arr, reject):
+        if fpath not in file_updates:
+            file_updates[fpath] = []
+        file_updates[fpath].append((idx, q, rej))
+    
+    for fpath, updates in file_updates.items():
+        try:
+            df = read_tsv(fpath)
+            if df is None:
+                continue
+            
+            df["q_global"] = np.nan
+            df["fdr_reject"] = False
+            
+            for idx, q, rej in updates:
+                if idx < len(df):
+                    df.loc[idx, "q_global"] = q
+                    df.loc[idx, "fdr_reject"] = rej
+            
+            write_tsv(df, fpath)
+        except Exception as e:
+            if logger:
+                logger.warning(f"Failed to update {fpath.name}: {e}")
+    
+    return {
+        "n_tests": len(p_arr),
+        "n_rejected": n_rejected,
+        "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
+        "alpha": alpha,
+    }
+
+
 def fdr_bh_mask(
     p_vals: np.ndarray,
     alpha: Optional[float] = None,
@@ -121,9 +221,13 @@ def fdr_bh_values(
     return qvals, reject
 
 
-def bh_adjust(pvals: np.ndarray) -> np.ndarray:
+def bh_adjust(pvals: np.ndarray, config: Optional[Any] = None) -> np.ndarray:
     """Simple BH adjustment without config."""
-    return fdr_bh(pvals, alpha=0.05)
+    from eeg_pipeline.utils.config.loader import get_config_value, load_config
+    if config is None:
+        config = load_config()
+    alpha = float(get_config_value(config, "statistics.fdr_alpha", 0.05))
+    return fdr_bh(pvals, alpha=alpha)
 
 
 def select_p_values_for_fdr(
@@ -234,7 +338,9 @@ def get_cluster_correction_config(
     
     cluster_cfg = config.get("behavior_analysis.cluster_correction", {}) if config else {}
     cluster_alpha = float(heatmap_config.get("cluster_alpha", cluster_cfg.get("alpha", alpha)))
-    n_perm = int(heatmap_config.get("n_cluster_perm", cluster_cfg.get("n_permutations", 100)))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    default_n_perm = int(get_config_value(config, "behavior_analysis.cluster_correction.default_n_permutations", get_config_value(config, "statistics.cluster_n_perm", 100)))
+    n_perm = int(heatmap_config.get("n_cluster_perm", cluster_cfg.get("n_permutations", default_n_perm)))
     seed = int(heatmap_config.get("cluster_rng_seed", cluster_cfg.get("rng_seed", default_rng_seed)))
     
     return cluster_alpha, n_perm, np.random.default_rng(seed), seed
@@ -259,6 +365,38 @@ def compute_fdr_rejections_for_heatmap(
     crit_val = float(np.max(p_valid[rej])) if np.any(rej) else np.nan
     
     return rej_map, crit_val
+
+
+def compute_effective_n(n_tests: int, correlation_matrix: Optional[np.ndarray] = None) -> int:
+    """Compute effective number of independent tests.
+    
+    Uses eigenvalue decomposition of correlation matrix if provided,
+    following the Li & Ji (2005) method.
+    
+    Parameters
+    ----------
+    n_tests : int
+        Total number of tests
+    correlation_matrix : np.ndarray, optional
+        Correlation matrix between tests
+        
+    Returns
+    -------
+    int
+        Effective number of independent tests
+    """
+    if correlation_matrix is None:
+        return n_tests
+    
+    try:
+        eigenvalues = np.linalg.eigvalsh(correlation_matrix)
+        eigenvalues = eigenvalues[eigenvalues > 0]
+        
+        # Li & Ji (2005) method
+        n_eff = 1 + (n_tests - 1) * (1 - np.var(eigenvalues) / n_tests)
+        return max(1, int(np.ceil(n_eff)))
+    except Exception:
+        return n_tests
 
 
 def build_correlation_matrices_for_prefix(

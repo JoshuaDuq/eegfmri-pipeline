@@ -11,7 +11,8 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import load_settings, get_constants, get_config_value, ensure_config, get_frequency_band_names
+from ..config.loader import load_settings, get_constants, get_config_value, ensure_config, get_frequency_band_names, get_frequency_bands
+from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 
 
 ###################################################################
@@ -123,6 +124,47 @@ def compute_tfr_for_visualization(
     return compute_tfr_morlet(epochs, config, logger=logger)
 
 
+def _extract_baseline_power_features(
+    tfr: mne.time_frequency.EpochsTFR,
+    bands: Dict[str, Tuple[float, float]],
+    baseline_indices: Tuple[int, int],
+    logger: logging.Logger,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Local helper to extract baseline power."""
+    b_start, b_end = baseline_indices
+    # Retrieve data in baseline window: (n_epochs, n_ch, n_freqs, n_times_baseline)
+    # Note: tfr.data is (n_epochs, n_ch, n_freqs, n_times)
+    
+    # We need to slice indices carefully. MNE times are mapped.
+    # But b_start, b_end are passed as indices from validate_baseline_indices?
+    # validate_baseline_indices returns indices relative to times array.
+    
+    data_baseline = tfr.data[..., int(b_start):int(b_end)]
+    # Avg over time
+    data_mean_time = np.mean(data_baseline, axis=-1) # (n_epochs, n_ch, n_freqs)
+    
+    results = {}
+    ch_names = tfr.info["ch_names"]
+    n_epochs = len(tfr)
+    
+    freqs = tfr.freqs
+    
+    for band, (fmin, fmax) in bands.items():
+        if fmax is None: fmax = freqs[-1]
+        freq_mask = (freqs >= fmin) & (freqs <= fmax)
+        if not np.any(freq_mask): continue
+        
+        # Avg over freqs
+        band_power = np.mean(data_mean_time[..., freq_mask], axis=-1) # (n_epochs, n_ch)
+        
+        for i, ch in enumerate(ch_names):
+            col = NamingSchema.build("power", "baseline", band, "ch", "mean", channel=ch)
+            results[col] = band_power[:, i]
+            
+    df = pd.DataFrame(results)
+    return df, list(df.columns)
+
+
 def extract_roi_tfrs(
     power: mne.time_frequency.EpochsTFR,
     config,
@@ -169,16 +211,22 @@ def compute_tfr_for_subject(
     config,
     deriv_root: Path,
     logger: logging.Logger,
+    tfr_computed: Optional[mne.time_frequency.EpochsTFR] = None,
 ) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
     from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus  # local import to avoid circular deps
-    from eeg_pipeline.analysis.features.power import extract_baseline_power_features  # local import to avoid circular deps
+    # from eeg_pipeline.analysis.features.power import extract_baseline_power_features  # REMOVED
+
     freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
 
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
 
-    logger.info("Computing TFR...")
-    tfr = compute_tfr_morlet(epochs, config, logger=logger)
+    if tfr_computed is not None:
+        logger.info("Using pre-computed TFR...")
+        tfr = tfr_computed
+    else:
+        logger.info("Computing TFR...")
+        tfr = compute_tfr_morlet(epochs, config, logger=logger)
 
     if len(aligned_events) != len(tfr):
         raise ValueError(
@@ -192,21 +240,23 @@ def compute_tfr_for_subject(
     tfr_analysis = config.get("time_frequency_analysis", {})
     tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
-    min_baseline_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5))
-    b_start, b_end, _ = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
+    min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+    b_start_time, b_end_time, b_idxs = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
 
-    power_bands = get_frequency_band_names(config)
+    power_bands = get_frequency_bands(config)
 
     tfr_comment = getattr(tfr, "comment", None)
     if isinstance(tfr_comment, str) and "BASELINED:" in tfr_comment:
         raise ValueError(f"TFR already baseline-corrected (comment: '{tfr_comment}')")
 
     logger.info("Extracting baseline power features (raw power)...")
-    baseline_df, baseline_cols = extract_baseline_power_features(
-        tfr, power_bands, (b_start, b_end), config, logger
+    
+    # Use indices for extraction
+    baseline_df, baseline_cols = _extract_baseline_power_features(
+        tfr, power_bands, (b_idxs[0], b_idxs[-1] + 1), logger
     )
 
-    return tfr, baseline_df, baseline_cols, b_start, b_end
+    return tfr, baseline_df, baseline_cols, b_start_time, b_end_time
 
 
 def normalize_power_with_baseline(
@@ -725,10 +775,7 @@ def read_tfr_average_with_logratio(
 ) -> Optional["mne.time_frequency.AverageTFR"]:
     if min_baseline_samples is None:
         config = ensure_config(config)
-        if config is not None:
-            min_baseline_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5))
-        else:
-            min_baseline_samples = 5
+        min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     logger = _get_logger(logger)
     
     tfr_obj = _load_tfr_from_path(tfr_path, logger)
@@ -981,10 +1028,7 @@ def validate_baseline_window(
 ) -> Tuple[float, float, np.ndarray]:
     if min_samples is None:
         config = ensure_config(config)
-        if config is not None:
-            min_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5))
-        else:
-            min_samples = 5
+        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     
     b_start, b_end = baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
@@ -1080,7 +1124,7 @@ def apply_baseline_to_tfr(
     )
     min_samples_roi = config.get("behavior_analysis.statistics.min_samples_roi", 20)
     min_baseline_samples = int(
-        config.get("time_frequency_analysis.min_baseline_samples", min_samples_roi)
+        get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", min_samples_roi)
     )
     
     try:
@@ -1110,7 +1154,7 @@ def validate_baseline_indices(
 ) -> Tuple[float, float, np.ndarray]:
     if min_samples is None:
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "time_frequency_analysis.min_baseline_samples", 5))
+        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     b_start, b_end = baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
     b_end = 0.0 if b_end is None else float(b_end)
@@ -1256,7 +1300,7 @@ def apply_baseline_safe(
     times = np.asarray(tfr_obj.times)
     
     if min_samples is None:
-        min_samples = int(config.get("time_frequency_analysis.min_baseline_samples"))
+        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     
     baseline_start = float(times.min()) if baseline[0] is None else float(baseline[0])
     baseline_end = 0.0 if baseline[1] is None else float(baseline[1])
@@ -1332,10 +1376,7 @@ def log_baseline_qc(
 ):
     if min_samples is None:
         config = ensure_config(config)
-        if config is not None:
-            min_samples = int(config.get("time_frequency_analysis.min_baseline_samples", 5))
-        else:
-            min_samples = 5
+        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     logger = _get_logger(logger)
     constants = _get_tfr_constants(config)
 
@@ -1492,12 +1533,8 @@ def band_time_masks(
     return fmask, tmask
 
 
-def time_mask(times: np.ndarray, tmin: float, tmax: float) -> np.ndarray:
-    return (times >= tmin) & (times < tmax)
-
-
-def freq_mask(freqs: np.ndarray, fmin: float, fmax: float) -> np.ndarray:
-    return (freqs >= fmin) & (freqs <= fmax)
+# Import from canonical windowing module
+from eeg_pipeline.utils.analysis.windowing import time_mask, freq_mask
 
 
 def find_tfr_path(subject: str, task: str, deriv_root: Path) -> Optional[Path]:

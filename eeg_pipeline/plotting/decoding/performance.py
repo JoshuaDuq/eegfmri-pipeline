@@ -22,54 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 ###################################################################
-# Helper Functions
+# Helper Functions (imported from helpers module)
 ###################################################################
 
-def _despine(ax) -> None:
-    sns.despine(ax=ax, trim=True)
-
-
-def _calculate_axis_limits(values: np.ndarray, plot_cfg, margin_factor: Optional[float] = None) -> tuple[float, float]:
-    if margin_factor is None:
-        margin_factor = plot_cfg.plot_type_configs.get("decoding", {}).get("axis_margin_factor", 0.05)
-    value_min = np.nanmin(values)
-    value_max = np.nanmax(values)
-    margin = (value_max - value_min) * margin_factor
-    return value_min - margin, value_max + margin
-
-
-def _calculate_shared_axis_limits(values1: np.ndarray, values2: np.ndarray, plot_cfg,
-                                   margin_factor: Optional[float] = None) -> tuple[float, float]:
-    combined_values = np.concatenate([values1, values2])
-    return _calculate_axis_limits(combined_values, plot_cfg, margin_factor)
-
-
-def _add_zero_reference_line(ax, plot_cfg, linewidth: Optional[float] = None, 
-                             linestyle: str = '--', alpha: Optional[float] = None) -> None:
-    if linewidth is None:
-        linewidth = plot_cfg.style.line.width_thin
-    if alpha is None:
-        alpha = plot_cfg.style.line.alpha_zero
-    ax.axhline(0, color=plot_cfg.style.colors.black, linewidth=linewidth, linestyle=linestyle, alpha=alpha)
-
-
-def _create_bar_plot(ax, x_positions: np.ndarray, values: np.ndarray, labels: list,
-                     ylabel: str, plot_cfg, color: Optional[str] = None, 
-                     alpha: Optional[float] = None, width: Optional[float] = None, 
-                     add_zero_line: bool = True) -> None:
-    if color is None:
-        color = plot_cfg.style.colors.gray
-    if alpha is None:
-        alpha = plot_cfg.style.bar.alpha
-    if width is None:
-        width = plot_cfg.style.bar.width
-    ax.bar(x_positions, values, color=color, alpha=alpha, width=width)
-    if add_zero_line:
-        _add_zero_reference_line(ax, plot_cfg)
-    ax.set_ylabel(ylabel)
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
-    _despine(ax)
+from eeg_pipeline.plotting.decoding.helpers import (
+    _despine,
+    _calculate_axis_limits,
+    _calculate_shared_axis_limits,
+    _add_zero_reference_line,
+    _create_bar_plot,
+)
 
 
 def _plot_bootstrap_metric(ax, point_value: float, ci: list, metric_name: str, plot_cfg, model_name: Optional[str] = None) -> None:

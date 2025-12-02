@@ -16,6 +16,11 @@ Usage:
 
     # Or use high-level visualizers
     from eeg_pipeline.plotting import visualize_erp_for_subjects
+
+Lazy Imports:
+    Many plotting functions use lazy imports to reduce startup time.
+    Access them directly from this module - they will be loaded on first use:
+    from eeg_pipeline.plotting import plot_power_distributions
 """
 
 # Configuration
@@ -80,11 +85,8 @@ def __getattr__(name: str):
         "compute_significance_mask": "core",
         # ERP
         "erp_contrast_pain": "erp",
-        "group_erp_contrast_pain": "erp",
         "erp_by_temperature": "erp",
-        "group_erp_by_temperature": "erp",
         "visualize_subject_erp": "erp",
-        "visualize_group_erp": "erp",
         # Features
         "plot_power_distributions": "features",
         "plot_channel_power_heatmap": "features",
@@ -94,20 +96,15 @@ def __getattr__(name: str):
         "plot_power_time_course_by_temperature": "features",
         "plot_trial_power_variability": "features",
         "plot_inter_band_spatial_power_correlation": "features",
-        "plot_group_power_plots": "features",
-        "plot_group_band_power_time_courses": "features",
         "plot_microstate_templates": "features",
         "plot_microstate_templates_by_pain": "features",
         "plot_microstate_templates_by_temperature": "features",
         "plot_microstate_coverage_by_pain": "features",
-        "plot_microstate_pain_correlation_heatmap": "features",
         "plot_microstate_temporal_evolution": "features",
         "plot_microstate_gfp_colored_by_state": "features",
         "plot_microstate_gfp_by_temporal_bins": "features",
         "plot_microstate_transition_network": "features",
         "plot_microstate_duration_distributions": "features",
-        "plot_group_microstate_template_stability": "features",
-        "plot_group_microstate_transition_summary": "features",
         "plot_connectivity_circle_for_band": "features",
         "plot_sliding_connectivity_trajectories": "features",
         "plot_sliding_degree_heatmap": "features",
@@ -124,11 +121,8 @@ def __getattr__(name: str):
         "plot_sliding_state_lagged_correlation_surfaces": "features",
         "plot_itpc_heatmap": "features",
         "plot_itpc_topomaps": "features",
-        "plot_itpc_behavior_scatter": "features",
         "plot_pac_comodulograms": "features",
         "plot_pac_time_ribbons": "features",
-        "plot_pac_behavior_scatter": "features",
-        "plot_aperiodic_r2_histogram": "features",
         "plot_aperiodic_residual_spectra": "features",
         "plot_aperiodic_run_trajectories": "features",
         "plot_aperiodic_topomaps": "features",
@@ -147,33 +141,19 @@ def __getattr__(name: str):
         "plot_topomap_grid_baseline_temps": "tfr",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",
         "plot_temporal_topomaps_allbands_plateau": "tfr",
-        "group_contrast_maxmin_temperature": "tfr",
-        "group_rois_all_trials": "tfr",
-        "group_contrast_pain_nonpain_rois": "tfr",
-        "group_contrast_pain_nonpain_scalpmean": "tfr",
-        "group_plot_bands_pain_temp_contrasts": "tfr",
-        "group_plot_topomap_grid_baseline_temps": "tfr",
-        "group_plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",
-        "group_plot_temporal_topomaps_allbands_plateau": "tfr",
-        "group_tf_correlation": "tfr",
         "visualize_subject_tfr": "tfr",
-        "visualize_group_tfr": "tfr",
         # Behavioral
         "generate_correlation_scatter": "behavioral",
         "plot_residual_qc": "behavioral",
         "plot_regression_residual_diagnostics": "behavioral",
         "plot_psychometrics": "behavioral",
         "plot_power_roi_scatter": "behavioral",
-        "plot_group_power_roi_scatter": "behavioral",
-        "plot_temporal_correlation_topomaps_by_temperature": "behavioral",
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "plot_pain_nonpain_clusters": "behavioral",
         "plot_regressor_distributions": "behavioral",
         "plot_pac_behavior_correlations": "behavioral",
         "plot_itpc_rating_scatter_grid": "behavioral",
-        "plot_group_temporal_topomaps": "behavioral",
         "visualize_subject_behavior": "behavioral",
-        "visualize_group_behavior": "behavioral",
         # Decoding
         "plot_time_generalization_matrix": "decoding",
         "plot_time_generalization_with_null": "decoding",

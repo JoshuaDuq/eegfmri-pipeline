@@ -346,12 +346,14 @@ def get_sig_marker_text(config=None) -> str:
     if not viz_params["diff_annotation_enabled"]:
         return ""
     
-    plot_cfg = get_plot_config(config) if config else None
+    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+    config = ensure_config(config)
+    plot_cfg = get_plot_config(config)
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    default_sig_alpha = tfr_config.get("default_significance_alpha", 0.05) if plot_cfg else 0.05
-    default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", 100) if plot_cfg else 100
-    alpha = config.get("statistics.sig_alpha", default_sig_alpha) if config else default_sig_alpha
-    n_perm = config.get("statistics.cluster_n_perm", default_cluster_n_perm) if config else default_cluster_n_perm
+    default_sig_alpha = tfr_config.get("default_significance_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)) if plot_cfg else get_config_value(config, "statistics.sig_alpha", 0.05)
+    default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", get_config_value(config, "statistics.cluster_n_perm", 100)) if plot_cfg else get_config_value(config, "statistics.cluster_n_perm", 100)
+    alpha = get_config_value(config, "statistics.sig_alpha", default_sig_alpha)
+    n_perm = get_config_value(config, "statistics.cluster_n_perm", default_cluster_n_perm)
     method = f"cluster permutation (n={n_perm})"
     return f" | Green markers: p < {alpha:.2f} ({method})"
 
@@ -431,11 +433,12 @@ def add_roi_annotations(
             data_group_a = None
             data_group_b = None
     
-    plot_cfg = get_plot_config(config) if config else None
+    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+    config = ensure_config(config)
+    plot_cfg = get_plot_config(config)
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    
     if fdr_alpha is None:
-        fdr_alpha = config.get("statistics.sig_alpha", config.get("behavior_analysis.statistics.fdr_alpha", 0.05)) if config else 0.05
+        fdr_alpha = get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)))
     
     percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0) if plot_cfg else 5.0
     is_percent_format = _detect_data_format(data, data_format, percent_threshold=percent_detection_threshold)
@@ -464,8 +467,15 @@ def add_roi_annotations(
         roi_data_dict[roi] = (pct, mask_vec)
         
         roi_pvalue = compute_roi_pvalue(
-            mask_vec, ch_names, p_ch, sig_mask, is_cluster, cluster_p_min,
-            data_group_a, data_group_b, paired, min_samples=None, config=config
+            mask_vec,
+            ch_names,
+            p_ch,
+            sig_mask,
+            is_cluster,
+            cluster_p_min,
+            data_group_a,
+            data_group_b,
+            paired,
         )
         roi_pvalues_raw[roi] = roi_pvalue
     

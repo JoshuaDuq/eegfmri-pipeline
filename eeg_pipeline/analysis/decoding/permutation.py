@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
 from sklearn.model_selection import LeaveOneGroupOut, GridSearchCV
@@ -19,6 +19,7 @@ from eeg_pipeline.utils.data.loading import (
     load_kept_indices,
 )
 from eeg_pipeline.utils.io.general import read_tsv, get_logger
+from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, load_settings, get_config_value
 
 logger = get_logger(__name__)
 
@@ -95,8 +96,14 @@ def _prepare_block_metadata_for_permutation(
 def _is_feature_constant_within_blocks(
     X: np.ndarray,
     blocks: np.ndarray,
-    threshold: float = 1e-10,
+    threshold: Optional[float] = None,
+    config: Optional[Any] = None,
 ) -> np.ndarray:
+    if threshold is None:
+        from eeg_pipeline.utils.config.loader import ensure_config
+        config = ensure_config(config)
+        threshold = float(get_config_value(config, "decoding.constants.min_variance_threshold", 1e-10))
+    
     if blocks is None or len(np.unique(blocks)) < 2:
         return np.zeros(X.shape[1], dtype=bool)
     
@@ -135,6 +142,7 @@ def _compute_permutation_importance_for_feature(
     n_repeats: int,
     seed: int,
     logger: logging.Logger,
+    config: Optional[Any] = None,
 ) -> float:
     # Drop samples with non-finite targets to avoid failures in CV/regression
     valid_y_mask = np.isfinite(y)
@@ -156,6 +164,11 @@ def _compute_permutation_importance_for_feature(
         logger.warning("Permutation importance requires at least two groups; only one group present.")
         return np.nan
 
+    if config is None:
+        config = load_settings()
+    
+    inner_splits_config = get_config_value(config, "decoding.cv.inner_splits", 5)
+    
     rng = np.random.default_rng(seed)
     # Skip features with no variation to avoid undefined correlations
     feat_values_all = X[:, feature_idx]
@@ -163,7 +176,7 @@ def _compute_permutation_importance_for_feature(
         logger.warning("Feature %d has near-zero variance across all samples; skipping permutation importance.", feature_idx)
         return np.nan
     if blocks is not None:
-        const_mask = _is_feature_constant_within_blocks(X[:, [feature_idx]], blocks, threshold=1e-10)
+        const_mask = _is_feature_constant_within_blocks(X[:, [feature_idx]], blocks, threshold=None, config=config)
         if const_mask[0]:
             logger.warning(
                 "Feature %d is effectively constant within blocks; permutation importance is undefined. Returning NaN.",
@@ -196,7 +209,7 @@ def _compute_permutation_importance_for_feature(
             blocks_train = blocks[train_idx]
             n_unique_blocks = len(np.unique(blocks_train))
             if n_unique_blocks >= 2:
-                n_splits_inner = min(3, n_unique_blocks)
+                n_splits_inner = min(inner_splits_config, n_unique_blocks)
                 inner_cv_splits = create_block_aware_inner_cv(blocks_train, n_splits_inner, seed, fold_idx, "permutation")
                 if inner_cv_splits is not None and len(inner_cv_splits) >= 2:
                     param_grid = getattr(pipe.named_steps.get("regressor"), "param_grid", {})
@@ -221,7 +234,7 @@ def _compute_permutation_importance_for_feature(
         else:
             n_unique_groups = len(np.unique(groups_train))
             if n_unique_groups >= 2:
-                n_splits_inner = min(3, n_unique_groups)
+                n_splits_inner = min(inner_splits_config, n_unique_groups)
                 inner_cv = create_inner_cv(groups_train, n_splits_inner)
                 param_grid = getattr(pipe.named_steps.get("regressor"), "param_grid", {})
                 if param_grid:
@@ -248,7 +261,8 @@ def _compute_permutation_importance_for_feature(
             r_orig, _ = safe_pearsonr(y_test[valid_mask_orig], y_pred_orig[valid_mask_orig])
             if np.isfinite(r_orig):
                 weight_orig = max(n_valid_orig - 3.0, 1.0)
-                orig_z_vals.append(np.arctanh(np.clip(r_orig, -0.999999, 0.999999)))
+                clip_min, clip_max = get_fisher_z_clip_values(config)
+                orig_z_vals.append(np.arctanh(np.clip(r_orig, clip_min, clip_max)))
                 orig_weights.append(weight_orig)
     
         groups_test = groups[test_idx] if groups is not None else None
@@ -286,7 +300,8 @@ def _compute_permutation_importance_for_feature(
                 r_perm, _ = safe_pearsonr(y_test[valid_mask_perm], y_pred_perm[valid_mask_perm])
                 if np.isfinite(r_perm):
                     weight_perm = max(n_valid_perm - 3.0, 1.0)
-                    perm_z_vals.append(np.arctanh(np.clip(r_perm, -0.999999, 0.999999)))
+                    clip_min, clip_max = get_fisher_z_clip_values(config)
+                    perm_z_vals.append(np.arctanh(np.clip(r_perm, clip_min, clip_max)))
                     perm_weights.append(weight_perm)
     
     if not orig_z_vals or not perm_z_vals:

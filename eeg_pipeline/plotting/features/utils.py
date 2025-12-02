@@ -1,0 +1,925 @@
+"""Shared utilities for feature visualization plotting.
+
+This module consolidates common functionality used across multiple plotting modules:
+- FDR correction for multiple comparisons
+- Effect size calculations (Cohen's d)
+- Bootstrap confidence intervals for means
+- Normality testing (Shapiro-Wilk)
+- Significance annotation formatting with standardized p/q values
+- Common statistical helpers
+- Config-driven accessors for bands and colors
+"""
+
+from __future__ import annotations
+
+from typing import Tuple, List, Dict, Any, Optional
+import numpy as np
+import pandas as pd
+from scipy import stats
+from statsmodels.stats.multitest import multipletests
+
+from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
+from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.utils.io.general import get_band_color
+
+
+###################################################################
+# CONFIG-DRIVEN ACCESSORS
+###################################################################
+
+_DEFAULT_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
+
+_DEFAULT_BAND_RANGES = {
+    "delta": "1-4 Hz",
+    "theta": "4-8 Hz",
+    "alpha": "8-13 Hz",
+    "beta": "13-30 Hz",
+    "gamma": "30-100 Hz"
+}
+
+
+def get_band_names(config: Any = None) -> List[str]:
+    """Return frequency band names from config (falls back to defaults)."""
+    bands = get_frequency_band_names(config)
+    if bands:
+        return list(bands)
+    return _DEFAULT_BANDS
+
+
+def get_band_colors(config: Any = None) -> Dict[str, str]:
+    """Return band color mapping from config (falls back to defaults)."""
+    colors = {band: get_band_color(band, config) for band in get_band_names(config)}
+    if colors:
+        return colors
+    return {
+        "delta": "#440154",
+        "theta": "#3b528b",
+        "alpha": "#21918c",
+        "beta": "#5ec962",
+        "gamma": "#fde725",
+    }
+
+
+def get_band_ranges(config: Any = None) -> Dict[str, str]:
+    """Return band range labels from config (falls back to defaults)."""
+    freq_bands = get_config_value(config, "time_frequency_analysis.bands", {}) or getattr(config, "frequency_bands", {})
+    if isinstance(freq_bands, dict) and freq_bands:
+        return {name: f"{vals[0]}-{vals[1]} Hz" for name, vals in freq_bands.items()}
+    return _DEFAULT_BAND_RANGES
+
+
+def get_condition_colors(config: Any = None) -> Dict[str, str]:
+    """Return condition color mapping from config (pain/nonpain)."""
+    plot_cfg = get_plot_config(config)
+    return {
+        "pain": plot_cfg.get_color("pain"),
+        "nonpain": plot_cfg.get_color("nonpain"),
+    }
+
+
+# Backward-compatibility constants (prefer get_* accessors above)
+
+
+###################################################################
+# FDR CORRECTION
+###################################################################
+
+def apply_fdr_correction(
+    pvalues: List[float],
+    alpha: Optional[float] = None,
+    method: str = "fdr_bh",
+    config: Any = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Apply FDR correction to multiple p-values.
+    
+    Args:
+        pvalues: List of p-values to correct
+        alpha: Significance threshold (default from config.statistics.fdr_alpha)
+        method: Correction method (default 'fdr_bh' = Benjamini-Hochberg)
+        config: Config object for pulling defaults
+    
+    Returns:
+        Tuple of (rejected, qvalues, corrected_alpha)
+        - rejected: Boolean array of which tests are significant
+        - qvalues: Corrected p-values (q-values)
+        - corrected_alpha: The corrected significance threshold
+    """
+    if alpha is None:
+        alpha = float(get_config_value(config, "statistics.fdr_alpha", 0.05))
+
+    if not pvalues:
+        return np.array([]), np.array([]), alpha
+    
+    pvalues_arr = np.asarray(pvalues)
+    rejected, qvals, alphac_sidak, alphac_bonf = multipletests(
+        pvalues_arr, alpha=alpha, method=method
+    )
+    return rejected, qvals, alphac_sidak
+
+
+###################################################################
+# EFFECT SIZE
+###################################################################
+
+def compute_cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
+    """Compute Cohen's d effect size between two groups.
+    
+    Uses pooled standard deviation for unequal group sizes.
+    
+    Args:
+        group1: First group values
+        group2: Second group values
+    
+    Returns:
+        Cohen's d effect size (positive = group2 > group1)
+    """
+    n1, n2 = len(group1), len(group2)
+    if n1 < 2 or n2 < 2:
+        return 0.0
+    
+    var1 = np.var(group1, ddof=1)
+    var2 = np.var(group2, ddof=1)
+    
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    
+    if pooled_std < 1e-10:
+        return 0.0
+    
+    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+
+def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
+    """Compute Cohen's d for paired samples.
+    
+    Args:
+        before: Values before intervention
+        after: Values after intervention
+    
+    Returns:
+        Cohen's d effect size (positive = increase after)
+    """
+    if len(before) != len(after) or len(before) < 2:
+        return 0.0
+    
+    diff = after - before
+    std_diff = np.std(diff, ddof=1)
+    
+    if std_diff < 1e-10:
+        return 0.0
+    
+    return np.mean(diff) / std_diff
+
+
+def interpret_cohens_d(d: float) -> str:
+    """Interpret Cohen's d magnitude.
+    
+    Args:
+        d: Cohen's d value
+    
+    Returns:
+        Interpretation string
+    """
+    abs_d = abs(d)
+    if abs_d < 0.2:
+        return "negligible"
+    elif abs_d < 0.5:
+        return "small"
+    elif abs_d < 0.8:
+        return "medium"
+    else:
+        return "large"
+
+
+###################################################################
+# SIGNIFICANCE FORMATTING
+###################################################################
+
+def format_significance_annotation(
+    q: float,
+    d: float,
+    significant: bool,
+    include_d: bool = True,
+    newline: bool = True
+) -> str:
+    """Format significance annotation for plots.
+    
+    Args:
+        q: FDR-corrected q-value
+        d: Cohen's d effect size
+        significant: Whether test is significant after FDR
+        include_d: Include Cohen's d in annotation
+        newline: Use newline between q and d
+    
+    Returns:
+        Formatted annotation string
+    """
+    sig_marker = "†" if significant else ""
+    sep = "\n" if newline else " "
+    
+    if include_d:
+        return f"q={q:.3f}{sig_marker}{sep}d={d:.2f}"
+    else:
+        return f"q={q:.3f}{sig_marker}"
+
+
+def get_significance_color(significant: bool, config: Any = None) -> str:
+    """Get color for significance annotation.
+    
+    Args:
+        significant: Whether test is significant
+        config: Config object for pulling palette
+    
+    Returns:
+        Color hex code
+    """
+    plot_cfg = get_plot_config(config)
+    style_colors = getattr(plot_cfg, "style", None)
+    if style_colors and hasattr(style_colors, "colors"):
+        sig_color = getattr(style_colors.colors, "significant", "#d62728")
+        nonsig_color = getattr(style_colors.colors, "nonsignificant", "#333333")
+        return sig_color if significant else nonsig_color
+    return "#d62728" if significant else "#333333"
+
+
+###################################################################
+# STATISTICAL HELPERS
+###################################################################
+
+def safe_mannwhitneyu(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    min_n: int = 3
+) -> Tuple[float, float]:
+    """Safely compute Mann-Whitney U test.
+    
+    Args:
+        group1: First group values
+        group2: Second group values
+        min_n: Minimum samples required
+    
+    Returns:
+        Tuple of (statistic, p_value), or (np.nan, 1.0) if test fails
+    """
+    if len(group1) < min_n or len(group2) < min_n:
+        return np.nan, 1.0
+    
+    try:
+        stat, p = stats.mannwhitneyu(group1, group2, alternative='two-sided')
+        return stat, p
+    except ValueError:
+        return np.nan, 1.0
+
+
+def safe_wilcoxon(
+    x: np.ndarray,
+    y: np.ndarray,
+    min_n: int = 5
+) -> Tuple[float, float]:
+    """Safely compute Wilcoxon signed-rank test.
+    
+    Args:
+        x: First paired sample
+        y: Second paired sample
+        min_n: Minimum samples required
+    
+    Returns:
+        Tuple of (statistic, p_value), or (np.nan, 1.0) if test fails
+    """
+    if len(x) != len(y) or len(x) < min_n:
+        return np.nan, 1.0
+    
+    try:
+        stat, p = stats.wilcoxon(x, y)
+        return stat, p
+    except ValueError:
+        return np.nan, 1.0
+
+
+###################################################################
+# CONFIG ACCESSORS
+###################################################################
+
+def get_font_sizes(config: Any = None) -> Dict[str, int]:
+    """Get font sizes from config as a dictionary.
+    
+    This provides a consistent way to access font sizes without
+    importing get_plot_config directly everywhere.
+    
+    Usage:
+        fonts = get_font_sizes(config)
+        ax.set_title("Title", fontsize=fonts['title'])
+        ax.set_xlabel("X", fontsize=fonts['label'])
+    
+    Returns:
+        Dict with keys: small, medium, large, title, annotation, label, ylabel, suptitle, figure_title
+    """
+    from eeg_pipeline.plotting.config import get_plot_config
+    
+    plot_cfg = get_plot_config(config)
+    return {
+        'small': plot_cfg.font.small,
+        'medium': plot_cfg.font.medium,
+        'large': plot_cfg.font.large,
+        'title': plot_cfg.font.title,
+        'annotation': plot_cfg.font.annotation,
+        'label': plot_cfg.font.label,
+        'ylabel': plot_cfg.font.ylabel,
+        'suptitle': plot_cfg.font.suptitle,
+        'figure_title': plot_cfg.font.figure_title,
+    }
+
+
+def get_figure_size(size_name: str = "standard", config: Any = None) -> Tuple[float, float]:
+    """Get figure size from config.
+    
+    Args:
+        size_name: One of "small", "standard", "wide", "square", etc.
+        config: Config object
+    
+    Returns:
+        Tuple (width, height)
+    """
+    from eeg_pipeline.plotting.config import get_plot_config
+    
+    plot_cfg = get_plot_config(config)
+    return plot_cfg.get_figure_size(size_name)
+
+
+###################################################################
+# BOOTSTRAP CONFIDENCE INTERVALS FOR MEANS
+###################################################################
+
+def bootstrap_mean_ci(
+    data: np.ndarray,
+    n_boot: int = 1000,
+    ci_level: float = 0.95,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[float, float, float]:
+    """Compute bootstrap confidence interval for the mean.
+    
+    Args:
+        data: 1D array of values
+        n_boot: Number of bootstrap iterations
+        ci_level: Confidence level (default 0.95 for 95% CI)
+        rng: Random number generator
+    
+    Returns:
+        Tuple of (mean, ci_low, ci_high)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    data = np.asarray(data).ravel()
+    data = data[np.isfinite(data)]
+    
+    if len(data) < 3:
+        return np.nan, np.nan, np.nan
+    
+    observed_mean = np.mean(data)
+    n = len(data)
+    
+    boot_means = np.empty(n_boot)
+    for i in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        boot_means[i] = np.mean(data[idx])
+    
+    alpha = 1 - ci_level
+    ci_low = np.percentile(boot_means, 100 * alpha / 2)
+    ci_high = np.percentile(boot_means, 100 * (1 - alpha / 2))
+    
+    return float(observed_mean), float(ci_low), float(ci_high)
+
+
+def bootstrap_mean_diff_ci(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    n_boot: int = 1000,
+    ci_level: float = 0.95,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[float, float, float]:
+    """Compute bootstrap CI for difference in means (group2 - group1).
+    
+    Args:
+        group1: First group values
+        group2: Second group values
+        n_boot: Number of bootstrap iterations
+        ci_level: Confidence level
+        rng: Random number generator
+    
+    Returns:
+        Tuple of (mean_diff, ci_low, ci_high)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    
+    if len(g1) < 3 or len(g2) < 3:
+        return np.nan, np.nan, np.nan
+    
+    observed_diff = np.mean(g2) - np.mean(g1)
+    n1, n2 = len(g1), len(g2)
+    
+    boot_diffs = np.empty(n_boot)
+    for i in range(n_boot):
+        idx1 = rng.integers(0, n1, size=n1)
+        idx2 = rng.integers(0, n2, size=n2)
+        boot_diffs[i] = np.mean(g2[idx2]) - np.mean(g1[idx1])
+    
+    alpha = 1 - ci_level
+    ci_low = np.percentile(boot_diffs, 100 * alpha / 2)
+    ci_high = np.percentile(boot_diffs, 100 * (1 - alpha / 2))
+    
+    return float(observed_diff), float(ci_low), float(ci_high)
+
+
+###################################################################
+# NORMALITY TESTING
+###################################################################
+
+def test_normality(
+    data: np.ndarray,
+    alpha: float = 0.05,
+    max_n: int = 5000,
+) -> Tuple[bool, float, str]:
+    """Test normality using Shapiro-Wilk test.
+    
+    Args:
+        data: 1D array of values
+        alpha: Significance threshold
+        max_n: Maximum sample size for Shapiro-Wilk (uses random subset if exceeded)
+    
+    Returns:
+        Tuple of (is_normal, p_value, interpretation)
+        - is_normal: True if p > alpha (fail to reject normality)
+        - p_value: Shapiro-Wilk p-value
+        - interpretation: Human-readable string
+    """
+    data = np.asarray(data).ravel()
+    data = data[np.isfinite(data)]
+    
+    if len(data) < 3:
+        return True, np.nan, "Insufficient data (n<3)"
+    
+    if len(data) > max_n:
+        rng = np.random.default_rng(42)
+        data = rng.choice(data, size=max_n, replace=False)
+    
+    try:
+        stat, p = stats.shapiro(data)
+    except Exception:
+        return True, np.nan, "Test failed"
+    
+    is_normal = p > alpha
+    
+    if p < 0.001:
+        interpretation = "Strongly non-normal (p<.001)"
+    elif p < 0.01:
+        interpretation = "Non-normal (p<.01)"
+    elif p < 0.05:
+        interpretation = "Marginally non-normal (p<.05)"
+    elif p < 0.10:
+        interpretation = "Approximately normal (p>.05)"
+    else:
+        interpretation = "Normal (p>.10)"
+    
+    return is_normal, float(p), interpretation
+
+
+###################################################################
+# STANDARDIZED STATISTICAL ANNOTATION
+###################################################################
+
+def compute_condition_stats(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    test: str = "mannwhitneyu",
+    n_boot: int = 1000,
+    config: Any = None,
+) -> Dict[str, Any]:
+    """Compute comprehensive statistics for condition comparison.
+    
+    Returns raw p-value, effect size, and bootstrap CI for difference.
+    FDR correction should be applied separately across all tests.
+    
+    Args:
+        group1: First group values (e.g., non-pain)
+        group2: Second group values (e.g., pain)
+        test: Statistical test ("mannwhitneyu" or "ttest")
+        n_boot: Bootstrap iterations for CI
+        config: Config object
+    
+    Returns:
+        Dict with keys:
+        - p_raw: Raw p-value from test
+        - statistic: Test statistic
+        - cohens_d: Effect size
+        - d_interpretation: Effect size interpretation
+        - mean_diff: Mean difference (group2 - group1)
+        - ci_low: Bootstrap CI lower bound
+        - ci_high: Bootstrap CI upper bound
+        - n1, n2: Sample sizes
+    """
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    
+    result = {
+        "p_raw": np.nan,
+        "statistic": np.nan,
+        "cohens_d": np.nan,
+        "d_interpretation": "N/A",
+        "mean_diff": np.nan,
+        "ci_low": np.nan,
+        "ci_high": np.nan,
+        "n1": len(g1),
+        "n2": len(g2),
+    }
+    
+    if len(g1) < 3 or len(g2) < 3:
+        return result
+    
+    if test == "mannwhitneyu":
+        try:
+            stat, p = stats.mannwhitneyu(g1, g2, alternative="two-sided")
+            result["statistic"] = float(stat)
+            result["p_raw"] = float(p)
+        except ValueError:
+            pass
+    elif test == "ttest":
+        try:
+            stat, p = stats.ttest_ind(g1, g2)
+            result["statistic"] = float(stat)
+            result["p_raw"] = float(p)
+        except ValueError:
+            pass
+    
+    result["cohens_d"] = compute_cohens_d(g1, g2)
+    result["d_interpretation"] = interpret_cohens_d(result["cohens_d"])
+    
+    diff, ci_lo, ci_hi = bootstrap_mean_diff_ci(g1, g2, n_boot=n_boot)
+    result["mean_diff"] = diff
+    result["ci_low"] = ci_lo
+    result["ci_high"] = ci_hi
+    
+    return result
+
+
+def format_stats_annotation(
+    p_raw: float,
+    q_fdr: Optional[float] = None,
+    cohens_d: Optional[float] = None,
+    ci_low: Optional[float] = None,
+    ci_high: Optional[float] = None,
+    compact: bool = True,
+) -> str:
+    """Format standardized statistical annotation for plots.
+    
+    Always shows both raw p and FDR-corrected q when available.
+    
+    Args:
+        p_raw: Raw p-value
+        q_fdr: FDR-corrected q-value (optional)
+        cohens_d: Cohen's d effect size (optional)
+        ci_low: Bootstrap CI lower bound (optional)
+        ci_high: Bootstrap CI upper bound (optional)
+        compact: Use compact format (default True)
+    
+    Returns:
+        Formatted annotation string
+    """
+    lines = []
+    
+    if np.isfinite(p_raw):
+        p_str = f"p={p_raw:.3f}" if p_raw >= 0.001 else "p<.001"
+        if q_fdr is not None and np.isfinite(q_fdr):
+            q_str = f"q={q_fdr:.3f}" if q_fdr >= 0.001 else "q<.001"
+            sig_marker = "†" if q_fdr < 0.05 else ""
+            if compact:
+                lines.append(f"{p_str}, {q_str}{sig_marker}")
+            else:
+                lines.append(f"{p_str}")
+                lines.append(f"{q_str}{sig_marker}")
+        else:
+            sig_marker = "*" if p_raw < 0.05 else ""
+            lines.append(f"{p_str}{sig_marker}")
+    
+    if cohens_d is not None and np.isfinite(cohens_d):
+        lines.append(f"d={cohens_d:.2f}")
+    
+    if ci_low is not None and ci_high is not None:
+        if np.isfinite(ci_low) and np.isfinite(ci_high):
+            lines.append(f"95%CI [{ci_low:.2f}, {ci_high:.2f}]")
+    
+    return "\n".join(lines) if lines else ""
+
+
+def format_footer_annotation(
+    n_tests: int,
+    correction_method: str = "FDR-BH",
+    alpha: float = 0.05,
+    n_significant: Optional[int] = None,
+    additional_info: Optional[str] = None,
+) -> str:
+    """Format footer annotation showing multiple comparison info.
+    
+    Args:
+        n_tests: Total number of statistical tests
+        correction_method: Correction method used
+        alpha: Significance threshold
+        n_significant: Number of significant tests after correction
+        additional_info: Additional text to append
+    
+    Returns:
+        Footer annotation string
+    """
+    parts = [f"{n_tests} tests"]
+    
+    if correction_method:
+        parts.append(f"{correction_method} α={alpha}")
+    
+    if n_significant is not None:
+        parts.append(f"{n_significant} significant")
+    
+    footer = " | ".join(parts)
+    
+    if additional_info:
+        footer = f"{footer} | {additional_info}"
+    
+    return footer
+
+
+###################################################################
+# VARIABILITY METRICS
+###################################################################
+
+def compute_variability_metrics(
+    data: np.ndarray,
+) -> Dict[str, float]:
+    """Compute variability metrics for trial-to-trial analysis.
+    
+    Args:
+        data: 1D array of values (e.g., power per trial)
+    
+    Returns:
+        Dict with:
+        - cv: Coefficient of variation (std/|mean|)
+        - fano: Fano factor (var/mean) - meaningful for positive data
+        - std: Standard deviation
+        - iqr: Interquartile range
+        - mad: Median absolute deviation
+    """
+    data = np.asarray(data).ravel()
+    data = data[np.isfinite(data)]
+    
+    if len(data) < 2:
+        return {
+            "cv": np.nan,
+            "fano": np.nan,
+            "std": np.nan,
+            "iqr": np.nan,
+            "mad": np.nan,
+        }
+    
+    mean_val = np.mean(data)
+    std_val = np.std(data, ddof=1)
+    var_val = np.var(data, ddof=1)
+    
+    cv = std_val / np.abs(mean_val) if np.abs(mean_val) > 1e-10 else np.nan
+    
+    fano = var_val / mean_val if mean_val > 1e-10 else np.nan
+    
+    iqr = np.percentile(data, 75) - np.percentile(data, 25)
+    
+    mad = np.median(np.abs(data - np.median(data)))
+    
+    return {
+        "cv": float(cv),
+        "fano": float(fano),
+        "std": float(std_val),
+        "iqr": float(iqr),
+        "mad": float(mad),
+    }
+
+
+###################################################################
+# TEMPORAL AUTOCORRELATION
+###################################################################
+
+def compute_lag1_autocorrelation(data: np.ndarray) -> float:
+    """Compute lag-1 autocorrelation for trial-to-trial analysis.
+    
+    Args:
+        data: 1D array of values (e.g., power per trial in order)
+    
+    Returns:
+        Lag-1 autocorrelation coefficient
+    """
+    data = np.asarray(data).ravel()
+    data = data[np.isfinite(data)]
+    
+    if len(data) < 3:
+        return np.nan
+    
+    return np.corrcoef(data[:-1], data[1:])[0, 1]
+
+
+def compute_feature_stability(
+    df: pd.DataFrame,
+    feature_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Compute stability metrics for each feature column.
+    
+    Args:
+        df: DataFrame with features (rows = trials)
+        feature_cols: Columns to analyze (default: all numeric)
+    
+    Returns:
+        DataFrame with columns: feature, cv, lag1_acf, n_valid
+    """
+    if feature_cols is None:
+        feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    results = []
+    for col in feature_cols:
+        vals = df[col].dropna().values
+        if len(vals) < 5:
+            continue
+        
+        mean_val = np.mean(vals)
+        std_val = np.std(vals, ddof=1)
+        cv = std_val / np.abs(mean_val) if np.abs(mean_val) > 1e-10 else np.nan
+        lag1 = compute_lag1_autocorrelation(vals)
+        
+        results.append({
+            "feature": col,
+            "cv": cv,
+            "lag1_acf": lag1,
+            "n_valid": len(vals),
+            "mean": mean_val,
+            "std": std_val,
+        })
+    
+    return pd.DataFrame(results)
+
+
+###################################################################
+# COHEN'S D INTERPRETATION LEGEND
+###################################################################
+
+def get_cohens_d_interpretation(d: float) -> str:
+    """Get interpretation string for Cohen's d effect size.
+    
+    Thresholds based on Cohen (1988):
+    - |d| < 0.2: negligible
+    - 0.2 <= |d| < 0.5: small
+    - 0.5 <= |d| < 0.8: medium
+    - |d| >= 0.8: large
+    """
+    abs_d = abs(d)
+    if abs_d < 0.2:
+        return "negligible"
+    elif abs_d < 0.5:
+        return "small"
+    elif abs_d < 0.8:
+        return "medium"
+    else:
+        return "large"
+
+
+def add_cohens_d_legend(ax, loc: str = "upper right", fontsize: int = 8) -> None:
+    """Add Cohen's d interpretation legend to an axis.
+    
+    Args:
+        ax: Matplotlib axis
+        loc: Legend location
+        fontsize: Font size for legend text
+    """
+    legend_text = (
+        "Cohen's d:\n"
+        "|d| < 0.2: negligible\n"
+        "0.2 ≤ |d| < 0.5: small\n"
+        "0.5 ≤ |d| < 0.8: medium\n"
+        "|d| ≥ 0.8: large"
+    )
+    
+    props = dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9, edgecolor="gray")
+    
+    if loc == "upper right":
+        x, y, ha, va = 0.98, 0.98, "right", "top"
+    elif loc == "upper left":
+        x, y, ha, va = 0.02, 0.98, "left", "top"
+    elif loc == "lower right":
+        x, y, ha, va = 0.98, 0.02, "right", "bottom"
+    else:
+        x, y, ha, va = 0.02, 0.02, "left", "bottom"
+    
+    ax.text(x, y, legend_text, transform=ax.transAxes, fontsize=fontsize,
+            verticalalignment=va, horizontalalignment=ha, bbox=props, family="monospace")
+
+
+###################################################################
+# NORMALITY ANNOTATION HELPER
+###################################################################
+
+def add_normality_annotation(
+    ax,
+    data: np.ndarray,
+    loc: str = "upper left",
+    fontsize: int = 8,
+    alpha: float = 0.05,
+) -> None:
+    """Add Shapiro-Wilk normality test result to plot.
+    
+    Args:
+        ax: Matplotlib axis
+        data: 1D array of values to test
+        loc: Annotation location
+        fontsize: Font size
+        alpha: Significance level for normality test
+    """
+    is_normal, p_value, interpretation = test_normality(data, alpha=alpha)
+    
+    if is_normal is None or np.isnan(p_value):
+        color = "gray"
+        symbol = "?"
+    elif is_normal:
+        color = "#22C55E"
+        symbol = "✓"
+    else:
+        color = "#F59E0B"
+        symbol = "✗"
+    
+    text = f"Normality: {symbol} {interpretation}"
+    
+    if loc == "upper left":
+        x, y, ha, va = 0.02, 0.98, "left", "top"
+    elif loc == "upper right":
+        x, y, ha, va = 0.98, 0.98, "right", "top"
+    elif loc == "lower left":
+        x, y, ha, va = 0.02, 0.02, "left", "bottom"
+    else:
+        x, y, ha, va = 0.98, 0.02, "right", "bottom"
+    
+    ax.text(x, y, text, transform=ax.transAxes, fontsize=fontsize,
+            verticalalignment=va, horizontalalignment=ha, color=color,
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
+
+
+###################################################################
+# PARALLEL BOOTSTRAP (PERFORMANCE)
+###################################################################
+
+def compute_bootstrap_ci_parallel(
+    data1: np.ndarray,
+    data2: np.ndarray,
+    n_boot: int = 1000,
+    ci: float = 0.95,
+    n_jobs: int = -1,
+) -> Tuple[float, float]:
+    """Compute bootstrap CI for mean difference using parallel processing.
+    
+    Uses joblib for parallel bootstrap iterations.
+    
+    Args:
+        data1: First group values
+        data2: Second group values
+        n_boot: Number of bootstrap iterations
+        ci: Confidence interval level
+        n_jobs: Number of parallel jobs (-1 = all cores)
+    
+    Returns:
+        Tuple of (ci_low, ci_high)
+    """
+    try:
+        from joblib import Parallel, delayed
+    except ImportError:
+        return compute_bootstrap_ci(data1, data2, n_boot=n_boot, ci=ci)
+    
+    data1 = np.asarray(data1).ravel()
+    data2 = np.asarray(data2).ravel()
+    data1 = data1[np.isfinite(data1)]
+    data2 = data2[np.isfinite(data2)]
+    
+    if len(data1) < 2 or len(data2) < 2:
+        return (np.nan, np.nan)
+    
+    def _single_bootstrap(seed):
+        rng = np.random.RandomState(seed)
+        boot1 = rng.choice(data1, size=len(data1), replace=True)
+        boot2 = rng.choice(data2, size=len(data2), replace=True)
+        return np.mean(boot2) - np.mean(boot1)
+    
+    diffs = Parallel(n_jobs=n_jobs)(
+        delayed(_single_bootstrap)(i) for i in range(n_boot)
+    )
+    
+    alpha = 1 - ci
+    ci_low = np.percentile(diffs, 100 * alpha / 2)
+    ci_high = np.percentile(diffs, 100 * (1 - alpha / 2))
+    
+    return (float(ci_low), float(ci_high))

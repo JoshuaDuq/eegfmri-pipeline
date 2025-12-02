@@ -29,8 +29,11 @@ def plot_autocorrelation_decay(
     decay_col: str = "acf_decay_time_ms",
     figsize: Tuple[float, float] = (10, 5),
     by_condition: str = None,
+    config: Any = None,
 ) -> plt.Figure:
     """Plot distribution of autocorrelation decay times."""
+    plot_cfg = get_plot_config(config)
+    
     if decay_col not in dynamics_df.columns:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, f"Column {decay_col} not found", ha="center", va="center")
@@ -38,7 +41,6 @@ def plot_autocorrelation_decay(
     
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
-    # Left: Histogram of decay times
     ax1 = axes[0]
     values = dynamics_df[decay_col].dropna().values
     
@@ -48,17 +50,16 @@ def plot_autocorrelation_decay(
         for idx, cond in enumerate(conditions[:2]):
             cond_vals = dynamics_df[dynamics_df[by_condition] == cond][decay_col].dropna()
             ax1.hist(cond_vals, bins=20, alpha=0.6, label=str(cond), color=colors[idx])
-        ax1.legend(fontsize=8)
+        ax1.legend(fontsize=10)
     else:
         ax1.hist(values, bins=25, color="#3B82F6", alpha=0.7, edgecolor="white")
     
-    ax1.set_xlabel("Decay Time (ms)", fontsize=10)
-    ax1.set_ylabel("Count", fontsize=10)
-    ax1.set_title("ACF Decay Time Distribution", fontsize=10, fontweight="bold")
+    ax1.set_xlabel("Decay Time (ms)", fontsize=11)
+    ax1.set_ylabel("Count", fontsize=11)
+    ax1.set_title("ACF Decay Time Distribution", fontsize=12, fontweight="bold")
     ax1.axvline(np.median(values), color="red", linestyle="--", linewidth=1.5, label=f"Median: {np.median(values):.0f} ms")
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=10)
     
-    # Right: ACF at specific lags
     ax2 = axes[1]
     lag_cols = [c for c in dynamics_df.columns if "acf_lag_" in c]
     
@@ -72,71 +73,13 @@ def plot_autocorrelation_decay(
         ax2.bar(range(len(lag_values)), lag_values, color="#22C55E", alpha=0.7, edgecolor="white")
         ax2.set_xticks(range(len(lag_values)))
         ax2.set_xticklabels([f"{l} ms" for l in lag_labels], fontsize=9)
-        ax2.set_xlabel("Lag", fontsize=10)
-        ax2.set_ylabel("Mean ACF", fontsize=10)
-        ax2.set_title("ACF at Fixed Lags", fontsize=10, fontweight="bold")
+        ax2.set_xlabel("Lag", fontsize=11)
+        ax2.set_ylabel("Mean ACF", fontsize=11)
+        ax2.set_title("ACF at Fixed Lags", fontsize=12, fontweight="bold")
         ax2.axhline(1/np.e, color="gray", linestyle="--", linewidth=1, alpha=0.7, label="1/e threshold")
-        ax2.legend(fontsize=8)
+        ax2.legend(fontsize=10)
     else:
         ax2.text(0.5, 0.5, "No lag columns", ha="center", va="center")
-    
-    plt.tight_layout()
-    save_fig(fig, save_path)
-    plt.close(fig)
-    
-    return fig
-
-
-def plot_dfa_scaling(
-    dynamics_df: pd.DataFrame,
-    save_path: Path,
-    *,
-    alpha_col: str = "dfa_alpha_broadband",
-    bands: List[str] = None,
-    figsize: Tuple[float, float] = (10, 5),
-) -> plt.Figure:
-    """Plot DFA exponent distributions and band comparison."""
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-    
-    # Left: Broadband DFA distribution
-    ax1 = axes[0]
-    if alpha_col in dynamics_df.columns:
-        alpha_values = dynamics_df[alpha_col].dropna().values
-        ax1.hist(alpha_values, bins=25, color="#6366F1", alpha=0.7, edgecolor="white")
-        ax1.axvline(np.median(alpha_values), color="red", linestyle="--", linewidth=1.5, label=f"Median: {np.median(alpha_values):.2f}")
-        ax1.axvline(0.5, color="gray", linestyle=":", linewidth=1, label="White noise (0.5)")
-        ax1.axvline(1.0, color="gray", linestyle="-.", linewidth=1, label="1/f noise (1.0)")
-        ax1.set_xlabel("DFA Exponent (α)", fontsize=10)
-        ax1.set_ylabel("Count", fontsize=10)
-        ax1.set_title("DFA Exponent Distribution", fontsize=10, fontweight="bold")
-        ax1.legend(fontsize=7)
-    else:
-        ax1.text(0.5, 0.5, f"Column {alpha_col} not found", ha="center", va="center")
-    
-    # Right: Band-specific DFA
-    ax2 = axes[1]
-    
-    if bands is None:
-        bands = ["theta", "alpha", "beta", "gamma"]
-    
-    band_cols = [f"dfa_alpha_{b}" for b in bands if f"dfa_alpha_{b}" in dynamics_df.columns]
-    
-    if band_cols:
-        means = [dynamics_df[c].mean() for c in band_cols]
-        stds = [dynamics_df[c].std() for c in band_cols]
-        band_labels = [c.replace("dfa_alpha_", "") for c in band_cols]
-        
-        colors = ["#F59E0B", "#3B82F6", "#22C55E", "#C42847"][:len(band_cols)]
-        
-        x_pos = np.arange(len(band_cols))
-        ax2.bar(x_pos, means, yerr=stds, color=colors, alpha=0.7, edgecolor="white", capsize=4)
-        ax2.set_xticks(x_pos)
-        ax2.set_xticklabels(band_labels, fontsize=9)
-        ax2.set_ylabel("DFA Exponent (α)", fontsize=10)
-        ax2.set_title("Band-Specific DFA", fontsize=10, fontweight="bold")
-        ax2.axhline(1.0, color="gray", linestyle="--", linewidth=1, alpha=0.7)
-    else:
-        ax2.text(0.5, 0.5, "No band DFA columns", ha="center", va="center")
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -180,12 +123,12 @@ def plot_mse_complexity_curves(
         sems = [dynamics_df[c].sem() for c in mse_cols]
         ax1.errorbar(scales, means, yerr=sems, marker="o", color="#6366F1", capsize=3)
     
-    ax1.set_xlabel("Scale", fontsize=10)
-    ax1.set_ylabel("Sample Entropy", fontsize=10)
-    ax1.set_title("Multiscale Entropy Curve", fontsize=10, fontweight="bold")
+    ax1.set_xlabel("Scale", fontsize=plot_cfg.font.title)
+    ax1.set_ylabel("Sample Entropy", fontsize=plot_cfg.font.title)
+    ax1.set_title("Multiscale Entropy Curve", fontsize=plot_cfg.font.title, fontweight="bold")
     ax1.set_xscale("log")
     if by_condition:
-        ax1.legend(fontsize=8)
+        ax1.legend(fontsize=plot_cfg.font.medium)
     
     # Right: Complexity index distribution
     ax2 = axes[1]
@@ -193,10 +136,10 @@ def plot_mse_complexity_curves(
         ci_values = dynamics_df["mse_complexity_index"].dropna().values
         ax2.hist(ci_values, bins=25, color="#22C55E", alpha=0.7, edgecolor="white")
         ax2.axvline(np.median(ci_values), color="red", linestyle="--", linewidth=1.5, label=f"Median: {np.median(ci_values):.2f}")
-        ax2.set_xlabel("Complexity Index", fontsize=10)
-        ax2.set_ylabel("Count", fontsize=10)
-        ax2.set_title("MSE Complexity Index", fontsize=10, fontweight="bold")
-        ax2.legend(fontsize=8)
+        ax2.set_xlabel("Complexity Index", fontsize=plot_cfg.font.title)
+        ax2.set_ylabel("Count", fontsize=plot_cfg.font.title)
+        ax2.set_title("MSE Complexity Index", fontsize=plot_cfg.font.title, fontweight="bold")
+        ax2.legend(fontsize=plot_cfg.font.medium)
     else:
         ax2.text(0.5, 0.5, "No complexity index", ha="center", va="center")
     
@@ -237,15 +180,15 @@ def plot_neural_timescale_comparison(
         for idx, cond in enumerate(unique_conds[:2]):
             mask = conditions == cond
             ax.scatter(x_clean[mask], y_clean[mask], c=colors[idx], alpha=0.6, s=40, label=str(cond))
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=plot_cfg.font.medium)
     else:
         ax.scatter(x_clean, y_clean, c="#3B82F6", alpha=0.6, s=40, edgecolors="white", linewidths=0.5)
     
     # Correlation
     r, p = stats.spearmanr(x_clean, y_clean)
-    ax.set_xlabel("ACF Decay Time (ms)", fontsize=10)
-    ax.set_ylabel("DFA Exponent (α)", fontsize=10)
-    ax.set_title(f"Neural Timescale Comparison (r = {r:.2f})", fontsize=11, fontweight="bold")
+    ax.set_xlabel("ACF Decay Time (ms)", fontsize=plot_cfg.font.title)
+    ax.set_ylabel("DFA Exponent (α)", fontsize=plot_cfg.font.title)
+    ax.set_title(f"Neural Timescale Comparison (r = {r:.2f})", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -307,13 +250,13 @@ def plot_dynamics_behavior_grid(
         x_line = np.linspace(x_clean.min(), x_clean.max(), 100)
         ax.plot(x_line, slope * x_line + intercept, color=color, linewidth=1.5)
         
-        ax.set_title(f"{col[:20]}... r={r:.2f}", fontsize=8, color=color)
+        ax.set_title(f"{col[:20]}... r={r:.2f}", fontsize=plot_cfg.font.medium, color=color)
         ax.tick_params(labelsize=7)
     
     for idx in range(len(dynamics_cols), len(axes)):
         axes[idx].set_visible(False)
     
-    fig.suptitle(f"Dynamics Features vs {behavior_label}", fontsize=11, fontweight="bold")
+    fig.suptitle(f"Dynamics Features vs {behavior_label}", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     plt.tight_layout()
     save_fig(fig, save_path)

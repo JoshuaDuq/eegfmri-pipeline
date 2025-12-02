@@ -7,7 +7,7 @@ Cohen's d, correlation difference effects, and Fisher z-tests.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 from scipy import stats
@@ -95,20 +95,23 @@ def fisher_z_test(
     r2: float,
     n1: int,
     n2: int,
+    config: Optional[Any] = None,
 ) -> Tuple[float, float]:
     """
     Fisher z-test for difference between two correlations.
     
     Returns (z_statistic, p_value).
     """
+    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
     if n1 < 4 or n2 < 4:
         return np.nan, np.nan
 
     if not (np.isfinite(r1) and np.isfinite(r2)):
         return np.nan, np.nan
 
-    r1 = np.clip(r1, -0.9999, 0.9999)
-    r2 = np.clip(r2, -0.9999, 0.9999)
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    r1 = np.clip(r1, clip_min, clip_max)
+    r2 = np.clip(r2, clip_min, clip_max)
 
     z1 = 0.5 * np.log((1 + r1) / (1 - r1))
     z2 = 0.5 * np.log((1 + r2) / (1 - r2))
@@ -121,13 +124,15 @@ def fisher_z_test(
     return float(z_stat), float(p)
 
 
-def cohens_q(r1: float, r2: float) -> float:
+def cohens_q(r1: float, r2: float, config: Optional[Any] = None) -> float:
     """Cohen's q for difference between correlations."""
+    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
     if not (np.isfinite(r1) and np.isfinite(r2)):
         return np.nan
 
-    r1 = np.clip(r1, -0.9999, 0.9999)
-    r2 = np.clip(r2, -0.9999, 0.9999)
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    r1 = np.clip(r1, clip_min, clip_max)
+    r2 = np.clip(r2, clip_min, clip_max)
 
     z1 = 0.5 * np.log((1 + r1) / (1 - r1))
     z2 = 0.5 * np.log((1 + r2) / (1 - r2))
@@ -140,14 +145,15 @@ def correlation_difference_effect(
     r2: float,
     n1: int,
     n2: int,
+    config: Optional[Any] = None,
 ) -> Dict[str, float]:
     """
     Comprehensive effect statistics for correlation difference.
     
     Returns dict with z_stat, p_value, cohens_q, r_diff.
     """
-    z_stat, p_val = fisher_z_test(r1, r2, n1, n2)
-    q = cohens_q(r1, r2)
+    z_stat, p_val = fisher_z_test(r1, r2, n1, n2, config)
+    q = cohens_q(r1, r2, config)
 
     return {
         "r_diff": float(r1 - r2) if np.isfinite(r1) and np.isfinite(r2) else np.nan,

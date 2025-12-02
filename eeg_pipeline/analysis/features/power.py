@@ -1,154 +1,148 @@
 from __future__ import annotations
 
 from typing import Optional, List, Tuple, Any
-import logging
-
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.analysis.tfr import (
-    time_mask,
-    freq_mask,
-    extract_tfr_object,
-    extract_band_power,
-    process_temporal_bin,
-)
-from eeg_pipeline.utils.config.loader import (
-    get_config_value,
-    get_frequency_bands,
-    parse_temporal_bin_config,
-)
+from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 
-
-###################################################################
-# Power Feature Extraction
-###################################################################
-
-
-def _prepare_tfr_power_inputs(tfr: Any, config: Any, logger: Any) -> Optional[Tuple[Any, np.ndarray, np.ndarray, np.ndarray, List[str]]]:
+def _prepare_tfr(tfr: Any, config: Any, logger: Any):
     tfr_obj = extract_tfr_object(tfr)
     if tfr_obj is None:
-        return None
+        return None, None, None, None, None
+    return tfr_obj, tfr_obj.data, tfr_obj.freqs, tfr_obj.times, tfr_obj.info["ch_names"]
 
-    tfr_data = tfr_obj.data
-    if tfr_data.ndim != 4:
-        raise RuntimeError("TFR data must have 4D shape (epochs, channels, freqs, times)")
-
-    n_nan = np.sum(~np.isfinite(tfr_data))
-    if n_nan > 0:
-        nan_fraction = n_nan / tfr_data.size
-        max_nan_fraction = float(config.get("analysis.data_quality.max_nan_fraction", 0.1))
-        if nan_fraction > max_nan_fraction:
-            logger.error(
-                f"TFR data contains {nan_fraction:.1%} non-finite values (max allowed: {max_nan_fraction:.1%})"
-            )
-            return None
-        logger.warning(
-            f"TFR data contains {n_nan} non-finite values ({nan_fraction:.2%}); "
-            "these will propagate as NaN in features"
-        )
-
-    freqs = tfr_obj.freqs
-    times = tfr_obj.times
-    channel_names = tfr_obj.info["ch_names"]
-    
-    return tfr_obj, tfr_data, freqs, times, channel_names
-
-
-def extract_baseline_power_features(
-    tfr: Any, bands: List[str], baseline_window: Tuple[float, float], config: Any, logger: Any
+def extract_power_features(
+    ctx: Any, # FeatureContext
+    bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Extract power features for all defined segments (baseline, ramp, plateau, etc.).
+    
+    Computes:
+    - Raw power for baseline (if available) - internalized for normalization
+    - Log-ratio power for active segments (ramp, plateau, bins) relative to baseline
+    - Global mean power per band
+    """
     if not bands:
         return pd.DataFrame(), []
-    
-    result = _prepare_tfr_power_inputs(tfr, config, logger)
-    if result is None:
+
+    tfr = ctx.results.get("tfr")
+    if tfr is None:
         return pd.DataFrame(), []
-    
-    tfr_obj, tfr_data, freqs, times, channel_names = result
-    
-    baseline_start, baseline_end = baseline_window
-    baseline_mask = time_mask(times, baseline_start, baseline_end)
-    if not np.any(baseline_mask):
-        logger.warning(f"No time points in baseline window ({baseline_start}, {baseline_end})")
+
+    tfr_obj, tfr_data, freqs, times, channel_names = _prepare_tfr(tfr, ctx.config, ctx.logger)
+    if tfr_data is None:
         return pd.DataFrame(), []
+
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+    freq_bands = get_frequency_bands(ctx.config)
     
-    frequency_bands = get_frequency_bands(config)
-    feature_arrays = []
-    column_names = []
-    
+    # Pre-calculate band masks and indices to save time
+    band_indices = {}
     for band in bands:
-        if band not in frequency_bands:
-            continue
-        
-        fmin, fmax = frequency_bands[band]
-        band_power = extract_band_power(tfr_data, freqs, fmin, fmax, baseline_mask)
-        if band_power is None:
-            continue
-        
-        feature_arrays.append(band_power)
-        column_names.extend([f"baseline_{band}_{ch}" for ch in channel_names])
+        if band in freq_bands:
+            fmin, fmax = freq_bands[band]
+            mask = (freqs >= fmin) & (freqs <= fmax)
+            if np.any(mask):
+                band_indices[band] = mask
 
-    if not feature_arrays:
-        return pd.DataFrame(), []
-
-    return pd.DataFrame(np.concatenate(feature_arrays, axis=1), columns=column_names), column_names
-
-
-def extract_band_power_features(
-    tfr: Any, bands: List[str], config: Any, logger: Any
-) -> Tuple[pd.DataFrame, List[str]]:
-    if not bands:
-        return pd.DataFrame(), []
+    n_epochs = len(tfr_data)
     
-    result = _prepare_tfr_power_inputs(tfr, config, logger)
-    if result is None:
-        return pd.DataFrame(), []
-    
-    tfr_obj, tfr_data, freqs, times, channel_names = result
-    
-    frequency_bands = get_frequency_bands(config)
-    temporal_bins = get_config_value(config, "feature_engineering.features.temporal_bins", [])
-    
-    if not temporal_bins:
-        logger.warning(
-            "No temporal bins configured in 'feature_engineering.features.temporal_bins'. "
-            "Power features will be empty. Check your configuration."
-        )
-        return pd.DataFrame(), []
-    
-    feature_arrays = []
-    column_names = []
-    
-    for band in bands:
-        if band not in frequency_bands:
-            logger.warning(f"Band '{band}' not defined in config; skipping")
-            continue
+    # Helper to get mask for TFR times
+    def _get_tfr_mask(segment_name):
+        w_meta = ctx.windows.metadata.get(segment_name)
+        if not w_meta:
+             return ctx.windows.get_mask(segment_name) # Fallback if no metadata
         
-        fmin, fmax = frequency_bands[band]
-        freq_mask_indices = freq_mask(freqs, fmin, fmax)
-        if not np.any(freq_mask_indices):
-            logger.warning(f"TFR freqs contain no points in band '{band}' ({fmin}-{fmax} Hz); skipping")
-            continue
-        
-        for bin_config in temporal_bins:
-            bin_params = parse_temporal_bin_config(bin_config)
-            if bin_params is None:
-                logger.warning(f"Invalid temporal bin configuration: {bin_config}; skipping")
-                continue
+        # Check if resizing needed
+        if len(times) != len(ctx.windows.times):
+             t_start, t_end = w_meta.start, w_meta.end
+             return (times >= t_start) & (times < t_end)
+        else:
+             return ctx.windows.get_mask(segment_name)
+
+    # Calculate Baseline Power per band/channel first (for normalization)
+    baseline_powers = {}
+    baseline_window = _get_tfr_mask("baseline")
+    has_baseline = np.any(baseline_window)
+    
+    if has_baseline:
+        for band, fmask in band_indices.items():
+            # Mean over freq, Mean over time
+            # tfr_data: (epochs, channels, freqs, times)
+            d = tfr_data[:, :, fmask, :][:, :, :, baseline_window]
+            # Average over time first (last axis) -> (epochs, channels, freqs)
+            # Then average over freq (axis 2) -> (epochs, channels)
+            # Note: TFR is usually Power values already.
+            p_base = np.nanmean(np.nanmean(d, axis=3), axis=2)
+            baseline_powers[band] = p_base
             
-            time_start, time_end, time_label = bin_params
-            result = process_temporal_bin(
-                tfr_data, freqs, times, channel_names,
-                band, fmin, fmax, time_start, time_end, time_label, logger
-            )
-            if result is not None:
-                band_power, cols = result
-                feature_arrays.append(band_power)
-                column_names.extend(cols)
+    # Iterate over all defined windows in Spec
+    segments_to_process = []
+    # Core segments including baseline
+    for seg in ["baseline", "ramp", "plateau"]:
+        if seg in ctx.windows.masks:
+             segments_to_process.append(seg)
+    # Bins
+    for name in ctx.windows.masks:
+        if name.startswith("coarse_") or name.startswith("fine_"):
+            segments_to_process.append(name)
+            
+    ctx.logger.info(f"Computing power features for {len(segments_to_process)} segments")
+    
+    output_data = {}
+    
+    for seg_name in segments_to_process:
+        mask = _get_tfr_mask(seg_name)
+        
+        if not np.any(mask):
+            continue
+            
+        for band, fmask in band_indices.items():
+            try:
+                d = tfr_data[:, :, fmask, :][:, :, :, mask]
+                
+                raw_power = np.nanmean(np.nanmean(d, axis=3), axis=2) # (n_epochs, n_channels)
+                
+                if band in baseline_powers:
+                    base = baseline_powers[band]
+                    denom = base.copy()
+                    denom[denom == 0] = np.nan
+                    # Log-ratio (dB)
+                    val_matrix = 10 * np.log10(raw_power / denom)
+                    stat_name = "logratio"
+                else:
+                    # Fallback to raw log10 if no baseline
+                    val_matrix = 10 * np.log10(raw_power)
+                    stat_name = "log10raw"
 
-    if not feature_arrays:
+                # Per-channel
+                for ch_idx, ch in enumerate(channel_names):
+                    col = NamingSchema.build("power", seg_name, band, "ch", stat_name, channel=ch)
+                    output_data[col] = val_matrix[:, ch_idx]
+                    
+                # Global Mean
+                global_mean = np.nanmean(val_matrix, axis=1) # (n_epochs,)
+                col_global = NamingSchema.build("power", seg_name, band, "global", stat_name + "_mean")
+                output_data[col_global] = global_mean
+            except Exception as e:
+                ctx.logger.error(f"Error computing power features for {seg_name} {band}: {e}")
+
+    if not output_data:
         return pd.DataFrame(), []
+        
+    df = pd.DataFrame(output_data)
+    return df, list(df.columns)
 
-    return pd.DataFrame(np.concatenate(feature_arrays, axis=1), columns=column_names), column_names
 
+# =============================================================================
+# Precomputed Data Extractors (Re-exports from extractors.py)
+# =============================================================================
+
+from eeg_pipeline.analysis.features.extractors import (
+    extract_spectral_extras_from_precomputed,
+    extract_asymmetry_from_precomputed,
+    extract_segment_power_from_precomputed,
+)

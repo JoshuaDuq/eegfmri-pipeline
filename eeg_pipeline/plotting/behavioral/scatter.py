@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import matplotlib.pyplot as plt
 import mne
@@ -13,17 +14,20 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 
 from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
-from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
+from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.plotting.behavioral.builders import (
     generate_correlation_scatter,
     plot_residual_qc,
     plot_regression_residual_diagnostics,
 )
-from eeg_pipeline.utils.data.loading import (
+from eeg_pipeline.utils.data import (
     _build_covariate_matrices,
     _load_features_and_targets,
     _pick_first_column,
     load_epochs_for_analysis,
+    load_precomputed_correlations,
+    get_precomputed_stats_for_roi_band,
+    load_subject_scatter_data,
 )
 from eeg_pipeline.utils.io.general import (
     deriv_plots_path,
@@ -54,6 +58,271 @@ from eeg_pipeline.utils.analysis.stats import (
     update_stats_from_dataframe,
 )
 from eeg_pipeline.utils.analysis.tfr import build_rois_from_info as _build_rois
+
+
+###################################################################
+# Data Containers
+###################################################################
+
+
+@dataclass
+class SubjectScatterData:
+    """Container for loaded subject data used in ROI scatter plotting."""
+    temporal_df: pd.DataFrame
+    features_df: pd.DataFrame
+    y: pd.Series
+    info: mne.Info
+    temp_series: Optional[pd.Series]
+    Z_df_full: Optional[pd.DataFrame]
+    Z_df_temp: Optional[pd.DataFrame]
+    roi_map: Dict[str, List[str]]
+    stats_dir: Path
+    plots_dir: Path
+    conn_df: Optional[pd.DataFrame] = None
+
+
+class FeatureColumnExtractor(Protocol):
+    """Protocol for feature-specific column extraction."""
+    
+    def __call__(
+        self, 
+        features_df: pd.DataFrame, 
+        band: str, 
+        roi_channels: List[str],
+        metric: Optional[str] = None,
+    ) -> Tuple[pd.Series, bool]:
+        ...
+
+
+###################################################################
+# Generic ROI Scatter Infrastructure
+###################################################################
+
+
+def _setup_scatter_context(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str],
+    plots_dir: Optional[Path],
+    feature_subdir: str,
+    config,
+    logger: logging.Logger,
+) -> Optional[SubjectScatterData]:
+    """Set up scatter plotting context and load subject data."""
+    plot_cfg = get_plot_config(config)
+    behavioral_config = plot_cfg.get_behavioral_config()
+    
+    if plots_dir is None:
+        plot_subdir = behavioral_config.get("plot_subdir", "behavior")
+        plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
+    
+    feature_dir = plots_dir / feature_subdir
+    ensure_dir(feature_dir)
+    
+    if task is None:
+        task = config.task
+    
+    # Load full data including connectivity
+    result = load_subject_scatter_data(subject, task, deriv_root, config, logger, None)
+    temporal_df, features_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df = result
+    
+    if temporal_df is None:
+        return None
+    
+    stats_dir = deriv_stats_path(deriv_root, subject)
+    
+    return SubjectScatterData(
+        temporal_df=temporal_df,
+        features_df=features_df,
+        y=y,
+        info=info,
+        temp_series=temp_series,
+        Z_df_full=Z_df_full,
+        Z_df_temp=Z_df_temp,
+        roi_map=roi_map,
+        stats_dir=stats_dir,
+        plots_dir=feature_dir,
+        conn_df=conn_df,
+    )
+
+
+def _generate_single_scatter(
+    roi_vals: pd.Series,
+    target_vals: pd.Series,
+    roi: str,
+    band: str,
+    band_title: str,
+    band_color: str,
+    metric: Optional[str],
+    target_type: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    output_path: Path,
+    method_code: str,
+    bootstrap_ci: int,
+    rng: np.random.Generator,
+    chs: List[str],
+    precomp_stats: Optional[Dict[str, Any]],
+    logger: logging.Logger,
+    config: Any,
+    results: Dict[str, List],
+    feature_name: str,
+) -> None:
+    """Generate a single scatter plot and record results."""
+    n_valid = len(joint_valid_mask(roi_vals, target_vals))
+    
+    if precomp_stats:
+        r_val = precomp_stats["r"]
+        p_val = precomp_stats["p"]
+        n_eff = precomp_stats["n"]
+        ci_val = (precomp_stats.get("ci_low"), precomp_stats.get("ci_high"))
+    else:
+        r_val, p_val, n_eff, ci_val = compute_correlation_stats(
+            roi_vals, target_vals, method_code, bootstrap_ci, rng
+        )
+    
+    if n_valid > 5:
+        generate_correlation_scatter(
+            x_data=roi_vals,
+            y_data=target_vals,
+            x_label=x_label,
+            y_label=y_label,
+            title_prefix=title,
+            band_color=band_color,
+            output_path=output_path,
+            method_code=method_code,
+            bootstrap_ci=0,
+            rng=rng,
+            roi_channels=chs,
+            logger=logger,
+            annotated_stats=(r_val, p_val, n_eff),
+            annot_ci=ci_val,
+            config=config,
+        )
+        
+        record = {
+            "feature": feature_name,
+            "roi": roi,
+            "target": target_type,
+            "r": r_val,
+            "p": p_val,
+            "n": n_eff,
+            "path": str(output_path),
+        }
+        results["all"].append(record)
+        if p_val < 0.05:
+            results["significant"].append(record)
+
+
+def _create_roi_scatter_plots(
+    data: SubjectScatterData,
+    feature_type: str,
+    column_extractor: FeatureColumnExtractor,
+    title_formatter: Callable[[str, str, str, Optional[str]], str],
+    x_label_formatter: Callable[[str, Optional[str]], str],
+    filename_formatter: Callable[[str, str, Optional[str]], str],
+    feature_name_formatter: Callable[[str, Optional[str]], str],
+    bands: List[str],
+    metrics: Optional[List[str]],
+    method_code: str,
+    bootstrap_ci: int,
+    rng: np.random.Generator,
+    do_temp: bool,
+    rating_stats: Optional[pd.DataFrame],
+    temp_stats: Optional[pd.DataFrame],
+    logger: logging.Logger,
+    config: Any,
+) -> Dict[str, Any]:
+    """Generic ROI scatter plotting with strategy pattern."""
+    results = {"significant": [], "all": []}
+    
+    # Select appropriate dataframe based on feature type
+    if feature_type == "connectivity":
+        source_df = data.conn_df
+        if source_df is None or source_df.empty:
+            logger.warning("No connectivity data available for scatter plots")
+            return results
+    else:
+        source_df = data.features_df
+    
+    metric_list = metrics if metrics else [None]
+    
+    for metric in metric_list:
+        for band in bands:
+            band_title = band.capitalize()
+            band_color = get_band_color(band, config)
+            
+            for roi, chs in data.roi_map.items():
+                roi_vals, is_valid = column_extractor(source_df, band, chs, metric)
+                if not is_valid:
+                    continue
+                
+                roi_plots_dir = data.plots_dir / sanitize_label(roi)
+                ensure_dir(roi_plots_dir)
+                
+                title_rating = title_formatter(band_title, roi, "Rating", metric)
+                x_label = x_label_formatter(band_title, metric)
+                output_path = roi_plots_dir / filename_formatter(band, "rating", metric)
+                feature_name = feature_name_formatter(band, metric)
+                
+                precomp = get_precomputed_stats_for_roi_band(rating_stats, roi, band, logger)
+                
+                _generate_single_scatter(
+                    roi_vals=roi_vals,
+                    target_vals=data.y,
+                    roi=roi,
+                    band=band,
+                    band_title=band_title,
+                    band_color=band_color,
+                    metric=metric,
+                    target_type="rating",
+                    title=title_rating,
+                    x_label=x_label,
+                    y_label="Rating",
+                    output_path=output_path,
+                    method_code=method_code,
+                    bootstrap_ci=bootstrap_ci,
+                    rng=rng,
+                    chs=chs,
+                    precomp_stats=precomp,
+                    logger=logger,
+                    config=config,
+                    results=results,
+                    feature_name=feature_name,
+                )
+                
+                if do_temp and data.temp_series is not None and not data.temp_series.empty:
+                    title_temp = title_formatter(band_title, roi, "Temp", metric)
+                    output_path_temp = roi_plots_dir / filename_formatter(band, "temp", metric)
+                    
+                    precomp_t = get_precomputed_stats_for_roi_band(temp_stats, roi, band, logger)
+                    
+                    _generate_single_scatter(
+                        roi_vals=roi_vals,
+                        target_vals=data.temp_series,
+                        roi=roi,
+                        band=band,
+                        band_title=band_title,
+                        band_color=band_color,
+                        metric=metric,
+                        target_type="temp",
+                        title=title_temp,
+                        x_label=x_label,
+                        y_label="Temperature (°C)",
+                        output_path=output_path_temp,
+                        method_code=method_code,
+                        bootstrap_ci=bootstrap_ci,
+                        rng=rng,
+                        chs=chs,
+                        precomp_stats=precomp_t,
+                        logger=logger,
+                        config=config,
+                        results=results,
+                        feature_name=feature_name,
+                    )
+    
+    return results
 
 
 ###################################################################
@@ -546,37 +815,22 @@ def _load_subject_data(
     logger: logging.Logger,
     partial_covars: Optional[List[str]] = None,
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, pd.Series, mne.Info, Optional[pd.Series], Optional[pd.DataFrame], Optional[pd.DataFrame], Dict[str, List[str]]]:
-    temporal_df, pow_df, _conn_df, y, info = _load_features_and_targets(subject, task, deriv_root, config)
-    y = pd.to_numeric(y, errors="coerce")
+    """Wrapper for load_subject_scatter_data for backward compatibility.
     
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=False,
-        deriv_root=deriv_root, bids_root=config.bids_root, config=config, logger=logger
-    )
-    if epochs is None:
-        logger.error(f"Could not find epochs for ROI scatter plots: sub-{subject}")
-        return None, pow_df, y, info, None, None, None, {}
-    
-    temp_series = None
-    temp_col = None
-    psych_temp_columns = config.get("event_columns.temperature", [])
-    if aligned_events is not None:
-        temp_col = _pick_first_column(aligned_events, psych_temp_columns)
-        if temp_col:
-            temp_series = pd.to_numeric(aligned_events[temp_col], errors="coerce")
-    
-    Z_df_full, Z_df_temp = _build_covariate_matrices(aligned_events, partial_covars, temp_col, config=config)
-    roi_map = _build_rois(info, config=config)
-    
-    return temporal_df, pow_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map
+    Returns 8-tuple (drops conn_df for backward compatibility with existing callers).
+    Use load_subject_scatter_data directly if you need connectivity data.
+    """
+    result = load_subject_scatter_data(subject, task, deriv_root, config, logger, partial_covars)
+    # Return first 8 elements for backward compatibility
+    return result[:8]
 
 
 def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> None:
-    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
-    plot_subdir = behavioral_config.get("plot_subdir", "04_behavior_correlations")
+    plot_subdir = behavioral_config.get("plot_subdir", "behavior")
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(plots_dir)
@@ -623,7 +877,7 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
         rating_valid = rating[valid_mask]
         
         method_code = behavioral_config.get("method_spearman", "spearman")
-        default_rng_seed = config.get("project.random_state", 42)
+        default_rng_seed = behavioral_config.get("default_rng_seed", 42)
         rng = np.random.default_rng(default_rng_seed)
         
         x_label = "Temperature (°C)"
@@ -680,7 +934,7 @@ def plot_power_roi_scatter(
     config=None,
 ) -> None:
     config = config or _get_default_config()
-    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting ROI power scatter plotting for sub-{subject}")
     
@@ -688,14 +942,14 @@ def plot_power_roi_scatter(
     behavioral_config = plot_cfg.get_behavioral_config()
     
     if plots_dir is None:
-        plot_subdir = behavioral_config.get("plot_subdir", "04_behavior_correlations")
+        plot_subdir = behavioral_config.get("plot_subdir", "behavior")
         plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     ensure_dir(plots_dir)
 
     if task is None:
-        task = config.get("project.task", "thermalactive")
+        task = config.task
 
-    default_rng_seed = config.get("project.random_state", 42)
+    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
     
     temporal_df, pow_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map = _load_subject_data(
@@ -720,7 +974,7 @@ def plot_power_roi_scatter(
     overall_roi_keys = behavioral_config.get("overall_roi_keys", ["overall", "all", "global"])
     target_rating = behavioral_config.get("target_rating", "rating")
     target_temperature = behavioral_config.get("target_temperature", "temperature")
-    power_bands_to_use = get_frequency_band_names(config)
+    power_bands_to_use = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
     
     for band in power_bands_to_use:
         band_cols = {c for c in pow_df.columns if c.startswith(f"{power_prefix}{band}_")}
@@ -954,11 +1208,11 @@ def _export_top_predictors(df_top: pd.DataFrame, stats_dir: Path, top_n: int, lo
 def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alpha: float = None, top_n: int = None, plots_dir: Optional[Path] = None) -> None:
     config = load_settings()
     if task is None:
-        task = config.get("project.task", "thermalactive")
+        task = config.task
     
-    alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha") or config.get("statistics.fdr_alpha", 0.05)
+    alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha", 0.05)
     top_n = top_n or int(config.get("behavior_analysis.predictors.top_n", 20))
-    log_name = config.get("logging.log_file_name", "behavior_analysis.log")
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Creating top {top_n} behavioral predictors plot for sub-{subject}")
     
@@ -966,7 +1220,7 @@ def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alp
         deriv_root = Path(config.deriv_root)
         plot_cfg = get_plot_config(config) if config else None
         behavioral_config = plot_cfg.plot_type_configs.get("behavioral", {}) if plot_cfg else {}
-        plot_subdir = behavioral_config.get("plot_subdir", "04_behavior_correlations") if plot_cfg else "04_behavior_correlations"
+        plot_subdir = behavioral_config.get("plot_subdir", "behavior") if plot_cfg else "behavior"
         plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     stats_dir = deriv_stats_path(Path(config.deriv_root), subject)
     ensure_dir(plots_dir)
@@ -1007,4 +1261,446 @@ def plot_top_behavioral_predictors(subject: str, task: Optional[str] = None, alp
         logger.info(f"Found {len(df_top)} significant predictors (out of {len(df)} total correlations)")
     
     _export_top_predictors(df_top, stats_dir, top_n, logger)
+
+
+###################################################################
+# Dynamics ROI Scatter (LZC, PE, Hjorth)
+###################################################################
+
+
+def _get_dynamics_metrics(config) -> List[str]:
+    return config.get("dynamics.metrics", ["lzc", "pe", "hjorth_mobility", "hjorth_complexity"])
+
+
+def _get_dynamics_metric_title(metric: str) -> str:
+    titles = {
+        "lzc": "LZC",
+        "pe": "PE", 
+        "hjorth_mobility": "Hjorth Mob.",
+        "hjorth_complexity": "Hjorth Comp.",
+    }
+    return titles.get(metric, metric.upper())
+
+
+def _extract_dynamics_columns(features_df: pd.DataFrame, band: str, metric: str, roi_channels: List[str]) -> List[str]:
+    cols = []
+    for col in features_df.columns:
+        if f"dynamics_plateau_{band}_" not in col:
+            continue
+        if f"_{metric}" not in col:
+            continue
+        for ch in roi_channels:
+            if f"_ch_{ch}_" in col or col.endswith(f"_ch_{ch}"):
+                cols.append(col)
+                break
+    return cols
+
+
+def _extract_dynamics_values(
+    features_df: pd.DataFrame, 
+    band: str, 
+    roi_channels: List[str],
+    metric: Optional[str] = None,
+) -> Tuple[pd.Series, bool]:
+    """Extract dynamics feature values for a ROI."""
+    if metric is None:
+        return pd.Series(dtype=float), False
+    cols = _extract_dynamics_columns(features_df, band, metric, roi_channels)
+    if not cols:
+        return pd.Series(dtype=float), False
+    vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return vals, True
+
+
+def _format_dynamics_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
+    """Format title for dynamics scatter plot."""
+    metric_title = _get_dynamics_metric_title(metric) if metric else "Dynamics"
+    return f"{metric_title} ({band_title}) vs {target} — {roi}"
+
+
+def _format_dynamics_x_label(band_title: str, metric: Optional[str]) -> str:
+    """Format x-axis label for dynamics scatter plot."""
+    metric_title = _get_dynamics_metric_title(metric) if metric else "Dynamics"
+    return f"{metric_title} Power"
+
+
+def _format_dynamics_filename(band: str, target: str, metric: Optional[str]) -> str:
+    """Format filename for dynamics scatter plot."""
+    metric_safe = metric if metric else "dynamics"
+    return f"scatter_dynamics_{metric_safe}_{band}_vs_{target}"
+
+
+def _format_dynamics_feature_name(band: str, metric: Optional[str]) -> str:
+    """Format feature name for dynamics results."""
+    return f"dynamics_{metric}_{band}" if metric else f"dynamics_{band}"
+
+
+def _extract_aperiodic_values(
+    features_df: pd.DataFrame, 
+    band: str, 
+    roi_channels: List[str],
+    metric: Optional[str] = None,
+) -> Tuple[pd.Series, bool]:
+    """Extract aperiodic feature values for a ROI."""
+    if metric is None:
+        return pd.Series(dtype=float), False
+    roi_cols = []
+    for col in features_df.columns:
+        if "aperiodic_plateau_broadband_ch_" not in col:
+            continue
+        if f"_{metric}" not in col:
+            continue
+        for ch in roi_channels:
+            if f"_ch_{ch}_" in col:
+                roi_cols.append(col)
+                break
+    if not roi_cols:
+        return pd.Series(dtype=float), False
+    vals = features_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return vals, True
+
+
+def _format_aperiodic_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
+    """Format title for aperiodic scatter plot."""
+    metric_title = f"1/f {metric.capitalize()}" if metric else "1/f"
+    return f"{metric_title} vs {target} — {roi}"
+
+
+def _format_aperiodic_x_label(band_title: str, metric: Optional[str]) -> str:
+    """Format x-axis label for aperiodic scatter plot."""
+    return f"1/f {metric.capitalize()}" if metric else "1/f"
+
+
+def _format_aperiodic_filename(band: str, target: str, metric: Optional[str]) -> str:
+    """Format filename for aperiodic scatter plot."""
+    metric_safe = metric if metric else "aperiodic"
+    return f"scatter_aperiodic_{metric_safe}_vs_{target}"
+
+
+def _format_aperiodic_feature_name(band: str, metric: Optional[str]) -> str:
+    """Format feature name for aperiodic results."""
+    return f"aperiodic_{metric}" if metric else "aperiodic"
+
+
+def _extract_within_roi_connectivity(features_df: pd.DataFrame, band: str, roi_channels: List[str]) -> pd.Series:
+    import re
+    cols = []
+    for col in features_df.columns:
+        if f"conn_plateau_{band}_" not in col:
+            continue
+        match = re.search(r'_chpair_([A-Za-z0-9]+)-([A-Za-z0-9]+)_', col)
+        if match:
+            ch1, ch2 = match.group(1), match.group(2)
+            if ch1 in roi_channels and ch2 in roi_channels:
+                cols.append(col)
+    
+    if not cols:
+        return pd.Series([np.nan] * len(features_df), index=features_df.index)
+    return features_df[cols].mean(axis=1)
+
+
+def _extract_connectivity_values(
+    features_df: pd.DataFrame, 
+    band: str, 
+    roi_channels: List[str],
+    metric: Optional[str] = None,
+) -> Tuple[pd.Series, bool]:
+    """Extract connectivity feature values for a ROI."""
+    vals = _extract_within_roi_connectivity(features_df, band, roi_channels)
+    if vals.isna().all():
+        return vals, False
+    return vals, True
+
+
+def _format_connectivity_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
+    """Format title for connectivity scatter plot."""
+    return f"wPLI ({band_title}) vs {target} — {roi}"
+
+
+def _format_connectivity_x_label(band_title: str, metric: Optional[str]) -> str:
+    """Format x-axis label for connectivity scatter plot."""
+    return f"wPLI ({band_title})"
+
+
+def _format_connectivity_filename(band: str, target: str, metric: Optional[str]) -> str:
+    """Format filename for connectivity scatter plot."""
+    return f"scatter_conn_{band}_vs_{target}"
+
+
+def _format_connectivity_feature_name(band: str, metric: Optional[str]) -> str:
+    """Format feature name for connectivity results."""
+    return f"conn_{band}"
+
+
+def _extract_itpc_columns(features_df: pd.DataFrame, band: str, roi_channels: List[str]) -> List[str]:
+    cols = []
+    for col in features_df.columns:
+        if f"itpc_plateau_{band}_ch_" not in col:
+            continue
+        for ch in roi_channels:
+            if f"_ch_{ch}_" in col or col.endswith(f"_ch_{ch}"):
+                cols.append(col)
+                break
+    return cols
+
+
+def _extract_itpc_values(
+    features_df: pd.DataFrame, 
+    band: str, 
+    roi_channels: List[str],
+    metric: Optional[str] = None,
+) -> Tuple[pd.Series, bool]:
+    """Extract ITPC feature values for a ROI."""
+    cols = _extract_itpc_columns(features_df, band, roi_channels)
+    if not cols:
+        return pd.Series(dtype=float), False
+    vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return vals, True
+
+
+def _format_itpc_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
+    """Format title for ITPC scatter plot."""
+    return f"ITPC ({band_title}) vs {target} — {roi}"
+
+
+def _format_itpc_x_label(band_title: str, metric: Optional[str]) -> str:
+    """Format x-axis label for ITPC scatter plot."""
+    return f"ITPC ({band_title})"
+
+
+def _format_itpc_filename(band: str, target: str, metric: Optional[str]) -> str:
+    """Format filename for ITPC scatter plot."""
+    return f"scatter_itpc_{band}_vs_{target}"
+
+
+def _format_itpc_feature_name(band: str, metric: Optional[str]) -> str:
+    """Format feature name for ITPC results."""
+    return f"itpc_{band}"
+
+
+def plot_dynamics_roi_scatter(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str] = None,
+    use_spearman: bool = True,
+    do_temp: bool = True,
+    bootstrap_ci: int = 0,
+    rng: Optional[np.random.Generator] = None,
+    *,
+    plots_dir: Optional[Path] = None,
+    config=None,
+) -> Dict[str, Any]:
+    """Generate scatter plots for dynamics features vs behavioral outcomes."""
+    config = config or _get_default_config()
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger.info(f"Starting dynamics ROI scatter plotting for sub-{subject}")
+    
+    behavioral_config = get_plot_config(config).get_behavioral_config()
+    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    rng = rng or np.random.default_rng(default_rng_seed)
+    
+    data = _setup_scatter_context(subject, deriv_root, task, plots_dir, "dynamics", config, logger)
+    if data is None:
+        return {"significant": [], "all": []}
+    
+    rating_stats = load_precomputed_correlations(data.stats_dir, "dynamics", "rating", logger)
+    temp_stats = load_precomputed_correlations(data.stats_dir, "dynamics", "temperature", logger) if do_temp else None
+    
+    results = _create_roi_scatter_plots(
+        data=data,
+        feature_type="dynamics",
+        column_extractor=_extract_dynamics_values,
+        title_formatter=_format_dynamics_title,
+        x_label_formatter=_format_dynamics_x_label,
+        filename_formatter=_format_dynamics_filename,
+        feature_name_formatter=_format_dynamics_feature_name,
+        bands=config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"]),
+        metrics=_get_dynamics_metrics(config),
+        method_code="spearman" if use_spearman else "pearson",
+        bootstrap_ci=bootstrap_ci,
+        rng=rng,
+        do_temp=do_temp,
+        rating_stats=rating_stats,
+        temp_stats=temp_stats,
+        logger=logger,
+        config=config,
+    )
+    
+    logger.info(f"Dynamics scatter: {len(results['significant'])} significant of {len(results['all'])} total")
+    return results
+
+
+###################################################################
+# Aperiodic ROI Scatter (slope, offset)
+###################################################################
+
+
+def plot_aperiodic_roi_scatter(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str] = None,
+    use_spearman: bool = True,
+    do_temp: bool = True,
+    bootstrap_ci: int = 0,
+    rng: Optional[np.random.Generator] = None,
+    *,
+    plots_dir: Optional[Path] = None,
+    config=None,
+) -> Dict[str, Any]:
+    """Generate scatter plots for aperiodic (1/f) features vs behavioral outcomes."""
+    config = config or _get_default_config()
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger.info(f"Starting aperiodic ROI scatter plotting for sub-{subject}")
+    
+    behavioral_config = get_plot_config(config).get_behavioral_config()
+    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    rng = rng or np.random.default_rng(default_rng_seed)
+    
+    data = _setup_scatter_context(subject, deriv_root, task, plots_dir, "aperiodic", config, logger)
+    if data is None:
+        return {"significant": [], "all": []}
+    
+    rating_stats = load_precomputed_correlations(data.stats_dir, "aperiodic", "rating", logger)
+    temp_stats = load_precomputed_correlations(data.stats_dir, "aperiodic", "temperature", logger) if do_temp else None
+    
+    results = _create_roi_scatter_plots(
+        data=data,
+        feature_type="aperiodic",
+        column_extractor=_extract_aperiodic_values,
+        title_formatter=_format_aperiodic_title,
+        x_label_formatter=_format_aperiodic_x_label,
+        filename_formatter=_format_aperiodic_filename,
+        feature_name_formatter=_format_aperiodic_feature_name,
+        bands=["broadband"],
+        metrics=["slope", "offset"],
+        method_code="spearman" if use_spearman else "pearson",
+        bootstrap_ci=bootstrap_ci,
+        rng=rng,
+        do_temp=do_temp,
+        rating_stats=rating_stats,
+        temp_stats=temp_stats,
+        logger=logger,
+        config=config,
+    )
+    
+    logger.info(f"Aperiodic scatter: {len(results['significant'])} significant of {len(results['all'])} total")
+    return results
+
+
+###################################################################
+# Connectivity ROI Scatter (wPLI, AEC)
+###################################################################
+
+
+def plot_connectivity_roi_scatter(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str] = None,
+    use_spearman: bool = True,
+    do_temp: bool = True,
+    bootstrap_ci: int = 0,
+    rng: Optional[np.random.Generator] = None,
+    *,
+    plots_dir: Optional[Path] = None,
+    config=None,
+) -> Dict[str, Any]:
+    """Generate scatter plots for connectivity features vs behavioral outcomes."""
+    config = config or _get_default_config()
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger.info(f"Starting connectivity ROI scatter plotting for sub-{subject}")
+    
+    behavioral_config = get_plot_config(config).get_behavioral_config()
+    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    rng = rng or np.random.default_rng(default_rng_seed)
+    
+    data = _setup_scatter_context(subject, deriv_root, task, plots_dir, "connectivity", config, logger)
+    if data is None:
+        return {"significant": [], "all": []}
+    
+    rating_stats = load_precomputed_correlations(data.stats_dir, "connectivity", "rating", logger)
+    temp_stats = load_precomputed_correlations(data.stats_dir, "connectivity", "temperature", logger) if do_temp else None
+    
+    results = _create_roi_scatter_plots(
+        data=data,
+        feature_type="connectivity",
+        column_extractor=_extract_connectivity_values,
+        title_formatter=_format_connectivity_title,
+        x_label_formatter=_format_connectivity_x_label,
+        filename_formatter=_format_connectivity_filename,
+        feature_name_formatter=_format_connectivity_feature_name,
+        bands=config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"]),
+        metrics=None,
+        method_code="spearman" if use_spearman else "pearson",
+        bootstrap_ci=bootstrap_ci,
+        rng=rng,
+        do_temp=do_temp,
+        rating_stats=rating_stats,
+        temp_stats=temp_stats,
+        logger=logger,
+        config=config,
+    )
+    
+    logger.info(f"Connectivity scatter: {len(results['significant'])} significant of {len(results['all'])} total")
+    return results
+
+
+###################################################################
+# ITPC ROI Scatter
+###################################################################
+
+
+def plot_itpc_roi_scatter(
+    subject: str,
+    deriv_root: Path,
+    task: Optional[str] = None,
+    use_spearman: bool = True,
+    do_temp: bool = True,
+    bootstrap_ci: int = 0,
+    rng: Optional[np.random.Generator] = None,
+    *,
+    plots_dir: Optional[Path] = None,
+    config=None,
+) -> Dict[str, Any]:
+    """Generate scatter plots for ITPC features vs behavioral outcomes."""
+    config = config or _get_default_config()
+    log_name = config.get("output.log_file_name", "behavior_analysis.log")
+    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger.info(f"Starting ITPC ROI scatter plotting for sub-{subject}")
+    
+    behavioral_config = get_plot_config(config).get_behavioral_config()
+    default_rng_seed = behavioral_config.get("default_rng_seed", 42)
+    rng = rng or np.random.default_rng(default_rng_seed)
+    
+    data = _setup_scatter_context(subject, deriv_root, task, plots_dir, "itpc", config, logger)
+    if data is None:
+        return {"significant": [], "all": []}
+    
+    rating_stats = load_precomputed_correlations(data.stats_dir, "itpc", "rating", logger)
+    temp_stats = load_precomputed_correlations(data.stats_dir, "itpc", "temperature", logger) if do_temp else None
+    
+    results = _create_roi_scatter_plots(
+        data=data,
+        feature_type="itpc",
+        column_extractor=_extract_itpc_values,
+        title_formatter=_format_itpc_title,
+        x_label_formatter=_format_itpc_x_label,
+        filename_formatter=_format_itpc_filename,
+        feature_name_formatter=_format_itpc_feature_name,
+        bands=config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"]),
+        metrics=None,
+        method_code="spearman" if use_spearman else "pearson",
+        bootstrap_ci=bootstrap_ci,
+        rng=rng,
+        do_temp=do_temp,
+        rating_stats=rating_stats,
+        temp_stats=temp_stats,
+        logger=logger,
+        config=config,
+    )
+    
+    logger.info(f"ITPC scatter: {len(results['significant'])} significant of {len(results['all'])} total")
+    return results
 

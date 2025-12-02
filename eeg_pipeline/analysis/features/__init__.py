@@ -32,43 +32,37 @@ from __future__ import annotations
 # =============================================================================
 # Core API - Primary Entry Points
 # =============================================================================
-from eeg_pipeline.analysis.features.pipeline import (
-    extract_precomputed_features,
-    extract_fmri_prediction_features,
+# Canonical implementations live in eeg_pipeline.pipelines.features
+# Imported lazily below to avoid circular dependencies.
+from eeg_pipeline.analysis.features.results import (
     ExtractionResult,
     FeatureSet,
+    FeatureExtractionResult,
 )
 
-from eeg_pipeline.analysis.features.core import (
-    PrecomputedData,
-    precompute_data,
-    ConfigLike,
-)
+from eeg_pipeline.types import PrecomputedData, ConfigLike, BandData, PSDData, TimeWindows
+from eeg_pipeline.analysis.features.precompute import precompute_data
 
 # =============================================================================
 # Quality & Normalization
 # =============================================================================
-from eeg_pipeline.analysis.features.quality import (
-    FeatureQuality,
-    FeatureQualityReport,
-    compute_feature_quality,
-    filter_quality_features,
-)
+from eeg_pipeline.analysis.features.quality import extract_quality_features
 
 from eeg_pipeline.analysis.features.normalization import (
     normalize_features,
     FeatureNormalizer,
 )
 
-from eeg_pipeline.analysis.features.reliability import (
-    compute_feature_reliability,
+from eeg_pipeline.utils.analysis.stats.reliability import (
+    compute_dataframe_reliability as compute_feature_reliability,
     filter_reliable_features,
+    ReliabilityResult,
 )
 
 # =============================================================================
 # Manifest & Output
 # =============================================================================
-from eeg_pipeline.analysis.features.manifest import (
+from eeg_pipeline.utils.analysis.features.metadata import (
     generate_manifest,
     save_features_organized,
 )
@@ -80,17 +74,22 @@ __all__ = [
     # Main extraction functions
     "extract_precomputed_features",
     "extract_fmri_prediction_features",
+    "extract_all_features",
     "ExtractionResult",
     "FeatureSet",
+    # Orchestration
+    "FeaturePipeline",
+    "process_subject",
+    "extract_features_for_subjects",
     # Core data structures
     "PrecomputedData",
+    "BandData",
+    "PSDData",
+    "TimeWindows",
     "precompute_data",
     "ConfigLike",
     # Quality assessment
-    "FeatureQuality",
-    "FeatureQualityReport",
-    "compute_feature_quality",
-    "filter_quality_features",
+    "extract_quality_features",
     # Normalization
     "normalize_features",
     "FeatureNormalizer",
@@ -113,24 +112,21 @@ _LAZY_IMPORTS = {
     "make_feature_name": "naming",
     "parse_feature_name": "manifest",  # Authoritative parser with FeatureMetadata
     
-    # Core data structures
-    "BandData": "core",
-    "PSDData": "core",
-    "TimeWindows": "core",
-    "EPSILON_STD": "core",
-    "build_roi_map": "core",
-    "pick_eeg_channels": "core",
-    "compute_gfp": "core",
+    # Constants and utilities (imported from their actual modules)
+    "EPSILON_STD": "config",
+    "build_roi_map": "eeg_pipeline.utils.analysis.channels",
+    "pick_eeg_channels": "eeg_pipeline.utils.analysis.channels",
+    "compute_gfp": "eeg_pipeline.utils.analysis.signal_metrics",
     
     # Normalization
     "normalize_train_test": "normalization",
     "zscore_normalize": "normalization",
     "robust_normalize": "normalization",
     
-    # Reliability
-    "ReliabilityResult": "reliability",
-    "compute_split_half_reliability": "reliability",
-    "compute_icc": "reliability",
+    # Reliability (canonical: utils.analysis.stats.reliability)
+    "ReliabilityResult": "eeg_pipeline.utils.analysis.stats.reliability",
+    "compute_split_half_reliability": "eeg_pipeline.utils.analysis.stats.reliability",
+    "compute_icc": "eeg_pipeline.utils.analysis.stats.reliability",
     
     # Quality
     "identify_correlated_features": "quality",
@@ -152,6 +148,14 @@ _LAZY_IMPORTS = {
     
     # ML presets
     "get_feature_groups_for_ml": "pipeline",
+
+    # Pipeline orchestrators (lazy to prevent circular imports)
+    "FeaturePipeline": "eeg_pipeline.pipelines.features",
+    "process_subject": "eeg_pipeline.pipelines.features",
+    "extract_features_for_subjects": "eeg_pipeline.pipelines.features",
+    "extract_all_features": "eeg_pipeline.pipelines.features",
+    "extract_precomputed_features": "eeg_pipeline.pipelines.features",
+    "extract_fmri_prediction_features": "eeg_pipeline.pipelines.features",
 }
 
 
@@ -159,7 +163,13 @@ def __getattr__(name: str):
     """Lazy import for secondary functions."""
     if name in _LAZY_IMPORTS:
         import importlib
-        module = importlib.import_module(f".{_LAZY_IMPORTS[name]}", __package__)
+        module_path = _LAZY_IMPORTS[name]
+        # Handle absolute module paths (starting with eeg_pipeline)
+        if module_path.startswith("eeg_pipeline."):
+            module = importlib.import_module(module_path)
+        else:
+            # Relative import within this package
+            module = importlib.import_module(f".{module_path}", __package__)
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

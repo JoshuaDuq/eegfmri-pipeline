@@ -1,473 +1,516 @@
 """
-Behavior Analysis Pipeline.
+Behavior Analysis Pipeline (Canonical)
+======================================
 
-Orchestrates brain-behavior correlation analysis for EEG data.
+Pipeline class for EEG-behavior correlation analysis.
+This module provides the PipelineBase subclass for behavior analysis.
+
+The actual statistical routines remain in analysis/behavior/:
+- correlations.py: Enhanced correlations with controls
+- feature_correlator.py: Unified feature correlator
+- cluster_tests.py: Cluster permutation tests
+- mixed_effects.py: Mixed-effects models
+- temporal.py: Time-frequency correlations
+- condition.py: Pain vs non-pain comparison
 
 Usage:
-    # Single subject
-    process_subject("0001", task="thermalactive", deriv_root=deriv_root, config=config)
-
-    # Multiple subjects
-    compute_behavior_correlations_for_subjects(["0001", "0002"], run_group_aggregation=True)
+    pipeline = BehaviorPipeline(config=config)
+    pipeline.process_subject("0001", "thermalactive")
+    
+    # Or batch processing
+    pipeline.run_batch(["0001", "0002"])
 """
 
 from __future__ import annotations
 
+import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
-from eeg_pipeline.analysis.behavior.core import (
-    BehaviorContext,
-    ComputationResult,
-    ComputationStatus,
-)
+from eeg_pipeline.context.behavior import BehaviorContext
+from eeg_pipeline.pipelines.base import PipelineBase
 
 
 ###################################################################
-# Computation Registry
+# Configuration
 ###################################################################
 
-ALL_COMPUTATIONS = [
-    "power_roi",
-    "connectivity_roi",
-    "time_frequency",
-    "temporal_correlations",
-    "cluster_test",
-    "precomputed_correlations",
-    "condition_correlations",
-    "mixed_effects",
-    "mediation",
-    "quality_report",
-    "exports",
-]
+
+@dataclass
+class BehaviorPipelineConfig:
+    method: str = "spearman"
+    min_samples: int = 10
+    control_temperature: bool = True
+    control_trial_order: bool = True
+    compute_change_scores: bool = True
+    compute_pain_sensitivity: bool = True
+    compute_reliability: bool = True
+    
+    run_condition_comparison: bool = True
+    run_temporal_correlations: bool = True
+    run_cluster_tests: bool = False
+    run_mediation: bool = False
+    run_mixed_effects: bool = False
+    
+    fdr_alpha: float = 0.05
+    n_permutations: int = 1000
+    n_jobs: int = -1
+    
+    @classmethod
+    def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
+        from eeg_pipeline.utils.config.loader import get_config_value
+        return cls(
+            method=get_config_value(config, "behavior_analysis.statistics.correlation_method", "spearman"),
+            min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
+            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
+            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
+            run_temporal_correlations=get_config_value(config, "behavior_analysis.time_frequency_heatmap.enabled", True),
+            run_cluster_tests=get_config_value(config, "behavior_analysis.cluster_correction.enabled", False),
+            run_mediation=get_config_value(config, "behavior_analysis.mediation.enabled", False),
+            run_mixed_effects=get_config_value(config, "behavior_analysis.mixed_effects.enabled", False),
+            n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
+        )
 
 
-def _make_computation(
-    name: str,
-    func: Callable[[BehaviorContext], None],
-    critical: bool = True,
-) -> Callable[[BehaviorContext], ComputationResult]:
-    """Factory for computation wrappers with consistent error handling."""
+@dataclass
+class BehaviorPipelineResults:
+    subject: str
+    correlations: Optional[pd.DataFrame] = None
+    pain_sensitivity: Optional[pd.DataFrame] = None
+    condition_effects: Optional[pd.DataFrame] = None
+    mediation: Optional[pd.DataFrame] = None
+    mixed_effects: Optional[pd.DataFrame] = None
+    cluster: Optional[Dict[str, Any]] = None
+    summary: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_summary(self) -> Dict[str, Any]:
+        s = {"subject": self.subject}
+        if self.correlations is not None:
+            s["n_features"] = len(self.correlations)
+            s["n_sig_raw"] = int((self.correlations["p_raw"] < 0.05).sum())
+            s["n_sig_controlled"] = int((self.correlations["p_partial_temp"].fillna(1) < 0.05).sum())
+        if self.condition_effects is not None:
+            s["n_condition_effects"] = len(self.condition_effects)
+            s["n_large_effects"] = int((self.condition_effects["hedges_g"].abs() >= 0.8).sum())
+        return s
 
-    def wrapper(ctx: BehaviorContext) -> ComputationResult:
-        try:
-            func(ctx)
-            return ComputationResult(name=name, status=ComputationStatus.SUCCESS)
-        except Exception as exc:
-            log_method = ctx.logger.error if critical else ctx.logger.warning
-            log_method(f"{name} failed: {exc}")
-            return ComputationResult(name=name, status=ComputationStatus.FAILED, error=str(exc))
 
-    return wrapper
+###################################################################
+# Helper Functions
+###################################################################
 
 
-def _get_computation_registry() -> Dict[str, Callable[[BehaviorContext], ComputationResult]]:
-    """Build computation registry with lazy imports."""
-    from eeg_pipeline.analysis.behavior.power_roi import compute_power_roi_stats_from_context
-    from eeg_pipeline.analysis.behavior.connectivity import (
-        correlate_connectivity_roi_from_context,
+def _combine_features(ctx: BehaviorContext) -> pd.DataFrame:
+    dfs = []
+    for name, df in [
+        ("power", ctx.power_df),
+        ("connectivity", ctx.connectivity_df),
+        ("microstates", ctx.microstates_df),
+        ("aperiodic", ctx.aperiodic_df),
+        ("itpc", ctx.itpc_df),
+        ("pac", ctx.pac_df),
+        ("precomputed", ctx.precomputed_df),
+    ]:
+        if df is not None and not df.empty:
+            if not any(str(c).startswith(name) for c in df.columns):
+                df = df.add_prefix(f"{name}_")
+            dfs.append(df)
+    
+    return pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
+
+
+###################################################################
+# Pipeline Stages
+###################################################################
+
+
+def _stage_load(ctx: BehaviorContext) -> bool:
+    if not ctx.load_data():
+        ctx.logger.warning("Failed to load data")
+        return False
+    
+    ctx.logger.info(f"Loaded {ctx.n_trials} trials")
+    return True
+
+
+def _stage_correlate(
+    ctx: BehaviorContext,
+    config: BehaviorPipelineConfig,
+) -> tuple:
+    from eeg_pipeline.analysis.behavior import (
+        run_pain_sensitivity_correlations,
+        run_unified_feature_correlations,
     )
-    from eeg_pipeline.analysis.behavior.temporal import (
+    from eeg_pipeline.utils.io.general import read_tsv
+    
+    ctx.logger.info("Running unified feature correlator...")
+    result = run_unified_feature_correlations(ctx)
+    
+    corr_df = pd.DataFrame()
+    if result.status.name == "SUCCESS":
+        combined_path = ctx.stats_dir / "corr_stats_all_features_vs_rating.tsv"
+        if combined_path.exists():
+            corr_df = read_tsv(combined_path)
+            ctx.logger.info(f"Loaded {len(corr_df)} correlation results from unified correlator")
+    
+    psi_df = pd.DataFrame()
+    if config.compute_pain_sensitivity and ctx.temperature is not None:
+        features = _combine_features(ctx)
+        if not features.empty:
+            psi_df = run_pain_sensitivity_correlations(
+                features_df=features,
+                ratings=ctx.targets,
+                temperatures=ctx.temperature,
+                method=config.method,
+                min_samples=config.min_samples,
+                logger=ctx.logger,
+            )
+    
+    return corr_df, psi_df
+
+
+def _stage_condition(
+    ctx: BehaviorContext,
+    config: BehaviorPipelineConfig,
+) -> pd.DataFrame:
+    from eeg_pipeline.analysis.behavior import split_by_condition, compute_condition_effects
+    
+    if ctx.aligned_events is None:
+        return pd.DataFrame()
+    
+    pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(
+        ctx.aligned_events, ctx.config, ctx.logger
+    )
+    
+    if n_pain < 5 or n_nonpain < 5:
+        ctx.logger.warning(f"Insufficient trials: {n_pain} pain, {n_nonpain} non-pain")
+        return pd.DataFrame()
+    
+    features = _combine_features(ctx)
+    if features.empty:
+        return pd.DataFrame()
+    
+    return compute_condition_effects(
+        features, pain_mask, nonpain_mask,
+        min_samples=5, fdr_alpha=config.fdr_alpha, logger=ctx.logger,
+        n_jobs=config.n_jobs, config=ctx.config
+    )
+
+
+def _stage_temporal(ctx: BehaviorContext) -> None:
+    from eeg_pipeline.analysis.behavior import (
         compute_time_frequency_from_context,
         compute_temporal_from_context,
     )
-    from eeg_pipeline.analysis.behavior.cluster_tests import run_cluster_test_from_context
-    from eeg_pipeline.analysis.behavior.precomputed_correlations import compute_precomputed_correlations
-    from eeg_pipeline.analysis.behavior.condition_correlations import compute_condition_correlations
-    from eeg_pipeline.analysis.behavior.exports import export_combined_power_corr_stats
-
-    def _exports(ctx: BehaviorContext) -> None:
-        export_combined_power_corr_stats(ctx.subject)
-
-    def _mixed_effects(ctx: BehaviorContext) -> None:
-        """Run mixed-effects analysis if enabled."""
-        me_cfg = ctx.config.get("behavior_analysis.mixed_effects", {})
-        if not me_cfg.get("enabled", False):
-            ctx.logger.info("Mixed-effects analysis disabled in config")
-            return
-        
-        from eeg_pipeline.analysis.behavior.mixed_effects import run_multilevel_correlation_analysis
-        
-        if ctx.precomputed_df is None:
-            ctx.logger.warning("No precomputed features for mixed-effects analysis")
-            return
-        
-        feature_cols = [c for c in ctx.precomputed_df.columns 
-                       if c not in ["subject", "epoch", "trial", "condition"]]
-        
-        target_col = ctx.config.get("event_columns.rating", ["rating"])[0]
-        if target_col not in ctx.precomputed_df.columns:
-            ctx.logger.warning(f"Target column {target_col} not found")
-            return
-        
-        results_df = run_multilevel_correlation_analysis(
-            ctx.precomputed_df,
-            feature_cols[:100],  # Limit for speed
-            target_col,
-            subject_col="subject",
-        )
-        
-        if not results_df.empty:
-            out_path = ctx.stats_dir / "mixed_effects_results.tsv"
-            results_df.to_csv(out_path, sep="\t", index=False)
-            ctx.logger.info(f"Saved mixed-effects results to {out_path}")
-
-    def _mediation(ctx: BehaviorContext) -> None:
-        """Run mediation analysis if enabled."""
-        med_cfg = ctx.config.get("behavior_analysis.mediation", {})
-        if not med_cfg.get("enabled", False):
-            ctx.logger.info("Mediation analysis disabled in config")
-            return
-        
-        from eeg_pipeline.analysis.behavior.mediation import run_mediation_analysis
-        
-        if ctx.precomputed_df is None:
-            ctx.logger.warning("No precomputed features for mediation analysis")
-            return
-        
-        x_col = med_cfg.get("independent_variable", "temperature")
-        y_col = med_cfg.get("dependent_variable", "rating")
-        mediators = med_cfg.get("mediators", [])
-        
-        if not mediators:
-            # Auto-select top features by variance
-            feature_cols = [c for c in ctx.precomputed_df.columns 
-                           if c not in ["subject", "epoch", "trial", "condition", x_col, y_col]]
-            if feature_cols:
-                variances = ctx.precomputed_df[feature_cols].var()
-                mediators = variances.nlargest(20).index.tolist()
-        
-        if x_col not in ctx.precomputed_df.columns or y_col not in ctx.precomputed_df.columns:
-            ctx.logger.warning(f"X ({x_col}) or Y ({y_col}) column not found")
-            return
-        
-        n_boot = med_cfg.get("n_bootstrap", 1000)
-        results_df = run_mediation_analysis(
-            ctx.precomputed_df, x_col, mediators, y_col, n_bootstrap=n_boot
-        )
-        
-        if not results_df.empty:
-            out_path = ctx.stats_dir / "mediation_results.tsv"
-            results_df.to_csv(out_path, sep="\t", index=False)
-            ctx.logger.info(f"Saved mediation results to {out_path}")
-
-    def _quality_report(ctx: BehaviorContext) -> None:
-        """Generate quality report for features."""
-        from eeg_pipeline.analysis.features.quality import generate_quality_report
-        import json
-        
-        if ctx.precomputed_df is None:
-            return
-        
-        report = generate_quality_report(
-            ctx.precomputed_df,
-            subject_col="subject" if "subject" in ctx.precomputed_df.columns else None,
-        )
-        
-        # Save report
-        report_path = ctx.stats_dir / "feature_quality_report.json"
-        
-        # Convert numpy types for JSON
-        def convert(obj):
-            if isinstance(obj, (np.integer, np.floating)):
-                return float(obj)
-            if isinstance(obj, (np.bool_, bool)):
-                return bool(obj)
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, dict):
-                return {k: convert(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [convert(v) for v in obj]
-            return obj
-        
-        with open(report_path, "w") as f:
-            json.dump(convert(report), f, indent=2)
-        ctx.logger.info(f"Saved quality report to {report_path}")
-
-    return {
-        "power_roi": _make_computation("power_roi", compute_power_roi_stats_from_context),
-        "connectivity_roi": _make_computation("connectivity_roi", correlate_connectivity_roi_from_context),
-        "time_frequency": _make_computation("time_frequency", compute_time_frequency_from_context),
-        "temporal_correlations": _make_computation("temporal_correlations", compute_temporal_from_context),
-        "cluster_test": _make_computation("cluster_test", run_cluster_test_from_context, critical=False),
-        "precomputed_correlations": lambda ctx: compute_precomputed_correlations(ctx),
-        "condition_correlations": lambda ctx: compute_condition_correlations(ctx),
-        "mixed_effects": _make_computation("mixed_effects", _mixed_effects, critical=False),
-        "mediation": _make_computation("mediation", _mediation, critical=False),
-        "quality_report": _make_computation("quality_report", _quality_report, critical=False),
-        "exports": _make_computation("exports", _exports),
-    }
-
-
-###################################################################
-# Context Creation
-###################################################################
-
-
-def initialize_analysis_context(
-    subject: str,
-    task: Optional[str],
-    config: Any = None,
-):
-    """
-    Initialize analysis context for behavior analysis.
     
-    Returns (config, task, deriv_root, stats_dir, logger).
-    """
+    ctx.logger.info("Computing time-frequency correlations...")
+    try:
+        compute_time_frequency_from_context(ctx)
+    except Exception as e:
+        ctx.logger.warning(f"Time-frequency correlations failed: {e}")
+    
+    ctx.logger.info("Computing temporal correlations by condition...")
+    try:
+        compute_temporal_from_context(ctx)
+    except Exception as e:
+        ctx.logger.warning(f"Temporal correlations failed: {e}")
+
+
+def _stage_cluster(ctx: BehaviorContext, config: BehaviorPipelineConfig) -> Dict[str, Any]:
+    from eeg_pipeline.analysis.behavior import run_cluster_test_from_context
+    
+    ctx.logger.info("Running cluster permutation tests...")
+    ctx.n_perm = config.n_permutations
+    
+    try:
+        run_cluster_test_from_context(ctx)
+        return {"status": "completed"}
+    except Exception as e:
+        ctx.logger.warning(f"Cluster tests failed: {e}")
+        return {"status": "failed", "error": str(e)}
+
+
+def _stage_advanced(
+    ctx: BehaviorContext,
+    config: BehaviorPipelineConfig,
+    results: BehaviorPipelineResults,
+) -> None:
+    from eeg_pipeline.analysis.behavior import run_mediation_analysis, run_multilevel_correlation_analysis
+    
+    if ctx.precomputed_df is None:
+        return
+    
+    if config.run_mediation:
+        ctx.logger.info("Running mediation analysis...")
+        feature_cols = [c for c in ctx.precomputed_df.columns 
+                       if c not in ["subject", "epoch", "trial", "condition", "temperature", "rating"]]
+        if feature_cols:
+            variances = ctx.precomputed_df[feature_cols].var()
+            mediators = variances.nlargest(20).index.tolist()
+            results.mediation = run_mediation_analysis(
+                ctx.precomputed_df, "temperature", mediators, "rating", n_bootstrap=1000
+            )
+    
+    if config.run_mixed_effects and "subject" in ctx.precomputed_df.columns:
+        ctx.logger.info("Running mixed-effects analysis...")
+        feature_cols = [c for c in ctx.precomputed_df.columns 
+                       if c not in ["subject", "epoch", "trial", "condition", "temperature", "rating"]]
+        if feature_cols:
+            results.mixed_effects = run_multilevel_correlation_analysis(
+                ctx.precomputed_df, feature_cols[:50], "rating", "subject"
+            )
+
+
+def _stage_validate(ctx: BehaviorContext, config: BehaviorPipelineConfig) -> None:
+    from eeg_pipeline.utils.analysis.stats.fdr import apply_global_fdr
+    
+    ctx.logger.info("Applying global FDR correction...")
+    apply_global_fdr(ctx.stats_dir, alpha=config.fdr_alpha, logger=ctx.logger)
+
+
+def _stage_export(
+    ctx: BehaviorContext,
+    results: BehaviorPipelineResults,
+) -> List[Path]:
+    from eeg_pipeline.utils.io.general import write_tsv, ensure_dir
+    
+    ensure_dir(ctx.stats_dir)
+    saved = []
+    
+    if results.correlations is not None and not results.correlations.empty:
+        path = ctx.stats_dir / "correlations.tsv"
+        write_tsv(results.correlations, path)
+        saved.append(path)
+    
+    if results.pain_sensitivity is not None and not results.pain_sensitivity.empty:
+        path = ctx.stats_dir / "pain_sensitivity.tsv"
+        write_tsv(results.pain_sensitivity, path)
+        saved.append(path)
+    
+    if results.condition_effects is not None and not results.condition_effects.empty:
+        path = ctx.stats_dir / "condition_effects.tsv"
+        write_tsv(results.condition_effects, path)
+        saved.append(path)
+    
+    if results.mediation is not None and not results.mediation.empty:
+        path = ctx.stats_dir / "mediation.tsv"
+        write_tsv(results.mediation, path)
+        saved.append(path)
+    
+    summary = results.to_summary()
+    with open(ctx.stats_dir / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2, default=str)
+    saved.append(ctx.stats_dir / "summary.json")
+    
+    ctx.logger.info(f"Saved {len(saved)} output files")
+    return saved
+
+
+###################################################################
+# Pipeline Class
+###################################################################
+
+
+class BehaviorPipeline(PipelineBase):
+    """Pipeline for EEG-behavior correlation analysis."""
+    
+    def __init__(self, config: Optional[Any] = None, pipeline_config: Optional[BehaviorPipelineConfig] = None):
+        super().__init__(name="behavior_analysis", config=config)
+        self.pipeline_config = pipeline_config or BehaviorPipelineConfig.from_config(self.config)
+
+    def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
+        from eeg_pipeline.utils.io.general import deriv_stats_path, ensure_dir, get_subject_logger
+        
+        task = task or self.config.get("project.task", "thermalactive")
+        
+        stats_dir = deriv_stats_path(self.deriv_root, subject)
+        ensure_dir(stats_dir)
+        
+        logger = get_subject_logger(
+            "behavior_analysis", subject,
+            self.config.get("logging.log_file_name", "behavior_analysis.log"),
+            config=self.config
+        )
+        
+        logger.info(f"{'='*60}")
+        logger.info(f"Behavior Pipeline: sub-{subject}")
+        logger.info(f"{'='*60}")
+        
+        ctx = BehaviorContext(
+            subject=subject,
+            task=task,
+            config=self.config,
+            logger=logger,
+            deriv_root=self.deriv_root,
+            stats_dir=stats_dir,
+            use_spearman=(self.pipeline_config.method == "spearman"),
+            rng=np.random.default_rng(42),
+        )
+        
+        results = BehaviorPipelineResults(subject=subject)
+        
+        logger.info("Stage 1: Loading data...")
+        if not _stage_load(ctx):
+            return results
+        
+        logger.info("Stage 2: Running unified correlations...")
+        results.correlations, results.pain_sensitivity = _stage_correlate(ctx, self.pipeline_config)
+        
+        if self.pipeline_config.run_condition_comparison:
+            logger.info("Stage 3: Condition comparison...")
+            results.condition_effects = _stage_condition(ctx, self.pipeline_config)
+        
+        if self.pipeline_config.run_temporal_correlations:
+            logger.info("Stage 4: Temporal correlations...")
+            _stage_temporal(ctx)
+        
+        if self.pipeline_config.run_cluster_tests:
+            logger.info("Stage 5: Cluster permutation tests...")
+            results.cluster = _stage_cluster(ctx, self.pipeline_config)
+        
+        if self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects:
+            logger.info("Stage 6: Advanced analyses...")
+            _stage_advanced(ctx, self.pipeline_config, results)
+        
+        logger.info("Stage 7: Global FDR correction...")
+        _stage_validate(ctx, self.pipeline_config)
+        
+        logger.info("Stage 8: Saving results...")
+        _stage_export(ctx, results)
+        
+        summary = results.to_summary()
+        logger.info(f"{'='*60}")
+        logger.info(f"Complete: {summary.get('n_features', 0)} features")
+        logger.info(f"  Significant (raw): {summary.get('n_sig_raw', 0)}")
+        logger.info(f"  Significant (controlled): {summary.get('n_sig_controlled', 0)}")
+        logger.info(f"{'='*60}")
+        
+        return results
+
+
+###################################################################
+# Module-Level Entry Points
+###################################################################
+
+
+def run_pipeline(
+    subject: str,
+    task: Optional[str] = None,
+    config: Optional[Any] = None,
+    pipeline_config: Optional[BehaviorPipelineConfig] = None,
+) -> BehaviorPipelineResults:
+    pipeline = BehaviorPipeline(config=config, pipeline_config=pipeline_config)
+    return pipeline.process_subject(subject, task=task)
+
+
+def run_pipeline_batch(
+    subjects: List[str],
+    task: Optional[str] = None,
+    config: Optional[Any] = None,
+    run_group_aggregation: bool = True,
+    parallel_subjects: bool = False,
+    n_jobs: int = -1,
+) -> Dict[str, BehaviorPipelineResults]:
     from eeg_pipeline.utils.config.loader import load_settings
-    from eeg_pipeline.utils.io.general import deriv_stats_path, ensure_dir, get_subject_logger
-
-    if not subject:
-        raise ValueError("Subject must be provided")
-
+    from eeg_pipeline.utils.progress import BatchProgress
+    from eeg_pipeline.utils.io.general import get_logger
+    from eeg_pipeline.analysis.behavior.parallel import parallel_subjects as run_parallel_subjects, get_n_jobs
+    
     if config is None:
         config = load_settings()
-
-    if task is None:
-        task = config.get("project.task", "thermalactive")
     
-    log_file = (
-        config.get("logging.file_names.behavior_analysis", None)
-        or config.get("logging.log_file_name", "behavior_analysis.log")
-    )
-    logger = get_subject_logger(
-        "behavior_analysis",
-        subject,
-        log_file,
-        config=config,
-    )
-
-    deriv_root = Path(config.deriv_root)
-    stats_dir = deriv_stats_path(deriv_root, subject)
-    ensure_dir(stats_dir)
-
-    return config, task, deriv_root, stats_dir, logger
-
-
-def create_context(
-    subject: str,
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    logger: logging.Logger,
-    *,
-    use_spearman: bool = True,
-    bootstrap: int = 0,
-    n_perm: int = 100,
-    rng_seed: int = 42,
-) -> BehaviorContext:
-    """Create BehaviorContext for a subject."""
-    from eeg_pipeline.utils.io.general import deriv_stats_path, ensure_dir
-    from eeg_pipeline.utils.analysis.reliability import get_subject_seed
-
-    stats_dir = deriv_stats_path(deriv_root, subject)
-    ensure_dir(stats_dir)
-
-    return BehaviorContext(
-        subject=subject,
-        task=task,
-        config=config,
-        logger=logger,
-        deriv_root=deriv_root,
-        stats_dir=stats_dir,
-        use_spearman=use_spearman,
-        bootstrap=bootstrap,
-        n_perm=n_perm,
-        rng=np.random.default_rng(get_subject_seed(rng_seed, subject)),
-    )
-
-
-###################################################################
-# Pipeline Execution
-###################################################################
-
-
-def run_computations(ctx: BehaviorContext, computations: Optional[List[str]] = None) -> None:
-    """Run selected computations on a context."""
-    from eeg_pipeline.utils.progress import PipelineProgress
-
-    to_run = list(computations) if computations else list(ALL_COMPUTATIONS)
-
-    # Always include condition_correlations
-    if "condition_correlations" not in to_run:
-        to_run.append("condition_correlations")
-        ctx.logger.info("Auto-including 'condition_correlations'")
-
-    registry = _get_computation_registry()
-    valid = [c for c in to_run if c in registry]
-
-    if not valid:
-        ctx.logger.warning("No valid computations to run")
-        return
-
-    progress = PipelineProgress(total=len(valid), logger=ctx.logger, desc="Behavior")
-    progress.start()
-
-    for name in valid:
-        result = registry[name](ctx)
-        ctx.add_result(name, result)
-        progress.step(message=f"Completed {name}")
-
-    progress.finish()
-
-
-def apply_fdr_and_export(ctx: BehaviorContext, alpha: Optional[float] = None) -> None:
-    """Apply global FDR correction and export significant predictors."""
-    from eeg_pipeline.analysis.behavior.fdr_correction import apply_global_fdr
-    from eeg_pipeline.analysis.behavior.exports import export_all_significant_predictors
-
-    ctx.logger.info("Applying global FDR correction...")
-
-    try:
-        apply_global_fdr(ctx.subject)
-    except Exception as exc:
-        ctx.logger.error(f"FDR correction failed: {exc}")
-        raise RuntimeError("FDR correction failed - required for valid inference") from exc
-
-    sig_alpha = alpha or float(ctx.config.get("statistics.sig_alpha", 0.05))
-    ctx.logger.info(f"Exporting significant predictors (alpha={sig_alpha})...")
-    export_all_significant_predictors(ctx.subject, alpha=sig_alpha, use_fdr=True)
-
-
-###################################################################
-# Public API
-###################################################################
-
-
-def process_subject(
-    subject: str,
-    deriv_root: Path,
-    task: str,
-    config: Any,
-    logger: Optional[logging.Logger] = None,
-    correlation_method: str = "spearman",
-    bootstrap: int = 0,
-    n_perm: int = 0,
-    rng_seed: int = 42,
-    computations: Optional[List[str]] = None,
-) -> None:
-    """Process a single subject for behavior analysis."""
-    from eeg_pipeline.utils.io.general import get_subject_logger
-
-    if not subject or not task:
-        raise ValueError(f"subject and task required, got: {subject=}, {task=}")
-
-    if logger is None:
-        log_file = (
-            config.get("logging.file_names.behavior_analysis", None)
-            or config.get("logging.log_file_name", "behavior_analysis.log")
+    logger = get_logger(__name__)
+    pipeline_config = BehaviorPipelineConfig.from_config(config)
+    n_jobs_actual = get_n_jobs(config, n_jobs)
+    
+    if parallel_subjects and len(subjects) > 1:
+        logger.info(f"Parallel subject processing: {len(subjects)} subjects, {n_jobs_actual} jobs")
+        
+        def process_single_subject(subject: str) -> BehaviorPipelineResults:
+            return run_pipeline(subject, task, config, pipeline_config)
+        
+        results = run_parallel_subjects(
+            subjects=subjects,
+            process_func=process_single_subject,
+            n_jobs=n_jobs_actual,
+            logger=logger,
         )
-        logger = get_subject_logger(
-            "behavior_analysis",
-            subject,
-            log_file,
-            config=config,
-        )
-
-    logger.info(f"=== Behavior analysis: sub-{subject}, task-{task} ===")
-
-    # Resolve n_perm from config
-    if n_perm == 0:
-        n_perm = int(config.get("behavior_analysis.statistics.n_permutations", 100))
-
-    ctx = create_context(
-        subject=subject,
-        task=task,
-        deriv_root=deriv_root,
-        config=config,
-        logger=logger,
-        use_spearman=(correlation_method == "spearman"),
-        bootstrap=bootstrap,
-        n_perm=n_perm,
-        rng_seed=rng_seed,
-    )
-
-    if not ctx.load_data():
-        logger.warning("No target variable found; skipping")
-        return
-
-    run_computations(ctx, computations)
-    apply_fdr_and_export(ctx)
-
-    n_success = sum(1 for r in ctx.results.values() if r.status == ComputationStatus.SUCCESS)
-    n_failed = sum(1 for r in ctx.results.values() if r.status == ComputationStatus.FAILED)
-    logger.info(f"Completed: {n_success} succeeded, {n_failed} failed")
+        
+        for subject in subjects:
+            if results.get(subject) is None:
+                results[subject] = BehaviorPipelineResults(subject=subject)
+        
+        return results
+    
+    results = {}
+    
+    with BatchProgress(subjects=subjects, logger=logger, desc="Behavior") as batch:
+        for subject in subjects:
+            start = batch.start_subject(subject)
+            try:
+                results[subject] = run_pipeline(subject, task, config, pipeline_config)
+                batch.finish_subject(subject, start)
+            except Exception as e:
+                logger.error(f"Failed sub-{subject}: {e}")
+                results[subject] = BehaviorPipelineResults(subject=subject)
+                batch.finish_subject(subject, start)
+    
+    return results
 
 
 def compute_behavior_correlations_for_subjects(
     subjects: List[str],
     task: Optional[str] = None,
-    deriv_root: Optional[Path] = None,
-    config: Any = None,
-    correlation_method: Optional[str] = None,
+    correlation_method: str = "spearman",
     bootstrap: int = 0,
-    n_perm: Optional[int] = None,
-    rng_seed: int = 42,
-    run_group_aggregation: bool = True,
+    n_perm: int = 100,
+    rng_seed: Optional[int] = None,
     computations: Optional[List[str]] = None,
-) -> None:
-    """Run behavior analysis for multiple subjects."""
+    parallel_subjects: bool = False,
+    n_jobs: int = -1,
+) -> Dict[str, BehaviorPipelineResults]:
     from eeg_pipeline.utils.config.loader import load_settings
-    from eeg_pipeline.utils.io.general import (
-        setup_matplotlib,
-        ensure_derivatives_dataset_description,
-        get_logger,
-    )
-    from eeg_pipeline.utils.progress import BatchProgress
+    
+    config = load_settings()
+    
+    def _ensure_nested(d: dict, *keys) -> dict:
+        for key in keys:
+            if key not in d:
+                d[key] = {}
+            d = d[key]
+        return d
+    
+    if correlation_method:
+        _ensure_nested(config, "behavior_analysis", "statistics")["correlation_method"] = correlation_method
+    if bootstrap is not None and bootstrap > 0:
+        _ensure_nested(config, "behavior_analysis")["bootstrap"] = bootstrap
+    if n_perm is not None and n_perm > 0:
+        _ensure_nested(config, "behavior_analysis", "statistics")["n_permutations"] = n_perm
+    if rng_seed is not None:
+        _ensure_nested(config, "project")["random_state"] = rng_seed
+    if n_jobs != -1:
+        _ensure_nested(config, "behavior_analysis")["n_jobs"] = n_jobs
+    
+    if computations:
+        comp_set = set(computations)
+        ba = _ensure_nested(config, "behavior_analysis")
+        ba["temporal_enabled"] = "temporal" in comp_set
+        ba["cluster_enabled"] = "cluster" in comp_set
+        ba["mediation_enabled"] = "mediation" in comp_set
+    
+    return run_pipeline_batch(subjects, task, config, parallel_subjects=parallel_subjects, n_jobs=n_jobs)
 
-    if not subjects:
-        raise ValueError("No subjects specified")
 
-    if config is None:
-        config = load_settings()
-
-    if deriv_root is None:
-        deriv_root = Path(config.deriv_root)
-
-    setup_matplotlib(config)
-    ensure_derivatives_dataset_description(deriv_root=deriv_root)
-
-    task = task or config.get("project.task", "thermalactive")
-    correlation_method = correlation_method or config.get(
-        "behavior_analysis.statistics.correlation_method", "spearman"
-    )
-    n_perm = n_perm or int(config.get("behavior_analysis.statistics.n_permutations", 100))
-
-    logger = get_logger(__name__)
-
-    with BatchProgress(subjects=subjects, logger=logger, desc="Behavior Analysis") as batch:
-        for subject in subjects:
-            start_time = batch.start_subject(subject)
-            try:
-                process_subject(
-                    subject=subject,
-                    deriv_root=deriv_root,
-                    task=task,
-                    config=config,
-                    correlation_method=correlation_method,
-                    bootstrap=bootstrap,
-                    n_perm=n_perm,
-                    rng_seed=rng_seed,
-                    computations=computations,
-                )
-                batch.finish_subject(subject, start_time)
-            except Exception as exc:
-                logger.error(f"Failed sub-{subject}: {exc}")
-                batch.finish_subject(subject, start_time)
-
-    if run_group_aggregation and len(subjects) >= 2:
-        logger.info("Running group-level aggregation...")
-        from eeg_pipeline.analysis.group import aggregate_behavior_correlations
-
-        aggregate_behavior_correlations(
-            subjects=subjects,
-            task=task,
-            deriv_root=deriv_root,
-            pooling_strategy="within_subject_centered",
-            config=config,
-        )
+__all__ = [
+    "BehaviorPipeline",
+    "BehaviorPipelineConfig",
+    "BehaviorPipelineResults",
+    "run_pipeline",
+    "run_pipeline_batch",
+    "compute_behavior_correlations_for_subjects",
+]

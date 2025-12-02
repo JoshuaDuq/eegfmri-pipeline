@@ -25,7 +25,7 @@ from eeg_pipeline.analysis.decoding.cv import (
     get_min_channels_required,
     safe_pearsonr,
 )
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_settings, get_fisher_z_clip_values
 from eeg_pipeline.plotting.decoding import (
     plot_time_generalization_with_null,
 )
@@ -287,7 +287,8 @@ def time_generalization_regression(
                 if total_count < min_count_per_cell:
                     continue
                 
-                r_clipped = np.clip(valid_r, -0.999999, 0.999999)
+                clip_min, clip_max = get_fisher_z_clip_values(config_local)
+                r_clipped = np.clip(valid_r, clip_min, clip_max)
                 r_z = np.arctanh(r_clipped)
                 
                 # Use n-3 weighting for proper Fisher z variance (variance of z ~ 1/(n-3))

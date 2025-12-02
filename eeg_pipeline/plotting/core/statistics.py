@@ -36,7 +36,9 @@ def get_strict_mode(config) -> bool:
     Returns:
         Strict mode boolean (default: True)
     """
-    return config.get("analysis.strict_mode", True) if config else True
+    from eeg_pipeline.utils.config.loader import ensure_config, get_config_value
+    config = ensure_config(config)
+    return get_config_value(config, "analysis.strict_mode", True)
 
 
 ###################################################################
@@ -208,11 +210,13 @@ def compute_cluster_significance_from_combined(
     info_common = mne.pick_info(reference_info, [reference_info["ch_names"].index(ch) for ch in common_chs])
     
     try:
+        from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+        config = ensure_config(config)
         sig_mask_full, cluster_p_min, cluster_k, cluster_mass = cluster_test_two_sample_arrays(
             group_a_subjects, group_b_subjects, info_common,
-            alpha=config.get("statistics.sig_alpha", 0.05) if config else 0.05,
+            alpha=get_config_value(config, "statistics.sig_alpha", 0.05),
             paired=False,
-            n_permutations=config.get("statistics.cluster_n_perm", 100) if config else 100,
+            n_permutations=get_config_value(config, "statistics.cluster_n_perm", 100),
             config=config
         )
         
@@ -317,8 +321,10 @@ def build_statistical_title(
     if not viz_params["diff_annotation_enabled"]:
         return ""
     
-    alpha = config.get("statistics.sig_alpha", 0.05) if config else 0.05
-    n_perm = config.get("statistics.cluster_n_perm", 100) if config else 100
+    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
+    config = ensure_config(config)
+    alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+    n_perm = get_config_value(config, "statistics.cluster_n_perm", 100)
     
     parts = []
     

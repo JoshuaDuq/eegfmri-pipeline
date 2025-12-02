@@ -132,13 +132,14 @@ class TextPosition:
     stats_x: float = 0.05
     stats_y: float = 0.95
     p_value_x: float = 0.98
-    p_value_y: float = 0.98
+    p_value_y: float = 0.88  # Lowered from 0.98 to avoid title overlap
     bootstrap_x: float = 0.02
     bootstrap_y: float = 0.98
     channel_annotation_x: float = 0.02
     channel_annotation_y: float = 0.94
     title_y: float = 0.975
     residual_qc_title_y: float = 1.02
+
 
 
 @dataclass
@@ -323,7 +324,7 @@ class PlotConfig:
             stats_x=text_pos_dict.get("stats_x", 0.05),
             stats_y=text_pos_dict.get("stats_y", 0.95),
             p_value_x=text_pos_dict.get("p_value_x", 0.98),
-            p_value_y=text_pos_dict.get("p_value_y", 0.98),
+            p_value_y=text_pos_dict.get("p_value_y", 0.88),
             bootstrap_x=text_pos_dict.get("bootstrap_x", 0.02),
             bootstrap_y=text_pos_dict.get("bootstrap_y", 0.98),
             channel_annotation_x=text_pos_dict.get("channel_annotation_x", 0.02),

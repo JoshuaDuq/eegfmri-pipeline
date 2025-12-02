@@ -33,16 +33,17 @@ from ...utils.data.loading import (
 from ...utils.analysis.stats import (
     compute_coverage_statistics,
     compute_consensus_labels,
+    compute_consensus_labels,
     format_correlation_text,
 )
+from scipy.stats import mannwhitneyu
 from ...analysis.features.microstates import (
     compute_gfp_with_floor as _compute_gfp,
     label_timecourse as _label_timecourse,
     extract_templates_from_trials as _extract_templates_from_trials,
-    MicrostateDurationStat,
-    MicrostateTransitionStats,
 )
 from ..config import get_plot_config
+from eeg_pipeline.utils.analysis.events import extract_pain_mask
 
 
 ###################################################################
@@ -167,7 +168,8 @@ def _plot_topomap_row(
     info_eeg: mne.Info,
     state_letters: List[str],
     colors: np.ndarray,
-    n_states: int
+    n_states: int,
+    plot_cfg: Any
 ) -> None:
     """Plot row of topomaps for microstate templates.
     
@@ -187,7 +189,7 @@ def _plot_topomap_row(
             show=False, contours=6, cmap="RdBu_r"
         )
         ax_topo.set_title(
-            f"State {state_letters[state_idx]}", fontsize=11, weight='bold', color=colors[state_idx]
+            f"State {state_letters[state_idx]}", fontsize=plot_cfg.font.suptitle, weight='bold', color=colors[state_idx]
         )
 
 
@@ -352,7 +354,7 @@ def _create_gfp_sequence_figure(
         hspace=grid_hspace, wspace=grid_wspace
     )
     
-    _plot_topomap_row(fig, gs, templates, info_eeg, state_letters, colors, n_states)
+    _plot_topomap_row(fig, gs, templates, info_eeg, state_letters, colors, n_states, plot_cfg)
     
     ax_gfp = fig.add_subplot(gs[1, :])
     _plot_gfp_sequence(ax_gfp, times_stimulus, gfp_mean, labels_consensus, colors, plateau_start, plot_cfg)
@@ -464,7 +466,7 @@ def _plot_gfp_sequence_for_bin(
         hspace=grid_hspace, wspace=grid_wspace
     )
     
-    _plot_topomap_row(fig, gs, templates, info_eeg, state_letters, colors, n_states)
+    _plot_topomap_row(fig, gs, templates, info_eeg, state_letters, colors, n_states, plot_cfg)
     
     ax_gfp = fig.add_subplot(gs[1, :])
     plateau_start = times_bin[0] if times_bin[0] > 0 else None
@@ -592,10 +594,10 @@ def plot_microstate_templates_by_pain(
     X = epochs.get_data()[:, picks, :]
     sfreq = float(epochs.info["sfreq"])
     templates_nonpain = _extract_templates_from_trials(
-        X[nonpain_mask], sfreq, n_states, config
+        X[nonpain_mask], sfreq, n_states
     )
     templates_pain = _extract_templates_from_trials(
-        X[pain_mask], sfreq, n_states, config
+        X[pain_mask], sfreq, n_states
     )
     
     if templates_nonpain is None or templates_pain is None:
@@ -621,7 +623,7 @@ def plot_microstate_templates_by_pain(
             templates_nonpain[i], info_eeg, axes=axes[0, i],
             show=False, contours=6, cmap="RdBu_r"
         )
-        axes[0, i].set_title(f"State {state_letters[i]}", fontsize=10)
+        axes[0, i].set_title(f"State {state_letters[i]}", fontsize=plot_cfg.font.title)
         mne.viz.plot_topomap(
             templates_pain[i], info_eeg, axes=axes[1, i],
             show=False, contours=6, cmap="RdBu_r"
@@ -714,7 +716,7 @@ def plot_microstate_templates_by_temperature(
         min_trials_for_templates = plot_cfg.validation.get("min_trials_for_templates", 5)
         if temp_mask.sum() < min_trials_for_templates:
             continue
-        templates = _extract_templates_from_trials(X[temp_mask], sfreq, n_states, config)
+        templates = _extract_templates_from_trials(X[temp_mask], sfreq, n_states)
         if templates is not None:
             templates_by_temp[temp] = templates
     
@@ -747,7 +749,7 @@ def plot_microstate_templates_by_temperature(
             )
             if row_idx == 0:
                 axes[row_idx, col_idx].set_title(
-                    f"State {state_letters[col_idx]}", fontsize=10
+                    f"State {state_letters[col_idx]}", fontsize=plot_cfg.font.title
                 )
         microstate_config = plot_cfg.plot_type_configs.get("microstate", {})
         temp_label_x = microstate_config.get("temperature_label_x", -0.35)
@@ -884,87 +886,7 @@ def plot_microstate_coverage_by_pain(
     _log_if_present(logger, "info", "Saved microstate coverage by pain condition")
 
 
-def plot_microstate_pain_correlation_heatmap(
-    corr_df: pd.DataFrame,
-    pval_df: Optional[pd.DataFrame],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot microstate-pain correlation heatmap.
-    
-    Args:
-        corr_df: Correlation DataFrame (metrics x states)
-        pval_df: Optional p-value DataFrame
-        subject: Subject identifier
-        save_dir: Directory to save plot
-        logger: Logger instance
-        config: Configuration object
-    """
-    if corr_df is None or corr_df.empty:
-        _log_if_present(logger, "warning", "No microstate correlation data provided; skipping heatmap")
-        return
 
-    plot_cfg = get_plot_config(config)
-    features_config = plot_cfg.plot_type_configs.get("features", {})
-    correlation_config = features_config.get("correlation", {})
-
-    metric_labels = list(corr_df.index)
-    state_labels = list(corr_df.columns)
-    n_states = len(state_labels)
-    corr_matrix = corr_df.to_numpy(dtype=float)
-    p_matrix = _prepare_pvalue_matrix(pval_df, metric_labels, state_labels, corr_matrix.shape)
-
-    width_value = plot_cfg.figure_sizes.get("microstate_width_per_column", 1.2)
-    width_per_col = float(width_value[0] if isinstance(width_value, tuple) else width_value)
-    height_value = plot_cfg.figure_sizes.get("microstate_height_per_row", 1.0)
-    height_per_row = float(height_value[0] if isinstance(height_value, tuple) else height_value)
-
-    fig, ax = plt.subplots(
-        figsize=(
-            max(6, n_states * width_per_col),
-            max(5, len(metric_labels) * height_per_row)
-        )
-    )
-    
-    vmin = correlation_config.get("vmin", -0.6)
-    vmax = correlation_config.get("vmax", 0.6)
-    threshold_text = correlation_config.get("threshold_text", 0.4)
-    
-    im = ax.imshow(
-        corr_matrix, cmap="RdBu_r",
-        vmin=vmin, vmax=vmax, aspect="auto"
-    )
-    ax.set_xticks(np.arange(n_states))
-    ax.set_yticks(np.arange(len(metric_labels)))
-    ax.set_xticklabels(state_labels)
-    ax.set_yticklabels(metric_labels)
-    ax.set_xlabel("Microstate", fontsize=plot_cfg.font.ylabel)
-    ax.set_ylabel("Metric", fontsize=plot_cfg.font.ylabel)
-    ax.set_title("Microstate-Pain Rating Correlations (Spearman r)", fontsize=plot_cfg.font.figure_title)
-
-    for i, metric in enumerate(metric_labels):
-        for j, state in enumerate(state_labels):
-            value = corr_matrix[i, j]
-            if not np.isfinite(value):
-                continue
-            
-            text_color = "white" if abs(value) > threshold_text else "black"
-            text = format_correlation_text(value, p_matrix[i, j])
-            ax.text(j, i, text, ha="center", va="center", color=text_color, fontsize=plot_cfg.font.medium)
-
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label("Spearman r", fontsize=plot_cfg.font.title)
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_microstate_pain_correlation",
-        formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches
-    )
-    plt.close(fig)
-    _log_if_present(logger, "info", "Saved microstate-pain correlation heatmap")
 
 
 ###################################################################
@@ -1322,7 +1244,7 @@ def plot_microstate_gfp_by_temporal_bins(
 
 
 def plot_microstate_transition_network(
-    transitions: MicrostateTransitionStats,
+    transitions: Any,
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
@@ -1353,9 +1275,11 @@ def plot_microstate_transition_network(
 
     trans_nonpain = transitions.nonpain
     trans_pain = transitions.pain
-    vmax = max(float(np.max(trans_nonpain)), float(np.max(trans_pain)), 1e-6)
+    from eeg_pipeline.utils.config.loader import get_config_value
+    epsilon_amp = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", 1e-10))
+    vmax = max(float(np.max(trans_nonpain)), float(np.max(trans_pain)), epsilon_amp)
     q_mat = getattr(transitions, "q_values", None)
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
+    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
     cmap = plt.cm.get_cmap("YlOrRd")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -1369,9 +1293,9 @@ def plot_microstate_transition_network(
         ax.set_yticks(np.arange(n_states))
         ax.set_xticklabels(state_labels)
         ax.set_yticklabels(state_labels)
-        ax.set_xlabel("To State", fontsize=10)
-        ax.set_ylabel("From State", fontsize=10)
-        ax.set_title(f"{title} Transitions", fontsize=11)
+        ax.set_xlabel("To State", fontsize=plot_cfg.font.title)
+        ax.set_ylabel("From State", fontsize=plot_cfg.font.title)
+        ax.set_title(f"{title} Transitions", fontsize=plot_cfg.font.suptitle)
         for i in range(n_states):
             for j in range(n_states):
                 value = matrix[i, j]
@@ -1387,7 +1311,7 @@ def plot_microstate_transition_network(
                         else:
                             text_color = "gray"
                             label += "\nns"
-                ax.text(j, i, label, ha="center", va="center", color=text_color, fontsize=8)
+                ax.text(j, i, label, ha="center", va="center", color=text_color, fontsize=plot_cfg.font.medium)
         plt.colorbar(im, ax=ax, label="Probability", shrink=0.8)
 
     plot_cfg = get_plot_config(config)
@@ -1416,7 +1340,7 @@ def plot_microstate_transition_network(
 
 
 def plot_microstate_duration_distributions(
-    duration_stats: List[MicrostateDurationStat],
+    duration_stats: List[Any],
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
@@ -1473,21 +1397,22 @@ def plot_microstate_duration_distributions(
                 pc.set_alpha(0.6)
         ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels)
-        ax.set_ylabel("Duration (s)", fontsize=10)
-        ax.set_title(f"State {stat.state}", fontsize=11)
+        ax.set_ylabel("Duration (s)", fontsize=plot_cfg.font.title)
+        ax.set_title(f"State {stat.state}", fontsize=plot_cfg.font.suptitle)
         ax.grid(True, alpha=0.3, axis='y')
 
         q_val = getattr(stat, "q_value", np.nan)
-        alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
+        from eeg_pipeline.utils.config.loader import get_config_value
+        alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
         if nonpain_data.size and pain_data.size and np.isfinite(q_val):
             if q_val < alpha:
                 y_min, y_max = ax.get_ylim()
                 ax.plot([0, 1], [y_max * 0.95, y_max * 0.95], 'k-', linewidth=1)
                 sig_text = "**" if q_val < (alpha / 5) else "*"
-                ax.text(0.5, y_max * 0.97, f"{sig_text} (q={q_val:.3f}, alpha={alpha:.2f})", ha='center', fontsize=10)
+                ax.text(0.5, y_max * 0.97, f"{sig_text} (q={q_val:.3f}, alpha={alpha:.2f})", ha='center', fontsize=plot_cfg.font.title)
 
     if n_states > 0:
-        axes[-1].set_xlabel("Condition", fontsize=10)
+        axes[-1].set_xlabel("Condition", fontsize=plot_cfg.font.title)
 
     plot_cfg = get_plot_config(config)
     plt.suptitle("Microstate Duration Distributions by Pain Condition", fontsize=plot_cfg.font.figure_title)
@@ -1513,125 +1438,285 @@ def plot_microstate_duration_distributions(
     _log_if_present(logger, "info", "Saved microstate duration distributions")
 
 
-###################################################################
-# Group Microstate Plotting
-###################################################################
 
-
-def plot_group_microstate_template_stability(
-    group_template_path: Path,
+def plot_microstate_by_condition(
+    microstate_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Plot group microstate template stability correlation matrix.
+    """Compare microstate metrics between Pain and Non-pain using box+strip plots.
     
-    Args:
-        group_template_path: Path to group template file
-        save_dir: Directory to save plot
-        logger: Logger instance
-        config: Configuration object
+    Statistical improvements:
+    - Shows both raw p-value and FDR-corrected q-value
+    - Includes bootstrap 95% CI for mean difference
+    - Reports Cohen's d effect size
+    - Footer shows total tests and correction method
     """
-    if not group_template_path.exists():
-        _log_if_present(logger, "warning", f"Group microstate template file not found: {group_template_path}")
-        return
-    try:
-        data = np.load(group_template_path, allow_pickle=True)
-        templates = data.get("templates")
-    except Exception as exc:
-        _log_if_present(logger, "warning", f"Failed to load group templates: {exc}")
-        return
-    if templates is None or templates.size == 0:
-        _log_if_present(logger, "warning", "Group templates empty; skipping stability plot")
+    if microstate_df is None or microstate_df.empty or events_df is None:
         return
 
-    corr_mat = np.corrcoef(templates)
+    pain_mask = extract_pain_mask(events_df, config)
+    if pain_mask is None:
+        return
+    
+    from eeg_pipeline.plotting.features.utils import (
+        compute_condition_stats,
+        apply_fdr_correction,
+        format_stats_annotation,
+        format_footer_annotation,
+    )
+        
+    metrics = ['coverage', 'duration', 'occurrence']
+    states = []
+    
+    for c in microstate_df.columns:
+        if c.startswith('ms_coverage_State'):
+            states.append(c.replace('ms_coverage_State', ''))
+    states = sorted(list(set(states)))
+    
+    if not states:
+        return
+    
+    condition_colors = {"pain": "#d62728", "nonpain": "#1f77b4"}
     plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=(5, 4))
-    im = ax.imshow(corr_mat, cmap="RdBu_r", vmin=-1, vmax=1)
-    ax.set_title("Group microstate template correlations")
-    ax.set_xlabel("Template")
-    ax.set_ylabel("Template")
-    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
-    cbar.set_label("Correlation")
-    output_path = save_dir / "group_microstate_template_correlation"
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+    
+    for metric in metrics:
+        all_stats = []
+        all_pvals = []
+        metric_data = []
+        
+        for state in states:
+            col = f"ms_{metric}_State{state}"
+            if col not in microstate_df.columns:
+                continue
+            vals = pd.to_numeric(microstate_df[col], errors='coerce')
+            if len(vals) != len(pain_mask):
+                continue
+            vals_pain = vals[pain_mask].dropna()
+            vals_nonpain = vals[~pain_mask].dropna()
+            if len(vals_pain) >= 3 and len(vals_nonpain) >= 3:
+                stats_result = compute_condition_stats(vals_nonpain.values, vals_pain.values, n_boot=1000, config=config)
+                all_stats.append(stats_result)
+                all_pvals.append(stats_result["p_raw"])
+                metric_data.append({
+                    'state': state,
+                    'pain': vals_pain.values,
+                    'nonpain': vals_nonpain.values,
+                    'stats': stats_result,
+                    'stats_idx': len(all_stats) - 1,
+                })
+        
+        if not metric_data:
+            continue
+        
+        if all_pvals:
+            valid_pvals = [p for p in all_pvals if np.isfinite(p)]
+            if valid_pvals:
+                rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
+                q_idx = 0
+                for i, p in enumerate(all_pvals):
+                    if np.isfinite(p):
+                        all_stats[i]["q_fdr"] = qvals[q_idx]
+                        all_stats[i]["fdr_significant"] = rejected[q_idx]
+                        q_idx += 1
+                    else:
+                        all_stats[i]["q_fdr"] = np.nan
+                        all_stats[i]["fdr_significant"] = False
+                n_significant = int(np.sum(rejected))
+            else:
+                n_significant = 0
+        else:
+            n_significant = 0
+            
+        n_states_with_data = len(metric_data)
+        fig, axes = plt.subplots(1, n_states_with_data, figsize=(4 * n_states_with_data, 5), sharey=True)
+        if n_states_with_data == 1:
+            axes = [axes]
+        
+        for idx, data in enumerate(metric_data):
+            ax = axes[idx]
+            vals_nonpain = data['nonpain']
+            vals_pain = data['pain']
+            
+            bp = ax.boxplot([vals_nonpain, vals_pain], 
+                           positions=[0, 1], widths=0.4, patch_artist=True)
+            bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+            bp["boxes"][0].set_alpha(0.6)
+            bp["boxes"][1].set_facecolor(condition_colors["pain"])
+            bp["boxes"][1].set_alpha(0.6)
+            
+            ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
+                      vals_nonpain, c=condition_colors["nonpain"], alpha=0.3, s=8)
+            ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
+                      vals_pain, c=condition_colors["pain"], alpha=0.3, s=8)
+            
+            if data.get("stats") is not None:
+                s = data["stats"]
+                annotation = format_stats_annotation(
+                    p_raw=s["p_raw"],
+                    q_fdr=s.get("q_fdr"),
+                    cohens_d=s["cohens_d"],
+                    ci_low=s["ci_low"],
+                    ci_high=s["ci_high"],
+                    compact=True,
+                )
+                text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+                ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
+                       ha="center", fontsize=7, va="top", color=text_color,
+                       bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
+            
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.large)
+            ax.set_title(f"State {data['state']}", fontweight="bold")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            
+            if idx == 0:
+                ax.set_ylabel(metric.capitalize())
+        
+        n_pain = int(pain_mask.sum())
+        n_nonpain = int((~pain_mask).sum())
+        fig.suptitle(f"Microstate {metric.capitalize()} by Condition (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P", 
+                    fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
+        
+        n_tests = len([p for p in all_pvals if np.isfinite(p)])
+        footer = format_footer_annotation(
+            n_tests=n_tests,
+            correction_method="FDR-BH",
+            alpha=0.05,
+            n_significant=n_significant,
+            additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
+        )
+        fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+        save_fig(fig, save_dir / f"sub-{subject}_microstate_{metric}_by_condition",
+                 formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+        plt.close(fig)
+        
+    if logger:
+        logger.info("Saved microstate condition comparisons")
+
+
+def plot_microstate_transition_matrix(
+    microstate_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> None:
+    """Plot microstate transition probability matrix as heatmap.
+    
+    Shows A→B, A→C, B→A, B→C etc. transition probabilities.
+    Handles column patterns: trans_{i}_to_{j} or transition_{i}_{j}
+    """
+    if microstate_df is None or microstate_df.empty:
+        return
+    
+    # Look for both 'transition' and 'trans_' patterns
+    trans_cols = [c for c in microstate_df.columns 
+                  if 'transition' in c.lower() or 'trans_' in c.lower()]
+    if not trans_cols:
+        if logger:
+            logger.info("No transition columns found for matrix")
+        return
+    
+    # Extract state indices from column names
+    states = set()
+    for c in trans_cols:
+        # Pattern: trans_{i}_to_{j} or microstates_..._trans_{i}_to_{j}
+        if 'trans_' in c.lower() and '_to_' in c.lower():
+            try:
+                parts = c.lower().split('trans_')[1].split('_to_')
+                if len(parts) == 2:
+                    from_state = parts[0]
+                    to_state = parts[1].split('_')[0]  # Handle trailing parts
+                    states.add(from_state)
+                    states.add(to_state)
+            except (IndexError, ValueError):
+                pass
+        else:
+            # Legacy patterns
+            parts = c.split('_')
+            for p in parts:
+                if len(p) == 1 and p.isalpha() and p.isupper():
+                    states.add(p)
+                elif p.startswith('State') or p.startswith('state'):
+                    states.add(p.replace('State', '').replace('state', ''))
+    
+    states = sorted(list(states))
+    n_states = len(states)
+    
+    if n_states < 2:
+        if logger:
+            logger.info("Not enough states for transition matrix")
+        return
+    
+    trans_matrix = np.zeros((n_states, n_states))
+    
+    for i, from_state in enumerate(states):
+        for j, to_state in enumerate(states):
+            # Match patterns
+            patterns = [
+                f"trans_{from_state}_to_{to_state}",
+                f"transition_{from_state}_{to_state}",
+                f"ms_transition_{from_state}_{to_state}",
+                f"transition_State{from_state}_State{to_state}",
+                f"microstates_transition_{from_state}_{to_state}",
+            ]
+            for pat in patterns:
+                matching = [c for c in trans_cols if pat.lower() in c.lower()]
+                if matching:
+                    val = microstate_df[matching[0]].mean()
+                    if not np.isnan(val):
+                        trans_matrix[i, j] = val
+                    break
+    
+    if trans_matrix.sum() == 0:
+        if logger:
+            logger.info("Empty transition matrix")
+        return
+    
+    plot_cfg = get_plot_config(config)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    
+    state_labels = [f"State {s}" for s in states]
+    
+    im = ax.imshow(trans_matrix, cmap='Blues', vmin=0)
+    
+    ax.set_xticks(range(n_states))
+    ax.set_yticks(range(n_states))
+    ax.set_xticklabels(state_labels, fontsize=plot_cfg.font.large)
+    ax.set_yticklabels(state_labels, fontsize=plot_cfg.font.large)
+    ax.set_xlabel("To State", fontsize=plot_cfg.font.title)
+    ax.set_ylabel("From State", fontsize=plot_cfg.font.title)
+    
+    for i in range(n_states):
+        for j in range(n_states):
+            val = trans_matrix[i, j]
+            if val > 0:
+                color = 'white' if val > trans_matrix.max() * 0.6 else 'black'
+                ax.text(j, i, f"{val:.2f}", ha='center', va='center', 
+                       fontsize=plot_cfg.font.medium, color=color)
+    
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("Transition Probability", fontsize=plot_cfg.font.large)
+    
+    ax.set_title(f"Microstate Transition Matrix (sub-{subject})", 
+                fontsize=plot_cfg.font.suptitle, fontweight="bold")
+    
+    plt.tight_layout()
+    save_fig(fig, save_dir / f"sub-{subject}_microstate_transition_matrix",
+             formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
-    _log_if_present(logger, "info", "Saved group microstate template correlation heatmap")
-
-
-def plot_group_microstate_transition_summary(
-    transitions: MicrostateTransitionStats,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Plot group microstate transition summary with difference plot.
     
-    Args:
-        transitions: MicrostateTransitionStats object
-        save_dir: Directory to save plot
-        logger: Logger instance
-        config: Configuration object
-    """
-    if transitions is None:
-        _log_if_present(logger, "warning", "No group microstate transitions to plot")
-        return
+    if logger:
+        logger.info("Saved microstate transition matrix")
 
-    state_labels = transitions.state_labels
-    n_states = len(state_labels)
-    if n_states == 0:
-        _log_if_present(logger, "warning", "No states found for microstate transitions")
-        return
 
-    ensure_dir(save_dir)
-    plot_cfg = get_plot_config(config)
-    alpha = float(config.get("behavior_analysis.statistics.fdr_alpha") or 0.05)
-    q_mat = getattr(transitions, "q_values", None)
-    sig_mask = (np.isfinite(q_mat) & (q_mat < alpha)) if q_mat is not None else None
-
-    diff = transitions.pain - transitions.nonpain
-    vmax = np.nanmax([transitions.nonpain, transitions.pain, 1e-6])
-    diff_lim = np.nanmax(np.abs(diff))
-    diff_lim = diff_lim if np.isfinite(diff_lim) and diff_lim > 0 else 1.0
-
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
-    matrices = [
-        (transitions.nonpain, "Non-pain", "YlOrRd", (0, vmax)),
-        (transitions.pain, "Pain", "YlOrRd", (0, vmax)),
-        (diff, "Pain - Non-pain", "RdBu_r", (-diff_lim, diff_lim)),
-    ]
-
-    ims = []
-    for ax, (mat, title, cmap, vlim) in zip(axes, matrices):
-        im = ax.imshow(mat, cmap=cmap, vmin=vlim[0], vmax=vlim[1], aspect="auto")
-        ax.set_xticks(np.arange(n_states))
-        ax.set_yticks(np.arange(n_states))
-        ax.set_xticklabels(state_labels)
-        ax.set_yticklabels(state_labels)
-        ax.set_xlabel("To State")
-        ax.set_ylabel("From State")
-        ax.set_title(title)
-        if sig_mask is not None and title != "Pain - Non-pain":
-            ax.contour(sig_mask, levels=[0.5], colors="k", linewidths=0.8)
-        ims.append(im)
-
-    cbar = fig.colorbar(ims[0], ax=axes[:2].tolist(), shrink=0.8, pad=0.02)
-    cbar.set_label("Transition rate (per s)")
-    cbar_diff = fig.colorbar(ims[2], ax=[axes[2]], shrink=0.8, pad=0.02)
-    cbar_diff.set_label("Δ transition rate (per s)")
-
-    fig.suptitle("Group microstate transition summary", fontsize=plot_cfg.font.figure_title)
-    output_path = save_dir / "group_microstate_transitions"
-    save_fig(
-        fig,
-        output_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    _log_if_present(logger, "info", f"Saved group microstate transitions to {output_path}")
 

@@ -448,3 +448,20 @@ def compute_spectral_entropy(
         se = se / np.log2(p.size)
 
     return se
+
+
+def compute_gfp(data: np.ndarray) -> np.ndarray:
+    """
+    Compute Global Field Power for all epochs.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input data (epochs, channels, times)
+        
+    Returns
+    -------
+    np.ndarray
+        GFP (epochs, times)
+    """
+    return np.std(data, axis=1)

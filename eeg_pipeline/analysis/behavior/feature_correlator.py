@@ -10,154 +10,357 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 import logging
 import re
 
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.analysis.behavior.core import (
-    BehaviorContext,
-    ComputationResult,
-    ComputationStatus,
+from eeg_pipeline.context.behavior import BehaviorContext, ComputationResult, ComputationStatus
+from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationRecord,
     correlate_features_loop,
     save_correlation_results,
-    MIN_SAMPLES_DEFAULT,
 )
 from eeg_pipeline.utils.io.general import deriv_features_path, read_tsv, write_tsv
+from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.context.behavior import AnalysisConfig
+from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value, load_config
+from eeg_pipeline.utils.analysis.stats import (
+    prepare_aligned_data,
+    compute_correlation,
+    compute_bootstrap_ci,
+    compute_partial_correlations,
+    compute_permutation_pvalues,
+    compute_temp_permutation_pvalues,
+    CorrelationStats,
+)
+from eeg_pipeline.analysis.behavior.parallel import parallel_feature_types, get_n_jobs
 
 
-# =============================================================================
-# Feature File Registry
-# =============================================================================
+def _align_groups_to_series(
+    series: pd.Series,
+    groups: Optional[Union[pd.Series, np.ndarray]]
+) -> Optional[np.ndarray]:
+    """Align group labels to a pandas Series index."""
+    if groups is None:
+        return None
+    if isinstance(groups, pd.Series):
+        missing = series.index.difference(groups.index)
+        if not missing.empty:
+            raise ValueError(f"Group labels missing for {len(missing)} samples")
+        return groups.loc[series.index].to_numpy()
+    arr = np.asarray(groups)
+    if arr.size != len(series):
+        raise ValueError("Group labels length does not match series length")
+    return arr
 
-FEATURE_FILES = {
-    "power": "features_eeg_direct.tsv",
-    "power_plateau": "features_eeg_plateau.tsv",
-    "precomputed": "features_precomputed.tsv",
-    "connectivity": "features_connectivity.tsv",
-    "microstates": "features_microstates.tsv",
-    "aperiodic": "features_aperiodic.tsv",
-    "itpc": "features_itpc.tsv",
-    "pac": "features_pac_trials.tsv",
-    "source": "features_source.tsv",
-    "dynamics": "features_dynamics.tsv",
+
+def _build_temp_record_unified(
+    x: pd.Series,
+    temp: Optional[pd.Series],
+    cov_no_temp: Optional[pd.DataFrame],
+    identifier: str,
+    id_key: str,
+    band: str,
+    cfg: AnalysisConfig,
+    groups: Optional[np.ndarray] = None,
+    **extra
+) -> Optional[Dict[str, Any]]:
+    """Build a temperature correlation record with optional bootstrap/permutation."""
+    if temp is None or (hasattr(temp, 'empty') and temp.empty):
+        return None
+    
+    from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation, build_correlation_record
+    
+    min_s = cfg.min_samples_channel if id_key == "channel" else cfg.min_samples_roi
+    x_a, temp_a, cov_a, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
+    
+    if len(x_a) == 0 or len(temp_a) == 0:
+        return None
+
+    try:
+        grp = _align_groups_to_series(x_a, groups if groups is not None else cfg.groups)
+    except ValueError as err:
+        cfg.logger.warning(f"Group alignment failed for {identifier}: {err}")
+        grp = None
+    r, p, _ = safe_correlation(x_a, temp_a, cfg.method, min_s)
+    
+    ci_lo, ci_hi = np.nan, np.nan
+    p_perm = np.nan
+    
+    if cfg.bootstrap > 0:
+        ci_lo, ci_hi = compute_bootstrap_ci(
+            x_a, temp_a, cfg.bootstrap, 0.95,
+            "spearman" if cfg.use_spearman else "pearson", cfg.rng
+        )
+    
+    if cfg.n_perm > 0:
+        p_perm, _ = compute_temp_permutation_pvalues(
+            x_a, temp_a, cov_a, cfg.method, cfg.n_perm, cfg.rng,
+            band, identifier, cfg.logger, groups=grp
+        )
+    
+    return build_correlation_record(
+        identifier, band, r, p, len(x_a), cfg.method,
+                                    ci_low=ci_lo, ci_high=ci_hi, p_perm=p_perm,
+        identifier_type=id_key, **extra
+    ).to_dict()
+
+
+def _compute_roi_correlation_stats(
+    x: pd.Series,
+    y: pd.Series,
+    x_a: np.ndarray,
+    y_a: np.ndarray,
+    cov: Optional[pd.DataFrame],
+    temp: Optional[pd.Series],
+    n_eff: int,
+    band: str,
+    roi: str,
+    context: str,
+    cfg: AnalysisConfig,
+    groups: Optional[np.ndarray] = None,
+    me_records: Optional[List[Dict]] = None,
+) -> CorrelationStats:
+    """Compute comprehensive correlation statistics for an ROI."""
+    r, p = compute_correlation(x_a, y_a, cfg.use_spearman)
+    
+    r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
+        x, y, cov, temp, cfg.method, context, cfg.logger, cfg.min_samples_roi
+    )
+    
+    ci_lo, ci_hi = compute_bootstrap_ci(
+        x_a, y_a, cfg.bootstrap, 0.95,
+        "spearman" if cfg.use_spearman else "pearson", cfg.rng
+    )
+    
+    x_series = pd.Series(x_a) if not isinstance(x_a, pd.Series) else x_a
+    y_series = pd.Series(y_a) if not isinstance(y_a, pd.Series) else y_a
+    
+    p_perm, p_part_perm, p_part_temp_perm = compute_permutation_pvalues(
+        x_series, y_series, cov, temp, cfg.method, cfg.n_perm, n_eff, cfg.rng,
+        band, roi, groups=groups
+    )
+    
+    return CorrelationStats(
+        correlation=r,
+        p_value=p,
+        ci_low=ci_lo,
+        ci_high=ci_hi,
+        r_partial=r_part,
+        p_partial=p_part,
+        n_partial=n_part,
+        r_partial_temp=r_part_temp,
+        p_partial_temp=p_part_temp,
+        n_partial_temp=n_part_temp,
+        p_perm=p_perm,
+        p_partial_perm=p_part_perm,
+        p_partial_temp_perm=p_part_temp_perm,
+    )
+
+
+def _align_features_and_targets(
+    df: pd.DataFrame,
+    targets: pd.Series,
+    min_samples: int,
+    logger: logging.Logger,
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
+    """Align feature dataframe and targets on shared index and drop missing targets."""
+    if df is None or df.empty or targets is None or targets.empty:
+        return None, None
+
+    if not df.index.equals(targets.index):
+        common_index = df.index.intersection(targets.index)
+        if common_index.empty:
+            logger.error("No overlapping samples between features and targets")
+            return None, None
+        df = df.loc[common_index]
+        targets = targets.loc[common_index]
+
+    valid_mask = targets.notna()
+    if valid_mask.sum() < min_samples:
+        logger.warning(
+            "Insufficient valid samples after alignment "
+            f"(found {valid_mask.sum()}, need >= {min_samples})"
+        )
+        return None, None
+
+    return df.loc[valid_mask], targets.loc[valid_mask]
+
+
+###################################################################
+# Feature registry loading (config-driven)
+###################################################################
+
+# Standard EEG channel names for bare channel classification
+_CHANNEL_NAMES = {
+    # 10-20 system
+    "FP1", "FP2", "FPZ", "F7", "F3", "FZ", "F4", "F8",
+    "T7", "C3", "CZ", "C4", "T8", "P7", "P3", "PZ", "P4", "P8",
+    "O1", "OZ", "O2",
+    # Extended 10-10 system
+    "AF3", "AF4", "AF7", "AF8", "AFZ",
+    "F1", "F2", "F5", "F6", "F9", "F10",
+    "FC1", "FC2", "FC3", "FC4", "FC5", "FC6", "FCZ", "FT7", "FT8", "FT9", "FT10",
+    "C1", "C2", "C5", "C6",
+    "CP1", "CP2", "CP3", "CP4", "CP5", "CP6", "CPZ",
+    "TP7", "TP8", "TP9", "TP10",
+    "P1", "P2", "P5", "P6", "P9", "P10",
+    "PO3", "PO4", "PO7", "PO8", "POZ",
+    "I1", "I2", "IZ",
 }
 
-# Map source file types to standardized feature type names for visualization
-SOURCE_TO_FEATURE_TYPE = {
-    "power": "power",
-    "power_plateau": "power",  # Group plateau with power
-    "precomputed": "precomputed",  # Keep separate as it may contain mixed types
-    "connectivity": "connectivity",
-    "microstates": "microstate",  # Standardize to singular
-    "aperiodic": "aperiodic",
-    "itpc": "itpc",
-    "pac": "pac",
-    "source": "source",
-    "dynamics": "dynamics",
-}
 
-# Feature type hierarchy with subtypes
-FEATURE_TYPE_HIERARCHY = {
-    "power": {
-        "subtypes": ["direct", "plateau"],
-        "structure": "band × channel × time",
-    },
-    "connectivity": {
-        "subtypes": ["aec", "wpli", "plv", "pli", "imcoh", "coh", "icoh"],
-        "structure": "measure × band × channel_pair",
-    },
-    "microstate": {
-        "subtypes": ["coverage", "duration", "occurrence", "transition", "gev", "entropy", "valid"],
-        "structure": "metric × state",
-    },
-    "precomputed": {
-        "subtypes": ["gfp", "roi", "temporal", "spectral", "complexity", "other"],
-        "structure": "mixed",
-    },
-    "itpc": {
-        "subtypes": ["itpc"],
-        "structure": "band × channel × time_bin",
-    },
-    "pac": {
-        "subtypes": ["pac"],
-        "structure": "roi × phase_freq × amp_freq × time",
-    },
-}
+@dataclass
+class FeatureRule:
+    """Pattern-based feature classification rule loaded from config."""
 
-# Feature classifiers - ordered by specificity (most specific first)
-# This ensures that more specific patterns are matched before general ones
-FEATURE_CLASSIFIERS = [
-    # Most specific patterns first
-    ("gfp", lambda c: c.startswith("gfp_") or "global_field_power" in c.lower()),
-    ("erds", lambda c: c.startswith("erds_")),
-    ("itpc", lambda c: c.startswith("itpc_") or ("itpc" in c.lower() and not "itpc_" in c)),
-    ("pac", lambda c: c.startswith("pac_") or (("phase" in c.lower() and "amplitude" in c.lower()) and "pac_" not in c)),
-    ("microstate", lambda c: c.startswith("ms_") or ("microstate" in c.lower() and not c.startswith("ms_"))),
-    ("aperiodic", lambda c: c.startswith(("aper_", "powcorr_", "aperiodic_"))),
-    ("source", lambda c: c.startswith("src_") or (c.startswith("source_") and not c.startswith("src_"))),
-    
-    # Connectivity patterns (before graph, as graph is more general)
-    ("connectivity", lambda c: any(c.startswith(p) for p in ["wpli_", "plv_", "aec_", "imcoh_", "pli_", "conn_", "coh_", "icoh_", "corr_", "sync_", "coherence_", "connectivity_"])),
-    
-    # Graph metrics (check for graph-specific suffixes)
-    ("graph", lambda c: any(m in c for m in ["_geff", "_clust", "_pc", "_smallworld", "_modularity", "_betweenness", "_pathlength", "_efficiency", "_charpath"])),
-    
-    # Power features (common, but check after more specific ones)
-    ("power", lambda c: (c.startswith("pow_") or c.startswith("power_")) and not any(c.startswith(p) for p in ["powcorr_", "power_plateau_", "power_relative_"])),
-    
-    # Spectral features (check for spectral-specific prefixes)
-    ("spectral", lambda c: any(c.startswith(p) for p in ["iaf_", "relative_", "ratio_", "spectral_", "peak_", "bandwidth_", "spectral_edge_", "spectral_entropy_", "freq_", "dominant_freq_"])),
-    
-    # Complexity features
-    ("complexity", lambda c: any(c.startswith(p) for p in ["pe_", "sampen_", "hjorth_", "lzc_", "hurst_", "dfa_", "permutation_entropy_", "sample_entropy_", "approximate_entropy_", "shannon_", "renyi_"])),
-    
-    # Temporal features (more general, check after specific ones)
-    ("temporal", lambda c: any(c.startswith(p) for p in ["mean_", "var_", "std_", "skew_", "kurt_", "rms_", "p2p_", "median_", "iqr_", "line_length_", "nle_", "zero_cross_", "slope_", "variance_", "stddev_"])),
-    
-    # ROI features (check last as it's very general)
-    ("roi", lambda c: (c.startswith("roi_") or "_roi_" in c) and not any(c.startswith(p) for p in ["pow_", "power_", "conn_", "connectivity_"])),
-    
-    # Asymmetry/laterality (very general, check last)
-    ("roi", lambda c: ("asymmetry_" in c or "laterality_" in c) and not any(c.startswith(p) for p in ["pow_", "power_", "conn_", "connectivity_"])),
-]
+    label: str
+    startswith: Tuple[str, ...] = field(default_factory=tuple)
+    contains: Tuple[str, ...] = field(default_factory=tuple)
+    regex: Optional[re.Pattern] = None
+    channel_pair: bool = False
+    channel_name: bool = False
+    exclude_startswith: Tuple[str, ...] = field(default_factory=tuple)
+    exclude_contains: Tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass
+class FeatureRegistry:
+    """Container for config-driven feature metadata."""
+
+    files: Dict[str, str]
+    source_to_type: Dict[str, str]
+    type_hierarchy: Dict[str, Any]
+    patterns: Dict[str, re.Pattern]
+    classifiers: List[FeatureRule]
+
+
+_FEATURE_REGISTRY_CACHE: Optional[FeatureRegistry] = None
+
+
+def _load_feature_rules(rule_cfg: List[Dict[str, Any]]) -> List[FeatureRule]:
+    rules: List[FeatureRule] = []
+    for entry in rule_cfg:
+        regex = re.compile(entry["regex"], re.IGNORECASE) if "regex" in entry else None
+        rules.append(
+            FeatureRule(
+                label=entry["label"],
+                startswith=tuple(entry.get("startswith", [])),
+                contains=tuple(entry.get("contains", [])),
+                regex=regex,
+                channel_pair=bool(entry.get("channel_pair", False)),
+                channel_name=bool(entry.get("channel_name", False)),
+                exclude_startswith=tuple(entry.get("exclude_startswith", [])),
+                exclude_contains=tuple(entry.get("exclude_contains", [])),
+            )
+        )
+    return rules
+
+
+def _load_feature_patterns(pattern_cfg: Dict[str, str]) -> Dict[str, re.Pattern]:
+    if not pattern_cfg:
+        raise ValueError("behavior_analysis.feature_registry.feature_patterns must be defined.")
+    return {name: re.compile(pattern, re.IGNORECASE) for name, pattern in pattern_cfg.items()}
+
+
+def load_feature_registry(config: Any) -> FeatureRegistry:
+    """Load the feature registry from config with strict validation."""
+    registry_cfg = get_config_value(config, "behavior_analysis.feature_registry", None)
+    if not registry_cfg:
+        raise ValueError("behavior_analysis.feature_registry is required in eeg_config.yaml")
+
+    files = registry_cfg.get("files")
+    if not files:
+        raise ValueError("behavior_analysis.feature_registry.files is required and cannot be empty.")
+
+    source_to_type = registry_cfg.get("source_to_feature_type", {})
+    type_hierarchy = registry_cfg.get("feature_type_hierarchy", {})
+    patterns = _load_feature_patterns(registry_cfg.get("feature_patterns", {}))
+    classifiers = _load_feature_rules(registry_cfg.get("feature_classifiers", []))
+
+    return FeatureRegistry(
+        files=files,
+        source_to_type=source_to_type,
+        type_hierarchy=type_hierarchy,
+        patterns=patterns,
+        classifiers=classifiers,
+    )
+
+
+def get_feature_registry(config: Any = None) -> FeatureRegistry:
+    """Return cached registry or load using provided config/default config."""
+    global _FEATURE_REGISTRY_CACHE
+
+    if config is not None:
+        return load_feature_registry(config)
+
+    if _FEATURE_REGISTRY_CACHE is None:
+        _FEATURE_REGISTRY_CACHE = load_feature_registry(load_config())
+
+    return _FEATURE_REGISTRY_CACHE
+
+
+def _is_channel_pair(name: str) -> bool:
+    """Check if name is a channel pair like AF3_AF4."""
+    parts = name.split("_")
+    if len(parts) != 2:
+        return False
+    return parts[0].upper() in _CHANNEL_NAMES and parts[1].upper() in _CHANNEL_NAMES
 
 
 @dataclass
 class CorrelationConfig:
     """Configuration for feature-behavior correlations."""
-    method: str = "spearman"
-    min_samples: int = MIN_SAMPLES_DEFAULT
+
+    method: str
+    min_samples: int
     apply_fdr: bool = True
     n_bootstrap: int = 0
     n_permutations: int = 0
     filter_threshold: float = 0.0
-    # New options for robust statistics
     compute_bayes_factor: bool = False
     robust_method: Optional[str] = None  # "percentage_bend", "winsorized", "shepherd"
     compute_loso_stability: bool = False
 
     @classmethod
-    def from_context(cls, ctx: BehaviorContext) -> "CorrelationConfig":
-        cfg = ctx.config or {}
-        behavior_cfg = cfg.get("behavior_analysis", {})
+    def from_config(cls, config: Any) -> "CorrelationConfig":
+        """Build configuration using behavior_analysis settings."""
         return cls(
-            method=ctx.method,
-            min_samples=ctx.min_samples_channel,
-            n_bootstrap=ctx.bootstrap,
-            n_permutations=ctx.n_perm,
-            compute_bayes_factor=behavior_cfg.get("compute_bayes_factors", False),
-            robust_method=behavior_cfg.get("robust_correlation", None),
-            compute_loso_stability=behavior_cfg.get("loso_stability", False),
+            method=get_config_value(
+                config, "behavior_analysis.statistics.correlation_method", "spearman"
+            ),
+            min_samples=get_min_samples(config, "channel"),
+            n_bootstrap=int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 0)),
+            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 0)),
+            compute_bayes_factor=bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False)),
+            robust_method=get_config_value(config, "behavior_analysis.robust_correlation", None),
+            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.loso_stability", False)),
+        )
+
+    @classmethod
+    def from_context(cls, ctx: BehaviorContext) -> "CorrelationConfig":
+        """Context-aware configuration that honors runtime overrides."""
+        base = cls.from_config(ctx.config or {})
+        return cls(
+            method=ctx.method or base.method,
+            min_samples=ctx.min_samples_channel or base.min_samples,
+            apply_fdr=base.apply_fdr,
+            n_bootstrap=ctx.bootstrap if ctx.bootstrap is not None else base.n_bootstrap,
+            n_permutations=ctx.n_perm if ctx.n_perm is not None else base.n_permutations,
+            filter_threshold=base.filter_threshold,
+            compute_bayes_factor=base.compute_bayes_factor,
+            robust_method=base.robust_method,
+            compute_loso_stability=base.compute_loso_stability,
         )
 
 
 @dataclass
 class FeatureCorrelationResult:
     """Result for a single feature type's correlations."""
+
     feature_type: str
     n_features: int
     n_significant: int
@@ -172,146 +375,296 @@ class FeatureCorrelationResult:
 # =============================================================================
 
 
-def _classify_subtype(column: str, feature_type: str, source_file: Optional[str] = None) -> str:
-    """Classify feature subtype within a feature type.
-    
-    Parameters
-    ----------
-    column : str
-        Feature column name
-    feature_type : str
-        Primary feature type (e.g., "power", "connectivity")
-    source_file : str, optional
-        Source file type (e.g., "power_plateau", "connectivity")
-    
-    Returns
-    -------
-    str
-        Subtype (e.g., "direct", "aec", "coverage")
-    """
+def _rule_matches(column: str, rule: FeatureRule) -> bool:
+    """Check if a column matches a rule definition."""
+    col_lower = column.lower()
+
+    if rule.exclude_startswith and any(col_lower.startswith(p.lower()) for p in rule.exclude_startswith):
+        return False
+    if rule.exclude_contains and any(p.lower() in col_lower for p in rule.exclude_contains):
+        return False
+    if rule.channel_pair and not _is_channel_pair(column):
+        return False
+    if rule.channel_name and column.upper() not in _CHANNEL_NAMES:
+        return False
+    if rule.startswith and not any(col_lower.startswith(p.lower()) for p in rule.startswith):
+        return False
+    if rule.contains and not any(p.lower() in col_lower for p in rule.contains):
+        return False
+    if rule.regex and not rule.regex.search(column):
+        return False
+
+    # Ensure rule carries at least one positive condition
+    if not any([rule.startswith, rule.contains, rule.regex, rule.channel_pair, rule.channel_name]):
+        return False
+    return True
+
+
+def _classify_subtype(
+    column: str,
+    feature_type: str,
+    registry: FeatureRegistry,
+    source_file: Optional[str] = None,
+) -> str:
+    """Classify feature subtype using registry patterns and known hierarchies."""
     col_lower = column.lower()
     parts = column.split("_")
-    
+
+    # Pattern-based subtype hints
+    patterns = registry.patterns
+
     if feature_type == "power":
-        # Check source file first
-        if source_file and ("plateau" in source_file or "_plateau" in source_file):
+        if source_file and "plateau" in source_file:
             return "plateau"
-        # Check column name
+        if patterns.get("powcorr") and patterns["powcorr"].match(column):
+            return "correlation"
         if "plateau" in col_lower:
             return "plateau"
+        if col_lower.startswith("baseline_"):
+            return "baseline"
         return "direct"
-    
-    elif feature_type == "connectivity":
-        # Extract measure from column name (first part)
+
+    if feature_type == "connectivity":
+        if patterns.get("conn_graph") and patterns["conn_graph"].match(column):
+            return "graph"
         if len(parts) > 0:
             measure = parts[0].lower()
             if measure in ["aec", "wpli", "plv", "pli", "imcoh", "coh", "icoh", "corr", "sync"]:
                 return measure
+            if measure.startswith("sw") and "corr" in measure:
+                return "sliding_window"
         return "unknown"
-    
-    elif feature_type == "microstate":
-        # Extract metric from column name (second part after "ms")
+
+    if feature_type == "microstate":
+        if patterns.get("ms_transition") and patterns["ms_transition"].match(column):
+            return "transition"
         if len(parts) >= 2 and parts[0].lower() == "ms":
             metric = parts[1].lower()
-            if metric in ["coverage", "duration", "occurrence", "transition", "gev", "entropy", "valid"]:
+            if metric in registry.type_hierarchy.get("microstate", {}).get("subtypes", []):
                 return metric
+        if column.isdigit():
+            return "state"
         return "unknown"
-    
-    elif feature_type == "precomputed":
-        # Classify based on prefix
+
+    if feature_type == "precomputed":
         if len(parts) > 0:
             prefix = parts[0].lower()
             if prefix == "gfp":
                 return "gfp"
-            elif prefix == "roi":
+            if prefix == "roi":
                 return "roi"
-            elif prefix in ["mean", "var", "std", "skew", "kurt", "median", "iqr", "rms", "p2p"]:
-                return "temporal"
-            elif prefix in ["iaf", "peak", "bandwidth", "spectral", "relative", "ratio"]:
+            if prefix in ["pow", "power", "logpow", "relpow"]:
+                return "power"
+            if prefix in [
+                "iaf",
+                "sef50",
+                "sef75",
+                "sef90",
+                "sef95",
+                "se",
+                "spec",
+                "spectral",
+                "peakfreq",
+                "peakpow",
+                "peakprom",
+                "bandwidth",
+                "relative",
+                "ratio",
+                "slope",
+                "edge",
+            ]:
                 return "spectral"
-            elif prefix in ["pe", "sampen", "hjorth", "lzc", "hurst", "dfa", "entropy"]:
+            if prefix in ["mean", "var", "std", "skew", "kurt", "median", "iqr", "rms", "p2p"]:
+                return "temporal"
+            if prefix in ["pe", "sampen", "hjorth", "lzc", "hurst", "dfa", "entropy", "complexity"]:
                 return "complexity"
+            if prefix in ["conn", "plv", "imcoh", "aec", "psi"]:
+                return "connectivity"
+            if prefix in ["pac"]:
+                return "pac"
+            if prefix in ["itpc"]:
+                return "itpc"
+            if prefix in ["dynamics"]:
+                return "dynamics"
+            if prefix in ["asym", "asymmetry"]:
+                return "asymmetry"
         return "other"
-    
-    elif feature_type == "itpc":
-        return "itpc"
-    
-    elif feature_type == "pac":
-        return "pac"
-    
+
+    if feature_type == "itpc":
+        # Check source file or pattern
+        if "trial" in col_lower: return "single_trial"
+        if "map" in col_lower: return "map"
+        if "plateau" in col_lower: return "plateau"
+        if "ramp" in col_lower: return "ramp"
+        return "summary"
+
+    if feature_type == "pac":
+        if "trial" in col_lower: return "trial"
+        if "amp" in col_lower: return "amplitude"
+        if "phase" in col_lower: return "phase"
+        return "comodulogram"
+
+    hierarchy_subtypes = registry.type_hierarchy.get(feature_type, {}).get("subtypes", [])
+    if hierarchy_subtypes:
+        for subtype in hierarchy_subtypes:
+            if subtype in col_lower:
+                return subtype
+
     return "unknown"
 
 
-def classify_feature(column: str, source_file_type: Optional[str] = None, include_subtype: bool = True) -> Tuple[str, str, Dict[str, Any]]:
-    """Classify feature and extract metadata with subtype information.
-    
-    Uses a two-tier approach:
-    1. PRIMARY: If source_file_type is provided, use it (most reliable)
-    2. SECONDARY: Fall back to column name pattern matching
-    
-    This ensures features are classified correctly based on their source file,
-    which is more reliable than inferring from column names.
-    
-    Parameters
-    ----------
-    column : str
-        Feature column name or identifier (e.g., "pow_alpha_C3", "C3_alpha_power", "wpli_alpha_C3-Fz")
-    source_file_type : str, optional
-        Source file type from FEATURE_FILES (e.g., "power", "connectivity", "microstates")
-        If provided, this takes precedence over column name matching.
-    include_subtype : bool
-        If True, returns (type, subtype, metadata). If False, returns (type, "", metadata) for backward compatibility.
-    
-    Returns
-    -------
-    Tuple[str, str, Dict[str, Any]]
-        (feature_type, subtype, metadata_dict) where metadata contains "identifier", "band", "source", and "subtype"
-    """
+def _match_feature_patterns(
+    column: str, registry: FeatureRegistry
+) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+    """Try regex-based pattern matching for detailed classification."""
+    patterns = registry.patterns
+
+    for ftype, pattern in patterns.items():
+        match = pattern.match(column)
+        if not match:
+            continue
+        groups = match.groups()
+        meta = {"identifier": column, "band": "N/A", "source": "inferred", "subtype": "unknown"}
+
+        if ftype == "erds":
+            meta.update({"band": groups[0], "identifier": groups[1], "channel": groups[1]})
+            return "power", "erds", meta
+        if ftype == "erds_windowed":
+            meta.update({"band": groups[0], "channel": groups[1], "window": groups[2], "identifier": f"{groups[1]}_{groups[2]}"})
+            return "power", "erds_windowed", meta
+        if ftype == "relative_power":
+            meta.update({"band": groups[0], "channel": groups[1], "identifier": groups[1]})
+            return "power", "relative", meta
+        if ftype == "band_ratio":
+            meta.update({"band": f"{groups[0]}/{groups[1]}", "channel": groups[2], "identifier": groups[2]})
+            return "power", "ratio", meta
+        if ftype in ("temporal_stat", "amplitude"):
+            meta.update({"stat": groups[0], "channel": groups[1], "identifier": groups[1]})
+            return "temporal", groups[0], meta
+        if ftype == "hjorth":
+            meta.update({"param": groups[0], "channel": groups[1], "identifier": groups[1]})
+            return "complexity", "hjorth", meta
+        if ftype == "roi_power":
+            meta.update({"band": groups[0], "roi": groups[1], "identifier": groups[1]})
+            return "power", "roi", meta
+        if ftype in ("roi_asymmetry", "roi_laterality"):
+            meta.update({"band": groups[0], "pair": groups[1], "identifier": groups[1]})
+            return "roi", "asymmetry", meta
+        if ftype == "ms_transition":
+            meta.update({"from_state": groups[0], "to_state": groups[1], "identifier": f"{groups[0]}->{groups[1]}"})
+            return "microstate", "transition", meta
+        if ftype.startswith("ms_"):
+            meta.update({"state": groups[0], "identifier": groups[0]})
+            return "microstate", ftype.replace("ms_", ""), meta
+        if ftype == "itpc":
+            meta.update({"band": groups[0], "channel": groups[1], "time_bin": groups[2], "identifier": groups[1]})
+            return "itpc", "itpc", meta
+        if ftype == "aperiodic":
+            meta.update({"param": groups[0], "channel": groups[1], "identifier": groups[1], "band": "aperiodic"})
+            return "aperiodic", groups[0], meta
+        if ftype == "powcorr":
+            meta.update({"band": groups[0], "channel": groups[1], "identifier": groups[1]})
+            return "power", "correlation", meta
+        if ftype == "conn_graph":
+            meta.update({"measure": groups[0], "band": groups[1], "metric": groups[2], "identifier": f"{groups[0]}_{groups[2]}"})
+            return "connectivity", "graph", meta
+        if ftype == "gfp":
+            meta.update({"metric": groups[0], "identifier": groups[0], "band": "global"})
+            return "gfp", groups[0], meta
+        if ftype == "power_segmented":
+            segment, band, ident = groups[0], groups[1], groups[2]
+            meta.update({"band": band, "identifier": ident, "segment": segment})
+            return "power", segment, meta
+        if ftype == "connectivity_segmented":
+            measure, segment, band, ident = groups[0], groups[1], groups[2], groups[3]
+            meta.update({"band": band, "identifier": ident, "measure": measure, "segment": segment})
+            return "connectivity", segment, meta
+        if ftype == "itpc_segmented":
+            band, ch, segment = groups[0], groups[1], groups[2]
+            meta.update({"band": band, "channel": ch, "segment": segment, "identifier": ch})
+            return "itpc", segment, meta
+        if ftype == "dynamics_burst_segmented":
+            band, segment, metric = groups[0], groups[1], groups[2]
+            meta.update({"band": band, "segment": segment, "metric": metric, "identifier": f"{band}_{segment}_{metric}"})
+            return "dynamics", segment, meta
+
+        meta.update({"identifier": groups[0] if groups else column})
+        return ftype, "unknown", meta
+
+    return None
+
+
+def classify_feature(
+    column: str,
+    source_file_type: Optional[str] = None,
+    include_subtype: bool = True,
+    registry: Optional[FeatureRegistry] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Classify feature and extract metadata using config-driven registry."""
     if not column or not isinstance(column, str):
-        meta = {"identifier": str(column) if column else "unknown", "band": "N/A", "source": source_file_type or "unknown", "subtype": "unknown"}
+        meta = {
+            "identifier": str(column) if column else "unknown",
+            "band": "N/A",
+            "source": source_file_type or "unknown",
+            "subtype": "unknown",
+        }
         return ("unknown", "unknown", meta) if include_subtype else ("unknown", "", meta)
-    
-    # PRIMARY: Use source file type if available (most reliable)
-    if source_file_type:
-        standardized_type = SOURCE_TO_FEATURE_TYPE.get(source_file_type, source_file_type)
-        subtype = _classify_subtype(column, standardized_type, source_file_type)
-        meta = _parse_feature_metadata(column, standardized_type)
-        meta["source"] = source_file_type
+
+    registry = registry or get_feature_registry()
+
+    # PRIMARY: source file type mapping
+    feature_type = registry.source_to_type.get(source_file_type, source_file_type)
+    meta: Dict[str, Any] = {"identifier": column, "band": "N/A", "source": source_file_type or "inferred", "subtype": "unknown"}
+
+    # FIRST PRIORITY: NamingSchema parsing
+    # This covers all new features (ITPC, PAC, modern Power) generically
+    parsed = NamingSchema.parse(column)
+    if parsed.get("valid"):
+        # Map schema group to feature_type
+        # Schema groups: power, itpc, pac, connectivity, microstate, etc.
+        feature_type = parsed["group"]
+        subtype = parsed.get("segment", "unknown")
+        
+        # Build meta from parsed
+        meta.update({
+            "identifier": parsed.get("identifier") or parsed.get("stat") or column,
+            "band": parsed.get("band", "N/A"),
+            "stat": parsed.get("stat"),
+            "scope": parsed.get("scope"),
+            "segment": parsed.get("segment"),
+            "source": source_file_type or "inferred",
+        })
+        
+        # Specific overrides/refinements
+        if feature_type == "power":
+            if subtype == "baseline":
+                meta["subtype"] = "baseline"
+            elif subtype == "plateau":
+                meta["subtype"] = "plateau" # normalized
+                
         meta["subtype"] = subtype
-        return (standardized_type, subtype, meta) if include_subtype else (standardized_type, "", meta)
-    
-    # SECONDARY: Fall back to column name pattern matching
-    col_lower = column.lower()
-    col_original = column
-    
-    # Try each classifier in order (most specific first)
-    for ftype, classifier in FEATURE_CLASSIFIERS:
-        if classifier(col_lower):
-            subtype = _classify_subtype(col_original, ftype)
-            meta = _parse_feature_metadata(col_original, ftype)
-            meta["source"] = "inferred"
-            meta["subtype"] = subtype
-            return (ftype, subtype, meta) if include_subtype else (ftype, "", meta)
-    
-    # If no match, check for common patterns that might indicate feature type
-    # This helps catch edge cases
-    if any(x in col_lower for x in ["_delta", "_theta", "_alpha", "_beta", "_gamma"]):
-        # Likely a frequency band feature - try to infer type
-        if "pow" in col_lower or "power" in col_lower:
-            subtype = _classify_subtype(col_original, "power")
-            meta = _parse_feature_metadata(col_original, "power")
-            meta["source"] = "inferred"
-            meta["subtype"] = subtype
-            return ("power", subtype, meta) if include_subtype else ("power", "", meta)
-        elif "conn" in col_lower or "connectivity" in col_lower:
-            subtype = _classify_subtype(col_original, "connectivity")
-            meta = _parse_feature_metadata(col_original, "connectivity")
-            meta["source"] = "inferred"
-            meta["subtype"] = subtype
-            return ("connectivity", subtype, meta) if include_subtype else ("connectivity", "", meta)
-    
-    meta = {"identifier": col_original, "band": "N/A", "source": "unknown", "subtype": "unknown"}
-    return ("unknown", "unknown", meta) if include_subtype else ("unknown", "", meta)
+        return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
+
+    # SECONDARY: regex-based patterns (most specific legacy)
+    pattern_match = _match_feature_patterns(column, registry)
+    if pattern_match:
+        feature_type, subtype, meta = pattern_match
+        meta["source"] = source_file_type or meta.get("source", "inferred")
+        meta["subtype"] = subtype
+        return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
+
+    # TERTIARY: classifier rules
+    for rule in registry.classifiers:
+        if _rule_matches(column, rule):
+            feature_type = rule.label
+            break
+
+    feature_type = registry.source_to_type.get(feature_type, feature_type) or "unknown"
+    subtype = _classify_subtype(column, feature_type, registry, source_file_type)
+    meta.update(_parse_feature_metadata(column, feature_type))
+    meta["subtype"] = subtype
+
+    return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
 
 
 def _parse_feature_metadata(column: str, ftype: str) -> Dict[str, Any]:
@@ -400,6 +753,27 @@ def _parse_feature_metadata(column: str, ftype: str) -> Dict[str, Any]:
             else:
                 meta["identifier"] = "_".join(parts[1:])
     
+    elif ftype == "precomputed":
+        # Precomputed features: gfp_*, iaf_*, pow_*, spec_*, slope_*, sef*_*, etc.
+        # Many have band info embedded: pow_alpha_C3, spec_alpha_C3, iaf_cog_C3
+        if len(parts) >= 2:
+            # Check all parts for band info
+            for i, part in enumerate(parts):
+                if part.lower() in freq_bands:
+                    meta["band"] = part.lower()
+                    # Identifier is everything except the band
+                    remaining = parts[:i] + parts[i+1:]
+                    meta["identifier"] = "_".join(remaining) if remaining else column
+                    break
+            else:
+                # No band found - use full name as identifier
+                meta["identifier"] = column
+    
+    elif ftype == "gfp":
+        # GFP features: gfp_mean, gfp_max, gfp_baseline_change
+        meta["band"] = "global"
+        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
+    
     return meta
 
 
@@ -427,6 +801,8 @@ class FeatureBehaviorCorrelator:
         self.features_dir = deriv_features_path(deriv_root, subject)
         self._feature_dfs: Dict[str, pd.DataFrame] = {}
         self._loaded = False
+        self.registry = get_feature_registry(config)
+        self.default_corr_config = CorrelationConfig.from_config(config)
 
     def load_all_features(self) -> Dict[str, int]:
         """Load all available feature files. Returns feature counts."""
@@ -434,7 +810,7 @@ class FeatureBehaviorCorrelator:
             return {k: len(v.columns) for k, v in self._feature_dfs.items()}
 
         counts = {}
-        for name, filename in FEATURE_FILES.items():
+        for name, filename in self.registry.files.items():
             path = self.features_dir / filename
             if path.exists():
                 df = read_tsv(path)
@@ -451,20 +827,29 @@ class FeatureBehaviorCorrelator:
         targets: pd.Series,
         target_name: str = "rating",
         corr_config: Optional[CorrelationConfig] = None,
+        n_jobs: int = -1,
     ) -> Dict[str, FeatureCorrelationResult]:
         """Correlate all loaded features with behavioral target."""
         if not self._loaded:
             self.load_all_features()
 
         if corr_config is None:
-            corr_config = CorrelationConfig()
+            corr_config = self.default_corr_config
 
-        self.logger.info(f"Correlating features with {target_name}...")
-        results = {}
-
-        for name, df in self._feature_dfs.items():
-            result = self._correlate_df(df, targets, corr_config, name)
-            results[name] = result
+        n_jobs_actual = get_n_jobs(self.config, n_jobs)
+        self.logger.info(f"Correlating features with {target_name}... (n_jobs={n_jobs_actual})")
+        
+        # Parallel correlation across feature types
+        results = parallel_feature_types(
+            feature_dfs=self._feature_dfs,
+            targets=targets,
+            correlate_func=self._correlate_df,
+            corr_config=corr_config,
+            n_jobs=n_jobs_actual,
+            logger=self.logger,
+        )
+        
+        for name, result in results.items():
             if result.n_features > 0:
                 self.logger.debug(f"  {name}: {result.n_features} features, {result.n_significant} sig")
 
@@ -482,16 +867,25 @@ class FeatureBehaviorCorrelator:
         if df is None or df.empty or targets is None or len(targets) == 0:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
+        df_aligned, targets_aligned = _align_features_and_targets(
+            df, targets, config.min_samples, self.logger
+        )
+        if df_aligned is None or targets_aligned is None:
+            return FeatureCorrelationResult(feature_type, 0, 0)
+
         # Use core correlation loop
+        classifier = lambda col, source_file_type=None, include_subtype=True: classify_feature(
+            col, source_file_type=source_file_type, include_subtype=include_subtype, registry=self.registry
+        )
         records, _ = correlate_features_loop(
-            feature_df=df,
-            target_values=targets,
+            feature_df=df_aligned,
+            target_values=targets_aligned,
             method=config.method,
             min_samples=config.min_samples,
             logger=None,  # Suppress per-column logging
             identifier_type="feature",
             analysis_type=feature_type,
-            feature_classifier=classify_feature,
+            feature_classifier=classifier,
             robust_method=config.robust_method,
         )
 
@@ -568,10 +962,119 @@ class FeatureBehaviorCorrelator:
                 continue
 
             path = self.stats_dir / f"corr_stats_{name}_vs_{target_name}.tsv"
-            save_correlation_results(df, path, apply_fdr=apply_fdr, config=self.config, logger=self.logger)
+            save_correlation_results(df, path)
             saved_files.append(path)
 
         return saved_files
+
+    def compute_roi_correlations(
+        self,
+        power_df: pd.DataFrame,
+        targets: pd.Series,
+        target_name: str,
+        corr_config: CorrelationConfig,
+    ) -> Optional[pd.DataFrame]:
+        """Compute ROI-level power correlations by averaging channels within ROIs.
+        
+        Handles column naming patterns:
+        - power_{segment}_{band}_ch_{channel}_{stat} (e.g., power_plateau_delta_ch_Fp2_logratio)
+        - pow_{band}_{channel} (legacy)
+        """
+        from eeg_pipeline.utils.analysis.tfr import get_rois
+        
+        roi_defs = get_rois(self.config)
+        if not roi_defs:
+            self.logger.debug("No ROI definitions found in config")
+            return None
+        
+        bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+        
+        def extract_channel_from_col(col: str, band: str) -> Optional[str]:
+            """Extract channel name from power column."""
+            # Pattern: power_{segment}_{band}_ch_{channel}_{stat}
+            match = re.search(rf"_{band}_ch_([A-Za-z0-9]+)_", col, re.IGNORECASE)
+            if match:
+                return match.group(1)
+            # Legacy: pow_{band}_{channel}
+            match = re.search(rf"pow_{band}_([A-Za-z0-9]+)$", col, re.IGNORECASE)
+            if match:
+                return match.group(1)
+            return None
+        
+        records = []
+        for band in bands:
+            # Find all columns for this band (plateau segment preferred for pain analysis)
+            band_cols = [c for c in power_df.columns 
+                        if f"_{band}_ch_" in c.lower() or f"pow_{band}_" in c.lower()]
+            
+            # Prefer plateau columns if available
+            plateau_cols = [c for c in band_cols if "plateau" in c.lower()]
+            if plateau_cols:
+                band_cols = plateau_cols
+            
+            if not band_cols:
+                continue
+            
+            for roi_name, patterns in roi_defs.items():
+                roi_cols = []
+                for col in band_cols:
+                    ch_name = extract_channel_from_col(col, band)
+                    if ch_name is None:
+                        continue
+                    for pattern in patterns:
+                        if re.match(pattern, ch_name, re.IGNORECASE):
+                            roi_cols.append(col)
+                            break
+                
+                if not roi_cols:
+                    continue
+                
+                roi_vals = power_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                valid = roi_vals.notna() & targets.notna()
+                
+                if valid.sum() < corr_config.min_samples:
+                    continue
+                
+                r, p = compute_correlation(
+                    roi_vals[valid].values, targets[valid].values,
+                    corr_config.method == "spearman"
+                )
+                
+                records.append({
+                    "roi": roi_name,
+                    "band": band,
+                    "r": r,
+                    "p": p,
+                    "n": int(valid.sum()),
+                    "method": corr_config.method,
+                })
+            
+            overall_vals = power_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            valid = overall_vals.notna() & targets.notna()
+            if valid.sum() >= corr_config.min_samples:
+                r, p = compute_correlation(
+                    overall_vals[valid].values, targets[valid].values,
+                    corr_config.method == "spearman"
+                )
+                records.append({
+                    "roi": "overall",
+                    "band": band,
+                    "r": r,
+                    "p": p,
+                    "n": int(valid.sum()),
+                    "method": corr_config.method,
+                })
+        
+        if not records:
+            self.logger.warning("No ROI correlations computed - check power column naming")
+            return None
+        
+        df = pd.DataFrame(records)
+        suffix = "rating" if "rating" in target_name.lower() else "temp"
+        path = self.stats_dir / f"corr_stats_pow_roi_vs_{suffix}.tsv"
+        write_tsv(df, path)
+        self.logger.info(f"Saved ROI correlations: {path.name} ({len(df)} rows)")
+        return df
 
     def run_complete_analysis(
         self,
@@ -580,57 +1083,62 @@ class FeatureBehaviorCorrelator:
         corr_config: Optional[CorrelationConfig] = None,
     ) -> ComputationResult:
         """Run complete feature-behavior correlation analysis."""
-        try:
-            self.load_all_features()
+        self.load_all_features()
 
-            if not self._feature_dfs:
-                return ComputationResult(
-                    name="feature_correlator",
-                    status=ComputationStatus.SKIPPED,
-                    metadata={"reason": "No features loaded"},
+        if not self._feature_dfs:
+            return ComputationResult(
+                name="feature_correlator",
+                status=ComputationStatus.SKIPPED,
+                metadata={"reason": "No features loaded"},
+            )
+
+        if corr_config is None:
+            corr_config = self.default_corr_config
+
+        all_records = []
+        metadata = {"n_feature_types": len(self._feature_dfs)}
+
+        if rating_series is not None and len(rating_series) > 0:
+            rating_results = self.correlate_all(rating_series, "rating", corr_config)
+            self.save_results(rating_results, "rating")
+
+            for name, result in rating_results.items():
+                metadata[f"{name}_n_features"] = result.n_features
+                metadata[f"{name}_n_significant"] = result.n_significant
+                all_records.extend(result.records)
+            
+            if "power" in self._feature_dfs:
+                self.compute_roi_correlations(
+                    self._feature_dfs["power"], rating_series, "rating", corr_config
                 )
 
-            all_records = []
-            metadata = {"n_feature_types": len(self._feature_dfs)}
+        min_samples_default = get_min_samples(self.config, "default")
+        if temperature_series is not None and len(temperature_series.dropna()) > min_samples_default:
+            temp_results = self.correlate_all(temperature_series, "temperature", corr_config)
+            self.save_results(temp_results, "temperature")
+            
+            if "power" in self._feature_dfs:
+                self.compute_roi_correlations(
+                    self._feature_dfs["power"], temperature_series, "temp", corr_config
+                )
 
-            # Rating correlations
-            if rating_series is not None and len(rating_series) > 0:
-                rating_results = self.correlate_all(rating_series, "rating", corr_config)
-                self.save_results(rating_results, "rating")
+        if all_records:
+            combined_df = pd.DataFrame(all_records)
+            combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
+            save_correlation_results(combined_df, combined_path)
 
-                for name, result in rating_results.items():
-                    metadata[f"{name}_n_features"] = result.n_features
-                    metadata[f"{name}_n_significant"] = result.n_significant
-                    all_records.extend(result.records)
+        alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        n_sig = sum(1 for r in all_records if r.get("p", 1) < alpha)
+        self.logger.info(
+            f"Complete: {len(all_records)} correlations, {n_sig} significant "
+            f"(alpha={alpha})"
+        )
 
-            # Temperature correlations
-            if temperature_series is not None and len(temperature_series.dropna()) > MIN_SAMPLES_DEFAULT:
-                temp_results = self.correlate_all(temperature_series, "temperature", corr_config)
-                self.save_results(temp_results, "temperature")
-
-            # Combined output
-            if all_records:
-                combined_df = pd.DataFrame(all_records)
-                combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
-                save_correlation_results(combined_df, combined_path, apply_fdr=True,
-                                        config=self.config, logger=self.logger)
-
-            n_sig = sum(1 for r in all_records if r.get("p", 1) < 0.05)
-            self.logger.info(f"Complete: {len(all_records)} correlations, {n_sig} significant")
-
-            return ComputationResult(
-                name="feature_correlator",
-                status=ComputationStatus.SUCCESS,
-                metadata=metadata,
-            )
-
-        except Exception as e:
-            self.logger.error(f"Feature correlation failed: {e}")
-            return ComputationResult(
-                name="feature_correlator",
-                status=ComputationStatus.FAILED,
-                error=str(e),
-            )
+        return ComputationResult(
+            name="feature_correlator",
+            status=ComputationStatus.SUCCESS,
+            metadata=metadata,
+        )
 
 
 # =============================================================================
@@ -647,6 +1155,20 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         logger=ctx.logger,
         stats_dir=ctx.stats_dir,
     )
+    
+    # Inject loaded data from context to ensure new features are included
+    # (BehaviorContext is the source of truth for data loading)
+    if ctx.power_df is not None: correlator._feature_dfs["power"] = ctx.power_df
+    if ctx.connectivity_df is not None: correlator._feature_dfs["connectivity"] = ctx.connectivity_df
+    if ctx.microstates_df is not None: correlator._feature_dfs["microstate"] = ctx.microstates_df
+    if ctx.aperiodic_df is not None: correlator._feature_dfs["aperiodic"] = ctx.aperiodic_df
+    if ctx.itpc_df is not None: correlator._feature_dfs["itpc"] = ctx.itpc_df
+    if ctx.pac_df is not None: correlator._feature_dfs["pac"] = ctx.pac_df
+    if ctx.precomputed_df is not None: correlator._feature_dfs["feature"] = ctx.precomputed_df # legacy name support
+    
+    # Mark as loaded so it doesn't try to reload from registry files
+    correlator._loaded = True
+    
     return correlator.run_complete_analysis(
         rating_series=ctx.targets,
         temperature_series=ctx.temperature,
@@ -654,16 +1176,32 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     )
 
 
+def _load_pain_feature_patterns(config: Any) -> List[str]:
+    """Fetch pain-relevant feature regex patterns from config."""
+    patterns = get_config_value(config, "behavior_analysis.pain_relevant_patterns", None)
+    if patterns is None:
+        raise ValueError(
+            "Define behavior_analysis.pain_relevant_patterns in eeg_config.yaml "
+            "as a list of regex strings for pain-relevant features."
+        )
+    if not isinstance(patterns, (list, tuple)):
+        raise ValueError("behavior_analysis.pain_relevant_patterns must be a list.")
+    cleaned = [str(p).strip() for p in patterns if str(p).strip()]
+    if not cleaned:
+        raise ValueError("behavior_analysis.pain_relevant_patterns is empty.")
+    return cleaned
+
+
 def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
     """Correlate features most relevant to pain processing."""
-    pain_patterns = [
-        r"pow_alpha_(C3|C4|CP3|CP4|Cz)",
-        r"pow_theta_(Fz|FCz|F3|F4)",
-        r"pow_(loGamma|hiGamma)_(C3|C4|CP3|CP4)",
-        r"aper_(slope|offset)_",
-        r"wpli_(alpha|theta)_",
-        r"ms_(coverage|duration)_",
-    ]
+    try:
+        pain_patterns = _load_pain_feature_patterns(ctx.config)
+    except ValueError as err:
+        return ComputationResult(
+            name="pain_relevant",
+            status=ComputationStatus.FAILED,
+            error=str(err),
+        )
 
     correlator = FeatureBehaviorCorrelator(
         subject=ctx.subject, deriv_root=ctx.deriv_root,
@@ -691,10 +1229,10 @@ def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
 
     if all_records:
         df = pd.DataFrame(all_records)
-        save_correlation_results(df, ctx.stats_dir / "corr_stats_pain_relevant_vs_rating.tsv",
-                                apply_fdr=True, config=ctx.config, logger=ctx.logger)
+        save_correlation_results(df, ctx.stats_dir / "corr_stats_pain_relevant_vs_rating.tsv")
 
-    n_sig = sum(1 for r in all_records if r.get("p", 1) < 0.05)
+    alpha = float(get_config_value(ctx.config, "statistics.sig_alpha", 0.05))
+    n_sig = sum(1 for r in all_records if r.get("p", 1) < alpha)
     return ComputationResult(name="pain_relevant", status=ComputationStatus.SUCCESS,
                             metadata={"n_features": len(all_records), "n_significant": n_sig})
 
@@ -702,6 +1240,7 @@ def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
 def generate_feature_coverage_report(ctx: BehaviorContext) -> Dict[str, Any]:
     """Generate feature coverage report."""
     features_dir = deriv_features_path(ctx.deriv_root, ctx.subject)
+    registry = get_feature_registry(ctx.config)
     
     report = {
         "subject": ctx.subject,
@@ -712,7 +1251,7 @@ def generate_feature_coverage_report(ctx: BehaviorContext) -> Dict[str, Any]:
         "missing_files": [],
     }
 
-    for name, filename in FEATURE_FILES.items():
+    for name, filename in registry.files.items():
         path = features_dir / filename
         if path.exists():
             df = read_tsv(path)
@@ -721,13 +1260,13 @@ def generate_feature_coverage_report(ctx: BehaviorContext) -> Dict[str, Any]:
                 report["feature_files"][name] = {"n_features": len(df.columns), "n_epochs": len(df)}
                 report["total_features"] += len(df.columns)
                 for col in df.columns:
-                    ftype, _, _ = classify_feature(col, include_subtype=True)
+                    ftype, _, _ = classify_feature(col, include_subtype=True, registry=registry)
                     report["feature_types"][ftype] = report["feature_types"].get(ftype, 0) + 1
         else:
             report["missing_files"].append(name)
 
-    report["coverage_pct"] = len(report["available_files"]) / len(FEATURE_FILES) * 100
-    ctx.logger.info(f"Coverage: {len(report['available_files'])}/{len(FEATURE_FILES)} files")
+    report["coverage_pct"] = len(report["available_files"]) / len(registry.files) * 100
+    ctx.logger.info(f"Coverage: {len(report['available_files'])}/{len(registry.files)} files")
     return report
 
 
@@ -744,7 +1283,8 @@ def compute_feature_importance_summary(ctx: BehaviorContext) -> pd.DataFrame:
 
     rating_results = correlator.correlate_all(ctx.targets, "rating", corr_config)
     temp_results = None
-    if ctx.temperature is not None and len(ctx.temperature.dropna()) > MIN_SAMPLES_DEFAULT:
+    min_samples_default = get_min_samples(ctx.config, "default")
+    if ctx.temperature is not None and len(ctx.temperature.dropna()) > min_samples_default:
         temp_results = correlator.correlate_all(ctx.temperature, "temperature", corr_config)
 
     summary = []

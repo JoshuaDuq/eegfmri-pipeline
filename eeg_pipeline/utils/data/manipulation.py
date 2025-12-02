@@ -1,0 +1,112 @@
+"""
+Data Manipulation Utilities.
+
+Common functions for manipulating DataFrames and other data structures.
+"""
+
+from __future__ import annotations
+
+from typing import List, Optional, Union, Any, Tuple
+import pandas as pd
+
+
+def reorder_pivot(
+    pivot: pd.DataFrame,
+    row_order: List[str],
+    col_order: List[str],
+) -> pd.DataFrame:
+    """Reorder pivot table rows and columns to match specified order.
+    
+    Args:
+        pivot: Pivot table to reorder
+        row_order: Desired row order (items not in pivot are skipped)
+        col_order: Desired column order (items not in pivot are skipped)
+    
+    Returns:
+        Reordered pivot table
+    """
+    if pivot.empty:
+        return pivot
+    
+    # Filter to existing rows/columns
+    rows = [r for r in row_order if r in pivot.index]
+    cols = [c for c in col_order if c in pivot.columns]
+    
+    # Add any remaining rows/columns not in order
+    rows += [r for r in pivot.index if r not in rows]
+    cols += [c for c in pivot.columns if c not in cols]
+    
+    return pivot.reindex(index=rows, columns=cols)
+
+
+def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """Find first matching column from a list of candidates.
+    
+    Args:
+        df: DataFrame to search
+        candidates: List of column names to try in order
+    
+    Returns:
+        First matching column name, or None if no match
+    """
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def build_plateau_features(
+    pow_df: pd.DataFrame,
+    pow_cols: List[str],
+    baseline_df: pd.DataFrame,
+    baseline_cols: List[str],
+    ch_names: List[str],
+    power_bands: List[str],
+    logger: Any,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Construct plateau-averaged band power DataFrame.
+    
+    Args:
+        pow_df: DataFrame containing power features
+        pow_cols: List of power column names
+        baseline_df: DataFrame containing baseline features
+        baseline_cols: List of baseline column names
+        ch_names: List of channel names
+        power_bands: List of power band names
+        logger: Logger instance
+    
+    Returns:
+        Tuple of (plateau DataFrame, list of plateau column names)
+    """
+    col_name_to_series = {}
+    plateau_cols = []
+
+    for band in power_bands:
+        for ch in ch_names:
+            plateau_col_direct = f"pow_{band}_{ch}_plateau"
+            if plateau_col_direct in pow_cols:
+                name = f"pow_{band}_{ch}"
+                col_name_to_series[name] = pow_df[plateau_col_direct]
+                plateau_cols.append(name)
+                continue
+
+            early_col = f"pow_{band}_{ch}_early"
+            mid_col = f"pow_{band}_{ch}_mid"
+            late_col = f"pow_{band}_{ch}_late"
+
+            if early_col in pow_cols and mid_col in pow_cols and late_col in pow_cols:
+                plateau_val = pow_df[[early_col, mid_col, late_col]].mean(axis=1)
+                name = f"pow_{band}_{ch}"
+                col_name_to_series[name] = plateau_val
+                plateau_cols.append(name)
+
+        if not baseline_df.empty:
+            for ch in ch_names:
+                baseline_col = f"baseline_{band}_{ch}"
+                if baseline_col in baseline_cols:
+                    col_name_to_series[baseline_col] = baseline_df[baseline_col]
+                    plateau_cols.append(baseline_col)
+
+    plateau_df = pd.DataFrame(col_name_to_series)
+    plateau_df = plateau_df.reindex(columns=plateau_cols)
+    return plateau_df, plateau_cols

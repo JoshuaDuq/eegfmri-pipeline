@@ -15,11 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 ###################################################################
-# Helper Functions
+# Helper Functions (imported from helpers module)
 ###################################################################
 
-def _despine(ax) -> None:
-    sns.despine(ax=ax, trim=True)
+from eeg_pipeline.plotting.decoding.helpers import _despine
 
 
 ###################################################################

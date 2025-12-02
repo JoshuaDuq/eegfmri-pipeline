@@ -470,3 +470,148 @@ def validate_connectivity_input(
     
     return result
 
+
+###################################################################
+# Data Format Helpers
+###################################################################
+
+
+def detect_data_format(
+    data: np.ndarray, 
+    data_format: Optional[str] = None, 
+    percent_threshold: Optional[float] = None,
+    config: Optional[Any] = None
+) -> bool:
+    """
+    Detect if data is in percent change or absolute units.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Data to check
+    data_format : str, optional
+        Force format ("percent" or "abs")
+    percent_threshold : float, optional
+        Threshold for percent detection
+    config : Any, optional
+        Config object to look up default threshold
+        
+    Returns
+    -------
+    bool
+        True if data appears to be in percent change
+    """
+    if data_format is not None:
+        return data_format == "percent"
+    
+    if percent_threshold is None:
+        # Try to get from config object if available
+        if config and hasattr(config, "get"):
+            percent_threshold = float(config.get("io.constants.percent_threshold", 5.0))
+        # Fallback to looking up by attribute if not a dict-like
+        elif config and hasattr(config, "io") and hasattr(config.io, "constants"):
+             percent_threshold = config.io.constants.percent_threshold
+        else:
+             percent_threshold = 5.0
+    
+    data_finite = data[np.isfinite(data)]
+    if data_finite.size == 0:
+        return False
+    data_abs_max = float(np.nanmax(np.abs(data_finite)))
+    return data_abs_max > percent_threshold
+
+
+###################################################################
+# Alignment Validation
+###################################################################
+
+
+def _handle_alignment_error(msg: str, strict: bool, logger: Optional[logging.Logger]) -> None:
+    if strict:
+        raise ValueError(msg)
+    if logger:
+        logger.warning(msg)
+
+
+def ensure_aligned_lengths(
+    *arrays_or_series,
+    context: str = "",
+    strict: Optional[bool] = None,
+    logger: Optional[logging.Logger] = None
+) -> None:
+    """
+    Ensure multiple arrays or series have the same length and index.
+    
+    Parameters
+    ----------
+    *arrays_or_series : Array-like
+        Objects to check
+    context : str
+        Error message context
+    strict : bool, optional
+        If True, raise ValueError on mismatch
+    logger : logging.Logger, optional
+        Logger for warnings if not strict
+    """
+    strict = strict if strict is not None else True
+    
+    non_null = [obj for obj in arrays_or_series if obj is not None]
+    if len(non_null) < 2:
+        return
+    
+    lengths = {len(obj) for obj in non_null}
+    if len(lengths) > 1:
+        msg = f"{context}: Length mismatch detected: {[len(obj) for obj in non_null]}"
+        _handle_alignment_error(msg, strict, logger)
+        return
+    
+    ref_index = None
+    for obj in non_null:
+        idx = getattr(obj, "index", None)
+        if idx is None:
+            continue
+        if ref_index is None:
+            ref_index = idx
+        elif len(idx) != len(ref_index) or not idx.equals(ref_index):
+            msg = f"{context}: Index misalignment detected; align before analysis"
+            _handle_alignment_error(msg, strict, logger)
+            return
+
+
+###################################################################
+# Pipeline Specific Validation
+###################################################################
+
+
+def validate_epochs_for_plotting(epochs: mne.Epochs, logger: Optional[logging.Logger] = None) -> bool:
+    """Check if epochs are valid for plotting."""
+    if epochs is None:
+        if logger:
+            logger.warning("Epochs object is None")
+        return False
+    if len(epochs) == 0:
+        if logger:
+            logger.warning("Epochs object is empty")
+        return False
+    return True
+
+
+def require_epochs_tfr(tfr, context_msg: str, logger: Optional[logging.Logger] = None) -> bool:
+    """Check if object is EpochsTFR."""
+    if not isinstance(tfr, mne.time_frequency.EpochsTFR):
+        if logger:
+            logger.warning(f"{context_msg} requires EpochsTFR; skipping.")
+        return False
+    return True
+
+
+def validate_predictor_file(df: pd.DataFrame, predictor_type: str, target: str, logger: logging.Logger) -> bool:
+    """Validate predictor file columns."""
+    if predictor_type == "Channel":
+        if "channel" not in df.columns or "band" not in df.columns:
+            logger.debug(
+                f"Skipping combined file for target '{target}' - missing required columns "
+                f"(expected 'channel' and 'band')"
+            )
+            return False
+    return True

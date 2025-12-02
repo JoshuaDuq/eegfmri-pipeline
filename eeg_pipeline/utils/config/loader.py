@@ -7,6 +7,39 @@ import os
 
 ###################################################################
 # Config Path Resolution
+#
+# This module is the **single entry point** for configuration:
+# - All code that needs settings should go through `load_config` /
+#   `load_settings` (or helpers defined below).
+# - The underlying source of truth is `eeg_config.yaml` in this
+#   directory; no other YAML or config files should be read elsewhere
+#   in the package.
+# - Helper accessors (e.g. `get_frequency_bands`, `get_constants`)
+#   provide typed, domain-specific views on top of the raw config.
+#
+# CONFIG ACCESS PATTERNS:
+# ------------------------
+# Preferred access methods (in order of preference):
+#
+# 1. Using ConfigDict.get() with dot notation (recommended):
+#    config = load_config()
+#    value = config.get("section.subsection.key", default_value)
+#
+# 2. Using get_config_value() helper:
+#    value = get_config_value(config, "section.subsection.key", default_value)
+#
+# 3. Using get_nested_value() for raw dicts:
+#    value = get_nested_value(config_dict, "section.subsection.key", default_value)
+#
+# 4. Attribute-style access (for top-level sections only):
+#    config = load_config()
+#    paths = config.paths  # Returns ConfigDict for paths section
+#    task = config.task  # Returns project.task value
+#
+# AVOID:
+# - Direct dict access with [] unless accessing top-level keys
+# - Hardcoding parameter values (always use config)
+# - Accessing config without defaults (use get() with defaults)
 ###################################################################
 
 
@@ -71,6 +104,12 @@ def _resolve_paths_recursive(obj: Any, config_dir: Path, project_root: Path) -> 
 
 
 class ConfigError(Exception):
+    """Exception raised for configuration-related errors."""
+    pass
+
+
+class ConfigValidationError(ConfigError):
+    """Exception raised when config validation fails."""
     pass
 
 
@@ -129,13 +168,36 @@ def _should_reload_config(config_path: Path) -> bool:
 
 
 def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
+    """Load and parse YAML config file.
+    
+    Args:
+        config_path: Path to config YAML file
+        
+    Returns:
+        Parsed config dictionary with resolved paths
+        
+    Raises:
+        ConfigError: If file cannot be read or parsed
+    """
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
-        raise ConfigError(f"Failed to parse YAML config: {e}") from e
+        raise ConfigError(
+            f"Failed to parse YAML config at {config_path}: {e}\n"
+            "Please check the YAML syntax and ensure all anchors are properly defined."
+        ) from e
     except OSError as e:
-        raise ConfigError(f"Failed to load config file: {e}") from e
+        raise ConfigError(
+            f"Failed to load config file at {config_path}: {e}\n"
+            "Please ensure the file exists and is readable."
+        ) from e
+    
+    if not isinstance(config, dict):
+        raise ConfigError(
+            f"Config file {config_path} must contain a YAML dictionary/mapping, "
+            f"got {type(config).__name__}"
+        )
     
     return resolve_config_paths(config, config_path)
 
@@ -151,6 +213,28 @@ def load_config(
     script_name: Optional[str] = None,
     apply_thread_limits: bool = True
 ) -> ConfigDict:
+    """Load configuration from YAML file.
+    
+    This is the main entry point for accessing configuration. The config is
+    cached and automatically reloaded if the file changes.
+    
+    Args:
+        config_path: Optional path to config file. If None, uses default
+                    eeg_config.yaml in config directory.
+        script_name: Optional script name (for logging, currently unused)
+        apply_thread_limits: Whether to apply thread limits from config
+        
+    Returns:
+        ConfigDict instance providing dot-notation and dict access
+        
+    Raises:
+        ConfigError: If config file cannot be loaded or parsed
+        
+    Example:
+        >>> config = load_config()
+        >>> task = config.get("project.task", "default_task")
+        >>> alpha = config.get("statistics.sig_alpha", 0.05)
+    """
     global _CONFIG, _CONFIG_PATH, _CONFIG_MTIME
     
     resolved_path = _resolve_config_path(config_path)
@@ -201,6 +285,26 @@ def load_settings(config_path: Optional[Union[str, Path]] = None, script_name: O
 
 
 def get_nested_value(config: Dict[str, Any], key: str, default: Any = None) -> Any:
+    """Get nested config value using dot notation.
+    
+    Args:
+        config: Configuration dictionary
+        key: Dot-separated key path (e.g., "section.subsection.key")
+        default: Default value to return if key not found
+        
+    Returns:
+        Config value or default if not found
+        
+    Example:
+        >>> config = {"section": {"subsection": {"key": "value"}}}
+        >>> get_nested_value(config, "section.subsection.key", "default")
+        'value'
+        >>> get_nested_value(config, "section.missing", "default")
+        'default'
+    """
+    if not isinstance(config, dict):
+        return default
+        
     keys = key.split('.')
     value = config
 
@@ -214,6 +318,23 @@ def get_nested_value(config: Dict[str, Any], key: str, default: Any = None) -> A
 
 
 def get_config_value(config: Any, key: str, default: Any) -> Any:
+    """Get config value with fallback to default.
+    
+    Works with ConfigDict, regular dicts, or None. This is the preferred
+    method for accessing config values when you need a default.
+    
+    Args:
+        config: Configuration object (ConfigDict, dict, or None)
+        key: Dot-separated key path (e.g., "section.subsection.key")
+        default: Default value to return if key not found or config is None
+        
+    Returns:
+        Config value or default
+        
+    Example:
+        >>> config = load_config()
+        >>> alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+    """
     if config is None:
         return default
     
@@ -264,7 +385,7 @@ def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
     if hasattr(config, "frequency_bands"):
         return config.frequency_bands
     
-    return {}
+    return get_default_frequency_bands()
 
 
 def get_frequency_band_names(config: Any) -> List[str]:
@@ -333,3 +454,80 @@ def get_constants(section: str, config: Optional[Any] = None) -> Dict[str, Any]:
         raise ValueError(f"{section}.constants not found in config.")
     
     return dict(constants)
+
+
+###################################################################
+# Behavior Analysis Constants
+###################################################################
+
+
+def get_min_samples(config: Any, sample_type: str = "default") -> int:
+    """Get minimum samples threshold from config."""
+    defaults = {"channel": 10, "roi": 20, "default": 5, "edge": 30, "temporal": 15}
+    if config is None:
+        return defaults.get(sample_type, 5)
+    return int(get_config_value(config, f"behavior_analysis.min_samples.{sample_type}",
+                                 defaults.get(sample_type, 5)))
+
+
+def get_min_trials(config: Any, trial_type: str = "per_condition") -> int:
+    """Get minimum trials threshold from config."""
+    defaults = {"per_condition": 15, "for_tfr": 20}
+    if config is None:
+        return defaults.get(trial_type, 15)
+    return int(get_config_value(config, f"behavior_analysis.min_trials.{trial_type}",
+                                 defaults.get(trial_type, 15)))
+
+
+###################################################################
+# Statistical Constants
+###################################################################
+
+
+def get_fisher_z_clip_values(config: Any) -> Tuple[float, float]:
+    """Get Fisher z-transform clipping bounds from config.
+    
+    Args:
+        config: Configuration object (ConfigDict, dict, or None)
+        
+    Returns:
+        Tuple of (clip_min, clip_max) for Fisher z-transform clipping
+    """
+    clip_min = get_config_value(config, "statistics.constants.fisher_z_clip_min", -0.999999)
+    clip_max = get_config_value(config, "statistics.constants.fisher_z_clip_max", 0.999999)
+    return float(clip_min), float(clip_max)
+
+
+###################################################################
+# Feature Extraction Constants
+###################################################################
+
+
+def get_feature_constant(config: Any, constant_name: str, default: Any = None) -> Any:
+    """Get a feature extraction constant from config."""
+    if config is None:
+        return default
+    
+    # Map constant names to config paths
+    constant_map = {
+        "EPSILON_STD": "feature_engineering.constants.epsilon_std",
+        "EPSILON_PSD": "feature_engineering.constants.epsilon_psd",
+        "EPSILON_AMP": "feature_engineering.constants.epsilon_amp",
+        "MIN_EPOCHS_FOR_FEATURES": "feature_engineering.constants.min_epochs_for_features",
+        "MIN_CHANNELS_FOR_CONNECTIVITY": "feature_engineering.constants.min_channels_for_connectivity",
+        "MIN_SAMPLES_FOR_PSD": "feature_engineering.constants.min_samples_for_psd",
+        "MIN_VALID_FRACTION": "feature_engineering.constants.min_valid_fraction",
+        "MIN_EPOCHS_FOR_MICROSTATES": "feature_engineering.microstates.min_epochs_for_microstates",
+        "MAX_GFP_PEAKS_PER_EPOCH": "feature_engineering.microstates.max_gfp_peaks_per_epoch",
+        "MIN_EPOCHS_FOR_PLV": "feature_engineering.constants.min_epochs_for_plv",
+        "MIN_EDGE_SAMPLES": "feature_engineering.constants.min_edge_samples",
+        "MIN_SAMPLES_FOR_ENTROPY": "feature_engineering.complexity.min_samples_for_entropy",
+        "DEFAULT_PE_ORDER": "feature_engineering.complexity.pe_order",
+        "DEFAULT_PE_DELAY": "feature_engineering.complexity.pe_delay",
+    }
+    
+    config_path = constant_map.get(constant_name)
+    if config_path:
+        return get_config_value(config, config_path, default)
+    
+    return default

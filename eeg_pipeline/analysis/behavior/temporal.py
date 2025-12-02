@@ -26,10 +26,7 @@ from eeg_pipeline.utils.analysis.tfr import (
 )
 
 if TYPE_CHECKING:
-    from eeg_pipeline.analysis.behavior.core import BehaviorContext
-
-_MIN_SAMPLES_PER_COVARIATE = 5
-_PARTIAL_CORR_BASE_SAMPLES = 5
+    from eeg_pipeline.context.behavior import BehaviorContext
 
 
 def _create_temperature_masks(temp_series: Optional[pd.Series], min_trials: int, logger) -> Dict[str, np.ndarray]:
@@ -50,9 +47,13 @@ def _create_temperature_masks(temp_series: Optional[pd.Series], min_trials: int,
 def _compute_single_bin_correlation(
     f_i: int, t_i: int, power: np.ndarray, y: np.ndarray, times: np.ndarray,
     time_edges: np.ndarray, min_pts: int, use_spearman: bool,
-    cov_mat: Optional[np.ndarray], cov_df: Optional[pd.DataFrame], n_cov: int
+    cov_mat: Optional[np.ndarray], cov_df: Optional[pd.DataFrame], n_cov: int,
+    config: Any, min_samples_per_cov: int = 5, partial_corr_base: int = 5, min_dof: int = 2
 ) -> Tuple[int, int, np.ndarray, float, float, int, bool]:
-    """Compute correlation for a single frequency-time bin. Returns (f_i, t_i, bin_data, r, p, n_obs, is_valid)."""
+    """Compute correlation for a single frequency-time bin. Returns (f_i, t_i, bin_data, r, p, n_obs, is_valid).
+    
+    Note: Config values are passed as parameters to avoid repeated config lookups in parallel execution.
+    """
     t_mask = (times >= time_edges[t_i]) & (times < time_edges[t_i + 1])
     bin_vals = np.full(len(y), np.nan)
     if t_mask.any():
@@ -64,7 +65,7 @@ def _compute_single_bin_correlation(
     
     if cov_mat is not None:
         cov_valid = valid & np.all(np.isfinite(cov_mat), axis=1)
-        req = max(min_pts, n_cov * _MIN_SAMPLES_PER_COVARIATE + _PARTIAL_CORR_BASE_SAMPLES)
+        req = max(min_pts, n_cov * min_samples_per_cov + partial_corr_base)
         n_obs = int(cov_valid.sum())
         if n_obs >= req:
             try:
@@ -73,13 +74,16 @@ def _compute_single_bin_correlation(
                     pd.DataFrame(cov_mat[cov_valid], columns=list(cov_df.columns)),
                     method="spearman" if use_spearman else "pearson"
                 )
-            except Exception:
-                pass
+            except (ValueError, RuntimeWarning) as err:
+                logging.getLogger(__name__).debug(
+                    "Partial correlation failed for bin (f=%s, t=%s): %s", f_i, t_i, err
+                )
+                r, p = np.nan, np.nan
     elif n_obs >= min_pts:
         r, p = compute_correlation(bin_vals[valid], y[valid], "spearman" if use_spearman else "pearson")
     
     dof = n_obs - n_cov - 2
-    is_valid = np.isfinite(r) and np.isfinite(p) and dof >= 2 and abs(r) < 1
+    is_valid = np.isfinite(r) and np.isfinite(p) and dof >= min_dof and abs(r) < 1
     
     return f_i, t_i, bin_vals, r, p, n_obs, is_valid
 
@@ -87,8 +91,10 @@ def _compute_single_bin_correlation(
 def _compute_tf_correlations_for_bins(
     power: np.ndarray, y: np.ndarray, times: np.ndarray, freqs: np.ndarray,
     time_edges: np.ndarray, min_pts: int, use_spearman: bool, cov_df: Optional[pd.DataFrame] = None,
-    n_jobs: int = 1,
+    n_jobs: int = 1, config: Optional[Any] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]]]:
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
     n_bins = len(time_edges) - 1
     corrs = np.full((len(freqs), n_bins), np.nan)
     pvals = np.full_like(corrs, np.nan)
@@ -100,6 +106,11 @@ def _compute_tf_correlations_for_bins(
     if cov_df is not None and not cov_df.empty:
         cov_mat = cov_df.apply(pd.to_numeric, errors="coerce").to_numpy()
         n_cov = cov_mat.shape[1]
+    
+    # Pre-compute config values ONCE before parallel execution
+    min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
+    partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
+    min_dof = int(get_config_value(config, "behavior_analysis.statistics.min_dof_for_correlation", 2))
 
     # Create list of all (frequency, time_bin) pairs to process
     tasks = [(f_i, t_i) for f_i in range(len(freqs)) for t_i in range(n_bins)]
@@ -109,15 +120,17 @@ def _compute_tf_correlations_for_bins(
         results = [
             _compute_single_bin_correlation(
                 f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
-                cov_mat, cov_df, n_cov
+                cov_mat, cov_df, n_cov, config, min_samples_per_cov, partial_corr_base, min_dof
             )
             for f_i, t_i in tasks
         ]
     else:
-        results = Parallel(n_jobs=n_jobs, backend='threading')(
+        # Use 'loky' (process-based) for CPU-bound correlation computations
+        # This bypasses Python's GIL for true parallelism
+        results = Parallel(n_jobs=n_jobs, backend='loky')(
             delayed(_compute_single_bin_correlation)(
                 f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
-                cov_mat, cov_df, n_cov
+                cov_mat, cov_df, n_cov, config, min_samples_per_cov, partial_corr_base, min_dof
             )
             for f_i, t_i in tasks
         )
@@ -134,9 +147,48 @@ def _compute_tf_correlations_for_bins(
     return corrs, pvals, n_valid, bin_data, info_bins
 
 
+def _compute_single_condition_channel(
+    b_i: int, w_i: int, c_i: int, bp: np.ndarray, y_c: np.ndarray,
+    cov_vals: Optional[np.ndarray], cov_valid_mask: Optional[np.ndarray],
+    req_samples: int, method: str, use_spearman: bool,
+) -> Tuple[int, int, int, float, float, int]:
+    """Compute correlation for a single band/window/channel combination."""
+    ch_p = bp[:, c_i]
+    valid = np.isfinite(ch_p) & np.isfinite(y_c)
+    if cov_valid_mask is not None:
+        valid &= cov_valid_mask
+    
+    if valid.sum() < req_samples:
+        return b_i, w_i, c_i, np.nan, np.nan, 0
+    
+    ch_valid = ch_p[valid]
+    if np.std(ch_valid) < 1e-12:
+        return b_i, w_i, c_i, np.nan, np.nan, 0
+    
+    try:
+        if cov_vals is not None and cov_vals.shape[1] > 0:
+            r, p, n = compute_partial_corr(
+                pd.Series(ch_valid), pd.Series(y_c[valid]),
+                pd.DataFrame(cov_vals[valid]), method=method
+            )
+            if n < req_samples:
+                return b_i, w_i, c_i, np.nan, np.nan, 0
+        else:
+            corr_fn = spearmanr if use_spearman else pearsonr
+            r, p = corr_fn(ch_valid, y_c[valid])
+        
+        if np.isfinite(r) and np.isfinite(p):
+            return b_i, w_i, c_i, float(r), float(p), int(valid.sum())
+    except (ValueError, RuntimeWarning):
+        pass
+    
+    return b_i, w_i, c_i, np.nan, np.nan, 0
+
+
 def _compute_correlations_for_condition(
     tfr, y: np.ndarray, mask: np.ndarray, name: str, bands: Dict, win_s: np.ndarray, win_e: np.ndarray,
     fmax: float, min_trials: int, corr_fn, alpha: float, logger, cov_df: Optional[pd.DataFrame] = None,
+    config: Optional[Any] = None, n_jobs: int = 1,
 ) -> Optional[Dict[str, Any]]:
     if mask is None or mask.sum() < min_trials:
         return None
@@ -144,14 +196,28 @@ def _compute_correlations_for_condition(
     # Convert boolean mask to integer indices for MNE object indexing
     idx = np.where(mask)[0] if mask.dtype == bool else mask
     tfr_c, y_c = tfr[idx], y[mask]
-    method = "spearman" if corr_fn == spearmanr else "pearson"
+    use_spearman = corr_fn == spearmanr
+    method = "spearman" if use_spearman else "pearson"
     cov_vals = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce").to_numpy() if cov_df is not None and not cov_df.empty else None
     
     n_ch, n_b, n_w = len(tfr.ch_names), len(bands), len(win_s)
     corrs = np.full((n_b, n_w, n_ch), np.nan)
     pvals = np.full_like(corrs, np.nan)
     n_valid = np.zeros_like(corrs, dtype=int)
-
+    
+    # Pre-compute config values outside loop
+    from eeg_pipeline.utils.config.loader import get_config_value
+    if cov_vals is not None:
+        min_samples_per_cov = int(get_config_value(config, "behavior_analysis.statistics.min_samples_per_covariate", 5))
+        partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
+        req_samples = max(min_trials, cov_vals.shape[1] * min_samples_per_cov + partial_corr_base)
+    else:
+        req_samples = min_trials
+    
+    # Build tasks for parallel execution
+    tasks = []
+    band_power_cache = {}
+    
     for b_i, (bn, (fmin, fmax_b)) in enumerate(bands.items()):
         fmax_eff = min(fmax_b, fmax)
         if fmin >= fmax_eff:
@@ -160,31 +226,29 @@ def _compute_correlations_for_condition(
             bp = extract_trial_band_power(tfr_c, fmin, fmax_eff, t0, t1)
             if bp is None:
                 continue
+            cov_valid_mask = np.all(np.isfinite(cov_vals), axis=1) if cov_vals is not None else None
+            
             for c_i in range(n_ch):
-                ch_p = bp[:, c_i]
-                valid = np.isfinite(ch_p) & np.isfinite(y_c)
-                if cov_vals is not None:
-                    valid &= np.all(np.isfinite(cov_vals), axis=1)
-                    req = max(min_trials, cov_vals.shape[1] * _MIN_SAMPLES_PER_COVARIATE + _PARTIAL_CORR_BASE_SAMPLES)
-                else:
-                    req = min_trials
-                if valid.sum() < req:
-                    continue
-                try:
-                    if cov_vals is not None and cov_vals.shape[1] > 0:
-                        r, p, n = compute_partial_corr(
-                            pd.Series(ch_p[valid]), pd.Series(y_c[valid]),
-                            pd.DataFrame(cov_vals[valid]), method=method
-                        )
-                        if n < req:
-                            continue
-                    else:
-                        r, p = corr_fn(ch_p[valid], y_c[valid])
-                    if np.isfinite(r) and np.isfinite(p):
-                        corrs[b_i, w_i, c_i], pvals[b_i, w_i, c_i] = r, p
-                        n_valid[b_i, w_i, c_i] = int(valid.sum())
-                except Exception:
-                    pass
+                tasks.append((b_i, w_i, c_i, bp, y_c, cov_vals, cov_valid_mask, req_samples, method, use_spearman))
+    
+    # Execute in parallel or sequential
+    if n_jobs == 1 or len(tasks) < 50:
+        results = [
+            _compute_single_condition_channel(*task)
+            for task in tasks
+        ]
+    else:
+        results = Parallel(n_jobs=n_jobs, backend='loky')(
+            delayed(_compute_single_condition_channel)(*task)
+            for task in tasks
+        )
+    
+    # Aggregate results
+    for b_i, w_i, c_i, r, p, n in results:
+        if np.isfinite(r):
+            corrs[b_i, w_i, c_i] = r
+            pvals[b_i, w_i, c_i] = p
+            n_valid[b_i, w_i, c_i] = n
 
     return {
         "correlations": corrs, "p_values": pvals, "p_corrected": np.full_like(pvals, np.nan),
@@ -229,14 +293,28 @@ def _run_tf_correlations_core(subject: str, epochs, events: pd.DataFrame, y: pd.
             return
         freqs, power = freqs[fm], power[:, fm, :]
     
-    time_edges = np.arange(times[0], times[-1] + float(hm_cfg.get("time_resolution")), float(hm_cfg.get("time_resolution")))
+    time_res = hm_cfg.get("time_resolution", 0.1)
+    time_edges = np.arange(times[0], times[-1] + float(time_res), float(time_res))
     min_pts = int(config.get("behavior_analysis.statistics.min_samples_roi", 20))
     
     # Get number of parallel jobs for correlation computation (default: 1 for safety)
-    n_jobs_corr = int(config.get("behavior_analysis.time_frequency_heatmap.n_jobs", 1))
+    tf_jobs_cfg = config.get("behavior_analysis.time_frequency_heatmap.n_jobs", None)
+    global_jobs_cfg = config.get("behavior_analysis.n_jobs", 1)
+    n_jobs_corr = tf_jobs_cfg if tf_jobs_cfg is not None else global_jobs_cfg
+    try:
+        n_jobs_corr = int(n_jobs_corr)
+    except (TypeError, ValueError):
+        n_jobs_corr = 1
+    if n_jobs_corr == 0:
+        n_jobs_corr = 1  # joblib treats 0 as invalid; guard explicitly
+    backend_label = "loky" if n_jobs_corr != 1 else "sequential"
+    logger.info(
+        "TF correlations backend=%s, n_jobs=%s, bins=%s, freqs=%s",
+        backend_label, n_jobs_corr, len(time_edges) - 1, len(freqs),
+    )
     
     corrs, pvals, n_valid, bin_data, info_bins = _compute_tf_correlations_for_bins(
-        power, y_arr, times, freqs, time_edges, min_pts, use_spearman, cov_df, n_jobs=n_jobs_corr
+        power, y_arr, times, freqs, time_edges, min_pts, use_spearman, cov_df, n_jobs=n_jobs_corr, config=config
     )
     
     # Cluster correction
@@ -325,6 +403,43 @@ def compute_time_frequency_correlations(subject: str, task: str, deriv_root: Pat
                               config, use_spearman, cov_df, logger)
 
 
+def _build_temporal_tsv_records(
+    res: Dict[str, Any],
+    condition: str,
+    ch_names: List[str],
+    method: str,
+) -> List[Dict[str, Any]]:
+    """Build TSV records from temporal correlation results for global FDR."""
+    records = []
+    corrs = res["correlations"]  # shape: (n_bands, n_windows, n_channels)
+    pvals = res["p_values"]
+    n_valid = res["n_valid"]
+    band_names = res["band_names"]
+    win_s = res["window_starts"]
+    win_e = res["window_ends"]
+    
+    n_bands, n_windows, n_channels = corrs.shape
+    for b_i in range(n_bands):
+        for w_i in range(n_windows):
+            for c_i in range(n_channels):
+                r = corrs[b_i, w_i, c_i]
+                p = pvals[b_i, w_i, c_i]
+                if not np.isfinite(r) or not np.isfinite(p):
+                    continue
+                records.append({
+                    "condition": condition,
+                    "band": band_names[b_i],
+                    "time_start": float(win_s[w_i]),
+                    "time_end": float(win_e[w_i]),
+                    "channel": ch_names[c_i] if c_i < len(ch_names) else f"ch_{c_i}",
+                    "r": float(r),
+                    "p": float(p),
+                    "n": int(n_valid[b_i, w_i, c_i]),
+                    "method": method,
+                })
+    return records
+
+
 def _run_temporal_by_condition_core(epochs, events, y, stats_dir: Path, config, use_spearman: bool, cov_df, logger) -> None:
     """Core implementation for temporal correlations by condition."""
     from eeg_pipeline.utils.analysis.tfr import apply_baseline_to_tfr
@@ -334,9 +449,14 @@ def _run_temporal_by_condition_core(epochs, events, y, stats_dir: Path, config, 
     if not epochs.preload:
         epochs.load_data()
     
-    topo_cfg = config.get("behavior_analysis.temporal_correlation_topomaps", {})
-    win_ms = float(topo_cfg.get("window_size_ms", 100.0))
-    min_trials = int(topo_cfg.get("min_trials_per_condition", 5))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    win_ms = float(get_config_value(
+        config, "behavior_analysis.temporal_correlation_topomaps.window_size_ms", 500.0
+    ))
+    min_trials = int(get_config_value(
+        config, "behavior_analysis.temporal_correlation_topomaps.min_trials_per_condition", 5
+    ))
     plateau = tuple(config.get("time_frequency_analysis.plateau_window"))
     
     tfr = compute_tfr_morlet(epochs, config, logger=logger)
@@ -355,51 +475,57 @@ def _run_temporal_by_condition_core(epochs, events, y, stats_dir: Path, config, 
     y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
     n = compute_aligned_data_length(tfr, events)
     pain_col = get_pain_column_from_config(config, events)
-    temp_col = get_temperature_column_from_config(config, events)
     pain_vec = extract_pain_vector_array(tfr, events, pain_col, n) if pain_col else None
-    temp_series = extract_temperature_series(tfr, events, temp_col, n) if temp_col else None
     
     pain_m, non_m = ((pain_vec == 1), (pain_vec == 0)) if pain_vec is not None else (None, None)
-    temp_masks = _create_temperature_masks(temp_series, min_trials, logger)
     
     fmax = float(np.max(tfr.freqs))
+    from eeg_pipeline.utils.config.loader import get_config_value
     bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
     corr_fn = spearmanr if use_spearman else pearsonr
-    alpha = float(config.get("statistics.sig_alpha", 0.05))
+    alpha = float(get_config_value(config, "statistics.sig_alpha", 0.05))
     sfx = "_spearman" if use_spearman else "_pearson"
+    method = "spearman" if use_spearman else "pearson"
     ensure_dir(stats_dir)
     
-    # Save temperature data in combined file (for plotting function)
-    temp_results = {}
-    info_dict = {"ch_names": tfr.ch_names}
+    # Collect all TSV records for combined file (for global FDR)
+    all_tsv_records = []
+    ch_names = tfr.ch_names
+    
+    info_dict = {"ch_names": ch_names}
     if hasattr(tfr, "info"):
         info_dict["info"] = tfr.info
     
-    for t_str, t_mask in temp_masks.items():
-        res = _compute_correlations_for_condition(tfr, y_arr, t_mask, f"temp_{t_str}", bands, win_s, win_e, fmax, min_trials, corr_fn, alpha, logger, cov_df)
-        if res:
-            # Store in combined dict for single file (use temp_ prefix as expected by plotting function)
-            temp_results[f"temp_{t_str}"] = np.array([res], dtype=object)  # Wrap in array for npz compatibility
-            # Also save individual file for backwards compatibility
-            np.savez_compressed(stats_dir / f"temporal_correlations_temp_{t_str}{sfx}.npz", **res, times=times, ch_names=tfr.ch_names)
+    # Note: Temperature-level topomaps removed - correlating power with rating 
+    # within a single temperature level produces no variance since all trials 
+    # at the same temperature tend to have similar ratings.
     
-    # Save combined temperature file if we have any temperature data
-    if temp_results:
-        # Unwrap the results for the combined file
-        combined_temp_data = {}
-        for key, res_array in temp_results.items():
-            combined_temp_data[key] = res_array.item()  # Unwrap from array
-        combined_temp_data.update(info_dict)
-        combined_temp_data["times"] = times
-        np.savez_compressed(stats_dir / f"temporal_correlations_by_temperature{sfx}.npz", **combined_temp_data)
-        logger.info(f"Saved combined temperature temporal correlations: {len(temp_results)} temperature levels")
-    
+    # Save pain/non-pain data in combined file (for plotting function)
+    pain_results = {}
     for name, mask in [("pain", pain_m), ("non_pain", non_m)]:
         if mask is None:
             continue
-        res = _compute_correlations_for_condition(tfr, y_arr, mask, name, bands, win_s, win_e, fmax, min_trials, corr_fn, alpha, logger, cov_df)
+        n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
+        res = _compute_correlations_for_condition(tfr, y_arr, mask, name, bands, win_s, win_e, fmax, min_trials, corr_fn, alpha, logger, cov_df, config, n_jobs)
         if res:
-            np.savez_compressed(stats_dir / f"temporal_correlations_{name}{sfx}.npz", **res, times=times, ch_names=tfr.ch_names)
+            pain_results[name] = res
+            np.savez_compressed(stats_dir / f"temporal_correlations_{name}{sfx}.npz", **res, times=times, ch_names=ch_names)
+            # Build TSV records for global FDR
+            all_tsv_records.extend(_build_temporal_tsv_records(res, name, ch_names, method))
+    
+    # Save combined pain file if we have pain data
+    if pain_results:
+        combined_pain_data = dict(pain_results)
+        combined_pain_data.update(info_dict)
+        combined_pain_data["times"] = times
+        np.savez_compressed(stats_dir / f"temporal_correlations_by_pain{sfx}.npz", **combined_pain_data)
+        logger.info(f"Saved combined pain temporal correlations: {len(pain_results)} conditions")
+    
+    # Save combined TSV for global FDR correction
+    if all_tsv_records:
+        tsv_path = stats_dir / f"corr_stats_temporal_all{sfx}.tsv"
+        write_tsv(pd.DataFrame(all_tsv_records), tsv_path)
+        logger.info(f"Saved temporal correlation TSV for global FDR: {len(all_tsv_records)} tests -> {tsv_path.name}")
     
     logger.info("Temporal correlations by condition completed")
 

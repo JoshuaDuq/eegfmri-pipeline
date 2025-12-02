@@ -7,9 +7,12 @@ at both subject and group levels. Coordinates calls to specialized plotting modu
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import List, Optional
 import logging
+
+from joblib import Parallel, delayed, cpu_count
 
 from ...utils.data.loading import load_epochs_for_analysis
 from ...utils.io.general import deriv_plots_path, ensure_dir
@@ -42,20 +45,55 @@ from .channels import (
 from .rois import (
     contrast_pain_nonpain_rois,
 )
-from .group import (
-    group_contrast_pain_nonpain_scalpmean,
-    group_rois_all_trials,
-    group_contrast_pain_nonpain_rois,
-    group_plot_bands_pain_temp_contrasts,
-    group_plot_topomap_grid_baseline_temps,
-    group_plot_pain_nonpain_temporal_topomaps_diff_allbands,
-    group_plot_temporal_topomaps_allbands_plateau,
+from .band_evolution import (
+    visualize_band_evolution,
 )
 
 
 ###################################################################
 # TFR visualization helpers
 ###################################################################
+
+
+def _plot_topomaps(
+    power,
+    events_df,
+    plots_dir,
+    config,
+    baseline_window,
+    plateau_window,
+    logger: logging.Logger,
+) -> None:
+    """Plot all topomap visualizations.
+    
+    Consolidates topomap plotting logic to avoid duplication.
+    """
+    plot_bands_pain_temp_contrasts(
+        power, events_df, plots_dir, config=config, baseline=baseline_window,
+        plateau_window=plateau_window, logger=logger
+    )
+    
+    plot_topomap_grid_baseline_temps(
+        power, events_df, plots_dir, config=config, baseline=baseline_window,
+        plateau_window=plateau_window, logger=logger
+    )
+    
+    window_size_ms = config.get(
+        "erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0
+    )
+    plot_pain_nonpain_temporal_topomaps_diff_allbands(
+        power, events_df, plots_dir, config=config, baseline=baseline_window,
+        plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
+    )
+    
+    window_count = config.get(
+        "erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5
+    )
+    plot_temporal_topomaps_allbands_plateau(
+        power, events_df, plots_dir, config=config, baseline=baseline_window,
+        plateau_window=plateau_window, window_count=window_count, logger=logger
+    )
+
 
 def visualize_subject_tfr(
     subject: str,
@@ -113,7 +151,7 @@ def visualize_subject_tfr(
     plots_to_run = plots if plots is not None else (
         ["rois", "rois_contrast"] if tfr_roi_only else
         ["topomaps"] if tfr_topomaps_only else
-        ["scalpmean", "scalpmean_contrast", "channels", "channels_contrast", "rois", "rois_contrast", "topomaps"]
+        ["scalpmean", "scalpmean_contrast", "channels", "channels_contrast", "rois", "rois_contrast", "topomaps", "band_evolution"]
     )
     
     if tfr_roi_only:
@@ -142,26 +180,9 @@ def visualize_subject_tfr(
             return
         
         if "topomaps" in plots_to_run:
-            plot_bands_pain_temp_contrasts(
-                power, events_df, plots_dir, config=config, baseline=baseline_window,
-                plateau_window=plateau_window, logger=logger
-            )
-            
-            plot_topomap_grid_baseline_temps(
-                power, events_df, plots_dir, config=config, baseline=baseline_window,
-                plateau_window=plateau_window, logger=logger
-            )
-            
-            window_size_ms = topomap_windows_config.get("pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
-            plot_pain_nonpain_temporal_topomaps_diff_allbands(
-                power, events_df, plots_dir, config=config, baseline=baseline_window,
-                plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
-            )
-            
-            window_count = topomap_windows_config.get("temporal_allbands_plateau.window_count", 5)
-            plot_temporal_topomaps_allbands_plateau(
-                power, events_df, plots_dir, config=config, baseline=baseline_window,
-                plateau_window=plateau_window, window_count=window_count, logger=logger
+            _plot_topomaps(
+                power, events_df, plots_dir, config,
+                baseline_window, plateau_window, logger
             )
         
         logger.info(f"TFR topomap visualizations saved to {plots_dir}")
@@ -211,144 +232,76 @@ def visualize_subject_tfr(
     
     if "topomaps" in plots_to_run and events_df is not None:
         logger.info("Plotting topomaps...")
-        plot_bands_pain_temp_contrasts(
-            power, events_df, plots_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, logger=logger
+        _plot_topomaps(
+            power, events_df, plots_dir, config,
+            baseline_window, plateau_window, logger
         )
-        
-        plot_topomap_grid_baseline_temps(
-            power, events_df, plots_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, logger=logger
-        )
-        
-        window_size_ms = config.get("erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
-        plot_pain_nonpain_temporal_topomaps_diff_allbands(
-            power, events_df, plots_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
-        )
-        
-        window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5)
-        plot_temporal_topomaps_allbands_plateau(
-            power, events_df, plots_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, window_count=window_count, logger=logger
+    
+    # Band power evolution plots
+    if "band_evolution" in plots_to_run and events_df is not None:
+        logger.info("Plotting band power evolution...")
+        visualize_band_evolution(
+            power, events_df, plots_dir, config=config,
+            baseline=baseline_window, plateau_window=plateau_window, logger=logger
         )
     
     logger.info(f"TFR visualizations saved to {plots_dir}")
 
 
-def visualize_group_tfr(
-    subjects: List[str],
-    task: str,
-    config,
-    logger: logging.Logger,
-    tfr_roi_only: bool = False,
-    tfr_topomaps_only: bool = False,
-) -> None:
-    """Visualize TFR for a group of subjects.
-    
-    Creates group-level time-frequency representation visualizations including:
-    - Group scalp-mean contrasts
-    - Group ROI analysis
-    - Group topomap visualizations
-    
-    Args:
-        subjects: List of subject IDs (without 'sub-' prefix)
-        task: Task name
-        config: Configuration object
-        logger: Logger instance
-        tfr_roi_only: If True, only create ROI-level plots
-        tfr_topomaps_only: If True, only create topomap plots
-    """
-    if len(subjects) < 2:
-        logger.warning(f"Group visualization requires at least 2 subjects, got {len(subjects)}")
-        return
-    
-    logger.info(f"Visualizing group TFR for {len(subjects)} subjects...")
-    
-    group_dir = config.deriv_root / "group" / "eeg" / "plots" / "tfr"
-    ensure_dir(group_dir)
-    
-    tfr_analysis = config.get("time_frequency_analysis", {})
-    baseline_window_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
-    baseline_window = validate_baseline_window_pre_stimulus(baseline_window_raw, logger=logger)
-    plateau_window = tuple(tfr_analysis.get("plateau_window", [3.0, 10.5]))
-    
-    all_powers = []
-    all_events = []
-    
-    for subject in subjects:
-        epochs, events_df = load_epochs_for_analysis(
-            subject, task, align="strict", preload=True,
-            deriv_root=config.deriv_root, bids_root=config.bids_root,
-            config=config, logger=logger
-        )
-        
-        if epochs is None:
-            logger.warning(f"Skipping sub-{subject}: failed to load epochs")
-            continue
-        
-        power = compute_tfr_for_visualization(epochs, config, logger)
-        all_powers.append(power)
-        all_events.append(events_df)
-    
-    if len(all_powers) < 2:
-        logger.error("Insufficient subjects loaded for group analysis")
-        return
-    
-    if tfr_roi_only:
-        logger.info("Plotting group ROI analysis only...")
-        group_rois_all_trials(
-            all_powers, group_dir, config=config, baseline=baseline_window, logger=logger
-        )
-        
-        group_contrast_pain_nonpain_rois(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window, logger=logger
-        )
-    elif tfr_topomaps_only:
-        logger.info("Plotting group topomaps only...")
-        group_plot_bands_pain_temp_contrasts(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, logger=logger
-        )
-        
-        group_plot_topomap_grid_baseline_temps(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, logger=logger
-        )
-        
-        window_size_ms = config.get("erp_analysis.topomap_windows.pain_nonpain_temporal_diff_allbands.window_size_ms", 100.0)
-        group_plot_pain_nonpain_temporal_topomaps_diff_allbands(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, window_size_ms=window_size_ms, logger=logger
-        )
-        
-        window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5)
-        group_plot_temporal_topomaps_allbands_plateau(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, window_count=window_count, logger=logger
-        )
-    else:
-        logger.info("Plotting group pain contrast...")
-        group_contrast_pain_nonpain_scalpmean(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window,
-            plateau_window=plateau_window, logger=logger
-        )
-        
-        logger.info("Plotting group ROI analysis...")
-        group_rois_all_trials(
-            all_powers, group_dir, config=config, baseline=baseline_window, logger=logger
-        )
-        
-        group_contrast_pain_nonpain_rois(
-            all_powers, all_events, group_dir, config=config, baseline=baseline_window, logger=logger
-        )
-    
-    logger.info(f"Group TFR visualizations saved to {group_dir}")
-
-
 ###################################################################
 # Batch processing
 ###################################################################
+
+
+def _get_n_jobs(config=None) -> int:
+    """Get number of parallel jobs from config or environment."""
+    n_jobs = -1
+    
+    if config is not None:
+        from ...utils.config.loader import get_config_value
+        n_jobs = int(get_config_value(config, "time_frequency_analysis.n_jobs", -1))
+    
+    env_jobs = os.environ.get("EEG_PIPELINE_N_JOBS")
+    if env_jobs is not None:
+        try:
+            n_jobs = int(env_jobs)
+        except ValueError:
+            pass
+    
+    if n_jobs == -1:
+        n_jobs = max(1, cpu_count() - 1)
+    elif n_jobs <= 0:
+        n_jobs = 1
+    
+    return n_jobs
+
+
+def _visualize_single_subject(
+    subject: str,
+    task: str,
+    config,
+    tfr_roi_only: bool,
+    tfr_topomaps_only: bool,
+) -> str:
+    """Worker function for parallel TFR visualization.
+    
+    Returns subject ID on success for logging.
+    """
+    from ...utils.io.general import setup_matplotlib, get_logger
+    
+    setup_matplotlib(config)
+    logger = get_logger(__name__)
+    
+    try:
+        visualize_subject_tfr(
+            subject, task, config, logger,
+            tfr_roi_only=tfr_roi_only,
+            tfr_topomaps_only=tfr_topomaps_only
+        )
+        return subject
+    except Exception as e:
+        logger.error(f"Failed to visualize sub-{subject}: {e}")
+        return None
 
 
 def visualize_tfr_for_subjects(
@@ -357,14 +310,14 @@ def visualize_tfr_for_subjects(
     deriv_root: Optional[Path] = None,
     config=None,
     logger: Optional[logging.Logger] = None,
-    group: bool = False,
     tfr_roi_only: bool = False,
     tfr_topomaps_only: bool = False,
+    n_jobs: Optional[int] = None,
 ) -> None:
     """Batch process TFR visualizations for multiple subjects.
     
-    High-level entry point for creating TFR visualizations for a list of subjects,
-    optionally including group-level analysis.
+    High-level entry point for creating TFR visualizations for a list of subjects.
+    Supports parallel processing across subjects.
     
     Args:
         subjects: List of subject IDs (without 'sub-' prefix)
@@ -372,9 +325,9 @@ def visualize_tfr_for_subjects(
         deriv_root: Optional derivatives root path
         config: Optional configuration object (loads from settings if None)
         logger: Optional logger instance
-        group: If True, create group-level visualizations
         tfr_roi_only: If True, only create ROI-level plots
         tfr_topomaps_only: If True, only create topomap plots
+        n_jobs: Number of parallel jobs (-1 = all cores minus 1, 1 = sequential)
     """
     if not subjects:
         raise ValueError("No subjects specified")
@@ -395,23 +348,32 @@ def visualize_tfr_for_subjects(
     if tfr_roi_only and tfr_topomaps_only:
         raise ValueError("Cannot specify both tfr_roi_only and tfr_topomaps_only")
     
+    if n_jobs is None:
+        n_jobs = _get_n_jobs(config)
+    
     mode_str = "ROI-only" if tfr_roi_only else "topomaps-only" if tfr_topomaps_only else "full"
-    logger.info(f"Starting TFR visualization ({mode_str}): {len(subjects)} subject(s), task={task}")
     
-    for idx, subject in enumerate(subjects, 1):
-        logger.info(f"[{idx}/{len(subjects)}] Visualizing sub-{subject}")
-        visualize_subject_tfr(subject, task, config, logger, tfr_roi_only=tfr_roi_only, tfr_topomaps_only=tfr_topomaps_only)
-    
-    if group and len(subjects) >= 2:
-        logger.info("Creating group visualizations...")
-        visualize_group_tfr(subjects, task, config, logger, tfr_roi_only=tfr_roi_only, tfr_topomaps_only=tfr_topomaps_only)
+    if n_jobs == 1 or len(subjects) == 1:
+        logger.info(f"Starting TFR visualization ({mode_str}): {len(subjects)} subject(s), task={task} [sequential]")
+        for idx, subject in enumerate(subjects, 1):
+            logger.info(f"[{idx}/{len(subjects)}] Visualizing sub-{subject}")
+            visualize_subject_tfr(subject, task, config, logger, tfr_roi_only=tfr_roi_only, tfr_topomaps_only=tfr_topomaps_only)
+    else:
+        logger.info(f"Starting TFR visualization ({mode_str}): {len(subjects)} subject(s), task={task} [parallel, n_jobs={n_jobs}]")
+        results = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(
+            delayed(_visualize_single_subject)(
+                subject, task, config, tfr_roi_only, tfr_topomaps_only
+            )
+            for subject in subjects
+        )
+        successful = [r for r in results if r is not None]
+        logger.info(f"Completed {len(successful)}/{len(subjects)} subjects")
     
     logger.info("TFR visualization complete")
 
 
 __all__ = [
     "visualize_subject_tfr",
-    "visualize_group_tfr",
     "visualize_tfr_for_subjects",
 ]
 

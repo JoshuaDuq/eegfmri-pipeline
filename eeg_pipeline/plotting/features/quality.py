@@ -18,6 +18,7 @@ from matplotlib.patches import Patch
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.io.general import save_fig, ensure_dir
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 def plot_feature_distribution_grid(
@@ -28,9 +29,15 @@ def plot_feature_distribution_grid(
     n_cols: int = 4,
     figsize_per_plot: Tuple[float, float] = (3, 2.5),
     max_features: int = 16,
+    config: Any = None,
 ) -> plt.Figure:
     """Grid of histograms for feature distributions with normality indicators."""
     from scipy import stats
+    plot_cfg = get_plot_config(config)
+    cfg = get_config_value(config, "plotting.plots.features.quality.distribution", {})
+    n_cols = cfg.get("n_cols", n_cols)
+    figsize_per_plot = tuple(cfg.get("figsize_per_plot", figsize_per_plot))
+    max_features = cfg.get("max_features", max_features)
 
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         fig, ax = plt.subplots()
@@ -70,7 +77,7 @@ def plot_feature_distribution_grid(
         
         if len(values) < 5:
             ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-            ax.set_title(col[:15], fontsize=8)
+            ax.set_title(col[:15], fontsize=plot_cfg.font.medium)
             continue
         
         # Normality test
@@ -80,7 +87,7 @@ def plot_feature_distribution_grid(
             else:
                 _, p_norm = stats.normaltest(values)
             is_normal = p_norm > 0.05
-        except:
+        except Exception:
             is_normal = None
             p_norm = np.nan
         
@@ -92,7 +99,7 @@ def plot_feature_distribution_grid(
         
         # Title with normality indicator
         norm_text = "OK" if is_normal else "X" if is_normal is not None else "?"
-        ax.set_title(f"{col[:12]}... {norm_text}", fontsize=7, color=color)
+        ax.set_title(f"{col[:12]}... {norm_text}", fontsize=plot_cfg.font.small, color=color)
         ax.tick_params(labelsize=6)
     
     for idx in range(n_features, len(axes)):
@@ -103,7 +110,7 @@ def plot_feature_distribution_grid(
         Patch(facecolor="#22C55E", label="Normal (p>.05)"),
         Patch(facecolor="#EF4444", label="Non-normal"),
     ]
-    fig.legend(handles=legend_elements, loc="upper right", fontsize=8)
+    fig.legend(handles=legend_elements, loc="upper right", fontsize=plot_cfg.font.medium)
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -121,8 +128,15 @@ def plot_outlier_trials_heatmap(
     figsize: Tuple[float, float] = (12, 8),
     max_features: int = 30,
     max_trials: int = 100,
+    config: Any = None,
 ) -> plt.Figure:
     """Heatmap showing outlier status per trial and feature."""
+    plot_cfg = get_plot_config(config)
+    cfg = get_config_value(config, "plotting.plots.features.quality.outlier", {})
+    z_threshold = cfg.get("z_threshold", z_threshold)
+    figsize = tuple(cfg.get("figsize", figsize))
+    max_features = cfg.get("max_features", max_features)
+    max_trials = cfg.get("max_trials", max_trials)
     if quality_df is None or not isinstance(quality_df, pd.DataFrame) or quality_df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
@@ -165,9 +179,9 @@ def plot_outlier_trials_heatmap(
     
     im = ax.imshow(outlier_matrix, aspect="auto", cmap="Reds", vmin=0, vmax=1)
     
-    ax.set_xlabel("Feature", fontsize=10)
-    ax.set_ylabel("Trial", fontsize=10)
-    ax.set_title(f"Outlier Detection (|z| > {z_threshold})", fontsize=11, fontweight="bold")
+    ax.set_xlabel("Feature", fontsize=plot_cfg.font.title)
+    ax.set_ylabel("Trial", fontsize=plot_cfg.font.title)
+    ax.set_title(f"Outlier Detection (|z| > {z_threshold})", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     # Colorbar
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
@@ -178,7 +192,7 @@ def plot_outlier_trials_heatmap(
     n_outliers = np.sum(outlier_matrix)
     total_cells = outlier_matrix.size
     pct = 100 * n_outliers / total_cells
-    ax.set_xlabel(f"Feature ({n_outliers:.0f} outliers, {pct:.1f}% of data)", fontsize=10)
+    ax.set_xlabel(f"Feature ({n_outliers:.0f} outliers, {pct:.1f}% of data)", fontsize=plot_cfg.font.title)
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -194,8 +208,13 @@ def plot_snr_distribution(
     snr_col: str = "snr_db",
     threshold_db: float = 3.0,
     figsize: Tuple[float, float] = (8, 5),
+    config: Any = None,
 ) -> plt.Figure:
     """Plot distribution of trial SNR values."""
+    plot_cfg = get_plot_config(config)
+    cfg = get_config_value(config, "plotting.plots.features.quality.snr", {})
+    threshold_db = cfg.get("threshold_db", threshold_db)
+    figsize = tuple(cfg.get("figsize", figsize))
     if snr_col not in quality_df.columns:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, f"Column {snr_col} not found", ha="center", va="center")
@@ -214,16 +233,16 @@ def plot_snr_distribution(
     ax.axvline(threshold_db, color="black", linestyle="--", linewidth=2, label="Threshold")
     ax.axvline(np.median(values), color="blue", linestyle=":", linewidth=1.5, label=f"Median: {np.median(values):.1f} dB")
     
-    ax.set_xlabel("Signal-to-Noise Ratio (dB)", fontsize=10)
-    ax.set_ylabel("Count", fontsize=10)
-    ax.set_title("Trial Quality: SNR Distribution", fontsize=11, fontweight="bold")
-    ax.legend(fontsize=8)
+    ax.set_xlabel("Signal-to-Noise Ratio (dB)", fontsize=plot_cfg.font.title)
+    ax.set_ylabel("Count", fontsize=plot_cfg.font.title)
+    ax.set_title("Trial Quality: SNR Distribution", fontsize=plot_cfg.font.suptitle, fontweight="bold")
+    ax.legend(fontsize=plot_cfg.font.medium)
     
     # Summary
     n_poor = np.sum(below)
     n_total = len(values)
     ax.text(0.98, 0.98, f"{n_poor}/{n_total} ({100*n_poor/n_total:.1f}%) below threshold",
-            transform=ax.transAxes, ha="right", va="top", fontsize=9, 
+            transform=ax.transAxes, ha="right", va="top", fontsize=plot_cfg.font.large, 
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
     
     plt.tight_layout()
@@ -240,8 +259,13 @@ def plot_missing_data_matrix(
     feature_cols: Optional[List[str]] = None,
     figsize: Tuple[float, float] = (12, 6),
     max_features: int = 50,
+    config: Any = None,
 ) -> plt.Figure:
     """Visualize missing data patterns across features."""
+    plot_cfg = get_plot_config(config)
+    cfg = get_config_value(config, "plotting.plots.features.quality.missing", {})
+    figsize = tuple(cfg.get("figsize", figsize))
+    max_features = cfg.get("max_features", max_features)
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
@@ -267,9 +291,9 @@ def plot_missing_data_matrix(
     # Left: Heatmap
     ax1 = axes[0]
     im = ax1.imshow(missing_matrix, aspect="auto", cmap="gray_r", vmin=0, vmax=1)
-    ax1.set_xlabel("Feature", fontsize=10)
-    ax1.set_ylabel("Trial", fontsize=10)
-    ax1.set_title("Missing Data Pattern (white = missing)", fontsize=10, fontweight="bold")
+    ax1.set_xlabel("Feature", fontsize=plot_cfg.font.title)
+    ax1.set_ylabel("Trial", fontsize=plot_cfg.font.title)
+    ax1.set_title("Missing Data Pattern (white = missing)", fontsize=plot_cfg.font.title, fontweight="bold")
     
     # Right: Per-feature missing %
     ax2 = axes[1]
@@ -278,9 +302,9 @@ def plot_missing_data_matrix(
     
     colors = ["#EF4444" if p > 10 else "#F59E0B" if p > 1 else "#22C55E" for p in missing_pct]
     ax2.barh(y_pos, missing_pct, color=colors, edgecolor="white", linewidth=0.5)
-    ax2.set_xlabel("Missing %", fontsize=10)
+    ax2.set_xlabel("Missing %", fontsize=plot_cfg.font.title)
     ax2.set_yticks([])
-    ax2.set_title("Per-Feature", fontsize=10)
+    ax2.set_title("Per-Feature", fontsize=plot_cfg.font.title)
     ax2.set_xlim(0, max(100, max(missing_pct) * 1.1))
     
     plt.tight_layout()
@@ -297,8 +321,10 @@ def plot_reliability_summary(
     icc_col: str = "icc",
     feature_col: str = "feature",
     figsize: Tuple[float, float] = (10, 6),
+    config: Any = None,
 ) -> plt.Figure:
     """Summary plot of feature reliability with ICC categories."""
+    plot_cfg = get_plot_config(config)
     if icc_df.empty or icc_col not in icc_df.columns:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No ICC data", ha="center", va="center")
@@ -316,9 +342,9 @@ def plot_reliability_summary(
     for thresh, label in [(0.5, "Moderate"), (0.75, "Good"), (0.9, "Excellent")]:
         ax1.axvline(thresh, color="gray", linestyle="--", linewidth=1, alpha=0.7)
     
-    ax1.set_xlabel("ICC", fontsize=10)
-    ax1.set_ylabel("Count", fontsize=10)
-    ax1.set_title("ICC Distribution", fontsize=10, fontweight="bold")
+    ax1.set_xlabel("ICC", fontsize=plot_cfg.font.title)
+    ax1.set_ylabel("Count", fontsize=plot_cfg.font.title)
+    ax1.set_title("ICC Distribution", fontsize=plot_cfg.font.title, fontweight="bold")
     ax1.set_xlim(0, 1)
     
     # Right: Category pie chart
@@ -338,7 +364,7 @@ def plot_reliability_summary(
     if valid:
         counts_v, cats_v, colors_v = zip(*valid)
         ax2.pie(counts_v, labels=cats_v, colors=colors_v, autopct="%1.0f%%", startangle=90)
-        ax2.set_title("Reliability Categories", fontsize=10, fontweight="bold")
+        ax2.set_title("Reliability Categories", fontsize=plot_cfg.font.title, fontweight="bold")
     else:
         ax2.text(0.5, 0.5, "No data", ha="center", va="center")
     
@@ -374,8 +400,8 @@ def plot_quality_summary_dashboard(
       Total cells: {quality_report.get('missing_data', {}).get('total_missing', 0)}
       Features affected: {quality_report.get('missing_data', {}).get('features_with_missing', 0)}
     """
-    ax1.text(0.1, 0.9, summary_text, transform=ax1.transAxes, fontsize=10, va="top", family="monospace")
-    ax1.set_title("Data Summary", fontsize=11, fontweight="bold")
+    ax1.text(0.1, 0.9, summary_text, transform=ax1.transAxes, fontsize=plot_cfg.font.title, va="top", family="monospace")
+    ax1.set_title("Data Summary", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     # Top center: Issue counts
     ax2 = fig.add_subplot(gs[0, 1])
@@ -391,8 +417,8 @@ def plot_quality_summary_dashboard(
     colors = ["#EF4444", "#F59E0B", "#6366F1", "#8B5CF6"]
     
     ax2.barh(issues, counts, color=colors, edgecolor="white")
-    ax2.set_xlabel("Count", fontsize=10)
-    ax2.set_title("Distribution Issues", fontsize=11, fontweight="bold")
+    ax2.set_xlabel("Count", fontsize=plot_cfg.font.title)
+    ax2.set_title("Distribution Issues", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     # Top right: Problematic trials
     ax3 = fig.add_subplot(gs[0, 2])
@@ -407,7 +433,7 @@ def plot_quality_summary_dashboard(
     
     if n_total > 0:
         ax3.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90)
-    ax3.set_title("Trial Quality", fontsize=11, fontweight="bold")
+    ax3.set_title("Trial Quality", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     # Bottom: Feature issue details (if available)
     ax4 = fig.add_subplot(gs[1, :])
@@ -429,9 +455,9 @@ def plot_quality_summary_dashboard(
         
         if issues_list:
             issues_text = "Top Feature Issues:\n" + "\n".join(issues_list[:8])
-            ax4.text(0.1, 0.9, issues_text, transform=ax4.transAxes, fontsize=9, va="top", family="monospace")
+            ax4.text(0.1, 0.9, issues_text, transform=ax4.transAxes, fontsize=plot_cfg.font.large, va="top", family="monospace")
     
-    ax4.set_title("Feature Details", fontsize=11, fontweight="bold")
+    ax4.set_title("Feature Details", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
     plt.suptitle("Feature Quality Report", fontsize=13, fontweight="bold")
     

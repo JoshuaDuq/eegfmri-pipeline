@@ -5,7 +5,7 @@ Submodules:
 - cv: Cross-validation utilities and fold management
 - pipelines: ML pipeline factories (ElasticNet, RF)
 - data: Data loading for decoding
-- cross_validation: LOSO and within-subject CV
+- orchestration: High-level CV orchestration (LOSO, within-subject CV)
 - time_generalization: Temporal generalization analysis
 - permutation: Permutation importance
 """
@@ -52,11 +52,17 @@ from eeg_pipeline.analysis.decoding.data import (
     load_epoch_windows,
 )
 
-# Cross-validation implementations
-from eeg_pipeline.analysis.decoding.cross_validation import (
+# Cross-validation orchestration (high-level CV strategies)
+# Canonical pipeline class is in eeg_pipeline.pipelines.decoding
+from eeg_pipeline.analysis.decoding.orchestration import (
     nested_loso_predictions,
     within_subject_kfold_predictions,
     loso_baseline_predictions,
+    nested_loso_predictions_from_matrix,
+)
+from eeg_pipeline.pipelines.decoding import (
+    run_regression_decoding,
+    run_time_generalization,
 )
 
 # Time generalization
@@ -137,6 +143,9 @@ __all__ = [
     "nested_loso_predictions",
     "within_subject_kfold_predictions",
     "loso_baseline_predictions",
+    "nested_loso_predictions_from_matrix",
+    "run_regression_decoding",
+    "run_time_generalization",
     # Time generalization
     "time_generalization_regression",
     # Classification

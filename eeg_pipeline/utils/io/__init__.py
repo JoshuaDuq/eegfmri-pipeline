@@ -1,3 +1,13 @@
+"""
+I/O utilities for the EEG pipeline.
+
+This module provides file I/O operations, path management, and logging utilities.
+
+Submodules:
+- general: Core I/O functions (TSV reading/writing, path utilities, logging, figure saving)
+- decoding: Decoding-specific I/O utilities (import separately to avoid circular imports)
+"""
+
 # Import commonly used functions from general
 from .general import (
     ensure_dir,
@@ -9,8 +19,6 @@ from .general import (
     get_subject_logger,
     get_group_logger,
     setup_matplotlib,
-    fdr_bh,
-    fdr_bh_reject,
 )
 
 # Decoding functions - import lazily to avoid circular imports
@@ -26,6 +34,4 @@ __all__ = [
     "get_subject_logger",
     "get_group_logger",
     "setup_matplotlib",
-    "fdr_bh",
-    "fdr_bh_reject",
 ]

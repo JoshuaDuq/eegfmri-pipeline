@@ -329,3 +329,27 @@ def ensure_finite(arr: np.ndarray, fill_value: float = 0.0) -> np.ndarray:
     """Replace NaN and Inf with fill_value."""
     return np.where(np.isfinite(arr), arr, fill_value)
 
+
+def nanmean_with_fraction(data: np.ndarray, mask: np.ndarray) -> Tuple[float, float, int, int]:
+    """
+    Compute NaN-safe mean inside a mask and report finite fractions.
+    
+    Returns
+    -------
+    mean_val : float
+        Mean value (NaN if no valid samples)
+    frac : float
+        Fraction of valid samples (valid / total)
+    valid : int
+        Number of valid samples
+    total : int
+        Total number of samples in mask
+    """
+    masked = data[mask]
+    total = int(masked.size)
+    finite_mask = np.isfinite(masked)
+    valid = int(np.sum(finite_mask))
+    mean_val = float(np.nanmean(masked)) if valid > 0 else np.nan
+    frac = float(valid / total) if total > 0 else 0.0
+    return mean_val, frac, valid, total
+

@@ -1,12 +1,12 @@
 """
-Mixed-Effects Modeling for Behavior Analysis
-==============================================
+Mixed-Effects and Mediation Analysis
+======================================
 
-Proper handling of repeated measures with:
-- Linear mixed-effects models
-- Random intercepts and slopes
-- ICC computation
+Statistical models for behavior analysis:
+- Linear mixed-effects models (random intercepts/slopes)
+- ICC computation with confidence intervals
 - Multilevel correlation analysis
+- Mediation analysis (Baron & Kenny with bootstrap CI)
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy import stats
+
+from eeg_pipeline.utils.analysis.stats.reliability import compute_icc as _compute_icc_array
 
 
 @dataclass
@@ -89,29 +91,44 @@ def _fit_lmer_manual(
     # Compute ICC
     icc = sigma2_u / (sigma2_u + sigma2_e + 1e-12)
     
-    # Re-estimate fixed effects with GLS
-    # Construct V = Z @ D @ Z' + R where D = sigma2_u * I and R = sigma2_e * I
+    # Re-estimate fixed effects with GLS using proper block-diagonal V^{-1}
     # For random intercept: V_ij = sigma2_u (if same group) + sigma2_e (if i=j)
-    
-    # Use weighted least squares approximation
-    weights = 1 / (sigma2_e + sigma2_u + 1e-12)
-    W = np.diag(np.full(n_obs, weights))
+    # V^{-1} has a closed form for balanced designs; use approximation for unbalanced
     
     try:
-        XtWX = X.T @ W @ X
-        XtWy = X.T @ W @ y
-        beta_gls = np.linalg.solve(XtWX, XtWy)
+        # Build block-diagonal inverse covariance matrix
+        # For each group: V_g^{-1} = (1/sigma2_e) * [I - (sigma2_u/(sigma2_e + n_g*sigma2_u)) * J]
+        # where J is matrix of ones
+        V_inv = np.zeros((n_obs, n_obs))
+        for g_id in unique_groups:
+            mask = (groups == g_id)
+            n_g = mask.sum()
+            idx = np.where(mask)[0]
+            
+            # Inverse of compound symmetry matrix (vectorized)
+            a = 1.0 / sigma2_e
+            b = sigma2_u / (sigma2_e * (sigma2_e + n_g * sigma2_u) + 1e-12)
+            
+            # Fill block: diagonal = a-b, off-diagonal = -b
+            V_inv[np.ix_(idx, idx)] = -b
+            V_inv[idx, idx] = a - b
         
-        # Standard errors
-        cov_beta = np.linalg.inv(XtWX)
+        # GLS estimation
+        XtVX = X.T @ V_inv @ X
+        XtVy = X.T @ V_inv @ y
+        beta_gls = np.linalg.solve(XtVX, XtVy)
+        
+        # Standard errors from (X'V^{-1}X)^{-1}
+        cov_beta = np.linalg.inv(XtVX)
         se = np.sqrt(np.diag(cov_beta))
         
         # Fixed effect for x (second coefficient)
         fixed_effect = beta_gls[1]
         fixed_se = se[1]
         
-        # t-statistic and p-value (Satterthwaite approximation)
-        df = n_obs - n_groups - 1
+        # Satterthwaite degrees of freedom approximation
+        # df ≈ 2 * (E[Var])^2 / Var[Var] ≈ n_groups - 1 for between-subject effects
+        df = max(n_groups - 2, 1)
         t_stat = fixed_effect / (fixed_se + 1e-12)
         fixed_p = 2 * (1 - stats.t.cdf(abs(t_stat), df))
         
@@ -203,7 +220,9 @@ def compute_icc(
     group_col: str,
     icc_type: str = "ICC(1,1)",
 ) -> Tuple[float, Tuple[float, float]]:
-    """Compute Intraclass Correlation Coefficient.
+    """Compute Intraclass Correlation Coefficient from DataFrame.
+    
+    Delegates to canonical implementation in utils.analysis.stats.reliability.
     
     Returns (icc, (ci_low, ci_high)).
     """
@@ -215,63 +234,22 @@ def compute_icc(
     if n_groups < 2:
         return np.nan, (np.nan, np.nan)
     
-    # Group statistics
-    group_data = [df_clean[df_clean[group_col] == g][value_col].values for g in groups]
-    group_sizes = np.array([len(g) for g in group_data])
-    n_total = np.sum(group_sizes)
-    
-    if n_total < 5:
-        return np.nan, (np.nan, np.nan)
-    
-    # Grand mean
-    grand_mean = df_clean[value_col].mean()
-    
-    # Mean squares
-    group_means = np.array([np.mean(g) for g in group_data])
-    
-    # Between-groups sum of squares
-    ss_between = np.sum(group_sizes * (group_means - grand_mean) ** 2)
-    
-    # Within-groups sum of squares
-    ss_within = np.sum([np.sum((g - np.mean(g)) ** 2) for g in group_data])
-    
-    df_between = n_groups - 1
-    df_within = n_total - n_groups
-    
-    ms_between = ss_between / df_between if df_between > 0 else 0
-    ms_within = ss_within / df_within if df_within > 0 else 0
-    
-    # Average group size
-    n0 = (n_total - np.sum(group_sizes ** 2) / n_total) / (n_groups - 1)
-    
-    # ICC(1,1): Single rater, absolute agreement
-    if icc_type == "ICC(1,1)":
-        icc = (ms_between - ms_within) / (ms_between + (n0 - 1) * ms_within)
-    # ICC(2,1): Single rater, consistency
-    elif icc_type == "ICC(2,1)":
-        icc = (ms_between - ms_within) / (ms_between + (n0 - 1) * ms_within)
-    # ICC(3,1): Single rater, consistency (two-way mixed)
-    else:
-        icc = (ms_between - ms_within) / (ms_between + (n0 - 1) * ms_within)
-    
-    icc = max(-1, min(1, icc))
-    
-    # Confidence interval using F distribution
-    f_ratio = ms_between / (ms_within + 1e-12)
-    
+    # Pivot to (subjects x raters) format for canonical ICC
     try:
-        f_low = f_ratio / stats.f.ppf(0.975, df_between, df_within)
-        f_high = f_ratio / stats.f.ppf(0.025, df_between, df_within)
+        pivot = df_clean.pivot_table(
+            index=group_col,
+            columns=df_clean.groupby(group_col).cumcount(),
+            values=value_col,
+            aggfunc="first"
+        ).dropna()
         
-        ci_low = (f_low - 1) / (f_low + n0 - 1)
-        ci_high = (f_high - 1) / (f_high + n0 - 1)
+        if pivot.shape[0] < 2 or pivot.shape[1] < 2:
+            return np.nan, (np.nan, np.nan)
         
-        ci_low = max(-1, min(1, ci_low))
-        ci_high = max(-1, min(1, ci_high))
-    except (ValueError, ZeroDivisionError):
-        ci_low, ci_high = np.nan, np.nan
-    
-    return float(icc), (float(ci_low), float(ci_high))
+        icc, ci_low, ci_high = _compute_icc_array(pivot.values, icc_type=icc_type)
+        return float(icc), (float(ci_low), float(ci_high))
+    except Exception:
+        return np.nan, (np.nan, np.nan)
 
 
 def run_multilevel_correlation_analysis(
@@ -313,3 +291,79 @@ def run_multilevel_correlation_analysis(
     
     return results_df
 
+
+###################################################################
+# Mediation Analysis (delegates to utils)
+###################################################################
+
+from eeg_pipeline.utils.analysis.stats.mediation import (
+    MediationResult as _UtilsMediationResult,
+    run_full_mediation_analysis,
+    analyze_mediation_for_features,
+)
+
+
+def run_mediation_analysis(
+    df: pd.DataFrame,
+    x_col: str,
+    mediator_cols: List[str],
+    y_col: str,
+    n_bootstrap: int = 1000,
+) -> pd.DataFrame:
+    """Run mediation analysis for multiple potential mediators.
+    
+    Tests whether EEG features mediate the relationship between
+    temperature and pain rating. Delegates to utils.analysis.stats.mediation.
+    
+    Args:
+        df: DataFrame with all variables
+        x_col: Independent variable column (e.g., "temperature")
+        mediator_cols: List of potential mediator columns (EEG features)
+        y_col: Dependent variable column (e.g., "rating")
+        n_bootstrap: Number of bootstrap samples for CI
+    
+    Returns:
+        DataFrame with mediation results for each mediator
+    """
+    X = df[x_col].values
+    Y = df[y_col].values
+    
+    # Filter to valid mediator columns
+    valid_cols = [c for c in mediator_cols if c in df.columns]
+    if not valid_cols:
+        return pd.DataFrame()
+    
+    feature_df = df[valid_cols]
+    
+    # Use utils function
+    results = analyze_mediation_for_features(
+        X=X,
+        feature_df=feature_df,
+        Y=Y,
+        n_boot=n_bootstrap,
+        min_effect_size=0.05,  # Lower threshold to test more
+        x_label=x_col,
+        y_label=y_col,
+    )
+    
+    if not results:
+        return pd.DataFrame()
+    
+    # Convert to DataFrame
+    records = []
+    for r in results:
+        records.append({
+            "mediator": r.m_label,
+            "a_path": r.a,
+            "b_path": r.b,
+            "c_path": r.c,
+            "c_prime": r.c_prime,
+            "indirect_effect": r.ab,
+            "indirect_ci_low": r.ci_ab_low,
+            "indirect_ci_high": r.ci_ab_high,
+            "proportion_mediated": r.proportion_mediated,
+            "sobel_p": r.p_ab,
+            "significant": r.is_significant_mediation(),
+        })
+    
+    return pd.DataFrame(records)

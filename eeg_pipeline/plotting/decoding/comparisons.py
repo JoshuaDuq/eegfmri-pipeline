@@ -17,39 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 ###################################################################
-# Helper Functions
+# Helper Functions (imported from helpers module)
 ###################################################################
 
-def _despine(ax) -> None:
-    sns.despine(ax=ax, trim=True)
-
-
-def _add_zero_reference_line(ax, plot_cfg, linewidth: Optional[float] = None, 
-                             linestyle: str = '--', alpha: Optional[float] = None) -> None:
-    if linewidth is None:
-        linewidth = plot_cfg.style.line.width_thin
-    if alpha is None:
-        alpha = plot_cfg.style.line.alpha_zero
-    ax.axhline(0, color=plot_cfg.style.colors.black, linewidth=linewidth, linestyle=linestyle, alpha=alpha)
-
-
-def _create_bar_plot(ax, x_positions: np.ndarray, values: np.ndarray, labels: list,
-                     ylabel: str, plot_cfg, color: Optional[str] = None, 
-                     alpha: Optional[float] = None, width: Optional[float] = None, 
-                     add_zero_line: bool = True) -> None:
-    if color is None:
-        color = plot_cfg.style.colors.gray
-    if alpha is None:
-        alpha = plot_cfg.style.bar.alpha
-    if width is None:
-        width = plot_cfg.style.bar.width
-    ax.bar(x_positions, values, color=color, alpha=alpha, width=width)
-    if add_zero_line:
-        _add_zero_reference_line(ax, plot_cfg)
-    ax.set_ylabel(ylabel)
-    ax.set_xticks(x_positions)
-    ax.set_xticklabels(labels, rotation=45, ha='right')
-    _despine(ax)
+from eeg_pipeline.plotting.decoding.helpers import (
+    _despine,
+    _add_zero_reference_line,
+    _create_bar_plot,
+)
 
 
 ###################################################################
