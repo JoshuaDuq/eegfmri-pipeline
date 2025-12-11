@@ -40,5 +40,6 @@ wheels/
 Thumbs.db
 
 # Data folder
+eeg_pipeline/data/
 
 .venv311/
