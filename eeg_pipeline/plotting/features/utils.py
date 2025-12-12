@@ -20,7 +20,7 @@ from statsmodels.stats.multitest import multipletests
 
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.io.general import get_band_color
+from eeg_pipeline.utils.io.plotting import get_band_color
 
 
 ###################################################################

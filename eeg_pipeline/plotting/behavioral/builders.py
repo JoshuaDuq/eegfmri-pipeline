@@ -14,17 +14,16 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 
 from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
-from eeg_pipeline.utils.io.general import (
-    ensure_aligned_lengths,
+from eeg_pipeline.utils.validation import ensure_aligned_lengths
+from eeg_pipeline.utils.io.plotting import (
     save_fig,
     get_behavior_footer as _get_behavior_footer,
     logratio_to_pct as _logratio_to_pct,
     pct_to_logratio as _pct_to_logratio,
-    format_channel_list_for_display,
-    format_roi_description,
-    get_default_logger as _get_default_logger,
     get_default_config as _get_default_config,
 )
+from eeg_pipeline.utils.io.formatting import format_channel_list_for_display, format_roi_description
+from eeg_pipeline.utils.io.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.utils.analysis.stats import (
     format_correlation_stats_text,
     bootstrap_corr_ci as _bootstrap_corr_ci,

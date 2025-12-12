@@ -8,9 +8,15 @@ Cohen's d, correlation difference effects, and Fisher z-tests.
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple, Any
+import logging
 
 import numpy as np
+import pandas as pd
 from scipy import stats
+
+from eeg_pipeline.utils.io.columns import get_pain_column_from_config
+from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 
 
 def cohens_d(
@@ -211,4 +217,77 @@ def compute_effect_sizes(
             results["hedges_g"] = hedges_g(group1_data, group2_data)
 
     return results
+
+
+###################################################################
+# Condition Effects (Pain vs Non-Pain)
+###################################################################
+
+
+def split_by_condition(
+    events_df: pd.DataFrame,
+    config: Any,
+    logger: logging.Logger,
+) -> Tuple[np.ndarray, np.ndarray, int, int]:
+    """Split trials into pain and non-pain conditions."""
+    pain_col = get_pain_column_from_config(config, events_df)
+
+    if pain_col is None or pain_col not in events_df.columns:
+        logger.error("Pain column not found in events")
+        return np.array([]), np.array([]), 0, 0
+
+    pain_series = pd.to_numeric(events_df[pain_col], errors="coerce")
+    pain_mask = (pain_series == 1).values
+    nonpain_mask = (pain_series == 0).values
+
+    n_pain = int(pain_mask.sum())
+    n_nonpain = int(nonpain_mask.sum())
+
+    logger.info(f"Condition split: {n_pain} pain, {n_nonpain} non-pain trials")
+
+    return pain_mask, nonpain_mask, n_pain, n_nonpain
+
+
+def compute_condition_effects(
+    features_df: pd.DataFrame,
+    pain_mask: np.ndarray,
+    nonpain_mask: np.ndarray,
+    min_samples: int = 5,
+    fdr_alpha: float = 0.05,
+    logger: Optional[logging.Logger] = None,
+    n_jobs: int = -1,
+    config: Optional[Any] = None,
+) -> pd.DataFrame:
+    """Compute effect sizes for pain vs non-pain comparison."""
+    n_jobs_actual = get_n_jobs(config, n_jobs)
+
+    if logger:
+        logger.debug(f"Computing condition effects for {len(features_df.columns)} features (n_jobs={n_jobs_actual})")
+
+    feature_columns = list(features_df.columns)
+    records = parallel_condition_effects(
+        feature_columns=feature_columns,
+        features_df=features_df,
+        pain_mask=pain_mask,
+        nonpain_mask=nonpain_mask,
+        min_samples=min_samples,
+        n_jobs=n_jobs_actual,
+    )
+
+    if not records:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+
+    df["q_value"] = fdr_bh(df["p_value"].values, alpha=fdr_alpha, config=config)
+    df["significant_fdr"] = df["q_value"] < fdr_alpha
+
+    df = df.sort_values("hedges_g", key=abs, ascending=False)
+
+    if logger:
+        n_sig = df["significant_fdr"].sum()
+        n_large = (df["hedges_g"].abs() >= 0.8).sum()
+        logger.info(f"Condition effects: {n_sig}/{len(df)} FDR significant, {n_large} large effects")
+
+    return df
 

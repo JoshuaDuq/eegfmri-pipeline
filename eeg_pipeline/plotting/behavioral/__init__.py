@@ -1,9 +1,8 @@
 """
 Behavioral correlation plotting module.
 
-This module provides functions for creating behavioral correlation visualizations
-at multiple levels: scatter plots, temporal topomaps, group analysis, and
-orchestration functions for comprehensive visualization workflows.
+Low-level plotting primitives live here. High-level orchestration/IO is defined in
+`pipelines.viz.behavior` to keep responsibilities separated.
 """
 
 from __future__ import annotations
@@ -56,14 +55,21 @@ from .moderation_plots import (
     plot_johnson_neyman,
 )
 
-# Visualization orchestration
-from .viz import (
-    visualize_subject_behavior,
-    visualize_behavior_for_subjects,
-)
+# Visualization orchestration (pipeline-layer; re-exported via lightweight wrappers
+# to avoid circular imports during module initialization)
+def visualize_subject_behavior(*args, **kwargs):
+    from eeg_pipeline.pipelines.viz.behavior import visualize_subject_behavior as _impl
 
-# Significant plot collector
-from .collect_significant import collect_significant_plots
+    return _impl(*args, **kwargs)
+
+
+def visualize_behavior_for_subjects(*args, **kwargs):
+    from eeg_pipeline.pipelines.viz.behavior import visualize_behavior_for_subjects as _impl
+
+    return _impl(*args, **kwargs)
+
+# Significant plot collector lives in utils (pipeline-level)
+from eeg_pipeline.utils.io.plot_collections import collect_significant_plots
 
 
 __all__ = [
@@ -97,7 +103,7 @@ __all__ = [
     # Moderation analysis
     "plot_simple_slopes",
     "plot_johnson_neyman",
-    # Visualization orchestration
+    # Visualization orchestration (pipeline)
     "visualize_subject_behavior",
     "visualize_behavior_for_subjects",
     # Significant collection

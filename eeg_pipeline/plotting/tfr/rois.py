@@ -15,12 +15,10 @@ import numpy as np
 import pandas as pd
 import mne
 
-from ...utils.io.general import (
-    unwrap_figure,
-    sanitize_label,
-    get_pain_column_from_config,
-    ensure_aligned_lengths,
-)
+from eeg_pipeline.utils.io.plotting import unwrap_figure
+from eeg_pipeline.utils.io.formatting import sanitize_label
+from eeg_pipeline.utils.io.columns import get_pain_column_from_config
+from eeg_pipeline.utils.validation import ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     create_tfr_subset,

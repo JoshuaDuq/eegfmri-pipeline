@@ -1,25 +1,30 @@
 """
-Preprocessing Pipeline (Canonical)
-==================================
+Preprocessing Pipeline
+======================
 
-High-level preprocessing orchestration functions:
-- run_raw_to_bids: Convert raw BrainVision files to BIDS format
-- run_merge_behavior: Merge behavioral data into BIDS events files
+Pipeline class and orchestration functions for preprocessing EEG data:
+- Raw-to-BIDS conversion
+- Behavioral data merge
 
-Helper functions for file discovery, run indexing, and data manipulation
-are in eeg_pipeline.utils.data.preprocessing.
+Usage:
+    pipeline = PreprocessingPipeline(config=config)
+    pipeline.run_batch(["0001", "0002"], task="thermalactive")
+
+Low-level helpers (file discovery, annotation filtering) are in utils/data/preprocessing.py.
 """
 
 from __future__ import annotations
 
-import re
+import inspect
 import logging
+import re
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import mne
+import pandas as pd
 
+from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.utils.data.preprocessing import (
     find_brainvision_vhdrs,
     parse_subject_id,
@@ -41,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 ###################################################################
-# Merge Functions
+# Orchestration Functions
 ###################################################################
 
 
@@ -52,6 +57,7 @@ def merge_behavior_to_events(
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> bool:
+    """Merge behavioral data into a single events.tsv file."""
     from eeg_pipeline.utils.data.loading import trim_behavioral_to_events_strict
     
     m = re.search(r"sub-([A-Za-z0-9]+)", str(events_tsv))
@@ -149,11 +155,6 @@ def merge_behavior_to_events(
         return False
 
 
-###################################################################
-# High-Level Preprocessing Functions
-###################################################################
-
-
 def run_raw_to_bids(
     source_root: Path,
     bids_root: Path,
@@ -163,11 +164,11 @@ def run_raw_to_bids(
     line_freq: float = 60.0,
     overwrite: bool = False,
     zero_base_onsets: bool = False,
-    trim_to_first_volume: bool = False,
+    do_trim_to_first_volume: bool = False,
     event_prefixes: Optional[List[str]] = None,
     keep_all_annotations: bool = False,
 ) -> int:
-    import inspect
+    """Convert raw BrainVision files to BIDS format."""
     from mne_bids import BIDSPath, write_raw_bids
     
     logger.info("Scanning for BrainVision files in: %s", source_root)
@@ -199,9 +200,8 @@ def run_raw_to_bids(
         raw.info["line_freq"] = line_freq
         
         was_trimmed = False
-        if trim_to_first_volume:
-            from eeg_pipeline.utils.data.preprocessing import trim_to_first_volume as _trim
-            was_trimmed = _trim(raw)
+        if do_trim_to_first_volume:
+            was_trimmed = trim_to_first_volume(raw)
         
         if was_trimmed and not raw.preload:
             raw.load_data()
@@ -248,6 +248,7 @@ def run_merge_behavior(
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> int:
+    """Merge behavioral data into BIDS events files."""
     pattern_run = f"sub-*/eeg/*_task-{task}_run-*_events.tsv"
     ev_paths = sorted(bids_root.glob(pattern_run))
     if not ev_paths:
@@ -283,23 +284,142 @@ def run_merge_behavior(
 
 
 ###################################################################
+# Pipeline Class
+###################################################################
+
+
+class PreprocessingPipeline(PipelineBase):
+    """Pipeline for preprocessing EEG data.
+    
+    Unlike other pipelines, preprocessing operates on source data rather than
+    per-subject derivatives. Use run_raw_to_bids() and run_merge_behavior()
+    instead of process_subject().
+    """
+    
+    def __init__(self, config: Optional[Any] = None):
+        super().__init__(name="preprocessing", config=config)
+        self.bids_root = Path(self.config.bids_root)
+        self.source_root = Path(self.config.get("paths.source_data", "data/source_data"))
+
+    def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
+        """Process a single subject through raw-to-BIDS and merge-behavior."""
+        task = task or self.config.get("project.task", "thermalactive")
+        
+        self.logger.info(f"Processing sub-{subject}: raw-to-BIDS")
+        run_raw_to_bids(
+            source_root=self.source_root,
+            bids_root=self.bids_root,
+            task=task,
+            subjects=[subject],
+            montage=kwargs.get("montage", "easycap-M1"),
+            line_freq=kwargs.get("line_freq", 60.0),
+            overwrite=kwargs.get("overwrite", False),
+            zero_base_onsets=kwargs.get("zero_base_onsets", False),
+            trim_to_first_volume=kwargs.get("trim_to_first_volume", False),
+            event_prefixes=kwargs.get("event_prefixes"),
+            keep_all_annotations=kwargs.get("keep_all_annotations", False),
+        )
+        
+        self.logger.info(f"Processing sub-{subject}: merge-behavior")
+        run_merge_behavior(
+            bids_root=self.bids_root,
+            source_root=self.source_root,
+            task=task,
+            event_prefixes=kwargs.get("event_prefixes"),
+            event_types=kwargs.get("event_types"),
+            dry_run=kwargs.get("dry_run", False),
+        )
+
+    def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
+        """Run preprocessing for multiple subjects."""
+        task = task or self.config.get("project.task", "thermalactive")
+        
+        self.logger.info(f"Running raw-to-BIDS for {len(subjects)} subjects")
+        n_converted = run_raw_to_bids(
+            source_root=self.source_root,
+            bids_root=self.bids_root,
+            task=task,
+            subjects=subjects,
+            montage=kwargs.get("montage", "easycap-M1"),
+            line_freq=kwargs.get("line_freq", 60.0),
+            overwrite=kwargs.get("overwrite", False),
+            zero_base_onsets=kwargs.get("zero_base_onsets", False),
+            trim_to_first_volume=kwargs.get("trim_to_first_volume", False),
+            event_prefixes=kwargs.get("event_prefixes"),
+            keep_all_annotations=kwargs.get("keep_all_annotations", False),
+        )
+        
+        self.logger.info(f"Running merge-behavior")
+        n_merged = run_merge_behavior(
+            bids_root=self.bids_root,
+            source_root=self.source_root,
+            task=task,
+            event_prefixes=kwargs.get("event_prefixes"),
+            event_types=kwargs.get("event_types"),
+            dry_run=kwargs.get("dry_run", False),
+        )
+        
+        return [{
+            "subjects": subjects,
+            "n_converted": n_converted,
+            "n_merged": n_merged,
+            "status": "success",
+        }]
+
+    def run_raw_to_bids(
+        self,
+        task: Optional[str] = None,
+        subjects: Optional[List[str]] = None,
+        montage: str = "easycap-M1",
+        line_freq: float = 60.0,
+        overwrite: bool = False,
+        zero_base_onsets: bool = False,
+        do_trim_to_first_volume: bool = False,
+        event_prefixes: Optional[List[str]] = None,
+        keep_all_annotations: bool = False,
+    ) -> int:
+        """Convert raw BrainVision files to BIDS format."""
+        task = task or self.config.get("project.task", "thermalactive")
+        return run_raw_to_bids(
+            source_root=self.source_root,
+            bids_root=self.bids_root,
+            task=task,
+            subjects=subjects,
+            montage=montage,
+            line_freq=line_freq,
+            overwrite=overwrite,
+            zero_base_onsets=zero_base_onsets,
+            do_trim_to_first_volume=do_trim_to_first_volume,
+            event_prefixes=event_prefixes,
+            keep_all_annotations=keep_all_annotations,
+        )
+
+    def run_merge_behavior(
+        self,
+        task: Optional[str] = None,
+        event_prefixes: Optional[List[str]] = None,
+        event_types: Optional[List[str]] = None,
+        dry_run: bool = False,
+    ) -> int:
+        """Merge behavioral data into BIDS events files."""
+        task = task or self.config.get("project.task", "thermalactive")
+        return run_merge_behavior(
+            bids_root=self.bids_root,
+            source_root=self.source_root,
+            task=task,
+            event_prefixes=event_prefixes,
+            event_types=event_types,
+            dry_run=dry_run,
+        )
+
+
+###################################################################
 # Exports
 ###################################################################
 
 __all__ = [
+    "PreprocessingPipeline",
     "run_raw_to_bids",
     "run_merge_behavior",
     "merge_behavior_to_events",
-    "find_brainvision_vhdrs",
-    "parse_subject_id",
-    "extract_run_number",
-    "get_run_index",
-    "normalize_string",
-    "normalize_event_filters",
-    "find_behavior_csv_for_run",
-    "create_event_mask",
-    "combine_runs_for_subject",
-    "set_channel_types",
-    "set_montage",
-    "ensure_dataset_description",
 ]

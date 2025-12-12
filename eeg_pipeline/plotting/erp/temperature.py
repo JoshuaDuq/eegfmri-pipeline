@@ -12,17 +12,16 @@ from typing import Dict, List, Optional, Tuple
 
 import mne
 
-from ...utils.io.general import (
+from eeg_pipeline.utils.io.plotting import (
     unwrap_figure as _unwrap_figure,
-    format_baseline_string as _format_baseline_string,
     log_if_present as _log_if_present,
-    validate_epochs_for_plotting,
     build_footer,
     save_fig,
-    ensure_dir,
-    find_temperature_column_in_metadata,
-    sanitize_label as _sanitize_label,
 )
+from eeg_pipeline.utils.io.formatting import format_baseline_string as _format_baseline_string, sanitize_label as _sanitize_label
+from eeg_pipeline.utils.validation import validate_epochs_for_plotting
+from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.utils.io.columns import find_temperature_column_in_metadata
 from ...utils.data.loading import (
     process_temperature_levels,
     build_epoch_query_string,

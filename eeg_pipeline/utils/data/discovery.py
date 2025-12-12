@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from ..config.loader import ConfigDict
-from ..io.general import _find_clean_epochs_path
+from ..io.paths import _find_clean_epochs_path
 
 
 def _collect_subjects_from_bids(bids_root: Path) -> List[str]:

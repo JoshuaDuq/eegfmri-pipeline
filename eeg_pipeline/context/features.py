@@ -30,6 +30,26 @@ FEATURE_CATEGORIES = [
     "quality",
 ]
 
+# Precomputed feature groups (used by CLI overrides and config)
+PRECOMPUTED_GROUP_CHOICES = [
+    "erds",
+    "spectral",
+    "gfp",
+    "roi",
+    "temporal",
+    "complexity",
+    "ratios",
+    "asymmetry",
+    "aperiodic",
+    "connectivity",
+    "microstates",
+    "pac",
+    "cfc",
+    "dynamics_advanced",
+    "itpc",
+    "quality",
+]
+
 
 @dataclass
 class FeatureContext:

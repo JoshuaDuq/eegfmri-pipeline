@@ -124,6 +124,57 @@ def compute_tfr_for_visualization(
     return compute_tfr_morlet(epochs, config, logger=logger)
 
 
+def compute_complex_tfr(
+    epochs: mne.Epochs,
+    config,
+    logger: Optional[logging.Logger] = None,
+    freqs: Optional[np.ndarray] = None,
+) -> mne.time_frequency.EpochsTFR:
+    """
+    Compute complex-valued TFR for phase-based metrics (ITPC, PAC).
+    
+    Parameters
+    ----------
+    epochs : mne.Epochs
+        Epochs to compute TFR for
+    config : Any
+        Configuration object
+    logger : Optional[logging.Logger]
+        Logger instance
+    freqs : Optional[np.ndarray]
+        Frequency array. If None, uses config defaults.
+        
+    Returns
+    -------
+    mne.time_frequency.EpochsTFR
+        Complex-valued TFR object (output="complex")
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
+    
+    if freqs is None:
+        freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
+    
+    n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
+    workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
+    
+    logger.info("Computing complex TFR for phase-based metrics...")
+    return epochs.compute_tfr(
+        method="morlet",
+        freqs=freqs,
+        n_cycles=n_cycles,
+        decim=tfr_decim,
+        picks=tfr_picks,
+        use_fft=True,
+        return_itc=False,
+        average=False,
+        output="complex",
+        n_jobs=workers,
+    )
+
+
 def _extract_baseline_power_features(
     tfr: mne.time_frequency.EpochsTFR,
     bands: Dict[str, Tuple[float, float]],
@@ -277,25 +328,48 @@ def normalize_power_with_baseline(
     pow_numeric = pow_df.apply(pd.to_numeric, errors="coerce")
     baseline_numeric = baseline_df.apply(pd.to_numeric, errors="coerce")
 
-    pow_pattern = re.compile(r"^pow_([^_]+)_(.+)_([^_]+)$")
-    baseline_pattern = re.compile(r"^baseline_([^_]+)_(.+)$")
+    pow_pattern_legacy = re.compile(r"^pow_([^_]+)_(.+)_([^_]+)$")
+    baseline_pattern_legacy = re.compile(r"^baseline_([^_]+)_(.+)$")
+
+    # NamingSchema v2 patterns
+    # power_<segment>_<band>_ch_<channel>_<stat>
+    pow_pattern_v2 = re.compile(r"^power_([^_]+)_([^_]+)_ch_(.+)_(.+)$")
+    # power_baseline_<band>_ch_<channel>_mean
+    baseline_pattern_v2 = re.compile(r"^power_baseline_([^_]+)_ch_(.+)_mean$")
 
     baseline_lookup: Dict[Tuple[str, str], np.ndarray] = {}
     for col in baseline_numeric.columns:
-        match = baseline_pattern.match(str(col))
-        if not match:
+        col_str = str(col)
+        match_v2 = baseline_pattern_v2.match(col_str)
+        if match_v2:
+            band, ch = match_v2.groups()
+            baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
             continue
-        band, ch = match.groups()
-        baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
+
+        match_legacy = baseline_pattern_legacy.match(col_str)
+        if match_legacy:
+            band, ch = match_legacy.groups()
+            baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
 
     pow_norm = pow_numeric.copy()
     missing: List[Tuple[str, str]] = []
 
     for col in pow_numeric.columns:
-        match = pow_pattern.match(str(col))
-        if not match:
+        col_str = str(col)
+
+        band = None
+        ch = None
+        match_v2 = pow_pattern_v2.match(col_str)
+        if match_v2:
+            _segment, band, ch, _stat = match_v2.groups()
+        else:
+            match_legacy = pow_pattern_legacy.match(col_str)
+            if match_legacy:
+                band, ch, _ = match_legacy.groups()
+
+        if band is None or ch is None:
             continue
-        band, ch, _ = match.groups()
+
         baseline_vals = baseline_lookup.get((band, ch))
         if baseline_vals is None:
             missing.append((band, ch))
@@ -2082,7 +2156,7 @@ def extract_roi_contrast_data(
     Do not use the output of this function for statistical tests that require
     trial-level variance.
     """
-    from ..io.general import get_pain_column_from_config
+    from ..io.columns import get_pain_column_from_config
     import mne
     
     if power is None or ev is None:

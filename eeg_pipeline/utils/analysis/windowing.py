@@ -376,3 +376,80 @@ class TimeWindowSpec:
             idx += 1
             
         return windows
+
+
+###################################################################
+# Pain Window Utilities (migrated from general.py)
+###################################################################
+
+
+def get_pain_window(constants=None, config: Optional[Any] = None) -> Tuple[float, float]:
+    """Get the plateau/pain window from config or constants."""
+    if config is not None:
+        plateau_window = config.get("time_frequency_analysis.plateau_window")
+        return tuple(plateau_window)
+    
+    if constants is None:
+        raise ValueError("Either constants or config must be provided to get_pain_window")
+    
+    if "PLATEAU_WINDOW" not in constants:
+        raise KeyError(
+            "PLATEAU_WINDOW not found in constants. "
+            "Use PLATEAU_WINDOW (tuple) not PLATEAU_END (float)"
+        )
+    
+    return constants["PLATEAU_WINDOW"]
+
+
+WINDOW_PAIN = get_pain_window
+
+
+###################################################################
+# Segment Masks for Feature Extraction
+###################################################################
+
+
+def get_segment_masks(
+    times: np.ndarray,
+    windows: Optional[TimeWindows],
+    config: Optional[Any] = None,
+) -> Dict[str, Optional[np.ndarray]]:
+    """
+    Derive ramp/plateau/offset/baseline masks based on times and config.
+    
+    This is the canonical implementation - import from here instead of
+    duplicating in dynamics.py or connectivity.py.
+    
+    Args:
+        times: Time array from epochs/precomputed data
+        windows: TimeWindows object with active_mask, baseline_mask, etc.
+        config: Configuration dict for ramp_end, offset_start values
+        
+    Returns:
+        Dict with keys 'ramp', 'plateau', 'baseline', 'offset' mapping to boolean masks
+    """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    cfg = config or {}
+    ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
+    offset_start = get_config_value(cfg, "feature_engineering.features.offset_start", None)
+
+    ramp_mask = (times >= 0) & (times <= ramp_end)
+    plateau_mask = getattr(windows, "active_mask", None) if windows else None
+    baseline_mask = getattr(windows, "baseline_mask", None) if windows else None
+    
+    offset_mask = None
+    if offset_start is not None:
+        try:
+            offset_start_f = float(offset_start)
+            if offset_start_f < times[-1]:
+                offset_mask = times >= offset_start_f
+        except Exception:
+            offset_mask = None
+
+    return {
+        "ramp": ramp_mask,
+        "plateau": plateau_mask,
+        "baseline": baseline_mask,
+        "offset": offset_mask,
+    }

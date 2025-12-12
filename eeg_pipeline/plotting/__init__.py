@@ -86,7 +86,6 @@ def __getattr__(name: str):
         # ERP
         "erp_contrast_pain": "erp",
         "erp_by_temperature": "erp",
-        "visualize_subject_erp": "erp",
         # Features
         "plot_power_distributions": "features",
         "plot_channel_power_heatmap": "features",
@@ -127,7 +126,6 @@ def __getattr__(name: str):
         "plot_aperiodic_run_trajectories": "features",
         "plot_aperiodic_topomaps": "features",
         "plot_aperiodic_vs_pain": "features",
-        "visualize_subject_features": "features",
         # TFR
         "plot_cz_all_trials_raw": "tfr",
         "plot_cz_all_trials": "tfr",
@@ -141,7 +139,6 @@ def __getattr__(name: str):
         "plot_topomap_grid_baseline_temps": "tfr",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",
         "plot_temporal_topomaps_allbands_plateau": "tfr",
-        "visualize_subject_tfr": "tfr",
         # Behavioral
         "generate_correlation_scatter": "behavioral",
         "plot_residual_qc": "behavioral",
@@ -153,7 +150,6 @@ def __getattr__(name: str):
         "plot_regressor_distributions": "behavioral",
         "plot_pac_behavior_correlations": "behavioral",
         "plot_itpc_rating_scatter_grid": "behavioral",
-        "visualize_subject_behavior": "behavioral",
         # Decoding
         "plot_time_generalization_matrix": "decoding",
         "plot_time_generalization_with_null": "decoding",
@@ -170,11 +166,6 @@ def __getattr__(name: str):
         "plot_incremental_validity": "decoding",
         "plot_feature_importance_top_n": "decoding",
         "plot_feature_importance_stability": "decoding",
-        "visualize_regression_results": "decoding",
-        "visualize_time_generalization": "decoding",
-        "visualize_model_comparisons": "decoding",
-        "visualize_riemann_analysis": "decoding",
-        "visualize_incremental_validity": "decoding",
     }
 
     if name in _module_map:

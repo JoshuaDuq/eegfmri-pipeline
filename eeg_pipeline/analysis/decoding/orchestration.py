@@ -2,25 +2,20 @@
 Decoding Orchestration (Canonical)
 ==================================
 
-Single source of truth for all LOSO decoding orchestration.
-This module handles both epoch-based and matrix-based decoding.
+Single source of truth for LOSO decoding orchestration.
+This module handles epoch-based and matrix-based cross-validation strategies:
 
-Epoch-based (loads from disk with channel harmonization):
 - nested_loso_predictions: Epoch-based nested LOSO with channel harmonization
 - within_subject_kfold_predictions: Within-subject k-fold CV
 - loso_baseline_predictions: Baseline (mean) predictions
-
-Matrix-based (operates on pre-loaded feature matrices):
 - nested_loso_predictions_from_matrix: Matrix-based nested LOSO
-- run_regression_decoding: Full regression pipeline with plots
-- run_time_generalization: Time-generalization analysis
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Any, Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -59,13 +54,28 @@ from eeg_pipeline.utils.data.loading import (
     prepare_trial_records_from_epochs,
     load_kept_indices,
     load_epochs_with_targets,
+    load_plateau_matrix,
 )
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.io.general import read_tsv, write_tsv, get_logger
+from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
+from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.utils.io.decoding import (
+    export_predictions,
+    export_indices,
+    prepare_best_params_path,
+)
+from eeg_pipeline.utils.io.logging import get_logger
 from eeg_pipeline.plotting.decoding import (
     plot_decoding_null_hist,
     plot_residual_diagnostics,
 )
+from eeg_pipeline.plotting.decoding.performance import (
+    plot_prediction_scatter,
+    plot_per_subject_performance,
+    plot_permutation_null,
+)
+from eeg_pipeline.plotting.decoding.time_generalization import plot_time_generalization_with_null
+from eeg_pipeline.analysis.decoding.time_generalization import time_generalization_regression
 
 logger = get_logger(__name__)
 
@@ -672,6 +682,11 @@ def nested_loso_predictions_from_matrix(
     )
 
 
+###################################################################
+# Pipeline-Level Runners
+###################################################################
+
+
 def run_regression_decoding(
     subjects: List[str],
     task: str,
@@ -685,17 +700,7 @@ def run_regression_decoding(
     logger: logging.Logger,
 ) -> Path:
     """Run LOSO regression decoding on plateau features."""
-    from eeg_pipeline.utils.io.general import ensure_dir
-    from eeg_pipeline.utils.io.decoding import export_predictions, export_indices, prepare_best_params_path
-    from eeg_pipeline.plotting.decoding import (
-        plot_prediction_scatter,
-        plot_per_subject_performance,
-        plot_residual_diagnostics,
-        plot_permutation_null,
-    )
-    from eeg_pipeline.utils.data.loading import load_plateau_matrix
-
-    X, y, groups, feature_names, meta = load_plateau_matrix(subjects, task, deriv_root, config, logger)
+    X, y, groups, _feature_names, meta = load_plateau_matrix(subjects, task, deriv_root, config, logger)
 
     results_dir = results_root / "regression"
     plots_dir = results_dir / "plots"
@@ -707,22 +712,44 @@ def run_regression_decoding(
     best_params_path = prepare_best_params_path(results_dir / "best_params_elasticnet.jsonl", mode="truncate")
     null_path = results_dir / "loso_null_elasticnet.npz" if n_perm > 0 else None
 
-    y_true, y_pred, groups_ordered, test_indices, fold_ids = nested_loso_predictions_from_matrix(
-        X=X, y=y, groups=groups, pipe=pipe, param_grid=param_grid,
-        inner_cv_splits=inner_splits, n_jobs=-1, seed=rng_seed,
-        best_params_log_path=best_params_path, model_name="elasticnet",
-        outer_n_jobs=outer_jobs, null_n_perm=n_perm, null_output_path=null_path,
+    y_true, y_pred, groups_ordered, test_indices, fold_ids = nested_loso_predictions_matrix(
+        X=X,
+        y=y,
+        groups=groups,
+        pipe=pipe,
+        param_grid=param_grid,
+        inner_cv_splits=inner_splits,
+        n_jobs=-1,
+        seed=rng_seed,
+        best_params_log_path=best_params_path,
+        model_name="elasticnet",
+        outer_n_jobs=outer_jobs,
+        null_n_perm=n_perm,
+        null_output_path=null_path,
+        config=config,
     )
 
     pred_path = results_dir / "loso_predictions.tsv"
     pred_df = export_predictions(
-        y_true, y_pred, groups_ordered, test_indices, fold_ids,
-        "elasticnet", meta.reset_index(drop=True), pred_path,
+        y_true,
+        y_pred,
+        groups_ordered,
+        test_indices,
+        fold_ids,
+        "elasticnet",
+        meta.reset_index(drop=True),
+        pred_path,
     )
-    export_indices(groups_ordered, test_indices, fold_ids, meta.reset_index(drop=True),
-                   results_dir / "loso_indices.tsv", add_heldout_subject_id=True)
+    export_indices(
+        groups_ordered,
+        test_indices,
+        fold_ids,
+        meta.reset_index(drop=True),
+        results_dir / "loso_indices.tsv",
+        add_heldout_subject_id=True,
+    )
 
-    r_subj, per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config)
+    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config)
     p_val = np.nan
 
     if null_path and null_path.exists():
@@ -735,6 +762,7 @@ def run_regression_decoding(
 
     try:
         from sklearn.metrics import r2_score
+
         r2_val = float(r2_score(y_true, y_pred))
     except Exception:
         r2_val = np.nan
@@ -772,10 +800,6 @@ def run_time_generalization(
     logger: logging.Logger,
 ) -> None:
     """Run time-generalization decoding analysis."""
-    from eeg_pipeline.utils.io.general import ensure_dir
-    from eeg_pipeline.plotting.decoding import plot_time_generalization_with_null
-    from eeg_pipeline.analysis.decoding.time_generalization import time_generalization_regression
-
     results_dir = results_root / "time_generalization"
     ensure_dir(results_dir)
 
@@ -795,15 +819,25 @@ def run_time_generalization(
 
     tg_path = results_dir / "time_generalization_regression.npz"
     tg_npz = np.load(tg_path) if tg_path.exists() else None
-    null_mat = tg_npz["null_r"] if tg_npz and "null_r" in tg_npz else None
+    null_mat = tg_npz["null_r"] if tg_npz is not None and "null_r" in tg_npz else None
 
     plot_time_generalization_with_null(
-        tg_matrix=tg_r, null_matrix=null_mat, window_centers=window_centers,
-        save_path=results_dir / "time_generalization_r.png", metric="r", config=config,
+        tg_matrix=tg_r,
+        null_matrix=null_mat,
+        window_centers=window_centers,
+        save_path=results_dir / "time_generalization_r.png",
+        metric="r",
+        config=config,
     )
     plot_time_generalization_with_null(
-        tg_matrix=tg_r2, null_matrix=null_mat, window_centers=window_centers,
-        save_path=results_dir / "time_generalization_r2.png", metric="r2", config=config,
+        tg_matrix=tg_r2,
+        null_matrix=null_mat,
+        window_centers=window_centers,
+        save_path=results_dir / "time_generalization_r2.png",
+        metric="r2",
+        config=config,
     )
 
     logger.info(f"Saved time-generalization outputs to {results_dir}")
+
+

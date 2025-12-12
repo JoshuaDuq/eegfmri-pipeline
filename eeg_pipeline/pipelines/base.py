@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Any, List, Optional, TypeVar, Generic, Dict
 
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.io.general import (
+from eeg_pipeline.utils.io.logging import (
     get_logger,
     get_subject_logger,
-    setup_matplotlib,
-    ensure_derivatives_dataset_description,
 )
+from eeg_pipeline.utils.io.plotting import setup_matplotlib
+from eeg_pipeline.utils.io.paths import ensure_derivatives_dataset_description
 from eeg_pipeline.utils.progress import BatchProgress
 
 T = TypeVar("T")

@@ -14,7 +14,8 @@ import pandas as pd
 import numpy as np
 
 from ..config.loader import load_settings, ConfigDict
-from ..io.general import read_tsv, deriv_stats_path
+from ..io.tsv import read_tsv
+from ..io.paths import deriv_stats_path
 from .covariates import _build_covariate_matrices
 
 
@@ -50,28 +51,34 @@ def load_precomputed_correlations(
     target_suffix = "rating" if "rating" in target.lower() else "temperature"
     
     file_patterns = {
-        "power": f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
-        "power_roi": f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
-        "aperiodic": f"corr_stats_aperiodic_vs_{target_suffix}.tsv",
-        "connectivity": f"corr_stats_connectivity_vs_{target_suffix}.tsv",
-        "itpc": f"corr_stats_itpc_vs_{target_suffix}.tsv",
-        "dynamics": f"corr_stats_dynamics_vs_{target_suffix}.tsv",
+        "power": [
+            f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
+            f"corr_stats_power_combined_vs_{target_suffix}.tsv",
+        ],
+        "power_roi": [
+            f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
+            f"corr_stats_power_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
+        ],
+        "aperiodic": [f"corr_stats_aperiodic_vs_{target_suffix}.tsv"],
+        "connectivity": [f"corr_stats_connectivity_vs_{target_suffix}.tsv"],
+        "itpc": [f"corr_stats_itpc_vs_{target_suffix}.tsv"],
+        "dynamics": [f"corr_stats_dynamics_vs_{target_suffix}.tsv"],
     }
     
-    fname = file_patterns.get(feature_type)
-    if not fname:
+    candidates = file_patterns.get(feature_type)
+    if not candidates:
         logger.warning(f"Unknown feature type for stats loading: {feature_type}")
         return None
-        
-    fpath = stats_dir / fname
-    if not fpath.exists():
-        return None
-        
-    df = read_tsv(fpath)
-    if df is None or df.empty:
-        return None
-        
-    return df
+
+    for fname in candidates:
+        fpath = stats_dir / fname
+        if not fpath.exists():
+            continue
+        df = read_tsv(fpath)
+        if df is not None and not df.empty:
+            return df
+
+    return None
 
 
 def get_precomputed_stats_for_roi_band(

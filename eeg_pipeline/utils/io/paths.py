@@ -282,6 +282,37 @@ def extract_subject_id_from_path(path: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def ensure_derivatives_dataset_description(
+    deriv_root: Optional[Path] = None, 
+    constants=None, 
+    config=None
+) -> None:
+    """Ensure BIDS dataset_description.json exists in derivatives root."""
+    import json
+    
+    root = _resolve_deriv_root(deriv_root, config, constants)
+    
+    desc_path = root / "dataset_description.json"
+    if desc_path.exists():
+        return
+    
+    meta = {
+        "Name": "EEG Pipeline Derivatives",
+        "BIDSVersion": "1.8.0",
+        "DatasetType": "derivative",
+        "GeneratedBy": [
+            {
+                "Name": "EEG_fMRI_Analysis Pipeline",
+                "Version": "unknown",
+                "Description": "Custom EEG analysis (ERP, TFR, features, decoding)",
+            }
+        ],
+    }
+    ensure_dir(root)
+    with open(desc_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+
+
 __all__ = [
     "_normalize_subject_label",
     "_normalize_subject_id",
@@ -306,6 +337,7 @@ __all__ = [
     "_find_events_path",
     "_load_events_df",
     "extract_subject_id_from_path",
+    "ensure_derivatives_dataset_description",
 ]
 
 

@@ -16,9 +16,7 @@ import pandas as pd
 import mne
 import matplotlib.pyplot as plt
 
-from ...utils.io.general import (
-    save_fig as central_save_fig,
-)
+from eeg_pipeline.utils.io.plotting import save_fig as central_save_fig
 from ...utils.analysis.tfr import (
     validate_baseline_indices,
     average_tfr_band,

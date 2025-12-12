@@ -129,13 +129,9 @@ class ErpPipeline(PipelineBase):
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         """Process a single subject for ERP statistics extraction."""
-        from eeg_pipeline.utils.io.general import (
-            deriv_stats_path,
-            ensure_dir,
-            write_tsv,
-            find_pain_column_in_metadata,
-            find_temperature_column_in_metadata,
-        )
+        from eeg_pipeline.utils.io.paths import deriv_stats_path, ensure_dir
+        from eeg_pipeline.utils.io.tsv import write_tsv
+        from eeg_pipeline.utils.io.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
         from eeg_pipeline.utils.analysis.stats import count_trials_by_condition
         
         task = task or self.config.get("project.task")
@@ -192,58 +188,8 @@ class ErpPipeline(PipelineBase):
             self.logger.error(f"Failed to write ERP stats: {e}")
 
 
-###################################################################
-# Module-Level Entry Points (Backward Compatibility)
-###################################################################
-
-
-def extract_erp_stats(
-    subject: str,
-    task: str,
-    crop_tmin: Optional[float] = None,
-    crop_tmax: Optional[float] = None,
-    include_tmax_in_crop: bool = False,
-    config=None,
-    logger: Optional[logging.Logger] = None,
-) -> None:
-    """Extract ERP statistics for a single subject."""
-    from eeg_pipeline.utils.config.loader import load_settings
-    
-    if config is None:
-        config = load_settings()
-    
-    pipeline = ErpPipeline(config=config)
-    pipeline.set_crop_params(crop_tmin, crop_tmax)
-    pipeline.process_subject(subject, task=task)
-
-
-def extract_erp_stats_for_subjects(
-    subjects: List[str],
-    task: Optional[str] = None,
-    deriv_root: Optional[Path] = None,
-    config=None,
-    crop_tmin: Optional[float] = None,
-    crop_tmax: Optional[float] = None,
-) -> List[Dict[str, Any]]:
-    """Extract ERP statistics for multiple subjects."""
-    from eeg_pipeline.utils.config.loader import load_settings
-
-    if not subjects:
-        raise ValueError("No subjects specified")
-
-    if config is None:
-        config = load_settings()
-
-    pipeline = ErpPipeline(config=config)
-    pipeline.set_crop_params(crop_tmin, crop_tmax)
-    
-    return pipeline.run_batch(subjects, task=task, crop_tmin=crop_tmin, crop_tmax=crop_tmax)
-
-
 __all__ = [
     "ErpPipeline",
-    "extract_erp_stats",
-    "extract_erp_stats_for_subjects",
     "get_erp_config",
     "load_and_prepare_epochs",
 ]

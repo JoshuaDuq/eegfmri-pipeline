@@ -16,14 +16,10 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 
-from ...utils.io.general import (
-    ensure_dir,
-    save_fig,
-    get_logger,
-    log_if_present,
-    get_pain_column_from_config,
-    deriv_stats_path,
-)
+from eeg_pipeline.utils.io.paths import ensure_dir, deriv_stats_path
+from eeg_pipeline.utils.io.plotting import save_fig, log_if_present
+from eeg_pipeline.utils.io.logging import get_logger
+from eeg_pipeline.utils.io.columns import get_pain_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from .utils import get_condition_colors

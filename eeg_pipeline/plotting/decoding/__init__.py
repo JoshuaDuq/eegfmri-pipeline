@@ -1,9 +1,8 @@
 """
 Decoding plotting module.
 
-This module provides functions for creating decoding visualizations including:
-time-generalization matrices, performance metrics, residual diagnostics, model
-comparisons, and orchestration functions for comprehensive visualization workflows.
+Low-level plotting primitives live here. High-level orchestration/IO is defined in
+`pipelines.viz.decoding` to keep responsibilities separated.
 """
 
 from __future__ import annotations
@@ -43,16 +42,6 @@ from .importance import (
     plot_feature_importance_stability,
 )
 
-# Visualization orchestration
-from .viz import (
-    visualize_regression_results,
-    visualize_time_generalization,
-    visualize_model_comparisons,
-    visualize_riemann_analysis,
-    visualize_incremental_validity,
-)
-
-
 __all__ = [
     # Time-generalization plotting
     "plot_time_generalization_matrix",
@@ -74,11 +63,4 @@ __all__ = [
     # Feature importance plotting
     "plot_feature_importance_top_n",
     "plot_feature_importance_stability",
-    # Visualization orchestration
-    "visualize_regression_results",
-    "visualize_time_generalization",
-    "visualize_model_comparisons",
-    "visualize_riemann_analysis",
-    "visualize_incremental_validity",
 ]
-

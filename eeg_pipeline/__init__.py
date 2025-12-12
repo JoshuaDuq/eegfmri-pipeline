@@ -14,11 +14,13 @@ Package Structure
 
 Quick Start
 -----------
->>> from eeg_pipeline.pipelines import extract_features_for_subjects
->>> extract_features_for_subjects(["0001", "0002"])
+>>> from eeg_pipeline.pipelines import FeaturePipeline
+>>> pipeline = FeaturePipeline()
+>>> pipeline.run_batch(["0001", "0002"])
 
->>> from eeg_pipeline.pipelines import compute_behavior_correlations_for_subjects
->>> compute_behavior_correlations_for_subjects(["0001", "0002"])
+>>> from eeg_pipeline.pipelines import BehaviorPipeline
+>>> pipeline = BehaviorPipeline()
+>>> pipeline.run_batch(["0001", "0002"])
 """
 
 __version__ = "0.1.0"

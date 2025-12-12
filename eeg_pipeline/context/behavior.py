@@ -1,4 +1,12 @@
-"""Behavior analysis context."""
+"""
+Behavior Analysis Context
+=========================
+
+Context objects for behavior analysis data loading and state management.
+
+Note: For new code, consider using BehaviorPipeline from pipelines/behavior.py
+which provides a higher-level interface with the same functionality.
+"""
 
 from __future__ import annotations
 
@@ -55,6 +63,10 @@ class BehaviorContext:
     n_perm: int = 100
     rng: Optional[np.random.Generator] = None
     partial_covars: Optional[List[str]] = None
+    control_temperature: bool = True
+    control_trial_order: bool = True
+    compute_change_scores: bool = True
+    compute_reliability: bool = True
     
     epochs: Any = None
     epochs_info: Any = None
@@ -71,8 +83,10 @@ class BehaviorContext:
     temperature_column: Optional[str] = None
     covariates_df: Optional[pd.DataFrame] = None
     covariates_without_temp_df: Optional[pd.DataFrame] = None
+    group_ids: Optional[np.ndarray] = None
     results: Dict[str, ComputationResult] = field(default_factory=dict)
     _data_loaded: bool = False
+    _change_scores_added: bool = False
 
     @property
     def method(self) -> str:
@@ -122,10 +136,9 @@ class BehaviorContext:
             return self.targets is not None
 
         from eeg_pipeline.utils.data.loading import (
-            _load_features_and_targets, load_epochs_for_analysis,
+            load_epochs_for_analysis, load_feature_bundle,
             extract_temperature_data, build_covariate_matrix, build_covariates_without_temp,
         )
-        from eeg_pipeline.utils.io.general import deriv_features_path, read_tsv
 
         self.logger.info("Loading data...")
         try:
@@ -140,65 +153,77 @@ class BehaviorContext:
 
             self.epochs_info = self.epochs.info
 
-            # Load features
-            features_dir = deriv_features_path(self.deriv_root, self.subject)
+            bundle = load_feature_bundle(
+                self.subject, self.deriv_root, self.logger, include_targets=True
+            )
             
-            def _safe_read(filename: str) -> Optional[pd.DataFrame]:
-                path = features_dir / filename
-                if not path.exists():
-                    return None
-                try:
-                    return read_tsv(path)
-                except Exception as e:
-                    self.logger.warning(f"Failed to read {filename}: {e}")
-                    return None
-
-            # Load main features file (contains power, microstates, aperiodic, itpc)
-            self.power_df = _safe_read("features_eeg_direct.tsv")
-            
-            # Only load separate files if they contain unique features not in direct
-            # Connectivity and PAC are separate pipelines, always load them
-            self.connectivity_df = _safe_read("features_connectivity.tsv")
-            self.pac_df = _safe_read("features_pac_trials.tsv")
-            
-            # These are included in features_eeg_direct.tsv, set to None to avoid duplicates
-            self.microstates_df = None
-            self.aperiodic_df = None
-            self.itpc_df = None
+            self.power_df = bundle.power_df
+            self.connectivity_df = bundle.connectivity_df
+            self.pac_df = bundle.pac_trials_df
+            self.microstates_df = bundle.microstate_df
+            self.aperiodic_df = bundle.aperiodic_df
+            self.itpc_df = bundle.itpc_df
+            # Consolidate any precomputed/derived tables
+            precomputed_sources = [
+                bundle.all_features_df,
+                bundle.complexity_df,
+                bundle.dynamics_df,
+            ]
             self.precomputed_df = None
-            
-            # Load targets
-            targets_df = _safe_read("target_vas_ratings.tsv")
-            if targets_df is not None:
-                if targets_df.shape[1] == 1:
-                    self.targets = pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
-                else:
-                    # Try to find a numeric column
-                    numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
-                    if len(numeric_cols) > 0:
-                        self.targets = pd.to_numeric(targets_df[numeric_cols[0]], errors="coerce")
-                    else:
-                        self.logger.warning("No numeric columns found in targets file")
-                        self.targets = None
+            for df in precomputed_sources:
+                if df is None or df.empty:
+                    continue
+                self.precomputed_df = df if self.precomputed_df is None else pd.concat(
+                    [self.precomputed_df, df], axis=1
+                )
+            feature_tables = {
+                "power": self.power_df,
+                "connectivity": self.connectivity_df,
+                "pac": self.pac_df,
+                "microstates": self.microstates_df,
+                "aperiodic": self.aperiodic_df,
+                "itpc": self.itpc_df,
+                "precomputed": self.precomputed_df,
+            }
+            feature_counts = {
+                name: 0 if table is None or table.empty else table.shape[1]
+                for name, table in feature_tables.items()
+            }
+            if all(count == 0 for count in feature_counts.values()):
+                self.logger.error(
+                    "Feature bundle is empty for sub-%s; aborting analysis", self.subject
+                )
+                return False
             else:
-                self.targets = None
+                self.logger.info(
+                    "Feature coverage loaded: %s",
+                    ", ".join(f"{k}={v}" for k, v in feature_counts.items() if v > 0),
+                )
+            self.targets = bundle.targets
 
             if self.targets is None or len(self.targets) == 0:
                 self.logger.warning("No targets found")
                 return False
 
-            # Load temperature
             self.temperature, self.temperature_column = extract_temperature_data(
                 self.aligned_events, self.config
             )
 
-            # Build covariates
             self.covariates_df = build_covariate_matrix(
                 self.aligned_events, self.partial_covars, self.config
             )
             self.covariates_without_temp_df = build_covariates_without_temp(
                 self.covariates_df, self.temperature_column
             )
+
+            # Align potential grouping variables for LOSO/clustered evaluation
+            for candidate in ["subject", "session", "run", "block"]:
+                if self.aligned_events is not None and candidate in self.aligned_events.columns:
+                    try:
+                        self.group_ids = np.asarray(self.aligned_events[candidate])
+                        break
+                    except Exception:
+                        self.group_ids = None
 
             self._data_loaded = True
             return True

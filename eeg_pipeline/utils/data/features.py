@@ -14,13 +14,10 @@ from .loading import (
     validate_feature_block_lengths,
     validate_trial_alignment_manifest,
 )
-from ..io.general import (
-    _pick_target_column,
-    deriv_stats_path,
-    ensure_dir,
-    write_tsv,
-    sanitize_label,
-)
+from ..io.columns import _pick_target_column
+from ..io.paths import deriv_stats_path, ensure_dir
+from ..io.tsv import write_tsv
+from ..io.formatting import sanitize_label
 
 
 ###################################################################
@@ -74,10 +71,25 @@ def align_feature_dataframes(
 
         if pow_df is not None and not getattr(pow_df, "empty", False):
             min_valid_band_fraction = float(config.get("feature_engineering.features.min_valid_band_fraction", 0.0))
-            band_names = sorted({str(c).split("_")[1] for c in pow_df.columns if str(c).startswith("pow_") and len(str(c).split("_")) >= 3})
+
+            def _power_band(col: Any) -> Optional[str]:
+                name = str(col)
+                if name.startswith("power_"):
+                    parts = name.split("_")
+                    if len(parts) >= 3:
+                        return parts[2]
+                    return None
+                if name.startswith("pow_"):
+                    parts = name.split("_")
+                    if len(parts) >= 2:
+                        return parts[1]
+                    return None
+                return None
+
+            band_names = sorted({b for b in (_power_band(c) for c in pow_df.columns) if b})
             band_drop_counts = {}
             for band in band_names:
-                band_cols = [c for c in pow_df.columns if str(c).startswith(f"pow_{band}_")]
+                band_cols = [c for c in pow_df.columns if _power_band(c) == band]
                 if not band_cols:
                     continue
                 values = pow_df[band_cols].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
@@ -86,7 +98,7 @@ def align_feature_dataframes(
                 band_drop_counts[band] = int(band_invalid.sum())
                 if np.any(band_invalid):
                     pow_df.loc[band_invalid, band_cols] = np.nan
-                    qc_col = f"qc_pow_{band}"
+                    qc_col = f"qc_power_{band}"
                     if qc_col not in pow_df.columns:
                         pow_df[qc_col] = True
                     pow_df.loc[band_invalid, qc_col] = False
@@ -273,7 +285,7 @@ def save_all_features(
 ) -> pd.DataFrame:
     """Save all aligned feature blocks to disk and return combined features."""
     import json
-    from eeg_pipeline.utils.analysis.features.metadata import generate_feature_sidecar
+    from eeg_pipeline.utils.analysis.features.metadata import generate_manifest
 
     direct_blocks = []
     direct_cols = []
@@ -451,15 +463,15 @@ def save_all_features(
     # --- Generate JSON Sidecar ---
     try:
         subject_str = features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
-        sidecar = generate_feature_sidecar(
-            feature_df_columns=list(combined_df.columns),
-            description="Combined EEG Features including Power, Connectivity, Microstates, and Aperiodic metrics.",
-            subject=subject_str,
-            additional_metadata={"CreationTime": pd.Timestamp.now().isoformat()}
-        )
         sidecar_path = features_dir / "features.json"
-        with open(sidecar_path, 'w') as f:
-            json.dump(sidecar, f, indent=2)
+        manifest = generate_manifest(
+            feature_columns=list(combined_df.columns),
+            config=config,
+            subject=subject_str,
+            task=config.get("project.task") if config is not None else None,
+        )
+        with open(sidecar_path, "w") as f:
+            json.dump(manifest, f, indent=2)
         logger.info("Saved feature metadata sidecar: %s", sidecar_path)
     except Exception as e:
         logger.warning(f"Failed to generate feature sidecar: {e}")

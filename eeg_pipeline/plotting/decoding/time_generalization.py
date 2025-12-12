@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from eeg_pipeline.utils.io.general import save_fig
+from eeg_pipeline.utils.io.plotting import save_fig
 from eeg_pipeline.plotting.config import get_plot_config
 
 logger = logging.getLogger(__name__)

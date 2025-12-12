@@ -56,39 +56,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-
-###################################################################
-# Configuration
-###################################################################
-
-
-def _get_classification_config(config: Any) -> Dict[str, Any]:
-    """Extract classification configuration with defaults."""
-    if config is None:
-        from eeg_pipeline.utils.config.loader import load_settings
-        config = load_settings()
-
-    models = config.get("decoding.models", {})
-    svm_cfg = models.get("svm", {})
-    lr_cfg = models.get("logistic_regression", {})
-    rf_cfg = models.get("random_forest", {})
-
-    return {
-        # SVM
-        "svm_kernel": svm_cfg.get("kernel", "rbf"),
-        "svm_C_grid": svm_cfg.get("C_grid", [0.1, 1.0, 10.0]),
-        "svm_gamma_grid": svm_cfg.get("gamma_grid", ["scale", "auto"]),
-        "svm_class_weight": svm_cfg.get("class_weight", "balanced"),
-        # Logistic Regression
-        "lr_penalty": lr_cfg.get("penalty", "l2"),
-        "lr_C_grid": lr_cfg.get("C_grid", [0.01, 0.1, 1.0, 10.0]),
-        "lr_max_iter": lr_cfg.get("max_iter", 1000),
-        "lr_class_weight": lr_cfg.get("class_weight", "balanced"),
-        # Random Forest
-        "rf_n_estimators": rf_cfg.get("n_estimators", 100),
-        "rf_max_depth_grid": rf_cfg.get("max_depth_grid", [5, 10, None]),
-        "rf_class_weight": rf_cfg.get("class_weight", "balanced"),
-    }
+from eeg_pipeline.analysis.decoding.config import get_decoding_config
 
 
 ###################################################################
@@ -121,7 +89,7 @@ def create_svm_pipeline(
     Pipeline
         sklearn Pipeline with imputation, scaling, and SVM
     """
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
 
     return Pipeline([
         ("impute", SimpleImputer(strategy="median")),
@@ -160,7 +128,7 @@ def create_logistic_pipeline(
     Pipeline
         sklearn Pipeline with imputation, scaling, and LogisticRegression
     """
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
@@ -199,7 +167,7 @@ def create_rf_classification_pipeline(
     Pipeline
         sklearn Pipeline with imputation and RandomForestClassifier
     """
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
 
     return Pipeline([
         ("impute", SimpleImputer(strategy="median")),
@@ -245,7 +213,7 @@ def create_ensemble_pipeline(
 
 def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for SVM hyperparameter tuning."""
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
     return {
         "svm__C": cfg["svm_C_grid"],
         "svm__gamma": cfg["svm_gamma_grid"],
@@ -254,7 +222,7 @@ def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
 
 def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for Logistic Regression."""
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
     return {
         "lr__C": cfg["lr_C_grid"],
     }
@@ -262,7 +230,7 @@ def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
 
 def build_rf_classification_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for Random Forest classifier."""
-    cfg = _get_classification_config(config)
+    cfg = get_decoding_config(config)
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
         "rf__min_samples_leaf": [1, 3, 5],
@@ -646,7 +614,7 @@ def save_classification_results(
     prefix: str = "classification",
 ) -> Dict[str, Path]:
     """Save classification results to files."""
-    from eeg_pipeline.utils.io.general import write_tsv
+    from eeg_pipeline.utils.io.tsv import write_tsv
     
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)

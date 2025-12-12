@@ -16,7 +16,7 @@ import numpy as np
 import mne
 
 
-from ..io.general import _load_events_df
+from ..io.paths import _load_events_df
 from ..config.loader import ConfigDict
 from ..validation import ensure_aligned_lengths
 
@@ -309,3 +309,26 @@ def get_aligned_events(
     validate_alignment(aligned_events, epochs, logger, strict=strict, config=config)
 
     return aligned_events
+
+
+###################################################################
+# Index Reconstruction (migrated from general.py)
+###################################################################
+
+
+def reconstruct_kept_indices(dropped_trials_path: Path, n_events: int) -> np.ndarray:
+    """Reconstruct which trial indices were kept after artifact rejection."""
+    if not dropped_trials_path.exists():
+        return np.arange(n_events)
+    
+    dropped_df = pd.read_csv(dropped_trials_path, sep="\t")
+    if "original_index" not in dropped_df.columns or len(dropped_df) == 0:
+        return np.arange(n_events)
+    
+    dropped_indices_raw = pd.to_numeric(dropped_df["original_index"], errors="coerce").dropna()
+    if len(dropped_indices_raw) == 0:
+        return np.arange(n_events)
+    
+    dropped_indices = set(dropped_indices_raw.astype(int).tolist())
+    kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices])
+    return kept_indices

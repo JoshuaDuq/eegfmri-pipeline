@@ -160,6 +160,10 @@ def correlate_features_loop(
     feature_classifier: Optional[Any] = None,
     robust_method: Optional[str] = None,
     config: Optional[Any] = None,
+    n_bootstrap: int = 0,
+    n_permutations: int = 0,
+    rng: Optional[np.random.Generator] = None,
+    groups: Optional[np.ndarray] = None,
 ) -> Tuple[List[CorrelationRecord], pd.DataFrame]:
     """Correlate all features with target values."""
     if min_samples is None:
@@ -184,6 +188,9 @@ def correlate_features_loop(
         n_use = min(n_f, n_t)
         feature_df, target_arr = feature_df.iloc[:n_use], target_arr[:n_use]
 
+    rng = rng or np.random.default_rng()
+    ci_level = get_ci_level(config)
+
     records = []
     for col in feature_df.columns:
         vals = pd.to_numeric(feature_df[col], errors="coerce").to_numpy()
@@ -194,10 +201,55 @@ def correlate_features_loop(
         else:
             ft, ident, band = analysis_type, col, "N/A"
 
+        valid_mask = np.isfinite(vals) & np.isfinite(target_arr)
+        n_valid = int(valid_mask.sum())
+
         r, p, n = safe_correlation(vals, target_arr, method, min_samples, robust_method=robust_method)
+        ci_low = ci_high = p_perm = np.nan
+
+        if np.isfinite(r) and n_valid >= (min_samples or 0):
+            if n_bootstrap and n_bootstrap > 0:
+                from .eeg_stats import compute_bootstrap_ci
+
+                ci_low, ci_high = compute_bootstrap_ci(
+                    vals[valid_mask],
+                    target_arr[valid_mask],
+                    n_bootstrap=n_bootstrap,
+                    ci_level=ci_level,
+                    method=method,
+                    rng=rng,
+                )
+
+            if n_permutations and n_permutations > 0:
+                from .permutation import compute_permutation_pvalues
+
+                x_series = pd.Series(vals[valid_mask])
+                y_series = pd.Series(target_arr[valid_mask])
+                p_perm, _, _ = compute_permutation_pvalues(
+                    x_series,
+                    y_series,
+                    covariates_df=None,
+                    temp_series=None,
+                    method=method,
+                    n_perm=n_permutations,
+                    n_eff=n_valid,
+                    rng=rng,
+                    groups=groups,
+                )
+
         if np.isfinite(r):
             records.append(build_correlation_record(
-                ident, band, r, p, n, method, identifier_type=identifier_type, analysis_type=ft
+                ident,
+                band,
+                r,
+                p,
+                n,
+                method,
+                identifier_type=identifier_type,
+                analysis_type=ft,
+                ci_low=ci_low,
+                ci_high=ci_high,
+                p_perm=p_perm,
             ))
 
     if logger:
@@ -253,6 +305,344 @@ def safe_correlation(
                 float(p) if np.isfinite(p) else np.nan, n_valid)
     except Exception:
         return np.nan, np.nan, n_valid
+
+
+###################################################################
+# Pain Sensitivity Helpers
+###################################################################
+
+
+def compute_pain_sensitivity_index(
+    ratings: pd.Series,
+    temperatures: pd.Series,
+) -> pd.Series:
+    """Compute pain sensitivity as residual from temperature-rating regression."""
+    valid = ratings.notna() & temperatures.notna()
+    psi = pd.Series(np.nan, index=ratings.index)
+
+    if valid.sum() < 5:
+        return psi
+
+    r_valid = ratings[valid].values
+    t_valid = temperatures[valid].values
+
+    X = np.column_stack([np.ones(len(t_valid)), t_valid])
+    try:
+        beta = np.linalg.lstsq(X, r_valid, rcond=None)[0]
+        predicted = X @ beta
+        psi.loc[valid] = r_valid - predicted
+    except np.linalg.LinAlgError:
+        psi.loc[valid] = r_valid
+
+    return psi
+
+
+def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute plateau - baseline change for matching feature pairs."""
+    baseline_cols = [c for c in features_df.columns if "_baseline_" in c]
+
+    change_data: Dict[str, np.ndarray] = {}
+    for bl_col in baseline_cols:
+        pl_col = bl_col.replace("_baseline_", "_plateau_")
+        if pl_col in features_df.columns:
+            bl_vals = features_df[bl_col].values
+            pl_vals = features_df[pl_col].values
+
+            if bl_vals.ndim != 1 or pl_vals.ndim != 1:
+                continue
+
+            change_col = bl_col.replace("_baseline_", "_change_")
+            change_data[change_col] = pl_vals - bl_vals
+
+    if not change_data:
+        return pd.DataFrame(index=features_df.index)
+
+    return pd.DataFrame(change_data, index=features_df.index)
+
+
+@dataclass
+class CorrelationResult:
+    """Single feature correlation result (legacy structure)."""
+
+    feature: str
+    band: str
+    r_raw: float
+    p_raw: float
+    n: int
+    r_partial_temp: float
+    p_partial_temp: float
+    r_partial_order: float
+    p_partial_order: float
+    r_partial_full: float
+    p_partial_full: float
+    effect_interpretation: str
+    reliability: float
+    is_change_score: bool
+    method: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "feature": self.feature,
+            "band": self.band,
+            "r_raw": self.r_raw,
+            "p_raw": self.p_raw,
+            "n": self.n,
+            "r_partial_temp": self.r_partial_temp,
+            "p_partial_temp": self.p_partial_temp,
+            "r_partial_order": self.r_partial_order,
+            "p_partial_order": self.p_partial_order,
+            "r_partial_full": self.r_partial_full,
+            "p_partial_full": self.p_partial_full,
+            "effect_interpretation": self.effect_interpretation,
+            "reliability": self.reliability,
+            "is_change_score": self.is_change_score,
+            "method": self.method,
+            "r_primary": self.r_partial_temp if np.isfinite(self.r_partial_temp) else self.r_raw,
+            "p_primary": self.p_partial_temp if np.isfinite(self.p_partial_temp) else self.p_raw,
+        }
+
+
+def run_pain_sensitivity_correlations(
+    features_df: pd.DataFrame,
+    ratings: pd.Series,
+    temperatures: pd.Series,
+    method: str = "spearman",
+    min_samples: int = 10,
+    logger: Optional[logging.Logger] = None,
+) -> pd.DataFrame:
+    """Correlate features with pain sensitivity index."""
+    def _align_psi_inputs() -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series]]:
+        if features_df is None or features_df.empty or ratings is None or temperatures is None:
+            return None, None, None
+
+        common_index = features_df.index
+        common_index = common_index.intersection(ratings.index)
+        common_index = common_index.intersection(temperatures.index)
+
+        if common_index.empty:
+            if logger:
+                logger.error("No overlapping samples across features, ratings, and temperatures for PSI")
+            return None, None, None
+
+        feat_aligned = features_df.loc[common_index]
+        ratings_aligned = ratings.loc[common_index]
+        temps_aligned = temperatures.loc[common_index]
+
+        valid_mask = ratings_aligned.notna() & temps_aligned.notna()
+        if valid_mask.sum() < min_samples:
+            if logger:
+                logger.warning(
+                    "Insufficient valid samples for PSI after alignment "
+                    f"(found {valid_mask.sum()}, need >= {min_samples})"
+                )
+            return None, None, None
+
+        return (
+            feat_aligned.loc[valid_mask],
+            ratings_aligned.loc[valid_mask],
+            temps_aligned.loc[valid_mask],
+        )
+
+    feat_aligned, ratings_aligned, temps_aligned = _align_psi_inputs()
+    if feat_aligned is None or ratings_aligned is None or temps_aligned is None:
+        return pd.DataFrame()
+
+    psi = compute_pain_sensitivity_index(ratings_aligned, temps_aligned)
+
+    if psi.isna().all():
+        if logger:
+            logger.warning("Could not compute pain sensitivity index")
+        return pd.DataFrame()
+
+    valid_psi = psi.notna()
+    if valid_psi.sum() < min_samples:
+        if logger:
+            logger.warning(
+                "Insufficient PSI samples after masking "
+                f"(found {valid_psi.sum()}, need >= {min_samples})"
+            )
+        return pd.DataFrame()
+
+    psi_valid = psi.loc[valid_psi]
+    feat_valid = feat_aligned.loc[valid_psi]
+
+    records = []
+    for col in feat_valid.columns:
+        vals = pd.to_numeric(feat_valid[col], errors="coerce").values
+        r, p, n = safe_correlation(vals, psi_valid.values, method, min_samples)
+
+        if np.isfinite(r):
+            records.append({
+                "feature": col,
+                "r_psi": float(r),
+                "p_psi": float(p),
+                "n": n,
+                "effect_interpretation": interpret_correlation(r),
+            })
+
+    if logger:
+        n_sig = sum(1 for r in records if r["p_psi"] < 0.05)
+        logger.info(f"Pain sensitivity: {len(records)} features, {n_sig} significant")
+
+    return pd.DataFrame(records)
+
+
+###################################################################
+# Alignment and ROI Helpers
+###################################################################
+
+
+def _align_groups_to_series(
+    series: pd.Series,
+    groups: Optional[Union[pd.Series, np.ndarray]],
+) -> Optional[np.ndarray]:
+    """Align group labels to a pandas Series index."""
+    if groups is None:
+        return None
+    if isinstance(groups, pd.Series):
+        missing = series.index.difference(groups.index)
+        if not missing.empty:
+            raise ValueError(f"Group labels missing for {len(missing)} samples")
+        return groups.loc[series.index].to_numpy()
+    arr = np.asarray(groups)
+    if arr.size != len(series):
+        raise ValueError("Group labels length does not match series length")
+    return arr
+
+
+def _align_features_and_targets(
+    df: pd.DataFrame,
+    targets: pd.Series,
+    min_samples: int,
+    logger: logging.Logger,
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
+    """Align feature dataframe and targets on shared index and drop missing targets."""
+    if df is None or df.empty or targets is None or targets.empty:
+        return None, None
+
+    if not df.index.equals(targets.index):
+        common_index = df.index.intersection(targets.index)
+        if common_index.empty:
+            logger.error("No overlapping samples between features and targets")
+            return None, None
+        df = df.loc[common_index]
+        targets = targets.loc[common_index]
+
+    valid_mask = targets.notna()
+    if valid_mask.sum() < min_samples:
+        logger.warning(
+            "Insufficient valid samples after alignment "
+            f"(found {valid_mask.sum()}, need >= {min_samples})"
+        )
+        return None, None
+
+    return df.loc[valid_mask], targets.loc[valid_mask]
+
+
+def _build_temp_record_unified(
+    x: pd.Series,
+    temp: Optional[pd.Series],
+    cov_no_temp: Optional[pd.DataFrame],
+    identifier: str,
+    id_key: str,
+    band: str,
+    cfg: Any,
+    groups: Optional[np.ndarray] = None,
+    **extra: Any,
+) -> Optional[Dict[str, Any]]:
+    """Build a temperature correlation record with optional bootstrap/permutation."""
+    if temp is None or (hasattr(temp, "empty") and temp.empty):
+        return None
+
+    from . import compute_bootstrap_ci, compute_temp_permutation_pvalues, prepare_aligned_data
+
+    x_a, temp_a, cov_a, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
+    if len(x_a) == 0 or len(temp_a) == 0:
+        return None
+
+    try:
+        grp = _align_groups_to_series(x_a, groups if groups is not None else getattr(cfg, "groups", None))
+    except ValueError:
+        grp = None
+
+    min_s = getattr(cfg, "min_samples_channel", None) or getattr(cfg, "min_samples_roi", 0)
+    r, p, _ = safe_correlation(x_a, temp_a, cfg.method, min_s)
+
+    ci_lo, ci_hi = np.nan, np.nan
+    p_perm = np.nan
+
+    if getattr(cfg, "bootstrap", 0) > 0:
+        ci_lo, ci_hi = compute_bootstrap_ci(
+            x_a, temp_a, cfg.bootstrap, 0.95,
+            "spearman" if getattr(cfg, "use_spearman", False) else "pearson", cfg.rng
+        )
+
+    if getattr(cfg, "n_perm", 0) > 0:
+        p_perm, _ = compute_temp_permutation_pvalues(
+            x_a, temp_a, cov_a, cfg.method, cfg.n_perm, cfg.rng,
+            band, identifier, getattr(cfg, "logger", None), groups=grp
+        )
+
+    return build_correlation_record(
+        identifier, band, r, p, len(x_a), cfg.method,
+        ci_low=ci_lo, ci_high=ci_hi, p_perm=p_perm,
+        identifier_type=id_key, **extra,
+    ).to_dict()
+
+
+def _compute_roi_correlation_stats(
+    x: pd.Series,
+    y: pd.Series,
+    x_a: np.ndarray,
+    y_a: np.ndarray,
+    cov: Optional[pd.DataFrame],
+    temp: Optional[pd.Series],
+    n_eff: int,
+    band: str,
+    roi: str,
+    context: str,
+    cfg: Any,
+    groups: Optional[np.ndarray] = None,
+    me_records: Optional[List[Dict]] = None,
+) -> Any:
+    """Compute comprehensive correlation statistics for an ROI."""
+    from . import compute_bootstrap_ci, compute_partial_correlations, compute_permutation_pvalues
+    from .base import CorrelationStats
+
+    r, p = compute_correlation(x_a, y_a, getattr(cfg, "use_spearman", False))
+
+    r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
+        x, y, cov, temp, cfg.method, context, getattr(cfg, "logger", None), cfg.min_samples_roi
+    )
+
+    ci_lo, ci_hi = compute_bootstrap_ci(
+        x_a, y_a, cfg.bootstrap, 0.95,
+        "spearman" if getattr(cfg, "use_spearman", False) else "pearson", cfg.rng
+    )
+
+    x_series = pd.Series(x_a) if not isinstance(x_a, pd.Series) else x_a
+    y_series = pd.Series(y_a) if not isinstance(y_a, pd.Series) else y_a
+
+    p_perm, p_part_perm, p_part_temp_perm = compute_permutation_pvalues(
+        x_series, y_series, cov, temp, cfg.method, cfg.n_perm, n_eff, cfg.rng,
+        band, roi, groups=groups
+    )
+
+    return CorrelationStats(
+        correlation=r,
+        p_value=p,
+        ci_low=ci_lo,
+        ci_high=ci_hi,
+        r_partial=r_part,
+        p_partial=p_part,
+        n_partial=n_part,
+        r_partial_temp=r_part_temp,
+        p_partial_temp=p_part_temp,
+        n_partial_temp=n_part_temp,
+        p_perm=p_perm,
+        p_partial_perm=p_part_perm,
+        p_partial_temp_perm=p_part_temp_perm,
+    )
 
 
 def fisher_z(r: float, config: Optional[Any] = None) -> float:
@@ -895,4 +1285,94 @@ def save_correlation_results(
     float_format = "%.6f"
     
     df.to_csv(path, sep=sep, index=index, float_format=float_format)
+
+
+###################################################################
+# Effect Size Benchmarks
+###################################################################
+
+
+EFFECT_SIZE_BENCHMARKS = {
+    "negligible": (0.0, 0.2),
+    "small": (0.2, 0.5),
+    "medium": (0.5, 0.8),
+    "large": (0.8, float("inf")),
+}
+
+CORRELATION_BENCHMARKS = {
+    "negligible": (0.0, 0.1),
+    "small": (0.1, 0.3),
+    "medium": (0.3, 0.5),
+    "large": (0.5, float("inf")),
+}
+
+
+def interpret_effect_size(d: float) -> str:
+    """Interpret Cohen's d effect size."""
+    d_abs = abs(d)
+    for label, (lo, hi) in EFFECT_SIZE_BENCHMARKS.items():
+        if lo <= d_abs < hi:
+            return label
+    return "unknown"
+
+
+def interpret_correlation(r: float) -> str:
+    """Interpret correlation magnitude."""
+    r_abs = abs(r)
+    for label, (lo, hi) in CORRELATION_BENCHMARKS.items():
+        if lo <= r_abs < hi:
+            return label
+    return "unknown"
+
+
+def correlate_single_feature(
+    feature_values: np.ndarray,
+    target_values: np.ndarray,
+    temperature: Optional[np.ndarray],
+    trial_order: Optional[np.ndarray],
+    method: str,
+    min_samples: int,
+) -> Tuple[float, float, float, float, float, float, float, float, int]:
+    """Compute all correlations for a single feature.
+    
+    Returns:
+        (r_raw, p_raw, r_partial_temp, p_partial_temp, r_partial_order, 
+         p_partial_order, r_partial_full, p_partial_full, n_valid)
+    """
+    valid = np.isfinite(feature_values) & np.isfinite(target_values)
+    if temperature is not None:
+        valid &= np.isfinite(temperature)
+    if trial_order is not None:
+        valid &= np.isfinite(trial_order)
+    
+    n_valid = int(valid.sum())
+    if n_valid < min_samples:
+        return (np.nan,) * 8 + (0,)
+    
+    x, y = feature_values[valid], target_values[valid]
+    
+    if np.std(x) < 1e-10 or np.std(y) < 1e-10:
+        return (np.nan,) * 8 + (n_valid,)
+    
+    r_raw, p_raw = compute_correlation(x, y, method)
+    
+    r_pt, p_pt, r_po, p_po, r_pf, p_pf = np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
+    
+    if temperature is not None:
+        temp_df = pd.DataFrame({"temp": temperature[valid]})
+        r_pt, p_pt, _ = partial_corr_xy_given_Z(pd.Series(x), pd.Series(y), temp_df, method)
+    
+    if trial_order is not None:
+        order_df = pd.DataFrame({"order": trial_order[valid]})
+        r_po, p_po, _ = partial_corr_xy_given_Z(pd.Series(x), pd.Series(y), order_df, method)
+    
+    if temperature is not None and trial_order is not None:
+        full_df = pd.DataFrame({"temp": temperature[valid], "order": trial_order[valid]})
+        r_pf, p_pf, _ = partial_corr_xy_given_Z(pd.Series(x), pd.Series(y), full_df, method)
+    elif temperature is not None:
+        r_pf, p_pf = r_pt, p_pt
+    elif trial_order is not None:
+        r_pf, p_pf = r_po, p_po
+    
+    return r_raw, p_raw, r_pt, p_pt, r_po, p_po, r_pf, p_pf, n_valid
 

@@ -15,81 +15,19 @@ try:
 except ImportError:
     plot_connectivity_circle = None
 
-from ...utils.io.general import (
-    ensure_dir,
-    get_logger,
-    log_if_present,
-    find_column_in_events,
-    get_column_from_config,
-)
+from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.utils.io.logging import get_logger
+from eeg_pipeline.utils.io.plotting import log_if_present, save_fig, get_band_color
+from eeg_pipeline.utils.io.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
-from eeg_pipeline.utils.io.general import save_fig, find_pain_column_in_events, get_band_color
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from ..config import get_plot_config
-from ...utils.analysis.stats import fdr_bh
-
-
-def _parse_connectivity_columns(
-    columns: List[str],
-    measure: str,
-    band: str,
-) -> Tuple[List[str], List[Tuple[str, str]], List[int]]:
-    relevant_cols = []
-    edges = []
-    indices = []
-    
-    # New Schema: conn_{segment}_{band}_chpair_{ch1}-{ch2}_{stat}
-    # Example: conn_plateau_gamma_chpair_CP4-AF8_aec_orth
-    # Also support older: {measure}_{band}_{ch1}-{ch2}
-    
-    for idx, col in enumerate(columns):
-        # 1. Check for New Schema
-        if col.startswith("conn_") and f"_{band}_" in col and "_chpair_" in col:
-            # Check measure suffix
-            if measure in col:
-                # Extract pair
-                # ...chpair_A-B_...
-                try:
-                    parts = col.split("_chpair_")[1].split("_")
-                    pair_str = parts[0]
-                    if "-" in pair_str:
-                        ch1, ch2 = pair_str.split("-")
-                        relevant_cols.append(col)
-                        edges.append((ch1, ch2))
-                        indices.append(idx)
-                        continue
-                except (IndexError, ValueError):
-                    pass
-
-        # 2. Check for Old Schema
-        prefix = f"{measure}_{band}_"
-        if col.startswith(prefix):
-            remainder = col[len(prefix):]
-            if '__' in remainder:
-                parts = remainder.split('__')
-                if len(parts) == 2:
-                    relevant_cols.append(col)
-                    edges.append((parts[0], parts[1]))
-                    indices.append(idx)
-                    continue
-
-            if '-' in remainder:
-                parts = remainder.split('-')
-                if len(parts) == 2:
-                    relevant_cols.append(col)
-                    edges.append((parts[0], parts[1]))
-                    indices.append(idx)
-                    continue
-            
-            if '_' in remainder:
-                parts = remainder.split('_')
-                if len(parts) == 2:
-                    relevant_cols.append(col)
-                    edges.append((parts[0], parts[1]))
-                    indices.append(idx)
-                    continue
-
-    return relevant_cols, edges, indices
+from eeg_pipeline.utils.analysis.connectivity import (
+    build_adjacency_from_edges,
+    build_matrix_from_edges,
+    compute_significance_mask,
+    parse_connectivity_columns,
+)
 
 
 def plot_connectivity_circle_for_band(
@@ -114,7 +52,7 @@ def plot_connectivity_circle_for_band(
         "pain": plot_cfg.get_color("pain"),
     }
     
-    cols, edges, _ = _parse_connectivity_columns(features_df.columns, measure, band)
+    cols, edges, _ = parse_connectivity_columns(features_df.columns, measure, band)
     
     if not cols:
         log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
@@ -241,7 +179,7 @@ def plot_connectivity_circle_by_condition(
         "pain": plot_cfg.get_color("pain"),
     }
     
-    cols, edges, _ = _parse_connectivity_columns(features_df.columns, measure, band)
+    cols, edges, _ = parse_connectivity_columns(features_df.columns, measure, band)
     
     if not cols:
         log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
@@ -323,19 +261,6 @@ def plot_connectivity_circle_by_condition(
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
     log_if_present(logger, "info", f"Saved {measure} {band} connectivity circle by condition")
-
-
-def _build_matrix_from_edges(edge_values: Dict[Tuple[str, str], float], node_order: Optional[List[str]] = None) -> Tuple[np.ndarray, List[str]]:
-    nodes = node_order or sorted({n for pair in edge_values.keys() for n in pair})
-    idx = {n: i for i, n in enumerate(nodes)}
-    mat = np.zeros((len(nodes), len(nodes)), dtype=float)
-    for (u, v), val in edge_values.items():
-        if u not in idx or v not in idx:
-            continue
-        i, j = idx[u], idx[v]
-        mat[i, j] = val
-        mat[j, i] = val
-    return mat, nodes
 
 
 def plot_sliding_connectivity_trajectories(
@@ -509,7 +434,7 @@ def plot_edge_significance_circle_from_stats(
     if not edge_vals:
         return
 
-    mat, nodes = _build_matrix_from_edges(edge_vals)
+    mat, nodes = build_matrix_from_edges(edge_vals)
     plot_cfg = get_plot_config(config)
     if plot_connectivity_circle is None:
         log_if_present(logger, "warning", "mne-connectivity not installed; skipping significance circle")
@@ -690,29 +615,6 @@ def plot_rsn_radar(
     log_if_present(get_logger(__name__), "info", f"Saved RSN radar for {measure} {band}")
 
 
-def _build_adjacency_from_edges(
-    features_df: pd.DataFrame,
-    edge_cols: List[str],
-    channel_order: List[str],
-) -> np.ndarray:
-    n_ch = len(channel_order)
-    adj = np.zeros((n_ch, n_ch), dtype=float)
-    for col in edge_cols:
-        try:
-            nodes_str = col.split("_")[-1]
-            ch1, ch2 = nodes_str.split("__")
-        except ValueError:
-            continue
-        if ch1 not in channel_order or ch2 not in channel_order:
-            continue
-        i = channel_order.index(ch1)
-        j = channel_order.index(ch2)
-        vals = pd.to_numeric(features_df[col], errors="coerce")
-        adj[i, j] = float(np.nanmean(vals))
-        adj[j, i] = adj[i, j]
-    return adj
-
-
 def plot_connectivity_by_condition(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
@@ -878,73 +780,6 @@ def plot_connectivity_by_condition(
     log_if_present(logger, "info", f"Saved connectivity by condition ({n_significant}/{n_tests} FDR significant)")
 
 
-def _compute_significance_mask(
-    features_df: pd.DataFrame,
-    edge_cols: List[str],
-    events_df: Optional[pd.DataFrame],
-    config: Any,
-) -> Optional[np.ndarray]:
-    if events_df is None or events_df.empty:
-        return None
-
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
-        return None
-
-    # We need at least some trials in both conditions
-    n_pain = pain_mask.sum()
-    n_nonpain = (~pain_mask).sum()
-    if n_pain < 3 or n_nonpain < 3:
-        return None
-
-    p_values = []
-    edge_map = []
-    
-    # Pre-select rows for performance
-    df_pain = features_df[pain_mask]
-    df_nonpain = features_df[~pain_mask]
-
-    for col in edge_cols:
-        vals_pain = pd.to_numeric(df_pain[col], errors="coerce").values
-        vals_nonpain = pd.to_numeric(df_nonpain[col], errors="coerce").values
-        
-        # Remove NaNs
-        vals_pain = vals_pain[np.isfinite(vals_pain)]
-        vals_nonpain = vals_nonpain[np.isfinite(vals_nonpain)]
-
-        if len(vals_pain) < 3 or len(vals_nonpain) < 3:
-            p_values.append(np.nan)
-            edge_map.append(col)
-            continue
-            
-        try:
-            _, p = mannwhitneyu(vals_pain, vals_nonpain, alternative='two-sided')
-            p_values.append(p)
-        except ValueError:
-            p_values.append(np.nan)
-        edge_map.append(col)
-
-    p_values = np.array(p_values, dtype=float)
-    finite_mask = np.isfinite(p_values)
-    if not np.any(finite_mask):
-        return None
-        
-    q_vals = np.full_like(p_values, np.nan, dtype=float)
-    if finite_mask.any():
-        q_vals[finite_mask] = fdr_bh(p_values[finite_mask], config=config)
-        
-    from eeg_pipeline.utils.config.loader import get_config_value
-    # Use standard statistics alpha, defaulting to 0.05
-    alpha = float(get_config_value(config, "statistics.fdr_alpha", 0.05))
-    
-    sig_edges = {edge_map[i] for i, q in enumerate(q_vals) if np.isfinite(q) and q < alpha}
-    
-    if not sig_edges:
-        return None
-        
-    return sig_edges
-
-
 def plot_connectivity_heatmap(
     features_df: pd.DataFrame,
     info: mne.Info,
@@ -968,11 +803,11 @@ def plot_connectivity_heatmap(
         except ValueError:
             continue
     channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
-    adj = _build_adjacency_from_edges(features_df, edge_cols, channel_order)
+    adj = build_adjacency_from_edges(features_df, edge_cols, channel_order)
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = _compute_significance_mask(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significance_mask(features_df, edge_cols, events_df, config)
     plot_cfg = get_plot_config(config)
     vmax = float(np.nanmax(np.abs(adj))) if np.any(np.isfinite(adj)) else 1.0
 
@@ -1037,11 +872,11 @@ def plot_connectivity_network(
         except ValueError:
             continue
     channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
-    adj = _build_adjacency_from_edges(features_df, edge_cols, channel_order)
+    adj = build_adjacency_from_edges(features_df, edge_cols, channel_order)
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = _compute_significance_mask(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significance_mask(features_df, edge_cols, events_df, config)
     sig_set = sig_edges if isinstance(sig_edges, set) else set()
 
     plot_cfg = get_plot_config(config)

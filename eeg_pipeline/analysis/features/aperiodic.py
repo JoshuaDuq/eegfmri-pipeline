@@ -342,3 +342,107 @@ def extract_aperiodic_features(
     qc_payload = {"segments_computed": list(set(col.split("_")[1] for col in df.columns if "_" in col))}
     
     return df, list(df.columns), qc_payload
+
+
+def extract_aperiodic_features_from_epochs(
+    epochs: mne.Epochs,
+    baseline_window: Tuple[float, float],
+    bands: List[str],
+    config: Any,
+    logger: Any,
+    *,
+    events_df: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    picks, ch_names = pick_eeg_channels(epochs)
+    if len(picks) == 0:
+        return pd.DataFrame(), [], {}
+
+    times = epochs.times
+    sfreq = float(epochs.info["sfreq"])
+    min_samples = int(sfreq)
+
+    def _clamp_window(window: Tuple[float, float]) -> Optional[Tuple[float, float]]:
+        if times.size == 0:
+            return None
+        start, end = float(window[0]), float(window[1])
+        start = max(start, float(times[0]))
+        end = min(end, float(times[-1]))
+        if end <= start:
+            return None
+        return (start, end)
+
+    baseline = _clamp_window(baseline_window)
+    if baseline is None:
+        return pd.DataFrame(), [], {"skipped_reason": "invalid_baseline_window"}
+
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
+    plateau_window = get_config_value(config, "time_frequency_analysis.plateau_window", [3.0, 10.5])
+    plateau = _clamp_window((float(plateau_window[0]), float(plateau_window[1])))
+    ramp = _clamp_window((0.0, ramp_end))
+
+    all_data: Dict[str, np.ndarray] = {}
+    segments_done: List[str] = []
+
+    baseline_data = _extract_aperiodic_for_segment(
+        epochs,
+        picks,
+        ch_names,
+        "baseline",
+        baseline[0],
+        baseline[1],
+        bands,
+        config,
+        logger,
+    )
+    if baseline_data:
+        all_data.update(baseline_data)
+        segments_done.append("baseline")
+
+    if ramp is not None:
+        ramp_mask = (times >= ramp[0]) & (times <= ramp[1])
+        if int(np.sum(ramp_mask)) >= min_samples:
+            ramp_data = _extract_aperiodic_for_segment(
+                epochs,
+                picks,
+                ch_names,
+                "ramp",
+                ramp[0],
+                ramp[1],
+                bands,
+                config,
+                logger,
+            )
+            if ramp_data:
+                all_data.update(ramp_data)
+                segments_done.append("ramp")
+
+    if plateau is not None:
+        plateau_mask = (times >= plateau[0]) & (times <= plateau[1])
+        if int(np.sum(plateau_mask)) >= min_samples:
+            plateau_data = _extract_aperiodic_for_segment(
+                epochs,
+                picks,
+                ch_names,
+                "plateau",
+                plateau[0],
+                plateau[1],
+                bands,
+                config,
+                logger,
+            )
+            if plateau_data:
+                all_data.update(plateau_data)
+                segments_done.append("plateau")
+
+    if not all_data:
+        return pd.DataFrame(), [], {"skipped_reason": "empty_result"}
+
+    df = pd.DataFrame(all_data)
+    qc_payload = {
+        "segments_computed": sorted(set(segments_done)),
+        "baseline_window": (float(baseline[0]), float(baseline[1])),
+        "plateau_window": (float(plateau[0]), float(plateau[1])) if plateau is not None else None,
+    }
+    return df, list(df.columns), qc_payload

@@ -81,29 +81,68 @@ def build_plateau_features(
     col_name_to_series = {}
     plateau_cols = []
 
+    def _first_present(candidates: List[str]) -> Optional[str]:
+        for name in candidates:
+            if name in pow_cols:
+                return name
+        return None
+
     for band in power_bands:
         for ch in ch_names:
-            plateau_col_direct = f"pow_{band}_{ch}_plateau"
-            if plateau_col_direct in pow_cols:
-                name = f"pow_{band}_{ch}"
-                col_name_to_series[name] = pow_df[plateau_col_direct]
-                plateau_cols.append(name)
+            preferred = _first_present(
+                [
+                    f"power_plateau_{band}_ch_{ch}_logratio",
+                    f"power_plateau_{band}_ch_{ch}_log10raw",
+                    f"pow_{band}_{ch}_plateau",
+                ]
+            )
+            if preferred is not None:
+                out_name = preferred
+                col_name_to_series[out_name] = pow_df[preferred]
+                plateau_cols.append(out_name)
                 continue
 
-            early_col = f"pow_{band}_{ch}_early"
-            mid_col = f"pow_{band}_{ch}_mid"
-            late_col = f"pow_{band}_{ch}_late"
+            early = _first_present(
+                [
+                    f"power_early_{band}_ch_{ch}_logratio",
+                    f"power_early_{band}_ch_{ch}_log10raw",
+                    f"pow_{band}_{ch}_early",
+                ]
+            )
+            mid = _first_present(
+                [
+                    f"power_mid_{band}_ch_{ch}_logratio",
+                    f"power_mid_{band}_ch_{ch}_log10raw",
+                    f"pow_{band}_{ch}_mid",
+                ]
+            )
+            late = _first_present(
+                [
+                    f"power_late_{band}_ch_{ch}_logratio",
+                    f"power_late_{band}_ch_{ch}_log10raw",
+                    f"pow_{band}_{ch}_late",
+                ]
+            )
 
-            if early_col in pow_cols and mid_col in pow_cols and late_col in pow_cols:
-                plateau_val = pow_df[[early_col, mid_col, late_col]].mean(axis=1)
-                name = f"pow_{band}_{ch}"
-                col_name_to_series[name] = plateau_val
-                plateau_cols.append(name)
+            if early is not None and mid is not None and late is not None:
+                plateau_val = pow_df[[early, mid, late]].mean(axis=1)
+
+                stat = "logratio" if any(s.endswith("_logratio") for s in [early, mid, late]) else "log10raw"
+                out_name = f"power_plateau_{band}_ch_{ch}_{stat}"
+                col_name_to_series[out_name] = plateau_val
+                plateau_cols.append(out_name)
 
         if not baseline_df.empty:
             for ch in ch_names:
-                baseline_col = f"baseline_{band}_{ch}"
-                if baseline_col in baseline_cols:
+                baseline_col = None
+                for candidate in [
+                    f"power_baseline_{band}_ch_{ch}_mean",
+                    f"baseline_{band}_{ch}",
+                ]:
+                    if candidate in baseline_cols:
+                        baseline_col = candidate
+                        break
+                if baseline_col is not None:
                     col_name_to_series[baseline_col] = baseline_df[baseline_col]
                     plateau_cols.append(baseline_col)
 

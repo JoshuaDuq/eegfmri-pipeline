@@ -17,26 +17,28 @@ from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
 from eeg_pipeline.plotting.core.utils import get_font_sizes
 from eeg_pipeline.plotting.core.colorbars import create_difference_colorbar
 from eeg_pipeline.plotting.core.annotations import find_annotation_x_position, get_sig_marker_text
+from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotRegistry
 from eeg_pipeline.utils.analysis.tfr import (
     build_rois_from_info,
     build_roi_channel_mask,
 )
-from eeg_pipeline.utils.io.general import (
+from eeg_pipeline.utils.io.paths import (
     deriv_plots_path,
     deriv_stats_path,
     ensure_dir,
     find_connectivity_features_path,
+)
+from eeg_pipeline.utils.io.plotting import (
     get_viz_params,
     plot_topomap_on_ax,
     robust_sym_vlim,
     save_fig,
-    read_tsv,
     get_behavior_footer as _get_behavior_footer,
-    get_subject_logger,
-    get_default_logger as _get_default_logger,
     get_default_config as _get_default_config,
     log_if_present as _log_if_present,
 )
+from eeg_pipeline.utils.io.tsv import read_tsv
+from eeg_pipeline.utils.io.logging import get_subject_logger, get_default_logger as _get_default_logger
 from eeg_pipeline.utils.config.loader import load_settings, get_frequency_band_names
 from eeg_pipeline.utils.analysis.stats import (
     compute_correlation_vmax,
@@ -928,3 +930,34 @@ def plot_significant_correlations_topomap(
     plt.close(fig)
     
     logger.info(f"Created topomaps for {len(bands_with_data)} frequency bands: {[bd['band'] for bd in bands_with_data]}")
+
+
+###################################################################
+# Registry adapters
+###################################################################
+
+
+@BehaviorPlotRegistry.register("temporal", name="temporal_topomaps")
+def run_temporal_topomaps(ctx, saved_plots):
+    plot_temporal_correlation_topomaps_by_pain(
+        subject=ctx.subject,
+        task=ctx.task,
+        plots_dir=ctx.plots_dir,
+        stats_dir=ctx.stats_dir,
+        config=ctx.config,
+        logger=ctx.logger,
+        use_spearman=ctx.use_spearman,
+    )
+    saved_plots["temporal_topomaps"] = ctx.plots_dir / "topomaps"
+
+
+@BehaviorPlotRegistry.register("temporal", name="pain_clusters")
+def run_pain_clusters(ctx, saved_plots):
+    plot_pain_nonpain_clusters(
+        subject=ctx.subject,
+        stats_dir=ctx.stats_dir,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+        logger=ctx.logger,
+    )
+    saved_plots["pain_clusters"] = ctx.plots_dir / "topomaps"

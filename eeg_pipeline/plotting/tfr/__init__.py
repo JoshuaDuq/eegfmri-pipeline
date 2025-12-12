@@ -1,9 +1,8 @@
 """
 Time-frequency representation (TFR) plotting module.
 
-This module provides functions for creating time-frequency representation visualizations
-at multiple levels: channel-level, scalp-mean, ROI-level, topomaps, group analysis,
-and correlation analysis.
+Low-level plotting primitives live here. High-level orchestration/IO is defined in
+`pipelines.viz.tfr` to keep responsibilities separated.
 """
 
 from __future__ import annotations
@@ -59,11 +58,24 @@ from .band_evolution import (
     plot_band_power_summary,
 )
 
-# Visualization orchestration
-from .viz import (
-    visualize_subject_tfr,
-    visualize_tfr_for_subjects,
-)
+###################################################################
+# Visualization orchestration wrappers (pipeline layer)
+###################################################################
+# These lightweight wrappers avoid an import-time dependency on
+# `eeg_pipeline.pipelines.viz.tfr`, preventing circular imports while
+# preserving the public API.
+
+
+def visualize_subject_tfr(*args, **kwargs):
+    from eeg_pipeline.pipelines.viz.tfr import visualize_subject_tfr as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def visualize_tfr_for_subjects(*args, **kwargs):
+    from eeg_pipeline.pipelines.viz.tfr import visualize_tfr_for_subjects as _impl
+
+    return _impl(*args, **kwargs)
 
 
 __all__ = [
@@ -96,8 +108,7 @@ __all__ = [
     "plot_condition_comparison_per_band",
     "plot_roi_condition_comparison",
     "plot_band_power_summary",
-    # Visualization orchestration
+    # Visualization orchestration (pipeline)
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
 ]
-

@@ -21,13 +21,13 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
-from eeg_pipeline.utils.io.general import (
+from eeg_pipeline.utils.io.plotting import (
     save_fig,
     get_behavior_footer as _get_behavior_footer,
-    get_default_logger as _get_default_logger,
     get_default_config as _get_default_config,
-    ensure_dir,
 )
+from eeg_pipeline.utils.io.logging import get_default_logger as _get_default_logger
+from eeg_pipeline.utils.io.paths import ensure_dir
 
 
 ###################################################################

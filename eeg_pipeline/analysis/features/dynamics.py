@@ -16,39 +16,15 @@ from typing import List, Dict, Tuple, Any
 from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.config.loader import get_config_value
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+
 
 def _get_segment_masks(precomputed: "PrecomputedData") -> Dict[str, np.ndarray]:
     """Derive ramp/plateau/offset masks based on times and config.
     
-    Duplicates logic from pipeline.py temporarily until sharedutils are established, 
-    or we can import if we decide to unify. For now, local helper to stay independent.
+    Wrapper around the canonical get_segment_masks in utils/analysis/windowing.py.
     """
-    times = precomputed.times
-    windows = precomputed.windows
-    cfg = precomputed.config or {}
-    ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
-    offset_start = get_config_value(cfg, "feature_engineering.features.offset_start", None)
-
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    plateau_mask = getattr(windows, "active_mask", None)
-    baseline_mask = getattr(windows, "baseline_mask", None)
-    offset_mask = None
-    if offset_start is not None:
-        try:
-            offset_start_f = float(offset_start)
-            # Skip offset if it lies beyond epoch duration
-            if offset_start_f < times[-1]:
-                offset_mask = times >= offset_start_f
-        except Exception:
-            offset_mask = None
-
-    return {
-        "ramp": ramp_mask,
-        "plateau": plateau_mask,
-        "baseline": baseline_mask,
-        "offset": offset_mask,
-    }
+    return get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
 
 def _process_single_epoch_dynamics(
     ep_idx: int,

@@ -23,7 +23,7 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 
-from eeg_pipeline.utils.io.general import get_logger
+from eeg_pipeline.utils.io.logging import get_logger
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, get_config_value
 
 logger = get_logger(__name__)

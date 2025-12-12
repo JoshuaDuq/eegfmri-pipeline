@@ -407,7 +407,7 @@ def compute_hierarchical_fdr_summary(
         Summary with hierarchical FDR results.
     """
     from pathlib import Path
-    from eeg_pipeline.utils.io.general import read_tsv
+    from eeg_pipeline.utils.io.tsv import read_tsv
     
     stats_dir = Path(stats_dir)
     

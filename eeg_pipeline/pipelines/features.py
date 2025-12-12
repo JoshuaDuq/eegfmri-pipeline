@@ -37,18 +37,17 @@ import pandas as pd
 if TYPE_CHECKING:
     import mne
 
-from eeg_pipeline.context.features import FeatureContext, FEATURE_CATEGORIES
+from eeg_pipeline.context.features import (
+    FeatureContext,
+    FEATURE_CATEGORIES,
+    PRECOMPUTED_GROUP_CHOICES,
+)
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.io.general import (
-    deriv_features_path,
-    deriv_plots_path,
-    ensure_dir,
-    setup_matplotlib,
-    write_tsv,
-    _load_events_df,
-    _pick_target_column,
-)
+from eeg_pipeline.utils.io.paths import deriv_features_path, deriv_plots_path, ensure_dir, _load_events_df
+from eeg_pipeline.utils.io.plotting import setup_matplotlib
+from eeg_pipeline.utils.io.tsv import write_tsv
+from eeg_pipeline.utils.io.columns import _pick_target_column
 from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import (
     align_feature_dataframes,
@@ -69,6 +68,7 @@ from eeg_pipeline.utils.analysis.tfr import (
     compute_adaptive_n_cycles,
     save_tfr_with_sidecar,
     resolve_tfr_workers,
+    compute_complex_tfr,
 )
 
 from eeg_pipeline.analysis.features.power import (
@@ -81,8 +81,14 @@ from eeg_pipeline.analysis.features.connectivity import (
     extract_connectivity_features,
     extract_connectivity_from_precomputed,
 )
-from eeg_pipeline.analysis.features.microstates import extract_microstate_features
-from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_features
+from eeg_pipeline.analysis.features.microstates import (
+    extract_microstate_features,
+    extract_microstate_features_from_epochs,
+)
+from eeg_pipeline.analysis.features.aperiodic import (
+    extract_aperiodic_features,
+    extract_aperiodic_features_from_epochs,
+)
 from eeg_pipeline.analysis.features.phase import extract_phase_features, compute_pac_comodulograms
 from eeg_pipeline.analysis.features.complexity import (
     extract_dynamics_features,
@@ -108,32 +114,60 @@ from eeg_pipeline.analysis.features.cfc import extract_pac_from_precomputed, ext
 ###################################################################
 
 
-def _get_precomputed_groups(config: Any) -> List[str]:
-    groups = config.get("feature_engineering.precomputed_groups")
+def _get_precomputed_groups(config: Any, override: Optional[List[str]] = None) -> List[str]:
+    """
+    Resolve which precomputed feature groups to run.
+    
+    Priority:
+    1. Runtime override (CLI/kwargs)
+    2. Config entry feature_engineering.precomputed_groups
+    """
+    groups = override if override is not None else config.get("feature_engineering.precomputed_groups")
     if not groups:
-        raise ValueError("feature_engineering.precomputed_groups must be defined in eeg_config.yaml")
-    return list(groups)
+        raise ValueError(
+            "Precomputed groups not specified; set feature_engineering.precomputed_groups "
+            "in eeg_config.yaml or provide via CLI."
+        )
+    
+    groups = [str(g) for g in groups]
+    groups = list(dict.fromkeys(groups))
+    if not groups:
+        raise ValueError("No precomputed groups specified; provide at least one.")
+    
+    unknown = [g for g in groups if g not in PRECOMPUTED_GROUP_CHOICES]
+    if unknown:
+        logging.getLogger(__name__).warning("Unrecognized precomputed groups requested: %s", ", ".join(unknown))
+    return groups
 
 
-def _compute_complex_tfr(epochs, config: Any, logger: logging.Logger):
-    freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
-    freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
-    n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
-    workers = resolve_tfr_workers(int(config.get("time_frequency_analysis.tfr.workers", -1)))
 
-    logger.info("Computing complex TFR for phase-based metrics...")
-    return epochs.compute_tfr(
-        method="morlet",
-        freqs=freqs,
-        n_cycles=n_cycles,
-        decim=tfr_decim,
-        picks=tfr_picks,
-        use_fft=True,
-        return_itc=False,
-        average=False,
-        output="complex",
-        n_jobs=workers,
-    )
+
+def _resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> List[str]:
+    """
+    Decide which feature categories to compute.
+    
+    Priority:
+    1. Runtime-provided list (CLI/kwargs)
+    2. Config entry feature_engineering.feature_categories
+    3. All available categories (default)
+    """
+    if requested is not None:
+        categories = list(requested)
+    else:
+        from_config = config.get("feature_engineering.feature_categories")
+        categories = list(from_config) if from_config else list(FEATURE_CATEGORIES)
+    
+    categories = list(dict.fromkeys(str(cat) for cat in categories))
+    if not categories:
+        raise ValueError("No feature categories specified; provide at least one.")
+    
+    invalid = [c for c in categories if c not in FEATURE_CATEGORIES]
+    if invalid:
+        raise ValueError(
+            f"Invalid feature categories {invalid}. "
+            f"Valid options: {', '.join(FEATURE_CATEGORIES)}"
+        )
+    return categories
 
 
 def _combine_feature_groups(result: Any, groups: List[str]) -> tuple:
@@ -156,7 +190,11 @@ def _combine_feature_groups(result: Any, groups: List[str]) -> tuple:
     return combined, cols
 
 
-def extract_all_features(ctx: FeatureContext) -> FeatureExtractionResult:
+def extract_all_features(
+    ctx: FeatureContext,
+    *,
+    precomputed_groups_override: Optional[List[str]] = None,
+) -> FeatureExtractionResult:
     """
     Extract all EEG features for a subject using TFR-based approach.
     
@@ -180,7 +218,7 @@ def extract_all_features(ctx: FeatureContext) -> FeatureExtractionResult:
 
     def _resolve_precomputed_groups() -> List[str]:
         try:
-            return _get_precomputed_groups(ctx.config)
+            return _get_precomputed_groups(ctx.config, precomputed_groups_override)
         except Exception as exc:
             ctx.logger.error(f"Precomputed groups unavailable: {exc}")
             return []
@@ -205,8 +243,9 @@ def extract_all_features(ctx: FeatureContext) -> FeatureExtractionResult:
     
     if needs_tfr:
         if any(c in ctx.feature_categories for c in ["itpc", "pac"]):
-            tfr_complex = _compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+            tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
             if tfr_complex is not None:
+                ctx.tfr_complex = tfr_complex
                 ctx.logger.info("Deriving power TFR from complex TFR...")
                 tfr_power = tfr_complex.copy()
                 tfr_power.data = np.abs(tfr_complex.data) ** 2
@@ -304,13 +343,28 @@ def extract_all_features(ctx: FeatureContext) -> FeatureExtractionResult:
     if "pac" in ctx.feature_categories:
         progress.step(message="Computing PAC features...")
         if tfr_complex is None:
-            tfr_complex = _compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+            tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+            if tfr_complex is not None:
+                ctx.tfr_complex = tfr_complex
 
         if tfr_complex is not None:
             freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
             freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
+
+            plateau_meta = ctx.windows.metadata.get("plateau") if ctx.windows is not None else None
+            plateau_window = None
+            if plateau_meta is not None and getattr(plateau_meta, "valid", False):
+                plateau_window = (float(plateau_meta.start), float(plateau_meta.end))
+
             pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
-                tfr_complex, freqs, tfr_complex.times, ctx.epochs.info, ctx.config, ctx.logger
+                tfr_complex,
+                freqs,
+                tfr_complex.times,
+                ctx.epochs.info,
+                ctx.config,
+                ctx.logger,
+                segment_name="plateau",
+                segment_window=plateau_window,
             )
             _check_length("PAC trials", pac_trials_df)
             _check_length("PAC time-resolved", pac_time_df)
@@ -490,13 +544,13 @@ def extract_precomputed_features(
              )
              baseline_window = tuple(baseline_window)
         
-        df, cols, qc = extract_aperiodic_features(
-            epochs, 
-            baseline_window, 
-            bands, 
-            config, 
-            logger, 
-            events_df=events_df
+        df, cols, qc = extract_aperiodic_features_from_epochs(
+            epochs,
+            baseline_window,
+            bands,
+            config,
+            logger,
+            events_df=events_df,
         )
         if not df.empty:
             result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")
@@ -515,7 +569,12 @@ def extract_precomputed_features(
     if "microstates" in feature_groups:
         logger.info("Extracting microstate features...")
         n_states = int(config.get("feature_engineering.microstates.n_states", 4))
-        ms_df, ms_cols, _ = extract_microstate_features(epochs, n_states, config, logger)
+        ms_df, ms_cols, _ = extract_microstate_features_from_epochs(
+            epochs,
+            n_states,
+            config,
+            logger,
+        )
         if not ms_df.empty:
             result.features["microstates"] = FeatureSet(ms_df, ms_cols, "microstates")
         else:
@@ -651,9 +710,13 @@ class FeaturePipeline(PipelineBase):
         if task is None:
             raise ValueError("Missing required config value: project.task")
         fixed_templates_path = kwargs.get("fixed_templates_path")
-        feature_categories = kwargs.get("feature_categories")
+        feature_categories = _resolve_feature_categories(self.config, kwargs.get("feature_categories"))
+        precomputed_groups = kwargs.get("precomputed_groups")
         
         self.logger.info(f"=== Feature extraction: sub-{subject}, task-{task} ===")
+        self.logger.info("Feature categories: %s", ", ".join(feature_categories))
+        if precomputed_groups:
+            self.logger.info("Precomputed groups override: %s", ", ".join(precomputed_groups))
         
         features_dir = deriv_features_path(self.deriv_root, subject)
         ensure_dir(features_dir)
@@ -708,10 +771,10 @@ class FeaturePipeline(PipelineBase):
             aligned_events=aligned_events,
             fixed_templates=fixed_templates,
             fixed_template_ch_names=fixed_template_ch_names,
-            feature_categories=feature_categories or list(FEATURE_CATEGORIES),
+            feature_categories=feature_categories,
         )
 
-        features = extract_all_features(ctx)
+        features = extract_all_features(ctx, precomputed_groups_override=precomputed_groups)
 
         tfr = features.tfr
         pow_df = features.pow_df
@@ -839,35 +902,8 @@ class FeaturePipeline(PipelineBase):
         )
 
 
-###################################################################
-# Module-Level Entry Points
-###################################################################
-
-
-def process_subject(
-    subject: str,
-    task: Optional[str] = None,
-    config: Optional[Any] = None,
-    **kwargs,
-) -> None:
-    pipeline = FeaturePipeline(config=config)
-    pipeline.process_subject(subject, task=task, **kwargs)
-
-
-def extract_features_for_subjects(
-    subjects: List[str],
-    task: Optional[str] = None,
-    config: Optional[Any] = None,
-    **kwargs,
-) -> List[Dict[str, Any]]:
-    pipeline = FeaturePipeline(config=config)
-    return pipeline.run_batch(subjects, task=task, **kwargs)
-
-
 __all__ = [
     "FeaturePipeline",
-    "process_subject",
-    "extract_features_for_subjects",
     "extract_all_features",
     "extract_precomputed_features",
     "extract_fmri_prediction_features",

@@ -22,10 +22,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from ...utils.io.general import ensure_dir, save_fig, read_tsv, deriv_plots_path, deriv_features_path
+from eeg_pipeline.utils.io.paths import ensure_dir, deriv_plots_path, deriv_features_path
+from eeg_pipeline.utils.io.plotting import save_fig
+from eeg_pipeline.utils.io.tsv import read_tsv
 from eeg_pipeline.plotting.utils import get_band_colors, get_significance_colors
 from eeg_pipeline.utils.data.manipulation import find_column
 from eeg_pipeline.utils.data import load_subject_scatter_data
+from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotRegistry
 
 
 # =============================================================================
@@ -301,6 +304,23 @@ def visualize_dose_response(
     
     logger.info(f"Created {len(saved_files)} dose-response plots")
     return saved_files
+
+
+###################################################################
+# Registry adapters
+###################################################################
+
+
+@BehaviorPlotRegistry.register("dose_response", name="dose_response")
+def run_dose_response(ctx, saved_plots):
+    results = visualize_dose_response(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        config=ctx.config,
+        logger=ctx.logger,
+    )
+    saved_plots.update(results)
 
 
 

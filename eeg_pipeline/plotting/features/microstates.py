@@ -16,14 +16,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mne
 
-from ...utils.io.general import (
+from eeg_pipeline.utils.io.plotting import (
     save_fig,
-    ensure_dir,
-    find_temperature_column_in_events,
     extract_eeg_picks,
     log_if_present as _log_if_present,
     validate_picks as _validate_picks,
 )
+from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.utils.io.columns import find_temperature_column_in_events
 from ...utils.data.loading import (
     resolve_columns,
     get_aligned_events,

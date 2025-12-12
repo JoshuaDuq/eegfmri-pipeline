@@ -37,11 +37,13 @@ import seaborn as sns
 import mne
 from mne.viz import plot_topomap
 
-from eeg_pipeline.utils.io.general import ensure_dir, read_tsv as _read_tsv, save_fig as _save_fig, deriv_plots_path, deriv_features_path
+from eeg_pipeline.utils.io.paths import ensure_dir, deriv_plots_path, deriv_features_path, deriv_stats_path
+from eeg_pipeline.utils.io.tsv import read_tsv as _read_tsv
+from eeg_pipeline.utils.io.plotting import save_fig as _save_fig, setup_matplotlib
+from eeg_pipeline.utils.io.logging import get_logger
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
-from eeg_pipeline.context.visualization import FeaturePlotContext
-from eeg_pipeline.plotting.manager import VisualizationRegistry, VisualizationManager
+from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry, VisualizationManager
 from eeg_pipeline.plotting.features.report import generate_feature_report
 
 from eeg_pipeline.plotting.features.burst import (
@@ -294,7 +296,6 @@ def _plot_microstate_templates_mne(ctx: FeaturePlotContext, saved_files: Dict[st
 
     n_microstates = int(ctx.config.get("feature_engineering.microstates.n_states", 4))
     # Try to find stats/templates file
-    from eeg_pipeline.utils.io.general import deriv_stats_path
     stats_dir = deriv_stats_path(ctx.config.deriv_root, ctx.subject)
     template_path = stats_dir / f"microstates_templates_K{n_microstates}.npz"
     
@@ -908,7 +909,6 @@ def _plot_itpc_features(ctx: FeaturePlotContext, saved_files: Dict[str, Path]) -
     
     itpc_dir = ctx.subdir("itpc")
     
-    from eeg_pipeline.utils.io.general import deriv_stats_path
     stats_dir = deriv_stats_path(ctx.config.deriv_root, ctx.subject)
     itpc_path = stats_dir / "itpc_data.npz"
     
@@ -1027,7 +1027,6 @@ def visualize_features_for_subjects(
         from eeg_pipeline.utils.config.loader import load_settings
         config = load_settings()
     
-    from eeg_pipeline.utils.io.general import setup_matplotlib, get_logger
     setup_matplotlib(config)
     
     task = task or config.get("project.task", "thermalactive")

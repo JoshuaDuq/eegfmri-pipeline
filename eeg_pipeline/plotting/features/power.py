@@ -17,9 +17,9 @@ import mne
 from mne.viz import plot_topomap
 
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
-from eeg_pipeline.utils.io.general import (
-    get_band_color,
-    save_fig,
+from eeg_pipeline.utils.io.plotting import get_band_color, save_fig
+from eeg_pipeline.utils.io.columns import (
+    find_pain_column_in_events,
     find_temperature_column_in_events,
 )
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
@@ -827,7 +827,7 @@ def plot_power_spectral_density_by_pain(
         logger.warning("No events for PSD by pain")
         return
     
-    pain_col = find_pain_column_in_events(events_df)
+    pain_col = find_pain_column_in_events(events_df, config)
     if pain_col is None:
         logger.warning("No pain binary column found")
         return

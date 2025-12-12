@@ -29,23 +29,21 @@ from eeg_pipeline.utils.data import (
     get_precomputed_stats_for_roi_band,
     load_subject_scatter_data,
 )
-from eeg_pipeline.utils.io.general import (
-    deriv_plots_path,
-    deriv_stats_path,
-    ensure_dir,
+from eeg_pipeline.utils.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir, _load_events_df
+from eeg_pipeline.utils.io.plotting import (
     save_fig,
-    _load_events_df,
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
-    sanitize_label,
-    get_subject_logger,
-    get_default_logger as _get_default_logger,
     get_default_config as _get_default_config,
+)
+from eeg_pipeline.utils.io.formatting import (
+    sanitize_label,
     get_residual_labels,
     get_target_labels,
     get_temporal_xlabel,
     format_time_suffix,
 )
+from eeg_pipeline.utils.io.logging import get_subject_logger, get_default_logger as _get_default_logger
 from eeg_pipeline.utils.analysis.stats import (
     compute_partial_residuals as _compute_partial_residuals,
     bootstrap_corr_ci as _bootstrap_corr_ci,
@@ -58,6 +56,7 @@ from eeg_pipeline.utils.analysis.stats import (
     update_stats_from_dataframe,
 )
 from eeg_pipeline.utils.analysis.tfr import build_rois_from_info as _build_rois
+from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotRegistry
 
 
 ###################################################################
@@ -447,6 +446,13 @@ def _plot_partial_residuals(
 def _get_temporal_columns(temporal_df: pd.DataFrame, band: str, time_label: str, config: Optional[Any] = None) -> List[str]:
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
+    v2_cols = [
+        c for c in temporal_df.columns
+        if str(c).startswith(f"power_{time_label}_{band}_ch_")
+    ]
+    if v2_cols:
+        return v2_cols
+
     power_prefix = behavioral_config.get("power_prefix", "pow_")
     return [
         c for c in temporal_df.columns
@@ -977,7 +983,14 @@ def plot_power_roi_scatter(
     power_bands_to_use = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
     
     for band in power_bands_to_use:
-        band_cols = {c for c in pow_df.columns if c.startswith(f"{power_prefix}{band}_")}
+        band_cols = {
+            c for c in pow_df.columns
+            if str(c).startswith(f"power_plateau_{band}_ch_")
+        }
+        using_v2 = True
+        if not band_cols:
+            using_v2 = False
+            band_cols = {c for c in pow_df.columns if str(c).startswith(f"{power_prefix}{band}_")}
         if not band_cols:
             continue
         
@@ -1003,7 +1016,22 @@ def plot_power_roi_scatter(
             )
 
         for roi, chs in roi_map.items():
-            roi_cols = [f"{power_prefix}{band}_{ch}" for ch in chs if f"{power_prefix}{band}_{ch}" in band_cols]
+            if using_v2:
+                roi_cols = []
+                for ch in chs:
+                    candidates = [
+                        f"power_plateau_{band}_ch_{ch}_logratio",
+                        f"power_plateau_{band}_ch_{ch}_log10raw",
+                    ]
+                    col = next((c for c in candidates if c in band_cols), None)
+                    if col is not None:
+                        roi_cols.append(col)
+            else:
+                roi_cols = [
+                    f"{power_prefix}{band}_{ch}"
+                    for ch in chs
+                    if f"{power_prefix}{band}_{ch}" in band_cols
+                ]
             if not roi_cols:
                 continue
             
@@ -1108,7 +1136,9 @@ def _load_correlation_stats(stats_dir: Path, logger: logging.Logger, config: Opt
         target_temperature = behavioral_config.get("target_temperature", "temperature")
     candidate_files = [
         (target_rating, stats_dir / "corr_stats_pow_combined_vs_rating.tsv"),
+        (target_rating, stats_dir / "corr_stats_power_combined_vs_rating.tsv"),
         (target_temperature, stats_dir / "corr_stats_pow_combined_vs_temp.tsv"),
+        (target_temperature, stats_dir / "corr_stats_power_combined_vs_temp.tsv"),
     ]
     
     frames = []
@@ -1703,4 +1733,92 @@ def plot_itpc_roi_scatter(
     
     logger.info(f"ITPC scatter: {len(results['significant'])} significant of {len(results['all'])} total")
     return results
+
+
+###################################################################
+# Registry adapters
+###################################################################
+
+
+def _record_results(ctx, result):
+    if isinstance(result, dict) and "all" in result:
+        ctx.all_results.append(result)
+
+
+@BehaviorPlotRegistry.register("psychometrics", name="psychometrics")
+def run_psychometrics(ctx, saved_plots):
+    plot_psychometrics(ctx.subject, ctx.deriv_root, ctx.task, ctx.config)
+    saved_plots["psychometrics"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("scatter", name="power_roi_scatter")
+def run_power_scatter(ctx, saved_plots):
+    result = plot_power_roi_scatter(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        use_spearman=ctx.use_spearman,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+        rating_stats=ctx.rating_stats,
+        temp_stats=ctx.temp_stats,
+    )
+    _record_results(ctx, result)
+    saved_plots["power_roi_scatter"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("scatter", name="dynamics_scatter")
+def run_dynamics_scatter(ctx, saved_plots):
+    result = plot_dynamics_roi_scatter(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        use_spearman=ctx.use_spearman,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+    )
+    _record_results(ctx, result)
+    saved_plots["dynamics_scatter"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("scatter", name="aperiodic_scatter")
+def run_aperiodic_scatter(ctx, saved_plots):
+    result = plot_aperiodic_roi_scatter(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        use_spearman=ctx.use_spearman,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+    )
+    _record_results(ctx, result)
+    saved_plots["aperiodic_scatter"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("scatter", name="connectivity_scatter")
+def run_connectivity_scatter(ctx, saved_plots):
+    result = plot_connectivity_roi_scatter(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        use_spearman=ctx.use_spearman,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+    )
+    _record_results(ctx, result)
+    saved_plots["connectivity_scatter"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("scatter", name="itpc_scatter")
+def run_itpc_scatter(ctx, saved_plots):
+    result = plot_itpc_roi_scatter(
+        subject=ctx.subject,
+        deriv_root=ctx.deriv_root,
+        task=ctx.task,
+        use_spearman=ctx.use_spearman,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+    )
+    _record_results(ctx, result)
+    saved_plots["itpc_scatter"] = ctx.plots_dir
 

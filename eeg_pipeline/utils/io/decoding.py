@@ -13,13 +13,9 @@ import pandas as pd
 import mne
 from scipy.stats import norm
 
-from ..io.general import (
-    ensure_dir,
-    deriv_stats_path,
-    _find_clean_epochs_path,
-    fdr_bh,
-    get_logger,
-)
+from .paths import ensure_dir, deriv_stats_path, _find_clean_epochs_path
+from .logging import get_logger
+from ..analysis.stats.fdr import fdr_bh
 from ..config.loader import load_settings
 from ..data.loading import resolve_columns
 
@@ -297,12 +293,34 @@ def export_indices(
 ###################################################################
 
 def parse_pow_feature(feat: str) -> Optional[Tuple[str, str]]:
-    if not isinstance(feat, str) or not feat.startswith("pow_"):
+    if not isinstance(feat, str):
         return None
-    parts = feat[4:].split("_")
-    if len(parts) < 2:
-        return None
-    return "_".join(parts[:-1]), parts[-1]
+
+    # Legacy plateau power: pow_<band>_<channel>
+    if feat.startswith("pow_"):
+        parts = feat[4:].split("_")
+        if len(parts) < 2:
+            return None
+        band = parts[0]
+        channel = parts[1]
+        return band, channel
+
+    # NamingSchema power per-channel: power_<segment>_<band>_ch_<channel>_<stat>
+    if feat.startswith("power_") and "_ch_" in feat:
+        parts = feat.split("_")
+        if len(parts) < 6:
+            return None
+        # parts = [power, segment, band, ch, <channel...>, <stat...>]
+        band = parts[2]
+        if parts[3] != "ch":
+            return None
+        remainder = feat.split("_ch_", 1)[-1]
+        if "_" not in remainder:
+            return None
+        channel = remainder.rsplit("_", 1)[0]
+        return band, channel
+
+    return None
 
 def write_feature_importance_tsv(
     subject: str,

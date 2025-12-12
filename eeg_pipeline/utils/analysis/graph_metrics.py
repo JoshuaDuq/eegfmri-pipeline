@@ -326,3 +326,67 @@ def compute_network_segregation_integration(
     if total_sum == 0:
         return np.nan, np.nan
     return float(within_sum / total_sum), float(between_sum / total_sum)
+
+
+# =============================================================================
+# Legacy helpers (compatibility)
+# =============================================================================
+
+def compute_legacy_graph_summaries(adj: np.ndarray, measure: str, band: str) -> Dict[str, float]:
+    """Compute graph summaries matching the legacy connectivity extractor.
+
+    Notes
+    -----
+    This intentionally preserves the historical behavior in
+    `eeg_pipeline.analysis.features.connectivity._graph_metrics` to avoid
+    changing results during refactors.
+    """
+    adj = np.asarray(adj, dtype=float)
+    adj[~np.isfinite(adj)] = 0.0
+    np.fill_diagonal(adj, 0.0)
+
+    if adj.size == 0 or np.all(adj == 0):
+        return {
+            f"{measure}_{band}_geff": np.nan,
+            f"{measure}_{band}_clust": np.nan,
+            f"{measure}_{band}_pc": np.nan,
+            f"{measure}_{band}_smallworld": np.nan,
+        }
+
+    G = nx.from_numpy_array(np.abs(adj))
+    if G.number_of_nodes() == 0:
+        return {}
+
+    # Global efficiency (legacy: unweighted)
+    try:
+        geff = nx.global_efficiency(G)
+    except ZeroDivisionError:
+        geff = np.nan
+
+    # Clustering coefficient (weighted, averaged)
+    try:
+        clust_vals = nx.clustering(G, weight="weight").values()
+        clust = float(np.mean(list(clust_vals))) if clust_vals else np.nan
+    except Exception:
+        clust = np.nan
+
+    # Participation coefficient placeholder (legacy behavior)
+    pc_mean = np.nan
+
+    # Small-world sigma (legacy: binary, only if connected; restricted iterations)
+    try:
+        adj_bin = (np.abs(adj) > 0).astype(float)
+        G_bin = nx.Graph(adj_bin)
+        if nx.is_connected(G_bin):
+            smallworld = float(nx.algorithms.smallworld.sigma(G_bin, niter=5, nrand=5))
+        else:
+            smallworld = np.nan
+    except Exception:
+        smallworld = np.nan
+
+    return {
+        f"{measure}_{band}_geff": geff,
+        f"{measure}_{band}_clust": clust,
+        f"{measure}_{band}_pc": pc_mean,
+        f"{measure}_{band}_smallworld": smallworld,
+    }

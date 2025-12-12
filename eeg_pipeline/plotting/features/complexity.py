@@ -16,7 +16,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from eeg_pipeline.utils.io.general import save_fig
+from eeg_pipeline.utils.io.plotting import save_fig
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import (

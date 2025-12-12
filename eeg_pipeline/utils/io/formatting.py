@@ -33,7 +33,7 @@ def format_baseline_string(baseline_window: Tuple[float, float]) -> str:
 
 
 def parse_analysis_type_from_filename(filename: str) -> str:
-    if filename.startswith("corr_stats_pow_roi"):
+    if filename.startswith("corr_stats_pow_roi") or filename.startswith("corr_stats_power_roi"):
         return "pow_roi"
     if filename.startswith("corr_stats_conn_roi_summary"):
         return "conn_roi_summary"
@@ -205,6 +205,130 @@ def format_time_suffix(time_label: Optional[str]) -> str:
     return " (plateau)"
 
 
+###################################################################
+# File Building Utilities (migrated from general.py)
+###################################################################
+
+import numpy as np
+
+
+def build_file_updates_dict(
+    file_references: List[Tuple[Path, int]],
+    q_array: np.ndarray,
+    rejections_array: np.ndarray,
+    p_array: np.ndarray,
+) -> Dict[Path, List[Tuple[int, float, bool, float]]]:
+    from ..analysis.stats import _safe_float
+    
+    file_updates: Dict[Path, List[Tuple[int, float, bool, float]]] = {}
+    
+    for index, (file_path, row_index) in enumerate(file_references):
+        update_item = (
+            row_index,
+            _safe_float(q_array[index]),
+            bool(rejections_array[index]),
+            _safe_float(p_array[index]),
+        )
+        file_updates.setdefault(file_path, []).append(update_item)
+    
+    return file_updates
+
+
+def build_predictor_column_mapping(predictor_type: str) -> Dict[str, str]:
+    base_cols = {
+        "predictor": "predictor",
+        "band": "band",
+        "r": "r",
+        "p": "p",
+        "n": "n",
+        "predictor_type": "type",
+        "target": "target",
+    }
+    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
+    base_cols[region_col] = "region"
+    return base_cols
+
+
+def build_predictor_name(df: pd.DataFrame, predictor_type: str) -> pd.Series:
+    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
+    if region_col not in df.columns:
+        region_col = "roi" if "roi" in df.columns else "channel" if "channel" in df.columns else df.columns[0]
+    return df[region_col].astype(str) + " (" + df["band"].astype(str) + ")"
+
+
+def build_connectivity_heatmap_records(
+    n_nodes: int,
+    node_names: List[str],
+    correlation_matrix: np.ndarray,
+    p_value_matrix: np.ndarray,
+    rejection_map: Dict[Tuple[int, int], bool],
+    critical_value: float,
+) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    for i in range(n_nodes):
+        for j in range(i + 1, n_nodes):
+            pair_key = (i, j)
+            records.append({
+                "node_i": node_names[i],
+                "node_j": node_names[j],
+                "r": correlation_matrix[i, j],
+                "p": p_value_matrix[i, j],
+                "fdr_reject": rejection_map.get(pair_key, False),
+                "fdr_crit_p": critical_value,
+            })
+    return records
+
+
+def _get_df_value(df: pd.DataFrame, col: str, row_idx: int, default: str = "") -> str:
+    return df.get(col, pd.Series([default] * len(df))).iloc[row_idx]
+
+
+def build_meta_for_row(
+    df: pd.DataFrame,
+    row_idx: int,
+    filename: str,
+    analysis_type: str,
+    target: str,
+    measure_band: str,
+    p_source: str,
+) -> Dict[str, Any]:
+    meta = {
+        "source_file": filename,
+        "analysis_type": analysis_type,
+        "target": target,
+        "measure_band": measure_band,
+        "row_index": int(row_idx),
+    }
+    if p_source:
+        meta["p_used_source"] = p_source
+
+    try:
+        if analysis_type == "pow_roi":
+            roi = _get_df_value(df, "roi", row_idx)
+            band = _get_df_value(df, "band", row_idx)
+            meta.update({"roi": roi, "band": band})
+            meta["test_label"] = f"pow_{band}_ROI {roi} vs {target}"
+        elif analysis_type == "conn_roi_summary":
+            roi_i = _get_df_value(df, "roi_i", row_idx)
+            roi_j = _get_df_value(df, "roi_j", row_idx)
+            meta.update({"roi_i": roi_i, "roi_j": roi_j})
+            meta["test_label"] = f"conn_{measure_band}_ROI {roi_i}-{roi_j} vs {target}"
+        elif analysis_type == "pow_channel":
+            channel = _get_df_value(df, "channel", row_idx)
+            band = _get_df_value(df, "band", row_idx)
+            meta.update({"channel": channel, "band": band})
+            meta["test_label"] = f"pow_{band}_Channel {channel} vs {target}"
+        elif analysis_type == "conn_edges":
+            node_i = _get_df_value(df, "node_i", row_idx)
+            node_j = _get_df_value(df, "node_j", row_idx)
+            meta.update({"node_i": node_i, "node_j": node_j})
+            meta["test_label"] = f"conn_{measure_band}_Edge {node_i}-{node_j} vs {target}"
+    except (KeyError, IndexError):
+        pass
+    
+    return meta
+
+
 __all__ = [
     "sanitize_label",
     "format_baseline_window_string",
@@ -215,6 +339,11 @@ __all__ = [
     "format_band_range",
     "build_partial_covars_string",
     "format_band_label",
+    "build_file_updates_dict",
+    "build_predictor_column_mapping",
+    "build_predictor_name",
+    "build_connectivity_heatmap_records",
+    "build_meta_for_row",
     "get_correlation_type_labels",
     "format_temperature_label",
     "extract_subject_id_from_path",

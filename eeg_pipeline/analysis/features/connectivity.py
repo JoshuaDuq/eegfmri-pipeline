@@ -30,6 +30,7 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
     symmetrize_adjacency as _symmetrize_and_clip,
     compute_global_efficiency_weighted as _global_efficiency_weighted,
     compute_small_world_sigma,
+    compute_legacy_graph_summaries,
 )
 
 # --- Helpers ---
@@ -239,76 +240,8 @@ def extract_connectivity_features(
 # =============================================================================
 
 def _graph_metrics(adj: np.ndarray, measure: str, band: str) -> Dict[str, float]:
-    """Compute graph metrics for a single adjacency matrix."""
-    adj = np.asarray(adj, dtype=float)
-    # Ensure zero diagonal and handle NaNs
-    adj[~np.isfinite(adj)] = 0.0
-    np.fill_diagonal(adj, 0.0)
-    
-    if adj.size == 0 or np.all(adj == 0):
-        return {
-            f"{measure}_{band}_geff": np.nan,
-            f"{measure}_{band}_clust": np.nan,
-            f"{measure}_{band}_pc": np.nan,
-            f"{measure}_{band}_smallworld": np.nan,
-        }
-    
-    G = nx.from_numpy_array(np.abs(adj))
-    if G.number_of_nodes() == 0:
-        return {}
-
-    # Global Efficiency
-    try:
-        geff = nx.global_efficiency(G)
-    except ZeroDivisionError:
-        geff = np.nan
-
-    # Clustering Coefficient (Weighted)
-    try:
-        clust_vals = nx.clustering(G, weight="weight").values()
-        clust = float(np.mean(list(clust_vals))) if clust_vals else np.nan
-    except Exception:
-        clust = np.nan
-
-    # Performance (community quality - simplified proxy or skip if too heavy)
-    # Note: pipeline.py used nx.algorithms.community.quality.performance
-    # which requires a partition. The original code in pipeline.py passed list(G.edges())
-    # as partition? That seems wrong/suspicious in the original code. 
-    # nx.performance(G, partition) requires partition to be a sequence of node sets.
-    # list(G.edges()) is a list of tuples. 
-    # For safety, we will wrap in try/except as per original code, but it likely failed silently there too.
-    try:
-        # Replicating original logic even if dubious, to maintain behavior, 
-        # but likely this was calculating something else or intended differently.
-        # If it was failing, it returned nan.
-        from networkx.algorithms.community import performance
-        # Assuming simple partition of connected components? 
-        # The original code: performance(G, list(G.edges()))
-        # This is almost certainly strictly invalid for 'partition', coverage is likely what was meant?
-        # We'll just set to NaN to avoid crashing if it's bad.
-        pc_mean = np.nan 
-    except Exception:
-        pc_mean = np.nan
-
-    # Small-world Sigma (requires binary graph for standard sigma, or normalized for weighted)
-    # Pipeline used: sigma(nx.Graph(adj_bin))
-    try:
-        adj_bin = (np.abs(adj) > 0).astype(float)
-        # Check connectivity for smallworld sigma (needs connected graph usually)
-        G_bin = nx.Graph(adj_bin)
-        if nx.is_connected(G_bin):
-            smallworld = float(nx.algorithms.smallworld.sigma(G_bin, niter=5, nrand=5)) # restricted iter for speed
-        else:
-            smallworld = np.nan
-    except Exception:
-        smallworld = np.nan
-
-    return {
-        f"{measure}_{band}_geff": geff,
-        f"{measure}_{band}_clust": clust,
-        f"{measure}_{band}_pc": pc_mean,
-        f"{measure}_{band}_smallworld": smallworld,
-    }
+    """Compute graph summaries for a single adjacency matrix (legacy-compatible)."""
+    return compute_legacy_graph_summaries(adj=adj, measure=measure, band=band)
 
 def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
     if mask is None:
@@ -318,18 +251,12 @@ def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
     return arr
 
 def _get_segment_masks(precomputed: Any) -> Dict[str, np.ndarray]:
-    """Helper to get masks for baseline, ramp, and plateau segments."""
-    times = precomputed.times
-    windows = precomputed.windows
-    cfg = precomputed.config or {}
-    from eeg_pipeline.utils.config.loader import get_config_value
-    ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
+    """Helper to get masks for baseline, ramp, and plateau segments.
     
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    plateau_mask = getattr(windows, "active_mask", None)
-    baseline_mask = getattr(windows, "baseline_mask", None)
-    
-    return {"baseline": baseline_mask, "ramp": ramp_mask, "plateau": plateau_mask}
+    Wrapper around the canonical get_segment_masks in utils/analysis/windowing.py.
+    """
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    return get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
 
 def extract_connectivity_from_precomputed(
     precomputed: Any # PrecomputedData

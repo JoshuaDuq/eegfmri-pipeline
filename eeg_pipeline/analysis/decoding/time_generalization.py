@@ -29,7 +29,7 @@ from eeg_pipeline.utils.config.loader import load_settings, get_fisher_z_clip_va
 from eeg_pipeline.plotting.decoding import (
     plot_time_generalization_with_null,
 )
-from eeg_pipeline.utils.io.general import get_logger
+from eeg_pipeline.utils.io.logging import get_logger
 
 logger = get_logger(__name__)
 

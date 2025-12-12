@@ -10,6 +10,7 @@ Phase-based features for EEG analysis:
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Tuple, Any
+import logging
 import numpy as np
 import pandas as pd
 import mne
@@ -180,7 +181,10 @@ def compute_pac_comodulograms(
     times: np.ndarray,
     info: mne.Info,
     config: Any,
-    logger: logging.Logger
+    logger: logging.Logger,
+    *,
+    segment_name: str = "plateau",
+    segment_window: Optional[Tuple[float, float]] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
     Compute Phase-Amplitude Coupling (PAC) using Mean Vector Length (MVL).
@@ -195,21 +199,35 @@ def compute_pac_comodulograms(
     if tfr_complex is None:
         return None, None, None, None, None
         
-    data = tfr_complex.data # (n_epochs, n_ch, n_freqs, n_times)
-    n_epochs, n_ch, n_freqs, n_times = data.shape
-    
+    data = tfr_complex.data  # (n_epochs, n_ch, n_freqs, n_times)
+    n_epochs, n_ch, _, _ = data.shape
+
+    tfr_freqs = np.asarray(getattr(tfr_complex, "freqs", freqs), dtype=float)
+    tfr_times = np.asarray(getattr(tfr_complex, "times", times), dtype=float)
+
+    if segment_window is not None:
+        start, end = float(segment_window[0]), float(segment_window[1])
+        t_mask = (tfr_times >= start) & (tfr_times < end)
+        if not np.any(t_mask):
+            logger.warning("PAC: empty time window for %s [%0.3f, %0.3f)", segment_name, start, end)
+            return None, None, None, None, None
+        data = data[..., t_mask]
+        tfr_times = tfr_times[t_mask]
+
+    n_times = data.shape[-1]
+
     # Define frequency ranges
     # Phase: Low freqs (e.g. 2-13 Hz)
     # Amp: High freqs (e.g. 15-100 Hz)
-    phase_mask = (freqs >= 2) & (freqs <= 13)
-    amp_mask = (freqs >= 15) & (freqs <= 100)
+    phase_mask = (tfr_freqs >= 2) & (tfr_freqs <= 13)
+    amp_mask = (tfr_freqs >= 15) & (tfr_freqs <= 100)
     
     if not np.any(phase_mask) or not np.any(amp_mask):
         logger.warning("No valid phase/amplitude frequencies for PAC")
         return None, None, None, None, None
         
-    phase_freqs = freqs[phase_mask]
-    amp_freqs = freqs[amp_mask]
+    phase_freqs = tfr_freqs[phase_mask]
+    amp_freqs = tfr_freqs[amp_mask]
     
     phase_indices = np.where(phase_mask)[0]
     amp_indices = np.where(amp_mask)[0]
@@ -227,7 +245,7 @@ def compute_pac_comodulograms(
     
     # Let's vectorize over trials and time?
     # (n_epochs, n_ch, n_phase, n_times)
-    phases = np.angle(data[:, :, phase_indices, :]) 
+    phases = np.angle(data[:, :, phase_indices, :])
     expphi = np.exp(1j * phases)
     
     # (n_epochs, n_ch, n_amp, n_times)
@@ -276,7 +294,7 @@ def compute_pac_comodulograms(
         pac_val = np.abs(mvl_complex) # (n_epochs, n_phase, n_amp)
         
         # 1. Aggregated (mean over epochs) -> (n_phase, n_amp)
-        pac_mean_evoked = np.mean(pac_val, axis=0) 
+        _ = np.mean(pac_val, axis=0)
         
         # Flatten for pac_df? 
         # Usually pac_df is (freq_phase * freq_amp) rows, columns=channels?
@@ -317,7 +335,14 @@ def compute_pac_comodulograms(
                 # Mean over freq bins
                 pac_trial_val = np.mean(pac_sub, axis=(1, 2)) # (n_epochs,)
                 
-                col_name = NamingSchema.build("pac", "plateau", f"{p_name}_{a_name}", "ch", "val", channel=ch_names[ch_idx])
+                col_name = NamingSchema.build(
+                    "pac",
+                    segment_name,
+                    f"{p_name}_{a_name}",
+                    "ch",
+                    "val",
+                    channel=ch_names[ch_idx],
+                )
                 trials_pac_list.append(pd.Series(pac_trial_val, name=col_name))
 
     # Combine all trial series
@@ -325,11 +350,6 @@ def compute_pac_comodulograms(
         return None, phase_freqs, amp_freqs, None, None
         
     pac_trials_df = pd.concat(trials_pac_list, axis=1)
-    
-    # Return 
-    pac_trials_df = pd.concat(trials_pac_list, axis=1)
-    
-    # Return 
     return None, phase_freqs, amp_freqs, pac_trials_df, None
 
 

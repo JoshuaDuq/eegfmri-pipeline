@@ -340,7 +340,7 @@ def get_sig_marker_text(config=None) -> str:
     Returns:
         Significance marker text string, or empty string if diff_annotation_enabled is False
     """
-    from ...utils.io.general import get_viz_params
+    from eeg_pipeline.utils.io.plotting import get_viz_params
     
     viz_params = get_viz_params(config)
     if not viz_params["diff_annotation_enabled"]:
@@ -406,7 +406,7 @@ def add_roi_annotations(
         apply_fdr_correction: Whether to apply FDR correction
         fdr_alpha: Optional FDR alpha threshold
     """
-    from ...utils.io.general import detect_data_format as _detect_data_format
+    from eeg_pipeline.utils.validation import detect_data_format as _detect_data_format
     
     if config is None and roi_map is None:
         return

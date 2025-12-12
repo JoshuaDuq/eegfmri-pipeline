@@ -1,6 +1,10 @@
+###################################################################
+# PROJECT & PATHS
+###################################################################
 project:
   task: "thermalactive"  # Task name used in BIDS paths and file naming
   random_state: 42  # Random seed for reproducible analyses (used in decoding, ML models, behavior analysis, phase features)
+
 paths:
   bids_root: "../../data/bids_output"  # BIDS-formatted raw data directory
   deriv_root: "../../data/derivatives"  # Processed derivatives output directory
@@ -15,6 +19,7 @@ paths:
 # These definitions are referenced throughout the config using YAML anchors (& and *)
 # to ensure consistency and avoid duplication.
 
+# Frequency bands and time windows
 frequency_bands: &frequency_bands  # Standard EEG frequency band definitions [Hz] (used throughout TFR/feature analysis)
   delta: [1.0, 3.9]  # Delta band range
   theta: [4.0, 7.9]  # Theta band range
@@ -24,35 +29,25 @@ frequency_bands: &frequency_bands  # Standard EEG frequency band definitions [Hz
 
 plateau_window: &plateau_window [3.0, 10.5]  # Thermal plateau period [s] for feature extraction (used throughout analysis)
 baseline_window_tfr: &baseline_window_tfr [-3.0, -0.5]  # TFR baseline correction window [s] relative to stimulus (shortened to avoid filter edge effects)
-default_baseline_tfr_correlation: &default_baseline_tfr_correlation [-0.5, -0.01]  # Default baseline window [s] for TFR correlation plots (fallback when config unavailable)
+
+# Thresholds and counts
 min_samples_for_stats: &min_samples_for_stats 2  # Minimum samples required for statistical tests (shared threshold)
-default_alpha: &default_alpha 0.05  # Default significance threshold (alpha level) - primary anchor for all alpha values
-epsilon_std: &epsilon_std 1e-12  # Small epsilon for standard deviation/division operations (prevents division by zero)
-epsilon_psd: &epsilon_psd 1e-20  # Small epsilon for power spectral density/log operations (prevents log(0))
-epsilon_amp: &epsilon_amp 1e-10  # Small epsilon for amplitude calculations (prevents division by zero)
-epsilon_amp_pac: &epsilon_amp_pac 1e-9  # Small epsilon for PAC amplitude normalization
-min_epochs_default: &min_epochs_default 20  # Default minimum epochs required for analysis
-fisher_z_clip_min: &fisher_z_clip_min -0.999999  # Lower clipping bound for Fisher z-transform (prevents -inf)
-fisher_z_clip_max: &fisher_z_clip_max 0.999999  # Upper clipping bound for Fisher z-transform (prevents +inf)
-ci_percentile_low: &ci_percentile_low 2.5  # Lower percentile for bootstrap CI (2.5th percentile)
-ci_percentile_high: &ci_percentile_high 97.5  # Upper percentile for bootstrap CI (97.5th percentile)
-log_base: &log_base 10.0  # Base for logarithm calculations (log10)
-percentage_multiplier: &percentage_multiplier 100.0  # Multiplier to convert proportions to percentages
-default_min_subjects_topomaps: &default_min_subjects_topomaps 3  # Default minimum subjects required for group topomaps
-default_correlation_vmin: &default_correlation_vmin -0.6  # Default minimum correlation value for colormaps
-default_correlation_vmax: &default_correlation_vmax 0.6  # Default maximum correlation value for colormaps
-default_n_permutations_quick: &default_n_permutations_quick 100  # Default permutations for quick tests (reduced for testing)
-default_n_permutations_full: &default_n_permutations_full 1000  # Default permutations for full statistical tests
-default_cluster_n_perm: &default_cluster_n_perm 100  # Default cluster permutation count (reduced for testing)
 min_samples_per_covariate: &min_samples_per_covariate 5  # Minimum samples per covariate for partial correlation
 partial_corr_base_samples: &partial_corr_base_samples 5  # Base samples required for partial correlation
 min_dof_for_correlation: &min_dof_for_correlation 2  # Minimum degrees of freedom for correlation validity
-min_samples_for_bayes: &min_samples_for_bayes 3  # Minimum samples required for Bayes factor calculation
-alpha_transparent: &alpha_transparent 0.2  # Light transparency for fills/grids
-alpha_medium: &alpha_medium 0.5  # Medium transparency for reference lines/annotations
-default_fit_line_points: &default_fit_line_points 100  # Number of points for regression fit lines
-default_time_grid_points: &default_time_grid_points 200  # Number of points for time grid interpolation
-default_labelpad: &default_labelpad 10  # Default label padding [points]
+default_alpha: &default_alpha 0.05  # Default significance threshold (alpha level) - primary anchor for all alpha values
+default_cluster_n_perm: &default_cluster_n_perm 100  # Default cluster permutation count (reduced for testing)
+fisher_z_clip_min: &fisher_z_clip_min -0.999999  # Lower clipping bound for Fisher z-transform (prevents -inf)
+fisher_z_clip_max: &fisher_z_clip_max 0.999999  # Upper clipping bound for Fisher z-transform (prevents +inf)
+
+# Numeric guards and helpers
+epsilon_std: &epsilon_std 1e-12  # Small epsilon for standard deviation/division operations (prevents division by zero)
+epsilon_psd: &epsilon_psd 1e-20  # Small epsilon for power spectral density/log operations (prevents log(0))
+epsilon_amp: &epsilon_amp 1e-10  # Small epsilon for amplitude calculations (prevents division by zero)
+log_base: &log_base 10.0  # Base for logarithm calculations (log10)
+percentage_multiplier: &percentage_multiplier 100.0  # Multiplier to convert proportions to percentages
+
+# Region-of-interest definitions
 rois: &roi_definitions  # Region of interest definitions: regex patterns matching channel names
   Frontal:  # Prefrontal + frontal (bilateral)
     - "^(Fp1|Fp2|Fpz|AF3|AF4|AF7|AF8|F1|F2|F3|F4|F5|F6|F7|F8)$"
@@ -112,10 +107,6 @@ alignment:  # Epoch-event alignment parameters
 preprocessing:  # Preprocessing parameters
   resample_freq: 500  # Target sampling frequency [Hz] for resampling (used in validation)
 
-raw_to_bids:  # Raw data to BIDS conversion parameters
-  default_montage: "easycap-M1"  # Default MNE montage name for channel positions
-  default_line_freq: 60.0  # Line noise frequency [Hz] for notch filtering
-
 io:  # I/O utility constants
   constants:  # Validation thresholds and I/O parameters
     percent_threshold: 5.0  # Threshold for detecting percent format data (used in detect_data_format)
@@ -127,13 +118,13 @@ io:  # I/O utility constants
 # VALIDATION & QUALITY CONTROL
 ###################################################################
 validation:  # Data validation parameters (used in validation.py)
-  min_epochs: *min_epochs_default  # Minimum number of epochs required for analysis (reference to shared min_epochs_default)
+  min_epochs: 20  # Minimum number of epochs required for analysis (reference to shared min_epochs_default)
   min_channels: 10  # Minimum number of channels required for analysis
   max_amplitude_uv: 500  # Maximum amplitude threshold [µV] for artifact detection
 
 analysis:  # General analysis parameters (used across multiple analysis modules)
   min_subjects_for_group: 2  # Minimum number of subjects required for group-level analysis (used in decoding cross-validation, group feature aggregation)
-  min_subjects_for_topomaps: *default_min_subjects_topomaps  # Minimum subjects required for group topomaps (reference to shared default_min_subjects_topomaps)
+  min_subjects_for_topomaps: 3  # Minimum subjects required for group topomaps (reference to shared default_min_subjects_topomaps)
 erp_analysis:  # ERP analysis parameters (used in 01_erp_analysis.py)
   erp:  # Event-related potential analysis settings
     picks: "eeg"  # Channel type selector for MNE (used in _extract_erp_config)
@@ -190,6 +181,18 @@ time_frequency_analysis:  # Time-frequency analysis parameters (used in 02_tfr_a
 ###################################################################
 feature_engineering:  # Feature extraction parameters (used in 03_feature_extraction.py)
   save_tfr_with_sidecar: true  # Whether to save TFR files with BIDS sidecar JSON metadata
+  feature_categories:  # Feature groups to compute (edit to limit work)
+    - "power"
+    - "connectivity"
+    - "microstates"
+    - "aperiodic"
+    - "itpc"
+    - "pac"
+    - "precomputed"
+    - "cfc"
+    - "dynamics_advanced"
+    - "complexity"
+    - "quality"
   features:  # Feature extraction window definitions
     plateau_window: *plateau_window  # Thermal plateau period [s] for feature extraction (reference to plateau_window anchor)
     ramp_end: 3.0  # Stimulus ramp ends at 3s
@@ -246,17 +249,17 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     min_fit_points: 5  # Minimum frequency points required for valid aperiodic fit
     min_samples: 5  # Minimum time samples required in PSD window
     constants:  # Feature extraction constants
-    epsilon_std: *epsilon_std  # Small epsilon for standard deviation calculations (prevents division by zero, reference to shared epsilon_std)
-    epsilon_psd: *epsilon_psd  # Small epsilon for power spectral density calculations (prevents log(0), reference to shared epsilon_psd)
-    epsilon_amp: *epsilon_amp  # Small epsilon for amplitude calculations (prevents division by zero, reference to shared epsilon_amp)
-    epsilon_normalization: *epsilon_std  # Epsilon for normalization operations (prevents division by zero, reference to shared epsilon_std)
-    ascii_uppercase_a: 65  # ASCII code for 'A' (used in microstate labeling)
-    min_correlation_samples: 5  # Minimum samples required for correlation calculations
-    kmeans_n_init: 20  # Number of k-means initializations for microstate clustering
-    aperiodic_fmin: 2.0  # Minimum frequency [Hz] for aperiodic component fitting
-    aperiodic_fmax: 40.0  # Maximum frequency [Hz] for aperiodic component fitting
-    pac_epsilon_amp: *epsilon_amp_pac  # Small epsilon for PAC amplitude normalization (reference to shared epsilon_amp_pac)
-    itpc_epsilon_amp: *epsilon_std  # Small epsilon for ITPC amplitude normalization (reference to shared epsilon_std)
+      epsilon_std: *epsilon_std  # Small epsilon for standard deviation calculations (prevents division by zero, reference to shared epsilon_std)
+      epsilon_psd: *epsilon_psd  # Small epsilon for power spectral density calculations (prevents log(0), reference to shared epsilon_psd)
+      epsilon_amp: *epsilon_amp  # Small epsilon for amplitude calculations (prevents division by zero, reference to shared epsilon_amp)
+      epsilon_normalization: *epsilon_std  # Epsilon for normalization operations (prevents division by zero, reference to shared epsilon_std)
+      ascii_uppercase_a: 65  # ASCII code for 'A' (used in microstate labeling)
+      min_correlation_samples: 5  # Minimum samples required for correlation calculations
+      kmeans_n_init: 20  # Number of k-means initializations for microstate clustering
+      aperiodic_fmin: 2.0  # Minimum frequency [Hz] for aperiodic component fitting
+      aperiodic_fmax: 40.0  # Maximum frequency [Hz] for aperiodic component fitting
+      pac_epsilon_amp: 1e-9  # Small epsilon for PAC amplitude normalization (reference to shared epsilon_amp_pac)
+      itpc_epsilon_amp: *epsilon_std  # Small epsilon for ITPC amplitude normalization (reference to shared epsilon_std)
     min_epochs_for_features: 10  # Minimum epochs required for feature extraction
     min_channels_for_connectivity: 3  # Minimum channels required for connectivity computation
     min_samples_for_psd: 64  # Minimum samples required for PSD computation
@@ -340,7 +343,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     phase_step_hz: 1.0  # Step size for phase frequencies [Hz] (used in compute_pac_comodulograms)
     amp_step_hz: 5.0  # Step size for amplitude frequencies [Hz] (used in compute_pac_comodulograms)
     plateau_window: *plateau_window  # Time window [s] to compute PAC (defaults to TFR plateau if unset, used in compute_pac_comodulograms)
-    min_epochs: *min_epochs_default  # Minimum number of epochs required for PAC computation (used in compute_pac_comodulograms, reference to shared min_epochs_default)
+    min_epochs: 20  # Minimum number of epochs required for PAC computation (used in compute_pac_comodulograms, reference to shared min_epochs_default)
     n_surrogates: 200  # Number of surrogate tests for PAC significance (used in compute_pac_comodulograms)
   cross_frequency:  # Cross-frequency coupling parameters (used in cfc.py)
     methods: ["mi"]  # PAC methods: "mi" (modulation index), "glm", "mvl"
@@ -560,9 +563,9 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
       n_cluster_perm: 10  # Number of cluster permutation tests (quick check)
   cluster_correction:  # Cluster-based permutation test parameters (used in cluster correction)
     alpha: *default_alpha  # Cluster significance threshold (reference to shared default_alpha)
-    n_permutations: *default_n_permutations_full  # Number of permutations for cluster correction (reference to shared default_n_permutations_full, minimum 1000 recommended for reliable p-value estimation at alpha=0.05)
-    min_permutations: *default_n_permutations_full  # Minimum permutations for reliable cluster test p-values at alpha=0.05 (reference to shared default_n_permutations_full)
-    default_n_permutations: *default_n_permutations_quick  # Default number of permutations for quick cluster tests (used in cluster_tests.py when n_perm not specified, reference to shared default_n_permutations_quick)
+    n_permutations: 1000  # Number of permutations for cluster correction (reference to shared default_n_permutations_full, minimum 1000 recommended for reliable p-value estimation at alpha=0.05)
+    min_permutations: 1000  # Minimum permutations for reliable cluster test p-values at alpha=0.05 (reference to shared default_n_permutations_full)
+    default_n_permutations: 100  # Default number of permutations for quick cluster tests (used in cluster_tests.py when n_perm not specified, reference to shared default_n_permutations_quick)
   temporal_correlation_topomaps:  # Temporal correlation topomap parameters (used in compute_temporal_correlations_by_condition)
     window_size_ms: 500.0  # Window size [ms] for temporal binning
     min_trials_per_condition: 5  # Minimum trials required per condition (temperature/pain) for correlation computation
@@ -572,10 +575,10 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
   statistics:  # Statistical analysis parameters (used in _compute_correlation_statistics, compute_power_roi_stats)
     correlation_method: "spearman"  # Correlation method: "spearman" (rank) or "pearson" (linear, used in pipelines/behavior.py, same default as statistics.use_spearman_default)
     fdr_alpha: *default_alpha  # False discovery rate threshold (reference to shared default_alpha anchor, used in apply_global_fdr)
-    n_permutations: *default_n_permutations_full  # Number of permutation tests (used in compute_permutation_pvalues, ROI stats, topomap correlations, reference to shared default_n_permutations_full). Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
-    default_n_permutations: *default_n_permutations_quick  # Default number of permutations for quick tests (used in cluster tests, reference to shared default_n_permutations_quick)
+    n_permutations: 1000  # Number of permutation tests (used in compute_permutation_pvalues, ROI stats, topomap correlations, reference to shared default_n_permutations_full). Minimum 1000 recommended for reliable p-value estimation at alpha=0.05
+    default_n_permutations: 100  # Default number of permutations for quick tests (used in cluster tests, reference to shared default_n_permutations_quick)
     default_alpha: *default_alpha  # Default significance threshold (reference to shared default_alpha anchor)
-    default_n_bootstrap: *default_n_permutations_full  # Default number of bootstrap iterations (reference to shared default_n_permutations_full)
+    default_n_bootstrap: 1000  # Default number of bootstrap iterations (reference to shared default_n_permutations_full)
     min_samples_per_covariate: *min_samples_per_covariate  # Minimum samples per covariate for partial correlation (reference to shared min_samples_per_covariate)
     partial_corr_base_samples: *partial_corr_base_samples  # Base samples required for partial correlation (reference to shared partial_corr_base_samples)
     min_dof_for_correlation: *min_dof_for_correlation  # Minimum degrees of freedom for correlation validity (reference to shared min_dof_for_correlation)
@@ -584,8 +587,8 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     max_correlation: 0.9999  # Maximum correlation value (prevents 1.0 for Fisher z-transform)
     partial_covariates: ["temperature", "block"]  # Covariates for partial correlation (e.g., ["temperature", "block"])
     bootstrap_ci_percentiles:  # Bootstrap confidence interval percentiles (reference to shared ci_percentile values)
-      - *ci_percentile_low
-      - *ci_percentile_high
+      - 2.5
+      - 97.5
     bootstrap_use_fisher_z: false  # Whether to use Fisher z-transform for bootstrap correlations (used in stats.py)
     bootstrap_bias_correction: true  # Whether to apply bias correction to bootstrap correlations (used in stats.py)
     min_nodes_for_heatmap: 3  # Minimum nodes/channels required for heatmap computation
@@ -663,14 +666,6 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     mediators: []  # List of feature columns to test as mediators
 
 ###################################################################
-# GROUP AGGREGATION
-###################################################################
-feature_aggregation:  # Feature aggregation parameters (used in aggregate_features.py)
-  power_bin: "plateau"  # Power bin label for feature aggregation (used in group/features.py)
-  filenames:  # Output filenames for aggregated feature statistics (used in aggregate_features.py)
-    microstate_transitions: "aggregated_microstate_transitions.tsv"  # Filename for microstate transition summary (used in aggregate_feature_stats)
-
-###################################################################
 # DECODING & MACHINE LEARNING
 ###################################################################
 decoding:  # Decoding/regression analysis parameters (used in 05_decoding.py, decoding.py)
@@ -727,8 +722,6 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
     fisher_z_clip_min: *fisher_z_clip_min  # Lower clipping bound for Fisher z-transform (prevents -inf, reference to shared fisher_z_clip_min)
     fisher_z_clip_max: *fisher_z_clip_max  # Upper clipping bound for Fisher z-transform (prevents +inf, reference to shared fisher_z_clip_max)
     ci_multiplier_95: 1.96  # Multiplier for 95% confidence intervals (1.96 * SE)
-    ci_percentile_low: *ci_percentile_low  # Lower percentile for bootstrap CI (2.5th percentile, reference to shared ci_percentile_low)
-    ci_percentile_high: *ci_percentile_high  # Upper percentile for bootstrap CI (97.5th percentile, reference to shared ci_percentile_high)
     t_critical_alpha_05: 0.975  # Critical t-value quantile for alpha=0.05 (two-tailed, same as decoding.constants.bootstrap_ci_alpha_high)
     min_samples_for_stats: *min_samples_for_stats  # Minimum samples required for statistical tests (reference to shared min_samples_for_stats)
     min_samples_for_correlation: 5  # Minimum samples required for correlation calculations (used in safe_correlation, correlate_features_loop)
@@ -943,7 +936,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       percent_detection_threshold: 5.0  # Minimum percentage change to display in annotations [%]
       default_cluster_n_perm: *default_cluster_n_perm  # Default number of permutations for cluster tests (reference to shared default_cluster_n_perm)
       default_significance_alpha: *default_alpha  # Default significance threshold (reference to shared default_alpha, used in plotting/tfr/correlation.py)
-      default_baseline_window: *default_baseline_tfr_correlation  # Default baseline window [s] for TFR correlation plots (fallback, reference to shared default_baseline_tfr_correlation)
+      default_baseline_window: [-0.5, -0.01]  # Default baseline window [s] for TFR correlation plots (fallback, reference to shared default_baseline_tfr_correlation)
       default_max_freq: 80.0  # Default maximum frequency [Hz] for TFR plots (same as frequency_bands.gamma[1])
       gamma_lower_bound: 30.1  # Lower bound of gamma band [Hz] (same as frequency_bands.gamma[0])
       default_nave: 1  # Default number of averages (1 = single trial)
@@ -1175,9 +1168,9 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         annotation_alpha: 0.3  # Annotation box transparency
         annotation_color: "yellow"  # Annotation box background color
       temporal:  # Temporal correlation plot parameters (used in temporal.py)
-        labelpad: *default_labelpad  # Label padding [points] (reference to shared default_labelpad)
-        time_grid_points: *default_time_grid_points  # Number of points for time grid interpolation (reference to shared default_time_grid_points)
-        fit_line_points: *default_fit_line_points  # Number of points for regression fit lines (reference to shared default_fit_line_points)
+        labelpad: 10  # Label padding [points] (reference to shared default_labelpad)
+        time_grid_points: 200  # Number of points for time grid interpolation (reference to shared default_time_grid_points)
+        fit_line_points: 100  # Number of points for regression fit lines (reference to shared default_fit_line_points)
         scatter_marker_size: 100  # Scatter marker size [points] for peak markers
         scatter_marker_size_small: 22  # Small scatter marker size [points]
         scatter_marker_size_tiny: 14  # Tiny scatter marker size [points]
@@ -1191,9 +1184,9 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
           medium: 11  # Medium font size for titles
           large: 13  # Large font size for suptitles
         alpha_values:  # Alpha transparency values for temporal plots
-          grid: *alpha_transparent  # Grid transparency (reference to shared alpha_transparent)
+          grid: 0.2  # Grid transparency (reference to shared alpha_transparent)
           fill: 0.3  # Fill area transparency
-          line_reference: *alpha_medium  # Reference line transparency (reference to shared alpha_medium)
+          line_reference: 0.5  # Reference line transparency (reference to shared alpha_medium)
           text_box: 0.5  # Text box background transparency
           scatter: 0.65  # Scatter plot marker transparency
           scatter_dim: 0.7  # Dim scatter plot marker transparency
@@ -1240,7 +1233,6 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
         histogram_bins_permutation: 50  # Number of bins for permutation null distribution histogram (used in _plot_permutation_null)
         histogram_bins_loo: 20  # Number of bins for leave-one-out stability histogram (used in _plot_loo_stability)
         histogram_bins_bayes: 30  # Number of bins for Bayes factor histogram (used in _plot_bayes_factors)
-        min_samples_for_bayes: *min_samples_for_bayes  # Minimum samples required for Bayes factor calculation (used in _approx_bayes_factor, reference to shared min_samples_for_bayes)
       statistical_validity:  # Statistical validity plot parameters (used in statistical_validity.py)
         figsize_wide: [15, 5]  # Wide figure size [width, height] [inches]
         figsize_standard: [12, 5]  # Standard figure size [width, height] [inches]
@@ -1341,8 +1333,8 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
     features:  # Feature plot configuration (used in plot_features.py)
       figure_size: "standard"  # Figure size preset name
       correlation:  # Correlation plot parameters
-        vmin: *default_correlation_vmin  # Minimum correlation value for colormap (reference to shared default_correlation_vmin)
-        vmax: *default_correlation_vmax  # Maximum correlation value for colormap (reference to shared default_correlation_vmax)
+        vmin: -0.6  # Minimum correlation value for colormap (reference to shared default_correlation_vmin)
+        vmax: 0.6  # Maximum correlation value for colormap (reference to shared default_correlation_vmax)
         threshold_text: 0.4  # Correlation threshold for displaying text annotations
         threshold_color: 0.5  # Correlation threshold for color highlighting
         max_features: 50  # Maximum number of features to include in correlation heatmaps

@@ -23,59 +23,41 @@ from eeg_pipeline.pipelines.erp import (
     ErpPipeline,
     get_erp_config,
     load_and_prepare_epochs,
-    extract_erp_stats,
-    extract_erp_stats_for_subjects,
 )
 from eeg_pipeline.pipelines.features import (
     FeaturePipeline,
     extract_all_features,
     extract_precomputed_features,
     extract_fmri_prediction_features,
-    extract_features_for_subjects,
-    process_subject,
 )
 from eeg_pipeline.pipelines.behavior import (
     BehaviorPipeline,
     BehaviorPipelineConfig,
     BehaviorPipelineResults,
-    run_pipeline as run_behavior_pipeline,
-    run_pipeline_batch as run_behavior_pipeline_batch,
-    compute_behavior_correlations_for_subjects,
 )
-from eeg_pipeline.pipelines.decoding import (
-    DecodingPipeline,
-    run_regression_decoding,
-    run_time_generalization,
-)
+from eeg_pipeline.pipelines.decoding import DecodingPipeline
+from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
 __all__ = [
     # Base
     "PipelineBase",
     # Preprocessing
+    "PreprocessingPipeline",
     "run_raw_to_bids",
     "run_merge_behavior",
     # ERP
     "ErpPipeline",
     "get_erp_config",
     "load_and_prepare_epochs",
-    "extract_erp_stats",
-    "extract_erp_stats_for_subjects",
     # Features
     "FeaturePipeline",
     "extract_all_features",
     "extract_precomputed_features",
     "extract_fmri_prediction_features",
-    "extract_features_for_subjects",
-    "process_subject",
     # Behavior
     "BehaviorPipeline",
     "BehaviorPipelineConfig",
     "BehaviorPipelineResults",
-    "run_behavior_pipeline",
-    "run_behavior_pipeline_batch",
-    "compute_behavior_correlations_for_subjects",
     # Decoding
     "DecodingPipeline",
-    "run_regression_decoding",
-    "run_time_generalization",
 ]

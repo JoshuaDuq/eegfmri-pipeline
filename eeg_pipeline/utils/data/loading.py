@@ -9,13 +9,13 @@ import numpy as np
 import pandas as pd
 import mne
 
-from ..io.general import (
+from ..io.paths import (
     _find_clean_epochs_path,
     _load_events_df,
-    _pick_target_column,
     deriv_features_path,
-    read_tsv,
 )
+from ..io.columns import _pick_target_column
+from ..io.tsv import read_tsv
 from ..config.loader import load_settings, ConfigDict, get_config_value, ensure_config, get_frequency_band_names
 
 EEGConfig = ConfigDict
@@ -293,7 +293,7 @@ def _handle_alignment_mismatch(
         if n_events > n_epochs:
             return aligned_events.iloc[:n_epochs].reset_index(drop=True)
         else:
-            from ..io.general import log_and_raise_error
+            from ..io.logging import log_and_raise_error
             error_msg = (
                 f"Alignment length mismatch for sub-{subject}, task-{task}: "
                 f"events={n_events}, epochs={n_epochs}, diff={diff}. "
@@ -301,7 +301,7 @@ def _handle_alignment_mismatch(
             )
             log_and_raise_error(logger, error_msg)
     else:
-        from ..io.general import log_and_raise_error
+        from ..io.logging import log_and_raise_error
         reason = "allow_misaligned_trim=False" if not allow_trim else f"mismatch ({diff}) exceeds max_tolerable_mismatch ({min_alignment_samples})"
         error_msg = (
             f"Alignment length mismatch for sub-{subject}, task-{task}: "
@@ -1109,6 +1109,86 @@ def load_feature_bundle_for_subject(
     return pow_df, ms_df, conn_df, aper_df, pac_df, pac_trials_df, pac_time_df, itpc_df
 
 
+@dataclass
+class FeatureBundle:
+    """Unified container for all feature tables loaded for a subject."""
+    power_df: Optional[pd.DataFrame] = None
+    microstate_df: Optional[pd.DataFrame] = None
+    connectivity_df: Optional[pd.DataFrame] = None
+    aperiodic_df: Optional[pd.DataFrame] = None
+    pac_df: Optional[pd.DataFrame] = None
+    pac_trials_df: Optional[pd.DataFrame] = None
+    pac_time_df: Optional[pd.DataFrame] = None
+    itpc_df: Optional[pd.DataFrame] = None
+    complexity_df: Optional[pd.DataFrame] = None
+    dynamics_df: Optional[pd.DataFrame] = None
+    all_features_df: Optional[pd.DataFrame] = None
+    targets: Optional[pd.Series] = None
+    
+    @property
+    def n_trials(self) -> int:
+        if self.power_df is not None:
+            return len(self.power_df)
+        return 0
+    
+    @property
+    def empty(self) -> bool:
+        return self.power_df is None
+
+
+def load_feature_bundle(
+    subject: str,
+    deriv_root: Path,
+    logger: Optional[logging.Logger] = None,
+    include_targets: bool = False,
+) -> FeatureBundle:
+    """
+    Load all feature tables for a subject into a unified FeatureBundle.
+    
+    This is the canonical loader for feature data. Use this instead of
+    hand-rolling _safe_read logic in individual contexts.
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    features_dir = deriv_features_path(deriv_root, subject)
+    
+    def _safe_read(path: Path) -> Optional[pd.DataFrame]:
+        if not path.exists():
+            return None
+        try:
+            return read_tsv(path)
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
+            logger.warning("Failed to read %s: %s", path, exc)
+            return None
+
+    bundle = FeatureBundle(
+        power_df=_safe_read(features_dir / "features_eeg_direct.tsv"),
+        microstate_df=_safe_read(features_dir / "features_microstates.tsv"),
+        connectivity_df=_safe_read(features_dir / "features_connectivity.tsv"),
+        aperiodic_df=_safe_read(features_dir / "features_aperiodic.tsv"),
+        pac_df=_safe_read(features_dir / "features_pac.tsv"),
+        pac_trials_df=_safe_read(features_dir / "features_pac_trials.tsv"),
+        pac_time_df=_safe_read(features_dir / "features_pac_time.tsv"),
+        itpc_df=_safe_read(features_dir / "features_itpc.tsv"),
+        complexity_df=_safe_read(features_dir / "features_complexity.tsv"),
+        dynamics_df=_safe_read(features_dir / "features_dynamics.tsv"),
+        all_features_df=_safe_read(features_dir / "features_all.tsv"),
+    )
+    
+    if include_targets:
+        targets_df = _safe_read(features_dir / "target_vas_ratings.tsv")
+        if targets_df is not None:
+            if targets_df.shape[1] == 1:
+                bundle.targets = pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
+            else:
+                numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) > 0:
+                    bundle.targets = pd.to_numeric(targets_df[numeric_cols[0]], errors="coerce")
+    
+    return bundle
+
+
 def load_feature_dfs_for_subjects(
     subjects: List[str],
     deriv_root: Path,
@@ -1220,16 +1300,25 @@ def load_behavior_stats_files(stats_dir: Path, logger: logging.Logger) -> tuple[
     rating_stats = None
     temp_stats = None
 
-    rating_path = stats_dir / "corr_stats_pow_roi_vs_rating.tsv"
-    temp_path = stats_dir / "corr_stats_pow_roi_vs_temp.tsv"
+    rating_candidates = [
+        stats_dir / "corr_stats_pow_roi_vs_rating.tsv",
+        stats_dir / "corr_stats_power_roi_vs_rating.tsv",
+    ]
+    temp_candidates = [
+        stats_dir / "corr_stats_pow_roi_vs_temp.tsv",
+        stats_dir / "corr_stats_power_roi_vs_temp.tsv",
+    ]
 
-    if rating_path.exists():
+    rating_path = next((p for p in rating_candidates if p.exists()), None)
+    temp_path = next((p for p in temp_candidates if p.exists()), None)
+
+    if rating_path is not None:
         try:
             rating_stats = read_tsv(rating_path)
         except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
             logger.warning("Failed to read rating stats: %s", exc)
 
-    if temp_path.exists():
+    if temp_path is not None:
         try:
             temp_stats = read_tsv(temp_path)
         except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
@@ -1265,7 +1354,7 @@ def load_subject_data_for_summary(subjects: List[str], task: str, deriv_root: Pa
     if not subjects:
         return {}, {}, {}, {}, False
     
-    from ..io.general import _find_clean_epochs_path
+    from ..io.paths import _find_clean_epochs_path
     
     rating_x = {}
     rating_y = {}
@@ -1307,7 +1396,16 @@ def load_subject_data_for_summary(subjects: List[str], task: str, deriv_root: Pa
         
         power_bands = get_frequency_band_names(config)
         for band in power_bands:
-            power_cols = [col for col in power_df.columns if col.startswith(f"pow_{band}_")]
+            band_str = str(band)
+            power_cols = [
+                col for col in power_df.columns
+                if str(col).startswith(f"power_plateau_{band_str}_ch_")
+            ]
+            if not power_cols:
+                power_cols = [
+                    col for col in power_df.columns
+                    if str(col).startswith(f"pow_{band_str}_")
+                ]
             if not power_cols:
                 continue
             
@@ -1722,9 +1820,16 @@ def extract_roi_columns(
     if not roi or not channels or not band:
         return None
     
-    roi_columns = [
-        f"pow_{band}_{ch}" for ch in channels if f"pow_{band}_{ch}" in band_columns
-    ]
+    roi_columns = []
+    for ch in channels:
+        candidates = [
+            f"power_plateau_{band}_ch_{ch}_logratio",
+            f"power_plateau_{band}_ch_{ch}_log10raw",
+            f"pow_{band}_{ch}",
+        ]
+        col = next((c for c in candidates if c in band_columns), None)
+        if col is not None:
+            roi_columns.append(col)
     return roi_columns if roi_columns else None
 
 def extract_rating_array_for_tf(
@@ -1805,17 +1910,25 @@ def build_summary_map_for_prefix(
 
 def load_channel_correlations(subject: str, band: str, deriv_root: Path, 
                                correlation_type: str) -> Optional[pd.DataFrame]:
-    from ..io.general import deriv_stats_path
+    from ..io.paths import deriv_stats_path
     
     if not subject or not band or correlation_type not in ("rating", "temp"):
         return None
     
+    stats_dir = deriv_stats_path(deriv_root, subject)
     if correlation_type == "rating":
-        file_path = deriv_stats_path(deriv_root, subject) / f"corr_stats_pow_{band}_vs_rating.tsv"
+        candidates = [
+            stats_dir / f"corr_stats_pow_{band}_vs_rating.tsv",
+            stats_dir / f"corr_stats_power_{band}_vs_rating.tsv",
+        ]
     else:
-        file_path = deriv_stats_path(deriv_root, subject) / f"corr_stats_pow_{band}_vs_temp.tsv"
-    
-    if not file_path.exists():
+        candidates = [
+            stats_dir / f"corr_stats_pow_{band}_vs_temp.tsv",
+            stats_dir / f"corr_stats_power_{band}_vs_temp.tsv",
+        ]
+
+    file_path = next((p for p in candidates if p.exists()), None)
+    if file_path is None:
         return None
     
     df = pd.read_csv(file_path, sep="\t")
@@ -1825,7 +1938,7 @@ def load_channel_correlations(subject: str, band: str, deriv_root: Path,
     return df
 
 def load_connectivity_files(subjects: List[str], deriv_root: Path) -> Dict[str, List[pd.DataFrame]]:
-    from ..io.general import deriv_stats_path
+    from ..io.paths import deriv_stats_path
     
     if not subjects:
         return {}
@@ -1891,14 +2004,29 @@ def extract_band_channel_vectors(df: pd.DataFrame, band_names: List[str]) -> Dic
     band_vectors = {}
     for band in band_names:
         band_str = str(band)
-        cols = [c for c in df.columns if str(c).startswith(f"pow_{band_str}_")]
+        cols = [
+            c for c in df.columns
+            if str(c).startswith(f"power_plateau_{band_str}_ch_")
+        ]
+        legacy = False
+        if not cols:
+            cols = [c for c in df.columns if str(c).startswith(f"pow_{band_str}_")]
+            legacy = True
         if not cols:
             continue
         series = df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=0)
-        channel_means = {
-            c.replace(f"pow_{band_str}_", ""): float(v)
-            for c, v in series.items() if np.isfinite(v)
-        }
+        channel_means = {}
+        for c, v in series.items():
+            if not np.isfinite(v):
+                continue
+            name = str(c)
+            if legacy:
+                ch = name.replace(f"pow_{band_str}_", "")
+            else:
+                prefix = f"power_plateau_{band_str}_ch_"
+                rest = name[len(prefix):]
+                ch = rest.rsplit("_", 1)[0] if "_" in rest else rest
+            channel_means[ch] = float(v)
         if channel_means:
             band_vectors[band_str] = channel_means
     return band_vectors

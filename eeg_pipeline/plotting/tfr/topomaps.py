@@ -16,17 +16,14 @@ import pandas as pd
 import mne
 import matplotlib.pyplot as plt
 
-from ...utils.io.general import (
+from eeg_pipeline.utils.io.plotting import (
     robust_sym_vlim,
     extract_eeg_picks,
-    get_pain_column_from_config,
-    get_temperature_column_from_config,
-    require_epochs_tfr,
-    ensure_aligned_lengths,
     get_viz_params,
     plot_topomap_on_ax,
-    detect_data_format,
 )
+from eeg_pipeline.utils.io.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths, detect_data_format
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     create_tfr_subset,

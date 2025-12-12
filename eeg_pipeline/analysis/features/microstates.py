@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -282,5 +282,103 @@ def extract_microstate_features(
     if not all_data:
         return pd.DataFrame(), [], templates
         
+    df = pd.DataFrame(all_data)
+    return df, list(df.columns), templates
+
+
+def extract_microstate_features_from_epochs(
+    epochs: mne.Epochs,
+    n_states: int,
+    config: Any,
+    logger: Any,
+    *,
+    fixed_templates: Optional[np.ndarray] = None,
+    fixed_template_ch_names: Optional[List[str]] = None,
+) -> Tuple[pd.DataFrame, List[str], Optional[np.ndarray]]:
+    picks, ch_names = pick_eeg_channels(epochs)
+    if len(picks) == 0:
+        return pd.DataFrame(), [], None
+
+    full_data = epochs.get_data(picks=picks)
+    sfreq = float(epochs.info["sfreq"])
+    n_jobs = int(config.get("system.n_jobs", -1))
+    min_samples = 10
+
+    from eeg_pipeline.utils.analysis.windowing import compute_time_windows
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    try:
+        windows = compute_time_windows(epochs.times, config, logger=logger, strict=False)
+    except Exception:
+        windows = None
+
+    baseline_mask = getattr(windows, "baseline_mask", None) if windows is not None else None
+    plateau_mask = getattr(windows, "active_mask", None) if windows is not None else None
+
+    if plateau_mask is None or not np.any(plateau_mask):
+        return pd.DataFrame(), [], None
+
+    data_plateau = full_data[..., plateau_mask]
+    if data_plateau.shape[-1] < min_samples:
+        return pd.DataFrame(), [], None
+
+    if fixed_templates is not None and fixed_template_ch_names is not None:
+        templates = _reorder_templates_to_picks(
+            fixed_templates,
+            list(fixed_template_ch_names),
+            picks,
+            epochs.info,
+            logger,
+        )
+    else:
+        templates = extract_templates_from_trials(data_plateau, sfreq, n_states)
+
+    if templates is None:
+        return pd.DataFrame(), [], None
+
+    all_data: Dict[str, List[float]] = {}
+
+    if baseline_mask is not None and int(np.sum(baseline_mask)) >= min_samples:
+        data_baseline = full_data[..., baseline_mask]
+        all_data.update(
+            _extract_microstates_for_segment(
+                data_baseline,
+                templates,
+                sfreq,
+                n_states,
+                "baseline",
+                n_jobs=n_jobs,
+            )
+        )
+
+    ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
+    ramp_mask = (epochs.times >= 0) & (epochs.times <= ramp_end)
+    if int(np.sum(ramp_mask)) >= min_samples:
+        data_ramp = full_data[..., ramp_mask]
+        all_data.update(
+            _extract_microstates_for_segment(
+                data_ramp,
+                templates,
+                sfreq,
+                n_states,
+                "ramp",
+                n_jobs=n_jobs,
+            )
+        )
+
+    all_data.update(
+        _extract_microstates_for_segment(
+            data_plateau,
+            templates,
+            sfreq,
+            n_states,
+            "plateau",
+            n_jobs=n_jobs,
+        )
+    )
+
+    if not all_data:
+        return pd.DataFrame(), [], templates
+
     df = pd.DataFrame(all_data)
     return df, list(df.columns), templates

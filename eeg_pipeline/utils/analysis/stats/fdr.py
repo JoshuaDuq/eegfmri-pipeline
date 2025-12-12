@@ -8,6 +8,9 @@ Benjamini-Hochberg false discovery rate correction functions and utilities.
 from __future__ import annotations
 
 import logging
+import re
+from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -17,7 +20,7 @@ from .base import get_config_value, get_fdr_alpha
 from .correlation import compute_correlation
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    pass
 
 
 def fdr_bh(
@@ -114,9 +117,9 @@ def apply_global_fdr(
     alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Any]:
-    """Apply global FDR correction across all correlation files."""
+    """Apply global FDR correction across correlation files within families."""
     from pathlib import Path
-    from eeg_pipeline.utils.io.general import read_tsv, write_tsv
+    from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
     
     stats_dir = Path(stats_dir)
     files = list(stats_dir.glob("*.tsv"))
@@ -125,8 +128,24 @@ def apply_global_fdr(
             logger.warning(f"No TSV files found in {stats_dir}")
         return {"n_tests": 0, "n_rejected": 0}
     
-    all_p = []
-    file_refs = []
+    all_p_by_family: Dict[str, list] = defaultdict(list)
+    file_refs_by_family: Dict[str, list] = defaultdict(list)
+
+    def infer_family(fpath: Path, df: pd.DataFrame) -> str:
+        """Infer hypothesis family to avoid mixing heterogeneous tests."""
+        name = fpath.stem
+        corr_match = re.match(r"corr_stats_(.+)_vs_(.+)", name)
+        if corr_match:
+            feature_part, target_part = corr_match.groups()
+            return f"target:{target_part}|features:{feature_part}"
+
+        if "target" in df.columns and "feature_type" in df.columns:
+            return f"target:{df['target'].iloc[0]}|features:{df['feature_type'].iloc[0]}"
+
+        if "target" in df.columns:
+            return f"target:{df['target'].iloc[0]}"
+
+        return name
     
     for fpath in files:
         df = read_tsv(fpath)
@@ -141,33 +160,44 @@ def apply_global_fdr(
         
         if p_col is None:
             continue
+
+        family = infer_family(fpath, df)
         
         p_series = pd.to_numeric(df[p_col], errors="coerce")
         valid_mask = p_series.notna()
         valid_indices = np.where(valid_mask)[0]
         
         for i in valid_indices:
-            all_p.append(float(p_series.iloc[i]))
-            file_refs.append((fpath, i, p_col))
+            all_p_by_family[family].append(float(p_series.iloc[i]))
+            file_refs_by_family[family].append((fpath, i, p_col))
     
-    if not all_p:
+    if not all_p_by_family:
         if logger:
             logger.warning("No valid p-values found for FDR correction")
         return {"n_tests": 0, "n_rejected": 0}
     
-    p_arr = np.array(all_p)
-    q_arr, reject, critical_p = fdr_correction(p_arr, alpha)
-    
-    n_rejected = int(reject.sum())
-    
-    if logger:
-        logger.info(f"Global FDR: {n_rejected}/{len(p_arr)} rejected at alpha={alpha}")
-    
-    file_updates = {}
-    for (fpath, idx, p_col), q, rej in zip(file_refs, q_arr, reject):
-        if fpath not in file_updates:
-            file_updates[fpath] = []
-        file_updates[fpath].append((idx, q, rej))
+    summary = {"n_tests": 0, "n_rejected": 0, "alpha": alpha, "families": {}}
+    file_updates: Dict[Path, list] = defaultdict(list)
+
+    for family, p_list in all_p_by_family.items():
+        p_arr = np.array(p_list)
+        q_arr, reject, critical_p = fdr_correction(p_arr, alpha)
+
+        summary["n_tests"] += len(p_arr)
+        summary["n_rejected"] += int(reject.sum())
+        summary["families"][family] = {
+            "n_tests": len(p_arr),
+            "n_rejected": int(reject.sum()),
+            "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
+        }
+
+        if logger:
+            logger.info(
+                f"Global FDR [{family}]: {int(reject.sum())}/{len(p_arr)} rejected at alpha={alpha}"
+            )
+
+        for (fpath, idx, p_col), q, rej in zip(file_refs_by_family[family], q_arr, reject):
+            file_updates[fpath].append((idx, q, rej, family))
     
     for fpath, updates in file_updates.items():
         try:
@@ -175,25 +205,24 @@ def apply_global_fdr(
             if df is None:
                 continue
             
-            df["q_global"] = np.nan
-            df["fdr_reject"] = False
+            if "q_global" not in df.columns:
+                df["q_global"] = np.nan
+            if "fdr_reject" not in df.columns:
+                df["fdr_reject"] = False
+            df["fdr_family"] = df.get("fdr_family", np.nan)
             
-            for idx, q, rej in updates:
+            for idx, q, rej, family in updates:
                 if idx < len(df):
                     df.loc[idx, "q_global"] = q
-                    df.loc[idx, "fdr_reject"] = rej
+                    df.loc[idx, "fdr_reject"] = bool(rej)
+                    df.loc[idx, "fdr_family"] = family
             
             write_tsv(df, fpath)
         except Exception as e:
             if logger:
                 logger.warning(f"Failed to update {fpath.name}: {e}")
     
-    return {
-        "n_tests": len(p_arr),
-        "n_rejected": n_rejected,
-        "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
-        "alpha": alpha,
-    }
+    return summary
 
 
 def fdr_bh_mask(

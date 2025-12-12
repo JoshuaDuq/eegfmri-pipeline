@@ -4,10 +4,12 @@ Machine learning decoding analysis.
 Submodules:
 - cv: Cross-validation utilities and fold management
 - pipelines: ML pipeline factories (ElasticNet, RF)
-- data: Data loading for decoding
 - orchestration: High-level CV orchestration (LOSO, within-subject CV)
 - time_generalization: Temporal generalization analysis
 - permutation: Permutation importance
+
+Data loading utilities live in `eeg_pipeline.utils.data.loading` and are
+re-exported here for convenience.
 """
 
 # CV utilities
@@ -46,8 +48,8 @@ from eeg_pipeline.analysis.decoding.pipelines import (
     build_rf_param_grid,
 )
 
-# Data loading
-from eeg_pipeline.analysis.decoding.data import (
+# Data loading (canonical location: eeg_pipeline.utils.data.loading)
+from eeg_pipeline.utils.data.loading import (
     load_plateau_matrix,
     load_epoch_windows,
 )
@@ -59,10 +61,6 @@ from eeg_pipeline.analysis.decoding.orchestration import (
     within_subject_kfold_predictions,
     loso_baseline_predictions,
     nested_loso_predictions_from_matrix,
-)
-from eeg_pipeline.pipelines.decoding import (
-    run_regression_decoding,
-    run_time_generalization,
 )
 
 # Time generalization
@@ -144,8 +142,6 @@ __all__ = [
     "within_subject_kfold_predictions",
     "loso_baseline_predictions",
     "nested_loso_predictions_from_matrix",
-    "run_regression_decoding",
-    "run_time_generalization",
     # Time generalization
     "time_generalization_regression",
     # Classification

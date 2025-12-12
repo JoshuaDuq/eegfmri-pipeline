@@ -16,17 +16,15 @@ import pandas as pd
 import mne
 import matplotlib.pyplot as plt
 
-from ...utils.io.general import (
+from eeg_pipeline.utils.io.plotting import (
     robust_sym_vlim,
     extract_eeg_picks,
     logratio_to_pct,
-    get_pain_column_from_config,
-    get_temperature_column_from_config,
-    require_epochs_tfr,
-    ensure_aligned_lengths,
     get_viz_params,
     plot_topomap_on_ax,
 )
+from eeg_pipeline.utils.io.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -541,8 +539,8 @@ def _save_fig(
         logger: Optional logger instance
         baseline_used: Optional baseline window tuple
     """
-    from ...utils.io.general import save_fig as central_save_fig
-    from ...utils.io.general import format_baseline_window_string, build_footer
+    from eeg_pipeline.utils.io.plotting import save_fig as central_save_fig, build_footer
+    from eeg_pipeline.utils.io.formatting import format_baseline_window_string
     
     out_dir.mkdir(parents=True, exist_ok=True)
 

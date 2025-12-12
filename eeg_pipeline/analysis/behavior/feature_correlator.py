@@ -22,8 +22,13 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationRecord,
     correlate_features_loop,
     save_correlation_results,
+    _align_groups_to_series,
+    _align_features_and_targets,
+    _build_temp_record_unified,
+    _compute_roi_correlation_stats,
 )
-from eeg_pipeline.utils.io.general import deriv_features_path, read_tsv, write_tsv
+from eeg_pipeline.utils.io.paths import deriv_features_path
+from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 from eeg_pipeline.context.behavior import AnalysisConfig
 from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value, load_config
@@ -35,280 +40,19 @@ from eeg_pipeline.utils.analysis.stats import (
     compute_permutation_pvalues,
     compute_temp_permutation_pvalues,
     CorrelationStats,
+    fdr_bh,
 )
-from eeg_pipeline.analysis.behavior.parallel import parallel_feature_types, get_n_jobs
+from eeg_pipeline.utils.parallel import parallel_feature_types, get_n_jobs
+from eeg_pipeline.analysis.features.registry import (
+    FeatureRegistry,
+    FeatureRule,
+    classify_feature,
+    get_feature_registry,
+)
+import eeg_pipeline.analysis.features.registry as feature_registry
+from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
 
-
-def _align_groups_to_series(
-    series: pd.Series,
-    groups: Optional[Union[pd.Series, np.ndarray]]
-) -> Optional[np.ndarray]:
-    """Align group labels to a pandas Series index."""
-    if groups is None:
-        return None
-    if isinstance(groups, pd.Series):
-        missing = series.index.difference(groups.index)
-        if not missing.empty:
-            raise ValueError(f"Group labels missing for {len(missing)} samples")
-        return groups.loc[series.index].to_numpy()
-    arr = np.asarray(groups)
-    if arr.size != len(series):
-        raise ValueError("Group labels length does not match series length")
-    return arr
-
-
-def _build_temp_record_unified(
-    x: pd.Series,
-    temp: Optional[pd.Series],
-    cov_no_temp: Optional[pd.DataFrame],
-    identifier: str,
-    id_key: str,
-    band: str,
-    cfg: AnalysisConfig,
-    groups: Optional[np.ndarray] = None,
-    **extra
-) -> Optional[Dict[str, Any]]:
-    """Build a temperature correlation record with optional bootstrap/permutation."""
-    if temp is None or (hasattr(temp, 'empty') and temp.empty):
-        return None
-    
-    from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation, build_correlation_record
-    
-    min_s = cfg.min_samples_channel if id_key == "channel" else cfg.min_samples_roi
-    x_a, temp_a, cov_a, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
-    
-    if len(x_a) == 0 or len(temp_a) == 0:
-        return None
-
-    try:
-        grp = _align_groups_to_series(x_a, groups if groups is not None else cfg.groups)
-    except ValueError as err:
-        cfg.logger.warning(f"Group alignment failed for {identifier}: {err}")
-        grp = None
-    r, p, _ = safe_correlation(x_a, temp_a, cfg.method, min_s)
-    
-    ci_lo, ci_hi = np.nan, np.nan
-    p_perm = np.nan
-    
-    if cfg.bootstrap > 0:
-        ci_lo, ci_hi = compute_bootstrap_ci(
-            x_a, temp_a, cfg.bootstrap, 0.95,
-            "spearman" if cfg.use_spearman else "pearson", cfg.rng
-        )
-    
-    if cfg.n_perm > 0:
-        p_perm, _ = compute_temp_permutation_pvalues(
-            x_a, temp_a, cov_a, cfg.method, cfg.n_perm, cfg.rng,
-            band, identifier, cfg.logger, groups=grp
-        )
-    
-    return build_correlation_record(
-        identifier, band, r, p, len(x_a), cfg.method,
-                                    ci_low=ci_lo, ci_high=ci_hi, p_perm=p_perm,
-        identifier_type=id_key, **extra
-    ).to_dict()
-
-
-def _compute_roi_correlation_stats(
-    x: pd.Series,
-    y: pd.Series,
-    x_a: np.ndarray,
-    y_a: np.ndarray,
-    cov: Optional[pd.DataFrame],
-    temp: Optional[pd.Series],
-    n_eff: int,
-    band: str,
-    roi: str,
-    context: str,
-    cfg: AnalysisConfig,
-    groups: Optional[np.ndarray] = None,
-    me_records: Optional[List[Dict]] = None,
-) -> CorrelationStats:
-    """Compute comprehensive correlation statistics for an ROI."""
-    r, p = compute_correlation(x_a, y_a, cfg.use_spearman)
-    
-    r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
-        x, y, cov, temp, cfg.method, context, cfg.logger, cfg.min_samples_roi
-    )
-    
-    ci_lo, ci_hi = compute_bootstrap_ci(
-        x_a, y_a, cfg.bootstrap, 0.95,
-        "spearman" if cfg.use_spearman else "pearson", cfg.rng
-    )
-    
-    x_series = pd.Series(x_a) if not isinstance(x_a, pd.Series) else x_a
-    y_series = pd.Series(y_a) if not isinstance(y_a, pd.Series) else y_a
-    
-    p_perm, p_part_perm, p_part_temp_perm = compute_permutation_pvalues(
-        x_series, y_series, cov, temp, cfg.method, cfg.n_perm, n_eff, cfg.rng,
-        band, roi, groups=groups
-    )
-    
-    return CorrelationStats(
-        correlation=r,
-        p_value=p,
-        ci_low=ci_lo,
-        ci_high=ci_hi,
-        r_partial=r_part,
-        p_partial=p_part,
-        n_partial=n_part,
-        r_partial_temp=r_part_temp,
-        p_partial_temp=p_part_temp,
-        n_partial_temp=n_part_temp,
-        p_perm=p_perm,
-        p_partial_perm=p_part_perm,
-        p_partial_temp_perm=p_part_temp_perm,
-    )
-
-
-def _align_features_and_targets(
-    df: pd.DataFrame,
-    targets: pd.Series,
-    min_samples: int,
-    logger: logging.Logger,
-) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
-    """Align feature dataframe and targets on shared index and drop missing targets."""
-    if df is None or df.empty or targets is None or targets.empty:
-        return None, None
-
-    if not df.index.equals(targets.index):
-        common_index = df.index.intersection(targets.index)
-        if common_index.empty:
-            logger.error("No overlapping samples between features and targets")
-            return None, None
-        df = df.loc[common_index]
-        targets = targets.loc[common_index]
-
-    valid_mask = targets.notna()
-    if valid_mask.sum() < min_samples:
-        logger.warning(
-            "Insufficient valid samples after alignment "
-            f"(found {valid_mask.sum()}, need >= {min_samples})"
-        )
-        return None, None
-
-    return df.loc[valid_mask], targets.loc[valid_mask]
-
-
-###################################################################
-# Feature registry loading (config-driven)
-###################################################################
-
-# Standard EEG channel names for bare channel classification
-_CHANNEL_NAMES = {
-    # 10-20 system
-    "FP1", "FP2", "FPZ", "F7", "F3", "FZ", "F4", "F8",
-    "T7", "C3", "CZ", "C4", "T8", "P7", "P3", "PZ", "P4", "P8",
-    "O1", "OZ", "O2",
-    # Extended 10-10 system
-    "AF3", "AF4", "AF7", "AF8", "AFZ",
-    "F1", "F2", "F5", "F6", "F9", "F10",
-    "FC1", "FC2", "FC3", "FC4", "FC5", "FC6", "FCZ", "FT7", "FT8", "FT9", "FT10",
-    "C1", "C2", "C5", "C6",
-    "CP1", "CP2", "CP3", "CP4", "CP5", "CP6", "CPZ",
-    "TP7", "TP8", "TP9", "TP10",
-    "P1", "P2", "P5", "P6", "P9", "P10",
-    "PO3", "PO4", "PO7", "PO8", "POZ",
-    "I1", "I2", "IZ",
-}
-
-
-@dataclass
-class FeatureRule:
-    """Pattern-based feature classification rule loaded from config."""
-
-    label: str
-    startswith: Tuple[str, ...] = field(default_factory=tuple)
-    contains: Tuple[str, ...] = field(default_factory=tuple)
-    regex: Optional[re.Pattern] = None
-    channel_pair: bool = False
-    channel_name: bool = False
-    exclude_startswith: Tuple[str, ...] = field(default_factory=tuple)
-    exclude_contains: Tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass
-class FeatureRegistry:
-    """Container for config-driven feature metadata."""
-
-    files: Dict[str, str]
-    source_to_type: Dict[str, str]
-    type_hierarchy: Dict[str, Any]
-    patterns: Dict[str, re.Pattern]
-    classifiers: List[FeatureRule]
-
-
-_FEATURE_REGISTRY_CACHE: Optional[FeatureRegistry] = None
-
-
-def _load_feature_rules(rule_cfg: List[Dict[str, Any]]) -> List[FeatureRule]:
-    rules: List[FeatureRule] = []
-    for entry in rule_cfg:
-        regex = re.compile(entry["regex"], re.IGNORECASE) if "regex" in entry else None
-        rules.append(
-            FeatureRule(
-                label=entry["label"],
-                startswith=tuple(entry.get("startswith", [])),
-                contains=tuple(entry.get("contains", [])),
-                regex=regex,
-                channel_pair=bool(entry.get("channel_pair", False)),
-                channel_name=bool(entry.get("channel_name", False)),
-                exclude_startswith=tuple(entry.get("exclude_startswith", [])),
-                exclude_contains=tuple(entry.get("exclude_contains", [])),
-            )
-        )
-    return rules
-
-
-def _load_feature_patterns(pattern_cfg: Dict[str, str]) -> Dict[str, re.Pattern]:
-    if not pattern_cfg:
-        raise ValueError("behavior_analysis.feature_registry.feature_patterns must be defined.")
-    return {name: re.compile(pattern, re.IGNORECASE) for name, pattern in pattern_cfg.items()}
-
-
-def load_feature_registry(config: Any) -> FeatureRegistry:
-    """Load the feature registry from config with strict validation."""
-    registry_cfg = get_config_value(config, "behavior_analysis.feature_registry", None)
-    if not registry_cfg:
-        raise ValueError("behavior_analysis.feature_registry is required in eeg_config.yaml")
-
-    files = registry_cfg.get("files")
-    if not files:
-        raise ValueError("behavior_analysis.feature_registry.files is required and cannot be empty.")
-
-    source_to_type = registry_cfg.get("source_to_feature_type", {})
-    type_hierarchy = registry_cfg.get("feature_type_hierarchy", {})
-    patterns = _load_feature_patterns(registry_cfg.get("feature_patterns", {}))
-    classifiers = _load_feature_rules(registry_cfg.get("feature_classifiers", []))
-
-    return FeatureRegistry(
-        files=files,
-        source_to_type=source_to_type,
-        type_hierarchy=type_hierarchy,
-        patterns=patterns,
-        classifiers=classifiers,
-    )
-
-
-def get_feature_registry(config: Any = None) -> FeatureRegistry:
-    """Return cached registry or load using provided config/default config."""
-    global _FEATURE_REGISTRY_CACHE
-
-    if config is not None:
-        return load_feature_registry(config)
-
-    if _FEATURE_REGISTRY_CACHE is None:
-        _FEATURE_REGISTRY_CACHE = load_feature_registry(load_config())
-
-    return _FEATURE_REGISTRY_CACHE
-
-
-def _is_channel_pair(name: str) -> bool:
-    """Check if name is a channel pair like AF3_AF4."""
-    parts = name.split("_")
-    if len(parts) != 2:
-        return False
-    return parts[0].upper() in _CHANNEL_NAMES and parts[1].upper() in _CHANNEL_NAMES
+_CHANNEL_NAMES = feature_registry._CHANNEL_NAMES
 
 
 @dataclass
@@ -320,10 +64,18 @@ class CorrelationConfig:
     apply_fdr: bool = True
     n_bootstrap: int = 0
     n_permutations: int = 0
+    rng: Optional[np.random.Generator] = None
     filter_threshold: float = 0.0
     compute_bayes_factor: bool = False
     robust_method: Optional[str] = None  # "percentage_bend", "winsorized", "shepherd"
     compute_loso_stability: bool = False
+    compute_reliability: bool = False
+    covariates_df: Optional[pd.DataFrame] = None
+    covariates_without_temp_df: Optional[pd.DataFrame] = None
+    temperature_series: Optional[pd.Series] = None
+    groups: Optional[np.ndarray] = None
+    control_temperature: bool = True
+    control_trial_order: bool = True
 
     @classmethod
     def from_config(cls, config: Any) -> "CorrelationConfig":
@@ -335,9 +87,11 @@ class CorrelationConfig:
             min_samples=get_min_samples(config, "channel"),
             n_bootstrap=int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 0)),
             n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 0)),
+            rng=None,
             compute_bayes_factor=bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False)),
             robust_method=get_config_value(config, "behavior_analysis.robust_correlation", None),
             compute_loso_stability=bool(get_config_value(config, "behavior_analysis.loso_stability", False)),
+            compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
         )
 
     @classmethod
@@ -350,10 +104,18 @@ class CorrelationConfig:
             apply_fdr=base.apply_fdr,
             n_bootstrap=ctx.bootstrap if ctx.bootstrap is not None else base.n_bootstrap,
             n_permutations=ctx.n_perm if ctx.n_perm is not None else base.n_permutations,
+            rng=ctx.rng,
             filter_threshold=base.filter_threshold,
             compute_bayes_factor=base.compute_bayes_factor,
             robust_method=base.robust_method,
             compute_loso_stability=base.compute_loso_stability,
+            compute_reliability=getattr(ctx, "compute_reliability", False),
+            covariates_df=getattr(ctx, "covariates_df", None),
+            covariates_without_temp_df=getattr(ctx, "covariates_without_temp_df", None),
+            temperature_series=getattr(ctx, "temperature", None) if getattr(ctx, "control_temperature", True) else None,
+            groups=getattr(ctx, "group_ids", None),
+            control_temperature=getattr(ctx, "control_temperature", True),
+            control_trial_order=getattr(ctx, "control_trial_order", True),
         )
 
 
@@ -376,28 +138,8 @@ class FeatureCorrelationResult:
 
 
 def _rule_matches(column: str, rule: FeatureRule) -> bool:
-    """Check if a column matches a rule definition."""
-    col_lower = column.lower()
-
-    if rule.exclude_startswith and any(col_lower.startswith(p.lower()) for p in rule.exclude_startswith):
-        return False
-    if rule.exclude_contains and any(p.lower() in col_lower for p in rule.exclude_contains):
-        return False
-    if rule.channel_pair and not _is_channel_pair(column):
-        return False
-    if rule.channel_name and column.upper() not in _CHANNEL_NAMES:
-        return False
-    if rule.startswith and not any(col_lower.startswith(p.lower()) for p in rule.startswith):
-        return False
-    if rule.contains and not any(p.lower() in col_lower for p in rule.contains):
-        return False
-    if rule.regex and not rule.regex.search(column):
-        return False
-
-    # Ensure rule carries at least one positive condition
-    if not any([rule.startswith, rule.contains, rule.regex, rule.channel_pair, rule.channel_name]):
-        return False
-    return True
+    """Delegate to shared registry rule matcher."""
+    return feature_registry._rule_matches(column, rule)
 
 
 def _classify_subtype(
@@ -420,7 +162,7 @@ def _classify_subtype(
             return "correlation"
         if "plateau" in col_lower:
             return "plateau"
-        if col_lower.startswith("baseline_"):
+        if col_lower.startswith("baseline_") or col_lower.startswith("power_baseline_"):
             return "baseline"
         return "direct"
 
@@ -777,6 +519,17 @@ def _parse_feature_metadata(column: str, ftype: str) -> Dict[str, Any]:
     return meta
 
 
+###################################################################
+# Shared classification bindings
+###################################################################
+# Ensure all classification helpers use the shared registry module.
+_rule_matches = feature_registry._rule_matches
+_classify_subtype = feature_registry._classify_subtype
+_match_feature_patterns = feature_registry._match_feature_patterns
+_parse_feature_metadata = feature_registry._parse_feature_metadata
+classify_feature = feature_registry.classify_feature
+
+
 # =============================================================================
 # Core Correlator Class
 # =============================================================================
@@ -839,11 +592,14 @@ class FeatureBehaviorCorrelator:
         n_jobs_actual = get_n_jobs(self.config, n_jobs)
         self.logger.info(f"Correlating features with {target_name}... (n_jobs={n_jobs_actual})")
         
+        def _corr_with_groups(df, tvals, cfg, name):
+            return self._correlate_df(df, tvals, cfg, name, subject_ids=cfg.groups)
+
         # Parallel correlation across feature types
         results = parallel_feature_types(
             feature_dfs=self._feature_dfs,
             targets=targets,
-            correlate_func=self._correlate_df,
+            correlate_func=_corr_with_groups,
             corr_config=corr_config,
             n_jobs=n_jobs_actual,
             logger=self.logger,
@@ -877,44 +633,113 @@ class FeatureBehaviorCorrelator:
         classifier = lambda col, source_file_type=None, include_subtype=True: classify_feature(
             col, source_file_type=source_file_type, include_subtype=include_subtype, registry=self.registry
         )
+        cov_aligned = None
+        temp_aligned = None
+        loso_groups = None
+        perm_groups = None
+        if config.control_trial_order and config.covariates_without_temp_df is not None:
+            cov_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+        elif config.covariates_df is not None:
+            cov_aligned = config.covariates_df.reindex(df_aligned.index)
+        if config.control_temperature and config.temperature_series is not None:
+            temp_aligned = config.temperature_series.reindex(df_aligned.index)
+        if subject_ids is not None:
+            try:
+                loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
+                perm_groups = loso_groups
+            except ValueError as exc:
+                self.logger.debug(f"Group alignment failed: {exc}")
+        if perm_groups is None and config.groups is not None:
+            try:
+                perm_groups = _align_groups_to_series(targets_aligned, config.groups)
+                if loso_groups is None:
+                    loso_groups = perm_groups
+            except ValueError as exc:
+                self.logger.debug(f"Permutation group alignment failed: {exc}")
         records, _ = correlate_features_loop(
             feature_df=df_aligned,
             target_values=targets_aligned,
             method=config.method,
             min_samples=config.min_samples,
-            logger=None,  # Suppress per-column logging
+            logger=None,
             identifier_type="feature",
             analysis_type=feature_type,
             feature_classifier=classifier,
             robust_method=config.robust_method,
+            config=self.config,
+            n_bootstrap=config.n_bootstrap,
+            n_permutations=config.n_permutations,
+            rng=config.rng,
+            groups=perm_groups,
         )
 
         # Convert CorrelationRecord to dict and add feature_type
         record_dicts = []
-        for rec in records:
+        for col_name, rec in zip(df_aligned.columns, records):
             d = rec.to_dict()
             d["feature_type"] = feature_type
+            d["p"] = d.get("p_value", np.nan)
+            d["p_raw"] = d.get("p_value", np.nan)
             
             # Compute Bayes Factor if requested
             if config.compute_bayes_factor:
-                col = rec.identifier
-                if col in df.columns:
-                    bf10, bf_interp = self._compute_bayes_factor(df[col], targets, config.method)
+                if col_name in df_aligned.columns:
+                    bf10, bf_interp = self._compute_bayes_factor(df_aligned[col_name], targets_aligned, config.method)
                     d["bf10"] = bf10
                     d["bf_interpretation"] = bf_interp
+
+            # Partial correlations with covariates / temperature
+            if cov_aligned is not None or temp_aligned is not None:
+                try:
+                    r_pc, p_pc, n_pc, r_temp, p_temp, n_temp = compute_partial_correlations(
+                        df_aligned[col_name],
+                        targets_aligned,
+                        cov_aligned,
+                        temp_aligned,
+                        config.method,
+                        feature_type,
+                        logger=self.logger,
+                        min_samples=config.min_samples,
+                        config=self.config,
+                    )
+                    d["r_partial_cov"] = r_pc
+                    d["p_partial_cov"] = p_pc
+                    d["n_partial_cov"] = n_pc
+                    d["r_partial_temp"] = r_temp
+                    d["p_partial_temp"] = p_temp
+                    d["n_partial_temp"] = n_temp
+                except Exception as exc:
+                    self.logger.debug(f"Partial correlation failed for {col_name}: {exc}")
             
             # Compute LOSO stability if requested
-            if config.compute_loso_stability and subject_ids is not None:
-                col = rec.identifier
-                if col in df.columns:
+            if config.compute_loso_stability and loso_groups is not None:
+                if col_name in df_aligned.columns:
                     r_mean, r_std, stability, _ = self._compute_loso_stability(
-                        df[col].values, targets.values, subject_ids, config.method
+                        df_aligned[col_name].values, targets_aligned.values, loso_groups, config.method
                     )
                     d["loso_r_mean"] = r_mean
                     d["loso_r_std"] = r_std
                     d["loso_stability"] = stability
+
+            if config.compute_reliability:
+                try:
+                    rel = compute_correlation_split_half_reliability(
+                        df_aligned[col_name].values, targets_aligned.values, config.method, n_splits=50
+                    )
+                    d["reliability_split_half"] = rel
+                except Exception as exc:
+                    self.logger.debug(f"Reliability failed for {col_name}: {exc}")
             
             record_dicts.append(d)
+
+        # Apply within-type FDR if requested
+        if record_dicts and config.apply_fdr:
+            p_vals = [r.get("p_value", np.nan) for r in record_dicts]
+            valid_idx = [i for i, pv in enumerate(p_vals) if pd.notna(pv)]
+            if valid_idx:
+                q_vals = fdr_bh(np.array([p_vals[i] for i in valid_idx]))
+                for idx, q in zip(valid_idx, q_vals):
+                    record_dicts[idx]["p_fdr"] = float(q)
 
         n_sig = sum(1 for r in records if r.is_significant)
         return FeatureCorrelationResult(feature_type, len(df.columns), n_sig, record_dicts)
@@ -1070,6 +895,15 @@ class FeatureBehaviorCorrelator:
             return None
         
         df = pd.DataFrame(records)
+        # Add multiplicity control (per band) and raw aliases for consistency
+        df["p_raw"] = df["p"]
+        if corr_config.apply_fdr and "band" in df.columns:
+            for band, mask in df.groupby("band").groups.items():
+                band_idx = list(mask)
+                p_vals = df.loc[band_idx, "p"].to_numpy()
+                df.loc[band_idx, "p_fdr"] = fdr_bh(p_vals)
+        elif corr_config.apply_fdr:
+            df["p_fdr"] = fdr_bh(df["p"].to_numpy())
         suffix = "rating" if "rating" in target_name.lower() else "temp"
         path = self.stats_dir / f"corr_stats_pow_roi_vs_{suffix}.tsv"
         write_tsv(df, path)
@@ -1124,6 +958,11 @@ class FeatureBehaviorCorrelator:
 
         if all_records:
             combined_df = pd.DataFrame(all_records)
+            if "p_value" in combined_df.columns and "p" not in combined_df.columns:
+                combined_df["p"] = combined_df["p_value"]
+                combined_df["p_raw"] = combined_df["p_value"]
+            if corr_config.apply_fdr and "p" in combined_df.columns:
+                combined_df["p_fdr"] = fdr_bh(combined_df["p"].to_numpy())
             combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
             save_correlation_results(combined_df, combined_path)
 
