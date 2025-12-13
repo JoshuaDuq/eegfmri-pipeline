@@ -22,6 +22,12 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands
 
 # --- Helpers ---
 
+def _get_itpc_method(config: Any) -> str:
+    method = str(config.get("feature_engineering.itpc.method", "loo")).strip().lower()
+    if method not in {"loo", "global"}:
+        method = "loo"
+    return method
+
 def _compute_loo_itpc(data, train_mask=None):
     """
     Compute Leave-One-Out ITPC.
@@ -41,23 +47,17 @@ def _compute_loo_itpc(data, train_mask=None):
     
     if n_train < 1: return np.zeros_like(np.abs(data))
     
-    # Sum of all training vectors
-    sum_train = np.sum(unit[train_mask], axis=0) # (ch, freq, time)
-    
-    # LOO Calculation
-    loo_itpc = np.zeros_like(np.abs(data), dtype=float)
-    
-    for i in range(n_epochs):
-        # Result for trial i
-        if train_mask[i] and n_train > 1:
-            # If i is in training set, remove it from sum
-            mean_vec = (sum_train - unit[i]) / (n_train - 1)
-        else:
-            # If test, or only 1 train, use full train sum mean
-            mean_vec = sum_train / max(1, n_train)
-            
-        loo_itpc[i] = np.abs(mean_vec)
-        
+    sum_train = np.sum(unit[train_mask], axis=0)  # (ch, freq, time)
+
+    mean_test = sum_train / max(1, n_train)
+    loo_itpc = np.broadcast_to(np.abs(mean_test), (n_epochs,) + mean_test.shape).copy()
+
+    if n_train > 1:
+        train_indices = np.flatnonzero(train_mask)
+        if train_indices.size:
+            loo_train = (sum_train[None, ...] - unit[train_indices]) / (n_train - 1)
+            loo_itpc[train_indices] = np.abs(loo_train)
+
     return loo_itpc
 
 # --- Main API ---
@@ -69,19 +69,14 @@ def extract_phase_features(
     
     config = ctx.config
     epochs = ctx.epochs
-    
-    # Check if TFR Complex is available
-    if ctx.tfr_complex is None:
-        # Compute it?
-        # Usually extract_all_features calls compute_tfr first if needed.
-        # But here we might need "complex" specifically.
-        # Check if ctx.tfr is complex? MNE TFR object has .data which is complex if 'output="complex"'
-        # If not, we might need to recompute.
-        # For now, let's assume we need to compute it if missing or if ctx.tfr is power-only.
-        # Actually pipeline attempts to compute TFR once.
-        # If tfr is power, we can't get phase.
-        pass
 
+    itpc_method = _get_itpc_method(config)
+    if itpc_method != "loo":
+        raise ValueError(
+            "ITPC method 'global' is not supported for trial-wise feature columns. "
+            "Set feature_engineering.itpc.method='loo' for per-trial ITPC."
+        )
+    
     # Ensure we have complex TFR
     tfr = ctx.tfr_complex
     if tfr is None:
@@ -216,11 +211,23 @@ def compute_pac_comodulograms(
 
     n_times = data.shape[-1]
 
-    # Define frequency ranges
-    # Phase: Low freqs (e.g. 2-13 Hz)
-    # Amp: High freqs (e.g. 15-100 Hz)
-    phase_mask = (tfr_freqs >= 2) & (tfr_freqs <= 13)
-    amp_mask = (tfr_freqs >= 15) & (tfr_freqs <= 100)
+    pac_cfg = config.get("feature_engineering.pac", {}) if config is not None else {}
+    min_epochs = int(pac_cfg.get("min_epochs", 2))
+    if n_epochs < min_epochs:
+        logger.warning("PAC: insufficient epochs (%d < %d); skipping", n_epochs, min_epochs)
+        return None, None, None, None, None
+
+    phase_range = pac_cfg.get("phase_range", [4.0, 8.0])
+    amp_range = pac_cfg.get("amp_range", [30.0, 80.0])
+    try:
+        phase_min, phase_max = float(phase_range[0]), float(phase_range[1])
+        amp_min, amp_max = float(amp_range[0]), float(amp_range[1])
+    except Exception:
+        phase_min, phase_max = 4.0, 8.0
+        amp_min, amp_max = 30.0, 80.0
+
+    phase_mask = (tfr_freqs >= phase_min) & (tfr_freqs <= phase_max)
+    amp_mask = (tfr_freqs >= amp_min) & (tfr_freqs <= amp_max)
     
     if not np.any(phase_mask) or not np.any(amp_mask):
         logger.warning("No valid phase/amplitude frequencies for PAC")
@@ -265,12 +272,37 @@ def compute_pac_comodulograms(
     # Aggregated: (n_ch, n_phase, n_amp) - Mean over epochs and time
     # Trial-wise: (n_epochs, n_ch, n_phase, n_amp) - Mean over time
     
-    # Since we need trial-wise for regression usually, let's try to keep it.
-    # If too big, we might reduce to band pairs.
-    
     ch_names = info['ch_names']
     
     trials_pac_list = []
+
+    tf_bands = config.get("time_frequency_analysis.bands", {}) if config is not None else {}
+    requested_pairs = pac_cfg.get("pairs")
+    if requested_pairs is None:
+        requested_pairs = [("theta", "gamma"), ("alpha", "gamma")]
+
+    pairs: List[Tuple[str, str]] = []
+    for p in requested_pairs:
+        if not p or len(p) < 2:
+            continue
+        pairs.append((str(p[0]), str(p[1])))
+
+    valid_pairs: List[Tuple[str, str, Tuple[float, float], Tuple[float, float]]] = []
+    for phase_band, amp_band in pairs:
+        if phase_band not in tf_bands or amp_band not in tf_bands:
+            continue
+        try:
+            pmin, pmax = float(tf_bands[phase_band][0]), float(tf_bands[phase_band][1])
+            amin, amax = float(tf_bands[amp_band][0]), float(tf_bands[amp_band][1])
+        except Exception:
+            continue
+        if amin <= pmax:
+            continue
+        valid_pairs.append((phase_band, amp_band, (pmin, pmax), (amin, amax)))
+
+    if not valid_pairs:
+        logger.warning("PAC: no valid band pairs found in config; skipping")
+        return None, phase_freqs, amp_freqs, None, None
     
     for ch_idx in range(n_ch):
         # (n_epochs, n_phase, n_times)
@@ -302,48 +334,22 @@ def compute_pac_comodulograms(
         # Let's leave pac_df as None for now if not strictly needed, or simple summary.
         # Ideally: pac_df has index (f_p, f_a), columns channels.
         
-        # 2. Trial-wise features
-        # We want features like "PAC_theta_gamma_chX"
-        # We need to bin frequencies into bands to reduce dimensions.
-        
-        # Aggregation Bins
-        band_ranges = {
-            "theta": (4, 8),
-            "alpha": (8, 13),
-            "beta": (13, 30),
-            "gamma": (30, 100)
-        }
-        
-        # Map phase_freqs to bands (theta, alpha)
-        # Map amp_freqs to bands (beta, gamma)
-        
-        for p_name, (p_min, p_max) in band_ranges.items():
-            # Find indices in phase_freqs
-            p_mask_band = (phase_freqs >= p_min) & (phase_freqs <= p_max)
-            if not np.any(p_mask_band): continue
-            
-            for a_name, (a_min, a_max) in band_ranges.items():
-                if p_name == a_name: continue # Skip same band? Usually yes.
-                if a_min < p_max: continue # Amp must be higher
-                
-                a_mask_band = (amp_freqs >= a_min) & (amp_freqs <= a_max)
-                if not np.any(a_mask_band): continue
-                
-                # Subset PAC (n_epochs, n_p_sub, n_a_sub)
-                pac_sub = pac_val[:, p_mask_band, :][:, :, a_mask_band]
-                
-                # Mean over freq bins
-                pac_trial_val = np.mean(pac_sub, axis=(1, 2)) # (n_epochs,)
-                
-                col_name = NamingSchema.build(
-                    "pac",
-                    segment_name,
-                    f"{p_name}_{a_name}",
-                    "ch",
-                    "val",
-                    channel=ch_names[ch_idx],
-                )
-                trials_pac_list.append(pd.Series(pac_trial_val, name=col_name))
+        for phase_band, amp_band, (pmin, pmax), (amin, amax) in valid_pairs:
+            p_mask_band = (phase_freqs >= pmin) & (phase_freqs <= pmax)
+            a_mask_band = (amp_freqs >= amin) & (amp_freqs <= amax)
+            if not np.any(p_mask_band) or not np.any(a_mask_band):
+                continue
+            pac_sub = pac_val[:, p_mask_band, :][:, :, a_mask_band]
+            pac_trial_val = np.mean(pac_sub, axis=(1, 2))
+            col_name = NamingSchema.build(
+                "pac",
+                segment_name,
+                f"{phase_band}_{amp_band}",
+                "ch",
+                "val",
+                channel=ch_names[ch_idx],
+            )
+            trials_pac_list.append(pd.Series(pac_trial_val, name=col_name))
 
     # Combine all trial series
     if not trials_pac_list:
@@ -362,11 +368,18 @@ def extract_itpc_from_precomputed(
     """
     if not precomputed.band_data or precomputed.windows is None:
         return pd.DataFrame(), []
+
+    cfg = precomputed.config or {}
+    itpc_method = _get_itpc_method(cfg)
+    if itpc_method != "loo":
+        raise ValueError(
+            "ITPC method 'global' is not supported for trial-wise feature columns from precomputed phases. "
+            "Set feature_engineering.itpc.method='loo' for per-trial ITPC."
+        )
         
     # Get masks for all segments
     times = precomputed.times
     windows = precomputed.windows
-    cfg = precomputed.config or {}
     from eeg_pipeline.utils.config.loader import get_config_value
     ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
     
@@ -388,67 +401,23 @@ def extract_itpc_from_precomputed(
         phases = bd.phase
         if phases is None or phases.size == 0:
             continue
-            
-        # Compute ITPC over time
-        # 1. Complex vectors
+
+        # Trial-wise ITPC via leave-one-out (LOO):
+        #   itpc_i(t) = | (sum_{k!=i} exp(1j*phi_k(t))) / (N-1) |
+        # This produces one value per trial after time-averaging within each segment.
         complex_vectors = np.exp(1j * phases)
-        # 2. Mean vector over epochs
-        mean_vec = np.mean(complex_vectors, axis=0) # (n_ch, n_times)
-        # 3. Magnitude (ITPC)
-        itpc_t = np.abs(mean_vec) # (n_ch, n_times)
-        
-        # Segment averages
+        sum_vec = np.sum(complex_vectors, axis=0)  # (n_ch, n_times)
+
+        loo_means = (sum_vec[None, :, :] - complex_vectors) / (n_epochs - 1)
+        loo_itpc_t = np.abs(loo_means)  # (n_epochs, n_ch, n_times)
+
         for seg_name, mask in masks.items():
             if mask is None or not np.any(mask):
                 continue
-                
-            # Average ITPC over time in this segment
-            # itpc_t[:, mask] -> (n_ch, n_samples)
-            itpc_vals = np.mean(itpc_t[:, mask], axis=1) # (n_ch,)
-            
-            for i, ch in enumerate(ch_names):
+            loo_itpc_seg = np.mean(loo_itpc_t[:, :, mask], axis=2)  # (n_epochs, n_ch)
+            for ch_idx, ch in enumerate(ch_names):
                 col = NamingSchema.build("itpc", seg_name, band, "ch", "val", channel=ch)
-                # We replicate value for each trial? 
-                # ITPC is an inter-trial measure, so it's a SINGLE value for the whole dataset (or condition).
-                # But our pipeline pipeline typically produces features PER TRIAL for subsequent analysis.
-                # However, ITPC is by definition encompassing multiple trials.
-                # If we return a single value, how do we fit into the dataframe which usually has N_trials rows?
-                
-                # Option A: Replicate the value N times (Global Inter-Trial Coherence)
-                # Option B: Leave-One-Out ITPC per trial (Trial-wise)
-                # The pipeline usually expects trial-wise features for regression.
-                
-                # Let's check 'extract_phase_features' which does LOO.
-                # If we want simple ITPC, we can't really do single-trial ITPC unless we do LOO or Single-Trial Phase Consistency (vector length vs reference?)
-                
-                # Given 'extract_itpc_from_precomputed' is called in pipeline, let's assume LOO is better for 'features'.
-                # But LOO is expensive to compute here if not vectorized carefully.
-                # Let's implement LOO efficiently.
-                
-                pass
-
-            # Update: LOO Implementation
-            # loo_itpc (n_epochs, n_ch, n_samples)
-            # sum_vec = sum(vecs)
-            # loo_mean = (sum_vec - vec_i) / (N-1)
-            # loo_itpc_i = abs(loo_mean)
-            
-            sum_vec = np.sum(complex_vectors, axis=0) # (n_ch, n_times)
-            
-            # Broadcast subtract: (1, ch, t) - (N, ch, t) -> (N, ch, t) ? No
-            # (ch, t) - (N, ch, t) -> broadcast sum_vec to match?
-            # sum_vec[None, :, :] - complex_vectors
-            
-            loo_means = (sum_vec[None, :, :] - complex_vectors) / (n_epochs - 1)
-            loo_itpc_t = np.abs(loo_means) # (n_epochs, n_ch, n_times)
-            
-            # Average over time mask
-            # (n_epochs, n_ch)
-            loo_itpc_seg = np.mean(loo_itpc_t[:, :, mask], axis=2)
-            
-            for i, ch in enumerate(ch_names):
-                col = NamingSchema.build("itpc", seg_name, band, "ch", "val", channel=ch)
-                results[col] = loo_itpc_seg[:, i]
+                results[col] = loo_itpc_seg[:, ch_idx]
                 
     if not results:
         return pd.DataFrame(), []

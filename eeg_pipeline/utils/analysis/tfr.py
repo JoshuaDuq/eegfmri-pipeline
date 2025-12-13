@@ -317,8 +317,8 @@ def normalize_power_with_baseline(
     logger: logging.Logger,
 ) -> pd.DataFrame:
     """
-    Convert raw band/bin power to log-ratio using pre-stimulus baseline means:
-        log(mean_bin / mean_baseline)
+    Convert raw band/bin power to log10-ratio using pre-stimulus baseline means:
+        log10(mean_bin / mean_baseline)
     """
     if baseline_df is None or baseline_df.empty:
         logger.error("Baseline features missing; cannot normalize power features.")
@@ -378,7 +378,7 @@ def normalize_power_with_baseline(
 
         baseline_safe = np.where(baseline_vals > 0, baseline_vals, np.nan)
         vals = pow_numeric[col].to_numpy(dtype=float)
-        pow_norm[col] = np.log((vals + epsilon) / (baseline_safe + epsilon))
+        pow_norm[col] = np.log10((vals + epsilon) / (baseline_safe + epsilon))
 
     if missing:
         missing_labels = ", ".join(sorted({f"{b}:{c}" for b, c in missing}))

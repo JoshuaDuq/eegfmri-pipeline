@@ -15,7 +15,7 @@ import numpy as np
 import mne
 
 from eeg_pipeline.types import PrecomputedData, PrecomputedQC
-from eeg_pipeline.utils.analysis.windowing import compute_time_windows
+from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
 from eeg_pipeline.utils.analysis.spectral import compute_band_data, compute_psd
 from eeg_pipeline.utils.analysis.signal_metrics import compute_gfp
 from eeg_pipeline.utils.config.loader import get_frequency_bands
@@ -52,6 +52,7 @@ def precompute_data(
     compute_bands: bool = True,
     compute_psd_data: bool = True,
     n_plateau_windows: int = 5,
+    windows_spec: Any = None,
 ) -> PrecomputedData:
     """
     Precompute all intermediate data needed by feature extraction modules.
@@ -120,8 +121,14 @@ def precompute_data(
     
     # Compute time windows
     try:
-        precomputed.windows = compute_time_windows(
-            times, config, n_plateau_windows, logger=logger, strict=True
+        spec = windows_spec
+        if spec is None:
+            spec = TimeWindowSpec(times=times, config=config, sampling_rate=sfreq, logger=logger)
+        precomputed.windows = time_windows_from_spec(
+            spec,
+            n_plateau_windows=n_plateau_windows,
+            logger=logger,
+            strict=True,
         )
         precomputed.qc.time_windows = {
             "baseline_samples": int(np.sum(precomputed.windows.baseline_mask)),
@@ -211,13 +218,25 @@ def precompute_data(
     
     # Compute PSD
     if compute_psd_data:
-        precomputed.psd_data = compute_psd(data, sfreq, config=config, logger=logger)
+        psd_input = data
+        psd_window = "full"
+        try:
+            baseline_mask = getattr(precomputed.windows, "baseline_mask", None) if precomputed.windows is not None else None
+            if baseline_mask is not None and isinstance(baseline_mask, np.ndarray) and np.any(baseline_mask):
+                psd_input = data[:, :, baseline_mask]
+                psd_window = "baseline"
+        except Exception:
+            psd_input = data
+            psd_window = "full"
+
+        precomputed.psd_data = compute_psd(psd_input, sfreq, config=config, logger=logger)
         if precomputed.psd_data is not None:
             logger.info(f"Precomputed PSD: {len(precomputed.psd_data.freqs)} freq bins")
             psd_arr = precomputed.psd_data.psd
             precomputed.qc.psd = {
                 "n_freq_bins": int(len(precomputed.psd_data.freqs)),
                 "finite_fraction": float(np.isfinite(psd_arr).sum() / psd_arr.size),
+                "window": psd_window,
                 "freq_range": (
                     float(precomputed.psd_data.freqs[0]),
                     float(precomputed.psd_data.freqs[-1]),

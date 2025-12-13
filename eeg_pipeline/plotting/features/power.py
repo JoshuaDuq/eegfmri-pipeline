@@ -204,12 +204,12 @@ def plot_power_by_condition(
             if row_idx == 0:
                 ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
             if col_idx == 0:
-                ax.set_ylabel(f"{seg_name}\n({seg_time})\nPower (dB)", fontsize=9)
+                ax.set_ylabel(f"{seg_name}\n({seg_time})\nPower (log ratio)", fontsize=9)
     
     n_pain = int(pain_mask.sum())
     n_nonpain = int((~pain_mask).sum())
     title = (f"Band Power by Condition: Pain vs Non-Pain Comparison\n"
-             f"Baseline-Normalized dB (Log Ratio to Pre-Stimulus)\n"
+             f"Baseline-Normalized Log Ratio (log10 to Pre-Stimulus)\n"
              f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain trials")
     fig.suptitle(title, fontsize=11, fontweight="bold", y=1.02)
     

@@ -27,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from itertools import combinations
@@ -99,6 +100,10 @@ from eeg_pipeline.analysis.features.precompute import precompute_data
 from eeg_pipeline.analysis.features.extractors import (
     extract_erds_from_precomputed,
     extract_power_from_precomputed,
+    extract_gfp_from_precomputed,
+    extract_roi_features_from_precomputed,
+    extract_temporal_features_from_precomputed,
+    extract_band_ratios_from_precomputed,
 )
 from eeg_pipeline.analysis.features.results import (
     FeatureSet,
@@ -136,8 +141,18 @@ def _get_precomputed_groups(config: Any, override: Optional[List[str]] = None) -
     
     unknown = [g for g in groups if g not in PRECOMPUTED_GROUP_CHOICES]
     if unknown:
-        logging.getLogger(__name__).warning("Unrecognized precomputed groups requested: %s", ", ".join(unknown))
-    return groups
+        logging.getLogger(__name__).warning(
+            "Skipping unsupported precomputed groups (not implemented/allowed): %s",
+            ", ".join(unknown),
+        )
+
+    supported = [g for g in groups if g in PRECOMPUTED_GROUP_CHOICES]
+    if not supported:
+        raise ValueError(
+            "No supported precomputed groups requested after filtering; requested="
+            f"{groups}. Supported={PRECOMPUTED_GROUP_CHOICES}"
+        )
+    return supported
 
 
 
@@ -265,6 +280,21 @@ def extract_all_features(
         ctx.tfr = tfr
         ctx.baseline_df = baseline_df
         ctx.baseline_cols = baseline_cols
+
+        # IMPORTANT: keep the in-memory TFR in raw power units for feature extraction.
+        # Baseline-normalized power features are computed explicitly in extract_power_features().
+        # This avoids ambiguous mixing of already-baselined vs logratio-derived features.
+        if ctx.config.get("feature_engineering.save_tfr_with_sidecar", False):
+            try:
+                if tfr is not None and b_start is not None and b_end is not None:
+                    baseline_mode = str(ctx.config.get("time_frequency_analysis.baseline_mode", "logratio"))
+                    tfr_to_save = tfr.copy()
+                    tfr_to_save.apply_baseline(baseline=(b_start, b_end), mode=baseline_mode)
+                    tfr_to_save.comment = f"BASELINED:mode={baseline_mode};win=({b_start:.3f},{b_end:.3f})"
+                    tfr_out = ctx.deriv_root / f"sub-{ctx.subject}" / "eeg" / f"sub-{ctx.subject}_task-{ctx.task}_power_epo-tfr.h5"
+                    save_tfr_with_sidecar(tfr_to_save, tfr_out, (b_start, b_end), baseline_mode, ctx.logger, ctx.config)
+            except Exception as exc:
+                ctx.logger.warning("Failed to save baselined TFR with sidecar: %s", exc)
     else:
         ctx.logger.info("Skipping TFR computation (not needed for requested feature categories)")
 
@@ -279,15 +309,6 @@ def extract_all_features(
                  raise ValueError(f"Power length mismatch: {len(pow_df)} vs {expected_n_trials}")
         results.pow_df = pow_df
         results.pow_cols = pow_cols
-
-    if tfr is not None and b_start is not None and b_end is not None:
-        ctx.logger.info("Applying baseline correction to TFR...")
-        tfr.apply_baseline(baseline=(b_start, b_end), mode="logratio")
-        tfr.comment = f"BASELINED:mode=logratio;win=({b_start:.3f},{b_end:.3f})"
-
-        if ctx.config.get("feature_engineering.save_tfr_with_sidecar", False):
-            tfr_out = ctx.deriv_root / f"sub-{ctx.subject}" / "eeg" / f"sub-{ctx.subject}_task-{ctx.task}_power_epo-tfr.h5"
-            save_tfr_with_sidecar(tfr, tfr_out, (b_start, b_end), "logratio", ctx.logger, ctx.config)
 
     if "connectivity" in ctx.feature_categories:
         progress.step(message="Extracting connectivity features...")
@@ -483,7 +504,18 @@ def extract_precomputed_features(
     if feature_groups is None:
         feature_groups = ["erds", "spectral"]
     
-    compute_bands = any(g in feature_groups for g in ["erds", "spectral", "connectivity", "pac", "dynamics_advanced"])
+    compute_bands = any(
+        g in feature_groups
+        for g in [
+            "erds",
+            "spectral",
+            "connectivity",
+            "pac",
+            "dynamics_advanced",
+            "roi",
+            "ratios",
+        ]
+    )
     compute_psd_data = any(g in feature_groups for g in ["aperiodic", "spectral"])
     
     if precomputed is None:
@@ -519,7 +551,7 @@ def extract_precomputed_features(
 
     if "spectral" in feature_groups:
         logger.info("Extracting spectral power features...")
-        n_jobs_spectral = int(config.get("system.n_jobs", -1))
+        n_jobs_spectral = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
         df, cols, qc = extract_power_from_precomputed(precomputed, bands)
         extra_df, extra_cols = extract_spectral_extras_from_precomputed(precomputed, bands, n_jobs=n_jobs_spectral)
         seg_df, seg_cols = extract_segment_power_from_precomputed(precomputed, bands, n_jobs=n_jobs_spectral)
@@ -566,6 +598,38 @@ def extract_precomputed_features(
         else:
             result.qc["connectivity"] = {"skipped_reason": "empty_result"}
 
+    if "gfp" in feature_groups:
+        logger.info("Extracting GFP features...")
+        gfp_df, gfp_cols = extract_gfp_from_precomputed(precomputed, config)
+        if not gfp_df.empty:
+            result.features["gfp"] = FeatureSet(gfp_df, gfp_cols, "gfp")
+        else:
+            result.qc["gfp"] = {"skipped_reason": "empty_result"}
+
+    if "roi" in feature_groups:
+        logger.info("Extracting ROI-aggregated features...")
+        roi_df, roi_cols = extract_roi_features_from_precomputed(precomputed, bands, config)
+        if not roi_df.empty:
+            result.features["roi"] = FeatureSet(roi_df, roi_cols, "roi")
+        else:
+            result.qc["roi"] = {"skipped_reason": "empty_result"}
+
+    if "temporal" in feature_groups:
+        logger.info("Extracting temporal (time-domain) features...")
+        tmp_df, tmp_cols = extract_temporal_features_from_precomputed(precomputed, config)
+        if not tmp_df.empty:
+            result.features["temporal"] = FeatureSet(tmp_df, tmp_cols, "temporal")
+        else:
+            result.qc["temporal"] = {"skipped_reason": "empty_result"}
+
+    if "ratios" in feature_groups:
+        logger.info("Extracting band ratio features...")
+        ratio_df, ratio_cols = extract_band_ratios_from_precomputed(precomputed, config)
+        if not ratio_df.empty:
+            result.features["ratios"] = FeatureSet(ratio_df, ratio_cols, "ratios")
+        else:
+            result.qc["ratios"] = {"skipped_reason": "empty_result"}
+
     if "microstates" in feature_groups:
         logger.info("Extracting microstate features...")
         n_states = int(config.get("feature_engineering.microstates.n_states", 4))
@@ -605,7 +669,7 @@ def extract_precomputed_features(
 
     if "dynamics_advanced" in feature_groups:
         logger.info("Extracting advanced dynamics from precomputed data...")
-        n_jobs_dynamics = int(config.get("system.n_jobs", -1))
+        n_jobs_dynamics = int(config.get("feature_engineering.parallel.n_jobs_temporal", -1))
         dyn_df, dyn_cols = extract_dynamics_from_precomputed(precomputed, n_jobs=n_jobs_dynamics)
         if not dyn_df.empty:
             result.features["dynamics_advanced"] = FeatureSet(dyn_df, dyn_cols, "dynamics_advanced")
@@ -622,7 +686,7 @@ def extract_precomputed_features(
 
     if "asymmetry" in feature_groups:
         logger.info("Computing hemispheric asymmetry features...")
-        n_jobs_asym = int(config.get("system.n_jobs", -1))
+        n_jobs_asym = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
         asym_df, asym_cols = extract_asymmetry_from_precomputed(precomputed, n_jobs=n_jobs_asym)
         if not asym_df.empty:
             result.features["asymmetry"] = FeatureSet(asym_df, asym_cols, "asymmetry")
@@ -631,7 +695,7 @@ def extract_precomputed_features(
 
     if "complexity" in feature_groups:
         logger.info("Computing complexity metrics (LZC, entropy, DFA-lite)...")
-        n_jobs_complexity = int(config.get("system.n_jobs", -1))
+        n_jobs_complexity = int(config.get("feature_engineering.parallel.n_jobs_complexity", -1))
         comp_df, comp_cols = extract_complexity_from_precomputed(precomputed, n_jobs=n_jobs_complexity)
         if not comp_df.empty:
             result.features["complexity"] = FeatureSet(comp_df, comp_cols, "complexity")
@@ -857,6 +921,17 @@ class FeaturePipeline(PipelineBase):
         dynamics_df = extra_aligned.get("dynamics", dynamics_df)
         cfc_df = extra_aligned.get("cfc", cfc_df)
 
+        feature_qc: Dict[str, Any] = {}
+        if features.aper_qc is not None:
+            feature_qc["aperiodic"] = features.aper_qc
+        if precomputed_result is not None and getattr(precomputed_result, "qc", None):
+            feature_qc["precomputed"] = precomputed_result.qc
+        if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
+            try:
+                feature_qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
+            except Exception:
+                feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+
         combined_df = save_all_features(
             pow_df_aligned, pow_cols, baseline_df_aligned, baseline_cols,
             conn_df_aligned, conn_cols, ms_df_aligned, ms_cols,
@@ -866,15 +941,9 @@ class FeaturePipeline(PipelineBase):
             comp_df=comp_df, comp_cols=comp_cols,
             dynamics_df=dynamics_df, dynamics_cols=dynamics_cols,
             cfc_df=cfc_df, cfc_cols=cfc_cols,
+            precomputed_df=precomputed_df, precomputed_cols=precomputed_cols,
+            feature_qc=feature_qc or None,
         )
-
-        if precomputed_df is not None and not precomputed_df.empty:
-            write_tsv(precomputed_df, features_dir / "features_precomputed.tsv")
-            write_tsv(pd.Series(precomputed_cols, name="feature").to_frame(), features_dir / "features_precomputed_columns.tsv")
-            if combined_df is not None:
-                combined_df = pd.concat([combined_df, precomputed_df], axis=1)
-            else:
-                combined_df = precomputed_df
 
         regressor_df = export_fmri_regressors(
             aligned_events, pow_df_aligned, pow_cols, ms_df_aligned,

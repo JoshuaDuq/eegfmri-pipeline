@@ -181,6 +181,16 @@ time_frequency_analysis:  # Time-frequency analysis parameters (used in 02_tfr_a
 ###################################################################
 feature_engineering:  # Feature extraction parameters (used in 03_feature_extraction.py)
   save_tfr_with_sidecar: true  # Whether to save TFR files with BIDS sidecar JSON metadata
+  constants:
+    epsilon_std: *epsilon_std
+    epsilon_psd: *epsilon_psd
+    epsilon_amp: *epsilon_amp
+    min_epochs_for_features: 10
+    min_channels_for_connectivity: 3
+    min_samples_for_psd: 64
+    min_valid_fraction: 0.5
+    min_epochs_for_plv: 10
+    min_edge_samples: 30
   feature_categories:  # Feature groups to compute (edit to limit work)
     - "power"
     - "connectivity"
@@ -232,6 +242,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
         label: "t7"
   microstates:  # EEG microstate extraction parameters (used in extract_microstate_features)
     n_states: 4  # Number of microstate clusters to extract
+    kmeans_n_init: 20
     min_peak_distance_ms: 20.0  # Minimum distance [ms] between GFP peaks for microstate segmentation (used in extract_templates_from_trials)
     peaks_per_epoch: 5  # Number of GFP peaks to extract per epoch (used in extract_templates_from_trials)
     max_gfp_peaks_per_epoch: 100  # Maximum GFP peaks per epoch (used in extract_templates_from_trials)
@@ -247,6 +258,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     psd_window: *baseline_window_tfr  # Time window [s] for PSD computation (must be pre-stimulus, ≤ 0) - uses TFR baseline window
     peak_rejection_z: 3.5  # Z-score threshold for robust peak rejection during aperiodic fitting
     min_fit_points: 5  # Minimum frequency points required for valid aperiodic fit
+    min_r2: 0.6  # Minimum R² for accepting aperiodic (1/f) fit; below this threshold slope/offset/powcorr are set to NaN
     min_samples: 5  # Minimum time samples required in PSD window
     constants:  # Feature extraction constants
       epsilon_std: *epsilon_std  # Small epsilon for standard deviation calculations (prevents division by zero, reference to shared epsilon_std)
@@ -275,6 +287,8 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     n_jobs_connectivity: -1  # Number of parallel jobs for connectivity computation (per-band parallelization, used in connectivity.py)
     n_jobs_feature_groups: -1  # Number of parallel jobs for running independent feature extractors (used in pipeline.py); keep low to limit memory
   connectivity:  # Connectivity feature parameters
+    allow_legacy_fallback: false  # If false, require mne-connectivity; legacy fallback is not scientifically equivalent
+    output_level: "full"  # "full" writes all channel-pair edges; "global_only" writes only global summaries and graph metrics
     enable_imcoh: false  # Enable imaginary coherence computation (robust to volume conduction)
     enable_pli: false  # Enable Phase Lag Index computation
     aec_mode: "orth"  # Amplitude Envelope Correlation mode: "orth" (orthogonalized) or "standard"
@@ -286,6 +300,9 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     sliding_graph_top_prop: 0.1  # Top proportion of edges for sliding window graph metrics (falls back to graph_top_prop if not set, used in compute_sliding_connectivity_features)
     sliding_highpass_hz: null  # Highpass filter [Hz] for sliding connectivity (falls back to highpass_hz if not set, used in compute_sliding_connectivity_features)
     sliding_lowpass_hz: null  # Lowpass filter [Hz] for sliding connectivity (falls back to lowpass_hz if not set, used in compute_sliding_connectivity_features)
+
+  validation:  # Strict scientific validation behaviors
+    fail_on_missing_windows: true  # If true, raise when baseline/plateau windows are missing instead of silently skipping/falling back
   spectral:  # Spectral extras (band ratios, entropy)
     ratio_pairs:  # Band power ratios to compute (num/den)
       - ["theta", "beta"]
@@ -441,13 +458,13 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
         subtypes: ["pac"]
         structure: "roi × phase_freq × amp_freq × time"
     feature_patterns:  # Regex-based parsing (order-independent)
-      power_segmented: '^power_(ramp|plateau|offset)_(\\w+)_(.+)$'
-      erds_windowed: '^erds_(\\w+)_(\\w+)_(early|mid|late|t\\d+)$'
-      erds: '^erds_(\\w+)_(.+)$'
+      power_segmented: '^power_(.+)_(\\w+)_(ch|global)_(.+)$'
+      erds_windowed: '^erds_(early|mid|late|t\\d+)_([A-Za-z0-9]+)_ch_(.+)_(percent|db)$'
+      erds: '^erds_(plateau|baseline|ramp|full|early|mid|late|t\\d+)_([A-Za-z0-9]+)_(ch|global)_(.+)$'
       iaf: '^iaf_(.+)$'
       iaf_power: '^iaf_power_(.+)$'
       relative_power: '^relative_(\\w+)_(.+)$'
-      band_ratio: '^ratio_(\\w+)_(\\w+)_(.+)$'
+      band_ratio: '^ratios_(plateau|baseline|ramp|offset|full)_(.+)_global_power_ratio$'
       spectral_entropy: '^spectral_entropy_(.+)$'
       spectral_edge: '^spectral_edge_(\\d*\\.?\\d*)_(.+)$'
       peak_freq: '^peak_freq_(\\w+)_(.+)$'
@@ -469,12 +486,12 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
       roi_asymmetry: '^asymmetry_(\\w+)_(.+)$'
       roi_erds: '^roi_erds_(\\w+)_(.+)$'
       roi_laterality: '^laterality_(\\w+)_(.+)$'
-      ms_coverage: '^ms_coverage_(\\w+)$'
-      ms_duration: '^ms_duration_(\\w+)$'
-      ms_occurrence: '^ms_occurrence_(\\w+)$'
-      ms_transition: '^ms_transition_(\\w+)_(\\w+)$'
-      ms_gev: '^ms_gev_(\\w+)$'
-      ms_entropy: '^ms_entropy$'
+      ms_coverage: '^microstates_(baseline|ramp|plateau)_broadband_global_coverage_state(\\d+)$'
+      ms_duration: '^microstates_(baseline|ramp|plateau)_broadband_global_duration_state(\\d+)$'
+      ms_occurrence: '^microstates_(baseline|ramp|plateau)_broadband_global_occurrence_state(\\d+)$'
+      ms_transition: '^microstates_(baseline|ramp|plateau)_broadband_global_trans_(\\d+)_to_(\\d+)$'
+      ms_gev: '^microstates_(baseline|ramp|plateau)_broadband_global_gev$'
+      ms_entropy: '^microstates_(baseline|ramp|plateau)_broadband_global_ms_entropy$'
       itpc: '^itpc_(\\w+)_(.+)_(\\w+)$'
       plv: '^plv_(\\w+)_(.+)_(.+)$'
       pac: '^pac_(.+)$'

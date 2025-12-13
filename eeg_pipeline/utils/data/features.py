@@ -282,6 +282,9 @@ def save_all_features(
     dynamics_cols: List[str] = None,
     cfc_df: Optional[pd.DataFrame] = None,
     cfc_cols: List[str] = None,
+    precomputed_df: Optional[pd.DataFrame] = None,
+    precomputed_cols: Optional[List[str]] = None,
+    feature_qc: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     """Save all aligned feature blocks to disk and return combined features."""
     import json
@@ -349,10 +352,27 @@ def save_all_features(
         pac_trials_path = features_dir / "features_pac_trials.tsv"
         logger.info("Saving PAC per-trial values: %s", pac_trials_path)
         write_tsv(pac_trials_df, pac_trials_path)
+        # Include PAC per-trial values in features_all.tsv
+        direct_blocks.append(pac_trials_df)
+        direct_cols.extend(list(pac_trials_df.columns))
     if pac_time_df is not None and not pac_time_df.empty:
         pac_time_path = features_dir / "features_pac_time.tsv"
         logger.info("Saving PAC time-resolved values: %s", pac_time_path)
         write_tsv(pac_time_df, pac_time_path)
+        # Only include PAC time-resolved features in features_all.tsv if they are trial-aligned
+        try:
+            n_trials = len(y) if y is not None else None
+            if n_trials is not None and len(pac_time_df) == n_trials:
+                direct_blocks.append(pac_time_df)
+                direct_cols.extend(list(pac_time_df.columns))
+            else:
+                logger.info(
+                    "PAC time-resolved output is not trial-aligned (rows=%d, trials=%s); excluding from features_all.tsv",
+                    len(pac_time_df),
+                    str(n_trials) if n_trials is not None else "unknown",
+                )
+        except Exception as exc:
+            logger.warning("Failed to evaluate PAC time alignment; excluding from features_all.tsv: %s", exc)
 
     # Complexity features
     if comp_df is not None and not comp_df.empty:
@@ -389,7 +409,24 @@ def save_all_features(
         logger.info("Saving CFC features: %s", cfc_path)
         write_tsv(cfc_df, cfc_path)
 
-    if aper_qc:
+    # Precomputed features
+    if precomputed_df is not None and not precomputed_df.empty:
+        if precomputed_cols:
+            if len(precomputed_cols) == len(precomputed_df.columns):
+                precomputed_df.columns = precomputed_cols
+            else:
+                logger.warning(
+                    "Precomputed column mismatch: %d names vs %d columns. Using DataFrame names.",
+                    len(precomputed_cols),
+                    len(precomputed_df.columns),
+                )
+        precomputed_path = features_dir / "features_precomputed.tsv"
+        precomputed_cols_path = features_dir / "features_precomputed_columns.tsv"
+        logger.info("Saving precomputed features: %s", precomputed_path)
+        write_tsv(precomputed_df, precomputed_path)
+        write_tsv(pd.Series(list(precomputed_df.columns), name="feature").to_frame(), precomputed_cols_path)
+
+    if aper_qc and aper_qc.get("freqs") is not None and aper_qc.get("slopes") is not None and aper_qc.get("offsets") is not None and aper_qc.get("r2") is not None:
         try:
             subject_name = features_dir.parent.parent.name.replace("sub-", "")
             deriv_root = features_dir.parent.parent.parent
@@ -409,6 +446,8 @@ def save_all_features(
             logger.info("Saved aperiodic QC sidecar to %s", qc_path)
         except (OSError, IOError, TypeError, KeyError) as exc:
             logger.warning("Failed to save aperiodic QC npz: %s", exc)
+    elif aper_qc:
+        logger.info("Aperiodic QC payload present but incomplete; skipping aperiodic_qc.npz")
 
     if direct_blocks:
         direct_df = pd.concat(direct_blocks, axis=1)
@@ -449,6 +488,9 @@ def save_all_features(
     if conn_df is not None and not conn_df.empty:
         blocks.append(conn_df)
         cols_all.extend(conn_df.columns)
+    if precomputed_df is not None and not precomputed_df.empty:
+        blocks.append(precomputed_df)
+        cols_all.extend(precomputed_df.columns)
 
     if blocks:
         combined_df = pd.concat(blocks, axis=1)
@@ -469,6 +511,7 @@ def save_all_features(
             config=config,
             subject=subject_str,
             task=config.get("project.task") if config is not None else None,
+            qc=feature_qc,
         )
         with open(sidecar_path, "w") as f:
             json.dump(manifest, f, indent=2)

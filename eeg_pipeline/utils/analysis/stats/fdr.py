@@ -132,32 +132,51 @@ def apply_global_fdr(
     file_refs_by_family: Dict[str, list] = defaultdict(list)
 
     def infer_family(fpath: Path, df: pd.DataFrame) -> str:
-        """Infer hypothesis family to avoid mixing heterogeneous tests."""
         name = fpath.stem
+        if "test_family" in df.columns and df["test_family"].notna().any():
+            try:
+                return str(df["test_family"].dropna().iloc[0])
+            except Exception:
+                pass
+
         corr_match = re.match(r"corr_stats_(.+)_vs_(.+)", name)
         if corr_match:
             feature_part, target_part = corr_match.groups()
             return f"target:{target_part}|features:{feature_part}"
 
-        if "target" in df.columns and "feature_type" in df.columns:
-            return f"target:{df['target'].iloc[0]}|features:{df['feature_type'].iloc[0]}"
-
-        if "target" in df.columns:
-            return f"target:{df['target'].iloc[0]}"
+        if "target" in df.columns and df["target"].notna().any():
+            try:
+                tgt = str(df["target"].dropna().iloc[0])
+                ftype = str(df["feature_type"].dropna().iloc[0]) if "feature_type" in df.columns and df["feature_type"].notna().any() else None
+                return f"target:{tgt}|features:{ftype}" if ftype else f"target:{tgt}"
+            except Exception:
+                pass
 
         return name
+
+    def select_p_column(df: pd.DataFrame) -> Optional[str]:
+        if "p_primary_perm" in df.columns:
+            p = pd.to_numeric(df["p_primary_perm"], errors="coerce")
+            if p.notna().any():
+                return "p_primary_perm"
+        if "p_primary" in df.columns:
+            p = pd.to_numeric(df["p_primary"], errors="coerce")
+            if p.notna().any():
+                return "p_primary"
+        if "p_raw" in df.columns:
+            return "p_raw"
+        if "p" in df.columns:
+            return "p"
+        if "p_value" in df.columns:
+            return "p_value"
+        return None
     
     for fpath in files:
         df = read_tsv(fpath)
         if df is None or df.empty:
             continue
-        
-        p_col = None
-        for col in ["p_primary", "p_partial_temp", "p_raw", "p_value", "p"]:
-            if col in df.columns:
-                p_col = col
-                break
-        
+
+        p_col = select_p_column(df)
         if p_col is None:
             continue
 
@@ -189,6 +208,7 @@ def apply_global_fdr(
             "n_tests": len(p_arr),
             "n_rejected": int(reject.sum()),
             "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
+            "p_kind": str(file_refs_by_family[family][0][2]) if file_refs_by_family[family] else None,
         }
 
         if logger:
@@ -197,7 +217,7 @@ def apply_global_fdr(
             )
 
         for (fpath, idx, p_col), q, rej in zip(file_refs_by_family[family], q_arr, reject):
-            file_updates[fpath].append((idx, q, rej, family))
+            file_updates[fpath].append((idx, q, rej, family, p_col))
     
     for fpath, updates in file_updates.items():
         try:
@@ -210,12 +230,15 @@ def apply_global_fdr(
             if "fdr_reject" not in df.columns:
                 df["fdr_reject"] = False
             df["fdr_family"] = df.get("fdr_family", np.nan)
+            if "fdr_p_kind" not in df.columns:
+                df["fdr_p_kind"] = np.nan
             
-            for idx, q, rej, family in updates:
+            for idx, q, rej, family, p_col in updates:
                 if idx < len(df):
                     df.loc[idx, "q_global"] = q
                     df.loc[idx, "fdr_reject"] = bool(rej)
                     df.loc[idx, "fdr_family"] = family
+                    df.loc[idx, "fdr_p_kind"] = p_col
             
             write_tsv(df, fpath)
         except Exception as e:

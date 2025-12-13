@@ -29,7 +29,7 @@ def get_correlation_method(use_spearman: bool) -> str:
 def compute_correlation(
     x: np.ndarray,
     y: np.ndarray,
-    method: str = "spearman",
+    method: Union[str, bool] = "spearman",
 ) -> Tuple[float, float]:
     """
     Compute correlation coefficient and p-value.
@@ -47,6 +47,15 @@ def compute_correlation(
 
     if np.std(x_v) < 1e-12 or np.std(y_v) < 1e-12:
         return np.nan, np.nan
+
+    if isinstance(method, bool):
+        method = "spearman" if method else "pearson"
+    if not isinstance(method, str):
+        raise TypeError("method must be a string ('spearman'/'pearson')")
+
+    method = method.lower().strip()
+    if method not in {"spearman", "pearson"}:
+        raise ValueError("method must be 'spearman' or 'pearson'")
 
     if method == "spearman":
         r, p = stats.spearmanr(x_v, y_v)
@@ -609,7 +618,8 @@ def _compute_roi_correlation_stats(
     from . import compute_bootstrap_ci, compute_partial_correlations, compute_permutation_pvalues
     from .base import CorrelationStats
 
-    r, p = compute_correlation(x_a, y_a, getattr(cfg, "use_spearman", False))
+    method = getattr(cfg, "method", "spearman")
+    r, p = compute_correlation(x_a, y_a, method)
 
     r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
         x, y, cov, temp, cfg.method, context, getattr(cfg, "logger", None), cfg.min_samples_roi

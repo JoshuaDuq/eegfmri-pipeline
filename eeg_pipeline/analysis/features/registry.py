@@ -452,7 +452,16 @@ def classify_feature(
     parsed = NamingSchema.parse(column)
     if parsed.get("valid"):
         # Map schema group to feature_type
-        feature_type = parsed["group"]
+        schema_group = parsed["group"]
+        if schema_group in {"conn", "conn_legacy"}:
+            feature_type = "connectivity"
+        elif schema_group == "microstates":
+            feature_type = "microstate"
+        elif schema_group == "asymmetry":
+            # Keep asymmetry under ROI in downstream behavioral hierarchy.
+            feature_type = "roi"
+        else:
+            feature_type = schema_group
         subtype = parsed.get("segment", "unknown")
 
         # Build meta from parsed
@@ -471,6 +480,10 @@ def classify_feature(
                 meta["subtype"] = "baseline"
             elif subtype == "plateau":
                 meta["subtype"] = "plateau"
+
+        if feature_type == "roi" and schema_group == "asymmetry":
+            meta["subtype"] = "asymmetry"
+            subtype = "asymmetry"
 
         meta["subtype"] = subtype
         return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)

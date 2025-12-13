@@ -22,6 +22,7 @@ from joblib import Parallel, delayed
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.spectral import bandpass_filter_epochs
 from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 
 
 def _compute_modulation_index(phase: np.ndarray, amp: np.ndarray, n_bins: int = 18) -> float:
@@ -136,9 +137,11 @@ def _compute_pac_epoch(
                 if np.isfinite(mi):
                     mi_values.append(mi)
                     
-            key = f"mi_pac_{phase_band}_{amp_band}"
-            record[f"{key}_mean"] = float(np.mean(mi_values)) if mi_values else np.nan
-            record[f"{key}_max"] = float(np.max(mi_values)) if mi_values else np.nan
+            pair_label = f"{phase_band}_{amp_band}"
+            col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "mi_mean")
+            col_max = NamingSchema.build("cfc", "full", pair_label, "global", "mi_max")
+            record[col_mean] = float(np.mean(mi_values)) if mi_values else np.nan
+            record[col_max] = float(np.max(mi_values)) if mi_values else np.nan
             
     return record
 
@@ -171,8 +174,9 @@ def _compute_glm_pac_epoch(
                 if np.isfinite(r2):
                     glm_values.append(r2)
                     
-            key = f"glm_pac_{phase_band}_{amp_band}"
-            record[f"{key}_mean"] = float(np.mean(glm_values)) if glm_values else np.nan
+            pair_label = f"{phase_band}_{amp_band}"
+            col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "glm_r2_mean")
+            record[col_mean] = float(np.mean(glm_values)) if glm_values else np.nan
             
     return record
 
@@ -189,7 +193,7 @@ def extract_modulation_index_pac(
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
     
     # 1. Pre-filter all relevant bands
     # Collect unique bands needed
@@ -254,7 +258,7 @@ def extract_glm_pac(
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
 
     # Pre-filter
     all_bands = set(phase_bands) | set(amp_bands)
@@ -304,9 +308,11 @@ def _compute_ppc_epoch(
             if np.isfinite(plv):
                 ppc_values.append(plv)
                 
-        key = f"ppc_{b1}_{b2}_{n}to{m}"
-        record[f"{key}_mean"] = float(np.mean(ppc_values)) if ppc_values else np.nan
-        record[f"{key}_max"] = float(np.max(ppc_values)) if ppc_values else np.nan
+        pair_label = f"{b1}_{b2}_{n}to{m}"
+        col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "ppc_mean")
+        col_max = NamingSchema.build("cfc", "full", pair_label, "global", "ppc_max")
+        record[col_mean] = float(np.mean(ppc_values)) if ppc_values else np.nan
+        record[col_max] = float(np.max(ppc_values)) if ppc_values else np.nan
         
     return record
 
@@ -322,7 +328,7 @@ def extract_phase_phase_coupling(
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
     
     # Pre-filter
     needed_bands = set()
@@ -443,7 +449,7 @@ def extract_bicoherence_features(
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
     fmax = min(freq_range[1], sfreq / 2 - 1)
     
     records = Parallel(n_jobs=n_jobs)(
@@ -465,8 +471,24 @@ def extract_pac_from_precomputed(
     if not precomputed.band_data:
         return pd.DataFrame(), []
 
+    logger = getattr(precomputed, "logger", None)
+
+    def _apply_time_mask(arr_2d: np.ndarray, time_mask: Any) -> np.ndarray:
+        if arr_2d.ndim != 2:
+            raise ValueError(f"Expected 2D array (ch, time); got shape {arr_2d.shape}")
+        if time_mask is None:
+            return arr_2d
+        if isinstance(time_mask, slice):
+            return arr_2d[:, time_mask]
+        if isinstance(time_mask, np.ndarray):
+            if time_mask.dtype != bool:
+                raise ValueError("Time mask must be boolean")
+            return arr_2d[:, time_mask]
+        raise TypeError(f"Unsupported mask type: {type(time_mask)}")
+
     pac_cfg = config.get("feature_engineering.pac", {})
-    n_bins = int(pac_cfg.get("n_phase_bins", 18))
+    cfc_cfg = config.get("feature_engineering.cross_frequency", {})
+    n_bins = int(pac_cfg.get("n_bins", cfc_cfg.get("n_bins", 18)))
     default_pairs = pac_cfg.get("pairs")
     if default_pairs is None:
         default_pairs = [("theta", "gamma"), ("alpha", "gamma")]
@@ -484,7 +506,28 @@ def extract_pac_from_precomputed(
     if active_mask is None or not np.any(active_mask):
         active_mask = slice(None)
 
-    estimators = pac_cfg.get("estimators", ["tort", "plv", "cl_corr"])
+    raw_estimators = pac_cfg.get("estimators", ["tort", "cl_corr"])
+    if raw_estimators is None:
+        raw_estimators = []
+
+    est_set = set()
+    for est in raw_estimators:
+        if est is None:
+            continue
+        est_norm = str(est).strip().lower()
+        if est_norm in {"clcorr", "cl_corr", "cl-corr"}:
+            est_norm = "cl_corr"
+        est_set.add(est_norm)
+
+    supported = {"tort", "cl_corr"}
+    unsupported = sorted([e for e in est_set if e not in supported])
+    if unsupported and logger is not None:
+        logger.warning(
+            "PAC (precomputed): ignoring unsupported estimators=%s. Supported=%s",
+            ", ".join(unsupported),
+            ", ".join(sorted(supported)),
+        )
+    estimators = {e for e in est_set if e in supported}
     records: List[Dict[str, float]] = []
     
     for ep_idx in range(precomputed.data.shape[0]):
@@ -497,8 +540,8 @@ def extract_pac_from_precomputed(
             amp_env = precomputed.band_data[amp_band].envelope[ep_idx]
             
             # Use mask
-            phase_seg = phase[:, active_mask] if not isinstance(active_mask, slice) else phase
-            amp_seg = amp_env[:, active_mask] if not isinstance(active_mask, slice) else amp_env
+            phase_seg = _apply_time_mask(phase, active_mask)
+            amp_seg = _apply_time_mask(amp_env, active_mask)
 
             if phase_seg.shape[1] == 0 or amp_seg.shape[1] == 0:
                 continue
@@ -512,13 +555,15 @@ def extract_pac_from_precomputed(
                     # Reuse _compute_modulation_index helper if available, or inline
                     # Since _compute_modulation_index is defined in this file (cfc.py), we can use it!
                     mi = _compute_modulation_index(ph, amp, n_bins)
-                    record[f"pac_mi_{phase_band}_{amp_band}_{ch_name}"] = mi
-
-                # PLV between phase and envelope phase
-                if "plv" in estimators:
-                    amp_phase = np.angle(amp + 1e-12 + 0j)  # envelope phase proxy
-                    plv = float(np.abs(np.mean(np.exp(1j * (ph - amp_phase)))))
-                    record[f"pac_plv_{phase_band}_{amp_band}_{ch_name}"] = plv
+                    col = NamingSchema.build(
+                        "pac",
+                        "plateau",
+                        f"{phase_band}_{amp_band}",
+                        "ch",
+                        "hilbert_mi",
+                        channel=str(ch_name),
+                    )
+                    record[col] = mi
 
                 # Circular-linear correlation (phase vs amplitude)
                 if "cl_corr" in estimators:
@@ -526,14 +571,36 @@ def extract_pac_from_precomputed(
                     cos_ph = np.cos(ph)
                     r_num = (np.corrcoef(sin_ph, amp)[0, 1] ** 2 + np.corrcoef(cos_ph, amp)[0, 1] ** 2)
                     clc = float(np.sqrt(max(r_num, 0.0)))
-                    record[f"pac_clcorr_{phase_band}_{amp_band}_{ch_name}"] = clc
+                    col = NamingSchema.build(
+                        "pac",
+                        "plateau",
+                        f"{phase_band}_{amp_band}",
+                        "ch",
+                        "hilbert_clcorr",
+                        channel=str(ch_name),
+                    )
+                    record[col] = clc
         
         # Global summaries per epoch across channels
         if record:
-            for key_prefix in ["pac_mi_", "pac_plv_", "pac_clcorr_"]:
-                vals = [v for k, v in record.items() if k.startswith(key_prefix)]
-                if vals:
-                    record[f"{key_prefix}global_mean"] = float(np.nanmean(vals))
+            for phase_band, amp_band in pairs:
+                pair_label = f"{phase_band}_{amp_band}"
+                for stat in ("hilbert_mi", "hilbert_clcorr"):
+                    prefix = f"pac_plateau_{pair_label}_ch_"
+                    vals = [
+                        v
+                        for k, v in record.items()
+                        if str(k).startswith(prefix) and str(k).endswith(f"_{stat}")
+                    ]
+                    if vals:
+                        col_g = NamingSchema.build(
+                            "pac",
+                            "plateau",
+                            pair_label,
+                            "global",
+                            f"{stat}_mean",
+                        )
+                        record[col_g] = float(np.nanmean(vals))
         records.append(record)
 
     if not records or all(len(r) == 0 for r in records):
@@ -564,15 +631,15 @@ def extract_all_cfc_features(
     all_cols = []
     
     freq_bands = get_frequency_bands(config)
-    phase_bands = [b for b in ["delta", "theta", "alpha"] if b in freq_bands]
-    amp_bands = [b for b in ["beta", "low_gamma", "gamma", "high_gamma"] if b in freq_bands]
-    if not amp_bands:
-        amp_bands = [b for b in freq_bands if freq_bands[b][0] >= 13]
+    cfc_cfg = config.get("feature_engineering.cross_frequency", {})
+    phase_bands = [b for b in cfc_cfg.get("phase_bands", ["theta", "alpha"]) if b in freq_bands]
+    amp_bands = [b for b in cfc_cfg.get("amp_bands", ["gamma"]) if b in freq_bands]
+    n_bins = int(cfc_cfg.get("n_bins", 18))
     
     if include_pac and phase_bands and amp_bands:
         logger.info("Extracting Modulation Index PAC...")
         pac_df, pac_cols = extract_modulation_index_pac(
-            epochs, phase_bands, amp_bands, config, logger
+            epochs, phase_bands, amp_bands, config, logger, n_bins=n_bins
         )
         if not pac_df.empty:
             dfs.append(pac_df)
@@ -587,13 +654,24 @@ def extract_all_cfc_features(
     
     if include_ppc:
         logger.info("Extracting Phase-Phase Coupling...")
-        band_pairs = [
-            ("theta", "alpha", 1, 2),
-            ("theta", "beta", 1, 3),
-            ("alpha", "beta", 1, 2),
-        ]
-        valid_pairs = [(b1, b2, n, m) for b1, b2, n, m in band_pairs 
-                       if b1 in freq_bands and b2 in freq_bands]
+        band_pairs = cfc_cfg.get(
+            "phase_phase_pairs",
+            [
+                ["theta", "alpha", 1, 2],
+                ["theta", "beta", 1, 3],
+                ["alpha", "beta", 1, 2],
+            ],
+        )
+        valid_pairs = []
+        for entry in band_pairs:
+            if not entry or len(entry) < 4:
+                continue
+            b1, b2, n, m = entry[0], entry[1], entry[2], entry[3]
+            if b1 in freq_bands and b2 in freq_bands:
+                try:
+                    valid_pairs.append((str(b1), str(b2), int(n), int(m)))
+                except Exception:
+                    continue
         if valid_pairs:
             ppc_df, ppc_cols = extract_phase_phase_coupling(epochs, valid_pairs, config, logger)
             if not ppc_df.empty:

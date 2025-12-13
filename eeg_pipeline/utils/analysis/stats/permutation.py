@@ -177,17 +177,107 @@ def compute_permutation_pvalues(
     
     if n_perm is None or n_perm <= 0 or n_eff < min_samples:
         return p_perm, p_partial_perm, p_temp_perm
-    
+
     p_perm = perm_pval_simple(x_aligned, y_aligned, method, n_perm, rng, groups=groups, config=config)
-    
+
     if covariates_df is not None and not covariates_df.empty:
-        p_partial_perm = perm_pval_partial_freedman_lane(x_aligned, y_aligned, covariates_df, method, n_perm, rng, groups=groups, config=config)
-    
+        p_partial_perm = perm_pval_partial_freedman_lane(
+            x_aligned,
+            y_aligned,
+            covariates_df,
+            method,
+            n_perm,
+            rng,
+            groups=groups,
+            config=config,
+        )
+
     if temp_series is not None and not temp_series.empty:
         temp_cov = pd.DataFrame({"temp": temp_series})
-        p_temp_perm = perm_pval_partial_freedman_lane(x_aligned, y_aligned, temp_cov, method, n_perm, rng, config=config)
-    
+        p_temp_perm = perm_pval_partial_freedman_lane(
+            x_aligned,
+            y_aligned,
+            temp_cov,
+            method,
+            n_perm,
+            rng,
+            groups=groups,
+            config=config,
+        )
+
     return p_perm, p_partial_perm, p_temp_perm
+
+
+def compute_permutation_pvalues_with_cov_temp(
+    x_aligned: pd.Series,
+    y_aligned: pd.Series,
+    covariates_df: Optional[pd.DataFrame],
+    temp_series: Optional[pd.Series],
+    method: str,
+    n_perm: Optional[int],
+    n_eff: int,
+    rng: np.random.Generator,
+    *,
+    min_samples: Optional[int] = None,
+    config: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
+    groups: Optional[np.ndarray] = None,
+) -> Tuple[float, float, float, float]:
+    p_perm, p_partial_cov, p_partial_temp = compute_permutation_pvalues(
+        x_aligned=x_aligned,
+        y_aligned=y_aligned,
+        covariates_df=covariates_df,
+        temp_series=temp_series,
+        method=method,
+        n_perm=n_perm,
+        n_eff=n_eff,
+        rng=rng,
+        min_samples=min_samples,
+        config=config,
+        logger=logger,
+        groups=groups,
+    )
+
+    p_partial_cov_temp = np.nan
+    if n_perm is None or n_perm <= 0:
+        return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+
+    if covariates_df is None or covariates_df.empty or temp_series is None or temp_series.empty:
+        return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+
+    if min_samples is None:
+        constants = get_statistics_constants(config)
+        min_samples = constants.get("min_samples_for_correlation", 5)
+    if n_eff < min_samples:
+        return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+
+    cov_temp = covariates_df.copy()
+    cov_temp["temp"] = temp_series
+    cov_temp = cov_temp.dropna()
+
+    if cov_temp.empty:
+        return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+
+    x_ct = x_aligned.reindex(cov_temp.index)
+    y_ct = y_aligned.reindex(cov_temp.index)
+    if x_ct.empty or y_ct.empty:
+        return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
+
+    try:
+        p_partial_cov_temp = perm_pval_partial_freedman_lane(
+            x_ct,
+            y_ct,
+            cov_temp,
+            method,
+            n_perm,
+            rng,
+            groups=groups,
+            config=config,
+        )
+    except Exception:
+        p_partial_cov_temp = np.nan
+
+    return p_perm, p_partial_cov, p_partial_temp, p_partial_cov_temp
 
 
 def compute_temp_permutation_pvalues(

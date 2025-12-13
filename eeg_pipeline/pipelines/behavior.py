@@ -27,6 +27,7 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 
 
@@ -253,20 +254,17 @@ def _stage_correlate(
         run_pain_sensitivity_correlations,
         run_unified_feature_correlations,
     )
-    from eeg_pipeline.utils.io.tsv import read_tsv
     
     # Attach change scores before correlation if enabled
     _add_change_scores(ctx)
 
     ctx.logger.info("Running unified feature correlator...")
     result = run_unified_feature_correlations(ctx)
-    
-    corr_df = pd.DataFrame()
-    if result.status.name == "SUCCESS":
-        combined_path = ctx.stats_dir / "corr_stats_all_features_vs_rating.tsv"
-        if combined_path.exists():
-            corr_df = read_tsv(combined_path)
-            ctx.logger.info(f"Loaded {len(corr_df)} correlation results from unified correlator")
+    corr_df = result.to_dataframe() if getattr(result, "dataframe", None) is not None else result.to_dataframe()
+    if corr_df is None:
+        corr_df = pd.DataFrame()
+    if not corr_df.empty:
+        ctx.logger.info(f"Obtained {len(corr_df)} correlation results from unified correlator")
     
     psi_df = pd.DataFrame()
     if config.compute_pain_sensitivity and ctx.temperature is not None:
@@ -282,6 +280,158 @@ def _stage_correlate(
             )
     
     return corr_df, psi_df
+
+
+def _build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
+    qc: Dict[str, Any] = {
+        "subject": ctx.subject,
+        "task": ctx.task,
+        "n_trials": int(ctx.n_trials),
+        "has_temperature": bool(ctx.has_temperature),
+        "temperature_column": ctx.temperature_column,
+        "group_column": getattr(ctx, "group_column", None),
+    }
+    if ctx.targets is not None:
+        s = pd.to_numeric(ctx.targets, errors="coerce")
+        qc["rating"] = {
+            "n_non_nan": int(s.notna().sum()),
+            "min": float(s.min()) if s.notna().any() else np.nan,
+            "max": float(s.max()) if s.notna().any() else np.nan,
+            "mean": float(s.mean()) if s.notna().any() else np.nan,
+            "std": float(s.std(ddof=1)) if s.notna().sum() > 1 else np.nan,
+        }
+    if ctx.temperature is not None:
+        t = pd.to_numeric(ctx.temperature, errors="coerce")
+        qc["temperature"] = {
+            "n_non_nan": int(t.notna().sum()),
+            "min": float(t.min()) if t.notna().any() else np.nan,
+            "max": float(t.max()) if t.notna().any() else np.nan,
+            "mean": float(t.mean()) if t.notna().any() else np.nan,
+            "std": float(t.std(ddof=1)) if t.notna().sum() > 1 else np.nan,
+        }
+
+    if ctx.targets is not None and ctx.temperature is not None:
+        s = pd.to_numeric(ctx.targets, errors="coerce")
+        t = pd.to_numeric(ctx.temperature, errors="coerce")
+        valid = s.notna() & t.notna()
+        if int(valid.sum()) >= 3:
+            r, p = compute_correlation(s[valid].values, t[valid].values, method="spearman")
+            qc["rating_temperature_sanity"] = {
+                "method": "spearman",
+                "n": int(valid.sum()),
+                "r": float(r) if np.isfinite(r) else np.nan,
+                "p": float(p) if np.isfinite(p) else np.nan,
+            }
+
+    if ctx.aligned_events is not None and ctx.targets is not None:
+        try:
+            from eeg_pipeline.analysis.behavior.api import split_by_condition
+
+            pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(
+                ctx.aligned_events, ctx.config, ctx.logger
+            )
+            if int(n_pain) > 0 or int(n_nonpain) > 0:
+                s = pd.to_numeric(ctx.targets, errors="coerce")
+                pain_ratings = s[pain_mask] if len(pain_mask) == len(s) else pd.Series(dtype=float)
+                nonpain_ratings = s[nonpain_mask] if len(nonpain_mask) == len(s) else pd.Series(dtype=float)
+                qc["pain_vs_nonpain"] = {
+                    "n_pain": int(n_pain),
+                    "n_nonpain": int(n_nonpain),
+                    "mean_rating_pain": float(pain_ratings.mean()) if pain_ratings.notna().any() else np.nan,
+                    "mean_rating_nonpain": float(nonpain_ratings.mean()) if nonpain_ratings.notna().any() else np.nan,
+                    "mean_rating_difference_pain_minus_nonpain": (
+                        float(pain_ratings.mean() - nonpain_ratings.mean())
+                        if pain_ratings.notna().any() and nonpain_ratings.notna().any()
+                        else np.nan
+                    ),
+                }
+        except Exception:
+            pass
+
+    if ctx.covariates_df is not None and not ctx.covariates_df.empty:
+        cov = ctx.covariates_df
+        qc["covariates"] = {
+            "n_covariates": int(cov.shape[1]),
+            "columns": [str(c) for c in cov.columns],
+            "missing_fraction_by_column": {
+                str(c): float(pd.to_numeric(cov[c], errors="coerce").isna().mean())
+                for c in cov.columns
+            },
+        }
+    feature_counts: Dict[str, int] = {}
+    for name, df in [
+        ("power", ctx.power_df),
+        ("connectivity", ctx.connectivity_df),
+        ("microstates", ctx.microstates_df),
+        ("aperiodic", ctx.aperiodic_df),
+        ("itpc", ctx.itpc_df),
+        ("pac", ctx.pac_df),
+        ("precomputed", ctx.precomputed_df),
+    ]:
+        if df is None or df.empty:
+            continue
+        feature_counts[name] = int(df.shape[1])
+    qc["feature_counts"] = feature_counts
+    return qc
+
+
+def _write_analysis_metadata(
+    ctx: BehaviorContext,
+    pipeline_config: BehaviorPipelineConfig,
+    results: BehaviorPipelineResults,
+) -> None:
+    payload: Dict[str, Any] = {
+        "subject": ctx.subject,
+        "task": ctx.task,
+        "method": pipeline_config.method,
+        "min_samples": pipeline_config.min_samples,
+        "control_temperature": bool(pipeline_config.control_temperature),
+        "control_trial_order": bool(pipeline_config.control_trial_order),
+        "compute_change_scores": bool(pipeline_config.compute_change_scores),
+        "compute_pain_sensitivity": bool(pipeline_config.compute_pain_sensitivity),
+        "compute_reliability": bool(pipeline_config.compute_reliability),
+        "n_permutations": int(pipeline_config.n_permutations),
+        "fdr_alpha": float(pipeline_config.fdr_alpha),
+        "n_trials": int(ctx.n_trials),
+        "outputs": {
+            "has_correlations": bool(results.correlations is not None and not results.correlations.empty),
+            "has_pain_sensitivity": bool(results.pain_sensitivity is not None and not results.pain_sensitivity.empty),
+            "has_condition_effects": bool(results.condition_effects is not None and not results.condition_effects.empty),
+        },
+        "qc": _build_behavior_qc(ctx),
+    }
+
+    if results.correlations is not None and not results.correlations.empty:
+        df = results.correlations
+        partial_cols = [
+            ("p_partial_cov", "partial_cov"),
+            ("p_partial_temp", "partial_temp"),
+            ("p_partial_cov_temp", "partial_cov_temp"),
+        ]
+        partial_ok: Dict[str, Any] = {}
+        for col, label in partial_cols:
+            if col not in df.columns:
+                continue
+            pvals = pd.to_numeric(df[col], errors="coerce")
+            partial_ok[label] = {
+                "n_non_nan": int(pvals.notna().sum()),
+                "fraction_non_nan": float(pvals.notna().mean()) if len(pvals) else np.nan,
+            }
+        if partial_ok:
+            payload["partial_correlation_feasibility"] = partial_ok
+
+        if "p_primary_source" in df.columns and df["p_primary_source"].notna().any():
+            payload["primary_test_source_counts"] = (
+                df["p_primary_source"].fillna("unknown").value_counts().to_dict()
+            )
+
+        if "within_family_p_kind" in df.columns and df["within_family_p_kind"].notna().any():
+            payload["within_family_p_kind_counts"] = (
+                df["within_family_p_kind"].fillna("unknown").value_counts().to_dict()
+            )
+
+    with open(ctx.stats_dir / "analysis_metadata.json", "w") as f:
+        json.dump(payload, f, indent=2, default=str)
 
 
 def _stage_condition(
@@ -589,6 +739,11 @@ class BehaviorPipeline(PipelineBase):
             _stage_export(ctx, results)
         else:
             logger.info("Stage 8: Skipped export (CLI selection)")
+
+        try:
+            _write_analysis_metadata(ctx, self.pipeline_config, results)
+        except Exception as e:
+            logger.warning(f"Failed to write analysis metadata: {e}")
         
         summary = results.to_summary()
         logger.info(f"{'='*60}")

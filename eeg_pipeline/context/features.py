@@ -37,8 +37,8 @@ PRECOMPUTED_GROUP_CHOICES = [
     "gfp",
     "roi",
     "temporal",
-    "complexity",
     "ratios",
+    "complexity",
     "asymmetry",
     "aperiodic",
     "connectivity",
@@ -91,6 +91,19 @@ class FeatureContext:
                  logger=self.logger
              )
 
+        fail_on_missing = bool(self.config.get("feature_engineering.validation.fail_on_missing_windows", False))
+        if fail_on_missing and self._windows is not None:
+            baseline_meta = self._windows.metadata.get("baseline")
+            plateau_meta = self._windows.metadata.get("plateau")
+            baseline_ok = bool(baseline_meta is not None and getattr(baseline_meta, "valid", False))
+            plateau_ok = bool(plateau_meta is not None and getattr(plateau_meta, "valid", False))
+            if not baseline_ok or not plateau_ok:
+                raise ValueError(
+                    "Missing required time windows for feature extraction: "
+                    f"baseline_ok={baseline_ok}, plateau_ok={plateau_ok}. "
+                    "Check time_frequency_analysis.baseline_window / plateau_window and epoch time range."
+                )
+
     @property
     def windows(self):
         """Access centralized time windows."""
@@ -102,6 +115,18 @@ class FeatureContext:
                  sampling_rate=self.epochs.info["sfreq"],
                  logger=self.logger
             )
+            fail_on_missing = bool(self.config.get("feature_engineering.validation.fail_on_missing_windows", False))
+            if fail_on_missing:
+                baseline_meta = self._windows.metadata.get("baseline")
+                plateau_meta = self._windows.metadata.get("plateau")
+                baseline_ok = bool(baseline_meta is not None and getattr(baseline_meta, "valid", False))
+                plateau_ok = bool(plateau_meta is not None and getattr(plateau_meta, "valid", False))
+                if not baseline_ok or not plateau_ok:
+                    raise ValueError(
+                        "Missing required time windows for feature extraction: "
+                        f"baseline_ok={baseline_ok}, plateau_ok={plateau_ok}. "
+                        "Check time_frequency_analysis.baseline_window / plateau_window and epoch time range."
+                    )
         return self._windows
 
     def add_result(self, key: str, value: Any, cols: Optional[List[str]] = None) -> None:
@@ -129,7 +154,7 @@ class FeatureContext:
         # Get bands from config for precomputation
         bands = get_frequency_band_names(self.config)
         self.precomputed = precompute_data(
-            self.epochs, bands, self.config, self.logger
+            self.epochs, bands, self.config, self.logger, windows_spec=self.windows
         )
         self._precomputed_ready = True
         return True

@@ -57,7 +57,11 @@ def _process_band(
         mask = s.notna() & temp.notna()
         n_valid[i] = int(mask.sum())
         if n_valid[i] >= min_samples:
-            corrs[i], pvals[i] = compute_correlation(s[mask], temp[mask], use_spearman)
+            corrs[i], pvals[i] = compute_correlation(
+                s[mask],
+                temp[mask],
+                "spearman" if use_spearman else "pearson",
+            )
 
     valid = np.isfinite(pvals) & (n_valid >= min_samples)
     if not valid.any():

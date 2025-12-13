@@ -74,24 +74,44 @@ def _extract_peak_maps_from_epoch(epoch, min_dist_samples, peaks_per_epoch):
     selected_peaks = peaks[sorted_indices[:n_select]]
     return zscore_maps(epoch[:, selected_peaks].T, axis=1)
 
-def extract_templates_from_trials(trial_data, sfreq, n_states):
-    # (Simplified for brevity but retaining core logic)
+def extract_templates_from_trials(trial_data, sfreq, n_states, config):
     peak_maps = []
-    min_dist = max(1, int((20.0/1000)*sfreq))
+    min_peak_distance_ms = float(config.get("feature_engineering.microstates.min_peak_distance_ms", 20.0))
+    peaks_per_epoch = int(config.get("feature_engineering.microstates.peaks_per_epoch", 5))
+    max_gfp_peaks_per_epoch = int(config.get("feature_engineering.microstates.max_gfp_peaks_per_epoch", 100))
+    min_dist = max(1, int((min_peak_distance_ms / 1000.0) * sfreq))
+
     for ep in trial_data:
-        m = _extract_peak_maps_from_epoch(ep, min_dist, 5)
-        if m is not None: peak_maps.append(m)
-    
-    if not peak_maps: return None
+        if ep.size == 0:
+            continue
+        gfp = compute_gfp_with_floor(ep)
+        peaks, _ = find_peaks(gfp, distance=min_dist)
+        if peaks.size == 0:
+            continue
+        if peaks.size > max_gfp_peaks_per_epoch:
+            sorted_peaks = peaks[np.argsort(gfp[peaks])[::-1][:max_gfp_peaks_per_epoch]]
+            peaks = np.sort(sorted_peaks)
+        sorted_indices = np.argsort(gfp[peaks])[::-1]
+        n_select = min(peaks_per_epoch, peaks.size)
+        selected_peaks = peaks[sorted_indices[:n_select]]
+        m = zscore_maps(ep[:, selected_peaks].T, axis=1)
+        if m is not None and m.size > 0:
+            peak_maps.append(m)
+
+    if not peak_maps:
+        return None
     all_maps = np.vstack(peak_maps)
-    
-    # Sign flip for polarity invariance
-    max_indices = np.argmax(np.abs(all_maps), axis=1)
-    signs = np.sign(all_maps[np.arange(all_maps.shape[0]), max_indices])
-    signs[signs==0] = 1
-    all_maps = all_maps * signs[:, np.newaxis]
-    
-    kmeans = KMeans(n_clusters=n_states, n_init=10, random_state=42)
+
+    polarity_invariant = bool(config.get("feature_engineering.microstates.polarity_invariant_kmeans", False))
+    if polarity_invariant:
+        max_indices = np.argmax(np.abs(all_maps), axis=1)
+        signs = np.sign(all_maps[np.arange(all_maps.shape[0]), max_indices])
+        signs[signs == 0] = 1
+        all_maps = all_maps * signs[:, np.newaxis]
+
+    random_state = int(config.get("project.random_state", 42))
+    n_init = int(config.get("feature_engineering.microstates.kmeans_n_init", 10))
+    kmeans = KMeans(n_clusters=n_states, n_init=n_init, random_state=random_state)
     kmeans.fit(all_maps)
     return zscore_maps(kmeans.cluster_centers_, axis=1)
 
@@ -104,51 +124,87 @@ def _reorder_templates_to_picks(templates, template_ch_names, picks, info, logge
         return None
     return templates[:, indices]
 
-def _compute_metrics(state_labels, sfreq, n_states, record):
+def _compute_metrics(
+    state_labels: np.ndarray,
+    sfreq: float,
+    n_states: int,
+    record: Dict[str, float],
+    *,
+    min_run_ms: float,
+    valid_mask: Optional[np.ndarray] = None,
+):
     # Compute Coverage, Duration, Occurrence
-    total_samples = float(state_labels.size)
-    duration_sec = total_samples / sfreq if sfreq > 0 else 0
-    counts = np.bincount(state_labels, minlength=n_states)
+    if valid_mask is None:
+        valid_mask = np.ones(state_labels.size, dtype=bool)
+
+    valid_mask = np.asarray(valid_mask, dtype=bool)
+    if valid_mask.shape[0] != state_labels.shape[0]:
+        raise ValueError("valid_mask must have same length as state_labels")
+
+    valid_labels = state_labels[valid_mask]
+    valid_samples = int(valid_labels.size)
+    total_samples = int(state_labels.size)
+    duration_sec_total = total_samples / sfreq if sfreq > 0 else 0.0
+    duration_sec_valid = valid_samples / sfreq if sfreq > 0 else 0.0
+
+    counts = np.bincount(valid_labels, minlength=n_states) if valid_samples > 0 else np.zeros(n_states, dtype=int)
     
     # Coverage
-    coverage = counts / total_samples if total_samples > 0 else np.zeros(n_states)
+    coverage = counts / float(valid_samples) if valid_samples > 0 else np.zeros(n_states)
     for i in range(n_states):
         record[f"coverage_state{i}"] = coverage[i]
         
-    # Duration / Occurrence
-    # Run Logic
-    if total_samples == 0: return
-    
-    runs = []
-    curr = state_labels[0]
-    length = 1
-    for x in state_labels[1:]:
-        if x == curr: length += 1
-        else:
-            runs.append((curr, length))
-            curr = x
+    if valid_samples == 0:
+        return
+
+    runs: List[Tuple[int, int]] = []
+    curr: Optional[int] = None
+    length = 0
+    for is_valid, x in zip(valid_mask, state_labels):
+        if not bool(is_valid):
+            if curr is not None and length > 0:
+                runs.append((int(curr), int(length)))
+            curr = None
+            length = 0
+            continue
+
+        xi = int(x)
+        if curr is None:
+            curr = xi
             length = 1
-    runs.append((curr, length))
+            continue
+
+        if xi == int(curr):
+            length += 1
+        else:
+            runs.append((int(curr), int(length)))
+            curr = xi
+            length = 1
+
+    if curr is not None and length > 0:
+        runs.append((int(curr), int(length)))
+
+    min_run_samples = max(1, int((min_run_ms / 1000.0) * sfreq)) if sfreq > 0 else 1
+    valid_runs = [(s, l) for (s, l) in runs if int(l) >= min_run_samples]
     
     durations = {i: [] for i in range(n_states)}
-    for s, l in runs:
+    for s, l in valid_runs:
         durations[s].append(l / sfreq)
         
     for i in range(n_states):
         durs = durations[i]
         mean_dur = np.mean(durs) if durs else 0.0
-        occ = len(durs) / duration_sec if duration_sec > 0 else 0.0
+        occ = len(durs) / duration_sec_valid if duration_sec_valid > 0 else 0.0
         record[f"duration_state{i}"] = mean_dur
         record[f"occurrence_state{i}"] = occ
         
     # Transition (Markov)
-    # Simple transition matrix
     trans = np.zeros((n_states, n_states))
-    for (s1, l1), (s2, l2) in zip(runs[:-1], runs[1:]):
-        trans[s1, s2] += 1
+    for (s1, _), (s2, _) in zip(valid_runs[:-1], valid_runs[1:]):
+        trans[int(s1), int(s2)] += 1
     # Rate? Or Probability? Plan doesn't specify deeply, usually probability or rate.
     # Legacy was rate.
-    trans_rate = trans / duration_sec if duration_sec > 0 else trans
+    trans_rate = trans / duration_sec_valid if duration_sec_valid > 0 else trans
     for i in range(n_states):
         for j in range(n_states):
             if i==j: continue
@@ -161,12 +217,56 @@ def _process_single_trial_microstates(
     templates: np.ndarray,
     sfreq: float,
     n_states: int,
+    *,
+    min_run_ms: float,
+    gfp_min_percentile: float,
+    min_valid_fraction: float,
+    min_correlation: float,
 ) -> Dict[str, float]:
     """Process a single trial for microstate features (parallel worker)."""
-    lbls, _, gev = label_timecourse(trial_data, templates)
-    rec = {}
-    _compute_metrics(lbls, sfreq, n_states, rec)
-    rec["gev"] = gev
+    def _empty_record() -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for i in range(n_states):
+            out[f"coverage_state{i}"] = np.nan
+            out[f"duration_state{i}"] = np.nan
+            out[f"occurrence_state{i}"] = np.nan
+        for i in range(n_states):
+            for j in range(n_states):
+                if i == j:
+                    continue
+                out[f"trans_{i}_to_{j}"] = np.nan
+        out["gev"] = np.nan
+        out["valid_fraction"] = np.nan
+        out["mean_abs_corr"] = np.nan
+        return out
+
+    lbls, assigned_corr, gev = label_timecourse(trial_data, templates)
+    if lbls.size == 0:
+        return _empty_record()
+
+    gfp = compute_gfp_with_floor(trial_data)
+    if gfp.size != lbls.size:
+        return _empty_record()
+
+    gfp_thresh = float(np.nanpercentile(gfp, gfp_min_percentile)) if np.isfinite(gfp_min_percentile) else np.nan
+    valid_mask = np.isfinite(gfp)
+    if np.isfinite(gfp_thresh):
+        valid_mask &= gfp >= gfp_thresh
+
+    if np.isfinite(min_correlation):
+        valid_mask &= np.abs(assigned_corr) >= float(min_correlation)
+
+    valid_fraction = float(np.mean(valid_mask)) if valid_mask.size else 0.0
+    rec = _empty_record()
+    rec["valid_fraction"] = valid_fraction
+    if np.any(valid_mask):
+        rec["mean_abs_corr"] = float(np.nanmean(np.abs(assigned_corr[valid_mask])))
+
+    if valid_fraction < float(min_valid_fraction) or int(np.sum(valid_mask)) < 2:
+        return rec
+
+    _compute_metrics(lbls, sfreq, n_states, rec, min_run_ms=min_run_ms, valid_mask=valid_mask)
+    rec["gev"] = float(gev) if np.isfinite(gev) else np.nan
     return rec
 
 
@@ -177,6 +277,11 @@ def _extract_microstates_for_segment(
     n_states: int,
     segment_name: str,
     n_jobs: int = 1,
+    *,
+    min_run_ms: float,
+    gfp_min_percentile: float,
+    min_valid_fraction: float,
+    min_correlation: float,
 ) -> Dict[str, List[float]]:
     """Extract microstate features for a single segment.
     
@@ -189,12 +294,30 @@ def _extract_microstates_for_segment(
     
     if n_jobs != 1:
         records = Parallel(n_jobs=n_jobs)(
-            delayed(_process_single_trial_microstates)(data[i], templates, sfreq, n_states)
+            delayed(_process_single_trial_microstates)(
+                data[i],
+                templates,
+                sfreq,
+                n_states,
+                min_run_ms=min_run_ms,
+                gfp_min_percentile=gfp_min_percentile,
+                min_valid_fraction=min_valid_fraction,
+                min_correlation=min_correlation,
+            )
             for i in range(len(data))
         )
     else:
         records = [
-            _process_single_trial_microstates(data[i], templates, sfreq, n_states)
+            _process_single_trial_microstates(
+                data[i],
+                templates,
+                sfreq,
+                n_states,
+                min_run_ms=min_run_ms,
+                gfp_min_percentile=gfp_min_percentile,
+                min_valid_fraction=min_valid_fraction,
+                min_correlation=min_correlation,
+            )
             for i in range(len(data))
         ]
     
@@ -222,8 +345,13 @@ def extract_microstate_features(
     
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
-    n_jobs = int(ctx.config.get("system.n_jobs", -1))
+    n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_feature_groups", -1))
     min_samples = 10
+
+    min_run_ms = float(ctx.config.get("feature_engineering.microstates.min_run_ms", 10.0))
+    gfp_min_percentile = float(ctx.config.get("feature_engineering.microstates.gfp_min_percentile", 25.0))
+    min_valid_fraction = float(ctx.config.get("feature_engineering.microstates.min_valid_fraction", 0.5))
+    min_correlation = float(ctx.config.get("feature_engineering.microstates.min_correlation", 0.25))
     
     # Get templates from plateau data (primary segment)
     mask_plateau = ctx.windows.get_mask("plateau")
@@ -242,7 +370,7 @@ def extract_microstate_features(
     if fixed is not None and fixed_names is not None:
         templates = _reorder_templates_to_picks(fixed, fixed_names, picks, epochs.info, ctx.logger)
     else:
-        templates = extract_templates_from_trials(data_plateau, sfreq, n_states)
+        templates = extract_templates_from_trials(data_plateau, sfreq, n_states, ctx.config)
         
     if templates is None:
         return pd.DataFrame(), [], None
@@ -254,27 +382,51 @@ def extract_microstate_features(
     if mask_baseline is not None and np.sum(mask_baseline) >= min_samples:
         data_baseline = full_data[..., mask_baseline]
         baseline_features = _extract_microstates_for_segment(
-            data_baseline, templates, sfreq, n_states, "baseline", n_jobs=n_jobs
+            data_baseline,
+            templates,
+            sfreq,
+            n_states,
+            "baseline",
+            n_jobs=n_jobs,
+            min_run_ms=min_run_ms,
+            gfp_min_percentile=gfp_min_percentile,
+            min_valid_fraction=min_valid_fraction,
+            min_correlation=min_correlation,
         )
         all_data.update(baseline_features)
         ctx.logger.info(f"Computed Microstates for baseline: {np.sum(mask_baseline)} samples")
     
     # Process ramp segment
-    from eeg_pipeline.utils.config.loader import get_config_value
-    times = epochs.times
-    ramp_end = float(get_config_value(ctx.config, "feature_engineering.features.ramp_end", 3.0))
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    if np.sum(ramp_mask) >= min_samples:
-        data_ramp = full_data[..., ramp_mask]
+    mask_ramp = ctx.windows.get_mask("ramp")
+    if mask_ramp is not None and np.sum(mask_ramp) >= min_samples:
+        data_ramp = full_data[..., mask_ramp]
         ramp_features = _extract_microstates_for_segment(
-            data_ramp, templates, sfreq, n_states, "ramp", n_jobs=n_jobs
+            data_ramp,
+            templates,
+            sfreq,
+            n_states,
+            "ramp",
+            n_jobs=n_jobs,
+            min_run_ms=min_run_ms,
+            gfp_min_percentile=gfp_min_percentile,
+            min_valid_fraction=min_valid_fraction,
+            min_correlation=min_correlation,
         )
         all_data.update(ramp_features)
-        ctx.logger.info(f"Computed Microstates for ramp: {np.sum(ramp_mask)} samples")
+        ctx.logger.info(f"Computed Microstates for ramp: {np.sum(mask_ramp)} samples")
     
     # Process plateau segment
     plateau_features = _extract_microstates_for_segment(
-        data_plateau, templates, sfreq, n_states, "plateau", n_jobs=n_jobs
+        data_plateau,
+        templates,
+        sfreq,
+        n_states,
+        "plateau",
+        n_jobs=n_jobs,
+        min_run_ms=min_run_ms,
+        gfp_min_percentile=gfp_min_percentile,
+        min_valid_fraction=min_valid_fraction,
+        min_correlation=min_correlation,
     )
     all_data.update(plateau_features)
     ctx.logger.info(f"Computed Microstates for plateau: {np.sum(mask_plateau)} samples")
@@ -301,11 +453,15 @@ def extract_microstate_features_from_epochs(
 
     full_data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_feature_groups", -1))
     min_samples = 10
 
-    from eeg_pipeline.utils.analysis.windowing import compute_time_windows
-    from eeg_pipeline.utils.config.loader import get_config_value
+    min_run_ms = float(config.get("feature_engineering.microstates.min_run_ms", 10.0))
+    gfp_min_percentile = float(config.get("feature_engineering.microstates.gfp_min_percentile", 25.0))
+    min_valid_fraction = float(config.get("feature_engineering.microstates.min_valid_fraction", 0.5))
+    min_correlation = float(config.get("feature_engineering.microstates.min_correlation", 0.25))
+
+    from eeg_pipeline.utils.analysis.windowing import compute_time_windows, get_segment_masks
 
     try:
         windows = compute_time_windows(epochs.times, config, logger=logger, strict=False)
@@ -331,7 +487,7 @@ def extract_microstate_features_from_epochs(
             logger,
         )
     else:
-        templates = extract_templates_from_trials(data_plateau, sfreq, n_states)
+        templates = extract_templates_from_trials(data_plateau, sfreq, n_states, config)
 
     if templates is None:
         return pd.DataFrame(), [], None
@@ -348,12 +504,16 @@ def extract_microstate_features_from_epochs(
                 n_states,
                 "baseline",
                 n_jobs=n_jobs,
+                min_run_ms=min_run_ms,
+                gfp_min_percentile=gfp_min_percentile,
+                min_valid_fraction=min_valid_fraction,
+                min_correlation=min_correlation,
             )
         )
 
-    ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
-    ramp_mask = (epochs.times >= 0) & (epochs.times <= ramp_end)
-    if int(np.sum(ramp_mask)) >= min_samples:
+    segment_masks = get_segment_masks(epochs.times, windows, config)
+    ramp_mask = segment_masks.get("ramp")
+    if ramp_mask is not None and int(np.sum(ramp_mask)) >= min_samples:
         data_ramp = full_data[..., ramp_mask]
         all_data.update(
             _extract_microstates_for_segment(
@@ -363,6 +523,10 @@ def extract_microstate_features_from_epochs(
                 n_states,
                 "ramp",
                 n_jobs=n_jobs,
+                min_run_ms=min_run_ms,
+                gfp_min_percentile=gfp_min_percentile,
+                min_valid_fraction=min_valid_fraction,
+                min_correlation=min_correlation,
             )
         )
 
@@ -374,6 +538,10 @@ def extract_microstate_features_from_epochs(
             n_states,
             "plateau",
             n_jobs=n_jobs,
+            min_run_ms=min_run_ms,
+            gfp_min_percentile=gfp_min_percentile,
+            min_valid_fraction=min_valid_fraction,
+            min_correlation=min_correlation,
         )
     )
 

@@ -34,39 +34,47 @@ def _fit_single_epoch_channel(
     peak_rejection_z: float,
     min_fit_points: int,
 ) -> Tuple[int, int, float, float, int, int, bool, np.ndarray, int]:
-    # (Same logic as before, condensed for brevity of this file write, but functionally identical)
-    finite_freq_mask = np.isfinite(log_freqs)
-    finite_mask = finite_freq_mask & np.isfinite(psd_vals)
-    valid_bins = int(np.sum(finite_mask))
+    finite_mask = np.isfinite(log_freqs) & np.isfinite(psd_vals)
+    finite_indices = np.flatnonzero(finite_mask)
+    valid_bins = int(finite_indices.size)
     if valid_bins < min_fit_points:
         return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, 0, False, np.array([], dtype=int), 1)
-    
-    freq = log_freqs[finite_mask]
-    psd_clean = psd_vals[finite_mask]
-    keep_mask = np.ones_like(psd_clean, dtype=bool)
-    
-    # Robust peak rejection
-    mad = stats.median_abs_deviation(psd_clean, scale="normal", nan_policy="omit")
-    median = np.median(psd_clean) if np.isfinite(psd_clean).any() else np.nan
+
+    psd_finite = psd_vals[finite_indices]
+    keep_mask = np.ones(valid_bins, dtype=bool)
+
+    mad = stats.median_abs_deviation(psd_finite, scale="normal", nan_policy="omit")
+    median = np.median(psd_finite) if np.isfinite(psd_finite).any() else np.nan
     peak_rejected = False
-    
+
     if np.isfinite(mad) and mad > 1e-12 and np.isfinite(median):
-        candidate_keep = psd_clean <= median + peak_rejection_z * mad
-        if np.sum(candidate_keep) >= min_fit_points:
+        candidate_keep = psd_finite <= median + peak_rejection_z * mad
+        if int(np.sum(candidate_keep)) >= min_fit_points:
             keep_mask = candidate_keep
             peak_rejected = bool(np.any(~candidate_keep))
-            freq = freq[keep_mask]
-            psd_clean = psd_clean[keep_mask]
-            
-    if psd_clean.size < min_fit_points:
-        return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, int(psd_clean.size), peak_rejected, np.array([], dtype=int), 2)
-        
+
+    kept_indices = finite_indices[keep_mask]
+    kept_bins = int(kept_indices.size)
+    if kept_bins < min_fit_points:
+        return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 2)
+
     try:
-        slope, intercept = np.polyfit(freq, psd_clean, 1)
-        final_indices = np.where(finite_mask)[0][keep_mask] # Approximation of indices logic
-        return (epoch_idx, channel_idx, float(intercept), float(slope), valid_bins, int(psd_clean.size), peak_rejected, final_indices, 0)
+        freq_fit = log_freqs[kept_indices]
+        psd_fit = psd_vals[kept_indices]
+        slope, intercept = np.polyfit(freq_fit, psd_fit, 1)
+        return (
+            epoch_idx,
+            channel_idx,
+            float(intercept),
+            float(slope),
+            valid_bins,
+            kept_bins,
+            peak_rejected,
+            kept_indices.astype(int),
+            0,
+        )
     except Exception:
-        return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, int(psd_clean.size), peak_rejected, np.array([], dtype=int), 3)
+        return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3)
 
 def _fit_aperiodic_with_qc(log_freqs, log_psd, peak_rejection_z, min_fit_points, logger, n_jobs=1):
     # Driver for parallel fitting
@@ -186,7 +194,7 @@ def _extract_aperiodic_for_segment(
     
     peak_z = float(config.get("feature_engineering.aperiodic.peak_rejection_z", 3.5))
     min_pts = int(config.get("feature_engineering.aperiodic.min_fit_points", 5))
-    n_jobs = int(config.get("system.n_jobs", -1))
+    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_aperiodic", -1))
     
     offsets, slopes, valid_bins, kept_bins, peak_rej, fit_masks, fit_qc = _fit_aperiodic_with_qc(
         log_freqs, log_psd, peak_z, min_pts, logger, n_jobs=n_jobs
@@ -194,8 +202,28 @@ def _extract_aperiodic_for_segment(
     
     residuals = compute_residuals(log_freqs, log_psd, offsets, slopes)
     r2, rms = _compute_fit_r2_and_rms(log_freqs, log_psd, offsets, slopes, fit_masks)
-    
-    data_dict = {}
+
+    min_r2 = float(config.get("feature_engineering.aperiodic.min_r2", 0.0))
+    if not np.isfinite(min_r2):
+        min_r2 = 0.0
+
+    max_rms = config.get("feature_engineering.aperiodic.max_rms", None)
+    if max_rms is not None:
+        try:
+            max_rms = float(max_rms)
+        except Exception:
+            max_rms = None
+    if max_rms is not None and not np.isfinite(max_rms):
+        max_rms = None
+
+    fit_ok = np.isfinite(r2)
+    if min_r2 > 0:
+        fit_ok &= (r2 >= min_r2)
+
+    if max_rms is not None:
+        fit_ok &= (np.isfinite(rms) & (rms <= max_rms))
+
+    data_dict: Dict[str, np.ndarray] = {}
     freq_bands = get_frequency_bands_for_aperiodic(config)
     n_epochs = psds.shape[0]
     
@@ -214,8 +242,15 @@ def _extract_aperiodic_for_segment(
         col_r2 = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "r2", channel=ch)
         col_rms = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "rms", channel=ch)
         
-        data_dict[col_slope] = slopes[:, i]
-        data_dict[col_offset] = offsets[:, i]
+        slope_vals = slopes[:, i].copy()
+        offset_vals = offsets[:, i].copy()
+        bad = ~fit_ok[:, i]
+        if np.any(bad):
+            slope_vals[bad] = np.nan
+            offset_vals[bad] = np.nan
+
+        data_dict[col_slope] = slope_vals
+        data_dict[col_offset] = offset_vals
         data_dict[col_r2] = r2[:, i]
         data_dict[col_rms] = rms[:, i]
         
@@ -250,6 +285,9 @@ def _extract_aperiodic_for_segment(
             res_band = residuals[:, i, fmask]
             ratio = np.power(10.0, res_band)
             mean_ratio = np.mean(ratio, axis=1)
+            if np.any(bad):
+                mean_ratio = mean_ratio.copy()
+                mean_ratio[bad] = np.nan
             
             col_powcorr = NamingSchema.build("aperiodic", segment_name, b, "ch", "powcorr", channel=ch)
             data_dict[col_powcorr] = mean_ratio
@@ -269,6 +307,24 @@ def _extract_aperiodic_for_segment(
     col_tbr_glob = NamingSchema.build("spectral", segment_name, "broadband", "global", "tbr")
     data_dict[col_apf_glob] = apf_global
     data_dict[col_tbr_glob] = tbr_global
+
+    data_dict["__qc__"] = {
+        "segment": segment_name,
+        "freqs": freqs,
+        "log_freqs": log_freqs,
+        "slopes": slopes,
+        "offsets": offsets,
+        "r2": r2,
+        "rms": rms,
+        "min_r2": float(min_r2),
+        "max_rms": float(max_rms) if max_rms is not None else None,
+        "fit_ok_fraction": float(np.nanmean(fit_ok)) if fit_ok.size else np.nan,
+        "residual_mean": np.nanmean(residuals, axis=2) if residuals.ndim == 3 else None,
+        "valid_bins": valid_bins,
+        "kept_bins": kept_bins,
+        "peak_rejected": peak_rej,
+        "channel_names": ch_names,
+    }
     
     return data_dict
 
@@ -289,7 +345,11 @@ def extract_aperiodic_features(
     times = epochs.times
     min_samples = int(sfreq)  # At least 1 second
     
-    all_data = {}
+    all_data: Dict[str, Any] = {}
+    qc_payload: Dict[str, Any] = {
+        "segments": {},
+        "channel_names": ch_names,
+    }
     
     # Process baseline segment
     mask_baseline = ctx.windows.get_mask("baseline")
@@ -299,19 +359,21 @@ def extract_aperiodic_features(
             epochs, picks, ch_names, "baseline",
             t_baseline[0], t_baseline[-1], bands, config, logger
         )
+        qc_payload["segments"]["baseline"] = baseline_data.get("__qc__")
+        baseline_data.pop("__qc__", None)
         all_data.update(baseline_data)
         logger.info(f"Computed Aperiodic for baseline: [{t_baseline[0]:.2f}, {t_baseline[-1]:.2f}]")
     
     # Process ramp segment
-    from eeg_pipeline.utils.config.loader import get_config_value
-    ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    if np.sum(ramp_mask) >= min_samples:
-        t_ramp = times[ramp_mask]
+    mask_ramp = ctx.windows.get_mask("ramp")
+    if mask_ramp is not None and np.sum(mask_ramp) >= min_samples:
+        t_ramp = times[mask_ramp]
         ramp_data = _extract_aperiodic_for_segment(
             epochs, picks, ch_names, "ramp",
             t_ramp[0], t_ramp[-1], bands, config, logger
         )
+        qc_payload["segments"]["ramp"] = ramp_data.get("__qc__")
+        ramp_data.pop("__qc__", None)
         all_data.update(ramp_data)
         logger.info(f"Computed Aperiodic for ramp: [{t_ramp[0]:.2f}, {t_ramp[-1]:.2f}]")
     
@@ -323,23 +385,31 @@ def extract_aperiodic_features(
             epochs, picks, ch_names, "plateau",
             t_plateau[0], t_plateau[-1], bands, config, logger
         )
+        qc_payload["segments"]["plateau"] = plateau_data.get("__qc__")
+        plateau_data.pop("__qc__", None)
         all_data.update(plateau_data)
         logger.info(f"Computed Aperiodic for plateau: [{t_plateau[0]:.2f}, {t_plateau[-1]:.2f}]")
     elif not all_data:
-        # Fallback to full epoch if no segments available
-        logger.warning("No valid segments for Aperiodic; using full epoch.")
-        full_data = _extract_aperiodic_for_segment(
-            epochs, picks, ch_names, "full",
-            times[0], times[-1], bands, config, logger
-        )
-        all_data.update(full_data)
+        logger.warning("No valid baseline/ramp/plateau segments for Aperiodic; returning empty result.")
     
     if not all_data:
         return pd.DataFrame(), [], {}
     
     df = pd.DataFrame(all_data)
     
-    qc_payload = {"segments_computed": list(set(col.split("_")[1] for col in df.columns if "_" in col))}
+    segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
+    qc_payload["segments_computed"] = segments_done
+    # Provide top-level keys expected by save_all_features
+    plateau_qc = qc_payload.get("segments", {}).get("plateau")
+    baseline_qc = qc_payload.get("segments", {}).get("baseline")
+    chosen = plateau_qc or baseline_qc
+    if chosen:
+        qc_payload["freqs"] = chosen.get("freqs")
+        qc_payload["residual_mean"] = chosen.get("residual_mean")
+        qc_payload["r2"] = chosen.get("r2")
+        qc_payload["slopes"] = chosen.get("slopes")
+        qc_payload["offsets"] = chosen.get("offsets")
+        qc_payload["channel_names"] = chosen.get("channel_names")
     
     return df, list(df.columns), qc_payload
 

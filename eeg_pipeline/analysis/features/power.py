@@ -36,6 +36,9 @@ def extract_power_features(
     if tfr_data is None:
         return pd.DataFrame(), []
 
+    tfr_comment = getattr(tfr_obj, "comment", None)
+    tfr_already_baselined = isinstance(tfr_comment, str) and ("BASELINED:" in tfr_comment)
+
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     freq_bands = get_frequency_bands(ctx.config)
     
@@ -105,17 +108,24 @@ def extract_power_features(
                 d = tfr_data[:, :, fmask, :][:, :, :, mask]
                 
                 raw_power = np.nanmean(np.nanmean(d, axis=3), axis=2) # (n_epochs, n_channels)
-                
-                if band in baseline_powers:
+                eps_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", 1e-20))
+                raw_power = np.maximum(raw_power, eps_psd)
+
+                if tfr_already_baselined:
+                    # Baseline normalization has already been applied at the TFR level.
+                    # Avoid computing a second log-ratio against a separately-estimated baseline.
+                    val_matrix = np.nanmean(np.nanmean(d, axis=3), axis=2)
+                    stat_name = "baselined"
+                elif band in baseline_powers:
                     base = baseline_powers[band]
                     denom = base.copy()
                     denom[denom == 0] = np.nan
-                    # Log-ratio (dB)
-                    val_matrix = 10 * np.log10(raw_power / denom)
+                    # Log-ratio
+                    val_matrix = np.log10(raw_power / denom)
                     stat_name = "logratio"
                 else:
                     # Fallback to raw log10 if no baseline
-                    val_matrix = 10 * np.log10(raw_power)
+                    val_matrix = np.log10(raw_power)
                     stat_name = "log10raw"
 
                 # Per-channel

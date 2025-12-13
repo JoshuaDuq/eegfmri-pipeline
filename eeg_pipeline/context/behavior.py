@@ -84,6 +84,7 @@ class BehaviorContext:
     covariates_df: Optional[pd.DataFrame] = None
     covariates_without_temp_df: Optional[pd.DataFrame] = None
     group_ids: Optional[np.ndarray] = None
+    group_column: Optional[str] = None
     results: Dict[str, ComputationResult] = field(default_factory=dict)
     _data_loaded: bool = False
     _change_scores_added: bool = False
@@ -212,18 +213,56 @@ class BehaviorContext:
             self.covariates_df = build_covariate_matrix(
                 self.aligned_events, self.partial_covars, self.config
             )
+
+            if self.control_trial_order and self.aligned_events is not None:
+                trial_candidates = [
+                    "trial_index",
+                    "trial_in_run",
+                    "trial",
+                    "trial_number",
+                ]
+                trial_col = None
+                for cand in trial_candidates:
+                    if cand in self.aligned_events.columns:
+                        trial_col = cand
+                        break
+
+                if trial_col is not None:
+                    trial_index_series = pd.to_numeric(self.aligned_events[trial_col], errors="coerce")
+                else:
+                    self.logger.warning(
+                        "control_trial_order=True but no trial column found in aligned_events; using sequential trial_index"
+                    )
+                    trial_index_series = pd.Series(
+                        np.arange(len(self.aligned_events)),
+                        index=self.aligned_events.index,
+                        name="trial_index",
+                    )
+
+                if self.covariates_df is None or self.covariates_df.empty:
+                    self.covariates_df = pd.DataFrame(index=self.aligned_events.index)
+                self.covariates_df["trial_index"] = trial_index_series
+
             self.covariates_without_temp_df = build_covariates_without_temp(
                 self.covariates_df, self.temperature_column
             )
 
-            # Align potential grouping variables for LOSO/clustered evaluation
-            for candidate in ["subject", "session", "run", "block"]:
-                if self.aligned_events is not None and candidate in self.aligned_events.columns:
+            self.group_ids = None
+            self.group_column = None
+            if self.aligned_events is not None:
+                for candidate in ["run", "block", "session", "subject"]:
+                    if candidate not in self.aligned_events.columns:
+                        continue
                     try:
-                        self.group_ids = np.asarray(self.aligned_events[candidate])
+                        values = self.aligned_events[candidate]
+                        if hasattr(values, "nunique") and int(values.nunique(dropna=False)) <= 1:
+                            continue
+                        self.group_ids = np.asarray(values)
+                        self.group_column = candidate
                         break
                     except Exception:
                         self.group_ids = None
+                        self.group_column = None
 
             self._data_loaded = True
             return True

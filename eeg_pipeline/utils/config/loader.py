@@ -507,8 +507,7 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
     """Get a feature extraction constant from config."""
     if config is None:
         return default
-    
-    # Map constant names to config paths
+
     constant_map = {
         "EPSILON_STD": "feature_engineering.constants.epsilon_std",
         "EPSILON_PSD": "feature_engineering.constants.epsilon_psd",
@@ -517,17 +516,16 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
         "MIN_CHANNELS_FOR_CONNECTIVITY": "feature_engineering.constants.min_channels_for_connectivity",
         "MIN_SAMPLES_FOR_PSD": "feature_engineering.constants.min_samples_for_psd",
         "MIN_VALID_FRACTION": "feature_engineering.constants.min_valid_fraction",
-        "MIN_EPOCHS_FOR_MICROSTATES": "feature_engineering.microstates.min_epochs_for_microstates",
-        "MAX_GFP_PEAKS_PER_EPOCH": "feature_engineering.microstates.max_gfp_peaks_per_epoch",
         "MIN_EPOCHS_FOR_PLV": "feature_engineering.constants.min_epochs_for_plv",
         "MIN_EDGE_SAMPLES": "feature_engineering.constants.min_edge_samples",
+        "MIN_EPOCHS_FOR_MICROSTATES": "feature_engineering.microstates.min_epochs_for_microstates",
+        "MAX_GFP_PEAKS_PER_EPOCH": "feature_engineering.microstates.max_gfp_peaks_per_epoch",
         "MIN_SAMPLES_FOR_ENTROPY": "feature_engineering.complexity.min_samples_for_entropy",
         "DEFAULT_PE_ORDER": "feature_engineering.complexity.pe_order",
         "DEFAULT_PE_DELAY": "feature_engineering.complexity.pe_delay",
     }
-    
+
     config_path = constant_map.get(constant_name)
-    if config_path:
-        return get_config_value(config, config_path, default)
-    
-    return default
+    if config_path is None:
+        return default
+    return get_config_value(config, config_path, default)

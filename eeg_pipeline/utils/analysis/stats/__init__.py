@@ -223,6 +223,7 @@ from .permutation import (
     compute_perm_and_partial_perm,
     compute_permutation_pvalue_partial,
     compute_permutation_pvalues,
+    compute_permutation_pvalues_with_cov_temp,
     compute_temp_permutation_pvalues,
     compute_permutation_pvalues_for_roi_pair,
 )
@@ -232,6 +233,7 @@ from .partial import (
     compute_partial_residuals,
     compute_partial_correlation_with_covariates,
     compute_partial_correlations,
+    compute_partial_correlations_with_cov_temp,
     compute_partial_correlation_for_roi_pair,
     prepare_aligned_data,
 )

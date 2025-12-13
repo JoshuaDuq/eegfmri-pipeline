@@ -269,9 +269,13 @@ class TimeWindowSpec:
         """Construct all standard windows defined in config."""
         tf_cfg = self.config.get("time_frequency_analysis", {})
         feat_cfg = self.config.get("feature_engineering.windows", {})
+        feat_features_cfg = self.config.get("feature_engineering.features", {})
         
         baseline_def = feat_cfg.get("baseline_window", tf_cfg.get("baseline_window", [-2.0, 0.0]))
-        plateau_def = feat_cfg.get("plateau_window", tf_cfg.get("plateau_window", [3.0, 10.0]))
+        plateau_def = feat_cfg.get(
+            "plateau_window",
+            feat_features_cfg.get("plateau_window", tf_cfg.get("plateau_window", [3.0, 10.0])),
+        )
         
         self._add_window("baseline", baseline_def[0], baseline_def[1])
         
@@ -282,12 +286,20 @@ class TimeWindowSpec:
             ramp_def = feat_cfg["ramp_window"]
             self._add_window("ramp", ramp_def[0], ramp_def[1])
         else:
-            self._add_window("ramp", 0.0, plateau_start)
+            ramp_end = feat_features_cfg.get("ramp_end")
+            if ramp_end is not None:
+                try:
+                    ramp_end = float(ramp_end)
+                except Exception:
+                    ramp_end = None
+            self._add_window("ramp", 0.0, ramp_end if ramp_end is not None else plateau_start)
              
         self._add_window("plateau", plateau_start, plateau_end)
         
         # Coarse bins (early/mid/late)
         coarse_bins = feat_cfg.get("coarse_bins")
+        if not coarse_bins:
+            coarse_bins = feat_features_cfg.get("temporal_bins")
         if not coarse_bins:
             duration = plateau_end - plateau_start
             bin_size = duration / 3.0
@@ -301,12 +313,27 @@ class TimeWindowSpec:
             self._add_window(b["label"], b["start"], b["end"], prefix="coarse")
             
         # Fine bins (t1..tN)
-        n_fine = int(feat_cfg.get("n_fine_bins", 7))
-        fine_dur = (plateau_end - plateau_start) / n_fine
-        for i in range(n_fine):
-            start = plateau_start + i * fine_dur
-            end = start + fine_dur
-            self._add_window(f"t{i+1}", start, end, prefix="fine")
+        fine_bins = feat_features_cfg.get("temporal_bins_fine")
+        if fine_bins:
+            for entry in fine_bins:
+                if not isinstance(entry, dict):
+                    continue
+                if "label" not in entry or "start" not in entry or "end" not in entry:
+                    continue
+                try:
+                    label = str(entry["label"])
+                    start = float(entry["start"])
+                    end = float(entry["end"])
+                except Exception:
+                    continue
+                self._add_window(label, start, end, prefix="fine")
+        else:
+            n_fine = int(feat_cfg.get("n_fine_bins", 7))
+            fine_dur = (plateau_end - plateau_start) / max(n_fine, 1)
+            for i in range(n_fine):
+                start = plateau_start + i * fine_dur
+                end = start + fine_dur
+                self._add_window(f"t{i+1}", start, end, prefix="fine")
 
     def _add_window(self, name: str, start: float, end: float, prefix: str = ""):
         """Add a window with clamping and validation."""
@@ -376,6 +403,82 @@ class TimeWindowSpec:
             idx += 1
             
         return windows
+
+
+def time_windows_from_spec(
+    spec: TimeWindowSpec,
+    n_plateau_windows: int = 5,
+    *,
+    logger: Optional[logging.Logger] = None,
+    strict: bool = True,
+) -> TimeWindows:
+    baseline_meta = spec.metadata.get("baseline")
+    plateau_meta = spec.metadata.get("plateau")
+
+    errors: List[str] = []
+    if baseline_meta is None or not bool(getattr(baseline_meta, "valid", False)):
+        errors.append("Baseline window is empty")
+    if plateau_meta is None or not bool(getattr(plateau_meta, "valid", False)):
+        errors.append("Active/plateau window is empty")
+
+    if errors:
+        if logger:
+            logger_method = logger.error if strict else logger.warning
+            logger_method("Time window validation failed: %s", "; ".join(errors))
+        if strict:
+            raise ValueError("; ".join(errors))
+
+    coarse_masks: List[np.ndarray] = []
+    coarse_labels: List[str] = []
+    fine_masks: List[np.ndarray] = []
+    fine_labels: List[str] = []
+    for key, mask in spec.masks.items():
+        if key.startswith("coarse_"):
+            coarse_labels.append(key.split("coarse_", 1)[1])
+            coarse_masks.append(mask)
+        elif key.startswith("fine_"):
+            fine_labels.append(key.split("fine_", 1)[1])
+            fine_masks.append(mask)
+
+    plateau_masks: List[np.ndarray] = []
+    window_labels: List[str] = []
+    if n_plateau_windows > 0 and plateau_meta is not None and bool(getattr(plateau_meta, "valid", False)):
+        plateau_start = float(getattr(plateau_meta, "start", np.nan))
+        plateau_end = float(getattr(plateau_meta, "end", np.nan))
+        window_duration = (plateau_end - plateau_start) / n_plateau_windows
+        for i in range(n_plateau_windows):
+            win_start = plateau_start + i * window_duration
+            win_end = win_start + window_duration
+            plateau_masks.append((spec.times >= win_start) & (spec.times < win_end))
+            window_labels.append(f"w{i}")
+
+    return TimeWindows(
+        baseline_mask=spec.get_mask("baseline"),
+        active_mask=spec.get_mask("plateau"),
+        baseline_range=(
+            (float(baseline_meta.start), float(baseline_meta.end))
+            if baseline_meta is not None
+            else (np.nan, np.nan)
+        ),
+        active_range=(
+            (float(plateau_meta.start), float(plateau_meta.end))
+            if plateau_meta is not None
+            else (np.nan, np.nan)
+        ),
+        clamped=bool(
+            (baseline_meta is not None and bool(getattr(baseline_meta, "clamped", False)))
+            or (plateau_meta is not None and bool(getattr(plateau_meta, "clamped", False)))
+        ),
+        valid=not errors,
+        errors=errors,
+        coarse_masks=coarse_masks,
+        coarse_labels=coarse_labels,
+        fine_masks=fine_masks,
+        fine_labels=fine_labels,
+        plateau_masks=plateau_masks,
+        window_labels=window_labels,
+        times=spec.times,
+    )
 
 
 ###################################################################

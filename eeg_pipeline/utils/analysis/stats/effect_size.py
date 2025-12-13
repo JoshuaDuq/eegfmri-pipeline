@@ -16,6 +16,7 @@ from scipy import stats
 
 from eeg_pipeline.utils.io.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.analysis.stats.validation import validate_pain_binary_values
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 
 
@@ -237,6 +238,9 @@ def split_by_condition(
         return np.array([]), np.array([]), 0, 0
 
     pain_series = pd.to_numeric(events_df[pain_col], errors="coerce")
+    ok, _ = validate_pain_binary_values(pain_series, logger=logger)
+    if not ok:
+        return np.array([]), np.array([]), 0, 0
     pain_mask = (pain_series == 1).values
     nonpain_mask = (pain_series == 0).values
 

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import re
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.config.loader import get_feature_constant, get_frequency_bands, get_config_value
@@ -120,6 +121,7 @@ def extract_erds_from_precomputed(
     times = precomputed.times
     active_times = times[windows.active_mask]
     
+    segment_label = "plateau"
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
         
@@ -163,9 +165,9 @@ def extract_erds_from_precomputed(
                     erds_trace_db = np.full_like(active_power_trace, np.nan)
                 
                 # Full period ERD/ERS
-                record[f"erds_{band}_{ch_name}_full_percent"] = float(erds_full)
+                record[NamingSchema.build("erds", segment_label, band, "ch", "percent", channel=ch_name)] = float(erds_full)
                 if use_log_ratio:
-                    record[f"erds_{band}_{ch_name}_full_db"] = float(erds_full_db)
+                    record[NamingSchema.build("erds", segment_label, band, "ch", "db", channel=ch_name)] = float(erds_full_db)
                 all_erds_full.append(erds_full)
                 all_log_full.append(erds_full_db)
                 
@@ -180,9 +182,9 @@ def extract_erds_from_precomputed(
                         else:
                             erds_win = np.nan
                             erds_win_db = np.nan
-                        record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                        record[NamingSchema.build("erds", win_label, band, "ch", "percent", channel=ch_name)] = float(erds_win)
                         if use_log_ratio:
-                            record[f"erds_{band}_{ch_name}_{win_label}_db"] = float(erds_win_db)
+                            record[NamingSchema.build("erds", win_label, band, "ch", "db", channel=ch_name)] = float(erds_win_db)
                         coarse_values[win_label] = erds_win
                 
                 # === Fine temporal bins (t1-t7) for HRF modeling ===
@@ -195,16 +197,20 @@ def extract_erds_from_precomputed(
                         else:
                             erds_win = np.nan
                             erds_win_db = np.nan
-                        record[f"erds_{band}_{ch_name}_{win_label}_percent"] = float(erds_win)
+                        record[NamingSchema.build("erds", win_label, band, "ch", "percent", channel=ch_name)] = float(erds_win)
                         if use_log_ratio:
-                            record[f"erds_{band}_{ch_name}_{win_label}_db"] = float(erds_win_db)
+                            record[NamingSchema.build("erds", win_label, band, "ch", "db", channel=ch_name)] = float(erds_win_db)
                 
                 # === Temporal dynamics ===
-                # Default ERD/ERS separation metrics to NaN for invalid baselines
-                record[f"erds_{band}_{ch_name}_erd_magnitude"] = np.nan
-                record[f"erds_{band}_{ch_name}_erd_duration"] = np.nan
-                record[f"erds_{band}_{ch_name}_ers_magnitude"] = np.nan
-                record[f"erds_{band}_{ch_name}_ers_duration"] = np.nan
+                # Default temporal metrics to NaN
+                record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "early_late_diff", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)] = np.nan
                 
                 if np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
                     valid_mask = np.isfinite(erds_trace)
@@ -212,27 +218,27 @@ def extract_erds_from_precomputed(
                     # Slope (linear trend over plateau)
                     if np.sum(valid_mask) > 2:
                         slope, _ = np.polyfit(active_times[valid_mask], erds_trace[valid_mask], 1)
-                        record[f"erds_{band}_{ch_name}_slope"] = float(slope)
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = float(slope)
                     else:
-                        record[f"erds_{band}_{ch_name}_slope"] = np.nan
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
                     
                     # Early-late difference
                     if "early" in coarse_values and "late" in coarse_values:
                         diff = coarse_values["late"] - coarse_values["early"]
-                        record[f"erds_{band}_{ch_name}_early_late_diff"] = float(diff)
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "early_late_diff", channel=ch_name)] = float(diff)
                     
                     # Peak latency
                     peak_idx = np.nanargmax(np.abs(erds_trace))
-                    record[f"erds_{band}_{ch_name}_peak_latency"] = float(active_times[peak_idx])
+                    record[NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)] = float(active_times[peak_idx])
 
                     # Onset latency
                     threshold = baseline_std / baseline_ref * 100 if baseline_ref > epsilon else np.inf
                     onset_mask = np.abs(erds_trace) > threshold
                     if np.any(onset_mask):
                         onset_idx = np.argmax(onset_mask)
-                        record[f"erds_{band}_{ch_name}_onset_latency"] = float(active_times[onset_idx])
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)] = float(active_times[onset_idx])
                     else:
-                        record[f"erds_{band}_{ch_name}_onset_latency"] = np.nan
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)] = np.nan
                     
                     # === ERD vs ERS separation ===
                     erd_vals = erds_trace[erds_trace < 0]
@@ -240,26 +246,29 @@ def extract_erds_from_precomputed(
                     
                     if baseline_valid:
                         if len(erd_vals) > 0:
-                            record[f"erds_{band}_{ch_name}_erd_magnitude"] = float(np.mean(np.abs(erd_vals)))
-                            record[f"erds_{band}_{ch_name}_erd_duration"] = float(len(erd_vals) / precomputed.sfreq)
+                            erd_magnitude = float(np.mean(np.abs(erd_vals)))
+                            erd_duration = float(len(erd_vals) / precomputed.sfreq)
                         else:
-                            record[f"erds_{band}_{ch_name}_erd_magnitude"] = 0.0
-                            record[f"erds_{band}_{ch_name}_erd_duration"] = 0.0
+                            erd_magnitude = 0.0
+                            erd_duration = 0.0
+
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)] = erd_magnitude
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)] = erd_duration
                         
                         if len(ers_vals) > 0:
-                            record[f"erds_{band}_{ch_name}_ers_magnitude"] = float(np.mean(ers_vals))
-                            record[f"erds_{band}_{ch_name}_ers_duration"] = float(len(ers_vals) / precomputed.sfreq)
+                            ers_magnitude = float(np.mean(ers_vals))
+                            ers_duration = float(len(ers_vals) / precomputed.sfreq)
                         else:
-                            record[f"erds_{band}_{ch_name}_ers_magnitude"] = 0.0
-                            record[f"erds_{band}_{ch_name}_ers_duration"] = 0.0
+                            ers_magnitude = 0.0
+                            ers_duration = 0.0
+
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)] = ers_magnitude
+                        record[NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)] = ers_duration
             
             # === Global statistics per band ===
             valid_erds = [e for e in all_erds_full if np.isfinite(e)]
             valid_log = [e for e in all_log_full if np.isfinite(e)]
-            record[f"erds_{band}_baseline_clamped_channels"] = int(clamped_channels_for_band)
-            record[f"erds_{band}_baseline_valid_channels"] = int(baseline_valid_count)
             baseline_valid_fraction = baseline_valid_count / n_channels if n_channels > 0 else 0.0
-            record[f"erds_{band}_baseline_valid_fraction"] = float(baseline_valid_fraction)
             
             if band not in qc_payload:
                 qc_payload[band] = {"clamped_channels": [], "baseline_min_power": min_baseline_power, "valid_fractions": []}
@@ -268,18 +277,18 @@ def extract_erds_from_precomputed(
             
             # Skip global summaries when baseline-valid fraction is too low to avoid mixing valid/invalid channels
             if baseline_valid_fraction < min_valid_fraction:
-                record[f"erds_{band}_global_full_mean"] = np.nan
-                record[f"erds_{band}_global_full_std"] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "global", "percent_mean")] = np.nan
+                record[NamingSchema.build("erds", segment_label, band, "global", "percent_std")] = np.nan
                 for win_label in windows.coarse_labels:
-                    record[f"erds_{band}_global_{win_label}_mean"] = np.nan
+                    record[NamingSchema.build("erds", win_label, band, "global", "percent_mean")] = np.nan
                     if use_log_ratio:
-                        record[f"erds_{band}_global_{win_label}_db_mean"] = np.nan
+                        record[NamingSchema.build("erds", win_label, band, "global", "db_mean")] = np.nan
                 if use_log_ratio:
-                    record[f"erds_{band}_global_full_db_mean"] = np.nan
-                    record[f"erds_{band}_global_full_db_std"] = np.nan
+                    record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
+                    record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
             elif valid_erds:
-                record[f"erds_{band}_global_full_mean"] = float(np.mean(valid_erds))
-                record[f"erds_{band}_global_full_std"] = float(np.std(valid_erds))
+                record[NamingSchema.build("erds", segment_label, band, "global", "percent_mean")] = float(np.mean(valid_erds))
+                record[NamingSchema.build("erds", segment_label, band, "global", "percent_std")] = float(np.std(valid_erds))
                 # Global per coarse bin
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if np.any(win_mask):
@@ -294,12 +303,12 @@ def extract_erds_from_precomputed(
                                 if use_log_ratio:
                                     win_log.append(10 * np.log10(max(wp, min_active_power) / bp_ref))
                         if win_erds:
-                            record[f"erds_{band}_global_{win_label}_mean"] = float(np.mean(win_erds))
+                            record[NamingSchema.build("erds", win_label, band, "global", "percent_mean")] = float(np.mean(win_erds))
                         if use_log_ratio and win_log:
-                            record[f"erds_{band}_global_{win_label}_db_mean"] = float(np.mean(win_log))
+                            record[NamingSchema.build("erds", win_label, band, "global", "db_mean")] = float(np.mean(win_log))
                 if use_log_ratio and valid_log:
-                    record[f"erds_{band}_global_full_db_mean"] = float(np.mean(valid_log))
-                    record[f"erds_{band}_global_full_db_std"] = float(np.std(valid_log))
+                    record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = float(np.mean(valid_log))
+                    record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = float(np.std(valid_log))
 
         records.append(record)
 
@@ -412,7 +421,7 @@ def extract_power_from_precomputed(
                     logratio = np.log10(active_power / baseline_power)
                 else:
                     logratio = np.nan
-                record[f"power_{band}_{ch_name}_full_logratio"] = float(logratio)
+                record[NamingSchema.build("power", "plateau", band, "ch", "logratio", channel=ch_name)] = float(logratio)
                 all_power_full.append(logratio)
                 
                 # === Coarse temporal bins (early, mid, late) ===
@@ -424,7 +433,7 @@ def extract_power_from_precomputed(
                             win_logratio = np.log10(win_power / baseline_power)
                         else:
                             win_logratio = np.nan
-                        record[f"power_{band}_{ch_name}_{win_label}_logratio"] = float(win_logratio)
+                        record[NamingSchema.build("power", win_label, band, "ch", "logratio", channel=ch_name)] = float(win_logratio)
                         coarse_values[win_label] = win_logratio
                 
                 # === Fine temporal bins (t1-t7) for HRF modeling ===
@@ -435,7 +444,7 @@ def extract_power_from_precomputed(
                             win_logratio = np.log10(win_power / baseline_power)
                         else:
                             win_logratio = np.nan
-                        record[f"power_{band}_{ch_name}_{win_label}_logratio"] = float(win_logratio)
+                        record[NamingSchema.build("power", win_label, band, "ch", "logratio", channel=ch_name)] = float(win_logratio)
                 
                 # === Temporal dynamics ===
                 if len(active_times) > 2:
@@ -445,31 +454,31 @@ def extract_power_from_precomputed(
                         valid_mask = np.isfinite(logratio_trace)
                         if np.sum(valid_mask) > 2:
                             slope, _ = np.polyfit(active_times[valid_mask], logratio_trace[valid_mask], 1)
-                            record[f"power_{band}_{ch_name}_slope"] = float(slope)
+                            record[NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)] = float(slope)
                         else:
-                            record[f"power_{band}_{ch_name}_slope"] = np.nan
+                            record[NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)] = np.nan
                     else:
-                        record[f"power_{band}_{ch_name}_slope"] = np.nan
+                        record[NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)] = np.nan
                     
                     # Early-late difference
                     if "early" in coarse_values and "late" in coarse_values:
                         diff = coarse_values["late"] - coarse_values["early"]
-                        record[f"power_{band}_{ch_name}_early_late_diff"] = float(diff)
+                        record[NamingSchema.build("power", "plateau", band, "ch", "early_late_diff", channel=ch_name)] = float(diff)
             
             # === Global statistics per band ===
             valid_power = [p for p in all_power_full if np.isfinite(p)]
             baseline_valid_fraction = baseline_valid_count / total_channels if total_channels > 0 else 0.0
-            record[f"power_{band}_baseline_valid_fraction"] = float(baseline_valid_fraction)
+            record[NamingSchema.build("power", "baseline", band, "global", "valid_fraction")] = float(baseline_valid_fraction)
             
             # Skip global summaries when baseline-valid fraction is too low
             if baseline_valid_fraction < min_valid_fraction:
-                record[f"power_{band}_global_full_mean"] = np.nan
-                record[f"power_{band}_global_full_std"] = np.nan
+                record[NamingSchema.build("power", "plateau", band, "global", "logratio_mean")] = np.nan
+                record[NamingSchema.build("power", "plateau", band, "global", "logratio_std")] = np.nan
                 for win_label in windows.coarse_labels:
-                    record[f"power_{band}_global_{win_label}_mean"] = np.nan
+                    record[NamingSchema.build("power", win_label, band, "global", "logratio_mean")] = np.nan
             elif valid_power:
-                record[f"power_{band}_global_full_mean"] = float(np.mean(valid_power))
-                record[f"power_{band}_global_full_std"] = float(np.std(valid_power))
+                record[NamingSchema.build("power", "plateau", band, "global", "logratio_mean")] = float(np.mean(valid_power))
+                record[NamingSchema.build("power", "plateau", band, "global", "logratio_std")] = float(np.std(valid_power))
                 
                 # Global per coarse bin
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
@@ -482,7 +491,7 @@ def extract_power_from_precomputed(
                                 if wp_frac >= min_valid_fraction:
                                     win_powers.append(np.log10(wp / bp))
                         if win_powers:
-                            record[f"power_{band}_global_{win_label}_mean"] = float(np.mean(win_powers))
+                            record[NamingSchema.build("power", win_label, band, "global", "logratio_mean")] = float(np.mean(win_powers))
 
         records.append(record)
 
@@ -524,16 +533,16 @@ def _process_spectral_extras_epoch(
                 continue
             fmin, fmax = freq_bands[band]
             pf, pp = _compute_spectral_peak(psd_ep, freqs, fmin, fmax)
-            record[f"spectral_{band}_{ch_name}_peak_freq"] = pf
-            record[f"spectral_{band}_{ch_name}_peak_power"] = pp
+            record[NamingSchema.build("spectral", "baseline", band, "ch", "peakfreq", channel=ch_name)] = pf
+            record[NamingSchema.build("spectral", "baseline", band, "ch", "peakpow", channel=ch_name)] = pp
 
         mask_fit = (freqs >= 1) & (freqs <= 40)
         if np.sum(mask_fit) > 2:
             log_f = np.log10(freqs[mask_fit])
             log_p = np.log10(psd_ep[mask_fit])
             slope, intercept = np.polyfit(log_f, log_p, 1)
-            record[f"spectral_aperiodic_{ch_name}_slope"] = float(slope)
-            record[f"spectral_aperiodic_{ch_name}_offset"] = float(intercept)
+            record[NamingSchema.build("spectral", "baseline", "broadband", "ch", "aperiodic_slope", channel=ch_name)] = float(slope)
+            record[NamingSchema.build("spectral", "baseline", "broadband", "ch", "aperiodic_offset", channel=ch_name)] = float(intercept)
     return record
 
 
@@ -571,6 +580,177 @@ def extract_spectral_extras_from_precomputed(
     return pd.DataFrame(records), list(pd.DataFrame(records).columns)
 
 
+###################################################################
+# Additional precomputed groups advertised in config
+###################################################################
+
+
+def extract_gfp_from_precomputed(precomputed: PrecomputedData, config: Any) -> Tuple[pd.DataFrame, List[str]]:
+    if precomputed.data is None or precomputed.windows is None:
+        return pd.DataFrame(), []
+
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+
+    windows = precomputed.windows
+    masks = get_segment_masks(precomputed.times, windows, config)
+
+    records: List[Dict[str, float]] = []
+    for ep_idx in range(precomputed.data.shape[0]):
+        x = precomputed.data[ep_idx]
+        gfp_t = np.nanstd(x, axis=0)
+        rec: Dict[str, float] = {}
+        for seg, mask in masks.items():
+            if mask is None or not np.any(mask):
+                continue
+            vals = gfp_t[mask]
+            rec[NamingSchema.build("gfp", seg, "broadband", "global", "mean")] = float(np.nanmean(vals))
+            rec[NamingSchema.build("gfp", seg, "broadband", "global", "max")] = float(np.nanmax(vals))
+        records.append(rec)
+
+    if not records or all(len(r) == 0 for r in records):
+        return pd.DataFrame(), []
+    df = pd.DataFrame(records)
+    return df, list(df.columns)
+
+
+def _compile_roi_indices(ch_names: List[str], roi_defs: Dict[str, List[str]]) -> Dict[str, List[int]]:
+    out: Dict[str, List[int]] = {}
+    for roi_name, patterns in (roi_defs or {}).items():
+        indices: List[int] = []
+        compiled = [re.compile(p) for p in patterns] if isinstance(patterns, list) else []
+        for idx, ch in enumerate(ch_names):
+            if any(rgx.match(ch) for rgx in compiled):
+                indices.append(idx)
+        if indices:
+            out[str(roi_name)] = indices
+    return out
+
+
+def extract_roi_features_from_precomputed(precomputed: PrecomputedData, bands: List[str], config: Any) -> Tuple[pd.DataFrame, List[str]]:
+    if not precomputed.band_data or precomputed.windows is None:
+        return pd.DataFrame(), []
+
+    roi_defs = get_config_value(config, "time_frequency_analysis.rois", {})
+    roi_to_idx = _compile_roi_indices(precomputed.ch_names, roi_defs)
+    if not roi_to_idx:
+        return pd.DataFrame(), []
+
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+
+    windows = precomputed.windows
+    masks = get_segment_masks(precomputed.times, windows, config)
+    baseline_mask = masks.get("baseline")
+    segments: Dict[str, Optional[np.ndarray]] = {
+        "ramp": masks.get("ramp"),
+        "plateau": masks.get("plateau"),
+    }
+    epsilon = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
+
+    if baseline_mask is None or not np.any(baseline_mask):
+        return pd.DataFrame(), []
+
+    records: List[Dict[str, float]] = []
+    for ep_idx in range(precomputed.data.shape[0]):
+        rec: Dict[str, float] = {}
+        for band in bands:
+            if band not in precomputed.band_data:
+                continue
+            power = precomputed.band_data[band].power[ep_idx]  # (ch, t)
+            base_ch = np.nanmean(power[:, baseline_mask], axis=1)
+            for roi_name, idxs in roi_to_idx.items():
+                base = float(np.nanmean(base_ch[idxs]))
+                base = base if np.isfinite(base) and base > epsilon else np.nan
+                for seg, mask in segments.items():
+                    if mask is None or not np.any(mask):
+                        continue
+                    seg_ch = np.nanmean(power[:, mask], axis=1)
+                    seg_val = float(np.nanmean(seg_ch[idxs]))
+                    if base is not None and np.isfinite(base) and base > epsilon and np.isfinite(seg_val):
+                        logratio = float(np.log10(seg_val / base))
+                    else:
+                        logratio = np.nan
+                    rec[NamingSchema.build("roi", seg, band, "global", f"{roi_name}_logratio_mean")] = logratio
+        records.append(rec)
+
+    if not records or all(len(r) == 0 for r in records):
+        return pd.DataFrame(), []
+    df = pd.DataFrame(records)
+    return df, list(df.columns)
+
+
+def extract_temporal_features_from_precomputed(precomputed: PrecomputedData, config: Any) -> Tuple[pd.DataFrame, List[str]]:
+    if precomputed.data is None or precomputed.windows is None:
+        return pd.DataFrame(), []
+
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+
+    windows = precomputed.windows
+    masks = get_segment_masks(precomputed.times, windows, config)
+
+    records: List[Dict[str, float]] = []
+    for ep_idx in range(precomputed.data.shape[0]):
+        x = precomputed.data[ep_idx]
+        rec: Dict[str, float] = {}
+        for seg, mask in masks.items():
+            if mask is None or not np.any(mask):
+                continue
+            seg_x = x[:, mask]
+            # Simple, robust summaries averaged over channels
+            var_mean = float(np.nanmean(np.nanvar(seg_x, axis=1)))
+            rms_mean = float(np.nanmean(np.sqrt(np.nanmean(seg_x ** 2, axis=1))))
+            ll_mean = float(np.nanmean(np.nanmean(np.abs(np.diff(seg_x, axis=1)), axis=1))) if seg_x.shape[1] > 1 else np.nan
+            rec[NamingSchema.build("temporal", seg, "broadband", "global", "var_mean")] = var_mean
+            rec[NamingSchema.build("temporal", seg, "broadband", "global", "rms_mean")] = rms_mean
+            rec[NamingSchema.build("temporal", seg, "broadband", "global", "line_length_mean")] = ll_mean
+        records.append(rec)
+
+    if not records or all(len(r) == 0 for r in records):
+        return pd.DataFrame(), []
+    df = pd.DataFrame(records)
+    return df, list(df.columns)
+
+
+def extract_band_ratios_from_precomputed(precomputed: PrecomputedData, config: Any) -> Tuple[pd.DataFrame, List[str]]:
+    if not precomputed.band_data or precomputed.windows is None:
+        return pd.DataFrame(), []
+
+    ratio_pairs = get_config_value(config, "feature_engineering.spectral.ratio_pairs", [])
+    pairs: List[Tuple[str, str]] = []
+    for entry in ratio_pairs:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            pairs.append((str(entry[0]), str(entry[1])))
+    if not pairs:
+        return pd.DataFrame(), []
+
+    plateau_mask = getattr(precomputed.windows, "active_mask", None)
+    if plateau_mask is None or not np.any(plateau_mask):
+        return pd.DataFrame(), []
+
+    eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
+    records: List[Dict[str, float]] = []
+    for ep_idx in range(precomputed.data.shape[0]):
+        rec: Dict[str, float] = {}
+        band_means: Dict[str, float] = {}
+        for band, bd in precomputed.band_data.items():
+            p = bd.power[ep_idx]
+            band_means[band] = float(np.nanmean(p[:, plateau_mask]))
+        for num, den in pairs:
+            if num not in band_means or den not in band_means:
+                continue
+            denom = band_means[den]
+            if not np.isfinite(denom) or denom <= eps:
+                ratio = np.nan
+            else:
+                ratio = float(band_means[num] / denom)
+            rec[NamingSchema.build("ratios", "plateau", f"{num}_{den}", "global", "power_ratio")] = ratio
+        records.append(rec)
+
+    if not records or all(len(r) == 0 for r in records):
+        return pd.DataFrame(), []
+    df = pd.DataFrame(records)
+    return df, list(df.columns)
+
+
 def _process_asymmetry_epoch(
     ep_idx: int,
     band_data: Dict[str, Any],
@@ -588,9 +768,10 @@ def _process_asymmetry_epoch(
             pl, pr = p_mean[l_idx], p_mean[r_idx]
             denom = pr + pl
             asym = (pr - pl) / denom if denom > 1e-12 else 0.0
-            record[f"asym_{band}_{l_name}_{r_name}_index"] = float(asym)
+            pair = f"{l_name}-{r_name}"
+            record[NamingSchema.build("asymmetry", "plateau", band, "chpair", "index", channel_pair=pair)] = float(asym)
             if pr > 0 and pl > 0:
-                record[f"asym_{band}_{l_name}_{r_name}_log"] = float(np.log(pr) - np.log(pl))
+                record[NamingSchema.build("asymmetry", "plateau", band, "chpair", "logdiff", channel_pair=pair)] = float(np.log(pr) - np.log(pl))
     return record
 
 
@@ -686,35 +867,18 @@ def extract_segment_power_from_precomputed(
     n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Compute baseline/ramp/plateau/offset band power with proper naming schema."""
-    def _local_get_masks(pc):
-        t = pc.times
-        w = pc.windows
-        cfg = pc.config or {}
-        ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
-        offset_start = get_config_value(cfg, "feature_engineering.features.offset_start", None)
-        
-        ramp_mask = (t >= 0) & (t <= ramp_end)
-        plateau_mask = getattr(w, "active_mask", None)
-        baseline_mask = getattr(w, "baseline_mask", None)
-        offset_mask = None
-        if offset_start is not None:
-            try:
-                if float(offset_start) < t[-1]:
-                    offset_mask = t >= float(offset_start)
-            except:
-                pass
-        return {"baseline": baseline_mask, "ramp": ramp_mask, "plateau": plateau_mask, "offset": offset_mask}
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 
-    masks = _local_get_masks(precomputed)
+    masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     baseline_mask = masks.get("baseline")
     if baseline_mask is None or not np.any(baseline_mask):
         return pd.DataFrame(), []
 
-    epsilon = 1e-12
-    if precomputed.config:
-        epsilon = float(precomputed.config.get("feature_engineering.epsilon_std", 1e-12))
+    epsilon = float(get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12))
     
-    segments_active = {k: v for k, v in masks.items() if k in ["ramp", "plateau", "offset"] and v is not None and np.any(v)}
+    # NOTE: plateau logratio features are produced by extract_power_from_precomputed().
+    # To avoid duplicate column names, this extractor contributes only non-plateau segments.
+    segments_active = {k: v for k, v in masks.items() if k in ["ramp", "offset"] and v is not None and np.any(v)}
     n_epochs = precomputed.data.shape[0]
 
     if n_jobs != 1:

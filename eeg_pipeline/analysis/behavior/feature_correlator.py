@@ -36,8 +36,8 @@ from eeg_pipeline.utils.analysis.stats import (
     prepare_aligned_data,
     compute_correlation,
     compute_bootstrap_ci,
-    compute_partial_correlations,
-    compute_permutation_pvalues,
+    compute_partial_correlations_with_cov_temp,
+    compute_permutation_pvalues_with_cov_temp,
     compute_temp_permutation_pvalues,
     CorrelationStats,
     fdr_bh,
@@ -678,8 +678,16 @@ class FeatureBehaviorCorrelator:
         for col_name, rec in zip(df_aligned.columns, records):
             d = rec.to_dict()
             d["feature_type"] = feature_type
-            d["p"] = d.get("p_value", np.nan)
-            d["p_raw"] = d.get("p_value", np.nan)
+            d["r_raw"] = d.get("r", np.nan)
+            d["p_raw"] = d.get("p", d.get("p_value", np.nan))
+            d["p_value"] = d.get("p", d.get("p_value", np.nan))
+            d["p_kind_primary"] = "p_raw"
+            d["p_primary"] = d["p_raw"]
+            d["r_primary"] = d["r_raw"]
+            d["p_primary_source"] = "raw"
+            d["p_primary_perm"] = np.nan
+            d["p_primary_is_permutation"] = False
+            d["n_covariates_used"] = int(cov_aligned.shape[1]) if cov_aligned is not None else 0
             
             # Compute Bayes Factor if requested
             if config.compute_bayes_factor:
@@ -691,13 +699,23 @@ class FeatureBehaviorCorrelator:
             # Partial correlations with covariates / temperature
             if cov_aligned is not None or temp_aligned is not None:
                 try:
-                    r_pc, p_pc, n_pc, r_temp, p_temp, n_temp = compute_partial_correlations(
-                        df_aligned[col_name],
-                        targets_aligned,
-                        cov_aligned,
-                        temp_aligned,
-                        config.method,
-                        feature_type,
+                    (
+                        r_pc,
+                        p_pc,
+                        n_pc,
+                        r_temp,
+                        p_temp,
+                        n_temp,
+                        r_cov_temp,
+                        p_cov_temp,
+                        n_cov_temp,
+                    ) = compute_partial_correlations_with_cov_temp(
+                        roi_values=df_aligned[col_name],
+                        target_values=targets_aligned,
+                        covariates_df=cov_aligned,
+                        temperature_series=temp_aligned,
+                        method=config.method,
+                        context=feature_type,
                         logger=self.logger,
                         min_samples=config.min_samples,
                         config=self.config,
@@ -708,8 +726,75 @@ class FeatureBehaviorCorrelator:
                     d["r_partial_temp"] = r_temp
                     d["p_partial_temp"] = p_temp
                     d["n_partial_temp"] = n_temp
+                    d["r_partial_cov_temp"] = r_cov_temp
+                    d["p_partial_cov_temp"] = p_cov_temp
+                    d["n_partial_cov_temp"] = n_cov_temp
                 except Exception as exc:
                     self.logger.debug(f"Partial correlation failed for {col_name}: {exc}")
+
+            if config.n_permutations and config.n_permutations > 0 and config.rng is not None:
+                try:
+                    x_series = df_aligned[col_name]
+                    y_series = targets_aligned
+                    cov_for_perm = cov_aligned
+                    temp_for_perm = temp_aligned
+                    n_eff = int(pd.concat([x_series, y_series], axis=1).dropna().shape[0])
+                    (
+                        p_perm_raw,
+                        p_perm_partial_cov,
+                        p_perm_partial_temp,
+                        p_perm_partial_cov_temp,
+                    ) = compute_permutation_pvalues_with_cov_temp(
+                        x_aligned=x_series,
+                        y_aligned=y_series,
+                        covariates_df=cov_for_perm,
+                        temp_series=temp_for_perm,
+                        method=config.method,
+                        n_perm=config.n_permutations,
+                        n_eff=n_eff,
+                        rng=config.rng,
+                        config=self.config,
+                        groups=perm_groups,
+                    )
+                    d["p_perm_raw"] = p_perm_raw
+                    d["p_perm_partial_cov"] = p_perm_partial_cov
+                    d["p_perm_partial_temp"] = p_perm_partial_temp
+                    d["p_perm_partial_cov_temp"] = p_perm_partial_cov_temp
+                    d["p_perm"] = p_perm_raw
+                except Exception as exc:
+                    self.logger.debug(f"Permutation p-values failed for {col_name}: {exc}")
+
+            # Choose primary correlation deterministically
+            if config.control_temperature and config.control_trial_order:
+                if pd.notna(d.get("p_partial_cov_temp", np.nan)):
+                    d["p_kind_primary"] = "p_partial_cov_temp"
+                    d["p_primary"] = d.get("p_partial_cov_temp", np.nan)
+                    d["r_primary"] = d.get("r_partial_cov_temp", np.nan)
+                    d["p_primary_source"] = "partial_cov_temp"
+            elif config.control_temperature:
+                if pd.notna(d.get("p_partial_temp", np.nan)):
+                    d["p_kind_primary"] = "p_partial_temp"
+                    d["p_primary"] = d.get("p_partial_temp", np.nan)
+                    d["r_primary"] = d.get("r_partial_temp", np.nan)
+                    d["p_primary_source"] = "partial_temp"
+            elif config.control_trial_order:
+                if pd.notna(d.get("p_partial_cov", np.nan)):
+                    d["p_kind_primary"] = "p_partial_cov"
+                    d["p_primary"] = d.get("p_partial_cov", np.nan)
+                    d["r_primary"] = d.get("r_partial_cov", np.nan)
+                    d["p_primary_source"] = "partial_cov"
+
+            if config.n_permutations and config.n_permutations > 0:
+                p_perm_col_by_primary = {
+                    "p_raw": "p_perm_raw",
+                    "p_partial_cov": "p_perm_partial_cov",
+                    "p_partial_temp": "p_perm_partial_temp",
+                    "p_partial_cov_temp": "p_perm_partial_cov_temp",
+                }
+                perm_col = p_perm_col_by_primary.get(d.get("p_kind_primary"))
+                if perm_col is not None:
+                    d["p_primary_perm"] = d.get(perm_col, np.nan)
+                    d["p_primary_is_permutation"] = bool(pd.notna(d.get("p_primary_perm", np.nan)))
             
             # Compute LOSO stability if requested
             if config.compute_loso_stability and loso_groups is not None:
@@ -734,12 +819,20 @@ class FeatureBehaviorCorrelator:
 
         # Apply within-type FDR if requested
         if record_dicts and config.apply_fdr:
-            p_vals = [r.get("p_value", np.nan) for r in record_dicts]
+            use_perm_p = bool(config.n_permutations and config.n_permutations > 0)
+            if use_perm_p:
+                p_vals = [r.get("p_primary_perm", np.nan) for r in record_dicts]
+                p_kind = "p_primary_perm"
+            else:
+                p_vals = [r.get("p_primary", np.nan) for r in record_dicts]
+                p_kind = "p_primary"
             valid_idx = [i for i, pv in enumerate(p_vals) if pd.notna(pv)]
             if valid_idx:
                 q_vals = fdr_bh(np.array([p_vals[i] for i in valid_idx]))
                 for idx, q in zip(valid_idx, q_vals):
                     record_dicts[idx]["p_fdr"] = float(q)
+                    record_dicts[idx]["q_within_family"] = float(q)
+                    record_dicts[idx]["within_family_p_kind"] = p_kind
 
         n_sig = sum(1 for r in records if r.is_significant)
         return FeatureCorrelationResult(feature_type, len(df.columns), n_sig, record_dicts)
@@ -785,6 +878,9 @@ class FeatureBehaviorCorrelator:
             df = result.to_dataframe()
             if df.empty:
                 continue
+
+            if "target" not in df.columns:
+                df["target"] = target_name
 
             path = self.stats_dir / f"corr_stats_{name}_vs_{target_name}.tsv"
             save_correlation_results(df, path)
@@ -862,7 +958,7 @@ class FeatureBehaviorCorrelator:
                 
                 r, p = compute_correlation(
                     roi_vals[valid].values, targets[valid].values,
-                    corr_config.method == "spearman"
+                    corr_config.method
                 )
                 
                 records.append({
@@ -879,7 +975,7 @@ class FeatureBehaviorCorrelator:
             if valid.sum() >= corr_config.min_samples:
                 r, p = compute_correlation(
                     overall_vals[valid].values, targets[valid].values,
-                    corr_config.method == "spearman"
+                    corr_config.method
                 )
                 records.append({
                     "roi": "overall",
@@ -897,6 +993,9 @@ class FeatureBehaviorCorrelator:
         df = pd.DataFrame(records)
         # Add multiplicity control (per band) and raw aliases for consistency
         df["p_raw"] = df["p"]
+        df["p_primary"] = df["p"]
+        df["p_kind_primary"] = "p"
+        df["p_primary_source"] = "raw"
         if corr_config.apply_fdr and "band" in df.columns:
             for band, mask in df.groupby("band").groups.items():
                 band_idx = list(mask)
@@ -956,13 +1055,21 @@ class FeatureBehaviorCorrelator:
                     self._feature_dfs["power"], temperature_series, "temp", corr_config
                 )
 
-        if all_records:
-            combined_df = pd.DataFrame(all_records)
+        combined_df = pd.DataFrame(all_records) if all_records else pd.DataFrame()
+        if not combined_df.empty:
             if "p_value" in combined_df.columns and "p" not in combined_df.columns:
                 combined_df["p"] = combined_df["p_value"]
                 combined_df["p_raw"] = combined_df["p_value"]
-            if corr_config.apply_fdr and "p" in combined_df.columns:
-                combined_df["p_fdr"] = fdr_bh(combined_df["p"].to_numpy())
+            if "p_primary" not in combined_df.columns and "p_raw" in combined_df.columns:
+                combined_df["p_primary"] = combined_df["p_raw"]
+                combined_df["p_kind_primary"] = "p_raw"
+                combined_df["p_primary_source"] = "raw"
+            if corr_config.apply_fdr:
+                if "p_primary_perm" in combined_df.columns and combined_df["p_primary_perm"].notna().any():
+                    p_for_fdr = pd.to_numeric(combined_df["p_primary_perm"], errors="coerce").to_numpy()
+                else:
+                    p_for_fdr = pd.to_numeric(combined_df["p_primary"], errors="coerce").to_numpy()
+                combined_df["p_fdr"] = fdr_bh(p_for_fdr)
             combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
             save_correlation_results(combined_df, combined_path)
 
@@ -977,6 +1084,7 @@ class FeatureBehaviorCorrelator:
             name="feature_correlator",
             status=ComputationStatus.SUCCESS,
             metadata=metadata,
+            dataframe=combined_df if not combined_df.empty else None,
         )
 
 
@@ -995,15 +1103,23 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         stats_dir=ctx.stats_dir,
     )
     
-    # Inject loaded data from context to ensure new features are included
-    # (BehaviorContext is the source of truth for data loading)
-    if ctx.power_df is not None: correlator._feature_dfs["power"] = ctx.power_df
-    if ctx.connectivity_df is not None: correlator._feature_dfs["connectivity"] = ctx.connectivity_df
-    if ctx.microstates_df is not None: correlator._feature_dfs["microstate"] = ctx.microstates_df
-    if ctx.aperiodic_df is not None: correlator._feature_dfs["aperiodic"] = ctx.aperiodic_df
-    if ctx.itpc_df is not None: correlator._feature_dfs["itpc"] = ctx.itpc_df
-    if ctx.pac_df is not None: correlator._feature_dfs["pac"] = ctx.pac_df
-    if ctx.precomputed_df is not None: correlator._feature_dfs["feature"] = ctx.precomputed_df # legacy name support
+    # Inject loaded data from context so context is the source of truth for data loading.
+    # Keys here should match registry feature file types where possible.
+    if ctx.power_df is not None:
+        correlator._feature_dfs["power"] = ctx.power_df
+    if ctx.connectivity_df is not None:
+        correlator._feature_dfs["connectivity"] = ctx.connectivity_df
+    if ctx.microstates_df is not None:
+        correlator._feature_dfs["microstates"] = ctx.microstates_df
+    if ctx.aperiodic_df is not None:
+        correlator._feature_dfs["aperiodic"] = ctx.aperiodic_df
+    if ctx.itpc_df is not None:
+        correlator._feature_dfs["itpc"] = ctx.itpc_df
+    if ctx.pac_df is not None:
+        correlator._feature_dfs["pac"] = ctx.pac_df
+    if ctx.precomputed_df is not None:
+        correlator._feature_dfs["precomputed"] = ctx.precomputed_df
+        correlator._feature_dfs["feature"] = ctx.precomputed_df
     
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True

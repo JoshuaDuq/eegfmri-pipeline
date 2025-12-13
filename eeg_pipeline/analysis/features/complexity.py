@@ -167,7 +167,7 @@ def extract_dynamics_features(
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
     freq_bands = get_frequency_bands(ctx.config)
-    n_jobs = int(ctx.config.get("system.n_jobs", -1))
+    n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_complexity", -1))
     params = _extract_params(ctx.config)
     min_samps = 100
     
@@ -185,18 +185,15 @@ def extract_dynamics_features(
             ctx.logger.info(f"Computed Dynamics for baseline: {np.sum(mask_baseline)} samples")
     
     # Process ramp segment
-    from eeg_pipeline.utils.config.loader import get_config_value
-    times = epochs.times
-    ramp_end = float(get_config_value(ctx.config, "feature_engineering.features.ramp_end", 3.0))
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    if np.sum(ramp_mask) >= min_samps:
-        data_ramp = full_data[..., ramp_mask]
+    mask_ramp = ctx.windows.get_mask("ramp")
+    if mask_ramp is not None and np.sum(mask_ramp) >= min_samps:
+        data_ramp = full_data[..., mask_ramp]
         ramp_df = _extract_dynamics_for_segment(
             data_ramp, ch_names, sfreq, bands, freq_bands, params, "ramp", n_jobs
         )
         if not ramp_df.empty:
             all_dfs.append(ramp_df)
-            ctx.logger.info(f"Computed Dynamics for ramp: {np.sum(ramp_mask)} samples")
+            ctx.logger.info(f"Computed Dynamics for ramp: {np.sum(mask_ramp)} samples")
     
     # Process plateau segment
     mask_plateau = ctx.windows.get_mask("plateau")

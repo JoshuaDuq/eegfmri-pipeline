@@ -172,6 +172,68 @@ def compute_partial_correlations(
     return r_partial, p_partial, n_partial, r_temp, p_temp, n_temp
 
 
+def compute_partial_correlations_with_cov_temp(
+    roi_values: pd.Series,
+    target_values: pd.Series,
+    covariates_df: Optional[pd.DataFrame],
+    temperature_series: Optional[pd.Series],
+    method: str,
+    context: str,
+    logger: Optional[logging.Logger] = None,
+    min_samples: Optional[int] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float, int, float, float, int, float, float, int]:
+    """Compute partial correlations for covariates-only, temp-only, and covariates+temp."""
+    r_cov, p_cov, n_cov, r_temp, p_temp, n_temp = compute_partial_correlations(
+        roi_values=roi_values,
+        target_values=target_values,
+        covariates_df=covariates_df,
+        temperature_series=temperature_series,
+        method=method,
+        context=context,
+        logger=logger,
+        min_samples=min_samples,
+        config=config,
+    )
+
+    r_cov_temp = p_cov_temp = np.nan
+    n_cov_temp = 0
+
+    if (
+        covariates_df is not None
+        and not covariates_df.empty
+        and temperature_series is not None
+        and not temperature_series.empty
+    ):
+        cov_temp = covariates_df.copy()
+        cov_temp["temp"] = temperature_series
+        try:
+            r_cov_temp, p_cov_temp, n_cov_temp = compute_partial_correlation_with_covariates(
+                roi_values,
+                target_values,
+                cov_temp,
+                method,
+                f"{context} rating|cov+temp",
+                logger,
+                min_samples,
+                config,
+            )
+        except Exception:
+            r_cov_temp, p_cov_temp, n_cov_temp = np.nan, np.nan, 0
+
+    return (
+        r_cov,
+        p_cov,
+        n_cov,
+        r_temp,
+        p_temp,
+        n_temp,
+        r_cov_temp,
+        p_cov_temp,
+        n_cov_temp,
+    )
+
+
 def compute_partial_correlation_for_roi_pair(
     x_masked: pd.Series,
     y_masked: pd.Series,
