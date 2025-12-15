@@ -16,14 +16,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mne
 
-from eeg_pipeline.utils.io.plotting import (
+from eeg_pipeline.plotting.io.figures import (
     save_fig,
     extract_eeg_picks,
     log_if_present as _log_if_present,
     validate_picks as _validate_picks,
 )
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.columns import find_temperature_column_in_events
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.columns import find_temperature_column_in_events
 from ...utils.data.loading import (
     resolve_columns,
     get_aligned_events,
@@ -32,7 +32,6 @@ from ...utils.data.loading import (
 )
 from ...utils.analysis.stats import (
     compute_coverage_statistics,
-    compute_consensus_labels,
     compute_consensus_labels,
     format_correlation_text,
 )
@@ -1276,10 +1275,12 @@ def plot_microstate_transition_network(
     trans_nonpain = transitions.nonpain
     trans_pain = transitions.pain
     from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.plotting.features.utils import get_fdr_alpha
+
     epsilon_amp = float(get_config_value(config, "feature_engineering.constants.epsilon_amp", 1e-10))
     vmax = max(float(np.max(trans_nonpain)), float(np.max(trans_pain)), epsilon_amp)
     q_mat = getattr(transitions, "q_values", None)
-    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
+    alpha = get_fdr_alpha(config)
     cmap = plt.cm.get_cmap("YlOrRd")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -1402,8 +1403,9 @@ def plot_microstate_duration_distributions(
         ax.grid(True, alpha=0.3, axis='y')
 
         q_val = getattr(stat, "q_value", np.nan)
-        from eeg_pipeline.utils.config.loader import get_config_value
-        alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
+        from eeg_pipeline.plotting.features.utils import get_fdr_alpha
+
+        alpha = get_fdr_alpha(config)
         if nonpain_data.size and pain_data.size and np.isfinite(q_val):
             if q_val < alpha:
                 y_min, y_max = ax.get_ylim()

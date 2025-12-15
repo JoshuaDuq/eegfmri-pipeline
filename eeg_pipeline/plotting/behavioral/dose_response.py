@@ -22,13 +22,19 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from eeg_pipeline.utils.io.paths import ensure_dir, deriv_plots_path, deriv_features_path
-from eeg_pipeline.utils.io.plotting import save_fig
-from eeg_pipeline.utils.io.tsv import read_tsv
-from eeg_pipeline.plotting.utils import get_band_colors, get_significance_colors
+from eeg_pipeline.io.paths import ensure_dir, deriv_plots_path, deriv_features_path
+from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.io.tsv import read_tsv
+from eeg_pipeline.plotting.core.utils import get_band_colors, get_significance_colors
+from eeg_pipeline.utils.data.feature_columns import (
+    get_aperiodic_columns,
+    get_connectivity_columns_by_band,
+    get_itpc_columns_by_band,
+    get_microstate_columns,
+    get_power_columns_by_band,
+)
 from eeg_pipeline.utils.data.manipulation import find_column
 from eeg_pipeline.utils.data import load_subject_scatter_data
-from eeg_pipeline.plotting.behavioral.registry import BehaviorPlotRegistry
 
 
 # =============================================================================
@@ -51,67 +57,6 @@ def _find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     DEPRECATED: Use eeg_pipeline.plotting.behavioral.utils.find_column instead.
     """
     return find_column(df, candidates)
-
-
-def _get_power_columns_by_band(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Get power columns grouped by frequency band."""
-    power_cols = {}
-    for band in BANDS:
-        band_cols = []
-        for c in df.columns:
-            c_lower = c.lower()
-            if any([
-                f"pow_{band}" in c_lower,
-                f"power_{band}" in c_lower,
-                f"_{band}_pow" in c_lower,
-                f"_{band}_power" in c_lower,
-                f"power_baseline_{band}" in c_lower,
-                f"power_stim_{band}" in c_lower,
-            ]):
-                band_cols.append(c)
-        if band_cols:
-            power_cols[band] = band_cols
-    return power_cols
-
-
-def _get_connectivity_columns_by_band(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Get connectivity columns grouped by frequency band."""
-    conn_cols = {}
-    for band in BANDS:
-        band_cols = [c for c in df.columns if f"conn_plateau_{band}_" in c.lower() or f"conn_{band}_" in c.lower()]
-        if band_cols:
-            conn_cols[band] = band_cols
-    return conn_cols
-
-
-def _get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Get aperiodic columns grouped by metric (slope, offset, exponent)."""
-    aper_cols = {}
-    for metric in ["slope", "offset", "exponent"]:
-        cols = [c for c in df.columns if f"aper_{metric}" in c.lower() or f"aperiodic_{metric}" in c.lower()]
-        if cols:
-            aper_cols[metric] = cols
-    return aper_cols
-
-
-def _get_microstate_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Get microstate columns grouped by metric (coverage, duration, occurrence)."""
-    ms_cols = {}
-    for metric in ["coverage", "duration", "occurrence", "gev"]:
-        cols = [c for c in df.columns if f"ms_{metric}" in c.lower() or f"microstate_{metric}" in c.lower()]
-        if cols:
-            ms_cols[metric] = cols
-    return ms_cols
-
-
-def _get_itpc_columns_by_band(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Get ITPC columns grouped by frequency band."""
-    itpc_cols = {}
-    for band in BANDS:
-        band_cols = [c for c in df.columns if f"itpc_plateau_{band}_" in c.lower() or f"itpc_{band}_" in c.lower()]
-        if band_cols:
-            itpc_cols[band] = band_cols
-    return itpc_cols
 
 
 def _load_additional_features(deriv_root: Path, subject: str, logger: logging.Logger) -> Dict[str, pd.DataFrame]:
@@ -207,7 +152,7 @@ def visualize_dose_response(
     # =================================================================
     df_power = pow_df.copy()
     df_power[temp_col] = temp_series.values
-    power_cols = _get_power_columns_by_band(df_power)
+    power_cols = get_power_columns_by_band(df_power, bands=BANDS)
     
     if power_cols:
         power_dir = output_dir / "power"
@@ -231,7 +176,7 @@ def visualize_dose_response(
     if conn_df is not None and not conn_df.empty:
         df_conn = conn_df.copy()
         df_conn[temp_col] = temp_series.values
-        conn_cols = _get_connectivity_columns_by_band(df_conn)
+        conn_cols = get_connectivity_columns_by_band(df_conn, bands=BANDS)
         
         if conn_cols:
             conn_dir = output_dir / "connectivity"
@@ -256,7 +201,7 @@ def visualize_dose_response(
         df_aper = additional_features["aperiodic"].copy()
         if len(df_aper) == len(temp_series):
             df_aper[temp_col] = temp_series.values
-            aper_cols = _get_aperiodic_columns(df_aper)
+            aper_cols = get_aperiodic_columns(df_aper)
             
             if aper_cols:
                 aper_dir = output_dir / "aperiodic"
@@ -272,7 +217,7 @@ def visualize_dose_response(
         df_ms = additional_features["microstates"].copy()
         if len(df_ms) == len(temp_series):
             df_ms[temp_col] = temp_series.values
-            ms_cols = _get_microstate_columns(df_ms)
+            ms_cols = get_microstate_columns(df_ms)
             
             if ms_cols:
                 ms_dir = output_dir / "microstates"
@@ -288,7 +233,7 @@ def visualize_dose_response(
         df_itpc = additional_features["itpc"].copy()
         if len(df_itpc) == len(temp_series):
             df_itpc[temp_col] = temp_series.values
-            itpc_cols = _get_itpc_columns_by_band(df_itpc)
+            itpc_cols = get_itpc_columns_by_band(df_itpc, bands=BANDS)
             
             if itpc_cols:
                 itpc_dir = output_dir / "itpc"
@@ -309,23 +254,6 @@ def visualize_dose_response(
 ###################################################################
 # Registry adapters
 ###################################################################
-
-
-@BehaviorPlotRegistry.register("dose_response", name="dose_response")
-def run_dose_response(ctx, saved_plots):
-    results = visualize_dose_response(
-        subject=ctx.subject,
-        deriv_root=ctx.deriv_root,
-        task=ctx.task,
-        config=ctx.config,
-        logger=ctx.logger,
-    )
-    saved_plots.update(results)
-
-
-
-
-
 # =============================================================================
 # Plot Functions
 # =============================================================================

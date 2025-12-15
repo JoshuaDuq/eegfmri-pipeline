@@ -125,8 +125,12 @@ class CorrelationRecord:
         if np.isfinite(self.r_partial): d["r_partial"] = self.r_partial
         if np.isfinite(self.p_partial): d["p_partial"] = self.p_partial
         if self.n_partial > 0: d["n_partial"] = self.n_partial
-        if np.isfinite(self.r_partial_temp): d["r_partial_given_temp"] = self.r_partial_temp
-        if np.isfinite(self.p_partial_temp): d["p_partial_given_temp"] = self.p_partial_temp
+        if np.isfinite(self.r_partial_temp):
+            d["r_partial_given_temp"] = self.r_partial_temp
+            d["r_partial_temp"] = self.r_partial_temp
+        if np.isfinite(self.p_partial_temp):
+            d["p_partial_given_temp"] = self.p_partial_temp
+            d["p_partial_temp"] = self.p_partial_temp
         d.update(self.extra_fields)
         return d
 
@@ -190,7 +194,7 @@ def correlate_features_loop(
         else:
             idx = condition_mask
         feature_df = feature_df.iloc[idx]
-        target_arr = target_arr[condition_mask]
+        target_arr = target_arr[idx]
 
     n_f, n_t = len(feature_df), len(target_arr)
     if n_f != n_t:

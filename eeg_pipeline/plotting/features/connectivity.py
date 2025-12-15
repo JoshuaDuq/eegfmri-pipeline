@@ -1,4 +1,5 @@
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -15,19 +16,30 @@ try:
 except ImportError:
     plot_connectivity_circle = None
 
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.logging import get_logger
-from eeg_pipeline.utils.io.plotting import log_if_present, save_fig, get_band_color
-from eeg_pipeline.utils.io.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.plotting.io.figures import log_if_present, save_fig, get_band_color
+from eeg_pipeline.io.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from ..config import get_plot_config
+from eeg_pipeline.plotting.features.utils import get_fdr_alpha
 from eeg_pipeline.utils.analysis.connectivity import (
     build_adjacency_from_edges,
     build_matrix_from_edges,
     compute_significance_mask,
     parse_connectivity_columns,
 )
+
+
+@lru_cache(maxsize=256)
+def _parse_connectivity_columns_cached(
+    columns: Tuple[str, ...],
+    measure: str,
+    band: str,
+) -> Tuple[Tuple[str, ...], Tuple[Tuple[str, str], ...]]:
+    cols, edges, _ = parse_connectivity_columns(list(columns), measure, band)
+    return tuple(cols), tuple(edges)
 
 
 def plot_connectivity_circle_for_band(
@@ -51,8 +63,10 @@ def plot_connectivity_circle_for_band(
         "nonpain": plot_cfg.get_color("nonpain"),
         "pain": plot_cfg.get_color("pain"),
     }
-    
-    cols, edges, _ = parse_connectivity_columns(features_df.columns, measure, band)
+
+    cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
+    cols = list(cols_tup)
+    edges = list(edges_tup)
     
     if not cols:
         log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
@@ -178,8 +192,10 @@ def plot_connectivity_circle_by_condition(
         "nonpain": plot_cfg.get_color("nonpain"),
         "pain": plot_cfg.get_color("pain"),
     }
-    
-    cols, edges, _ = parse_connectivity_columns(features_df.columns, measure, band)
+
+    cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
+    cols = list(cols_tup)
+    edges = list(edges_tup)
     
     if not cols:
         log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
@@ -1150,7 +1166,7 @@ def plot_sliding_state_lagged_correlation_surfaces(
     state_labels = state_labels or [f"S{idx}" for idx in range(n_states)]
     vmax = float(np.nanmax(np.abs(corr_r))) if np.isfinite(corr_r).any() else 1.0
     vmax = vmax if vmax > 0 else 1.0
-    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
+    alpha = get_fdr_alpha(config)
 
     fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("sliding", plot_type="connectivity"))
     im = ax.imshow(

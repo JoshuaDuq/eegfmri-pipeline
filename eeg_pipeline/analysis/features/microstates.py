@@ -15,21 +15,24 @@ from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 # --- Helpers (Preserved logic, condensed where possible) ---
 
 def zscore_maps(maps: np.ndarray, axis: int = 1, eps: float = 1e-12) -> np.ndarray:
-    if maps.size == 0: return maps
+    if maps.size == 0:
+        return maps
     mu = np.mean(maps, axis=axis, keepdims=True)
     sd = np.std(maps, axis=axis, keepdims=True)
     sd = np.where(sd < eps, eps, sd)
     return (maps - mu) / sd
 
 def compute_gfp_with_floor(data: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    if data.size == 0: return np.array([])
+    if data.size == 0:
+        return np.array([])
     gfp = np.std(data, axis=0)
     return np.where(gfp < eps, eps, gfp)
 
 def corr_maps(maps_a: np.ndarray, maps_b: np.ndarray) -> np.ndarray:
     # Pearson correlation between sets of maps
     # Assumes z-scored input for efficiency
-    if maps_a.shape[1] != maps_b.shape[1]: raise ValueError("Shape mismatch")
+    if maps_a.shape[1] != maps_b.shape[1]:
+        raise ValueError("Shape mismatch")
     n = maps_a.shape[1]
     denom = max(n - 1, 1)
     return (maps_a @ maps_b.T) / denom
@@ -42,7 +45,7 @@ def label_timecourse(channel_data: np.ndarray, templates: np.ndarray) -> Tuple[n
         assigned_correlations: (n_times,) array of correlation with assigned state
         gev: Global Explained Variance - how well templates explain the data
     """
-    if channel_data.size == 0: 
+    if channel_data.size == 0:
         return np.array([], dtype=int), np.array([], dtype=float), np.nan
     
     zscored = zscore_maps(channel_data.T, axis=1)  # (n_times, n_ch)
@@ -65,10 +68,12 @@ def label_timecourse(channel_data: np.ndarray, templates: np.ndarray) -> Tuple[n
     return state_indices.astype(int), assigned_correlations.astype(float), gev
 
 def _extract_peak_maps_from_epoch(epoch, min_dist_samples, peaks_per_epoch):
-    if epoch.size == 0: return None
+    if epoch.size == 0:
+        return None
     gfp = compute_gfp_with_floor(epoch)
     peaks, _ = find_peaks(gfp, distance=min_dist_samples)
-    if peaks.size == 0: return None
+    if peaks.size == 0:
+        return None
     sorted_indices = np.argsort(gfp[peaks])[::-1]
     n_select = min(peaks_per_epoch, peaks.size)
     selected_peaks = peaks[sorted_indices[:n_select]]
@@ -157,17 +162,41 @@ def _compute_metrics(
     if valid_samples == 0:
         return
 
-    runs: List[Tuple[int, int]] = []
+    # Build runs within each continuous valid segment.
+    # When valid_mask has gaps, we avoid counting transitions that involve the
+    # first run after a segment boundary (boundary artifacts).
+    runs_all: List[Tuple[int, int]] = []
+    transition_segments: List[List[Tuple[int, int]]] = []
+    segment_runs: List[Tuple[int, int]] = []
+    segment_index = 0
     curr: Optional[int] = None
     length = 0
+    in_segment = False
+
+    def _flush_segment() -> None:
+        nonlocal segment_runs, segment_index
+        if not segment_runs:
+            return
+        runs_all.extend(segment_runs)
+        if segment_index == 0:
+            transition_segments.append(list(segment_runs))
+        else:
+            transition_segments.append(list(segment_runs[1:]))
+        segment_runs = []
+        segment_index += 1
+
     for is_valid, x in zip(valid_mask, state_labels):
         if not bool(is_valid):
             if curr is not None and length > 0:
-                runs.append((int(curr), int(length)))
+                segment_runs.append((int(curr), int(length)))
             curr = None
             length = 0
+            if in_segment:
+                _flush_segment()
+            in_segment = False
             continue
 
+        in_segment = True
         xi = int(x)
         if curr is None:
             curr = xi
@@ -177,15 +206,21 @@ def _compute_metrics(
         if xi == int(curr):
             length += 1
         else:
-            runs.append((int(curr), int(length)))
+            segment_runs.append((int(curr), int(length)))
             curr = xi
             length = 1
 
     if curr is not None and length > 0:
-        runs.append((int(curr), int(length)))
+        segment_runs.append((int(curr), int(length)))
+    if in_segment:
+        _flush_segment()
 
     min_run_samples = max(1, int((min_run_ms / 1000.0) * sfreq)) if sfreq > 0 else 1
-    valid_runs = [(s, l) for (s, l) in runs if int(l) >= min_run_samples]
+    valid_runs = [(s, l) for (s, l) in runs_all if int(l) >= min_run_samples]
+    transition_segments = [
+        [(s, l) for (s, l) in seg if int(l) >= min_run_samples]
+        for seg in transition_segments
+    ]
     
     durations = {i: [] for i in range(n_states)}
     for s, l in valid_runs:
@@ -200,8 +235,9 @@ def _compute_metrics(
         
     # Transition (Markov)
     trans = np.zeros((n_states, n_states))
-    for (s1, _), (s2, _) in zip(valid_runs[:-1], valid_runs[1:]):
-        trans[int(s1), int(s2)] += 1
+    for seg_runs in transition_segments:
+        for (s1, _), (s2, _) in zip(seg_runs[:-1], seg_runs[1:]):
+            trans[int(s1), int(s2)] += 1
     # Rate? Or Probability? Plan doesn't specify deeply, usually probability or rate.
     # Legacy was rate.
     trans_rate = trans / duration_sec_valid if duration_sec_valid > 0 else trans
@@ -345,7 +381,15 @@ def extract_microstate_features(
     
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
-    n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_feature_groups", -1))
+
+    # Microstate computation parallelizes across epochs/trials.
+    # Prefer a dedicated knob if available; otherwise fall back to the legacy key.
+    n_jobs = int(
+        ctx.config.get(
+            "feature_engineering.parallel.n_jobs_microstates",
+            ctx.config.get("feature_engineering.parallel.n_jobs_feature_groups", -1),
+        )
+    )
     min_samples = 10
 
     min_run_ms = float(ctx.config.get("feature_engineering.microstates.min_run_ms", 10.0))
@@ -453,7 +497,15 @@ def extract_microstate_features_from_epochs(
 
     full_data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_feature_groups", -1))
+
+    # Microstate computation parallelizes across epochs/trials.
+    # Prefer a dedicated knob if available; otherwise fall back to the legacy key.
+    n_jobs = int(
+        config.get(
+            "feature_engineering.parallel.n_jobs_microstates",
+            config.get("feature_engineering.parallel.n_jobs_feature_groups", -1),
+        )
+    )
     min_samples = 10
 
     min_run_ms = float(config.get("feature_engineering.microstates.min_run_ms", 10.0))
@@ -461,15 +513,17 @@ def extract_microstate_features_from_epochs(
     min_valid_fraction = float(config.get("feature_engineering.microstates.min_valid_fraction", 0.5))
     min_correlation = float(config.get("feature_engineering.microstates.min_correlation", 0.25))
 
-    from eeg_pipeline.utils.analysis.windowing import compute_time_windows, get_segment_masks
+    from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
 
-    try:
-        windows = compute_time_windows(epochs.times, config, logger=logger, strict=False)
-    except Exception:
-        windows = None
-
-    baseline_mask = getattr(windows, "baseline_mask", None) if windows is not None else None
-    plateau_mask = getattr(windows, "active_mask", None) if windows is not None else None
+    spec = TimeWindowSpec(
+        times=epochs.times,
+        config=config,
+        sampling_rate=float(sfreq),
+        logger=logger,
+    )
+    baseline_mask = spec.get_mask("baseline")
+    ramp_mask = spec.get_mask("ramp")
+    plateau_mask = spec.get_mask("plateau")
 
     if plateau_mask is None or not np.any(plateau_mask):
         return pd.DataFrame(), [], None
@@ -511,8 +565,6 @@ def extract_microstate_features_from_epochs(
             )
         )
 
-    segment_masks = get_segment_masks(epochs.times, windows, config)
-    ramp_mask = segment_masks.get("ramp")
     if ramp_mask is not None and int(np.sum(ramp_mask)) >= min_samples:
         data_ramp = full_data[..., ramp_mask]
         all_data.update(

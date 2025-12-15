@@ -26,10 +26,7 @@ from eeg_pipeline.analysis.decoding.cv import (
     safe_pearsonr,
 )
 from eeg_pipeline.utils.config.loader import load_settings, get_fisher_z_clip_values
-from eeg_pipeline.plotting.decoding import (
-    plot_time_generalization_with_null,
-)
-from eeg_pipeline.utils.io.logging import get_logger
+from eeg_pipeline.io.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -353,22 +350,6 @@ def time_generalization_regression(
                 coverage_map=coverage_map,
                 null_r=null_r,
                 null_r2=null_r2,
-            )
-            plot_time_generalization_with_null(
-                tg_matrix=tg_r,
-                null_matrix=null_r,
-                window_centers=window_centers_out,
-                save_path=results_dir / "time_generalization_r.png",
-                metric="r",
-                config=config_local,
-            )
-            plot_time_generalization_with_null(
-                tg_matrix=tg_r2,
-                null_matrix=null_r2,
-                window_centers=window_centers_out,
-                save_path=results_dir / "time_generalization_r2.png",
-                metric="r2",
-                config=config_local,
             )
         except (OSError, PermissionError, ValueError) as exc:
             logger.warning("Failed to save time-generalization outputs: %s", exc)

@@ -17,7 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import t as t_dist
 
-from eeg_pipeline.utils.io.paths import deriv_group_stats_path, deriv_group_plots_path
+from eeg_pipeline.io.paths import deriv_group_stats_path, deriv_group_plots_path
 from ...utils.data.loading import (
     extract_time_frequency_grid,
 )

@@ -22,9 +22,9 @@ if TYPE_CHECKING:
     import mne
 
 from .base import get_statistics_constants, get_fdr_alpha, get_config_value, ensure_config
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.tsv import write_tsv
-from eeg_pipeline.utils.io.columns import get_pain_column_from_config
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.tsv import write_tsv
+from eeg_pipeline.io.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh_values, fdr_bh
 from eeg_pipeline.utils.analysis.stats.validation import validate_pain_binary_values
 from eeg_pipeline.utils.analysis.tfr import (

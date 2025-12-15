@@ -283,12 +283,13 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     n_jobs_aperiodic: -1  # Number of parallel jobs for aperiodic fitting (epoch×channel parallelization, used in aperiodic.py)
     n_jobs_complexity: -1  # Number of parallel jobs for complexity feature extraction (epoch parallelization, used in pipeline.py)
     n_jobs_temporal: -1  # Number of parallel jobs for temporal feature extraction (epoch parallelization, used in pipeline.py)
+    n_jobs_microstates: -1  # Number of parallel jobs for microstate feature extraction (epoch parallelization, used in microstates.py)
     n_jobs_pac: -1  # Number of parallel jobs for PAC computation (ROI×phase×amp combination parallelization, used in phase.py)
     n_jobs_connectivity: -1  # Number of parallel jobs for connectivity computation (per-band parallelization, used in connectivity.py)
     n_jobs_feature_groups: -1  # Number of parallel jobs for running independent feature extractors (used in pipeline.py); keep low to limit memory
   connectivity:  # Connectivity feature parameters
     allow_legacy_fallback: false  # If false, require mne-connectivity; legacy fallback is not scientifically equivalent
-    output_level: "full"  # "full" writes all channel-pair edges; "global_only" writes only global summaries and graph metrics
+    output_level: "global_only"  # "full" writes all channel-pair edges; "global_only" writes only global summaries and graph metrics
     enable_imcoh: false  # Enable imaginary coherence computation (robust to volume conduction)
     enable_pli: false  # Enable Phase Lag Index computation
     aec_mode: "orth"  # Amplitude Envelope Correlation mode: "orth" (orthogonalized) or "standard"
@@ -382,11 +383,13 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     mse_m: 2  # Embedding dimension for MSE
     mse_r_mult: 0.15  # Tolerance multiplier for MSE
   asymmetry:  # Hemispheric asymmetry pairs for precomputed asymmetry features
-    pairs:
+    channel_pairs:
       - ["F3", "F4"]
+      - ["F7", "F8"]
       - ["C3", "C4"]
       - ["P3", "P4"]
       - ["O1", "O2"]
+    segment_label: "plateau"
   source_features:  # Source-level feature parameters (used in source.py)
     enabled: false  # Enable source-level features (requires forward model)
     method: "dSPM"  # Source estimation method: "dSPM", "MNE", "sLORETA"

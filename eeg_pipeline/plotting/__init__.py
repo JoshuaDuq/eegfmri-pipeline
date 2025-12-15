@@ -26,21 +26,6 @@ Lazy Imports:
 # Configuration
 from .config import get_plot_config, PlotConfig
 
-# High-level visualizers (most commonly used)
-from .erp import visualize_erp_for_subjects
-from .features import visualize_features_for_subjects
-from .tfr import visualize_tfr_for_subjects
-from .behavioral import visualize_behavior_for_subjects
-
-# Core utilities
-from .core import (
-    get_font_sizes,
-    add_colorbar,
-    compute_cluster_significance,
-    build_statistical_title,
-)
-
-
 __all__ = [
     # Configuration
     "get_plot_config",
@@ -50,10 +35,13 @@ __all__ = [
     "add_colorbar",
     "compute_cluster_significance",
     "build_statistical_title",
-    # High-level visualizers
+    # High-level visualizers (lazy via __getattr__)
+    "visualize_subject_erp",
     "visualize_erp_for_subjects",
     "visualize_features_for_subjects",
+    "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
+    "visualize_subject_behavior",
     "visualize_behavior_for_subjects",
 ]
 
@@ -86,6 +74,8 @@ def __getattr__(name: str):
         # ERP
         "erp_contrast_pain": "erp",
         "erp_by_temperature": "erp",
+        "visualize_subject_erp": "erp",
+        "visualize_erp_for_subjects": "erp",
         # Features
         "plot_power_distributions": "features",
         "plot_channel_power_heatmap": "features",
@@ -139,6 +129,8 @@ def __getattr__(name: str):
         "plot_topomap_grid_baseline_temps": "tfr",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",
         "plot_temporal_topomaps_allbands_plateau": "tfr",
+        "visualize_subject_tfr": "tfr",
+        "visualize_tfr_for_subjects": "tfr",
         # Behavioral
         "generate_correlation_scatter": "behavioral",
         "plot_residual_qc": "behavioral",
@@ -150,6 +142,8 @@ def __getattr__(name: str):
         "plot_regressor_distributions": "behavioral",
         "plot_pac_behavior_correlations": "behavioral",
         "plot_itpc_rating_scatter_grid": "behavioral",
+        "visualize_subject_behavior": "behavioral",
+        "visualize_behavior_for_subjects": "behavioral",
         # Decoding
         "plot_time_generalization_matrix": "decoding",
         "plot_time_generalization_with_null": "decoding",
@@ -166,6 +160,9 @@ def __getattr__(name: str):
         "plot_incremental_validity": "decoding",
         "plot_feature_importance_top_n": "decoding",
         "plot_feature_importance_stability": "decoding",
+        "visualize_features_for_subjects": "features",
+        "visualize_tfr_for_subjects": "tfr",
+        "visualize_behavior_for_subjects": "behavioral",
     }
 
     if name in _module_map:

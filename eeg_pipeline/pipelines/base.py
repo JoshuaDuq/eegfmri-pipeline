@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Any, List, Optional, TypeVar, Generic, Dict
 
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.io.logging import (
+from eeg_pipeline.io.logging import (
     get_logger,
     get_subject_logger,
 )
-from eeg_pipeline.utils.io.plotting import setup_matplotlib
-from eeg_pipeline.utils.io.paths import ensure_derivatives_dataset_description
+from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.io.paths import ensure_derivatives_dataset_description, resolve_deriv_root
 from eeg_pipeline.utils.progress import BatchProgress
 
 T = TypeVar("T")
@@ -41,7 +41,7 @@ class PipelineBase(ABC):
     def _setup(self) -> None:
         """Perform initial setup."""
         setup_matplotlib(self.config)
-        self.deriv_root = Path(self.config.deriv_root)
+        self.deriv_root = resolve_deriv_root(config=self.config)
         ensure_derivatives_dataset_description(deriv_root=self.deriv_root)
 
     def run_batch(

@@ -9,9 +9,9 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from eeg_pipeline.utils.io.paths import deriv_plots_path, ensure_dir
-from eeg_pipeline.utils.io.logging import get_logger
-from eeg_pipeline.utils.io.plotting import setup_matplotlib
+from eeg_pipeline.io.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
+from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.plotting.erp.contrasts import erp_contrast_pain
 from eeg_pipeline.plotting.erp.temperature import erp_by_temperature
 from eeg_pipeline.plotting.erp.registry import (
@@ -34,13 +34,16 @@ def visualize_subject_erp(
     crop_tmax: Optional[float] = None,
     logger: Optional[logging.Logger] = None,
     plots: Optional[List[str]] = None,
+    deriv_root: Optional[Path] = None,
 ) -> None:
     if logger is None:
         logger = get_logger(__name__)
 
     logger.info(f"Visualizing ERP for sub-{subject}...")
 
-    plots_dir = deriv_plots_path(config.deriv_root, subject, subdir="erp")
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
+    plots_dir = deriv_plots_path(effective_deriv_root, subject, subdir="erp")
     ensure_dir(plots_dir)
 
     from eeg_pipeline.pipelines.erp import get_erp_config, load_and_prepare_epochs
@@ -55,6 +58,7 @@ def visualize_subject_erp(
         crop_tmax,
         erp_cfg["include_tmax_in_crop"],
         logger,
+        deriv_root=effective_deriv_root,
     )
 
     if epochs is None:
@@ -104,6 +108,8 @@ def visualize_erp_for_subjects(
 
     task = task or config.get("project.task", "thermalactive")
 
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
     if logger is None:
         logger = get_logger(__name__)
 
@@ -118,6 +124,7 @@ def visualize_erp_for_subjects(
             crop_tmin=crop_tmin,
             crop_tmax=crop_tmax,
             logger=logger,
+            deriv_root=effective_deriv_root,
         )
 
     logger.info("ERP visualization complete")

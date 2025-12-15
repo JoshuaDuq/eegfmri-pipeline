@@ -27,8 +27,8 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     _build_temp_record_unified,
     _compute_roi_correlation_stats,
 )
-from eeg_pipeline.utils.io.paths import deriv_features_path
-from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
+from eeg_pipeline.io.paths import deriv_features_path
+from eeg_pipeline.io.tsv import read_tsv, write_tsv
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 from eeg_pipeline.context.behavior import AnalysisConfig
 from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value, load_config
@@ -48,11 +48,9 @@ from eeg_pipeline.analysis.features.registry import (
     FeatureRule,
     classify_feature,
     get_feature_registry,
+    _CHANNEL_NAMES,
 )
-import eeg_pipeline.analysis.features.registry as feature_registry
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
-
-_CHANNEL_NAMES = feature_registry._CHANNEL_NAMES
 
 
 @dataclass
@@ -62,6 +60,7 @@ class CorrelationConfig:
     method: str
     min_samples: int
     apply_fdr: bool = True
+    fdr_alpha: Optional[float] = None
     n_bootstrap: int = 0
     n_permutations: int = 0
     rng: Optional[np.random.Generator] = None
@@ -85,6 +84,7 @@ class CorrelationConfig:
                 config, "behavior_analysis.statistics.correlation_method", "spearman"
             ),
             min_samples=get_min_samples(config, "channel"),
+            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05))),
             n_bootstrap=int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 0)),
             n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 0)),
             rng=None,
@@ -102,6 +102,7 @@ class CorrelationConfig:
             method=ctx.method or base.method,
             min_samples=ctx.min_samples_channel or base.min_samples,
             apply_fdr=base.apply_fdr,
+            fdr_alpha=base.fdr_alpha,
             n_bootstrap=ctx.bootstrap if ctx.bootstrap is not None else base.n_bootstrap,
             n_permutations=ctx.n_perm if ctx.n_perm is not None else base.n_permutations,
             rng=ctx.rng,
@@ -130,404 +131,6 @@ class FeatureCorrelationResult:
 
     def to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self.records) if self.records else pd.DataFrame()
-
-
-# =============================================================================
-# Feature Classification
-# =============================================================================
-
-
-def _rule_matches(column: str, rule: FeatureRule) -> bool:
-    """Delegate to shared registry rule matcher."""
-    return feature_registry._rule_matches(column, rule)
-
-
-def _classify_subtype(
-    column: str,
-    feature_type: str,
-    registry: FeatureRegistry,
-    source_file: Optional[str] = None,
-) -> str:
-    """Classify feature subtype using registry patterns and known hierarchies."""
-    col_lower = column.lower()
-    parts = column.split("_")
-
-    # Pattern-based subtype hints
-    patterns = registry.patterns
-
-    if feature_type == "power":
-        if source_file and "plateau" in source_file:
-            return "plateau"
-        if patterns.get("powcorr") and patterns["powcorr"].match(column):
-            return "correlation"
-        if "plateau" in col_lower:
-            return "plateau"
-        if col_lower.startswith("baseline_") or col_lower.startswith("power_baseline_"):
-            return "baseline"
-        return "direct"
-
-    if feature_type == "connectivity":
-        if patterns.get("conn_graph") and patterns["conn_graph"].match(column):
-            return "graph"
-        if len(parts) > 0:
-            measure = parts[0].lower()
-            if measure in ["aec", "wpli", "plv", "pli", "imcoh", "coh", "icoh", "corr", "sync"]:
-                return measure
-            if measure.startswith("sw") and "corr" in measure:
-                return "sliding_window"
-        return "unknown"
-
-    if feature_type == "microstate":
-        if patterns.get("ms_transition") and patterns["ms_transition"].match(column):
-            return "transition"
-        if len(parts) >= 2 and parts[0].lower() == "ms":
-            metric = parts[1].lower()
-            if metric in registry.type_hierarchy.get("microstate", {}).get("subtypes", []):
-                return metric
-        if column.isdigit():
-            return "state"
-        return "unknown"
-
-    if feature_type == "precomputed":
-        if len(parts) > 0:
-            prefix = parts[0].lower()
-            if prefix == "gfp":
-                return "gfp"
-            if prefix == "roi":
-                return "roi"
-            if prefix in ["pow", "power", "logpow", "relpow"]:
-                return "power"
-            if prefix in [
-                "iaf",
-                "sef50",
-                "sef75",
-                "sef90",
-                "sef95",
-                "se",
-                "spec",
-                "spectral",
-                "peakfreq",
-                "peakpow",
-                "peakprom",
-                "bandwidth",
-                "relative",
-                "ratio",
-                "slope",
-                "edge",
-            ]:
-                return "spectral"
-            if prefix in ["mean", "var", "std", "skew", "kurt", "median", "iqr", "rms", "p2p"]:
-                return "temporal"
-            if prefix in ["pe", "sampen", "hjorth", "lzc", "hurst", "dfa", "entropy", "complexity"]:
-                return "complexity"
-            if prefix in ["conn", "plv", "imcoh", "aec", "psi"]:
-                return "connectivity"
-            if prefix in ["pac"]:
-                return "pac"
-            if prefix in ["itpc"]:
-                return "itpc"
-            if prefix in ["dynamics"]:
-                return "dynamics"
-            if prefix in ["asym", "asymmetry"]:
-                return "asymmetry"
-        return "other"
-
-    if feature_type == "itpc":
-        # Check source file or pattern
-        if "trial" in col_lower: return "single_trial"
-        if "map" in col_lower: return "map"
-        if "plateau" in col_lower: return "plateau"
-        if "ramp" in col_lower: return "ramp"
-        return "summary"
-
-    if feature_type == "pac":
-        if "trial" in col_lower: return "trial"
-        if "amp" in col_lower: return "amplitude"
-        if "phase" in col_lower: return "phase"
-        return "comodulogram"
-
-    hierarchy_subtypes = registry.type_hierarchy.get(feature_type, {}).get("subtypes", [])
-    if hierarchy_subtypes:
-        for subtype in hierarchy_subtypes:
-            if subtype in col_lower:
-                return subtype
-
-    return "unknown"
-
-
-def _match_feature_patterns(
-    column: str, registry: FeatureRegistry
-) -> Optional[Tuple[str, str, Dict[str, Any]]]:
-    """Try regex-based pattern matching for detailed classification."""
-    patterns = registry.patterns
-
-    for ftype, pattern in patterns.items():
-        match = pattern.match(column)
-        if not match:
-            continue
-        groups = match.groups()
-        meta = {"identifier": column, "band": "N/A", "source": "inferred", "subtype": "unknown"}
-
-        if ftype == "erds":
-            meta.update({"band": groups[0], "identifier": groups[1], "channel": groups[1]})
-            return "power", "erds", meta
-        if ftype == "erds_windowed":
-            meta.update({"band": groups[0], "channel": groups[1], "window": groups[2], "identifier": f"{groups[1]}_{groups[2]}"})
-            return "power", "erds_windowed", meta
-        if ftype == "relative_power":
-            meta.update({"band": groups[0], "channel": groups[1], "identifier": groups[1]})
-            return "power", "relative", meta
-        if ftype == "band_ratio":
-            meta.update({"band": f"{groups[0]}/{groups[1]}", "channel": groups[2], "identifier": groups[2]})
-            return "power", "ratio", meta
-        if ftype in ("temporal_stat", "amplitude"):
-            meta.update({"stat": groups[0], "channel": groups[1], "identifier": groups[1]})
-            return "temporal", groups[0], meta
-        if ftype == "hjorth":
-            meta.update({"param": groups[0], "channel": groups[1], "identifier": groups[1]})
-            return "complexity", "hjorth", meta
-        if ftype == "roi_power":
-            meta.update({"band": groups[0], "roi": groups[1], "identifier": groups[1]})
-            return "power", "roi", meta
-        if ftype in ("roi_asymmetry", "roi_laterality"):
-            meta.update({"band": groups[0], "pair": groups[1], "identifier": groups[1]})
-            return "roi", "asymmetry", meta
-        if ftype == "ms_transition":
-            meta.update({"from_state": groups[0], "to_state": groups[1], "identifier": f"{groups[0]}->{groups[1]}"})
-            return "microstate", "transition", meta
-        if ftype.startswith("ms_"):
-            meta.update({"state": groups[0], "identifier": groups[0]})
-            return "microstate", ftype.replace("ms_", ""), meta
-        if ftype == "itpc":
-            meta.update({"band": groups[0], "channel": groups[1], "time_bin": groups[2], "identifier": groups[1]})
-            return "itpc", "itpc", meta
-        if ftype == "aperiodic":
-            meta.update({"param": groups[0], "channel": groups[1], "identifier": groups[1], "band": "aperiodic"})
-            return "aperiodic", groups[0], meta
-        if ftype == "powcorr":
-            meta.update({"band": groups[0], "channel": groups[1], "identifier": groups[1]})
-            return "power", "correlation", meta
-        if ftype == "conn_graph":
-            meta.update({"measure": groups[0], "band": groups[1], "metric": groups[2], "identifier": f"{groups[0]}_{groups[2]}"})
-            return "connectivity", "graph", meta
-        if ftype == "gfp":
-            meta.update({"metric": groups[0], "identifier": groups[0], "band": "global"})
-            return "gfp", groups[0], meta
-        if ftype == "power_segmented":
-            segment, band, ident = groups[0], groups[1], groups[2]
-            meta.update({"band": band, "identifier": ident, "segment": segment})
-            return "power", segment, meta
-        if ftype == "connectivity_segmented":
-            measure, segment, band, ident = groups[0], groups[1], groups[2], groups[3]
-            meta.update({"band": band, "identifier": ident, "measure": measure, "segment": segment})
-            return "connectivity", segment, meta
-        if ftype == "itpc_segmented":
-            band, ch, segment = groups[0], groups[1], groups[2]
-            meta.update({"band": band, "channel": ch, "segment": segment, "identifier": ch})
-            return "itpc", segment, meta
-        if ftype == "dynamics_burst_segmented":
-            band, segment, metric = groups[0], groups[1], groups[2]
-            meta.update({"band": band, "segment": segment, "metric": metric, "identifier": f"{band}_{segment}_{metric}"})
-            return "dynamics", segment, meta
-
-        meta.update({"identifier": groups[0] if groups else column})
-        return ftype, "unknown", meta
-
-    return None
-
-
-def classify_feature(
-    column: str,
-    source_file_type: Optional[str] = None,
-    include_subtype: bool = True,
-    registry: Optional[FeatureRegistry] = None,
-) -> Tuple[str, str, Dict[str, Any]]:
-    """Classify feature and extract metadata using config-driven registry."""
-    if not column or not isinstance(column, str):
-        meta = {
-            "identifier": str(column) if column else "unknown",
-            "band": "N/A",
-            "source": source_file_type or "unknown",
-            "subtype": "unknown",
-        }
-        return ("unknown", "unknown", meta) if include_subtype else ("unknown", "", meta)
-
-    registry = registry or get_feature_registry()
-
-    # PRIMARY: source file type mapping
-    feature_type = registry.source_to_type.get(source_file_type, source_file_type)
-    meta: Dict[str, Any] = {"identifier": column, "band": "N/A", "source": source_file_type or "inferred", "subtype": "unknown"}
-
-    # FIRST PRIORITY: NamingSchema parsing
-    # This covers all new features (ITPC, PAC, modern Power) generically
-    parsed = NamingSchema.parse(column)
-    if parsed.get("valid"):
-        # Map schema group to feature_type
-        # Schema groups: power, itpc, pac, connectivity, microstate, etc.
-        feature_type = parsed["group"]
-        subtype = parsed.get("segment", "unknown")
-        
-        # Build meta from parsed
-        meta.update({
-            "identifier": parsed.get("identifier") or parsed.get("stat") or column,
-            "band": parsed.get("band", "N/A"),
-            "stat": parsed.get("stat"),
-            "scope": parsed.get("scope"),
-            "segment": parsed.get("segment"),
-            "source": source_file_type or "inferred",
-        })
-        
-        # Specific overrides/refinements
-        if feature_type == "power":
-            if subtype == "baseline":
-                meta["subtype"] = "baseline"
-            elif subtype == "plateau":
-                meta["subtype"] = "plateau" # normalized
-                
-        meta["subtype"] = subtype
-        return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
-
-    # SECONDARY: regex-based patterns (most specific legacy)
-    pattern_match = _match_feature_patterns(column, registry)
-    if pattern_match:
-        feature_type, subtype, meta = pattern_match
-        meta["source"] = source_file_type or meta.get("source", "inferred")
-        meta["subtype"] = subtype
-        return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
-
-    # TERTIARY: classifier rules
-    for rule in registry.classifiers:
-        if _rule_matches(column, rule):
-            feature_type = rule.label
-            break
-
-    feature_type = registry.source_to_type.get(feature_type, feature_type) or "unknown"
-    subtype = _classify_subtype(column, feature_type, registry, source_file_type)
-    meta.update(_parse_feature_metadata(column, feature_type))
-    meta["subtype"] = subtype
-
-    return (feature_type, subtype, meta) if include_subtype else (feature_type, "", meta)
-
-
-def _parse_feature_metadata(column: str, ftype: str) -> Dict[str, Any]:
-    """Parse feature metadata from column name.
-    
-    Attempts to extract frequency band and identifier from various naming conventions.
-    """
-    parts = column.split("_")
-    meta = {"identifier": column, "band": "N/A"}
-    
-    # Common frequency bands (case-insensitive)
-    freq_bands = {"delta", "theta", "alpha", "beta", "gamma", "low_gamma", "high_gamma", 
-                  "low_beta", "high_beta", "mu", "spindle"}
-    
-    # Try to extract band from parts
-    band_candidates = [p.lower() for p in parts if p.lower() in freq_bands]
-    if band_candidates:
-        meta["band"] = band_candidates[0]  # Take first match
-    
-    # Parse based on feature type
-    if ftype == "power":
-        # Patterns: pow_alpha_C3, power_alpha_C3, pow_alpha_roi_frontal
-        if len(parts) >= 2:
-            # Check if second part is a band
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                # Band might be elsewhere, identifier is everything after pow/power
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "connectivity":
-        # Patterns: wpli_alpha_C3-Fz, plv_theta_C3-C4, conn_alpha_all
-        if len(parts) >= 2:
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "graph":
-        # Patterns: graph_alpha_geff, graph_theta_clust
-        if len(parts) >= 2:
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "aperiodic":
-        meta["band"] = "aperiodic"
-        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
-    
-    elif ftype in ("microstate", "itpc", "pac"):
-        # These might have bands or not
-        if len(parts) >= 2:
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "spectral":
-        # Patterns: iaf_C3, relative_alpha_C3, spectral_entropy_C3
-        if len(parts) >= 2:
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "temporal":
-        # Patterns: mean_C3, var_C3, rms_C3
-        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
-    
-    elif ftype == "complexity":
-        # Patterns: pe_C3, sampen_C3, hjorth_mobility_C3
-        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
-    
-    elif ftype == "roi":
-        # Patterns: roi_frontal, asymmetry_alpha, laterality_beta
-        if len(parts) >= 2:
-            if parts[1].lower() in freq_bands:
-                meta["band"] = parts[1].lower()
-                meta["identifier"] = "_".join(parts[2:]) if len(parts) > 2 else "all"
-            else:
-                meta["identifier"] = "_".join(parts[1:])
-    
-    elif ftype == "precomputed":
-        # Precomputed features: gfp_*, iaf_*, pow_*, spec_*, slope_*, sef*_*, etc.
-        # Many have band info embedded: pow_alpha_C3, spec_alpha_C3, iaf_cog_C3
-        if len(parts) >= 2:
-            # Check all parts for band info
-            for i, part in enumerate(parts):
-                if part.lower() in freq_bands:
-                    meta["band"] = part.lower()
-                    # Identifier is everything except the band
-                    remaining = parts[:i] + parts[i+1:]
-                    meta["identifier"] = "_".join(remaining) if remaining else column
-                    break
-            else:
-                # No band found - use full name as identifier
-                meta["identifier"] = column
-    
-    elif ftype == "gfp":
-        # GFP features: gfp_mean, gfp_max, gfp_baseline_change
-        meta["band"] = "global"
-        meta["identifier"] = "_".join(parts[1:]) if len(parts) > 1 else column
-    
-    return meta
-
-
-###################################################################
-# Shared classification bindings
-###################################################################
-# Ensure all classification helpers use the shared registry module.
-_rule_matches = feature_registry._rule_matches
-_classify_subtype = feature_registry._classify_subtype
-_match_feature_patterns = feature_registry._match_feature_patterns
-_parse_feature_metadata = feature_registry._parse_feature_metadata
-classify_feature = feature_registry.classify_feature
 
 
 # =============================================================================
@@ -637,8 +240,11 @@ class FeatureBehaviorCorrelator:
         temp_aligned = None
         loso_groups = None
         perm_groups = None
-        if config.control_trial_order and config.covariates_without_temp_df is not None:
-            cov_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+        if config.control_temperature:
+            if config.covariates_without_temp_df is not None:
+                cov_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+            else:
+                cov_aligned = None
         elif config.covariates_df is not None:
             cov_aligned = config.covariates_df.reindex(df_aligned.index)
         if config.control_temperature and config.temperature_series is not None:
@@ -828,13 +434,22 @@ class FeatureBehaviorCorrelator:
                 p_kind = "p_primary"
             valid_idx = [i for i, pv in enumerate(p_vals) if pd.notna(pv)]
             if valid_idx:
-                q_vals = fdr_bh(np.array([p_vals[i] for i in valid_idx]))
+                q_vals = fdr_bh(
+                    np.array([p_vals[i] for i in valid_idx]),
+                    alpha=config.fdr_alpha,
+                    config=self.config,
+                )
                 for idx, q in zip(valid_idx, q_vals):
                     record_dicts[idx]["p_fdr"] = float(q)
                     record_dicts[idx]["q_within_family"] = float(q)
                     record_dicts[idx]["within_family_p_kind"] = p_kind
 
-        n_sig = sum(1 for r in records if r.is_significant)
+        alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        n_sig = sum(
+            1
+            for rec in record_dicts
+            if pd.notna(rec.get("p_primary", np.nan)) and float(rec.get("p_primary")) < alpha
+        )
         return FeatureCorrelationResult(feature_type, len(df.columns), n_sig, record_dicts)
     
     def _compute_bayes_factor(
@@ -1069,7 +684,7 @@ class FeatureBehaviorCorrelator:
                     p_for_fdr = pd.to_numeric(combined_df["p_primary_perm"], errors="coerce").to_numpy()
                 else:
                     p_for_fdr = pd.to_numeric(combined_df["p_primary"], errors="coerce").to_numpy()
-                combined_df["p_fdr"] = fdr_bh(p_for_fdr)
+                combined_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
             combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
             save_correlation_results(combined_df, combined_path)
 

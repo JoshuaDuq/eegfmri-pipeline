@@ -3,27 +3,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Dict, List
 
-PlotterFunc = Callable[[Any, Dict[str, Path]], None]
+from eeg_pipeline.plotting.core.registry import (
+    FlatPlotManager,
+    FlatPlotRegistry,
+    PlotterFunc,
+)
 
 
-class ERPPlotRegistry:
+class ERPPlotRegistry(FlatPlotRegistry["ERPPlotContext"]):
     """Registry for ERP plotting functions."""
-
-    _registry: List[Tuple[str, PlotterFunc]] = []
-
-    @classmethod
-    def register(cls, name: str):
-        def decorator(func: PlotterFunc):
-            cls._registry.append((name, func))
-            return func
-
-        return decorator
-
-    @classmethod
-    def get_plotters(cls) -> List[Tuple[str, PlotterFunc]]:
-        return list(cls._registry)
 
 
 @dataclass
@@ -37,25 +27,17 @@ class ERPPlotContext:
     logger: logging.Logger
 
 
-class ERPPlotManager:
+class ERPPlotManager(FlatPlotManager["ERPPlotContext"]):
     """Run ERP plotters registered to the ERPPlotRegistry."""
 
     def __init__(self, ctx: ERPPlotContext):
-        self.ctx = ctx
-        self.logger = ctx.logger
-        self.saved_plots: Dict[str, Path] = {}
+        super().__init__(ctx, logger=ctx.logger)
 
     def run_all(self) -> Dict[str, Path]:
-        for name, func in ERPPlotRegistry.get_plotters():
-            self._run_single(name, func)
-        return self.saved_plots
+        return super().run_all(plotters=ERPPlotRegistry.get_plotters())
 
     def run_selected(self, plot_names: List[str]) -> Dict[str, Path]:
-        names = set(plot_names)
-        for name, func in ERPPlotRegistry.get_plotters():
-            if name in names:
-                self._run_single(name, func)
-        return self.saved_plots
+        return super().run_selected(plot_names, plotters=ERPPlotRegistry.get_plotters())
 
     def _run_single(self, name: str, func: PlotterFunc) -> None:
         try:
@@ -63,4 +45,3 @@ class ERPPlotManager:
             func(self.ctx, self.saved_plots)
         except Exception as exc:
             self.logger.error(f"ERP plotter '{name}' failed: {exc}", exc_info=True)
-

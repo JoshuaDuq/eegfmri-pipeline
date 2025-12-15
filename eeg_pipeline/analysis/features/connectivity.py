@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 import logging
+import time
 import numpy as np
 import pandas as pd
 import mne
@@ -32,6 +33,7 @@ from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 from eeg_pipeline.utils.config.loader import get_frequency_bands, get_fisher_z_clip_values
 from eeg_pipeline.utils.data.loading import flatten_lower_triangles
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.analysis.graph_metrics import (
     symmetrize_adjacency as _symmetrize_and_clip,
     compute_global_efficiency_weighted as _global_efficiency_weighted,
@@ -211,14 +213,6 @@ def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
         return arr[:, mask]
     return arr
 
-def _get_segment_masks(precomputed: Any) -> Dict[str, np.ndarray]:
-    """Helper to get masks for baseline, ramp, and plateau segments.
-    
-    Wrapper around the canonical get_segment_masks in utils/analysis/windowing.py.
-    """
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    return get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
-
 def extract_connectivity_from_precomputed(
     precomputed: Any, # PrecomputedData
     *,
@@ -268,7 +262,7 @@ def extract_connectivity_from_precomputed(
         )
 
     segments_use = segments if segments is not None else ["baseline", "ramp", "plateau"]
-    masks = _get_segment_masks(precomputed)
+    masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     seg_mask_map = {
         "baseline": masks.get("baseline"),
         "ramp": masks.get("ramp"),
@@ -280,7 +274,17 @@ def extract_connectivity_from_precomputed(
     if n_channels < 2:
         return pd.DataFrame(), []
 
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_connectivity", 1))
+    t_total0 = time.perf_counter()
+
+    from eeg_pipeline.utils.parallel import get_n_jobs
+
+    n_jobs = get_n_jobs(
+        config,
+        default=-1,
+        config_path="feature_engineering.parallel.n_jobs_connectivity",
+    )
+    if logger is not None:
+        logger.debug("Connectivity extraction: n_jobs=%s", n_jobs)
     n_epochs = int(precomputed.data.shape[0])
 
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
@@ -428,7 +432,7 @@ def extract_connectivity_from_precomputed(
                         record[col_glob] = float(np.nanmean(tmp))
 
                         if enable_graph_metrics and seg_name == "plateau":
-                            legacy_graph = _graph_metrics(tmp, measure_name, band)
+                            legacy_graph = _graph_metrics(tmp, measure_name, band, conn_cfg)
                             record.update({f"legacy_{k}": v for k, v in legacy_graph.items()})
 
             records_legacy.append(record)
@@ -437,6 +441,170 @@ def extract_connectivity_from_precomputed(
         return df, list(df.columns)
 
     freq_bands = get_frequency_bands(config)
+
+    use_task_parallel = bool(n_jobs > 1) and (not enable_graph_metrics)
+    inner_n_jobs = 1 if use_task_parallel else n_jobs
+
+    if logger is not None:
+        logger.info(
+            "Connectivity extraction setup: epochs=%d, channels=%d, pairs=%d, bands=%d, segments=%d, phase_measures=%d, aec=%s, output_level=%s, graph_metrics=%s",
+            n_epochs,
+            n_channels,
+            int(len(pair_names)),
+            int(len(bands_use)),
+            int(len(segments_use)),
+            int(len(phase_measures)),
+            str(bool(enable_aec)),
+            output_level,
+            str(bool(enable_graph_metrics)),
+        )
+
+    def _phase_task(seg_name: str, band: str, method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any) -> pd.DataFrame:
+        t0 = time.perf_counter()
+        con = spectral_connectivity_time(
+            seg_data,
+            freqs=freqs,
+            method=method,
+            indices=indices,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            average=False,
+            faverage=True,
+            mode=conn_mode,
+            n_cycles=use_n_cycles,
+            decim=decim,
+            n_jobs=inner_n_jobs,
+            verbose=False,
+        )
+
+        con_data = np.asarray(con.get_data())
+        if con_data.ndim == 2:
+            con_data = con_data[None, :, :]
+        if con_data.ndim == 3 and con_data.shape[-1] > 1:
+            con_vals = np.nanmean(con_data, axis=-1)
+        elif con_data.ndim == 3:
+            con_vals = con_data[:, :, 0]
+        else:
+            return pd.DataFrame()
+        if con_vals.shape[0] != n_epochs:
+            return pd.DataFrame()
+
+        parts: List[pd.DataFrame] = []
+        if output_level == "full":
+            prefix = f"conn_{seg_name}_{band}_chpair_"
+            suffix = f"_{method}"
+            cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
+            parts.append(pd.DataFrame(con_vals, columns=cols))
+
+        glob_col = f"conn_{seg_name}_{band}_global_{method}_mean"
+        parts.append(pd.DataFrame({glob_col: np.nanmean(con_vals, axis=1)}))
+
+        if enable_graph_metrics and seg_name == "plateau":
+            if logger is not None:
+                logger.info(
+                    "Connectivity graph metrics (phase): seg=%s band=%s method=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
+                    seg_name,
+                    band,
+                    method,
+                    int(n_epochs),
+                    int(n_channels),
+                    str(conn_cfg.get("small_world_n_rand", 100)),
+                )
+            def _graph_row(ep_idx: int) -> Dict[str, float]:
+                adj = np.zeros((n_channels, n_channels), dtype=float)
+                adj[pair_i, pair_j] = con_vals[ep_idx]
+                adj[pair_j, pair_i] = con_vals[ep_idx]
+                return _graph_metrics(adj, method, band, conn_cfg)
+
+            graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
+            )
+            parts.append(pd.DataFrame(graph_rows))
+
+        df_out = pd.concat(parts, axis=1) if parts else pd.DataFrame()
+        if logger is not None:
+            logger.debug("Connectivity task phase/%s/%s/%s finished in %.2fs (cols=%d)", seg_name, band, method, time.perf_counter() - t0, int(df_out.shape[1]))
+        return df_out
+
+    def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
+        t0 = time.perf_counter()
+        ec = envelope_correlation(
+            analytic_seg,
+            orthogonalize="pairwise",
+            log=False,
+            absolute=True,
+        )
+        ec_data = np.asarray(ec.get_data())
+        if ec_data.ndim >= 1 and ec_data.shape[-1] == 1:
+            ec_data = np.squeeze(ec_data, axis=-1)
+
+        expected_packed = int(n_channels * (n_channels + 1) // 2)
+        dense: Optional[np.ndarray] = None
+
+        if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+            dense = np.nanmean(ec_data, axis=-1)
+        elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
+            dense = ec_data
+        elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
+            dense = np.moveaxis(ec_data, -1, 0)
+        elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+            packed = np.nanmean(ec_data, axis=-1)
+            tril = np.tril_indices(n_channels, k=0)
+            dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+            dense[:, tril[0], tril[1]] = packed
+            dense[:, tril[1], tril[0]] = packed
+        elif ec_data.ndim == 2 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
+            tril = np.tril_indices(n_channels, k=0)
+            dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
+            dense[:, tril[0], tril[1]] = ec_data
+            dense[:, tril[1], tril[0]] = ec_data
+        elif ec_data.ndim == 1 and ec_data.shape[0] == expected_packed:
+            tril = np.tril_indices(n_channels, k=0)
+            dense = np.zeros((1, n_channels, n_channels), dtype=float)
+            dense[:, tril[0], tril[1]] = ec_data[None, :]
+            dense[:, tril[1], tril[0]] = ec_data[None, :]
+            dense = np.repeat(dense, n_epochs, axis=0)
+
+        if dense is None or dense.shape[0] != n_epochs:
+            return pd.DataFrame()
+
+        aec_vals = dense[:, pair_i, pair_j]
+
+        parts: List[pd.DataFrame] = []
+        if output_level == "full":
+            prefix = f"conn_{seg_name}_{band}_chpair_"
+            suffix = "_aec"
+            cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
+            parts.append(pd.DataFrame(aec_vals, columns=cols))
+
+        glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
+        parts.append(pd.DataFrame({glob_col: np.nanmean(aec_vals, axis=1)}))
+
+        if enable_graph_metrics and seg_name == "plateau":
+            if logger is not None:
+                logger.info(
+                    "Connectivity graph metrics (aec): seg=%s band=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
+                    seg_name,
+                    band,
+                    int(n_epochs),
+                    int(n_channels),
+                    str(conn_cfg.get("small_world_n_rand", 100)),
+                )
+            def _graph_row(ep_idx: int) -> Dict[str, float]:
+                adj = np.zeros((n_channels, n_channels), dtype=float)
+                adj[pair_i, pair_j] = aec_vals[ep_idx]
+                adj[pair_j, pair_i] = aec_vals[ep_idx]
+                return _graph_metrics(adj, "aec", band, conn_cfg)
+
+            graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
+                delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
+            )
+            parts.append(pd.DataFrame(graph_rows))
+
+        return pd.concat(parts, axis=1) if parts else pd.DataFrame()
+
+    tasks: List[Tuple[str, Tuple[Any, ...]]] = []
     for seg_name in segments_use:
         seg_mask = seg_mask_map.get(seg_name)
         seg_data = _slice_epochs(precomputed.data, seg_mask)
@@ -458,66 +626,12 @@ def extract_connectivity_from_precomputed(
                 continue
 
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
-
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet":
                 use_n_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, int(seg_data.shape[-1]))
 
             for method in phase_measures:
-                con = spectral_connectivity_time(
-                    seg_data,
-                    freqs=freqs,
-                    method=method,
-                    indices=indices,
-                    sfreq=sfreq,
-                    fmin=fmin,
-                    fmax=fmax,
-                    average=False,
-                    faverage=True,
-                    mode=conn_mode,
-                    n_cycles=use_n_cycles,
-                    decim=decim,
-                    n_jobs=n_jobs,
-                    verbose=False,
-                )
-
-                con_data = con.get_data()
-                con_data = np.asarray(con_data)
-                if con_data.ndim == 2:
-                    con_data = con_data[None, :, :]
-                if con_data.ndim == 3 and con_data.shape[-1] > 1:
-                    con_vals = np.nanmean(con_data, axis=-1)
-                elif con_data.ndim == 3:
-                    con_vals = con_data[:, :, 0]
-                else:
-                    continue
-                if con_vals.shape[0] != n_epochs:
-                    continue
-
-                cols = [
-                    NamingSchema.build(
-                        "conn",
-                        seg_name,
-                        band,
-                        "chpair",
-                        method,
-                        channel_pair=pair_name,
-                    )
-                    for pair_name in pair_names
-                ]
-
-                for ep_idx in range(n_epochs):
-                    if output_level == "full":
-                        records[ep_idx].update(dict(zip(cols, con_vals[ep_idx].tolist())))
-                    records[ep_idx][
-                        NamingSchema.build("conn", seg_name, band, "global", f"{method}_mean")
-                    ] = float(np.nanmean(con_vals[ep_idx]))
-
-                    if enable_graph_metrics and seg_name == "plateau":
-                        adj = np.zeros((n_channels, n_channels), dtype=float)
-                        adj[pair_i, pair_j] = con_vals[ep_idx]
-                        adj[pair_j, pair_i] = con_vals[ep_idx]
-                        records[ep_idx].update(_graph_metrics(adj, method, band, conn_cfg))
+                tasks.append(("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles)))
 
             if enable_aec and band in precomputed.band_data:
                 analytic_full = precomputed.band_data[band].analytic
@@ -526,77 +640,57 @@ def extract_connectivity_from_precomputed(
                     continue
                 if analytic_seg.shape[-1] < min_segment_samples:
                     continue
+                tasks.append(("aec", (seg_name, band, analytic_seg)))
 
-                ec = envelope_correlation(
-                    analytic_seg,
-                    orthogonalize="pairwise",
-                    log=False,
-                    absolute=True,
-                )
-                ec_data = np.asarray(ec.get_data())
-
-                if ec_data.ndim >= 1 and ec_data.shape[-1] == 1:
-                    ec_data = np.squeeze(ec_data, axis=-1)
-
-                expected_packed = int(n_channels * (n_channels + 1) // 2)
-
-                dense: Optional[np.ndarray] = None
-
-                if ec_data.ndim == 4 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
-                    dense = np.nanmean(ec_data, axis=-1)
-                elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_channels:
-                    dense = ec_data
-                elif ec_data.ndim == 3 and ec_data.shape[0] == n_channels and ec_data.shape[1] == n_channels and ec_data.shape[2] == n_epochs:
-                    dense = np.moveaxis(ec_data, -1, 0)
-                elif ec_data.ndim == 3 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
-                    packed = np.nanmean(ec_data, axis=-1)
-                    tril = np.tril_indices(n_channels, k=0)
-                    dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
-                    dense[:, tril[0], tril[1]] = packed
-                    dense[:, tril[1], tril[0]] = packed
-                elif ec_data.ndim == 2 and ec_data.shape[0] == n_epochs and ec_data.shape[1] == expected_packed:
-                    tril = np.tril_indices(n_channels, k=0)
-                    dense = np.zeros((n_epochs, n_channels, n_channels), dtype=float)
-                    dense[:, tril[0], tril[1]] = ec_data
-                    dense[:, tril[1], tril[0]] = ec_data
-                elif ec_data.ndim == 1 and ec_data.shape[0] == expected_packed:
-                    tril = np.tril_indices(n_channels, k=0)
-                    dense = np.zeros((1, n_channels, n_channels), dtype=float)
-                    dense[:, tril[0], tril[1]] = ec_data[None, :]
-                    dense[:, tril[1], tril[0]] = ec_data[None, :]
-                    dense = np.repeat(dense, n_epochs, axis=0)
-
-                if dense is None or dense.shape[0] != n_epochs:
-                    continue
-
-                aec_vals = dense[:, pair_i, pair_j]
-
-                cols = [
-                    NamingSchema.build(
-                        "conn",
-                        seg_name,
-                        band,
-                        "chpair",
-                        "aec",
-                        channel_pair=pair_name,
-                    )
-                    for pair_name in pair_names
-                ]
-                for ep_idx in range(n_epochs):
-                    if output_level == "full":
-                        records[ep_idx].update(dict(zip(cols, aec_vals[ep_idx].tolist())))
-                    records[ep_idx][
-                        NamingSchema.build("conn", seg_name, band, "global", "aec_mean")
-                    ] = float(np.nanmean(aec_vals[ep_idx]))
-
-                    if enable_graph_metrics and seg_name == "plateau":
-                        adj = np.zeros((n_channels, n_channels), dtype=float)
-                        adj[pair_i, pair_j] = aec_vals[ep_idx]
-                        adj[pair_j, pair_i] = aec_vals[ep_idx]
-                        records[ep_idx].update(_graph_metrics(adj, "aec", band, conn_cfg))
-
-    if not records or all(len(r) == 0 for r in records):
+    if not tasks:
         return pd.DataFrame(), []
 
-    df = pd.DataFrame(records)
+    def _run_task(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
+        kind, args = task
+        if kind == "phase":
+            return _phase_task(*args)
+        return _aec_task(*args)
+
+    if logger is not None:
+        logger.info("Running connectivity tasks: n_tasks=%d (threaded=%s)", int(len(tasks)), str(bool(use_task_parallel and len(tasks) > 1)))
+
+    task_times: Dict[str, float] = {"phase": 0.0, "aec": 0.0}
+    task_counts: Dict[str, int] = {"phase": 0, "aec": 0}
+
+    def _timed_run_task(task: Tuple[str, Tuple[Any, ...]]) -> pd.DataFrame:
+        kind, _ = task
+        t0 = time.perf_counter()
+        df_task = _run_task(task)
+        dt = time.perf_counter() - t0
+        if kind in task_times:
+            task_times[kind] += dt
+            task_counts[kind] += 1
+        return df_task
+
+    if use_task_parallel and len(tasks) > 1:
+        dfs = Parallel(n_jobs=n_jobs, backend="threading")(
+            delayed(_timed_run_task)(task) for task in tasks
+        )
+    else:
+        dfs = [_timed_run_task(task) for task in tasks]
+
+    dfs = [df for df in dfs if df is not None and not df.empty]
+    if not dfs:
+        return pd.DataFrame(), []
+
+    t_concat0 = time.perf_counter()
+    df = pd.concat(dfs, axis=1)
+    if logger is not None:
+        logger.info(
+            "Connectivity post-processing: task_time_phase=%.2fs (%d), task_time_aec=%.2fs (%d), concat=%.2fs, total=%.2fs, out_shape=(%d,%d)",
+            float(task_times["phase"]),
+            int(task_counts["phase"]),
+            float(task_times["aec"]),
+            int(task_counts["aec"]),
+            time.perf_counter() - t_concat0,
+            time.perf_counter() - t_total0,
+            int(df.shape[0]),
+            int(df.shape[1]),
+        )
+
     return df, list(df.columns)

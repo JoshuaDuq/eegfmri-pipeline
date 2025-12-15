@@ -6,6 +6,13 @@ import pandas as pd
 
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
+from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
+
+from eeg_pipeline.analysis.features.precomputed.asymmetry import extract_asymmetry_from_precomputed
+from eeg_pipeline.analysis.features.precomputed.spectral import (
+    extract_segment_power_from_precomputed,
+    extract_spectral_extras_from_precomputed,
+)
 
 def _prepare_tfr(tfr: Any, config: Any, logger: Any):
     tfr_obj = extract_tfr_object(tfr)
@@ -53,18 +60,8 @@ def extract_power_features(
 
     n_epochs = len(tfr_data)
     
-    # Helper to get mask for TFR times
     def _get_tfr_mask(segment_name):
-        w_meta = ctx.windows.metadata.get(segment_name)
-        if not w_meta:
-             return ctx.windows.get_mask(segment_name) # Fallback if no metadata
-        
-        # Check if resizing needed
-        if len(times) != len(ctx.windows.times):
-             t_start, t_end = w_meta.start, w_meta.end
-             return (times >= t_start) & (times < t_end)
-        else:
-             return ctx.windows.get_mask(segment_name)
+        return make_mask_for_times(ctx.windows, segment_name, times)
 
     # Calculate Baseline Power per band/channel first (for normalization)
     baseline_powers = {}
@@ -145,14 +142,3 @@ def extract_power_features(
         
     df = pd.DataFrame(output_data)
     return df, list(df.columns)
-
-
-# =============================================================================
-# Precomputed Data Extractors (Re-exports from extractors.py)
-# =============================================================================
-
-from eeg_pipeline.analysis.features.extractors import (
-    extract_spectral_extras_from_precomputed,
-    extract_asymmetry_from_precomputed,
-    extract_segment_power_from_precomputed,
-)

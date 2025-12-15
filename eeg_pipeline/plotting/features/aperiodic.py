@@ -16,13 +16,13 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 
-from eeg_pipeline.utils.io.paths import ensure_dir, deriv_stats_path
-from eeg_pipeline.utils.io.plotting import save_fig, log_if_present
-from eeg_pipeline.utils.io.logging import get_logger
-from eeg_pipeline.utils.io.columns import get_pain_column_from_config
+from eeg_pipeline.io.paths import ensure_dir, deriv_stats_path
+from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
+from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.io.columns import get_pain_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
-from .utils import get_condition_colors
+from .utils import get_condition_colors, get_fdr_alpha
 
 
 def _extract_aperiodic_data(
@@ -340,8 +340,7 @@ def plot_aperiodic_topomaps(
                     q_vals.append(np.nan)
             per_metric_qvals[metric] = np.array(q_vals, dtype=float)
 
-    from eeg_pipeline.utils.config.loader import get_config_value
-    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05)))
+    alpha = get_fdr_alpha(config)
     
     metrics = list(per_metric_common.keys())
     if not metrics:

@@ -14,7 +14,7 @@ from scipy.stats import ttest_rel, ttest_ind, t as t_dist
 
 from ..config import get_plot_config
 from .utils import log
-from eeg_pipeline.utils.io.plotting import get_viz_params
+from eeg_pipeline.plotting.io.figures import get_viz_params
 from ...utils.analysis.tfr import extract_trial_band_power
 from ...utils.analysis.stats import (
     cluster_test_epochs,

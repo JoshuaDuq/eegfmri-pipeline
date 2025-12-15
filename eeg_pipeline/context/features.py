@@ -81,15 +81,18 @@ class FeatureContext:
 
     def __post_init__(self):
         """Initialize windows if not provided."""
+        self._ensure_windows()
+
+    def _ensure_windows(self) -> None:
         if self._windows is None and self.epochs is not None:
-             # Lazy import
-             from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-             self._windows = TimeWindowSpec(
-                 times=self.epochs.times,
-                 config=self.config,
-                 sampling_rate=self.epochs.info["sfreq"],
-                 logger=self.logger
-             )
+            # Lazy import
+            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
+            self._windows = TimeWindowSpec(
+                times=self.epochs.times,
+                config=self.config,
+                sampling_rate=self.epochs.info["sfreq"],
+                logger=self.logger,
+            )
 
         fail_on_missing = bool(self.config.get("feature_engineering.validation.fail_on_missing_windows", False))
         if fail_on_missing and self._windows is not None:
@@ -107,26 +110,7 @@ class FeatureContext:
     @property
     def windows(self):
         """Access centralized time windows."""
-        if self._windows is None and self.epochs is not None:
-            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-            self._windows = TimeWindowSpec(
-                 times=self.epochs.times,
-                 config=self.config,
-                 sampling_rate=self.epochs.info["sfreq"],
-                 logger=self.logger
-            )
-            fail_on_missing = bool(self.config.get("feature_engineering.validation.fail_on_missing_windows", False))
-            if fail_on_missing:
-                baseline_meta = self._windows.metadata.get("baseline")
-                plateau_meta = self._windows.metadata.get("plateau")
-                baseline_ok = bool(baseline_meta is not None and getattr(baseline_meta, "valid", False))
-                plateau_ok = bool(plateau_meta is not None and getattr(plateau_meta, "valid", False))
-                if not baseline_ok or not plateau_ok:
-                    raise ValueError(
-                        "Missing required time windows for feature extraction: "
-                        f"baseline_ok={baseline_ok}, plateau_ok={plateau_ok}. "
-                        "Check time_frequency_analysis.baseline_window / plateau_window and epoch time range."
-                    )
+        self._ensure_windows()
         return self._windows
 
     def add_result(self, key: str, value: Any, cols: Optional[List[str]] = None) -> None:

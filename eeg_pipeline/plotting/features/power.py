@@ -17,8 +17,8 @@ import mne
 from mne.viz import plot_topomap
 
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
-from eeg_pipeline.utils.io.plotting import get_band_color, save_fig
-from eeg_pipeline.utils.io.columns import (
+from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
+from eeg_pipeline.io.columns import (
     find_pain_column_in_events,
     find_temperature_column_in_events,
 )
@@ -492,18 +492,24 @@ def plot_channel_power_heatmap(
     vmin = power_config.get("vmin")
     vmax = power_config.get("vmax")
     if vmin is None or vmax is None:
-        data_min = np.nanmin(heatmap_data)
-        data_max = np.nanmax(heatmap_data)
+        data_min = float(np.nanmin(heatmap_data))
+        data_max = float(np.nanmax(heatmap_data))
+        vmax_abs = max(abs(data_min), abs(data_max))
         if vmin is None:
-            vmin = data_min
+            vmin = -vmax_abs
         if vmax is None:
-            vmax = data_max
+            vmax = vmax_abs
     im = ax.imshow(heatmap_data, cmap='RdBu_r', aspect='auto', vmin=vmin, vmax=vmax)
     ax.set_xticks(range(len(channel_names)))
     ax.set_xticklabels(channel_names, rotation=45, ha='right', fontsize=plot_cfg.font.small)
     ax.set_yticks(range(len(valid_bands)))
     ax.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
-    ax.set_title('Mean Power per Channel and Band\nlog10(power/baseline)', fontsize=plot_cfg.font.figure_title)
+    n_trials = int(len(pow_df))
+    ax.set_title(
+        f"Mean Power per Channel and Band (n={n_trials} trials)\n"
+        "Baseline-normalized log10(power/baseline)",
+        fontsize=plot_cfg.font.figure_title,
+    )
     ax.set_xlabel('Channel', fontsize=plot_cfg.font.ylabel)
     ax.set_ylabel('Frequency Band', fontsize=plot_cfg.font.ylabel)
     plt.colorbar(im, ax=ax, label='log10(power/baseline)', shrink=0.8)
@@ -553,8 +559,8 @@ def plot_power_time_courses(
     tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
     plot_cfg = get_plot_config(config)
     
-    n_epochs = tfr_raw.data.shape[0]
-    n_channels = tfr_raw.data.shape[1]
+    n_epochs = int(tfr_raw.data.shape[0])
+    n_channels = int(tfr_raw.data.shape[1])
     
     fig, ax = plt.subplots(1, 1, figsize=(12, 5))
     
@@ -569,8 +575,16 @@ def plot_power_time_courses(
             logger.warning(f"No frequencies found for {band} band ({fmin}-{fmax} Hz)")
             continue
         
-        band_power_log = tfr_raw.data[:, :, freq_mask, :].mean(axis=(0, 1, 2))
-        ax.plot(times, band_power_log, linewidth=2, color=get_band_color(band, config), label=band.capitalize())
+        epoch_time_courses = tfr_raw.data[:, :, freq_mask, :].mean(axis=(1, 2))
+        mean_tc = np.nanmean(epoch_time_courses, axis=0)
+        if n_epochs >= 2:
+            sem_tc = np.nanstd(epoch_time_courses, axis=0, ddof=1) / np.sqrt(n_epochs)
+        else:
+            sem_tc = np.full_like(mean_tc, np.nan, dtype=float)
+
+        color = get_band_color(band, config)
+        ax.plot(times, mean_tc, linewidth=2, color=color, label=band.capitalize())
+        ax.fill_between(times, mean_tc - sem_tc, mean_tc + sem_tc, color=color, alpha=0.15, linewidth=0)
     
     b_start, b_end, _ = validate_baseline_indices(times, tfr_baseline)
     bs = max(float(times.min()), float(b_start))
@@ -587,7 +601,8 @@ def plot_power_time_courses(
     
     footer_text = (
         f"n={n_epochs} trials, {n_channels} channels | "
-        f"Baseline: [{b_start:.2f}, {b_end:.2f}]s (logratio)"
+        f"Baseline: [{b_start:.2f}, {b_end:.2f}]s | "
+        "Shading: ±SEM across trials"
     )
     fig.text(
         0.99, 0.01, footer_text,
@@ -1350,6 +1365,7 @@ def plot_power_variability_comprehensive(
     footer = f"n={len(pow_df)} trials | Shapiro-Wilk normality test α=0.05 | ✓=Normal, ✗=Non-normal"
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_fig(fig, save_dir / f"sub-{subject}_power_variability_comprehensive",
              formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
@@ -1375,7 +1391,7 @@ def plot_cross_frequency_power_correlation(
     if pow_df is None or pow_df.empty:
         return
     
-    from .utils import apply_fdr_correction, test_normality
+    from .utils import apply_fdr_correction, get_fdr_alpha, test_normality
     from scipy.stats import spearmanr
     
     plot_cfg = get_plot_config(config)
@@ -1387,7 +1403,7 @@ def plot_cross_frequency_power_correlation(
                 if c.startswith("power_") and f"_{band_str}_" in c and "_ch_" in c]
         if cols:
             vals = pow_df[cols].mean(axis=1).dropna().values
-            if len(vals) > 5:
+            if len(vals) >= 5:
                 band_power[band_str] = vals
     
     valid_bands = list(band_power.keys())
@@ -1415,8 +1431,14 @@ def plot_cross_frequency_power_correlation(
     upper_tri_idx = np.triu_indices(n_bands, k=1)
     pvals_upper = pval_matrix[upper_tri_idx]
     
+    alpha_fdr = get_fdr_alpha(config)
+
     if len(pvals_upper) > 0:
-        rejected, qvals, _ = apply_fdr_correction(list(pvals_upper), config=config)
+        rejected, qvals, alpha_fdr_arr = apply_fdr_correction(list(pvals_upper), config=config)
+        try:
+            alpha_fdr = float(np.asarray(alpha_fdr_arr).ravel()[0])
+        except Exception:
+            alpha_fdr = get_fdr_alpha(config)
         qval_matrix = np.zeros((n_bands, n_bands))
         qval_matrix[upper_tri_idx] = qvals
         qval_matrix = qval_matrix + qval_matrix.T
@@ -1429,7 +1451,10 @@ def plot_cross_frequency_power_correlation(
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     
     ax1 = axes[0]
-    im1 = ax1.imshow(corr_matrix, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
+    sig_mask = np.isfinite(qval_matrix) & (qval_matrix < alpha_fdr)
+    sig_mask |= np.eye(n_bands, dtype=bool)
+    corr_sig_only = np.where(sig_mask, corr_matrix, np.nan)
+    im1 = ax1.imshow(corr_sig_only, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
     ax1.set_xticks(range(n_bands))
     ax1.set_yticks(range(n_bands))
     ax1.set_xticklabels([b.capitalize() for b in valid_bands], rotation=45, ha="right", 
@@ -1794,7 +1819,7 @@ def plot_feature_redundancy_matrix(
     if features_df is None or features_df.empty:
         return
     
-    from .utils import apply_fdr_correction
+    from .utils import apply_fdr_correction, get_fdr_alpha
     from scipy.stats import spearmanr
     
     plot_cfg = get_plot_config(config)
@@ -1811,12 +1836,16 @@ def plot_feature_redundancy_matrix(
     
     corr_matrix = np.zeros((n_features, n_features))
     pval_matrix = np.ones((n_features, n_features))
+    qval_matrix = np.full((n_features, n_features), np.nan, dtype=float)
     
+    pvals_upper = []
+    upper_pairs = []
     for i in range(n_features):
         for j in range(i, n_features):
             if i == j:
                 corr_matrix[i, j] = 1.0
                 pval_matrix[i, j] = 0.0
+                qval_matrix[i, j] = 0.0
             else:
                 vals_i = features_df[numeric_cols[i]].dropna()
                 vals_j = features_df[numeric_cols[j]].dropna()
@@ -1827,26 +1856,43 @@ def plot_feature_redundancy_matrix(
                     corr_matrix[j, i] = r
                     pval_matrix[i, j] = p
                     pval_matrix[j, i] = p
+                    if np.isfinite(p):
+                        pvals_upper.append(float(p))
+                        upper_pairs.append((i, j))
+
+    alpha_fdr = get_fdr_alpha(config)
+
+    if pvals_upper:
+        rejected, qvals, alpha_fdr_arr = apply_fdr_correction(pvals_upper, config=config)
+        try:
+            alpha_fdr = float(np.asarray(alpha_fdr_arr).ravel()[0])
+        except Exception:
+            alpha_fdr = get_fdr_alpha(config)
+        for (i, j), q in zip(upper_pairs, qvals):
+            qval_matrix[i, j] = float(q)
+            qval_matrix[j, i] = float(q)
     
     high_corr_pairs = []
     for i in range(n_features):
         for j in range(i + 1, n_features):
-            if abs(corr_matrix[i, j]) > 0.7:
-                high_corr_pairs.append((numeric_cols[i], numeric_cols[j], corr_matrix[i, j]))
+            q = qval_matrix[i, j]
+            if abs(corr_matrix[i, j]) > 0.7 and np.isfinite(q) and q < alpha_fdr:
+                high_corr_pairs.append((numeric_cols[i], numeric_cols[j], corr_matrix[i, j], q))
     
     fig, axes = plt.subplots(1, 2, figsize=(16, 8))
     
     ax1 = axes[0]
-    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
-    masked_corr = np.ma.masked_where(~mask, corr_matrix)
-    
-    im1 = ax1.imshow(corr_matrix, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
+    sig_mask = np.isfinite(qval_matrix) & (qval_matrix < alpha_fdr)
+    sig_mask |= np.eye(n_features, dtype=bool)
+    corr_sig_only = np.where(sig_mask, corr_matrix, np.nan)
+    im1 = ax1.imshow(corr_sig_only, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
     ax1.set_xticks(range(n_features))
     ax1.set_yticks(range(n_features))
     short_labels = [c[:15] + "..." if len(c) > 15 else c for c in numeric_cols]
     ax1.set_xticklabels(short_labels, rotation=90, fontsize=6)
     ax1.set_yticklabels(short_labels, fontsize=6)
-    ax1.set_title("Feature Correlation Matrix", fontweight="bold")
+    n_tests = int(len(pvals_upper))
+    ax1.set_title(f"Feature Correlation Matrix (FDR α={alpha_fdr:.2g}, n_tests={n_tests})", fontweight="bold")
     plt.colorbar(im1, ax=ax1, shrink=0.8, label="Spearman ρ")
     
     ax2 = axes[1]
@@ -1854,7 +1900,7 @@ def plot_feature_redundancy_matrix(
         high_corr_pairs.sort(key=lambda x: abs(x[2]), reverse=True)
         top_pairs = high_corr_pairs[:20]
         
-        pair_labels = [f"{p[0][:12]}... vs {p[1][:12]}..." for p in top_pairs]
+        pair_labels = [f"{p[0][:12]}... vs {p[1][:12]}... (q={p[3]:.3f})" for p in top_pairs]
         pair_values = [p[2] for p in top_pairs]
         colors = ["#EF4444" if v > 0 else "#3B82F6" for v in pair_values]
         
@@ -1863,21 +1909,24 @@ def plot_feature_redundancy_matrix(
         ax2.set_yticks(y_pos)
         ax2.set_yticklabels(pair_labels, fontsize=7)
         ax2.set_xlabel("Spearman Correlation")
-        ax2.set_title(f"Highly Correlated Pairs (|ρ|>0.7): {len(high_corr_pairs)} found", fontweight="bold")
+        ax2.set_title(f"Highly Correlated Pairs (|ρ|>0.7, FDR): {len(high_corr_pairs)} found", fontweight="bold")
         ax2.axvline(0, color="black", linestyle="-", linewidth=0.5)
         ax2.axvline(0.7, color="gray", linestyle="--", alpha=0.5)
         ax2.axvline(-0.7, color="gray", linestyle="--", alpha=0.5)
         ax2.set_xlim(-1, 1)
         ax2.invert_yaxis()
     else:
-        ax2.text(0.5, 0.5, "No highly correlated pairs (|ρ|>0.7)", 
+        ax2.text(0.5, 0.5, "No highly correlated pairs (|ρ|>0.7, FDR)", 
                 ha="center", va="center", fontsize=12)
         ax2.set_title("Highly Correlated Pairs", fontweight="bold")
     
     fig.suptitle(f"Feature Redundancy Analysis (sub-{subject})", 
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
     
-    footer = f"n={len(features_df)} trials | {n_features} features | {len(high_corr_pairs)} redundant pairs (|ρ|>0.7)"
+    footer = (
+        f"n={len(features_df)} trials | {n_features} features | "
+        f"{len(high_corr_pairs)} redundant pairs (|ρ|>0.7, FDR α={alpha_fdr:.2g})"
+    )
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])

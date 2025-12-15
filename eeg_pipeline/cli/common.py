@@ -11,6 +11,8 @@ import argparse
 from pathlib import Path
 from typing import Any, List, Optional
 
+from eeg_pipeline.io.paths import resolve_deriv_root
+
 
 DEFAULT_TASK_KEY = "project.task"
 MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
@@ -65,4 +67,4 @@ def validate_min_subjects(
 
 
 def get_deriv_root(config: Any) -> Path:
-    return Path(config.deriv_root)
+    return resolve_deriv_root(config=config)

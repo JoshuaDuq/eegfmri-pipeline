@@ -19,14 +19,6 @@ from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 
-
-def _get_segment_masks(precomputed: "PrecomputedData") -> Dict[str, np.ndarray]:
-    """Derive ramp/plateau/offset masks based on times and config.
-    
-    Wrapper around the canonical get_segment_masks in utils/analysis/windowing.py.
-    """
-    return get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
-
 def _process_single_epoch_dynamics(
     ep_idx: int,
     gfp: np.ndarray,
@@ -188,7 +180,7 @@ def extract_dynamics_from_precomputed(precomputed: "PrecomputedData", n_jobs: in
         active_mask = slice(None)
 
     # Pre-calculate segment masks for burst analysis (e.g. gamma ramp)
-    seg_masks = _get_segment_masks(precomputed)
+    seg_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     n_epochs = precomputed.data.shape[0]
     
     if n_jobs != 1:

@@ -8,7 +8,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.io.columns import find_column_in_events, get_pain_column_from_config
+from eeg_pipeline.io.columns import find_column_in_events, get_pain_column_from_config
 
 
 def extract_pain_mask(events_df: pd.DataFrame, config: Any = None) -> Optional[np.ndarray]:

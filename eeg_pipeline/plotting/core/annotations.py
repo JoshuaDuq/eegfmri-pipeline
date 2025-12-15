@@ -340,7 +340,7 @@ def get_sig_marker_text(config=None) -> str:
     Returns:
         Significance marker text string, or empty string if diff_annotation_enabled is False
     """
-    from eeg_pipeline.utils.io.plotting import get_viz_params
+    from eeg_pipeline.plotting.io.figures import get_viz_params
     
     viz_params = get_viz_params(config)
     if not viz_params["diff_annotation_enabled"]:

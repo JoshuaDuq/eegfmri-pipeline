@@ -15,12 +15,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from eeg_pipeline.plotting.config import get_plot_config, PlotConfig
-from eeg_pipeline.utils.io.plotting import (
+from eeg_pipeline.plotting.io.figures import (
     save_fig,
     get_behavior_footer as _get_behavior_footer,
     get_default_config as _get_default_config,
 )
-from eeg_pipeline.utils.io.logging import get_default_logger as _get_default_logger
+from eeg_pipeline.io.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.utils.analysis.stats.moderation import ModerationResult
 
 

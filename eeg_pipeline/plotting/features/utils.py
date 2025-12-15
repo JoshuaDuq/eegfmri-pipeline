@@ -16,11 +16,17 @@ from typing import Tuple, List, Dict, Any, Optional
 import numpy as np
 import pandas as pd
 from scipy import stats
-from statsmodels.stats.multitest import multipletests
 
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.io.plotting import get_band_color
+from eeg_pipeline.plotting.io.figures import get_band_color
+from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.analysis.stats.effect_size import cohens_d as _cohens_d
+from eeg_pipeline.utils.analysis.stats.bootstrap import (
+    bootstrap_mean_ci as _bootstrap_mean_ci,
+    bootstrap_mean_diff_ci as _bootstrap_mean_diff_ci,
+)
+from eeg_pipeline.utils.analysis.stats.validation import check_normality_shapiro
 
 
 ###################################################################
@@ -77,6 +83,33 @@ def get_condition_colors(config: Any = None) -> Dict[str, str]:
     }
 
 
+def get_fdr_alpha(config: Any = None, default: float = 0.05) -> float:
+    """Return FDR alpha threshold from config."""
+    return float(
+        get_config_value(
+            config,
+            "behavior_analysis.statistics.fdr_alpha",
+            get_config_value(config, "statistics.fdr_alpha", default),
+        )
+    )
+
+
+def get_numeric_feature_columns(
+    df: pd.DataFrame,
+    *,
+    exclude: Optional[List[str]] = None,
+) -> List[str]:
+    """Return numeric feature columns excluding common metadata columns."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+
+    exclude_set = set(exclude or [])
+    exclude_set |= {"epoch", "trial", "subject", "index", "condition"}
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    return [c for c in numeric_cols if c not in exclude_set]
+
+
 # Backward-compatibility constants (prefer get_* accessors above)
 
 
@@ -110,11 +143,10 @@ def apply_fdr_correction(
     if not pvalues:
         return np.array([]), np.array([]), alpha
     
-    pvalues_arr = np.asarray(pvalues)
-    rejected, qvals, alphac_sidak, alphac_bonf = multipletests(
-        pvalues_arr, alpha=alpha, method=method
-    )
-    return rejected, qvals, alphac_sidak
+    pvalues_arr = np.asarray(pvalues, dtype=float)
+    qvals = fdr_bh(pvalues_arr, alpha=alpha, config=config)
+    rejected = np.isfinite(qvals) & (qvals < float(alpha))
+    return rejected, qvals, np.asarray(alpha, dtype=float)
 
 
 ###################################################################
@@ -133,19 +165,15 @@ def compute_cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
     Returns:
         Cohen's d effect size (positive = group2 > group1)
     """
-    n1, n2 = len(group1), len(group2)
-    if n1 < 2 or n2 < 2:
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    if g1.size < 2 or g2.size < 2:
         return 0.0
-    
-    var1 = np.var(group1, ddof=1)
-    var2 = np.var(group2, ddof=1)
-    
-    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
-    
-    if pooled_std < 1e-10:
-        return 0.0
-    
-    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+    d = _cohens_d(g2, g1, pooled=True)
+    return float(d) if np.isfinite(d) else 0.0
 
 
 def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
@@ -166,7 +194,6 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
     
     if std_diff < 1e-10:
         return 0.0
-    
     return np.mean(diff) / std_diff
 
 
@@ -296,56 +323,6 @@ def safe_wilcoxon(
 
 
 ###################################################################
-# CONFIG ACCESSORS
-###################################################################
-
-def get_font_sizes(config: Any = None) -> Dict[str, int]:
-    """Get font sizes from config as a dictionary.
-    
-    This provides a consistent way to access font sizes without
-    importing get_plot_config directly everywhere.
-    
-    Usage:
-        fonts = get_font_sizes(config)
-        ax.set_title("Title", fontsize=fonts['title'])
-        ax.set_xlabel("X", fontsize=fonts['label'])
-    
-    Returns:
-        Dict with keys: small, medium, large, title, annotation, label, ylabel, suptitle, figure_title
-    """
-    from eeg_pipeline.plotting.config import get_plot_config
-    
-    plot_cfg = get_plot_config(config)
-    return {
-        'small': plot_cfg.font.small,
-        'medium': plot_cfg.font.medium,
-        'large': plot_cfg.font.large,
-        'title': plot_cfg.font.title,
-        'annotation': plot_cfg.font.annotation,
-        'label': plot_cfg.font.label,
-        'ylabel': plot_cfg.font.ylabel,
-        'suptitle': plot_cfg.font.suptitle,
-        'figure_title': plot_cfg.font.figure_title,
-    }
-
-
-def get_figure_size(size_name: str = "standard", config: Any = None) -> Tuple[float, float]:
-    """Get figure size from config.
-    
-    Args:
-        size_name: One of "small", "standard", "wide", "square", etc.
-        config: Config object
-    
-    Returns:
-        Tuple (width, height)
-    """
-    from eeg_pipeline.plotting.config import get_plot_config
-    
-    plot_cfg = get_plot_config(config)
-    return plot_cfg.get_figure_size(size_name)
-
-
-###################################################################
 # BOOTSTRAP CONFIDENCE INTERVALS FOR MEANS
 ###################################################################
 
@@ -368,26 +345,7 @@ def bootstrap_mean_ci(
     """
     if rng is None:
         rng = np.random.default_rng()
-    
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
-    
-    if len(data) < 3:
-        return np.nan, np.nan, np.nan
-    
-    observed_mean = np.mean(data)
-    n = len(data)
-    
-    boot_means = np.empty(n_boot)
-    for i in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        boot_means[i] = np.mean(data[idx])
-    
-    alpha = 1 - ci_level
-    ci_low = np.percentile(boot_means, 100 * alpha / 2)
-    ci_high = np.percentile(boot_means, 100 * (1 - alpha / 2))
-    
-    return float(observed_mean), float(ci_low), float(ci_high)
+    return _bootstrap_mean_ci(data, n_boot=n_boot, ci_level=ci_level, rng=rng)
 
 
 def bootstrap_mean_diff_ci(
@@ -411,29 +369,7 @@ def bootstrap_mean_diff_ci(
     """
     if rng is None:
         rng = np.random.default_rng()
-    
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
-    
-    if len(g1) < 3 or len(g2) < 3:
-        return np.nan, np.nan, np.nan
-    
-    observed_diff = np.mean(g2) - np.mean(g1)
-    n1, n2 = len(g1), len(g2)
-    
-    boot_diffs = np.empty(n_boot)
-    for i in range(n_boot):
-        idx1 = rng.integers(0, n1, size=n1)
-        idx2 = rng.integers(0, n2, size=n2)
-        boot_diffs[i] = np.mean(g2[idx2]) - np.mean(g1[idx1])
-    
-    alpha = 1 - ci_level
-    ci_low = np.percentile(boot_diffs, 100 * alpha / 2)
-    ci_high = np.percentile(boot_diffs, 100 * (1 - alpha / 2))
-    
-    return float(observed_diff), float(ci_low), float(ci_high)
+    return _bootstrap_mean_diff_ci(group1, group2, n_boot=n_boot, ci_level=ci_level, rng=rng)
 
 
 ###################################################################
@@ -469,12 +405,16 @@ def test_normality(
         data = rng.choice(data, size=max_n, replace=False)
     
     try:
-        stat, p = stats.shapiro(data)
+        res = check_normality_shapiro(data, alpha=alpha)
     except Exception:
         return True, np.nan, "Test failed"
-    
+
+    if not np.isfinite(res.p_value):
+        return True, np.nan, "Test failed"
+
+    p = float(res.p_value)
     is_normal = p > alpha
-    
+
     if p < 0.001:
         interpretation = "Strongly non-normal (p<.001)"
     elif p < 0.01:
@@ -485,8 +425,8 @@ def test_normality(
         interpretation = "Approximately normal (p>.05)"
     else:
         interpretation = "Normal (p>.10)"
-    
-    return is_normal, float(p), interpretation
+
+    return is_normal, p, interpretation
 
 
 ###################################################################
@@ -561,7 +501,7 @@ def compute_condition_stats(
     result["cohens_d"] = compute_cohens_d(g1, g2)
     result["d_interpretation"] = interpret_cohens_d(result["cohens_d"])
     
-    diff, ci_lo, ci_hi = bootstrap_mean_diff_ci(g1, g2, n_boot=n_boot)
+    diff, ci_lo, ci_hi = _bootstrap_mean_diff_ci(g1, g2, n_boot=n_boot, config=config)
     result["mean_diff"] = diff
     result["ci_low"] = ci_lo
     result["ci_high"] = ci_hi
@@ -868,58 +808,3 @@ def add_normality_annotation(
     ax.text(x, y, text, transform=ax.transAxes, fontsize=fontsize,
             verticalalignment=va, horizontalalignment=ha, color=color,
             bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
-
-
-###################################################################
-# PARALLEL BOOTSTRAP (PERFORMANCE)
-###################################################################
-
-def compute_bootstrap_ci_parallel(
-    data1: np.ndarray,
-    data2: np.ndarray,
-    n_boot: int = 1000,
-    ci: float = 0.95,
-    n_jobs: int = -1,
-) -> Tuple[float, float]:
-    """Compute bootstrap CI for mean difference using parallel processing.
-    
-    Uses joblib for parallel bootstrap iterations.
-    
-    Args:
-        data1: First group values
-        data2: Second group values
-        n_boot: Number of bootstrap iterations
-        ci: Confidence interval level
-        n_jobs: Number of parallel jobs (-1 = all cores)
-    
-    Returns:
-        Tuple of (ci_low, ci_high)
-    """
-    try:
-        from joblib import Parallel, delayed
-    except ImportError:
-        return compute_bootstrap_ci(data1, data2, n_boot=n_boot, ci=ci)
-    
-    data1 = np.asarray(data1).ravel()
-    data2 = np.asarray(data2).ravel()
-    data1 = data1[np.isfinite(data1)]
-    data2 = data2[np.isfinite(data2)]
-    
-    if len(data1) < 2 or len(data2) < 2:
-        return (np.nan, np.nan)
-    
-    def _single_bootstrap(seed):
-        rng = np.random.RandomState(seed)
-        boot1 = rng.choice(data1, size=len(data1), replace=True)
-        boot2 = rng.choice(data2, size=len(data2), replace=True)
-        return np.mean(boot2) - np.mean(boot1)
-    
-    diffs = Parallel(n_jobs=n_jobs)(
-        delayed(_single_bootstrap)(i) for i in range(n_boot)
-    )
-    
-    alpha = 1 - ci
-    ci_low = np.percentile(diffs, 100 * alpha / 2)
-    ci_high = np.percentile(diffs, 100 * (1 - alpha / 2))
-    
-    return (float(ci_low), float(ci_high))

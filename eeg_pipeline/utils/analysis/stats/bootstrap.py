@@ -129,6 +129,78 @@ def bootstrap_corr_ci(
     return float(lo), float(hi)
 
 
+def bootstrap_mean_ci(
+    data: np.ndarray,
+    n_boot: Optional[int] = None,
+    ci_level: Optional[float] = None,
+    rng: Optional[np.random.Generator] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float, float]:
+    """Bootstrap percentile CI for the mean.
+
+    Returns (mean, ci_low, ci_high).
+    """
+    if n_boot is None:
+        n_boot = get_n_bootstrap(config)
+    if ci_level is None:
+        ci_level = get_ci_level(config)
+    if rng is None:
+        rng = np.random.default_rng()
+
+    x = np.asarray(data).ravel()
+    x = x[np.isfinite(x)]
+    if x.size < 3:
+        return np.nan, np.nan, np.nan
+
+    n = x.size
+    boot_means = np.empty(int(n_boot), dtype=float)
+    for i in range(int(n_boot)):
+        idx = rng.integers(0, n, size=n)
+        boot_means[i] = float(np.mean(x[idx]))
+
+    alpha = 1 - float(ci_level)
+    lo = float(np.percentile(boot_means, 100 * alpha / 2))
+    hi = float(np.percentile(boot_means, 100 * (1 - alpha / 2)))
+    return float(np.mean(x)), lo, hi
+
+
+def bootstrap_mean_diff_ci(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    n_boot: Optional[int] = None,
+    ci_level: Optional[float] = None,
+    rng: Optional[np.random.Generator] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float, float]:
+    """Bootstrap percentile CI for mean difference (group2 - group1)."""
+    if n_boot is None:
+        n_boot = get_n_bootstrap(config)
+    if ci_level is None:
+        ci_level = get_ci_level(config)
+    if rng is None:
+        rng = np.random.default_rng()
+
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    if g1.size < 3 or g2.size < 3:
+        return np.nan, np.nan, np.nan
+
+    n1 = g1.size
+    n2 = g2.size
+    boot_diffs = np.empty(int(n_boot), dtype=float)
+    for i in range(int(n_boot)):
+        idx1 = rng.integers(0, n1, size=n1)
+        idx2 = rng.integers(0, n2, size=n2)
+        boot_diffs[i] = float(np.mean(g2[idx2]) - np.mean(g1[idx1]))
+
+    alpha = 1 - float(ci_level)
+    lo = float(np.percentile(boot_diffs, 100 * alpha / 2))
+    hi = float(np.percentile(boot_diffs, 100 * (1 - alpha / 2)))
+    return float(np.mean(g2) - np.mean(g1)), lo, hi
+
+
 def bootstrap_ci_bca(
     x: np.ndarray,
     y: np.ndarray,

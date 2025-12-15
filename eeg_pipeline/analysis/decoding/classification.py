@@ -614,7 +614,7 @@ def save_classification_results(
     prefix: str = "classification",
 ) -> Dict[str, Path]:
     """Save classification results to files."""
-    from eeg_pipeline.utils.io.tsv import write_tsv
+    from eeg_pipeline.io.tsv import write_tsv
     
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)

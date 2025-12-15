@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.io.plotting import save_fig
-from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.io.paths import ensure_dir
 
 if TYPE_CHECKING:
     import mne

@@ -19,7 +19,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mne
 
-from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.io.paths import ensure_dir
 from ...utils.analysis.tfr import get_bands_for_tfr
 from ..config import get_plot_config
 

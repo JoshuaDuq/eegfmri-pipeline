@@ -292,7 +292,8 @@ class TimeWindowSpec:
                     ramp_end = float(ramp_end)
                 except Exception:
                     ramp_end = None
-            self._add_window("ramp", 0.0, ramp_end if ramp_end is not None else plateau_start)
+            ramp_start = float(baseline_def[1])
+            self._add_window("ramp", ramp_start, ramp_end if ramp_end is not None else plateau_start)
              
         self._add_window("plateau", plateau_start, plateau_end)
         
@@ -506,8 +507,6 @@ def get_pain_window(constants=None, config: Optional[Any] = None) -> Tuple[float
 
 WINDOW_PAIN = get_pain_window
 
-
-###################################################################
 # Segment Masks for Feature Extraction
 ###################################################################
 
@@ -556,3 +555,30 @@ def get_segment_masks(
         "baseline": baseline_mask,
         "offset": offset_mask,
     }
+
+
+def make_mask_for_times(spec: "TimeWindowSpec", window_name: str, times: np.ndarray) -> np.ndarray:
+    """Get a window mask aligned to an arbitrary time vector.
+
+    Use this when downstream computations have a different time axis than the
+    one used to build `spec` (e.g., decimated TFR time points).
+    """
+    if spec is None:
+        raise ValueError("spec is required")
+    if times is None:
+        raise ValueError("times is required")
+
+    spec_times = getattr(spec, "times", None)
+    if spec_times is not None and len(times) == len(spec_times):
+        return spec.get_mask(window_name)
+
+    meta = getattr(spec, "metadata", {}).get(window_name)
+    if meta is None:
+        return np.zeros_like(times, dtype=bool)
+
+    start = float(getattr(meta, "start", np.nan))
+    end = float(getattr(meta, "end", np.nan))
+    if not np.isfinite(start) or not np.isfinite(end):
+        return np.zeros_like(times, dtype=bool)
+
+    return (times >= start) & (times < end)

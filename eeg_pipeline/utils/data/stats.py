@@ -14,8 +14,8 @@ import pandas as pd
 import numpy as np
 
 from ..config.loader import load_settings, ConfigDict
-from ..io.tsv import read_tsv
-from ..io.paths import deriv_stats_path
+from eeg_pipeline.io.tsv import read_tsv
+from eeg_pipeline.io.paths import deriv_stats_path
 from .covariates import _build_covariate_matrices
 
 
@@ -49,20 +49,35 @@ def load_precomputed_correlations(
         logger = logging.getLogger(__name__)
     
     target_suffix = "rating" if "rating" in target.lower() else "temperature"
+    target_suffix_alt = "temp" if target_suffix == "temperature" else None
     
     file_patterns = {
         "power": [
             f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
             f"corr_stats_power_combined_vs_{target_suffix}.tsv",
+            f"corr_stats_power_vs_{target_suffix}.tsv",
+            f"corr_stats_power_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
         ],
         "power_roi": [
             f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
             f"corr_stats_power_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
         ],
-        "aperiodic": [f"corr_stats_aperiodic_vs_{target_suffix}.tsv"],
-        "connectivity": [f"corr_stats_connectivity_vs_{target_suffix}.tsv"],
-        "itpc": [f"corr_stats_itpc_vs_{target_suffix}.tsv"],
-        "dynamics": [f"corr_stats_dynamics_vs_{target_suffix}.tsv"],
+        "aperiodic": [
+            f"corr_stats_aperiodic_vs_{target_suffix}.tsv",
+            f"corr_stats_aperiodic_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "connectivity": [
+            f"corr_stats_connectivity_vs_{target_suffix}.tsv",
+            f"corr_stats_connectivity_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "itpc": [
+            f"corr_stats_itpc_vs_{target_suffix}.tsv",
+            f"corr_stats_itpc_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "dynamics": [
+            f"corr_stats_dynamics_vs_{target_suffix}.tsv",
+            f"corr_stats_dynamics_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
     }
     
     candidates = file_patterns.get(feature_type)
@@ -70,7 +85,23 @@ def load_precomputed_correlations(
         logger.warning(f"Unknown feature type for stats loading: {feature_type}")
         return None
 
+    candidates = [c for c in candidates if c]
+
     for fname in candidates:
+        fpath = stats_dir / fname
+        if not fpath.exists():
+            continue
+        df = read_tsv(fpath)
+        if df is not None and not df.empty:
+            return df
+
+    # Fallback: unified correlator naming convention corr_stats_<feature_type>_vs_<target>
+    # This keeps plotting working as analysis outputs evolve.
+    unified_candidates = [
+        f"corr_stats_{feature_type}_vs_{target_suffix}.tsv",
+        f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+    ]
+    for fname in [c for c in unified_candidates if c]:
         fpath = stats_dir / fname
         if not fpath.exists():
             continue
@@ -96,27 +127,41 @@ def get_precomputed_stats_for_roi_band(
         return {}
 
     # Filter by ROI/channel and band
-    # Column names vary: 'roi', 'channel', 'feature'
+    # Column names vary across analysis outputs.
     roi_col = next((c for c in ["roi", "channel", "feature"] if c in stats_df.columns), None)
     if not roi_col:
         return {}
+
+    band_col = "band" if "band" in stats_df.columns else None
+    if band_col is None:
+        # Some stats tables may encode band in other columns or not at all.
+        # For ROI scatter plots, band is required.
+        return {}
         
     subset = stats_df[
-        (stats_df[roi_col].astype(str) == roi) & 
-        (stats_df["band"].astype(str) == band)
+        (stats_df[roi_col].astype(str) == roi)
+        & (stats_df[band_col].astype(str) == band)
     ]
     
     if len(subset) == 0:
         return {}
         
     row = subset.iloc[0]
+
+    # Accept both legacy and newer global FDR column names.
+    fdr_reject = bool(
+        row.get("fdr_reject_global", False)
+        or row.get("fdr_reject", False)
+    )
+    q_val = row.get("q_fdr_global", row.get("q_global", row.get("q", np.nan)))
     return {
         "r": row.get("r", np.nan),
         "p": row.get("p", np.nan),
         "n": row.get("n", 0),
         "ci_low": row.get("ci_low", np.nan),
         "ci_high": row.get("ci_high", np.nan),
-        "fdr_reject": bool(row.get("fdr_reject_global", False)),
+        "q": q_val,
+        "fdr_reject": fdr_reject,
     }
 
 

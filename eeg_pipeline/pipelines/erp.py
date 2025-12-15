@@ -27,6 +27,32 @@ import pandas as pd
 from eeg_pipeline.pipelines.base import PipelineBase
 
 
+def extract_erp_stats(
+    subject: str,
+    task: str,
+    *,
+    config: Optional[Any] = None,
+    crop_tmin: Optional[float] = None,
+    crop_tmax: Optional[float] = None,
+) -> None:
+    pipeline = ErpPipeline(config=config)
+    pipeline.set_crop_params(crop_tmin=crop_tmin, crop_tmax=crop_tmax)
+    pipeline.process_subject(subject, task=task)
+
+
+def extract_erp_stats_for_subjects(
+    subjects: List[str],
+    *,
+    task: Optional[str] = None,
+    config: Optional[Any] = None,
+    crop_tmin: Optional[float] = None,
+    crop_tmax: Optional[float] = None,
+) -> None:
+    pipeline = ErpPipeline(config=config)
+    pipeline.set_crop_params(crop_tmin=crop_tmin, crop_tmax=crop_tmax)
+    pipeline.run_batch(subjects, task=task)
+
+
 ###################################################################
 # Configuration
 ###################################################################
@@ -75,6 +101,7 @@ def load_and_prepare_epochs(
     crop_tmax: Optional[float],
     include_tmax_in_crop: bool,
     logger: logging.Logger,
+    deriv_root: Optional[Path] = None,
 ):
     """Load epochs, attach metadata, and crop if requested."""
     from eeg_pipeline.utils.data.loading import load_epochs_for_analysis, crop_epochs
@@ -83,7 +110,7 @@ def load_and_prepare_epochs(
         subject, task,
         align="strict",
         preload=False,
-        deriv_root=config.deriv_root,
+        deriv_root=Path(config.deriv_root) if deriv_root is None else Path(deriv_root),
         bids_root=config.bids_root,
         config=config,
         logger=logger,
@@ -129,9 +156,9 @@ class ErpPipeline(PipelineBase):
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         """Process a single subject for ERP statistics extraction."""
-        from eeg_pipeline.utils.io.paths import deriv_stats_path, ensure_dir
-        from eeg_pipeline.utils.io.tsv import write_tsv
-        from eeg_pipeline.utils.io.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
+        from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
+        from eeg_pipeline.io.tsv import write_tsv
+        from eeg_pipeline.io.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
         from eeg_pipeline.utils.analysis.stats import count_trials_by_condition
         
         task = task or self.config.get("project.task")
@@ -192,4 +219,6 @@ __all__ = [
     "ErpPipeline",
     "get_erp_config",
     "load_and_prepare_epochs",
+    "extract_erp_stats",
+    "extract_erp_stats_for_subjects",
 ]

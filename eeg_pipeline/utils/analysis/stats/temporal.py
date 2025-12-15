@@ -34,9 +34,9 @@ from eeg_pipeline.utils.data.loading import (
     extract_pain_vector_array,
     load_epochs_for_analysis,
 )
-from eeg_pipeline.utils.io.columns import get_pain_column_from_config
-from eeg_pipeline.utils.io.paths import deriv_stats_path, ensure_dir
-from eeg_pipeline.utils.io.tsv import write_tsv
+from eeg_pipeline.io.columns import get_pain_column_from_config
+from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
+from eeg_pipeline.io.tsv import write_tsv
 
 if TYPE_CHECKING:
     from eeg_pipeline.context.behavior import BehaviorContext

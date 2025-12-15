@@ -177,7 +177,7 @@ def precompute_data(
         if not band_defs and logger:
             logger.warning("No valid bands found in config; skipping band precomputation.")
         else:
-            n_jobs_bands = int(config.get("feature_engineering.parallel.n_jobs_bands", 1))
+            n_jobs_bands = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
 
             results = []
             # Handle parallel execution (n_jobs != 1, including -1 for all CPUs)

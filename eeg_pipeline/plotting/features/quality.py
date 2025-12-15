@@ -17,8 +17,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.io.plotting import save_fig
-from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.plotting.io.figures import save_fig
+from eeg_pipeline.plotting.features.utils import get_numeric_feature_columns
+from eeg_pipeline.io.paths import ensure_dir
 from eeg_pipeline.utils.config.loader import get_config_value
 
 
@@ -46,17 +47,7 @@ def plot_feature_distribution_grid(
         return fig
 
     if feature_cols is None:
-        try:
-            numeric_df = df.select_dtypes(include=[np.number])
-            if numeric_df.empty or len(numeric_df.columns) == 0:
-                feature_cols = []
-            else:
-                feature_cols = [
-                    c for c in numeric_df.columns
-                    if c not in ["epoch", "trial", "subject", "index", "condition"]
-                ]
-        except Exception:
-            feature_cols = []
+        feature_cols = get_numeric_feature_columns(df)
     else:
         feature_cols = [c for c in feature_cols if c in df.columns] if feature_cols else []
 
@@ -144,10 +135,7 @@ def plot_outlier_trials_heatmap(
         return fig
 
     if feature_cols is None:
-        feature_cols = [
-            c for c in quality_df.select_dtypes(include=[np.number]).columns
-            if c not in ["epoch", "trial", "subject", "index", "condition"]
-        ]
+        feature_cols = get_numeric_feature_columns(quality_df)
     else:
         feature_cols = [c for c in feature_cols if c in quality_df.columns]
     
@@ -159,7 +147,7 @@ def plot_outlier_trials_heatmap(
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return fig
     
-    # Compute z-scores and outlier matrix
+    # Compute robust z-scores and outlier matrix
     outlier_matrix = np.zeros((len(df), len(feature_cols)))
     
     for j, col in enumerate(feature_cols):
@@ -167,14 +155,15 @@ def plot_outlier_trials_heatmap(
         valid = np.isfinite(values)
         if np.sum(valid) < 3:
             continue
-        
-        mean = np.nanmean(values)
-        std = np.nanstd(values)
-        if std < 1e-12:
+
+        median = float(np.nanmedian(values))
+        mad = float(np.nanmedian(np.abs(values - median)))
+        if not np.isfinite(mad) or mad < 1e-12:
             continue
-        
-        z_scores = np.abs((values - mean) / std)
-        outlier_matrix[:, j] = np.where(valid & (z_scores > z_threshold), 1, 0)
+
+        robust_z = 0.6745 * (values - median) / mad
+        robust_z_abs = np.abs(robust_z)
+        outlier_matrix[:, j] = np.where(valid & (robust_z_abs > z_threshold), 1, 0)
     
     fig, ax = plt.subplots(figsize=figsize)
     
@@ -182,7 +171,11 @@ def plot_outlier_trials_heatmap(
     
     ax.set_xlabel("Feature", fontsize=plot_cfg.font.title)
     ax.set_ylabel("Trial", fontsize=plot_cfg.font.title)
-    ax.set_title(f"Outlier Detection (|z| > {z_threshold})", fontsize=plot_cfg.font.suptitle, fontweight="bold")
+    ax.set_title(
+        f"Outlier Detection (robust |z| > {z_threshold})",
+        fontsize=plot_cfg.font.suptitle,
+        fontweight="bold",
+    )
     
     # Colorbar
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
@@ -193,7 +186,10 @@ def plot_outlier_trials_heatmap(
     n_outliers = np.sum(outlier_matrix)
     total_cells = outlier_matrix.size
     pct = 100 * n_outliers / total_cells
-    ax.set_xlabel(f"Feature ({n_outliers:.0f} outliers, {pct:.1f}% of data)", fontsize=plot_cfg.font.title)
+    ax.set_xlabel(
+        f"Feature ({n_outliers:.0f} outliers, {pct:.1f}% of data)",
+        fontsize=plot_cfg.font.title,
+    )
     
     plt.tight_layout()
     save_fig(fig, save_path)

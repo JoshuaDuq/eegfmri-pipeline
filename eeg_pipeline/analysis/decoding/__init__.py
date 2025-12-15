@@ -48,11 +48,8 @@ from eeg_pipeline.analysis.decoding.pipelines import (
     build_rf_param_grid,
 )
 
-# Data loading (canonical location: eeg_pipeline.utils.data.loading)
-from eeg_pipeline.utils.data.loading import (
-    load_plateau_matrix,
-    load_epoch_windows,
-)
+# Data loading (canonical location: eeg_pipeline.utils.data.decoding)
+from eeg_pipeline.utils.data.decoding import load_epoch_windows, load_plateau_matrix
 
 # Cross-validation orchestration (high-level CV strategies)
 # Canonical pipeline class is in eeg_pipeline.pipelines.decoding

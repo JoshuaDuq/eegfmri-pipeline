@@ -136,7 +136,7 @@ def _setup_features(subparsers: argparse._SubParsersAction) -> argparse.Argument
 
 def _run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.pipelines.features import FeaturePipeline
-    from eeg_pipeline.plotting.features import visualize_features_for_subjects
+    from eeg_pipeline.pipelines.viz.features import visualize_features_for_subjects
     
     if args.mode == "compute":
         pipeline = FeaturePipeline(config=config)
@@ -148,7 +148,7 @@ def _run_features(args: argparse.Namespace, subjects: List[str], config: Any) ->
             precomputed_groups=args.precomputed_groups,
         )
     elif args.mode == "visualize":
-        visualize_features_for_subjects(subjects=subjects, task=args.task)
+        visualize_features_for_subjects(subjects=subjects, task=args.task, config=config)
 
 
 def _setup_erp(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:

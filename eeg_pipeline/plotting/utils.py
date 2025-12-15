@@ -16,6 +16,10 @@ from matplotlib.patches import Patch
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.analysis.stats import fdr_bh
+from eeg_pipeline.plotting.core.colors import (
+    get_band_colors as _get_band_colors,
+    get_significance_colors as _get_significance_colors,
+)
 
 
 ###################################################################
@@ -29,10 +33,7 @@ def get_significance_colors(config: Any = None) -> Tuple[str, str]:
     Returns:
         Tuple of (significant_color, nonsignificant_color)
     """
-    plot_cfg = get_plot_config(config)
-    sig_color = plot_cfg.get_color("significant", plot_type="behavioral")
-    nonsig_color = plot_cfg.get_color("nonsignificant", plot_type="behavioral")
-    return sig_color, nonsig_color
+    return _get_significance_colors(config)
 
 
 def get_band_colors() -> Dict[str, str]:
@@ -41,13 +42,7 @@ def get_band_colors() -> Dict[str, str]:
     Returns:
         Dictionary mapping band names to hex colors
     """
-    return {
-        "delta": "#1f77b4",
-        "theta": "#2ca02c", 
-        "alpha": "#ff7f0e",
-        "beta": "#d62728",
-        "gamma": "#9467bd",
-    }
+    return _get_band_colors()
 
 
 def get_correlation_cmap() -> str:

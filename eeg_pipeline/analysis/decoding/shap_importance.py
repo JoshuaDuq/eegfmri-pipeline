@@ -608,7 +608,7 @@ def save_shap_results(
     Dict[str, Path]
         Mapping of result type to saved path
     """
-    from eeg_pipeline.utils.io.tsv import write_tsv
+    from eeg_pipeline.io.tsv import write_tsv
     
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)

@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import mne
 
-from eeg_pipeline.utils.io.plotting import (
+from eeg_pipeline.plotting.io.figures import (
     unwrap_figure,
     robust_sym_vlim,
     extract_eeg_picks,
@@ -23,8 +23,8 @@ from eeg_pipeline.utils.io.plotting import (
     build_footer,
     save_fig as central_save_fig,
 )
-from eeg_pipeline.utils.io.formatting import format_baseline_window_string
-from eeg_pipeline.utils.io.columns import get_pain_column_from_config
+from eeg_pipeline.io.formatting import format_baseline_window_string
+from eeg_pipeline.io.columns import get_pain_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,

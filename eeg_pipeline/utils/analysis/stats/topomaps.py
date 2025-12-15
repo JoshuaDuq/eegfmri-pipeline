@@ -23,8 +23,8 @@ from eeg_pipeline.utils.analysis.stats import (
     _safe_float,
 )
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.tsv import write_tsv
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.tsv import write_tsv
 
 
 def _process_band(

@@ -139,8 +139,10 @@ def _extract_dynamics_for_segment(
         filtered = bandpass_filter_epochs(data, sfreq, fmin, fmax, n_jobs=n_jobs)
         if filtered is None: 
             continue
-        
-        epoch_dicts = Parallel(n_jobs=n_jobs)(
+
+        # Avoid nested parallelism (bandpass_filter_epochs may already use threads/processes).
+        # Parallelizing both filtering and per-epoch metrics can oversubscribe CPUs and slow down.
+        epoch_dicts = Parallel(n_jobs=1)(
             delayed(_process_epoch_metrics)(filtered[e], ch_names, params, segment_name, band)
             for e in range(n_epochs)
         )

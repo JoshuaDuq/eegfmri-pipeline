@@ -78,7 +78,7 @@ def _resolve_single_path(value: str, config_dir: Path, project_root: Path) -> st
 
 def resolve_config_paths(config: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
     config_dir = config_path.parent
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).resolve().parents[3]
     _resolve_paths_recursive(config, config_dir, project_root)
     return config
 

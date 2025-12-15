@@ -16,7 +16,7 @@ import numpy as np
 import mne
 
 
-from ..io.paths import _load_events_df
+from eeg_pipeline.io.paths import _load_events_df
 from ..config.loader import ConfigDict
 from ..validation import ensure_aligned_lengths
 

@@ -109,11 +109,10 @@ __all__ = [
 
 _LAZY_IMPORTS = {
     # Naming utilities
-    "make_feature_name": "naming",
-    "parse_feature_name": "manifest",  # Authoritative parser with FeatureMetadata
+    "make_feature_name": "eeg_pipeline.utils.analysis.features.metadata",
+    "parse_feature_name": "eeg_pipeline.utils.analysis.features.metadata",  # Authoritative parser with FeatureMetadata
     
     # Constants and utilities (imported from their actual modules)
-    "EPSILON_STD": "config",
     "build_roi_map": "eeg_pipeline.utils.analysis.channels",
     "pick_eeg_channels": "eeg_pipeline.utils.analysis.channels",
     "compute_gfp": "eeg_pipeline.utils.analysis.signal_metrics",
@@ -129,33 +128,53 @@ _LAZY_IMPORTS = {
     "compute_icc": "eeg_pipeline.utils.analysis.stats.reliability",
     
     # Quality
-    "identify_correlated_features": "quality",
     "compute_trial_quality_metrics": "quality",
     
     # Microstates
     "extract_microstate_features": "microstates",
+    "extract_microstate_features_from_epochs": "microstates",
+
+    # Connectivity
+    "extract_connectivity_features": "connectivity",
+    "extract_connectivity_from_precomputed": "connectivity",
+
+    # Power
+    "extract_power_features": "power",
+    "extract_spectral_extras_from_precomputed": "precomputed.spectral",
+    "extract_asymmetry_from_precomputed": "precomputed.asymmetry",
+    "extract_segment_power_from_precomputed": "precomputed.spectral",
+
+    # Aperiodic
+    "extract_aperiodic_features": "aperiodic",
+    "extract_aperiodic_features_from_epochs": "aperiodic",
+
+    # Phase / PAC / ITPC
+    "extract_phase_features": "phase",
+    "compute_pac_comodulograms": "phase",
+    "extract_itpc_from_precomputed": "phase",
     
     # Cross-frequency coupling
     "extract_modulation_index_pac": "cfc",
     "extract_phase_phase_coupling": "cfc",
-    
-    # Aperiodic
-    "extract_aperiodic_features": "aperiodic",
+    "extract_pac_from_precomputed": "cfc",
+    "extract_all_cfc_features": "cfc",
     
     # Complexity
-    "extract_permutation_entropy_features": "complexity",
-    "extract_hjorth_parameters": "complexity",
-    
+    "extract_dynamics_features": "complexity",
+    "extract_complexity_from_precomputed": "complexity",
+
+    # Dynamics (precomputed)
+    "extract_dynamics_from_precomputed": "dynamics",
+
     # ML presets
-    "get_feature_groups_for_ml": "pipeline",
 
     # Pipeline orchestrators (lazy to prevent circular imports)
     "FeaturePipeline": "eeg_pipeline.pipelines.features",
     "process_subject": "eeg_pipeline.pipelines.features",
     "extract_features_for_subjects": "eeg_pipeline.pipelines.features",
-    "extract_all_features": "eeg_pipeline.pipelines.features",
-    "extract_precomputed_features": "eeg_pipeline.pipelines.features",
-    "extract_fmri_prediction_features": "eeg_pipeline.pipelines.features",
+    "extract_all_features": "eeg_pipeline.analysis.features.api",
+    "extract_precomputed_features": "eeg_pipeline.analysis.features.api",
+    "extract_fmri_prediction_features": "eeg_pipeline.analysis.features.api",
 }
 
 

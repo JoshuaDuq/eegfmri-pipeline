@@ -116,13 +116,20 @@ def apply_global_fdr(
     stats_dir: "Path",
     alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
+    include_glob: str = "*.tsv",
+    exclude_globs: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Apply global FDR correction across correlation files within families."""
     from pathlib import Path
-    from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
+    from eeg_pipeline.io.tsv import read_tsv, write_tsv
     
     stats_dir = Path(stats_dir)
-    files = list(stats_dir.glob("*.tsv"))
+    files = list(stats_dir.glob(include_glob))
+    if exclude_globs:
+        excluded = set()
+        for pat in exclude_globs:
+            excluded.update(stats_dir.glob(pat))
+        files = [f for f in files if f not in excluded]
     if not files:
         if logger:
             logger.warning(f"No TSV files found in {stats_dir}")
@@ -229,9 +236,15 @@ def apply_global_fdr(
                 df["q_global"] = np.nan
             if "fdr_reject" not in df.columns:
                 df["fdr_reject"] = False
-            df["fdr_family"] = df.get("fdr_family", np.nan)
+            if "fdr_family" not in df.columns:
+                df["fdr_family"] = pd.Series([None] * len(df), dtype="object")
+            else:
+                df["fdr_family"] = df["fdr_family"].astype("object")
+
             if "fdr_p_kind" not in df.columns:
-                df["fdr_p_kind"] = np.nan
+                df["fdr_p_kind"] = pd.Series([None] * len(df), dtype="object")
+            else:
+                df["fdr_p_kind"] = df["fdr_p_kind"].astype("object")
             
             for idx, q, rej, family, p_col in updates:
                 if idx < len(df):

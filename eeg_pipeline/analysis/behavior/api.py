@@ -54,7 +54,7 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
 from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
-from eeg_pipeline.utils.io.paths import deriv_stats_path
+from eeg_pipeline.io.paths import deriv_stats_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -123,20 +123,19 @@ __all__ = [
     "CorrelationResult",
     # Feature correlator
     "FeatureBehaviorCorrelator",
-    "run_unified_feature_correlations",
-    "correlate_pain_relevant_features",
-    "run_pain_sensitivity_correlations",
-    "classify_feature",
-    "get_feature_registry",
-    "FeatureRegistry",
-    "FeatureRule",
     "CorrelationConfig",
     "FeatureCorrelationResult",
+    "correlate_pain_relevant_features",
+    "run_unified_feature_correlations",
+    # Feature registry (backward-compatible re-exports)
+    "FeatureRegistry",
+    "FeatureRule",
     # Cluster tests
     "compute_pain_nonpain_time_cluster_test",
     "run_cluster_test_from_context",
     "run_pain_nonpain_cluster_test",
     # Mixed-effects
+    "MixedEffectsResult",
     "fit_mixed_effects_model",
     "compute_icc",
     "run_multilevel_correlation_analysis",

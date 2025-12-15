@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import json
 from typing import Any, Optional, List, Tuple
 
 import numpy as np
@@ -57,24 +58,14 @@ from eeg_pipeline.utils.data.loading import (
     load_plateau_matrix,
 )
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.io.tsv import read_tsv, write_tsv
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.decoding import (
+from eeg_pipeline.io.tsv import read_tsv, write_tsv
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.decoding import (
     export_predictions,
     export_indices,
     prepare_best_params_path,
 )
-from eeg_pipeline.utils.io.logging import get_logger
-from eeg_pipeline.plotting.decoding import (
-    plot_decoding_null_hist,
-    plot_residual_diagnostics,
-)
-from eeg_pipeline.plotting.decoding.performance import (
-    plot_prediction_scatter,
-    plot_per_subject_performance,
-    plot_permutation_null,
-)
-from eeg_pipeline.plotting.decoding.time_generalization import plot_time_generalization_with_null
+from eeg_pipeline.io.logging import get_logger
 from eeg_pipeline.analysis.decoding.time_generalization import time_generalization_regression
 
 logger = get_logger(__name__)
@@ -775,15 +766,9 @@ def run_regression_decoding(
         "p_value": p_val,
     }
 
-    plot_prediction_scatter(pred_df, "elasticnet", metrics, plots_dir / "loso_prediction_scatter.png", config=config)
-    plot_per_subject_performance(pred_df, "elasticnet", plots_dir / "loso_per_subject_performance.png", config=config)
-    plot_residual_diagnostics(pred_df, "elasticnet", plots_dir / "loso_residual_diagnostics.png", config=config)
-
-    if null_path and null_path.exists():
-        data = np.load(null_path)
-        null_rs = data.get("null_r")
-        if null_rs is not None and null_rs.size > 0 and np.isfinite(r_subj):
-            plot_permutation_null(null_rs, r_subj, p_val, plots_dir / "loso_null_distribution.png", config=config)
+    metrics_path = results_dir / "pooled_metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2, default=str)
 
     logger.info(f"Saved decoding results to {results_dir}")
     return results_dir
@@ -816,27 +801,6 @@ def run_time_generalization(
     except Exception as exc:
         logger.warning(f"Time-generalization failed: {exc}")
         return
-
-    tg_path = results_dir / "time_generalization_regression.npz"
-    tg_npz = np.load(tg_path) if tg_path.exists() else None
-    null_mat = tg_npz["null_r"] if tg_npz is not None and "null_r" in tg_npz else None
-
-    plot_time_generalization_with_null(
-        tg_matrix=tg_r,
-        null_matrix=null_mat,
-        window_centers=window_centers,
-        save_path=results_dir / "time_generalization_r.png",
-        metric="r",
-        config=config,
-    )
-    plot_time_generalization_with_null(
-        tg_matrix=tg_r2,
-        null_matrix=null_mat,
-        window_centers=window_centers,
-        save_path=results_dir / "time_generalization_r2.png",
-        metric="r2",
-        config=config,
-    )
 
     logger.info(f"Saved time-generalization outputs to {results_dir}")
 

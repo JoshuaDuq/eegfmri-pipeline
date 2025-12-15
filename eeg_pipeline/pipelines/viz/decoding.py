@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from eeg_pipeline.utils.io.paths import ensure_dir
+from eeg_pipeline.io.paths import ensure_dir
 
 from eeg_pipeline.plotting.decoding.time_generalization import (
     plot_time_generalization_matrix,
@@ -21,6 +21,7 @@ from eeg_pipeline.plotting.decoding.performance import (
     plot_decoding_null_hist,
     plot_calibration_curve,
     plot_bootstrap_distributions,
+    plot_permutation_null,
 )
 from eeg_pipeline.plotting.decoding.diagnostics import plot_residual_diagnostics
 from eeg_pipeline.plotting.decoding.comparisons import (
@@ -225,11 +226,158 @@ def visualize_incremental_validity(
     logger.info(f"Incremental validity visualizations saved to {plots_dir}")
 
 
+###################################################################
+# Post-Analysis Visualization (reads saved results)
+###################################################################
+
+
+def visualize_regression_from_disk(
+    results_dir: Path,
+    config: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Generate regression decoding plots from saved results on disk.
+    
+    This is the pipeline-layer entrypoint that reads predictions, metrics,
+    and null distributions from disk and generates all standard plots.
+    """
+    import json
+    import pandas as pd
+    import numpy as np
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    plots_dir = results_dir / "plots"
+    ensure_dir(plots_dir)
+    
+    pred_path = results_dir / "loso_predictions.tsv"
+    metrics_path = results_dir / "pooled_metrics.json"
+    null_path = results_dir / "loso_null_elasticnet.npz"
+    
+    if not pred_path.exists():
+        logger.warning(f"Predictions file not found: {pred_path}")
+        return
+    
+    pred_df = pd.read_csv(pred_path, sep="\t")
+    
+    pooled_metrics = {}
+    if metrics_path.exists():
+        with open(metrics_path) as f:
+            pooled_metrics = json.load(f)
+    
+    model_name = "elasticnet"
+    
+    plot_prediction_scatter(
+        pred_df=pred_df,
+        model_name=model_name,
+        pooled_metrics=pooled_metrics,
+        save_path=plots_dir / "loso_prediction_scatter",
+        config=config,
+    )
+    
+    plot_residual_diagnostics(
+        pred_df=pred_df,
+        model_name=model_name,
+        save_path=plots_dir / "loso_residual_diagnostics",
+        config=config,
+    )
+    
+    if "subject_id" in pred_df.columns or "group" in pred_df.columns:
+        group_col = "subject_id" if "subject_id" in pred_df.columns else "group"
+        per_subj_records = []
+        for subj, df_sub in pred_df.groupby(group_col):
+            yt = pd.to_numeric(df_sub["y_true"], errors="coerce").values
+            yp = pd.to_numeric(df_sub["y_pred"], errors="coerce").values
+            finite = np.isfinite(yt) & np.isfinite(yp)
+            if finite.sum() < 2:
+                continue
+            from scipy.stats import pearsonr
+            r_val, _ = pearsonr(yt[finite], yp[finite])
+            from sklearn.metrics import r2_score
+            r2_val = r2_score(yt[finite], yp[finite])
+            per_subj_records.append({"group": str(subj), "pearson_r": r_val, "r2": r2_val})
+        
+        if per_subj_records:
+            per_subj_df = pd.DataFrame(per_subj_records)
+            plot_per_subject_performance(
+                per_subj_df=per_subj_df,
+                model_name=model_name,
+                save_path=plots_dir / "loso_per_subject_performance",
+                config=config,
+            )
+    
+    if null_path.exists():
+        data = np.load(null_path)
+        null_rs = data.get("null_r")
+        empirical_r = pooled_metrics.get("pearson_r", np.nan)
+        if null_rs is not None and null_rs.size > 0 and np.isfinite(empirical_r):
+            plot_decoding_null_hist(
+                null_r=null_rs,
+                empirical_r=empirical_r,
+                save_path=plots_dir / "loso_null_distribution",
+                config=config,
+            )
+    
+    logger.info(f"Regression decoding visualizations saved to {plots_dir}")
+
+
+def visualize_time_generalization_from_disk(
+    results_dir: Path,
+    config: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Generate time-generalization plots from saved results on disk."""
+    import numpy as np
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    tg_path = results_dir / "time_generalization_regression.npz"
+    if not tg_path.exists():
+        logger.warning(f"Time-generalization results not found: {tg_path}")
+        return
+    
+    data = np.load(tg_path)
+    tg_r = data.get("r_matrix")
+    tg_r2 = data.get("r2_matrix")
+    window_centers = data.get("window_centers")
+    null_r = data.get("null_r")
+    null_r2 = data.get("null_r2")
+    
+    if tg_r is None or window_centers is None:
+        logger.warning("Missing required arrays in time-generalization results")
+        return
+    
+    plot_time_generalization_with_null(
+        tg_matrix=tg_r,
+        null_matrix=null_r,
+        window_centers=window_centers,
+        save_path=results_dir / "time_generalization_r",
+        metric="r",
+        config=config,
+    )
+    
+    if tg_r2 is not None:
+        plot_time_generalization_with_null(
+            tg_matrix=tg_r2,
+            null_matrix=null_r2,
+            window_centers=window_centers,
+            save_path=results_dir / "time_generalization_r2",
+            metric="r2",
+            config=config,
+        )
+    
+    logger.info(f"Time-generalization visualizations saved to {results_dir}")
+
+
 __all__ = [
     "visualize_regression_results",
     "visualize_time_generalization",
     "visualize_model_comparisons",
     "visualize_riemann_analysis",
     "visualize_incremental_validity",
+    "visualize_regression_from_disk",
+    "visualize_time_generalization_from_disk",
 ]
 

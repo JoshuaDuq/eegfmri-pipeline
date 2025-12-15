@@ -11,14 +11,18 @@ from pathlib import Path
 from typing import List, Optional
 
 from eeg_pipeline.utils.data.loading import load_behavior_stats_files
-from eeg_pipeline.utils.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir
-from eeg_pipeline.utils.io.plot_collections import collect_significant_plots
-from eeg_pipeline.utils.io.plotting import setup_matplotlib
-from eeg_pipeline.utils.io.logging import get_logger
+from eeg_pipeline.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir, resolve_deriv_root
+from eeg_pipeline.io.plot_collections import collect_significant_plots
+from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.io.logging import get_logger
 from eeg_pipeline.plotting.behavioral.registry import (
     BehaviorPlotContext,
     BehaviorPlotManager,
 )
+
+# Import plotters for side-effects: registers plot functions into BehaviorPlotRegistry.
+# This import must not call back into this module at import time.
+from eeg_pipeline.plotting.behavioral import registrations as _behavior_plotters  # noqa: F401
 
 
 ###################################################################
@@ -29,12 +33,13 @@ from eeg_pipeline.plotting.behavioral.registry import (
 def _build_behavior_plot_context(
     subject: str,
     task: str,
+    deriv_root: Path,
     config,
     logger: logging.Logger,
 ) -> BehaviorPlotContext:
     """Create a context object shared by all behavioral plotters."""
-    plots_dir = deriv_plots_path(config.deriv_root, subject, subdir="behavior")
-    stats_dir = deriv_stats_path(config.deriv_root, subject)
+    plots_dir = deriv_plots_path(deriv_root, subject, subdir="behavior")
+    stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(plots_dir)
     ensure_dir(stats_dir)
 
@@ -47,7 +52,7 @@ def _build_behavior_plot_context(
         task=task,
         config=config,
         logger=logger,
-        deriv_root=config.deriv_root,
+        deriv_root=deriv_root,
         plots_dir=plots_dir,
         stats_dir=stats_dir,
         use_spearman=use_spearman,
@@ -65,11 +70,13 @@ def visualize_subject_behavior(
     scatter_only: bool = False,
     temporal_only: bool = False,
     plots: Optional[List[str]] = None,
+    deriv_root: Optional[Path] = None,
 ) -> None:
     """Visualize behavioral correlations for a single subject."""
     logger.info(f"Visualizing behavioral correlations for sub-{subject}...")
 
-    ctx = _build_behavior_plot_context(subject, task, config, logger)
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+    ctx = _build_behavior_plot_context(subject, task, effective_deriv_root, config, logger)
     manager = BehaviorPlotManager(ctx)
 
     if scatter_only and temporal_only:
@@ -106,7 +113,7 @@ def visualize_subject_behavior(
 
     if ctx.all_results:
         logger.info("Collecting significant plots...")
-        collect_significant_plots(subject, config.deriv_root, ctx.all_results, config=config)
+        collect_significant_plots(subject, effective_deriv_root, ctx.all_results, config=config)
 
     logger.info(f"Behavioral visualizations saved to {ctx.plots_dir}")
 
@@ -138,6 +145,8 @@ def visualize_behavior_for_subjects(
 
     task = task or config.get("project.task", "thermalactive")
 
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
     if logger is None:
         logger = get_logger(__name__)
 
@@ -158,6 +167,7 @@ def visualize_behavior_for_subjects(
             logger,
             scatter_only=scatter_only,
             temporal_only=temporal_only,
+            deriv_root=effective_deriv_root,
         )
 
     logger.info("Behavioral visualization complete")

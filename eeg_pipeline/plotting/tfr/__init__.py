@@ -7,56 +7,7 @@ Low-level plotting primitives live here. High-level orchestration/IO is defined 
 
 from __future__ import annotations
 
-# Channel-level TFR plotting
-from .channels import (
-    plot_cz_all_trials_raw,
-    plot_cz_all_trials,
-    plot_channels_all_trials,
-    contrast_channels_pain_nonpain,
-)
-
-# Scalp-mean TFR plotting
-from .scalpmean import (
-    plot_scalpmean_all_trials,
-    contrast_scalpmean_pain_nonpain,
-)
-
-# Contrast plotting
-from .contrasts import (
-    contrast_maxmin_temperature,
-    contrast_pain_nonpain,
-    plot_bands_pain_temp_contrasts,
-)
-
-# ROI TFR plotting
-from .rois import (
-    compute_roi_tfrs,
-    plot_rois_all_trials,
-    contrast_pain_nonpain_rois,
-)
-
-# Topomap plotting
-from .topomaps import (
-    plot_topomap_grid_baseline_temps,
-    plot_pain_nonpain_temporal_topomaps_diff_allbands,
-    plot_temporal_topomaps_allbands_plateau,
-)
-
-
-# Quality control
-from .qc import (
-    qc_baseline_plateau_power,
-)
-
-# Band power evolution
-from .band_evolution import (
-    visualize_band_evolution,
-    plot_band_power_evolution_all_conditions,
-    plot_band_power_by_roi,
-    plot_condition_comparison_per_band,
-    plot_roi_condition_comparison,
-    plot_band_power_summary,
-)
+import importlib
 
 ###################################################################
 # Visualization orchestration wrappers (pipeline layer)
@@ -112,3 +63,44 @@ __all__ = [
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
 ]
+
+
+def __getattr__(name: str):
+    _module_map = {
+        # Channel-level TFR plotting
+        "plot_cz_all_trials_raw": "channels",
+        "plot_cz_all_trials": "channels",
+        "plot_channels_all_trials": "channels",
+        "contrast_channels_pain_nonpain": "channels",
+        # Scalp-mean TFR plotting
+        "plot_scalpmean_all_trials": "scalpmean",
+        "contrast_scalpmean_pain_nonpain": "scalpmean",
+        # Contrast plotting
+        "contrast_maxmin_temperature": "contrasts",
+        "contrast_pain_nonpain": "contrasts",
+        "plot_bands_pain_temp_contrasts": "contrasts",
+        # ROI TFR plotting
+        "compute_roi_tfrs": "rois",
+        "plot_rois_all_trials": "rois",
+        "contrast_pain_nonpain_rois": "rois",
+        # Topomap plotting
+        "plot_topomap_grid_baseline_temps": "topomaps",
+        "plot_pain_nonpain_temporal_topomaps_diff_allbands": "topomaps",
+        "plot_temporal_topomaps_allbands_plateau": "topomaps",
+        # Quality control
+        "qc_baseline_plateau_power": "qc",
+        # Band power evolution
+        "visualize_band_evolution": "band_evolution",
+        "plot_band_power_evolution_all_conditions": "band_evolution",
+        "plot_band_power_by_roi": "band_evolution",
+        "plot_condition_comparison_per_band": "band_evolution",
+        "plot_roi_condition_comparison": "band_evolution",
+        "plot_band_power_summary": "band_evolution",
+    }
+
+    module_name = _module_map.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    mod = importlib.import_module(f"{__name__}.{module_name}")
+    return getattr(mod, name)

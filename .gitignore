@@ -41,4 +41,24 @@ Thumbs.db
 
 # Data folder
 
+eeg_pipeline/data/**
+!eeg_pipeline/data/**/.gitkeep
+
+!eeg_pipeline/data/bids_output/
+eeg_pipeline/data/bids_output/**
+!eeg_pipeline/data/bids_output/README
+!eeg_pipeline/data/bids_output/dataset_description.json
+!eeg_pipeline/data/bids_output/participants.tsv
+!eeg_pipeline/data/bids_output/participants.json
+
+!eeg_pipeline/data/derivatives/
+eeg_pipeline/data/derivatives/**
+!eeg_pipeline/data/derivatives/dataset_description.json
+
+!eeg_pipeline/data/external/
+!eeg_pipeline/data/external/**
+
+eeg_pipeline/data/.DS_Store
+eeg_pipeline/data/**/.DS_Store
+
 .venv311/

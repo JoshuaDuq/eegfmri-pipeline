@@ -18,6 +18,10 @@ from eeg_pipeline.analysis.decoding.orchestration import (
     run_time_generalization,
 )
 from eeg_pipeline.pipelines.base import PipelineBase
+from eeg_pipeline.pipelines.viz.decoding import (
+    visualize_regression_from_disk,
+    visualize_time_generalization_from_disk,
+)
 
 
 ###################################################################
@@ -75,6 +79,12 @@ class DecodingPipeline(PipelineBase):
             logger=self.logger,
         )
         
+        visualize_regression_from_disk(
+            results_dir=results_dir,
+            config=self.config,
+            logger=self.logger,
+        )
+        
         if not skip_time_gen:
             run_time_generalization(
                 subjects=subjects,
@@ -84,6 +94,13 @@ class DecodingPipeline(PipelineBase):
                 n_perm=n_perm,
                 rng_seed=rng_seed,
                 results_root=self.results_root,
+                logger=self.logger,
+            )
+            
+            tg_results_dir = self.results_root / "time_generalization"
+            visualize_time_generalization_from_disk(
+                results_dir=tg_results_dir,
+                config=self.config,
                 logger=self.logger,
             )
         

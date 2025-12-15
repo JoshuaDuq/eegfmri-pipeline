@@ -9,16 +9,35 @@ import numpy as np
 import pandas as pd
 import mne
 
-from ..io.paths import (
+from eeg_pipeline.io.paths import (
     _find_clean_epochs_path,
     _load_events_df,
     deriv_features_path,
+    find_connectivity_features_path,
 )
-from ..io.columns import _pick_target_column
-from ..io.tsv import read_tsv
+from eeg_pipeline.io.columns import pick_target_column
+from eeg_pipeline.io.tsv import read_tsv, read_table
 from ..config.loader import load_settings, ConfigDict, get_config_value, ensure_config, get_frequency_band_names
 
 EEGConfig = ConfigDict
+
+from .epochs_loading import (
+    load_epochs_for_analysis as _load_epochs_for_analysis,
+    load_epochs_with_aligned_events as _load_epochs_with_aligned_events,
+    pick_event_columns as _pick_event_columns_v2,
+    resolve_columns as _resolve_columns_v2,
+    _validate_event_columns as _validate_event_columns_v2,
+)
+from .subjects import (
+    get_available_subjects as _get_available_subjects_v2,
+    parse_subject_args as _parse_subject_args_v2,
+)
+from .behavior import (
+    load_behavior_plot_features as _load_behavior_plot_features_v2,
+    load_stats_file_with_fallbacks as _load_stats_file_with_fallbacks_v2,
+    load_behavior_stats_files as _load_behavior_stats_files_v2,
+    load_subject_data_for_summary as _load_subject_data_for_summary_v2,
+)
 
 
 ###################################################################
@@ -56,8 +75,7 @@ class DecodingDataResult:
 ###################################################################
 
 def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
-    sub = f"sub-{subject}" if not subject.startswith("sub-") else subject
-    return deriv_root / sub / "eeg" / "features" / "trial_alignment.tsv"
+    return deriv_features_path(deriv_root, subject) / "trial_alignment.tsv"
 
 
 def _load_trial_alignment_manifest(manifest_path: Path, logger: Optional[logging.Logger] = None) -> pd.DataFrame:
@@ -121,17 +139,17 @@ def _load_features_and_targets(
     feats_dir = deriv_features_path(deriv_root, subject)
     temporal_path = feats_dir / "features_eeg_direct.tsv"
     plateau_path = feats_dir / "features_eeg_plateau.tsv"
-    conn_path = feats_dir / "features_connectivity.tsv"
+    conn_path = find_connectivity_features_path(deriv_root, subject)
     y_path = feats_dir / "target_vas_ratings.tsv"
 
     power_path = plateau_path if plateau_path.exists() else temporal_path
     if not power_path.exists() or not y_path.exists():
         raise FileNotFoundError(f"Missing features or targets for sub-{subject}. Expected at {feats_dir}")
 
-    temporal_df = pd.read_csv(temporal_path, sep="\t") if temporal_path.exists() else None
-    plateau_df = pd.read_csv(power_path, sep="\t")
-    conn_df = pd.read_csv(conn_path, sep="\t") if conn_path.exists() else None
-    y_df = pd.read_csv(y_path, sep="\t")
+    temporal_df = read_table(temporal_path) if temporal_path.exists() else None
+    plateau_df = read_table(power_path)
+    conn_df = read_table(conn_path) if conn_path.exists() else None
+    y_df = read_table(y_path)
 
     if y_df.shape[1] == 1:
         y = pd.to_numeric(y_df.iloc[:, 0], errors="coerce")
@@ -207,31 +225,7 @@ def _resolve_subjects_with_policy(
 
 
 def _validate_event_columns(events_df: pd.DataFrame, config: EEGConfig, logger: logging.Logger) -> None:
-    if events_df is None or events_df.empty:
-        return
-    
-    event_cols_config = config.get("event_columns", {})
-    if not event_cols_config:
-        logger.warning("No event_columns found in config; skipping validation")
-        return
-    
-    missing_columns = []
-    for logical_name, candidates in event_cols_config.items():
-        if not isinstance(candidates, (list, tuple)):
-            continue
-        found = any(col in events_df.columns for col in candidates)
-        if not found:
-            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
-    
-    if missing_columns:
-        available = list(events_df.columns)
-        error_msg = (
-            f"Required event columns not found in events DataFrame. "
-            f"Missing: {', '.join(missing_columns)}. "
-            f"Available columns: {available}"
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
+    _validate_event_columns_v2(events_df, config, logger)
 
 
 ###################################################################
@@ -293,7 +287,7 @@ def _handle_alignment_mismatch(
         if n_events > n_epochs:
             return aligned_events.iloc[:n_epochs].reset_index(drop=True)
         else:
-            from ..io.logging import log_and_raise_error
+            from eeg_pipeline.io.logging import log_and_raise_error
             error_msg = (
                 f"Alignment length mismatch for sub-{subject}, task-{task}: "
                 f"events={n_events}, epochs={n_epochs}, diff={diff}. "
@@ -301,7 +295,7 @@ def _handle_alignment_mismatch(
             )
             log_and_raise_error(logger, error_msg)
     else:
-        from ..io.logging import log_and_raise_error
+        from eeg_pipeline.io.logging import log_and_raise_error
         reason = "allow_misaligned_trim=False" if not allow_trim else f"mismatch ({diff}) exceeds max_tolerable_mismatch ({min_alignment_samples})"
         error_msg = (
             f"Alignment length mismatch for sub-{subject}, task-{task}: "
@@ -323,78 +317,18 @@ def load_epochs_for_analysis(
     constants=None,
     use_cache: bool = True,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    _validate_load_epochs_params(align, config)
-    
-    allow_trim = bool(config.get("alignment.allow_misaligned_trim"))
-    min_alignment_samples = int(config.get("alignment.min_alignment_samples"))
-    
-    epochs, events_df = _load_epochs_and_events(
-        subject, task, deriv_root, bids_root, preload, config, constants, logger
+    return _load_epochs_for_analysis(
+        subject,
+        task,
+        align=align,
+        preload=preload,
+        deriv_root=deriv_root,
+        bids_root=bids_root,
+        logger=logger,
+        config=config,
+        constants=constants,
+        use_cache=use_cache,
     )
-    if epochs is None:
-        return None, None
-    
-    if events_df is None:
-        if align == "strict":
-            raise ValueError(f"Events TSV not found for sub-{subject}, task-{task}. Required when align='strict'")
-        logger.warning("Events TSV not found; metadata will not be set.")
-        return epochs, None
-    
-    logger.info(f"Loaded events: {len(events_df)} rows")
-    logger.debug(f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}")
-    
-    _validate_event_columns(events_df, config, logger)
-    
-    try:
-        aligned_events = align_events_to_epochs(events_df, epochs, logger=logger)
-    except ValueError as err:
-        if align == "strict":
-            raise ValueError(
-                f"Alignment failed for sub-{subject}, task-{task} in strict mode: {err}. "
-                f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}"
-            ) from err
-        if align == "warn":
-            logger.warning(f"Alignment failed: {err}")
-        aligned_events = None
-    
-    if aligned_events is None:
-        if align == "strict":
-            raise ValueError(
-                f"Could not align events to epochs for sub-{subject}, task-{task}. "
-                f"Events have {len(events_df)} rows, epochs have {len(epochs)} epochs. "
-                f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}. "
-                f"This is required when align='strict'."
-            )
-        return epochs, None
-    
-    aligned_events = _handle_alignment_mismatch(
-        aligned_events, epochs, subject, task, allow_trim, min_alignment_samples, logger
-    )
-    
-    if len(aligned_events) != len(epochs):
-        error_msg = (
-            f"Failed to align events to epochs for sub-{subject}, task-{task}: "
-            f"final length mismatch (events={len(aligned_events)}, epochs={len(epochs)}). "
-            f"Cannot guarantee alignment."
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    validation_result = validate_alignment(aligned_events, epochs, logger, strict=(align == "strict"), config=config)
-    if not validation_result:
-        if align == "strict":
-            raise ValueError(
-                f"Alignment validation failed for sub-{subject}, task-{task} with strict mode."
-            )
-        logger.warning("Alignment validation failed; returning None for aligned events")
-        return epochs, None
-    
-    if use_cache:
-        epochs._behavioral = aligned_events  # type: ignore[attr-defined]
-    return epochs, aligned_events
 
 
 def load_epochs_with_aligned_events(
@@ -406,40 +340,19 @@ def load_epochs_with_aligned_events(
     preload: bool = True,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
-    epochs, aligned = load_epochs_for_analysis(
+    return _load_epochs_with_aligned_events(
         subject,
         task,
-        align="strict",
-        preload=preload,
+        config,
         deriv_root=deriv_root,
         bids_root=bids_root,
+        preload=preload,
         logger=logger,
-        config=config,
     )
-    if epochs is None or aligned is None:
-        return None, None
-    return epochs, aligned
 
 
 def pick_event_columns(df: pd.DataFrame, config) -> Dict[str, Optional[str]]:
-    out: Dict[str, Optional[str]] = {"rating": None, "temperature": None, "pain_binary": None}
-    rating_cols = config.get("event_columns.rating")
-    temp_cols = config.get("event_columns.temperature")
-    pain_cols = config.get("event_columns.pain_binary")
-
-    for cand in rating_cols:
-        if cand in df.columns:
-            out["rating"] = cand
-            break
-    for cand in temp_cols:
-        if cand in df.columns:
-            out["temperature"] = cand
-            break
-    for cand in pain_cols:
-        if cand in df.columns:
-            out["pain_binary"] = cand
-            break
-    return out
+    return _pick_event_columns_v2(df, config)
 
 
 def resolve_columns(
@@ -447,14 +360,7 @@ def resolve_columns(
     config: Optional[EEGConfig] = None,
     deriv_root: Optional[Path] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    if config is None:
-        if deriv_root is None:
-            raise ValueError("Either config or deriv_root must be provided to resolve_columns")
-        from ..config.loader import load_settings
-        config = load_settings()
-
-    cols = pick_event_columns(df, config)
-    return cols["pain_binary"], cols["temperature"], cols["rating"]
+    return _resolve_columns_v2(df, config=config, deriv_root=deriv_root)
 
 
 
@@ -473,80 +379,16 @@ def get_available_subjects(
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     logger: Optional[logging.Logger] = None,
 ) -> List[str]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if deriv_root is None:
-        deriv_root = config.deriv_root
-    
-    if bids_root is None:
-        bids_root = config.bids_root
-    
-    if task is None:
-        task = config.get("project.task")
-    
-    if discovery_sources is None:
-        discovery_sources = ["derivatives_epochs", "features"]
-    
-    subjects_from_config = config.subjects or []
-    
-    discovered_subjects = []
-    
-    if "bids" in discovery_sources:
-        bids_subjects = _collect_subjects_from_bids(bids_root)
-        discovered_subjects.append(("bids", bids_subjects))
-        logger.debug(f"Discovered {len(bids_subjects)} subjects from BIDS")
-    
-    if "derivatives_epochs" in discovery_sources:
-        epoch_subjects = _collect_subjects_from_derivatives_epochs(deriv_root, task, config=config, constants=constants)
-        discovered_subjects.append(("derivatives_epochs", epoch_subjects))
-        logger.debug(f"Discovered {len(epoch_subjects)} subjects from derivatives (clean epochs)")
-    
-    if "features" in discovery_sources:
-        feature_subjects = _collect_subjects_from_features(deriv_root)
-        discovered_subjects.append(("features", feature_subjects))
-        logger.debug(f"Discovered {len(feature_subjects)} subjects from derivatives (features)")
-    
-    if not discovered_subjects:
-        logger.warning("No subjects discovered from any source")
-        return []
-    
-    if subject_discovery_policy == "config_only":
-        resolved = subjects_from_config
-        logger.info(f"Using config subjects only: {len(resolved)} subjects")
-    elif subject_discovery_policy == "intersection":
-        all_discovered = [subj for _, subjects in discovered_subjects for subj in subjects]
-        if subjects_from_config:
-            resolved = sorted(list(set(all_discovered) & set(subjects_from_config)))
-            logger.info(
-                f"Using intersection: {len(resolved)} subjects "
-                f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
-            )
-        else:
-            if len(discovered_subjects) > 1:
-                subject_sets = [set(subjects) for _, subjects in discovered_subjects]
-                resolved = sorted(list(set.intersection(*subject_sets)))
-                logger.info(
-                    f"Using intersection of discovery sources: {len(resolved)} subjects "
-                    f"(from {len(discovered_subjects)} sources)"
-                )
-            else:
-                resolved = sorted(list(set(all_discovered)))
-                logger.info(
-                    f"Using discovered subjects: {len(resolved)} subjects "
-                    f"(from {discovered_subjects[0][0]})"
-                )
-    elif subject_discovery_policy == "union":
-        all_discovered = [subj for _, subjects in discovered_subjects for subj in subjects]
-        resolved = sorted(list(set(all_discovered) | set(subjects_from_config)))
-        logger.info(
-            f"Using union: {len(resolved)} subjects "
-            f"(discovered={len(set(all_discovered))}, config={len(subjects_from_config)})"
-        )
-    else:
-        raise ValueError(f"Unknown policy: {subject_discovery_policy}. Must be 'intersection', 'union', or 'config_only'")
-    
-    return resolved
+    return _get_available_subjects_v2(
+        config=config,
+        constants=constants,
+        deriv_root=deriv_root,
+        bids_root=bids_root,
+        task=task,
+        discovery_sources=discovery_sources,
+        subject_discovery_policy=subject_discovery_policy,
+        logger=logger,
+    )
 
 
 def parse_subject_args(
@@ -556,242 +398,24 @@ def parse_subject_args(
     deriv_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> List[str]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if deriv_root is None:
-        deriv_root = config.deriv_root
-    
-    if task is None:
-        task = config.get("project.task")
-    
-    subjects: Optional[List[str]] = None
-    
-    if hasattr(args, 'group') and args.group is not None:
-        g = args.group.strip()
-        if g.lower() in {"all", "*", "@all"}:
-            subjects = get_available_subjects(
-                config=config,
-                deriv_root=deriv_root,
-                task=task,
-                discovery_sources=["derivatives_epochs"],
-                logger=logger,
-            )
-        else:
-            candidates = [
-                s.strip()
-                for s in g.replace(";", ",").replace(" ", ",").split(",")
-                if s.strip()
-            ]
-            subjects = []
-            for s in candidates:
-                if _find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config) is not None:
-                    subjects.append(s)
-                else:
-                    logger.warning(f"--group subject '{s}' has no cleaned epochs; skipping")
-    elif hasattr(args, 'all_subjects') and args.all_subjects:
-        subjects = get_available_subjects(
-            config=config,
-            deriv_root=deriv_root,
-            task=task,
-            discovery_sources=["derivatives_epochs"],
-            logger=logger,
-        )
-    elif hasattr(args, 'subject') and args.subject:
-        subjects = list(dict.fromkeys(args.subject))
-    elif hasattr(args, 'subjects') and args.subjects:
-        subjects = list(dict.fromkeys(args.subjects))
-    
-    if subjects is None:
-        subjects = config.subjects if hasattr(config, 'subjects') and config.subjects else []
-    
-    return subjects
-
-
-def load_decoding_data(
-    subject: str,
-    deriv_root: Path,
-    config: EEGConfig,
-    bids_root: Optional[Path] = None,
-    task: Optional[str] = None,
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[pd.DataFrame, pd.Series, np.ndarray, pd.DataFrame]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if task is None:
-        task = config.get("project.task")
-    
-    if bids_root is None:
-        bids_root = config.bids_root
-    
-    sub = f"sub-{subject}"
-    feat_dir = deriv_root / sub / "eeg" / "features"
-    X_path = feat_dir / "features_eeg_direct.tsv"
-    y_path = feat_dir / "target_vas_ratings.tsv"
-    manifest_path = _get_trial_alignment_manifest_path(deriv_root, subject)
-    
-    if not (X_path.exists() and y_path.exists()):
-        raise FileNotFoundError(
-            f"Missing features/targets for {sub}: {X_path} or {y_path} not found"
-        )
-    
-    manifest = _load_trial_alignment_manifest(manifest_path, logger)
-    expected_n_trials = len(manifest)
-    
-    X = pd.read_csv(X_path, sep="\t")
-    y_df = pd.read_csv(y_path, sep="\t")
-    
-    if len(X) != expected_n_trials:
-        raise ValueError(
-            f"Feature count mismatch for subject {sub}, task {task}: "
-            f"features have {len(X)} rows but trial_alignment.tsv specifies {expected_n_trials} trials. "
-            f"This indicates a misalignment between feature extraction and trial manifest. "
-            f"Re-run 03_feature_extraction.py to regenerate features with proper alignment."
-        )
-    
-    if len(y_df) != expected_n_trials:
-        raise ValueError(
-            f"Target count mismatch for subject {sub}, task {task}: "
-            f"targets have {len(y_df)} rows but trial_alignment.tsv specifies {expected_n_trials} trials. "
-            f"This indicates a misalignment between target extraction and trial manifest. "
-            f"Re-run 03_feature_extraction.py to regenerate features with proper alignment."
-        )
-    
-    constants = {"TARGET_COLUMNS": config.get("event_columns.rating", [])}
-    tgt_col = _pick_target_column(y_df, constants=constants)
-    if tgt_col is None:
-        pain_col, _, rating_col = resolve_columns(y_df, deriv_root=deriv_root, config=config)
-        if rating_col is None:
-            raise ValueError(
-                f"No suitable target column found in {y_path} for subject {sub}, task {task}. "
-                f"Available columns: {list(y_df.columns)}"
-            )
-        tgt_col = rating_col
-    
-    y = pd.to_numeric(y_df[tgt_col], errors="coerce")
-    
-    if len(X) != len(y) or len(X) == 0:
-        raise ValueError(
-            f"Length mismatch or empty data for subject {sub}, task {task}: X={len(X)}, y={len(y)}"
-        )
-    
-    mask_valid = ~y.isna()
-    n_dropped = int((~mask_valid).sum())
-    if n_dropped > 0:
-        logger.warning(f"Dropping {n_dropped} trials with NaN targets for {sub}")
-    
-    X = X.loc[mask_valid].reset_index(drop=True)
-    y = y.loc[mask_valid].reset_index(drop=True)
-    
-    groups = np.array([sub] * len(X))
-    
-    meta = pd.DataFrame({
-        "subject_id": [sub] * len(X),
-        "trial_id": list(range(len(X))),
-    })
-    
-    logger.info(
-        f"Loaded data for {sub}: n_trials={len(X)}, n_features={X.shape[1]}"
+    return _parse_subject_args_v2(
+        args,
+        config,
+        task=task,
+        deriv_root=deriv_root,
+        logger=logger,
     )
-    
-    return X, y, groups, meta
 
 
-def load_multiple_subjects_decoding_data(
-    deriv_root: Path,
-    config: EEGConfig,
-    subjects: Optional[List[str]] = None,
-    subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
-    bids_root: Optional[Path] = None,
-    task: Optional[str] = None,
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[pd.DataFrame, pd.Series, np.ndarray, pd.DataFrame]:
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if task is None:
-        task = config.get("project.task")
-    
-    if bids_root is None:
-        bids_root = config.bids_root
-    
-    if subjects is None or subjects == ["all"]:
-        subjects = get_available_subjects(
-            config=config,
-            deriv_root=deriv_root,
-            bids_root=bids_root,
-            task=task,
-            discovery_sources=["features"],
-            subject_discovery_policy=subject_discovery_policy,
-            logger=logger,
-        )
-    else:
-        logger.info(f"Using explicitly provided subjects: {subjects}")
-    
-    X_list, y_list, g_list = [], [], []
-    trial_ids, subj_ids = [], []
-    col_template = None
-    n_found = 0
-    
-    for s in subjects:
-        try:
-            X, y, groups, meta = load_decoding_data(
-                subject=s,
-                deriv_root=deriv_root,
-                config=config,
-                bids_root=bids_root,
-                task=task,
-                logger=logger,
-            )
-        except (FileNotFoundError, ValueError) as e:
-            logger.warning(f"Skipping {s}: {e}")
-            continue
-        
-        if col_template is None:
-            col_template = list(X.columns)
-        elif list(X.columns) != col_template:
-            common = [c for c in col_template if c in X.columns]
-            if not common:
-                raise RuntimeError(f"No overlapping features for {s}")
-            if len(common) < len(col_template):
-                logger.warning(f"Using {len(common)} common features for {s}")
-            X = X.loc[:, common]
-            col_template = common
-        
-        n = len(X)
-        X_list.append(X)
-        y_list.append(y)
-        g_list.extend([meta["subject_id"].iloc[0]] * n)
-        trial_ids.extend(list(range(n)))
-        subj_ids.extend([meta["subject_id"].iloc[0]] * n)
-        n_found += 1
-    
-    if n_found == 0:
-        raise RuntimeError(
-            "No subjects with both features and targets were found. "
-                "Run 03_feature_extraction.py first."
-        )
-    
-    if col_template is None:
-        raise RuntimeError("No feature columns detected.")
-    
-    X_list = [Xi.loc[:, col_template].copy() for Xi in X_list]
-    X_all = pd.concat(X_list, axis=0, ignore_index=True)
-    y_all = pd.concat(y_list, axis=0, ignore_index=True)
-    groups = np.array(g_list)
-    feature_names = list(X_all.columns)
-    
-    meta = pd.DataFrame({
-        "subject_id": subj_ids,
-        "trial_id": trial_ids,
-    })
-    
-    logger.info(
-        f"Aggregated features: n_trials={len(X_all)}, n_features={X_all.shape[1]}, n_subjects={n_found}"
-    )
-    
-    return X_all, y_all, groups, meta
+# -----------------------------------------------------------------
+# Re-exports (preferred import path)
+# -----------------------------------------------------------------
+from .decoding import (  # noqa: E402
+    load_decoding_data as load_decoding_data,
+    load_multiple_subjects_decoding_data as load_multiple_subjects_decoding_data,
+    load_plateau_matrix as load_plateau_matrix,
+    load_epoch_windows as load_epoch_windows,
+)
 
 
 def load_epochs_with_targets(
@@ -858,8 +482,8 @@ def load_epochs_with_targets(
         
         _validate_event_columns(aligned, config, logger)
         
-        constants = {"TARGET_COLUMNS": config.get("event_columns.rating", [])}
-        tgt_col = _pick_target_column(aligned, constants=constants)
+        target_columns = list(config.get("event_columns.rating", []) or [])
+        tgt_col = pick_target_column(aligned, target_columns=target_columns)
         if tgt_col is None:
             logger.warning(f"No suitable target column for {sub}; skipping.")
             continue
@@ -895,80 +519,23 @@ def load_epochs_with_targets(
     return out, common_channels
 
 
-###################################################################
-# Epoch Selection and Processing Utilities
-###################################################################
+# -----------------------------------------------------------------
+# Re-exports (preferred import path)
+# -----------------------------------------------------------------
+from .epochs import (  # noqa: E402
+    apply_baseline as apply_baseline,
+    crop_epochs as crop_epochs,
+    process_temperature_levels as process_temperature_levels,
+    select_epochs_by_value as select_epochs_by_value,
+)
 
-def apply_baseline(
-    epochs: mne.Epochs,
-    baseline_window: Tuple[float, float],
-    logger: Optional[logging.Logger] = None,
-    config=None
-) -> mne.Epochs:
-    from ..analysis.tfr import validate_baseline_indices
-    times = np.asarray(epochs.times)
-    validate_baseline_indices(times, baseline_window, logger=logger, config=config)
-    baseline_start = float(baseline_window[0])
-    baseline_end = float(baseline_window[1])
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=UserWarning)
-        return epochs.copy().apply_baseline((baseline_start, min(baseline_end, 0.0)))
-
-
-def crop_epochs(
-    epochs: mne.Epochs,
-    crop_tmin: Optional[float],
-    crop_tmax: Optional[float],
-    include_tmax_in_crop: bool,
-    logger: Optional[logging.Logger] = None
-) -> mne.Epochs:
-    if crop_tmin is None and crop_tmax is None:
-        return epochs
-    
-    time_min = epochs.tmin if crop_tmin is None else float(crop_tmin)
-    time_max = epochs.tmax if crop_tmax is None else float(crop_tmax)
-    
-    if time_max <= time_min:
-        raise ValueError(f"Invalid crop window: tmin={time_min}, tmax={time_max}")
-    
-    epochs_copy = epochs.copy()
-    if not getattr(epochs_copy, "preload", False):
-        epochs_copy.load_data()
-    
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', category=UserWarning)
-        return epochs_copy.crop(tmin=time_min, tmax=time_max, include_tmax=include_tmax_in_crop)
-
-
-def process_temperature_levels(epochs: mne.Epochs, temperature_column: str) -> Tuple[List, Dict, bool]:
-    temperature_series = epochs.metadata[temperature_column]
-    numeric_values = pd.to_numeric(temperature_series, errors="coerce")
-    
-    if numeric_values.notna().all():
-        levels = np.sort(numeric_values.unique())
-        labels = {
-            value: str(int(value)) if float(value).is_integer() else str(value)
-            for value in levels
-        }
-        return levels, labels, True
-    
-    levels = sorted(temperature_series.astype(str).unique())
-    return levels, {}, False
-
-
-def select_epochs_by_value(epochs: mne.Epochs, column: str, value) -> mne.Epochs:
-    if epochs.metadata is None or column not in epochs.metadata.columns:
-        raise ValueError(f"Column '{column}' not found in epochs.metadata")
-    
-    val_expr = value if isinstance(value, (int, float)) else f"'{value}'"
-    selected = epochs[f"{column} == {val_expr}"]
-    if len(selected) == 0:
-        available_values = sorted(epochs.metadata[column].unique().tolist()) if column in epochs.metadata.columns else []
-        raise ValueError(
-            f"No epochs found for {column} == {value}. "
-            f"Available values: {available_values}"
-        )
-    return selected
+from .features_io import (  # noqa: E402
+    load_subject_features as load_subject_features,
+    load_feature_bundle_for_subject as load_feature_bundle_for_subject,
+    FeatureBundle as FeatureBundle,
+    load_feature_bundle as load_feature_bundle,
+    load_feature_dfs_for_subjects as load_feature_dfs_for_subjects,
+)
 
 
 ###################################################################
@@ -1020,232 +587,6 @@ def build_covariates_without_temp(
     return covariates_without_temp
 
 
-###################################################################
-# Feature Loading Utilities
-###################################################################
-
-def load_subject_features(subjects: List[str], deriv_root: Path, logger: Optional[logging.Logger] = None) -> Dict[str, pd.DataFrame]:
-    """Loads feature files for multiple subjects.
-    
-    Parameters
-    ----------
-    subjects : List[str]
-        List of subject identifiers (without 'sub-' prefix)
-    deriv_root : Path
-        Root directory for derivatives
-    logger : Optional[logging.Logger]
-        Logger instance
-        
-    Returns
-    -------
-    Dict[str, pd.DataFrame]
-        Dictionary mapping subject IDs to feature DataFrames
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if not subjects:
-        return {}
-    
-    subject_features = {}
-    for subject in subjects:
-        feature_path = deriv_features_path(deriv_root, subject) / "features_eeg_direct.tsv"
-        if not feature_path.exists():
-            logger.warning(f"Missing features for sub-{subject}: {feature_path}")
-            continue
-        subject_features[subject] = pd.read_csv(feature_path, sep="\t")
-    return subject_features
-
-
-def load_feature_bundle_for_subject(
-    subject: str,
-    deriv_root: Path,
-    logger: Optional[logging.Logger] = None,
-) -> tuple[
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-]:
-    """
-    Load per-subject feature tables commonly used for visualization.
-    Returns power, microstate, connectivity, aperiodic, PAC, PAC-trial, PAC-time, and ITPC dataframes (missing entries are None).
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    features_dir = deriv_features_path(deriv_root, subject)
-    power_path = features_dir / "features_eeg_direct.tsv"
-    if not power_path.exists():
-        logger.warning("Power features not found at %s", power_path)
-        return None, None, None, None, None, None, None, None
-
-    try:
-        pow_df = read_tsv(power_path)
-    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-        logger.error("Failed to read power features from %s: %s", power_path, exc)
-        return None, None, None, None, None, None, None, None
-
-    def _safe_read(path: Path) -> Optional[pd.DataFrame]:
-        if not path.exists():
-            return None
-        try:
-            return read_tsv(path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read %s: %s", path, exc)
-            return None
-
-    ms_df = _safe_read(features_dir / "features_microstates.tsv")
-    conn_df = _safe_read(features_dir / "features_connectivity.tsv")
-    aper_df = _safe_read(features_dir / "features_aperiodic.tsv")
-    pac_df = _safe_read(features_dir / "features_pac.tsv")
-    pac_trials_df = _safe_read(features_dir / "features_pac_trials.tsv")
-    pac_time_df = _safe_read(features_dir / "features_pac_time.tsv")
-    itpc_df = _safe_read(features_dir / "features_itpc.tsv")
-
-    return pow_df, ms_df, conn_df, aper_df, pac_df, pac_trials_df, pac_time_df, itpc_df
-
-
-@dataclass
-class FeatureBundle:
-    """Unified container for all feature tables loaded for a subject."""
-    power_df: Optional[pd.DataFrame] = None
-    microstate_df: Optional[pd.DataFrame] = None
-    connectivity_df: Optional[pd.DataFrame] = None
-    aperiodic_df: Optional[pd.DataFrame] = None
-    pac_df: Optional[pd.DataFrame] = None
-    pac_trials_df: Optional[pd.DataFrame] = None
-    pac_time_df: Optional[pd.DataFrame] = None
-    itpc_df: Optional[pd.DataFrame] = None
-    complexity_df: Optional[pd.DataFrame] = None
-    dynamics_df: Optional[pd.DataFrame] = None
-    all_features_df: Optional[pd.DataFrame] = None
-    targets: Optional[pd.Series] = None
-    
-    @property
-    def n_trials(self) -> int:
-        if self.power_df is not None:
-            return len(self.power_df)
-        return 0
-    
-    @property
-    def empty(self) -> bool:
-        return self.power_df is None
-
-
-def load_feature_bundle(
-    subject: str,
-    deriv_root: Path,
-    logger: Optional[logging.Logger] = None,
-    include_targets: bool = False,
-) -> FeatureBundle:
-    """
-    Load all feature tables for a subject into a unified FeatureBundle.
-    
-    This is the canonical loader for feature data. Use this instead of
-    hand-rolling _safe_read logic in individual contexts.
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
-    features_dir = deriv_features_path(deriv_root, subject)
-    
-    def _safe_read(path: Path) -> Optional[pd.DataFrame]:
-        if not path.exists():
-            return None
-        try:
-            return read_tsv(path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read %s: %s", path, exc)
-            return None
-
-    bundle = FeatureBundle(
-        power_df=_safe_read(features_dir / "features_eeg_direct.tsv"),
-        microstate_df=_safe_read(features_dir / "features_microstates.tsv"),
-        connectivity_df=_safe_read(features_dir / "features_connectivity.tsv"),
-        aperiodic_df=_safe_read(features_dir / "features_aperiodic.tsv"),
-        pac_df=_safe_read(features_dir / "features_pac.tsv"),
-        pac_trials_df=_safe_read(features_dir / "features_pac_trials.tsv"),
-        pac_time_df=_safe_read(features_dir / "features_pac_time.tsv"),
-        itpc_df=_safe_read(features_dir / "features_itpc.tsv"),
-        complexity_df=_safe_read(features_dir / "features_complexity.tsv"),
-        dynamics_df=_safe_read(features_dir / "features_dynamics.tsv"),
-        all_features_df=_safe_read(features_dir / "features_all.tsv"),
-    )
-    
-    if include_targets:
-        targets_df = _safe_read(features_dir / "target_vas_ratings.tsv")
-        if targets_df is not None:
-            if targets_df.shape[1] == 1:
-                bundle.targets = pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
-            else:
-                numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
-                    bundle.targets = pd.to_numeric(targets_df[numeric_cols[0]], errors="coerce")
-    
-    return bundle
-
-
-def load_feature_dfs_for_subjects(
-    subjects: List[str],
-    deriv_root: Path,
-    input_filename_key: str,
-    logger: logging.Logger,
-    config,
-) -> pd.DataFrame:
-    """
-    Load feature DataFrames for multiple subjects and concatenate them.
-    
-    Parameters
-    ----------
-    subjects : List[str]
-        List of subject identifiers (without 'sub-' prefix)
-    deriv_root : Path
-        Root directory for derivatives
-    input_filename_key : str
-        Config key for the feature filename (e.g., "group_aggregation.power_features_file")
-    logger : logging.Logger
-        Logger instance
-    config
-        Configuration object
-        
-    Returns
-    -------
-    pd.DataFrame
-        Concatenated DataFrame with all subjects' features, with 'subject' column prepended
-    """
-    input_filename = config.get(input_filename_key)
-    if not input_filename:
-        logger.warning(f"Input filename not found in config: {input_filename_key}")
-        return pd.DataFrame()
-    
-    all_dfs = []
-    for subject in subjects:
-        features_dir = deriv_features_path(deriv_root, subject)
-        file_path = features_dir / input_filename
-        
-        if not file_path.exists():
-            logger.debug(f"Features not found for sub-{subject} at {file_path}")
-            continue
-        
-        try:
-            df = read_tsv(file_path)
-            if df.empty:
-                continue
-            df.insert(0, "subject", subject)
-            all_dfs.append(df)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as e:
-            logger.warning(f"Failed to read features for sub-{subject} at {file_path}: {e}")
-            continue
-    
-    if not all_dfs:
-        logger.warning(f"No features found for {input_filename_key} across any subject")
-        return pd.DataFrame()
-    
-    return pd.concat(all_dfs, ignore_index=True)
 
 
 def load_behavior_plot_features(
@@ -1254,170 +595,28 @@ def load_behavior_plot_features(
     config,
     logger: logging.Logger,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.DataFrame], Optional[List[str]]]:
-    """Load power features, targets, and metadata needed for behavior plots."""
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject, task, align="strict", preload=False,
-        deriv_root=config.deriv_root, bids_root=config.bids_root,
-        config=config, logger=logger
-    )
-
-    _, pow_df, _, y, info = _load_features_and_targets(
-        subject, task, config.deriv_root, config, epochs=epochs
-    )
-
-    if pow_df is None or y is None:
-        logger.error("Features or targets not found for sub-%s", subject)
-        return None, None, None, None
-
-    power_bands = get_frequency_band_names(config)
-    return pow_df, y, info, power_bands
+    return _load_behavior_plot_features_v2(subject, task, config, logger)
 
 
 def load_stats_file_with_fallbacks(
     stats_dir: Path,
     patterns: List[str],
 ) -> Optional[pd.DataFrame]:
-    """Try loading a stats file from multiple possible patterns.
-    
-    Args:
-        stats_dir: Directory containing stats files
-        patterns: List of filename patterns to try in order
-    
-    Returns:
-        DataFrame if found, None otherwise
-    """
-    for pattern in patterns:
-        filepath = stats_dir / pattern
-        if filepath.exists():
-            df = read_tsv(filepath)
-            if df is not None and not df.empty:
-                return df
-    return None
+    return _load_stats_file_with_fallbacks_v2(stats_dir, patterns)
 
 
 def load_behavior_stats_files(stats_dir: Path, logger: logging.Logger) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    """Load rating and temperature correlation stats if available."""
-    rating_stats = None
-    temp_stats = None
-
-    rating_candidates = [
-        stats_dir / "corr_stats_pow_roi_vs_rating.tsv",
-        stats_dir / "corr_stats_power_roi_vs_rating.tsv",
-    ]
-    temp_candidates = [
-        stats_dir / "corr_stats_pow_roi_vs_temp.tsv",
-        stats_dir / "corr_stats_power_roi_vs_temp.tsv",
-    ]
-
-    rating_path = next((p for p in rating_candidates if p.exists()), None)
-    temp_path = next((p for p in temp_candidates if p.exists()), None)
-
-    if rating_path is not None:
-        try:
-            rating_stats = read_tsv(rating_path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read rating stats: %s", exc)
-
-    if temp_path is not None:
-        try:
-            temp_stats = read_tsv(temp_path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read temp stats: %s", exc)
-
-    return rating_stats, temp_stats
+    return _load_behavior_stats_files_v2(stats_dir, logger)
 
 
 def load_subject_data_for_summary(subjects: List[str], task: str, deriv_root: Path, config, logger: Optional[logging.Logger] = None) -> Tuple[Dict, Dict, Dict, Dict, bool]:
-    """Loads subject data for overall band summary.
-    
-    Parameters
-    ----------
-    subjects : List[str]
-        List of subject identifiers (without 'sub-' prefix)
-    task : str
-        Task identifier
-    deriv_root : Path
-        Root directory for derivatives
-    config : Any
-        Config object
-    logger : Optional[logging.Logger]
-        Logger instance
-        
-    Returns
-    -------
-    Tuple[Dict, Dict, Dict, Dict, bool]
-        (rating_x, rating_y, temp_x, temp_y, has_temperature)
-    """
-    if logger is None:
-        logger = logging.getLogger(__name__)
-    
-    if not subjects:
-        return {}, {}, {}, {}, False
-    
-    from ..io.paths import _find_clean_epochs_path
-    
-    rating_x = {}
-    rating_y = {}
-    temp_x = {}
-    temp_y = {}
-    has_temperature = False
-    
-    for subject in subjects:
-        try:
-            _temporal_df, power_df, _conn_df, ratings, _info = _load_features_and_targets(
-                subject, task, deriv_root, config
-            )
-            ratings = pd.to_numeric(ratings, errors="coerce")
-            
-            epochs_path = _find_clean_epochs_path(subject, task, deriv_root=deriv_root, config=config)
-            if not epochs_path:
-                continue
-            
-            epochs, aligned = load_epochs_for_analysis(
-                subject, task, align="strict", preload=False,
-                deriv_root=deriv_root, bids_root=config.bids_root, config=config
-            )
-            if epochs is None:
-                continue
-        except (FileNotFoundError, ValueError) as e:
-            logger.debug(f"Skipping subject {subject} due to expected error: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Unexpected error loading data for subject {subject}: {e}", exc_info=True)
-            raise
-        
-        temperature = None
-        if aligned is not None:
-            temp_columns = config.get("event_columns.temperature")
-            temp_col = _pick_first_column(aligned, temp_columns)
-            if temp_col:
-                temperature = pd.to_numeric(aligned[temp_col], errors="coerce")
-                has_temperature = True
-        
-        power_bands = get_frequency_band_names(config)
-        for band in power_bands:
-            band_str = str(band)
-            power_cols = [
-                col for col in power_df.columns
-                if str(col).startswith(f"power_plateau_{band_str}_ch_")
-            ]
-            if not power_cols:
-                power_cols = [
-                    col for col in power_df.columns
-                    if str(col).startswith(f"pow_{band_str}_")
-                ]
-            if not power_cols:
-                continue
-            
-            band_power = power_df[power_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1).to_numpy()
-            rating_x.setdefault(band, []).append(band_power)
-            rating_y.setdefault(band, []).append(ratings.to_numpy())
-            
-            if temperature is not None:
-                temp_x.setdefault(band, []).append(band_power)
-                temp_y.setdefault(band, []).append(temperature.to_numpy())
-    
-    return rating_x, rating_y, temp_x, temp_y, has_temperature
+    return _load_subject_data_for_summary_v2(
+        subjects,
+        task,
+        deriv_root,
+        config,
+        logger=logger,
+    )
 
 
 ###################################################################
@@ -1910,7 +1109,7 @@ def build_summary_map_for_prefix(
 
 def load_channel_correlations(subject: str, band: str, deriv_root: Path, 
                                correlation_type: str) -> Optional[pd.DataFrame]:
-    from ..io.paths import deriv_stats_path
+    from eeg_pipeline.io.paths import deriv_stats_path
     
     if not subject or not band or correlation_type not in ("rating", "temp"):
         return None
@@ -1938,7 +1137,7 @@ def load_channel_correlations(subject: str, band: str, deriv_root: Path,
     return df
 
 def load_connectivity_files(subjects: List[str], deriv_root: Path) -> Dict[str, List[pd.DataFrame]]:
-    from ..io.paths import deriv_stats_path
+    from eeg_pipeline.io.paths import deriv_stats_path
     
     if not subjects:
         return {}
@@ -1964,7 +1163,7 @@ def load_connectivity_files(subjects: List[str], deriv_root: Path) -> Dict[str, 
 ###################################################################
 
 def extract_channel_importance_from_coefficients(coef_matrix: np.ndarray, feature_names: List[str]) -> pd.DataFrame:
-    from ..io.decoding import parse_pow_feature
+    from eeg_pipeline.io.decoding import parse_pow_feature
     
     channel_band_to_indices = {}
     for idx, feat in enumerate(feature_names):
@@ -2459,221 +1658,6 @@ def prepare_topomap_correlation_data(band_data: Dict, info: mne.Info) -> Tuple[n
             topo_mask[j] = band_data['significant_mask'][ch_idx]
     
     return topo_data, topo_mask
-
-
-###################################################################
-# Decoding Data Loaders
-###################################################################
-
-
-def load_plateau_matrix(
-    subjects: List[str],
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    log: Optional[logging.Logger] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], pd.DataFrame]:
-    """
-    Load plateau features and targets for multiple subjects.
-
-    Parameters
-    ----------
-    subjects : List[str]
-        Subject IDs to load
-    task : str
-        Task name
-    deriv_root : Path
-        Derivatives directory
-    config : Any
-        Configuration object
-    log : logging.Logger, optional
-        Logger instance
-
-    Returns
-    -------
-    X : np.ndarray
-        Feature matrix (n_samples, n_features)
-    y : np.ndarray
-        Target vector (n_samples,)
-    groups : np.ndarray
-        Subject IDs for each sample
-    feature_cols : List[str]
-        Feature column names
-    meta : pd.DataFrame
-        Metadata with subject_id and trial_id
-    """
-    if log is None:
-        log = logging.getLogger(__name__)
-
-    X_blocks = []
-    y_blocks = []
-    groups = []
-    trial_ids = []
-    feature_cols: Optional[List[str]] = None
-
-    for sub in subjects:
-        _, plateau_df, _, y, _ = _load_features_and_targets(sub, task, deriv_root, config)
-
-        if plateau_df is None or plateau_df.empty:
-            log.warning(f"No plateau features for sub-{sub}; skipping")
-            continue
-
-        if feature_cols is None:
-            feature_cols = plateau_df.columns.tolist()
-        else:
-            missing = set(feature_cols) - set(plateau_df.columns)
-            if missing:
-                raise ValueError(f"Feature mismatch for sub-{sub}; missing: {sorted(missing)}")
-
-        X_block = plateau_df.apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
-        y_block = pd.to_numeric(y, errors="coerce").to_numpy(dtype=float)
-
-        X_blocks.append(X_block)
-        y_blocks.append(y_block)
-        groups.extend([sub] * len(y_block))
-        trial_ids.extend(list(range(len(y_block))))
-
-    if not X_blocks:
-        raise RuntimeError("No subjects with usable plateau features")
-
-    X = np.vstack(X_blocks)
-    y_all = np.concatenate(y_blocks)
-    groups_arr = np.asarray(groups)
-    meta = pd.DataFrame({"subject_id": groups_arr, "trial_id": trial_ids})
-
-    finite_mask = np.isfinite(y_all)
-    if not np.all(finite_mask):
-        n_dropped = np.sum(~finite_mask)
-        log.info(f"Dropping {n_dropped} non-finite targets out of {len(y_all)}")
-        X = X[finite_mask]
-        y_all = y_all[finite_mask]
-        groups_arr = groups_arr[finite_mask]
-        meta = meta.loc[finite_mask].reset_index(drop=True)
-
-    return X, y_all, groups_arr, feature_cols or [], meta
-
-
-def load_epoch_windows(
-    subjects: List[str],
-    task: str,
-    deriv_root: Path,
-    config: Any,
-    window_size: float = 0.5,
-    window_step: float = 0.25,
-    log: Optional[logging.Logger] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
-    """
-    Load epoch data windowed for time-generalization analysis.
-
-    Parameters
-    ----------
-    subjects : List[str]
-        Subject IDs
-    task : str
-        Task name
-    deriv_root : Path
-        Derivatives directory
-    config : Any
-        Configuration object
-    window_size : float
-        Window size in seconds
-    window_step : float
-        Step between windows in seconds
-    log : logging.Logger, optional
-        Logger instance
-
-    Returns
-    -------
-    X_windows : np.ndarray
-        Windowed features (n_samples, n_windows, n_features)
-    y : np.ndarray
-        Target vector
-    groups : np.ndarray
-        Subject IDs
-    window_centers : np.ndarray
-        Center times of each window
-    meta : pd.DataFrame
-        Metadata
-    """
-    if log is None:
-        log = logging.getLogger(__name__)
-
-    X_blocks = []
-    y_blocks = []
-    groups = []
-    window_centers = None
-
-    for sub in subjects:
-        epochs, aligned_events = load_epochs_for_analysis(
-            sub, task,
-            align="strict",
-            preload=True,
-            deriv_root=deriv_root,
-            config=config,
-            logger=log,
-        )
-
-        if epochs is None or aligned_events is None:
-            log.warning(f"No epochs for sub-{sub}; skipping")
-            continue
-
-        target_cols = config.get("event_columns.rating", [])
-        target_col = None
-        for col in target_cols:
-            if col in aligned_events.columns:
-                target_col = col
-                break
-
-        if target_col is None:
-            log.warning(f"No target column for sub-{sub}; skipping")
-            continue
-
-        y_sub = pd.to_numeric(aligned_events[target_col], errors="coerce").to_numpy()
-
-        data = epochs.get_data()
-        times = epochs.times
-        sfreq = epochs.info["sfreq"]
-
-        window_samples = int(window_size * sfreq)
-        step_samples = int(window_step * sfreq)
-
-        n_windows = (len(times) - window_samples) // step_samples + 1
-        if n_windows < 1:
-            log.warning(f"Epochs too short for windowing in sub-{sub}")
-            continue
-
-        if window_centers is None:
-            window_centers = np.array([
-                times[i * step_samples + window_samples // 2]
-                for i in range(n_windows)
-            ])
-
-        X_sub = np.zeros((len(data), n_windows, data.shape[1]))
-        for w in range(n_windows):
-            start = w * step_samples
-            end = start + window_samples
-            X_sub[:, w, :] = np.mean(data[:, :, start:end] ** 2, axis=2)
-
-        X_blocks.append(X_sub)
-        y_blocks.append(y_sub)
-        groups.extend([sub] * len(y_sub))
-
-    if not X_blocks:
-        raise RuntimeError("No subjects with usable epoch data")
-
-    X_windows = np.vstack(X_blocks)
-    y_all = np.concatenate(y_blocks)
-    groups_arr = np.asarray(groups)
-    meta = pd.DataFrame({"subject_id": groups_arr})
-
-    finite_mask = np.isfinite(y_all)
-    if not np.all(finite_mask):
-        X_windows = X_windows[finite_mask]
-        y_all = y_all[finite_mask]
-        groups_arr = groups_arr[finite_mask]
-        meta = meta.loc[finite_mask].reset_index(drop=True)
-
-    return X_windows, y_all, groups_arr, window_centers, meta
 
 
 __all__ = [

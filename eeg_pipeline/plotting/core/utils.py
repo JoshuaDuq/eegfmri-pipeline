@@ -8,9 +8,11 @@ These utilities have no dependencies on sibling plotting modules.
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from ..config import get_plot_config
+from .colors import get_band_colors as _get_band_colors
+from .colors import get_significance_colors as _get_significance_colors
 
 
 ###################################################################
@@ -62,3 +64,10 @@ def log(msg: str, logger: Optional[logging.Logger] = None, level: str = "info") 
         logger = logging.getLogger(__name__)
     getattr(logger, level)(msg)
 
+
+def get_significance_colors(config=None) -> Tuple[str, str]:
+    return _get_significance_colors(config)
+
+
+def get_band_colors() -> Dict[str, str]:
+    return _get_band_colors()

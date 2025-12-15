@@ -13,7 +13,7 @@ from typing import List, Optional
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
-from eeg_pipeline.utils.io.paths import deriv_plots_path, ensure_dir
+from eeg_pipeline.io.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization, extract_roi_tfrs
 from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus
 from eeg_pipeline.utils.parallel import get_n_jobs
@@ -108,10 +108,13 @@ def visualize_subject_tfr(
     tfr_roi_only: bool = False,
     tfr_topomaps_only: bool = False,
     plots: Optional[List[str]] = None,
+    deriv_root: Optional[Path] = None,
 ) -> None:
     logger.info(f"Visualizing TFR for sub-{subject}...")
 
-    plots_dir = deriv_plots_path(config.deriv_root, subject, subdir="tfr")
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
+
+    plots_dir = deriv_plots_path(effective_deriv_root, subject, subdir="tfr")
     ensure_dir(plots_dir)
 
     epochs, events_df = load_epochs_for_analysis(
@@ -119,7 +122,7 @@ def visualize_subject_tfr(
         task,
         align="strict",
         preload=True,
-        deriv_root=config.deriv_root,
+        deriv_root=effective_deriv_root,
         bids_root=config.bids_root,
         config=config,
         logger=logger,
@@ -274,10 +277,11 @@ def _visualize_single_subject(
     config,
     tfr_roi_only: bool,
     tfr_topomaps_only: bool,
+    deriv_root: Path,
 ) -> Optional[str]:
     """Worker function for parallel TFR visualization."""
-    from eeg_pipeline.utils.io.plotting import setup_matplotlib
-    from eeg_pipeline.utils.io.logging import get_logger
+    from eeg_pipeline.plotting.io.figures import setup_matplotlib
+    from eeg_pipeline.io.logging import get_logger
 
     setup_matplotlib(config)
     logger = get_logger(__name__)
@@ -290,6 +294,7 @@ def _visualize_single_subject(
             logger,
             tfr_roi_only=tfr_roi_only,
             tfr_topomaps_only=tfr_topomaps_only,
+            deriv_root=deriv_root,
         )
         return subject
     except Exception as e:
@@ -316,12 +321,14 @@ def visualize_tfr_for_subjects(
 
         config = load_settings()
 
-    from eeg_pipeline.utils.io.plotting import setup_matplotlib
-    from eeg_pipeline.utils.io.logging import get_logger
+    from eeg_pipeline.plotting.io.figures import setup_matplotlib
+    from eeg_pipeline.io.logging import get_logger
 
     setup_matplotlib(config)
 
     task = task or config.get("project.task", "thermalactive")
+
+    effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
 
     if logger is None:
         logger = get_logger(__name__)
@@ -347,6 +354,7 @@ def visualize_tfr_for_subjects(
                 logger,
                 tfr_roi_only=tfr_roi_only,
                 tfr_topomaps_only=tfr_topomaps_only,
+                deriv_root=effective_deriv_root,
             )
     else:
         logger.info(
@@ -354,7 +362,14 @@ def visualize_tfr_for_subjects(
             f"[parallel, n_jobs={n_jobs}]"
         )
         results = Parallel(n_jobs=n_jobs, backend="loky", verbose=10)(
-            delayed(_visualize_single_subject)(subject, task, config, tfr_roi_only, tfr_topomaps_only)
+            delayed(_visualize_single_subject)(
+                subject,
+                task,
+                config,
+                tfr_roi_only,
+                tfr_topomaps_only,
+                effective_deriv_root,
+            )
             for subject in subjects
         )
         successful = [r for r in results if r is not None]

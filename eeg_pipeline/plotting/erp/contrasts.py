@@ -12,16 +12,16 @@ from typing import Dict, List, Optional, Tuple
 
 import mne
 
-from eeg_pipeline.utils.io.plotting import (
+from eeg_pipeline.plotting.io.figures import (
     unwrap_figure as _unwrap_figure,
     log_if_present as _log_if_present,
     build_footer,
     save_fig,
 )
-from eeg_pipeline.utils.io.formatting import format_baseline_string as _format_baseline_string
+from eeg_pipeline.io.formatting import format_baseline_string as _format_baseline_string
 from eeg_pipeline.utils.validation import validate_epochs_for_plotting
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.columns import find_pain_column_in_metadata
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.columns import find_pain_column_in_metadata
 from ...utils.data.loading import select_epochs_by_value
 from ..config import get_plot_config
 

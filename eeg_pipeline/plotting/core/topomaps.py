@@ -12,7 +12,7 @@ import numpy as np
 import mne
 
 from ..config import get_plot_config
-from eeg_pipeline.utils.io.plotting import logratio_to_pct
+from eeg_pipeline.plotting.io.figures import logratio_to_pct
 from ...utils.analysis.stats import format_cluster_ann
 
 

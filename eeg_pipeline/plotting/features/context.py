@@ -9,44 +9,27 @@ This consolidates context/visualization.FeaturePlotContext and plotting/manager.
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import mne
 import pandas as pd
 
-from eeg_pipeline.utils.io.paths import ensure_dir
-from eeg_pipeline.utils.io.tsv import read_tsv as _read_tsv
-from eeg_pipeline.utils.io.plotting import save_fig as _save_fig
+from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.io.tsv import read_tsv as _read_tsv
+from eeg_pipeline.plotting.io.figures import save_fig as _save_fig
 from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.plotting.core.registry import (
+    CategorizedPlotManager,
+    CategorizedPlotRegistry,
+    PlotterFunc,
+)
 
 
-PlotterFunc = Callable[[Any, Dict[str, Path]], None]
-
-
-class VisualizationRegistry:
+class VisualizationRegistry(CategorizedPlotRegistry["FeaturePlotContext"]):
     """Registry for feature plotting functions."""
-    _registry: Dict[str, List[Tuple[str, PlotterFunc]]] = defaultdict(list)
-    
-    @classmethod
-    def register(cls, category: str, name: str = None):
-        """Decorator to register a plotting function."""
-        def decorator(func: PlotterFunc):
-            func_name = name or func.__name__
-            cls._registry[category].append((func_name, func))
-            return func
-        return decorator
-        
-    @classmethod
-    def get_categories(cls) -> List[str]:
-        return list(cls._registry.keys())
-        
-    @classmethod
-    def get_plotters(cls, category: str) -> List[Tuple[str, PlotterFunc]]:
-        return cls._registry.get(category, [])
 
 
 @dataclass
@@ -146,48 +129,39 @@ class FeaturePlotContext:
             return None
 
 
-class VisualizationManager:
+class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
     """Orchestrates the execution of registered plotters."""
-    
+
     def __init__(self, ctx: FeaturePlotContext):
-        self.ctx = ctx
-        self.logger = ctx.logger
-        self.saved_plots: Dict[str, Path] = {}
-        
+        super().__init__(ctx, logger=ctx.logger)
+
     def run_category(self, category: str) -> None:
-        """Run all plotters for a specific category."""
         plotters = VisualizationRegistry.get_plotters(category)
-        if not plotters:
-            self.logger.debug(f"No plotters found for category '{category}'")
-            return
-            
-        n_plotters = len(plotters)
-        self.logger.info(f"Generating {n_plotters} plots for '{category}'...")
-        
         from eeg_pipeline.plotting.style import use_style
-        
+
         with use_style():
-            for idx, (name, func) in enumerate(plotters, 1):
-                try:
-                    self.logger.info(f"  [{idx}/{n_plotters}] {name}...")
-                    func(self.ctx, self.saved_plots)
-                except Exception as e:
-                    self.logger.error(f"Plotter '{name}' failed: {e}", exc_info=True)
-                    
+            super().run_category(category, plotters=plotters)
+
     def run_all(self) -> Dict[str, Path]:
-        """Run all registered plotters."""
         categories = VisualizationRegistry.get_categories()
         preferred_order = [
-            "power", "connectivity", "microstates", 
-            "pac", "complexity", "burst", "erds", "aperiodic", "itpc"
+            "power",
+            "connectivity",
+            "microstates",
+            "pac",
+            "complexity",
+            "burst",
+            "erds",
+            "aperiodic",
+            "itpc",
         ]
-        
+
         ordered = [c for c in preferred_order if c in categories]
         ordered += [c for c in categories if c not in preferred_order]
-        
+
         for cat in ordered:
             self.run_category(cat)
-            
+
         return self.saved_plots
 
 

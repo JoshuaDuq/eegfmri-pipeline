@@ -13,6 +13,7 @@ from .decoding import (
     visualize_incremental_validity,
 )
 from .tfr import visualize_subject_tfr, visualize_tfr_for_subjects
+from .features import visualize_features, visualize_features_for_subjects
 
 __all__ = [
     "visualize_subject_behavior",
@@ -26,5 +27,6 @@ __all__ = [
     "visualize_incremental_validity",
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
+    "visualize_features",
+    "visualize_features_for_subjects",
 ]
-

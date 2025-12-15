@@ -2156,7 +2156,7 @@ def extract_roi_contrast_data(
     Do not use the output of this function for statistical tests that require
     trial-level variance.
     """
-    from ..io.columns import get_pain_column_from_config
+    from eeg_pipeline.io.columns import get_pain_column_from_config
     import mne
     
     if power is None or ev is None:
