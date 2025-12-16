@@ -53,9 +53,6 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
     plot_power_variability_comprehensive,
     plot_cross_frequency_power_correlation,
-    plot_feature_stability_heatmap,
-    plot_temporal_autocorrelation,
-    plot_feature_redundancy_matrix,
     plot_band_power_topomaps,
     plot_spectral_slope_topomap,
     plot_power_trial_variability,
@@ -65,7 +62,6 @@ from eeg_pipeline.plotting.features.roi import (
     plot_aperiodic_by_roi_condition,
     plot_band_segment_condition,
     plot_connectivity_by_roi_band_condition,
-    plot_feature_correlation_heatmap,
     plot_itpc_by_roi_band_condition,
     plot_itpc_plateau_vs_baseline,
     plot_pac_by_roi_condition,
@@ -770,9 +766,9 @@ def plot_tfr(ctx: FeaturePlotContext, saved_files):
     )
 
     from eeg_pipeline.plotting.features.power import plot_power_spectral_density
-    from eeg_pipeline.utils.analysis.tfr import compute_tfr
+    from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
 
-    tfr = compute_tfr(ctx.epochs, ctx.config, ctx.logger)
+    tfr = compute_tfr_morlet(ctx.epochs, ctx.config, ctx.logger)
     if tfr is None:
         return
     safe_plot(
@@ -936,63 +932,6 @@ def plot_power_variability(ctx: FeaturePlotContext, saved_files):
 def plot_power_summary(ctx: FeaturePlotContext, saved_files):
     power_bands = get_frequency_band_names(ctx.config)
 
-    if ctx.all_features is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "feature_stability_heatmap",
-            "summary",
-            None,
-            plot_feature_stability_heatmap,
-            features_df=ctx.all_features,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("summary"),
-            logger=ctx.logger,
-            config=ctx.config,
-        )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "temporal_autocorrelation",
-            "summary",
-            None,
-            plot_temporal_autocorrelation,
-            features_df=ctx.all_features,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("summary"),
-            logger=ctx.logger,
-            config=ctx.config,
-        )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "feature_redundancy_matrix",
-            "summary",
-            None,
-            plot_feature_redundancy_matrix,
-            features_df=ctx.all_features,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("summary"),
-            logger=ctx.logger,
-            config=ctx.config,
-        )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "feature_correlation_heatmap",
-            "summary",
-            None,
-            plot_feature_correlation_heatmap,
-            ctx.all_features,
-            ctx.subject,
-            ctx.subdir("summary"),
-            ctx.logger,
-            ctx.config,
-        )
-
     if ctx.power_df is not None and ctx.epochs_info is not None:
         safe_plot(
             ctx,
@@ -1066,23 +1005,4 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
 ###################################################################
 
 
-@VisualizationRegistry.register("summary")
-def plot_missing_data(ctx: FeaturePlotContext, saved_files):
-    if ctx.all_features is None:
-        return
 
-    from eeg_pipeline.plotting.features.quality import plot_missing_data_matrix
-
-    summary_dir = ctx.subdir("summary")
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "missing_data_matrix",
-        "summary",
-        None,
-        plot_missing_data_matrix,
-        ctx.all_features,
-        summary_dir / f"sub-{ctx.subject}_missing_data_matrix",
-        config=ctx.config,
-    )

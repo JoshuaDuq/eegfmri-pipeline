@@ -97,6 +97,14 @@ def _setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.Argument
     parser.add_argument("mode", choices=["compute", "visualize"], help="Pipeline mode")
     add_common_subject_args(parser)
     add_task_arg(parser)
+    parser.add_argument(
+        "--categories",
+        nargs="+",
+        choices=BEHAVIOR_VISUALIZE_CATEGORIES,
+        default=None,
+        metavar="CATEGORY",
+        help="Feature categories to process (e.g., power, connectivity, itpc)",
+    )
     
     compute_group = parser.add_argument_group("Compute mode options")
     compute_group.add_argument("--correlation-method", choices=["spearman", "pearson"], default=None)
@@ -104,34 +112,20 @@ def _setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.Argument
     compute_group.add_argument("--n-perm", type=int, default=None)
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
-    compute_group.add_argument(
-        "--feature-categories",
-        nargs="+",
-        choices=BEHAVIOR_VISUALIZE_CATEGORIES,
-        default=None,
-        metavar="CATEGORY",
-        help="Specific feature categories to analyze (e.g., power, connectivity, itpc)",
-    )
     
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
     plot_group.add_argument("--plots", nargs="+", metavar="PLOT")
     plot_group.add_argument("--all-plots", action="store_true")
     visualize_group.add_argument("--skip-scatter", action="store_true")
-    visualize_group.add_argument(
-        "--visualize-categories",
-        nargs="+",
-        choices=BEHAVIOR_VISUALIZE_CATEGORIES,
-        default=None,
-        metavar="CATEGORY",
-        help="Specific feature categories to visualize (e.g., power, connectivity, itpc)",
-    )
     return parser
 
 
 def _run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     from eeg_pipeline.pipelines.behavior import BehaviorPipeline
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
+    
+    categories = getattr(args, "categories", None)
     
     if args.mode == "compute":
         rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
@@ -147,19 +141,18 @@ def _run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) ->
         pipeline = BehaviorPipeline(
             config=config,
             computations=args.computations,
-            feature_categories=getattr(args, "feature_categories", None),
+            feature_categories=categories,
         )
         pipeline.run_batch(subjects, task=args.task)
     elif args.mode == "visualize":
         task = resolve_task(args.task, config)
-        visualize_categories = getattr(args, "visualize_categories", None)
         visualize_behavior_for_subjects(
             subjects=subjects,
             task=task,
             config=config,
             scatter_only=False,
             temporal_only=False,
-            visualize_categories=visualize_categories,
+            visualize_categories=categories,
         )
 
 
@@ -174,21 +167,20 @@ def _setup_features(subparsers: argparse._SubParsersAction) -> argparse.Argument
     add_common_subject_args(parser)
     add_task_arg(parser)
     parser.add_argument("--fixed-templates", type=str, help="Path to .npz file containing fixed microstate templates")
-    parser.add_argument("--feature-categories", nargs="+", choices=FEATURE_CATEGORIES, default=None)
+    parser.add_argument(
+        "--categories",
+        nargs="+",
+        choices=FEATURE_VISUALIZE_CATEGORIES,
+        default=None,
+        metavar="CATEGORY",
+        help="Feature categories to process (e.g., power, connectivity, itpc)",
+    )
     parser.add_argument(
         "--precomputed-groups",
         nargs="+",
         choices=PRECOMPUTED_GROUP_CHOICES,
         default=None,
         help="Override config precomputed groups for precomputed/cfc/dynamics features",
-    )
-    parser.add_argument(
-        "--visualize-categories",
-        nargs="+",
-        choices=FEATURE_VISUALIZE_CATEGORIES,
-        default=None,
-        metavar="CATEGORY",
-        help="Specific feature categories to visualize (e.g., power, connectivity, itpc)",
     )
     return parser
 
@@ -197,22 +189,23 @@ def _run_features(args: argparse.Namespace, subjects: List[str], config: Any) ->
     from eeg_pipeline.pipelines.features import FeaturePipeline
     from eeg_pipeline.plotting.orchestration.features import visualize_features_for_subjects
     
+    categories = getattr(args, "categories", None)
+    
     if args.mode == "compute":
         pipeline = FeaturePipeline(config=config)
         pipeline.run_batch(
             subjects=subjects,
             task=args.task,
             fixed_templates_path=Path(args.fixed_templates) if args.fixed_templates else None,
-            feature_categories=args.feature_categories,
+            feature_categories=categories,
             precomputed_groups=args.precomputed_groups,
         )
     elif args.mode == "visualize":
-        visualize_categories = getattr(args, "visualize_categories", None)
         visualize_features_for_subjects(
             subjects=subjects,
             task=args.task,
             config=config,
-            visualize_categories=visualize_categories,
+            visualize_categories=categories,
         )
 
 

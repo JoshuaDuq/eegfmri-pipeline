@@ -1937,101 +1937,6 @@ def plot_temporal_evolution(
         logger.info(f"Saved {feature_label} temporal evolution plot")
 
 
-def plot_feature_correlation_heatmap(
-    features_df: pd.DataFrame,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-    max_features: int = 50,
-) -> None:
-    """Feature Correlation Heatmap."""
-
-    if features_df is None or features_df.empty:
-        return
-
-    from scipy.cluster.hierarchy import linkage, leaves_list
-    from scipy.spatial.distance import squareform
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    skip_cols = ["condition", "trial", "epoch", "subject", "vas", "rating", "temp"]
-    numeric_cols = [
-        c
-        for c in features_df.select_dtypes(include=[np.number]).columns
-        if not any(skip in c.lower() for skip in skip_cols)
-    ]
-
-    if len(numeric_cols) < 3:
-        if logger:
-            logger.info("Too few numeric features for correlation heatmap")
-        return
-
-    max_features = int(
-        get_config_value(config, "plotting.plots.features.correlation.max_features", max_features)
-    )
-    if len(numeric_cols) > max_features:
-        variance = features_df[numeric_cols].var()
-        top_cols = variance.nlargest(max_features).index.tolist()
-        numeric_cols = top_cols
-
-    df_subset = features_df[numeric_cols].dropna(axis=1, how="all")
-
-    if df_subset.shape[1] < 3:
-        return
-
-    corr_matrix = df_subset.corr()
-
-    dissimilarity = 1 - np.abs(corr_matrix.values)
-    np.fill_diagonal(dissimilarity, 0)
-    dissimilarity = np.clip(dissimilarity, 0, None)
-    dissimilarity = (dissimilarity + dissimilarity.T) / 2
-
-    try:
-        condensed = squareform(dissimilarity)
-        linkage_matrix = linkage(condensed, method="average")
-        order = leaves_list(linkage_matrix)
-    except Exception:
-        order = np.arange(len(numeric_cols))
-
-    corr_ordered = corr_matrix.iloc[order, order]
-
-    plot_cfg = get_plot_config(config)
-    fig_size = max(10, min(20, len(numeric_cols) * 0.3))
-    fig, ax = plt.subplots(figsize=(fig_size, fig_size))
-
-    im = ax.imshow(corr_ordered.values, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
-
-    ax.set_xticks(np.arange(len(corr_ordered.columns)))
-    ax.set_yticks(np.arange(len(corr_ordered.index)))
-
-    short_labels = [
-        c.split("_")[-2] + "_" + c.split("_")[-1] if len(c.split("_")) > 2 else c[-15:]
-        for c in corr_ordered.columns
-    ]
-    ax.set_xticklabels(short_labels, rotation=90, fontsize=6)
-    ax.set_yticklabels(short_labels, fontsize=6)
-
-    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
-    cbar.set_label("Pearson Correlation", fontsize=plot_cfg.font.title)
-
-    title = f"Feature Correlation Heatmap\nSubject: {subject} | {len(numeric_cols)} features (clustered)"
-    ax.set_title(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", pad=10)
-
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_feature_correlation_heatmap",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-
-    if logger:
-        logger.info(f"Saved feature correlation heatmap ({len(numeric_cols)} features)")
-
-
 __all__ = [
     "plot_power_by_roi_band_condition",
     "plot_dynamics_by_roi_band_condition",
@@ -2043,5 +1948,4 @@ __all__ = [
     "plot_band_segment_condition",
     "plot_power_plateau_vs_baseline",
     "plot_temporal_evolution",
-    "plot_feature_correlation_heatmap",
 ]

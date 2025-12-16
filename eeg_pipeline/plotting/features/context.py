@@ -62,7 +62,6 @@ class FeaturePlotContext:
     
     def subdir(self, name: str) -> Path:
         path = self.plots_dir / name
-        ensure_dir(path)
         return path
     
     @property

@@ -11,7 +11,18 @@ PlotterFunc = Callable[[CtxT, Dict[str, Path]], None]
 
 
 class CategorizedPlotRegistry(Generic[CtxT]):
-    _registry: Dict[str, List[Tuple[str, PlotterFunc[CtxT]]]] = defaultdict(list)
+    """Base class for categorized plot registries.
+    
+    Each subclass gets its own isolated _registry dict via __init_subclass__.
+    This prevents plotters registered in FeaturePlotRegistry from appearing
+    in BehaviorPlotRegistry and vice versa.
+    """
+    _registry: Dict[str, List[Tuple[str, PlotterFunc[CtxT]]]]
+    
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Each subclass gets its own fresh registry
+        cls._registry = defaultdict(list)
 
     @classmethod
     def register(cls, category: str, name: Optional[str] = None):

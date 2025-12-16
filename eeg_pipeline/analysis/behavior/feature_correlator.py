@@ -146,95 +146,87 @@ def _process_single_column(
     col_name: str,
     col_values: np.ndarray,
     feature_type: str,
-    targets_arr: np.ndarray,
+    targets_aligned: np.ndarray,
     cov_aligned: Optional[pd.DataFrame],
     temp_aligned: Optional[pd.Series],
     loso_groups: Optional[np.ndarray],
     perm_groups: Optional[np.ndarray],
     config_method: str,
     config_min_samples: int,
-    config_n_bootstrap: int,
     config_n_permutations: int,
+    config_n_bootstrap: int,
     config_rng_seed: int,
     control_temperature: bool,
     control_trial_order: bool,
     compute_bayes_factor: bool,
     compute_loso_stability: bool,
     compute_reliability: bool,
-    pipeline_config: Optional[Any],
 ) -> Optional[Dict[str, Any]]:
-    """Process ALL correlations for a single column. Designed for parallel execution.
+    """Process correlations for a single column. Designed for parallel execution.
     
-    This function computes the initial correlation AND all enrichments (partial correlations,
-    permutation tests, etc.) to enable full parallelization at the column level.
+    Computes everything from scratch including basic correlation, partial correlations,
+    bootstrap CI, permutation tests, LOSO stability, and reliability.
     """
     from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
-    from eeg_pipeline.utils.analysis.stats import compute_bootstrap_ci
-    from eeg_pipeline.utils.config.loader import load_config
-    
-    # Ensure config is valid for statistical computations
-    if pipeline_config is None or (isinstance(pipeline_config, dict) and not pipeline_config):
-        pipeline_config = load_config()
+    from eeg_pipeline.utils.analysis.stats.eeg_stats import compute_bootstrap_ci
     
     rng = np.random.default_rng(config_rng_seed)
     
-    # Compute initial raw correlation
-    r_raw, p_raw, n_valid = safe_correlation(
-        col_values, targets_arr, config_method, config_min_samples
-    )
+    # Compute basic correlation
+    r, p, n_valid = safe_correlation(col_values, targets_aligned, config_method, config_min_samples)
     
-    if not np.isfinite(r_raw):
+    if not np.isfinite(r):
         return None
     
-    # Build base record
     d: Dict[str, Any] = {
         "feature": col_name,
         "feature_type": feature_type,
-        "r": r_raw,
-        "p": p_raw,
-        "r_raw": r_raw,
-        "p_raw": p_raw,
-        "p_value": p_raw,
+        "r": float(r),
+        "p": float(p),
         "n": n_valid,
         "method": config_method,
+        "r_raw": float(r),
+        "p_raw": float(p),
+        "p_value": float(p),
         "p_kind_primary": "p_raw",
-        "p_primary": p_raw,
-        "r_primary": r_raw,
+        "p_primary": float(p),
+        "r_primary": float(r),
         "p_primary_source": "raw",
         "p_primary_perm": np.nan,
         "p_primary_is_permutation": False,
         "n_covariates_used": int(cov_aligned.shape[1]) if cov_aligned is not None else 0,
     }
     
-    # Build Series for methods that need them
     feature_series = pd.Series(col_values)
-    target_series = pd.Series(targets_arr)
-    
+    target_series = pd.Series(targets_aligned)
+
     # Bootstrap CI
     if config_n_bootstrap and config_n_bootstrap > 0:
-        valid_mask = np.isfinite(col_values) & np.isfinite(targets_arr)
-        if valid_mask.sum() >= config_min_samples:
+        try:
+            valid_mask = np.isfinite(col_values) & np.isfinite(targets_aligned)
             ci_low, ci_high = compute_bootstrap_ci(
-                col_values[valid_mask],
-                targets_arr[valid_mask],
-                n_bootstrap=config_n_bootstrap,
-                ci_level=0.95,
-                method=config_method,
-                rng=rng,
+                col_values[valid_mask], targets_aligned[valid_mask],
+                n_bootstrap=config_n_bootstrap, ci_level=0.95,
+                method=config_method, rng=rng
             )
             d["ci_low"] = ci_low
             d["ci_high"] = ci_high
+        except Exception:
+            pass
 
-    # Bayes Factor
+    # Bayes factor
     if compute_bayes_factor:
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
-        bf10, bf_interp = compute_bayes_factor_correlation(
-            col_values, targets_arr, method=config_method
-        )
-        d["bf10"] = bf10
-        d["bf_interpretation"] = bf_interp
+        try:
+            from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
+            bf10, bf_interp = compute_bayes_factor_correlation(
+                col_values, targets_aligned, method=config_method
+            )
+            d["bf10"] = bf10
+            d["bf_interpretation"] = bf_interp
+        except Exception:
+            pass
 
-    # Partial correlations with covariates / temperature
+    # Partial correlations
     if cov_aligned is not None or temp_aligned is not None:
         try:
             (
@@ -250,7 +242,7 @@ def _process_single_column(
                 context=feature_type,
                 logger=None,
                 min_samples=config_min_samples,
-                config=pipeline_config,
+                config=None,
             )
             d["r_partial_cov"] = r_pc
             d["p_partial_cov"] = p_pc
@@ -282,7 +274,7 @@ def _process_single_column(
                 n_perm=config_n_permutations,
                 n_eff=n_eff,
                 rng=rng,
-                config=pipeline_config,
+                config=None,
                 groups=perm_groups,
             )
             d["p_perm_raw"] = p_perm_raw
@@ -293,7 +285,7 @@ def _process_single_column(
         except Exception:
             pass
 
-    # Choose primary correlation deterministically
+    # Select primary correlation
     if control_temperature and control_trial_order:
         if pd.notna(d.get("p_partial_cov_temp", np.nan)):
             d["p_kind_primary"] = "p_partial_cov_temp"
@@ -313,7 +305,7 @@ def _process_single_column(
             d["r_primary"] = d.get("r_partial_cov", np.nan)
             d["p_primary_source"] = "partial_cov"
 
-    # Map permutation p-value to primary
+    # Update permutation p-values based on primary
     if config_n_permutations and config_n_permutations > 0:
         p_perm_col_by_primary = {
             "p_raw": "p_perm_raw",
@@ -328,19 +320,22 @@ def _process_single_column(
 
     # LOSO stability
     if compute_loso_stability and loso_groups is not None:
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
-        r_mean, r_std, stability, _ = compute_loso_correlation_stability(
-            col_values, targets_arr, loso_groups, config_method
-        )
-        d["loso_r_mean"] = r_mean
-        d["loso_r_std"] = r_std
-        d["loso_stability"] = stability
+        try:
+            from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
+            r_mean, r_std, stability, _ = compute_loso_correlation_stability(
+                col_values, targets_aligned, loso_groups, config_method
+            )
+            d["loso_r_mean"] = r_mean
+            d["loso_r_std"] = r_std
+            d["loso_stability"] = stability
+        except Exception:
+            pass
 
     # Split-half reliability
     if compute_reliability:
         try:
             rel = compute_correlation_split_half_reliability(
-                col_values, targets_arr, config_method, n_splits=50
+                col_values, targets_aligned, config_method, n_splits=50
             )
             d["reliability_split_half"] = rel
         except Exception:
@@ -438,7 +433,7 @@ class FeatureBehaviorCorrelator:
         feature_type: str,
         subject_ids: Optional[np.ndarray] = None,
     ) -> FeatureCorrelationResult:
-        """Correlate a single feature dataframe with full parallel processing."""
+        """Correlate a single feature dataframe using core function."""
         if df is None or df.empty or targets is None or len(targets) == 0:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
@@ -448,28 +443,29 @@ class FeatureBehaviorCorrelator:
         if df_aligned is None or targets_aligned is None:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
-        # Prepare covariates and temperature
+        # Use core correlation loop
+        classifier = lambda col, source_file_type=None, include_subtype=True: classify_feature(
+            col, source_file_type=source_file_type, include_subtype=include_subtype, registry=self.registry
+        )
         cov_aligned = None
         temp_aligned = None
         loso_groups = None
         perm_groups = None
-        
         if config.control_temperature:
             if config.covariates_without_temp_df is not None:
                 cov_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+            else:
+                cov_aligned = None
         elif config.covariates_df is not None:
             cov_aligned = config.covariates_df.reindex(df_aligned.index)
-            
         if config.control_temperature and config.temperature_series is not None:
             temp_aligned = config.temperature_series.reindex(df_aligned.index)
-            
         if subject_ids is not None:
             try:
                 loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
                 perm_groups = loso_groups
             except ValueError as exc:
                 self.logger.debug(f"Group alignment failed: {exc}")
-                
         if perm_groups is None and config.groups is not None:
             try:
                 perm_groups = _align_groups_to_series(targets_aligned, config.groups)
@@ -477,8 +473,8 @@ class FeatureBehaviorCorrelator:
                     loso_groups = perm_groups
             except ValueError as exc:
                 self.logger.debug(f"Permutation group alignment failed: {exc}")
-
-        # Setup for parallel processing
+        
+        # Parallel column processing - all computation done in _process_single_column
         n_cols = len(df_aligned.columns)
         n_jobs_actual = config.n_jobs
         if n_jobs_actual == -1:
@@ -489,8 +485,10 @@ class FeatureBehaviorCorrelator:
             base_seed = int(config.rng.integers(0, 2**31))
         
         targets_arr = targets_aligned.values if hasattr(targets_aligned, 'values') else np.asarray(targets_aligned)
+        loso_groups_arr = loso_groups if loso_groups is not None else None
+        perm_groups_arr = perm_groups if perm_groups is not None else None
         
-        # Prepare arguments for each column - now includes ALL processing
+        # Prepare arguments for each column (no pre-computed records needed)
         col_args = []
         for i, col_name in enumerate(df_aligned.columns):
             col_values = pd.to_numeric(df_aligned[col_name], errors="coerce").values
@@ -501,19 +499,18 @@ class FeatureBehaviorCorrelator:
                 targets_arr,
                 cov_aligned,
                 temp_aligned,
-                loso_groups,
-                perm_groups,
+                loso_groups_arr,
+                perm_groups_arr,
                 config.method,
                 config.min_samples,
-                config.n_bootstrap,
                 config.n_permutations,
+                config.n_bootstrap,
                 base_seed + i,
                 config.control_temperature,
                 config.control_trial_order,
                 config.compute_bayes_factor,
                 config.compute_loso_stability,
                 config.compute_reliability,
-                self.config,
             ))
         
         # Use parallel processing when beneficial (>10 columns and n_jobs > 1)

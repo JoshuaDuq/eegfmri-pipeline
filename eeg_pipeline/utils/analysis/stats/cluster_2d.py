@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.ndimage import label
+from joblib import Parallel, delayed, cpu_count
 
 from .base import get_statistics_constants
 from .correlation import compute_correlation
@@ -49,6 +50,124 @@ def compute_cluster_masses_2d(
     return labels, masses
 
 
+def _permute_indices(n: int, rng_seed: int, groups: Optional[np.ndarray]) -> np.ndarray:
+    """Generate permuted indices (stateless for parallel use)."""
+    rng = np.random.default_rng(rng_seed)
+    if groups is None:
+        return rng.permutation(n)
+    perm = []
+    for g in np.unique(groups):
+        idx = np.where(groups == g)[0]
+        perm.extend(idx[rng.permutation(len(idx))])
+    return np.asarray(perm)
+
+
+def _single_permutation_threshold(
+    perm_seed: int,
+    n_samples: int,
+    groups: Optional[np.ndarray],
+    informative_bins: List[Tuple[int, int]],
+    bin_data: np.ndarray,
+    y_array: np.ndarray,
+    resid_cache: Dict,
+    min_valid_points: int,
+    use_spearman: bool,
+    cov_count: int,
+) -> float:
+    """Single permutation for threshold derivation."""
+    perm = _permute_indices(n_samples, perm_seed, groups)
+    max_abs = 0.0
+    for fi, ti in informative_bins:
+        r = _compute_single_bin_corr(
+            fi, ti, perm, resid_cache, bin_data, y_array,
+            min_valid_points, use_spearman, cov_count
+        )[0]
+        if np.isfinite(r):
+            max_abs = max(max_abs, abs(float(r)))
+    return max_abs
+
+
+def _single_permutation_mass(
+    perm_seed: int,
+    n_samples: int,
+    groups: Optional[np.ndarray],
+    informative_bins: List[Tuple[int, int]],
+    bin_data: np.ndarray,
+    y_array: np.ndarray,
+    resid_cache: Dict,
+    correlations_shape: Tuple[int, ...],
+    min_valid_points: int,
+    use_spearman: bool,
+    cov_count: int,
+    cluster_alpha: float,
+    cluster_forming_threshold: float,
+    cluster_structure: Optional[np.ndarray],
+) -> float:
+    """Single permutation for max mass computation."""
+    perm_idx = _permute_indices(n_samples, perm_seed, groups)
+    perm_corr = np.full(correlations_shape, np.nan)
+    perm_p = np.full(correlations_shape, np.nan)
+    
+    for fi, ti in informative_bins:
+        r, p = _compute_single_bin_corr(
+            fi, ti, perm_idx, resid_cache, bin_data, y_array,
+            min_valid_points, use_spearman, cov_count
+        )
+        perm_corr[fi, ti] = r
+        perm_p[fi, ti] = p
+    
+    _, masses = compute_cluster_masses_2d(
+        perm_corr, perm_p, cluster_alpha,
+        cluster_forming_threshold, cluster_structure
+    )
+    return max(masses.values()) if masses else 0.0
+
+
+def _compute_single_bin_corr(
+    fi: int,
+    ti: int,
+    perm_idx: np.ndarray,
+    resid_cache: Dict,
+    bin_data: np.ndarray,
+    y_array: np.ndarray,
+    min_valid_points: int,
+    use_spearman: bool,
+    cov_count: int,
+) -> Tuple[float, float]:
+    """Compute correlation for a single bin with permuted y."""
+    if resid_cache:
+        if (fi, ti) not in resid_cache:
+            return np.nan, np.nan
+        x_res, y_res, idx_map = resid_cache[(fi, ti)]
+        if x_res.size < min_valid_points:
+            return np.nan, np.nan
+        order = [idx_map[i] for i in perm_idx if i in idx_map]
+        if len(order) != y_res.size:
+            return np.nan, np.nan
+        y_perm = y_res[order]
+        r, _ = compute_correlation(x_res, y_perm, "spearman" if use_spearman else "pearson")
+        dof = x_res.size - cov_count - 2
+        if dof <= 0 or not np.isfinite(r) or abs(r) >= 1:
+            return np.nan, np.nan
+        t = r * np.sqrt(dof / max(1e-15, 1 - r**2))
+        p = float(2 * stats.t.sf(np.abs(t), dof))
+        return t, p
+    
+    bv = bin_data[fi, ti, :]
+    yv = y_array[perm_idx]
+    mask = np.isfinite(bv) & np.isfinite(yv)
+    n = int(mask.sum())
+    if n < min_valid_points:
+        return np.nan, np.nan
+    r, _ = compute_correlation(bv[mask], yv[mask], "spearman" if use_spearman else "pearson")
+    dof = n - 2
+    if dof <= 0 or not np.isfinite(r) or abs(r) >= 1:
+        return np.nan, np.nan
+    t = r * np.sqrt(dof / max(1e-15, 1 - r**2))
+    p = float(2 * stats.t.sf(np.abs(t), dof))
+    return t, p
+
+
 def compute_permutation_max_masses(
     bin_data: np.ndarray,
     informative_bins: List[Tuple[int, int]],
@@ -63,23 +182,25 @@ def compute_permutation_max_masses(
     covariates_matrix: Optional[np.ndarray] = None,
     groups: Optional[np.ndarray] = None,
     cluster_forming_threshold: Optional[float] = None,
+    n_jobs: int = -1,
 ) -> Tuple[List[float], float]:
-    """Compute permutation distribution of max cluster masses."""
+    """Compute permutation distribution of max cluster masses.
+    
+    Uses parallel processing with loky backend for speed.
+    """
     perm_max = []
     if n_cluster_perm <= 0:
         return perm_max, cluster_forming_threshold or 0.0
     
-    def _permute(n, rng, grps):
-        if grps is None:
-            return rng.permutation(n)
-        perm = []
-        for g in np.unique(grps):
-            idx = np.where(grps == g)[0]
-            perm.extend(idx[rng.permutation(len(idx))])
-        return np.asarray(perm)
+    n_jobs_actual = n_jobs
+    if n_jobs_actual == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
+    
+    grps = np.asarray(groups) if groups is not None else None
+    n_samples = len(y_array)
     
     # Build residual cache for partial correlation
-    resid_cache = {}
+    resid_cache: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray, Dict[int, int]]] = {}
     cov_count = covariates_matrix.shape[1] if covariates_matrix is not None else 0
     if covariates_matrix is not None:
         cov = np.asarray(covariates_matrix, dtype=float)
@@ -100,70 +221,56 @@ def compute_permutation_max_masses(
             idx_map = {int(i): pos for pos, i in enumerate(np.where(mask)[0])}
             resid_cache[(fi, ti)] = (x_res, y_res, idx_map)
     
-    def _corr(fi, ti, perm_idx):
-        if resid_cache:
-            if (fi, ti) not in resid_cache:
-                return np.nan, np.nan
-            x_res, y_res, idx_map = resid_cache[(fi, ti)]
-            if x_res.size < min_valid_points:
-                return np.nan, np.nan
-            order = [idx_map[i] for i in perm_idx if i in idx_map]
-            if len(order) != y_res.size:
-                return np.nan, np.nan
-            y_perm = y_res[order]
-            r, _ = compute_correlation(x_res, y_perm, "spearman" if use_spearman else "pearson")
-            dof = x_res.size - cov_count - 2
-            if dof <= 0 or not np.isfinite(r) or abs(r) >= 1:
-                return np.nan, np.nan
-            t = r * np.sqrt(dof / max(1e-15, 1 - r**2))
-            p = float(2 * stats.t.sf(np.abs(t), dof))
-            return t, p
-        
-        bv = bin_data[fi, ti, :]
-        yv = y_array[perm_idx]
-        mask = np.isfinite(bv) & np.isfinite(yv)
-        n = int(mask.sum())
-        if n < min_valid_points:
-            return np.nan, np.nan
-        r, _ = compute_correlation(bv[mask], yv[mask], "spearman" if use_spearman else "pearson")
-        dof = n - 2
-        if dof <= 0 or not np.isfinite(r) or abs(r) >= 1:
-            return np.nan, np.nan
-        t = r * np.sqrt(dof / max(1e-15, 1 - r**2))
-        p = float(2 * stats.t.sf(np.abs(t), dof))
-        return t, p
+    # Generate seeds for reproducibility
+    base_seed = int(cluster_rng.integers(0, 2**31))
     
-    template = np.arange(len(y_array))
-    grps = np.asarray(groups) if groups is not None else None
-    
-    # Derive threshold if needed
+    # Derive threshold if needed (parallelized)
     if cluster_forming_threshold is None:
-        max_abs = []
-        for _ in range(n_cluster_perm):
-            perm = _permute(len(template), cluster_rng, grps)
-            ma = 0.0
-            for fi, ti in informative_bins:
-                r, _ = _corr(fi, ti, perm)
-                if np.isfinite(r):
-                    ma = max(ma, abs(float(r)))
-            max_abs.append(ma)
+        if n_jobs_actual > 1 and n_cluster_perm > 10:
+            max_abs = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+                delayed(_single_permutation_threshold)(
+                    base_seed + i, n_samples, grps, informative_bins,
+                    bin_data, y_array, resid_cache, min_valid_points,
+                    use_spearman, cov_count
+                )
+                for i in range(n_cluster_perm)
+            )
+        else:
+            max_abs = [
+                _single_permutation_threshold(
+                    base_seed + i, n_samples, grps, informative_bins,
+                    bin_data, y_array, resid_cache, min_valid_points,
+                    use_spearman, cov_count
+                )
+                for i in range(n_cluster_perm)
+            ]
         cluster_forming_threshold = float(np.nanpercentile(max_abs, 100 * (1 - cluster_alpha))) if max_abs else 0.0
     
-    # Main permutation loop
-    for _ in range(n_cluster_perm):
-        perm_corr = np.full(correlations_shape, np.nan)
-        perm_p = np.full(correlations_shape, np.nan)
-        perm_idx = _permute(len(template), cluster_rng, grps)
-        
-        for fi, ti in informative_bins:
-            r, p = _corr(fi, ti, perm_idx)
-            perm_corr[fi, ti] = r
-            perm_p[fi, ti] = p
-        
-        _, masses = compute_cluster_masses_2d(perm_corr, perm_p, cluster_alpha, cluster_forming_threshold, cluster_structure)
-        perm_max.append(max(masses.values()) if masses else 0.0)
+    # Main permutation loop (parallelized)
+    offset_seed = base_seed + n_cluster_perm
+    if n_jobs_actual > 1 and n_cluster_perm > 10:
+        perm_max = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_single_permutation_mass)(
+                offset_seed + i, n_samples, grps, informative_bins,
+                bin_data, y_array, resid_cache, correlations_shape,
+                min_valid_points, use_spearman, cov_count,
+                cluster_alpha, cluster_forming_threshold, cluster_structure
+            )
+            for i in range(n_cluster_perm)
+        )
+    else:
+        perm_max = [
+            _single_permutation_mass(
+                offset_seed + i, n_samples, grps, informative_bins,
+                bin_data, y_array, resid_cache, correlations_shape,
+                min_valid_points, use_spearman, cov_count,
+                cluster_alpha, cluster_forming_threshold, cluster_structure
+            )
+            for i in range(n_cluster_perm)
+        ]
     
     return perm_max, cluster_forming_threshold
+
 
 
 def compute_cluster_pvalues(
@@ -214,6 +321,7 @@ def compute_cluster_correction_2d(
     covariates_matrix: Optional[np.ndarray] = None,
     groups: Optional[np.ndarray] = None,
     cluster_forming_threshold: Optional[float] = None,
+    n_jobs: int = -1,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[Dict[str, Any]], List[float], float]:
     """Full 2D cluster correction pipeline."""
     labels = np.zeros_like(correlations, dtype=int)
@@ -227,7 +335,7 @@ def compute_cluster_correction_2d(
     perm_max, thresh = compute_permutation_max_masses(
         bin_data, informative_bins, y_array, correlations.shape, cluster_alpha, min_valid_points,
         use_spearman, n_cluster_perm, cluster_rng, cluster_structure,
-        covariates_matrix, groups, cluster_forming_threshold,
+        covariates_matrix, groups, cluster_forming_threshold, n_jobs,
     )
     cluster_forming_threshold = cluster_forming_threshold if cluster_forming_threshold is not None else thresh
     
@@ -290,6 +398,35 @@ def compute_cluster_masses_1d(
     return full_labels, masses
 
 
+def _single_topomap_permutation(
+    perm_seed: int,
+    channel_data: np.ndarray,
+    temp_arr: np.ndarray,
+    n_channels: int,
+    cluster_alpha: float,
+    min_valid_points: int,
+    use_spearman: bool,
+    ch_to_eeg_idx: Dict[int, int],
+    eeg_picks: np.ndarray,
+    adjacency: np.ndarray,
+) -> float:
+    """Single permutation for topomap cluster correction."""
+    rng = np.random.default_rng(perm_seed)
+    temp_perm = rng.permutation(temp_arr)
+    corrs = np.full(n_channels, np.nan)
+    pvals = np.full(n_channels, np.nan)
+    
+    for ch in range(n_channels):
+        ch_vec = channel_data[ch, :]
+        mask = np.isfinite(ch_vec) & np.isfinite(temp_perm)
+        if mask.sum() >= min_valid_points:
+            r, p = compute_correlation(ch_vec[mask], temp_perm[mask], "spearman" if use_spearman else "pearson")
+            corrs[ch], pvals[ch] = r, p
+    
+    _, masses = compute_cluster_masses_1d(corrs, pvals, cluster_alpha, ch_to_eeg_idx, eeg_picks, adjacency)
+    return max(masses.values()) if masses else 0.0
+
+
 def compute_topomap_permutation_masses(
     channel_data: np.ndarray,
     temp_series: pd.Series,
@@ -302,28 +439,38 @@ def compute_topomap_permutation_masses(
     eeg_picks: np.ndarray,
     adjacency: np.ndarray,
     cluster_rng: np.random.Generator,
+    n_jobs: int = -1,
 ) -> List[float]:
-    """Compute permutation max masses for topomap cluster correction."""
-    perm_max = []
+    """Compute permutation max masses for topomap cluster correction.
+    
+    Uses parallel processing with loky backend for speed.
+    """
     if n_cluster_perm <= 0:
-        return perm_max
+        return []
+    
+    n_jobs_actual = n_jobs
+    if n_jobs_actual == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
     
     temp_arr = temp_series.to_numpy(dtype=float)
+    base_seed = int(cluster_rng.integers(0, 2**31))
     
-    for _ in range(n_cluster_perm):
-        temp_perm = cluster_rng.permutation(temp_arr)
-        corrs = np.full(n_channels, np.nan)
-        pvals = np.full(n_channels, np.nan)
-        
-        for ch in range(n_channels):
-            ch_vec = channel_data[ch, :]
-            mask = np.isfinite(ch_vec) & np.isfinite(temp_perm)
-            if mask.sum() >= min_valid_points:
-                r, p = compute_correlation(ch_vec[mask], temp_perm[mask], "spearman" if use_spearman else "pearson")
-                corrs[ch], pvals[ch] = r, p
-        
-        _, masses = compute_cluster_masses_1d(corrs, pvals, cluster_alpha, ch_to_eeg_idx, eeg_picks, adjacency)
-        perm_max.append(max(masses.values()) if masses else 0.0)
+    if n_jobs_actual > 1 and n_cluster_perm > 10:
+        perm_max = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_single_topomap_permutation)(
+                base_seed + i, channel_data, temp_arr, n_channels, cluster_alpha,
+                min_valid_points, use_spearman, ch_to_eeg_idx, eeg_picks, adjacency
+            )
+            for i in range(n_cluster_perm)
+        )
+    else:
+        perm_max = [
+            _single_topomap_permutation(
+                base_seed + i, channel_data, temp_arr, n_channels, cluster_alpha,
+                min_valid_points, use_spearman, ch_to_eeg_idx, eeg_picks, adjacency
+            )
+            for i in range(n_cluster_perm)
+        ]
     
     return perm_max
 

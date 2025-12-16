@@ -249,67 +249,6 @@ def plot_snr_distribution(
     return fig
 
 
-def plot_missing_data_matrix(
-    df: pd.DataFrame,
-    save_path: Path,
-    *,
-    feature_cols: Optional[List[str]] = None,
-    figsize: Tuple[float, float] = (12, 6),
-    max_features: int = 50,
-    config: Any = None,
-) -> plt.Figure:
-    """Visualize missing data patterns across features."""
-    plot_cfg = get_plot_config(config)
-    cfg = get_config_value(config, "plotting.plots.features.quality.missing", {})
-    figsize = tuple(cfg.get("figsize", figsize))
-    max_features = cfg.get("max_features", max_features)
-    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        return fig
-
-    if feature_cols is None:
-        feature_cols = [c for c in df.columns if c not in ["epoch", "trial", "subject", "index"]]
-    else:
-        feature_cols = [c for c in feature_cols if c in df.columns]
-    
-    feature_cols = feature_cols[:max_features]
-    
-    if not feature_cols:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No features", ha="center", va="center")
-        return fig
-    
-    # Missing data matrix
-    missing_matrix = df[feature_cols].isna().values.astype(float)
-    
-    fig, axes = plt.subplots(1, 2, figsize=figsize, gridspec_kw={"width_ratios": [3, 1]})
-    
-    # Left: Heatmap
-    ax1 = axes[0]
-    im = ax1.imshow(missing_matrix, aspect="auto", cmap="gray_r", vmin=0, vmax=1)
-    ax1.set_xlabel("Feature", fontsize=plot_cfg.font.title)
-    ax1.set_ylabel("Trial", fontsize=plot_cfg.font.title)
-    ax1.set_title("Missing Data Pattern (white = missing)", fontsize=plot_cfg.font.title, fontweight="bold")
-    
-    # Right: Per-feature missing %
-    ax2 = axes[1]
-    missing_pct = 100 * df[feature_cols].isna().mean().values
-    y_pos = np.arange(len(feature_cols))
-    
-    colors = ["#EF4444" if p > 10 else "#F59E0B" if p > 1 else "#22C55E" for p in missing_pct]
-    ax2.barh(y_pos, missing_pct, color=colors, edgecolor="white", linewidth=0.5)
-    ax2.set_xlabel("Missing %", fontsize=plot_cfg.font.title)
-    ax2.set_yticks([])
-    ax2.set_title("Per-Feature", fontsize=plot_cfg.font.title)
-    ax2.set_xlim(0, max(100, max(missing_pct) * 1.1))
-    
-    plt.tight_layout()
-    save_fig(fig, save_path)
-    plt.close(fig)
-    
-    return fig
-
 
 def plot_reliability_summary(
     icc_df: pd.DataFrame,

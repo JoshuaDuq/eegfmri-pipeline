@@ -324,6 +324,7 @@ def _compute_correlations_for_condition(
         "cluster_forming_thresholds": cluster_thresholds,
         "cluster_masses": cluster_masses,
         "band_names": band_names,
+        "band_ranges": [bands[bn] for bn in band_names],  # List of (fmin, fmax) tuples
         "window_starts": win_s,
         "window_ends": win_e,
     }

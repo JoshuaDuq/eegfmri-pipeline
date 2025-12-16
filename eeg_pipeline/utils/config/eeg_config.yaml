@@ -125,6 +125,7 @@ validation:  # Data validation parameters (used in validation.py)
 analysis:  # General analysis parameters (used across multiple analysis modules)
   min_subjects_for_group: 2  # Minimum number of subjects required for group-level analysis (used in decoding cross-validation, group feature aggregation)
   min_subjects_for_topomaps: 3  # Minimum subjects required for group topomaps (reference to shared default_min_subjects_topomaps)
+  strict_mode: true  # If true, raise errors on missing data/quality issues; if false, skip with warnings (used in plotting/core/statistics.py)
 erp_analysis:  # ERP analysis parameters (used in 01_erp_analysis.py)
   erp:  # Event-related potential analysis settings
     picks: "eeg"  # Channel type selector for MNE (used in _extract_erp_config)
@@ -142,6 +143,10 @@ erp_analysis:  # ERP analysis parameters (used in 01_erp_analysis.py)
       temp_butterfly: "erp_by_temperature_butterfly.svg"  # Temperature-stratified butterfly plot
       temp_butterfly_template: "erp_by_temperature_butterfly_{label}.svg"  # Template for temperature-specific plots
       counts_file_name: "erp_trial_counts.tsv"  # Filename for trial count statistics (used in extract_erp_stats)
+  topomap_windows:  # Topomap window configurations for ERP/TFR temporal analysis
+    temporal_allbands_plateau:  # Settings for temporal topomap windows across all frequency bands during plateau
+      window_size_ms: 500.0  # Window size [ms] for temporal binning
+      window_count: 5  # Number of temporal windows
 
 ###################################################################
 # TIME-FREQUENCY ANALYSIS
@@ -162,6 +167,7 @@ time_frequency_analysis:  # Time-frequency analysis parameters (used in 02_tfr_a
     time_res_threshold_low_freq: 5.0  # Time resolution threshold [ms] for low frequencies (quality check)
     time_res_threshold_high_freq: 2.0  # Time resolution threshold [ms] for high frequencies (quality check)
     workers: -1  # Number of parallel workers for TFR computation (-1 = all CPUs, same pattern as statistics.cluster_n_jobs and decoding.analysis.perm_refit_n_jobs, used in compute_tfr)
+    decim: 4  # Temporal decimation factor for TFR computation (reduces memory, used in rois.py)
   constants:  # TFR processing constants (used in tfr_utils.py)
     baseline_sentinel: "BASELINED:"  # String marker in TFR comment indicating baseline correction applied
     min_log_value: *epsilon_psd  # Minimum value for log10 operations (prevents log(0), reference to epsilon_psd)
@@ -185,6 +191,7 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     epsilon_std: *epsilon_std
     epsilon_psd: *epsilon_psd
     epsilon_amp: *epsilon_amp
+    epsilon_normalization: *epsilon_std  # Epsilon for normalization operations (used in zscore_normalize)
     min_epochs_for_features: 10
     min_channels_for_connectivity: 3
     min_samples_for_psd: 64
@@ -414,6 +421,11 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
 behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_behavioral_correlations.py, behavior.py)
   n_jobs: -1  # Number of parallel jobs for behavioral analyses (-1 = all CPUs)
   pooling_strategy: "within_subject_centered"  # Pooling strategy for group aggregation: "within_subject_centered" (z-score within subject) or "pooled" (raw pooling)
+  control_temperature: true  # Control for temperature in partial correlations
+  control_trial_order: true  # Control for trial order in partial correlations
+  compute_change_scores: true  # Compute trial-to-trial change score correlations
+  compute_pain_sensitivity: true  # Compute pain sensitivity slope features
+  bootstrap: 0  # Number of bootstrap iterations (0 = disabled, used as fallback for statistics.default_n_bootstrap)
   min_samples:  # Minimum samples for correlation validity (centralized thresholds)
     channel: 10  # Per-channel correlations
     roi: 20  # ROI-level correlations (more stringent for aggregated data)
@@ -581,11 +593,19 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
       n_cycles_factor: 2.0  # Cycles factor for TFR computation in heatmap (same as time_frequency_analysis.tfr.n_cycles_factor)
       decim: 4  # Temporal decimation factor for heatmap TFR
       n_cluster_perm: 10  # Number of cluster permutation tests (quick check)
+      enabled: true  # Enable time-frequency heatmap analysis
   cluster_correction:  # Cluster-based permutation test parameters (used in cluster correction)
+    enabled: false  # Enable cluster-based correction (computationally expensive)
     alpha: *default_alpha  # Cluster significance threshold (reference to shared default_alpha)
     n_permutations: 1000  # Number of permutations for cluster correction (reference to shared default_n_permutations_full, minimum 1000 recommended for reliable p-value estimation at alpha=0.05)
     min_permutations: 1000  # Minimum permutations for reliable cluster test p-values at alpha=0.05 (reference to shared default_n_permutations_full)
     default_n_permutations: 100  # Default number of permutations for quick cluster tests (used in cluster_tests.py when n_perm not specified, reference to shared default_n_permutations_quick)
+    cluster_forming_threshold: *default_alpha  # Threshold for cluster formation (reference to shared default_alpha)
+    min_timepoints: 2  # Minimum timepoints for valid cluster
+    min_channels: 1  # Minimum channels for valid cluster
+    min_cluster_size: 1  # Minimum cluster size for valid cluster
+    tail: 0  # Tail for cluster test (0=two-tailed, 1=right, -1=left)
+    fwer_method: "bonferroni"  # FWER correction method
   temporal_correlation_topomaps:  # Temporal correlation topomap parameters (used in compute_temporal_correlations_by_condition)
     window_size_ms: 500.0  # Window size [ms] for temporal binning
     min_trials_per_condition: 5  # Minimum trials required per condition (temperature/pain) for correlation computation
@@ -624,6 +644,7 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     min_samples_per_condition: 5  # Minimum samples required per condition (pain/non-pain) for condition comparisons (used in condition_correlations.py)
     min_samples_for_sliding_state: 5  # Minimum samples required for sliding state correlation (used in connectivity_correlations.py)
     group_temporal_n_perm: 100  # Number of permutations for group temporal analysis (used in plotting/behavioral/group.py)
+    compute_reliability: false  # Compute split-half reliability for correlations (used in feature_correlator.py)
   # Advanced statistical options
   compute_bayes_factors: false  # Compute Bayes Factor for each correlation (JZS prior, BF>3 = moderate evidence)
   robust_correlation: null  # Robust correlation method: null (standard), "percentage_bend", "winsorized", "shepherd"
@@ -736,6 +757,10 @@ statistics:  # Statistical analysis parameters (used in stats_utils.py)
   sig_alpha: *default_alpha  # Significance threshold for statistical tests (reference to shared default_alpha)
   fdr_alpha: *default_alpha  # False discovery rate threshold (Benjamini-Hochberg correction, reference to shared default_alpha)
   cluster_n_perm: *default_cluster_n_perm  # Number of permutations for cluster-based permutation tests (reference to shared default_cluster_n_perm)
+  cluster_n_jobs: -1  # Number of parallel jobs for cluster-based tests (-1 = all CPUs, used in resolve_cluster_n_jobs)
+  ci_level: 0.95  # Confidence interval level for bootstrap/correlation CIs (used in get_ci_level)
+  n_permutations: 1000  # Default number of permutations for permutation tests (used in get_n_permutations)
+  n_bootstrap: 1000  # Default number of bootstrap iterations (used in get_n_bootstrap)
   min_samples_per_channel: 5  # Minimum samples required per channel for statistical tests
   min_channels_for_aperiodic_corr: 10  # Minimum channels required for aperiodic correlation analysis
   constants:  # Statistical constants (used in _load_statistics_constants, stats_utils.py)
@@ -1084,7 +1109,6 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
       diagnostics_figsize: [10, 8]  # Diagnostics figure size [width, height] [inches]
       stats_fontsize: 10  # Statistics text font size [points]
       channel_annotation_fontsize: 8  # Channel annotation font size [points]
-      max_channels_to_display: 10  # Maximum channels to display in channel-level plots
       percentage_axis_fontsize: 9  # Font size for percentage axes [points]
       percentage_axis_nbins: 7  # Number of bins for percentage axis
       percentage_axis_minor_divisor: 2  # Divisor for minor ticks on percentage axis

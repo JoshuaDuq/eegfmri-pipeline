@@ -224,6 +224,21 @@ def compute_mediation_paths(
     return result
 
 
+def _single_bootstrap_mediation(
+    boot_seed: int,
+    X_c: np.ndarray,
+    M_c: np.ndarray,
+    Y_c: np.ndarray,
+    n: int,
+) -> float:
+    """Single bootstrap iteration for mediation analysis."""
+    rng = np.random.default_rng(boot_seed)
+    idx = rng.integers(0, n, size=n)
+    X_b, M_b, Y_b = X_c[idx], M_c[idx], Y_c[idx]
+    result = compute_mediation_paths(X_b, M_b, Y_b)
+    return result.ab if np.isfinite(result.ab) else np.nan
+
+
 def bootstrap_indirect_effect(
     X: np.ndarray,
     M: np.ndarray,
@@ -231,10 +246,12 @@ def bootstrap_indirect_effect(
     n_boot: int = 5000,
     ci_level: float = 0.95,
     rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
 ) -> Tuple[float, float, np.ndarray]:
     """Bootstrap confidence interval for indirect effect (a×b).
     
     Uses percentile method which is more robust than Sobel for small samples.
+    Parallel processing with loky backend for speed.
     
     Returns
     -------
@@ -242,6 +259,8 @@ def bootstrap_indirect_effect(
     ci_high : float
     boot_distribution : np.ndarray
     """
+    from joblib import Parallel, delayed, cpu_count
+    
     if rng is None:
         rng = np.random.default_rng()
     
@@ -255,15 +274,24 @@ def bootstrap_indirect_effect(
     M_c = M[mask]
     Y_c = Y[mask]
     
-    boot_ab = []
+    n_jobs_actual = n_jobs
+    if n_jobs_actual == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
     
-    for _ in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        X_b, M_b, Y_b = X_c[idx], M_c[idx], Y_c[idx]
-        
-        result = compute_mediation_paths(X_b, M_b, Y_b)
-        if np.isfinite(result.ab):
-            boot_ab.append(result.ab)
+    base_seed = int(rng.integers(0, 2**31))
+    
+    if n_jobs_actual > 1 and n_boot > 100:
+        boot_ab_raw = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_single_bootstrap_mediation)(base_seed + i, X_c, M_c, Y_c, n)
+            for i in range(n_boot)
+        )
+    else:
+        boot_ab_raw = [
+            _single_bootstrap_mediation(base_seed + i, X_c, M_c, Y_c, n)
+            for i in range(n_boot)
+        ]
+    
+    boot_ab = [ab for ab in boot_ab_raw if np.isfinite(ab)]
     
     if len(boot_ab) < 100:
         return np.nan, np.nan, np.array([])
@@ -285,6 +313,7 @@ def run_full_mediation_analysis(
     m_label: str = "Power",
     y_label: str = "Pain Rating",
     rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
 ) -> MediationResult:
     """Run complete mediation analysis with bootstrap CIs.
     
@@ -302,6 +331,8 @@ def run_full_mediation_analysis(
         Labels for variables
     rng : np.random.Generator, optional
         Random generator for reproducibility
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs)
         
     Returns
     -------
@@ -316,7 +347,7 @@ def run_full_mediation_analysis(
     
     # Bootstrap CI for indirect effect
     ci_low, ci_high, _ = bootstrap_indirect_effect(
-        X, M, Y, n_boot=n_boot, rng=rng
+        X, M, Y, n_boot=n_boot, rng=rng, n_jobs=n_jobs
     )
     result.ci_ab_low = ci_low
     result.ci_ab_high = ci_high
@@ -329,6 +360,44 @@ def run_full_mediation_analysis(
 ###################################################################
 
 
+def _analyze_single_feature_mediation(
+    col_name: str,
+    M_values: np.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
+    n_boot: int,
+    min_effect_size: float,
+    x_label: str,
+    y_label: str,
+    rng_seed: int,
+) -> Optional[MediationResult]:
+    """Analyze mediation for a single feature."""
+    mask = np.isfinite(X) & np.isfinite(M_values) & np.isfinite(Y)
+    if mask.sum() < 20:
+        return None
+    
+    r_xm, _ = stats.spearmanr(X[mask], M_values[mask])
+    r_my, _ = stats.spearmanr(M_values[mask], Y[mask])
+    
+    if abs(r_xm) < min_effect_size or abs(r_my) < min_effect_size:
+        return None
+    
+    rng = np.random.default_rng(rng_seed)
+    result = run_full_mediation_analysis(
+        X, M_values, Y,
+        n_boot=n_boot,
+        x_label=x_label,
+        m_label=col_name,
+        y_label=y_label,
+        rng=rng,
+        n_jobs=1,  # Avoid nested parallelism
+    )
+    
+    if result.is_significant_mediation():
+        return result
+    return None
+
+
 def analyze_mediation_for_features(
     X: np.ndarray,
     feature_df: pd.DataFrame,
@@ -339,10 +408,12 @@ def analyze_mediation_for_features(
     y_label: str = "Pain Rating",
     logger: Optional[logging.Logger] = None,
     rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
 ) -> List[MediationResult]:
     """Run mediation analysis for multiple neural features.
     
     Tests whether each feature mediates the X → Y relationship.
+    Uses parallel processing with loky backend for speed.
     
     Parameters
     ----------
@@ -360,50 +431,53 @@ def analyze_mediation_for_features(
         Variable labels
     logger : Logger, optional
     rng : np.random.Generator, optional
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs)
         
     Returns
     -------
     List[MediationResult]
         Results for features showing mediation potential
     """
+    from joblib import Parallel, delayed, cpu_count
+    
     if logger is None:
         logger = logging.getLogger(__name__)
     
     if rng is None:
         rng = np.random.default_rng()
     
-    results = []
+    n_jobs_actual = n_jobs
+    if n_jobs_actual == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
     
-    for col in feature_df.columns:
-        M = feature_df[col].values
-        
-        # Quick screening: check if feature is related to both X and Y
-        mask = np.isfinite(X) & np.isfinite(M) & np.isfinite(Y)
-        if mask.sum() < 20:
-            continue
-        
-        r_xm, _ = stats.spearmanr(X[mask], M[mask])
-        r_my, _ = stats.spearmanr(M[mask], Y[mask])
-        
-        if abs(r_xm) < min_effect_size or abs(r_my) < min_effect_size:
-            continue
-        
-        # Full analysis
-        result = run_full_mediation_analysis(
-            X, M, Y,
-            n_boot=n_boot,
-            x_label=x_label,
-            m_label=col,
-            y_label=y_label,
-            rng=rng,
+    base_seed = int(rng.integers(0, 2**31))
+    n_features = len(feature_df.columns)
+    
+    if n_jobs_actual > 1 and n_features > 5:
+        results_raw = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_analyze_single_feature_mediation)(
+                col, feature_df[col].values, X, Y, n_boot, min_effect_size,
+                x_label, y_label, base_seed + i
+            )
+            for i, col in enumerate(feature_df.columns)
         )
-        
-        if result.is_significant_mediation():
-            results.append(result)
-            logger.info(f"Significant mediation: {col} (ab={result.ab:.3f}, "
-                       f"CI=[{result.ci_ab_low:.3f}, {result.ci_ab_high:.3f}])")
+    else:
+        results_raw = [
+            _analyze_single_feature_mediation(
+                col, feature_df[col].values, X, Y, n_boot, min_effect_size,
+                x_label, y_label, base_seed + i
+            )
+            for i, col in enumerate(feature_df.columns)
+        ]
     
-    logger.info(f"Found {len(results)} significant mediators out of {len(feature_df.columns)} tested")
+    results = [r for r in results_raw if r is not None]
+    
+    for result in results:
+        logger.info(f"Significant mediation: {result.m_label} (ab={result.ab:.3f}, "
+                   f"CI=[{result.ci_ab_low:.3f}, {result.ci_ab_high:.3f}])")
+    
+    logger.info(f"Found {len(results)} significant mediators out of {n_features} tested")
     return results
 
 
