@@ -18,7 +18,7 @@ from eeg_pipeline.plotting.io.figures import (
     build_footer,
     save_fig,
 )
-from eeg_pipeline.io.formatting import format_baseline_string as _format_baseline_string
+from eeg_pipeline.utils.formatting import format_baseline_string as _format_baseline_string
 from eeg_pipeline.utils.validation import validate_epochs_for_plotting
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.data.columns import find_pain_column_in_metadata

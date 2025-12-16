@@ -83,19 +83,16 @@ def _annotate_tf_correlation_figure(fig: plt.Figure, config, alpha: float) -> No
         config: Configuration object
         alpha: Significance threshold (FDR alpha)
     """
-    try:
-        default_baseline = config.get("plotting.tfr.default_baseline_window", [-0.5, -0.01]) if config else [-0.5, -0.01]
-        bwin = config.get("time_frequency_analysis.baseline_window", default_baseline) if config else default_baseline
-        corr_txt = f"FDR BH α={alpha}"
-        text = (
-            f"Group TF correlation | Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s | "
-            f"{corr_txt}"
-        )
-        plot_cfg_annotate = get_plot_config(config)
-        font_size_label = plot_cfg_annotate.font.label
-        fig.text(0.01, 0.01, text, fontsize=font_size_label, alpha=0.8)
-    except Exception:
-        pass
+    default_baseline = config.get("plotting.tfr.default_baseline_window", [-0.5, -0.01]) if config else [-0.5, -0.01]
+    bwin = config.get("time_frequency_analysis.baseline_window", default_baseline) if config else default_baseline
+    corr_txt = f"FDR BH α={alpha}"
+    text = (
+        f"Group TF correlation | Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s | "
+        f"{corr_txt}"
+    )
+    plot_cfg_annotate = get_plot_config(config)
+    font_size_label = plot_cfg_annotate.font.label
+    fig.text(0.01, 0.01, text, fontsize=font_size_label, alpha=0.8)
 
 
 def _select_tf_correlation_method(

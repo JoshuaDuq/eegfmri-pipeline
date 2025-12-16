@@ -14,7 +14,7 @@ from eeg_pipeline.analysis.features.selection import (
     resolve_precomputed_groups,
 )
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.data.features import load_group_microstate_templates
+from eeg_pipeline.utils.data.feature_io import load_group_microstate_templates
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.utils.validation import validate_epochs
 from eeg_pipeline.utils.progress import PipelineProgress
@@ -30,11 +30,13 @@ from eeg_pipeline.analysis.features.precomputed.spectral import (
     extract_spectral_extras_from_precomputed,
     extract_segment_power_from_precomputed,
 )
-from eeg_pipeline.analysis.features.precomputed.gfp import extract_gfp_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.roi import extract_roi_features_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.temporal import extract_temporal_features_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.ratios import extract_band_ratios_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.asymmetry import extract_asymmetry_from_precomputed
+from eeg_pipeline.analysis.features.precomputed.extras import (
+    extract_gfp_from_precomputed,
+    extract_roi_features_from_precomputed,
+    extract_temporal_features_from_precomputed,
+    extract_band_ratios_from_precomputed,
+    extract_asymmetry_from_precomputed,
+)
 from eeg_pipeline.analysis.features.dynamics import extract_dynamics_from_precomputed
 from eeg_pipeline.analysis.features.aperiodic import (
     extract_aperiodic_features,

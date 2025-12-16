@@ -60,10 +60,9 @@ def update_stats_from_dataframe(
         return r_val, p_val, n_eff, ci_val
     
     def _sf(v):
-        try:
-            return float(v)
-        except:
+        if v is None or (isinstance(v, float) and np.isnan(v)):
             return np.nan
+        return float(v)
     
     return (
         _sf(stats_df.get("r", r_val)),

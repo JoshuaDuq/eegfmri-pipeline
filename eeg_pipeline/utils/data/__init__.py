@@ -1,8 +1,22 @@
 # Import commonly used functions
-from .epochs_loading import load_epochs_for_analysis
+from .epochs import load_epochs_for_analysis
 from .subjects import parse_subject_args, get_available_subjects
-from .features_io import load_feature_bundle
-from .features_io import _load_features_and_targets
+from .feature_io import (
+    FeatureBundle,
+    load_feature_bundle,
+    load_feature_bundle_for_subject,
+    load_feature_dfs_for_subjects,
+    load_subject_features,
+    _load_features_and_targets,
+    export_fmri_regressors,
+    save_all_features,
+    save_microstate_templates,
+    load_group_microstate_templates,
+    compute_group_microstate_templates,
+    save_trial_alignment_manifest,
+    save_dropped_trials_log,
+    iterate_feature_columns,
+)
 from .behavior import load_behavior_plot_features, load_behavior_stats_files, load_stats_file_with_fallbacks
 from .decoding import load_plateau_matrix, load_epoch_windows, load_epochs_with_targets
 from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
@@ -15,9 +29,6 @@ from .alignment import (
     align_events_to_epochs,
     get_aligned_events,
 )
-from .discovery import (
-    get_available_subjects as get_available_subjects,
-)
 from .covariates import (
     _build_covariate_matrices,
     _pick_first_column,
@@ -25,21 +36,13 @@ from .covariates import (
     extract_default_covariates,
     _resolve_covariate_columns,
 )
-from .features import (
-    align_feature_dataframes,
-    export_fmri_regressors,
-    save_all_features,
-    save_microstate_templates,
-    load_group_microstate_templates,
-    compute_group_microstate_templates,
-    save_trial_alignment_manifest,
-    save_dropped_trials_log,
-    iterate_feature_columns,
-)
+from .features import align_feature_dataframes
 from .manipulation import (
     find_column,
     reorder_pivot,
     build_plateau_features,
+    flatten_lower_triangles,
+    prepare_topomap_correlation_data,
 )
 from .preprocessing import (
     find_brainvision_vhdrs,
@@ -75,6 +78,8 @@ __all__ = [
     "iterate_feature_columns",
     "find_column",
     "reorder_pivot",
+    "flatten_lower_triangles",
+    "prepare_topomap_correlation_data",
     "load_stats_file_with_fallbacks",
     "load_epochs_with_targets",
     "load_plateau_matrix",

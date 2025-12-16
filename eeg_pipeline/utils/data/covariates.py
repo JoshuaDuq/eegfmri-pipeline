@@ -201,3 +201,67 @@ def _build_covariate_matrices(
         covariates_without_temp = None
 
     return covariates_df, covariates_without_temp
+
+
+def build_covariate_matrix(
+    aligned_events: Optional[pd.DataFrame],
+    partial_covars: Optional[List[str]],
+    config: Optional[Any] = None,
+) -> Optional[pd.DataFrame]:
+    """Build covariate matrix from aligned events.
+    
+    Public wrapper around _build_covariate_matrices that returns only
+    the full covariate matrix.
+    """
+    if aligned_events is None:
+        return None
+    
+    _, temp_col = extract_temperature_data(aligned_events, config)
+    covariates_df, _ = _build_covariate_matrices(
+        aligned_events, partial_covars, temp_col, config
+    )
+    return covariates_df
+
+
+def build_covariates_without_temp(
+    covariates_df: Optional[pd.DataFrame],
+    temperature_column: Optional[str],
+) -> Optional[pd.DataFrame]:
+    """Build covariate matrix excluding temperature column.
+    
+    Parameters
+    ----------
+    covariates_df : DataFrame or None
+        Full covariate matrix
+    temperature_column : str or None
+        Name of temperature column to exclude
+        
+    Returns
+    -------
+    DataFrame or None
+        Covariates without temperature, or None if empty
+    """
+    if covariates_df is None or covariates_df.empty:
+        return None
+    
+    temp_canonical = _canonical_covariate_name(temperature_column)
+    
+    cols_to_drop = []
+    if temperature_column and temperature_column in covariates_df.columns:
+        cols_to_drop.append(temperature_column)
+    if temp_canonical and temp_canonical in covariates_df.columns and temp_canonical != temperature_column:
+        cols_to_drop.append(temp_canonical)
+    
+    if not cols_to_drop:
+        return covariates_df.copy()
+    
+    result = covariates_df.drop(columns=cols_to_drop, errors="ignore")
+    return None if result.empty else result
+
+
+__all__ = [
+    "extract_temperature_data",
+    "extract_default_covariates",
+    "build_covariate_matrix",
+    "build_covariates_without_temp",
+]

@@ -8,7 +8,7 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 
-from eeg_pipeline.analysis.features.precomputed.asymmetry import extract_asymmetry_from_precomputed
+from eeg_pipeline.analysis.features.precomputed.extras import extract_asymmetry_from_precomputed
 from eeg_pipeline.analysis.features.precomputed.spectral import (
     extract_segment_power_from_precomputed,
     extract_spectral_extras_from_precomputed,

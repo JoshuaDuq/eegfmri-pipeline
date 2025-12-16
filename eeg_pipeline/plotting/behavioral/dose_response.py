@@ -26,7 +26,7 @@ from eeg_pipeline.infra.paths import ensure_dir, deriv_plots_path, deriv_feature
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.core.utils import get_band_colors, get_significance_colors
-from eeg_pipeline.utils.data.feature_columns import (
+from eeg_pipeline.utils.data.features import (
     get_aperiodic_columns,
     get_connectivity_columns_by_band,
     get_itpc_columns_by_band,
@@ -51,12 +51,7 @@ BAND_COLORS = get_band_colors()
 # =============================================================================
 
 
-def _find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    """Find first matching column from candidates.
-    
-    DEPRECATED: Use eeg_pipeline.plotting.behavioral.utils.find_column instead.
-    """
-    return find_column(df, candidates)
+
 
 
 def _load_additional_features(deriv_root: Path, subject: str, logger: logging.Logger) -> Dict[str, pd.DataFrame]:
@@ -321,18 +316,14 @@ def _plot_dose_response_curves(
             x_fit = np.linspace(x_valid.min(), x_valid.max(), 100)
             y_lin = slope * x_fit + intercept
             
-            try:
-                coeffs = np.polyfit(x_valid, y_valid, 2)
-                y_quad = np.polyval(coeffs, x_fit)
-                r_quad = np.corrcoef(y_valid, np.polyval(coeffs, x_valid))[0, 1]
-                
-                ax.plot(x_fit, y_lin, '--', color='gray', alpha=0.7, linewidth=1.5,
-                       label=f"Linear (r²={r_lin**2:.2f})")
-                ax.plot(x_fit, y_quad, ':', color='darkgray', alpha=0.7, linewidth=1.5,
-                       label=f"Quadratic (r²={r_quad**2:.2f})")
-            except Exception:
-                ax.plot(x_fit, y_lin, '--', color='gray', alpha=0.7, linewidth=1.5,
-                       label=f"Linear (r²={r_lin**2:.2f})")
+            coeffs = np.polyfit(x_valid, y_valid, 2)
+            y_quad = np.polyval(coeffs, x_fit)
+            r_quad = np.corrcoef(y_valid, np.polyval(coeffs, x_valid))[0, 1]
+            
+            ax.plot(x_fit, y_lin, '--', color='gray', alpha=0.7, linewidth=1.5,
+                   label=f"Linear (r²={r_lin**2:.2f})")
+            ax.plot(x_fit, y_quad, ':', color='darkgray', alpha=0.7, linewidth=1.5,
+                   label=f"Quadratic (r²={r_quad**2:.2f})")
         
         ax.set_xlabel("Temperature (°C)", fontsize=10)
         ax.set_ylabel(y_label, fontsize=10)
@@ -401,31 +392,28 @@ def _plot_nonlinearity_test(
         slope, intercept, r_lin, p_lin, _ = stats.linregress(x, y)
         ss_res_lin = np.sum((y - (slope * x + intercept)) ** 2)
         
-        try:
-            coeffs = np.polyfit(x, y, 2)
-            y_pred_quad = np.polyval(coeffs, x)
-            ss_res_quad = np.sum((y - y_pred_quad) ** 2)
-            r_quad = np.corrcoef(y, y_pred_quad)[0, 1]
-            
-            df_lin = len(x) - 2
-            df_quad = len(x) - 3
-            if df_quad > 0 and ss_res_quad > 0:
-                f_stat = ((ss_res_lin - ss_res_quad) / 1) / (ss_res_quad / df_quad)
-                p_improvement = 1 - stats.f.cdf(f_stat, 1, df_quad)
-            else:
-                f_stat = np.nan
-                p_improvement = np.nan
-            
-            results.append({
-                "band": band,
-                "r2_linear": r_lin ** 2,
-                "r2_quadratic": r_quad ** 2,
-                "improvement": r_quad ** 2 - r_lin ** 2,
-                "f_stat": f_stat,
-                "p_improvement": p_improvement,
-            })
-        except Exception:
-            continue
+        coeffs = np.polyfit(x, y, 2)
+        y_pred_quad = np.polyval(coeffs, x)
+        ss_res_quad = np.sum((y - y_pred_quad) ** 2)
+        r_quad = np.corrcoef(y, y_pred_quad)[0, 1]
+        
+        df_lin = len(x) - 2
+        df_quad = len(x) - 3
+        if df_quad > 0 and ss_res_quad > 0:
+            f_stat = ((ss_res_lin - ss_res_quad) / 1) / (ss_res_quad / df_quad)
+            p_improvement = 1 - stats.f.cdf(f_stat, 1, df_quad)
+        else:
+            f_stat = np.nan
+            p_improvement = np.nan
+        
+        results.append({
+            "band": band,
+            "r2_linear": r_lin ** 2,
+            "r2_quadratic": r_quad ** 2,
+            "improvement": r_quad ** 2 - r_lin ** 2,
+            "f_stat": f_stat,
+            "p_improvement": p_improvement,
+        })
     
     if results:
         results_df = pd.DataFrame(results)

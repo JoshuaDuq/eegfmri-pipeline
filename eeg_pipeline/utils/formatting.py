@@ -95,14 +95,6 @@ def format_temperature_label(val: Union[float, str]) -> str:
         return sanitize_label(str(val))
 
 
-def extract_subject_id_from_path(path: Path) -> Optional[str]:
-    import re
-
-    path_str = str(path)
-    match = re.search(r"sub-(\d+)", path_str)
-    return match.group(1) if match else None
-
-
 def write_group_trial_counts(
     subjects: List[str],
     output_dir: Path,
@@ -329,7 +321,6 @@ __all__ = [
     "build_meta_for_row",
     "get_correlation_type_labels",
     "format_temperature_label",
-    "extract_subject_id_from_path",
     "write_group_trial_counts",
     "format_channel_list_for_display",
     "format_roi_description",

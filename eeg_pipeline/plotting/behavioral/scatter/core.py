@@ -21,7 +21,7 @@ from eeg_pipeline.plotting.behavioral.builders import (
 from eeg_pipeline.utils.data import (
     load_subject_scatter_data,
 )
-from eeg_pipeline.io.formatting import (
+from eeg_pipeline.utils.formatting import (
     format_time_suffix,
     get_residual_labels,
     get_target_labels,
@@ -45,7 +45,7 @@ from eeg_pipeline.utils.analysis.stats import (
     joint_valid_mask,
     update_stats_from_dataframe,
 )
-from eeg_pipeline.utils.data.feature_columns import infer_power_band
+from eeg_pipeline.utils.data.features import infer_power_band
 
 
 @dataclass

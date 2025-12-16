@@ -8,11 +8,20 @@ Submodules:
 - analysis: Analysis utilities (statistics, TFR computation, windowing, signal metrics)
 - config: Configuration loading and YAML file management
 - data: Data loading, feature manipulation, and file I/O for data structures
-- io: File I/O utilities (reading/writing TSV files, path management, figure saving)
-- types: Progress callback types and utilities
 - validation: Data validation utilities
 - progress: Progress tracking and reporting
 - decorators: Function decorators for common patterns
+- formatting: String formatting utilities
+- parallel: Parallel processing utilities
 """
 
-__all__ = []
+__all__ = [
+    "validation",
+    "progress",
+    "formatting",
+    "parallel",
+    "decorators",
+    "analysis",
+    "config",
+    "data",
+]

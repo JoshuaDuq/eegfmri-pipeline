@@ -178,7 +178,7 @@ def load_multiple_subjects_decoding_data(
     if bids_root is None:
         bids_root = config.bids_root
 
-    from .discovery import get_available_subjects
+    from .subjects import get_available_subjects
 
     if subjects is None or subjects == ["all"]:
         subjects = get_available_subjects(
@@ -287,7 +287,7 @@ def load_epochs_with_targets(
             logger=logger,
         )
 
-    from .epochs_loading import load_epochs_for_analysis
+    from .epochs import load_epochs_for_analysis
 
     out: List[Tuple[str, mne.Epochs, pd.Series]] = []
     ch_sets: List[set] = []
@@ -392,7 +392,7 @@ def load_plateau_matrix(
     meta_blocks: List[pd.DataFrame] = []
     feature_cols: Optional[List[str]] = None
 
-    from .epochs_loading import load_epochs_for_analysis
+    from .epochs import load_epochs_for_analysis
 
     for sub in subjects:
         epochs, aligned_events = load_epochs_for_analysis(
@@ -462,7 +462,7 @@ def load_epoch_windows(
     if log is None:
         log = logging.getLogger(__name__)
 
-    from .epochs_loading import load_epochs_for_analysis
+    from .epochs import load_epochs_for_analysis
 
     X_blocks: List[np.ndarray] = []
     y_blocks: List[np.ndarray] = []

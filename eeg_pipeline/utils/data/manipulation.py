@@ -1,12 +1,16 @@
 """
 Data Manipulation Utilities.
 
-Common functions for manipulating DataFrames and other data structures.
+Common functions for manipulating DataFrames and other data structures,
+including connectivity matrix operations and topomap data preparation.
 """
 
 from __future__ import annotations
 
-from typing import List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple
+
+import mne
+import numpy as np
 import pandas as pd
 
 
@@ -149,3 +153,68 @@ def build_plateau_features(
     plateau_df = pd.DataFrame(col_name_to_series)
     plateau_df = plateau_df.reindex(columns=plateau_cols)
     return plateau_df, plateau_cols
+
+
+###################################################################
+# Connectivity Matrix Operations
+###################################################################
+
+
+def flatten_lower_triangles(
+    connectivity_trials: np.ndarray,
+    labels: Optional[np.ndarray],
+    prefix: str,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Flatten lower triangular connectivity matrices to feature vectors.
+    
+    Args:
+        connectivity_trials: 3D array (trials, nodes, nodes)
+        labels: Node labels for naming columns
+        prefix: Prefix for column names
+    
+    Returns:
+        Tuple of (DataFrame with flattened values, list of column names)
+    """
+    if connectivity_trials.ndim != 3:
+        raise ValueError("Connectivity array must be 3D (trials, nodes, nodes)")
+
+    n_trials, n_nodes, _ = connectivity_trials.shape
+    lower_tri_i, lower_tri_j = np.tril_indices(n_nodes, k=-1)
+    flattened_data = connectivity_trials[:, lower_tri_i, lower_tri_j]
+
+    if labels is not None and len(labels) == n_nodes:
+        pair_names = [f"{labels[i]}__{labels[j]}" for i, j in zip(lower_tri_i, lower_tri_j)]
+    else:
+        pair_names = [f"n{i}_n{j}" for i, j in zip(lower_tri_i, lower_tri_j)]
+
+    column_names = [f"{prefix}_{pair}" for pair in pair_names]
+    return pd.DataFrame(flattened_data), column_names
+
+
+###################################################################
+# Topomap Data Preparation
+###################################################################
+
+
+def prepare_topomap_correlation_data(band_data: Dict, info: mne.Info) -> Tuple[np.ndarray, np.ndarray]:
+    """Prepare correlation data for topomap visualization.
+    
+    Args:
+        band_data: Dictionary with 'channels', 'correlations', 'significant_mask' keys
+        info: MNE Info object with channel information
+    
+    Returns:
+        Tuple of (topomap data array, significance mask array)
+    """
+    n_info_chs = len(info["ch_names"])
+    topo_data = np.zeros(n_info_chs)
+    topo_mask = np.zeros(n_info_chs, dtype=bool)
+
+    for j, info_ch in enumerate(info["ch_names"]):
+        if info_ch in band_data["channels"]:
+            ch_idx = band_data["channels"].index(info_ch)
+            if np.isfinite(band_data["correlations"][ch_idx]):
+                topo_data[j] = band_data["correlations"][ch_idx]
+            topo_mask[j] = bool(band_data["significant_mask"][ch_idx])
+
+    return topo_data, topo_mask

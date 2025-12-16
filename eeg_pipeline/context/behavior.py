@@ -72,6 +72,7 @@ class BehaviorContext:
     control_trial_order: bool = True
     compute_change_scores: bool = True
     compute_reliability: bool = True
+    feature_categories: Optional[List[str]] = None
     
     epochs: Any = None
     epochs_info: Any = None
@@ -142,8 +143,8 @@ class BehaviorContext:
         if self._data_loaded:
             return self.targets is not None
 
-        from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
-        from eeg_pipeline.utils.data.features_io import load_feature_bundle
+        from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+        from eeg_pipeline.utils.data.feature_io import load_feature_bundle
         from eeg_pipeline.utils.data.covariates import (
             extract_temperature_data,
             build_covariate_matrix,
@@ -213,6 +214,38 @@ class BehaviorContext:
                     "Feature coverage loaded: %s",
                     ", ".join(f"{k}={v}" for k, v in feature_counts.items() if v > 0),
                 )
+            
+            if self.feature_categories:
+                category_map = {
+                    "power": "power_df",
+                    "connectivity": "connectivity_df",
+                    "pac": "pac_df",
+                    "microstates": "microstates_df",
+                    "aperiodic": "aperiodic_df",
+                    "itpc": "itpc_df",
+                    "dynamics": "precomputed_df",
+                    "precomputed": "precomputed_df",
+                    "psychometrics": None,
+                    "temporal": None,
+                    "dose_response": None,
+                }
+                keep_attrs = set()
+                for cat in self.feature_categories:
+                    attr = category_map.get(cat)
+                    if attr:
+                        keep_attrs.add(attr)
+                
+                if keep_attrs:
+                    for attr_name in ["power_df", "connectivity_df", "pac_df", "microstates_df", "aperiodic_df", "itpc_df", "precomputed_df"]:
+                        if attr_name not in keep_attrs:
+                            setattr(self, attr_name, None)
+                    
+                    kept_cats = [k for k, v in feature_counts.items() if v > 0 and category_map.get(k) in keep_attrs]
+                    self.logger.info(
+                        "Filtered to categories: %s",
+                        ", ".join(self.feature_categories),
+                    )
+            
             self.targets = bundle.targets
 
             if self.targets is None or len(self.targets) == 0:
@@ -236,30 +269,22 @@ class BehaviorContext:
                     f"Re-run feature extraction to generate aligned trial manifests."
                 )
 
-            manifest = read_tsv(manifest_path)
-            if len(manifest) != len(self.targets) or len(manifest) != len(self.aligned_events):
+            import json
+            with open(manifest_path, "r") as f:
+                manifest = json.load(f)
+            
+            manifest_n_epochs = manifest.get("n_epochs", 0)
+            if manifest_n_epochs != len(self.targets) or manifest_n_epochs != len(self.aligned_events):
                 raise ValueError(
                     "Trial alignment manifest length mismatch for sub-%s: manifest=%d, targets=%d, aligned_events=%d"
-                    % (self.subject, len(manifest), len(self.targets), len(self.aligned_events))
+                    % (self.subject, manifest_n_epochs, len(self.targets), len(self.aligned_events))
                 )
 
             self.data_qc["trial_alignment_manifest"] = {
                 "path": str(manifest_path),
-                "n_trials": int(len(manifest)),
-                "has_target_value": bool("target_value" in manifest.columns),
+                "n_trials": manifest_n_epochs,
+                "has_target_value": "events_trial_type" in manifest,
             }
-
-            if "target_value" in manifest.columns:
-                m = pd.to_numeric(manifest["target_value"], errors="coerce")
-                t = pd.to_numeric(self.targets, errors="coerce")
-                valid = m.notna() & t.notna()
-                if int(valid.sum()) > 0:
-                    diff = (m[valid].to_numpy(dtype=float) - t[valid].to_numpy(dtype=float))
-                    self.data_qc["trial_alignment_manifest_target_value"] = {
-                        "n_valid": int(valid.sum()),
-                        "mean_abs_error": float(np.mean(np.abs(diff))),
-                        "max_abs_error": float(np.max(np.abs(diff))),
-                    }
 
             rating_col = None
             try:

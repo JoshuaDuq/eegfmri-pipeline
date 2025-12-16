@@ -80,3 +80,50 @@ def get_n_bootstrap(config: Optional[Any] = None) -> int:
     """Get number of bootstrap samples from config."""
     return int(get_config_value(config, "statistics.n_bootstrap", 1000))
 
+
+def get_epsilon_std(config: Optional[Any] = None) -> float:
+    """Get epsilon for standard deviation/division operations."""
+    return float(get_config_value(config, "epsilon_std", 1e-12))
+
+
+def get_epsilon_psd(config: Optional[Any] = None) -> float:
+    """Get epsilon for power spectral density/log operations."""
+    return float(get_config_value(config, "epsilon_psd", 1e-20))
+
+
+def get_epsilon_amp(config: Optional[Any] = None) -> float:
+    """Get epsilon for amplitude calculations."""
+    return float(get_config_value(config, "epsilon_amp", 1e-10))
+
+
+def get_min_samples_for_correlation(config: Optional[Any] = None) -> int:
+    """Get minimum samples required for correlation calculations."""
+    return int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+
+
+def get_subject_seed(subject: str, base_seed: Optional[int] = None, config: Optional[Any] = None) -> int:
+    """Generate reproducible seed from subject ID.
+    
+    Useful for ensuring bootstrap/permutation results are reproducible
+    per subject while varying across subjects.
+    
+    Parameters
+    ----------
+    subject : str
+        Subject identifier
+    base_seed : int, optional
+        Base random seed. If None, uses project.random_state from config.
+    config : Any, optional
+        Configuration object
+        
+    Returns
+    -------
+    int
+        Subject-specific seed
+    """
+    if base_seed is None:
+        base_seed = int(get_config_value(config, "project.random_state", 42))
+    
+    subject_hash = hash(subject) % (2**31)
+    return (subject_hash + base_seed) % (2**31)
+

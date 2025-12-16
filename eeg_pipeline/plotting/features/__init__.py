@@ -10,13 +10,13 @@ import importlib
 
 
 def visualize_features(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.features import visualize_features as _impl
+    from eeg_pipeline.plotting.orchestration.features import visualize_features as _impl
 
     return _impl(*args, **kwargs)
 
 
 def visualize_features_for_subjects(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.features import visualize_features_for_subjects as _impl
+    from eeg_pipeline.plotting.orchestration.features import visualize_features_for_subjects as _impl
 
     return _impl(*args, **kwargs)
 

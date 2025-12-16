@@ -16,7 +16,7 @@ from eeg_pipeline.plotting.core.colorbars import create_difference_colorbar
 from eeg_pipeline.plotting.core.utils import get_font_sizes
 from eeg_pipeline.utils.analysis.stats import compute_band_correlations, compute_correlation_vmax
 from eeg_pipeline.utils.analysis.tfr import build_roi_channel_mask, build_rois_from_info
-from eeg_pipeline.utils.data.topomaps import prepare_topomap_correlation_data
+from eeg_pipeline.utils.data.manipulation import prepare_topomap_correlation_data
 from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import (

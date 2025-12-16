@@ -599,10 +599,7 @@ def plot_aperiodic_vs_pain(
     fig, ax = plt.subplots(figsize=(6, 5))
     
     sns.scatterplot(x=ratings_agg, y=slopes_agg, ax=ax, alpha=0.6)
-    try:
-        sns.regplot(x=ratings_agg, y=slopes_agg, ax=ax, scatter=False, lowess=True, line_kws={'color': 'red'})
-    except Exception:
-        pass
+    sns.regplot(x=ratings_agg, y=slopes_agg, ax=ax, scatter=False, lowess=True, line_kws={'color': 'red'})
     
     ax.set_xlabel(f"Pain Rating ({rating_col}, {agg_label})")
     ax.set_ylabel("Mean Aperiodic Slope")

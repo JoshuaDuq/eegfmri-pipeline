@@ -21,7 +21,7 @@ import mne
 from eeg_pipeline.utils.config.loader import get_nested_value, load_settings
 
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.io.formatting import sanitize_label, format_baseline_string
+from eeg_pipeline.utils.formatting import sanitize_label, format_baseline_string
 
 
 _PLOT_DEFAULT_DPI = None

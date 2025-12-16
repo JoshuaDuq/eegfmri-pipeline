@@ -24,7 +24,7 @@ from eeg_pipeline.plotting.io.figures import (
 )
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.data.columns import find_temperature_column_in_events
-from ...utils.data.epochs_loading import resolve_columns
+from ...utils.data.epochs import resolve_columns
 from ...utils.data.alignment import get_aligned_events, align_events_to_epochs
 from ...utils.data.alignment import validate_alignment as validate_aligned_events_length
 from ...utils.analysis.stats import (

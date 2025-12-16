@@ -162,21 +162,15 @@ from .eeg_stats import (
     compute_bootstrap_ci,
 )
 
-from .transform import (
+from .core import (
     center_series,
     zscore_series,
     apply_pooling_strategy,
     prepare_data_for_plotting,
     prepare_data_without_validation,
     prepare_group_data,
-)
-
-from .aperiodic import (
     fit_aperiodic,
     fit_aperiodic_to_all_epochs,
-)
-
-from .regression import (
     compute_linear_residuals,
     fit_linear_regression,
     compute_binned_statistics,
@@ -212,7 +206,7 @@ from .band_stats import (
     compute_partial_residuals_stats,
 )
 
-from .coupling import (
+from .core import (
     compute_consensus_labels,
     compute_inter_band_coupling_matrix,
     compute_group_channel_power_statistics,

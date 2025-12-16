@@ -20,15 +20,27 @@ def permute_within_groups(
     n: int,
     rng: np.random.Generator,
     groups: Optional[np.ndarray] = None,
+    min_group_size: int = 2,
 ) -> np.ndarray:
-    """Generate permutation indices, optionally within groups."""
+    """Generate permutation indices, optionally within groups.
+    
+    Raises ValueError if any group has fewer than min_group_size samples.
+    """
     if groups is None:
         idx = np.arange(n)
         rng.shuffle(idx)
         return idx
 
+    unique, counts = np.unique(groups, return_counts=True)
+    small_groups = unique[counts < min_group_size]
+    if len(small_groups) > 0:
+        raise ValueError(
+            f"Groups {small_groups.tolist()} have fewer than {min_group_size} samples. "
+            f"Permutation within groups requires at least {min_group_size} per group."
+        )
+
     idx = np.arange(n)
-    for g in np.unique(groups):
+    for g in unique:
         mask = groups == g
         sub = idx[mask]
         rng.shuffle(sub)

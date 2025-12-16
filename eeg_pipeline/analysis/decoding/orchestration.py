@@ -60,7 +60,7 @@ from eeg_pipeline.utils.data.decoding import load_plateau_matrix
 from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.io.decoding import (
+from eeg_pipeline.infra.decoding import (
     export_predictions,
     export_indices,
     prepare_best_params_path,

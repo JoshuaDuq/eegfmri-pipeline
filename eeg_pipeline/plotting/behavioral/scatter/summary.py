@@ -11,7 +11,7 @@ import pandas as pd
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.io.formatting import sanitize_label
+from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.infra.logging import get_subject_logger
 from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import (

@@ -278,10 +278,9 @@ def compute_partial_residuals_stats(
     from .bootstrap import bootstrap_corr_ci
     
     def _sf(v):
-        try:
-            return float(v)
-        except:
+        if v is None or (isinstance(v, float) and np.isnan(v)):
             return np.nan
+        return float(v)
     
     r_resid = p_resid = np.nan
     n_partial = n_res

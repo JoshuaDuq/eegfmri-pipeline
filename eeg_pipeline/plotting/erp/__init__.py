@@ -15,13 +15,13 @@ from .temperature import erp_by_temperature
 # preserving the public API.
 
 def visualize_subject_erp(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.erp import visualize_subject_erp as _impl
+    from eeg_pipeline.plotting.orchestration.erp import visualize_subject_erp as _impl
 
     return _impl(*args, **kwargs)
 
 
 def visualize_erp_for_subjects(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.erp import visualize_erp_for_subjects as _impl
+    from eeg_pipeline.plotting.orchestration.erp import visualize_erp_for_subjects as _impl
 
     return _impl(*args, **kwargs)
 

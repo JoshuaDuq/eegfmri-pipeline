@@ -18,12 +18,34 @@ from .base import get_statistics_constants
 from .correlation import compute_correlation
 
 
+def check_collinearity(
+    design_matrix: np.ndarray,
+    threshold: float = 0.9,
+) -> Tuple[bool, float]:
+    """Check design matrix for collinearity.
+    
+    Returns (has_collinearity, max_off_diagonal_correlation).
+    """
+    if design_matrix.shape[1] <= 1:
+        return False, 0.0
+    
+    try:
+        corr = np.corrcoef(design_matrix.T)
+        off_diag_mask = ~np.eye(corr.shape[0], dtype=bool)
+        max_corr = float(np.max(np.abs(corr[off_diag_mask])))
+        return max_corr > threshold, max_corr
+    except Exception:
+        return False, 0.0
+
+
 def _build_design_matrix(
     df: pd.DataFrame,
     covariate_columns: List[str],
     method: str,
+    logger: Optional[logging.Logger] = None,
+    collinearity_threshold: float = 0.9,
 ) -> Optional[np.ndarray]:
-    """Build design matrix for partial correlation."""
+    """Build design matrix for partial correlation with collinearity check."""
     intercept = np.ones(len(df))
     
     if method == "spearman":
@@ -34,7 +56,26 @@ def _build_design_matrix(
         design = np.column_stack([intercept, cov_data])
     
     if design.shape[1] > len(df) or np.linalg.matrix_rank(design) < design.shape[1]:
+        if logger:
+            logger.warning("Design matrix is rank-deficient, partial correlation skipped")
         return None
+    
+    has_collinearity, max_corr = check_collinearity(design, collinearity_threshold)
+    if has_collinearity:
+        if logger:
+            logger.warning(
+                f"High collinearity detected in covariates (max r={max_corr:.3f}), "
+                "partial correlation estimates may be unstable"
+            )
+    
+    try:
+        cond = np.linalg.cond(design)
+        if cond > 1e10:
+            if logger:
+                logger.warning(f"Design matrix ill-conditioned (cond={cond:.1e})")
+            return None
+    except Exception:
+        pass
     
     return design
 

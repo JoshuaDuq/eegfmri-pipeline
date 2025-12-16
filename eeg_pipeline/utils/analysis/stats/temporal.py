@@ -28,9 +28,9 @@ from eeg_pipeline.utils.analysis.tfr import (
 )
 from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.features_io import _load_features_and_targets
+from eeg_pipeline.utils.data.feature_io import _load_features_and_targets
 from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
-from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv

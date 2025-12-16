@@ -10,8 +10,8 @@ from ..config.loader import get_frequency_band_names
 from eeg_pipeline.infra.paths import resolve_deriv_root
 from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.infra.tsv import read_tsv
-from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
-from .epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.features import get_power_columns_by_band
+from .epochs import load_epochs_for_analysis
 
 
 def load_behavior_plot_features(
@@ -32,7 +32,7 @@ def load_behavior_plot_features(
         logger=logger,
     )
 
-    from .features_io import _load_features_and_targets
+    from .feature_io import _load_features_and_targets
 
     _, pow_df, _, y, info = _load_features_and_targets(
         subject, task, effective_deriv_root, config, epochs=epochs
@@ -99,7 +99,7 @@ def load_subject_data_for_summary(
 
     for subject in subjects:
         try:
-            from .features_io import _load_features_and_targets
+            from .feature_io import _load_features_and_targets
 
             _temporal_df, power_df, _conn_df, ratings, _info = _load_features_and_targets(
                 subject, task, deriv_root, config

@@ -30,6 +30,9 @@ from __future__ import annotations
 import os
 os.environ["NUMPY_SKIP_MACOS_CHECK"] = "1"
 
+import warnings
+warnings.filterwarnings("ignore", message=".*found in sys.modules.*", category=RuntimeWarning, module="runpy")
+
 import sys
 import logging
 import argparse

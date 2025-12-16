@@ -23,7 +23,7 @@ from eeg_pipeline.plotting.io.figures import (
     build_footer,
     save_fig as central_save_fig,
 )
-from eeg_pipeline.io.formatting import format_baseline_window_string
+from eeg_pipeline.utils.formatting import format_baseline_window_string
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict

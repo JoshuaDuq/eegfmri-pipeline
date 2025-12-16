@@ -75,7 +75,7 @@ class FeaturePlotContext:
     
     def load_data(self) -> None:
         """Load all feature data into memory using the canonical loader."""
-        from eeg_pipeline.utils.data.features_io import load_feature_bundle
+        from eeg_pipeline.utils.data.feature_io import load_feature_bundle
         
         self.logger.info("Loading feature data frames...")
         

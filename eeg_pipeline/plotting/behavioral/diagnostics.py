@@ -203,21 +203,15 @@ def compute_normality_tests(residuals: np.ndarray) -> Dict[str, Any]:
     
     # Shapiro-Wilk (best for n < 5000)
     if n <= 5000:
-        try:
-            stat, p = stats.shapiro(clean)
-            result["shapiro_stat"] = float(stat)
-            result["shapiro_p"] = float(p)
-        except Exception:
-            pass
+        stat, p = stats.shapiro(clean)
+        result["shapiro_stat"] = float(stat)
+        result["shapiro_p"] = float(p)
     
     # D'Agostino K² (better for larger samples)
     if n >= 20:
-        try:
-            stat, p = stats.normaltest(clean)
-            result["dagostino_stat"] = float(stat)
-            result["dagostino_p"] = float(p)
-        except Exception:
-            pass
+        stat, p = stats.normaltest(clean)
+        result["dagostino_stat"] = float(stat)
+        result["dagostino_p"] = float(p)
     
     # Moments
     result["skewness"] = float(stats.skew(clean))
@@ -295,21 +289,18 @@ def _plot_scale_location(
                alpha=plot_cfg.style.scatter.alpha, edgecolor='white', linewidth=0.5)
     
     # Add lowess smoother approximation
-    try:
-        # Sort by fitted values for smooth line
-        sort_idx = np.argsort(fitted)
-        fitted_sorted = fitted[sort_idx]
-        resid_sorted = sqrt_abs_resid[sort_idx]
-        
-        # Moving average as simple smoother
-        window = max(5, len(fitted) // 10)
-        smoothed = np.convolve(resid_sorted, np.ones(window)/window, mode='valid')
-        x_smooth = fitted_sorted[(window-1)//2:-(window//2)] if window > 1 else fitted_sorted
-        
-        if len(x_smooth) == len(smoothed):
-            ax.plot(x_smooth, smoothed, 'r-', linewidth=2, alpha=0.8, label='Smooth')
-    except Exception:
-        pass
+    # Sort by fitted values for smooth line
+    sort_idx = np.argsort(fitted)
+    fitted_sorted = fitted[sort_idx]
+    resid_sorted = sqrt_abs_resid[sort_idx]
+    
+    # Moving average as simple smoother
+    window = max(5, len(fitted) // 10)
+    smoothed = np.convolve(resid_sorted, np.ones(window)/window, mode='valid')
+    x_smooth = fitted_sorted[(window-1)//2:-(window//2)] if window > 1 else fitted_sorted
+    
+    if len(x_smooth) == len(smoothed):
+        ax.plot(x_smooth, smoothed, 'r-', linewidth=2, alpha=0.8, label='Smooth')
     
     ax.set_xlabel("Fitted Values", fontsize=plot_cfg.font.label)
     ax.set_ylabel("√|Standardized Residuals|", fontsize=plot_cfg.font.label)
@@ -358,23 +349,20 @@ def compute_vif(X: pd.DataFrame) -> pd.Series:
         # Add intercept
         X_design = np.column_stack([np.ones(len(y_temp)), X_other])
         
-        try:
-            # Compute R²
-            beta = np.linalg.lstsq(X_design, y_temp, rcond=None)[0]
-            y_pred = X_design @ beta
-            ss_res = np.sum((y_temp - y_pred)**2)
-            ss_tot = np.sum((y_temp - np.mean(y_temp))**2)
-            
-            if ss_tot < 1e-10:
-                r_squared = 0.0
-            else:
-                r_squared = 1 - (ss_res / ss_tot)
-            
-            r_squared = np.clip(r_squared, 0, 0.9999)
-            vif = 1.0 / (1.0 - r_squared)
-            vif_values[col] = float(vif)
-        except Exception:
-            vif_values[col] = np.nan
+        # Compute R²
+        beta = np.linalg.lstsq(X_design, y_temp, rcond=None)[0]
+        y_pred = X_design @ beta
+        ss_res = np.sum((y_temp - y_pred)**2)
+        ss_tot = np.sum((y_temp - np.mean(y_temp))**2)
+        
+        if ss_tot < 1e-10:
+            r_squared = 0.0
+        else:
+            r_squared = 1 - (ss_res / ss_tot)
+        
+        r_squared = np.clip(r_squared, 0, 0.9999)
+        vif = 1.0 / (1.0 - r_squared)
+        vif_values[col] = float(vif)
     
     return pd.Series(vif_values)
 

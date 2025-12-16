@@ -540,7 +540,7 @@ def _save_fig(
         baseline_used: Optional baseline window tuple
     """
     from eeg_pipeline.plotting.io.figures import save_fig as central_save_fig, build_footer
-    from eeg_pipeline.io.formatting import format_baseline_window_string
+    from eeg_pipeline.utils.formatting import format_baseline_window_string
     
     out_dir.mkdir(parents=True, exist_ok=True)
 

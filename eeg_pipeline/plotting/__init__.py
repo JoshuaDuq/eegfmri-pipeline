@@ -30,11 +30,6 @@ __all__ = [
     # Configuration
     "get_plot_config",
     "PlotConfig",
-    # Core utilities
-    "get_font_sizes",
-    "add_colorbar",
-    "compute_cluster_significance",
-    "build_statistical_title",
     # High-level visualizers (lazy via __getattr__)
     "visualize_subject_erp",
     "visualize_erp_for_subjects",

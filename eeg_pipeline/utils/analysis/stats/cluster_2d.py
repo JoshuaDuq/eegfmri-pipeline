@@ -28,11 +28,9 @@ def compute_cluster_masses_2d(
 ) -> Tuple[np.ndarray, Dict[int, float]]:
     """Compute cluster masses from 2D correlation matrix."""
     if cluster_structure is None:
-        try:
-            constants = get_statistics_constants(config)
-            cluster_structure = np.array(constants.get("cluster_structure_2d", [[1,1,1],[1,1,1],[1,1,1]]))
-        except:
-            cluster_structure = np.ones((3, 3))
+        constants = get_statistics_constants(config)
+        raw_structure = constants.get("cluster_structure_2d", [[1,1,1],[1,1,1],[1,1,1]])
+        cluster_structure = np.array(raw_structure) if raw_structure is not None else np.ones((3, 3))
     
     finite = np.isfinite(correlation_matrix)
     if cluster_forming_threshold is not None:

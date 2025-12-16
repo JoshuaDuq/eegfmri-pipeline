@@ -53,7 +53,7 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
 )
 from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import deriv_stats_path
 
 if TYPE_CHECKING:

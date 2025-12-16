@@ -438,14 +438,37 @@ def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
 
 def stage_validate(ctx: BehaviorContext, config: Any) -> None:
     from eeg_pipeline.utils.analysis.stats.fdr import apply_global_fdr
+    from eeg_pipeline.utils.analysis.stats.reliability import compute_hierarchical_fdr_summary
+
+    fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
 
     ctx.logger.info("Applying global FDR correction...")
     apply_global_fdr(
         ctx.stats_dir,
-        alpha=float(getattr(config, "fdr_alpha", 0.05)),
+        alpha=fdr_alpha,
         logger=ctx.logger,
         include_glob="corr_stats_*.tsv",
     )
+
+    ctx.logger.info("Computing hierarchical FDR summary...")
+    try:
+        hier_summary = compute_hierarchical_fdr_summary(
+            ctx.stats_dir,
+            alpha=fdr_alpha,
+            config=ctx.config,
+        )
+        if not hier_summary.empty:
+            hier_path = ctx.stats_dir / "hierarchical_fdr_summary.tsv"
+            hier_summary.to_csv(hier_path, sep="\t", index=False)
+            ctx.logger.info(f"Hierarchical FDR summary saved to {hier_path}")
+            
+            for _, row in hier_summary.iterrows():
+                ctx.logger.info(
+                    f"  {row['analysis_type']}: {row['n_reject_within']}/{row['n_tests']} "
+                    f"({row['pct_reject_within']:.1f}%) reject within-family"
+                )
+    except Exception as exc:
+        ctx.logger.warning(f"Hierarchical FDR failed: {exc}")
 
 
 def stage_export(ctx: BehaviorContext, results: Any) -> List[Path]:

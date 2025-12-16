@@ -34,7 +34,7 @@ from eeg_pipeline.utils.analysis.stats import (
 )
 from eeg_pipeline.plotting.features.utils import compute_cohens_d
 from eeg_pipeline.plotting import utils as plot_utils
-from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
+from eeg_pipeline.utils.data.features import get_power_columns_by_band
 from scipy.stats import mannwhitneyu
 
 

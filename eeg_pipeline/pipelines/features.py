@@ -41,9 +41,9 @@ from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.infra.paths import deriv_features_path, deriv_plots_path, ensure_dir, _load_events_df
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.utils.data.columns import pick_target_column
-from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
-from eeg_pipeline.utils.data.features import (
-    align_feature_dataframes,
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+from eeg_pipeline.utils.data.features import align_feature_dataframes
+from eeg_pipeline.utils.data.feature_io import (
     compute_group_microstate_templates,
     export_fmri_regressors,
     save_all_features,
@@ -196,13 +196,10 @@ class FeaturePipeline(PipelineBase):
         fixed_templates = None
         fixed_template_ch_names = None
         if fixed_templates_path and fixed_templates_path.exists():
-            try:
-                data = np.load(fixed_templates_path)
-                fixed_templates = data["templates"]
-                fixed_template_ch_names = data.get("ch_names")
-                self.logger.info(f"Loaded fixed templates from {fixed_templates_path}")
-            except Exception as e:
-                self.logger.error(f"Failed to load templates: {e}")
+            data = np.load(fixed_templates_path)
+            fixed_templates = data["templates"]
+            fixed_template_ch_names = data.get("ch_names")
+            self.logger.info(f"Loaded fixed templates from {fixed_templates_path}")
 
         ctx = FeatureContext(
             subject=subject,
@@ -306,7 +303,8 @@ class FeaturePipeline(PipelineBase):
         if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
             try:
                 feature_qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
-            except Exception:
+            except TypeError:
+                # If qc is not a dataclass, use it directly
                 feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
 
         combined_df = save_all_features(

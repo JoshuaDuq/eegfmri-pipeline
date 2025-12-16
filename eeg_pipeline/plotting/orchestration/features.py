@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.infra.paths import deriv_features_path, deriv_plots_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
@@ -32,8 +32,16 @@ def visualize_features(
     aligned_events: Optional[Any] = None,
     epochs: Optional[Any] = None,
     tfr: Optional[Any] = None,
+    visualize_categories: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
-    """Generate descriptive feature visualizations using registered plotters."""
+    """Generate descriptive feature visualizations using registered plotters.
+    
+    Parameters
+    ----------
+    visualize_categories : optional list of str
+        Specific categories to visualize (e.g., ["power", "connectivity"]).
+        If None, all registered categories are visualized.
+    """
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -61,7 +69,14 @@ def visualize_features(
             return {}
 
     manager = VisualizationManager(ctx)
-    saved_plots = manager.run_all()
+    
+    if visualize_categories:
+        logger.info(f"Visualizing specific categories: {', '.join(visualize_categories)}")
+        for category in visualize_categories:
+            manager.run_category(category)
+        saved_plots = manager.saved_plots
+    else:
+        saved_plots = manager.run_all()
 
     _save_plot_manifest(plots_dir=plots_dir, subject=subject, logger=logger)
 
@@ -126,8 +141,16 @@ def visualize_features_for_subjects(
     deriv_root: Optional[Path] = None,
     config: Any = None,
     logger: Optional[logging.Logger] = None,
+    visualize_categories: Optional[List[str]] = None,
 ) -> None:
-    """Visualize features for multiple subjects."""
+    """Visualize features for multiple subjects.
+    
+    Parameters
+    ----------
+    visualize_categories : optional list of str
+        Specific categories to visualize (e.g., ["power", "connectivity"]).
+        If None, all registered categories are visualized.
+    """
     if not subjects:
         raise ValueError("No subjects specified")
 
@@ -145,7 +168,8 @@ def visualize_features_for_subjects(
     if logger is None:
         logger = get_logger(__name__)
 
-    logger.info(f"Starting feature visualization: {len(subjects)} subject(s), task={task}")
+    cat_str = f" ({', '.join(visualize_categories)})" if visualize_categories else ""
+    logger.info(f"Starting feature visualization{cat_str}: {len(subjects)} subject(s), task={task}")
 
     for idx, subject in enumerate(subjects, 1):
         logger.info(f"[{idx}/{len(subjects)}] Visualizing sub-{subject}")
@@ -169,6 +193,7 @@ def visualize_features_for_subjects(
             epochs_info=epochs.info if epochs else None,
             aligned_events=aligned_events,
             epochs=epochs,
+            visualize_categories=visualize_categories,
         )
 
     logger.info("Feature visualization complete")

@@ -80,6 +80,53 @@ class ValidationReport:
             json.dump(self.to_dict(), f, indent=2)
 
 
+def validate_sample_size_for_correlation(
+    n: int,
+    target_r: float = 0.3,
+    power: float = 0.8,
+    alpha: float = 0.05,
+) -> AssumptionCheckResult:
+    """Check if sample size is adequate for detecting target correlation.
+    
+    Uses Fisher z-transform power calculation.
+    
+    Parameters
+    ----------
+    n : int
+        Actual sample size
+    target_r : float
+        Target/expected correlation effect size
+    power : float
+        Desired statistical power
+    alpha : float
+        Significance level
+        
+    Returns
+    -------
+    AssumptionCheckResult
+        Result with passed=True if n >= required_n
+    """
+    if abs(target_r) < 0.01:
+        required_n = 999999
+    else:
+        z_r = np.arctanh(np.clip(target_r, -0.999, 0.999))
+        z_alpha = stats.norm.ppf(1 - alpha / 2)
+        z_beta = stats.norm.ppf(power)
+        required_n = int(np.ceil(((z_alpha + z_beta) / z_r) ** 2 + 3))
+    
+    passed = n >= required_n
+    warning = "" if passed else f"Underpowered: n={n}, need n>={required_n} for power={power} to detect r={target_r}"
+    
+    return AssumptionCheckResult(
+        test_name="Sample Size Adequacy",
+        passed=passed,
+        statistic=float(n),
+        p_value=float(required_n),
+        warning_message=warning,
+        details={"target_r": target_r, "power": power, "alpha": alpha, "required_n": required_n},
+    )
+
+
 ###################################################################
 # Normality Checks
 ###################################################################

@@ -277,9 +277,11 @@ class BehaviorPipeline(PipelineBase):
         config: Optional[Any] = None,
         pipeline_config: Optional[BehaviorPipelineConfig] = None,
         computations: Optional[List[str]] = None,
+        feature_categories: Optional[List[str]] = None,
     ):
         super().__init__(name="behavior_analysis", config=config)
         self.pipeline_config = pipeline_config or BehaviorPipelineConfig.from_config(self.config)
+        self.feature_categories = feature_categories
         
         self._run_correlations = True
         self._run_export = True
@@ -313,6 +315,9 @@ class BehaviorPipeline(PipelineBase):
                     self.pipeline_config.compute_pain_sensitivity,
                 ]
             )
+        
+        if self.feature_categories:
+            self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
@@ -359,6 +364,7 @@ class BehaviorPipeline(PipelineBase):
             control_trial_order=self.pipeline_config.control_trial_order,
             compute_change_scores=self.pipeline_config.compute_change_scores,
             compute_reliability=self.pipeline_config.compute_reliability,
+            feature_categories=self.feature_categories,
         )
         
         results = BehaviorPipelineResults(subject=subject)

@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from joblib import Parallel, delayed
 
-from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization, extract_roi_tfrs
 from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus

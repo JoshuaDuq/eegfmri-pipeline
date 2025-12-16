@@ -104,7 +104,7 @@ def load_and_prepare_epochs(
     deriv_root: Optional[Path] = None,
 ):
     """Load epochs, attach metadata, and crop if requested."""
-    from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis, crop_epochs
+    from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis, crop_epochs
 
     epochs, aligned_events = load_epochs_for_analysis(
         subject, task,

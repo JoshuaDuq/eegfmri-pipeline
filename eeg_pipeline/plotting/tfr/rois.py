@@ -16,7 +16,7 @@ import pandas as pd
 import mne
 
 from eeg_pipeline.plotting.io.figures import unwrap_figure
-from eeg_pipeline.io.formatting import sanitize_label
+from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.validation import ensure_aligned_lengths
 from ...utils.analysis.tfr import (

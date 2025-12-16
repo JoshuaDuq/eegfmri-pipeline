@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from eeg_pipeline.utils.data.behavior import load_behavior_stats_files
 from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir, resolve_deriv_root
-from eeg_pipeline.io.plot_collections import collect_significant_plots
+from eeg_pipeline.plotting.io.collections import collect_significant_plots
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.plotting.behavioral.registry import (
@@ -62,6 +62,18 @@ def _build_behavior_plot_context(
     )
 
 
+CATEGORY_TO_PLOTS = {
+    "psychometrics": ["psychometrics"],
+    "power": ["power_roi_scatter"],
+    "dynamics": ["dynamics_scatter"],
+    "aperiodic": ["aperiodic_scatter"],
+    "connectivity": ["connectivity_scatter"],
+    "itpc": ["itpc_scatter"],
+    "temporal": ["temporal_topomaps", "pain_clusters"],
+    "dose_response": ["dose_response"],
+}
+
+
 def visualize_subject_behavior(
     subject: str,
     task: str,
@@ -71,8 +83,17 @@ def visualize_subject_behavior(
     temporal_only: bool = False,
     plots: Optional[List[str]] = None,
     deriv_root: Optional[Path] = None,
+    visualize_categories: Optional[List[str]] = None,
 ) -> None:
-    """Visualize behavioral correlations for a single subject."""
+    """Visualize behavioral correlations for a single subject.
+    
+    Parameters
+    ----------
+    visualize_categories : optional list of str
+        Specific categories to visualize (e.g., ["power", "connectivity"]).
+        Maps to specific plot names: power->power_roi_scatter, etc.
+        If None, all plots are generated.
+    """
     logger.info(f"Visualizing behavioral correlations for sub-{subject}...")
 
     effective_deriv_root = resolve_deriv_root(deriv_root=deriv_root, config=config)
@@ -82,7 +103,13 @@ def visualize_subject_behavior(
     if scatter_only and temporal_only:
         raise ValueError("Cannot specify both scatter_only and temporal_only")
 
-    if scatter_only:
+    if visualize_categories:
+        plot_names = []
+        for cat in visualize_categories:
+            plot_names.extend(CATEGORY_TO_PLOTS.get(cat, []))
+        logger.info(f"Running category-specific behavioral plots: {', '.join(visualize_categories)}")
+        manager.run_selected(plot_names)
+    elif scatter_only:
         plot_names = [
             "psychometrics",
             "power_roi_scatter",
@@ -131,8 +158,16 @@ def visualize_behavior_for_subjects(
     logger: Optional[logging.Logger] = None,
     scatter_only: bool = False,
     temporal_only: bool = False,
+    visualize_categories: Optional[List[str]] = None,
 ) -> None:
-    """Batch process behavioral visualizations for multiple subjects."""
+    """Batch process behavioral visualizations for multiple subjects.
+    
+    Parameters
+    ----------
+    visualize_categories : optional list of str
+        Specific categories to visualize (e.g., ["power", "connectivity"]).
+        Maps to specific plot names. If None, all plots are generated.
+    """
     if not subjects:
         raise ValueError("No subjects specified")
 
@@ -153,7 +188,14 @@ def visualize_behavior_for_subjects(
     if scatter_only and temporal_only:
         raise ValueError("Cannot specify both scatter_only and temporal_only")
 
-    mode_str = "scatter-only" if scatter_only else "temporal-only" if temporal_only else "full"
+    if visualize_categories:
+        mode_str = f"categories: {', '.join(visualize_categories)}"
+    elif scatter_only:
+        mode_str = "scatter-only"
+    elif temporal_only:
+        mode_str = "temporal-only"
+    else:
+        mode_str = "full"
     logger.info(
         f"Starting behavioral visualization ({mode_str}): {len(subjects)} subject(s), task={task}"
     )
@@ -168,6 +210,7 @@ def visualize_behavior_for_subjects(
             scatter_only=scatter_only,
             temporal_only=temporal_only,
             deriv_root=effective_deriv_root,
+            visualize_categories=visualize_categories,
         )
 
     logger.info("Behavioral visualization complete")

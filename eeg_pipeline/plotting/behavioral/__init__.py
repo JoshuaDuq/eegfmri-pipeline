@@ -12,19 +12,19 @@ import importlib
 # Visualization orchestration (pipeline-layer; re-exported via lightweight wrappers
 # to avoid circular imports during module initialization)
 def visualize_subject_behavior(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.behavior import visualize_subject_behavior as _impl
+    from eeg_pipeline.plotting.orchestration.behavior import visualize_subject_behavior as _impl
 
     return _impl(*args, **kwargs)
 
 
 def visualize_behavior_for_subjects(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.behavior import visualize_behavior_for_subjects as _impl
+    from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects as _impl
 
     return _impl(*args, **kwargs)
 
 
 def collect_significant_plots(*args, **kwargs):
-    from eeg_pipeline.io.plot_collections import collect_significant_plots as _impl
+    from eeg_pipeline.plotting.io.collections import collect_significant_plots as _impl
 
     return _impl(*args, **kwargs)
 

@@ -10,7 +10,7 @@ from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
-from ._common import validate_window_masks
+from .extras import validate_window_masks
 
 
 def extract_erds_from_precomputed(

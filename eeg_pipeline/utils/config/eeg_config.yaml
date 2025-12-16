@@ -627,7 +627,7 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
   # Advanced statistical options
   compute_bayes_factors: false  # Compute Bayes Factor for each correlation (JZS prior, BF>3 = moderate evidence)
   robust_correlation: null  # Robust correlation method: null (standard), "percentage_bend", "winsorized", "shepherd"
-  loso_stability: false  # Compute leave-one-subject-out correlation stability check
+  loso_stability: true  # Compute leave-one-subject-out correlation stability check
   reliability_check: false  # Compute split-half reliability for correlations
   targets:  # Behavioral targets to correlate with EEG features
     - "pain_rating"  # Primary target: pain intensity rating

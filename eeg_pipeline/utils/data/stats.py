@@ -192,8 +192,8 @@ def load_subject_scatter_data(
     Returns 9-tuple:
         temporal_df, plateau_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
     """
-    from .features_io import _load_features_and_targets
-    from .epochs_loading import load_epochs_for_analysis
+    from .feature_io import _load_features_and_targets
+    from .epochs import load_epochs_for_analysis
     from .alignment import get_aligned_events
     from .covariates import extract_temperature_data
     from ..analysis.tfr import build_rois_from_info

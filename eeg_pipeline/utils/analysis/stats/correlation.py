@@ -116,11 +116,13 @@ class CorrelationRecord:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for DataFrame."""
+        effect_size = self._interpret_effect_size()
         d = {
             self.identifier_type: self.identifier, "band": self.band,
             "r": self.correlation, "p": self.p_value, "n": self.n_valid,
             "method": self.method, "ci_low": self.ci_low, "ci_high": self.ci_high,
             "p_perm": self.p_perm, "q": self.q_value, "analysis": self.analysis_type,
+            "effect_size": effect_size,
         }
         if np.isfinite(self.r_partial): d["r_partial"] = self.r_partial
         if np.isfinite(self.p_partial): d["p_partial"] = self.p_partial
@@ -133,6 +135,20 @@ class CorrelationRecord:
             d["p_partial_temp"] = self.p_partial_temp
         d.update(self.extra_fields)
         return d
+
+    def _interpret_effect_size(self) -> str:
+        """Interpret correlation effect size using Cohen's conventions."""
+        if not np.isfinite(self.correlation):
+            return "unknown"
+        r_abs = abs(self.correlation)
+        if r_abs < 0.1:
+            return "negligible"
+        elif r_abs < 0.3:
+            return "small"
+        elif r_abs < 0.5:
+            return "medium"
+        else:
+            return "large"
 
     @property
     def is_significant(self) -> bool:
@@ -730,15 +746,19 @@ def compute_roi_correlation_stats(
     )
 
 
-def fisher_z(r: float, config: Optional[Any] = None) -> float:
+def fisher_z(r: float, config: Optional[Any] = None, logger: Optional[Any] = None) -> float:
     """Fisher z-transform of correlation coefficient.
     
     Args:
         r: Correlation coefficient to transform
         config: Optional config object for clipping bounds (defaults to config values)
+        logger: Optional logger for clipping warnings
     """
     clip_min, clip_max = get_fisher_z_clip_values(config)
+    r_orig = r
     r = np.clip(r, clip_min, clip_max)
+    if logger and r != r_orig:
+        logger.debug(f"Fisher z: clipped r from {r_orig:.6f} to {r:.6f}")
     return 0.5 * np.log((1 + r) / (1 - r))
 
 

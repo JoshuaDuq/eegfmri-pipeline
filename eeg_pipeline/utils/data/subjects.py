@@ -6,15 +6,64 @@ from typing import Any, Dict, List, Literal, Optional
 
 from ..config.loader import ConfigDict
 from eeg_pipeline.infra.paths import find_clean_epochs_path, resolve_deriv_root
-from .discovery import (
-    _collect_subjects_from_bids,
-    _collect_subjects_from_derivatives_epochs,
-    _collect_subjects_from_features,
-)
 
 
 EEGConfig = ConfigDict
 
+
+###################################################################
+# Subject Discovery Helpers
+###################################################################
+
+def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
+    """Collect all subjects from a BIDS directory."""
+    if not bids_root.exists():
+        return []
+    subjects = []
+    for sub_dir in sorted(bids_root.glob("sub-*")):
+        if sub_dir.is_dir():
+            subjects.append(sub_dir.name[4:])
+    return subjects
+
+
+def _collect_subjects_from_derivatives_epochs(
+    deriv_root: Path, 
+    task: str, 
+    config: Optional[ConfigDict] = None, 
+    constants: Optional[Dict[str, Any]] = None
+) -> List[str]:
+    """Collect subjects that have clean epochs available."""
+    if not deriv_root.exists():
+        return []
+        
+    subjects = []
+    for sub_dir in sorted(deriv_root.glob("sub-*")):
+        if not sub_dir.is_dir():
+            continue
+        sub_id = sub_dir.name[4:]
+        epo_path = find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
+        if epo_path is not None and epo_path.exists():
+            subjects.append(sub_id)
+    return subjects
+
+
+def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
+    """Collect subjects that have extracted features."""
+    if not deriv_root.exists():
+        return []
+    subjects = []
+    for sub_dir in sorted(deriv_root.glob("sub-*/eeg/features")):
+        eeg_feat = sub_dir / "features_eeg_direct.tsv"
+        y_tsv = sub_dir / "target_vas_ratings.tsv"
+        if eeg_feat.exists() and y_tsv.exists():
+            sub_id = sub_dir.parts[-3].replace("sub-", "")
+            subjects.append(sub_id)
+    return subjects
+
+
+###################################################################
+# Primary Subject Discovery Functions
+###################################################################
 
 def get_available_subjects(
     config: EEGConfig,
@@ -163,4 +212,10 @@ def parse_subject_args(
     return subjects
 
 
-__all__ = ["get_available_subjects", "parse_subject_args"]
+__all__ = [
+    "get_available_subjects",
+    "parse_subject_args",
+    "_collect_subjects_from_bids",
+    "_collect_subjects_from_derivatives_epochs", 
+    "_collect_subjects_from_features",
+]

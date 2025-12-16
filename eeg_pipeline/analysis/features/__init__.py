@@ -141,7 +141,7 @@ _LAZY_IMPORTS = {
     # Power
     "extract_power_features": "power",
     "extract_spectral_extras_from_precomputed": "precomputed.spectral",
-    "extract_asymmetry_from_precomputed": "precomputed.asymmetry",
+    "extract_asymmetry_from_precomputed": "precomputed.extras",
     "extract_segment_power_from_precomputed": "precomputed.spectral",
 
     # Aperiodic

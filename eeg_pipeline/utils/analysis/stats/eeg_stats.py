@@ -176,10 +176,9 @@ def compute_cluster_correction_2d(
         rng = np.random.default_rng()
     
     # Get cluster structure
-    try:
-        constants = get_statistics_constants(config)
-        structure = constants.get("cluster_structure_2d", np.ones((3, 3)))
-    except:
+    constants = get_statistics_constants(config)
+    structure = constants.get("cluster_structure_2d", np.ones((3, 3)))
+    if structure is None:
         structure = np.ones((3, 3))
     
     # Initial threshold

@@ -22,7 +22,7 @@ from eeg_pipeline.plotting.io.figures import (
     pct_to_logratio as _pct_to_logratio,
     get_default_config as _get_default_config,
 )
-from eeg_pipeline.io.formatting import format_channel_list_for_display, format_roi_description
+from eeg_pipeline.utils.formatting import format_channel_list_for_display, format_roi_description
 from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.utils.analysis.stats import (
     format_correlation_stats_text,

@@ -18,7 +18,7 @@ from eeg_pipeline.analysis.decoding.orchestration import (
     run_time_generalization,
 )
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.pipelines.viz.decoding import (
+from eeg_pipeline.plotting.orchestration.decoding import (
     visualize_regression_from_disk,
     visualize_time_generalization_from_disk,
 )

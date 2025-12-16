@@ -18,13 +18,13 @@ import importlib
 
 
 def visualize_subject_tfr(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.tfr import visualize_subject_tfr as _impl
+    from eeg_pipeline.plotting.orchestration.tfr import visualize_subject_tfr as _impl
 
     return _impl(*args, **kwargs)
 
 
 def visualize_tfr_for_subjects(*args, **kwargs):
-    from eeg_pipeline.pipelines.viz.tfr import visualize_tfr_for_subjects as _impl
+    from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects as _impl
 
     return _impl(*args, **kwargs)
 

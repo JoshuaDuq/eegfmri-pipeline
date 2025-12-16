@@ -60,6 +60,33 @@ def fdr_bh(
     return qvals
 
 
+def fdr_bhy(
+    pvals: Iterable[float],
+    alpha: Optional[float] = None,
+    config: Optional[Any] = None,
+) -> np.ndarray:
+    """Benjamini-Hochberg-Yekutieli FDR correction for dependent tests.
+    
+    Applies a more conservative correction appropriate when tests
+    have positive regression dependency (common in EEG/neuroimaging).
+    
+    Returns q-values (adjusted p-values).
+    """
+    if alpha is None:
+        alpha = get_fdr_alpha(config)
+
+    pvals_arr = np.asarray(list(pvals), dtype=float)
+    n = len(pvals_arr)
+    
+    if n == 0:
+        return np.array([])
+    
+    harmonic_sum = sum(1.0 / i for i in range(1, n + 1))
+    adjusted_alpha = alpha / harmonic_sum
+    
+    return fdr_bh(pvals_arr, alpha=adjusted_alpha, config=config)
+
+
 def fdr_bh_reject(
     pvals: np.ndarray,
     alpha: Optional[float] = None,

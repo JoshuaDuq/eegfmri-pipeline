@@ -10,11 +10,11 @@ from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import load_subject_data, plot_target_correlations
 from eeg_pipeline.utils.analysis.stats import extract_overall_statistics, extract_roi_statistics
-from eeg_pipeline.io.formatting import sanitize_label
+from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.infra.logging import get_subject_logger
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import get_band_color, get_default_config as _get_default_config
-from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
+from eeg_pipeline.utils.data.features import get_power_columns_by_band
 
 
 def plot_power_roi_scatter(

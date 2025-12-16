@@ -23,7 +23,7 @@ from eeg_pipeline.plotting.decoding.performance import (
     plot_bootstrap_distributions,
     plot_permutation_null,
 )
-from eeg_pipeline.plotting.decoding.diagnostics import plot_residual_diagnostics
+from eeg_pipeline.plotting.decoding.helpers import plot_residual_diagnostics
 from eeg_pipeline.plotting.decoding.comparisons import (
     plot_model_comparison,
     plot_riemann_band_comparison,
