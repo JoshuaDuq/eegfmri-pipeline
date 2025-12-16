@@ -11,15 +11,12 @@ import re
 import networkx as nx
 from scipy import stats
 from scipy.stats import spearmanr, mannwhitneyu
-try:
-    from mne_connectivity.viz import plot_connectivity_circle
-except ImportError:
-    plot_connectivity_circle = None
+from mne_connectivity.viz import plot_connectivity_circle
 
-from eeg_pipeline.io.paths import ensure_dir
-from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig, get_band_color
-from eeg_pipeline.io.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
+from eeg_pipeline.utils.data.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from ..config import get_plot_config
@@ -95,10 +92,6 @@ def plot_connectivity_circle_for_band(
             idx2 = node_indices[ch2]
             con_matrix[idx1, idx2] = val
             con_matrix[idx2, idx1] = val
-            
-    if plot_connectivity_circle is None:
-        log_if_present(logger, "warning", "mne-connectivity not installed; cannot plot connectivity circle")
-        return
 
     fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
     

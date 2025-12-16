@@ -18,28 +18,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import mne
 
-try:
-    from eeg_pipeline.utils.config.loader import load_settings, get_nested_value
-except ImportError:
-    load_settings = None
+from eeg_pipeline.utils.config.loader import get_nested_value, load_settings
 
-    def get_nested_value(config, key, default):
-        if config is None:
-            return default
-        if hasattr(config, "get"):
-            return config.get(key, default)
-        if isinstance(config, dict):
-            keys = key.split('.')
-            value = config
-            for k in keys:
-                if isinstance(value, dict) and k in value:
-                    value = value[k]
-                else:
-                    return default
-            return value
-        return default
-
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.io.formatting import sanitize_label, format_baseline_string
 
 
@@ -137,8 +118,6 @@ def pct_to_logratio(p):
 def get_viz_params(config=None):
     if config is None:
         try:
-            from eeg_pipeline.utils.config.loader import load_settings
-
             config = load_settings()
         except Exception:
             pass
@@ -213,7 +192,7 @@ def robust_sym_vlim(
         "adaptive_multiplier": 2.0,
     }
 
-    if config is None and load_settings is not None:
+    if config is None:
         config = load_settings()
 
     if config is not None:
@@ -313,8 +292,6 @@ def validate_picks(picks, logger):
 
 
 def get_default_config():
-    if load_settings is None:
-        raise ImportError("load_settings not available")
     return load_settings()
 
 
@@ -331,11 +308,9 @@ def _prepare_figure_footer(
         return None
 
     try:
-        from eeg_pipeline.utils.config.loader import load_settings
-
         cfg = load_settings()
         return build_footer(footer_template_name, cfg, **(footer_kwargs or {}))
-    except (ImportError, KeyError, ValueError, AttributeError):
+    except (KeyError, ValueError, AttributeError):
         return None
 
 

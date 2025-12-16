@@ -13,8 +13,10 @@ import pandas as pd
 import mne
 from scipy.stats import norm
 
-from .paths import ensure_dir, deriv_stats_path, find_clean_epochs_path
-from .logging import get_logger
+from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path, find_clean_epochs_path
+from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.domain.features.naming import parse_legacy_power_feature_name
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
@@ -238,32 +240,6 @@ def export_indices(
 # Feature Importance and Topomaps
 ###################################################################
 
-def parse_pow_feature(feat: str) -> Optional[Tuple[str, str]]:
-    if not isinstance(feat, str):
-        return None
-
-    if feat.startswith("pow_"):
-        parts = feat[4:].split("_")
-        if len(parts) < 2:
-            return None
-        band = parts[0]
-        channel = parts[1]
-        return band, channel
-
-    if feat.startswith("power_") and "_ch_" in feat:
-        parts = feat.split("_")
-        if len(parts) < 6:
-            return None
-        band = parts[2]
-        if parts[3] != "ch":
-            return None
-        remainder = feat.split("_ch_", 1)[-1]
-        if "_" not in remainder:
-            return None
-        channel = remainder.rsplit("_", 1)[0]
-        return band, channel
-
-    return None
 
 
 def write_feature_importance_tsv(
@@ -281,14 +257,14 @@ def write_feature_importance_tsv(
 
     bands_set = set()
     for feat in feature_names:
-        parsed = parse_pow_feature(feat)
+        parsed = parse_legacy_power_feature_name(feat)
         if parsed:
             bands_set.add(parsed[0])
     bands = sorted(bands_set)
 
     band_ch_to_idx: dict = {}
     for idx, feat in enumerate(feature_names):
-        parsed = parse_pow_feature(feat)
+        parsed = parse_legacy_power_feature_name(feat)
         if parsed:
             b, ch = parsed
             band_ch_to_idx.setdefault(b, {}).setdefault(ch, []).append(idx)
@@ -359,7 +335,7 @@ def aggregate_group_feature_topomaps(
 
         if matches:
             try:
-                df = pd.read_csv(matches[0], sep="\t")
+                df = read_tsv(matches[0])
                 df["subject"] = subject
                 tables.append(df)
             except (OSError, pd.errors.ParserError, UnicodeDecodeError) as e:
@@ -469,7 +445,6 @@ __all__ = [
     "read_best_params_jsonl_combined",
     "export_predictions",
     "export_indices",
-    "parse_pow_feature",
     "write_feature_importance_tsv",
     "aggregate_group_feature_topomaps",
 ]

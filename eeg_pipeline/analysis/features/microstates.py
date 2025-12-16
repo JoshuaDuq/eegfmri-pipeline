@@ -9,8 +9,9 @@ from sklearn.cluster import KMeans
 from scipy.signal import find_peaks
 from joblib import Parallel, delayed
 
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
+from eeg_pipeline.utils.config.loader import get_config_value
 
 # --- Helpers (Preserved logic, condensed where possible) ---
 
@@ -115,7 +116,13 @@ def extract_templates_from_trials(trial_data, sfreq, n_states, config):
         all_maps = all_maps * signs[:, np.newaxis]
 
     random_state = int(config.get("project.random_state", 42))
-    n_init = int(config.get("feature_engineering.microstates.kmeans_n_init", 10))
+    n_init = int(
+        get_config_value(
+            config,
+            "feature_engineering.microstates.kmeans_n_init",
+            10,
+        )
+    )
     kmeans = KMeans(n_clusters=n_states, n_init=n_init, random_state=random_state)
     kmeans.fit(all_maps)
     return zscore_maps(kmeans.cluster_centers_, axis=1)

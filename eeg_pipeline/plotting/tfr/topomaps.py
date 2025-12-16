@@ -22,7 +22,7 @@ from eeg_pipeline.plotting.io.figures import (
     get_viz_params,
     plot_topomap_on_ax,
 )
-from eeg_pipeline.io.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config, get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths, detect_data_format
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -31,10 +31,12 @@ from ...utils.analysis.tfr import (
     average_tfr_band,
     extract_trial_band_power,
     clip_time_range,
-    create_time_windows_fixed_size,
-    create_time_windows_fixed_count,
 )
-from ...utils.data.loading import (
+from ...utils.analysis.windowing import (
+    build_time_windows_fixed_count,
+    build_time_windows_fixed_size_clamped,
+)
+from ...utils.data.tfr_alignment import (
     compute_aligned_data_length,
     extract_pain_vector_array,
     extract_temperature_series,
@@ -641,7 +643,11 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
         return
 
-    window_starts, window_ends = create_time_windows_fixed_size(tmin_clip, tmax_clip, window_size_ms)
+    window_starts, window_ends = build_time_windows_fixed_size_clamped(
+        tmin_clip,
+        tmax_clip,
+        window_size_ms / 1000.0,
+    )
     n_windows = len(window_starts)
     log(f"Creating temporal topomaps from {tmin_clip:.2f} to {tmax_clip:.2f} s using {n_windows} windows ({window_size_ms:.1f}ms each).", logger)
 
@@ -784,7 +790,7 @@ def plot_temporal_topomaps_allbands_plateau(
         log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
         return
 
-    window_starts, window_ends = create_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
+    window_starts, window_ends = build_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
     n_windows = len(window_starts)
     window_size_eff = float((tmax_clip - tmin_clip) / n_windows) if n_windows > 0 else 0.0
     log(f"Creating temporal topomaps over plateau [{tmin_clip:.2f}, {tmax_clip:.2f}] s using {n_windows} windows (~{window_size_eff:.2f}s each).", logger)

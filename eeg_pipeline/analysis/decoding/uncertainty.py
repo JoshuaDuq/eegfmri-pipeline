@@ -661,7 +661,7 @@ def save_prediction_intervals(
     prefix: str = "prediction_intervals",
 ) -> Dict[str, Path]:
     """Save prediction interval results."""
-    from eeg_pipeline.io.tsv import write_tsv
+    from eeg_pipeline.infra.tsv import write_tsv
     
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)

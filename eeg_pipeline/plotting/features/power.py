@@ -16,9 +16,9 @@ import seaborn as sns
 import mne
 from mne.viz import plot_topomap
 
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
-from eeg_pipeline.io.columns import (
+from eeg_pipeline.utils.data.columns import (
     find_pain_column_in_events,
     find_temperature_column_in_events,
 )
@@ -34,6 +34,7 @@ from eeg_pipeline.utils.analysis.stats import (
 )
 from eeg_pipeline.plotting.features.utils import compute_cohens_d
 from eeg_pipeline.plotting import utils as plot_utils
+from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
 from scipy.stats import mannwhitneyu
 
 
@@ -100,8 +101,16 @@ def plot_power_by_condition(
     
     for row_idx, segment in enumerate(segments):
         for col_idx, band in enumerate(bands):
-            cols = [c for c in power_df.columns 
-                   if c.startswith("power_") and f"_{segment}_" in c and f"_{band}_" in c]
+            cols = []
+            for c in power_df.columns:
+                parsed = NamingSchema.parse(str(c))
+                if not (parsed.get("valid") and parsed.get("group") == "power"):
+                    continue
+                if str(parsed.get("segment") or "") != str(segment):
+                    continue
+                if str(parsed.get("band") or "") != str(band):
+                    continue
+                cols.append(c)
             
             if not cols:
                 cell_data[(row_idx, col_idx)] = None
@@ -455,14 +464,8 @@ def plot_channel_power_heatmap(
         config: Configuration object
     """
     plot_cfg = get_plot_config(config)
-    behavioral_config = plot_cfg.get_behavioral_config()
-    power_prefix = behavioral_config.get("power_prefix", "pow_")
-    
-    # Check if primary prefix yields columns
-    test_cols = [col for col in pow_df.columns if str(col).startswith(f'{power_prefix}')]
-    if not test_cols and power_prefix == "pow_":
-        # Fallback to "power_" if default "pow_" failed
-        power_prefix = "power_"
+
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
         
     band_means = []
     channel_names = []
@@ -470,13 +473,27 @@ def plot_channel_power_heatmap(
     
     for band in bands:
         band = str(band)
-        band_cols = [col for col in pow_df.columns if str(col).startswith(f'{power_prefix}{band}_')]
+        band_cols = power_cols_by_band.get(band, [])
         if band_cols:
             band_data = pow_df[band_cols].mean(axis=0)
             band_means.append(band_data.values)
             valid_bands.append(band)
             if not channel_names:
-                channel_names = [col.replace(f'{power_prefix}{band}_', '') for col in band_cols]
+                extracted: List[str] = []
+                for col in band_cols:
+                    parsed = NamingSchema.parse(str(col))
+                    if parsed.get("valid") and parsed.get("group") == "power":
+                        ident = parsed.get("identifier")
+                        if ident:
+                            extracted.append(str(ident))
+                            continue
+                    legacy = parse_legacy_power_feature_name(str(col))
+                    if legacy is not None:
+                        _legacy_band, legacy_ch = legacy
+                        extracted.append(str(legacy_ch))
+                        continue
+                    extracted.append(str(col))
+                channel_names = extracted
     
     if not band_means:
         logger.warning("No valid band data for heatmap")
@@ -1016,8 +1033,7 @@ def plot_power_time_course_by_temperature(
 
 def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, config):
     plot_cfg = get_plot_config(config)
-    behavioral_config = plot_cfg.get_behavioral_config()
-    power_prefix = behavioral_config.get("power_prefix", "pow_")
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     n_bands = len(bands)
     n_trials = len(pow_df)
     fig, axes = plt.subplots(n_bands, 1, figsize=(12, 3 * n_bands))
@@ -1026,7 +1042,7 @@ def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, confi
     
     for i, band in enumerate(bands):
         band_str = str(band)
-        band_cols = [col for col in pow_df.columns if str(col).startswith(f'{power_prefix}{band_str}_')]
+        band_cols = power_cols_by_band.get(band_str, [])
         if not band_cols:
             continue
         
@@ -1154,11 +1170,12 @@ def plot_power_trial_variability(
         return
     
     plot_cfg = get_plot_config(config)
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     
     fig, ax = plt.subplots(figsize=(8, 5))
     cv_data = []
     for band in bands:
-        cols = [c for c in pow_df.columns if c.startswith("power_") and f"_{band}_" in c and "_ch_" in c]
+        cols = power_cols_by_band.get(str(band), [])
         if not cols: continue
         power = pow_df[cols].mean(axis=1).values
         power = power[~np.isnan(power)]
@@ -1209,6 +1226,7 @@ def plot_power_variability_comprehensive(
     
     plot_cfg = get_plot_config(config)
     n_bands = len(bands)
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     
     fig = plt.figure(figsize=(14, 10))
     gs = fig.add_gridspec(3, n_bands, height_ratios=[1.5, 1, 1], hspace=0.35, wspace=0.3)
@@ -1217,8 +1235,7 @@ def plot_power_variability_comprehensive(
     
     for i, band in enumerate(bands):
         band_str = str(band)
-        cols = [c for c in pow_df.columns 
-                if c.startswith("power_") and f"_{band_str}_" in c and "_ch_" in c]
+        cols = power_cols_by_band.get(band_str, [])
         
         if not cols:
             continue
@@ -1551,7 +1568,8 @@ def plot_power_topomaps_from_df(
         return
 
     plot_cfg = get_plot_config(config)
-    bands_to_plot = [b for b in bands if any(f"_{b}_" in c for c in pow_df.columns)]
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
+    bands_to_plot = [b for b in bands if power_cols_by_band.get(str(b))]
     if not bands_to_plot: return
     
     fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=max(1, min(3, len(bands_to_plot))))
@@ -1563,7 +1581,15 @@ def plot_power_topomaps_from_df(
     
     for i, band in enumerate(bands_to_plot):
         ax = axes[i]
-        band_cols = [c for c in pow_df.columns if c.startswith("power_") and f"_{band}_" in c and "_ch_" in c]
+        band_cols = []
+        for c in power_cols_by_band.get(str(band), []):
+            parsed = NamingSchema.parse(str(c))
+            if parsed.get("valid") and parsed.get("group") == "power":
+                if str(parsed.get("scope") or "") == "ch":
+                    band_cols.append(c)
+                continue
+            if parse_legacy_power_feature_name(str(c)) is not None:
+                band_cols.append(c)
         if not band_cols:
             ax.axis('off')
             continue
@@ -1572,9 +1598,16 @@ def plot_power_topomaps_from_df(
         
         data_map = {}
         for col, val in mean_power.items():
-            parsed = NamingSchema.parse(col)
-            if parsed["valid"] and "identifier" in parsed:
-                data_map[parsed["identifier"]] = val
+            parsed = NamingSchema.parse(str(col))
+            if parsed.get("valid") and parsed.get("group") == "power":
+                ident = parsed.get("identifier")
+                if ident:
+                    data_map[str(ident)] = val
+                    continue
+            legacy = parse_legacy_power_feature_name(str(col))
+            if legacy is not None:
+                _legacy_band, legacy_ch = legacy
+                data_map[str(legacy_ch)] = val
         
         data_array = np.full(len(epochs_info.ch_names), np.nan)
         mask = np.zeros(len(epochs_info.ch_names), dtype=bool)

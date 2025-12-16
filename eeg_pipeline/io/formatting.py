@@ -8,8 +8,7 @@ from typing import Optional, List, Tuple, Dict, Any, Union
 import numpy as np
 import pandas as pd
 
-from .paths import ensure_dir
-
+from eeg_pipeline.infra.paths import ensure_dir
 
 def sanitize_label(label: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(label))

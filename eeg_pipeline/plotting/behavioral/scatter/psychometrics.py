@@ -14,14 +14,14 @@ from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.behavioral.builders import generate_correlation_scatter
 from eeg_pipeline.utils.analysis.stats import compute_kde_scale
 from eeg_pipeline.utils.data import _pick_first_column
-from eeg_pipeline.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir, _load_events_df
+from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir, _load_events_df
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
     get_default_config as _get_default_config,
     save_fig,
 )
-from eeg_pipeline.io.logging import get_subject_logger
+from eeg_pipeline.infra.logging import get_subject_logger
 
 
 def _plot_distribution_histogram(

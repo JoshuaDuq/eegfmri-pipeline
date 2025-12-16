@@ -4,7 +4,7 @@ from typing import Optional, List, Tuple, Any
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .feature_columns import infer_power_band
-from .loading import (
+from .feature_blocks import (
     register_feature_block,
     validate_feature_block_lengths,
     validate_trial_alignment_manifest,

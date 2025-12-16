@@ -7,7 +7,7 @@ import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
 from ._common import validate_window_masks
@@ -21,7 +21,12 @@ def extract_erds_from_precomputed(
         return pd.DataFrame(), [], {}
 
     n_epochs = precomputed.data.shape[0]
-    min_epochs = get_feature_constant(precomputed.config, "MIN_EPOCHS_FOR_FEATURES", 10)
+    try:
+        min_epochs = int(get_feature_constant(precomputed.config, "MIN_EPOCHS_FOR_FEATURES", 10))
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "Invalid config constant MIN_EPOCHS_FOR_FEATURES; expected an int-like value."
+        ) from e
     if n_epochs < min_epochs:
         if precomputed.logger:
             precomputed.logger.warning(
@@ -35,8 +40,19 @@ def extract_erds_from_precomputed(
     if not validate_window_masks(precomputed, precomputed.logger):
         return pd.DataFrame(), [], {}
 
-    epsilon = get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12)
-    min_valid_fraction = get_feature_constant(precomputed.config, "MIN_VALID_FRACTION", 0.5)
+    try:
+        epsilon = float(get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12))
+    except (TypeError, ValueError) as e:
+        raise ValueError("Invalid config constant EPSILON_STD; expected a float-like value.") from e
+
+    try:
+        min_valid_fraction = float(
+            get_feature_constant(precomputed.config, "MIN_VALID_FRACTION", 0.5)
+        )
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "Invalid config constant MIN_VALID_FRACTION; expected a float-like value."
+        ) from e
     config = precomputed.config or {}
     erds_cfg = config.get("feature_engineering.erds", {})
     min_baseline_power = float(

@@ -7,9 +7,10 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from ..config.loader import get_frequency_band_names
-from eeg_pipeline.io.paths import resolve_deriv_root
-from eeg_pipeline.io.columns import pick_target_column
-from eeg_pipeline.io.tsv import read_tsv
+from eeg_pipeline.infra.paths import resolve_deriv_root
+from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
 from .epochs_loading import load_epochs_for_analysis
 
 
@@ -31,7 +32,7 @@ def load_behavior_plot_features(
         logger=logger,
     )
 
-    from .loading import _load_features_and_targets
+    from .features_io import _load_features_and_targets
 
     _, pow_df, _, y, info = _load_features_and_targets(
         subject, task, effective_deriv_root, config, epochs=epochs
@@ -62,32 +63,17 @@ def load_behavior_stats_files(
     stats_dir: Path,
     logger: logging.Logger,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-    rating_stats = None
-    temp_stats = None
-
-    rating_candidates = [
-        stats_dir / "corr_stats_pow_roi_vs_rating.tsv",
-        stats_dir / "corr_stats_power_roi_vs_rating.tsv",
+    rating_patterns = [
+        "corr_stats_pow_roi_vs_rating.tsv",
+        "corr_stats_power_roi_vs_rating.tsv",
     ]
-    temp_candidates = [
-        stats_dir / "corr_stats_pow_roi_vs_temp.tsv",
-        stats_dir / "corr_stats_power_roi_vs_temp.tsv",
+    temp_patterns = [
+        "corr_stats_pow_roi_vs_temp.tsv",
+        "corr_stats_power_roi_vs_temp.tsv",
     ]
 
-    rating_path = next((p for p in rating_candidates if p.exists()), None)
-    temp_path = next((p for p in temp_candidates if p.exists()), None)
-
-    if rating_path is not None:
-        try:
-            rating_stats = read_tsv(rating_path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read rating stats: %s", exc)
-
-    if temp_path is not None:
-        try:
-            temp_stats = read_tsv(temp_path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read temp stats: %s", exc)
+    rating_stats = load_stats_file_with_fallbacks(stats_dir, rating_patterns)
+    temp_stats = load_stats_file_with_fallbacks(stats_dir, temp_patterns)
 
     return rating_stats, temp_stats
 
@@ -113,7 +99,7 @@ def load_subject_data_for_summary(
 
     for subject in subjects:
         try:
-            from .loading import _load_features_and_targets
+            from .features_io import _load_features_and_targets
 
             _temporal_df, power_df, _conn_df, ratings, _info = _load_features_and_targets(
                 subject, task, deriv_root, config
@@ -147,15 +133,10 @@ def load_subject_data_for_summary(
                 has_temperature = True
 
         power_bands = get_frequency_band_names(config)
+        power_cols_by_band = get_power_columns_by_band(power_df, bands=[str(b) for b in power_bands])
         for band in power_bands:
             band_str = str(band)
-            power_cols = [
-                col
-                for col in power_df.columns
-                if str(col).startswith(f"power_plateau_{band_str}_ch_")
-            ]
-            if not power_cols:
-                power_cols = [col for col in power_df.columns if str(col).startswith(f"pow_{band_str}_")]
+            power_cols = power_cols_by_band.get(band_str) or power_cols_by_band.get(band_str.lower())
             if not power_cols:
                 continue
 

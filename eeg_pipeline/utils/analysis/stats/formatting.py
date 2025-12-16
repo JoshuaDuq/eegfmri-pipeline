@@ -287,7 +287,10 @@ def _interpret_bayes_factor(bf10: float) -> str:
 def _safe_float(value: Any) -> float:
     """Safely convert value to float, returning NaN on failure."""
     try:
-        return float(value)
+        import numpy as np
+
+        f = float(value)
+        return f if np.isfinite(f) else float("nan")
     except (TypeError, ValueError):
         return float("nan")
 

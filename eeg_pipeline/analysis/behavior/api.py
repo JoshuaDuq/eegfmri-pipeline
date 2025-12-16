@@ -13,7 +13,7 @@ from eeg_pipeline.analysis.behavior.feature_correlator import (
     correlate_pain_relevant_features,
     run_unified_feature_correlations,
 )
-from eeg_pipeline.analysis.features.registry import (
+from eeg_pipeline.domain.features.registry import (
     FeatureRegistry,
     FeatureRule,
     classify_feature,
@@ -53,8 +53,8 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
 )
 from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
-from eeg_pipeline.io.paths import deriv_stats_path
+from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.infra.paths import deriv_stats_path
 
 if TYPE_CHECKING:
     from pathlib import Path

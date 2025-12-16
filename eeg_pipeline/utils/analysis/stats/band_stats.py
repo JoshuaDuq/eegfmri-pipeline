@@ -163,11 +163,36 @@ def compute_band_correlations(
     min_samples: int = 3,
 ) -> Tuple[List[str], np.ndarray, np.ndarray]:
     """Compute channel-wise correlations for a band."""
-    band_cols = [c for c in pow_df.columns if c.startswith(f'{power_prefix}{band}_')]
+    band_l = str(band).lower()
+
+    # Canonical NamingSchema columns:
+    # power_{segment}_{band}_ch_{channel}_{stat}
+    prefix = "power_"
+    token = f"_{band_l}_ch_"
+    candidate_cols = [
+        c
+        for c in pow_df.columns
+        if str(c).lower().startswith(prefix) and token in str(c).lower()
+    ]
+
+    if not candidate_cols:
+        return [], np.array([]), np.array([])
+
+    import re
+
+    # Example: power_plateau_alpha_ch_Fz_logratio
+    pattern = re.compile(rf"^power_[^_]+_{re.escape(band_l)}_ch_(.+?)_", re.IGNORECASE)
+    band_cols: List[str] = []
+    ch_names: List[str] = []
+    for col in candidate_cols:
+        m = pattern.match(str(col))
+        if m is None:
+            continue
+        band_cols.append(col)
+        ch_names.append(m.group(1))
+
     if not band_cols:
         return [], np.array([]), np.array([])
-    
-    ch_names = [c.replace(f'{power_prefix}{band}_', '') for c in band_cols]
     corrs, pvals = [], []
     
     for col in band_cols:

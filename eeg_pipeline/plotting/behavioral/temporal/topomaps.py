@@ -4,10 +4,11 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
 import matplotlib.pyplot as plt
+from eeg_pipeline.infra.tsv import read_tsv
 import mne
 import numpy as np
-import pandas as pd
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.core.annotations import find_annotation_x_position, get_sig_marker_text
@@ -15,9 +16,9 @@ from eeg_pipeline.plotting.core.colorbars import create_difference_colorbar
 from eeg_pipeline.plotting.core.utils import get_font_sizes
 from eeg_pipeline.utils.analysis.stats import compute_band_correlations, compute_correlation_vmax
 from eeg_pipeline.utils.analysis.tfr import build_roi_channel_mask, build_rois_from_info
-from eeg_pipeline.utils.data.loading import prepare_topomap_correlation_data
-from eeg_pipeline.io.logging import get_default_logger as _get_default_logger
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.utils.data.topomaps import prepare_topomap_correlation_data
+from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
     get_default_config as _get_default_config,
@@ -132,7 +133,7 @@ def _load_global_fdr_for_temporal_correlations(
         return None
 
     try:
-        df = pd.read_csv(tsv_path, sep="\t")
+        df = read_tsv(tsv_path)
     except Exception as e:
         logger.warning(f"Failed to load TSV for global FDR: {e}")
         return None

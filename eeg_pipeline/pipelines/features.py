@@ -38,10 +38,10 @@ if TYPE_CHECKING:
 from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.io.paths import deriv_features_path, deriv_plots_path, ensure_dir, _load_events_df
+from eeg_pipeline.infra.paths import deriv_features_path, deriv_plots_path, ensure_dir, _load_events_df
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
-from eeg_pipeline.io.columns import pick_target_column
-from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import (
     align_feature_dataframes,
     compute_group_microstate_templates,

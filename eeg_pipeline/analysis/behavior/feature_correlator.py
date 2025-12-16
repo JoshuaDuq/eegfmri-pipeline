@@ -22,14 +22,14 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationRecord,
     correlate_features_loop,
     save_correlation_results,
-    _align_groups_to_series,
-    _align_features_and_targets,
-    _build_temp_record_unified,
-    _compute_roi_correlation_stats,
+    align_groups_to_series,
+    align_features_and_targets,
+    build_temp_record_unified,
+    compute_roi_correlation_stats,
 )
-from eeg_pipeline.io.paths import deriv_features_path
-from eeg_pipeline.io.tsv import read_tsv, write_tsv
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.tsv import read_tsv, write_tsv
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.context.behavior import AnalysisConfig
 from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value, load_config
 from eeg_pipeline.utils.analysis.stats import (
@@ -43,7 +43,7 @@ from eeg_pipeline.utils.analysis.stats import (
     fdr_bh,
 )
 from eeg_pipeline.utils.parallel import parallel_feature_types, get_n_jobs
-from eeg_pipeline.analysis.features.registry import (
+from eeg_pipeline.domain.features.registry import (
     FeatureRegistry,
     FeatureRule,
     classify_feature,
@@ -226,7 +226,7 @@ class FeatureBehaviorCorrelator:
         if df is None or df.empty or targets is None or len(targets) == 0:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
-        df_aligned, targets_aligned = _align_features_and_targets(
+        df_aligned, targets_aligned = align_features_and_targets(
             df, targets, config.min_samples, self.logger
         )
         if df_aligned is None or targets_aligned is None:

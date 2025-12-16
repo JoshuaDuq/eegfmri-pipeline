@@ -18,6 +18,8 @@ from typing import Any, List, Optional
 import mne
 import pandas as pd
 
+from eeg_pipeline.infra.tsv import read_tsv
+
 from eeg_pipeline.utils.data.preprocessing import (
     combine_runs_for_subject,
     create_event_mask,
@@ -50,7 +52,7 @@ def merge_behavior_to_events(
     """Merge behavioral data into a single events.tsv file."""
     log = _logger or logger
 
-    from eeg_pipeline.utils.data.loading import trim_behavioral_to_events_strict
+    from eeg_pipeline.utils.data.alignment import trim_behavioral_to_events_strict
 
     m = re.search(r"sub-([A-Za-z0-9]+)", str(events_tsv))
     if not m:
@@ -80,7 +82,7 @@ def merge_behavior_to_events(
         return False
 
     try:
-        ev_df = pd.read_csv(events_tsv, sep="\t")
+        ev_df = read_tsv(events_tsv)
     except (pd.errors.ParserError, OSError) as exc:
         log.error("Failed reading events: %s -> %s", events_tsv, exc)
         return False

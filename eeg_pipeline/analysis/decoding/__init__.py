@@ -8,8 +8,8 @@ Submodules:
 - time_generalization: Temporal generalization analysis
 - permutation: Permutation importance
 
-Data loading utilities live in `eeg_pipeline.utils.data.loading` and are
-re-exported here for convenience.
+Data loading utilities live in `eeg_pipeline.utils.data.decoding` (decoding matrices)
+and `eeg_pipeline.utils.data.epochs_loading` / `eeg_pipeline.utils.data.features_io`.
 """
 
 # CV utilities

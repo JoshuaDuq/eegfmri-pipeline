@@ -315,8 +315,8 @@ class BehaviorPipeline(PipelineBase):
             )
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
-        from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
-        from eeg_pipeline.io.logging import get_subject_logger
+        from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+        from eeg_pipeline.infra.logging import get_subject_logger
         
         task = task or self.config.get("project.task", "thermalactive")
         

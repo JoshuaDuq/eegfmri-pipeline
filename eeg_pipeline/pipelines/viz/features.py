@@ -12,9 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from eeg_pipeline.utils.data.loading import load_epochs_for_analysis
-from eeg_pipeline.io.logging import get_logger
-from eeg_pipeline.io.paths import deriv_features_path, deriv_plots_path, ensure_dir, resolve_deriv_root
+from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.infra.paths import deriv_features_path, deriv_plots_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 
 # Import plotters for side-effects: registers plot functions into VisualizationRegistry.

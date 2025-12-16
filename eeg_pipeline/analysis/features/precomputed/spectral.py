@@ -8,7 +8,7 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_feature_constant, get_frequency_bands
 
 from ._common import validate_window_masks

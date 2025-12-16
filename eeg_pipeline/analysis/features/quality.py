@@ -20,7 +20,7 @@ import pandas as pd
 import mne
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
 # --- Helpers ---

@@ -22,9 +22,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
-from eeg_pipeline.io.paths import ensure_dir, deriv_plots_path, deriv_features_path
+from eeg_pipeline.infra.paths import ensure_dir, deriv_plots_path, deriv_features_path
 from eeg_pipeline.plotting.io.figures import save_fig
-from eeg_pipeline.io.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.core.utils import get_band_colors, get_significance_colors
 from eeg_pipeline.utils.data.feature_columns import (
     get_aperiodic_columns,

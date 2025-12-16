@@ -49,6 +49,35 @@ def time_mask(times: np.ndarray, tmin: float, tmax: float) -> np.ndarray:
     return (times >= tmin) & (times < tmax)
 
 
+def time_mask_strict(times: np.ndarray, tmin: float, tmax: float) -> np.ndarray:
+    tmask = (times >= float(tmin)) & (times < float(tmax))
+
+    if not np.any(tmask):
+        msg = f"Time window [{tmin}, {tmax}] outside data range [{times.min():.2f}, {times.max():.2f}]"
+        raise ValueError(msg)
+
+    return tmask
+
+
+def time_mask_loose(
+    times: np.ndarray,
+    tmin: float,
+    tmax: float,
+    logger: Optional[logging.Logger] = None,
+) -> np.ndarray:
+    tmask = (times >= float(tmin)) & (times < float(tmax))
+
+    if not np.any(tmask):
+        msg = f"Time window [{tmin}, {tmax}] outside data range [{times.min():.2f}, {times.max():.2f}]"
+        if logger:
+            logger.warning(f"{msg}; using entire time span")
+        else:
+            logging.getLogger(__name__).warning(f"{msg}; using entire time span")
+        tmask = np.ones_like(times, dtype=bool)
+
+    return tmask
+
+
 def freq_mask(freqs: np.ndarray, fmin: float, fmax: float) -> np.ndarray:
     """Create boolean mask for frequency window [fmin, fmax]."""
     return (freqs >= fmin) & (freqs <= fmax)
@@ -85,6 +114,79 @@ def sliding_window_centers(config: Any, n_windows: int) -> np.ndarray:
     return centers
 
 
+def build_time_windows(
+    window_len: float,
+    step: float,
+    tmin: float,
+    tmax: float,
+) -> List[Tuple[float, float]]:
+    windows: List[Tuple[float, float]] = []
+    t = float(tmin)
+    window_len = float(window_len)
+    step = float(step)
+    tmax = float(tmax)
+
+    if window_len <= 0 or step <= 0:
+        return windows
+
+    while t + window_len <= tmax + 1e-6:
+        windows.append((t, t + window_len))
+        t += step
+
+    return windows
+
+
+def build_time_windows_fixed_size_clamped(
+    tmin: float,
+    tmax: float,
+    window_len: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    tmin = float(tmin)
+    tmax = float(tmax)
+    window_len = float(window_len)
+
+    if window_len <= 0:
+        return np.array([]), np.array([])
+
+    windows = build_time_windows(window_len=window_len, step=window_len, tmin=tmin, tmax=tmax)
+    if windows:
+        last_end = float(windows[-1][1])
+    else:
+        last_end = tmin
+
+    if last_end < tmax - 1e-12:
+        windows.append((last_end, tmax))
+
+    if not windows:
+        return np.array([]), np.array([])
+
+    starts = np.array([w[0] for w in windows], dtype=float)
+    ends = np.array([w[1] for w in windows], dtype=float)
+    valid = np.isfinite(starts) & np.isfinite(ends) & (ends > starts)
+    return starts[valid], ends[valid]
+
+
+def build_time_windows_fixed_count(
+    tmin: float,
+    tmax: float,
+    n_windows: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    tmin = float(tmin)
+    tmax = float(tmax)
+    n_windows = int(n_windows)
+
+    if n_windows <= 0:
+        return np.array([]), np.array([])
+    if not np.isfinite(tmin) or not np.isfinite(tmax) or tmax <= tmin:
+        return np.array([]), np.array([])
+
+    edges = np.linspace(tmin, tmax, n_windows + 1)
+    starts = edges[:-1]
+    ends = edges[1:]
+    valid = np.isfinite(starts) & np.isfinite(ends) & (ends > starts)
+    return starts[valid], ends[valid]
+
+
 def compute_time_windows(
     times: np.ndarray,
     config: Any,
@@ -99,138 +201,17 @@ def compute_time_windows(
     Creates both coarse (early/mid/late) and fine (t1-t7) temporal bins
     based on config settings.
     """
-    errors: List[str] = []
-    tf_cfg = config.get("time_frequency_analysis", {})
-    baseline_window = tf_cfg.get("baseline_window", [-5.0, -0.01])
-    fe_cfg = config.get("feature_engineering.features", {})
-    plateau_window = tf_cfg.get("plateau_window", [3.0, 10.5])
-    available_range = (
-        (float(times[0]), float(times[-1])) if times.size > 0 else (np.nan, np.nan)
-    )
-
-    def _build_mask(start: float, end: float, label: str) -> Tuple[np.ndarray, Tuple[float, float], bool]:
-        mask = time_mask(times, start, end)
-        if np.any(mask):
-            return mask, (start, end), False
-
-        # Clamp to available time range to avoid empty masks
-        if times.size == 0:
-            if logger:
-                logger.warning("Time vector is empty; mask '%s' will be empty.", label)
-            return np.zeros_like(times, dtype=bool), (start, end), True
-
-        clamped_start = max(start, float(times[0]))
-        clamped_end = min(end, float(times[-1]))
-        clamped = time_mask(times, clamped_start, clamped_end)
-        if np.any(clamped):
-            if logger:
-                logger.warning(
-                    "Clamped %s window from [%.3f, %.3f] to available range [%.3f, %.3f].",
-                    label,
-                    start,
-                    end,
-                    clamped_start,
-                    clamped_end,
-                )
-            return clamped, (clamped_start, clamped_end), True
-
-        if logger:
-            logger.warning(
-                "No samples found for %s window [%.3f, %.3f]; features using this window will be NaN.",
-                label,
-                start,
-                end,
-            )
-        return clamped, (clamped_start, clamped_end), True
-
-    baseline_mask, (baseline_start, baseline_end), baseline_clamped = _build_mask(
-        baseline_window[0], baseline_window[1], "baseline"
-    )
-    active_mask, (plateau_start, plateau_end), active_clamped = _build_mask(
-        plateau_window[0], plateau_window[1], "plateau"
-    )
-    clamped_any = baseline_clamped or active_clamped
-    if not np.any(baseline_mask):
-        errors.append(
-            f"Baseline window [{baseline_start:.3f}, {baseline_end:.3f}] is empty; "
-            f"available time range: [{available_range[0]:.3f}, {available_range[1]:.3f}]"
-        )
-    if not np.any(active_mask):
-        errors.append(
-            f"Active/plateau window [{plateau_start:.3f}, {plateau_end:.3f}] is empty; "
-            f"available time range: [{available_range[0]:.3f}, {available_range[1]:.3f}]"
-        )
-    
-    # Coarse temporal bins from config
-    coarse_bins = fe_cfg.get("temporal_bins", [
-        {"start": 3.0, "end": 5.0, "label": "early"},
-        {"start": 5.0, "end": 7.5, "label": "mid"},
-        {"start": 7.5, "end": 10.5, "label": "late"},
-    ])
-    coarse_masks = []
-    coarse_labels = []
-    for bin_def in coarse_bins:
-        mask, _, _ = _build_mask(bin_def["start"], bin_def["end"], f"coarse-{bin_def['label']}")
-        coarse_masks.append(mask)
-        coarse_labels.append(bin_def["label"])
-    
-    # Fine temporal bins from config (for HRF modeling)
-    fine_masks = []
-    fine_labels = []
-    use_fine = fe_cfg.get("use_fine_temporal_bins", True)
-    if use_fine:
-        fine_bins = fe_cfg.get("temporal_bins_fine", [])
-        if not fine_bins:
-            # Generate default fine bins (7 bins of ~1s each)
-            n_fine = 7
-            duration = (plateau_end - plateau_start) / n_fine
-            fine_bins = [
-                {"start": plateau_start + i * duration, 
-                 "end": plateau_start + (i + 1) * duration, 
-                 "label": f"t{i+1}"}
-                for i in range(n_fine)
-            ]
-        for bin_def in fine_bins:
-            label = bin_def["label"]
-            mask, _, _ = _build_mask(bin_def["start"], bin_def["end"], f"fine-{label}")
-            fine_masks.append(mask)
-            fine_labels.append(label)
-    
-    # Legacy plateau windows (for backward compatibility)
-    plateau_masks = []
-    window_labels = []
-    if n_plateau_windows > 0:
-        window_duration = (plateau_end - plateau_start) / n_plateau_windows
-        for i in range(n_plateau_windows):
-            win_start = plateau_start + i * window_duration
-            win_end = win_start + window_duration
-            mask, _, _ = _build_mask(win_start, win_end, f"plateau-w{i}")
-            plateau_masks.append(mask)
-            window_labels.append(f"w{i}")
-    
-    # Explicitly warn when masks are empty after clamping so downstream code can bail early
-    if errors:
-        if logger:
-            logger_method = logger.error if strict else logger.warning
-            logger_method("Time window validation failed: %s", "; ".join(errors))
-        if strict:
-            raise ValueError("; ".join(errors))
-
-    return TimeWindows(
-        baseline_mask=baseline_mask,
-        active_mask=active_mask,
-        baseline_range=(baseline_start, baseline_end),
-        active_range=(plateau_start, plateau_end),
-        clamped=clamped_any,
-        valid=not errors,
-        errors=errors,
-        coarse_masks=coarse_masks,
-        coarse_labels=coarse_labels,
-        fine_masks=fine_masks,
-        fine_labels=fine_labels,
-        plateau_masks=plateau_masks,
-        window_labels=window_labels,
+    spec = TimeWindowSpec(
         times=times,
+        config=config,
+        sampling_rate=float(getattr(config, "sfreq", 1.0)) if config is not None else 1.0,
+        logger=logger,
+    )
+    return time_windows_from_spec(
+        spec,
+        n_plateau_windows=n_plateau_windows,
+        logger=logger,
+        strict=strict,
     )
 
 
@@ -505,8 +486,7 @@ def get_pain_window(constants=None, config: Optional[Any] = None) -> Tuple[float
     return constants["PLATEAU_WINDOW"]
 
 
-WINDOW_PAIN = get_pain_window
-
+###################################################################
 # Segment Masks for Feature Extraction
 ###################################################################
 

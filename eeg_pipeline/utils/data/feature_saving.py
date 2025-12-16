@@ -11,8 +11,8 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.io.formatting import sanitize_label
-from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
-from eeg_pipeline.io.tsv import write_parquet, write_tsv
+from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 
 from .feature_columns import infer_power_band
 
@@ -54,7 +54,7 @@ def save_all_features(
     feature_qc: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     import json
-    from eeg_pipeline.utils.analysis.features.metadata import generate_manifest
+    from eeg_pipeline.domain.features.naming import generate_manifest
 
     direct_blocks = []
     direct_cols: List[str] = []
@@ -390,7 +390,6 @@ def export_fmri_regressors(
             c
             for c in plateau_cols
             if infer_power_band(c, bands=power_bands) == band
-            and (str(c).startswith(f"pow_{band}_") or str(c).startswith(f"power_plateau_{band}_"))
         ]
         if not band_cols:
             continue

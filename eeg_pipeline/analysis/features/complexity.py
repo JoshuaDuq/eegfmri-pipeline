@@ -21,7 +21,7 @@ import mne
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_permutation_entropy as _permutation_entropy,
     compute_sample_entropy as _sample_entropy,

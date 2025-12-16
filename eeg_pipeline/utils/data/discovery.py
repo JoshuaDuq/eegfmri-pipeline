@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from ..config.loader import ConfigDict
-from eeg_pipeline.io.paths import _find_clean_epochs_path
+from eeg_pipeline.infra.paths import find_clean_epochs_path
 
 
 def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
@@ -40,7 +40,7 @@ def _collect_subjects_from_derivatives_epochs(
         if not sub_dir.is_dir():
             continue
         sub_id = sub_dir.name[4:]
-        epo_path = _find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
+        epo_path = find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
         if epo_path is not None and epo_path.exists():
             subjects.append(sub_id)
     return subjects
@@ -58,11 +58,6 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
             sub_id = sub_dir.parts[-3].replace("sub-", "")
             subjects.append(sub_id)
     return subjects
-
-
-def _collect_subject_ids_with_features(deriv_root: Path) -> List[str]:
-    """Alias for _collect_subjects_from_features."""
-    return _collect_subjects_from_features(deriv_root)
 
 
 def get_available_subjects(

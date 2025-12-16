@@ -20,12 +20,9 @@ from eeg_pipeline.plotting.io.figures import (
 )
 from eeg_pipeline.io.formatting import format_baseline_string as _format_baseline_string, sanitize_label as _sanitize_label
 from eeg_pipeline.utils.validation import validate_epochs_for_plotting
-from eeg_pipeline.io.paths import ensure_dir
-from eeg_pipeline.io.columns import find_temperature_column_in_metadata
-from ...utils.data.loading import (
-    process_temperature_levels,
-    build_epoch_query_string,
-)
+from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.utils.data.columns import find_temperature_column_in_metadata
+from ...utils.data.epochs import process_temperature_levels, build_epoch_query_string
 from ..config import get_plot_config
 from .contrasts import _apply_baseline_correction, _save_erp_figure
 

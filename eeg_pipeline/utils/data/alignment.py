@@ -16,9 +16,8 @@ import numpy as np
 import mne
 
 
-from eeg_pipeline.io.paths import _load_events_df
-from ..config.loader import ConfigDict
-from ..validation import ensure_aligned_lengths
+from eeg_pipeline.infra.paths import load_events_df
+from eeg_pipeline.infra.tsv import read_tsv
 
 
 ###################################################################
@@ -43,16 +42,6 @@ def _align_by_selection(events_df: pd.DataFrame, epochs: mne.Epochs, logger: log
             logger.info("Aligning using epochs.selection indices")
             return events_df.iloc[selection].reset_index(drop=True)
             
-    return events_df
-
-
-def _align_by_sample(events_df: pd.DataFrame, epochs: mne.Epochs, logger: logging.Logger) -> pd.DataFrame:
-    """Align events using sample indices or onset times."""
-    # This is more complex and depends on how events were stored
-    # Implementation placeholder - usually relies on 'onset' column matching
-    if "onset" in events_df.columns:
-        # TODO: Implement time-based alignment if selection fails
-        pass
     return events_df
 
 
@@ -126,68 +115,6 @@ def trim_behavioral_to_events_strict(
     # Pad with NaNs? Or return as is?
     # For strict behavior, we usually want to error or warn loudly
     return behavioral_df.reindex(range(n_events))
-
-
-def _match_by_trial_identifiers(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: logging.Logger,
-) -> pd.DataFrame:
-    """Match records using 'trial_type' or similar identifiers if available."""
-    # Placeholder for more advanced matching logic
-    return behavioral_df
-
-
-def _match_by_temperature(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: logging.Logger,
-) -> pd.DataFrame:
-    """Match records by checking temperature values if available."""
-    if "temperature" in behavioral_df.columns and "temperature" in events_df.columns:
-        # Check correlation or exact match
-        pass
-    return behavioral_df
-
-
-def _match_behavioral_to_events(
-    behavioral_df: pd.DataFrame,
-    events_df: pd.DataFrame,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    """Orchestrate matching of behavioral data to events."""
-    if logger is None:
-        logger = logging.getLogger(__name__)
-        
-    # 1. Try strict trimming first (simplest)
-    result = trim_behavioral_to_events_strict(behavioral_df, events_df, logger)
-    
-    # 2. Add validation/checks here
-    return result
-
-
-def align_events_to_epochs_strict(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    """Alias for align_events_to_epochs but implies stricter checks in future."""
-    return align_events_to_epochs(events_df, epochs, logger)
-
-
-def align_events_with_policy(
-    events_df: Optional[pd.DataFrame],
-    epochs: mne.Epochs,
-    config,
-    logger: Optional[logging.Logger] = None,
-) -> pd.DataFrame:
-    """
-    Align events according to configuration policy.
-    
-    Policy examples: 'strict_length', 'match_id', 'nearest_time'
-    """
-    # For now, use the standard alignment
-    return align_events_to_epochs(events_df, epochs, logger)
 
 
 def _handle_validation_error(msg: str, strict: bool, logger: logging.Logger):
@@ -272,7 +199,7 @@ def get_aligned_events(
     if config is None:
         raise ValueError("config is required for get_aligned_events")
 
-    events_df = _load_events_df(subject, task, bids_root=bids_root, config=config, constants=constants)
+    events_df = load_events_df(subject, task, bids_root=bids_root, config=config, constants=constants)
     if events_df is None:
         if strict:
             raise ValueError(f"Events TSV not found for sub-{subject}, task-{task}. Required when strict=True")
@@ -321,7 +248,7 @@ def reconstruct_kept_indices(dropped_trials_path: Path, n_events: int) -> np.nda
     if not dropped_trials_path.exists():
         return np.arange(n_events)
     
-    dropped_df = pd.read_csv(dropped_trials_path, sep="\t")
+    dropped_df = read_tsv(dropped_trials_path)
     if "original_index" not in dropped_df.columns or len(dropped_df) == 0:
         return np.arange(n_events)
     
@@ -332,3 +259,13 @@ def reconstruct_kept_indices(dropped_trials_path: Path, n_events: int) -> np.nda
     dropped_indices = set(dropped_indices_raw.astype(int).tolist())
     kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices])
     return kept_indices
+
+
+__all__ = [
+    "align_events_to_epochs",
+    "trim_behavioral_to_events_strict",
+    "validate_alignment",
+    "align_or_raise",
+    "get_aligned_events",
+    "reconstruct_kept_indices",
+]

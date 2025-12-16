@@ -12,7 +12,13 @@ import numpy as np
 import pandas as pd
 
 from ..config.loader import load_settings, get_constants, get_config_value, ensure_config, get_frequency_band_names, get_frequency_bands
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.utils.analysis.windowing import (
+    build_time_windows_fixed_count,
+    build_time_windows_fixed_size_clamped,
+    time_mask_loose,
+    time_mask_strict,
+)
 
 
 ###################################################################
@@ -328,28 +334,20 @@ def normalize_power_with_baseline(
     pow_numeric = pow_df.apply(pd.to_numeric, errors="coerce")
     baseline_numeric = baseline_df.apply(pd.to_numeric, errors="coerce")
 
-    pow_pattern_legacy = re.compile(r"^pow_([^_]+)_(.+)_([^_]+)$")
-    baseline_pattern_legacy = re.compile(r"^baseline_([^_]+)_(.+)$")
-
-    # NamingSchema v2 patterns
+    # Canonical NamingSchema patterns
     # power_<segment>_<band>_ch_<channel>_<stat>
-    pow_pattern_v2 = re.compile(r"^power_([^_]+)_([^_]+)_ch_(.+)_(.+)$")
+    pow_pattern = re.compile(r"^power_([^_]+)_([^_]+)_ch_(.+)_(.+)$")
     # power_baseline_<band>_ch_<channel>_mean
-    baseline_pattern_v2 = re.compile(r"^power_baseline_([^_]+)_ch_(.+)_mean$")
+    baseline_pattern = re.compile(r"^power_baseline_([^_]+)_ch_(.+)_mean$")
 
     baseline_lookup: Dict[Tuple[str, str], np.ndarray] = {}
     for col in baseline_numeric.columns:
         col_str = str(col)
-        match_v2 = baseline_pattern_v2.match(col_str)
-        if match_v2:
-            band, ch = match_v2.groups()
+        match = baseline_pattern.match(col_str)
+        if match:
+            band, ch = match.groups()
             baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
             continue
-
-        match_legacy = baseline_pattern_legacy.match(col_str)
-        if match_legacy:
-            band, ch = match_legacy.groups()
-            baseline_lookup[(band, ch)] = baseline_numeric[col].to_numpy(dtype=float)
 
     pow_norm = pow_numeric.copy()
     missing: List[Tuple[str, str]] = []
@@ -359,13 +357,9 @@ def normalize_power_with_baseline(
 
         band = None
         ch = None
-        match_v2 = pow_pattern_v2.match(col_str)
-        if match_v2:
-            _segment, band, ch, _stat = match_v2.groups()
-        else:
-            match_legacy = pow_pattern_legacy.match(col_str)
-            if match_legacy:
-                band, ch, _ = match_legacy.groups()
+        match = pow_pattern.match(col_str)
+        if match:
+            _segment, band, ch, _stat = match.groups()
 
         if band is None or ch is None:
             continue
@@ -1912,47 +1906,23 @@ def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Opti
 
 
 def create_time_windows_fixed_size(tmin_start: float, tmax_clip: float, window_size_ms: float, config: Optional[Any] = None) -> Tuple[np.ndarray, np.ndarray]:
-    window_size_s = window_size_ms / 1000.0
-    window_starts = np.arange(tmin_start, tmax_clip, window_size_s)
-    window_ends = window_starts + window_size_s
-    window_ends = np.minimum(window_ends, tmax_clip)
-    
-    valid_mask = window_starts < tmax_clip
-    window_starts = window_starts[valid_mask]
-    window_ends = window_ends[valid_mask]
-    
-    return window_starts, window_ends
+    return build_time_windows_fixed_size_clamped(
+        tmin_start,
+        tmax_clip,
+        window_size_ms / 1000.0,
+    )
 
 
 def create_time_windows_fixed_count(tmin_clip: float, tmax_clip: float, window_count: int) -> Tuple[np.ndarray, np.ndarray]:
-    edges = np.linspace(tmin_clip, tmax_clip, window_count + 1)
-    window_starts = edges[:-1]
-    window_ends = edges[1:]
-    return window_starts, window_ends
+    return build_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
 
 
 def create_time_mask_strict(times: np.ndarray, tmin: float, tmax: float) -> np.ndarray:
-    tmask = (times >= float(tmin)) & (times < float(tmax))
-    
-    if not np.any(tmask):
-        msg = f"Time window [{tmin}, {tmax}] outside data range [{times.min():.2f}, {times.max():.2f}]"
-        raise ValueError(msg)
-    
-    return tmask
+    return time_mask_strict(times, tmin, tmax)
 
 
 def create_time_mask_loose(times: np.ndarray, tmin: float, tmax: float, logger: Optional[logging.Logger] = None) -> np.ndarray:
-    tmask = (times >= float(tmin)) & (times < float(tmax))
-    
-    if not np.any(tmask):
-        msg = f"Time window [{tmin}, {tmax}] outside data range [{times.min():.2f}, {times.max():.2f}]"
-        if logger:
-            logger.warning(f"{msg}; using entire time span")
-        else:
-            logging.getLogger(__name__).warning(f"{msg}; using entire time span")
-        tmask = np.ones_like(times, dtype=bool)
-    
-    return tmask
+    return time_mask_loose(times, tmin, tmax, logger=logger)
 
 
 def clip_time_window(
@@ -2156,7 +2126,7 @@ def extract_roi_contrast_data(
     Do not use the output of this function for statistical tests that require
     trial-level variance.
     """
-    from eeg_pipeline.io.columns import get_pain_column_from_config
+    from eeg_pipeline.utils.data.columns import get_pain_column_from_config
     import mne
     
     if power is None or ev is None:

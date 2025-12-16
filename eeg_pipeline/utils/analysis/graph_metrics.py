@@ -121,27 +121,27 @@ def compute_global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> fl
         w = abs(data.get("weight", 0.0))
         lengths[(u, v)] = 1.0 / (w + eps)
     nx.set_edge_attributes(G, lengths, "length")
-    
+
     try:
-        return float(nx.global_efficiency(G, weight="length"))
-    except TypeError:
-        # Fallback for older networkx versions
-        try:
-            sp_lengths = dict(nx.all_pairs_dijkstra_path_length(G, weight="length"))
-            n = G.number_of_nodes()
-            if n <= 1:
-                return np.nan
-            inv_dist = []
-            for i in range(n):
-                for j in range(i + 1, n):
-                    d = sp_lengths.get(i, {}).get(j, np.inf)
-                    if np.isfinite(d) and d > 0:
-                        inv_dist.append(1.0 / d)
-            return float((2.0 / (n * (n - 1))) * np.sum(inv_dist)) if inv_dist else np.nan
-        except (nx.NetworkXError, ValueError, KeyError):
-            return np.nan
-    except ZeroDivisionError:
+        sp_lengths = dict(nx.all_pairs_dijkstra_path_length(G, weight="length"))
+    except (nx.NetworkXError, ValueError, KeyError):
         return np.nan
+
+    n = G.number_of_nodes()
+    if n <= 1:
+        return np.nan
+
+    inv_dist = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = sp_lengths.get(i, {}).get(j, np.inf)
+            if np.isfinite(d) and d > 0:
+                inv_dist.append(1.0 / d)
+
+    if not inv_dist:
+        return np.nan
+
+    return float((2.0 / (n * (n - 1))) * np.sum(inv_dist))
 
 
 def compute_small_world_sigma(

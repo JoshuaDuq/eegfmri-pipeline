@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Optional, List, Any, Dict
+from typing import Any, Dict, List, Optional
 
 import mne
 import pandas as pd
@@ -37,17 +37,17 @@ def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> O
     return _find_column_in_dataframe(events_df, column_names)
 
 
-def find_pain_column_in_events(events_df: pd.DataFrame, config) -> Optional[str]:
+def find_pain_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     constants = _get_io_constants(config)
     return _find_column_in_dataframe(events_df, constants["pain_column_names"])
 
 
-def find_temperature_column_in_events(events_df: pd.DataFrame, config) -> Optional[str]:
+def find_temperature_column_in_events(events_df: pd.DataFrame, config: Any) -> Optional[str]:
     constants = _get_io_constants(config)
     return _find_column_in_dataframe(events_df, constants["temperature_column_names"])
 
 
-def find_column_in_metadata(epochs: mne.Epochs, config_key: str, config) -> Optional[str]:
+def find_column_in_metadata(epochs: mne.Epochs, config_key: str, config: Any) -> Optional[str]:
     if not hasattr(epochs, "metadata") or epochs.metadata is None:
         return None
     column_names = config.get(config_key)
@@ -56,11 +56,11 @@ def find_column_in_metadata(epochs: mne.Epochs, config_key: str, config) -> Opti
     return _find_column_in_dataframe(epochs.metadata, column_names)
 
 
-def find_pain_column_in_metadata(epochs: mne.Epochs, config) -> Optional[str]:
+def find_pain_column_in_metadata(epochs: mne.Epochs, config: Any) -> Optional[str]:
     return find_column_in_metadata(epochs, "event_columns.pain_binary", config)
 
 
-def find_temperature_column_in_metadata(epochs: mne.Epochs, config) -> Optional[str]:
+def find_temperature_column_in_metadata(epochs: mne.Epochs, config: Any) -> Optional[str]:
     return find_column_in_metadata(epochs, "event_columns.temperature", config)
 
 

@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.analysis.features.metadata import generate_manifest, save_features_organized
+from eeg_pipeline.domain.features.naming import generate_manifest, save_features_organized
 
 
 @dataclass

@@ -10,22 +10,9 @@ Submodules:
 - decoding: Decoding-specific I/O utilities (import separately to avoid circular imports)
 """
 
-from .paths import (
-    ensure_dir,
-    deriv_features_path,
-    deriv_stats_path,
-    deriv_plots_path,
-)
-from .tsv import (
-    read_tsv,
-    write_tsv,
-    read_table,
-    write_table,
-)
-from .logging import (
-    get_subject_logger,
-    get_group_logger,
-)
+from eeg_pipeline.infra.paths import ensure_dir, deriv_features_path, deriv_stats_path, deriv_plots_path
+from eeg_pipeline.infra.tsv import read_tsv, write_tsv, read_table, write_table
+from eeg_pipeline.infra.logging import get_subject_logger, get_group_logger
 
 __all__ = [
     "ensure_dir",

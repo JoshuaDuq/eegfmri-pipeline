@@ -8,11 +8,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.config.loader import load_settings
 from eeg_pipeline.io.formatting import sanitize_label
-from eeg_pipeline.io.logging import get_subject_logger
-from eeg_pipeline.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir
+from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
@@ -111,7 +112,7 @@ def _load_correlation_stats(
     frames = []
     for target_label, path in candidate_files:
         if path.exists():
-            df = pd.read_csv(path, sep="\t")
+            df = read_tsv(path)
             df["target"] = target_label
             frames.append(df)
 

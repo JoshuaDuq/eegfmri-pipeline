@@ -22,7 +22,7 @@ from joblib import Parallel, delayed
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.spectral import bandpass_filter_epochs
 from eeg_pipeline.utils.config.loader import get_frequency_bands
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 
 
 def _compute_modulation_index(phase: np.ndarray, amp: np.ndarray, n_bins: int = 18) -> float:

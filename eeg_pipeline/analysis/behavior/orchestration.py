@@ -449,8 +449,8 @@ def stage_validate(ctx: BehaviorContext, config: Any) -> None:
 
 
 def stage_export(ctx: BehaviorContext, results: Any) -> List[Path]:
-    from eeg_pipeline.io.paths import ensure_dir
-    from eeg_pipeline.io.tsv import write_tsv
+    from eeg_pipeline.infra.paths import ensure_dir
+    from eeg_pipeline.infra.tsv import write_tsv
 
     ensure_dir(ctx.stats_dir)
     saved: List[Path] = []

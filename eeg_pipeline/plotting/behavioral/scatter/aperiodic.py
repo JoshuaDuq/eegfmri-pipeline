@@ -13,7 +13,7 @@ from eeg_pipeline.plotting.behavioral.scatter.core import (
 )
 from eeg_pipeline.utils.data import load_precomputed_correlations
 from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
-from eeg_pipeline.io.logging import get_subject_logger
+from eeg_pipeline.infra.logging import get_subject_logger
 
 
 def _extract_aperiodic_values(

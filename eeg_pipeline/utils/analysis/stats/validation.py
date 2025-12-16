@@ -20,10 +20,7 @@ from scipy import stats
 
 from .base import get_config_value, ensure_config
 
-try:
-    from ...config.loader import get_constants
-except ImportError:
-    get_constants = None
+from eeg_pipeline.utils.config.loader import get_constants
 
 
 ###################################################################
@@ -686,13 +683,9 @@ def validate_temperature_values(
 
     if min_temp is None or max_temp is None:
         config = ensure_config(config)
-        if get_constants is not None:
-            io_constants = get_constants("io", config)
-            min_temp = min_temp or float(io_constants.get("temperature_min", 35.0))
-            max_temp = max_temp or float(io_constants.get("temperature_max", 50.0))
-        else:
-            min_temp = min_temp or 35.0
-            max_temp = max_temp or 50.0
+        io_constants = get_constants("io", config)
+        min_temp = min_temp or float(io_constants.get("temperature_min", 35.0))
+        max_temp = max_temp or float(io_constants.get("temperature_max", 50.0))
 
     numeric_vals = pd.to_numeric(values, errors="coerce")
     n_nan = int(numeric_vals.isna().sum())

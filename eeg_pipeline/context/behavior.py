@@ -17,10 +17,13 @@ from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
+import mne
+
+from eeg_pipeline.infra.tsv import read_tsv
 
 from eeg_pipeline.utils.analysis.stats.correlation import CorrelationRecord, compute_correlation
-from eeg_pipeline.io.columns import pick_target_column
-from eeg_pipeline.io.paths import deriv_features_path
+from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.infra.paths import deriv_features_path
 
 
 class ComputationStatus(Enum):
@@ -139,9 +142,12 @@ class BehaviorContext:
         if self._data_loaded:
             return self.targets is not None
 
-        from eeg_pipeline.utils.data.loading import (
-            load_epochs_for_analysis, load_feature_bundle,
-            extract_temperature_data, build_covariate_matrix, build_covariates_without_temp,
+        from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+        from eeg_pipeline.utils.data.features_io import load_feature_bundle
+        from eeg_pipeline.utils.data.covariates import (
+            extract_temperature_data,
+            build_covariate_matrix,
+            build_covariates_without_temp,
         )
 
         self.logger.info("Loading data...")
@@ -230,7 +236,7 @@ class BehaviorContext:
                     f"Re-run feature extraction to generate aligned trial manifests."
                 )
 
-            manifest = pd.read_csv(manifest_path, sep="\t")
+            manifest = read_tsv(manifest_path)
             if len(manifest) != len(self.targets) or len(manifest) != len(self.aligned_events):
                 raise ValueError(
                     "Trial alignment manifest length mismatch for sub-%s: manifest=%d, targets=%d, aligned_events=%d"

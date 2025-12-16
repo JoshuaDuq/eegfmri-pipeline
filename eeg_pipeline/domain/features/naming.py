@@ -14,7 +14,7 @@ Provides:
 - make_power_name, make_erds_name, etc.: Domain-specific helpers
 - infer_feature_metadata, generate_feature_sidecar: Legacy metadata inference
 - generate_manifest, save_manifest: Manifest generation
-- save_features_organized, save_features_bids: I/O helpers
+- save_features_organized: I/O helpers
 - get_fine_time_bins, get_coarse_time_bins: Temporal bin generators
 """
 
@@ -24,7 +24,7 @@ import json
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import numpy as np
 import pandas as pd
@@ -93,13 +93,14 @@ STATISTICS = {
 @dataclass
 class FeatureName:
     """Parsed feature name components (legacy format)."""
+
     domain: str
     measure: Optional[str] = None
     band: Optional[str] = None
     location: Optional[str] = None
     time: Optional[str] = None
     statistic: Optional[str] = None
-    
+
     def to_string(self) -> str:
         """Convert to standardized feature name string."""
         parts = [self.domain]
@@ -119,6 +120,7 @@ class FeatureName:
 @dataclass
 class FeatureMetadata:
     """Metadata for a single feature (NamingSchema v2 format)."""
+
     name: str
     group: str
     segment: str
@@ -136,7 +138,7 @@ class FeatureMetadata:
 
 class NamingSchema:
     """Helper to build standardized feature column names."""
-    
+
     @staticmethod
     def build(
         group: str,
@@ -147,23 +149,8 @@ class NamingSchema:
         channel: Optional[str] = None,
         channel_pair: Optional[str] = None,
     ) -> str:
-        """
-        Construct a feature name.
-        
-        Args:
-            group: Feature group (power, conn, itpc, pac, dynamics, etc.)
-            segment: Time segment (baseline, ramp, plateau, early, mid, late, t1..N)
-            band: Frequency band (delta, theta, alpha, beta, gamma, or 'all')
-            scope: Scope of the metric (ch, chpair, global)
-            stat: Statistic name (logratio, mean, plv, etc.)
-            channel: Channel name (for scope='ch')
-            channel_pair: Channel pair name (for scope='chpair')
-            
-        Returns:
-            str: "group_segment_band_scope_[channel/pair]_stat"
-        """
         parts = [group, segment, band, scope]
-        
+
         if scope == "ch":
             if not channel:
                 raise ValueError("Channel must be provided for scope='ch'")
@@ -176,32 +163,31 @@ class NamingSchema:
             pass
         else:
             raise ValueError(f"Unknown scope: {scope}")
-            
+
         parts.append(stat)
         return "_".join(parts)
 
     @staticmethod
     def parse(name: str) -> dict:
-        """Parse a feature name back into components."""
         parts = name.split("_")
         if len(parts) < 5:
             return {"valid": False}
-        
+
         try:
             res = {
                 "group": parts[0],
                 "segment": parts[1],
                 "band": parts[2],
                 "scope": parts[3],
-                "valid": True
+                "valid": True,
             }
-            
+
             if res["scope"] == "global":
                 res["stat"] = "_".join(parts[4:])
             elif res["scope"] in ["ch", "chpair"]:
                 res["identifier"] = parts[4]
                 res["stat"] = "_".join(parts[5:])
-            
+
             return res
         except IndexError:
             return {"valid": False}
@@ -245,7 +231,9 @@ def make_erds_name(band: str, channel: str, time: str, stat: str = "percent") ->
     return f"erds_{band}_{channel}_{time}_{stat}"
 
 
-def make_conn_name(measure: str, band: str, time: str, stat: str = "mean", location: str = "global") -> str:
+def make_conn_name(
+    measure: str, band: str, time: str, stat: str = "mean", location: str = "global"
+) -> str:
     """Create connectivity feature name."""
     return f"conn_{measure}_{band}_{location}_{time}_{stat}"
 
@@ -313,11 +301,13 @@ def get_fine_time_bins(
     for i in range(n_bins):
         start = plateau_start + i * duration
         end = start + duration
-        bins.append({
-            "start": round(start, 2),
-            "end": round(end, 2),
-            "label": f"t{i+1}",
-        })
+        bins.append(
+            {
+                "start": round(start, 2),
+                "end": round(end, 2),
+                "label": f"t{i+1}",
+            }
+        )
     return bins
 
 
@@ -344,26 +334,21 @@ def get_all_time_bins(include_fine: bool = True) -> List[Dict[str, Any]]:
 
 
 def infer_feature_metadata(column_name: str) -> Dict[str, str]:
-    """
-    Parse a feature column name to infer its metadata.
-    
-    Returns a dictionary with keys like 'type', 'band', 'channel', 'metric'.
-    This is a simpler heuristic parser for legacy column naming.
-    """
-    parts = column_name.split('_')
+    """Parse a feature column name to infer its metadata."""
+    parts = column_name.split("_")
     meta = {"name": column_name}
-    
+
     if not parts:
         return meta
 
     prefix = parts[0]
-    
+
     if prefix == "pow":
         meta["type"] = "power"
         if len(parts) >= 3:
             meta["band"] = parts[1]
             meta["channel"] = "_".join(parts[2:])
-            
+
     elif prefix == "conn":
         meta["type"] = "connectivity"
         if len(parts) >= 2:
@@ -371,7 +356,7 @@ def infer_feature_metadata(column_name: str) -> Dict[str, str]:
         if len(parts) >= 4:
             meta["band"] = parts[2]
             meta["channel_pair"] = "_".join(parts[3:])
-            
+
     elif prefix == "ms":
         meta["type"] = "microstate"
         if len(parts) >= 2:
@@ -380,7 +365,7 @@ def infer_feature_metadata(column_name: str) -> Dict[str, str]:
             if parts[1] == "transition":
                 meta["transition_from"] = parts[2]
                 if len(parts) >= 4:
-                   meta["transition_to"] = parts[3] 
+                    meta["transition_to"] = parts[3]
             else:
                 meta["state"] = parts[2]
 
@@ -390,13 +375,13 @@ def infer_feature_metadata(column_name: str) -> Dict[str, str]:
             meta["metric"] = parts[1]
         if len(parts) >= 3:
             meta["channel"] = "_".join(parts[2:])
-            
+
     elif prefix == "pac":
         meta["type"] = "phase_amplitude_coupling"
-        
+
     elif prefix == "erds":
         meta["type"] = "erds"
-         
+
     else:
         meta["type"] = "other"
 
@@ -408,17 +393,13 @@ def generate_feature_sidecar(
     description: str = "Extracted EEG Features",
     subject: Optional[str] = None,
     task: Optional[str] = None,
-    additional_metadata: Optional[Dict[str, Any]] = None
+    additional_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Generate a JSON sidecar structure for feature files.
-    
-    This is a simpler alternative to generate_manifest for basic use cases.
-    """
+    """Generate a JSON sidecar structure for feature files."""
     features_meta = {}
     for col in feature_df_columns:
         features_meta[col] = infer_feature_metadata(col)
-        
+
     sidecar = {
         "Description": description,
         "SourcePipeline": "eeg_pipeline",
@@ -427,10 +408,10 @@ def generate_feature_sidecar(
         "FeatureCount": len(feature_df_columns),
         "Features": features_meta,
     }
-    
+
     if additional_metadata:
         sidecar.update(additional_metadata)
-        
+
     return sidecar
 
 
@@ -440,23 +421,23 @@ def generate_feature_sidecar(
 
 
 def parse_feature_name(name: str) -> FeatureMetadata:
-    """
-    Parse a feature name (NamingSchema v2).
-    Format:
-    - Global: {group}_{segment}_{band}_global_{stat}
-    - Channel: {group}_{segment}_{band}_ch_{channel}_{stat}
-    - Pair: {group}_{segment}_{band}_chpair_{pair}_{stat}
-    """
+    """Parse a feature name (NamingSchema v2)."""
     parts = name.split("_")
-    
+
     if len(parts) < 5:
-        return FeatureMetadata(name=name, group="unknown", segment="unknown", band="unknown", scope="unknown")
-    
+        return FeatureMetadata(
+            name=name,
+            group="unknown",
+            segment="unknown",
+            band="unknown",
+            scope="unknown",
+        )
+
     group = parts[0]
     segment = parts[1]
     band = parts[2]
     scope = parts[3]
-    
+
     if scope == "global":
         identifier = None
         stat = "_".join(parts[4:])
@@ -469,9 +450,16 @@ def parse_feature_name(name: str) -> FeatureMetadata:
             stat = "unknown"
     else:
         group = parts[0]
-        stat = parts[-1] 
-        return FeatureMetadata(name, group=group, segment="unknown", band="unknown", scope="unknown", statistic=stat)
-        
+        stat = parts[-1]
+        return FeatureMetadata(
+            name,
+            group=group,
+            segment="unknown",
+            band="unknown",
+            scope="unknown",
+            statistic=stat,
+        )
+
     return FeatureMetadata(
         name=name,
         group=group,
@@ -480,26 +468,41 @@ def parse_feature_name(name: str) -> FeatureMetadata:
         scope=scope,
         identifier=identifier,
         statistic=stat,
-        description=f"{group} feature on {segment} in {band} band ({scope if not identifier else identifier})"
+        description=f"{group} feature on {segment} in {band} band ({scope if not identifier else identifier})",
     )
 
 
-###################################################################
-# Manifest Generation
-###################################################################
+def parse_legacy_power_feature_name(name: str) -> Optional[Tuple[str, str]]:
+    if not isinstance(name, str):
+        return None
+
+    if name.startswith("pow_"):
+        parts = name[4:].split("_")
+        if len(parts) < 2:
+            return None
+        band = parts[0]
+        channel = parts[1]
+        return band, channel
+
+    if name.startswith("power_") and "_ch_" in name:
+        parts = name.split("_")
+        if len(parts) < 6:
+            return None
+        band = parts[2]
+        if parts[3] != "ch":
+            return None
+        remainder = name.split("_ch_", 1)[-1]
+        if "_" not in remainder:
+            return None
+        channel = remainder.rsplit("_", 1)[0]
+        return band, channel
+
+    return None
 
 
-def _json_safe(value: Any) -> Any:
-    """Convert common numpy/pandas objects to JSON-serializable structures."""
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, (np.generic,)):
-        return value.item()
-    if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(v) for v in value]
-    return value
+###################################################################
+# Manifest Generation (Canonical)
+###################################################################
 
 
 def generate_manifest(
@@ -509,65 +512,51 @@ def generate_manifest(
     task: Optional[str] = None,
     qc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Generate a manifest describing all features."""
-    
     features = []
-    groups = set()
-    bands = set()
-    segments = set()
-    
     for col in feature_columns:
-        if col in ["condition", "trial", "epoch", "subject"]:
-            continue
-        
-        meta = parse_feature_name(col)
-        features.append(asdict(meta))
-        
-        groups.add(meta.group)
-        bands.add(meta.band)
-        segments.add(meta.segment)
-            
-    manifest = {
-        "version": "2.0",
-        "generated_at": datetime.now().isoformat(),
+        name = str(col)
+        parsed = NamingSchema.parse(name)
+        if parsed.get("valid"):
+            features.append(
+                {
+                    "name": name,
+                    "group": parsed.get("group"),
+                    "segment": parsed.get("segment"),
+                    "band": parsed.get("band"),
+                    "scope": parsed.get("scope"),
+                    "identifier": parsed.get("identifier"),
+                    "statistic": parsed.get("stat"),
+                }
+            )
+        else:
+            legacy = infer_feature_metadata(name)
+            features.append(
+                {
+                    "name": name,
+                    "group": legacy.get("type", "unknown"),
+                    "segment": legacy.get("time", "unknown"),
+                    "band": legacy.get("band", "unknown"),
+                    "scope": "unknown",
+                    "identifier": legacy.get("channel") or legacy.get("channel_pair"),
+                    "statistic": legacy.get("statistic"),
+                }
+            )
+
+    return {
+        "created_at": datetime.utcnow().isoformat() + "Z",
         "subject": subject,
         "task": task,
-        "summary": {
-            "n_features": len(features),
-            "groups": sorted(list(groups)),
-            "bands": sorted(list(bands)),
-            "segments": sorted(list(segments)),
-        },
+        "n_features": len(features),
         "features": features,
+        "qc": qc or None,
+        "config": None if config is None else {},
     }
-    
-    if config is not None:
-        try:
-            from eeg_pipeline.utils.config.loader import get_config_value
-            manifest["config_summary"] = {
-                "baseline_window": get_config_value(config, "feature_engineering.windows.baseline_window"),
-                "plateau_window": get_config_value(config, "feature_engineering.windows.plateau_window"),
-            }
-        except Exception:
-            pass
-
-    if qc is not None:
-        manifest["qc"] = _json_safe(qc)
-    
-    return manifest
 
 
-def save_manifest(manifest: Dict[str, Any], output_path: Path) -> None:
-    """Save manifest to JSON file."""
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(manifest, f, indent=2)
-
-
-###################################################################
-# Feature I/O Helpers
-###################################################################
+def save_manifest(manifest: Dict[str, Any], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return path
 
 
 def save_features_organized(
@@ -575,134 +564,41 @@ def save_features_organized(
     output_dir: Path,
     subject: str,
     task: str,
-    config: Any = None,
-    qc: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Path]:
-    """Save features in organized structure (features_all, manifest, by_domain)."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    outputs = {}
-    
-    all_path = output_dir / f"{subject}_{task}_features_all.tsv"
-    df.to_csv(all_path, sep="\t", index=False)
-    outputs["all"] = all_path
-    
-    feature_cols = [c for c in df.columns if c not in ["condition", "trial", "epoch", "subject"]]
-    manifest = generate_manifest(feature_cols, config, subject, task, qc=qc)
-    manifest_path = output_dir / f"{subject}_{task}_features_manifest.json"
-    save_manifest(manifest, manifest_path)
-    outputs["manifest"] = manifest_path
-    
-    domain_dir = output_dir / "by_domain"
-    domain_dir.mkdir(exist_ok=True)
-    
-    cols_by_domain = {}
-    for col in feature_cols:
-        meta = parse_feature_name(col)
-        d = meta.group
-        if d not in cols_by_domain:
-            cols_by_domain[d] = []
-        cols_by_domain[d].append(col)
-        
-    for d, cols in cols_by_domain.items():
-        sub_df = df[["condition"] + cols] if "condition" in df.columns else df[cols]
-        d_path = domain_dir / f"{subject}_{task}_{d}.tsv"
-        sub_df.to_csv(d_path, sep="\t", index=False)
-        outputs[f"domain_{d}"] = d_path
-        
-    return outputs
-
-
-def save_features_bids(
-    df: pd.DataFrame,
-    bids_root: Path,
-    subject: str,
-    task: str,
     *,
-    session: Optional[str] = None,
-    run: Optional[str] = None,
     config: Any = None,
     qc: Optional[Dict[str, Any]] = None,
-    create_derivatives_structure: bool = True,
 ) -> Dict[str, Path]:
-    """Save features in BIDS-compliant structure."""
-    bids_root = Path(bids_root)
-    deriv_root = bids_root / "derivatives" / "features"
-    
-    sub_dir = deriv_root / f"sub-{subject}"
-    if session:
-        sub_dir = sub_dir / f"ses-{session}"
-    
-    parts = [f"sub-{subject}"]
-    if session:
-        parts.append(f"ses-{session}")
-    parts.append(f"task-{task}")
-    if run:
-        parts.append(f"run-{run}")
-    
-    base_name = "_".join(parts)
-    
-    if create_derivatives_structure:
-        sub_dir.mkdir(parents=True, exist_ok=True)
-        desc_path = deriv_root / "dataset_description.json"
-        if not desc_path.exists():
-            desc = {
-                "Name": "EEG Feature Derivatives",
-                "BIDSVersion": "1.8.0",
-                "DatasetType": "derivative",
-                "GeneratedBy": [{"Name": "eeg_pipeline_v2"}]
-            }
-            with open(desc_path, "w") as f:
-                json.dump(desc, f, indent=2)
-    
-    outputs = {}
-    
+    output_dir = Path(output_dir)
+    sub_dir = output_dir / f"sub-{subject}" / "eeg" / "features"
+    sub_dir.mkdir(parents=True, exist_ok=True)
+
+    base_name = f"sub-{subject}_task-{task}"
     features_path = sub_dir / f"{base_name}_features.tsv"
     df.to_csv(features_path, sep="\t", index=False)
-    outputs["features"] = features_path
-    
+
     feature_cols = [c for c in df.columns if c not in ["condition", "trial", "epoch", "subject"]]
-    manifest = generate_manifest(feature_cols, config, subject, task, qc=qc)
-    
-    sidecar = {
-        "Description": "EEG features",
-        "Sources": [f"sub-{subject}/eeg"],
-        "FeatureManifest": manifest,
-        "Columns": {}
+    manifest = generate_manifest(feature_cols, config=config, subject=subject, task=task, qc=qc)
+    manifest_path = sub_dir / f"{base_name}_features_manifest.json"
+    save_manifest(manifest, manifest_path)
+
+    return {
+        "features": features_path,
+        "manifest": manifest_path,
     }
-    
-    for f in manifest["features"]:
-        name = f["name"]
-        sidecar["Columns"][name] = {
-            "Description": f.get("description"),
-            "Group": f.get("group"),
-            "Band": f.get("band"),
-            "Window": f.get("segment")
-        }
-        
-    sidecar_path = sub_dir / f"{base_name}_features.json"
-    with open(sidecar_path, "w") as f_out:
-        json.dump(sidecar, f_out, indent=2)
-    outputs["sidecar"] = sidecar_path
-    
-    return outputs
 
 
 ###################################################################
 # Exports
 ###################################################################
 
+
 __all__ = [
-    # Constants
     "DOMAINS",
     "TIME_LABELS",
     "STATISTICS",
-    # Data classes
     "FeatureName",
     "FeatureMetadata",
     "NamingSchema",
-    # Domain helpers
     "make_feature_name",
     "make_power_name",
     "make_erds_name",
@@ -716,18 +612,14 @@ __all__ = [
     "make_asym_name",
     "make_gfp_name",
     "make_roi_name",
-    # Time bins
     "get_fine_time_bins",
     "get_coarse_time_bins",
     "get_all_time_bins",
-    # Metadata inference
     "infer_feature_metadata",
     "generate_feature_sidecar",
     "parse_feature_name",
-    # Manifest
+    "parse_legacy_power_feature_name",
     "generate_manifest",
     "save_manifest",
-    # I/O
     "save_features_organized",
-    "save_features_bids",
 ]

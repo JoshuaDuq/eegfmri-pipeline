@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 from typing import Any, List, Optional
 
-from eeg_pipeline.io.paths import resolve_deriv_root
+from eeg_pipeline.infra.paths import resolve_deriv_root
 
 
 DEFAULT_TASK_KEY = "project.task"

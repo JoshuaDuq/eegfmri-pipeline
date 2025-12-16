@@ -17,17 +17,14 @@ import mne
 
 from eeg_pipeline.plotting.io.figures import unwrap_figure
 from eeg_pipeline.io.formatting import sanitize_label
-from eeg_pipeline.io.columns import get_pain_column_from_config
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.validation import ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     create_tfr_subset,
     resolve_tfr_workers,
 )
-from ...utils.data.loading import (
-    compute_aligned_data_length,
-    extract_pain_vector_array,
-)
+from ...utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode

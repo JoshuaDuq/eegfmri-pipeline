@@ -62,7 +62,7 @@ from eeg_pipeline.utils.analysis.stats.reliability import (
 # =============================================================================
 # Manifest & Output
 # =============================================================================
-from eeg_pipeline.utils.analysis.features.metadata import (
+from eeg_pipeline.domain.features.naming import (
     generate_manifest,
     save_features_organized,
 )
@@ -109,8 +109,8 @@ __all__ = [
 
 _LAZY_IMPORTS = {
     # Naming utilities
-    "make_feature_name": "eeg_pipeline.utils.analysis.features.metadata",
-    "parse_feature_name": "eeg_pipeline.utils.analysis.features.metadata",  # Authoritative parser with FeatureMetadata
+    "make_feature_name": "eeg_pipeline.domain.features.naming",
+    "parse_feature_name": "eeg_pipeline.domain.features.naming",  # Authoritative parser with FeatureMetadata
     
     # Constants and utilities (imported from their actual modules)
     "build_roi_map": "eeg_pipeline.utils.analysis.channels",

@@ -14,9 +14,57 @@ import pandas as pd
 import numpy as np
 
 from ..config.loader import load_settings, ConfigDict
-from eeg_pipeline.io.tsv import read_tsv
-from eeg_pipeline.io.paths import deriv_stats_path
+from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.paths import deriv_stats_path
 from .covariates import _build_covariate_matrices
+
+
+def _build_correlation_stats_candidates(
+    feature_type: str,
+    target_suffix: str,
+    target_suffix_alt: Optional[str],
+) -> List[str]:
+    file_patterns = {
+        "power": [
+            f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
+            f"corr_stats_power_combined_vs_{target_suffix}.tsv",
+            f"corr_stats_power_vs_{target_suffix}.tsv",
+            f"corr_stats_power_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "power_roi": [
+            f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
+            f"corr_stats_power_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
+        ],
+        "aperiodic": [
+            f"corr_stats_aperiodic_vs_{target_suffix}.tsv",
+            f"corr_stats_aperiodic_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "connectivity": [
+            f"corr_stats_connectivity_vs_{target_suffix}.tsv",
+            f"corr_stats_connectivity_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "itpc": [
+            f"corr_stats_itpc_vs_{target_suffix}.tsv",
+            f"corr_stats_itpc_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+        "dynamics": [
+            f"corr_stats_dynamics_vs_{target_suffix}.tsv",
+            f"corr_stats_dynamics_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ],
+    }
+
+    candidates = file_patterns.get(feature_type) or []
+    candidates = [c for c in candidates if c]
+
+    # Fallback: unified correlator naming convention corr_stats_<feature_type>_vs_<target>
+    # This keeps plotting working as analysis outputs evolve.
+    candidates.extend(
+        [
+            f"corr_stats_{feature_type}_vs_{target_suffix}.tsv",
+            f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
+        ]
+    )
+    return [c for c in candidates if c]
 
 
 def load_precomputed_correlations(
@@ -50,58 +98,13 @@ def load_precomputed_correlations(
     
     target_suffix = "rating" if "rating" in target.lower() else "temperature"
     target_suffix_alt = "temp" if target_suffix == "temperature" else None
-    
-    file_patterns = {
-        "power": [
-            f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
-            f"corr_stats_power_combined_vs_{target_suffix}.tsv",
-            f"corr_stats_power_vs_{target_suffix}.tsv",
-            f"corr_stats_power_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "power_roi": [
-            f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
-            f"corr_stats_power_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
-        ],
-        "aperiodic": [
-            f"corr_stats_aperiodic_vs_{target_suffix}.tsv",
-            f"corr_stats_aperiodic_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "connectivity": [
-            f"corr_stats_connectivity_vs_{target_suffix}.tsv",
-            f"corr_stats_connectivity_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "itpc": [
-            f"corr_stats_itpc_vs_{target_suffix}.tsv",
-            f"corr_stats_itpc_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "dynamics": [
-            f"corr_stats_dynamics_vs_{target_suffix}.tsv",
-            f"corr_stats_dynamics_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-    }
-    
-    candidates = file_patterns.get(feature_type)
+
+    candidates = _build_correlation_stats_candidates(feature_type, target_suffix, target_suffix_alt)
     if not candidates:
         logger.warning(f"Unknown feature type for stats loading: {feature_type}")
         return None
 
-    candidates = [c for c in candidates if c]
-
     for fname in candidates:
-        fpath = stats_dir / fname
-        if not fpath.exists():
-            continue
-        df = read_tsv(fpath)
-        if df is not None and not df.empty:
-            return df
-
-    # Fallback: unified correlator naming convention corr_stats_<feature_type>_vs_<target>
-    # This keeps plotting working as analysis outputs evolve.
-    unified_candidates = [
-        f"corr_stats_{feature_type}_vs_{target_suffix}.tsv",
-        f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-    ]
-    for fname in [c for c in unified_candidates if c]:
         fpath = stats_dir / fname
         if not fpath.exists():
             continue
@@ -189,7 +192,8 @@ def load_subject_scatter_data(
     Returns 9-tuple:
         temporal_df, plateau_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
     """
-    from .loading import _load_features_and_targets, load_epochs_for_analysis
+    from .features_io import _load_features_and_targets
+    from .epochs_loading import load_epochs_for_analysis
     from .alignment import get_aligned_events
     from .covariates import extract_temperature_data
     from ..analysis.tfr import build_rois_from_info

@@ -12,10 +12,7 @@ from scipy.stats import gaussian_kde
 
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.data.loading import (
-    extract_channel_importance_from_coefficients,
-    extract_importance_column,
-)
+from eeg_pipeline.utils.data.decoding import extract_channel_importance_from_coefficients, extract_importance_column
 
 logger = logging.getLogger(__name__)
 

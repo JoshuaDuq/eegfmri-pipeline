@@ -16,7 +16,7 @@ import pandas as pd
 import mne
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.tfr import get_tfr_config, resolve_tfr_workers, compute_adaptive_n_cycles
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 from eeg_pipeline.utils.config.loader import get_frequency_bands

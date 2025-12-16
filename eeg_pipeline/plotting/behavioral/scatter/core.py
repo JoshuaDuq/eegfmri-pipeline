@@ -11,6 +11,7 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.behavioral.builders import (
     generate_correlation_scatter,
@@ -27,8 +28,8 @@ from eeg_pipeline.io.formatting import (
     get_temporal_xlabel,
     sanitize_label,
 )
-from eeg_pipeline.io.logging import get_subject_logger
-from eeg_pipeline.io.paths import deriv_plots_path, deriv_stats_path, ensure_dir
+from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
@@ -44,6 +45,7 @@ from eeg_pipeline.utils.analysis.stats import (
     joint_valid_mask,
     update_stats_from_dataframe,
 )
+from eeg_pipeline.utils.data.feature_columns import infer_power_band
 
 
 @dataclass
@@ -383,21 +385,26 @@ def _get_temporal_columns(
     time_label: str,
     config: Optional[Any] = None,
 ) -> List[str]:
-    v2_cols = [
-        c
-        for c in temporal_df.columns
-        if str(c).startswith(f"power_{time_label}_{band}_ch_")
-    ]
+    v2_cols = []
+    for c in temporal_df.columns:
+        parsed = NamingSchema.parse(str(c))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        if str(parsed.get("segment") or "") != str(time_label):
+            continue
+        if str(parsed.get("band") or "") != str(band):
+            continue
+        if str(parsed.get("scope") or "") != "ch":
+            continue
+        v2_cols.append(str(c))
     if v2_cols:
         return v2_cols
 
-    plot_cfg = get_plot_config(config)
-    behavioral_config = plot_cfg.get_behavioral_config()
-    power_prefix = behavioral_config.get("power_prefix", "pow_")
     return [
         c
         for c in temporal_df.columns
-        if c.startswith(f"{power_prefix}{band}_") and c.endswith(f"_{time_label}")
+        if infer_power_band(str(c), bands=[str(band)]) == str(band).lower()
+        and str(c).endswith(f"_{time_label}")
     ]
 
 

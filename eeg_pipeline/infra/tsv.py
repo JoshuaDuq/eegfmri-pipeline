@@ -6,14 +6,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from .paths import ensure_dir
+import pyarrow as pa
+import pyarrow.csv as pa_csv
 
-try:
-    import pyarrow as pa
-    import pyarrow.csv as pa_csv
-except Exception:
-    pa = None
-    pa_csv = None
+from .paths import ensure_dir
 
 
 def read_tsv(path: Path, **kwargs) -> pd.DataFrame:
@@ -52,10 +48,6 @@ def write_table(df: pd.DataFrame, path: Path, index: bool = False, **kwargs) -> 
 
 def write_tsv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
     ensure_dir(path.parent)
-    if pa is None or pa_csv is None:
-        df.to_csv(path, sep="\t", index=index)
-        return
-
     if index:
         df = df.reset_index(drop=False)
 

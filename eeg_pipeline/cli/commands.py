@@ -23,7 +23,7 @@ from eeg_pipeline.cli.common import (
     MIN_SUBJECTS_KEY,
     MIN_SUBJECTS_FOR_DECODING,
 )
-from eeg_pipeline.context.features import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
 
 
 @dataclass

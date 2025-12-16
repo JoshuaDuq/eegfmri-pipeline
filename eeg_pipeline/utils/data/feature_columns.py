@@ -4,6 +4,8 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
+
 
 _DEFAULT_BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
 
@@ -16,41 +18,17 @@ def infer_power_band(column_name: str, *, bands: Optional[List[str]] = None) -> 
     bands_use = [str(b).lower() for b in (bands or _DEFAULT_BANDS)]
     bands_set = set(bands_use)
 
-    if name.startswith("power_"):
-        parts = name.split("_")
-        # Support both legacy power_{band}_... and v2 power_{segment}_{band}_...
-        for idx in (1, 2):
-            if len(parts) > idx and parts[idx] in bands_set:
-                return parts[idx]
+    parsed = NamingSchema.parse(str(column_name))
+    if parsed.get("valid") and parsed.get("group") == "power":
+        band = str(parsed.get("band") or "").lower()
+        return band if band in bands_set else None
 
-        # Fallback: scan tokens
-        for token in parts:
-            if token in bands_set:
-                return token
+    legacy = parse_legacy_power_feature_name(str(column_name))
+    if legacy is None:
         return None
-    if name.startswith("pow_"):
-        parts = name.split("_")
-        if len(parts) >= 2:
-            if parts[1] in bands_set:
-                return parts[1]
-
-        for token in parts:
-            if token in bands_set:
-                return token
-        return None
-
-    # Substring-based legacy patterns (kept for backward compatibility)
-    for band_l in bands_use:
-        if (
-            f"power_baseline_{band_l}" in name
-            or f"power_stim_{band_l}" in name
-            or f"_{band_l}_pow" in name
-            or f"_{band_l}_power" in name
-            or f"pow_{band_l}" in name
-            or f"power_{band_l}" in name
-        ):
-            return band_l
-    return None
+    legacy_band, _legacy_ch = legacy
+    legacy_band = str(legacy_band).lower()
+    return legacy_band if legacy_band in bands_set else None
 
 
 def get_power_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = None) -> Dict[str, List[str]]:
@@ -60,9 +38,18 @@ def get_power_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = 
     for band in bands:
         band_cols: List[str] = []
         for c in df.columns:
-            c_band = infer_power_band(c, bands=bands)
-            if c_band == band:
-                band_cols.append(c)
+            parsed = NamingSchema.parse(str(c))
+            if parsed.get("valid") and parsed.get("group") == "power":
+                if str(parsed.get("band") or "").lower() == str(band).lower():
+                    band_cols.append(str(c))
+                continue
+
+            legacy = parse_legacy_power_feature_name(str(c))
+            if legacy is None:
+                continue
+            legacy_band, _legacy_ch = legacy
+            if str(legacy_band).lower() == str(band).lower():
+                band_cols.append(str(c))
         if band_cols:
             power_cols[band] = band_cols
 
@@ -73,17 +60,21 @@ def get_connectivity_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[s
     bands = bands or _DEFAULT_BANDS
     conn_cols: Dict[str, List[str]] = {}
 
+    bands_set = {str(b).lower() for b in bands}
     for band in bands:
-        band_cols = [
-            c
-            for c in df.columns
-            if (
-                f"conn_plateau_{band}_" in c.lower()
-                or f"conn_{band}_" in c.lower()
-                or f"conn_legacy_plateau_{band}_" in c.lower()
-                or f"conn_legacy_{band}_" in c.lower()
-            )
-        ]
+        band_l = str(band).lower()
+        if band_l not in bands_set:
+            continue
+        band_cols: List[str] = []
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "connectivity":
+                continue
+            if str(parsed.get("band") or "").lower() != band_l:
+                continue
+            band_cols.append(str(c))
         if band_cols:
             conn_cols[band] = band_cols
 
@@ -94,12 +85,21 @@ def get_itpc_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = N
     bands = bands or _DEFAULT_BANDS
     itpc_cols: Dict[str, List[str]] = {}
 
+    bands_set = {str(b).lower() for b in bands}
     for band in bands:
-        band_cols = [
-            c
-            for c in df.columns
-            if f"itpc_plateau_{band}_" in c.lower() or f"itpc_{band}_" in c.lower()
-        ]
+        band_l = str(band).lower()
+        if band_l not in bands_set:
+            continue
+        band_cols: List[str] = []
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "itpc":
+                continue
+            if str(parsed.get("band") or "").lower() != band_l:
+                continue
+            band_cols.append(str(c))
         if band_cols:
             itpc_cols[band] = band_cols
 
@@ -110,23 +110,16 @@ def get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     aper_cols: Dict[str, List[str]] = {}
 
     for metric in ["slope", "offset", "exponent"]:
-        cols = [
-            c
-            for c in df.columns
-            if f"aper_{metric}" in c.lower() or f"aperiodic_{metric}" in c.lower()
-        ]
-        if metric == "slope":
-            cols.extend([
-                c
-                for c in df.columns
-                if str(c).lower().startswith("aperiodic_") and str(c).lower().endswith("_slope")
-            ])
-        if metric == "offset":
-            cols.extend([
-                c
-                for c in df.columns
-                if str(c).lower().startswith("aperiodic_") and str(c).lower().endswith("_offset")
-            ])
+        cols: List[str] = []
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "aperiodic":
+                continue
+            stat = str(parsed.get("stat") or "")
+            if stat == metric or stat.endswith(f"_{metric}"):
+                cols.append(str(c))
         if cols:
             aper_cols[metric] = list(dict.fromkeys(cols))
 
@@ -137,18 +130,16 @@ def get_microstate_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     ms_cols: Dict[str, List[str]] = {}
 
     for metric in ["coverage", "duration", "occurrence", "gev"]:
-        cols = [
-            c
-            for c in df.columns
-            if f"ms_{metric}" in c.lower() or f"microstate_{metric}" in c.lower()
-        ]
-        cols.extend(
-            [
-                c
-                for c in df.columns
-                if str(c).lower().startswith("microstates_") and f"_{metric}" in str(c).lower()
-            ]
-        )
+        cols: List[str] = []
+        for c in df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "microstates":
+                continue
+            stat = str(parsed.get("stat") or "")
+            if stat == metric or stat.endswith(f"_{metric}"):
+                cols.append(str(c))
         if cols:
             ms_cols[metric] = list(dict.fromkeys(cols))
 

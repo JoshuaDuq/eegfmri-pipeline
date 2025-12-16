@@ -20,7 +20,7 @@ from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
     get_default_config as _get_default_config,
 )
-from eeg_pipeline.io.logging import get_default_logger as _get_default_logger
+from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
 from eeg_pipeline.utils.analysis.stats.moderation import ModerationResult
 
 

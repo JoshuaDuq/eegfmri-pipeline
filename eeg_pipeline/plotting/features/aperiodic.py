@@ -16,10 +16,11 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 
-from eeg_pipeline.io.paths import ensure_dir, deriv_stats_path
+from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
-from eeg_pipeline.io.logging import get_logger
-from eeg_pipeline.io.columns import get_pain_column_from_config
+from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from .utils import get_condition_colors, get_fdr_alpha
@@ -47,18 +48,21 @@ def _extract_aperiodic_data(
     df_masked = features_df if mask is None else features_df[mask]
     
     for ch_name in info.ch_names:
-        # Try new naming convention first: aperiodic_plateau_broadband_ch_{ch}_{metric}
-        col_new = f"aperiodic_plateau_broadband_ch_{ch_name}_{metric}"
-        # Fallback to old naming: aper_{metric}_{ch}
-        col_old = f"aper_{metric}_{ch_name}"
-        
-        col = col_new if col_new in df_masked.columns else col_old
-        if col in df_masked.columns:
-            val = df_masked[col].mean()
-            if not np.isnan(val):
-                data.append(val)
-                found_chs.append(ch_name)
-            
+        col = NamingSchema.build(
+            "aperiodic",
+            "plateau",
+            "broadband",
+            "ch",
+            metric,
+            channel=ch_name,
+        )
+        if col not in df_masked.columns:
+            continue
+        val = pd.to_numeric(df_masked[col], errors="coerce").mean()
+        if not np.isnan(val):
+            data.append(val)
+            found_chs.append(ch_name)
+
     return np.array(data), found_chs
 
 

@@ -6,13 +6,15 @@ from typing import Any, List, Optional
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import load_subject_data, plot_target_correlations
 from eeg_pipeline.utils.analysis.stats import extract_overall_statistics, extract_roi_statistics
 from eeg_pipeline.io.formatting import sanitize_label
-from eeg_pipeline.io.logging import get_subject_logger
-from eeg_pipeline.io.paths import deriv_plots_path, ensure_dir
+from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import get_band_color, get_default_config as _get_default_config
+from eeg_pipeline.utils.data.feature_columns import get_power_columns_by_band
 
 
 def plot_power_roi_scatter(
@@ -70,16 +72,8 @@ def plot_power_roi_scatter(
     power_bands_to_use = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
 
     for band in power_bands_to_use:
-        band_cols = {
-            c
-            for c in pow_df.columns
-            if str(c).startswith(f"power_plateau_{band}_ch_")
-        }
-        using_v2 = True
-        if not band_cols:
-            using_v2 = False
-            power_prefix = behavioral_config.get("power_prefix", "pow_")
-            band_cols = {c for c in pow_df.columns if str(c).startswith(f"{power_prefix}{band}_")}
+        power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in power_bands_to_use])
+        band_cols = set(power_cols_by_band.get(str(band), []))
         if not band_cols:
             continue
 
@@ -137,23 +131,26 @@ def plot_power_roi_scatter(
             )
 
         for roi, chs in roi_map.items():
-            if using_v2:
-                roi_cols = []
-                for ch in chs:
-                    candidates = [
-                        f"power_plateau_{band}_ch_{ch}_logratio",
-                        f"power_plateau_{band}_ch_{ch}_log10raw",
-                    ]
-                    col = next((c for c in candidates if c in band_cols), None)
-                    if col is not None:
-                        roi_cols.append(col)
-            else:
-                power_prefix = behavioral_config.get("power_prefix", "pow_")
-                roi_cols = [
-                    f"{power_prefix}{band}_{ch}"
-                    for ch in chs
-                    if f"{power_prefix}{band}_{ch}" in band_cols
-                ]
+            roi_cols = []
+            for ch in chs:
+                for c in band_cols:
+                    parsed = NamingSchema.parse(str(c))
+                    if parsed.get("valid") and parsed.get("group") == "power":
+                        if str(parsed.get("band") or "") != str(band):
+                            continue
+                        if str(parsed.get("segment") or "") != "plateau":
+                            continue
+                        if str(parsed.get("scope") or "") != "ch":
+                            continue
+                        if str(parsed.get("identifier") or "") == str(ch):
+                            roi_cols.append(str(c))
+                        continue
+
+                    legacy = parse_legacy_power_feature_name(str(c))
+                    if legacy is not None:
+                        _legacy_band, legacy_ch = legacy
+                        if str(_legacy_band) == str(band) and str(legacy_ch) == str(ch):
+                            roi_cols.append(str(c))
             if not roi_cols:
                 continue
 

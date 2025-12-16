@@ -15,18 +15,19 @@ from sklearn.impute import SimpleImputer
 from eeg_pipeline.utils.analysis.tfr import (
     find_common_channels_train_test,
 )
-from eeg_pipeline.utils.data.loading import (
+from eeg_pipeline.utils.analysis.windowing import build_time_windows
+from eeg_pipeline.utils.data.decoding import (
     filter_finite_targets,
     extract_epoch_data_block,
     prepare_trial_records_from_epochs,
-    load_epochs_with_targets,
 )
+from eeg_pipeline.utils.data.decoding import load_epochs_with_targets
 from eeg_pipeline.analysis.decoding.cv import (
     get_min_channels_required,
     safe_pearsonr,
 )
 from eeg_pipeline.utils.config.loader import load_settings, get_fisher_z_clip_values
-from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.infra.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -34,20 +35,6 @@ logger = get_logger(__name__)
 ###################################################################
 # Time Generalization Decoding
 ###################################################################
-
-
-def _build_time_windows(
-    window_len: float,
-    step: float,
-    tmin: float,
-    tmax: float,
-) -> List[Tuple[float, float]]:
-    windows = []
-    t = tmin
-    while t + window_len <= tmax + 1e-6:
-        windows.append((t, t + window_len))
-        t += step
-    return windows
 
 
 def _extract_window_features(
@@ -104,7 +91,7 @@ def time_generalization_regression(
     step = config_local.get("decoding.analysis.time_generalization.step", 0.25)
 
     tmin_pl, tmax_pl = plateau_window
-    windows = _build_time_windows(window_len, step, tmin_pl, tmax_pl)
+    windows = build_time_windows(window_len, step, tmin_pl, tmax_pl)
 
     if not windows:
         logger.warning("No valid time windows found.")

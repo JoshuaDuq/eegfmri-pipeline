@@ -12,34 +12,12 @@ from typing import Any, Optional
 
 import numpy as np
 
-try:
-    from ...config.loader import load_settings, get_constants, get_config_value, ensure_config
-except ImportError:
-    load_settings = None
-    get_constants = None
-
-    def get_config_value(config, key, default):
-        if config is None:
-            return default
-        if hasattr(config, "get"):
-            return config.get(key, default)
-        if isinstance(config, dict):
-            keys = key.split(".")
-            value = config
-            for k in keys:
-                if isinstance(value, dict) and k in value:
-                    value = value[k]
-                else:
-                    return default
-            return value
-        return default
-
-    def ensure_config(config=None):
-        if config is not None:
-            return config
-        if load_settings is not None:
-            return load_settings()
-        return None
+from eeg_pipeline.utils.config.loader import (
+    ensure_config,
+    get_config_value,
+    get_constants,
+    load_settings,
+)
 
 
 @dataclass

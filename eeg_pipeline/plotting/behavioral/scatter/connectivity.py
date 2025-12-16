@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
@@ -14,7 +14,7 @@ from eeg_pipeline.plotting.behavioral.scatter.core import (
 )
 from eeg_pipeline.utils.data import load_precomputed_correlations
 from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
-from eeg_pipeline.io.logging import get_subject_logger
+from eeg_pipeline.infra.logging import get_subject_logger
 
 
 def _extract_within_roi_connectivity(
@@ -22,20 +22,28 @@ def _extract_within_roi_connectivity(
     band: str,
     roi_channels: List[str],
 ) -> pd.Series:
-    cols = []
+    cols: List[str] = []
     for col in features_df.columns:
-        if f"conn_plateau_{band}_" not in col:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
             continue
-        match = re.search(r"_chpair_([A-Za-z0-9]+)-([A-Za-z0-9]+)_", col)
-        if match:
-            ch1, ch2 = match.group(1), match.group(2)
-            if ch1 in roi_channels and ch2 in roi_channels:
-                cols.append(col)
-
+        if parsed.get("group") != "connectivity":
+            continue
+        if parsed.get("segment") != "plateau":
+            continue
+        if parsed.get("band") != band:
+            continue
+        if parsed.get("scope") != "chpair":
+            continue
+        ident = str(parsed.get("identifier") or "")
+        if "-" not in ident:
+            continue
+        ch1, ch2 = ident.split("-", 1)
+        if ch1 in roi_channels and ch2 in roi_channels:
+            cols.append(str(col))
     if not cols:
         return pd.Series([np.nan] * len(features_df), index=features_df.index)
-
-    return features_df[cols].mean(axis=1)
+    return features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
 
 def _extract_connectivity_values(

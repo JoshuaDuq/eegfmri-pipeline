@@ -70,6 +70,35 @@ def process_temperature_levels(
     return levels, {}, False
 
 
+def build_epoch_query_string(
+    column: str,
+    level,
+    is_numeric: bool,
+    labels: Optional[Dict] = None,
+) -> Tuple[str, str]:
+    if labels is None:
+        labels = {}
+
+    if is_numeric:
+        try:
+            value = float(level)
+        except (TypeError, ValueError):
+            value = level
+        label = labels.get(level)
+        if label is None:
+            try:
+                label = str(int(value)) if float(value).is_integer() else str(value)
+            except Exception:
+                label = str(level)
+        query = f"{column} == {value}"
+        return query, str(label)
+
+    value_str = str(level)
+    label = labels.get(level, value_str)
+    query = f"{column} == '{value_str}'"
+    return query, str(label)
+
+
 def select_epochs_by_value(epochs: mne.Epochs, column: str, value) -> mne.Epochs:
     if epochs.metadata is None or column not in epochs.metadata.columns:
         raise ValueError(f"Column '{column}' not found in epochs.metadata")

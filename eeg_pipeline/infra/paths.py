@@ -83,15 +83,7 @@ def deriv_group_plots_path(deriv_root: Path, subdir: Optional[str] = None) -> Pa
 
 def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     sub = _normalize_subject_label(subject)
-    features_parquet = Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.parquet"
-    if features_parquet.exists():
-        return features_parquet
-
-    legacy_parquet = Path(deriv_root) / sub / "eeg" / "connectivity_features.parquet"
-    if legacy_parquet.exists():
-        return legacy_parquet
-
-    return Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.tsv"
+    return Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.parquet"
 
 
 def _resolve_deriv_root(
@@ -289,6 +281,23 @@ def _load_events_df(
     return pd.read_csv(events_path, sep="\t")
 
 
+def load_events_df(
+    subject: str,
+    task: str,
+    bids_root: Optional[Path] = None,
+    *,
+    constants=None,
+    config: Optional[EEGConfig] = None,
+) -> Optional[Any]:
+    return _load_events_df(
+        subject=subject,
+        task=task,
+        bids_root=bids_root,
+        constants=constants,
+        config=config,
+    )
+
+
 def extract_subject_id_from_path(path: Path) -> Optional[str]:
     import re
 
@@ -352,6 +361,7 @@ __all__ = [
     "_resolve_bids_root",
     "_find_events_path",
     "_load_events_df",
+    "load_events_df",
     "extract_subject_id_from_path",
     "ensure_derivatives_dataset_description",
 ]

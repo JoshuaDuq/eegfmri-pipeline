@@ -19,7 +19,7 @@ from matplotlib.patches import Patch
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import get_numeric_feature_columns
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.config.loader import get_config_value
 
 

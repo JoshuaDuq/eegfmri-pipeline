@@ -9,8 +9,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from eeg_pipeline.io.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
-from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
+from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.plotting.erp.contrasts import erp_contrast_pain
 from eeg_pipeline.plotting.erp.temperature import erp_by_temperature

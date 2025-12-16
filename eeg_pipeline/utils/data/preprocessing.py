@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 import mne
 
+from eeg_pipeline.infra.tsv import read_tsv
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,7 +147,7 @@ def load_run_files(run_files: List[Path]) -> List[Tuple[int, pd.DataFrame, Path]
         if run_number is None:
             continue
         try:
-            dataframe = pd.read_csv(file_path, sep="\t")
+            dataframe = read_tsv(file_path)
         except (pd.errors.ParserError, OSError) as e:
             logger.warning("Skipping run file due to read error: %s -> %s", file_path, e)
             continue

@@ -121,7 +121,7 @@ def apply_global_fdr(
 ) -> Dict[str, Any]:
     """Apply global FDR correction across correlation files within families."""
     from pathlib import Path
-    from eeg_pipeline.io.tsv import read_tsv, write_tsv
+    from eeg_pipeline.infra.tsv import read_tsv, write_tsv
     
     stats_dir = Path(stats_dir)
     files = list(stats_dir.glob(include_glob))

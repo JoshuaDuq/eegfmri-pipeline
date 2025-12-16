@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
@@ -81,7 +82,29 @@ def plot_power_by_roi_band_condition(
 
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
-            roi_vals = aggregate_by_roi(features_df, f"power_plateau_{band}_", roi_channels)
+
+            cols = []
+            roi_set = set(roi_channels)
+            for c in features_df.columns:
+                parsed = NamingSchema.parse(str(c))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != "power":
+                    continue
+                if parsed.get("segment") != "plateau":
+                    continue
+                if parsed.get("band") != band:
+                    continue
+                if parsed.get("scope") != "ch":
+                    continue
+                if parsed.get("identifier") not in roi_set:
+                    continue
+                cols.append(str(c))
+            roi_vals = (
+                features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                if cols
+                else pd.Series([np.nan] * len(features_df), index=features_df.index)
+            )
 
             vals_nonpain = roi_vals[~pain_mask].dropna().values
             vals_pain = roi_vals[pain_mask].dropna().values

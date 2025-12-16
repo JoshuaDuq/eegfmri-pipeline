@@ -20,7 +20,7 @@ from scipy import stats
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 from eeg_pipeline.utils.analysis.stats import compute_residuals
 

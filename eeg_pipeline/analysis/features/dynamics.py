@@ -16,7 +16,7 @@ from typing import List, Dict, Tuple, Any
 from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 
 def _process_single_epoch_dynamics(

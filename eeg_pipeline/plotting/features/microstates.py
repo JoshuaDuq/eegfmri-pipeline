@@ -22,14 +22,11 @@ from eeg_pipeline.plotting.io.figures import (
     log_if_present as _log_if_present,
     validate_picks as _validate_picks,
 )
-from eeg_pipeline.io.paths import ensure_dir
-from eeg_pipeline.io.columns import find_temperature_column_in_events
-from ...utils.data.loading import (
-    resolve_columns,
-    get_aligned_events,
-    align_events_with_policy,
-    validate_aligned_events_length,
-)
+from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.utils.data.columns import find_temperature_column_in_events
+from ...utils.data.epochs_loading import resolve_columns
+from ...utils.data.alignment import get_aligned_events, align_events_to_epochs
+from ...utils.data.alignment import validate_alignment as validate_aligned_events_length
 from ...utils.analysis.stats import (
     compute_coverage_statistics,
     compute_consensus_labels,
@@ -278,7 +275,7 @@ def _prepare_gfp_plotting_data(
         _log_if_present(logger, "warning", "No pain binary column found")
         return None, None, None, None, None
     
-    aligned_events = align_events_with_policy(events_df, epochs, config=config, logger=logger)
+    aligned_events = align_events_to_epochs(events_df, epochs, logger=logger)
     if not validate_aligned_events_length(aligned_events, epochs, logger):
         return None, None, None, None, None
     

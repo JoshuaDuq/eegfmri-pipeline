@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
@@ -13,18 +14,27 @@ from eeg_pipeline.plotting.behavioral.scatter.core import (
 )
 from eeg_pipeline.utils.data import load_precomputed_correlations
 from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
-from eeg_pipeline.io.logging import get_subject_logger
+from eeg_pipeline.infra.logging import get_subject_logger
 
 
 def _extract_itpc_columns(features_df: pd.DataFrame, band: str, roi_channels: List[str]) -> List[str]:
-    cols = []
+    cols: List[str] = []
+    roi_set = set(roi_channels)
     for col in features_df.columns:
-        if f"itpc_plateau_{band}_ch_" not in col:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
             continue
-        for ch in roi_channels:
-            if f"_ch_{ch}_" in col or col.endswith(f"_ch_{ch}"):
-                cols.append(col)
-                break
+        if parsed.get("group") != "itpc":
+            continue
+        if parsed.get("segment") != "plateau":
+            continue
+        if parsed.get("band") != band:
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        ch = parsed.get("identifier")
+        if ch in roi_set:
+            cols.append(str(col))
     return cols
 
 

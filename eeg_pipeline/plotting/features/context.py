@@ -17,8 +17,8 @@ import matplotlib.pyplot as plt
 import mne
 import pandas as pd
 
-from eeg_pipeline.io.paths import ensure_dir
-from eeg_pipeline.io.tsv import read_tsv as _read_tsv
+from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.infra.tsv import read_tsv as _read_tsv
 from eeg_pipeline.plotting.io.figures import save_fig as _save_fig
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.core.registry import (
@@ -75,7 +75,7 @@ class FeaturePlotContext:
     
     def load_data(self) -> None:
         """Load all feature data into memory using the canonical loader."""
-        from eeg_pipeline.utils.data.loading import load_feature_bundle
+        from eeg_pipeline.utils.data.features_io import load_feature_bundle
         
         self.logger.info("Loading feature data frames...")
         

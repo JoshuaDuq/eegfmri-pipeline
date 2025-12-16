@@ -15,9 +15,9 @@ import mne
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
-from eeg_pipeline.io.columns import get_column_from_config
+from eeg_pipeline.utils.data.columns import get_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.analysis.events import extract_pain_mask

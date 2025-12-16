@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 from ..config.loader import ConfigDict
-from eeg_pipeline.io.paths import _find_clean_epochs_path, resolve_deriv_root
+from eeg_pipeline.infra.paths import find_clean_epochs_path, resolve_deriv_root
 from .discovery import (
     _collect_subjects_from_bids,
     _collect_subjects_from_derivatives_epochs,
@@ -140,7 +140,7 @@ def parse_subject_args(
             ]
             subjects = []
             for s in candidates:
-                if _find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config) is not None:
+                if find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config) is not None:
                     subjects.append(s)
                 else:
                     logger.warning(f"--group subject '{s}' has no cleaned epochs; skipping")

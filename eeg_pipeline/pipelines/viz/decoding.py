@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.paths import ensure_dir
 
 from eeg_pipeline.plotting.decoding.time_generalization import (
     plot_time_generalization_matrix,
@@ -244,6 +244,7 @@ def visualize_regression_from_disk(
     import json
     import pandas as pd
     import numpy as np
+    from eeg_pipeline.infra.tsv import read_tsv
     
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -259,7 +260,7 @@ def visualize_regression_from_disk(
         logger.warning(f"Predictions file not found: {pred_path}")
         return
     
-    pred_df = pd.read_csv(pred_path, sep="\t")
+    pred_df = read_tsv(pred_path)
     
     pooled_metrics = {}
     if metrics_path.exists():

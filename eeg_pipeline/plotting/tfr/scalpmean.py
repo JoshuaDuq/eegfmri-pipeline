@@ -24,19 +24,15 @@ from eeg_pipeline.plotting.io.figures import (
     save_fig as central_save_fig,
 )
 from eeg_pipeline.io.formatting import format_baseline_window_string
-from eeg_pipeline.io.columns import get_pain_column_from_config
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
+from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
     apply_baseline_and_crop,
     create_tfr_subset,
-    create_time_mask_strict,
-    create_time_mask_loose,
 )
-from ...utils.data.loading import (
-    compute_aligned_data_length,
-    extract_pain_vector,
-)
+from ...utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode
@@ -70,9 +66,9 @@ def _compute_plateau_statistics(
     tmin_req, tmax_req = plateau_window
     strict_mode = get_strict_mode(config)
     if strict_mode:
-        tmask = create_time_mask_strict(times, tmin_req, tmax_req)
+        tmask = time_mask_strict(times, tmin_req, tmax_req)
     else:
-        tmask = create_time_mask_loose(times, tmin_req, tmax_req, logger)
+        tmask = time_mask_loose(times, tmin_req, tmax_req, logger)
     mu = float(np.nanmean(arr[:, tmask]))
     pct = logratio_to_pct(mu)
     return mu, pct, tmask

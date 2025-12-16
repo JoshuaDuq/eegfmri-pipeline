@@ -5,7 +5,7 @@ import mne
 
 from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry
 from eeg_pipeline.plotting.core.runner import safe_plot
-from eeg_pipeline.io.paths import deriv_stats_path
+from eeg_pipeline.infra.paths import deriv_stats_path
 
 from eeg_pipeline.plotting.features.microstates import (
     plot_microstate_by_condition,

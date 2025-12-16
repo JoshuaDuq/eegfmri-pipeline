@@ -23,7 +23,7 @@ from eeg_pipeline.plotting.io.figures import (
     get_viz_params,
     plot_topomap_on_ax,
 )
-from eeg_pipeline.io.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config, get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
@@ -36,7 +36,7 @@ from ...utils.analysis.tfr import (
 from ...utils.analysis.stats import (
     cluster_test_epochs,
 )
-from ...utils.data.loading import (
+from ...utils.data.tfr_alignment import (
     compute_aligned_data_length,
     extract_pain_vector,
     extract_temperature_series,

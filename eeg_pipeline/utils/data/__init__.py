@@ -1,14 +1,11 @@
 # Import commonly used functions
-from .loading import (
-    load_epochs_for_analysis,
-    parse_subject_args,
-    _load_features_and_targets,
-    resolve_columns,
-    load_feature_bundle,
-    load_behavior_plot_features,
-    load_behavior_stats_files,
-    load_stats_file_with_fallbacks,
-)
+from .epochs_loading import load_epochs_for_analysis
+from .subjects import parse_subject_args, get_available_subjects
+from .features_io import load_feature_bundle
+from .features_io import _load_features_and_targets
+from .behavior import load_behavior_plot_features, load_behavior_stats_files, load_stats_file_with_fallbacks
+from .decoding import load_plateau_matrix, load_epoch_windows, load_epochs_with_targets
+from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 from .stats import (
     load_precomputed_correlations,
     get_precomputed_stats_for_roi_band,
@@ -19,7 +16,7 @@ from .alignment import (
     get_aligned_events,
 )
 from .discovery import (
-    get_available_subjects,
+    get_available_subjects as get_available_subjects,
 )
 from .covariates import (
     _build_covariate_matrices,
@@ -79,9 +76,13 @@ __all__ = [
     "find_column",
     "reorder_pivot",
     "load_stats_file_with_fallbacks",
+    "load_epochs_with_targets",
+    "load_plateau_matrix",
+    "load_epoch_windows",
+    "compute_aligned_data_length",
+    "extract_pain_vector_array",
     "load_precomputed_correlations",
     "get_precomputed_stats_for_roi_band",
-    "load_subject_scatter_data",
     "load_subject_scatter_data",
     "get_aligned_events",
     "_build_covariate_matrices",

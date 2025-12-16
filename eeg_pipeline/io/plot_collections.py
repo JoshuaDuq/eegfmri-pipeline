@@ -9,8 +9,8 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
-from .paths import ensure_dir, deriv_plots_path
-from .logging import get_subject_logger
+from eeg_pipeline.infra.paths import ensure_dir, deriv_plots_path
+from eeg_pipeline.infra.logging import get_subject_logger
 from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
 from eeg_pipeline.plotting.config import get_plot_config
 

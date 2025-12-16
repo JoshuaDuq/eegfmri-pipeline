@@ -2,15 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.io.columns import pick_target_column
-from eeg_pipeline.io.paths import deriv_features_path, find_connectivity_features_path
-from eeg_pipeline.io.tsv import read_tsv, read_table
+from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.infra.paths import deriv_features_path, find_connectivity_features_path
+from eeg_pipeline.infra.tsv import read_tsv, read_table
+from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+
+
+def _safe_read_table(
+    path: Path,
+    logger: logging.Logger,
+) -> Optional[pd.DataFrame]:
+    if not path.exists():
+        return None
+    try:
+        return read_table(path)
+    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
+        logger.warning("Failed to read %s: %s", path, exc)
+        return None
 
 
 def load_subject_features(
@@ -33,6 +47,71 @@ def load_subject_features(
         subject_features[subject] = read_table(feature_path)
 
     return subject_features
+
+
+def _load_features_and_targets(
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    epochs: Optional[Any] = None,
+) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
+    feats_dir = deriv_features_path(deriv_root, subject)
+    temporal_path = feats_dir / "features_eeg_direct.tsv"
+    plateau_path = feats_dir / "features_eeg_plateau.tsv"
+    conn_path = find_connectivity_features_path(deriv_root, subject)
+    y_path = feats_dir / "target_vas_ratings.tsv"
+
+    power_path = plateau_path if plateau_path.exists() else temporal_path
+    if not power_path.exists() or not y_path.exists():
+        raise FileNotFoundError(f"Missing features or targets for sub-{subject}. Expected at {feats_dir}")
+
+    temporal_df = read_table(temporal_path) if temporal_path.exists() else None
+    plateau_df = read_table(power_path)
+    conn_df = read_table(conn_path) if conn_path.exists() else None
+    y_df = read_table(y_path)
+
+    if y_df.shape[1] == 1:
+        y = pd.to_numeric(y_df.iloc[:, 0], errors="coerce")
+    else:
+        numeric_cols = y_df.select_dtypes(exclude=["object"]).columns
+        if len(numeric_cols) == 0:
+            raise ValueError(f"No numeric target columns found in {y_path}")
+        y = pd.to_numeric(y_df[numeric_cols[0]], errors="coerce")
+
+    if epochs is None:
+        epochs, _ = load_epochs_for_analysis(
+            subject,
+            task,
+            align="strict",
+            preload=False,
+            deriv_root=deriv_root,
+            bids_root=getattr(config, "bids_root", None),
+            config=config,
+        )
+        if epochs is None:
+            raise FileNotFoundError(f"Could not locate clean epochs for sub-{subject}, task-{task}")
+
+    n_samples = len(y)
+    if len(plateau_df) != n_samples:
+        raise ValueError(
+            f"Length mismatch: plateau features ({len(plateau_df)} rows) != target ratings ({n_samples} rows) "
+            f"for sub-{subject}, task-{task}"
+        )
+
+    if temporal_df is not None and len(temporal_df) != n_samples:
+        raise ValueError(
+            f"Length mismatch: temporal features ({len(temporal_df)} rows) != target ratings ({n_samples} rows) "
+            f"for sub-{subject}, task-{task}"
+        )
+
+    if conn_df is not None and len(conn_df) != n_samples:
+        raise ValueError(
+            f"Length mismatch: connectivity features ({len(conn_df)} rows) != target ratings ({n_samples} rows) "
+            f"for sub-{subject}, task-{task}"
+        )
+
+    return temporal_df, plateau_df, conn_df, y, getattr(epochs, "info", None)
 
 
 def _load_feature_bundle_for_subject(
@@ -65,22 +144,13 @@ def _load_feature_bundle_for_subject(
         logger.error("Failed to read power features from %s: %s", power_path, exc)
         return None, None, None, None, None, None, None, None
 
-    def _safe_read(path: Path) -> Optional[pd.DataFrame]:
-        if not path.exists():
-            return None
-        try:
-            return read_table(path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read %s: %s", path, exc)
-            return None
-
-    ms_df = _safe_read(features_dir / "features_microstates.tsv")
-    conn_df = _safe_read(find_connectivity_features_path(deriv_root, subject))
-    aper_df = _safe_read(features_dir / "features_aperiodic.tsv")
-    pac_df = _safe_read(features_dir / "features_pac.tsv")
-    pac_trials_df = _safe_read(features_dir / "features_pac_trials.tsv")
-    pac_time_df = _safe_read(features_dir / "features_pac_time.tsv")
-    itpc_df = _safe_read(features_dir / "features_itpc.tsv")
+    ms_df = _safe_read_table(features_dir / "features_microstates.tsv", logger)
+    conn_df = _safe_read_table(find_connectivity_features_path(deriv_root, subject), logger)
+    aper_df = _safe_read_table(features_dir / "features_aperiodic.tsv", logger)
+    pac_df = _safe_read_table(features_dir / "features_pac.tsv", logger)
+    pac_trials_df = _safe_read_table(features_dir / "features_pac_trials.tsv", logger)
+    pac_time_df = _safe_read_table(features_dir / "features_pac_time.tsv", logger)
+    itpc_df = _safe_read_table(features_dir / "features_itpc.tsv", logger)
 
     return pow_df, ms_df, conn_df, aper_df, pac_df, pac_trials_df, pac_time_df, itpc_df
 
@@ -129,31 +199,22 @@ def load_feature_bundle(
 
     features_dir = deriv_features_path(deriv_root, subject)
 
-    def _safe_read(path: Path) -> Optional[pd.DataFrame]:
-        if not path.exists():
-            return None
-        try:
-            return read_table(path)
-        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.warning("Failed to read %s: %s", path, exc)
-            return None
-
     bundle = FeatureBundle(
-        power_df=_safe_read(features_dir / "features_eeg_direct.tsv"),
-        microstate_df=_safe_read(features_dir / "features_microstates.tsv"),
-        connectivity_df=_safe_read(find_connectivity_features_path(deriv_root, subject)),
-        aperiodic_df=_safe_read(features_dir / "features_aperiodic.tsv"),
-        pac_df=_safe_read(features_dir / "features_pac.tsv"),
-        pac_trials_df=_safe_read(features_dir / "features_pac_trials.tsv"),
-        pac_time_df=_safe_read(features_dir / "features_pac_time.tsv"),
-        itpc_df=_safe_read(features_dir / "features_itpc.tsv"),
-        complexity_df=_safe_read(features_dir / "features_complexity.tsv"),
-        dynamics_df=_safe_read(features_dir / "features_dynamics.tsv"),
-        all_features_df=_safe_read(features_dir / "features_all.tsv"),
+        power_df=_safe_read_table(features_dir / "features_eeg_direct.tsv", logger),
+        microstate_df=_safe_read_table(features_dir / "features_microstates.tsv", logger),
+        connectivity_df=_safe_read_table(find_connectivity_features_path(deriv_root, subject), logger),
+        aperiodic_df=_safe_read_table(features_dir / "features_aperiodic.tsv", logger),
+        pac_df=_safe_read_table(features_dir / "features_pac.tsv", logger),
+        pac_trials_df=_safe_read_table(features_dir / "features_pac_trials.tsv", logger),
+        pac_time_df=_safe_read_table(features_dir / "features_pac_time.tsv", logger),
+        itpc_df=_safe_read_table(features_dir / "features_itpc.tsv", logger),
+        complexity_df=_safe_read_table(features_dir / "features_complexity.tsv", logger),
+        dynamics_df=_safe_read_table(features_dir / "features_dynamics.tsv", logger),
+        all_features_df=_safe_read_table(features_dir / "features_all.tsv", logger),
     )
 
     if include_targets:
-        targets_df = _safe_read(features_dir / "target_vas_ratings.tsv")
+        targets_df = _safe_read_table(features_dir / "target_vas_ratings.tsv", logger)
         if targets_df is not None:
             if targets_df.shape[1] == 1:
                 bundle.targets = pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")

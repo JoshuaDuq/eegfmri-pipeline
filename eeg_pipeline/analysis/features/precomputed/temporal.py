@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 
 
 def extract_temporal_features_from_precomputed(

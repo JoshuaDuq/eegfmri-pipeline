@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.config.loader import get_config_value, get_feature_constant
 
 

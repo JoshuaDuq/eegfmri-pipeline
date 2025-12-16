@@ -49,23 +49,23 @@ from eeg_pipeline.analysis.decoding.pipelines import create_elasticnet_pipeline,
 from eeg_pipeline.utils.analysis.tfr import (
     find_common_channels_train_test,
 )
-from eeg_pipeline.utils.data.loading import (
+from eeg_pipeline.utils.data.decoding import (
     filter_finite_targets,
     extract_epoch_data_block,
     prepare_trial_records_from_epochs,
     load_kept_indices,
-    load_epochs_with_targets,
-    load_plateau_matrix,
 )
+from eeg_pipeline.utils.data.decoding import load_epochs_with_targets
+from eeg_pipeline.utils.data.decoding import load_plateau_matrix
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.io.tsv import read_tsv, write_tsv
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.tsv import read_tsv, write_tsv
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.io.decoding import (
     export_predictions,
     export_indices,
     prepare_best_params_path,
 )
-from eeg_pipeline.io.logging import get_logger
+from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.analysis.decoding.time_generalization import time_generalization_regression
 
 logger = get_logger(__name__)

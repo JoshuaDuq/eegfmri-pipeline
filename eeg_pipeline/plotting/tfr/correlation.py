@@ -17,10 +17,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import t as t_dist
 
-from eeg_pipeline.io.paths import deriv_group_stats_path, deriv_group_plots_path
-from ...utils.data.loading import (
-    extract_time_frequency_grid,
-)
+from eeg_pipeline.infra.tsv import read_tsv
+from eeg_pipeline.infra.paths import deriv_group_stats_path, deriv_group_plots_path
+from ...utils.data.tfr_alignment import extract_time_frequency_grid
 from ...utils.analysis.stats import (
     fdr_bh_values as _fdr_bh_values,
 )
@@ -73,7 +72,7 @@ def _load_subject_tf(sub: str, roi_suffix: str, method_suffix: str, config) -> O
         DataFrame with correlation statistics, or None if file doesn't exist
     """
     p = config.deriv_root / f"sub-{sub}" / "eeg" / "stats" / f"tf_corr_stats{roi_suffix}{method_suffix}.tsv"
-    return pd.read_csv(p, sep="\t") if p.exists() else None
+    return read_tsv(p) if p.exists() else None
 
 
 def _annotate_tf_correlation_figure(fig: plt.Figure, config, alpha: float) -> None:

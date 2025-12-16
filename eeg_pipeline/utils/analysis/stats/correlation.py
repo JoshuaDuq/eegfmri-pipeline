@@ -16,6 +16,7 @@ import pandas as pd
 from scipy import stats
 
 from .base import get_ci_level, get_config_value
+from .formatting import _safe_float
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 from pathlib import Path
@@ -95,21 +96,20 @@ class CorrelationRecord:
                    method: str, identifier_type: str = "channel",
                    analysis_type: str = "power", **extra) -> "CorrelationRecord":
         """Create from CorrelationStats object."""
-        def safe_float(v): return float(v) if np.isfinite(v) else np.nan
         return cls(
             identifier=identifier, band=band,
-            correlation=safe_float(stats.correlation),
-            p_value=safe_float(stats.p_value), n_valid=n_valid, method=method,
-            ci_low=safe_float(stats.ci_low), ci_high=safe_float(stats.ci_high),
-            p_perm=safe_float(stats.p_perm),
-            r_partial=safe_float(stats.r_partial),
-            p_partial=safe_float(stats.p_partial),
+            correlation=_safe_float(stats.correlation),
+            p_value=_safe_float(stats.p_value), n_valid=n_valid, method=method,
+            ci_low=_safe_float(stats.ci_low), ci_high=_safe_float(stats.ci_high),
+            p_perm=_safe_float(stats.p_perm),
+            r_partial=_safe_float(stats.r_partial),
+            p_partial=_safe_float(stats.p_partial),
             n_partial=int(getattr(stats, 'n_partial', 0)),
-            p_partial_perm=safe_float(stats.p_partial_perm),
-            r_partial_temp=safe_float(stats.r_partial_temp),
-            p_partial_temp=safe_float(stats.p_partial_temp),
+            p_partial_perm=_safe_float(stats.p_partial_perm),
+            r_partial_temp=_safe_float(stats.r_partial_temp),
+            p_partial_temp=_safe_float(stats.p_partial_temp),
             n_partial_temp=int(getattr(stats, 'n_partial_temp', 0)),
-            p_partial_temp_perm=safe_float(stats.p_partial_temp_perm),
+            p_partial_temp_perm=_safe_float(stats.p_partial_temp_perm),
             identifier_type=identifier_type, analysis_type=analysis_type,
             extra_fields=extra,
         )
@@ -149,14 +149,13 @@ def build_correlation_record(identifier: str, band: str, r: float, p: float, n: 
                               identifier_type: str = "channel", analysis_type: str = "power",
                               **extra) -> CorrelationRecord:
     """Build standardized correlation record."""
-    def sf(v): return float(v) if np.isfinite(v) else np.nan
     return CorrelationRecord(
-        identifier=identifier, band=band, correlation=sf(r), p_value=sf(p),
-        n_valid=int(n), method=method, ci_low=sf(ci_low), ci_high=sf(ci_high),
-        p_perm=sf(p_perm), r_partial=sf(r_partial), p_partial=sf(p_partial),
-        n_partial=int(n_partial), p_partial_perm=sf(p_partial_perm),
-        r_partial_temp=sf(r_partial_temp), p_partial_temp=sf(p_partial_temp),
-        n_partial_temp=int(n_partial_temp), p_partial_temp_perm=sf(p_partial_temp_perm),
+        identifier=identifier, band=band, correlation=_safe_float(r), p_value=_safe_float(p),
+        n_valid=int(n), method=method, ci_low=_safe_float(ci_low), ci_high=_safe_float(ci_high),
+        p_perm=_safe_float(p_perm), r_partial=_safe_float(r_partial), p_partial=_safe_float(p_partial),
+        n_partial=int(n_partial), p_partial_perm=_safe_float(p_partial_perm),
+        r_partial_temp=_safe_float(r_partial_temp), p_partial_temp=_safe_float(p_partial_temp),
+        n_partial_temp=int(n_partial_temp), p_partial_temp_perm=_safe_float(p_partial_temp_perm),
         identifier_type=identifier_type, analysis_type=analysis_type, extra_fields=extra,
     )
 
@@ -523,6 +522,13 @@ def _align_groups_to_series(
     return arr
 
 
+def align_groups_to_series(
+    series: pd.Series,
+    groups: Optional[Union[pd.Series, np.ndarray]],
+) -> Optional[np.ndarray]:
+    return _align_groups_to_series(series, groups)
+
+
 def _align_features_and_targets(
     df: pd.DataFrame,
     targets: pd.Series,
@@ -550,6 +556,15 @@ def _align_features_and_targets(
         return None, None
 
     return df.loc[valid_mask], targets.loc[valid_mask]
+
+
+def align_features_and_targets(
+    df: pd.DataFrame,
+    targets: pd.Series,
+    min_samples: int,
+    logger: logging.Logger,
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
+    return _align_features_and_targets(df, targets, min_samples, logger)
 
 
 def _build_temp_record_unified(
@@ -601,6 +616,30 @@ def _build_temp_record_unified(
         ci_low=ci_lo, ci_high=ci_hi, p_perm=p_perm,
         identifier_type=id_key, **extra,
     ).to_dict()
+
+
+def build_temp_record_unified(
+    x: pd.Series,
+    temp: Optional[pd.Series],
+    cov_no_temp: Optional[pd.DataFrame],
+    identifier: str,
+    id_key: str,
+    band: str,
+    cfg: Any,
+    groups: Optional[np.ndarray] = None,
+    **extra: Any,
+) -> Optional[Dict[str, Any]]:
+    return _build_temp_record_unified(
+        x,
+        temp,
+        cov_no_temp,
+        identifier,
+        id_key,
+        band,
+        cfg,
+        groups=groups,
+        **extra,
+    )
 
 
 def _compute_roi_correlation_stats(
@@ -656,6 +695,38 @@ def _compute_roi_correlation_stats(
         p_perm=p_perm,
         p_partial_perm=p_part_perm,
         p_partial_temp_perm=p_part_temp_perm,
+    )
+
+
+def compute_roi_correlation_stats(
+    x: pd.Series,
+    y: pd.Series,
+    x_a: np.ndarray,
+    y_a: np.ndarray,
+    cov: Optional[pd.DataFrame],
+    temp: Optional[pd.Series],
+    n_eff: int,
+    band: str,
+    roi: str,
+    context: str,
+    cfg: Any,
+    groups: Optional[np.ndarray] = None,
+    me_records: Optional[List[Dict]] = None,
+) -> Any:
+    return _compute_roi_correlation_stats(
+        x,
+        y,
+        x_a,
+        y_a,
+        cov,
+        temp,
+        n_eff,
+        band,
+        roi,
+        context,
+        cfg,
+        groups=groups,
+        me_records=me_records,
     )
 
 

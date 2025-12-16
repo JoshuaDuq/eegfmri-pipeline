@@ -21,22 +21,19 @@ from eeg_pipeline.utils.analysis.stats import (
 from eeg_pipeline.utils.analysis.tfr import (
     clip_time_range,
     compute_tfr_morlet,
-    create_time_windows_fixed_size,
     extract_trial_band_power,
     get_bands_for_tfr,
     restrict_epochs_to_roi,
     apply_baseline_to_tfr,
 )
+from eeg_pipeline.utils.analysis.windowing import build_time_windows_fixed_size_clamped
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.loading import (
-    _load_features_and_targets,
-    compute_aligned_data_length,
-    extract_pain_vector_array,
-    load_epochs_for_analysis,
-)
-from eeg_pipeline.io.columns import get_pain_column_from_config
-from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
-from eeg_pipeline.io.tsv import write_tsv
+from eeg_pipeline.utils.data.features_io import _load_features_and_targets
+from eeg_pipeline.utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
+from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+from eeg_pipeline.infra.tsv import write_tsv
 
 if TYPE_CHECKING:
     from eeg_pipeline.context.behavior import BehaviorContext
@@ -576,7 +573,7 @@ def _run_temporal_by_condition_core(
     clipped = clip_time_range(times, plateau[0], plateau[1])
     if clipped is None:
         return
-    win_s, win_e = create_time_windows_fixed_size(clipped[0], clipped[1], win_ms)
+    win_s, win_e = build_time_windows_fixed_size_clamped(clipped[0], clipped[1], win_ms / 1000.0)
     if len(win_s) == 0:
         return
 

@@ -8,7 +8,7 @@ import mne
 import pandas as pd
 
 from ..config.loader import ConfigDict
-from eeg_pipeline.io.paths import _find_clean_epochs_path, _load_events_df
+from eeg_pipeline.infra.paths import find_clean_epochs_path, load_events_df
 from .alignment import align_events_to_epochs, validate_alignment
 
 
@@ -60,7 +60,7 @@ def _load_epochs_and_events(
     constants,
     logger: logging.Logger,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
-    epochs_path = _find_clean_epochs_path(
+    epochs_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants
     )
     if epochs_path is None or not epochs_path.exists():
@@ -70,7 +70,7 @@ def _load_epochs_and_events(
     logger.info(f"Loading epochs: {epochs_path}")
     epochs = mne.read_epochs(epochs_path, preload=preload, verbose=False)
 
-    events_df = _load_events_df(
+    events_df = load_events_df(
         subject,
         task,
         bids_root=bids_root,
@@ -106,7 +106,7 @@ def _handle_alignment_mismatch(
         if n_events > n_epochs:
             return aligned_events.iloc[:n_epochs].reset_index(drop=True)
         else:
-            from eeg_pipeline.io.logging import log_and_raise_error
+            from eeg_pipeline.infra.logging import log_and_raise_error
 
             error_msg = (
                 f"Alignment length mismatch for sub-{subject}, task-{task}: "
@@ -115,7 +115,7 @@ def _handle_alignment_mismatch(
             )
             log_and_raise_error(logger, error_msg)
     else:
-        from eeg_pipeline.io.logging import log_and_raise_error
+        from eeg_pipeline.infra.logging import log_and_raise_error
 
         reason = (
             "allow_misaligned_trim=False"

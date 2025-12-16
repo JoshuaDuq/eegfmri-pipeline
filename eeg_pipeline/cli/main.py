@@ -35,7 +35,7 @@ import logging
 import argparse
 
 from eeg_pipeline.utils.config.loader import load_settings
-from eeg_pipeline.utils.data.loading import parse_subject_args
+from eeg_pipeline.utils.data.subjects import parse_subject_args
 from eeg_pipeline.cli.common import get_deriv_root
 from eeg_pipeline.cli.commands import COMMANDS, get_command
 

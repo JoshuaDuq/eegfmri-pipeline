@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
 from eeg_pipeline.utils.analysis.stats import (
     get_correlation_method,
     compute_correlation,
@@ -23,8 +24,8 @@ from eeg_pipeline.utils.analysis.stats import (
     _safe_float,
 )
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
-from eeg_pipeline.io.paths import ensure_dir
-from eeg_pipeline.io.tsv import write_tsv
+from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.infra.tsv import write_tsv
 
 
 def _process_band(
@@ -39,11 +40,34 @@ def _process_band(
     """
     Compute per-channel correlations for a single frequency band.
     """
-    cols = [c for c in pow_df.columns if c.startswith(f"pow_{band}_")]
+    cols: List[str] = []
+    ch_names: List[str] = []
+    band_l = str(band).lower()
+    for col in pow_df.columns:
+        name = str(col)
+        parsed = NamingSchema.parse(name)
+        if parsed.get("valid") and parsed.get("group") == "power":
+            if str(parsed.get("band") or "").lower() != band_l:
+                continue
+            identifier = parsed.get("identifier")
+            if identifier is None:
+                continue
+            cols.append(name)
+            ch_names.append(str(identifier))
+            continue
+
+        legacy = parse_legacy_power_feature_name(name)
+        if legacy is None:
+            continue
+        legacy_band, legacy_ch = legacy
+        if str(legacy_band).lower() != band_l:
+            continue
+        cols.append(name)
+        ch_names.append(str(legacy_ch))
+
     if not cols:
         return []
 
-    ch_names = [c.replace(f"pow_{band}_", "") for c in cols]
     n_ch = len(ch_names)
 
     corrs = np.full(n_ch, np.nan)

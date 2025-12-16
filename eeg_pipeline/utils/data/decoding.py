@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 import logging
 
 import numpy as np
 import pandas as pd
+import mne
 
-from eeg_pipeline.io.columns import pick_target_column
+from eeg_pipeline.utils.data.columns import pick_target_column
+from eeg_pipeline.infra.tsv import read_tsv
 from ..config.loader import ConfigDict
 
 
@@ -34,7 +36,7 @@ def _load_trial_alignment_manifest(
             f"Run 03_feature_extraction.py first to generate features with proper alignment."
         )
 
-    manifest = pd.read_csv(manifest_path, sep="\t")
+    manifest = read_tsv(manifest_path)
     if "trial_index" not in manifest.columns:
         raise ValueError(
             f"Invalid trial alignment manifest: missing 'trial_index' column in {manifest_path}"
@@ -99,8 +101,8 @@ def load_decoding_data(
     manifest = _load_trial_alignment_manifest(manifest_path, logger)
     expected_n_trials = len(manifest)
 
-    X = pd.read_csv(X_path, sep="\t")
-    y_df = pd.read_csv(y_path, sep="\t")
+    X = read_tsv(X_path)
+    y_df = read_tsv(y_path)
 
     if len(X) != expected_n_trials:
         raise ValueError(
@@ -255,6 +257,125 @@ def load_multiple_subjects_decoding_data(
     return X_all, y_all, groups, meta
 
 
+def load_epochs_with_targets(
+    deriv_root: Path,
+    config: EEGConfig,
+    subjects: Optional[List[str]] = None,
+    subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
+    task: str = "",
+    bids_root: Optional[Path] = None,
+    logger: Optional[logging.Logger] = None,
+) -> Tuple[List[Tuple[str, mne.Epochs, pd.Series]], List[str]]:
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    if task == "":
+        task = config.get("project.task")
+    if bids_root is None:
+        bids_root = config.bids_root
+
+    if subjects is None or subjects == ["all"]:
+        from .subjects import get_available_subjects
+
+        subjects = get_available_subjects(
+            config=config,
+            deriv_root=deriv_root,
+            bids_root=bids_root,
+            task=task,
+            discovery_sources=["features"],
+            subject_discovery_policy=subject_discovery_policy,
+            logger=logger,
+        )
+
+    from .epochs_loading import load_epochs_for_analysis
+
+    out: List[Tuple[str, mne.Epochs, pd.Series]] = []
+    ch_sets: List[set] = []
+
+    for s in subjects:
+        sub = f"sub-{s}" if not str(s).startswith("sub-") else str(s)
+
+        epochs_path = None
+        try:
+            from eeg_pipeline.infra.paths import find_clean_epochs_path
+
+            epochs_path = find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config)
+        except Exception:
+            epochs_path = None
+
+        if epochs_path is None or not Path(epochs_path).exists():
+            logger.warning(f"Clean epochs not found for {sub}; skipping.")
+            continue
+
+        epochs = mne.read_epochs(epochs_path, preload=True, verbose=False)
+        epochs.set_montage(mne.channels.make_standard_montage("standard_1005"))
+        if len(epochs.info.get("bads", [])) > 0:
+            epochs.interpolate_bads(reset_bads=True)
+
+        manifest_path = _get_trial_alignment_manifest_path(deriv_root, str(s))
+        manifest = _load_trial_alignment_manifest(manifest_path, logger)
+        if len(epochs) != len(manifest):
+            raise ValueError(
+                f"Epoch count mismatch for subject {sub}, task {task}: "
+                f"epochs have {len(epochs)} trials but trial_alignment.tsv specifies {len(manifest)} trials. "
+                "Re-run feature extraction to regenerate features with the current epochs."
+            )
+
+        _, aligned = load_epochs_for_analysis(
+            str(s),
+            task,
+            align="strict",
+            preload=False,
+            deriv_root=deriv_root,
+            bids_root=bids_root,
+            config=config,
+            logger=logger,
+        )
+        if aligned is None or len(aligned) == 0:
+            logger.warning(f"No aligned events/targets for {sub}; skipping.")
+            continue
+
+        target_columns = list(config.get("event_columns.rating", []) or [])
+        tgt_col = pick_target_column(aligned, target_columns=target_columns)
+        if tgt_col is None:
+            logger.warning(f"No suitable target column for {sub}; skipping.")
+            continue
+
+        y = pd.to_numeric(aligned[tgt_col], errors="coerce")
+        if len(epochs) != len(y):
+            logger.error(
+                f"Epochs-target length mismatch for subject {sub}, task {task}: "
+                f"epochs={len(epochs)}, y={len(y)}. Skipping subject."
+            )
+            continue
+
+        if len(epochs) == 0:
+            logger.warning(f"No trials for {sub}; skipping.")
+            continue
+
+        out.append((sub, epochs, y))
+        ch_sets.append(
+            set(
+                [
+                    ch
+                    for ch in epochs.info["ch_names"]
+                    if epochs.get_channel_types(picks=[ch])[0] == "eeg"
+                ]
+            )
+        )
+
+    if not out:
+        raise RuntimeError("No epochs + targets could be loaded for any subject.")
+
+    if not ch_sets:
+        return out, []
+
+    common_channels = (
+        sorted(set.intersection(*ch_sets)) if len(ch_sets) > 1 else sorted(ch_sets[0])
+    )
+    return out, common_channels
+
+
 def load_plateau_matrix(
     subjects: List[str],
     task: str,
@@ -271,7 +392,7 @@ def load_plateau_matrix(
     meta_blocks: List[pd.DataFrame] = []
     feature_cols: Optional[List[str]] = None
 
-    from .loading import load_epochs_for_analysis
+    from .epochs_loading import load_epochs_for_analysis
 
     for sub in subjects:
         epochs, aligned_events = load_epochs_for_analysis(
@@ -341,7 +462,7 @@ def load_epoch_windows(
     if log is None:
         log = logging.getLogger(__name__)
 
-    from .loading import load_epochs_for_analysis
+    from .epochs_loading import load_epochs_for_analysis
 
     X_blocks: List[np.ndarray] = []
     y_blocks: List[np.ndarray] = []
@@ -425,3 +546,143 @@ def load_epoch_windows(
         window_centers = np.array([])
 
     return X_windows, y_all, groups_arr, window_centers, meta
+
+
+def filter_finite_targets(
+    indices: np.ndarray,
+    targets: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    target_values = targets[indices]
+    finite_mask = np.isfinite(target_values)
+    filtered_indices = indices[finite_mask]
+    filtered_targets = target_values[finite_mask]
+    return filtered_indices, filtered_targets
+
+
+def extract_epoch_data_block(
+    indices: np.ndarray,
+    trial_records: List[Tuple[str, int]],
+    aligned_epochs: Dict[str, mne.Epochs],
+) -> np.ndarray:
+    X_list = []
+    for i in indices:
+        sub_i, ti = trial_records[int(i)]
+        try:
+            X_i = aligned_epochs[sub_i].get_data(picks="eeg", reject_by_annotation=None)[ti]
+        except TypeError:
+            X_i = aligned_epochs[sub_i].get_data(picks="eeg")[ti]
+        X_list.append(X_i)
+    return np.stack(X_list, axis=0)
+
+
+def prepare_trial_records_from_epochs(
+    tuples: List[Tuple[str, mne.Epochs, pd.Series]],
+) -> Tuple[
+    List[Tuple[str, int]],
+    np.ndarray,
+    np.ndarray,
+    Dict[str, mne.Epochs],
+    Dict[str, pd.Series],
+]:
+    trial_records: List[Tuple[str, int]] = []
+    y_all_list: List[float] = []
+    groups_list: List[str] = []
+    subj_to_epochs: Dict[str, mne.Epochs] = {}
+    subj_to_y: Dict[str, pd.Series] = {}
+
+    for sub, epochs, y in tuples:
+        n = min(len(epochs), len(y))
+        if n == 0:
+            continue
+        subj_to_epochs[sub] = epochs
+        subj_to_y[sub] = pd.to_numeric(y.iloc[:n], errors="coerce")
+        for ti in range(n):
+            trial_records.append((sub, ti))
+            y_all_list.append(float(subj_to_y[sub].iloc[ti]))
+            groups_list.append(sub)
+
+    if len(trial_records) == 0:
+        raise RuntimeError("No trial data available.")
+
+    y_all_arr = np.asarray(y_all_list)
+    groups_arr = np.asarray(groups_list)
+    return trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y
+
+
+def load_kept_indices(
+    subject_label: str,
+    deriv_root: Path,
+    n_events: int,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[np.ndarray]:
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    dropped_path = deriv_root / subject_label / "eeg" / "features" / "dropped_trials.tsv"
+    if not dropped_path.exists():
+        return None
+
+    dropped_df = read_tsv(dropped_path)
+    if "original_index" not in dropped_df.columns:
+        return None
+
+    dropped_indices_raw = pd.to_numeric(dropped_df["original_index"], errors="coerce").dropna()
+    if len(dropped_indices_raw) == 0:
+        return None
+
+    dropped_indices = set(dropped_indices_raw.astype(int).tolist())
+    kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices])
+    logger.info(f"{subject_label}: {len(dropped_indices)} trials dropped, {len(kept_indices)} kept")
+    return kept_indices
+
+
+def extract_channel_importance_from_coefficients(
+    coef_matrix: np.ndarray,
+    feature_names: List[str],
+) -> pd.DataFrame:
+    from eeg_pipeline.domain.features.naming import parse_legacy_power_feature_name
+
+    channel_band_to_indices: Dict[Tuple[str, str], List[int]] = {}
+    for idx, feat in enumerate(feature_names):
+        parsed = parse_legacy_power_feature_name(str(feat))
+        if parsed:
+            band, channel = parsed
+            channel_band_to_indices.setdefault((channel, band), []).append(idx)
+
+    channel_to_all_indices: Dict[str, List[int]] = {}
+    for (channel, _band), indices in channel_band_to_indices.items():
+        channel_to_all_indices.setdefault(channel, []).extend(indices)
+
+    n_folds = coef_matrix.shape[0]
+    channel_importance_data: List[Dict[str, float]] = []
+
+    for channel, indices in channel_to_all_indices.items():
+        channel_coefs = coef_matrix[:, indices]
+        channel_mean_abs = np.nanmean(np.abs(channel_coefs), axis=1)
+
+        for fold_idx in range(n_folds):
+            if np.isfinite(channel_mean_abs[fold_idx]):
+                channel_importance_data.append(
+                    {
+                        "channel": str(channel),
+                        "importance": float(channel_mean_abs[fold_idx]),
+                        "fold": float(fold_idx),
+                    }
+                )
+
+    return pd.DataFrame(channel_importance_data)
+
+
+def extract_importance_column(
+    importance_df: pd.DataFrame,
+    top_n: int,
+) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    if "mean_abs_shap" in importance_df.columns:
+        df_sorted = importance_df.sort_values("mean_abs_shap", ascending=False).head(top_n)
+        return df_sorted["mean_abs_shap"].values, "Mean |SHAP value|"
+
+    if "importance" in importance_df.columns:
+        df_sorted = importance_df.sort_values("importance", ascending=False).head(top_n)
+        return df_sorted["importance"].values, "Importance (ΔR²)"
+
+    return None, None

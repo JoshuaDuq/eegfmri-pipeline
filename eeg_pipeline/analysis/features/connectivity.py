@@ -12,14 +12,10 @@ All measures are computed per frequency band and trial.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
-import logging
 import time
 import numpy as np
 import pandas as pd
-import mne
-from scipy.signal import hilbert
 import networkx as nx
 from joblib import Parallel, delayed
 
@@ -29,134 +25,52 @@ except Exception:
     envelope_correlation = None
     spectral_connectivity_time = None
 
-from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
-from eeg_pipeline.utils.analysis.features.metadata import NamingSchema
-from eeg_pipeline.utils.config.loader import get_frequency_bands, get_fisher_z_clip_values
-from eeg_pipeline.utils.data.loading import flatten_lower_triangles
+from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.analysis.graph_metrics import (
     symmetrize_adjacency as _symmetrize_and_clip,
     compute_global_efficiency_weighted as _global_efficiency_weighted,
     compute_small_world_sigma,
-    compute_legacy_graph_summaries,
     threshold_adjacency as _threshold_adjacency,
 )
 
-# --- Helpers ---
+from eeg_pipeline.analysis.features.precompute import precompute_data
 
-def _load_schaefer_rsn_lookup() -> Dict[str, str]:
-    return {} 
-
-def _infer_community_map(labels: np.ndarray) -> Dict[str, str]:
-    return {}
-
-def _compute_wpli_epoch(epoch_data: np.ndarray) -> np.ndarray:
-    """Compute wPLI matrix for a single epoch."""
-    # epoch_data: (n_ch, n_times) - complex analytic signal
-    cross = epoch_data[:, None, :] * np.conj(epoch_data[None, :, :])
-    imag_cross = np.imag(cross)
-    denom = np.mean(np.abs(imag_cross), axis=-1)
-    numer = np.abs(np.mean(imag_cross, axis=-1))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        wpli = np.where(denom > 0, numer / denom, 0.0)
-    wpli = 0.5 * (wpli + wpli.T)
-    np.fill_diagonal(wpli, 0.0)
-    return wpli
-
-def _compute_wpli_matrices(analytic: np.ndarray, n_jobs: int = 1) -> np.ndarray:
-    """Compute wPLI matrices for all epochs in parallel."""
-    n_epochs = analytic.shape[0]
-    mats = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_wpli_epoch)(analytic[ep]) for ep in range(n_epochs)
-    )
-    return np.array(mats)
-
-def _compute_aec_orth_epoch(data: np.ndarray, epsilon: float = 1e-12) -> np.ndarray:
-    """Compute AEC orthogonalized matrix for a single epoch."""
-    n_channels = data.shape[0]
-    ep_aec = np.eye(n_channels, dtype=float)
-    
-    for i in range(n_channels):
-        xi = data[i]
-        for j in range(i + 1, n_channels):
-            xj = data[j]
-            # Orthogonalize xi with respect to xj
-            xj_norm_sq = np.sum(np.abs(xj) ** 2) + epsilon
-            beta_ij = np.sum(xi * np.conj(xj)) / xj_norm_sq
-            xi_orth = xi - beta_ij * xj
-            
-            # And vice versa
-            xi_norm_sq = np.sum(np.abs(xi) ** 2) + epsilon
-            beta_ji = np.sum(xj * np.conj(xi)) / xi_norm_sq
-            xj_orth = xj - beta_ji * xi
-            
-            env_i = np.abs(xi_orth)
-            env_j = np.abs(xj_orth)
-            std_i = env_i.std()
-            std_j = env_j.std()
-            
-            if std_i < epsilon or std_j < epsilon:
-                r = np.nan
-            else:
-                env_i = (env_i - env_i.mean()) / std_i
-                env_j = (env_j - env_j.mean()) / std_j
-                r = np.corrcoef(env_i, env_j)[0, 1]
-            ep_aec[i, j] = ep_aec[j, i] = r
-            
-    return ep_aec
-
-def _compute_aec_orth_matrices(analytic: np.ndarray, epsilon: float = 1e-12, n_jobs: int = 1) -> np.ndarray:
-    """Compute AEC matrices for all epochs in parallel."""
-    n_epochs = analytic.shape[0]
-    mats = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_aec_orth_epoch)(analytic[ep], epsilon) for ep in range(n_epochs)
-    )
-    return np.array(mats)
-
-def _bandpass_hilbert_trials(data, sfreq, fmin, fmax, logger, n_jobs=1):
-    try:
-        # Simple filter -> hilbert
-        # Using MNE filter with n_jobs
-        flat_data = data.reshape(-1, data.shape[-1])
-        filtered = mne.filter.filter_data(
-            flat_data, 
-            sfreq, 
-            l_freq=fmin, 
-            h_freq=fmax, 
-            verbose=False,
-            n_jobs=n_jobs
-        )
-        analytic = hilbert(filtered, axis=-1).reshape(data.shape)
-        return analytic
-    except Exception as e:
-        logger.error(f"Hilbert failed: {e}")
-        return None
-
-# --- Main Extraction Feature ---
 
 def extract_connectivity_features(
-    ctx: Any, # FeatureContext
-    bands: List[str]
+    ctx: Any,
+    bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     if not bands:
         return pd.DataFrame(), []
 
-    if not ctx.ensure_precomputed():
-        return pd.DataFrame(), []
-
-    precomputed = ctx.precomputed
+    precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
-        return pd.DataFrame(), []
+        if getattr(ctx, "epochs", None) is None:
+            return pd.DataFrame(), []
+        if not getattr(ctx.epochs, "preload", False):
+            ctx.logger.info("Preloading epochs data...")
+            ctx.epochs.load_data()
+        precomputed = precompute_data(
+            ctx.epochs,
+            bands,
+            ctx.config,
+            ctx.logger,
+            windows_spec=ctx.windows,
+        )
+        try:
+            ctx.set_precomputed(precomputed)
+        except Exception:
+            pass
 
-    conn_df, conn_cols = extract_connectivity_from_precomputed(
+    return extract_connectivity_from_precomputed(
         precomputed,
         bands=bands,
+        segments=["baseline", "ramp", "plateau"],
         config=ctx.config,
         logger=ctx.logger,
-        segments=["baseline", "ramp", "plateau"],
     )
-    return conn_df, conn_cols
-
 
 # =============================================================================
 # Precomputed Data Extractors (Moved from pipeline.py)
@@ -234,7 +148,6 @@ def extract_connectivity_from_precomputed(
 
     conn_cfg = config.get("feature_engineering.connectivity", {})
 
-    allow_legacy_fallback = bool(conn_cfg.get("allow_legacy_fallback", False))
     output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
     if output_level not in {"full", "global_only"}:
         output_level = "full"
@@ -344,101 +257,10 @@ def extract_connectivity_from_precomputed(
         return arr_3d
 
     if (spectral_connectivity_time is None) or (envelope_correlation is None):
-        if not allow_legacy_fallback:
-            raise ImportError(
-                "Connectivity extraction requires 'mne-connectivity' for scientifically vetted results. "
-                "Install mne-connectivity or explicitly set feature_engineering.connectivity.allow_legacy_fallback=true "
-                "to enable the legacy fallback (not recommended)."
-            )
-        if logger is not None:
-            logger.warning(
-                "mne-connectivity is not available; falling back to legacy connectivity extraction because "
-                "feature_engineering.connectivity.allow_legacy_fallback=true. Results may not be comparable to the "
-                "mne-connectivity backend."
-            )
-        records_legacy: List[Dict[str, float]] = []
-        for ep_idx in range(n_epochs):
-            record: Dict[str, float] = {}
-            for band in bands_use:
-                bd = precomputed.band_data[band]
-                analytic = bd.analytic[ep_idx]
-                phase = bd.phase[ep_idx]
-                envelope = bd.envelope[ep_idx]
-
-                for seg_name in segments_use:
-                    seg_mask = seg_mask_map.get(seg_name)
-                    if seg_mask is None or (isinstance(seg_mask, np.ndarray) and not np.any(seg_mask)):
-                        continue
-
-                    analytic_seg = _mask_array(analytic, seg_mask)
-                    if analytic_seg.ndim != 2 or analytic_seg.shape[1] < 5:
-                        continue
-
-                    mats: Dict[str, np.ndarray] = {}
-                    if enable_wpli:
-                        mats["wpli"] = _compute_wpli_epoch(analytic_seg)
-                    if enable_aec:
-                        mats["aec"] = _compute_aec_orth_epoch(analytic_seg)
-
-                    if enable_plv or enable_pli:
-                        phase_seg = _mask_array(phase, seg_mask)
-                        if phase_seg.ndim == 2 and phase_seg.shape[1] >= 2:
-                            if enable_plv:
-                                plv_mat = np.zeros((n_channels, n_channels), dtype=float)
-                                for i in range(n_channels):
-                                    for j in range(i + 1, n_channels):
-                                        diff = phase_seg[i] - phase_seg[j]
-                                        plv = float(np.abs(np.mean(np.exp(1j * diff))))
-                                        plv_mat[i, j] = plv
-                                        plv_mat[j, i] = plv
-                                mats["plv"] = plv_mat
-                            if enable_pli:
-                                pli_mat = np.zeros((n_channels, n_channels), dtype=float)
-                                for i in range(n_channels):
-                                    for j in range(i + 1, n_channels):
-                                        diff = phase_seg[i] - phase_seg[j]
-                                        pli = float(np.abs(np.mean(np.sign(np.sin(diff)))))
-                                        pli_mat[i, j] = pli
-                                        pli_mat[j, i] = pli
-                                mats["pli"] = pli_mat
-
-                    for measure_name, mat in mats.items():
-                        if mat.size == 0:
-                            continue
-
-                        if output_level == "full":
-                            for i in range(n_channels):
-                                for j in range(i + 1, n_channels):
-                                    pair_name = f"{ch_names[i]}-{ch_names[j]}"
-                                    col = NamingSchema.build(
-                                        "conn_legacy",
-                                        seg_name,
-                                        band,
-                                        "chpair",
-                                        measure_name,
-                                        channel_pair=pair_name,
-                                    )
-                                    record[col] = float(mat[i, j])
-
-                        tmp = np.asarray(mat, dtype=float).copy()
-                        np.fill_diagonal(tmp, np.nan)
-                        col_glob = NamingSchema.build(
-                            "conn_legacy",
-                            seg_name,
-                            band,
-                            "global",
-                            f"{measure_name}_mean",
-                        )
-                        record[col_glob] = float(np.nanmean(tmp))
-
-                        if enable_graph_metrics and seg_name == "plateau":
-                            legacy_graph = _graph_metrics(tmp, measure_name, band, conn_cfg)
-                            record.update({f"legacy_{k}": v for k, v in legacy_graph.items()})
-
-            records_legacy.append(record)
-
-        df = pd.DataFrame(records_legacy)
-        return df, list(df.columns)
+        raise ImportError(
+            "Connectivity extraction requires 'mne-connectivity'. "
+            "Install it with: pip install mne-connectivity"
+        )
 
     freq_bands = get_frequency_bands(config)
 

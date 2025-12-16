@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, List, Optional
 
-from eeg_pipeline.context.features import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
 
 
 def resolve_precomputed_groups(config: Any, override: Optional[List[str]] = None) -> List[str]:

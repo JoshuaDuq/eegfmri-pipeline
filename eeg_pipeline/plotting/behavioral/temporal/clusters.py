@@ -11,14 +11,14 @@ import pandas as pd
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
-from eeg_pipeline.io.logging import get_default_logger as _get_default_logger
-from eeg_pipeline.io.paths import ensure_dir
+from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
+from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import (
     get_default_config as _get_default_config,
     log_if_present as _log_if_present,
     save_fig,
 )
-from eeg_pipeline.io.tsv import read_tsv
+from eeg_pipeline.infra.tsv import read_tsv
 
 
 def plot_pain_nonpain_clusters(

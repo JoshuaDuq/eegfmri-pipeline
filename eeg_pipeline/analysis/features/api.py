@@ -86,10 +86,30 @@ def extract_all_features(
 
     precomputed_data = None
     needs_precompute = any(
-        c in ctx.feature_categories for c in ["precomputed", "cfc", "dynamics_advanced"]
+        c in ctx.feature_categories for c in ["connectivity", "precomputed", "cfc", "dynamics_advanced"]
     )
-    if needs_precompute and ctx.ensure_precomputed():
-        precomputed_data = ctx.precomputed
+    if needs_precompute:
+        if ctx.precomputed is not None:
+            precomputed_data = ctx.precomputed
+        else:
+            if ctx.epochs is None:
+                raise ValueError("Missing epochs; cannot precompute feature intermediates.")
+            if not ctx.epochs.preload:
+                ctx.logger.info("Preloading epochs data...")
+                ctx.epochs.load_data()
+            ctx.logger.info("Computing shared intermediate data...")
+            compute_psd_data = bool(
+                any(c in ctx.feature_categories for c in ["precomputed", "cfc", "dynamics_advanced"])
+            )
+            precomputed_data = precompute_data(
+                ctx.epochs,
+                power_bands,
+                ctx.config,
+                ctx.logger,
+                windows_spec=ctx.windows,
+                compute_psd_data=compute_psd_data,
+            )
+            ctx.set_precomputed(precomputed_data)
 
     def _check_length(name: str, df: Optional[pd.DataFrame]) -> None:
         if df is None or getattr(df, "empty", False):
@@ -112,7 +132,7 @@ def extract_all_features(
 
     results = FeatureExtractionResult()
 
-    tfr_dependent_categories = {"power", "connectivity", "itpc", "pac"}
+    tfr_dependent_categories = {"power", "itpc", "pac"}
     needs_tfr = bool(tfr_dependent_categories & set(ctx.feature_categories))
 
     tfr_complex = None
@@ -301,7 +321,7 @@ def extract_all_features(
             precomputed=precomputed_data,
         )
         if ctx.precomputed is None and precomputed_result is not None:
-            ctx.precomputed = precomputed_result.precomputed
+            ctx.set_precomputed(precomputed_result.precomputed)
         return precomputed_result
 
     if "precomputed" in ctx.feature_categories:

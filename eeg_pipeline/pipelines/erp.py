@@ -104,7 +104,7 @@ def load_and_prepare_epochs(
     deriv_root: Optional[Path] = None,
 ):
     """Load epochs, attach metadata, and crop if requested."""
-    from eeg_pipeline.utils.data.loading import load_epochs_for_analysis, crop_epochs
+    from eeg_pipeline.utils.data.epochs_loading import load_epochs_for_analysis, crop_epochs
 
     epochs, aligned_events = load_epochs_for_analysis(
         subject, task,
@@ -156,9 +156,9 @@ class ErpPipeline(PipelineBase):
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         """Process a single subject for ERP statistics extraction."""
-        from eeg_pipeline.io.paths import deriv_stats_path, ensure_dir
-        from eeg_pipeline.io.tsv import write_tsv
-        from eeg_pipeline.io.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
+        from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+        from eeg_pipeline.infra.tsv import write_tsv
+        from eeg_pipeline.utils.data.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
         from eeg_pipeline.utils.analysis.stats import count_trials_by_condition
         
         task = task or self.config.get("project.task")

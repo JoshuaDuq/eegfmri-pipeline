@@ -13,42 +13,7 @@ import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
-
-
-# Feature categories
-FEATURE_CATEGORIES = [
-    "power",
-    "connectivity",
-    "microstates",
-    "aperiodic",
-    "itpc",
-    "pac",
-    "precomputed",
-    "cfc",
-    "dynamics_advanced",
-    "complexity",
-    "quality",
-]
-
-# Precomputed feature groups (used by CLI overrides and config)
-PRECOMPUTED_GROUP_CHOICES = [
-    "erds",
-    "spectral",
-    "gfp",
-    "roi",
-    "temporal",
-    "ratios",
-    "complexity",
-    "asymmetry",
-    "aperiodic",
-    "connectivity",
-    "microstates",
-    "pac",
-    "cfc",
-    "dynamics_advanced",
-    "itpc",
-    "quality",
-]
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
 
 
 @dataclass
@@ -119,29 +84,9 @@ class FeatureContext:
         if cols is not None:
             self.results[f"{key}_cols"] = cols
 
-    def ensure_precomputed(self) -> bool:
-        """Ensure precomputed data is ready."""
-        if self._precomputed_ready and self.precomputed is not None:
-            return True
-        
-        if self.epochs is None:
-            return False
-            
-        if not self.epochs.preload:
-            self.logger.info("Preloading epochs data...")
-            self.epochs.load_data()
-        
-        # Lazy import to avoid circular dependencies (context should not depend on analysis)
-        from eeg_pipeline.analysis.features.precompute import precompute_data
-        
-        self.logger.info("Computing shared intermediate data...")
-        # Get bands from config for precomputation
-        bands = get_frequency_band_names(self.config)
-        self.precomputed = precompute_data(
-            self.epochs, bands, self.config, self.logger, windows_spec=self.windows
-        )
-        self._precomputed_ready = True
-        return True
+    def set_precomputed(self, precomputed: Optional[PrecomputedData]) -> None:
+        self.precomputed = precomputed
+        self._precomputed_ready = precomputed is not None
     
     @property
     def n_epochs(self) -> int:
