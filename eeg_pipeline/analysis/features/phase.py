@@ -9,7 +9,7 @@ Phase-based features for EEG analysis:
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Tuple, Any
+from typing import Optional, List, Tuple, Any
 import logging
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ import mne
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.analysis.tfr import get_tfr_config, resolve_tfr_workers, compute_adaptive_n_cycles
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 from eeg_pipeline.utils.config.loader import get_frequency_bands
@@ -101,7 +102,9 @@ def extract_phase_features(
             ctx.logger.error(f"TFR Complex computation failed: {e}")
             return pd.DataFrame(), []
             
-    if tfr is None: return pd.DataFrame(), []
+    if tfr is None:
+        ctx.logger.warning("Phase: No complex TFR available; skipping extraction.")
+        return pd.DataFrame(), []
     
     data = tfr.data # (epochs, ch, freq, time)
     times = tfr.times
@@ -119,7 +122,9 @@ def extract_phase_features(
     
     # Iterate segments (baseline, ramp, plateau)
     segments = ["plateau", "baseline"]
-    if "ramp" in ctx.windows.masks: segments.append("ramp")
+    ramp_mask = ctx.windows.get_mask("ramp")
+    if ramp_mask is not None and np.any(ramp_mask):
+        segments.append("ramp")
     
     for seg in segments:
         seg_mask_tfr = make_mask_for_times(ctx.windows, seg, times)
@@ -354,7 +359,11 @@ def extract_itpc_from_precomputed(
     
     ITPC = | (1/N) * sum( exp(i*phase) ) |
     """
-    if not precomputed.band_data or precomputed.windows is None:
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        logger = getattr(precomputed, "logger", None)
+        if logger is not None:
+            logger.warning("ITPC: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), []
 
     cfg = precomputed.config or {}
@@ -365,21 +374,18 @@ def extract_itpc_from_precomputed(
             "Set feature_engineering.itpc.method='loo' for per-trial ITPC."
         )
         
-    # Get masks for all segments
-    times = precomputed.times
     windows = precomputed.windows
-    from eeg_pipeline.utils.config.loader import get_config_value
-    ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
-    
     masks = {
-        "baseline": getattr(windows, "baseline_mask", None),
-        "ramp": (times >= 0) & (times <= ramp_end),
-        "plateau": getattr(windows, "active_mask", None)
+        "baseline": windows.get_mask("baseline"),
+        "ramp": windows.get_mask("ramp"),
+        "plateau": windows.get_mask("plateau"),
     }
     
     ch_names = precomputed.ch_names
-    n_epochs = precomputed.data.shape[0] # assuming .data is epochs data or similar
+    n_epochs = precomputed.data.shape[0]
     if n_epochs < 2:
+        if logger is not None:
+            logger.warning("ITPC: Fewer than 2 epochs available; skipping extraction.")
         return pd.DataFrame(), []
     
     results = {}

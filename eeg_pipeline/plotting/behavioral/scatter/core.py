@@ -33,12 +33,12 @@ from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
-    get_default_config as _get_default_config,
     save_fig,
 )
 from eeg_pipeline.utils.analysis.stats import (
     bootstrap_corr_ci as _bootstrap_corr_ci,
     compute_correlation_stats,
+    partial_corr_xy_given_Z,
     compute_partial_residuals as _compute_partial_residuals,
     compute_partial_residuals_stats,
     compute_kde_scale,
@@ -143,7 +143,8 @@ def _generate_single_scatter(
     results: Dict[str, List],
     feature_name: str,
 ) -> None:
-    n_valid = len(joint_valid_mask(roi_vals, target_vals))
+    valid_mask = joint_valid_mask(roi_vals, target_vals)
+    n_valid = int(valid_mask.sum())
 
     if precomp_stats:
         r_val = precomp_stats["r"]
@@ -184,7 +185,10 @@ def _generate_single_scatter(
             "path": str(output_path),
         }
         results["all"].append(record)
-        if p_val < 0.05:
+        plot_cfg = get_plot_config(config)
+        behavioral_config = plot_cfg.get_behavioral_config()
+        sig_thr = float(behavioral_config.get("significance_threshold", 0.05))
+        if np.isfinite(p_val) and p_val < sig_thr:
             results["significant"].append(record)
 
 
@@ -265,7 +269,7 @@ def create_roi_scatter_plots(
                 )
 
                 if do_temp and data.temp_series is not None and not data.temp_series.empty:
-                    title_temp = title_formatter(band_title, roi, "Temp", metric)
+                    title_temp = title_formatter(band_title, roi, "Temperature", metric)
                     output_path_temp = roi_plots_dir / filename_formatter(band, "temp", metric)
 
                     precomp_t = _get_precomputed_stats_for_roi_band(temp_stats, roi, band, logger)
@@ -338,7 +342,8 @@ def _get_title_components(
 
 
 def _get_target_suffix(target_type: str, config=None) -> str:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
     target_rating = behavioral_config.get("target_rating", "rating")
@@ -439,7 +444,8 @@ def _plot_partial_residuals(
         context=f"Partial residuals {roi_name} {target_type} {band_title}",
     )
 
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
     min_samples_for_plot = plot_cfg.validation.get("min_samples_for_plot", 5)
     if n_res < min_samples_for_plot:
@@ -632,17 +638,28 @@ def plot_target_correlations(
     stats_df: Optional[pd.Series],
     logger: logging.Logger,
     config,
+    results: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    feature_name: Optional[str] = None,
     temporal_df: Optional[pd.DataFrame] = None,
     roi_channels: Optional[List[str]] = None,
 ) -> None:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
     min_samples_for_plot = plot_cfg.validation.get("min_samples_for_plot", 5)
 
     has_covariates = Z_covars is not None and not Z_covars.empty
     if has_covariates:
-        annotated_stats = None
-        annot_ci = None
+        r_val, p_val, n_eff = partial_corr_xy_given_Z(
+            power_vals,
+            target_vals,
+            Z_covars,
+            method_code,
+            config=config,
+        )
+        ci_val = (np.nan, np.nan)
+        annotated_stats = (r_val, p_val, n_eff)
+        annot_ci = ci_val
         bootstrap_ci_for_plot = 0
     else:
         r_val, p_val, n_eff, ci_val = compute_correlation_stats(

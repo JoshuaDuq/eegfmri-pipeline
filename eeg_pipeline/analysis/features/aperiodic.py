@@ -21,8 +21,10 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import STANDARD_SEGMENTS, get_segment_mask, validate_extractor_inputs
 from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 from eeg_pipeline.utils.analysis.stats import compute_residuals
+from eeg_pipeline.utils.parallel import get_n_jobs
 
 # --- Helper Functions (Preserved) ---
 
@@ -194,7 +196,7 @@ def _extract_aperiodic_for_segment(
     
     peak_z = float(config.get("feature_engineering.aperiodic.peak_rejection_z", 3.5))
     min_pts = int(config.get("feature_engineering.aperiodic.min_fit_points", 5))
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_aperiodic", -1))
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_aperiodic")
     
     offsets, slopes, valid_bins, kept_bins, peak_rej, fit_masks, fit_qc = _fit_aperiodic_with_qc(
         log_freqs, log_psd, peak_z, min_pts, logger, n_jobs=n_jobs
@@ -254,23 +256,38 @@ def _extract_aperiodic_for_segment(
         data_dict[col_r2] = r2[:, i]
         data_dict[col_rms] = rms[:, i]
         
-        # Alpha Peak Frequency (per epoch, per channel)
-        apf_vals = np.zeros(n_epochs)
-        for ep in range(n_epochs):
-            apf_vals[ep] = _find_alpha_peak_frequency(freqs, psds[ep, i, :], alpha_range)
-        col_apf = NamingSchema.build("spectral", segment_name, "alpha", "ch", "peakfreq", channel=ch)
+        # Alpha Peak Frequency (vectorized across epochs)
+        # Use center of gravity for each epoch
+        alpha_mask = (freqs >= alpha_range[0]) & (freqs <= alpha_range[1])
+        if np.any(alpha_mask):
+            alpha_freqs = freqs[alpha_mask]
+            alpha_psd = psds[:, i, alpha_mask]  # (n_epochs, n_alpha_freqs)
+            alpha_psd_pos = np.maximum(alpha_psd, 0)
+            total_power = np.sum(alpha_psd_pos, axis=1)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                apf_vals = np.where(
+                    total_power > 0,
+                    np.sum(alpha_freqs * alpha_psd_pos, axis=1) / total_power,
+                    np.nan
+                )
+        else:
+            apf_vals = np.full(n_epochs, np.nan)
+        col_apf = NamingSchema.build("aperiodic", segment_name, "alpha", "ch", "peakfreq", channel=ch)
         data_dict[col_apf] = apf_vals
         
-        # Theta/Beta Ratio (per epoch, per channel)
-        tbr_vals = np.zeros(n_epochs)
-        for ep in range(n_epochs):
-            theta_power = np.mean(psds[ep, i, theta_mask]) if np.any(theta_mask) else np.nan
-            beta_power = np.mean(psds[ep, i, beta_mask]) if np.any(beta_mask) else np.nan
-            if beta_power > 0 and np.isfinite(theta_power) and np.isfinite(beta_power):
-                tbr_vals[ep] = theta_power / beta_power
-            else:
-                tbr_vals[ep] = np.nan
-        col_tbr = NamingSchema.build("spectral", segment_name, "broadband", "ch", "tbr", channel=ch)
+        # Theta/Beta Ratio (vectorized across epochs)
+        if np.any(theta_mask) and np.any(beta_mask):
+            theta_power = np.mean(psds[:, i, theta_mask], axis=1)  # (n_epochs,)
+            beta_power = np.mean(psds[:, i, beta_mask], axis=1)    # (n_epochs,)
+            with np.errstate(invalid='ignore', divide='ignore'):
+                tbr_vals = np.where(
+                    (beta_power > 0) & np.isfinite(theta_power) & np.isfinite(beta_power),
+                    theta_power / beta_power,
+                    np.nan
+                )
+        else:
+            tbr_vals = np.full(n_epochs, np.nan)
+        col_tbr = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "tbr", channel=ch)
         data_dict[col_tbr] = tbr_vals
         
         # Power-corrected band power
@@ -292,19 +309,18 @@ def _extract_aperiodic_for_segment(
             col_powcorr = NamingSchema.build("aperiodic", segment_name, b, "ch", "powcorr", channel=ch)
             data_dict[col_powcorr] = mean_ratio
     
-    # Global APF and TBR (mean across channels)
-    apf_global = np.zeros(n_epochs)
-    tbr_global = np.zeros(n_epochs)
-    for ep in range(n_epochs):
-        apf_ch_vals = [data_dict[NamingSchema.build("spectral", segment_name, "alpha", "ch", "peakfreq", channel=ch)][ep] 
-                       for ch in ch_names]
-        tbr_ch_vals = [data_dict[NamingSchema.build("spectral", segment_name, "broadband", "ch", "tbr", channel=ch)][ep] 
-                       for ch in ch_names]
-        apf_global[ep] = np.nanmean(apf_ch_vals)
-        tbr_global[ep] = np.nanmean(tbr_ch_vals)
+    # Global APF and TBR (vectorized mean across channels)
+    apf_ch_keys = [NamingSchema.build("aperiodic", segment_name, "alpha", "ch", "peakfreq", channel=ch) for ch in ch_names]
+    tbr_ch_keys = [NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "tbr", channel=ch) for ch in ch_names]
     
-    col_apf_glob = NamingSchema.build("spectral", segment_name, "alpha", "global", "peakfreq")
-    col_tbr_glob = NamingSchema.build("spectral", segment_name, "broadband", "global", "tbr")
+    apf_stack = np.column_stack([data_dict[k] for k in apf_ch_keys])  # (n_epochs, n_channels)
+    tbr_stack = np.column_stack([data_dict[k] for k in tbr_ch_keys])  # (n_epochs, n_channels)
+    
+    apf_global = np.nanmean(apf_stack, axis=1)
+    tbr_global = np.nanmean(tbr_stack, axis=1)
+    
+    col_apf_glob = NamingSchema.build("aperiodic", segment_name, "alpha", "global", "peakfreq")
+    col_tbr_glob = NamingSchema.build("aperiodic", segment_name, "broadband", "global", "tbr")
     data_dict[col_apf_glob] = apf_global
     data_dict[col_tbr_glob] = tbr_global
 
@@ -334,16 +350,22 @@ def extract_aperiodic_features(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     
+    valid, err = validate_extractor_inputs(ctx, "Aperiodic", min_epochs=2)
+    if not valid:
+        ctx.logger.warning(err)
+        return pd.DataFrame(), [], {}
+    
     epochs = ctx.epochs
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: 
+    if len(picks) == 0:
+        ctx.logger.warning("Aperiodic: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), [], {}
     
     config = ctx.config
     logger = ctx.logger
     sfreq = epochs.info["sfreq"]
     times = epochs.times
-    min_samples = int(sfreq)  # At least 1 second
+    min_samples = int(sfreq)
     
     all_data: Dict[str, Any] = {}
     qc_payload: Dict[str, Any] = {
@@ -351,55 +373,28 @@ def extract_aperiodic_features(
         "channel_names": ch_names,
     }
     
-    # Process baseline segment
-    mask_baseline = ctx.windows.get_mask("baseline")
-    if mask_baseline is not None and np.sum(mask_baseline) >= min_samples:
-        t_baseline = times[mask_baseline]
-        baseline_data = _extract_aperiodic_for_segment(
-            epochs, picks, ch_names, "baseline",
-            t_baseline[0], t_baseline[-1], bands, config, logger
+    for seg_name in STANDARD_SEGMENTS:
+        mask = get_segment_mask(ctx.windows, seg_name)
+        if mask is None or np.sum(mask) < min_samples:
+            continue
+        t_seg = times[mask]
+        seg_data = _extract_aperiodic_for_segment(
+            epochs, picks, ch_names, seg_name,
+            t_seg[0], t_seg[-1], bands, config, logger
         )
-        qc_payload["segments"]["baseline"] = baseline_data.get("__qc__")
-        baseline_data.pop("__qc__", None)
-        all_data.update(baseline_data)
-        logger.info(f"Computed Aperiodic for baseline: [{t_baseline[0]:.2f}, {t_baseline[-1]:.2f}]")
-    
-    # Process ramp segment
-    mask_ramp = ctx.windows.get_mask("ramp")
-    if mask_ramp is not None and np.sum(mask_ramp) >= min_samples:
-        t_ramp = times[mask_ramp]
-        ramp_data = _extract_aperiodic_for_segment(
-            epochs, picks, ch_names, "ramp",
-            t_ramp[0], t_ramp[-1], bands, config, logger
-        )
-        qc_payload["segments"]["ramp"] = ramp_data.get("__qc__")
-        ramp_data.pop("__qc__", None)
-        all_data.update(ramp_data)
-        logger.info(f"Computed Aperiodic for ramp: [{t_ramp[0]:.2f}, {t_ramp[-1]:.2f}]")
-    
-    # Process plateau segment
-    mask_plateau = ctx.windows.get_mask("plateau")
-    if mask_plateau is not None and np.sum(mask_plateau) >= min_samples:
-        t_plateau = times[mask_plateau]
-        plateau_data = _extract_aperiodic_for_segment(
-            epochs, picks, ch_names, "plateau",
-            t_plateau[0], t_plateau[-1], bands, config, logger
-        )
-        qc_payload["segments"]["plateau"] = plateau_data.get("__qc__")
-        plateau_data.pop("__qc__", None)
-        all_data.update(plateau_data)
-        logger.info(f"Computed Aperiodic for plateau: [{t_plateau[0]:.2f}, {t_plateau[-1]:.2f}]")
-    elif not all_data:
-        logger.warning("No valid baseline/ramp/plateau segments for Aperiodic; returning empty result.")
+        qc_payload["segments"][seg_name] = seg_data.get("__qc__")
+        seg_data.pop("__qc__", None)
+        all_data.update(seg_data)
+        logger.info(f"Computed Aperiodic for {seg_name}: [{t_seg[0]:.2f}, {t_seg[-1]:.2f}]")
     
     if not all_data:
+        logger.warning("No valid segments for Aperiodic; returning empty result.")
         return pd.DataFrame(), [], {}
     
     df = pd.DataFrame(all_data)
     
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
     qc_payload["segments_computed"] = segments_done
-    # Provide top-level keys expected by save_all_features
     plateau_qc = qc_payload.get("segments", {}).get("plateau")
     baseline_qc = qc_payload.get("segments", {}).get("baseline")
     chosen = plateau_qc or baseline_qc
@@ -425,6 +420,7 @@ def extract_aperiodic_features_from_epochs(
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
+        logger.warning("Aperiodic: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), [], {}
 
     times = epochs.times

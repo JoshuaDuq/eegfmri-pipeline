@@ -38,7 +38,6 @@ class Command:
 
 
 BEHAVIOR_COMPUTATIONS = [
-    # Canonical stage flags
     "correlations",
     "pain_sensitivity",
     "condition",
@@ -47,17 +46,6 @@ BEHAVIOR_COMPUTATIONS = [
     "mediation",
     "mixed_effects",
     "export",
-    # Legacy aliases (kept for backward compatibility)
-    "power_roi",
-    "connectivity_roi",
-    "connectivity_heatmaps",
-    "sliding_connectivity",
-    "time_frequency",
-    "temporal_correlations",
-    "cluster_test",
-    "precomputed_correlations",
-    "condition_correlations",
-    "exports",
 ]
 
 
@@ -72,6 +60,11 @@ FEATURE_VISUALIZE_CATEGORIES = [
     "burst",
     "erds",
     "complexity",
+]
+
+
+FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES + [
+    category for category in FEATURE_VISUALIZE_CATEGORIES if category not in FEATURE_CATEGORIES
 ]
 
 
@@ -146,13 +139,37 @@ def _run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) ->
         pipeline.run_batch(subjects, task=args.task)
     elif args.mode == "visualize":
         task = resolve_task(args.task, config)
+
+        selected_plots = getattr(args, "plots", None)
+        run_all_plots = bool(getattr(args, "all_plots", False))
+        skip_scatter = bool(getattr(args, "skip_scatter", False))
+
+        if selected_plots is not None:
+            visualize_categories = None
+            plots = selected_plots
+        elif skip_scatter:
+            visualize_categories = None
+            plots = [
+                "psychometrics",
+                "temporal_topomaps",
+                "pain_clusters",
+                "dose_response",
+            ]
+        elif run_all_plots:
+            visualize_categories = None
+            plots = []
+        else:
+            visualize_categories = categories
+            plots = None
+
         visualize_behavior_for_subjects(
             subjects=subjects,
             task=task,
             config=config,
             scatter_only=False,
             temporal_only=False,
-            visualize_categories=categories,
+            visualize_categories=visualize_categories,
+            plots=plots,
         )
 
 
@@ -170,10 +187,10 @@ def _setup_features(subparsers: argparse._SubParsersAction) -> argparse.Argument
     parser.add_argument(
         "--categories",
         nargs="+",
-        choices=FEATURE_VISUALIZE_CATEGORIES,
+        choices=FEATURE_CATEGORY_CHOICES,
         default=None,
         metavar="CATEGORY",
-        help="Feature categories to process (e.g., power, connectivity, itpc)",
+        help="Feature categories to process (some are compute-only or visualize-only)",
     )
     parser.add_argument(
         "--precomputed-groups",

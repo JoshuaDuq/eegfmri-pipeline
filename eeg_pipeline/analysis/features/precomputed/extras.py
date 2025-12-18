@@ -21,6 +21,7 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import get_segment_mask, SEGMENT_PLATEAU, validate_precomputed
 from eeg_pipeline.utils.config.loader import get_config_value, get_feature_constant
 
 
@@ -72,7 +73,10 @@ def extract_gfp_from_precomputed(
     precomputed: PrecomputedData,
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    logger = getattr(precomputed, "logger", None)
     if precomputed.data is None or precomputed.windows is None:
+        if logger is not None:
+            logger.warning("GFP: No data or windows available; skipping extraction.")
         return pd.DataFrame(), []
 
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -111,7 +115,10 @@ def extract_temporal_features_from_precomputed(
     precomputed: PrecomputedData,
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    logger = getattr(precomputed, "logger", None)
     if precomputed.data is None or precomputed.windows is None:
+        if logger is not None:
+            logger.warning("Temporal: No data or windows available; skipping extraction.")
         return pd.DataFrame(), []
 
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -155,7 +162,11 @@ def extract_band_ratios_from_precomputed(
     precomputed: PrecomputedData,
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
-    if not precomputed.band_data or precomputed.windows is None:
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        logger = getattr(precomputed, "logger", None)
+        if logger is not None:
+            logger.warning("Band ratios: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), []
 
     ratio_pairs = get_config_value(config, "feature_engineering.spectral.ratio_pairs", [])
@@ -253,7 +264,10 @@ def extract_asymmetry_from_precomputed(
     precomputed: Any,
     n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    logger = getattr(precomputed, "logger", None)
     if not precomputed.band_data:
+        if logger is not None:
+            logger.warning("Asymmetry: No band data available; skipping extraction.")
         return pd.DataFrame(), []
 
     default_pairs = [("F3", "F4"), ("F7", "F8"), ("C3", "C4"), ("P3", "P4"), ("O1", "O2")]
@@ -277,16 +291,10 @@ def extract_asymmetry_from_precomputed(
     if not valid_pairs:
         return pd.DataFrame(), []
 
-    mask = None
-    if precomputed.windows is not None:
-        plateau_mask = getattr(precomputed.windows, "plateau_mask", None)
-        if isinstance(plateau_mask, np.ndarray) and np.any(plateau_mask):
-            mask = plateau_mask
-        else:
-            active_mask = getattr(precomputed.windows, "active_mask", None)
-            if isinstance(active_mask, np.ndarray) and np.any(active_mask):
-                mask = active_mask
-    if mask is None:
+    mask = get_segment_mask(precomputed.windows, SEGMENT_PLATEAU)
+    if mask is None or not np.any(mask):
+        mask = get_segment_mask(precomputed.windows, "active")
+    if mask is None or not np.any(mask):
         mask = slice(None)
 
     n_epochs = precomputed.data.shape[0]
@@ -336,7 +344,11 @@ def extract_roi_features_from_precomputed(
     bands: List[str],
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
-    if not precomputed.band_data or precomputed.windows is None:
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        logger = getattr(precomputed, "logger", None)
+        if logger is not None:
+            logger.warning("ROI: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), []
 
     roi_defs = get_config_value(config, "time_frequency_analysis.rois", {})

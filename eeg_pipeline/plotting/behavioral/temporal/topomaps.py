@@ -242,6 +242,29 @@ def plot_temporal_correlation_topomaps_by_pain(
     result_pain = data["pain"].item()
     result_non = data["non_pain"].item()
 
+    required_result_keys = [
+        "correlations",
+        "p_values",
+        "p_corrected",
+        "band_names",
+        "band_ranges",
+        "window_starts",
+        "window_ends",
+    ]
+    for condition_name, result in [("pain", result_pain), ("non_pain", result_non)]:
+        missing = [k for k in required_result_keys if k not in result]
+        if missing:
+            logger.error(
+                "Temporal correlation stats file is missing required fields (%s) for condition '%s': %s. "
+                "Regenerate temporal stats (this overwrites stale outputs) via: "
+                "python -m eeg_pipeline.cli.main behavior compute --subject %s --computations temporal",
+                data_path.name,
+                condition_name,
+                ", ".join(missing),
+                subject,
+            )
+            return
+
     band_names = result_pain["band_names"]
     band_ranges = result_pain["band_ranges"]
     window_starts = result_pain["window_starts"]

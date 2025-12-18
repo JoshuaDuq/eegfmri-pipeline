@@ -46,10 +46,8 @@ from eeg_pipeline.utils.parallel import parallel_feature_types, get_n_jobs
 from joblib import Parallel, delayed, cpu_count
 from eeg_pipeline.domain.features.registry import (
     FeatureRegistry,
-    FeatureRule,
     classify_feature,
     get_feature_registry,
-    _CHANNEL_NAMES,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
 
@@ -79,49 +77,63 @@ class CorrelationConfig:
     n_jobs: int = -1
 
     @classmethod
-    def from_config(cls, config: Any) -> "CorrelationConfig":
-        """Build configuration using behavior_analysis settings."""
+    def from_config(cls, config: Any, ctx: Optional[BehaviorContext] = None) -> "CorrelationConfig":
+        """Build configuration from config dict with optional context overrides.
+        
+        Parameters
+        ----------
+        config : Any
+            Configuration dictionary with behavior_analysis settings.
+        ctx : BehaviorContext, optional
+            If provided, runtime overrides from context take precedence.
+        """
+        method = get_config_value(
+            config, "behavior_analysis.statistics.correlation_method", "spearman"
+        )
+        min_samples = get_min_samples(config, "channel")
+        fdr_alpha = float(get_config_value(
+            config, "behavior_analysis.statistics.fdr_alpha",
+            get_config_value(config, "statistics.fdr_alpha", 0.05)
+        ))
+        n_bootstrap = int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))
+        n_permutations = int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000))
+        compute_bayes_factor = bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False))
+        robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+        compute_loso_stability = bool(get_config_value(config, "behavior_analysis.loso_stability", True))
+        compute_reliability = bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False))
+        n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
+        
+        if ctx is not None:
+            method = ctx.method or method
+            min_samples = ctx.min_samples_channel or min_samples
+            n_bootstrap = ctx.bootstrap if ctx.bootstrap is not None else n_bootstrap
+            n_permutations = ctx.n_perm if ctx.n_perm is not None else n_permutations
+            compute_reliability = ctx.compute_reliability
+        
         return cls(
-            method=get_config_value(
-                config, "behavior_analysis.statistics.correlation_method", "spearman"
-            ),
-            min_samples=get_min_samples(config, "channel"),
-            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", 0.05))),
-            n_bootstrap=int(get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 0)),
-            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 0)),
-            rng=None,
-            compute_bayes_factor=bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False)),
-            robust_method=get_config_value(config, "behavior_analysis.robust_correlation", None),
-            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.loso_stability", False)),
-            compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
-            n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
+            method=method,
+            min_samples=min_samples,
+            fdr_alpha=fdr_alpha,
+            n_bootstrap=n_bootstrap,
+            n_permutations=n_permutations,
+            rng=ctx.rng if ctx else None,
+            compute_bayes_factor=compute_bayes_factor,
+            robust_method=robust_method,
+            compute_loso_stability=compute_loso_stability,
+            compute_reliability=compute_reliability,
+            covariates_df=ctx.covariates_df if ctx else None,
+            covariates_without_temp_df=ctx.covariates_without_temp_df if ctx else None,
+            temperature_series=ctx.temperature if ctx and ctx.control_temperature else None,
+            groups=ctx.group_ids if ctx else None,
+            control_temperature=ctx.control_temperature if ctx else True,
+            control_trial_order=ctx.control_trial_order if ctx else True,
+            n_jobs=n_jobs,
         )
 
     @classmethod
     def from_context(cls, ctx: BehaviorContext) -> "CorrelationConfig":
         """Context-aware configuration that honors runtime overrides."""
-        base = cls.from_config(ctx.config or {})
-        return cls(
-            method=ctx.method or base.method,
-            min_samples=ctx.min_samples_channel or base.min_samples,
-            apply_fdr=base.apply_fdr,
-            fdr_alpha=base.fdr_alpha,
-            n_bootstrap=ctx.bootstrap if ctx.bootstrap is not None else base.n_bootstrap,
-            n_permutations=ctx.n_perm if ctx.n_perm is not None else base.n_permutations,
-            rng=ctx.rng,
-            filter_threshold=base.filter_threshold,
-            compute_bayes_factor=base.compute_bayes_factor,
-            robust_method=base.robust_method,
-            compute_loso_stability=base.compute_loso_stability,
-            compute_reliability=getattr(ctx, "compute_reliability", False),
-            covariates_df=getattr(ctx, "covariates_df", None),
-            covariates_without_temp_df=getattr(ctx, "covariates_without_temp_df", None),
-            temperature_series=getattr(ctx, "temperature", None) if getattr(ctx, "control_temperature", True) else None,
-            groups=getattr(ctx, "group_ids", None),
-            control_temperature=getattr(ctx, "control_temperature", True),
-            control_trial_order=getattr(ctx, "control_trial_order", True),
-            n_jobs=int(get_config_value(ctx.config, "behavior_analysis.n_jobs", -1)),
-        )
+        return cls.from_config(ctx.config or {}, ctx=ctx)
 
 
 @dataclass
@@ -138,8 +150,230 @@ class FeatureCorrelationResult:
 
 
 # =============================================================================
-# Parallel Column Processing Helper
+# Parallel Column Processing Helpers
 # =============================================================================
+
+
+@dataclass
+class ColumnProcessorParams:
+    """Parameters for parallel column processing. Bundles config to reduce function args."""
+    method: str
+    min_samples: int
+    n_permutations: int
+    n_bootstrap: int
+    control_temperature: bool
+    control_trial_order: bool
+    compute_bayes_factor: bool
+    compute_loso_stability: bool
+    compute_reliability: bool
+
+
+def _build_base_record(
+    col_name: str,
+    feature_type: str,
+    r: float,
+    p: float,
+    n_valid: int,
+    method: str,
+    n_covariates: int,
+) -> Dict[str, Any]:
+    """Build base correlation record with raw statistics."""
+    return {
+        "feature": col_name,
+        "feature_type": feature_type,
+        "r": float(r),
+        "p": float(p),
+        "n": n_valid,
+        "method": method,
+        "r_raw": float(r),
+        "p_raw": float(p),
+        "p_value": float(p),
+        "p_kind_primary": "p_raw",
+        "p_primary": float(p),
+        "r_primary": float(r),
+        "p_primary_source": "raw",
+        "p_primary_perm": np.nan,
+        "p_primary_is_permutation": False,
+        "n_covariates_used": n_covariates,
+    }
+
+
+def _add_bootstrap_ci(
+    record: Dict[str, Any],
+    col_values: np.ndarray,
+    targets: np.ndarray,
+    n_bootstrap: int,
+    method: str,
+    rng: np.random.Generator,
+) -> None:
+    """Add bootstrap confidence intervals to record."""
+    from eeg_pipeline.utils.analysis.stats.eeg_stats import compute_bootstrap_ci
+    
+    valid_mask = np.isfinite(col_values) & np.isfinite(targets)
+    ci_low, ci_high = compute_bootstrap_ci(
+        col_values[valid_mask], targets[valid_mask],
+        n_bootstrap=n_bootstrap, ci_level=0.95,
+        method=method, rng=rng
+    )
+    record["ci_low"] = ci_low
+    record["ci_high"] = ci_high
+
+
+def _add_bayes_factor(
+    record: Dict[str, Any],
+    col_values: np.ndarray,
+    targets: np.ndarray,
+    method: str,
+) -> None:
+    """Add Bayes factor to record."""
+    from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
+    
+    bf10, bf_interp = compute_bayes_factor_correlation(col_values, targets, method=method)
+    record["bf10"] = bf10
+    record["bf_interpretation"] = bf_interp
+
+
+def _add_partial_correlations(
+    record: Dict[str, Any],
+    feature_series: pd.Series,
+    target_series: pd.Series,
+    cov_aligned: Optional[pd.DataFrame],
+    temp_aligned: Optional[pd.Series],
+    method: str,
+    feature_type: str,
+    min_samples: int,
+) -> None:
+    """Add partial correlation results to record."""
+    (
+        r_pc, p_pc, n_pc,
+        r_temp, p_temp, n_temp,
+        r_cov_temp, p_cov_temp, n_cov_temp,
+    ) = compute_partial_correlations_with_cov_temp(
+        roi_values=feature_series,
+        target_values=target_series,
+        covariates_df=cov_aligned,
+        temperature_series=temp_aligned,
+        method=method,
+        context=feature_type,
+        logger=None,
+        min_samples=min_samples,
+        config=None,
+    )
+    record["r_partial_cov"] = r_pc
+    record["p_partial_cov"] = p_pc
+    record["n_partial_cov"] = n_pc
+    record["r_partial_temp"] = r_temp
+    record["p_partial_temp"] = p_temp
+    record["n_partial_temp"] = n_temp
+    record["r_partial_cov_temp"] = r_cov_temp
+    record["p_partial_cov_temp"] = p_cov_temp
+    record["n_partial_cov_temp"] = n_cov_temp
+
+
+def _add_permutation_pvalues(
+    record: Dict[str, Any],
+    feature_series: pd.Series,
+    target_series: pd.Series,
+    cov_aligned: Optional[pd.DataFrame],
+    temp_aligned: Optional[pd.Series],
+    method: str,
+    n_permutations: int,
+    rng: np.random.Generator,
+    perm_groups: Optional[np.ndarray],
+) -> None:
+    """Add permutation p-values to record."""
+    n_eff = int(pd.concat([feature_series, target_series], axis=1).dropna().shape[0])
+    (
+        p_perm_raw,
+        p_perm_partial_cov,
+        p_perm_partial_temp,
+        p_perm_partial_cov_temp,
+    ) = compute_permutation_pvalues_with_cov_temp(
+        x_aligned=feature_series,
+        y_aligned=target_series,
+        covariates_df=cov_aligned,
+        temp_series=temp_aligned,
+        method=method,
+        n_perm=n_permutations,
+        n_eff=n_eff,
+        rng=rng,
+        config=None,
+        groups=perm_groups,
+    )
+    record["p_perm_raw"] = p_perm_raw
+    record["p_perm_partial_cov"] = p_perm_partial_cov
+    record["p_perm_partial_temp"] = p_perm_partial_temp
+    record["p_perm_partial_cov_temp"] = p_perm_partial_cov_temp
+    record["p_perm"] = p_perm_raw
+
+
+def _select_primary_correlation(
+    record: Dict[str, Any],
+    control_temperature: bool,
+    control_trial_order: bool,
+) -> None:
+    """Select primary correlation based on control settings."""
+    if control_temperature and control_trial_order:
+        if pd.notna(record.get("p_partial_cov_temp", np.nan)):
+            record["p_kind_primary"] = "p_partial_cov_temp"
+            record["p_primary"] = record.get("p_partial_cov_temp", np.nan)
+            record["r_primary"] = record.get("r_partial_cov_temp", np.nan)
+            record["p_primary_source"] = "partial_cov_temp"
+    elif control_temperature:
+        if pd.notna(record.get("p_partial_temp", np.nan)):
+            record["p_kind_primary"] = "p_partial_temp"
+            record["p_primary"] = record.get("p_partial_temp", np.nan)
+            record["r_primary"] = record.get("r_partial_temp", np.nan)
+            record["p_primary_source"] = "partial_temp"
+    elif control_trial_order:
+        if pd.notna(record.get("p_partial_cov", np.nan)):
+            record["p_kind_primary"] = "p_partial_cov"
+            record["p_primary"] = record.get("p_partial_cov", np.nan)
+            record["r_primary"] = record.get("r_partial_cov", np.nan)
+            record["p_primary_source"] = "partial_cov"
+
+
+def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
+    """Update primary permutation p-value based on selected primary."""
+    p_perm_col_by_primary = {
+        "p_raw": "p_perm_raw",
+        "p_partial_cov": "p_perm_partial_cov",
+        "p_partial_temp": "p_perm_partial_temp",
+        "p_partial_cov_temp": "p_perm_partial_cov_temp",
+    }
+    perm_col = p_perm_col_by_primary.get(record.get("p_kind_primary"))
+    if perm_col is not None:
+        record["p_primary_perm"] = record.get(perm_col, np.nan)
+        record["p_primary_is_permutation"] = bool(pd.notna(record.get("p_primary_perm", np.nan)))
+
+
+def _add_loso_stability(
+    record: Dict[str, Any],
+    col_values: np.ndarray,
+    targets: np.ndarray,
+    loso_groups: np.ndarray,
+    method: str,
+) -> None:
+    """Add LOSO stability metrics to record."""
+    from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
+    
+    r_mean, r_std, stability, _ = compute_loso_correlation_stability(
+        col_values, targets, loso_groups, method
+    )
+    record["loso_r_mean"] = r_mean
+    record["loso_r_std"] = r_std
+    record["loso_stability"] = stability
+
+
+def _add_reliability(
+    record: Dict[str, Any],
+    col_values: np.ndarray,
+    targets: np.ndarray,
+    method: str,
+) -> None:
+    """Add split-half reliability to record."""
+    rel = compute_correlation_split_half_reliability(col_values, targets, method, n_splits=50)
+    record["reliability_split_half"] = rel
 
 
 def _process_single_column(
@@ -162,186 +396,69 @@ def _process_single_column(
     compute_loso_stability: bool,
     compute_reliability: bool,
 ) -> Optional[Dict[str, Any]]:
-    """Process correlations for a single column. Designed for parallel execution.
-    
-    Computes everything from scratch including basic correlation, partial correlations,
-    bootstrap CI, permutation tests, LOSO stability, and reliability.
-    """
+    """Process correlations for a single column. Designed for parallel execution."""
     from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
-    from eeg_pipeline.utils.analysis.stats.eeg_stats import compute_bootstrap_ci
     
     rng = np.random.default_rng(config_rng_seed)
     
-    # Compute basic correlation
     r, p, n_valid = safe_correlation(col_values, targets_aligned, config_method, config_min_samples)
-    
     if not np.isfinite(r):
         return None
     
-    d: Dict[str, Any] = {
-        "feature": col_name,
-        "feature_type": feature_type,
-        "r": float(r),
-        "p": float(p),
-        "n": n_valid,
-        "method": config_method,
-        "r_raw": float(r),
-        "p_raw": float(p),
-        "p_value": float(p),
-        "p_kind_primary": "p_raw",
-        "p_primary": float(p),
-        "r_primary": float(r),
-        "p_primary_source": "raw",
-        "p_primary_perm": np.nan,
-        "p_primary_is_permutation": False,
-        "n_covariates_used": int(cov_aligned.shape[1]) if cov_aligned is not None else 0,
-    }
+    n_cov = int(cov_aligned.shape[1]) if cov_aligned is not None else 0
+    record = _build_base_record(col_name, feature_type, r, p, n_valid, config_method, n_cov)
     
     feature_series = pd.Series(col_values)
     target_series = pd.Series(targets_aligned)
 
-    # Bootstrap CI
     if config_n_bootstrap and config_n_bootstrap > 0:
         try:
-            valid_mask = np.isfinite(col_values) & np.isfinite(targets_aligned)
-            ci_low, ci_high = compute_bootstrap_ci(
-                col_values[valid_mask], targets_aligned[valid_mask],
-                n_bootstrap=config_n_bootstrap, ci_level=0.95,
-                method=config_method, rng=rng
-            )
-            d["ci_low"] = ci_low
-            d["ci_high"] = ci_high
-        except Exception:
-            pass
+            _add_bootstrap_ci(record, col_values, targets_aligned, config_n_bootstrap, config_method, rng)
+        except Exception as exc:
+            record["bootstrap_error"] = str(exc)
 
-    # Bayes factor
     if compute_bayes_factor:
         try:
-            from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
-            bf10, bf_interp = compute_bayes_factor_correlation(
-                col_values, targets_aligned, method=config_method
-            )
-            d["bf10"] = bf10
-            d["bf_interpretation"] = bf_interp
-        except Exception:
-            pass
+            _add_bayes_factor(record, col_values, targets_aligned, config_method)
+        except Exception as exc:
+            record["bayes_factor_error"] = str(exc)
 
-    # Partial correlations
     if cov_aligned is not None or temp_aligned is not None:
         try:
-            (
-                r_pc, p_pc, n_pc,
-                r_temp, p_temp, n_temp,
-                r_cov_temp, p_cov_temp, n_cov_temp,
-            ) = compute_partial_correlations_with_cov_temp(
-                roi_values=feature_series,
-                target_values=target_series,
-                covariates_df=cov_aligned,
-                temperature_series=temp_aligned,
-                method=config_method,
-                context=feature_type,
-                logger=None,
-                min_samples=config_min_samples,
-                config=None,
+            _add_partial_correlations(
+                record, feature_series, target_series, cov_aligned, temp_aligned,
+                config_method, feature_type, config_min_samples
             )
-            d["r_partial_cov"] = r_pc
-            d["p_partial_cov"] = p_pc
-            d["n_partial_cov"] = n_pc
-            d["r_partial_temp"] = r_temp
-            d["p_partial_temp"] = p_temp
-            d["n_partial_temp"] = n_temp
-            d["r_partial_cov_temp"] = r_cov_temp
-            d["p_partial_cov_temp"] = p_cov_temp
-            d["n_partial_cov_temp"] = n_cov_temp
-        except Exception:
-            pass
+        except Exception as exc:
+            record["partial_corr_error"] = str(exc)
 
-    # Permutation p-values
     if config_n_permutations and config_n_permutations > 0:
         try:
-            n_eff = int(pd.concat([feature_series, target_series], axis=1).dropna().shape[0])
-            (
-                p_perm_raw,
-                p_perm_partial_cov,
-                p_perm_partial_temp,
-                p_perm_partial_cov_temp,
-            ) = compute_permutation_pvalues_with_cov_temp(
-                x_aligned=feature_series,
-                y_aligned=target_series,
-                covariates_df=cov_aligned,
-                temp_series=temp_aligned,
-                method=config_method,
-                n_perm=config_n_permutations,
-                n_eff=n_eff,
-                rng=rng,
-                config=None,
-                groups=perm_groups,
+            _add_permutation_pvalues(
+                record, feature_series, target_series, cov_aligned, temp_aligned,
+                config_method, config_n_permutations, rng, perm_groups
             )
-            d["p_perm_raw"] = p_perm_raw
-            d["p_perm_partial_cov"] = p_perm_partial_cov
-            d["p_perm_partial_temp"] = p_perm_partial_temp
-            d["p_perm_partial_cov_temp"] = p_perm_partial_cov_temp
-            d["p_perm"] = p_perm_raw
-        except Exception:
-            pass
+        except Exception as exc:
+            record["permutation_error"] = str(exc)
 
-    # Select primary correlation
-    if control_temperature and control_trial_order:
-        if pd.notna(d.get("p_partial_cov_temp", np.nan)):
-            d["p_kind_primary"] = "p_partial_cov_temp"
-            d["p_primary"] = d.get("p_partial_cov_temp", np.nan)
-            d["r_primary"] = d.get("r_partial_cov_temp", np.nan)
-            d["p_primary_source"] = "partial_cov_temp"
-    elif control_temperature:
-        if pd.notna(d.get("p_partial_temp", np.nan)):
-            d["p_kind_primary"] = "p_partial_temp"
-            d["p_primary"] = d.get("p_partial_temp", np.nan)
-            d["r_primary"] = d.get("r_partial_temp", np.nan)
-            d["p_primary_source"] = "partial_temp"
-    elif control_trial_order:
-        if pd.notna(d.get("p_partial_cov", np.nan)):
-            d["p_kind_primary"] = "p_partial_cov"
-            d["p_primary"] = d.get("p_partial_cov", np.nan)
-            d["r_primary"] = d.get("r_partial_cov", np.nan)
-            d["p_primary_source"] = "partial_cov"
+    _select_primary_correlation(record, control_temperature, control_trial_order)
 
-    # Update permutation p-values based on primary
     if config_n_permutations and config_n_permutations > 0:
-        p_perm_col_by_primary = {
-            "p_raw": "p_perm_raw",
-            "p_partial_cov": "p_perm_partial_cov",
-            "p_partial_temp": "p_perm_partial_temp",
-            "p_partial_cov_temp": "p_perm_partial_cov_temp",
-        }
-        perm_col = p_perm_col_by_primary.get(d.get("p_kind_primary"))
-        if perm_col is not None:
-            d["p_primary_perm"] = d.get(perm_col, np.nan)
-            d["p_primary_is_permutation"] = bool(pd.notna(d.get("p_primary_perm", np.nan)))
+        _update_primary_perm_pvalue(record)
 
-    # LOSO stability
     if compute_loso_stability and loso_groups is not None:
         try:
-            from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
-            r_mean, r_std, stability, _ = compute_loso_correlation_stability(
-                col_values, targets_aligned, loso_groups, config_method
-            )
-            d["loso_r_mean"] = r_mean
-            d["loso_r_std"] = r_std
-            d["loso_stability"] = stability
-        except Exception:
-            pass
+            _add_loso_stability(record, col_values, targets_aligned, loso_groups, config_method)
+        except Exception as exc:
+            record["loso_error"] = str(exc)
 
-    # Split-half reliability
     if compute_reliability:
         try:
-            rel = compute_correlation_split_half_reliability(
-                col_values, targets_aligned, config_method, n_splits=50
-            )
-            d["reliability_split_half"] = rel
-        except Exception:
-            pass
+            _add_reliability(record, col_values, targets_aligned, config_method)
+        except Exception as exc:
+            record["reliability_error"] = str(exc)
 
-    return d
+    return record
 
 
 # =============================================================================
@@ -443,10 +560,6 @@ class FeatureBehaviorCorrelator:
         if df_aligned is None or targets_aligned is None:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
-        # Use core correlation loop
-        classifier = lambda col, source_file_type=None, include_subtype=True: classify_feature(
-            col, source_file_type=source_file_type, include_subtype=include_subtype, registry=self.registry
-        )
         cov_aligned = None
         temp_aligned = None
         loso_groups = None
@@ -480,7 +593,7 @@ class FeatureBehaviorCorrelator:
         if n_jobs_actual == -1:
             n_jobs_actual = max(1, cpu_count() - 1)
         
-        base_seed = 42
+        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
         if config.rng is not None:
             base_seed = int(config.rng.integers(0, 2**31))
         
@@ -555,31 +668,6 @@ class FeatureBehaviorCorrelator:
         )
         return FeatureCorrelationResult(feature_type, len(df.columns), n_sig, record_dicts)
     
-    def _compute_bayes_factor(
-        self,
-        feature_series: pd.Series,
-        target_series: pd.Series,
-        method: str,
-    ) -> Tuple[float, str]:
-        """Compute Bayes Factor for correlation."""
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_bayes_factor_correlation
-        return compute_bayes_factor_correlation(
-            feature_series.values, target_series.values, method=method
-        )
-    
-    def _compute_loso_stability(
-        self,
-        feature_values: np.ndarray,
-        target_values: np.ndarray,
-        subject_ids: np.ndarray,
-        method: str,
-    ) -> Tuple[float, float, float, List[float]]:
-        """Compute LOSO correlation stability."""
-        from eeg_pipeline.utils.analysis.stats.correlation import compute_loso_correlation_stability
-        return compute_loso_correlation_stability(
-            feature_values, target_values, subject_ids, method
-        )
-
     def save_results(
         self,
         results: Dict[str, FeatureCorrelationResult],
@@ -775,13 +863,6 @@ class FeatureBehaviorCorrelator:
 
         combined_df = pd.DataFrame(all_records) if all_records else pd.DataFrame()
         if not combined_df.empty:
-            if "p_value" in combined_df.columns and "p" not in combined_df.columns:
-                combined_df["p"] = combined_df["p_value"]
-                combined_df["p_raw"] = combined_df["p_value"]
-            if "p_primary" not in combined_df.columns and "p_raw" in combined_df.columns:
-                combined_df["p_primary"] = combined_df["p_raw"]
-                combined_df["p_kind_primary"] = "p_raw"
-                combined_df["p_primary_source"] = "raw"
             if corr_config.apply_fdr:
                 if "p_primary_perm" in combined_df.columns and combined_df["p_primary_perm"].notna().any():
                     p_for_fdr = pd.to_numeric(combined_df["p_primary_perm"], errors="coerce").to_numpy()
@@ -837,7 +918,6 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         correlator._feature_dfs["pac"] = ctx.pac_df
     if ctx.precomputed_df is not None:
         correlator._feature_dfs["precomputed"] = ctx.precomputed_df
-        correlator._feature_dfs["feature"] = ctx.precomputed_df
     
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True

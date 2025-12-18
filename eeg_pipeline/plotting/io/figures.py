@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import mne
 
-from eeg_pipeline.utils.config.loader import get_nested_value, load_settings
+from eeg_pipeline.utils.config.loader import get_nested_value, load_config
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.formatting import sanitize_label, format_baseline_string
@@ -93,10 +93,16 @@ def unwrap_figure(obj):
     return obj[0] if isinstance(obj, list) else obj
 
 
-def get_behavior_footer(config) -> str:
+def get_behavior_footer(config, *, inference: Optional[str] = None, alpha: Optional[float] = None) -> str:
     bwin = tuple(config.get("time_frequency_analysis.baseline_window"))
-    fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha")
-    return f"Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s | Significance: BH-FDR α={fdr_alpha}"
+    baseline_str = f"Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s"
+    if inference is None:
+        fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha")
+        return f"{baseline_str} | Significance: BH-FDR α={fdr_alpha}"
+
+    if alpha is not None and np.isfinite(alpha):
+        return f"{baseline_str} | {inference} (α={float(alpha):.3g})"
+    return f"{baseline_str} | {inference}"
 
 
 def get_band_color(band: str, config=None) -> str:
@@ -118,7 +124,7 @@ def pct_to_logratio(p):
 def get_viz_params(config=None):
     if config is None:
         try:
-            config = load_settings()
+            config = load_config()
         except Exception:
             pass
 
@@ -193,7 +199,7 @@ def robust_sym_vlim(
     }
 
     if config is None:
-        config = load_settings()
+        config = load_config()
 
     if config is not None:
         vlim_config = config.get("visualization.robust_vlim", {})
@@ -292,7 +298,7 @@ def validate_picks(picks, logger):
 
 
 def get_default_config():
-    return load_settings()
+    return load_config()
 
 
 def _prepare_figure_footer(
@@ -308,7 +314,7 @@ def _prepare_figure_footer(
         return None
 
     try:
-        cfg = load_settings()
+        cfg = load_config()
         return build_footer(footer_template_name, cfg, **(footer_kwargs or {}))
     except (KeyError, ValueError, AttributeError):
         return None

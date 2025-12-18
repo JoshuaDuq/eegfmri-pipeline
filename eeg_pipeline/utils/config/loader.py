@@ -9,8 +9,8 @@ import os
 # Config Path Resolution
 #
 # This module is the **single entry point** for configuration:
-# - All code that needs settings should go through `load_config` /
-#   `load_settings` (or helpers defined below).
+# - All code that needs settings should go through `load_config`
+#   (or helpers defined below).
 # - The underlying source of truth is `eeg_config.yaml` in this
 #   directory; no other YAML or config files should be read elsewhere
 #   in the package.
@@ -274,11 +274,6 @@ def _load_and_cache_config(config_path: Path, apply_thread_limits: bool) -> Dict
     return config
 
 
-def load_settings(config_path: Optional[Union[str, Path]] = None, script_name: Optional[str] = None) -> ConfigDict:
-    """Alias for load_config for backward compatibility."""
-    return load_config(config_path, script_name=script_name)
-
-
 ###################################################################
 # Config Value Access Utilities
 ###################################################################
@@ -504,7 +499,11 @@ def get_fisher_z_clip_values(config: Any) -> Tuple[float, float]:
 
 
 def get_feature_constant(config: Any, constant_name: str, default: Any = None) -> Any:
-    """Get a feature extraction constant from config."""
+    """Get a feature extraction constant from config.
+    
+    Automatically converts string representations of numbers to the appropriate
+    numeric type based on the default value's type.
+    """
     if config is None:
         return default
 
@@ -528,4 +527,17 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
     config_path = constant_map.get(constant_name)
     if config_path is None:
         return default
-    return get_config_value(config, config_path, default)
+    
+    value = get_config_value(config, config_path, default)
+    
+    # Auto-convert string representations of numbers to numeric types
+    if isinstance(value, str) and default is not None:
+        try:
+            if isinstance(default, float):
+                return float(value)
+            elif isinstance(default, int):
+                return int(float(value))  # Handle "1e-12" -> 0 for ints
+        except (ValueError, TypeError):
+            return default
+    
+    return value

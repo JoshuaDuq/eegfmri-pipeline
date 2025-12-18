@@ -88,23 +88,6 @@ class FrequencyBands(TypedDict, total=False):
     high_gamma: Tuple[float, float]
 
 
-@dataclass
-class FeatureResult:
-    """Container for feature extraction results."""
-
-    df: pd.DataFrame
-    columns: List[str]
-    name: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def __len__(self) -> int:
-        return len(self.df)
-
-    @property
-    def empty(self) -> bool:
-        return self.df.empty
-
-
 # Re-export ValidationResult from utils.validation to avoid duplication
 from eeg_pipeline.utils.validation import ValidationResult
 
@@ -294,7 +277,7 @@ class TimeWindows:
     # Fine temporal bins (t1-t7 for HRF modeling)
     fine_masks: List[np.ndarray] = field(default_factory=list)
     fine_labels: List[str] = field(default_factory=list)
-    # Legacy compatibility
+    # Uniform plateau subdivision (w0, w1, ...) based on n_plateau_windows
     plateau_masks: List[np.ndarray] = field(default_factory=list)
     window_labels: List[str] = field(default_factory=list)
     # Time vector for ramp computation

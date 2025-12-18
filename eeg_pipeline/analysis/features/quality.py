@@ -21,9 +21,9 @@ import mne
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import EPSILON_STD
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
-# --- Helpers ---
 
 def _compute_signal_metrics(data, sfreq):
     # data: (n_ch, n_times)
@@ -70,7 +70,7 @@ def _compute_signal_metrics(data, sfreq):
         pow_sig = np.sum(psds[:, mask_sig], axis=1)
         pow_noise = np.sum(psds[:, mask_noise], axis=1)
         
-        snr_db = 10 * np.log10(pow_sig / (pow_noise + 1e-12))
+        snr_db = 10 * np.log10(pow_sig / (pow_noise + EPSILON_STD))
         res["snr"] = snr_db
         
         # Muscle: Power(30-100) / Total
@@ -78,10 +78,11 @@ def _compute_signal_metrics(data, sfreq):
         pow_mus = np.sum(psds[:, mask_mus], axis=1)
         total = np.sum(psds, axis=1)
         
-        mus_ratio = pow_mus / (total + 1e-12)
+        mus_ratio = pow_mus / (total + EPSILON_STD)
         res["muscle"] = mus_ratio
         
-    except Exception:
+    except ValueError:
+        # PSD computation can fail on degenerate signals
         res["snr"] = np.full(data.shape[0], np.nan)
         res["muscle"] = np.full(data.shape[0], np.nan)
         

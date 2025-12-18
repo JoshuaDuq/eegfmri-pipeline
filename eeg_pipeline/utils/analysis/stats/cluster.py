@@ -239,9 +239,9 @@ def resolve_cluster_n_jobs(config=None) -> int:
         except ValueError:
             pass
 
-    if config is None and load_settings is not None:
+    if config is None and load_config is not None:
         try:
-            config = load_settings()
+            config = load_config()
         except Exception:
             pass
 

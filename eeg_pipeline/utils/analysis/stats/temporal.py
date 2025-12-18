@@ -262,7 +262,7 @@ def _compute_correlations_for_condition(
     cluster_rng = np.random.default_rng(seed)
 
     cluster_labels = np.zeros_like(corrs, dtype=int)
-    cluster_pvals = np.full_like(corrs, np.nan)
+    p_corrected = np.full_like(corrs, np.nan)
     cluster_sig = np.zeros_like(corrs, dtype=bool)
     cluster_records: List[Dict[str, Any]] = []
     cluster_perm_max: List[Dict[str, Any]] = []
@@ -296,7 +296,7 @@ def _compute_correlations_for_condition(
         )
 
         cluster_labels[b_i] = labels
-        cluster_pvals[b_i] = pvals_corr
+        p_corrected[b_i] = pvals_corr
         cluster_sig[b_i] = sig_mask
         cluster_records.append({"band": bn, "clusters": records})
         cluster_perm_max.append({"band": bn, "perm_max_masses": perm_max})
@@ -317,7 +317,7 @@ def _compute_correlations_for_condition(
         "p_values": pvals,
         "n_valid": n_valid,
         "mask": cluster_sig,
-        "cluster_pvals": cluster_pvals,
+        "p_corrected": p_corrected,
         "cluster_labels": cluster_labels,
         "cluster_records": cluster_records,
         "cluster_perm_max_masses": cluster_perm_max,

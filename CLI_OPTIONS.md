@@ -38,22 +38,21 @@ Modes: `raw-to-bids`, `merge-behavior`
 
 Modes: `compute`, `visualize`
 
+**Shared options:**
+- `--categories ...` (select feature categories to process)
+  - Choices: `psychometrics`, `power`, `dynamics`, `aperiodic`, `connectivity`, `itpc`, `temporal`, `dose_response`
+
 **Compute options:**
 - `--correlation-method spearman|pearson`
 - `--bootstrap INT` (default 0)
 - `--n-perm INT`
 - `--rng-seed INT`
 - `--computations ...` (select stages to run)
-  - Canonical: `correlations`, `pain_sensitivity`, `condition`, `temporal`, `cluster`, `mediation`, `mixed_effects`, `export`
-  - Legacy aliases accepted: `power_roi`, `connectivity_roi`, `connectivity_heatmaps`, `sliding_connectivity`, `time_frequency`, `temporal_correlations`, `cluster_test`, `precomputed_correlations`, `condition_correlations`, `exports`
-- `--feature-categories ...` (select specific feature types to analyze)
-  - Choices: `psychometrics`, `power`, `dynamics`, `aperiodic`, `connectivity`, `itpc`, `temporal`, `dose_response`
+  - Choices: `correlations`, `pain_sensitivity`, `condition`, `temporal`, `cluster`, `mediation`, `mixed_effects`, `export`
 
 **Visualize options:**
 - `--plots ...` or `--all-plots` (mutually exclusive)
 - `--skip-scatter`
-- `--visualize-categories ...` (select specific feature categories to visualize)
-  - Choices: `psychometrics`, `power`, `dynamics`, `aperiodic`, `connectivity`, `itpc`, `temporal`, `dose_response`
 
 ---
 
@@ -61,16 +60,16 @@ Modes: `compute`, `visualize`
 
 Modes: `compute`, `visualize`
 
+**Shared options:**
+- `--categories ...` (select feature categories to process)
+  - Compute choices: `power`, `connectivity`, `microstates`, `aperiodic`, `itpc`, `pac`, `precomputed`, `cfc`, `dynamics_advanced`, `complexity`, `quality`
+  - Visualize choices: `power`, `connectivity`, `microstates`, `aperiodic`, `itpc`, `pac`, `dynamics`, `burst`, `erds`, `complexity`
+  - Note: behavior-only categories like `psychometrics` and `dose_response` are not valid for `features`
+
 **Compute options:**
 - `--fixed-templates PATH` (.npz file containing fixed microstate templates)
-- `--feature-categories ...` (select which features to extract)
-  - Choices: `power`, `connectivity`, `microstates`, `aperiodic`, `itpc`, `pac`, `precomputed`, `cfc`, `dynamics_advanced`, `complexity`, `quality`
 - `--precomputed-groups ...` (override config precomputed groups)
   - Choices: `erds`, `spectral`, `gfp`, `roi`, `temporal`, `ratios`, `complexity`, `asymmetry`, `aperiodic`, `connectivity`, `microstates`, `pac`, `cfc`, `dynamics_advanced`, `itpc`, `quality`
-
-**Visualize options:**
-- `--visualize-categories ...` (select specific feature categories to visualize)
-  - Choices: `power`, `connectivity`, `microstates`, `aperiodic`, `itpc`, `pac`, `dynamics`, `burst`, `erds`, `complexity`
 
 ---
 
@@ -115,17 +114,20 @@ No explicit mode argument (compute only).
 
 ```bash
 # Compute only power features
-python -m eeg_pipeline.cli.main features compute --subject 0001 --feature-categories power
+python -m eeg_pipeline.cli.main features compute --subject 0001 --categories power
+
+# Compute a broader set of feature families
+python -m eeg_pipeline.cli.main features compute --subject 0001 --categories power connectivity microstates aperiodic itpc pac precomputed cfc dynamics_advanced complexity quality
 
 # Visualize only power and connectivity plots
-python -m eeg_pipeline.cli.main features visualize --subject 0001 --visualize-categories power connectivity
+python -m eeg_pipeline.cli.main features visualize --subject 0001 --categories power connectivity
 
 # Visualize only ITPC behavioral correlations
-python -m eeg_pipeline.cli.main behavior visualize --subject 0001 --visualize-categories itpc
+python -m eeg_pipeline.cli.main behavior visualize --subject 0001 --categories itpc
 
 # Compute correlations and visualize power scatter plots
 python -m eeg_pipeline.cli.main behavior compute --subject 0001
-python -m eeg_pipeline.cli.main behavior visualize --subject 0001 --visualize-categories power
+python -m eeg_pipeline.cli.main behavior visualize --subject 0001 --categories power
 ```
 
 ### Preprocessing
@@ -142,7 +144,7 @@ python -m eeg_pipeline.cli.main preprocessing merge-behavior --dry-run
 
 ```bash
 # Run features for multiple subjects
-python -m eeg_pipeline.cli.main features compute --group all --feature-categories power connectivity
+python -m eeg_pipeline.cli.main features compute --group all --categories power connectivity
 
 # Run behavior correlations with bootstrap CI
 python -m eeg_pipeline.cli.main behavior compute --all-subjects --bootstrap 1000

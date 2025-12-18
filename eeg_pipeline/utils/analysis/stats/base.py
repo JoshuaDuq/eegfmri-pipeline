@@ -16,7 +16,7 @@ from eeg_pipeline.utils.config.loader import (
     ensure_config,
     get_config_value,
     get_constants,
-    load_settings,
+    load_config,
 )
 
 

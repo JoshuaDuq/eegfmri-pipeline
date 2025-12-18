@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 ###################################################################
 
 from eeg_pipeline.plotting.decoding.helpers import (
-    _despine,
-    _add_zero_reference_line,
+    despine,
+    add_zero_reference_line,
 )
 
 
@@ -72,7 +72,7 @@ def plot_feature_importance_top_n(importance_df: pd.DataFrame, model_name: str, 
     ax.set_yticklabels(features, fontsize=plot_cfg.font.small)
     ax.set_xlabel(ylabel)
     ax.invert_yaxis()
-    _despine(ax)
+    despine(ax)
     
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info(f"Saved {model_name} top {top_n} features: {save_path}")
@@ -111,8 +111,8 @@ def _plot_violin_stability(df: pd.DataFrame, channels_ordered: list, model_name:
     ax.set_ylabel('Feature Importance (|coefficient|)', fontsize=plot_cfg.font.large)
     ax.set_title(f'{model_name}: Feature Importance Stability Across Folds', 
                  fontsize=plot_cfg.font.title, fontweight='bold')
-    _add_zero_reference_line(ax, plot_cfg)
-    _despine(ax)
+    add_zero_reference_line(ax, plot_cfg)
+    despine(ax)
     
     return fig
 

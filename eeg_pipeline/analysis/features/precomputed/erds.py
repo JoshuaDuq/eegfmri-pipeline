@@ -8,6 +8,7 @@ import pandas as pd
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
 from .extras import validate_window_masks
@@ -17,7 +18,11 @@ def extract_erds_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
-    if not precomputed.band_data or precomputed.windows is None:
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        logger = getattr(precomputed, "logger", None)
+        if logger is not None:
+            logger.warning("ERDS: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), [], {}
 
     n_epochs = precomputed.data.shape[0]

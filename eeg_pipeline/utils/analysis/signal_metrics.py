@@ -73,19 +73,16 @@ def compute_nonlinear_energy(x: np.ndarray) -> float:
 # =============================================================================
 
 def embed_time_series(x: np.ndarray, order: int, delay: int) -> np.ndarray:
-    """Create time-delay embedding of a signal."""
+    """Create time-delay embedding of a signal using vectorized operations."""
     n = len(x)
     if n < (order - 1) * delay + 1:
         return np.array([])
     
     n_vectors = n - (order - 1) * delay
-    embedded = np.zeros((n_vectors, order))
     
-    for i in range(n_vectors):
-        for j in range(order):
-            embedded[i, j] = x[i + j * delay]
-    
-    return embedded
+    # Vectorized embedding using advanced indexing
+    indices = np.arange(order) * delay + np.arange(n_vectors)[:, np.newaxis]
+    return x[indices]
 
 
 def compute_permutation_entropy(
@@ -238,6 +235,8 @@ def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = No
     """
     Compute Lempel-Ziv complexity of a binarized signal.
     
+    Uses an optimized incremental LZ76 algorithm.
+    
     Parameters
     ----------
     x : np.ndarray
@@ -256,26 +255,27 @@ def compute_lempel_ziv_complexity(x: np.ndarray, threshold: Optional[float] = No
     if threshold is None:
         threshold = np.median(x)
     
-    binary = (x > threshold).astype(int)
+    binary = (x > threshold).astype(np.uint8)
     n = len(binary)
     
-    # LZ76 algorithm
-    s = "".join(map(str, binary))
-    i, k, l = 0, 1, 1
-    c = 1
-    k_max = 1
+    # Standard LZ76 implementation
+    # We maintain seen substrings in a set for O(1) lookup
+    vocabulary = set()
+    c = 0  # Complexity count
     
-    while k <= n - 1:
-        if s[i:i + l] in s[0:k - l + 1]:
-            l += 1
-            k += 1
-        else:
-            c += 1
-            i += 1
-            if l > k_max:
-                k_max = l
-            l = 1
-            k = i + 1
+    i = 0  # Start of current substring
+    while i < n:
+        # Try to extend the current substring as long as it exists in vocabulary
+        length = 1
+        while i + length <= n and tuple(binary[i:i + length]) in vocabulary:
+            length += 1
+        
+        # Add the new pattern to vocabulary (includes the novel extension)
+        if i + length <= n:
+            vocabulary.add(tuple(binary[i:i + length]))
+        
+        c += 1
+        i += length  # Move past the current phrase
     
     # Normalize by theoretical maximum
     if n > 1:

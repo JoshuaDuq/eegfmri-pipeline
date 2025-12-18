@@ -400,9 +400,9 @@ def resolve_columns(
     if config is None:
         if deriv_root is None:
             raise ValueError("Either config or deriv_root must be provided to resolve_columns")
-        from ..config.loader import load_settings
+        from ..config.loader import load_config
 
-        config = load_settings()
+        config = load_config()
 
     cols = pick_event_columns(df, config)
     return cols["pain_binary"], cols["temperature"], cols["rating"]

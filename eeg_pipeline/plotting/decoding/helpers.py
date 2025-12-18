@@ -162,12 +162,3 @@ def plot_residual_diagnostics(
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info(f"Saved {model_name} residual diagnostics: {save_path}")
-
-
-# Backward compatibility aliases (private names)
-_despine = despine
-_calculate_axis_limits = calculate_axis_limits
-_calculate_shared_axis_limits = calculate_shared_axis_limits
-_add_zero_reference_line = add_zero_reference_line
-_create_bar_plot = create_bar_plot
-

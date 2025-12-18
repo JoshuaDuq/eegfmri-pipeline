@@ -141,48 +141,7 @@ def _load_features_and_targets(
     return temporal_df, plateau_df, conn_df, y, getattr(epochs, "info", None)
 
 
-def _load_feature_bundle_for_subject(
-    subject: str,
-    deriv_root: Path,
-    logger: Optional[logging.Logger] = None,
-) -> tuple[
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-    Optional[pd.DataFrame],
-]:
-    """Legacy tuple-return bundle loader (kept for backward compatibility)."""
-    if logger is None:
-        logger = logging.getLogger(__name__)
 
-    features_dir = deriv_features_path(deriv_root, subject)
-    power_path = features_dir / "features_eeg_direct.tsv"
-    if not power_path.exists():
-        logger.warning("Power features not found at %s", power_path)
-        return None, None, None, None, None, None, None, None
-
-    try:
-        pow_df = read_table(power_path)
-    except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-        logger.error("Failed to read power features from %s: %s", power_path, exc)
-        return None, None, None, None, None, None, None, None
-
-    ms_df = _safe_read_table(features_dir / "features_microstates.tsv", logger)
-    conn_df = _safe_read_table(find_connectivity_features_path(deriv_root, subject), logger)
-    aper_df = _safe_read_table(features_dir / "features_aperiodic.tsv", logger)
-    pac_df = _safe_read_table(features_dir / "features_pac.tsv", logger)
-    pac_trials_df = _safe_read_table(features_dir / "features_pac_trials.tsv", logger)
-    pac_time_df = _safe_read_table(features_dir / "features_pac_time.tsv", logger)
-    itpc_df = _safe_read_table(features_dir / "features_itpc.tsv", logger)
-
-    return pow_df, ms_df, conn_df, aper_df, pac_df, pac_trials_df, pac_time_df, itpc_df
-
-
-load_feature_bundle_for_subject = _load_feature_bundle_for_subject
 
 
 @dataclass
@@ -315,6 +274,7 @@ def load_feature_dfs_for_subjects(
 # SAVING UTILITIES
 ###################################################################
 
+
 def save_all_features(
     pow_df: pd.DataFrame,
     pow_cols: List[str],
@@ -349,6 +309,67 @@ def save_all_features(
     feature_qc: Optional[Dict[str, Any]] = None,
 ) -> pd.DataFrame:
     from eeg_pipeline.domain.features.naming import generate_manifest
+
+    def _dedupe_identical_duplicate_columns(
+        df: pd.DataFrame,
+        *,
+        df_label: str,
+    ) -> pd.DataFrame:
+        if df is None or df.empty:
+            return df
+
+        dup_mask = df.columns.duplicated(keep=False)
+        if not bool(np.any(dup_mask)):
+            return df
+
+        dup_names = pd.Index(df.columns[dup_mask]).unique().tolist()
+        cols_to_drop: List[int] = []
+        for col_name in dup_names:
+            idxs = [i for i, c in enumerate(df.columns) if c == col_name]
+            if len(idxs) <= 1:
+                continue
+
+            base = df.iloc[:, idxs[0]]
+            for idx in idxs[1:]:
+                other = df.iloc[:, idx]
+
+                if base.equals(other):
+                    cols_to_drop.append(idx)
+                    continue
+
+                try:
+                    base_num = pd.to_numeric(base, errors="coerce")
+                    other_num = pd.to_numeric(other, errors="coerce")
+                except Exception:
+                    base_num = base
+                    other_num = other
+
+                if (
+                    isinstance(base_num, pd.Series)
+                    and isinstance(other_num, pd.Series)
+                    and base_num.equals(other_num)
+                ):
+                    cols_to_drop.append(idx)
+                    continue
+
+                raise ValueError(
+                    "Duplicate feature column name with non-identical values detected while building "
+                    f"{df_label}: '{col_name}'. This indicates the same feature was computed more than once "
+                    "with conflicting values; aborting to preserve scientific validity."
+                )
+
+        if not cols_to_drop:
+            return df
+
+        drop_mask = np.ones(df.shape[1], dtype=bool)
+        drop_mask[np.array(cols_to_drop, dtype=int)] = False
+        logger.warning(
+            "Dropping %d duplicate feature columns with identical values while building %s. Examples=%s",
+            len(cols_to_drop),
+            df_label,
+            ",".join(str(c) for c in dup_names[:5]),
+        )
+        return df.iloc[:, drop_mask]
 
     direct_blocks = []
     direct_cols: List[str] = []
@@ -524,6 +545,7 @@ def save_all_features(
 
     if direct_blocks:
         direct_df = pd.concat(direct_blocks, axis=1)
+        direct_df = _dedupe_identical_duplicate_columns(direct_df, df_label="features_eeg_direct.tsv")
     else:
         direct_df = pd.DataFrame()
         logger.info("No direct feature blocks to concatenate (connectivity/precomputed-only run)")
@@ -531,6 +553,7 @@ def save_all_features(
     if not direct_df.empty:
         eeg_direct_path = features_dir / "features_eeg_direct.tsv"
         eeg_direct_cols_path = features_dir / "features_eeg_direct_columns.tsv"
+        direct_cols = list(direct_df.columns)
         logger.info("Saving direct EEG features: %s", eeg_direct_path)
         write_tsv(direct_df, eeg_direct_path)
         write_tsv(pd.Series(direct_cols, name="feature").to_frame(), eeg_direct_cols_path)
@@ -575,6 +598,7 @@ def save_all_features(
 
     if blocks:
         combined_df = pd.concat(blocks, axis=1)
+        combined_df = _dedupe_identical_duplicate_columns(combined_df, df_label="features_all.tsv")
     else:
         combined_df = pd.DataFrame()
         logger.warning("No feature blocks available for combined output")
@@ -931,7 +955,6 @@ __all__ = [
     # Reading
     "FeatureBundle",
     "load_feature_bundle",
-    "load_feature_bundle_for_subject",
     "load_feature_dfs_for_subjects",
     "load_subject_features",
     "_load_features_and_targets",

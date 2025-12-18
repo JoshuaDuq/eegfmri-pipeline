@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .base import get_fdr_alpha
+from .base import get_ci_level, get_fdr_alpha
+from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 
 def format_p_value(p: float) -> str:
@@ -83,6 +84,7 @@ def format_correlation_stats_text(
     n: int,
     ci: tuple = None,
     stats_tag: str = None,
+    config: Optional[Any] = None,
     include_r_squared: bool = True,
     include_bayes_factor: bool = False,
 ) -> str:
@@ -112,7 +114,7 @@ def format_correlation_stats_text(
     """
     import numpy as np
     
-    # Handle tuple input for backward compatibility
+    # Extract CI bounds from tuple if provided
     ci_low, ci_high = None, None
     if ci is not None:
         if isinstance(ci, tuple) and len(ci) == 2:
@@ -130,10 +132,12 @@ def format_correlation_stats_text(
     # Ensure CI is always shown - use Fisher Z if not provided
     if ci_low is None or ci_high is None or not (np.isfinite(ci_low) and np.isfinite(ci_high)):
         if np.isfinite(r) and n > 3:
-            ci_low, ci_high = _compute_fisher_z_ci(r, n)
+            ci_level = get_ci_level(config)
+            ci_low, ci_high = _compute_fisher_z_ci(r, n, ci_level=ci_level, config=config)
     
     if ci_low is not None and ci_high is not None and np.isfinite(ci_low) and np.isfinite(ci_high):
-        text += f", 95% CI [{ci_low:.3f}, {ci_high:.3f}]"
+        ci_pct = int(round(get_ci_level(config) * 100))
+        text += f", {ci_pct}% CI [{ci_low:.3f}, {ci_high:.3f}]"
     
     # Add Bayes Factor if requested
     if include_bayes_factor and np.isfinite(r) and n > 3:
@@ -156,7 +160,13 @@ def format_correlation_stats_text(
     return text
 
 
-def _compute_fisher_z_ci(r: float, n: int, ci_level: float = 0.95) -> tuple:
+def _compute_fisher_z_ci(
+    r: float,
+    n: int,
+    *,
+    ci_level: float = 0.95,
+    config: Optional[Any] = None,
+) -> tuple:
     """Compute Fisher Z-transformed confidence interval for correlation.
     
     Uses the Fisher transformation: z = arctanh(r)
@@ -169,7 +179,8 @@ def _compute_fisher_z_ci(r: float, n: int, ci_level: float = 0.95) -> tuple:
         return np.nan, np.nan
     
     # Clip r to avoid arctanh overflow
-    r_clipped = np.clip(r, -0.9999, 0.9999)
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    r_clipped = np.clip(r, clip_min, clip_max)
     
     # Fisher Z transform
     z = np.arctanh(r_clipped)

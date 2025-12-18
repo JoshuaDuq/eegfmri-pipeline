@@ -7,7 +7,6 @@ The pipeline layer (`eeg_pipeline.pipelines.behavior`) should remain a thin wrap
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -16,20 +15,13 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
+from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
 
 
 def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
     dfs = []
     base_index = None
-    for name, df in [
-        ("power", ctx.power_df),
-        ("connectivity", ctx.connectivity_df),
-        ("microstates", ctx.microstates_df),
-        ("aperiodic", ctx.aperiodic_df),
-        ("itpc", ctx.itpc_df),
-        ("pac", ctx.pac_df),
-        ("precomputed", ctx.precomputed_df),
-    ]:
+    for name, df in ctx.iter_feature_tables():
         if df is not None and not df.empty:
             if base_index is None:
                 base_index = df.index
@@ -40,16 +32,38 @@ def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
                 )
                 ctx.logger.error(msg)
                 raise ValueError(msg)
-            if not any(str(c).startswith(name) for c in df.columns):
-                df = df.add_prefix(f"{name}_")
+            prefix = f"{name}_"
+            df = df.rename(columns={c: c if str(c).startswith(prefix) else f"{prefix}{c}" for c in df.columns})
+
+            if df.columns.duplicated().any():
+                dupes = [str(c) for c in df.columns[df.columns.duplicated()].unique()]
+                msg = f"Duplicate feature columns within {name}: {dupes}"
+                ctx.logger.error(msg)
+                raise ValueError(msg)
+
+            if dfs:
+                existing_cols = pd.Index([])
+                for prev in dfs:
+                    existing_cols = existing_cols.append(prev.columns)
+                overlap = existing_cols.intersection(df.columns)
+                if not overlap.empty:
+                    msg = f"Duplicate feature columns across tables: {[str(c) for c in overlap.tolist()]}"
+                    ctx.logger.error(msg)
+                    raise ValueError(msg)
             dfs.append(df)
 
-    return pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
+    combined = pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
+    if not combined.empty and combined.columns.duplicated().any():
+        dupes = [str(c) for c in combined.columns[combined.columns.duplicated()].unique()]
+        msg = f"Duplicate feature columns after combining: {dupes}"
+        ctx.logger.error(msg)
+        raise ValueError(msg)
+    return combined
 
 
 def add_change_scores(ctx: BehaviorContext) -> None:
     """Compute and append change scores (plateau-baseline) once per context."""
-    if getattr(ctx, "_change_scores_added", False) or not getattr(ctx, "compute_change_scores", False):
+    if ctx._change_scores_added or not ctx.compute_change_scores:
         return
 
     from eeg_pipeline.utils.analysis.stats.correlation import compute_change_features
@@ -92,22 +106,22 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
 
     ctx.logger.info("Running unified feature correlator...")
     result = run_unified_feature_correlations(ctx)
-    corr_df = result.to_dataframe() if getattr(result, "dataframe", None) is not None else result.to_dataframe()
+    corr_df = result.to_dataframe()
     if corr_df is None:
         corr_df = pd.DataFrame()
     if not corr_df.empty:
         ctx.logger.info(f"Obtained {len(corr_df)} correlation results from unified correlator")
 
     psi_df = pd.DataFrame()
-    if getattr(config, "compute_pain_sensitivity", False) and ctx.temperature is not None:
+    if config.compute_pain_sensitivity and ctx.temperature is not None:
         features = combine_features(ctx)
         if not features.empty:
             psi_df = run_pain_sensitivity_correlations(
                 features_df=features,
                 ratings=ctx.targets,
                 temperatures=ctx.temperature,
-                method=getattr(config, "method", "spearman"),
-                min_samples=int(getattr(config, "min_samples", 10)),
+                method=config.method,
+                min_samples=config.min_samples,
                 logger=ctx.logger,
             )
 
@@ -118,14 +132,14 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     qc: Dict[str, Any] = {
         "subject": ctx.subject,
         "task": ctx.task,
-        "n_trials": int(ctx.n_trials),
-        "has_temperature": bool(ctx.has_temperature),
+        "n_trials": ctx.n_trials,
+        "has_temperature": ctx.has_temperature,
         "temperature_column": ctx.temperature_column,
-        "group_column": getattr(ctx, "group_column", None),
+        "group_column": ctx.group_column,
     }
 
-    if getattr(ctx, "data_qc", None):
-        qc["data_qc"] = getattr(ctx, "data_qc")
+    if ctx.data_qc:
+        qc["data_qc"] = ctx.data_qc
 
     if ctx.targets is not None:
         s = pd.to_numeric(ctx.targets, errors="coerce")
@@ -190,7 +204,7 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
                     ),
                 }
 
-    if getattr(ctx, "covariates_df", None) is not None and not ctx.covariates_df.empty:
+    if ctx.covariates_df is not None and not ctx.covariates_df.empty:
         cov = ctx.covariates_df
         qc["covariates"] = {
             "n_covariates": int(cov.shape[1]),
@@ -201,15 +215,7 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
         }
 
     feature_counts: Dict[str, int] = {}
-    for name, df in [
-        ("power", ctx.power_df),
-        ("connectivity", ctx.connectivity_df),
-        ("microstates", ctx.microstates_df),
-        ("aperiodic", ctx.aperiodic_df),
-        ("itpc", ctx.itpc_df),
-        ("pac", ctx.pac_df),
-        ("precomputed", ctx.precomputed_df),
-    ]:
+    for name, df in ctx.iter_feature_tables():
         if df is None or df.empty:
             continue
         feature_counts[name] = int(df.shape[1])
@@ -222,16 +228,16 @@ def write_analysis_metadata(ctx: BehaviorContext, pipeline_config: Any, results:
     payload: Dict[str, Any] = {
         "subject": ctx.subject,
         "task": ctx.task,
-        "method": getattr(pipeline_config, "method", None),
-        "min_samples": getattr(pipeline_config, "min_samples", None),
-        "control_temperature": bool(getattr(pipeline_config, "control_temperature", True)),
-        "control_trial_order": bool(getattr(pipeline_config, "control_trial_order", True)),
-        "compute_change_scores": bool(getattr(pipeline_config, "compute_change_scores", True)),
-        "compute_pain_sensitivity": bool(getattr(pipeline_config, "compute_pain_sensitivity", True)),
-        "compute_reliability": bool(getattr(pipeline_config, "compute_reliability", True)),
-        "n_permutations": int(getattr(pipeline_config, "n_permutations", 0)),
-        "fdr_alpha": float(getattr(pipeline_config, "fdr_alpha", 0.05)),
-        "n_trials": int(ctx.n_trials),
+        "method": pipeline_config.method,
+        "min_samples": pipeline_config.min_samples,
+        "control_temperature": pipeline_config.control_temperature,
+        "control_trial_order": pipeline_config.control_trial_order,
+        "compute_change_scores": pipeline_config.compute_change_scores,
+        "compute_pain_sensitivity": pipeline_config.compute_pain_sensitivity,
+        "compute_reliability": pipeline_config.compute_reliability,
+        "n_permutations": pipeline_config.n_permutations,
+        "fdr_alpha": pipeline_config.fdr_alpha,
+        "n_trials": ctx.n_trials,
         "outputs": {
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
             "has_pain_sensitivity": bool(getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty),
@@ -240,8 +246,8 @@ def write_analysis_metadata(ctx: BehaviorContext, pipeline_config: Any, results:
         "qc": build_behavior_qc(ctx),
     }
 
-    if getattr(ctx, "data_qc", None):
-        payload["data_qc"] = getattr(ctx, "data_qc")
+    if ctx.data_qc:
+        payload["data_qc"] = ctx.data_qc
 
     corr_df = getattr(results, "correlations", None)
     if corr_df is not None and not corr_df.empty:
@@ -278,24 +284,24 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     if ctx.aligned_events is None:
         return pd.DataFrame()
 
+    fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
+
     try:
         pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
     except Exception as exc:
-        fail_fast = bool(getattr(ctx.config, "get", lambda *_: True)("behavior_analysis.condition.fail_fast", True))
         if fail_fast:
             raise
         ctx.logger.warning(f"Condition split failed; skipping condition effects: {exc}")
         return pd.DataFrame()
 
     if n_pain == 0 and n_nonpain == 0:
-        fail_fast = bool(getattr(ctx.config, "get", lambda *_: True)("behavior_analysis.condition.fail_fast", True))
         msg = "Condition split produced zero trials; check pain coding and config event_columns.pain_binary"
         if fail_fast:
             raise ValueError(msg)
         ctx.logger.warning(msg)
         return pd.DataFrame()
 
-    min_samples = max(int(getattr(config, "min_samples", 10)), ctx.get_min_samples("default"))
+    min_samples = max(config.min_samples, ctx.get_min_samples("default"))
     if n_pain < min_samples or n_nonpain < min_samples:
         ctx.logger.warning(
             f"Insufficient trials: {n_pain} pain, {n_nonpain} non-pain (need >= {min_samples})"
@@ -311,9 +317,9 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         pain_mask,
         nonpain_mask,
         min_samples=min_samples,
-        fdr_alpha=float(getattr(config, "fdr_alpha", 0.05)),
+        fdr_alpha=config.fdr_alpha,
         logger=ctx.logger,
-        n_jobs=int(getattr(config, "n_jobs", -1)),
+        n_jobs=config.n_jobs,
         config=ctx.config,
     )
 
@@ -369,7 +375,7 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
     from eeg_pipeline.analysis.behavior.api import run_cluster_test_from_context
 
     ctx.logger.info("Running cluster permutation tests...")
-    ctx.n_perm = int(getattr(config, "n_permutations", getattr(config, "n_permutations", 0)))
+    ctx.n_perm = config.n_permutations
 
     try:
         run_cluster_test_from_context(ctx)
@@ -379,68 +385,53 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
         return {"status": "failed", "error": str(exc)}
 
 
+_METADATA_COLUMNS = frozenset(["subject", "epoch", "trial", "condition", "temperature", "rating"])
+
+
+def _get_feature_columns(df: pd.DataFrame) -> List[str]:
+    """Extract feature columns excluding metadata columns."""
+    return [c for c in df.columns if c not in _METADATA_COLUMNS]
+
+
 def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis, run_multilevel_correlation_analysis
 
     if ctx.precomputed_df is None:
         return
 
-    if bool(getattr(config, "run_mediation", False)):
-        ctx.logger.info("Running mediation analysis...")
-        feature_cols = [
-            c
-            for c in ctx.precomputed_df.columns
-            if c
-            not in [
-                "subject",
-                "epoch",
-                "trial",
-                "condition",
-                "temperature",
-                "rating",
-            ]
-        ]
-        if feature_cols:
-            variances = ctx.precomputed_df[feature_cols].var()
-            mediators = variances.nlargest(20).index.tolist()
-            results.mediation = run_mediation_analysis(
-                ctx.precomputed_df,
-                "temperature",
-                mediators,
-                "rating",
-                n_bootstrap=1000,
-            )
+    feature_cols = _get_feature_columns(ctx.precomputed_df)
+    if not feature_cols:
+        return
 
-    if bool(getattr(config, "run_mixed_effects", False)) and "subject" in ctx.precomputed_df.columns:
+    if config.run_mediation:
+        ctx.logger.info("Running mediation analysis...")
+        n_bootstrap = get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
+        variances = ctx.precomputed_df[feature_cols].var()
+        mediators = variances.nlargest(20).index.tolist()
+        results.mediation = run_mediation_analysis(
+            ctx.precomputed_df,
+            "temperature",
+            mediators,
+            "rating",
+            n_bootstrap=n_bootstrap,
+        )
+
+    if config.run_mixed_effects and "subject" in ctx.precomputed_df.columns:
         ctx.logger.info("Running mixed-effects analysis...")
-        feature_cols = [
-            c
-            for c in ctx.precomputed_df.columns
-            if c
-            not in [
-                "subject",
-                "epoch",
-                "trial",
-                "condition",
-                "temperature",
-                "rating",
-            ]
-        ]
-        if feature_cols:
-            results.mixed_effects = run_multilevel_correlation_analysis(
-                ctx.precomputed_df,
-                feature_cols[:50],
-                "rating",
-                "subject",
-                config=ctx.config,
-            )
+        results.mixed_effects = run_multilevel_correlation_analysis(
+            ctx.precomputed_df,
+            feature_cols[:50],
+            "rating",
+            "subject",
+            config=ctx.config,
+        )
 
 
 def stage_validate(ctx: BehaviorContext, config: Any) -> None:
     from eeg_pipeline.utils.analysis.stats.fdr import apply_global_fdr
     from eeg_pipeline.utils.analysis.stats.reliability import compute_hierarchical_fdr_summary
 
-    fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
+    fdr_alpha = config.fdr_alpha
 
     ctx.logger.info("Applying global FDR correction...")
     apply_global_fdr(

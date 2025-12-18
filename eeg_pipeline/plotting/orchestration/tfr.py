@@ -317,9 +317,9 @@ def visualize_tfr_for_subjects(
         raise ValueError("No subjects specified")
 
     if config is None:
-        from eeg_pipeline.utils.config.loader import load_settings
+        from eeg_pipeline.utils.config.loader import load_config
 
-        config = load_settings()
+        config = load_config()
 
     from eeg_pipeline.plotting.io.figures import setup_matplotlib
     from eeg_pipeline.infra.logging import get_logger

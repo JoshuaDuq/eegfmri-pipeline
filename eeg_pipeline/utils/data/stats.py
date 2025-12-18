@@ -13,7 +13,7 @@ from typing import Optional, List, Any, Dict, Tuple
 import pandas as pd
 import numpy as np
 
-from ..config.loader import load_settings, ConfigDict
+from ..config.loader import load_config, ConfigDict
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.infra.paths import deriv_stats_path
 from .covariates import _build_covariate_matrices
@@ -24,47 +24,11 @@ def _build_correlation_stats_candidates(
     target_suffix: str,
     target_suffix_alt: Optional[str],
 ) -> List[str]:
-    file_patterns = {
-        "power": [
-            f"corr_stats_pow_combined_vs_{target_suffix}.tsv",
-            f"corr_stats_power_combined_vs_{target_suffix}.tsv",
-            f"corr_stats_power_vs_{target_suffix}.tsv",
-            f"corr_stats_power_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "power_roi": [
-            f"corr_stats_pow_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
-            f"corr_stats_power_roi_vs_{target_suffix.replace('temperature', 'temp')}.tsv",
-        ],
-        "aperiodic": [
-            f"corr_stats_aperiodic_vs_{target_suffix}.tsv",
-            f"corr_stats_aperiodic_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "connectivity": [
-            f"corr_stats_connectivity_vs_{target_suffix}.tsv",
-            f"corr_stats_connectivity_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "itpc": [
-            f"corr_stats_itpc_vs_{target_suffix}.tsv",
-            f"corr_stats_itpc_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-        "dynamics": [
-            f"corr_stats_dynamics_vs_{target_suffix}.tsv",
-            f"corr_stats_dynamics_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ],
-    }
-
-    candidates = file_patterns.get(feature_type) or []
-    candidates = [c for c in candidates if c]
-
-    # Fallback: unified correlator naming convention corr_stats_<feature_type>_vs_<target>
-    # This keeps plotting working as analysis outputs evolve.
-    candidates.extend(
-        [
-            f"corr_stats_{feature_type}_vs_{target_suffix}.tsv",
-            f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv" if target_suffix_alt else None,
-        ]
-    )
-    return [c for c in candidates if c]
+    """Build list of candidate filenames for precomputed correlation stats."""
+    candidates = [f"corr_stats_{feature_type}_vs_{target_suffix}.tsv"]
+    if target_suffix_alt:
+        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv")
+    return candidates
 
 
 def load_precomputed_correlations(
@@ -151,12 +115,8 @@ def get_precomputed_stats_for_roi_band(
         
     row = subset.iloc[0]
 
-    # Accept both legacy and newer global FDR column names.
-    fdr_reject = bool(
-        row.get("fdr_reject_global", False)
-        or row.get("fdr_reject", False)
-    )
-    q_val = row.get("q_fdr_global", row.get("q_global", row.get("q", np.nan)))
+    fdr_reject = bool(row.get("fdr_reject", False))
+    q_val = row.get("q_global", row.get("q", np.nan))
     return {
         "r": row.get("r", np.nan),
         "p": row.get("p", np.nan),

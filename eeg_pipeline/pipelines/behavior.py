@@ -29,6 +29,7 @@ from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.orchestration import (
     add_change_scores as _add_change_scores_impl,
     build_behavior_qc as _build_behavior_qc_impl,
@@ -60,20 +61,6 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "export",
 ]
 
-# Legacy aliases supported for backward-compatible CLI choices
-_BEHAVIOR_COMP_ALIASES = {
-    "condition_correlations": "condition",
-    "time_frequency": "temporal",
-    "temporal_correlations": "temporal",
-    "cluster_test": "cluster",
-    "exports": "export",
-    "precomputed_correlations": "correlations",
-    "power_roi": "correlations",
-    "connectivity_roi": "correlations",
-    "connectivity_heatmaps": "correlations",
-    "sliding_connectivity": "temporal",
-}
-
 
 def _resolve_behavior_computation_flags(
     requested: Optional[List[str]],
@@ -88,11 +75,7 @@ def _resolve_behavior_computation_flags(
         return None
     
     flags = {k: False for k in BEHAVIOR_COMPUTATION_FLAGS}
-    normalized: List[str] = []
-    for item in requested:
-        key = str(item).lower()
-        key = _BEHAVIOR_COMP_ALIASES.get(key, key)
-        normalized.append(key)
+    normalized = [str(item).lower() for item in requested]
     
     unknown = [k for k in normalized if k not in BEHAVIOR_COMPUTATION_FLAGS]
     if unknown and logger:
@@ -113,7 +96,7 @@ class BehaviorPipelineConfig:
     control_trial_order: bool = True
     compute_change_scores: bool = True
     compute_pain_sensitivity: bool = True
-    compute_reliability: bool = True
+    compute_reliability: bool = False
     bootstrap: int = 0
     
     run_condition_comparison: bool = True
@@ -128,7 +111,6 @@ class BehaviorPipelineConfig:
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
-        from eeg_pipeline.utils.config.loader import get_config_value
         return cls(
             method=get_config_value(config, "behavior_analysis.statistics.correlation_method", "spearman"),
             min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
@@ -136,8 +118,8 @@ class BehaviorPipelineConfig:
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
             compute_change_scores=bool(get_config_value(config, "behavior_analysis.compute_change_scores", True)),
             compute_pain_sensitivity=bool(get_config_value(config, "behavior_analysis.compute_pain_sensitivity", True)),
-            compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", True)),
-            bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 0))),
+            compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
+            bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
             n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
             run_temporal_correlations=get_config_value(config, "behavior_analysis.time_frequency_heatmap.enabled", True),
@@ -187,81 +169,6 @@ class BehaviorPipelineResults:
             s["n_large_effects"] = int((self.condition_effects["hedges_g"].abs() >= 0.8).sum())
         return s
 
-
-###################################################################
-# Helper Functions
-###################################################################
-
-
-def _combine_features(ctx: BehaviorContext) -> pd.DataFrame:
-    return _combine_features_impl(ctx)
-
-
-def _add_change_scores(ctx: BehaviorContext) -> None:
-    """Compute and append change scores (plateau-baseline) once per context."""
-    return _add_change_scores_impl(ctx)
-
-
-###################################################################
-# Pipeline Stages
-###################################################################
-
-
-def _stage_load(ctx: BehaviorContext) -> bool:
-    return _stage_load_impl(ctx)
-
-
-def _stage_correlate(
-    ctx: BehaviorContext,
-    config: BehaviorPipelineConfig,
-) -> tuple:
-    return _stage_correlate_impl(ctx, config)
-
-
-def _build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
-    return _build_behavior_qc_impl(ctx)
-
-
-def _write_analysis_metadata(
-    ctx: BehaviorContext,
-    pipeline_config: BehaviorPipelineConfig,
-    results: BehaviorPipelineResults,
-) -> None:
-    return _write_analysis_metadata_impl(ctx, pipeline_config, results)
-
-
-def _stage_condition(
-    ctx: BehaviorContext,
-    config: BehaviorPipelineConfig,
-) -> pd.DataFrame:
-    return _stage_condition_impl(ctx, config)
-
-
-def _stage_temporal(ctx: BehaviorContext) -> None:
-    return _stage_temporal_impl(ctx)
-
-
-def _stage_cluster(ctx: BehaviorContext, config: BehaviorPipelineConfig) -> Dict[str, Any]:
-    return _stage_cluster_impl(ctx, config)
-
-
-def _stage_advanced(
-    ctx: BehaviorContext,
-    config: BehaviorPipelineConfig,
-    results: BehaviorPipelineResults,
-) -> None:
-    return _stage_advanced_impl(ctx, config, results)
-
-
-def _stage_validate(ctx: BehaviorContext, config: BehaviorPipelineConfig) -> None:
-    return _stage_validate_impl(ctx, config)
-
-
-def _stage_export(
-    ctx: BehaviorContext,
-    results: BehaviorPipelineResults,
-) -> List[Path]:
-    return _stage_export_impl(ctx, results)
 
 
 ###################################################################
@@ -338,11 +245,7 @@ class BehaviorPipeline(PipelineBase):
         logger.info(f"Behavior Pipeline: sub-{subject}")
         logger.info(f"{'='*60}")
 
-        base_seed = 42
-        try:
-            base_seed = int(self.config.get("behavior_analysis.statistics.base_seed", base_seed))
-        except Exception:
-            base_seed = 42
+        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
         rng = np.random.default_rng(get_subject_seed(base_seed, subject))
 
         stats_cfg = self.config.get("behavior_analysis.statistics", {})
@@ -370,53 +273,53 @@ class BehaviorPipeline(PipelineBase):
         results = BehaviorPipelineResults(subject=subject)
         
         logger.info("Stage 1: Loading data...")
-        if not _stage_load(ctx):
+        if not _stage_load_impl(ctx):
             return results
         
         if self._run_correlations:
             logger.info("Stage 2: Running unified correlations...")
-            results.correlations, results.pain_sensitivity = _stage_correlate(ctx, self.pipeline_config)
+            results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
         else:
             logger.info("Stage 2: Skipped correlations (CLI selection)")
         
         if self.pipeline_config.run_condition_comparison:
             logger.info("Stage 3: Condition comparison...")
-            results.condition_effects = _stage_condition(ctx, self.pipeline_config)
+            results.condition_effects = _stage_condition_impl(ctx, self.pipeline_config)
         else:
             logger.info("Stage 3: Skipped condition comparison (CLI selection)")
         
         if self.pipeline_config.run_temporal_correlations:
             logger.info("Stage 4: Temporal correlations...")
-            _stage_temporal(ctx)
+            _stage_temporal_impl(ctx)
         else:
             logger.info("Stage 4: Skipped temporal correlations (CLI selection)")
         
         if self.pipeline_config.run_cluster_tests:
             logger.info("Stage 5: Cluster permutation tests...")
-            results.cluster = _stage_cluster(ctx, self.pipeline_config)
+            results.cluster = _stage_cluster_impl(ctx, self.pipeline_config)
         else:
             logger.info("Stage 5: Skipped cluster tests (CLI selection)")
         
         if self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects:
             logger.info("Stage 6: Advanced analyses...")
-            _stage_advanced(ctx, self.pipeline_config, results)
+            _stage_advanced_impl(ctx, self.pipeline_config, results)
         else:
             logger.info("Stage 6: Skipped advanced analyses (CLI selection)")
         
         if self._run_validation:
             logger.info("Stage 7: Global FDR correction...")
-            _stage_validate(ctx, self.pipeline_config)
+            _stage_validate_impl(ctx, self.pipeline_config)
         else:
             logger.info("Stage 7: Skipped global FDR (no computations selected)")
         
         if self._run_export:
             logger.info("Stage 8: Saving results...")
-            _stage_export(ctx, results)
+            _stage_export_impl(ctx, results)
         else:
             logger.info("Stage 8: Skipped export (CLI selection)")
 
         try:
-            _write_analysis_metadata(ctx, self.pipeline_config, results)
+            _write_analysis_metadata_impl(ctx, self.pipeline_config, results)
         except Exception as e:
             logger.warning(f"Failed to write analysis metadata: {e}")
         

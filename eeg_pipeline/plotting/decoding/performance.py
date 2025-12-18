@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 ###################################################################
 
 from eeg_pipeline.plotting.decoding.helpers import (
-    _despine,
-    _calculate_axis_limits,
-    _calculate_shared_axis_limits,
-    _add_zero_reference_line,
-    _create_bar_plot,
+    despine,
+    calculate_axis_limits,
+    calculate_shared_axis_limits,
+    add_zero_reference_line,
+    create_bar_plot,
 )
 
 
@@ -47,7 +47,7 @@ def _plot_bootstrap_metric(ax, point_value: float, ci: list, metric_name: str, p
         ax.text(plot_cfg.text_position.bootstrap_x, plot_cfg.text_position.bootstrap_y, model_name, 
                 transform=ax.transAxes, fontsize=plot_cfg.font.medium, verticalalignment='top', weight='bold')
     ax.legend(fontsize=plot_cfg.font.small, loc='upper right', frameon=False)
-    _despine(ax)
+    despine(ax)
 
 
 ###################################################################
@@ -79,7 +79,7 @@ def plot_prediction_scatter(pred_df: pd.DataFrame, model_name: str, pooled_metri
     ax.scatter(y_true, y_pred, s=marker_size, alpha=plot_cfg.style.scatter.alpha, 
                c=plot_cfg.style.colors.gray, edgecolors='none')
     
-    lim_min, lim_max = _calculate_shared_axis_limits(y_true, y_pred, plot_cfg)
+    lim_min, lim_max = calculate_shared_axis_limits(y_true, y_pred, plot_cfg)
     axis_limits = [lim_min, lim_max]
     
     ax.plot(axis_limits, axis_limits, plot_cfg.style.colors.black, 
@@ -111,7 +111,7 @@ def plot_prediction_scatter(pred_df: pd.DataFrame, model_name: str, pooled_metri
     ax.set_xlim(axis_limits)
     ax.set_ylim(axis_limits)
     ax.set_aspect('equal')
-    _despine(ax)
+    despine(ax)
     
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info(f"Saved {model_name} prediction scatter: {save_path}")
@@ -141,8 +141,8 @@ def plot_per_subject_performance(per_subj_df: pd.DataFrame, model_name: str, sav
     
     x_positions = np.arange(len(subjects))
     
-    _create_bar_plot(axes[0], x_positions, pearson_r, subjects.tolist(), "Pearson's r", plot_cfg)
-    _create_bar_plot(axes[1], x_positions, r2, subjects.tolist(), 'R²', plot_cfg)
+    create_bar_plot(axes[0], x_positions, pearson_r, subjects.tolist(), "Pearson's r", plot_cfg)
+    create_bar_plot(axes[1], x_positions, r2, subjects.tolist(), 'R²', plot_cfg)
     
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
@@ -170,7 +170,7 @@ def plot_decoding_null_hist(
     ax.set_ylabel("Count")
     ax.set_title(title)
     ax.legend(frameon=False)
-    _despine(ax)
+    despine(ax)
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info("Saved decoding null histogram to %s", save_path)
@@ -218,7 +218,7 @@ def plot_calibration_curve(pred_df: pd.DataFrame, model_name: str, cal_metrics: 
                     markersize=plot_cfg.style.errorbar_markersize, color=plot_cfg.style.colors.red, 
                     linewidth=plot_cfg.style.line.width_standard, capsize=plot_cfg.style.errorbar_capsize)
     
-    lim_min, lim_max = _calculate_shared_axis_limits(y_pred_finite, y_true_finite, plot_cfg)
+    lim_min, lim_max = calculate_shared_axis_limits(y_pred_finite, y_true_finite, plot_cfg)
     axis_limits = [lim_min, lim_max]
     
     ax.plot(axis_limits, axis_limits, color=plot_cfg.style.colors.black, linestyle='--',
@@ -245,7 +245,7 @@ def plot_calibration_curve(pred_df: pd.DataFrame, model_name: str, cal_metrics: 
     ax.set_ylim(axis_limits)
     ax.set_aspect('equal')
     ax.legend(fontsize=plot_cfg.font.small, loc='lower right', frameon=False)
-    _despine(ax)
+    despine(ax)
     
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info(f"Saved {model_name} calibration curve: {save_path}")
@@ -322,7 +322,7 @@ def plot_permutation_null(null_rs: np.ndarray, observed_r: float, p_value: float
     ax.set_xlabel('Max |r| (null distribution)')
     ax.set_ylabel('Density')
     ax.legend(fontsize=plot_cfg.font.small, loc='upper left', frameon=False)
-    _despine(ax)
+    despine(ax)
     
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info("Saved permutation null distribution: %s", save_path)

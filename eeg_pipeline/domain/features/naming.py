@@ -8,14 +8,13 @@ from this module.
 
 Provides:
 - NamingSchema: Builder class for structured names (group.segment.band.scope.stat)
-- FeatureName: Dataclass for parsed feature names
 - FeatureMetadata: Dataclass for structured metadata
 - DOMAINS, TIME_LABELS, STATISTICS: Standard constants
-- make_power_name, make_erds_name, etc.: Domain-specific helpers
-- infer_feature_metadata, generate_feature_sidecar: Legacy metadata inference
 - generate_manifest, save_manifest: Manifest generation
 - save_features_organized: I/O helpers
 - get_fine_time_bins, get_coarse_time_bins: Temporal bin generators
+- parse_feature_name: Parse NamingSchema v2 format
+- parse_legacy_power_feature_name: Backward compatibility for legacy power features
 """
 
 from __future__ import annotations
@@ -88,33 +87,6 @@ STATISTICS = {
 ###################################################################
 # Data Classes
 ###################################################################
-
-
-@dataclass
-class FeatureName:
-    """Parsed feature name components (legacy format)."""
-
-    domain: str
-    measure: Optional[str] = None
-    band: Optional[str] = None
-    location: Optional[str] = None
-    time: Optional[str] = None
-    statistic: Optional[str] = None
-
-    def to_string(self) -> str:
-        """Convert to standardized feature name string."""
-        parts = [self.domain]
-        if self.measure:
-            parts.append(self.measure)
-        if self.band:
-            parts.append(self.band)
-        if self.location:
-            parts.append(self.location)
-        if self.time:
-            parts.append(self.time)
-        if self.statistic:
-            parts.append(self.statistic)
-        return "_".join(parts)
 
 
 @dataclass
@@ -194,98 +166,6 @@ class NamingSchema:
 
 
 ###################################################################
-# Domain-Specific Helper Functions
-###################################################################
-
-
-def make_feature_name(
-    domain: str,
-    band: Optional[str] = None,
-    location: Optional[str] = None,
-    time: Optional[str] = None,
-    stat: str = "mean",
-    measure: Optional[str] = None,
-) -> str:
-    """Create a standardized feature name."""
-    parts = [domain]
-    if measure:
-        parts.append(measure)
-    if band:
-        parts.append(band)
-    if location:
-        parts.append(location)
-    if time:
-        parts.append(time)
-    if stat:
-        parts.append(stat)
-    return "_".join(parts)
-
-
-def make_power_name(band: str, channel: str, time: str, stat: str = "mean") -> str:
-    """Create power feature name."""
-    return f"power_{band}_{channel}_{time}_{stat}"
-
-
-def make_erds_name(band: str, channel: str, time: str, stat: str = "percent") -> str:
-    """Create ERD/ERS feature name."""
-    return f"erds_{band}_{channel}_{time}_{stat}"
-
-
-def make_conn_name(
-    measure: str, band: str, time: str, stat: str = "mean", location: str = "global"
-) -> str:
-    """Create connectivity feature name."""
-    return f"conn_{measure}_{band}_{location}_{time}_{stat}"
-
-
-def make_phase_name(measure: str, band: str, channel: str, time: str, stat: str = "mean") -> str:
-    """Create phase feature name."""
-    return f"phase_{measure}_{band}_{channel}_{time}_{stat}"
-
-
-def make_aper_name(measure: str, channel: str, time: str = "baseline") -> str:
-    """Create aperiodic feature name."""
-    return f"aper_{measure}_{channel}_{time}"
-
-
-def make_spec_name(measure: str, band: str, channel: str) -> str:
-    """Create spectral shape feature name."""
-    return f"spec_{measure}_{band}_{channel}"
-
-
-def make_ms_name(measure: str, state: str, time: str = "full") -> str:
-    """Create microstate feature name."""
-    return f"ms_{measure}_{state}_{time}"
-
-
-def make_comp_name(measure: str, band: str, channel: str, time: str) -> str:
-    """Create complexity feature name."""
-    return f"comp_{measure}_{band}_{channel}_{time}"
-
-
-def make_temp_name(measure: str, band: str, channel: str, time: str) -> str:
-    """Create temporal feature name."""
-    return f"temp_{measure}_{band}_{channel}_{time}"
-
-
-def make_asym_name(band: str, pair: str, time: str, stat: str = "index") -> str:
-    """Create asymmetry feature name."""
-    return f"asym_{stat}_{band}_{pair}_{time}"
-
-
-def make_gfp_name(band: str, time: str, stat: str = "mean") -> str:
-    """Create GFP feature name."""
-    if band:
-        return f"gfp_{band}_{time}_{stat}"
-    return f"gfp_{time}_{stat}"
-
-
-def make_roi_name(domain: str, band: str, roi: str, time: str, stat: str = "mean") -> str:
-    """Create ROI-aggregated feature name."""
-    return f"roi_{domain}_{band}_{roi}_{time}_{stat}"
-
-
-###################################################################
 # Time Bin Generators
 ###################################################################
 
@@ -329,94 +209,7 @@ def get_all_time_bins(include_fine: bool = True) -> List[Dict[str, Any]]:
 
 
 ###################################################################
-# Simple Metadata Inference (Legacy API)
-###################################################################
-
-
-def infer_feature_metadata(column_name: str) -> Dict[str, str]:
-    """Parse a feature column name to infer its metadata."""
-    parts = column_name.split("_")
-    meta = {"name": column_name}
-
-    if not parts:
-        return meta
-
-    prefix = parts[0]
-
-    if prefix == "pow":
-        meta["type"] = "power"
-        if len(parts) >= 3:
-            meta["band"] = parts[1]
-            meta["channel"] = "_".join(parts[2:])
-
-    elif prefix == "conn":
-        meta["type"] = "connectivity"
-        if len(parts) >= 2:
-            meta["metric"] = parts[1]
-        if len(parts) >= 4:
-            meta["band"] = parts[2]
-            meta["channel_pair"] = "_".join(parts[3:])
-
-    elif prefix == "ms":
-        meta["type"] = "microstate"
-        if len(parts) >= 2:
-            meta["metric"] = parts[1]
-        if len(parts) >= 3:
-            if parts[1] == "transition":
-                meta["transition_from"] = parts[2]
-                if len(parts) >= 4:
-                    meta["transition_to"] = parts[3]
-            else:
-                meta["state"] = parts[2]
-
-    elif prefix == "aper":
-        meta["type"] = "aperiodic"
-        if len(parts) >= 2:
-            meta["metric"] = parts[1]
-        if len(parts) >= 3:
-            meta["channel"] = "_".join(parts[2:])
-
-    elif prefix == "pac":
-        meta["type"] = "phase_amplitude_coupling"
-
-    elif prefix == "erds":
-        meta["type"] = "erds"
-
-    else:
-        meta["type"] = "other"
-
-    return meta
-
-
-def generate_feature_sidecar(
-    feature_df_columns: List[str],
-    description: str = "Extracted EEG Features",
-    subject: Optional[str] = None,
-    task: Optional[str] = None,
-    additional_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Generate a JSON sidecar structure for feature files."""
-    features_meta = {}
-    for col in feature_df_columns:
-        features_meta[col] = infer_feature_metadata(col)
-
-    sidecar = {
-        "Description": description,
-        "SourcePipeline": "eeg_pipeline",
-        "Subject": subject,
-        "Task": task,
-        "FeatureCount": len(feature_df_columns),
-        "Features": features_meta,
-    }
-
-    if additional_metadata:
-        sidecar.update(additional_metadata)
-
-    return sidecar
-
-
-###################################################################
-# Structured Metadata Parsing (NamingSchema v2)
+# Structured Metadata Parsing
 ###################################################################
 
 
@@ -500,9 +293,62 @@ def parse_legacy_power_feature_name(name: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def infer_feature_metadata(name: str) -> Dict[str, Optional[str]]:
+    """Infer metadata from legacy feature names that don't match NamingSchema v2."""
+    result: Dict[str, Optional[str]] = {
+        "type": None,
+        "time": None,
+        "band": None,
+        "channel": None,
+        "channel_pair": None,
+        "statistic": None,
+    }
+    
+    if not isinstance(name, str):
+        return result
+    
+    legacy = parse_legacy_power_feature_name(name)
+    if legacy is not None:
+        band, channel = legacy
+        result["type"] = "power"
+        result["band"] = band
+        result["channel"] = channel
+        return result
+    
+    name_lower = name.lower()
+    for domain in DOMAINS:
+        if name_lower.startswith(domain):
+            result["type"] = domain
+            break
+    
+    for band in ["delta", "theta", "alpha", "beta", "gamma"]:
+        if band in name_lower:
+            result["band"] = band
+            break
+    
+    return result
+
+
 ###################################################################
 # Manifest Generation (Canonical)
 ###################################################################
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively convert numpy arrays and other non-JSON types to serializable forms."""
+    if obj is None:
+        return None
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (np.integer, np.floating)):
+        return float(obj) if isinstance(obj, np.floating) else int(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(item) for item in obj]
+    return obj
 
 
 def generate_manifest(
@@ -548,7 +394,7 @@ def generate_manifest(
         "task": task,
         "n_features": len(features),
         "features": features,
-        "qc": qc or None,
+        "qc": _make_json_serializable(qc) if qc else None,
         "config": None if config is None else {},
     }
 
@@ -596,27 +442,11 @@ __all__ = [
     "DOMAINS",
     "TIME_LABELS",
     "STATISTICS",
-    "FeatureName",
     "FeatureMetadata",
     "NamingSchema",
-    "make_feature_name",
-    "make_power_name",
-    "make_erds_name",
-    "make_conn_name",
-    "make_phase_name",
-    "make_aper_name",
-    "make_spec_name",
-    "make_ms_name",
-    "make_comp_name",
-    "make_temp_name",
-    "make_asym_name",
-    "make_gfp_name",
-    "make_roi_name",
     "get_fine_time_bins",
     "get_coarse_time_bins",
     "get_all_time_bins",
-    "infer_feature_metadata",
-    "generate_feature_sidecar",
     "parse_feature_name",
     "parse_legacy_power_feature_name",
     "generate_manifest",

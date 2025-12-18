@@ -100,9 +100,9 @@ def visualize_erp_for_subjects(
         raise ValueError("No subjects specified")
 
     if config is None:
-        from eeg_pipeline.utils.config.loader import load_settings
+        from eeg_pipeline.utils.config.loader import load_config
 
-        config = load_settings()
+        config = load_config()
 
     setup_matplotlib(config)
 

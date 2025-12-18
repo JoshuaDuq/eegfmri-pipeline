@@ -4,7 +4,6 @@ from .subjects import parse_subject_args, get_available_subjects
 from .feature_io import (
     FeatureBundle,
     load_feature_bundle,
-    load_feature_bundle_for_subject,
     load_feature_dfs_for_subjects,
     load_subject_features,
     _load_features_and_targets,
@@ -62,7 +61,6 @@ __all__ = [
     "get_available_subjects",
     "_load_features_and_targets",
     "align_events_to_epochs",
-    "resolve_columns",
     "load_feature_bundle",
     "load_behavior_plot_features",
     "load_behavior_stats_files",

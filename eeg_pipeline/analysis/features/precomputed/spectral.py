@@ -9,6 +9,7 @@ from joblib import Parallel, delayed
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.analysis.arrays import nanmean_with_fraction
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import validate_precomputed
 from eeg_pipeline.utils.config.loader import get_feature_constant, get_frequency_bands
 
 from .extras import validate_window_masks
@@ -18,7 +19,11 @@ def extract_power_from_precomputed(
     precomputed: PrecomputedData,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
-    if not precomputed.band_data or precomputed.windows is None:
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        logger = getattr(precomputed, "logger", None)
+        if logger is not None:
+            logger.warning("Power (precomputed): %s; skipping extraction.", err_msg)
         return pd.DataFrame(), [], {}
 
     n_epochs = precomputed.data.shape[0]
@@ -36,8 +41,8 @@ def extract_power_from_precomputed(
     if not validate_window_masks(precomputed, precomputed.logger):
         return pd.DataFrame(), [], {}
 
-    epsilon = get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12)
-    min_valid_fraction = get_feature_constant(precomputed.config, "MIN_VALID_FRACTION", 0.5)
+    epsilon = float(get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12))
+    min_valid_fraction = float(get_feature_constant(precomputed.config, "MIN_VALID_FRACTION", 0.5))
     windows = precomputed.windows
 
     records: List[Dict[str, float]] = []
@@ -74,7 +79,7 @@ def extract_power_from_precomputed(
                 else:
                     logratio = np.nan
                 record[
-                    NamingSchema.build("power", "plateau", band, "ch", "logratio", channel=ch_name)
+                    NamingSchema.build("spectral", "plateau", band, "ch", "logratio", channel=ch_name)
                 ] = float(logratio)
                 all_power_full.append(float(logratio) if np.isfinite(logratio) else np.nan)
 
@@ -88,7 +93,7 @@ def extract_power_from_precomputed(
                     else:
                         win_logratio = np.nan
                     record[
-                        NamingSchema.build("power", win_label, band, "ch", "logratio", channel=ch_name)
+                        NamingSchema.build("spectral", win_label, band, "ch", "logratio", channel=ch_name)
                     ] = float(win_logratio)
                     coarse_values[win_label] = float(win_logratio)
 
@@ -101,7 +106,7 @@ def extract_power_from_precomputed(
                     else:
                         win_logratio = np.nan
                     record[
-                        NamingSchema.build("power", win_label, band, "ch", "logratio", channel=ch_name)
+                        NamingSchema.build("spectral", win_label, band, "ch", "logratio", channel=ch_name)
                     ] = float(win_logratio)
 
                 if len(active_times) > 2:
@@ -114,15 +119,15 @@ def extract_power_from_precomputed(
                                 active_times[valid_mask], logratio_trace[valid_mask], 1
                             )
                             record[
-                                NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)
+                                NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
                             ] = float(slope)
                         else:
                             record[
-                                NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)
+                                NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
                             ] = np.nan
                     else:
                         record[
-                            NamingSchema.build("power", "plateau", band, "ch", "slope", channel=ch_name)
+                            NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
                         ] = np.nan
 
                     if "early" in coarse_values and "late" in coarse_values:
@@ -143,26 +148,26 @@ def extract_power_from_precomputed(
                 baseline_valid_count / total_channels if total_channels > 0 else 0.0
             )
             record[
-                NamingSchema.build("power", "baseline", band, "global", "valid_fraction")
+                NamingSchema.build("spectral", "baseline", band, "global", "valid_fraction")
             ] = float(baseline_valid_fraction)
 
             if baseline_valid_fraction < min_valid_fraction:
                 record[
-                    NamingSchema.build("power", "plateau", band, "global", "logratio_mean")
+                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_mean")
                 ] = np.nan
                 record[
-                    NamingSchema.build("power", "plateau", band, "global", "logratio_std")
+                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_std")
                 ] = np.nan
                 for win_label in windows.coarse_labels:
                     record[
-                        NamingSchema.build("power", win_label, band, "global", "logratio_mean")
+                        NamingSchema.build("spectral", win_label, band, "global", "logratio_mean")
                     ] = np.nan
             elif valid_power:
                 record[
-                    NamingSchema.build("power", "plateau", band, "global", "logratio_mean")
+                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_mean")
                 ] = float(np.mean(valid_power))
                 record[
-                    NamingSchema.build("power", "plateau", band, "global", "logratio_std")
+                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_std")
                 ] = float(np.std(valid_power))
                 for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
                     if not np.any(win_mask):
@@ -178,7 +183,7 @@ def extract_power_from_precomputed(
                                 win_powers.append(np.log10(wp / bp))
                     if win_powers:
                         record[
-                            NamingSchema.build("power", win_label, band, "global", "logratio_mean")
+                            NamingSchema.build("spectral", win_label, band, "global", "logratio_mean")
                         ] = float(np.mean(win_powers))
 
         records.append(record)
@@ -259,7 +264,10 @@ def extract_spectral_extras_from_precomputed(
     bands: List[str],
     n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    logger = getattr(precomputed, "logger", None)
     if precomputed.psd_data is None:
+        if logger is not None:
+            logger.warning("Spectral extras: No PSD data available; skipping extraction.")
         return pd.DataFrame(), []
 
     psd = precomputed.psd_data.psd
@@ -309,12 +317,12 @@ def _process_segment_power_epoch(
                 baseline_log = np.log10(baseline_power_per_ch[ch_idx])
             else:
                 baseline_log = np.nan
-            col = NamingSchema.build("power", "baseline", band, "ch", "logpower", channel=ch_name)
+            col = NamingSchema.build("spectral", "baseline", band, "ch", "logpower", channel=ch_name)
             record[col] = float(baseline_log)
 
         valid_baseline = baseline_power_per_ch[baseline_power_per_ch > epsilon]
         if len(valid_baseline) > 0:
-            col_glob = NamingSchema.build("power", "baseline", band, "global", "logpower")
+            col_glob = NamingSchema.build("spectral", "baseline", band, "global", "logpower")
             record[col_glob] = float(np.nanmean(np.log10(valid_baseline)))
 
         for seg_name, seg_mask in segments_active.items():
@@ -326,12 +334,12 @@ def _process_segment_power_epoch(
                     logratio = np.log10(seg_mean[ch_idx] / baseline_power_per_ch[ch_idx])
                 else:
                     logratio = np.nan
-                col = NamingSchema.build("power", seg_name, band, "ch", "logratio", channel=ch_name)
+                col = NamingSchema.build("spectral", seg_name, band, "ch", "logratio", channel=ch_name)
                 record[col] = float(logratio)
 
             valid = baseline_power_per_ch > epsilon
             if np.any(valid):
-                col_glob = NamingSchema.build("power", seg_name, band, "global", "logratio")
+                col_glob = NamingSchema.build("spectral", seg_name, band, "global", "logratio")
                 record[col_glob] = float(
                     np.nanmean(np.log10(seg_mean[valid] / baseline_power_per_ch[valid]))
                 )

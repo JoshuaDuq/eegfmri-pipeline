@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any, Tuple
 
 import pandas as pd
 
-from ..config.loader import load_settings
+from ..config.loader import load_config
 
 
 ###################################################################
@@ -39,7 +39,7 @@ def _canonical_covariate_name(name: Optional[str], config=None) -> Optional[str]
     
     if config is None:
         try:
-            config = load_settings()
+            config = load_config()
         except (OSError, ValueError):
             # Config file not found or invalid - use defaults
             config = None
@@ -170,7 +170,7 @@ def _build_covariate_matrices(
 
     if config is None:
         try:
-            config = load_settings()
+            config = load_config()
         except (OSError, ValueError):
             # Config file not found or invalid - proceed without config-based covariate resolution
             config = None

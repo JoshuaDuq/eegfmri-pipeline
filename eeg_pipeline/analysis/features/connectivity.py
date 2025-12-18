@@ -84,7 +84,7 @@ def _graph_metrics(adj: np.ndarray, measure: str, band: str, conn_cfg: Dict[str,
     top_prop = conn_cfg.get("graph_top_prop", 0.1)
     try:
         top_prop = float(top_prop)
-    except Exception:
+    except (ValueError, TypeError):
         top_prop = 0.1
     if not np.isfinite(top_prop) or top_prop <= 0 or top_prop > 1:
         top_prop = 0.1
@@ -92,9 +92,10 @@ def _graph_metrics(adj: np.ndarray, measure: str, band: str, conn_cfg: Dict[str,
     small_world_n_rand = conn_cfg.get("small_world_n_rand", 100)
     try:
         small_world_n_rand = int(small_world_n_rand)
-    except Exception:
+    except (ValueError, TypeError):
         small_world_n_rand = 100
-    small_world_n_rand = max(5, small_world_n_rand)
+    if small_world_n_rand > 0:
+        small_world_n_rand = max(5, small_world_n_rand)
 
     adj_sym = _symmetrize_and_clip(adj)
     adj_abs = np.abs(adj_sym)
@@ -105,19 +106,22 @@ def _graph_metrics(adj: np.ndarray, measure: str, band: str, conn_cfg: Dict[str,
     try:
         clust_vals = nx.clustering(nx.from_numpy_array(adj_bin)).values()
         clust = float(np.mean(list(clust_vals))) if clust_vals else np.nan
-    except Exception:
+    except (nx.NetworkXError, ValueError, ZeroDivisionError):
         clust = np.nan
 
-    try:
-        smallworld = float(compute_small_world_sigma(adj_bin, n_rand=small_world_n_rand))
-    except Exception:
+    if small_world_n_rand > 0:
+        try:
+            smallworld = float(compute_small_world_sigma(adj_bin, n_rand=small_world_n_rand))
+        except (ValueError, RuntimeError, ZeroDivisionError):
+            smallworld = np.nan
+    else:
         smallworld = np.nan
 
     return {
-        f"{measure}_{band}_geff": geff,
-        f"{measure}_{band}_clust": clust,
-        f"{measure}_{band}_pc": np.nan,
-        f"{measure}_{band}_smallworld": smallworld,
+        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_geff"): geff,
+        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_clust"): clust,
+        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_pc"): np.nan,
+        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_smallworld"): smallworld,
     }
 
 def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
@@ -185,6 +189,8 @@ def extract_connectivity_from_precomputed(
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
     if n_channels < 2:
+        if logger is not None:
+            logger.warning("Connectivity: Fewer than 2 channels available; skipping extraction.")
         return pd.DataFrame(), []
 
     t_total0 = time.perf_counter()
@@ -264,8 +270,9 @@ def extract_connectivity_from_precomputed(
 
     freq_bands = get_frequency_bands(config)
 
-    use_task_parallel = bool(n_jobs > 1) and (not enable_graph_metrics)
+    use_task_parallel = bool(n_jobs > 1)
     inner_n_jobs = 1 if use_task_parallel else n_jobs
+    graph_n_jobs = 1 if use_task_parallel else n_jobs
 
     if logger is not None:
         logger.info(
@@ -339,9 +346,12 @@ def extract_connectivity_from_precomputed(
                 adj[pair_j, pair_i] = con_vals[ep_idx]
                 return _graph_metrics(adj, method, band, conn_cfg)
 
-            graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
-            )
+            if graph_n_jobs == 1:
+                graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
+            else:
+                graph_rows = Parallel(n_jobs=graph_n_jobs, backend="loky")(
+                    delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
+                )
             parts.append(pd.DataFrame(graph_rows))
 
         df_out = pd.concat(parts, axis=1) if parts else pd.DataFrame()
@@ -419,9 +429,12 @@ def extract_connectivity_from_precomputed(
                 adj[pair_j, pair_i] = aec_vals[ep_idx]
                 return _graph_metrics(adj, "aec", band, conn_cfg)
 
-            graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
-                delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
-            )
+            if graph_n_jobs == 1:
+                graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
+            else:
+                graph_rows = Parallel(n_jobs=graph_n_jobs, backend="loky")(
+                    delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
+                )
             parts.append(pd.DataFrame(graph_rows))
 
         return pd.concat(parts, axis=1) if parts else pd.DataFrame()
@@ -490,7 +503,7 @@ def extract_connectivity_from_precomputed(
         return df_task
 
     if use_task_parallel and len(tasks) > 1:
-        dfs = Parallel(n_jobs=n_jobs, backend="threading")(
+        dfs = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(_timed_run_task)(task) for task in tasks
         )
     else:

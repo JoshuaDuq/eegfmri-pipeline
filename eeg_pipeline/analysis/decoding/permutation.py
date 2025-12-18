@@ -18,7 +18,7 @@ from eeg_pipeline.analysis.decoding.cv import (
 from eeg_pipeline.utils.data.decoding import load_kept_indices
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.infra.logging import get_logger
-from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, load_settings, get_config_value
+from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, load_config, get_config_value
 
 logger = get_logger(__name__)
 
@@ -164,7 +164,7 @@ def _compute_permutation_importance_for_feature(
         return np.nan
 
     if config is None:
-        config = load_settings()
+        config = load_config()
     
     inner_splits_config = get_config_value(config, "decoding.cv.inner_splits", 5)
     

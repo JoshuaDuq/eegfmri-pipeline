@@ -18,7 +18,6 @@ from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
-    get_default_config as _get_default_config,
     save_fig,
 )
 from eeg_pipeline.infra.logging import get_subject_logger
@@ -42,12 +41,7 @@ def _plot_distribution_histogram(
 
     band_color = get_band_color("alpha", config)
     behavioral_config = plot_cfg.get_behavioral_config()
-    default_bins = behavioral_config.get("histogram_default_bins", 30)
-    bins = (
-        plot_cfg.style.histogram.bins
-        if hasattr(plot_cfg.style.histogram, "bins")
-        else default_bins
-    )
+    bins = int(behavioral_config.get("histogram_bins", plot_cfg.get_histogram_bins(plot_type="behavioral")))
 
     ax.hist(
         data,
@@ -110,6 +104,8 @@ def _plot_distribution_histogram(
 
 
 def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> None:
+    if config is None:
+        raise ValueError("config is required for psychometrics plotting")
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     plot_cfg = get_plot_config(config)

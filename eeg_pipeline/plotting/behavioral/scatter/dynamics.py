@@ -6,13 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
     setup_scatter_context,
 )
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.utils.data import load_precomputed_correlations
-from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
 from eeg_pipeline.infra.logging import get_subject_logger
 
 
@@ -30,17 +32,33 @@ def _get_dynamics_metric_title(metric: str) -> str:
     return titles.get(metric, metric.upper())
 
 
-def _extract_dynamics_columns(features_df: pd.DataFrame, band: str, metric: str, roi_channels: List[str]) -> List[str]:
-    cols = []
+def _extract_dynamics_columns(
+    features_df: pd.DataFrame,
+    *,
+    segment: str,
+    band: str,
+    metric: str,
+    roi_channels: List[str],
+) -> List[str]:
+    cols: List[str] = []
+    roi_set = set(roi_channels)
     for col in features_df.columns:
-        if f"dynamics_plateau_{band}_" not in col:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
             continue
-        if f"_{metric}" not in col:
+        if parsed.get("group") != "dynamics":
             continue
-        for ch in roi_channels:
-            if f"_ch_{ch}_" in col or col.endswith(f"_ch_{ch}"):
-                cols.append(col)
-                break
+        if str(parsed.get("segment") or "") != str(segment):
+            continue
+        if str(parsed.get("band") or "") != str(band):
+            continue
+        if str(parsed.get("scope") or "") != "ch":
+            continue
+        if str(parsed.get("stat") or "") != str(metric):
+            continue
+        ch = str(parsed.get("identifier") or "")
+        if ch in roi_set:
+            cols.append(str(col))
     return cols
 
 
@@ -52,11 +70,10 @@ def _extract_dynamics_values(
 ) -> Tuple[pd.Series, bool]:
     if metric is None:
         return pd.Series(dtype=float), False
-    cols = _extract_dynamics_columns(features_df, band, metric, roi_channels)
-    if not cols:
-        return pd.Series(dtype=float), False
-    vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-    return vals, True
+    raise RuntimeError(
+        "Dynamics extractor must be provided via closure with a fixed segment. "
+        "Use plot_dynamics_roi_scatter(...), which injects the correct extractor."
+    )
 
 
 def _format_dynamics_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
@@ -66,7 +83,7 @@ def _format_dynamics_title(band_title: str, roi: str, target: str, metric: Optio
 
 def _format_dynamics_x_label(band_title: str, metric: Optional[str]) -> str:
     metric_title = _get_dynamics_metric_title(metric) if metric else "Dynamics"
-    return f"{metric_title} Power"
+    return f"{metric_title} ({band_title})"
 
 
 def _format_dynamics_filename(band: str, target: str, metric: Optional[str]) -> str:
@@ -90,7 +107,8 @@ def plot_dynamics_roi_scatter(
     plots_dir: Optional[Path] = None,
     config=None,
 ) -> Dict[str, Any]:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral dynamics ROI scatter plotting")
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting dynamics ROI scatter plotting for sub-{subject}")
@@ -99,9 +117,24 @@ def plot_dynamics_roi_scatter(
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
 
+    dyn_plot_cfg = behavioral_config.get("dynamics", {})
+    feature_file = str(dyn_plot_cfg.get("feature_file", "features_complexity.tsv"))
+    segment = str(dyn_plot_cfg.get("segment", "baseline"))
+
     data = setup_scatter_context(subject, deriv_root, task, plots_dir, "dynamics", config, logger)
     if data is None:
         return {"significant": [], "all": []}
+
+    dyn_path = deriv_features_path(deriv_root, subject) / feature_file
+    dyn_df = read_table(dyn_path) if dyn_path.exists() else None
+    if dyn_df is None or dyn_df.empty:
+        logger.warning("Dynamics features not found at %s", dyn_path)
+        return {"significant": [], "all": []}
+    if len(dyn_df) != len(data.y):
+        raise ValueError(
+            f"Length mismatch: dynamics features ({len(dyn_df)}) != targets ({len(data.y)})"
+        )
+    data.features_df = dyn_df
 
     rating_stats = load_precomputed_correlations(data.stats_dir, "dynamics", "rating", logger)
     temp_stats = (
@@ -110,15 +143,33 @@ def plot_dynamics_roi_scatter(
         else None
     )
 
+    column_extractor = (
+        lambda df, band, roi_channels, metric=None: (
+            (lambda cols: (
+                (df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1), True)
+                if cols
+                else (pd.Series(dtype=float), False)
+            ))(
+                _extract_dynamics_columns(
+                    df,
+                    segment=segment,
+                    band=str(band),
+                    metric=str(metric) if metric is not None else "",
+                    roi_channels=roi_channels,
+                )
+            )
+        )
+    )
+
     results = create_roi_scatter_plots(
         data=data,
         feature_type="dynamics",
-        column_extractor=_extract_dynamics_values,
+        column_extractor=column_extractor,
         title_formatter=_format_dynamics_title,
         x_label_formatter=_format_dynamics_x_label,
         filename_formatter=_format_dynamics_filename,
         feature_name_formatter=_format_dynamics_feature_name,
-        bands=config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"]),
+        bands=config.get("power.bands_to_use") or list(config.get("frequency_bands", {}).keys()),
         metrics=_get_dynamics_metrics(config),
         method_code="spearman" if use_spearman else "pearson",
         bootstrap_ci=bootstrap_ci,

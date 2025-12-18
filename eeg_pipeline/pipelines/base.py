@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Optional, TypeVar, Generic, Dict
 
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.infra.logging import (
     get_logger,
     get_subject_logger,
@@ -34,7 +34,7 @@ class PipelineBase(ABC):
 
     def __init__(self, name: str, config: Optional[Any] = None):
         self.name = name
-        self.config = config or load_settings()
+        self.config = config or load_config()
         self.logger = get_logger(f"eeg_pipeline.pipelines.{name}")
         self._setup()
 

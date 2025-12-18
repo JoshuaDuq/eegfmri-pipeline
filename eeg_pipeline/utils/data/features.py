@@ -165,11 +165,16 @@ def validate_trial_alignment_manifest(
 ) -> None:
     import json
     
-    manifest_path = features_dir / "trial_alignment.tsv"
+    manifest_path = features_dir / "trial_alignment.json"
+    
     if not manifest_path.exists():
-        raise ValueError(f"Trial alignment manifest not found: {manifest_path}")
+        raise FileNotFoundError(
+            f"Trial alignment manifest not found: {manifest_path}. "
+            f"Re-run feature extraction to generate aligned trial manifests."
+        )
+    actual_path = manifest_path
 
-    with open(manifest_path, "r") as f:
+    with open(actual_path, "r") as f:
         manifest = json.load(f)
     
     manifest_n_epochs = manifest.get("n_epochs", 0)

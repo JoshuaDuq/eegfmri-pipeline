@@ -339,7 +339,7 @@ def extract_all_features(
         progress.step(message="Extracting CFC features...")
         precomputed_result = _ensure_precomputed_result()
         if precomputed_result is not None:
-            cfc_df = precomputed_result.get_feature_group_df("cfc")
+            cfc_df = precomputed_result.get_feature_group_df("cfc", include_condition=False)
             _check_length("CFC", cfc_df)
             if cfc_df is not None and not cfc_df.empty:
                 cfc_fs = precomputed_result.features.get("cfc")
@@ -351,7 +351,7 @@ def extract_all_features(
         progress.step(message="Extracting advanced dynamics features...")
         precomputed_result = _ensure_precomputed_result()
         if precomputed_result is not None:
-            dyn_df = precomputed_result.get_feature_group_df("dynamics_advanced")
+            dyn_df = precomputed_result.get_feature_group_df("dynamics_advanced", include_condition=False)
             _check_length("Advanced dynamics", dyn_df)
             if dyn_df is not None and not dyn_df.empty:
                 dyn_fs = precomputed_result.features.get("dynamics_advanced")

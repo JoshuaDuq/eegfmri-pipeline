@@ -12,8 +12,9 @@ from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
     setup_scatter_context,
 )
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.utils.data import load_precomputed_correlations
-from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
 from eeg_pipeline.infra.logging import get_subject_logger
 
 
@@ -79,7 +80,8 @@ def plot_itpc_roi_scatter(
     plots_dir: Optional[Path] = None,
     config=None,
 ) -> Dict[str, Any]:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral ITPC ROI scatter plotting")
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting ITPC ROI scatter plotting for sub-{subject}")
@@ -91,6 +93,17 @@ def plot_itpc_roi_scatter(
     data = setup_scatter_context(subject, deriv_root, task, plots_dir, "itpc", config, logger)
     if data is None:
         return {"significant": [], "all": []}
+
+    itpc_path = deriv_features_path(deriv_root, subject) / "features_itpc.tsv"
+    itpc_df = read_table(itpc_path) if itpc_path.exists() else None
+    if itpc_df is None or itpc_df.empty:
+        logger.warning("ITPC features not found at %s", itpc_path)
+        return {"significant": [], "all": []}
+    if len(itpc_df) != len(data.y):
+        raise ValueError(
+            f"Length mismatch: ITPC features ({len(itpc_df)}) != targets ({len(data.y)})"
+        )
+    data.features_df = itpc_df
 
     rating_stats = load_precomputed_correlations(data.stats_dir, "itpc", "rating", logger)
     temp_stats = (
@@ -107,7 +120,7 @@ def plot_itpc_roi_scatter(
         x_label_formatter=_format_itpc_x_label,
         filename_formatter=_format_itpc_filename,
         feature_name_formatter=_format_itpc_feature_name,
-        bands=config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"]),
+        bands=config.get("power.bands_to_use") or list(config.get("frequency_bands", {}).keys()),
         metrics=None,
         method_code="spearman" if use_spearman else "pearson",
         bootstrap_ci=bootstrap_ci,

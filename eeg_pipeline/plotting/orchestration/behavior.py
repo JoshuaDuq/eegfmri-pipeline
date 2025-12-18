@@ -14,6 +14,7 @@ from eeg_pipeline.utils.data.behavior import load_behavior_stats_files
 from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.plotting.io.collections import collect_significant_plots
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.plotting.behavioral.registry import (
     BehaviorPlotContext,
@@ -38,7 +39,11 @@ def _build_behavior_plot_context(
     logger: logging.Logger,
 ) -> BehaviorPlotContext:
     """Create a context object shared by all behavioral plotters."""
-    plots_dir = deriv_plots_path(deriv_root, subject, subdir="behavior")
+    plot_cfg = get_plot_config(config)
+    behavioral_config = plot_cfg.get_behavioral_config()
+    plot_subdir = behavioral_config.get("plot_subdir", "behavior")
+
+    plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     stats_dir = deriv_stats_path(deriv_root, subject)
     ensure_dir(plots_dir)
     ensure_dir(stats_dir)
@@ -134,6 +139,7 @@ def visualize_subject_behavior(
             "temporal_topomaps",
             "pain_clusters",
             "dose_response",
+            "top_predictors",
         ]
         logger.info("Running behavioral plots via registry...")
         manager.run_selected(plot_names) if plots else manager.run_all()
@@ -159,6 +165,7 @@ def visualize_behavior_for_subjects(
     scatter_only: bool = False,
     temporal_only: bool = False,
     visualize_categories: Optional[List[str]] = None,
+    plots: Optional[List[str]] = None,
 ) -> None:
     """Batch process behavioral visualizations for multiple subjects.
     
@@ -172,9 +179,9 @@ def visualize_behavior_for_subjects(
         raise ValueError("No subjects specified")
 
     if config is None:
-        from eeg_pipeline.utils.config.loader import load_settings
+        from eeg_pipeline.utils.config.loader import load_config
 
-        config = load_settings()
+        config = load_config()
 
     setup_matplotlib(config)
 
@@ -209,6 +216,7 @@ def visualize_behavior_for_subjects(
             logger,
             scatter_only=scatter_only,
             temporal_only=temporal_only,
+            plots=plots,
             deriv_root=effective_deriv_root,
             visualize_categories=visualize_categories,
         )

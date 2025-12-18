@@ -6,13 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import (
     create_roi_scatter_plots,
     setup_scatter_context,
 )
+from eeg_pipeline.infra.paths import deriv_features_path
+from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.utils.data import load_precomputed_correlations
-from eeg_pipeline.plotting.io.figures import get_default_config as _get_default_config
 from eeg_pipeline.infra.logging import get_subject_logger
 
 
@@ -25,21 +27,30 @@ def _extract_aperiodic_values(
     if metric is None:
         return pd.Series(dtype=float), False
 
-    roi_cols = []
+    roi_set = set(roi_channels)
+    cols: List[str] = []
     for col in features_df.columns:
-        if "aperiodic_plateau_broadband_ch_" not in col:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
             continue
-        if f"_{metric}" not in col:
+        if parsed.get("group") != "aperiodic":
             continue
-        for ch in roi_channels:
-            if f"_ch_{ch}_" in col:
-                roi_cols.append(col)
-                break
+        if parsed.get("segment") != band:
+            continue
+        if parsed.get("band") != "broadband":
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        if parsed.get("stat") != metric:
+            continue
+        ch = str(parsed.get("identifier") or "")
+        if ch and ch in roi_set:
+            cols.append(str(col))
 
-    if not roi_cols:
+    if not cols:
         return pd.Series(dtype=float), False
 
-    vals = features_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
     return vals, True
 
 
@@ -73,7 +84,8 @@ def plot_aperiodic_roi_scatter(
     plots_dir: Optional[Path] = None,
     config=None,
 ) -> Dict[str, Any]:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral aperiodic ROI scatter plotting")
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting aperiodic ROI scatter plotting for sub-{subject}")
@@ -82,9 +94,23 @@ def plot_aperiodic_roi_scatter(
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
 
+    aperiodic_plot_cfg = behavioral_config.get("aperiodic", {})
+    segment = str(aperiodic_plot_cfg.get("segment", "baseline"))
+
     data = setup_scatter_context(subject, deriv_root, task, plots_dir, "aperiodic", config, logger)
     if data is None:
         return {"significant": [], "all": []}
+
+    aperiodic_path = deriv_features_path(deriv_root, subject) / "features_aperiodic.tsv"
+    aperiodic_df = read_table(aperiodic_path) if aperiodic_path.exists() else None
+    if aperiodic_df is None or aperiodic_df.empty:
+        logger.warning("Aperiodic features not found at %s", aperiodic_path)
+        return {"significant": [], "all": []}
+    if len(aperiodic_df) != len(data.y):
+        raise ValueError(
+            f"Length mismatch: aperiodic features ({len(aperiodic_df)}) != targets ({len(data.y)})"
+        )
+    data.features_df = aperiodic_df
 
     rating_stats = load_precomputed_correlations(data.stats_dir, "aperiodic", "rating", logger)
     temp_stats = (
@@ -101,7 +127,7 @@ def plot_aperiodic_roi_scatter(
         x_label_formatter=_format_aperiodic_x_label,
         filename_formatter=_format_aperiodic_filename,
         feature_name_formatter=_format_aperiodic_feature_name,
-        bands=["broadband"],
+        bands=[segment],
         metrics=["slope", "offset"],
         method_code="spearman" if use_spearman else "pearson",
         bootstrap_ci=bootstrap_ci,

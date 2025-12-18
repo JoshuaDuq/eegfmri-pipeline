@@ -110,9 +110,6 @@ def get_numeric_feature_columns(
     return [c for c in numeric_cols if c not in exclude_set]
 
 
-# Backward-compatibility constants (prefer get_* accessors above)
-
-
 ###################################################################
 # FDR CORRECTION
 ###################################################################

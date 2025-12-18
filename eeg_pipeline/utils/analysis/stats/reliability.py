@@ -408,33 +408,25 @@ def compute_hierarchical_fdr_summary(
     """
     from pathlib import Path
     from eeg_pipeline.infra.tsv import read_tsv
+    from eeg_pipeline.utils.analysis.stats.fdr import infer_fdr_family, select_p_column_for_fdr
     
     stats_dir = Path(stats_dir)
     
-    # Group files by analysis type
-    analysis_groups = {
-        "power": [],
-        "connectivity": [],
-        "microstates": [],
-        "aperiodic": [],
-        "pac": [],
-        "other": [],
-    }
-    
-    for f in stats_dir.glob("corr_stats_*.tsv"):
-        fname = f.name.lower()
-        if "pow" in fname or "power" in fname:
-            analysis_groups["power"].append(f)
-        elif "conn" in fname or "edge" in fname or "graph" in fname:
-            analysis_groups["connectivity"].append(f)
-        elif "microstate" in fname or "ms_" in fname:
-            analysis_groups["microstates"].append(f)
-        elif "aperiodic" in fname:
-            analysis_groups["aperiodic"].append(f)
-        elif "pac" in fname:
-            analysis_groups["pac"].append(f)
-        else:
-            analysis_groups["other"].append(f)
+    def _extract_feature_family(family: str) -> str:
+        if "|features:" in family:
+            return str(family.split("|features:", 1)[1]).strip()
+        return str(family)
+
+    # Group files by feature family, using the same inference as apply_global_fdr
+    analysis_groups: Dict[str, List[Path]] = {}
+    for fpath in stats_dir.glob("corr_stats_*.tsv"):
+        df = read_tsv(fpath)
+        if df is None or df.empty:
+            continue
+
+        family = infer_fdr_family(fpath, df)
+        group_name = _extract_feature_family(family)
+        analysis_groups.setdefault(group_name, []).append(fpath)
     
     # Collect p-values by group
     p_by_group = {}
@@ -449,12 +441,7 @@ def compute_hierarchical_fdr_summary(
             if df is None or df.empty:
                 continue
             
-            p_col = None
-            for col in ["p", "p_value", "p_perm", "pvalue"]:
-                if col in df.columns:
-                    p_col = col
-                    break
-            
+            p_col = select_p_column_for_fdr(df)
             if p_col is None:
                 continue
             

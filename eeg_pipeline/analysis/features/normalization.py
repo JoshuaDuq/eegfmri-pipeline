@@ -59,8 +59,8 @@ def zscore_normalize(
     if epsilon is None:
         # Get epsilon from config if available
         try:
-            from eeg_pipeline.utils.config.loader import load_settings, get_config_value
-            config = load_settings()
+            from eeg_pipeline.utils.config.loader import load_config, get_config_value
+            config = load_config()
             epsilon = get_config_value(config, "feature_engineering.constants.epsilon_normalization", 1e-12)
         except Exception:
             epsilon = 1e-12  # Fallback default epsilon

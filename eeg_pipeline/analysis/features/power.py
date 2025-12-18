@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-from typing import Optional, List, Tuple, Any
+from typing import List, Tuple, Any
 import numpy as np
 import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import EPSILON_PSD, STANDARD_SEGMENTS
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
-
-from eeg_pipeline.analysis.features.precomputed.extras import extract_asymmetry_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.spectral import (
-    extract_segment_power_from_precomputed,
-    extract_spectral_extras_from_precomputed,
-)
 
 def _prepare_tfr(tfr: Any, config: Any, logger: Any):
     tfr_obj = extract_tfr_object(tfr)
@@ -82,13 +77,15 @@ def extract_power_features(
     # Iterate over all defined windows in Spec
     segments_to_process = []
     # Core segments including baseline
-    for seg in ["baseline", "ramp", "plateau"]:
-        if seg in ctx.windows.masks:
-             segments_to_process.append(seg)
-    # Bins
-    for name in ctx.windows.masks:
-        if name.startswith("coarse_") or name.startswith("fine_"):
-            segments_to_process.append(name)
+    for seg in STANDARD_SEGMENTS:
+        mask = ctx.windows.get_mask(seg)
+        if mask is not None and np.any(mask):
+            segments_to_process.append(seg)
+    # Bins (coarse and fine temporal windows)
+    if hasattr(ctx.windows, 'masks') and isinstance(ctx.windows.masks, dict):
+        for name in ctx.windows.masks:
+            if name.startswith("coarse_") or name.startswith("fine_"):
+                segments_to_process.append(name)
             
     ctx.logger.info(f"Computing power features for {len(segments_to_process)} segments")
     
@@ -105,7 +102,7 @@ def extract_power_features(
                 d = tfr_data[:, :, fmask, :][:, :, :, mask]
                 
                 raw_power = np.nanmean(np.nanmean(d, axis=3), axis=2) # (n_epochs, n_channels)
-                eps_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", 1e-20))
+                eps_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
                 raw_power = np.maximum(raw_power, eps_psd)
 
                 if tfr_already_baselined:

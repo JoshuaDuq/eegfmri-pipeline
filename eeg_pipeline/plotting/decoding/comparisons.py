@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 ###################################################################
 
 from eeg_pipeline.plotting.decoding.helpers import (
-    _despine,
-    _add_zero_reference_line,
-    _create_bar_plot,
+    despine,
+    add_zero_reference_line,
+    create_bar_plot,
 )
 
 
@@ -60,13 +60,13 @@ def plot_model_comparison(models_dict: dict, save_path: Path, config: Optional[A
     
     x_positions = np.arange(len(model_names))
     
-    _create_bar_plot(axes[0], x_positions, np.array(r_values), model_names, "Pearson's r", plot_cfg)
+    create_bar_plot(axes[0], x_positions, np.array(r_values), model_names, "Pearson's r", plot_cfg)
     y_lim_padding = plot_cfg.plot_type_configs.get("decoding", {}).get("y_lim_padding_factor", 1.1)
     r_min = min(0, min(r_values) * y_lim_padding)
     r_max = max(r_values) * y_lim_padding
     axes[0].set_ylim([r_min, r_max])
     
-    _create_bar_plot(axes[1], x_positions, np.array(r2_values), model_names, 'R²', plot_cfg)
+    create_bar_plot(axes[1], x_positions, np.array(r2_values), model_names, 'R²', plot_cfg)
     r2_min = min(0, min(r2_values) * y_lim_padding)
     r2_max = max(r2_values) * y_lim_padding
     axes[1].set_ylim([r2_min, r2_max])
@@ -95,8 +95,8 @@ def plot_riemann_band_comparison(band_results: dict, save_path: Path, config: Op
     
     x_positions = np.arange(len(bands))
     
-    _create_bar_plot(axes[0], x_positions, np.array(r_vals), bands, "Pearson's r", plot_cfg)
-    _create_bar_plot(axes[1], x_positions, np.array(r2_vals), bands, 'R²', plot_cfg)
+    create_bar_plot(axes[0], x_positions, np.array(r_vals), bands, "Pearson's r", plot_cfg)
+    create_bar_plot(axes[1], x_positions, np.array(r2_vals), bands, 'R²', plot_cfg)
     
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
@@ -128,16 +128,16 @@ def plot_riemann_sliding_window(sliding_df: pd.DataFrame, save_path: Path, confi
     
     axes[0].plot(time_centers, r_values, 'o-', color=plot_cfg.style.colors.gray, 
                  linewidth=plot_cfg.style.line.width_thick, markersize=marker_size)
-    _add_zero_reference_line(axes[0], plot_cfg)
+    add_zero_reference_line(axes[0], plot_cfg)
     axes[0].set_ylabel("Pearson's r")
-    _despine(axes[0])
+    despine(axes[0])
     
     axes[1].plot(time_centers, r2_values, 'o-', color=plot_cfg.style.colors.gray, 
                  linewidth=plot_cfg.style.line.width_thick, markersize=marker_size)
-    _add_zero_reference_line(axes[1], plot_cfg)
+    add_zero_reference_line(axes[1], plot_cfg)
     axes[1].set_xlabel('Time (s)')
     axes[1].set_ylabel('R²')
-    _despine(axes[1])
+    despine(axes[1])
     
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
@@ -179,11 +179,11 @@ def plot_incremental_validity(inc_summary: dict, save_path: Path, config: Option
            color=plot_cfg.style.colors.gray, alpha=plot_cfg.style.bar.alpha, 
            width=plot_cfg.style.bar.width, capsize=plot_cfg.style.errorbar_capsize_large, 
            error_kw={'linewidth': plot_cfg.style.line.width_standard})
-    _add_zero_reference_line(ax, plot_cfg)
+    add_zero_reference_line(ax, plot_cfg)
     ax.set_ylabel("Pearson's r")
     ax.set_xticks(x_positions)
     ax.set_xticklabels(metrics, rotation=45, ha='right')
-    _despine(ax)
+    despine(ax)
     
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)

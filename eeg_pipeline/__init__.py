@@ -29,7 +29,6 @@ __all__ = [
     "__version__",
     "EEGConfig",
     "ConfigLike",
-    "FeatureResult",
     "CorrelationResult",
     "DecodingResult",
     "ValidationResult",
@@ -45,7 +44,6 @@ def __getattr__(name: str):
     if name in {
         "EEGConfig",
         "ConfigLike",
-        "FeatureResult",
         "CorrelationResult",
         "DecodingResult",
         "ValidationResult",

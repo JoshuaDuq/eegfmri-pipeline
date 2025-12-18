@@ -57,7 +57,7 @@ from eeg_pipeline.utils.data.decoding import (
 )
 from eeg_pipeline.utils.data.decoding import load_epochs_with_targets
 from eeg_pipeline.utils.data.decoding import load_plateau_matrix
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.decoding import (
@@ -91,7 +91,7 @@ def nested_loso_predictions(
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = load_settings()
+    config_local = load_config()
     if inner_splits is None:
         inner_splits = config_local.get("decoding.cv.inner_splits", 5)
     if seed is None:
@@ -297,7 +297,7 @@ def _fit_within_subject_fold(
     n_jobs: int,
     logger: logging.Logger,
 ) -> Pipeline:
-    config_local = load_settings()
+    config_local = load_config()
     
     if blocks_train is not None:
         n_unique_blocks = len(np.unique(blocks_train))
@@ -351,7 +351,7 @@ def within_subject_kfold_predictions(
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = load_settings()
+    config_local = load_config()
     if n_splits is None:
         n_splits = config_local.get("decoding.cv.default_n_splits", 5)
     if seed is None:
@@ -557,7 +557,7 @@ def loso_baseline_predictions(
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = load_settings()
+    config_local = load_config()
     min_subjects_for_loso = config_local.get("analysis.min_subjects_for_group", 2)
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")

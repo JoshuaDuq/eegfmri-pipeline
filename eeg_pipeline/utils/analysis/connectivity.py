@@ -185,16 +185,9 @@ def compute_significant_edges(
     return sig_edges or None
 
 
-# Backwards-compatible alias (older name)
-compute_significance_mask = compute_significant_edges
-
-
 __all__ = [
     "parse_connectivity_columns",
     "build_matrix_from_edges",
     "build_adjacency_from_edges",
     "compute_significant_edges",
-    "compute_significance_mask",
 ]
-
-

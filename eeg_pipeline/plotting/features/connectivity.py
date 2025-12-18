@@ -24,7 +24,7 @@ from eeg_pipeline.plotting.features.utils import get_fdr_alpha
 from eeg_pipeline.utils.analysis.connectivity import (
     build_adjacency_from_edges,
     build_matrix_from_edges,
-    compute_significance_mask,
+    compute_significant_edges,
     parse_connectivity_columns,
 )
 
@@ -816,7 +816,7 @@ def plot_connectivity_heatmap(
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = compute_significance_mask(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significant_edges(features_df, edge_cols, events_df, config)
     plot_cfg = get_plot_config(config)
     vmax = float(np.nanmax(np.abs(adj))) if np.any(np.isfinite(adj)) else 1.0
 
@@ -885,7 +885,7 @@ def plot_connectivity_network(
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = compute_significance_mask(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significant_edges(features_df, edge_cols, events_df, config)
     sig_set = sig_edges if isinstance(sig_edges, set) else set()
 
     plot_cfg = get_plot_config(config)

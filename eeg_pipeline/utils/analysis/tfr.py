@@ -11,7 +11,7 @@ import mne
 import numpy as np
 import pandas as pd
 
-from ..config.loader import load_settings, get_constants, get_config_value, ensure_config, get_frequency_band_names, get_frequency_bands
+from ..config.loader import load_config, get_constants, get_config_value, ensure_config, get_frequency_band_names, get_frequency_bands
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.windowing import (
     build_time_windows_fixed_count,
@@ -1643,7 +1643,7 @@ def compute_subject_tfr(
 ) -> Tuple[Optional["mne.time_frequency.EpochsTFR"], Optional[pd.DataFrame]]:
     from ..data.loading import load_epochs_for_analysis
     
-    config = load_settings()
+    config = load_config()
     epochs, events_df = load_epochs_for_analysis(
         subject, task, align="strict", preload=True,
         deriv_root=config.deriv_root, bids_root=config.bids_root,

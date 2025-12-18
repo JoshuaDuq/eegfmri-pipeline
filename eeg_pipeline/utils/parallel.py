@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import numpy as np
@@ -239,16 +240,40 @@ def _compute_single_condition_effect(
     if len(pain_valid) < min_samples or len(nonpain_valid) < min_samples:
         return None
 
+    mean_pain = float(np.mean(pain_valid))
+    mean_nonpain = float(np.mean(nonpain_valid))
+    std_pain = float(np.std(pain_valid, ddof=1))
+    std_nonpain = float(np.std(nonpain_valid, ddof=1))
+
+    eps_std = 1e-12
+    eps_mean = 1e-12
+
     g = hedges_g(pain_valid, nonpain_valid)
-    t_stat, p_val = stats.ttest_ind(pain_valid, nonpain_valid, equal_var=False)
-    interp = interpret_effect_size(g)
+    t_stat = np.nan
+    p_val = np.nan
+
+    if std_pain < eps_std and std_nonpain < eps_std:
+        if abs(mean_pain - mean_nonpain) < eps_mean:
+            g = 0.0
+            t_stat = 0.0
+            p_val = 1.0
+    else:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", RuntimeWarning)
+                t_stat, p_val = stats.ttest_ind(pain_valid, nonpain_valid, equal_var=False)
+        except RuntimeWarning:
+            t_stat = np.nan
+            p_val = np.nan
+
+    interp = interpret_effect_size(g) if np.isfinite(g) else "unknown"
 
     return {
         "feature": col,
-        "mean_pain": float(np.mean(pain_valid)),
-        "mean_nonpain": float(np.mean(nonpain_valid)),
-        "std_pain": float(np.std(pain_valid, ddof=1)),
-        "std_nonpain": float(np.std(nonpain_valid, ddof=1)),
+        "mean_pain": mean_pain,
+        "mean_nonpain": mean_nonpain,
+        "std_pain": std_pain,
+        "std_nonpain": std_nonpain,
         "hedges_g": float(g),
         "effect_interpretation": interp,
         "t_statistic": float(t_stat),

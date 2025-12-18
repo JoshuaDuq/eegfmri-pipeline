@@ -23,6 +23,52 @@ if TYPE_CHECKING:
     pass
 
 
+def infer_fdr_family(fpath: Path, df: pd.DataFrame) -> str:
+    name = fpath.stem
+    if "test_family" in df.columns and df["test_family"].notna().any():
+        try:
+            return str(df["test_family"].dropna().iloc[0])
+        except Exception:
+            pass
+
+    corr_match = re.match(r"corr_stats_(.+)_vs_(.+)", name)
+    if corr_match:
+        feature_part, target_part = corr_match.groups()
+        return f"target:{target_part}|features:{feature_part}"
+
+    if "target" in df.columns and df["target"].notna().any():
+        try:
+            tgt = str(df["target"].dropna().iloc[0])
+            ftype = (
+                str(df["feature_type"].dropna().iloc[0])
+                if "feature_type" in df.columns and df["feature_type"].notna().any()
+                else None
+            )
+            return f"target:{tgt}|features:{ftype}" if ftype else f"target:{tgt}"
+        except Exception:
+            pass
+
+    return name
+
+
+def select_p_column_for_fdr(df: pd.DataFrame) -> Optional[str]:
+    if "p_primary_perm" in df.columns:
+        p = pd.to_numeric(df["p_primary_perm"], errors="coerce")
+        if p.notna().any():
+            return "p_primary_perm"
+    if "p_primary" in df.columns:
+        p = pd.to_numeric(df["p_primary"], errors="coerce")
+        if p.notna().any():
+            return "p_primary"
+    if "p_raw" in df.columns:
+        return "p_raw"
+    if "p" in df.columns:
+        return "p"
+    if "p_value" in df.columns:
+        return "p_value"
+    return None
+
+
 def fdr_bh(
     pvals: Iterable[float],
     alpha: Optional[float] = None,
@@ -166,45 +212,11 @@ def apply_global_fdr(
     file_refs_by_family: Dict[str, list] = defaultdict(list)
 
     def infer_family(fpath: Path, df: pd.DataFrame) -> str:
-        name = fpath.stem
-        if "test_family" in df.columns and df["test_family"].notna().any():
-            try:
-                return str(df["test_family"].dropna().iloc[0])
-            except Exception:
-                pass
-
-        corr_match = re.match(r"corr_stats_(.+)_vs_(.+)", name)
-        if corr_match:
-            feature_part, target_part = corr_match.groups()
-            return f"target:{target_part}|features:{feature_part}"
-
-        if "target" in df.columns and df["target"].notna().any():
-            try:
-                tgt = str(df["target"].dropna().iloc[0])
-                ftype = str(df["feature_type"].dropna().iloc[0]) if "feature_type" in df.columns and df["feature_type"].notna().any() else None
-                return f"target:{tgt}|features:{ftype}" if ftype else f"target:{tgt}"
-            except Exception:
-                pass
-
-        return name
+        return infer_fdr_family(fpath, df)
 
     def select_p_column(df: pd.DataFrame) -> Optional[str]:
-        if "p_primary_perm" in df.columns:
-            p = pd.to_numeric(df["p_primary_perm"], errors="coerce")
-            if p.notna().any():
-                return "p_primary_perm"
-        if "p_primary" in df.columns:
-            p = pd.to_numeric(df["p_primary"], errors="coerce")
-            if p.notna().any():
-                return "p_primary"
-        if "p_raw" in df.columns:
-            return "p_raw"
-        if "p" in df.columns:
-            return "p"
-        if "p_value" in df.columns:
-            return "p_value"
-        return None
-    
+        return select_p_column_for_fdr(df)
+
     for fpath in files:
         df = read_tsv(fpath)
         if df is None or df.empty:

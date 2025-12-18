@@ -181,10 +181,13 @@ class PlotConfig:
         figure_sizes_dict = plotting.get("figure_sizes", {})
         plots_config = plotting.get("plots", {})
         plot_types_legacy = plotting.get("plot_types", {})
+        behavioral_config = plotting.get("behavioral", {})
         validation_dict = plotting.get("validation", {})
         
         plot_types = dict(plot_types_legacy)
         plot_types.update(plots_config)
+        if isinstance(behavioral_config, dict) and behavioral_config:
+            plot_types["behavioral"] = behavioral_config
         
         layout = defaults.get("layout", {})
         layout_rects = {

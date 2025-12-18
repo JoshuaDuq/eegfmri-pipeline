@@ -20,7 +20,6 @@ from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
     logratio_to_pct as _logratio_to_pct,
     pct_to_logratio as _pct_to_logratio,
-    get_default_config as _get_default_config,
 )
 from eeg_pipeline.utils.formatting import format_channel_list_for_display, format_roi_description
 from eeg_pipeline.infra.logging import get_default_logger as _get_default_logger
@@ -233,7 +232,8 @@ def generate_correlation_scatter(
     config = None,
 ) -> None:
     logger = logger or _get_default_logger()
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
 
     ensure_aligned_lengths(x_data, y_data, context="Correlation scatter inputs", strict=True)
@@ -285,11 +285,13 @@ def generate_correlation_scatter(
     line_width = plot_cfg.get_line_width("bold", plot_type="behavioral")
     
     behavioral_config = plot_cfg.get_behavioral_config()
+    show_regression_ci = bool(behavioral_config.get("show_regression_ci", False))
+    reg_ci = int(behavioral_config.get("correlation_ci_level", 95)) if show_regression_ci else None
     sns.regplot(
         x=x_clean,
         y=y_clean,
         ax=ax_main,
-        ci=behavioral_config.get("correlation_ci_level", 95),
+        ci=reg_ci,
         scatter_kws={
             "s": marker_size,
             "alpha": plot_cfg.style.scatter.alpha,
@@ -308,7 +310,7 @@ def generate_correlation_scatter(
 
     _add_percentage_axis(ax_histx, x_label, plot_cfg)
 
-    stats_text = format_correlation_stats_text(r_disp, p_disp, n_disp, ci_disp, stats_tag)
+    stats_text = format_correlation_stats_text(r_disp, p_disp, n_disp, ci_disp, stats_tag, config=config)
     fig.text(
         plot_cfg.text_position.p_value_x,
         plot_cfg.text_position.p_value_y,
@@ -329,9 +331,24 @@ def generate_correlation_scatter(
         fig.tight_layout()
 
     _log_plot_details(logger, title_prefix, roi_channels)
-    save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi, 
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches,
-             footer=_get_behavior_footer(config), logger=logger)
+
+    behavioral_config = plot_cfg.get_behavioral_config()
+    sig_thr = float(behavioral_config.get("significance_threshold", 0.05))
+    if Z_covars is not None and not Z_covars.empty:
+        inference = "Displayed: partial-correlation p-values (uncorrected)"
+    else:
+        inference = "Displayed: correlation p-values (uncorrected)"
+
+    save_fig(
+        fig,
+        output_path,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+        footer=_get_behavior_footer(config, inference=inference, alpha=sig_thr),
+        logger=logger,
+    )
     plt.close(fig)
 
 
@@ -409,7 +426,8 @@ def plot_residual_qc(
     logger: Optional[logging.Logger] = None,
     config = None,
 ) -> None:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     logger = logger or _get_default_logger()
     plot_cfg = get_plot_config(config)
 
@@ -441,7 +459,7 @@ def plot_residual_qc(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
-        footer=_get_behavior_footer(config),
+        footer=_get_behavior_footer(config, inference="Descriptive: regression residual QC"),
         logger=logger,
     )
     plt.close(fig)
@@ -492,7 +510,8 @@ def plot_regression_residual_diagnostics(
     logger: Optional[logging.Logger] = None,
     config = None,
 ) -> None:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     logger = logger or _get_default_logger()
     plot_cfg = get_plot_config(config)
 
@@ -525,7 +544,7 @@ def plot_regression_residual_diagnostics(
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
-        footer=_get_behavior_footer(config),
+        footer=_get_behavior_footer(config, inference="Descriptive: regression residual diagnostics"),
         logger=logger,
     )
     plt.close(fig)

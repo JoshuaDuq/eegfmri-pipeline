@@ -8,6 +8,7 @@ from eeg_pipeline.plotting.behavioral.scatter.dynamics import plot_dynamics_roi_
 from eeg_pipeline.plotting.behavioral.scatter.itpc import plot_itpc_roi_scatter
 from eeg_pipeline.plotting.behavioral.scatter.power import plot_power_roi_scatter
 from eeg_pipeline.plotting.behavioral.scatter.psychometrics import plot_psychometrics
+from eeg_pipeline.plotting.behavioral.scatter.summary import plot_top_behavioral_predictors
 from eeg_pipeline.plotting.behavioral.temporal.clusters import plot_pain_nonpain_clusters
 from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_pain
 
@@ -131,3 +132,14 @@ def run_dose_response(ctx, saved_plots):
         logger=ctx.logger,
     )
     saved_plots.update(results)
+
+
+@BehaviorPlotRegistry.register("summary", name="top_predictors")
+def run_top_predictors(ctx, saved_plots):
+    plot_top_behavioral_predictors(
+        subject=ctx.subject,
+        task=ctx.task,
+        plots_dir=ctx.plots_dir,
+        config=ctx.config,
+    )
+    saved_plots["top_predictors"] = ctx.plots_dir

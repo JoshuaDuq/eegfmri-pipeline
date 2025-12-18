@@ -10,7 +10,7 @@ Advanced CFC measures for EEG-fMRI analysis:
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -21,11 +21,15 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.analysis.spectral import bandpass_filter_epochs
-from eeg_pipeline.utils.config.loader import get_frequency_bands
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.parallel import get_n_jobs
 
 
-def _compute_modulation_index(phase: np.ndarray, amp: np.ndarray, n_bins: int = 18) -> float:
+DEFAULT_PAC_N_BINS = 18
+
+
+def _compute_modulation_index(phase: np.ndarray, amp: np.ndarray, n_bins: int = DEFAULT_PAC_N_BINS) -> float:
     """Compute Modulation Index (Tort et al. 2010)."""
     bin_edges = np.linspace(-np.pi, np.pi, n_bins + 1)
     
@@ -187,13 +191,14 @@ def extract_modulation_index_pac(
     """Extract Modulation Index PAC (Tort et al. 2010)."""
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
+        logger.warning("CFC/PAC: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), []
 
     freq_bands = get_frequency_bands(config)
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_pac")
     
     # 1. Pre-filter all relevant bands
     # Collect unique bands needed
@@ -252,13 +257,15 @@ def extract_glm_pac(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract GLM-based PAC."""
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: return pd.DataFrame(), []
+    if len(picks) == 0:
+        logger.warning("GLM-PAC: No EEG channels available; skipping extraction.")
+        return pd.DataFrame(), []
     
     freq_bands = get_frequency_bands(config)
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_pac")
 
     # Pre-filter
     all_bands = set(phase_bands) | set(amp_bands)
@@ -322,13 +329,15 @@ def extract_phase_phase_coupling(
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Extract n:m phase-phase coupling."""
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: return pd.DataFrame(), []
+    if len(picks) == 0:
+        logger.warning("Phase-Phase Coupling: No EEG channels available; skipping extraction.")
+        return pd.DataFrame(), []
     
     freq_bands = get_frequency_bands(config)
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_pac")
     
     # Pre-filter
     needed_bands = set()
@@ -424,18 +433,17 @@ def _compute_bicoherence_epoch(
             
     if bic_values:
         mean_bic = np.nanmean(bic_values, axis=0)
-        record["bicoherence_mean"] = float(np.nanmean(mean_bic))
-        record["bicoherence_max"] = float(np.nanmax(mean_bic))
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_mean")] = float(np.nanmean(mean_bic))
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_max")] = float(np.nanmax(mean_bic))
         
-        # Peak location
         idx = np.nanargmax(mean_bic)
         i_idx, j_idx = np.unravel_index(idx, mean_bic.shape)
-        record["bicoherence_peak_f1"] = float(freqs[i_idx]) if i_idx < len(freqs) else np.nan
-        record["bicoherence_peak_f2"] = float(freqs[j_idx]) if j_idx < len(freqs) else np.nan
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_peak_f1")] = float(freqs[i_idx]) if i_idx < len(freqs) else np.nan
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_peak_f2")] = float(freqs[j_idx]) if j_idx < len(freqs) else np.nan
 
     else:
-        record["bicoherence_mean"] = np.nan
-        record["bicoherence_max"] = np.nan
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_mean")] = np.nan
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_max")] = np.nan
         
     return record
 
@@ -444,12 +452,14 @@ def extract_bicoherence_features(
     epochs: mne.Epochs, config: Any, logger: Any, *, freq_range: Tuple[float, float] = (1, 50)
 ) -> Tuple[pd.DataFrame, List[str]]:
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: return pd.DataFrame(), []
+    if len(picks) == 0:
+        logger.warning("Bicoherence: No EEG channels available; skipping extraction.")
+        return pd.DataFrame(), []
     
     data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
     n_epochs = data.shape[0]
-    n_jobs = int(config.get("feature_engineering.parallel.n_jobs_pac", -1))
+    n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_pac")
     fmax = min(freq_range[1], sfreq / 2 - 1)
     
     records = Parallel(n_jobs=n_jobs)(

@@ -14,14 +14,19 @@ Features are computed on the 'plateau' window (pain) by default.
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any
 import numpy as np
 import pandas as pd
-import mne
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import (
+    MIN_SAMPLES_COMPLEXITY,
+    STANDARD_SEGMENTS,
+    get_segment_mask,
+    validate_extractor_inputs,
+)
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_permutation_entropy as _permutation_entropy,
     compute_sample_entropy as _sample_entropy,
@@ -50,13 +55,13 @@ def _compute_metrics_for_trace(data: np.ndarray, params: Dict[str, Any]) -> Dict
     # PE
     res["pe"] = _permutation_entropy(data, order=params["pe_order"], delay=params["pe_delay"])
     
-    # Hjorth
+    # Hjorth parameters - can fail on constant or degenerate signals
     try:
         act, mob, comp = _hjorth_parameters(data)
         res["hjorth_activity"] = act
         res["hjorth_mobility"] = mob
         res["hjorth_complexity"] = comp
-    except Exception:
+    except (ValueError, ZeroDivisionError, RuntimeError):
         res["hjorth_activity"] = np.nan
         res["hjorth_mobility"] = np.nan
         res["hjorth_complexity"] = np.nan
@@ -140,9 +145,10 @@ def _extract_dynamics_for_segment(
         if filtered is None: 
             continue
 
-        # Avoid nested parallelism (bandpass_filter_epochs may already use threads/processes).
-        # Parallelizing both filtering and per-epoch metrics can oversubscribe CPUs and slow down.
-        epoch_dicts = Parallel(n_jobs=1)(
+        # Use parallelism for epoch processing - bandpass filter is already complete at this point
+        # so there's no nested parallelism concern
+        effective_jobs = n_jobs if n_epochs > 4 else 1  # Only parallelize if worthwhile
+        epoch_dicts = Parallel(n_jobs=effective_jobs, prefer="threads")(
             delayed(_process_epoch_metrics)(filtered[e], ch_names, params, segment_name, band)
             for e in range(n_epochs)
         )
@@ -161,52 +167,38 @@ def extract_dynamics_features(
     bands: List[str]
 ) -> Tuple[pd.DataFrame, List[str]]:
     
+    valid, err = validate_extractor_inputs(ctx, "Complexity", min_epochs=2)
+    if not valid:
+        ctx.logger.warning(err)
+        return pd.DataFrame(), []
+    
     epochs = ctx.epochs
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: 
+    if len(picks) == 0:
+        ctx.logger.warning("Complexity: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), []
     
     full_data = epochs.get_data(picks=picks)
     sfreq = epochs.info["sfreq"]
+    from eeg_pipeline.utils.parallel import get_n_jobs
     freq_bands = get_frequency_bands(ctx.config)
-    n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_complexity", -1))
+    n_jobs = get_n_jobs(ctx.config, default=-1, config_path="feature_engineering.parallel.n_jobs_complexity")
     params = _extract_params(ctx.config)
-    min_samps = 100
+    min_samps = MIN_SAMPLES_COMPLEXITY
     
     all_dfs = []
     
-    # Process baseline segment
-    mask_baseline = ctx.windows.get_mask("baseline")
-    if mask_baseline is not None and np.sum(mask_baseline) >= min_samps:
-        data_baseline = full_data[..., mask_baseline]
-        baseline_df = _extract_dynamics_for_segment(
-            data_baseline, ch_names, sfreq, bands, freq_bands, params, "baseline", n_jobs
+    for seg_name in STANDARD_SEGMENTS:
+        mask = get_segment_mask(ctx.windows, seg_name)
+        if mask is None or np.sum(mask) < min_samps:
+            continue
+        data_seg = full_data[..., mask]
+        seg_df = _extract_dynamics_for_segment(
+            data_seg, ch_names, sfreq, bands, freq_bands, params, seg_name, n_jobs
         )
-        if not baseline_df.empty:
-            all_dfs.append(baseline_df)
-            ctx.logger.info(f"Computed Dynamics for baseline: {np.sum(mask_baseline)} samples")
-    
-    # Process ramp segment
-    mask_ramp = ctx.windows.get_mask("ramp")
-    if mask_ramp is not None and np.sum(mask_ramp) >= min_samps:
-        data_ramp = full_data[..., mask_ramp]
-        ramp_df = _extract_dynamics_for_segment(
-            data_ramp, ch_names, sfreq, bands, freq_bands, params, "ramp", n_jobs
-        )
-        if not ramp_df.empty:
-            all_dfs.append(ramp_df)
-            ctx.logger.info(f"Computed Dynamics for ramp: {np.sum(mask_ramp)} samples")
-    
-    # Process plateau segment
-    mask_plateau = ctx.windows.get_mask("plateau")
-    if mask_plateau is not None and np.sum(mask_plateau) >= min_samps:
-        data_plateau = full_data[..., mask_plateau]
-        plateau_df = _extract_dynamics_for_segment(
-            data_plateau, ch_names, sfreq, bands, freq_bands, params, "plateau", n_jobs
-        )
-        if not plateau_df.empty:
-            all_dfs.append(plateau_df)
-            ctx.logger.info(f"Computed Dynamics for plateau: {np.sum(mask_plateau)} samples")
+        if not seg_df.empty:
+            all_dfs.append(seg_df)
+            ctx.logger.info(f"Computed Dynamics for {seg_name}: {np.sum(mask)} samples")
     
     if not all_dfs:
         ctx.logger.warning("No valid segments for dynamics")
@@ -244,12 +236,12 @@ def _process_complexity_epoch(
             
             try:
                 lzc = _lempel_ziv_complexity(trace)
-            except Exception:
+            except (ValueError, RuntimeError):
                 lzc = np.nan
             
             try:
                 pe = _permutation_entropy(trace, order=3, delay=1)
-            except Exception:
+            except (ValueError, RuntimeError):
                 pe = np.nan
             
             col_lzc = NamingSchema.build("complexity", segment_name, band, "ch", "lzc", channel=ch_name)
@@ -307,11 +299,9 @@ def extract_complexity_from_precomputed(
 
     all_records: List[Dict[str, float]] = []
     
-    # Get segment masks
-    baseline_mask = getattr(precomputed.windows, "baseline_mask", None)
-    active_mask = getattr(precomputed.windows, "active_mask", None)
+    baseline_mask = precomputed.windows.get_mask("baseline")
+    active_mask = precomputed.windows.get_mask("plateau")
     
-    # Process baseline segment
     if baseline_mask is not None and np.any(baseline_mask):
         baseline_records = _compute_complexity_for_segment(precomputed, baseline_mask, "baseline", n_jobs=n_jobs)
         if baseline_records:

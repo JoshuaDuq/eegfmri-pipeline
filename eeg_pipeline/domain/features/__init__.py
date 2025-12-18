@@ -8,7 +8,20 @@ from eeg_pipeline.domain.features.registry import (
     get_feature_registry,
 )
 
+
+FEATURE_TYPES = (
+    "power",
+    "connectivity",
+    "microstates",
+    "aperiodic",
+    "itpc",
+    "pac",
+    "precomputed",
+)
+
+
 __all__ = [
+    "FEATURE_TYPES",
     "NamingSchema",
     "FeatureRegistry",
     "FeatureRule",

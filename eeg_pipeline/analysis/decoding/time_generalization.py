@@ -26,7 +26,7 @@ from eeg_pipeline.analysis.decoding.cv import (
     get_min_channels_required,
     safe_pearsonr,
 )
-from eeg_pipeline.utils.config.loader import load_settings, get_fisher_z_clip_values
+from eeg_pipeline.utils.config.loader import load_config, get_fisher_z_clip_values
 from eeg_pipeline.infra.logging import get_logger
 
 logger = get_logger(__name__)
@@ -81,7 +81,7 @@ def time_generalization_regression(
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = config_dict or load_settings()
+    config_local = config_dict or load_config()
     min_subjects_for_loso = config_local.get("analysis.min_subjects_for_group", 2)
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")

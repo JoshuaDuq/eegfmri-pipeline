@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.behavioral.scatter.core import load_subject_data, plot_target_correlations
 from eeg_pipeline.utils.analysis.stats import extract_overall_statistics, extract_roi_statistics
 from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.infra.logging import get_subject_logger
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir
-from eeg_pipeline.plotting.io.figures import get_band_color, get_default_config as _get_default_config
+from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.data.features import get_power_columns_by_band
 
 
@@ -31,8 +31,9 @@ def plot_power_roi_scatter(
     temp_stats: Optional[pd.DataFrame] = None,
     plots_dir: Optional[Path] = None,
     config: Optional[Any] = None,
-) -> None:
-    config = config or _get_default_config()
+) -> Dict[str, Any]:
+    if config is None:
+        raise ValueError("config is required for behavioral power ROI scatter plotting")
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
     logger.info(f"Starting ROI power scatter plotting for sub-{subject}")
@@ -55,12 +56,12 @@ def plot_power_roi_scatter(
         subject, task, deriv_root, config, logger, partial_covars
     )
     if temporal_df is None:
-        return
+        return {"significant": [], "all": []}
 
     if rating_stats is None:
-        logger.warning("ROI rating statistics not provided; plots will use empirical correlations only.")
+        logger.debug("ROI rating statistics not provided; using empirical correlations")
     if do_temp and temp_stats is None:
-        logger.warning("ROI temperature statistics not provided; temperature annotations will be omitted.")
+        logger.debug("ROI temperature statistics not provided; using empirical correlations")
 
     method_code = "spearman" if use_spearman else "pearson"
     covar_names = list(Z_df_full.columns) if Z_df_full is not None and not Z_df_full.empty else None
@@ -69,10 +70,15 @@ def plot_power_roi_scatter(
     overall_roi_keys = behavioral_config.get("overall_roi_keys", ["overall", "all", "global"])
     target_rating = behavioral_config.get("target_rating", "rating")
     target_temperature = behavioral_config.get("target_temperature", "temperature")
-    power_bands_to_use = config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
+    power_bands_to_use = config.get("power.bands_to_use") or list(config.get("frequency_bands", {}).keys())
+    if not power_bands_to_use:
+        logger.error("Frequency bands not configured in eeg_config.yaml")
+        return {"significant": [], "all": []}
+
+    results = {"significant": [], "all": []}
+    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in power_bands_to_use])
 
     for band in power_bands_to_use:
-        power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in power_bands_to_use])
         band_cols = set(power_cols_by_band.get(str(band), []))
         if not band_cols:
             continue
@@ -103,6 +109,8 @@ def plot_power_roi_scatter(
             stats_df=stats_overall_rating,
             logger=logger,
             config=config,
+            results=results,
+            feature_name=f"power_{band}",
             temporal_df=temporal_df,
         )
 
@@ -127,6 +135,8 @@ def plot_power_roi_scatter(
                 stats_df=stats_overall_temp,
                 logger=logger,
                 config=config,
+                results=results,
+                feature_name=f"power_{band}",
                 temporal_df=temporal_df,
             )
 
@@ -135,22 +145,16 @@ def plot_power_roi_scatter(
             for ch in chs:
                 for c in band_cols:
                     parsed = NamingSchema.parse(str(c))
-                    if parsed.get("valid") and parsed.get("group") == "power":
-                        if str(parsed.get("band") or "") != str(band):
-                            continue
-                        if str(parsed.get("segment") or "") != "plateau":
-                            continue
-                        if str(parsed.get("scope") or "") != "ch":
-                            continue
-                        if str(parsed.get("identifier") or "") == str(ch):
-                            roi_cols.append(str(c))
+                    if not parsed.get("valid") or parsed.get("group") != "power":
                         continue
-
-                    legacy = parse_legacy_power_feature_name(str(c))
-                    if legacy is not None:
-                        _legacy_band, legacy_ch = legacy
-                        if str(_legacy_band) == str(band) and str(legacy_ch) == str(ch):
-                            roi_cols.append(str(c))
+                    if str(parsed.get("band") or "") != str(band):
+                        continue
+                    if str(parsed.get("segment") or "") != "plateau":
+                        continue
+                    if str(parsed.get("scope") or "") != "ch":
+                        continue
+                    if str(parsed.get("identifier") or "") == str(ch):
+                        roi_cols.append(str(c))
             if not roi_cols:
                 continue
 
@@ -176,6 +180,8 @@ def plot_power_roi_scatter(
                 stats_df=stats_roi_rating,
                 logger=logger,
                 config=config,
+                results=results,
+                feature_name=f"power_{band}",
                 temporal_df=temporal_df,
                 roi_channels=chs,
             )
@@ -199,6 +205,10 @@ def plot_power_roi_scatter(
                     stats_df=stats_roi_temp,
                     logger=logger,
                     config=config,
+                    results=results,
+                    feature_name=f"power_{band}",
                     temporal_df=temporal_df,
                     roi_channels=chs,
                 )
+
+    return results

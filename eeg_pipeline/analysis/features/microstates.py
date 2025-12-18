@@ -10,6 +10,12 @@ from scipy.signal import find_peaks
 from joblib import Parallel, delayed
 
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.constants import (
+    MIN_SAMPLES_DEFAULT,
+    STANDARD_SEGMENTS,
+    get_segment_mask,
+    validate_extractor_inputs,
+)
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.utils.config.loader import get_config_value
 
@@ -380,10 +386,16 @@ def extract_microstate_features(
     ctx: Any, # FeatureContext
 ) -> Tuple[pd.DataFrame, List[str], Optional[np.ndarray]]:
     
+    valid, err = validate_extractor_inputs(ctx, "Microstates", min_epochs=10)
+    if not valid:
+        ctx.logger.warning(err)
+        return pd.DataFrame(), [], None
+    
     n_states = int(ctx.config.get("feature_engineering.microstates.n_states", 4))
     epochs = ctx.epochs
     picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0: 
+    if len(picks) == 0:
+        ctx.logger.warning("Microstates: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), [], None
     
     full_data = epochs.get_data(picks=picks)
@@ -397,7 +409,7 @@ def extract_microstate_features(
             ctx.config.get("feature_engineering.parallel.n_jobs_feature_groups", -1),
         )
     )
-    min_samples = 10
+    min_samples = MIN_SAMPLES_DEFAULT
 
     min_run_ms = float(ctx.config.get("feature_engineering.microstates.min_run_ms", 10.0))
     gfp_min_percentile = float(ctx.config.get("feature_engineering.microstates.gfp_min_percentile", 25.0))
@@ -428,59 +440,25 @@ def extract_microstate_features(
     
     all_data = {}
     
-    # Process baseline segment
-    mask_baseline = ctx.windows.get_mask("baseline")
-    if mask_baseline is not None and np.sum(mask_baseline) >= min_samples:
-        data_baseline = full_data[..., mask_baseline]
-        baseline_features = _extract_microstates_for_segment(
-            data_baseline,
+    for seg_name in STANDARD_SEGMENTS:
+        mask = get_segment_mask(ctx.windows, seg_name)
+        if mask is None or np.sum(mask) < min_samples:
+            continue
+        data_seg = full_data[..., mask]
+        seg_features = _extract_microstates_for_segment(
+            data_seg,
             templates,
             sfreq,
             n_states,
-            "baseline",
+            seg_name,
             n_jobs=n_jobs,
             min_run_ms=min_run_ms,
             gfp_min_percentile=gfp_min_percentile,
             min_valid_fraction=min_valid_fraction,
             min_correlation=min_correlation,
         )
-        all_data.update(baseline_features)
-        ctx.logger.info(f"Computed Microstates for baseline: {np.sum(mask_baseline)} samples")
-    
-    # Process ramp segment
-    mask_ramp = ctx.windows.get_mask("ramp")
-    if mask_ramp is not None and np.sum(mask_ramp) >= min_samples:
-        data_ramp = full_data[..., mask_ramp]
-        ramp_features = _extract_microstates_for_segment(
-            data_ramp,
-            templates,
-            sfreq,
-            n_states,
-            "ramp",
-            n_jobs=n_jobs,
-            min_run_ms=min_run_ms,
-            gfp_min_percentile=gfp_min_percentile,
-            min_valid_fraction=min_valid_fraction,
-            min_correlation=min_correlation,
-        )
-        all_data.update(ramp_features)
-        ctx.logger.info(f"Computed Microstates for ramp: {np.sum(mask_ramp)} samples")
-    
-    # Process plateau segment
-    plateau_features = _extract_microstates_for_segment(
-        data_plateau,
-        templates,
-        sfreq,
-        n_states,
-        "plateau",
-        n_jobs=n_jobs,
-        min_run_ms=min_run_ms,
-        gfp_min_percentile=gfp_min_percentile,
-        min_valid_fraction=min_valid_fraction,
-        min_correlation=min_correlation,
-    )
-    all_data.update(plateau_features)
-    ctx.logger.info(f"Computed Microstates for plateau: {np.sum(mask_plateau)} samples")
+        all_data.update(seg_features)
+        ctx.logger.info(f"Computed Microstates for {seg_name}: {np.sum(mask)} samples")
     
     if not all_data:
         return pd.DataFrame(), [], templates
@@ -500,20 +478,19 @@ def extract_microstate_features_from_epochs(
 ) -> Tuple[pd.DataFrame, List[str], Optional[np.ndarray]]:
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
+        logger.warning("Microstates: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), [], None
 
     full_data = epochs.get_data(picks=picks)
     sfreq = float(epochs.info["sfreq"])
 
-    # Microstate computation parallelizes across epochs/trials.
-    # Prefer a dedicated knob if available; otherwise fall back to the legacy key.
     n_jobs = int(
         config.get(
             "feature_engineering.parallel.n_jobs_microstates",
             config.get("feature_engineering.parallel.n_jobs_feature_groups", -1),
         )
     )
-    min_samples = 10
+    min_samples = MIN_SAMPLES_DEFAULT
 
     min_run_ms = float(config.get("feature_engineering.microstates.min_run_ms", 10.0))
     gfp_min_percentile = float(config.get("feature_engineering.microstates.gfp_min_percentile", 25.0))

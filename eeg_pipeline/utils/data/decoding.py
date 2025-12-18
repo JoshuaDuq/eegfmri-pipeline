@@ -19,13 +19,19 @@ EEGConfig = ConfigDict
 
 def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
     sub = f"sub-{subject}" if not subject.startswith("sub-") else subject
-    return deriv_root / sub / "eeg" / "features" / "trial_alignment.tsv"
+    base = deriv_root / sub / "eeg" / "features"
+    json_path = base / "trial_alignment.json"
+    if json_path.exists():
+        return json_path
+    return base / "trial_alignment.tsv"
 
 
 def _load_trial_alignment_manifest(
     manifest_path: Path,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
+    import json as json_module
+    
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -36,6 +42,19 @@ def _load_trial_alignment_manifest(
             f"Run 03_feature_extraction.py first to generate features with proper alignment."
         )
 
+    if manifest_path.suffix == ".json" or manifest_path.name.endswith(".tsv"):
+        try:
+            with open(manifest_path, "r") as f:
+                content = f.read().strip()
+            if content.startswith("{"):
+                data = json_module.loads(content)
+                n_epochs = data.get("n_epochs", 0)
+                manifest = pd.DataFrame({"trial_index": list(range(n_epochs))})
+                logger.debug(f"Loaded JSON trial alignment manifest: {n_epochs} trials from {manifest_path}")
+                return manifest
+        except (json_module.JSONDecodeError, KeyError):
+            pass
+    
     manifest = read_tsv(manifest_path)
     if "trial_index" not in manifest.columns:
         raise ValueError(

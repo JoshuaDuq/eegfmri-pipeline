@@ -10,14 +10,13 @@ import pandas as pd
 
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.infra.logging import get_subject_logger
 from eeg_pipeline.infra.paths import deriv_plots_path, deriv_stats_path, ensure_dir
 from eeg_pipeline.plotting.io.figures import (
     get_band_color,
     get_behavior_footer as _get_behavior_footer,
-    get_default_config as _get_default_config,
     save_fig,
 )
 
@@ -30,7 +29,8 @@ def _create_rating_distribution_plot(
     y: pd.Series,
     config=None,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
     behavioral_config = _get_behavioral_config(plot_cfg)
     rating_config = behavioral_config.get("rating_distribution", {})
@@ -71,7 +71,8 @@ def plot_behavioral_response_patterns(
     logger: logging.Logger,
     config=None,
 ) -> None:
-    config = config or _get_default_config()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     plot_cfg = get_plot_config(config)
     fig, _ = _create_rating_distribution_plot(y, config)
 
@@ -93,60 +94,106 @@ def _load_correlation_stats(
     logger: logging.Logger,
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
-    if config is None:
-        target_rating = "rating"
-        target_temperature = "temperature"
-    else:
-        plot_cfg = get_plot_config(config)
-        behavioral_config = _get_behavioral_config(plot_cfg)
-        target_rating = behavioral_config.get("target_rating", "rating")
-        target_temperature = behavioral_config.get("target_temperature", "temperature")
+    plot_cfg = get_plot_config(config) if config is not None else None
+    behavioral_config = _get_behavioral_config(plot_cfg) if plot_cfg is not None else {}
+    target_rating = behavioral_config.get("target_rating", "rating")
 
-    candidate_files = [
-        (target_rating, stats_dir / "corr_stats_pow_combined_vs_rating.tsv"),
-        (target_rating, stats_dir / "corr_stats_power_combined_vs_rating.tsv"),
-        (target_temperature, stats_dir / "corr_stats_pow_combined_vs_temp.tsv"),
-        (target_temperature, stats_dir / "corr_stats_power_combined_vs_temp.tsv"),
+    candidates = [
+        (target_rating, stats_dir / "correlations.tsv"),
+        (target_rating, stats_dir / "corr_stats_all_features_vs_rating.tsv"),
     ]
 
-    frames = []
-    for target_label, path in candidate_files:
-        if path.exists():
-            df = read_tsv(path)
+    for target_label, path in candidates:
+        if not path.exists():
+            continue
+        df = read_tsv(path)
+        if df is None or df.empty:
+            continue
+        if "target" not in df.columns:
+            df = df.copy()
             df["target"] = target_label
-            frames.append(df)
+        return df
 
-    if not frames:
-        logger.warning(
-            "No combined correlation stats found for rating or temperature. Expected one of: "
-            + ", ".join(str(p) for _, p in candidate_files)
-        )
-        return None
+    logger.warning(
+        "No correlation stats found. Expected one of: %s",
+        ", ".join(str(p) for _, p in candidates),
+    )
+    return None
 
-    return pd.concat(frames, axis=0, ignore_index=True)
+
+def _prepare_predictor_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df = df.copy()
+    df["r"] = pd.to_numeric(df.get("r"), errors="coerce")
+    df["n"] = pd.to_numeric(df.get("n"), errors="coerce")
+
+    # Prefer permutation p-values if present
+    p_cols = ["p_primary_perm", "p_primary", "p"]
+    p_kind = None
+    for col in p_cols:
+        if col in df.columns and pd.to_numeric(df[col], errors="coerce").notna().any():
+            p_kind = col
+            break
+    if p_kind is None:
+        return pd.DataFrame()
+
+    df["p_plot"] = pd.to_numeric(df[p_kind], errors="coerce")
+    df["p_kind"] = p_kind
+
+    # Parse NamingSchema v2 feature names into display fields
+    def _parse_row(feat: Any) -> dict:
+        parsed = NamingSchema.parse(str(feat))
+        if not parsed.get("valid"):
+            return {"band": None, "identifier": None, "group": None, "segment": None, "scope": None}
+        return {
+            "band": parsed.get("band"),
+            "identifier": parsed.get("identifier"),
+            "group": parsed.get("group"),
+            "segment": parsed.get("segment"),
+            "scope": parsed.get("scope"),
+        }
+
+    parsed_rows = df["feature"].apply(_parse_row)
+    parsed_df = pd.DataFrame(list(parsed_rows))
+    for col in parsed_df.columns:
+        df[col] = parsed_df[col]
+
+    def _label(row: pd.Series) -> str:
+        group = str(row.get("group") or "feature")
+        band = row.get("band")
+        ident = row.get("identifier")
+        seg = row.get("segment")
+        if ident:
+            base = f"{group}:{ident}"
+        else:
+            base = group
+        if band:
+            base = f"{base} ({band})"
+        if seg:
+            base = f"{base} [{seg}]"
+        if "target" in row and pd.notna(row["target"]):
+            base = f"{base} → {row['target']}"
+        return base
+
+    df["predictor"] = df.apply(_label, axis=1)
+    df["abs_r"] = df["r"].abs()
+    return df
 
 
 def _filter_significant_predictors(df: pd.DataFrame, alpha: float) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
     return df[
-        (df["p"] <= alpha)
+        (df["p_plot"].notna())
+        & (df["p_plot"] <= alpha)
         & df["r"].notna()
-        & df["p"].notna()
-        & df["channel"].notna()
-        & df["band"].notna()
     ].copy()
 
 
 def _create_predictor_labels(df: pd.DataFrame) -> pd.Series:
-    if "target" in df.columns:
-        return (
-            df["channel"]
-            + " ("
-            + df["band"]
-            + ") ["
-            + df["target"].astype(str)
-            + "]"
-        )
-    return df["channel"] + " (" + df["band"] + ")"
+    return df["predictor"].astype(str)
 
 
 def _create_predictors_plot(
@@ -166,8 +213,8 @@ def _create_predictors_plot(
         figsize=(figsize_width, max(figsize_height_base, top_n * figsize_height_per_predictor))
     )
 
-    band_colors = {str(band): get_band_color(band, config) for band in df_top["band"].unique()}
-    colors = [band_colors[band] for band in df_top["band"]]
+    band_colors = {str(band): get_band_color(band, config) for band in df_top["band"].dropna().unique()}
+    colors = [band_colors.get(str(b), plot_cfg.get_color("gray", plot_type="behavioral")) for b in df_top["band"]]
 
     bar_alpha = predictors_config.get("bar_alpha", 0.8)
     bar_edgecolor = predictors_config.get("bar_edgecolor", "black")
@@ -235,7 +282,7 @@ def _export_top_predictors(
     logger: logging.Logger,
 ) -> None:
     top_predictors_file = stats_dir / f"top_{top_n}_behavioral_predictors.tsv"
-    export_cols = ["predictor", "channel", "band", "r", "abs_r", "p", "n"]
+    export_cols = ["predictor", "r", "abs_r", "p_plot", "p_kind", "n"]
     if "target" in df_top.columns and "target" not in export_cols:
         export_cols = ["target"] + export_cols
 
@@ -251,12 +298,15 @@ def plot_top_behavioral_predictors(
     alpha: float = None,
     top_n: int = None,
     plots_dir: Optional[Path] = None,
+    *,
+    config: Optional[Any] = None,
 ) -> None:
-    config = load_settings()
+    if config is None:
+        raise ValueError("config is required for behavioral plotting")
     if task is None:
         task = config.task
 
-    alpha = alpha or config.get("behavior_analysis.statistics.fdr_alpha", 0.05)
+    alpha = alpha if alpha is not None else float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05))
     top_n = top_n or int(config.get("behavior_analysis.predictors.top_n", 20))
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
@@ -274,8 +324,13 @@ def plot_top_behavioral_predictors(
     stats_dir = deriv_stats_path(Path(config.deriv_root), subject)
     ensure_dir(plots_dir)
 
-    df = _load_correlation_stats(stats_dir, logger)
+    df = _load_correlation_stats(stats_dir, logger, config=config)
     if df is None:
+        return
+
+    df = _prepare_predictor_table(df)
+    if df.empty:
+        logger.warning("No usable correlation table for top predictors")
         return
 
     df_sig = _filter_significant_predictors(df, alpha)
@@ -283,7 +338,6 @@ def plot_top_behavioral_predictors(
         logger.warning(f"No significant correlations found (p <= {alpha})")
         return
 
-    df_sig["abs_r"] = df_sig["r"].abs()
     df_top = df_sig.nlargest(top_n, "abs_r")
 
     if df_top.empty:

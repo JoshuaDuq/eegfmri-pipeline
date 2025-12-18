@@ -1,5 +1,4 @@
 from .loader import (
-    load_settings,
     load_config,
     ConfigDict,
     get_config_value,
@@ -11,7 +10,6 @@ from .loader import (
 )
 
 __all__ = [
-    "load_settings",
     "load_config",
     "ConfigDict",
     "get_config_value",
@@ -21,5 +19,3 @@ __all__ = [
     "ConfigError",
     "ConfigValidationError",
 ]
-
-

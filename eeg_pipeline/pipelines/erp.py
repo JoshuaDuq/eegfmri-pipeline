@@ -60,10 +60,10 @@ def extract_erp_stats_for_subjects(
 
 def get_erp_config(config=None) -> dict:
     """Return ERP configuration with defaults."""
-    from eeg_pipeline.utils.config.loader import load_settings
+    from eeg_pipeline.utils.config.loader import load_config
 
     if config is None:
-        config = load_settings()
+        config = load_config()
 
     erp = config.get("erp_analysis.erp", {})
 

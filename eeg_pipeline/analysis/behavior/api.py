@@ -139,7 +139,6 @@ __all__ = [
     "fit_mixed_effects_model",
     "compute_icc",
     "run_multilevel_correlation_analysis",
-    "MixedEffectsResult",
     "run_mediation_analysis",
     # Condition
     "split_by_condition",

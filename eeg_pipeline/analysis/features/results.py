@@ -270,7 +270,7 @@ def combine_feature_groups(result: ExtractionResult, groups: List[str]) -> tuple
     Returns
     -------
     tuple
-        (combined_df, column_list)
+        (combined_df, column_list) where column_list matches combined_df.columns exactly
     """
     dfs: List[pd.DataFrame] = []
     cols: List[str] = []
@@ -285,6 +285,5 @@ def combine_feature_groups(result: ExtractionResult, groups: List[str]) -> tuple
     combined = pd.concat(dfs, axis=1)
     if result.condition is not None:
         combined.insert(0, "condition", result.condition)
-    fixed_cols = ["condition"] if "condition" in combined.columns else []
-    other_cols = sorted([c for c in combined.columns if c not in fixed_cols])
-    return combined[fixed_cols + other_cols], cols
+        cols = ["condition"] + cols
+    return combined, cols

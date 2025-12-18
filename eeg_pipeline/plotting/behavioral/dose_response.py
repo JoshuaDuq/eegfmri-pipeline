@@ -38,12 +38,26 @@ from eeg_pipeline.utils.data import load_subject_scatter_data
 
 
 # =============================================================================
-# Constants
+# Config Helpers
 # =============================================================================
 
-BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
-# Use shared band colors from utils
-BAND_COLORS = get_band_colors()
+
+def _get_bands_from_config(config) -> list:
+    """Get frequency bands from config.
+    
+    Raises ValueError if config is None or frequency bands are not configured.
+    """
+    if config is None:
+        raise ValueError("Config is required for dose-response visualization")
+    bands = config.get("power.bands_to_use", None)
+    if bands is None:
+        bands = list(config.get("frequency_bands", {}).keys())
+    if not bands:
+        raise ValueError(
+            "Frequency bands not configured. Set 'power.bands_to_use' or "
+            "'frequency_bands' in eeg_config.yaml"
+        )
+    return bands
 
 
 # =============================================================================
@@ -145,24 +159,27 @@ def visualize_dose_response(
     # =================================================================
     # Power dose-response
     # =================================================================
+    bands = _get_bands_from_config(config)
+    band_colors = get_band_colors()
+    
     df_power = pow_df.copy()
     df_power[temp_col] = temp_series.values
-    power_cols = get_power_columns_by_band(df_power, bands=BANDS)
+    power_cols = get_power_columns_by_band(df_power, bands=bands)
     
     if power_cols:
         power_dir = output_dir / "power"
         ensure_dir(power_dir)
         _plot_dose_response_curves(
             df_power, temp_col, power_cols, subject, power_dir, saved_files, logger,
-            feature_type="Power", y_label="Mean Power (a.u.)"
+            feature_type="Power", y_label="Mean Power (a.u.)", bands=bands, band_colors=band_colors
         )
         _plot_nonlinearity_test(
             df_power, temp_col, power_cols, subject, power_dir, saved_files, logger,
-            feature_type="power"
+            feature_type="power", bands=bands, band_colors=band_colors
         )
         _plot_threshold_detection(
             df_power, temp_col, power_cols, subject, power_dir, saved_files, logger,
-            feature_type="power"
+            feature_type="power", bands=bands, band_colors=band_colors
         )
     
     # =================================================================
@@ -171,22 +188,22 @@ def visualize_dose_response(
     if conn_df is not None and not conn_df.empty:
         df_conn = conn_df.copy()
         df_conn[temp_col] = temp_series.values
-        conn_cols = get_connectivity_columns_by_band(df_conn, bands=BANDS)
+        conn_cols = get_connectivity_columns_by_band(df_conn, bands=bands)
         
         if conn_cols:
             conn_dir = output_dir / "connectivity"
             ensure_dir(conn_dir)
             _plot_dose_response_curves(
                 df_conn, temp_col, conn_cols, subject, conn_dir, saved_files, logger,
-                feature_type="Connectivity", y_label="Mean wPLI"
+                feature_type="Connectivity", y_label="Mean wPLI", bands=bands, band_colors=band_colors
             )
             _plot_nonlinearity_test(
                 df_conn, temp_col, conn_cols, subject, conn_dir, saved_files, logger,
-                feature_type="connectivity"
+                feature_type="connectivity", bands=bands, band_colors=band_colors
             )
             _plot_threshold_detection(
                 df_conn, temp_col, conn_cols, subject, conn_dir, saved_files, logger,
-                feature_type="connectivity"
+                feature_type="connectivity", bands=bands, band_colors=band_colors
             )
     
     # =================================================================
@@ -228,18 +245,18 @@ def visualize_dose_response(
         df_itpc = additional_features["itpc"].copy()
         if len(df_itpc) == len(temp_series):
             df_itpc[temp_col] = temp_series.values
-            itpc_cols = get_itpc_columns_by_band(df_itpc, bands=BANDS)
+            itpc_cols = get_itpc_columns_by_band(df_itpc, bands=bands)
             
             if itpc_cols:
                 itpc_dir = output_dir / "itpc"
                 ensure_dir(itpc_dir)
                 _plot_dose_response_curves(
                     df_itpc, temp_col, itpc_cols, subject, itpc_dir, saved_files, logger,
-                    feature_type="ITPC", y_label="Mean ITPC"
+                    feature_type="ITPC", y_label="Mean ITPC", bands=bands, band_colors=band_colors
                 )
                 _plot_nonlinearity_test(
                     df_itpc, temp_col, itpc_cols, subject, itpc_dir, saved_files, logger,
-                    feature_type="itpc"
+                    feature_type="itpc", bands=bands, band_colors=band_colors
                 )
     
     logger.info(f"Created {len(saved_files)} dose-response plots")
@@ -264,8 +281,15 @@ def _plot_dose_response_curves(
     logger: logging.Logger,
     feature_type: str = "Power",
     y_label: str = "Mean Power (a.u.)",
+    bands: Optional[List[str]] = None,
+    band_colors: Optional[Dict[str, str]] = None,
 ) -> None:
     """Plot dose-response curves for each frequency band."""
+    if bands is None:
+        bands = ["delta", "theta", "alpha", "beta", "gamma"]
+    if band_colors is None:
+        band_colors = get_band_colors()
+    
     fig, axes = plt.subplots(2, 3, figsize=(14, 9))
     axes = axes.flatten()
     
@@ -277,7 +301,7 @@ def _plot_dose_response_curves(
         logger.debug("Insufficient temperature levels for dose-response")
         return
     
-    for idx, band in enumerate(BANDS):
+    for idx, band in enumerate(bands):
         ax = axes[idx]
         
         if band not in feature_cols:
@@ -303,7 +327,7 @@ def _plot_dose_response_curves(
         
         ax.errorbar(
             unique_temps, temp_means, yerr=temp_sems,
-            fmt='o-', color=BAND_COLORS[band], capsize=4, capthick=1.5,
+            fmt='o-', color=band_colors.get(band, "#333333"), capsize=4, capthick=1.5,
             markersize=8, linewidth=2, label="Observed"
         )
         
@@ -369,14 +393,21 @@ def _plot_nonlinearity_test(
     saved_files: Dict[str, Path],
     logger: logging.Logger,
     feature_type: str = "power",
+    bands: Optional[List[str]] = None,
+    band_colors: Optional[Dict[str, str]] = None,
 ) -> None:
     """Test for nonlinear dose-response relationships."""
+    if bands is None:
+        bands = ["delta", "theta", "alpha", "beta", "gamma"]
+    if band_colors is None:
+        band_colors = get_band_colors()
+    
     fig, ax = plt.subplots(figsize=(10, 6))
     
     temps = pd.to_numeric(df[temp_col], errors="coerce")
     results = []
     
-    for band in BANDS:
+    for band in bands:
         if band not in feature_cols:
             continue
         
@@ -462,8 +493,15 @@ def _plot_threshold_detection(
     saved_files: Dict[str, Path],
     logger: logging.Logger,
     feature_type: str = "power",
+    bands: Optional[List[str]] = None,
+    band_colors: Optional[Dict[str, str]] = None,
 ) -> None:
     """Detect response thresholds via derivative and normalized response analysis."""
+    if bands is None:
+        bands = ["delta", "theta", "alpha", "beta", "gamma"]
+    if band_colors is None:
+        band_colors = get_band_colors()
+    
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
     temps = pd.to_numeric(df[temp_col], errors="coerce")
@@ -474,7 +512,7 @@ def _plot_threshold_detection(
         return
     
     ax1 = axes[0]
-    for band in BANDS:
+    for band in bands:
         if band not in feature_cols:
             continue
         
@@ -492,7 +530,7 @@ def _plot_threshold_detection(
         
         if len(unique_temps) > 1:
             derivative = np.gradient(temp_means, unique_temps)
-            ax1.plot(unique_temps, derivative, 'o-', color=BAND_COLORS[band],
+            ax1.plot(unique_temps, derivative, 'o-', color=band_colors.get(band, "#333333"),
                     label=band.title(), markersize=6, linewidth=1.5)
     
     ax1.axhline(0, color="gray", linestyle="--", linewidth=1)
@@ -504,7 +542,7 @@ def _plot_threshold_detection(
     ax1.grid(True, alpha=0.3)
     
     ax2 = axes[1]
-    for band in BANDS:
+    for band in bands:
         if band not in feature_cols:
             continue
         
@@ -528,7 +566,7 @@ def _plot_threshold_detection(
                 y_norm = (y_norm - y_norm.min()) / y_range
             else:
                 y_norm = np.zeros_like(y_norm)
-            ax2.plot(unique_temps[valid], y_norm, 'o-', color=BAND_COLORS[band],
+            ax2.plot(unique_temps[valid], y_norm, 'o-', color=band_colors.get(band, "#333333"),
                     label=band.title(), markersize=6, linewidth=1.5)
     
     ax2.axhline(0.5, color="gray", linestyle="--", linewidth=1, alpha=0.7)

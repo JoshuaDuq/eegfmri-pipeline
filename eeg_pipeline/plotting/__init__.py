@@ -65,7 +65,7 @@ def __getattr__(name: str):
         "create_scalpmean_tfr_from_existing": "core",
         "get_strict_mode": "core",
         "compute_cluster_significance_from_combined": "core",
-        "compute_significance_mask": "core",
+        "compute_significance_mask": "core",  # TFR significance mask (different from connectivity)
         # ERP
         "erp_contrast_pain": "erp",
         "erp_by_temperature": "erp",

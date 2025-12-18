@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -112,13 +112,12 @@ class BehaviorContext:
         return get_frequency_band_names(self.config)
 
     def get_min_samples(self, sample_type: str = "default") -> int:
-        """Get minimum samples threshold from config."""
-        # Avoid circular imports by using local constants or passed config
-        defaults = {"channel": 10, "roi": 20, "default": 5, "edge": 30, "temporal": 15}
-        if self.config is None:
-            return defaults.get(sample_type, 5)
-        return int(self.config.get(f"behavior_analysis.min_samples.{sample_type}",
-                             defaults.get(sample_type, 5)))
+        """Get minimum samples threshold from config.
+        
+        Delegates to centralized get_min_samples in utils.config.loader.
+        """
+        from eeg_pipeline.utils.config.loader import get_min_samples
+        return get_min_samples(self.config, sample_type)
 
     @property
     def min_samples_channel(self) -> int:
@@ -143,346 +142,361 @@ class BehaviorContext:
         if self._data_loaded:
             return self.targets is not None
 
+        self.logger.info("Loading data...")
+        try:
+            if not self._load_epochs():
+                return False
+            if not self._load_features():
+                return False
+            if not self._validate_alignment():
+                return False
+            self._build_covariates()
+            self._extract_group_ids()
+            self._data_loaded = True
+            return True
+        except Exception as e:
+            self.logger.error(f"Data loading failed: {e}")
+            return False
+
+    def _load_epochs(self) -> bool:
+        """Load epochs and aligned events."""
         from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
+
+        self.epochs, self.aligned_events = load_epochs_for_analysis(
+            self.subject, self.task, align="strict", preload=True,
+            deriv_root=self.deriv_root, logger=self.logger, config=self.config
+        )
+        if self.epochs is None or self.aligned_events is None:
+            self.logger.error("Failed to load epochs or events")
+            return False
+        self.epochs_info = self.epochs.info
+        return True
+
+    def _load_features(self) -> bool:
+        """Load feature bundle and apply category filtering."""
         from eeg_pipeline.utils.data.feature_io import load_feature_bundle
+
+        bundle = load_feature_bundle(
+            self.subject, self.deriv_root, self.logger,
+            include_targets=True, config=self.config,
+        )
+
+        self.power_df = bundle.power_df
+        self.connectivity_df = bundle.connectivity_df
+        self.pac_df = bundle.pac_trials_df
+        self.microstates_df = bundle.microstate_df
+        self.aperiodic_df = bundle.aperiodic_df
+        self.itpc_df = bundle.itpc_df
+
+        precomputed_sources = [bundle.all_features_df, bundle.complexity_df, bundle.dynamics_df]
+        self.precomputed_df = None
+        for df in precomputed_sources:
+            if df is not None and not df.empty:
+                if self.precomputed_df is None:
+                    self.precomputed_df = df
+                else:
+                    new_cols = [c for c in df.columns if c not in self.precomputed_df.columns]
+                    if new_cols:
+                        self.precomputed_df = pd.concat(
+                            [self.precomputed_df, df[new_cols]], axis=1
+                        )
+
+        feature_counts = self._get_feature_counts()
+        if all(count == 0 for count in feature_counts.values()):
+            self.logger.error("Feature bundle is empty for sub-%s; aborting analysis", self.subject)
+            return False
+        self.logger.info(
+            "Feature coverage loaded: %s",
+            ", ".join(f"{k}={v}" for k, v in feature_counts.items() if v > 0),
+        )
+
+        self._apply_category_filter(feature_counts)
+        self.targets = bundle.targets
+
+        if self.targets is None or len(self.targets) == 0:
+            self.logger.warning("No targets found")
+            return False
+        return True
+
+    def iter_feature_tables(self) -> List[Tuple[str, Optional[pd.DataFrame]]]:
+        """Iterate over all feature tables as (name, dataframe) pairs.
+        
+        Centralizes the canonical ordering of feature types to avoid duplication.
+        Uses FEATURE_TYPES from domain.features for consistency.
+        """
+        from eeg_pipeline.domain.features import FEATURE_TYPES
+        
+        attr_map = {
+            "power": self.power_df,
+            "connectivity": self.connectivity_df,
+            "microstates": self.microstates_df,
+            "aperiodic": self.aperiodic_df,
+            "itpc": self.itpc_df,
+            "pac": self.pac_df,
+            "precomputed": self.precomputed_df,
+        }
+        return [(ft, attr_map.get(ft)) for ft in FEATURE_TYPES]
+
+    def _get_feature_counts(self) -> Dict[str, int]:
+        """Get feature counts for each feature type."""
+        return {
+            name: 0 if table is None or table.empty else table.shape[1]
+            for name, table in self.iter_feature_tables()
+        }
+
+    def _apply_category_filter(self, feature_counts: Dict[str, int]) -> None:
+        """Apply feature category filtering if specified."""
+        if not self.feature_categories:
+            return
+
+        category_map = {
+            "power": "power_df", "connectivity": "connectivity_df",
+            "pac": "pac_df", "microstates": "microstates_df",
+            "aperiodic": "aperiodic_df", "itpc": "itpc_df",
+            "dynamics": "precomputed_df", "precomputed": "precomputed_df",
+            "psychometrics": None, "temporal": None, "dose_response": None,
+        }
+        keep_attrs = {category_map.get(cat) for cat in self.feature_categories if category_map.get(cat)}
+
+        if keep_attrs:
+            for attr_name in ["power_df", "connectivity_df", "pac_df", "microstates_df", "aperiodic_df", "itpc_df", "precomputed_df"]:
+                if attr_name not in keep_attrs:
+                    setattr(self, attr_name, None)
+            self.logger.info("Filtered to categories: %s", ", ".join(self.feature_categories))
+
+    def _validate_alignment(self) -> bool:
+        """Validate trial alignment between features, events, and targets."""
+        import json
+
+        if self.aligned_events is None or len(self.aligned_events) != len(self.targets):
+            self.logger.error(
+                "Trial alignment mismatch for sub-%s: aligned_events=%s, targets=%s",
+                self.subject,
+                0 if self.aligned_events is None else len(self.aligned_events),
+                len(self.targets),
+            )
+            return False
+
+        features_dir = deriv_features_path(self.deriv_root, self.subject)
+        manifest_path = features_dir / "trial_alignment.json"
+        
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"Trial alignment manifest missing: {manifest_path}. "
+                f"Re-run feature extraction to generate aligned trial manifests."
+            )
+        actual_path = manifest_path
+
+        with open(actual_path, "r") as f:
+            manifest = json.load(f)
+
+        manifest_n_epochs = manifest.get("n_epochs", 0)
+        if manifest_n_epochs != len(self.targets) or manifest_n_epochs != len(self.aligned_events):
+            raise ValueError(
+                "Trial alignment manifest length mismatch for sub-%s: manifest=%d, targets=%d, aligned_events=%d"
+                % (self.subject, manifest_n_epochs, len(self.targets), len(self.aligned_events))
+            )
+
+        self.data_qc["trial_alignment_manifest"] = {
+            "path": str(actual_path),
+            "n_trials": manifest_n_epochs,
+            "has_target_value": "events_trial_type" in manifest,
+        }
+
+        self._validate_rating_consistency()
+        if not self._align_feature_tables():
+            return False
+        return True
+
+    def _validate_rating_consistency(self) -> None:
+        """Validate consistency between events rating and targets."""
+        rating_col = None
+        try:
+            target_columns = list(self.config.get("event_columns.rating", []) or []) if self.config is not None else []
+            rating_col = pick_target_column(self.aligned_events, target_columns=target_columns)
+        except Exception:
+            rating_col = None
+
+        if rating_col is None or rating_col not in self.aligned_events.columns:
+            return
+
+        events_rating = pd.to_numeric(self.aligned_events[rating_col], errors="coerce")
+        targets_rating = pd.to_numeric(self.targets, errors="coerce")
+        valid = events_rating.notna() & targets_rating.notna()
+
+        if int(valid.sum()) >= 3:
+            r, p = compute_correlation(
+                events_rating[valid].values,
+                targets_rating[valid].values,
+                method="spearman",
+            )
+            diff = events_rating[valid].to_numpy(dtype=float) - targets_rating[valid].to_numpy(dtype=float)
+            self.data_qc["events_targets_rating_consistency"] = {
+                "events_rating_column": str(rating_col),
+                "n_valid": int(valid.sum()),
+                "spearman_r": float(r) if np.isfinite(r) else np.nan,
+                "spearman_p": float(p) if np.isfinite(p) else np.nan,
+                "mean_abs_error": float(np.mean(np.abs(diff))) if len(diff) else np.nan,
+                "max_abs_error": float(np.max(np.abs(diff))) if len(diff) else np.nan,
+            }
+
+    def _align_feature_tables(self) -> bool:
+        """Align all feature tables to target index using iter_feature_tables."""
+        base_index = self.targets.index
+
+        def align_df(name: str, df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+            if df is None or df.empty:
+                return df
+            if len(df) != len(base_index):
+                self.logger.error(
+                    "Feature table length mismatch for %s: %s rows vs %s targets for sub-%s",
+                    name, len(df), len(base_index), self.subject,
+                )
+                return None
+            if not df.index.equals(base_index):
+                df = df.copy()
+                df.index = base_index
+            return df
+
+        attr_map = {
+            "power": "power_df",
+            "connectivity": "connectivity_df",
+            "microstates": "microstates_df",
+            "aperiodic": "aperiodic_df",
+            "itpc": "itpc_df",
+            "pac": "pac_df",
+            "precomputed": "precomputed_df",
+        }
+        for name, attr in attr_map.items():
+            setattr(self, attr, align_df(name, getattr(self, attr)))
+
+        if all(df is None or df.empty for _, df in self.iter_feature_tables()):
+            self.logger.error("All feature tables failed alignment for sub-%s", self.subject)
+            return False
+        return True
+
+    def _build_covariates(self) -> None:
+        """Build covariate matrices for partial correlations."""
         from eeg_pipeline.utils.data.covariates import (
             extract_temperature_data,
             build_covariate_matrix,
             build_covariates_without_temp,
         )
 
-        self.logger.info("Loading data...")
-        try:
-            self.epochs, self.aligned_events = load_epochs_for_analysis(
-                self.subject, self.task, align="strict", preload=True,
-                deriv_root=self.deriv_root, logger=self.logger, config=self.config
-            )
-            
-            if self.epochs is None or self.aligned_events is None:
-                self.logger.error("Failed to load epochs or events")
-                return False
+        self.temperature, self.temperature_column = extract_temperature_data(
+            self.aligned_events, self.config
+        )
+        self.covariates_df = build_covariate_matrix(
+            self.aligned_events, self.partial_covars, self.config
+        )
+        self.covariates_df = self._sanitize_covariates(self.covariates_df)
 
-            self.epochs_info = self.epochs.info
+        self._setup_trial_order_covariate()
 
-            bundle = load_feature_bundle(
-                self.subject,
-                self.deriv_root,
-                self.logger,
-                include_targets=True,
-                config=self.config,
-            )
-            
-            self.power_df = bundle.power_df
-            self.connectivity_df = bundle.connectivity_df
-            self.pac_df = bundle.pac_trials_df
-            self.microstates_df = bundle.microstate_df
-            self.aperiodic_df = bundle.aperiodic_df
-            self.itpc_df = bundle.itpc_df
-            # Consolidate any precomputed/derived tables
-            precomputed_sources = [
-                bundle.all_features_df,
-                bundle.complexity_df,
-                bundle.dynamics_df,
-            ]
-            self.precomputed_df = None
-            for df in precomputed_sources:
-                if df is None or df.empty:
-                    continue
-                self.precomputed_df = df if self.precomputed_df is None else pd.concat(
-                    [self.precomputed_df, df], axis=1
-                )
-            feature_tables = {
-                "power": self.power_df,
-                "connectivity": self.connectivity_df,
-                "pac": self.pac_df,
-                "microstates": self.microstates_df,
-                "aperiodic": self.aperiodic_df,
-                "itpc": self.itpc_df,
-                "precomputed": self.precomputed_df,
-            }
-            feature_counts = {
-                name: 0 if table is None or table.empty else table.shape[1]
-                for name, table in feature_tables.items()
-            }
-            if all(count == 0 for count in feature_counts.values()):
-                self.logger.error(
-                    "Feature bundle is empty for sub-%s; aborting analysis", self.subject
-                )
-                return False
-            else:
-                self.logger.info(
-                    "Feature coverage loaded: %s",
-                    ", ".join(f"{k}={v}" for k, v in feature_counts.items() if v > 0),
-                )
-            
-            if self.feature_categories:
-                category_map = {
-                    "power": "power_df",
-                    "connectivity": "connectivity_df",
-                    "pac": "pac_df",
-                    "microstates": "microstates_df",
-                    "aperiodic": "aperiodic_df",
-                    "itpc": "itpc_df",
-                    "dynamics": "precomputed_df",
-                    "precomputed": "precomputed_df",
-                    "psychometrics": None,
-                    "temporal": None,
-                    "dose_response": None,
-                }
-                keep_attrs = set()
-                for cat in self.feature_categories:
-                    attr = category_map.get(cat)
-                    if attr:
-                        keep_attrs.add(attr)
-                
-                if keep_attrs:
-                    for attr_name in ["power_df", "connectivity_df", "pac_df", "microstates_df", "aperiodic_df", "itpc_df", "precomputed_df"]:
-                        if attr_name not in keep_attrs:
-                            setattr(self, attr_name, None)
-                    
-                    kept_cats = [k for k, v in feature_counts.items() if v > 0 and category_map.get(k) in keep_attrs]
-                    self.logger.info(
-                        "Filtered to categories: %s",
-                        ", ".join(self.feature_categories),
-                    )
-            
-            self.targets = bundle.targets
+        if (
+            not self.control_temperature
+            and self.temperature_column
+            and self.covariates_df is not None
+            and not self.covariates_df.empty
+            and self.temperature_column in self.covariates_df.columns
+        ):
+            self.covariates_df = self.covariates_df.drop(columns=[self.temperature_column], errors="ignore")
+            self.covariates_df = self._sanitize_covariates(self.covariates_df)
 
-            if self.targets is None or len(self.targets) == 0:
-                self.logger.warning("No targets found")
-                return False
+        self.covariates_without_temp_df = build_covariates_without_temp(
+            self.covariates_df, self.temperature_column
+        )
+        if self.covariates_without_temp_df is not None and self.aligned_events is not None:
+            if not self.covariates_without_temp_df.index.equals(self.aligned_events.index):
+                self.covariates_without_temp_df = self.covariates_without_temp_df.copy()
+                self.covariates_without_temp_df.index = self.aligned_events.index
+        self.covariates_without_temp_df = self._sanitize_covariates(self.covariates_without_temp_df)
 
-            if self.aligned_events is None or len(self.aligned_events) != len(self.targets):
-                self.logger.error(
-                    "Trial alignment mismatch for sub-%s: aligned_events=%s, targets=%s",
-                    self.subject,
-                    0 if self.aligned_events is None else len(self.aligned_events),
-                    len(self.targets),
-                )
-                return False
+    def _sanitize_covariates(self, cov: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        """Clean covariate DataFrame: convert to numeric, remove constants and NaN columns."""
+        if cov is None or cov.empty:
+            return None
+        cov = cov.copy()
+        if self.aligned_events is not None and not cov.index.equals(self.aligned_events.index):
+            cov.index = self.aligned_events.index
+        for col in list(cov.columns):
+            cov[col] = pd.to_numeric(cov[col], errors="coerce")
+        cov = cov.replace([np.inf, -np.inf], np.nan)
+        cov = cov.dropna(axis=1, how="all")
+        if cov.empty:
+            return None
+        constant_cols = [
+            c for c in cov.columns
+            if int(pd.to_numeric(cov[c], errors="coerce").nunique(dropna=True)) <= 1
+        ]
+        if constant_cols:
+            cov = cov.drop(columns=constant_cols, errors="ignore")
+        return None if cov.empty else cov
 
-            features_dir = deriv_features_path(self.deriv_root, self.subject)
-            manifest_path = features_dir / "trial_alignment.tsv"
-            if not manifest_path.exists():
-                raise FileNotFoundError(
-                    f"Trial alignment manifest missing: {manifest_path}. "
-                    f"Re-run feature extraction to generate aligned trial manifests."
-                )
+    def _setup_trial_order_covariate(self) -> None:
+        """Setup trial order as a covariate if enabled and valid."""
+        self.data_qc["trial_order"] = {"enabled": bool(self.control_trial_order)}
+        if not self.control_trial_order or self.aligned_events is None:
+            return
 
-            import json
-            with open(manifest_path, "r") as f:
-                manifest = json.load(f)
-            
-            manifest_n_epochs = manifest.get("n_epochs", 0)
-            if manifest_n_epochs != len(self.targets) or manifest_n_epochs != len(self.aligned_events):
-                raise ValueError(
-                    "Trial alignment manifest length mismatch for sub-%s: manifest=%d, targets=%d, aligned_events=%d"
-                    % (self.subject, manifest_n_epochs, len(self.targets), len(self.aligned_events))
-                )
+        trial_candidates = ["trial_index", "trial_in_run", "trial", "trial_number"]
+        trial_col = None
+        for cand in trial_candidates:
+            if cand in self.aligned_events.columns:
+                trial_col = cand
+                break
 
-            self.data_qc["trial_alignment_manifest"] = {
-                "path": str(manifest_path),
-                "n_trials": manifest_n_epochs,
-                "has_target_value": "events_trial_type" in manifest,
-            }
+        if trial_col is None:
+            self.control_trial_order = False
+            self.data_qc["trial_order"].update({"enabled": False, "reason": "missing_trial_column"})
+            return
 
-            rating_col = None
+        trial_index_series = pd.to_numeric(self.aligned_events[trial_col], errors="coerce")
+        max_missing = float(
+            self.config.get("behavior_analysis.trial_order.max_missing_fraction", 0.1)
+            if self.config is not None else 0.1
+        )
+        missing_fraction = float(trial_index_series.isna().mean()) if len(trial_index_series) else 1.0
+        n_unique = int(trial_index_series.dropna().nunique())
+        is_monotonic = bool(trial_index_series.dropna().is_monotonic_increasing)
+
+        self.data_qc["trial_order"].update({
+            "source_column": str(trial_col),
+            "missing_fraction": missing_fraction,
+            "n_unique_non_nan": n_unique,
+            "is_monotonic_increasing_non_nan": is_monotonic,
+            "max_missing_fraction_threshold": max_missing,
+        })
+
+        if trial_index_series.isna().all() or missing_fraction > max_missing or not is_monotonic:
+            self.control_trial_order = False
+            self.data_qc["trial_order"].update({"enabled": False, "reason": "unreliable_trial_order_column"})
+        else:
+            if self.covariates_df is None or self.covariates_df.empty:
+                self.covariates_df = pd.DataFrame(index=self.aligned_events.index)
+            self.covariates_df["trial_index"] = trial_index_series
+            self.covariates_df = self._sanitize_covariates(self.covariates_df)
+
+    def _extract_group_ids(self) -> None:
+        """Extract group IDs for permutation testing."""
+        self.group_ids = None
+        self.group_column = None
+        if self.aligned_events is None:
+            return
+
+        for candidate in ["run", "block", "session", "subject"]:
+            if candidate not in self.aligned_events.columns:
+                continue
             try:
-                target_columns = list(self.config.get("event_columns.rating", []) or []) if self.config is not None else []
-                rating_col = pick_target_column(self.aligned_events, target_columns=target_columns)
+                values = self.aligned_events[candidate]
+                if hasattr(values, "nunique") and int(values.nunique(dropna=False)) <= 1:
+                    continue
+                self.group_ids = pd.Series(values, index=self.aligned_events.index, name=candidate)
+                self.group_column = candidate
+                break
             except Exception:
-                rating_col = None
-            if rating_col is not None and rating_col in self.aligned_events.columns:
-                events_rating = pd.to_numeric(self.aligned_events[rating_col], errors="coerce")
-                targets_rating = pd.to_numeric(self.targets, errors="coerce")
-                valid = events_rating.notna() & targets_rating.notna()
-                if int(valid.sum()) >= 3:
-                    r, p = compute_correlation(
-                        events_rating[valid].values,
-                        targets_rating[valid].values,
-                        method="spearman",
-                    )
-                    diff = (events_rating[valid].to_numpy(dtype=float) - targets_rating[valid].to_numpy(dtype=float))
-                    self.data_qc["events_targets_rating_consistency"] = {
-                        "events_rating_column": str(rating_col),
-                        "n_valid": int(valid.sum()),
-                        "spearman_r": float(r) if np.isfinite(r) else np.nan,
-                        "spearman_p": float(p) if np.isfinite(p) else np.nan,
-                        "mean_abs_error": float(np.mean(np.abs(diff))) if len(diff) else np.nan,
-                        "max_abs_error": float(np.max(np.abs(diff))) if len(diff) else np.nan,
-                    }
-
-            base_index = self.targets.index
-
-            def _align_feature_df(name: str, df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
-                if df is None or df.empty:
-                    return df
-                if len(df) != len(base_index):
-                    self.logger.error(
-                        "Feature table length mismatch for %s: %s rows vs %s targets for sub-%s",
-                        name,
-                        len(df),
-                        len(base_index),
-                        self.subject,
-                    )
-                    return None
-                if not df.index.equals(base_index):
-                    df = df.copy()
-                    df.index = base_index
-                return df
-
-            self.power_df = _align_feature_df("power", self.power_df)
-            self.connectivity_df = _align_feature_df("connectivity", self.connectivity_df)
-            self.pac_df = _align_feature_df("pac", self.pac_df)
-            self.microstates_df = _align_feature_df("microstates", self.microstates_df)
-            self.aperiodic_df = _align_feature_df("aperiodic", self.aperiodic_df)
-            self.itpc_df = _align_feature_df("itpc", self.itpc_df)
-            self.precomputed_df = _align_feature_df("precomputed", self.precomputed_df)
-
-            if all(
-                df is None or df.empty
-                for df in [
-                    self.power_df,
-                    self.connectivity_df,
-                    self.pac_df,
-                    self.microstates_df,
-                    self.aperiodic_df,
-                    self.itpc_df,
-                    self.precomputed_df,
-                ]
-            ):
-                self.logger.error("All feature tables failed alignment for sub-%s", self.subject)
-                return False
-
-            self.temperature, self.temperature_column = extract_temperature_data(
-                self.aligned_events, self.config
-            )
-
-            self.covariates_df = build_covariate_matrix(
-                self.aligned_events, self.partial_covars, self.config
-            )
-
-            def _sanitize_covariates(cov: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
-                if cov is None or cov.empty:
-                    return None
-                cov = cov.copy()
-                if self.aligned_events is not None and not cov.index.equals(self.aligned_events.index):
-                    cov.index = self.aligned_events.index
-                for col in list(cov.columns):
-                    cov[col] = pd.to_numeric(cov[col], errors="coerce")
-                cov = cov.replace([np.inf, -np.inf], np.nan)
-                cov = cov.dropna(axis=1, how="all")
-                if cov.empty:
-                    return None
-                constant_cols = [
-                    c
-                    for c in cov.columns
-                    if int(pd.to_numeric(cov[c], errors="coerce").nunique(dropna=True)) <= 1
-                ]
-                if constant_cols:
-                    cov = cov.drop(columns=constant_cols, errors="ignore")
-                return None if cov.empty else cov
-
-            self.covariates_df = _sanitize_covariates(self.covariates_df)
-
-            self.data_qc["trial_order"] = {"enabled": bool(self.control_trial_order)}
-            if self.control_trial_order and self.aligned_events is not None:
-                trial_candidates = [
-                    "trial_index",
-                    "trial_in_run",
-                    "trial",
-                    "trial_number",
-                ]
-                trial_col = None
-                for cand in trial_candidates:
-                    if cand in self.aligned_events.columns:
-                        trial_col = cand
-                        break
-
-                if trial_col is None:
-                    self.control_trial_order = False
-                    self.data_qc["trial_order"].update({"enabled": False, "reason": "missing_trial_column"})
-                else:
-                    trial_index_series = pd.to_numeric(self.aligned_events[trial_col], errors="coerce")
-                    max_missing = float(
-                        self.config.get("behavior_analysis.trial_order.max_missing_fraction", 0.1)
-                        if self.config is not None
-                        else 0.1
-                    )
-                    missing_fraction = float(trial_index_series.isna().mean()) if len(trial_index_series) else 1.0
-                    n_unique = int(trial_index_series.dropna().nunique())
-                    is_monotonic = bool(trial_index_series.dropna().is_monotonic_increasing)
-
-                    self.data_qc["trial_order"].update(
-                        {
-                            "source_column": str(trial_col),
-                            "missing_fraction": missing_fraction,
-                            "n_unique_non_nan": n_unique,
-                            "is_monotonic_increasing_non_nan": is_monotonic,
-                            "max_missing_fraction_threshold": max_missing,
-                        }
-                    )
-
-                    if trial_index_series.isna().all() or missing_fraction > max_missing or not is_monotonic:
-                        self.control_trial_order = False
-                        self.data_qc["trial_order"].update(
-                            {
-                                "enabled": False,
-                                "reason": "unreliable_trial_order_column",
-                            }
-                        )
-                    else:
-                        if self.covariates_df is None or self.covariates_df.empty:
-                            self.covariates_df = pd.DataFrame(index=self.aligned_events.index)
-                        self.covariates_df["trial_index"] = trial_index_series
-                        self.covariates_df = _sanitize_covariates(self.covariates_df)
-
-            if (
-                not self.control_temperature
-                and self.temperature_column
-                and self.covariates_df is not None
-                and not self.covariates_df.empty
-                and self.temperature_column in self.covariates_df.columns
-            ):
-                self.covariates_df = self.covariates_df.drop(
-                    columns=[self.temperature_column],
-                    errors="ignore",
-                )
-                self.covariates_df = _sanitize_covariates(self.covariates_df)
-
-            self.covariates_without_temp_df = build_covariates_without_temp(
-                self.covariates_df, self.temperature_column
-            )
-
-            if self.covariates_without_temp_df is not None and self.aligned_events is not None:
-                if not self.covariates_without_temp_df.index.equals(self.aligned_events.index):
-                    self.covariates_without_temp_df = self.covariates_without_temp_df.copy()
-                    self.covariates_without_temp_df.index = self.aligned_events.index
-            self.covariates_without_temp_df = _sanitize_covariates(self.covariates_without_temp_df)
-
-            self.group_ids = None
-            self.group_column = None
-            if self.aligned_events is not None:
-                for candidate in ["run", "block", "session", "subject"]:
-                    if candidate not in self.aligned_events.columns:
-                        continue
-                    try:
-                        values = self.aligned_events[candidate]
-                        if hasattr(values, "nunique") and int(values.nunique(dropna=False)) <= 1:
-                            continue
-                        self.group_ids = pd.Series(values, index=self.aligned_events.index, name=candidate)
-                        self.group_column = candidate
-                        break
-                    except Exception:
-                        self.group_ids = None
-                        self.group_column = None
-
-            self._data_loaded = True
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Data loading failed: {e}")
-            return False
+                self.group_ids = None
+                self.group_column = None
 
     def add_result(self, result: ComputationResult) -> None:
         """Add a computation result."""

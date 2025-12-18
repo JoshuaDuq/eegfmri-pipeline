@@ -109,7 +109,6 @@ __all__ = [
 
 _LAZY_IMPORTS = {
     # Naming utilities
-    "make_feature_name": "eeg_pipeline.domain.features.naming",
     "parse_feature_name": "eeg_pipeline.domain.features.naming",  # Authoritative parser with FeatureMetadata
     
     # Constants and utilities (imported from their actual modules)

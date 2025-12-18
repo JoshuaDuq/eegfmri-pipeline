@@ -183,7 +183,7 @@ class FeaturePipeline(PipelineBase):
         if original_events is not None:
             save_dropped_trials_log(epochs, original_events, features_dir / "dropped_trials.tsv", self.logger)
 
-        save_trial_alignment_manifest(aligned_events, epochs, features_dir / "trial_alignment.tsv", self.config, self.logger)
+        save_trial_alignment_manifest(aligned_events, epochs, features_dir / "trial_alignment.json", self.config, self.logger)
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
         target_col = pick_target_column(aligned_events, target_columns=target_columns)

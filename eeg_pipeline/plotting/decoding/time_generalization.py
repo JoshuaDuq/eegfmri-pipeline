@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions (imported from helpers module)
 ###################################################################
 
-from eeg_pipeline.plotting.decoding.helpers import _despine
+from eeg_pipeline.plotting.decoding.helpers import despine
 
 
 ###################################################################
@@ -78,7 +78,7 @@ def plot_time_generalization_matrix(
     cbar.set_label(metric.upper())
 
     ax.set_title("Time-generalization")
-    _despine(ax)
+    despine(ax)
 
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
@@ -155,7 +155,7 @@ def plot_time_generalization_with_null(
     cbar.set_label(metric.upper())
 
     ax.set_title("Time-generalization (empirical vs null)")
-    _despine(ax)
+    despine(ax)
 
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)

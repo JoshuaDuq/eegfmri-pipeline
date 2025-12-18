@@ -27,6 +27,12 @@ frequency_bands: &frequency_bands  # Standard EEG frequency band definitions [Hz
   beta: [13.0, 30.0]  # Beta band range
   gamma: [30.1, 80.0]  # Gamma band range
 
+power:  # Power feature configuration
+  bands_to_use: ["delta", "theta", "alpha", "beta", "gamma"]  # Frequency bands to use for power analysis (used in scatter plots, dose-response)
+
+dynamics:  # Dynamics feature configuration
+  metrics: ["lzc", "pe", "hjorth_mobility", "hjorth_complexity"]  # Dynamics metrics to compute and plot
+
 plateau_window: &plateau_window [3.0, 10.5]  # Thermal plateau period [s] for feature extraction (used throughout analysis)
 baseline_window_tfr: &baseline_window_tfr [-3.0, -0.5]  # TFR baseline correction window [s] relative to stimulus (shortened to avoid filter edge effects)
 
@@ -296,12 +302,12 @@ feature_engineering:  # Feature extraction parameters (used in 03_feature_extrac
     n_jobs_feature_groups: -1  # Number of parallel jobs for running independent feature extractors (used in pipeline.py); keep low to limit memory
   connectivity:  # Connectivity feature parameters
     allow_legacy_fallback: false  # If false, require mne-connectivity; legacy fallback is not scientifically equivalent
-    output_level: "global_only"  # "full" writes all channel-pair edges; "global_only" writes only global summaries and graph metrics
+    output_level: "full"  # "full" writes all channel-pair edges; "global_only" writes only global summaries and graph metrics
     enable_imcoh: false  # Enable imaginary coherence computation (robust to volume conduction)
     enable_pli: false  # Enable Phase Lag Index computation
     aec_mode: "orth"  # Amplitude Envelope Correlation mode: "orth" (orthogonalized) or "standard"
     graph_top_prop: 0.1  # Top proportion of edges to keep for graph metrics (0.1 = top 10%)
-    small_world_n_rand: 100  # Number of random graphs for small-world sigma calculation
+    small_world_n_rand: 0  # Number of random graphs for small-world sigma (0 = skip, very expensive)
     epsilon: *epsilon_std  # Small epsilon for connectivity calculations (prevents division by zero, used in connectivity.py _EPSILON and _compute_imcoh_matrices, reference to shared epsilon_std)
     sliding_window_len: 1.0  # Sliding window length [s] for dynamic connectivity (used in compute_sliding_connectivity_features)
     sliding_window_step: 0.5  # Sliding window step size [s] for dynamic connectivity (used in compute_sliding_connectivity_features)
@@ -619,6 +625,7 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     default_n_permutations: 100  # Default number of permutations for quick tests (used in cluster tests, reference to shared default_n_permutations_quick)
     default_alpha: *default_alpha  # Default significance threshold (reference to shared default_alpha anchor)
     default_n_bootstrap: 1000  # Default number of bootstrap iterations (reference to shared default_n_permutations_full)
+    base_seed: 42  # Base random seed for reproducible behavior analysis (used in get_subject_seed)
     min_samples_per_covariate: *min_samples_per_covariate  # Minimum samples per covariate for partial correlation (reference to shared min_samples_per_covariate)
     partial_corr_base_samples: *partial_corr_base_samples  # Base samples required for partial correlation (reference to shared partial_corr_base_samples)
     min_dof_for_correlation: *min_dof_for_correlation  # Minimum degrees of freedom for correlation validity (reference to shared min_dof_for_correlation)
@@ -699,6 +706,8 @@ behavior_analysis:  # Behavioral correlation analysis parameters (used in 04_beh
     random_effects: "intercept"  # Random effect structure: "intercept", "slope", "both"
     subject_column: "subject"  # Column name for subject grouping
     report_icc: true  # Report intraclass correlation coefficient
+  condition:  # Condition comparison parameters (pain vs non-pain)
+    fail_fast: true  # If true, raise errors on condition split failures; if false, skip with warnings
   mediation:  # Mediation analysis parameters
     enabled: false  # Run mediation analysis
     n_bootstrap: 5000  # Bootstrap iterations for indirect effect CI
@@ -1088,6 +1097,7 @@ plotting:  # Plotting configuration (used in plotting_config.py, io_utils.py)
     samples_per_bin: 10  # Target samples per bin for calibration
   behavioral:  # Behavioral correlation plot configuration (used in plot_behavioral.py, accessed as plotting.behavioral)
       plot_subdir: "behavior"  # Subdirectory for behavioral plots
+      default_rng_seed: 42  # Default random seed for bootstrap/permutation in behavioral plots
       max_channels_to_display: 10  # Maximum channels to display in channel lists (used in format_channel_list_for_display)
       figure_size: "standard"  # Figure size preset name
       scatter_marker_size: "large"  # Scatter marker size preset name

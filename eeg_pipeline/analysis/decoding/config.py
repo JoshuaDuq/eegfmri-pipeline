@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from eeg_pipeline.utils.config.loader import load_settings
+from eeg_pipeline.utils.config.loader import load_config
 
 
 def _ensure_config(config: Any) -> Any:
-    return config if config is not None else load_settings()
+    return config if config is not None else load_config()
 
 
 def get_decoding_config(config: Any = None) -> Dict[str, Any]:
