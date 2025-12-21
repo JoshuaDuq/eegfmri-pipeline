@@ -35,19 +35,17 @@ import pandas as pd
 
 
 DOMAINS = {
-    "power": "power",
-    "erds": "erds",
-    "conn": "conn",
-    "phase": "phase",
-    "pac": "pac",
-    "aper": "aper",
-    "spec": "spec",
-    "ms": "ms",
-    "comp": "comp",
-    "temp": "temp",
-    "asym": "asym",
-    "gfp": "gfp",
-    "roi": "roi",
+    "power": "power",         # Band power
+    "spectral": "spectral",   # Peak frequency, IAF
+    "aper": "aper",           # Aperiodic 1/f
+    "erds": "erds",           # Event-related desync/sync
+    "ratio": "ratio",         # Band power ratios
+    "asym": "asym",           # Hemispheric asymmetry
+    "conn": "conn",           # Connectivity
+    "itpc": "itpc",           # Inter-trial phase coherence
+    "pac": "pac",             # Phase-amplitude coupling
+    "comp": "comp",           # Complexity
+    "qual": "qual",           # Quality metrics
 }
 
 TIME_LABELS = {
@@ -127,6 +125,10 @@ class NamingSchema:
             if not channel:
                 raise ValueError("Channel must be provided for scope='ch'")
             parts.append(channel)
+        elif scope == "roi":
+            if not channel:
+                raise ValueError("ROI name must be provided for scope='roi'")
+            parts.append(channel)  # ROI name passed via channel parameter
         elif scope == "chpair":
             if not channel_pair:
                 raise ValueError("Channel pair must be provided for scope='chpair'")
@@ -156,7 +158,7 @@ class NamingSchema:
 
             if res["scope"] == "global":
                 res["stat"] = "_".join(parts[4:])
-            elif res["scope"] in ["ch", "chpair"]:
+            elif res["scope"] in ["ch", "chpair", "roi"]:
                 res["identifier"] = parts[4]
                 res["stat"] = "_".join(parts[5:])
 
@@ -234,7 +236,7 @@ def parse_feature_name(name: str) -> FeatureMetadata:
     if scope == "global":
         identifier = None
         stat = "_".join(parts[4:])
-    elif scope in ("ch", "chpair"):
+    elif scope in ("ch", "chpair", "roi"):
         if len(parts) >= 6:
             identifier = parts[4]
             stat = "_".join(parts[5:])

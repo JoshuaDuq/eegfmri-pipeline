@@ -230,9 +230,6 @@ class FeatureExtractionResult:
     pow_cols: List[str] = field(default_factory=list)
     conn_df: Optional[pd.DataFrame] = None
     conn_cols: List[str] = field(default_factory=list)
-    ms_df: Optional[pd.DataFrame] = None
-    ms_cols: List[str] = field(default_factory=list)
-    ms_templates: Any = None
     aper_df: Optional[pd.DataFrame] = None
     aper_cols: List[str] = field(default_factory=list)
     aper_qc: Optional[Any] = None
@@ -245,16 +242,25 @@ class FeatureExtractionResult:
     pac_amp_freqs: Optional[Any] = None
     pac_trials_df: Optional[pd.DataFrame] = None
     pac_time_df: Optional[pd.DataFrame] = None
-    precomputed_df: Optional[pd.DataFrame] = None
-    precomputed_cols: List[str] = field(default_factory=list)
-    cfc_df: Optional[pd.DataFrame] = None
-    cfc_cols: List[str] = field(default_factory=list)
-    dynamics_df: Optional[pd.DataFrame] = None
-    dynamics_cols: List[str] = field(default_factory=list)
+    # ERDS features
+    erds_df: Optional[pd.DataFrame] = None
+    erds_cols: List[str] = field(default_factory=list)
+    # Spectral features (IAF, peak frequency, spectral edge)
+    spectral_df: Optional[pd.DataFrame] = None
+    spectral_cols: List[str] = field(default_factory=list)
+    # Band power ratios
+    ratios_df: Optional[pd.DataFrame] = None
+    ratios_cols: List[str] = field(default_factory=list)
+    # Hemispheric asymmetry
+    asymmetry_df: Optional[pd.DataFrame] = None
+    asymmetry_cols: List[str] = field(default_factory=list)
+    # Complexity features
     comp_df: Optional[pd.DataFrame] = None
     comp_cols: List[str] = field(default_factory=list)
+    # Quality metrics
     quality_df: Optional[pd.DataFrame] = None
     quality_cols: List[str] = field(default_factory=list)
+
 
 
 def combine_feature_groups(result: ExtractionResult, groups: List[str]) -> tuple:

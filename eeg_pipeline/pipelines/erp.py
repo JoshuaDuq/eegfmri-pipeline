@@ -160,10 +160,14 @@ class ErpPipeline(PipelineBase):
         from eeg_pipeline.infra.tsv import write_tsv
         from eeg_pipeline.utils.data.columns import find_pain_column_in_metadata, find_temperature_column_in_metadata
         from eeg_pipeline.utils.analysis.stats import count_trials_by_condition
+        from eeg_pipeline.cli.common import ProgressReporter
         
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
+        
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        total_steps = 4
         
         crop_tmin = kwargs.get("crop_tmin", self._crop_tmin)
         crop_tmax = kwargs.get("crop_tmax", self._crop_tmax)
@@ -171,15 +175,22 @@ class ErpPipeline(PipelineBase):
         
         self.logger.info(f"=== ERP analysis: sub-{subject}, task-{task} ===")
         
+        progress.subject_start(f"sub-{subject}")
+        progress.step("Initializing", current=1, total=total_steps)
+        
+        progress.step("Loading epochs", current=2, total=total_steps)
         epochs = load_and_prepare_epochs(
             subject, task, self.config, crop_tmin, crop_tmax, include_tmax, self.logger
         )
         
         if epochs is None:
             self.logger.error(f"Failed to load data for sub-{subject}, task-{task}")
+            progress.error("load_failed", f"Failed to load data for sub-{subject}")
             return
         
         self.logger.info(f"Loaded {len(epochs)} epochs")
+        
+        progress.step("Extracting statistics", current=3, total=total_steps)
         
         n_pain = 0
         n_nonpain = 0
@@ -194,6 +205,8 @@ class ErpPipeline(PipelineBase):
             temperatures = sorted(epochs.metadata[temp_col].unique().tolist())
         
         self.logger.info(f"ERP stats: pain={n_pain}, non-pain={n_nonpain}, temps={temperatures}")
+        
+        progress.step("Saving results", current=4, total=total_steps)
         
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
@@ -213,6 +226,10 @@ class ErpPipeline(PipelineBase):
             self.logger.info(f"Saved ERP stats to {stats_path}")
         except Exception as e:
             self.logger.error(f"Failed to write ERP stats: {e}")
+            progress.error("save_failed", f"Failed to write ERP stats: {e}")
+            return
+        
+        progress.subject_done(f"sub-{subject}", success=True)
 
 
 __all__ = [

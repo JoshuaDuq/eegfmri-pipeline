@@ -134,8 +134,9 @@ def plot_power_by_roi_band_condition(
         for i, (key, p, d) in enumerate(pvalue_keys):
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
-    plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(16, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -350,7 +351,9 @@ def plot_dynamics_by_roi_band_condition(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(16, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -552,7 +555,9 @@ def plot_aperiodic_by_roi_condition(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_metrics, figsize=(8, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_metric", 4.0))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_metrics, figsize=(width_per_col * n_metrics, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, metric in enumerate(metrics):
@@ -700,7 +705,9 @@ def plot_connectivity_by_roi_band_condition(
     measure_label = measure_labels.get(measure, measure.upper())
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(16, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         roi_patterns = rois[roi_name]
@@ -934,7 +941,9 @@ def plot_itpc_by_roi_band_condition(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(16, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -1145,7 +1154,9 @@ def plot_itpc_plateau_vs_baseline(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(16, 2.5 * n_rois))
+    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
+    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):

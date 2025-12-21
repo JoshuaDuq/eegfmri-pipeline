@@ -41,7 +41,7 @@ from eeg_pipeline.analysis.features.results import (
 )
 
 from eeg_pipeline.types import PrecomputedData, ConfigLike, BandData, PSDData, TimeWindows
-from eeg_pipeline.analysis.features.precompute import precompute_data
+from eeg_pipeline.analysis.features.preparation import precompute_data
 
 # =============================================================================
 # Quality & Normalization

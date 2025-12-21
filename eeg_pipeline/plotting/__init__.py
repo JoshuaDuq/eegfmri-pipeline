@@ -134,7 +134,7 @@ def __getattr__(name: str):
         "plot_power_roi_scatter": "behavioral",
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "plot_pain_nonpain_clusters": "behavioral",
-        "plot_regressor_distributions": "behavioral",
+
         "plot_pac_behavior_correlations": "behavioral",
         "plot_itpc_rating_scatter_grid": "behavioral",
         "visualize_subject_behavior": "behavioral",

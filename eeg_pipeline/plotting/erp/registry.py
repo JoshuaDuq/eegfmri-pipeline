@@ -45,3 +45,8 @@ class ERPPlotManager(FlatPlotManager["ERPPlotContext"]):
             func(self.ctx, self.saved_plots)
         except Exception as exc:
             self.logger.error(f"ERP plotter '{name}' failed: {exc}", exc_info=True)
+
+
+
+
+

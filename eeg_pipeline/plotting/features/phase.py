@@ -161,9 +161,9 @@ def plot_itpc_topomaps(
     n_rows = len(bands)
     n_cols = len(time_bins)
     
-    fig_width = 4.5 * n_cols
-    fig_height = 4.0 * n_rows
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
+    width_per_state = float(plot_cfg.plot_type_configs.get("itpc", {}).get("width_per_bin", 4.5))
+    height_per_state = float(plot_cfg.plot_type_configs.get("itpc", {}).get("height_per_band", 4.0))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_state * n_cols, height_per_state * n_rows), squeeze=False)
     
     topomap_data = {}
     all_values = []
@@ -319,13 +319,17 @@ def plot_itpc_by_condition(
         format_footer_annotation,
     )
     
-    condition_colors = {"pain": "#d62728", "nonpain": "#1f77b4"}
-    band_colors = {
-        "delta": "#440154", "theta": "#3b528b", 
-        "alpha": "#21918c", "beta": "#5ec962", "gamma": "#fde725"
-    }
+    condition_colors = get_condition_colors(config)
+    from .utils import get_band_colors
+    band_colors = get_band_colors(config)
     
     plot_cfg = get_plot_config(config)
+    n_bands = len(bands)
+    
+    # Calculate figure size dynamically
+    width_per_band = float(plot_cfg.plot_type_configs.get("itpc", {}).get("width_per_band_box", 4.0))
+    fig_height = float(plot_cfg.plot_type_configs.get("itpc", {}).get("height_box", 5.0))
+    figsize = (width_per_band * n_bands, fig_height)
     
     itpc_cols = [c for c in itpc_df.columns if c.startswith("itpc_")]
     if not itpc_cols:
@@ -387,7 +391,7 @@ def plot_itpc_by_condition(
         n_significant = 0
     
     n_bands = len(bands)
-    fig, axes = plt.subplots(1, n_bands, figsize=(4 * n_bands, 5), squeeze=False)
+    fig, axes = plt.subplots(1, n_bands, figsize=figsize, squeeze=False)
     axes = axes.flatten()
     
     for idx, band in enumerate(bands):
@@ -426,9 +430,9 @@ def plot_itpc_by_condition(
                 ci_high=s["ci_high"],
                 compact=True,
             )
-            text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+            text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
             ax.text(0.5, 0.98, annotation, ha="center", va="top", 
-                   transform=ax.transAxes, fontsize=7, color=text_color,
+                   transform=ax.transAxes, fontsize=plot_cfg.font.annotation, color=text_color,
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
         
         ax.set_xticks([0, 1])
@@ -545,7 +549,9 @@ def plot_pac_comodulograms(
     n_cols = min(3, n_rois)
     n_rows = (n_rois + n_cols - 1) // n_cols
     
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows), squeeze=False)
+    width_per_col = float(pac_plot_cfg.get("width_per_col", 4.0))
+    height_per_row = float(pac_plot_cfg.get("height_per_row", 3.5))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_col * n_cols, height_per_row * n_rows), squeeze=False)
     
     for idx, roi in enumerate(rois):
         row, col = idx // n_cols, idx % n_cols
@@ -707,17 +713,18 @@ def plot_pac_by_condition(
     if len(pac_trials_df) % len(events_df) != 0:
         return
     
-    rois = pac_trials_df['roi'].unique()
-    if len(rois) == 0:
+    rois = sorted(pac_trials_df['roi'].unique())
+    n_rois = len(rois)
+    if n_rois == 0:
         return
     
-    condition_colors = {"pain": "#d62728", "nonpain": "#1f77b4"}
-        
+    condition_colors = get_condition_colors(config)
     plot_cfg = get_plot_config(config)
-    n_rois = min(len(rois), 4)
-    rois = rois[:n_rois]
     
-    fig, axes = plt.subplots(1, n_rois, figsize=(4 * n_rois, 5), squeeze=False)
+    # Calculate figure size dynamically
+    width_per_roi = float(plot_cfg.plot_type_configs.get("pac", {}).get("width_per_roi", 4.0))
+    fig_height = float(plot_cfg.plot_type_configs.get("pac", {}).get("height_box", 5.0))
+    fig, axes = plt.subplots(1, n_rois, figsize=(width_per_roi * n_rois, fig_height), squeeze=False)
     axes = axes.flatten()
         
     for i, roi in enumerate(rois):

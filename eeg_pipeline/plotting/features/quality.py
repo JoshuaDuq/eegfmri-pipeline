@@ -60,7 +60,9 @@ def plot_feature_distribution_grid(
         return fig
     
     n_rows = (n_features + n_cols - 1) // n_cols
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows))
+    width_per_plot = float(plot_cfg.plot_type_configs.get("quality", {}).get("width_per_plot", 3.0))
+    height_per_plot = float(plot_cfg.plot_type_configs.get("quality", {}).get("height_per_plot", 2.5))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_plot * n_cols, height_per_plot * n_rows))
     axes = np.atleast_2d(axes).flatten()
     
     for idx, col in enumerate(feature_cols):
@@ -126,9 +128,11 @@ def plot_outlier_trials_heatmap(
     plot_cfg = get_plot_config(config)
     cfg = get_config_value(config, "plotting.plots.features.quality.outlier", {})
     z_threshold = cfg.get("z_threshold", z_threshold)
-    figsize = tuple(cfg.get("figsize", figsize))
     max_features = cfg.get("max_features", max_features)
     max_trials = cfg.get("max_trials", max_trials)
+    
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     if quality_df is None or not isinstance(quality_df, pd.DataFrame) or quality_df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
@@ -211,7 +215,8 @@ def plot_snr_distribution(
     plot_cfg = get_plot_config(config)
     cfg = get_config_value(config, "plotting.plots.features.quality.snr", {})
     threshold_db = cfg.get("threshold_db", threshold_db)
-    figsize = tuple(cfg.get("figsize", figsize))
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("standard", plot_type="features")
     if snr_col not in quality_df.columns:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, f"Column {snr_col} not found", ha="center", va="center")
@@ -317,7 +322,7 @@ def plot_quality_summary_dashboard(
     *,
     figsize: Tuple[float, float] = (14, 8),
 ) -> plt.Figure:
-    """Create comprehensive quality dashboard from quality report."""
+    plot_cfg = get_plot_config(None) # Can add config param if needed
     fig = plt.figure(figsize=figsize)
     
     # Grid layout

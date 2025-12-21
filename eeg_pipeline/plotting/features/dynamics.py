@@ -28,7 +28,7 @@ def plot_autocorrelation_decay(
     save_path: Path,
     *,
     decay_col: str = "acf_decay_time_ms",
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
     by_condition: str = None,
     config: Any = None,
 ) -> plt.Figure:
@@ -40,6 +40,8 @@ def plot_autocorrelation_decay(
         ax.text(0.5, 0.5, f"Column {decay_col} not found", ha="center", va="center")
         return fig
     
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     ax1 = axes[0]
@@ -93,10 +95,12 @@ def plot_mse_complexity_curves(
     dynamics_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (10, 5),
+    config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
     by_condition: str = None,
 ) -> plt.Figure:
     """Plot multiscale entropy curves across scales."""
+    plot_cfg = get_plot_config(config)
     mse_cols = sorted([c for c in dynamics_df.columns if c.startswith("mse_scale_")])
     
     if not mse_cols:
@@ -104,6 +108,8 @@ def plot_mse_complexity_curves(
         ax.text(0.5, 0.5, "No MSE scale columns found", ha="center", va="center")
         return fig
     
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     # Extract scales
@@ -155,17 +161,21 @@ def plot_neural_timescale_comparison(
     dynamics_df: pd.DataFrame,
     save_path: Path,
     *,
+    config: Any = None,
     decay_col: str = "acf_decay_time_ms",
     dfa_col: str = "dfa_alpha_broadband",
     by_condition: str = None,
-    figsize: Tuple[float, float] = (8, 6),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Scatter plot comparing different timescale measures."""
+    plot_cfg = get_plot_config(config)
     if decay_col not in dynamics_df.columns or dfa_col not in dynamics_df.columns:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "Required columns not found", ha="center", va="center")
         return fig
     
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("standard", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     x = dynamics_df[decay_col].values
@@ -203,11 +213,13 @@ def plot_dynamics_behavior_grid(
     behavior: np.ndarray,
     save_path: Path,
     *,
+    config: Any = None,
     dynamics_cols: List[str] = None,
     behavior_label: str = "Rating",
-    figsize: Tuple[float, float] = (12, 8),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Grid of dynamics features vs behavior correlations."""
+    plot_cfg = get_plot_config(config)
     if dynamics_cols is None:
         dynamics_cols = [c for c in dynamics_df.columns 
                         if any(k in c for k in ["acf_", "dfa_", "mse_"]) and not c.endswith("_ms")]
@@ -222,6 +234,8 @@ def plot_dynamics_behavior_grid(
     n_cols_grid = 3
     n_rows = (len(dynamics_cols) + n_cols_grid - 1) // n_cols_grid
     
+    if figsize is None:
+        figsize = (12, 4 * n_rows)
     fig, axes = plt.subplots(n_rows, n_cols_grid, figsize=figsize)
     axes = np.atleast_2d(axes).flatten()
     
@@ -264,4 +278,3 @@ def plot_dynamics_behavior_grid(
     plt.close(fig)
     
     return fig
-

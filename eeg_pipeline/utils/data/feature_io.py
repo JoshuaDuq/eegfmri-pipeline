@@ -67,7 +67,7 @@ def load_subject_features(
 
     subject_features: Dict[str, pd.DataFrame] = {}
     for subject in subjects:
-        feature_path = deriv_features_path(deriv_root, subject) / "features_eeg_direct.tsv"
+        feature_path = deriv_features_path(deriv_root, subject) / "features_power.tsv"
         if not feature_path.exists():
             logger.warning(f"Missing features for sub-{subject}: {feature_path}")
             continue
@@ -84,8 +84,8 @@ def _load_features_and_targets(
     epochs: Optional[Any] = None,
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     feats_dir = deriv_features_path(deriv_root, subject)
-    temporal_path = feats_dir / "features_eeg_direct.tsv"
-    plateau_path = feats_dir / "features_eeg_plateau.tsv"
+    temporal_path = feats_dir / "features_power.tsv"
+    plateau_path = feats_dir / "features_power_plateau.tsv"
     conn_path = find_connectivity_features_path(deriv_root, subject)
     y_path = feats_dir / "target_vas_ratings.tsv"
 
@@ -186,7 +186,7 @@ def load_feature_bundle(
     features_dir = deriv_features_path(deriv_root, subject)
 
     bundle = FeatureBundle(
-        power_df=_safe_read_table(features_dir / "features_eeg_direct.tsv", logger),
+        power_df=_safe_read_table(features_dir / "features_power.tsv", logger),
         microstate_df=_safe_read_table(features_dir / "features_microstates.tsv", logger),
         connectivity_df=_safe_read_table(find_connectivity_features_path(deriv_root, subject), logger),
         aperiodic_df=_safe_read_table(features_dir / "features_aperiodic.tsv", logger),
@@ -300,13 +300,11 @@ def save_all_features(
     config,
     comp_df: Optional[pd.DataFrame] = None,
     comp_cols: Optional[List[str]] = None,
-    dynamics_df: Optional[pd.DataFrame] = None,
-    dynamics_cols: Optional[List[str]] = None,
-    cfc_df: Optional[pd.DataFrame] = None,
-    cfc_cols: Optional[List[str]] = None,
-    precomputed_df: Optional[pd.DataFrame] = None,
-    precomputed_cols: Optional[List[str]] = None,
+    spectral_df: Optional[pd.DataFrame] = None,
+    spectral_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
+    export_all: bool = True,
+    suffix: Optional[str] = None,
 ) -> pd.DataFrame:
     from eeg_pipeline.domain.features.naming import generate_manifest
 
@@ -411,7 +409,8 @@ def save_all_features(
                     len(ms_df.columns),
                 )
         direct_cols.extend(list(ms_df.columns))
-        ms_path = features_dir / "features_microstates.tsv"
+        ms_name = f"features_microstates_{suffix}.tsv" if suffix else "features_microstates.tsv"
+        ms_path = features_dir / ms_name
         logger.info("Saving microstate features: %s", ms_path)
         write_tsv(ms_df, ms_path)
 
@@ -427,7 +426,8 @@ def save_all_features(
                     len(aper_df.columns),
                 )
         direct_cols.extend(list(aper_df.columns))
-        aper_path = features_dir / "features_aperiodic.tsv"
+        aper_name = f"features_aperiodic_{suffix}.tsv" if suffix else "features_aperiodic.tsv"
+        aper_path = features_dir / aper_name
         logger.info("Saving aperiodic features: %s", aper_path)
         write_tsv(aper_df, aper_path)
 
@@ -436,24 +436,28 @@ def save_all_features(
             itpc_df.columns = itpc_cols
         direct_blocks.append(itpc_df)
         direct_cols.extend(list(itpc_df.columns))
-        itpc_path = features_dir / "features_itpc.tsv"
+        itpc_name = f"features_itpc_{suffix}.tsv" if suffix else "features_itpc.tsv"
+        itpc_path = features_dir / itpc_name
         logger.info("Saving ITPC features (channel x band x segment): %s", itpc_path)
         write_tsv(itpc_df, itpc_path)
 
     if pac_df is not None and not pac_df.empty:
-        pac_path = features_dir / "features_pac.tsv"
+        pac_name = f"features_pac_{suffix}.tsv" if suffix else "features_pac.tsv"
+        pac_path = features_dir / pac_name
         logger.info("Saving PAC comodulograms: %s", pac_path)
         write_tsv(pac_df, pac_path)
 
     if pac_trials_df is not None and not pac_trials_df.empty:
-        pac_trials_path = features_dir / "features_pac_trials.tsv"
+        pac_trials_name = f"features_pac_trials_{suffix}.tsv" if suffix else "features_pac_trials.tsv"
+        pac_trials_path = features_dir / pac_trials_name
         logger.info("Saving PAC per-trial values: %s", pac_trials_path)
         write_tsv(pac_trials_df, pac_trials_path)
         direct_blocks.append(pac_trials_df)
         direct_cols.extend(list(pac_trials_df.columns))
 
     if pac_time_df is not None and not pac_time_df.empty:
-        pac_time_path = features_dir / "features_pac_time.tsv"
+        pac_time_name = f"features_pac_time_{suffix}.tsv" if suffix else "features_pac_time.tsv"
+        pac_time_path = features_dir / pac_time_name
         logger.info("Saving PAC time-resolved values: %s", pac_time_path)
         write_tsv(pac_time_df, pac_time_path)
 
@@ -480,45 +484,22 @@ def save_all_features(
             if len(comp_cols) == len(comp_df.columns):
                 comp_df.columns = comp_cols
         direct_cols.extend(list(comp_df.columns))
-        comp_path = features_dir / "features_complexity.tsv"
+        comp_name = f"features_complexity_{suffix}.tsv" if suffix else "features_complexity.tsv"
+        comp_path = features_dir / comp_name
         logger.info("Saving complexity features: %s", comp_path)
         write_tsv(comp_df, comp_path)
 
-    if dynamics_df is not None and not dynamics_df.empty:
-        direct_blocks.append(dynamics_df)
-        if dynamics_cols:
-            if len(dynamics_cols) == len(dynamics_df.columns):
-                dynamics_df.columns = dynamics_cols
-        direct_cols.extend(list(dynamics_df.columns))
-        dyn_path = features_dir / "features_dynamics.tsv"
-        logger.info("Saving dynamics features: %s", dyn_path)
-        write_tsv(dynamics_df, dyn_path)
+    if spectral_df is not None and not spectral_df.empty:
+        direct_blocks.append(spectral_df)
+        if spectral_cols:
+            if len(spectral_cols) == len(spectral_df.columns):
+                spectral_df.columns = spectral_cols
+        direct_cols.extend(list(spectral_df.columns))
+        spec_name = f"features_spectral_{suffix}.tsv" if suffix else "features_spectral.tsv"
+        spec_path = features_dir / spec_name
+        logger.info("Saving spectral features (IAF): %s", spec_path)
+        write_tsv(spectral_df, spec_path)
 
-    if cfc_df is not None and not cfc_df.empty:
-        direct_blocks.append(cfc_df)
-        if cfc_cols:
-            if len(cfc_cols) == len(cfc_df.columns):
-                cfc_df.columns = cfc_cols
-        direct_cols.extend(list(cfc_df.columns))
-        cfc_path = features_dir / "features_cfc.tsv"
-        logger.info("Saving CFC features: %s", cfc_path)
-        write_tsv(cfc_df, cfc_path)
-
-    if precomputed_df is not None and not precomputed_df.empty:
-        if precomputed_cols:
-            if len(precomputed_cols) == len(precomputed_df.columns):
-                precomputed_df.columns = precomputed_cols
-            else:
-                logger.warning(
-                    "Precomputed column mismatch: %d names vs %d columns. Using DataFrame names.",
-                    len(precomputed_cols),
-                    len(precomputed_df.columns),
-                )
-        precomputed_path = features_dir / "features_precomputed.tsv"
-        precomputed_cols_path = features_dir / "features_precomputed_columns.tsv"
-        logger.info("Saving precomputed features: %s", precomputed_path)
-        write_tsv(precomputed_df, precomputed_path)
-        write_tsv(pd.Series(list(precomputed_df.columns), name="feature").to_frame(), precomputed_cols_path)
 
     if aper_qc and aper_qc.get("freqs") is not None and aper_qc.get("slopes") is not None and aper_qc.get("offsets") is not None and aper_qc.get("r2") is not None:
         try:
@@ -526,7 +507,8 @@ def save_all_features(
             deriv_root = features_dir.parent.parent.parent
             stats_dir = deriv_stats_path(deriv_root, subject_name)
             stats_dir.mkdir(parents=True, exist_ok=True)
-            qc_path = stats_dir / "aperiodic_qc.npz"
+            qc_name = f"aperiodic_qc_{suffix}.npz" if suffix else "aperiodic_qc.npz"
+            qc_path = stats_dir / qc_name
             np.savez_compressed(
                 qc_path,
                 freqs=aper_qc.get("freqs"),
@@ -545,22 +527,26 @@ def save_all_features(
 
     if direct_blocks:
         direct_df = pd.concat(direct_blocks, axis=1)
-        direct_df = _dedupe_identical_duplicate_columns(direct_df, df_label="features_eeg_direct.tsv")
+        direct_df = _dedupe_identical_duplicate_columns(direct_df, df_label="features_power.tsv")
     else:
         direct_df = pd.DataFrame()
         logger.info("No direct feature blocks to concatenate (connectivity/precomputed-only run)")
 
     if not direct_df.empty:
-        eeg_direct_path = features_dir / "features_eeg_direct.tsv"
-        eeg_direct_cols_path = features_dir / "features_eeg_direct_columns.tsv"
+        direct_name = f"features_power_{suffix}.tsv" if suffix else "features_power.tsv"
+        cols_name = f"features_power_columns_{suffix}.tsv" if suffix else "features_power_columns.tsv"
+        eeg_direct_path = features_dir / direct_name
+        eeg_direct_cols_path = features_dir / cols_name
         direct_cols = list(direct_df.columns)
-        logger.info("Saving direct EEG features: %s", eeg_direct_path)
+        logger.info("Saving power features: %s", eeg_direct_path)
         write_tsv(direct_df, eeg_direct_path)
         write_tsv(pd.Series(direct_cols, name="feature").to_frame(), eeg_direct_cols_path)
 
     if plateau_df is not None and not plateau_df.empty:
-        plateau_path = features_dir / "features_eeg_plateau.tsv"
-        plateau_cols_path = features_dir / "features_eeg_plateau_columns.tsv"
+        plateau_name = f"features_power_plateau_{suffix}.tsv" if suffix else "features_power_plateau.tsv"
+        p_cols_name = f"features_power_plateau_columns_{suffix}.tsv" if suffix else "features_power_plateau_columns.tsv"
+        plateau_path = features_dir / plateau_name
+        plateau_cols_path = features_dir / p_cols_name
         logger.info("Saving plateau-averaged EEG features: %s", plateau_path)
         write_tsv(plateau_df, plateau_path)
         write_tsv(pd.Series(plateau_cols or [], name="feature").to_frame(), plateau_cols_path)
@@ -576,7 +562,8 @@ def save_all_features(
                     len(conn_df.columns),
                 )
 
-        conn_path = features_dir / "features_connectivity.parquet"
+        conn_name = f"features_connectivity_{suffix}.parquet" if suffix else "features_connectivity.parquet"
+        conn_path = features_dir / conn_name
         logger.info("Saving connectivity features: %s", conn_path)
         t0 = time.perf_counter()
         write_parquet(conn_df, conn_path)
@@ -592,9 +579,6 @@ def save_all_features(
     if not direct_df.empty:
         blocks.append(direct_df)
         cols_all.extend(list(direct_df.columns))
-    if precomputed_df is not None and not precomputed_df.empty:
-        blocks.append(precomputed_df)
-        cols_all.extend(list(precomputed_df.columns))
 
     if blocks:
         combined_df = pd.concat(blocks, axis=1)
@@ -603,20 +587,25 @@ def save_all_features(
         combined_df = pd.DataFrame()
         logger.warning("No feature blocks available for combined output")
 
-    combined_path = features_dir / "features_all.tsv"
-    logger.info("Saving combined features: %s", combined_path)
-    t0 = time.perf_counter()
-    write_tsv(combined_df, combined_path)
-    logger.info(
-        "Saved combined TSV in %.2fs (rows=%d, cols=%d)",
-        time.perf_counter() - t0,
-        len(combined_df),
-        len(combined_df.columns),
-    )
+    if not export_all:
+        logger.debug("Skipping features_all.tsv creation (export_all=False)")
+    else:
+        all_name = f"features_all_{suffix}.tsv" if suffix else "features_all.tsv"
+        combined_path = features_dir / all_name
+        logger.info("Saving combined features: %s", combined_path)
+        t0 = time.perf_counter()
+        write_tsv(combined_df, combined_path)
+        logger.info(
+            "Saved combined TSV in %.2fs (rows=%d, cols=%d)",
+            time.perf_counter() - t0,
+            len(combined_df),
+            len(combined_df.columns),
+        )
 
     try:
         subject_str = features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
-        sidecar_path = features_dir / "features.json"
+        json_name = f"features_{suffix}.json" if suffix else "features.json"
+        sidecar_path = features_dir / json_name
         manifest = generate_manifest(
             feature_columns=list(combined_df.columns),
             config=config,
@@ -951,6 +940,53 @@ def iterate_feature_columns(
     return list(feature_df.columns), feature_df
 
 
+def combine_all_features(features_dir: Path, config=None) -> Optional[pd.DataFrame]:
+    """
+    Combine all individual feature files into features_all.tsv.
+    
+    This utility loads all feature TSV files from a subject's features directory
+    and merges them into a single combined file.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    features_dir = Path(features_dir)
+    if not features_dir.exists():
+        logger.warning("Features directory does not exist: %s", features_dir)
+        return None
+    
+    blocks = []
+    
+    # Load direct EEG features
+    direct_path = features_dir / "features_power.tsv"
+    if direct_path.exists():
+        df = _safe_read_table(direct_path, logger)
+        if df is not None and not df.empty:
+            blocks.append(df)
+    
+    
+    if not blocks:
+        logger.warning("No feature files found to combine in %s", features_dir)
+        return None
+    
+    # Combine all blocks
+    combined_df = pd.concat(blocks, axis=1)
+    
+    # Remove exact duplicate columns
+    dup_mask = combined_df.columns.duplicated(keep="first")
+    if dup_mask.any():
+        logger.info("Removing %d duplicate columns", dup_mask.sum())
+        combined_df = combined_df.loc[:, ~dup_mask]
+    
+    # Save combined file
+    combined_path = features_dir / "features_all.tsv"
+    write_tsv(combined_df, combined_path)
+    logger.info("Saved combined features: %s (rows=%d, cols=%d)", 
+                combined_path, len(combined_df), len(combined_df.columns))
+    
+    return combined_df
+
+
 __all__ = [
     # Reading
     "FeatureBundle",
@@ -960,6 +996,7 @@ __all__ = [
     "_load_features_and_targets",
     # Saving
     "build_plateau_features",
+    "combine_all_features",
     "compute_group_microstate_templates",
     "export_fmri_regressors",
     "iterate_feature_columns",

@@ -37,10 +37,12 @@ def plot_hjorth_by_band(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Hjorth mobility across frequency bands."""
     plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     data_list = []
@@ -91,7 +93,7 @@ def plot_complexity_by_condition(
     subject: str,
     save_path: Path,
     config: Any = None,
-    figsize: Tuple[float, float] = (14, 8),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Complexity metrics by condition and timing (baseline vs plateau).
     
@@ -110,6 +112,12 @@ def plot_complexity_by_condition(
         return fig
     
     plot_cfg = get_plot_config(config)
+    if figsize is None:
+        # 3 columns, 2 rows
+        width_per_col = float(plot_cfg.plot_type_configs.get("complexity", {}).get("width_per_measure", 4.5))
+        height_per_row = float(plot_cfg.plot_type_configs.get("complexity", {}).get("height_per_segment", 4.0))
+        figsize = (width_per_col * 3, height_per_row * 2)
+    
     from eeg_pipeline.utils.config.loader import get_config_value
     from .utils import (
         compute_condition_stats,
@@ -118,7 +126,7 @@ def plot_complexity_by_condition(
         format_footer_annotation,
     )
     
-    baseline_window = get_config_value(config, "baseline_window_tfr", [-3.0, -0.5])
+    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
     plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
     
     segment_labels = {
@@ -229,7 +237,7 @@ def plot_complexity_by_condition(
                         ci_high=s["ci_high"],
                         compact=True,
                     )
-                    text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
                     ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
                            ha="center", fontsize=plot_cfg.font.annotation, va="top", color=text_color,
                            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))

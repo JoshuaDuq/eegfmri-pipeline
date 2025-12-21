@@ -16,7 +16,9 @@ FEATURE_TYPES = (
     "aperiodic",
     "itpc",
     "pac",
-    "precomputed",
+    "complexity",
+    "dynamics",
+    "cfc",
 )
 
 

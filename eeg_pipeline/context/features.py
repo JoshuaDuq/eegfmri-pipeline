@@ -13,7 +13,7 @@ import pandas as pd
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
-from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, PRECOMPUTED_GROUP_CHOICES
+from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, SPATIAL_MODES
 
 
 @dataclass
@@ -29,6 +29,12 @@ class FeatureContext:
     fixed_templates: Optional[np.ndarray] = None
     fixed_template_ch_names: Optional[List[str]] = None
     feature_categories: List[str] = field(default_factory=lambda: list(FEATURE_CATEGORIES))
+    bands: Optional[List[str]] = None  # Runtime override for frequency bands
+    spatial_modes: List[str] = field(default_factory=lambda: ["roi", "global"])  # Spatial aggregation
+    tmin: Optional[float] = None  # Custom time window start (seconds)
+    tmax: Optional[float] = None  # Custom time window end (seconds)
+    name: Optional[str] = None  # Name of the current time range
+    aggregation_method: str = "mean"  # Aggregation method: 'mean' or 'median'
     
     # Pre-computed data (computed lazily)
     precomputed: Optional[PrecomputedData] = None
@@ -51,25 +57,26 @@ class FeatureContext:
     def _ensure_windows(self) -> None:
         if self._windows is None and self.epochs is not None:
             # Lazy import
-            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-            self._windows = TimeWindowSpec(
+            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
+            spec = TimeWindowSpec(
                 times=self.epochs.times,
                 config=self.config,
                 sampling_rate=self.epochs.info["sfreq"],
                 logger=self.logger,
+                name=self.name,
             )
+            # Convert spec to TimeWindows dataclass
+            self._windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
 
         fail_on_missing = bool(self.config.get("feature_engineering.validation.fail_on_missing_windows", False))
         if fail_on_missing and self._windows is not None:
-            baseline_meta = self._windows.metadata.get("baseline")
-            plateau_meta = self._windows.metadata.get("plateau")
-            baseline_ok = bool(baseline_meta is not None and getattr(baseline_meta, "valid", False))
-            plateau_ok = bool(plateau_meta is not None and getattr(plateau_meta, "valid", False))
-            if not baseline_ok or not plateau_ok:
+            baseline_ok = self._windows.baseline_mask is not None and np.any(self._windows.baseline_mask)
+            active_ok = self._windows.active_mask is not None and np.any(self._windows.active_mask)
+            if not baseline_ok or not active_ok:
                 raise ValueError(
                     "Missing required time windows for feature extraction: "
-                    f"baseline_ok={baseline_ok}, plateau_ok={plateau_ok}. "
-                    "Check time_frequency_analysis.baseline_window / plateau_window and epoch time range."
+                    f"baseline_ok={baseline_ok}, active_ok={active_ok}. "
+                    "Check time_frequency_analysis.baseline_window / active_window and epoch time range."
                 )
 
     @property

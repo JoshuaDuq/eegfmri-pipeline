@@ -93,7 +93,8 @@ def plot_connectivity_circle_for_band(
             con_matrix[idx1, idx2] = val
             con_matrix[idx2, idx1] = val
 
-    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    fig_size = plot_cfg.get_figure_size("square", plot_type="connectivity")
+    fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
     
     vmin, vmax = None, None
     colormap = "RdBu"
@@ -231,7 +232,8 @@ def plot_connectivity_circle_by_condition(
     if n_lines is None:
         n_lines = max(min_lines, max(n_sig_nonpain, n_sig_pain))
     
-    fig, axes = plt.subplots(1, 2, figsize=(18, 9), subplot_kw=dict(polar=True))
+    width_per_col = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("width_per_circle", 9.0))
+    fig, axes = plt.subplots(1, 2, figsize=(width_per_col * 2, width_per_col), subplot_kw=dict(polar=True))
     
     try:
         plot_connectivity_circle(
@@ -449,7 +451,8 @@ def plot_edge_significance_circle_from_stats(
         log_if_present(logger, "warning", "mne-connectivity not installed; skipping significance circle")
         return
 
-    fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+    fig_size = plot_cfg.get_figure_size("standard", plot_type="connectivity")
+    fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
     vmax = np.nanmax(np.abs(mat)) if np.isfinite(mat).any() else 1.0
     plot_connectivity_circle(
         mat,
@@ -709,7 +712,9 @@ def plot_connectivity_by_condition(
     else:
         n_significant = 0
     
-    fig, axes = plt.subplots(len(measures), len(bands), figsize=(14, 8), sharey="row")
+    width_per_col = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("width_per_band", 3.5))
+    height_per_row = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("height_per_measure", 4.0))
+    fig, axes = plt.subplots(len(measures), len(bands), figsize=(width_per_col * len(bands), height_per_row * len(measures)), sharey="row")
     
     for m_idx, measure in enumerate(measures):
         for b_idx, band in enumerate(bands):
@@ -747,7 +752,7 @@ def plot_connectivity_by_condition(
                         ci_high=s["ci_high"],
                         compact=True,
                     )
-                    text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
                     ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
                            ha="center", fontsize=6, va="top", color=text_color,
                            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
@@ -983,7 +988,8 @@ def plot_sliding_state_centroids(
                 i, j = node_idx[u], node_idx[v]
                 adj[i, j] = val
                 adj[j, i] = val
-        fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
+        fig_size = plot_cfg.get_figure_size("standard", plot_type="connectivity")
+        fig, ax = plt.subplots(figsize=fig_size, subplot_kw=dict(polar=True))
         vmax = np.nanmax(np.abs(adj)) if np.isfinite(adj).any() else 1.0
         plot_connectivity_circle(
             adj,

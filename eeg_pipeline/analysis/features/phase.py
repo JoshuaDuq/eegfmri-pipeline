@@ -146,9 +146,37 @@ def extract_phase_features(
             # Mean over freq -> (epochs, ch)
             itpc_band = np.mean(itpc_seg_mean_t[..., f_mask], axis=-1)
             
-            for i, ch in enumerate(ch_names):
-                col = NamingSchema.build("itpc", seg, band, "ch", "val", channel=ch)
-                results[col] = itpc_band[:, i]
+            # Output generation based on spatial_modes
+            spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
+            
+            # Build ROI map if needed
+            roi_map = {}
+            if 'roi' in spatial_modes:
+                from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+                from eeg_pipeline.utils.analysis.channels import build_roi_map
+                roi_defs = get_roi_definitions(config)
+                if roi_defs:
+                    roi_map = build_roi_map(ch_names, roi_defs)
+
+            # Per-channel
+            if 'channels' in spatial_modes:
+                for i, ch in enumerate(ch_names):
+                    col = NamingSchema.build("itpc", seg, band, "ch", "val", channel=ch)
+                    results[col] = itpc_band[:, i]
+            
+            # ROI Mean
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, ch_indices in roi_map.items():
+                    if ch_indices:
+                        roi_val = np.nanmean(itpc_band[:, ch_indices], axis=1)
+                        col = NamingSchema.build("itpc", seg, band, "roi", "val", channel=roi_name)
+                        results[col] = roi_val
+                        
+            # Global Mean
+            if 'global' in spatial_modes:
+                global_val = np.nanmean(itpc_band, axis=1)
+                col = NamingSchema.build("itpc", seg, band, "global", "val")
+                results[col] = global_val
                 
     # 2. PAC (Optional)
     # -----------------
@@ -268,6 +296,7 @@ def compute_pac_comodulograms(
     ch_names = info['ch_names']
     
     trials_pac_list = []
+    pair_channel_data: Dict[str, np.ndarray] = {}
 
     tf_bands = config.get("time_frequency_analysis.bands", {}) if config is not None else {}
     requested_pairs = pac_cfg.get("pairs")
@@ -327,22 +356,66 @@ def compute_pac_comodulograms(
         # Let's leave pac_df as None for now if not strictly needed, or simple summary.
         # Ideally: pac_df has index (f_p, f_a), columns channels.
         
+        # Prepare per-pair PAC values
         for phase_band, amp_band, (pmin, pmax), (amin, amax) in valid_pairs:
             p_mask_band = (phase_freqs >= pmin) & (phase_freqs <= pmax)
             a_mask_band = (amp_freqs >= amin) & (amp_freqs <= amax)
             if not np.any(p_mask_band) or not np.any(a_mask_band):
                 continue
-            pac_sub = pac_val[:, p_mask_band, :][:, :, a_mask_band]
-            pac_trial_val = np.mean(pac_sub, axis=(1, 2))
-            col_name = NamingSchema.build(
-                "pac",
-                segment_name,
-                f"{phase_band}_{amp_band}",
-                "ch",
-                "val",
-                channel=ch_names[ch_idx],
-            )
-            trials_pac_list.append(pd.Series(pac_trial_val, name=col_name))
+            
+            sub_pac = pac_val[:, p_mask_band, :][:, :, a_mask_band]
+            # Mean across phase/amp freqs -> (n_epochs,) for this channel/pair
+            pair_vals = np.mean(sub_pac, axis=(1, 2))
+            
+            band_pair_name = f"{phase_band}_{amp_band}"
+            
+            # Store in a temporary structure for later spatial aggregation if needed
+            # For simplicity, we'll just handle it per channel here and add Roi/Global later
+            # Wait, better to store all channel values for this pair first.
+            if band_pair_name not in pair_channel_data:
+                pair_channel_data[band_pair_name] = np.full((n_epochs, n_ch), np.nan)
+            pair_channel_data[band_pair_name][:, ch_idx] = pair_vals
+
+    # Spatial aggregation for PAC
+    spatial_modes = getattr(config if hasattr(config, 'get') else None, 'spatial_modes', ['roi', 'global'])
+    # config here might be a dict or a formal config object. In extract_phase_features it's ctx.config.
+    # In compute_pac_comodulograms, it's passed as 'config'.
+    
+    # Actually, let's just get it safely
+    if hasattr(config, "get"):
+        spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"])
+    
+    # Build ROI map
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
+    for band_pair, matrix in pair_channel_data.items():
+        # matrix is (n_epochs, n_ch)
+        
+        # Channels
+        if 'channels' in spatial_modes:
+            for ch_idx, ch in enumerate(ch_names):
+                col = NamingSchema.build("pac", segment_name, band_pair, "ch", "val", channel=ch)
+                trials_pac_list.append(pd.Series(matrix[:, ch_idx], name=col))
+        
+        # ROI
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, ch_indices in roi_map.items():
+                if ch_indices:
+                    roi_val = np.nanmean(matrix[:, ch_indices], axis=1)
+                    col = NamingSchema.build("pac", segment_name, band_pair, "roi", "val", channel=roi_name)
+                    trials_pac_list.append(pd.Series(roi_val, name=col))
+                    
+        # Global
+        if 'global' in spatial_modes:
+            global_val = np.nanmean(matrix, axis=1)
+            col = NamingSchema.build("pac", segment_name, band_pair, "global", "val")
+            trials_pac_list.append(pd.Series(global_val, name=col))
 
     # Combine all trial series
     if not trials_pac_list:
@@ -405,13 +478,40 @@ def extract_itpc_from_precomputed(
         loo_means = (sum_vec[None, :, :] - complex_vectors) / (n_epochs - 1)
         loo_itpc_t = np.abs(loo_means)  # (n_epochs, n_ch, n_times)
 
+        # Get spatial modes and ROI map from precomputed or context
+        spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+        roi_map = {}
+        if 'roi' in spatial_modes:
+            from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+            from eeg_pipeline.utils.analysis.channels import build_roi_map
+            roi_defs = get_roi_definitions(cfg)
+            if roi_defs:
+                roi_map = build_roi_map(ch_names, roi_defs)
+
         for seg_name, mask in masks.items():
             if mask is None or not np.any(mask):
                 continue
             loo_itpc_seg = np.mean(loo_itpc_t[:, :, mask], axis=2)  # (n_epochs, n_ch)
-            for ch_idx, ch in enumerate(ch_names):
-                col = NamingSchema.build("itpc", seg_name, band, "ch", "val", channel=ch)
-                results[col] = loo_itpc_seg[:, ch_idx]
+            
+            # Channels
+            if 'channels' in spatial_modes:
+                for ch_idx, ch in enumerate(ch_names):
+                    col = NamingSchema.build("itpc", seg_name, band, "ch", "val", channel=ch)
+                    results[col] = loo_itpc_seg[:, ch_idx]
+
+            # ROI
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, ch_indices in roi_map.items():
+                    if ch_indices:
+                        roi_val = np.nanmean(loo_itpc_seg[:, ch_indices], axis=1)
+                        col = NamingSchema.build("itpc", seg_name, band, "roi", "val", channel=roi_name)
+                        results[col] = roi_val
+
+            # Global
+            if 'global' in spatial_modes:
+                global_val = np.nanmean(loo_itpc_seg, axis=1)
+                col = NamingSchema.build("itpc", seg_name, band, "global", "val")
+                results[col] = global_val
                 
     if not results:
         return pd.DataFrame(), []

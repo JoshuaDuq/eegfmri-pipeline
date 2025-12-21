@@ -77,10 +77,8 @@ def _resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> 
 
 def extract_all_features(
     ctx: FeatureContext,
-    *,
-    precomputed_groups_override: Optional[List[str]] = None,
 ) -> FeatureExtractionResult:
-    return _extract_all_features(ctx, precomputed_groups_override=precomputed_groups_override)
+    return _extract_all_features(ctx)
 
 
 ###################################################################
@@ -96,7 +94,6 @@ def extract_precomputed_features(
     *,
     feature_groups: Optional[List[str]] = None,
     events_df: Optional[pd.DataFrame] = None,
-    n_plateau_windows: int = 5,
     precomputed: Optional[PrecomputedData] = None,
 ) -> ExtractionResult:
     return _extract_precomputed_features(
@@ -106,7 +103,6 @@ def extract_precomputed_features(
         logger,
         feature_groups=feature_groups,
         events_df=events_df,
-        n_plateau_windows=n_plateau_windows,
         precomputed=precomputed,
     )
 
@@ -137,7 +133,10 @@ class FeaturePipeline(PipelineBase):
     def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         ledger = super().run_batch(subjects, task=task, **kwargs)
         
-        if self.config.get("feature_engineering.microstates.build_group_templates", False):
+        # Post-batch orchestrations
+        feature_categories = _resolve_feature_categories(self.config, kwargs.get("feature_categories"))
+        
+        if "microstates" in feature_categories and self.config.get("feature_engineering.microstates.build_group_templates", False):
             n_microstates = int(self.config.get("feature_engineering.microstates.n_states", 4))
             self.logger.info("Building group microstate templates from %d subjects...", len(subjects))
             group_templates, _ = compute_group_microstate_templates(
@@ -149,34 +148,45 @@ class FeaturePipeline(PipelineBase):
         return ledger
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
+        from eeg_pipeline.cli.common import ProgressReporter
+        
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
         fixed_templates_path = kwargs.get("fixed_templates_path")
         feature_categories = _resolve_feature_categories(self.config, kwargs.get("feature_categories"))
-        precomputed_groups = kwargs.get("precomputed_groups")
+        
+        # Initialize progress reporter
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        
+        # Calculate total steps: load + per-category extraction + align + save
+        total_steps = 2 + len(feature_categories) + 2  # load, categories, align, save
         
         self.logger.info(f"=== Feature extraction: sub-{subject}, task-{task} ===")
         self.logger.info("Feature categories: %s", ", ".join(feature_categories))
-        if precomputed_groups:
-            self.logger.info("Precomputed groups override: %s", ", ".join(precomputed_groups))
+        
+        progress.subject_start(f"sub-{subject}")
+        progress.step("Initializing", current=1, total=total_steps)
         
         features_dir = deriv_features_path(self.deriv_root, subject)
         ensure_dir(features_dir)
         
         setup_matplotlib(self.config)
 
+        progress.step("Loading epochs", current=2, total=total_steps)
         epochs, aligned_events = load_epochs_for_analysis(
-            subject, task, align="strict", preload=False,
+            subject, task, align="strict", preload=True,
             deriv_root=self.deriv_root, logger=self.logger, config=self.config,
         )
 
         if epochs is None:
             self.logger.error(f"No cleaned epochs for sub-{subject}; skipping")
+            progress.error("no_epochs", f"No cleaned epochs for sub-{subject}")
             return
 
         if aligned_events is None:
             self.logger.warning("No events available; skipping")
+            progress.error("no_events", "No aligned events")
             return
 
         original_events = _load_events_df(subject, task, bids_root=self.config.bids_root, config=self.config)
@@ -201,149 +211,256 @@ class FeaturePipeline(PipelineBase):
             fixed_template_ch_names = data.get("ch_names")
             self.logger.info(f"Loaded fixed templates from {fixed_templates_path}")
 
-        ctx = FeatureContext(
-            subject=subject,
-            task=task,
-            config=self.config,
-            deriv_root=self.deriv_root,
-            logger=self.logger,
-            epochs=epochs,
-            aligned_events=aligned_events,
-            fixed_templates=fixed_templates,
-            fixed_template_ch_names=fixed_template_ch_names,
-            feature_categories=feature_categories,
-        )
+        # Determine time ranges to process
+        time_ranges = kwargs.get("time_ranges")
+        if not time_ranges:
+            time_ranges = [
+                {"name": None, "tmin": kwargs.get("tmin"), "tmax": kwargs.get("tmax")}
+            ]
 
-        features = extract_all_features(ctx, precomputed_groups_override=precomputed_groups)
+        # Optimization: Pre-compute TFR on full epochs if we have multiple ranges
+        # and TFR is needed for the requested categories.
+        tfr_full = None
+        tfr_categories = {"power", "itpc", "pac", "cfc"}
+        if len(time_ranges) > 1 and any(cat in feature_categories for cat in tfr_categories):
+            from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
+            self.logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
+            tfr_full = compute_tfr_morlet(epochs, self.config, logger=self.logger)
 
-        tfr = features.tfr
-        pow_df = features.pow_df
-        pow_cols = features.pow_cols
-        baseline_df = features.baseline_df
-        baseline_cols = features.baseline_cols
-        conn_df = features.conn_df
-        conn_cols = features.conn_cols
-        ms_df = features.ms_df
-        ms_cols = features.ms_cols
-        ms_templates = features.ms_templates
-        aper_df = features.aper_df
-        aper_cols = features.aper_cols
-        itpc_df = features.phase_df
-        itpc_cols = features.phase_cols
-        itpc_trial_df = features.itpc_trial_df
-        itpc_trial_cols = features.itpc_trial_cols
-        pac_df = features.pac_df
-        pac_trials_df = features.pac_trials_df
-        pac_time_df = features.pac_time_df
-        precomputed_df = features.precomputed_df
-        precomputed_cols = features.precomputed_cols
-        
-        comp_df = features.comp_df
-        comp_cols = features.comp_cols
-        dynamics_df = features.dynamics_df
-        dynamics_cols = features.dynamics_cols
-        cfc_df = features.cfc_df
-        cfc_cols = features.cfc_cols
-
-        if itpc_trial_df is not None and not itpc_trial_df.empty:
-            pow_df = pd.concat([pow_df, itpc_trial_df], axis=1)
-            pow_cols.extend(itpc_trial_cols)
-
-        power_bands = get_frequency_band_names(self.config)
-        n_microstates = int(self.config.get("feature_engineering.microstates.n_states", 4))
-        save_microstate_templates(epochs, ms_templates, subject, n_microstates, self.deriv_root, self.logger)
-
-        self.logger.info("Aligning features...")
-
-        critical_features = ["target"]
-        if "power" in ctx.feature_categories:
-            critical_features.append("power")
-            critical_features.append("baseline")
-
-        extra_blocks = {
-            "itpc": itpc_df,
-            "itpc_trial": itpc_trial_df,
-            "pac": pac_df,
-            "pac_trials": pac_trials_df,
-            "pac_time": pac_time_df,
-            "precomputed": precomputed_df,
-            "complexity": comp_df,
-            "dynamics": dynamics_df,
-            "cfc": cfc_df,
+        # Optimization: Pre-compute shared intermediates on full epochs
+        precomputed_full = None
+        precompute_categories = {
+            "connectivity", "erds", "gfp", "spectral_extras", "temporal",
+            "ratios", "asymmetry", "cfc", "dynamics_advanced", "aperiodic"
         }
-        extra_blocks = {k: v for k, v in extra_blocks.items() if v is not None and not getattr(v, "empty", False)}
+        if len(time_ranges) > 1 and any(cat in feature_categories for cat in precompute_categories):
+            from eeg_pipeline.analysis.features.preparation import precompute_data
+            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
+            self.logger.info("Pre-computing shared intermediates on full epochs for multi-range extraction...")
+            # Use all bands requested or in config
+            bands = kwargs.get("bands") or get_frequency_band_names(self.config)
+            # Create a TimeWindowSpec using the user-specified time ranges, not config
+            user_windows_spec = TimeWindowSpec(
+                times=epochs.times,
+                config=self.config,
+                sampling_rate=float(epochs.info["sfreq"]),
+                logger=self.logger,
+                explicit_windows=time_ranges,  # Pass user's time ranges
+            )
+            precomputed_full = precompute_data(
+                epochs,
+                bands,
+                self.config,
+                self.logger,
+                compute_psd_data=True,
+                windows_spec=user_windows_spec,
+            )
 
-        (
-            pow_df_aligned, baseline_df_aligned, conn_df_aligned,
-            ms_df_aligned, aper_df_aligned, y_aligned, retention_stats
-        ) = align_feature_dataframes(
-            pow_df, baseline_df, conn_df, ms_df, aper_df, y, aligned_events, features_dir, self.logger, self.config,
-            critical_features=critical_features,
-            extra_blocks=extra_blocks,
-        )
+        for tr_spec in time_ranges:
+            name = tr_spec.get("name")
+            tmin = tr_spec.get("tmin")
+            tmax = tr_spec.get("tmax")
 
-        if retention_stats is None:
-            self.logger.error("Feature alignment failed. Skipping save.")
-            return
+            # Validate and swap if needed
+            if tmin is not None and tmax is not None and tmin > tmax:
+                self.logger.warning(
+                    f"Time range '{name}' has tmin ({tmin}) > tmax ({tmax}). Swapping values."
+                )
+                tmin, tmax = tmax, tmin
+            
+            # Treat "full" as default (no suffix)
+            suffix = name if name and name.lower() != "full" else None
+            
+            range_info = f"range '{name}'" if name else "default range"
+            self.logger.info(f"--- Processing {range_info} ({tmin} to {tmax}s) ---")
 
-        extra_aligned = retention_stats.get("extra_aligned", {})
-        itpc_df = extra_aligned.get("itpc", itpc_df)
-        itpc_trial_df = extra_aligned.get("itpc_trial", itpc_trial_df)
-        pac_df = extra_aligned.get("pac", pac_df)
-        pac_trials_df = extra_aligned.get("pac_trials", pac_trials_df)
-        pac_time_df = extra_aligned.get("pac_time", pac_time_df)
-        precomputed_df = extra_aligned.get("precomputed", precomputed_df)
-        comp_df = extra_aligned.get("complexity", comp_df)
-        dynamics_df = extra_aligned.get("dynamics", dynamics_df)
-        cfc_df = extra_aligned.get("cfc", cfc_df)
+            ctx = FeatureContext(
+                subject=subject,
+                task=task,
+                config=self.config,
+                deriv_root=self.deriv_root,
+                logger=self.logger,
+                epochs=epochs,
+                aligned_events=aligned_events,
+                fixed_templates=fixed_templates,
+                fixed_template_ch_names=fixed_template_ch_names,
+                feature_categories=feature_categories,
+                bands=kwargs.get("bands"),  # Runtime band override
+                spatial_modes=kwargs.get("spatial_modes") or ["roi", "global"],
+                tmin=tmin,
+                tmax=tmax,
+                name=name,
+                aggregation_method=kwargs.get("aggregation_method", "mean"),
+                tfr=tfr_full,
+                precomputed=precomputed_full,
+            )
+            
+            # Pass progress reporter to context
+            ctx.progress = progress
+            ctx.total_steps = total_steps
+            ctx.current_step = 2
 
-        feature_qc: Dict[str, Any] = {}
-        if features.aper_qc is not None:
-            feature_qc["aperiodic"] = features.aper_qc
-        if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
-            try:
-                feature_qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
-            except TypeError:
-                # If qc is not a dataclass, use it directly
-                feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+            progress.step(f"Extracting features ({name or 'full'})", current=3, total=total_steps)
+            features = extract_all_features(ctx)
 
-        combined_df = save_all_features(
-            pow_df_aligned, pow_cols, baseline_df_aligned, baseline_cols,
-            conn_df_aligned, conn_cols, ms_df_aligned, ms_cols,
-            aper_df_aligned, aper_cols, itpc_df, itpc_cols,
-            pac_df, pac_trials_df, pac_time_df,
-            features.aper_qc, None, None, y_aligned, features_dir, self.logger, self.config,
-            comp_df=comp_df, comp_cols=comp_cols,
-            dynamics_df=dynamics_df, dynamics_cols=dynamics_cols,
-            cfc_df=cfc_df, cfc_cols=cfc_cols,
-            precomputed_df=precomputed_df, precomputed_cols=precomputed_cols,
-            feature_qc=feature_qc or None,
-        )
+            pow_df = features.pow_df
+            pow_cols = features.pow_cols
+            baseline_df = features.baseline_df
+            baseline_cols = features.baseline_cols
+            conn_df = features.conn_df
+            conn_cols = features.conn_cols
+            aper_df = features.aper_df
+            aper_cols = features.aper_cols
+            itpc_df = features.phase_df
+            itpc_cols = features.phase_cols
+            itpc_trial_df = features.itpc_trial_df
+            itpc_trial_cols = features.itpc_trial_cols
+            pac_df = features.pac_df
+            pac_trials_df = features.pac_trials_df
+            pac_time_df = features.pac_time_df
+            comp_df = features.comp_df
+            comp_cols = features.comp_cols
+            spectral_df = features.spectral_df
+            spectral_cols = features.spectral_cols
+            erds_df = features.erds_df
+            erds_cols = features.erds_cols
 
-        regressor_df = export_fmri_regressors(
-            aligned_events, pow_df_aligned, pow_cols, ms_df_aligned,
-            features.pac_trials_df, aper_df_aligned, y_aligned,
-            power_bands, subject, task, features_dir, self.config, self.logger,
-        )
-        if regressor_df is not None:
-            plots_dir = deriv_plots_path(self.deriv_root, subject, subdir="behavior")
-            self.logger.warning("plot_regressor_distributions not yet implemented, skipping")
+            # Save ERDS features to their own file (like aperiodic, microstates, etc.)
+            if erds_df is not None and not erds_df.empty:
+                from eeg_pipeline.infra.tsv import write_tsv
+                erds_name = f"features_erds_{suffix}.tsv" if suffix else "features_erds.tsv"
+                erds_path = features_dir / erds_name
+                self.logger.info(f"Saving ERDS features: {erds_path}")
+                write_tsv(erds_df, erds_path)
+                # Also save column list
+                erds_cols_name = f"features_erds_columns_{suffix}.tsv" if suffix else "features_erds_columns.tsv"
+                write_tsv(pd.Series(list(erds_df.columns), name="feature").to_frame(), features_dir / erds_cols_name)
 
-        n_trials = len(y_aligned)
-        n_pow = pow_df_aligned.shape[1] if pow_df_aligned is not None else 0
-        n_conn = conn_df_aligned.shape[1] if conn_df_aligned is not None and not conn_df_aligned.empty else 0
-        n_ms = ms_df_aligned.shape[1] if ms_df_aligned is not None and not ms_df_aligned.empty else 0
-        n_aper = aper_df_aligned.shape[1] if aper_df_aligned is not None and not aper_df_aligned.empty else 0
-        n_precomp = precomputed_df.shape[1] if precomputed_df is not None and not precomputed_df.empty else 0
-        if combined_df is None:
-             n_total = 0
-        else:
-             n_total = combined_df.shape[1]
+            # Merge ERDS features into power DataFrame for combined output
+            if erds_df is not None and not erds_df.empty:
+                if pow_df is not None and not pow_df.empty:
+                    pow_df = pd.concat([pow_df, erds_df], axis=1)
+                    pow_cols.extend(erds_cols)
+                else:
+                    pow_df = erds_df
+                    pow_cols = list(erds_cols)
 
-        self.logger.info(
-            f"Done: sub-{subject}, trials={n_trials}, power={n_pow}, conn={n_conn}, "
-            f"ms={n_ms}, aper={n_aper}, precomp={n_precomp}, total={n_total}"
-        )
+            if itpc_trial_df is not None and not itpc_trial_df.empty:
+                if pow_df is not None:
+                    pow_df = pd.concat([pow_df, itpc_trial_df], axis=1)
+                    pow_cols.extend(itpc_trial_cols)
+                else:
+                    pow_df = itpc_trial_df
+                    pow_cols = list(itpc_trial_cols)
+
+            power_bands = get_frequency_band_names(self.config)
+
+            progress.step(f"Aligning features ({name or 'full'})", current=total_steps - 1, total=total_steps)
+            self.logger.info(f"Aligning features for {range_info}...")
+
+            critical_features = ["target"]
+            if "power" in ctx.feature_categories:
+                critical_features.append("power")
+                critical_features.append("baseline")
+
+            extra_blocks = {
+                "itpc": itpc_df,
+                "itpc_trial": itpc_trial_df,
+                "pac": pac_df,
+                "pac_trials": pac_trials_df,
+                "pac_time": pac_time_df,
+                "complexity": comp_df,
+                "spectral": spectral_df,
+            }
+            extra_blocks = {k: v for k, v in extra_blocks.items() if v is not None and not getattr(v, "empty", False)}
+
+            (
+                pow_df_aligned, baseline_df_aligned, conn_df_aligned,
+                _, aper_df_aligned, y_aligned, retention_stats
+            ) = align_feature_dataframes(
+                pow_df, baseline_df, conn_df, None, aper_df, y, aligned_events, features_dir, self.logger, self.config,
+                critical_features=critical_features,
+                extra_blocks=extra_blocks,
+            )
+
+            if retention_stats is None:
+                self.logger.error(f"Feature alignment failed for {range_info}. Skipping save.")
+                continue
+
+            extra_aligned = retention_stats.get("extra_aligned", {})
+            itpc_df = extra_aligned.get("itpc", itpc_df)
+            itpc_trial_df = extra_aligned.get("itpc_trial", itpc_trial_df)
+            pac_df = extra_aligned.get("pac", pac_df)
+            pac_trials_df = extra_aligned.get("pac_trials", pac_trials_df)
+            pac_time_df = extra_aligned.get("pac_time", pac_time_df)
+            comp_df = extra_aligned.get("complexity", comp_df)
+            spectral_df = extra_aligned.get("spectral", spectral_df)
+
+            feature_qc: Dict[str, Any] = {}
+            if features.aper_qc is not None:
+                feature_qc["aperiodic"] = features.aper_qc
+            if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
+                try:
+                    feature_qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
+                except TypeError:
+                    feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+
+            progress.step(f"Saving features ({name or 'full'})", current=total_steps, total=total_steps)
+            
+            should_combine = self.config.get("feature_engineering.create_combined_features", False)
+            combined_df = save_all_features(
+                pow_df_aligned, pow_cols, baseline_df_aligned, baseline_cols,
+                conn_df_aligned, conn_cols, None, [],
+                aper_df_aligned, aper_cols, itpc_df, itpc_cols,
+                pac_df, pac_trials_df, pac_time_df,
+                features.aper_qc, None, None, y_aligned, features_dir, self.logger, self.config,
+                comp_df=comp_df, comp_cols=comp_cols,
+                spectral_df=spectral_df, spectral_cols=spectral_cols,
+                feature_qc=feature_qc or None,
+                export_all=should_combine,
+                suffix=suffix,
+            )
+
+            if not suffix and self.config.get("feature_engineering.export_fmri_regressors", False):
+                export_fmri_regressors(
+                    aligned_events, pow_df_aligned, pow_cols, None,
+                    features.pac_trials_df, aper_df_aligned, y_aligned,
+                    power_bands, subject, task, features_dir, self.config, self.logger,
+                )
+
+            n_trials = len(y_aligned)
+            n_pow = pow_df_aligned.shape[1] if pow_df_aligned is not None else 0
+            n_conn = conn_df_aligned.shape[1] if conn_df_aligned is not None and not conn_df_aligned.empty else 0
+            n_aper = aper_df_aligned.shape[1] if aper_df_aligned is not None and not aper_df_aligned.empty else 0
+            n_spectral = spectral_df.shape[1] if spectral_df is not None and not spectral_df.empty else 0
+            n_total = combined_df.shape[1] if combined_df is not None else 0
+
+            # Save extraction configuration metadata
+            extraction_config = {
+                "name": name,
+                "spatial_modes": ctx.spatial_modes,
+                "aggregation_method": ctx.aggregation_method,
+                "tmin": ctx.tmin,
+                "tmax": ctx.tmax,
+                "bands": ctx.bands,
+                "feature_categories": feature_categories,
+                "n_trials": n_trials,
+                "subject": subject,
+                "task": task,
+            }
+            config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
+            config_path = features_dir / config_name
+            import json
+            with open(config_path, "w") as f:
+                json.dump(extraction_config, f, indent=2)
+            self.logger.info(f"Saved extraction config: {config_path}")
+
+            self.logger.info(
+                f"Done {range_info}: sub-{subject}, trials={n_trials}, power={n_pow}, conn={n_conn}, "
+                f"aper={n_aper}, spectral={n_spectral}, total={n_total}"
+            )
+
+        progress.subject_done(f"sub-{subject}", success=True)
 
 
 def process_subject(subject: str, task: Optional[str] = None, config: Optional[Any] = None, **kwargs: Any) -> None:

@@ -19,7 +19,6 @@ from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import (
     EPSILON_STD,
-    SEGMENT_PLATEAU,
     validate_precomputed,
 )
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -37,33 +36,36 @@ def _process_single_epoch_dynamics(
     active_mask: np.ndarray,
     baseline_mask: np.ndarray,
     seg_masks: Dict[str, np.ndarray],
+    ch_names: List[str],
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]],
+    segment_label: str = "active",
     burst_percentile: float = DEFAULT_BURST_PERCENTILE,
 ) -> Dict[str, float]:
     """Process dynamics for a single epoch (parallel worker)."""
     record: Dict[str, float] = {}
-
-    segment_label = SEGMENT_PLATEAU
     
-    # 1. GFP Dynamics
+    # 1. GFP Dynamics (Always Global)
     if gfp is not None and gfp.size > 0:
         gfp_trace = gfp[ep_idx]
         gfp_active = gfp_trace[active_mask] if not isinstance(active_mask, slice) else gfp_trace
         
         if gfp_active.size:
-            record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_mean")] = float(np.nanmean(gfp_active))
-            record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_std")] = float(np.nanstd(gfp_active))
-            record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_fano")] = float(
-                np.nanvar(gfp_active) / (np.nanmean(gfp_active) + EPSILON_STD)
-            )
+            if 'global' in spatial_modes:
+                record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_mean")] = float(np.nanmean(gfp_active))
+                record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_std")] = float(np.nanstd(gfp_active))
+                record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_fano")] = float(
+                    np.nanvar(gfp_active) / (np.nanmean(gfp_active) + EPSILON_STD)
+                )
 
-            if gfp_active.size > 1:
-                times_active = times[active_mask] if not isinstance(active_mask, slice) else times
-                valid = np.isfinite(gfp_active)
-                if np.sum(valid) > 2:
-                    slope, _ = np.polyfit(times_active[valid], gfp_active[valid], 1)
-                    record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_slope")] = float(slope)
+                if gfp_active.size > 1:
+                    times_active = times[active_mask] if not isinstance(active_mask, slice) else times
+                    valid = np.isfinite(gfp_active)
+                    if np.sum(valid) > 2:
+                        slope, _ = np.polyfit(times_active[valid], gfp_active[valid], 1)
+                        record[NamingSchema.build("dynamics", segment_label, "broadband", "global", "gfp_slope")] = float(slope)
     
-    if gfp_band:
+    if gfp_band and 'global' in spatial_modes:
         for band_name, gfp_b in gfp_band.items():
             gfp_band_active = gfp_b[ep_idx][active_mask] if not isinstance(active_mask, slice) else gfp_b[ep_idx]
             if gfp_band_active.size:
@@ -81,80 +83,68 @@ def _process_single_epoch_dynamics(
             baseline_power = np.full(power.shape[0], np.nan)
         
         active_power = power[:, active_mask] if not isinstance(active_mask, slice) else power
-        active_mean = np.nanmean(active_power, axis=1)
+        # Mean across time per channel -> (n_ch,)
+        ch_active_mean = np.nanmean(active_power, axis=1)
         
-        record[NamingSchema.build("dynamics", segment_label, band, "global", "mean_active")] = float(np.nanmean(active_mean))
-        if np.any(np.isfinite(baseline_power)):
-            record[NamingSchema.build("dynamics", segment_label, band, "global", "logratio")] = float(
-                np.nanmean(np.log10(active_mean / (baseline_power + EPSILON_STD)))
-            )
+        # Logratio per channel
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ch_logratio = np.log10(ch_active_mean / (baseline_power + EPSILON_STD))
+            
+        # Variability per channel
+        ch_fano = np.nanvar(active_power, axis=1) / (np.nanmean(active_power, axis=1) + EPSILON_STD)
 
-        # Trial-level variability (Fano) across time
-        record[NamingSchema.build("dynamics", segment_label, band, "global", "power_fano")] = float(
-            np.nanvar(active_power) / (np.nanmean(active_power) + EPSILON_STD)
-        )
-
-        # Burst detection on envelopes (simple percentile threshold)
+        # Burst detection on envelopes
         env = bd.envelope[ep_idx]
         env_active = env[:, active_mask] if not isinstance(active_mask, slice) else env
+        
+        n_ch = env_active.shape[0]
+        ch_burst_rate = np.zeros(n_ch)
+        ch_burst_dur = np.full(n_ch, np.nan)
+        ch_burst_amp = np.full(n_ch, np.nan)
         
         if env_active.size > 0:
             thresh = np.nanpercentile(env_active, burst_percentile)
             burst_mask = env_active > thresh
-            durations: List[float] = []
-            amps: List[float] = []
-            
-            for ch_idx in range(env_active.shape[0]):
-                ch_mask = burst_mask[ch_idx]
-                if ch_mask.size == 0:
-                    continue
-                    
-                # Find contiguous regions
-                diff = np.diff(np.concatenate([[0], ch_mask.astype(int), [0]]))
-                starts = np.where(diff == 1)[0]
-                ends = np.where(diff == -1)[0]
-                
-                for s, e in zip(starts, ends):
-                    dur = (e - s) / sfreq
-                    durations.append(dur)
-                    amps.append(float(np.nanmax(env_active[ch_idx, s:e]) if e > s else np.nan))
-                    
-            if durations:
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_rate")] = float(len(durations))
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_mean_duration")] = float(np.nanmean(durations))
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_mean_amplitude")] = float(np.nanmean(amps))
-            else:
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_rate")] = 0.0
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_mean_duration")] = np.nan
-                record[NamingSchema.build("dynamics", segment_label, band, "global", "burst_mean_amplitude")] = np.nan
+            for c in range(n_ch):
+                c_mask = burst_mask[c]
+                if c_mask.size == 0 or not np.any(c_mask): continue
+                diff = np.diff(np.concatenate([[0], c_mask.astype(int), [0]]))
+                starts, ends = np.where(diff == 1)[0], np.where(diff == -1)[0]
+                durs = (ends - starts) / sfreq
+                ch_burst_rate[c] = len(durs)
+                if durs.size > 0:
+                    ch_burst_dur[c] = np.mean(durs)
+                    ch_burst_amp[c] = np.mean([np.nanmax(env_active[c, s:e]) for s, e in zip(starts, ends)])
+
+        metrics = {
+            "mean_active": ch_active_mean,
+            "logratio": ch_logratio,
+            "power_fano": ch_fano,
+            "burst_rate": ch_burst_rate,
+            "burst_mean_duration": ch_burst_dur,
+            "burst_mean_amplitude": ch_burst_amp,
+        }
         
-        # Ramp-specific burst metrics for gamma
-        if band.lower() == "gamma":
-            ramp_mask = seg_masks.get("ramp")
-            if ramp_mask is not None and np.any(ramp_mask):
-                env_ramp = env[:, ramp_mask]
-                thresh_ramp = np.nanpercentile(env_ramp, 75) if env_ramp.size > 0 else np.nan
-                
-                if env_ramp.size > 0 and np.isfinite(thresh_ramp):
-                    burst_mask_ramp = env_ramp > thresh_ramp
-                    durations_r: List[float] = []
-                    amps_r: List[float] = []
-                    
-                    for ch_idx in range(env_ramp.shape[0]):
-                        ch_mask = burst_mask_ramp[ch_idx]
-                        if ch_mask.size == 0:
-                            continue
-                        diff = np.diff(np.concatenate([[0], ch_mask.astype(int), [0]]))
-                        starts = np.where(diff == 1)[0]
-                        ends = np.where(diff == -1)[0]
-                        for s, e in zip(starts, ends):
-                            dur = (e - s) / sfreq
-                            durations_r.append(dur)
-                            amps_r.append(float(np.nanmax(env_ramp[ch_idx, s:e]) if e > s else np.nan))
-                            
-                    record[NamingSchema.build("dynamics", "ramp", "gamma", "global", "burst_rate")] = float(len(durations_r)) if durations_r else 0.0
-                    record[NamingSchema.build("dynamics", "ramp", "gamma", "global", "burst_mean_duration")] = float(np.nanmean(durations_r)) if durations_r else np.nan
-                    record[NamingSchema.build("dynamics", "ramp", "gamma", "global", "burst_mean_amplitude")] = float(np.nanmean(amps_r)) if amps_r else np.nan
+        for k, vals in metrics.items():
+            # Channels
+            if 'channels' in spatial_modes:
+                for c, ch in enumerate(ch_names):
+                    col = NamingSchema.build("dynamics", segment_label, band, "ch", k, channel=ch)
+                    record[col] = float(vals[c])
+
+            # ROI
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, idxs in roi_map.items():
+                    if idxs:
+                        val = np.nanmean(vals[idxs])
+                        col = NamingSchema.build("dynamics", segment_label, band, "roi", f"{k}_mean", channel=roi_name)
+                        record[col] = float(val)
+            
+            # Global
+            if 'global' in spatial_modes:
+                val = np.nanmean(vals)
+                col = NamingSchema.build("dynamics", segment_label, band, "global", f"{k}_mean")
+                record[col] = float(val)
 
     return record
 
@@ -165,19 +155,35 @@ def extract_dynamics_from_precomputed(precomputed: "PrecomputedData", n_jobs: in
     if not is_valid:
         return pd.DataFrame(), []
 
-    active_mask = precomputed.windows.get_mask("plateau")
+    ctx_name = getattr(precomputed.windows, "name", "active") or "active"
+    active_mask = precomputed.windows.get_mask(ctx_name)
     baseline_mask = precomputed.windows.get_mask("baseline")
+    if active_mask is None or (isinstance(active_mask, np.ndarray) and not np.any(active_mask)):
+        active_mask = precomputed.windows.active_mask
     if active_mask is None or (isinstance(active_mask, np.ndarray) and not np.any(active_mask)):
         active_mask = slice(None)
 
     # Pre-calculate segment masks for burst analysis (e.g. gamma ramp)
     seg_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     n_epochs = precomputed.data.shape[0]
+    ch_names = precomputed.ch_names
     
+    # Spatial info
+    spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(precomputed.config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+            
     burst_percentile = float(get_config_value(
         precomputed.config, "feature_engineering.dynamics.burst_percentile", DEFAULT_BURST_PERCENTILE
     ))
     
+    seg_label = getattr(precomputed.windows, "name", "active") or "active"
+
     if n_jobs != 1:
         records = Parallel(n_jobs=n_jobs)(
             delayed(_process_single_epoch_dynamics)(
@@ -190,6 +196,10 @@ def extract_dynamics_from_precomputed(precomputed: "PrecomputedData", n_jobs: in
                 active_mask,
                 baseline_mask,
                 seg_masks,
+                ch_names,
+                spatial_modes,
+                roi_map,
+                seg_label,
                 burst_percentile,
             )
             for ep_idx in range(n_epochs)
@@ -206,6 +216,10 @@ def extract_dynamics_from_precomputed(precomputed: "PrecomputedData", n_jobs: in
                 active_mask,
                 baseline_mask,
                 seg_masks,
+                ch_names,
+                spatial_modes,
+                roi_map,
+                seg_label,
                 burst_percentile,
             )
             for ep_idx in range(n_epochs)

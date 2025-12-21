@@ -905,20 +905,20 @@ class TestERPPipeline:
 ###################################################################
 
 
-class TestPreprocessingPipeline:
-    """Exhaustive tests for preprocessing pipeline."""
+class TestUtilityPipeline:
+    """Exhaustive tests for utility pipeline."""
 
     def test_pipeline_instantiation(self, mock_config):
-        from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+        from eeg_pipeline.pipelines.utilities import UtilityPipeline
 
-        pipeline = PreprocessingPipeline(config=mock_config)
+        pipeline = UtilityPipeline(config=mock_config)
 
         assert pipeline is not None
         assert hasattr(pipeline, "run_raw_to_bids")
         assert hasattr(pipeline, "run_merge_behavior")
 
     def test_preprocessing_functions(self):
-        from eeg_pipeline.pipelines.preprocessing import (
+        from eeg_pipeline.pipelines.utilities import (
             run_raw_to_bids,
             run_merge_behavior,
         )
@@ -1065,7 +1065,7 @@ class TestPipelineInfrastructure:
 
         assert len(COMMANDS) > 0
 
-        expected_commands = ["behavior", "features", "erp", "tfr", "decoding", "preprocessing"]
+        expected_commands = ["behavior", "features", "erp", "tfr", "decoding", "utilities"]
         for cmd_name in expected_commands:
             cmd = get_command(cmd_name)
             assert cmd is not None, f"Command '{cmd_name}' not found"

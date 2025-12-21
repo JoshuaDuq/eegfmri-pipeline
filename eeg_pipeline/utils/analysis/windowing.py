@@ -190,7 +190,6 @@ def build_time_windows_fixed_count(
 def compute_time_windows(
     times: np.ndarray,
     config: Any,
-    n_plateau_windows: int = 5,
     *,
     logger: Optional[logging.Logger] = None,
     strict: bool = True,
@@ -198,8 +197,7 @@ def compute_time_windows(
     """
     Compute all time window masks once.
     
-    Creates both coarse (early/mid/late) and fine (t1-t7) temporal bins
-    based on config settings.
+    Uses configuration to determine baseline and active windows.
     """
     spec = TimeWindowSpec(
         times=times,
@@ -209,7 +207,6 @@ def compute_time_windows(
     )
     return time_windows_from_spec(
         spec,
-        n_plateau_windows=n_plateau_windows,
         logger=logger,
         strict=strict,
     )
@@ -233,12 +230,16 @@ class TimeWindowSpec:
         times: np.ndarray,
         config: Any,
         sampling_rate: float,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        name: Optional[str] = None,
+        explicit_windows: Optional[List[Dict[str, Any]]] = None,
     ):
         self.times = times
         self.sfreq = sampling_rate
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
+        self.name = name
+        self.explicit_windows = explicit_windows  # User-specified time ranges from CLI/TUI
         
         self.masks: Dict[str, np.ndarray] = {}
         self.metadata: Dict[str, WindowMetadata] = {}
@@ -247,75 +248,60 @@ class TimeWindowSpec:
         self._build_all_windows()
         
     def _build_all_windows(self):
-        """Construct all standard windows defined in config."""
-        tf_cfg = self.config.get("time_frequency_analysis", {})
+        """Construct windows based on explicit user input or configuration."""
+        # If explicit windows are provided (from CLI/TUI), use ONLY those
+        if self.explicit_windows:
+            for win in self.explicit_windows:
+                win_name = win.get("name")
+                win_tmin = win.get("tmin")
+                win_tmax = win.get("tmax")
+                if win_name and win_tmin is not None and win_tmax is not None:
+                    self._add_window(win_name, float(win_tmin), float(win_tmax))
+            return
+        
+        # Fall back to config-based windows only if no explicit windows
         feat_cfg = self.config.get("feature_engineering.windows", {})
-        feat_features_cfg = self.config.get("feature_engineering.features", {})
+        tf_cfg = self.config.get("time_frequency_analysis", {})
         
-        baseline_def = feat_cfg.get("baseline_window", tf_cfg.get("baseline_window", [-2.0, 0.0]))
-        plateau_def = feat_cfg.get(
-            "plateau_window",
-            feat_features_cfg.get("plateau_window", tf_cfg.get("plateau_window", [3.0, 10.0])),
-        )
-        
-        self._add_window("baseline", baseline_def[0], baseline_def[1])
-        
-        plateau_start = plateau_def[0]
-        plateau_end = plateau_def[1]
-        
-        if "ramp_window" in feat_cfg:
-            ramp_def = feat_cfg["ramp_window"]
-            self._add_window("ramp", ramp_def[0], ramp_def[1])
-        else:
-            ramp_end = feat_features_cfg.get("ramp_end")
-            if ramp_end is not None:
-                try:
-                    ramp_end = float(ramp_end)
-                except Exception:
-                    ramp_end = None
-            ramp_start = float(baseline_def[1])
-            self._add_window("ramp", ramp_start, ramp_end if ramp_end is not None else plateau_start)
-             
-        self._add_window("plateau", plateau_start, plateau_end)
-        
-        # Coarse bins (early/mid/late)
-        coarse_bins = feat_cfg.get("coarse_bins")
-        if not coarse_bins:
-            coarse_bins = feat_features_cfg.get("temporal_bins")
-        if not coarse_bins:
-            duration = plateau_end - plateau_start
-            bin_size = duration / 3.0
-            coarse_bins = [
-                {"label": "early", "start": plateau_start, "end": plateau_start + bin_size},
-                {"label": "mid", "start": plateau_start + bin_size, "end": plateau_start + 2*bin_size},
-                {"label": "late", "start": plateau_start + 2*bin_size, "end": plateau_end},
+        # 1. Build baseline ONLY if explicitly defined (usually for normalization)
+        baseline_def = feat_cfg.get("baseline_window", tf_cfg.get("baseline_window"))
+        if baseline_def and isinstance(baseline_def, (list, tuple)) and len(baseline_def) >= 2:
+            self._add_window("baseline", float(baseline_def[0]), float(baseline_def[1]))
+
+        # 2. Targeted window (context/user-defined iteration)
+        if self.name:
+            # Look for this specific name in all possible config sections
+            all_cfgs = [
+                self.config.get("feature_engineering.windows", {}),
+                self.config.get("feature_engineering.features", {}),
+                self.config.get("time_frequency_analysis", {}),
             ]
+            found = False
+            for cfg in all_cfgs:
+                # Check for exact name or common suffix "window"
+                for key in [self.name, f"{self.name}_window"]:
+                    val = cfg.get(key)
+                    if isinstance(val, (list, tuple)) and len(val) >= 2:
+                        try:
+                            self._add_window(self.name, float(val[0]), float(val[1]))
+                            found = True
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                if found:
+                    break
             
-        for b in coarse_bins:
-            self._add_window(b["label"], b["start"], b["end"], prefix="coarse")
-            
-        # Fine bins (t1..tN)
-        fine_bins = feat_features_cfg.get("temporal_bins_fine")
-        if fine_bins:
-            for entry in fine_bins:
-                if not isinstance(entry, dict):
-                    continue
-                if "label" not in entry or "start" not in entry or "end" not in entry:
-                    continue
-                try:
-                    label = str(entry["label"])
-                    start = float(entry["start"])
-                    end = float(entry["end"])
-                except Exception:
-                    continue
-                self._add_window(label, start, end, prefix="fine")
-        else:
-            n_fine = int(feat_cfg.get("n_fine_bins", 7))
-            fine_dur = (plateau_end - plateau_start) / max(n_fine, 1)
-            for i in range(n_fine):
-                start = plateau_start + i * fine_dur
-                end = start + fine_dur
-                self._add_window(f"t{i+1}", start, end, prefix="fine")
+            if not found:
+                # If name isn't in config, we treat it as an alias for the full available span
+                self._add_window(self.name, self.times[0], self.times[-1])
+            return
+
+        # 3. Batch windows: process 'custom_windows' if defined
+        custom = feat_cfg.get("custom_windows", [])
+        if isinstance(custom, list):
+            for win in custom:
+                if isinstance(win, dict) and "name" in win and "start" in win and "end" in win:
+                    self._add_window(win["name"], float(win["start"]), float(win["end"]))
 
     def _add_window(self, name: str, start: float, end: float, prefix: str = ""):
         """Add a window with clamping and validation."""
@@ -389,19 +375,20 @@ class TimeWindowSpec:
 
 def time_windows_from_spec(
     spec: TimeWindowSpec,
-    n_plateau_windows: int = 5,
     *,
     logger: Optional[logging.Logger] = None,
     strict: bool = True,
 ) -> TimeWindows:
+    """Create a TimeWindows object from a specification."""
     baseline_meta = spec.metadata.get("baseline")
-    plateau_meta = spec.metadata.get("plateau")
-
+    # Prefer 'active' (paradigm-neutral) over 'plateau' (experiment-specific)
+    active_meta = spec.metadata.get("active") or spec.metadata.get("plateau")
+    
+    # Check if we at least have ONE valid window
+    valid_any = any(m.valid for m in spec.metadata.values())
     errors: List[str] = []
-    if baseline_meta is None or not bool(getattr(baseline_meta, "valid", False)):
-        errors.append("Baseline window is empty")
-    if plateau_meta is None or not bool(getattr(plateau_meta, "valid", False)):
-        errors.append("Active/plateau window is empty")
+    if not valid_any:
+        errors.append("No valid time windows defined or found in data")
 
     if errors:
         if logger:
@@ -410,56 +397,37 @@ def time_windows_from_spec(
         if strict:
             raise ValueError("; ".join(errors))
 
-    coarse_masks: List[np.ndarray] = []
-    coarse_labels: List[str] = []
-    fine_masks: List[np.ndarray] = []
-    fine_labels: List[str] = []
-    for key, mask in spec.masks.items():
-        if key.startswith("coarse_"):
-            coarse_labels.append(key.split("coarse_", 1)[1])
-            coarse_masks.append(mask)
-        elif key.startswith("fine_"):
-            fine_labels.append(key.split("fine_", 1)[1])
-            fine_masks.append(mask)
+    # Build the generic masks and ranges dictionaries
+    masks = {k: v for k, v in spec.masks.items()}
+    ranges = {}
+    for k, meta in spec.metadata.items():
+        ranges[k] = (float(meta.start), float(meta.end))
 
-    plateau_masks: List[np.ndarray] = []
-    window_labels: List[str] = []
-    if n_plateau_windows > 0 and plateau_meta is not None and bool(getattr(plateau_meta, "valid", False)):
-        plateau_start = float(getattr(plateau_meta, "start", np.nan))
-        plateau_end = float(getattr(plateau_meta, "end", np.nan))
-        window_duration = (plateau_end - plateau_start) / n_plateau_windows
-        for i in range(n_plateau_windows):
-            win_start = plateau_start + i * window_duration
-            win_end = win_start + window_duration
-            plateau_masks.append((spec.times >= win_start) & (spec.times < win_end))
-            window_labels.append(f"w{i}")
+    # Determine active mask/range - prefer 'active', then 'plateau', then first non-baseline
+    active_key = None
+    for key in ["active", "plateau"]:
+        if key in masks:
+            active_key = key
+            break
+    if active_key is None:
+        # Use first non-baseline window
+        for key in masks:
+            if key != "baseline":
+                active_key = key
+                break
 
     return TimeWindows(
         baseline_mask=spec.get_mask("baseline"),
-        active_mask=spec.get_mask("plateau"),
-        baseline_range=(
-            (float(baseline_meta.start), float(baseline_meta.end))
-            if baseline_meta is not None
-            else (np.nan, np.nan)
-        ),
-        active_range=(
-            (float(plateau_meta.start), float(plateau_meta.end))
-            if plateau_meta is not None
-            else (np.nan, np.nan)
-        ),
-        clamped=bool(
-            (baseline_meta is not None and bool(getattr(baseline_meta, "clamped", False)))
-            or (plateau_meta is not None and bool(getattr(plateau_meta, "clamped", False)))
-        ),
+        active_mask=spec.get_mask(active_key) if active_key else np.zeros_like(spec.times, dtype=bool),
+        baseline_range=ranges.get("baseline", (np.nan, np.nan)),
+        active_range=ranges.get(active_key, (np.nan, np.nan)) if active_key else (np.nan, np.nan),
+        masks=masks,
+        ranges=ranges,
+        clamped=any(m.clamped for m in spec.metadata.values()),
         valid=not errors,
         errors=errors,
-        coarse_masks=coarse_masks,
-        coarse_labels=coarse_labels,
-        fine_masks=fine_masks,
-        fine_labels=fine_labels,
-        plateau_masks=plateau_masks,
-        window_labels=window_labels,
         times=spec.times,
+        name=spec.name,
     )
 
 
@@ -496,45 +464,33 @@ def get_segment_masks(
     windows: Optional[TimeWindows],
     config: Optional[Any] = None,
 ) -> Dict[str, Optional[np.ndarray]]:
-    """
-    Derive ramp/plateau/offset/baseline masks based on times and config.
-    
-    This is the canonical implementation - import from here instead of
-    duplicating in dynamics.py or connectivity.py.
-    
-    Args:
-        times: Time array from epochs/precomputed data
-        windows: TimeWindows object with active_mask, baseline_mask, etc.
-        config: Configuration dict for ramp_end, offset_start values
-        
-    Returns:
-        Dict with keys 'ramp', 'plateau', 'baseline', 'offset' mapping to boolean masks
-    """
-    from eeg_pipeline.utils.config.loader import get_config_value
-    
-    cfg = config or {}
-    ramp_end = float(get_config_value(cfg, "feature_engineering.features.ramp_end", 3.0))
-    offset_start = get_config_value(cfg, "feature_engineering.features.offset_start", None)
+    """Return all named masks from the TimeWindows object."""
+    if not windows:
+        return {}
 
-    ramp_mask = (times >= 0) & (times <= ramp_end)
-    plateau_mask = getattr(windows, "active_mask", None) if windows else None
-    baseline_mask = getattr(windows, "baseline_mask", None) if windows else None
-    
-    offset_mask = None
-    if offset_start is not None:
-        try:
-            offset_start_f = float(offset_start)
-            if offset_start_f < times[-1]:
-                offset_mask = times >= offset_start_f
-        except Exception:
-            offset_mask = None
+    # 1. Start with all generic masks
+    out = {k: v for k, v in windows.masks.items()}
 
-    return {
-        "ramp": ramp_mask,
-        "plateau": plateau_mask,
-        "baseline": baseline_mask,
-        "offset": offset_mask,
-    }
+    # 2. Add baseline explicitly if not already in masks
+    if windows.baseline_mask is not None and "baseline" not in out:
+        if np.any(windows.baseline_mask):
+            out["baseline"] = windows.baseline_mask
+
+    # 3. Add active/plateau explicitly if not already in masks
+    if windows.active_mask is not None:
+        name = getattr(windows, "name", "active") or "active"
+        if name not in out and np.any(windows.active_mask):
+            out[name] = windows.active_mask
+
+    # 4. Filter for only the targeted name if in a named iteration
+    if windows.name:
+        # We always keep baseline for potential normalization
+        targeted = {"baseline": out.get("baseline")} if "baseline" in out else {}
+        if windows.name in out:
+            targeted[windows.name] = out[windows.name]
+        return targeted
+
+    return out
 
 
 def make_mask_for_times(spec: "TimeWindowSpec", window_name: str, times: np.ndarray) -> np.ndarray:

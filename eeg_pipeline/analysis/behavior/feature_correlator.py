@@ -916,8 +916,12 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
         correlator._feature_dfs["itpc"] = ctx.itpc_df
     if ctx.pac_df is not None:
         correlator._feature_dfs["pac"] = ctx.pac_df
-    if ctx.precomputed_df is not None:
-        correlator._feature_dfs["precomputed"] = ctx.precomputed_df
+    if ctx.complexity_df is not None:
+        correlator._feature_dfs["complexity"] = ctx.complexity_df
+    if ctx.dynamics_df is not None:
+        correlator._feature_dfs["dynamics"] = ctx.dynamics_df
+    if ctx.cfc_df is not None:
+        correlator._feature_dfs["cfc"] = ctx.cfc_df
     
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True

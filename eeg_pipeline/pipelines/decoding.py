@@ -47,6 +47,8 @@ class DecodingPipeline(PipelineBase):
         )
 
     def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
+        from eeg_pipeline.cli.common import ProgressReporter
+        
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
@@ -55,16 +57,22 @@ class DecodingPipeline(PipelineBase):
         if len(subjects) < min_subjects:
             raise ValueError(f"Decoding requires at least {min_subjects} subjects, got {len(subjects)}")
         
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         n_perm = kwargs.get("n_perm", 0)
         inner_splits = kwargs.get("inner_splits", 3)
         outer_jobs = kwargs.get("outer_jobs", 1)
         rng_seed = kwargs.get("rng_seed") or self.config.get("project.random_state", 42)
         skip_time_gen = kwargs.get("skip_time_gen", False)
         
+        total_steps = 4 if not skip_time_gen else 2
+        
         self.logger.info(
             f"Starting decoding: {len(subjects)} subjects, task={task}, n_perm={n_perm}, "
             f"inner_splits={inner_splits}, outer_jobs={outer_jobs}"
         )
+        
+        progress.start("decoding", subjects)
+        progress.step("Regression decoding", current=1, total=total_steps)
         
         results_dir = run_regression_decoding(
             subjects=subjects,
@@ -79,6 +87,8 @@ class DecodingPipeline(PipelineBase):
             logger=self.logger,
         )
         
+        progress.step("Visualizing regression", current=2, total=total_steps)
+        
         visualize_regression_from_disk(
             results_dir=results_dir,
             config=self.config,
@@ -86,6 +96,8 @@ class DecodingPipeline(PipelineBase):
         )
         
         if not skip_time_gen:
+            progress.step("Time generalization", current=3, total=total_steps)
+            
             run_time_generalization(
                 subjects=subjects,
                 task=task,
@@ -97,6 +109,8 @@ class DecodingPipeline(PipelineBase):
                 logger=self.logger,
             )
             
+            progress.step("Visualizing time generalization", current=4, total=total_steps)
+            
             tg_results_dir = self.results_root / "time_generalization"
             visualize_time_generalization_from_disk(
                 results_dir=tg_results_dir,
@@ -105,6 +119,7 @@ class DecodingPipeline(PipelineBase):
             )
         
         self.logger.info("Decoding complete.")
+        progress.complete(success=True)
         
         return [{"subjects": subjects, "status": "success", "results_dir": str(results_dir)}]
 

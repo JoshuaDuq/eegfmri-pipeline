@@ -185,10 +185,14 @@ class BehaviorPipeline(PipelineBase):
         pipeline_config: Optional[BehaviorPipelineConfig] = None,
         computations: Optional[List[str]] = None,
         feature_categories: Optional[List[str]] = None,
+        feature_files: Optional[List[str]] = None,
+        computation_features: Optional[Dict[str, List[str]]] = None,
     ):
         super().__init__(name="behavior_analysis", config=config)
         self.pipeline_config = pipeline_config or BehaviorPipelineConfig.from_config(self.config)
         self.feature_categories = feature_categories
+        self.feature_files = feature_files
+        self.computation_features = computation_features or {}
         
         self._run_correlations = True
         self._run_export = True
@@ -225,12 +229,21 @@ class BehaviorPipeline(PipelineBase):
         
         if self.feature_categories:
             self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))
+        
+        if self.computation_features:
+            for comp, feats in self.computation_features.items():
+                self.logger.info("  %s features: %s", comp, ", ".join(feats))
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
+        from eeg_pipeline.cli.common import ProgressReporter
         
         task = task or self.config.get("project.task", "thermalactive")
+        
+        # Initialize progress reporter
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        total_steps = 8  # 8 stages in the pipeline
         
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
@@ -244,6 +257,8 @@ class BehaviorPipeline(PipelineBase):
         logger.info(f"{'='*60}")
         logger.info(f"Behavior Pipeline: sub-{subject}")
         logger.info(f"{'='*60}")
+        
+        progress.subject_start(f"sub-{subject}")
 
         base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
         rng = np.random.default_rng(get_subject_seed(base_seed, subject))
@@ -268,54 +283,71 @@ class BehaviorPipeline(PipelineBase):
             compute_change_scores=self.pipeline_config.compute_change_scores,
             compute_reliability=self.pipeline_config.compute_reliability,
             feature_categories=self.feature_categories,
+            selected_feature_files=self.feature_files,
         )
         
         results = BehaviorPipelineResults(subject=subject)
         
+        progress.step("Loading data", current=1, total=total_steps)
         logger.info("Stage 1: Loading data...")
         if not _stage_load_impl(ctx):
+            progress.error("load_failed", "Failed to load data")
             return results
         
         if self._run_correlations:
+            progress.step("Running correlations", current=2, total=total_steps)
             logger.info("Stage 2: Running unified correlations...")
             results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
         else:
+            progress.step("Skipping correlations", current=2, total=total_steps)
             logger.info("Stage 2: Skipped correlations (CLI selection)")
         
         if self.pipeline_config.run_condition_comparison:
+            progress.step("Condition comparison", current=3, total=total_steps)
             logger.info("Stage 3: Condition comparison...")
             results.condition_effects = _stage_condition_impl(ctx, self.pipeline_config)
         else:
+            progress.step("Skipping conditions", current=3, total=total_steps)
             logger.info("Stage 3: Skipped condition comparison (CLI selection)")
         
         if self.pipeline_config.run_temporal_correlations:
+            progress.step("Temporal correlations", current=4, total=total_steps)
             logger.info("Stage 4: Temporal correlations...")
             _stage_temporal_impl(ctx)
         else:
+            progress.step("Skipping temporal", current=4, total=total_steps)
             logger.info("Stage 4: Skipped temporal correlations (CLI selection)")
         
         if self.pipeline_config.run_cluster_tests:
+            progress.step("Cluster permutation tests", current=5, total=total_steps)
             logger.info("Stage 5: Cluster permutation tests...")
             results.cluster = _stage_cluster_impl(ctx, self.pipeline_config)
         else:
+            progress.step("Skipping cluster tests", current=5, total=total_steps)
             logger.info("Stage 5: Skipped cluster tests (CLI selection)")
         
         if self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects:
+            progress.step("Advanced analyses", current=6, total=total_steps)
             logger.info("Stage 6: Advanced analyses...")
             _stage_advanced_impl(ctx, self.pipeline_config, results)
         else:
+            progress.step("Skipping advanced", current=6, total=total_steps)
             logger.info("Stage 6: Skipped advanced analyses (CLI selection)")
         
         if self._run_validation:
+            progress.step("Global FDR correction", current=7, total=total_steps)
             logger.info("Stage 7: Global FDR correction...")
             _stage_validate_impl(ctx, self.pipeline_config)
         else:
+            progress.step("Skipping FDR", current=7, total=total_steps)
             logger.info("Stage 7: Skipped global FDR (no computations selected)")
         
         if self._run_export:
+            progress.step("Saving results", current=8, total=total_steps)
             logger.info("Stage 8: Saving results...")
             _stage_export_impl(ctx, results)
         else:
+            progress.step("Skipping export", current=8, total=total_steps)
             logger.info("Stage 8: Skipped export (CLI selection)")
 
         try:
@@ -329,6 +361,8 @@ class BehaviorPipeline(PipelineBase):
         logger.info(f"  Significant (raw): {summary.get('n_sig_raw', 0)}")
         logger.info(f"  Significant (controlled): {summary.get('n_sig_controlled', 0)}")
         logger.info(f"{'='*60}")
+        
+        progress.subject_done(f"sub-{subject}", success=True)
         
         return results
 

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.domain.features.constants import EPSILON_PSD, STANDARD_SEGMENTS
+from eeg_pipeline.domain.features.constants import EPSILON_PSD
 from eeg_pipeline.utils.analysis.tfr import extract_tfr_object
 from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
 
@@ -26,6 +26,7 @@ def extract_power_features(
     - Raw power for baseline (if available) - internalized for normalization
     - Log-ratio power for active segments (ramp, plateau, bins) relative to baseline
     - Global mean power per band
+    - ROI mean power per band (if spatial_modes includes 'roi')
     """
     if not bands:
         return pd.DataFrame(), []
@@ -44,6 +45,18 @@ def extract_power_features(
     from eeg_pipeline.utils.config.loader import get_frequency_bands
     freq_bands = get_frequency_bands(ctx.config)
     
+    # Get spatial modes from context
+    spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
+    
+    # Build ROI map if needed
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(ctx.config)
+        if roi_defs:
+            roi_map = build_roi_map(channel_names, roi_defs)
+    
     # Pre-calculate band masks and indices to save time
     band_indices = {}
     for band in bands:
@@ -55,8 +68,14 @@ def extract_power_features(
 
     n_epochs = len(tfr_data)
     
+    ctx_name = getattr(ctx, "name", None)
     def _get_tfr_mask(segment_name):
-        return make_mask_for_times(ctx.windows, segment_name, times)
+        mask = make_mask_for_times(ctx.windows, segment_name, times)
+        # If mask is empty but name matches context name, use full window
+        if not np.any(mask) and segment_name == ctx_name:
+            return np.ones(len(times), dtype=bool)
+        return mask
+    
 
     # Calculate Baseline Power per band/channel first (for normalization)
     baseline_powers = {}
@@ -74,20 +93,15 @@ def extract_power_features(
             p_base = np.nanmean(np.nanmean(d, axis=3), axis=2)
             baseline_powers[band] = p_base
             
-    # Iterate over all defined windows in Spec
-    segments_to_process = []
-    # Core segments including baseline
-    for seg in STANDARD_SEGMENTS:
-        mask = ctx.windows.get_mask(seg)
-        if mask is not None and np.any(mask):
-            segments_to_process.append(seg)
-    # Bins (coarse and fine temporal windows)
-    if hasattr(ctx.windows, 'masks') and isinstance(ctx.windows.masks, dict):
-        for name in ctx.windows.masks:
-            if name.startswith("coarse_") or name.startswith("fine_"):
-                segments_to_process.append(name)
-            
-    ctx.logger.info(f"Computing power features for {len(segments_to_process)} segments")
+    # Determine segments to process: ONLY the one requested in context
+    # unless no name is provided, in which case we fall back to 'full'
+    ctx_name = getattr(ctx, "name", None)
+    if ctx_name:
+        segments_to_process = [ctx_name]
+    else:
+        segments_to_process = ["full"]
+
+    ctx.logger.info(f"Computing power features for segment: {segments_to_process[0]}")
     
     output_data = {}
     
@@ -122,15 +136,26 @@ def extract_power_features(
                     val_matrix = np.log10(raw_power)
                     stat_name = "log10raw"
 
-                # Per-channel
-                for ch_idx, ch in enumerate(channel_names):
-                    col = NamingSchema.build("power", seg_name, band, "ch", stat_name, channel=ch)
-                    output_data[col] = val_matrix[:, ch_idx]
+                # Per-channel (only if 'channels' in spatial_modes)
+                if 'channels' in spatial_modes:
+                    for ch_idx, ch in enumerate(channel_names):
+                        col = NamingSchema.build("power", seg_name, band, "ch", stat_name, channel=ch)
+                        output_data[col] = val_matrix[:, ch_idx]
                     
-                # Global Mean
-                global_mean = np.nanmean(val_matrix, axis=1) # (n_epochs,)
-                col_global = NamingSchema.build("power", seg_name, band, "global", stat_name + "_mean")
-                output_data[col_global] = global_mean
+                # Global Mean (only if 'global' in spatial_modes)
+                if 'global' in spatial_modes:
+                    global_mean = np.nanmean(val_matrix, axis=1) # (n_epochs,)
+                    col_global = NamingSchema.build("power", seg_name, band, "global", stat_name + "_mean")
+                    output_data[col_global] = global_mean
+                
+                # ROI Mean (only if 'roi' in spatial_modes)
+                if 'roi' in spatial_modes and roi_map:
+                    for roi_name, ch_indices in roi_map.items():
+                        if len(ch_indices) > 0:
+                            roi_mean = np.nanmean(val_matrix[:, ch_indices], axis=1)
+                            col_roi = NamingSchema.build("power", seg_name, band, "roi", stat_name + "_mean", channel=roi_name)
+                            output_data[col_roi] = roi_mean
+                            
             except Exception as e:
                 ctx.logger.error(f"Error computing power features for {seg_name} {band}: {e}")
 

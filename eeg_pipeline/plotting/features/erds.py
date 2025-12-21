@@ -30,13 +30,15 @@ def plot_erds_temporal_evolution(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (12, 5),
     config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Mean active power vs baseline logratio by band."""
     bands = get_band_names(config)
     band_colors = get_band_colors(config)
     plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
@@ -112,9 +114,16 @@ def plot_erds_latency_distribution(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (12, 5),
+    config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Burst rate and duration across frequency bands."""
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
+    
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     ax = axes[0]
@@ -193,9 +202,16 @@ def plot_erds_erd_ers_separation(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (12, 5),
+    config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Burst amplitude and power variability (Fano factor)."""
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
+    
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     ax = axes[0]
@@ -203,7 +219,7 @@ def plot_erds_erd_ers_separation(
     positions = []
     colors = []
     
-    for i, band in enumerate(BANDS):
+    for i, band in enumerate(bands):
         cols = [c for c in features_df.columns if f"dynamics_{band}_burst_mean_amplitude" in c]
         if cols:
             vals = features_df[cols[0]].dropna().values
@@ -211,7 +227,7 @@ def plot_erds_erd_ers_separation(
             if len(vals) > 0:
                 data_list.append(vals)
                 positions.append(i)
-                colors.append(BAND_COLORS[band])
+                colors.append(band_colors[band])
     
     if data_list:
         parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
@@ -219,8 +235,8 @@ def plot_erds_erd_ers_separation(
             pc.set_facecolor(colors[i])
             pc.set_alpha(0.6)
     
-    ax.set_xticks(range(len(BANDS)))
-    ax.set_xticklabels([b.capitalize() for b in BANDS])
+    ax.set_xticks(range(len(bands)))
+    ax.set_xticklabels([b.capitalize() for b in bands])
     ax.set_xlabel("Band")
     ax.set_ylabel("Amplitude")
     ax.set_title("Burst Amplitude")
@@ -270,9 +286,16 @@ def plot_erds_global_summary(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (12, 5),
+    config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Power change and GFP summary by band."""
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
+    
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
     ax = axes[0]
@@ -345,7 +368,6 @@ def plot_erds_global_summary(
 
 
 __all__ = [
-    "plot_erds_distribution",
     "plot_erds_temporal_evolution",
     "plot_erds_latency_distribution",
     "plot_erds_erd_ers_separation",

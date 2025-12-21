@@ -76,7 +76,7 @@ def extract_erds_from_precomputed(
     times = precomputed.times
     active_times = times[windows.active_mask]
 
-    segment_label = "plateau"
+    segment_label = getattr(windows, "name", "plateau") or "plateau"
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
 
@@ -139,43 +139,8 @@ def extract_erds_from_precomputed(
                 all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
                 all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
 
-                coarse_values: Dict[str, float] = {}
-                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_power = np.mean(power[ch_idx, win_mask])
-                    if baseline_valid:
-                        erds_win = ((win_power - baseline_ref) / baseline_ref) * 100
-                        erds_win_db = 10 * np.log10(max(win_power, min_active_power) / baseline_ref)
-                    else:
-                        erds_win = np.nan
-                        erds_win_db = np.nan
-                    record[
-                        NamingSchema.build("erds", win_label, band, "ch", "percent", channel=ch_name)
-                    ] = float(erds_win)
-                    if use_log_ratio:
-                        record[
-                            NamingSchema.build("erds", win_label, band, "ch", "db", channel=ch_name)
-                        ] = float(erds_win_db)
-                    coarse_values[win_label] = float(erds_win)
-
-                for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_power = np.mean(power[ch_idx, win_mask])
-                    if baseline_valid:
-                        erds_win = ((win_power - baseline_ref) / baseline_ref) * 100
-                        erds_win_db = 10 * np.log10(max(win_power, min_active_power) / baseline_ref)
-                    else:
-                        erds_win = np.nan
-                        erds_win_db = np.nan
-                    record[
-                        NamingSchema.build("erds", win_label, band, "ch", "percent", channel=ch_name)
-                    ] = float(erds_win)
-                    if use_log_ratio:
-                        record[
-                            NamingSchema.build("erds", win_label, band, "ch", "db", channel=ch_name)
-                        ] = float(erds_win_db)
+                all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
+                all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
 
                 record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
                 record[
@@ -207,19 +172,6 @@ def extract_erds_from_precomputed(
                         record[
                             NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)
                         ] = float(slope)
-
-                    if "early" in coarse_values and "late" in coarse_values:
-                        diff = coarse_values["late"] - coarse_values["early"]
-                        record[
-                            NamingSchema.build(
-                                "erds",
-                                segment_label,
-                                band,
-                                "ch",
-                                "early_late_diff",
-                                channel=ch_name,
-                            )
-                        ] = float(diff)
 
                     peak_idx = int(np.nanargmax(np.abs(erds_trace)))
                     record[
@@ -294,14 +246,6 @@ def extract_erds_from_precomputed(
                 record[
                     NamingSchema.build("erds", segment_label, band, "global", "percent_std")
                 ] = np.nan
-                for win_label in windows.coarse_labels:
-                    record[
-                        NamingSchema.build("erds", win_label, band, "global", "percent_mean")
-                    ] = np.nan
-                    if use_log_ratio:
-                        record[
-                            NamingSchema.build("erds", win_label, band, "global", "db_mean")
-                        ] = np.nan
                 if use_log_ratio:
                     record[
                         NamingSchema.build("erds", segment_label, band, "global", "db_mean")
@@ -316,28 +260,6 @@ def extract_erds_from_precomputed(
                 record[
                     NamingSchema.build("erds", segment_label, band, "global", "percent_std")
                 ] = float(np.std(valid_erds))
-
-                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_erds: List[float] = []
-                    win_log: List[float] = []
-                    for ch_idx in range(len(precomputed.ch_names)):
-                        bp = np.mean(power[ch_idx, windows.baseline_mask])
-                        bp_ref = bp if bp >= min_baseline_power else min_baseline_power
-                        if bp_ref > epsilon:
-                            wp = np.mean(power[ch_idx, win_mask])
-                            win_erds.append(((wp - bp_ref) / bp_ref) * 100)
-                            if use_log_ratio:
-                                win_log.append(10 * np.log10(max(wp, min_active_power) / bp_ref))
-                    if win_erds:
-                        record[
-                            NamingSchema.build("erds", win_label, band, "global", "percent_mean")
-                        ] = float(np.mean(win_erds))
-                    if use_log_ratio and win_log:
-                        record[
-                            NamingSchema.build("erds", win_label, band, "global", "db_mean")
-                        ] = float(np.mean(win_log))
 
                 if use_log_ratio and valid_log:
                     record[

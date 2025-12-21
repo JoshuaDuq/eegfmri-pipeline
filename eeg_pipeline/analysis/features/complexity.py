@@ -23,10 +23,10 @@ from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import (
     MIN_SAMPLES_COMPLEXITY,
-    STANDARD_SEGMENTS,
     get_segment_mask,
     validate_extractor_inputs,
 )
+from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.analysis.signal_metrics import (
     compute_permutation_entropy as _permutation_entropy,
     compute_sample_entropy as _sample_entropy,
@@ -80,43 +80,43 @@ def _process_epoch_metrics(
     ch_names: List[str], 
     params: Dict[str, Any],
     seg: str,
-    band: str
+    band: str,
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]],
 ) -> Dict[str, float]:
-    """Process all channels for a single epoch and return named features."""
-    # epoch_data shape: (n_ch, n_times)
-    epoch_res = {}
+    """Process all channels for a single epoch and aggregate spatially."""
+    n_ch = len(ch_names)
+    metric_keys = ["pe", "hjorth_mobility", "hjorth_complexity", "lzc"]
+    if params.get("include_sampen"): 
+        metric_keys.append("sampen")
     
-    # Global accumulators for this epoch (mean across channels)
-    acc: Dict[str, List[float]] = {
-        "pe": [], 
-        "hjorth_mobility": [], 
-        "hjorth_complexity": [], 
-        "lzc": []
-    }
-    if params["include_sampen"]:
-        acc["sampen"] = []
-    
-    # Per-channel metrics
-    for c, ch in enumerate(ch_names):
-        trace = epoch_data[c]
-        mets = _compute_metrics_for_trace(trace, params)
-        
-        for k, v in mets.items():
-            # Build column name: dynamics_plateau_theta_ch_pe_Fp1
-            col_name = NamingSchema.build("dynamics", seg, band, "ch", k, channel=ch)
-            epoch_res[col_name] = v
+    results_mat = np.full((len(metric_keys), n_ch), np.nan)
+    for c in range(n_ch):
+        mets = _compute_metrics_for_trace(epoch_data[c], params)
+        for m_idx, k in enumerate(metric_keys):
+            results_mat[m_idx, c] = mets.get(k, np.nan)
             
-            if k in acc and np.isfinite(v):
-                acc[k].append(v)
-                
-    # Global mean metrics for this epoch
-    for k, vals in acc.items():
-        # Build column name: dynamics_plateau_theta_global_pe
-        col_global = NamingSchema.build("dynamics", seg, band, "global", k)
-        if vals:
-            epoch_res[col_global] = np.mean(vals)
-        else:
-            epoch_res[col_global] = np.nan
+    epoch_res = {}
+    for m_idx, k in enumerate(metric_keys):
+        # Channels
+        if 'channels' in spatial_modes:
+            for c, ch in enumerate(ch_names):
+                col = NamingSchema.build("dynamics", seg, band, "ch", k, channel=ch)
+                epoch_res[col] = results_mat[m_idx, c]
+        
+        # ROI
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, ch_indices in roi_map.items():
+                if ch_indices:
+                    roi_val = np.nanmean(results_mat[m_idx, ch_indices])
+                    col = NamingSchema.build("dynamics", seg, band, "roi", k, channel=roi_name)
+                    epoch_res[col] = roi_val
+                    
+        # Global
+        if 'global' in spatial_modes:
+            global_val = np.nanmean(results_mat[m_idx, :])
+            col = NamingSchema.build("dynamics", seg, band, "global", k)
+            epoch_res[col] = global_val
             
     return epoch_res
 
@@ -131,6 +131,8 @@ def _extract_dynamics_for_segment(
     params: Dict[str, Any],
     segment_name: str,
     n_jobs: int,
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]],
 ) -> pd.DataFrame:
     """Extract dynamics features for a single segment."""
     n_epochs = len(data)
@@ -149,7 +151,7 @@ def _extract_dynamics_for_segment(
         # so there's no nested parallelism concern
         effective_jobs = n_jobs if n_epochs > 4 else 1  # Only parallelize if worthwhile
         epoch_dicts = Parallel(n_jobs=effective_jobs, prefer="threads")(
-            delayed(_process_epoch_metrics)(filtered[e], ch_names, params, segment_name, band)
+            delayed(_process_epoch_metrics)(filtered[e], ch_names, params, segment_name, band, spatial_modes, roi_map)
             for e in range(n_epochs)
         )
         
@@ -184,17 +186,29 @@ def extract_dynamics_features(
     freq_bands = get_frequency_bands(ctx.config)
     n_jobs = get_n_jobs(ctx.config, default=-1, config_path="feature_engineering.parallel.n_jobs_complexity")
     params = _extract_params(ctx.config)
-    min_samps = MIN_SAMPLES_COMPLEXITY
+    n_epochs = len(full_data) # Added to define n_epochs for effective_jobs
+    effective_jobs = n_jobs if n_epochs > 4 else 1
     
+    # Get spatial modes and ROI map from context
+    spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(ctx.config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
     all_dfs = []
-    
-    for seg_name in STANDARD_SEGMENTS:
-        mask = get_segment_mask(ctx.windows, seg_name)
-        if mask is None or np.sum(mask) < min_samps:
+    segments = get_segment_masks(epochs.times, ctx.windows, ctx.config)
+    for seg_name, mask in segments.items():
+        if mask is None or np.sum(mask) < int(sfreq):
             continue
-        data_seg = full_data[..., mask]
+        
+        seg_data = full_data[:, :, mask]
         seg_df = _extract_dynamics_for_segment(
-            data_seg, ch_names, sfreq, bands, freq_bands, params, seg_name, n_jobs
+            seg_data, ch_names, sfreq, bands, freq_bands, params, seg_name, n_jobs,
+            spatial_modes=spatial_modes, roi_map=roi_map
         )
         if not seg_df.empty:
             all_dfs.append(seg_df)
@@ -218,6 +232,7 @@ def _process_complexity_epoch(
     ch_names: List[str],
     segment_mask: np.ndarray,
     segment_name: str,
+    params: Dict[str, Any],
 ) -> Dict[str, float]:
     """Process complexity for a single epoch (parallel worker)."""
     record: Dict[str, float] = {}
@@ -240,7 +255,7 @@ def _process_complexity_epoch(
                 lzc = np.nan
             
             try:
-                pe = _permutation_entropy(trace, order=3, delay=1)
+                pe = _permutation_entropy(trace, order=params.get("pe_order", 3), delay=params.get("pe_delay", 1))
             except (ValueError, RuntimeError):
                 pe = np.nan
             
@@ -266,6 +281,7 @@ def _compute_complexity_for_segment(
     precomputed: Any,
     segment_mask: np.ndarray,
     segment_name: str,
+    params: Dict[str, Any],
     n_jobs: int = 1,
 ) -> List[Dict[str, float]]:
     """Compute complexity metrics for a single segment using precomputed envelopes."""
@@ -274,14 +290,14 @@ def _compute_complexity_for_segment(
     if n_jobs != 1:
         records = Parallel(n_jobs=n_jobs)(
             delayed(_process_complexity_epoch)(
-                ep_idx, precomputed.band_data, precomputed.ch_names, segment_mask, segment_name
+                ep_idx, precomputed.band_data, precomputed.ch_names, segment_mask, segment_name, params
             )
             for ep_idx in range(n_epochs)
         )
     else:
         records = [
             _process_complexity_epoch(
-                ep_idx, precomputed.band_data, precomputed.ch_names, segment_mask, segment_name
+                ep_idx, precomputed.band_data, precomputed.ch_names, segment_mask, segment_name, params
             )
             for ep_idx in range(n_epochs)
         ]
@@ -297,28 +313,19 @@ def extract_complexity_from_precomputed(
     if precomputed.windows is None:
         return pd.DataFrame(), []
 
-    all_records: List[Dict[str, float]] = []
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segments = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     
-    baseline_mask = precomputed.windows.get_mask("baseline")
-    active_mask = precomputed.windows.get_mask("plateau")
+    all_records = []
+    params = _extract_params(precomputed.config)
     
-    if baseline_mask is not None and np.any(baseline_mask):
-        baseline_records = _compute_complexity_for_segment(precomputed, baseline_mask, "baseline", n_jobs=n_jobs)
-        if baseline_records:
+    for seg_label, mask in segments.items():
+        if mask is not None and np.any(mask):
+            seg_recs = _compute_complexity_for_segment(precomputed, mask, seg_label, params, n_jobs=n_jobs)
             if not all_records:
-                all_records = baseline_records
+                all_records = seg_recs
             else:
-                for i, rec in enumerate(baseline_records):
-                    all_records[i].update(rec)
-    
-    # Process plateau segment
-    if active_mask is not None and np.any(active_mask):
-        plateau_records = _compute_complexity_for_segment(precomputed, active_mask, "plateau", n_jobs=n_jobs)
-        if plateau_records:
-            if not all_records:
-                all_records = plateau_records
-            else:
-                for i, rec in enumerate(plateau_records):
+                for i, rec in enumerate(seg_recs):
                     all_records[i].update(rec)
     
     if not all_records or all(len(r) == 0 for r in all_records):

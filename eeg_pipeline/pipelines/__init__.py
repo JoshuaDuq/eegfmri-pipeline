@@ -8,6 +8,7 @@ Pipeline Classes:
 - BehaviorPipeline: EEG-behavior correlation analysis
 - DecodingPipeline: ML-based prediction (LOSO, time-generalization)
 - ErpPipeline: Event-related potential analysis
+- PreprocessingPipeline: Bad channels, ICA, epochs
 
 Preprocessing Functions:
 - run_raw_to_bids: Convert raw BrainVision to BIDS
@@ -15,7 +16,7 @@ Preprocessing Functions:
 """
 
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.pipelines.preprocessing import (
+from eeg_pipeline.pipelines.utilities import (
     run_raw_to_bids,
     run_merge_behavior,
 )
@@ -36,13 +37,14 @@ from eeg_pipeline.pipelines.behavior import (
     BehaviorPipelineResults,
 )
 from eeg_pipeline.pipelines.decoding import DecodingPipeline
+from eeg_pipeline.pipelines.utilities import UtilityPipeline
 from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
 __all__ = [
     # Base
     "PipelineBase",
-    # Preprocessing
-    "PreprocessingPipeline",
+    # Utilities
+    "UtilityPipeline",
     "run_raw_to_bids",
     "run_merge_behavior",
     # ERP
@@ -60,4 +62,6 @@ __all__ = [
     "BehaviorPipelineResults",
     # Decoding
     "DecodingPipeline",
+    # Preprocessing
+    "PreprocessingPipeline",
 ]

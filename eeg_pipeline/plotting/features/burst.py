@@ -28,8 +28,11 @@ def plot_burst_duration_distribution(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     bands = get_band_names(config)
@@ -81,8 +84,11 @@ def plot_burst_amplitude_distribution(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     bands = get_band_names(config)
@@ -133,9 +139,11 @@ def plot_burst_summary_by_band(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (12, 8),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("standard", plot_type="features")
     bands = get_band_names(config)
     band_colors = get_band_colors(config)
     fig, axes = plt.subplots(1, 2, figsize=figsize)
@@ -204,16 +212,19 @@ def plot_gfp_by_band(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     plot_cfg = get_plot_config(config)
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     data_list = []
     positions = []
     colors = []
+    
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
     
     for i, band in enumerate(bands):
         cols = [c for c in features_df.columns if f"gfp_{band}_mean_active" in c]
@@ -261,16 +272,19 @@ def plot_power_fano_factor(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     plot_cfg = get_plot_config(config)
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     data_list = []
     positions = []
     colors = []
+    
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
     
     for i, band in enumerate(bands):
         cols = [c for c in features_df.columns if f"dynamics_{band}_power_fano" in c]
@@ -316,16 +330,19 @@ def plot_power_logratio(
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Tuple[float, float] = (10, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     plot_cfg = get_plot_config(config)
-    bands = get_band_names(config)
-    band_colors = get_band_colors(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     data_list = []
     positions = []
     colors = []
+    
+    bands = get_band_names(config)
+    band_colors = get_band_colors(config)
     
     for i, band in enumerate(bands):
         cols = [c for c in features_df.columns if f"dynamics_{band}_logratio" in c]
@@ -369,9 +386,13 @@ def plot_gamma_ramp_bursts(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
-    figsize: Tuple[float, float] = (8, 5),
+    config: Any = None,
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Gamma burst characteristics during ramp period."""
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("standard", plot_type="features")
     fig, ax = plt.subplots(figsize=figsize)
     
     rate_cols = [c for c in features_df.columns if "dynamics_gamma_burst_rate" in c]
@@ -383,8 +404,9 @@ def plot_gamma_ramp_bursts(
         
         valid = np.isfinite(rates) & np.isfinite(durations)
         if np.sum(valid) > 0:
+            band_colors = get_band_colors(config)
             ax.scatter(rates[valid], durations[valid], 
-                      c=BAND_COLORS["gamma"], alpha=0.6, s=30, edgecolors="white")
+                      c=band_colors["gamma"], alpha=0.6, s=30, edgecolors="white")
             
             r, p = stats.spearmanr(rates[valid], durations[valid])
             ax.text(0.05, 0.95, f"ρ = {r:.2f}, p = {p:.3f}", 
@@ -409,7 +431,7 @@ def plot_dynamics_by_condition(
     subject: str,
     save_path: Path,
     config: Any = None,
-    figsize: Tuple[float, float] = (16, 5),
+    figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
     """Dynamics by condition per frequency band during plateau.
     
@@ -423,6 +445,9 @@ def plot_dynamics_by_condition(
     - Footer shows total tests and correction method
     """
     pain_mask = extract_pain_mask(events_df, config)
+    plot_cfg = get_plot_config(config)
+    if figsize is None:
+        figsize = plot_cfg.get_figure_size("standard", plot_type="features")
     if pain_mask is None or len(features_df) != len(pain_mask):
         fig, ax = plt.subplots(figsize=figsize)
         ax.text(0.5, 0.5, "Cannot identify conditions", ha="center", va="center")
@@ -536,7 +561,7 @@ def plot_dynamics_by_condition(
                     ci_high=s["ci_high"],
                     compact=True,
                 )
-                text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+                text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
                 ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
                        ha="center", fontsize=6, va="top", color=text_color,
                        bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))

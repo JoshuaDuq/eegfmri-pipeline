@@ -35,30 +35,49 @@ def _collect_subjects_from_derivatives_epochs(
     """Collect subjects that have clean epochs available."""
     if not deriv_root.exists():
         return []
-        
-    subjects = []
-    for sub_dir in sorted(deriv_root.glob("sub-*")):
-        if not sub_dir.is_dir():
-            continue
-        sub_id = sub_dir.name[4:]
-        epo_path = find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
-        if epo_path is not None and epo_path.exists():
-            subjects.append(sub_id)
-    return subjects
+    
+    subjects = set()
+    
+    # Search in deriv_root/sub-* and deriv_root/preprocessed/sub-*
+    search_patterns = [
+        deriv_root.glob("sub-*"),
+        (deriv_root / "preprocessed").glob("sub-*") if (deriv_root / "preprocessed").exists() else [],
+    ]
+    
+    for pattern in search_patterns:
+        for sub_dir in sorted(pattern):
+            if not sub_dir.is_dir():
+                continue
+            sub_id = sub_dir.name[4:]
+            epo_path = find_clean_epochs_path(sub_id, task, deriv_root=deriv_root, config=config, constants=constants)
+            if epo_path is not None and epo_path.exists():
+                subjects.add(sub_id)
+    
+    return sorted(list(subjects))
 
 
 def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
     """Collect subjects that have extracted features."""
     if not deriv_root.exists():
         return []
-    subjects = []
-    for sub_dir in sorted(deriv_root.glob("sub-*/eeg/features")):
-        eeg_feat = sub_dir / "features_eeg_direct.tsv"
-        y_tsv = sub_dir / "target_vas_ratings.tsv"
-        if eeg_feat.exists() and y_tsv.exists():
-            sub_id = sub_dir.parts[-3].replace("sub-", "")
-            subjects.append(sub_id)
-    return subjects
+    
+    subjects = set()
+    
+    # Search in deriv_root/sub-*/eeg/features and deriv_root/preprocessed/sub-*/eeg/features
+    search_patterns = [
+        deriv_root.glob("sub-*/eeg/features"),
+        (deriv_root / "preprocessed").glob("sub-*/eeg/features") if (deriv_root / "preprocessed").exists() else [],
+    ]
+    
+    for pattern in search_patterns:
+        for sub_dir in sorted(pattern):
+            eeg_feat = sub_dir / "features_power.tsv"
+            y_tsv = sub_dir / "target_vas_ratings.tsv"
+            if eeg_feat.exists() and y_tsv.exists():
+                sub_id = sub_dir.parts[-3].replace("sub-", "")
+                subjects.add(sub_id)
+    
+    return sorted(list(subjects))
 
 
 ###################################################################
@@ -90,7 +109,7 @@ def get_available_subjects(
     if discovery_sources is None:
         discovery_sources = ["derivatives_epochs", "features"]
 
-    subjects_from_config = config.subjects or []
+    subjects_from_config = getattr(config, "subjects", None) or []
 
     discovered_subjects = []
 
@@ -215,7 +234,34 @@ def parse_subject_args(
 __all__ = [
     "get_available_subjects",
     "parse_subject_args",
+    "get_epoch_metadata",
     "_collect_subjects_from_bids",
     "_collect_subjects_from_derivatives_epochs", 
     "_collect_subjects_from_features",
 ]
+
+
+def get_epoch_metadata(
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    config: Optional[ConfigDict] = None,
+    constants: Optional[Dict[str, Any]] = None,
+) -> Dict[str, float]:
+    """Get metadata (tmin, tmax) for subject's epochs."""
+    import mne
+    epo_path = find_clean_epochs_path(
+        subject, task, deriv_root=deriv_root, config=config, constants=constants
+    )
+    if epo_path is None or not epo_path.exists():
+        return {}
+    
+    try:
+        # Read header only
+        epochs = mne.read_epochs(epo_path, preload=False, verbose=False)
+        return {
+            "tmin": float(epochs.tmin),
+            "tmax": float(epochs.tmax),
+        }
+    except Exception:
+        return {}

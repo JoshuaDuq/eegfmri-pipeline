@@ -73,6 +73,7 @@ class BehaviorContext:
     compute_change_scores: bool = True
     compute_reliability: bool = True
     feature_categories: Optional[List[str]] = None
+    selected_feature_files: Optional[List[str]] = None  # Specific files to load (e.g., ["power", "aperiodic"])
     
     epochs: Any = None
     epochs_info: Any = None
@@ -81,7 +82,9 @@ class BehaviorContext:
     connectivity_df: Optional[pd.DataFrame] = None
     microstates_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
-    precomputed_df: Optional[pd.DataFrame] = None
+    complexity_df: Optional[pd.DataFrame] = None
+    dynamics_df: Optional[pd.DataFrame] = None
+    cfc_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
@@ -173,33 +176,98 @@ class BehaviorContext:
         return True
 
     def _load_features(self) -> bool:
-        """Load feature bundle and apply category filtering."""
+        """Load feature bundle and apply category/file filtering."""
         from eeg_pipeline.utils.data.feature_io import load_feature_bundle
-
-        bundle = load_feature_bundle(
-            self.subject, self.deriv_root, self.logger,
-            include_targets=True, config=self.config,
-        )
-
-        self.power_df = bundle.power_df
-        self.connectivity_df = bundle.connectivity_df
-        self.pac_df = bundle.pac_trials_df
-        self.microstates_df = bundle.microstate_df
-        self.aperiodic_df = bundle.aperiodic_df
-        self.itpc_df = bundle.itpc_df
-
-        precomputed_sources = [bundle.all_features_df, bundle.complexity_df, bundle.dynamics_df]
-        self.precomputed_df = None
-        for df in precomputed_sources:
-            if df is not None and not df.empty:
-                if self.precomputed_df is None:
-                    self.precomputed_df = df
+        from eeg_pipeline.utils.data.feature_discovery import STANDARD_FEATURE_FILES
+        from eeg_pipeline.infra.paths import deriv_features_path
+        from eeg_pipeline.infra.tsv import read_tsv
+        
+        # If specific files are selected, load them selectively
+        if self.selected_feature_files:
+            self.logger.info(f"Loading selected feature files: {', '.join(self.selected_feature_files)}")
+            features_dir = deriv_features_path(self.deriv_root, self.subject)
+            
+            # Map of feature file key to context attribute
+            file_attr_map = {
+                "power": "power_df",
+                "connectivity": "connectivity_df",
+                "microstates": "microstates_df",
+                "aperiodic": "aperiodic_df",
+                "itpc": "itpc_df",
+                "pac": "pac_df",
+                "complexity": "complexity_df",
+                "dynamics": "dynamics_df",
+                "cfc": "cfc_df",
+            }
+            
+            for key in self.selected_feature_files:
+                if key not in STANDARD_FEATURE_FILES:
+                    self.logger.warning(f"Unknown feature file key: {key}")
+                    continue
+                
+                filename = STANDARD_FEATURE_FILES[key]
+                path = features_dir / filename
+                
+                if not path.exists():
+                    self.logger.warning(f"Feature file not found: {path}")
+                    continue
+                
+                try:
+                    if path.suffix == ".parquet":
+                        import pandas as pd
+                        df = pd.read_parquet(path)
+                    else:
+                        df = read_tsv(path)
+                    
+                    attr_name = file_attr_map.get(key)
+                    if attr_name:
+                        current = getattr(self, attr_name)
+                        if current is None:
+                            setattr(self, attr_name, df)
+                        else:
+                            # Merge for precomputed-style attributes
+                            new_cols = [c for c in df.columns if c not in current.columns]
+                            if new_cols:
+                                setattr(self, attr_name, pd.concat([current, df[new_cols]], axis=1))
+                    
+                    self.logger.info(f"Loaded {key}: {df.shape[1]} columns, {df.shape[0]} rows")
+                except Exception as e:
+                    self.logger.warning(f"Failed to load {key}: {e}")
+            
+            # Load targets separately
+            targets_path = features_dir / "target_vas_ratings.tsv"
+            if targets_path.exists():
+                targets_df = read_tsv(targets_path)
+                if targets_df.shape[1] == 1:
+                    self.targets = pd.to_numeric(targets_df.iloc[:, 0], errors="coerce")
                 else:
-                    new_cols = [c for c in df.columns if c not in self.precomputed_df.columns]
-                    if new_cols:
-                        self.precomputed_df = pd.concat(
-                            [self.precomputed_df, df[new_cols]], axis=1
-                        )
+                    from eeg_pipeline.utils.data.columns import pick_target_column
+                    target_col = pick_target_column(targets_df, target_columns=self.config.get("event_columns.rating", []) if self.config else [])
+                    if target_col:
+                        self.targets = pd.to_numeric(targets_df[target_col], errors="coerce")
+                    else:
+                        numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
+                        if len(numeric_cols) > 0:
+                            self.targets = pd.to_numeric(targets_df[numeric_cols[0]], errors="coerce")
+        else:
+            # Default: load all via bundle (existing behavior)
+            bundle = load_feature_bundle(
+                self.subject, self.deriv_root, self.logger,
+                include_targets=True, config=self.config,
+            )
+
+            self.power_df = bundle.power_df
+            self.connectivity_df = bundle.connectivity_df
+            self.pac_df = bundle.pac_trials_df
+            self.microstates_df = bundle.microstate_df
+            self.aperiodic_df = bundle.aperiodic_df
+            self.itpc_df = bundle.itpc_df
+
+            self.complexity_df = bundle.complexity_df
+            self.dynamics_df = bundle.dynamics_df
+            self.cfc_df = None  # Loaded via dedicated check if needed
+            
+            self.targets = bundle.targets
 
         feature_counts = self._get_feature_counts()
         if all(count == 0 for count in feature_counts.values()):
@@ -211,7 +279,6 @@ class BehaviorContext:
         )
 
         self._apply_category_filter(feature_counts)
-        self.targets = bundle.targets
 
         if self.targets is None or len(self.targets) == 0:
             self.logger.warning("No targets found")
@@ -233,7 +300,9 @@ class BehaviorContext:
             "aperiodic": self.aperiodic_df,
             "itpc": self.itpc_df,
             "pac": self.pac_df,
-            "precomputed": self.precomputed_df,
+            "complexity": self.complexity_df,
+            "dynamics": self.dynamics_df,
+            "cfc": self.cfc_df,
         }
         return [(ft, attr_map.get(ft)) for ft in FEATURE_TYPES]
 
@@ -253,13 +322,18 @@ class BehaviorContext:
             "power": "power_df", "connectivity": "connectivity_df",
             "pac": "pac_df", "microstates": "microstates_df",
             "aperiodic": "aperiodic_df", "itpc": "itpc_df",
-            "dynamics": "precomputed_df", "precomputed": "precomputed_df",
+            "complexity": "complexity_df", "dynamics": "dynamics_df",
+            "cfc": "cfc_df",
             "psychometrics": None, "temporal": None, "dose_response": None,
         }
         keep_attrs = {category_map.get(cat) for cat in self.feature_categories if category_map.get(cat)}
 
         if keep_attrs:
-            for attr_name in ["power_df", "connectivity_df", "pac_df", "microstates_df", "aperiodic_df", "itpc_df", "precomputed_df"]:
+            all_attrs = [
+                "power_df", "connectivity_df", "pac_df", "microstates_df", 
+                "aperiodic_df", "itpc_df", "complexity_df", "dynamics_df", "cfc_df"
+            ]
+            for attr_name in all_attrs:
                 if attr_name not in keep_attrs:
                     setattr(self, attr_name, None)
             self.logger.info("Filtered to categories: %s", ", ".join(self.feature_categories))
@@ -365,7 +439,9 @@ class BehaviorContext:
             "aperiodic": "aperiodic_df",
             "itpc": "itpc_df",
             "pac": "pac_df",
-            "precomputed": "precomputed_df",
+            "complexity": "complexity_df",
+            "dynamics": "dynamics_df",
+            "cfc": "cfc_df",
         }
         for name, attr in attr_map.items():
             setattr(self, attr, align_df(name, getattr(self, attr)))

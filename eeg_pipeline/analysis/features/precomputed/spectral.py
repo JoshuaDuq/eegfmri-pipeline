@@ -61,6 +61,8 @@ def extract_power_from_precomputed(
             total_channels = len(precomputed.ch_names)
             all_power_full: List[float] = []
 
+            seg_label = getattr(windows, "name", "plateau") or "plateau"
+
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
                 baseline_power, baseline_frac, _, baseline_total = nanmean_with_fraction(
                     power[ch_idx], windows.baseline_mask
@@ -78,36 +80,11 @@ def extract_power_from_precomputed(
                     logratio = np.log10(active_power / baseline_power)
                 else:
                     logratio = np.nan
+                
                 record[
-                    NamingSchema.build("spectral", "plateau", band, "ch", "logratio", channel=ch_name)
+                    NamingSchema.build("spectral", seg_label, band, "ch", "logratio", channel=ch_name)
                 ] = float(logratio)
                 all_power_full.append(float(logratio) if np.isfinite(logratio) else np.nan)
-
-                coarse_values: Dict[str, float] = {}
-                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_power, win_frac, _, _ = nanmean_with_fraction(power[ch_idx], win_mask)
-                    if baseline_valid and win_frac >= min_valid_fraction:
-                        win_logratio = np.log10(win_power / baseline_power)
-                    else:
-                        win_logratio = np.nan
-                    record[
-                        NamingSchema.build("spectral", win_label, band, "ch", "logratio", channel=ch_name)
-                    ] = float(win_logratio)
-                    coarse_values[win_label] = float(win_logratio)
-
-                for win_mask, win_label in zip(windows.fine_masks, windows.fine_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_power, win_frac, _, _ = nanmean_with_fraction(power[ch_idx], win_mask)
-                    if baseline_valid and win_frac >= min_valid_fraction:
-                        win_logratio = np.log10(win_power / baseline_power)
-                    else:
-                        win_logratio = np.nan
-                    record[
-                        NamingSchema.build("spectral", win_label, band, "ch", "logratio", channel=ch_name)
-                    ] = float(win_logratio)
 
                 if len(active_times) > 2:
                     active_power_trace = power[ch_idx, windows.active_mask]
@@ -119,29 +96,16 @@ def extract_power_from_precomputed(
                                 active_times[valid_mask], logratio_trace[valid_mask], 1
                             )
                             record[
-                                NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
+                                NamingSchema.build("spectral", seg_label, band, "ch", "slope", channel=ch_name)
                             ] = float(slope)
                         else:
                             record[
-                                NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
+                                NamingSchema.build("spectral", seg_label, band, "ch", "slope", channel=ch_name)
                             ] = np.nan
                     else:
                         record[
-                            NamingSchema.build("spectral", "plateau", band, "ch", "slope", channel=ch_name)
+                            NamingSchema.build("spectral", seg_label, band, "ch", "slope", channel=ch_name)
                         ] = np.nan
-
-                    if "early" in coarse_values and "late" in coarse_values:
-                        diff = coarse_values["late"] - coarse_values["early"]
-                        record[
-                            NamingSchema.build(
-                                "power",
-                                "plateau",
-                                band,
-                                "ch",
-                                "early_late_diff",
-                                channel=ch_name,
-                            )
-                        ] = float(diff)
 
             valid_power = [p for p in all_power_full if np.isfinite(p)]
             baseline_valid_fraction = (
@@ -153,38 +117,18 @@ def extract_power_from_precomputed(
 
             if baseline_valid_fraction < min_valid_fraction:
                 record[
-                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_mean")
+                    NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
                 ] = np.nan
                 record[
-                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_std")
+                    NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
                 ] = np.nan
-                for win_label in windows.coarse_labels:
-                    record[
-                        NamingSchema.build("spectral", win_label, band, "global", "logratio_mean")
-                    ] = np.nan
             elif valid_power:
                 record[
-                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_mean")
+                    NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
                 ] = float(np.mean(valid_power))
                 record[
-                    NamingSchema.build("spectral", "plateau", band, "global", "logratio_std")
+                    NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
                 ] = float(np.std(valid_power))
-                for win_mask, win_label in zip(windows.coarse_masks, windows.coarse_labels):
-                    if not np.any(win_mask):
-                        continue
-                    win_powers: List[float] = []
-                    for ch_idx in range(len(precomputed.ch_names)):
-                        bp, bp_frac, _, bp_total = nanmean_with_fraction(
-                            power[ch_idx], windows.baseline_mask
-                        )
-                        if bp > epsilon and bp_frac >= min_valid_fraction and bp_total > 0:
-                            wp, wp_frac, _, _ = nanmean_with_fraction(power[ch_idx], win_mask)
-                            if wp_frac >= min_valid_fraction:
-                                win_powers.append(np.log10(wp / bp))
-                    if win_powers:
-                        record[
-                            NamingSchema.build("spectral", win_label, band, "global", "logratio_mean")
-                        ] = float(np.mean(win_powers))
 
         records.append(record)
 

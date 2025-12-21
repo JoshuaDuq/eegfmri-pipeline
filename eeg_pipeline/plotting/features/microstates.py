@@ -976,7 +976,8 @@ def plot_microstate_temporal_evolution(
     microstate_config = plot_cfg.plot_type_configs.get("microstate", {})
     stimulus_start_time = microstate_config.get("stimulus_start_time", 0.0)
     
-    fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="microstate")
+    fig, axes = plt.subplots(2, 1, figsize=fig_size, sharex=True)
     for state_idx in range(n_states):
         axes[0].plot(
             times, state_probabilities_nonpain[state_idx],
@@ -1280,7 +1281,8 @@ def plot_microstate_transition_network(
     alpha = get_fdr_alpha(config)
     cmap = plt.cm.get_cmap("YlOrRd")
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="microstate")
+    fig, axes = plt.subplots(1, 2, figsize=fig_size)
     condition_titles = [
         f"Non-pain (n={n_nonpain})" if n_nonpain else "Non-pain",
         f"Pain (n={n_pain})" if n_pain else "Pain"
@@ -1362,7 +1364,9 @@ def plot_microstate_duration_distributions(
         return
 
     n_states = len(duration_stats)
-    fig, axes = plt.subplots(n_states, 1, figsize=(10, 2.5 * n_states), sharex=True)
+    width_per_col = float(plot_cfg.plot_type_configs.get("microstate", {}).get("width_per_column", 10.0))
+    height_per_state = float(plot_cfg.plot_type_configs.get("microstate", {}).get("height_per_state", 2.5))
+    fig, axes = plt.subplots(n_states, 1, figsize=(width_per_col, height_per_state * n_states), sharex=True)
     if n_states == 1:
         axes = [axes]
 
@@ -1531,7 +1535,8 @@ def plot_microstate_by_condition(
             n_significant = 0
             
         n_states_with_data = len(metric_data)
-        fig, axes = plt.subplots(1, n_states_with_data, figsize=(4 * n_states_with_data, 5), sharey=True)
+        width_per_state = float(plot_cfg.plot_type_configs.get("microstate", {}).get("width_per_condition", 4.0))
+        fig, axes = plt.subplots(1, n_states_with_data, figsize=(width_per_state * n_states_with_data, 5), sharey=True)
         if n_states_with_data == 1:
             axes = [axes]
         
@@ -1681,7 +1686,8 @@ def plot_microstate_transition_matrix(
         return
     
     plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig_size = plot_cfg.get_figure_size("medium", plot_type="microstate")
+    fig, ax = plt.subplots(figsize=fig_size)
     
     state_labels = [f"State {s}" for s in states]
     

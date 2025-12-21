@@ -152,3 +152,8 @@ python -m eeg_pipeline.cli.main behavior compute --all-subjects --bootstrap 1000
 # Run decoding with permutation testing
 python -m eeg_pipeline.cli.main decoding --subject 0001 --subject 0002 --n-perm 100
 ```
+
+
+
+
+

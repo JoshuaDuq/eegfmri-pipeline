@@ -252,6 +252,19 @@ class BandData:
     envelope: np.ndarray  # Amplitude envelope
     phase: np.ndarray     # Instantaneous phase
     power: np.ndarray     # Envelope squared
+    
+    def crop(self, tmin_idx: int, tmax_idx: int) -> BandData:
+        """Crop band data to specific time indices."""
+        return BandData(
+            band=self.band,
+            fmin=self.fmin,
+            fmax=self.fmax,
+            filtered=self.filtered[..., tmin_idx:tmax_idx],
+            analytic=self.analytic[..., tmin_idx:tmax_idx],
+            envelope=self.envelope[..., tmin_idx:tmax_idx],
+            phase=self.phase[..., tmin_idx:tmax_idx],
+            power=self.power[..., tmin_idx:tmax_idx],
+        )
 
 
 @dataclass
@@ -261,27 +274,31 @@ class PSDData:
     psd: np.ndarray  # (epochs, channels, freqs)
 
 
-@dataclass 
+@dataclass
 class TimeWindows:
     """Pre-computed time window masks for feature extraction."""
+
+    # Required fields (no defaults)
     baseline_mask: np.ndarray
     active_mask: np.ndarray
+
+    # Fields with defaults
     baseline_range: Tuple[float, float] = (np.nan, np.nan)
     active_range: Tuple[float, float] = (np.nan, np.nan)
+
+    # Generic containers for ANY number of arbitrary windows
+    # keys are window names (e.g. 'stimulus', 'response', 'segment_a')
+    masks: Dict[str, np.ndarray] = field(default_factory=dict)
+    ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+
     clamped: bool = False
     valid: bool = True
     errors: List[str] = field(default_factory=list)
-    # Coarse temporal bins (early, mid, late)
-    coarse_masks: List[np.ndarray] = field(default_factory=list)
-    coarse_labels: List[str] = field(default_factory=list)
-    # Fine temporal bins (t1-t7 for HRF modeling)
-    fine_masks: List[np.ndarray] = field(default_factory=list)
-    fine_labels: List[str] = field(default_factory=list)
-    # Uniform plateau subdivision (w0, w1, ...) based on n_plateau_windows
-    plateau_masks: List[np.ndarray] = field(default_factory=list)
-    window_labels: List[str] = field(default_factory=list)
-    # Time vector for ramp computation
+
+    # Time vector for derived mask computation
     times: Optional[np.ndarray] = None
+    # Current range name if in a targeted iteration
+    name: Optional[str] = None
 
     def _empty_mask(self) -> np.ndarray:
         """Return an empty mask matching the stored mask length."""
@@ -289,6 +306,8 @@ class TimeWindows:
             return np.zeros_like(self.baseline_mask, dtype=bool)
         if self.active_mask is not None:
             return np.zeros_like(self.active_mask, dtype=bool)
+        if self.times is not None:
+            return np.zeros_like(self.times, dtype=bool)
         return np.array([], dtype=bool)
 
     def get_mask(self, name: str) -> np.ndarray:
@@ -297,28 +316,28 @@ class TimeWindows:
             return self._empty_mask()
         key = str(name).lower()
 
+        # 1. Check specialized fields
         if key in {"baseline", "pre", "prestim"}:
             return self.baseline_mask
         if key in {"plateau", "active", "stim", "task"}:
             return self.active_mask
 
+        # 2. Check generic dictionary
+        if key in self.masks:
+            return self.masks[key]
+
+        # 3. Dynamic "ramp" computation (compatibility)
         if key == "ramp":
             if (
                 self.times is not None
                 and np.isfinite(self.baseline_range[1])
                 and np.isfinite(self.active_range[0])
             ):
-                ramp_mask = (self.times >= self.baseline_range[1]) & (self.times < self.active_range[0])
+                ramp_mask = (self.times >= self.baseline_range[1]) & (
+                    self.times < self.active_range[0]
+                )
                 if np.any(ramp_mask):
                     return ramp_mask
-            return self._empty_mask()
-
-        if key in self.coarse_labels:
-            return self.coarse_masks[self.coarse_labels.index(key)]
-        if key in self.fine_labels:
-            return self.fine_masks[self.fine_labels.index(key)]
-        if key in self.window_labels:
-            return self.plateau_masks[self.window_labels.index(key)]
 
         return self._empty_mask()
 
@@ -382,3 +401,52 @@ class PrecomputedData:
     config: Any = None
     logger: Any = None
     qc: PrecomputedQC = field(default_factory=PrecomputedQC)
+
+    def crop(self, tmin: float, tmax: float) -> PrecomputedData:
+        """Create a new PrecomputedData object cropped to the time range."""
+        from eeg_pipeline.utils.analysis.tfr import time_mask
+        
+        mask = time_mask(self.times, tmin, tmax)
+        if not np.any(mask):
+            return self
+            
+        tmin_idx = int(np.where(mask)[0][0])
+        tmax_idx = int(np.where(mask)[0][-1]) + 1
+        
+        new_times = self.times[mask]
+        new_data = self.data[..., mask]
+        
+        cropped = PrecomputedData(
+            data=new_data,
+            times=new_times,
+            sfreq=self.sfreq,
+            ch_names=self.ch_names,
+            picks=self.picks,
+            config=self.config,
+            logger=self.logger,
+        )
+        
+        # Crop band data
+        for band, bd in self.band_data.items():
+            cropped.band_data[band] = bd.crop(tmin_idx, tmax_idx)
+            
+        # Crop GFP
+        if self.gfp is not None:
+            cropped.gfp = self.gfp[..., mask]
+        for band, gfp_arr in self.gfp_band.items():
+            cropped.gfp_band[band] = gfp_arr[..., mask]
+            
+        # PSD needs to be recomputed if it was computed on a different window,
+        # but for now we just clear it or leave it as is if it's already range-specific.
+        # Most extractors will recompute PSD if missing.
+        cropped.psd_data = None 
+            
+        # Recompute windows for the new time range
+        from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
+        try:
+            spec = TimeWindowSpec(times=new_times, config=self.config, sampling_rate=self.sfreq, logger=self.logger)
+            cropped.windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
+        except Exception:
+            cropped.windows = None
+            
+        return cropped

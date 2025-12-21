@@ -61,6 +61,106 @@ def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
     return combined
 
 
+def run_combine_features_utility(
+    subjects: List[str],
+    categories: List[str],
+    deriv_root: Path,
+    config: Any,
+    logger: logging.Logger,
+    progress: Optional[Any] = None,
+) -> int:
+    """Utility to manually combine individual feature files for multiple subjects."""
+    from eeg_pipeline.infra.paths import deriv_features_path
+    from eeg_pipeline.infra.tsv import write_tsv, read_tsv, read_parquet
+    from eeg_pipeline.utils.data.feature_io import find_connectivity_features_path
+    
+    mapping = {
+        "power": "features_power.tsv",
+        "microstates": "features_microstates.tsv",
+        "connectivity": "features_connectivity.parquet",
+        "aperiodic": "features_aperiodic.tsv",
+        "itpc": "features_itpc.tsv",
+        "pac": "features_pac.tsv",
+        "complexity": "features_complexity.tsv",
+        "dynamics_advanced": "features_dynamics.tsv",
+        "cfc": "features_cfc.tsv",
+        "ratios": "features_ratios.tsv",
+        "asymmetry": "features_asymmetry.tsv",
+        "quality": "features_quality.tsv",
+        "gfp": "features_gfp.tsv",
+    }
+    
+    count = 0
+    if progress:
+        progress.start("combine_features", subjects)
+        
+    for subj in subjects:
+        if progress:
+            progress.subject_start(f"sub-{subj}")
+            
+        features_dir = deriv_features_path(deriv_root, subj)
+        if not features_dir.exists():
+            logger.warning(f"Feature directory missing for sub-{subj}")
+            if progress:
+                progress.subject_done(f"sub-{subj}", success=False)
+            continue
+            
+        dfs = []
+        for cat in categories:
+            fname = mapping.get(cat)
+            if not fname:
+                # Try default fallback
+                fname = f"features_{cat}.tsv"
+            
+            fpath = features_dir / fname
+            if cat == "connectivity":
+                fpath = find_connectivity_features_path(deriv_root, subj)
+                
+            if not fpath.exists():
+                logger.debug(f"Skipping {cat}: {fpath.name} not found")
+                continue
+            
+            try:
+                if fpath.suffix == ".parquet":
+                    df = read_parquet(fpath)
+                else:
+                    df = read_tsv(fpath)
+                
+                if df is not None and not df.empty:
+                    dfs.append(df)
+            except Exception as e:
+                logger.warning(f"Failed to load {fpath.name}: {e}")
+
+        if not dfs:
+            logger.warning(f"No features found to combine for sub-{subj}")
+            if progress:
+                progress.subject_done(f"sub-{subj}", success=False)
+            continue
+            
+        try:
+            combined = pd.concat(dfs, axis=1)
+            # Basic sanity check
+            if combined.columns.duplicated().any():
+                logger.warning(f"Duplicate columns found while combining features for sub-{subj}; keep first occurrences")
+                combined = combined.loc[:, ~combined.columns.duplicated()]
+            
+            out_path = features_dir / "features_all.tsv"
+            write_tsv(combined, out_path)
+            logger.info(f"Successfully created {out_path.name} ({len(combined.columns)} columns)")
+            count += 1
+            if progress:
+                progress.subject_done(f"sub-{subj}", success=True)
+        except Exception as e:
+            logger.error(f"Failed to combine features for sub-{subj}: {e}")
+            if progress:
+                progress.subject_done(f"sub-{subj}", success=False)
+
+    if progress:
+        progress.complete(success=(count > 0))
+        
+    return count
+
+
 def add_change_scores(ctx: BehaviorContext) -> None:
     """Compute and append change scores (plateau-baseline) once per context."""
     if ctx._change_scores_added or not ctx.compute_change_scores:
@@ -83,7 +183,9 @@ def add_change_scores(ctx: BehaviorContext) -> None:
     ctx.aperiodic_df = _augment(ctx.aperiodic_df)
     ctx.itpc_df = _augment(ctx.itpc_df)
     ctx.pac_df = _augment(ctx.pac_df)
-    ctx.precomputed_df = _augment(ctx.precomputed_df)
+    ctx.complexity_df = _augment(ctx.complexity_df)
+    ctx.dynamics_df = _augment(ctx.dynamics_df)
+    ctx.cfc_df = _augment(ctx.cfc_df)
     ctx._change_scores_added = True
 
 
@@ -396,30 +498,31 @@ def _get_feature_columns(df: pd.DataFrame) -> List[str]:
 def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis, run_multilevel_correlation_analysis
 
-    if ctx.precomputed_df is None:
+    features = combine_features(ctx)
+    if features.empty:
         return
 
-    feature_cols = _get_feature_columns(ctx.precomputed_df)
+    feature_cols = _get_feature_columns(features)
     if not feature_cols:
         return
 
     if config.run_mediation:
         ctx.logger.info("Running mediation analysis...")
         n_bootstrap = get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
-        variances = ctx.precomputed_df[feature_cols].var()
+        variances = features[feature_cols].var()
         mediators = variances.nlargest(20).index.tolist()
         results.mediation = run_mediation_analysis(
-            ctx.precomputed_df,
+            features,
             "temperature",
             mediators,
             "rating",
             n_bootstrap=n_bootstrap,
         )
 
-    if config.run_mixed_effects and "subject" in ctx.precomputed_df.columns:
+    if config.run_mixed_effects and "subject" in features.columns:
         ctx.logger.info("Running mixed-effects analysis...")
         results.mixed_effects = run_multilevel_correlation_analysis(
-            ctx.precomputed_df,
+            features,
             feature_cols[:50],
             "rating",
             "subject",

@@ -8,46 +8,35 @@ import numpy as np
 ###################################################################
 
 FEATURE_CATEGORIES = [
-    "power",
-    "connectivity",
-    "microstates",
-    "aperiodic",
-    "itpc",
-    "pac",
-    "precomputed",
-    "cfc",
-    "dynamics_advanced",
-    "complexity",
-    "quality",
+    # Core spectral features
+    "power",          # Band power (log-ratio normalized)
+    "spectral",       # Peak frequency, IAF, spectral edge
+    "aperiodic",      # 1/f spectral slope (E/I balance)
+    "erds",           # Event-related (de)synchronization
+    "ratios",         # Band power ratios (theta/beta, etc.)
+    "asymmetry",      # Hemispheric power asymmetry
+    # Connectivity & phase
+    "connectivity",   # Functional connectivity (wPLI, AEC)
+    "itpc",           # Inter-trial phase coherence
+    "pac",            # Phase-amplitude coupling
+    # Exploratory & QC
+    "complexity",     # Signal complexity (exploratory)
+    "quality",        # Trial quality metrics
+]
+
+SPATIAL_MODES = [
+    "roi",       # Aggregate by ROI (mean across channels in each ROI)
+    "channels",  # Per-channel features (no aggregation)
+    "global",    # Global mean across all channels
 ]
 
 PRECOMPUTED_GROUP_CHOICES = [
     "erds",
     "spectral",
-    "gfp",
-    "roi",
-    "temporal",
     "ratios",
-    "complexity",
     "asymmetry",
-    "aperiodic",
-    "connectivity",
-    "microstates",
-    "pac",
-    "cfc",
-    "dynamics_advanced",
-    "itpc",
-    "quality",
 ]
 
-###################################################################
-# Standard Segments for Feature Extraction
-###################################################################
-
-STANDARD_SEGMENTS = ["baseline", "ramp", "plateau"]
-SEGMENT_BASELINE = "baseline"
-SEGMENT_RAMP = "ramp"
-SEGMENT_PLATEAU = "plateau"
 
 ###################################################################
 # Numerical Constants
@@ -134,53 +123,20 @@ def get_segment_mask(windows: Any, segment_name: str) -> Optional[np.ndarray]:
     
     Standardizes access to window masks across all feature modules.
     """
-    if windows is None:
+    if windows is None or not segment_name:
         return None
+
+    # 1. Preferred method
     if hasattr(windows, "get_mask"):
         return windows.get_mask(segment_name)
+
+    # 2. Generic dictionary
+    if hasattr(windows, "masks") and isinstance(windows.masks, dict):
+        return windows.masks.get(segment_name)
+
+    # 3. Legacy attribute access
     mask_attr = f"{segment_name}_mask"
     if hasattr(windows, mask_attr):
         return getattr(windows, mask_attr)
-    if hasattr(windows, "masks") and isinstance(windows.masks, dict):
-        return windows.masks.get(segment_name)
+
     return None
-
-
-def process_standard_segments(
-    windows: Any,
-    processor_fn: Callable[[str, np.ndarray], Dict[str, Any]],
-    min_samples: int = MIN_SAMPLES_DEFAULT,
-    segments: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """Process standard segments (baseline, ramp, plateau) with a processor function.
-    
-    Parameters
-    ----------
-    windows : Any
-        Time window specification with get_mask() method
-    processor_fn : Callable[[str, np.ndarray], Dict[str, Any]]
-        Function that takes (segment_name, mask) and returns dict of results
-    min_samples : int
-        Minimum samples required for processing
-    segments : Optional[List[str]]
-        Segments to process (default: STANDARD_SEGMENTS)
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Combined results from all processed segments
-    """
-    if segments is None:
-        segments = STANDARD_SEGMENTS
-    
-    results: Dict[str, Any] = {}
-    for seg_name in segments:
-        mask = get_segment_mask(windows, seg_name)
-        if mask is None or not np.any(mask):
-            continue
-        if np.sum(mask) < min_samples:
-            continue
-        seg_results = processor_fn(seg_name, mask)
-        if seg_results:
-            results.update(seg_results)
-    return results

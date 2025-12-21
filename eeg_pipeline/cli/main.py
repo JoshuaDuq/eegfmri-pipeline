@@ -11,7 +11,7 @@ Usage:
     eeg-pipeline <command> [options]
 
 Commands:
-    preprocessing  Raw-to-BIDS conversion and behavior merge
+    utilities      Raw-to-BIDS conversion and behavior merge
     behavior       Brain-behavior correlation analysis
     features       Feature extraction from epochs
     erp            Event-related potential analysis
@@ -19,7 +19,7 @@ Commands:
     decoding       ML-based prediction
 
 Examples:
-    python -m eeg_pipeline.cli.main preprocessing raw-to-bids --source-root data/source_data
+    python -m eeg_pipeline.cli.main utilities raw-to-bids --source-root data/source_data
     python -m eeg_pipeline.cli.main features compute --subject 0001
     python -m eeg_pipeline.cli.main behavior compute --all-subjects
     python -m eeg_pipeline.cli.main decoding --subject 0001 --subject 0002
@@ -46,7 +46,7 @@ from eeg_pipeline.cli.commands import COMMANDS, get_command
 def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     

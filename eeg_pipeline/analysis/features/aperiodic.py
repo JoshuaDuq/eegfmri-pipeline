@@ -21,7 +21,7 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.domain.features.constants import STANDARD_SEGMENTS, get_segment_mask, validate_extractor_inputs
+from eeg_pipeline.domain.features.constants import get_segment_mask, validate_extractor_inputs
 from eeg_pipeline.utils.config.loader import get_frequency_bands_for_aperiodic
 from eeg_pipeline.utils.analysis.stats import compute_residuals
 from eeg_pipeline.utils.parallel import get_n_jobs
@@ -164,6 +164,7 @@ def _extract_aperiodic_for_segment(
     bands: List[str],
     config: Any,
     logger: Any,
+    spatial_modes: Optional[List[str]] = None,
 ) -> Dict[str, np.ndarray]:
     """Extract aperiodic and spectral features for a single segment.
     
@@ -172,7 +173,20 @@ def _extract_aperiodic_for_segment(
     - Power-corrected band power
     - Alpha Peak Frequency (APF)
     - Theta/Beta Ratio (TBR)
+    
+    Outputs respect spatial_modes: 'channels', 'roi', 'global'
     """
+    if spatial_modes is None:
+        spatial_modes = ['roi', 'global']
+    
+    # Build ROI map if needed
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
     fmin = float(config.get("feature_engineering.constants.aperiodic_fmin", 2.0))
     fmax = float(config.get("feature_engineering.constants.aperiodic_fmax", 40.0))
     
@@ -225,104 +239,92 @@ def _extract_aperiodic_for_segment(
     if max_rms is not None:
         fit_ok &= (np.isfinite(rms) & (rms <= max_rms))
 
-    data_dict: Dict[str, np.ndarray] = {}
-    freq_bands = get_frequency_bands_for_aperiodic(config)
+    # Prepare feature matrices for aggregation
     n_epochs = psds.shape[0]
+    n_channels = len(ch_names)
     
-    # Get theta and beta ranges for TBR
+    metrics: Dict[str, Tuple[str, str, np.ndarray]] = {} # name -> (band, stat, matrix)
+    metrics["slope"] = ("broadband", "slope", slopes.copy())
+    metrics["offset"] = ("broadband", "offset", offsets.copy())
+    metrics["r2"] = ("broadband", "r2", r2.copy())
+    metrics["rms"] = ("broadband", "rms", rms.copy())
+    
+    # Apply fit_ok mask to slope and offset
+    for m in ["slope", "offset"]:
+        mat = metrics[m][2]
+        mat[~fit_ok] = np.nan
+
+    # APF and TBR
+    apf_matrix = np.full((n_epochs, n_channels), np.nan)
+    tbr_matrix = np.full((n_epochs, n_channels), np.nan)
+    
+    # Get frequency bands for metrics
+    freq_bands = get_frequency_bands_for_aperiodic(config)
     theta_range = freq_bands.get("theta", (4.0, 8.0))
     beta_range = freq_bands.get("beta", (13.0, 30.0))
     alpha_range = freq_bands.get("alpha", (8.0, 13.0))
-    
+
+    alpha_mask = (freqs >= alpha_range[0]) & (freqs <= alpha_range[1])
     theta_mask = (freqs >= theta_range[0]) & (freqs <= theta_range[1])
     beta_mask = (freqs >= beta_range[0]) & (freqs <= beta_range[1])
     
-    for i, ch in enumerate(ch_names):
-        # Aperiodic features
-        col_slope = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "slope", channel=ch)
-        col_offset = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "offset", channel=ch)
-        col_r2 = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "r2", channel=ch)
-        col_rms = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "rms", channel=ch)
-        
-        slope_vals = slopes[:, i].copy()
-        offset_vals = offsets[:, i].copy()
-        bad = ~fit_ok[:, i]
-        if np.any(bad):
-            slope_vals[bad] = np.nan
-            offset_vals[bad] = np.nan
-
-        data_dict[col_slope] = slope_vals
-        data_dict[col_offset] = offset_vals
-        data_dict[col_r2] = r2[:, i]
-        data_dict[col_rms] = rms[:, i]
-        
-        # Alpha Peak Frequency (vectorized across epochs)
-        # Use center of gravity for each epoch
-        alpha_mask = (freqs >= alpha_range[0]) & (freqs <= alpha_range[1])
+    for i in range(n_channels):
+        # APF
         if np.any(alpha_mask):
-            alpha_freqs = freqs[alpha_mask]
-            alpha_psd = psds[:, i, alpha_mask]  # (n_epochs, n_alpha_freqs)
+            alpha_psd = psds[:, i, alpha_mask]
             alpha_psd_pos = np.maximum(alpha_psd, 0)
             total_power = np.sum(alpha_psd_pos, axis=1)
             with np.errstate(invalid='ignore', divide='ignore'):
-                apf_vals = np.where(
-                    total_power > 0,
-                    np.sum(alpha_freqs * alpha_psd_pos, axis=1) / total_power,
-                    np.nan
-                )
-        else:
-            apf_vals = np.full(n_epochs, np.nan)
-        col_apf = NamingSchema.build("aperiodic", segment_name, "alpha", "ch", "peakfreq", channel=ch)
-        data_dict[col_apf] = apf_vals
+                apf_matrix[:, i] = np.where(total_power > 0, np.sum(freqs[alpha_mask] * alpha_psd_pos, axis=1) / total_power, np.nan)
         
-        # Theta/Beta Ratio (vectorized across epochs)
+        # TBR
         if np.any(theta_mask) and np.any(beta_mask):
-            theta_power = np.mean(psds[:, i, theta_mask], axis=1)  # (n_epochs,)
-            beta_power = np.mean(psds[:, i, beta_mask], axis=1)    # (n_epochs,)
+            theta_pow = np.mean(psds[:, i, theta_mask], axis=1)
+            beta_pow = np.mean(psds[:, i, beta_mask], axis=1)
             with np.errstate(invalid='ignore', divide='ignore'):
-                tbr_vals = np.where(
-                    (beta_power > 0) & np.isfinite(theta_power) & np.isfinite(beta_power),
-                    theta_power / beta_power,
-                    np.nan
-                )
-        else:
-            tbr_vals = np.full(n_epochs, np.nan)
-        col_tbr = NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "tbr", channel=ch)
-        data_dict[col_tbr] = tbr_vals
+                tbr_matrix[:, i] = np.where(beta_pow > 0, theta_pow / beta_pow, np.nan)
+                
+    metrics["peakfreq"] = ("alpha", "peakfreq", apf_matrix)
+    metrics["tbr"] = ("broadband", "tbr", tbr_matrix)
+    
+    # Powcorr per band
+    for b in bands:
+        if b not in freq_bands: continue
+        bfmin, bfmax = freq_bands[b]
+        fmask = (freqs >= bfmin) & (freqs <= bfmax)
+        if not np.any(fmask): continue
         
-        # Power-corrected band power
-        for b in bands:
-            if b not in freq_bands: 
-                continue
-            bfmin, bfmax = freq_bands[b]
-            fmask = (freqs >= bfmin) & (freqs <= bfmax)
-            if not np.any(fmask): 
-                continue
-            
+        pc_matrix = np.full((n_epochs, n_channels), np.nan)
+        for i in range(n_channels):
             res_band = residuals[:, i, fmask]
             ratio = np.power(10.0, res_band)
-            mean_ratio = np.mean(ratio, axis=1)
-            if np.any(bad):
-                mean_ratio = mean_ratio.copy()
-                mean_ratio[bad] = np.nan
-            
-            col_powcorr = NamingSchema.build("aperiodic", segment_name, b, "ch", "powcorr", channel=ch)
-            data_dict[col_powcorr] = mean_ratio
+            pc_matrix[:, i] = np.mean(ratio, axis=1)
+            pc_matrix[~fit_ok[:, i], i] = np.nan
+        metrics[f"{b}_powcorr"] = (b, "powcorr", pc_matrix)
+
+    # Output generation based on spatial_modes
+    data_dict: Dict[str, np.ndarray] = {}
     
-    # Global APF and TBR (vectorized mean across channels)
-    apf_ch_keys = [NamingSchema.build("aperiodic", segment_name, "alpha", "ch", "peakfreq", channel=ch) for ch in ch_names]
-    tbr_ch_keys = [NamingSchema.build("aperiodic", segment_name, "broadband", "ch", "tbr", channel=ch) for ch in ch_names]
-    
-    apf_stack = np.column_stack([data_dict[k] for k in apf_ch_keys])  # (n_epochs, n_channels)
-    tbr_stack = np.column_stack([data_dict[k] for k in tbr_ch_keys])  # (n_epochs, n_channels)
-    
-    apf_global = np.nanmean(apf_stack, axis=1)
-    tbr_global = np.nanmean(tbr_stack, axis=1)
-    
-    col_apf_glob = NamingSchema.build("aperiodic", segment_name, "alpha", "global", "peakfreq")
-    col_tbr_glob = NamingSchema.build("aperiodic", segment_name, "broadband", "global", "tbr")
-    data_dict[col_apf_glob] = apf_global
-    data_dict[col_tbr_glob] = tbr_global
+    for met_name, (band, stat, matrix) in metrics.items():
+        # Per-channel
+        if 'channels' in spatial_modes:
+            for i, ch in enumerate(ch_names):
+                col = NamingSchema.build("aperiodic", segment_name, band, "ch", stat, channel=ch)
+                data_dict[col] = matrix[:, i]
+                
+        # ROI Mean
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, ch_indices in roi_map.items():
+                if ch_indices:
+                    roi_vals = np.nanmean(matrix[:, ch_indices], axis=1)
+                    col = NamingSchema.build("aperiodic", segment_name, band, "roi", stat, channel=roi_name)
+                    data_dict[col] = roi_vals
+                    
+        # Global Mean
+        if 'global' in spatial_modes:
+            global_vals = np.nanmean(matrix, axis=1)
+            col = NamingSchema.build("aperiodic", segment_name, band, "global", stat)
+            data_dict[col] = global_vals
 
     data_dict["__qc__"] = {
         "segment": segment_name,
@@ -373,14 +375,18 @@ def extract_aperiodic_features(
         "channel_names": ch_names,
     }
     
-    for seg_name in STANDARD_SEGMENTS:
-        mask = get_segment_mask(ctx.windows, seg_name)
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segments = get_segment_masks(times, ctx.windows, config)
+    
+    for seg_name, mask in segments.items():
         if mask is None or np.sum(mask) < min_samples:
             continue
         t_seg = times[mask]
+        spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
         seg_data = _extract_aperiodic_for_segment(
             epochs, picks, ch_names, seg_name,
-            t_seg[0], t_seg[-1], bands, config, logger
+            t_seg[0], t_seg[-1], bands, config, logger,
+            spatial_modes=spatial_modes
         )
         qc_payload["segments"][seg_name] = seg_data.get("__qc__")
         seg_data.pop("__qc__", None)

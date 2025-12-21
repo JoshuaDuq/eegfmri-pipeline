@@ -77,7 +77,7 @@ def plot_power_by_condition(
         format_footer_annotation,
     )
     
-    baseline_window = get_config_value(config, "baseline_window_tfr", [-3.0, -0.5])
+    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
     plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
     
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
@@ -152,13 +152,15 @@ def plot_power_by_condition(
                 else:
                     all_stats[i]["q_fdr"] = np.nan
                     all_stats[i]["fdr_significant"] = False
-            n_significant = int(np.sum(rejected))
-        else:
-            n_significant = 0
-    else:
-        n_significant = 0
+            n_significant = int(np.sum(rejected)) if all_pvals else 0
     
-    fig, axes = plt.subplots(len(segments), len(bands), figsize=(16, 8), sharey="row")
+    width_per_col = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.2))
+    height_per_row = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_segment", 4.0))
+    fig, axes = plt.subplots(
+        len(segments), len(bands), 
+        figsize=(width_per_col * len(bands), height_per_row * len(segments)), 
+        sharey="row"
+    )
     
     for row_idx, segment in enumerate(segments):
         seg_name, seg_time = segment_labels[segment]
@@ -200,7 +202,7 @@ def plot_power_by_condition(
                         compact=True,
                     )
                     
-                    text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
                     ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
                            ha="center", fontsize=6, va="top", color=text_color,
                            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
@@ -253,7 +255,9 @@ def _setup_subplot_grid(n_items: int, n_cols: int = 2) -> Tuple[plt.Figure, List
         Tuple of (figure, list of axes)
     """
     n_rows = (n_items + n_cols - 1) // n_cols
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 4 * n_rows))
+    width_per_col = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_col", 6.0))
+    height_per_row = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_row", 4.0))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_col * n_cols, height_per_row * n_rows))
     
     if n_items == 1:
         axes = [axes]
@@ -308,17 +312,9 @@ def _validate_epochs_tfr(tfr: Any, function_name: str, logger: logging.Logger) -
 
 
 def _get_plateau_window(config: Any) -> List[float]:
-    """Get plateau window from config.
-    
-    Args:
-        config: Configuration object
-    
-    Returns:
-        List of [start, end] times for plateau window
-    """
-    if config:
-        return config.get("time_frequency_analysis.plateau_window", [3.0, 10.5])
-    return [3.0, 10.5]
+    """Get plateau window from config."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    return get_config_value(config, "plateau_window", [3.0, 10.5])
 
 
 def _crop_tfr_to_plateau(tfr: Any, plateau_window: List[float], logger: logging.Logger) -> Optional[Any]:
@@ -573,13 +569,15 @@ def plot_power_time_courses(
     """
     times = tfr_raw.times
     features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
-    tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     plot_cfg = get_plot_config(config)
     
     n_epochs = int(tfr_raw.data.shape[0])
     n_channels = int(tfr_raw.data.shape[1])
     
-    fig, ax = plt.subplots(1, 1, figsize=(12, 5))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
+    fig, ax = plt.subplots(figsize=fig_size)
     
     for band in bands:
         if band not in features_freq_bands:
@@ -672,7 +670,8 @@ def _plot_psd_by_temperature(
     temp_colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
     
     plateau_window = _get_plateau_window(config)
-    tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
     trial_counts = []
     for idx, temp in enumerate(unique_temps):
@@ -813,7 +812,8 @@ def plot_power_spectral_density(
     _validate_epochs_tfr(tfr, "plot_power_spectral_density", logger)
     
     plateau_window = _get_plateau_window(config)
-    tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
     if events_df is not None and not events_df.empty:
         temp_col = None
@@ -869,7 +869,8 @@ def plot_power_spectral_density_by_pain(
         return
     
     plateau_window = _get_plateau_window(config)
-    tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
+    from eeg_pipeline.utils.config.loader import get_config_value
+    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
     pain_vals = pd.to_numeric(events_df[pain_col], errors="coerce")
     
@@ -981,10 +982,12 @@ def plot_power_time_course_by_temperature(
     
     unique_temps = sorted(temps.dropna().unique())
     colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
+    fig, ax = plt.subplots(figsize=fig_size)
     
-    tfr_baseline = tuple(config.get("time_frequency_analysis.baseline_window", [-2.0, 0.0]))
-    freq_bands = config.get("time_frequency_analysis.bands", {})
+    from eeg_pipeline.utils.config.loader import get_config_value
+    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+    freq_bands = get_config_value(config, "time_frequency_analysis.bands", {})
     band_range = freq_bands.get(band, [None, None])
     
     for idx, temp in enumerate(unique_temps):
@@ -1040,7 +1043,9 @@ def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, confi
     power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     n_bands = len(bands)
     n_trials = len(pow_df)
-    fig, axes = plt.subplots(n_bands, 1, figsize=(12, 3 * n_bands))
+    width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_standard", 12.0))
+    height_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_band", 3.0))
+    fig, axes = plt.subplots(n_bands, 1, figsize=(width_per_band, height_per_band * n_bands))
     if n_bands == 1:
         axes = [axes]
     
@@ -1686,7 +1691,8 @@ def plot_spectral_slope_topomap(
     if mask.sum() < 3:
         return
     
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
+    fig, axes = plt.subplots(1, 2, figsize=fig_size)
     
     ax1 = axes[0]
     valid_data = data_array[mask]
@@ -1700,7 +1706,7 @@ def plot_spectral_slope_topomap(
     ax1.set_title("1/f Spectral Slope", fontweight="bold")
     
     ax2 = axes[1]
-    ax2.hist(valid_data, bins=20, color="#6366F1", alpha=0.7, edgecolor="white")
+    ax2.hist(valid_data, bins=20, color=plot_cfg.style.colors.blue, alpha=0.7, edgecolor="white")
     ax2.axvline(np.median(valid_data), color="red", linestyle="--", linewidth=2, 
                 label=f"Median: {np.median(valid_data):.2f}")
     ax2.set_xlabel("Slope")
@@ -1864,7 +1870,8 @@ def plot_band_power_topomaps(
         return
     
     n_bands = len(valid_bands)
-    fig, axes = plt.subplots(1, n_bands, figsize=(3.5 * n_bands, 4))
+    width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.5))
+    fig, axes = plt.subplots(1, n_bands, figsize=(width_per_band * n_bands, 4))
     if n_bands == 1:
         axes = [axes]
     

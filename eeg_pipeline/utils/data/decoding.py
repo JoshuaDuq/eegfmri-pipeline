@@ -108,7 +108,7 @@ def load_decoding_data(
 
     sub = f"sub-{subject}"
     feat_dir = deriv_root / sub / "eeg" / "features"
-    X_path = feat_dir / "features_eeg_direct.tsv"
+    X_path = feat_dir / "features_power.tsv"
     y_path = feat_dir / "target_vas_ratings.tsv"
     manifest_path = _get_trial_alignment_manifest_path(deriv_root, subject)
 

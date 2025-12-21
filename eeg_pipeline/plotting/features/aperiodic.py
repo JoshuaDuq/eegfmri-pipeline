@@ -120,7 +120,8 @@ def plot_aperiodic_residual_spectra(
     p5 = np.nanpercentile(residual_mean, 5, axis=0)
     p95 = np.nanpercentile(residual_mean, 95, axis=0)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
+    fig, ax = plt.subplots(figsize=fig_size)
     ax.plot(freqs, mean_resid, label="Mean residual", color="k")
     ax.fill_between(freqs, p5, p95, color="gray", alpha=0.3, label="5–95% channels")
     ax.axhline(0, color="black", linestyle="--", alpha=0.5)
@@ -185,7 +186,8 @@ def plot_aperiodic_run_trajectories(
         return
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
+    fig, axes = plt.subplots(1, 2, figsize=fig_size)
     axes[0].errorbar(run_order, slope_means, yerr=slope_sems, fmt="o-", color="purple", capsize=3)
     axes[0].set_title("Slope by run")
     axes[0].set_ylabel("Aperiodic slope")
@@ -355,8 +357,8 @@ def plot_aperiodic_topomaps(
     n_cols = 4 if has_pain_data else 1
     n_rows = len(metrics)
     
-    fig_width = 5.0 * n_cols
-    fig_height = 4.5 * n_rows
+    fig_width = float(plot_cfg.plot_type_configs.get("aperiodic", {}).get("width_per_column", 5.0)) * n_cols
+    fig_height = float(plot_cfg.plot_type_configs.get("aperiodic", {}).get("height_per_row", 4.5)) * n_rows
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
     
     for row_idx, metric in enumerate(metrics):
@@ -596,7 +598,8 @@ def plot_aperiodic_vs_pain(
     q_perm = q_vals_perm[0] if q_vals_perm.size else p_perm
 
     plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
+    fig, ax = plt.subplots(figsize=fig_size)
     
     sns.scatterplot(x=ratings_agg, y=slopes_agg, ax=ax, alpha=0.6)
     sns.regplot(x=ratings_agg, y=slopes_agg, ax=ax, scatter=False, lowess=True, line_kws={'color': 'red'})
@@ -710,7 +713,8 @@ def plot_aperiodic_by_condition(
     else:
         n_significant = 0
     
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
+    fig, axes = plt.subplots(1, 2, figsize=fig_size)
     
     for ax, metric in zip(axes, ["Slope", "Offset"]):
         data = metric_data.get(metric)
@@ -747,7 +751,7 @@ def plot_aperiodic_by_condition(
                 ci_high=s["ci_high"],
                 compact=True,
             )
-            text_color = "#d62728" if s.get("fdr_significant", False) else "#333333"
+            text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
             ax.text(0.5, 0.98, annotation, ha="center", va="top", 
                    transform=ax.transAxes, fontsize=7, color=text_color,
                    bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))

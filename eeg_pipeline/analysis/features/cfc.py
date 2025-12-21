@@ -102,86 +102,122 @@ def _compute_glm_pac(phase: np.ndarray, amp: np.ndarray) -> float:
         return np.nan
 
 
-def _compute_pac_epoch(
-    ep_idx: int, 
-    filtered_signals: Dict[str, np.ndarray], 
-    phase_bands: List[str], 
-    amp_bands: List[str], 
-    freq_bands: Dict[str, Tuple[float, float]], 
-    ch_names: List[str], 
-    n_bins: int
-) -> Dict[str, float]:
-    """Compute PAC for a single epoch (parallel worker)."""
-    record = {}
-    
-    for phase_band in phase_bands:
-        if phase_band not in filtered_signals: continue
-        
-        p_signal_all = filtered_signals[phase_band][ep_idx] # (n_ch, n_times)
-        p_phase_all = np.angle(p_signal_all)
-        
-        for amp_band in amp_bands:
-            if amp_band not in filtered_signals: continue
-            
-            # Freq check (amp > phase)
-            p_fmin, p_fmax = freq_bands[phase_band]
-            a_fmin, a_fmax = freq_bands[amp_band]
-            if a_fmin <= p_fmax: continue
-            
-            a_signal_all = filtered_signals[amp_band][ep_idx]
-            a_amp_all = np.abs(a_signal_all)
-            
-            mi_values = []
-            for ch_idx in range(len(ch_names)):
-                mi = _compute_modulation_index(
-                    p_phase_all[ch_idx], 
-                    a_amp_all[ch_idx], 
-                    n_bins
-                )
-                if np.isfinite(mi):
-                    mi_values.append(mi)
-                    
-            pair_label = f"{phase_band}_{amp_band}"
-            col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "mi_mean")
-            col_max = NamingSchema.build("cfc", "full", pair_label, "global", "mi_max")
-            record[col_mean] = float(np.mean(mi_values)) if mi_values else np.nan
-            record[col_max] = float(np.max(mi_values)) if mi_values else np.nan
-            
-    return record
-
-
-def _compute_glm_pac_epoch(
+def _compute_mi_matrices(
     ep_idx: int,
     filtered_signals: Dict[str, np.ndarray],
     phase_bands: List[str],
     amp_bands: List[str],
     freq_bands: Dict[str, Tuple[float, float]],
-    ch_names: List[str]
-) -> Dict[str, float]:
-    """Compute GLM-PAC for a single epoch (parallel worker)."""
-    record = {}
-    for phase_band in phase_bands:
-        if phase_band not in filtered_signals: continue
-        p_phase_all = np.angle(filtered_signals[phase_band][ep_idx])
+    ch_names: List[str],
+    n_bins: int
+) -> Dict[str, np.ndarray]:
+    """Compute MI matrix (phase_band, amp_band, n_ch) for an epoch."""
+    epoch_res = {}
+    for pb in phase_bands:
+        if pb not in filtered_signals: continue
+        p_phase = np.angle(filtered_signals[pb][ep_idx])
+        p_fmax = freq_bands[pb][1]
         
-        for amp_band in amp_bands:
-            if amp_band not in filtered_signals: continue
-            p_fmin, p_fmax = freq_bands[phase_band]
-            a_fmin, a_fmax = freq_bands[amp_band]
-            if a_fmin <= p_fmax: continue
+        for ab in amp_bands:
+            if ab not in filtered_signals: continue
+            if freq_bands[ab][0] <= p_fmax: continue
             
-            a_amp_all = np.abs(filtered_signals[amp_band][ep_idx])
+            a_amp = np.abs(filtered_signals[ab][ep_idx])
+            n_ch = len(ch_names)
+            mi_ch = np.zeros(n_ch)
+            for c in range(n_ch):
+                mi_ch[c] = _compute_modulation_index(p_phase[c], a_amp[c], n_bins)
             
-            glm_values = []
-            for ch_idx in range(len(ch_names)):
-                r2 = _compute_glm_pac(p_phase_all[ch_idx], a_amp_all[ch_idx])
-                if np.isfinite(r2):
-                    glm_values.append(r2)
-                    
-            pair_label = f"{phase_band}_{amp_band}"
-            col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "glm_r2_mean")
-            record[col_mean] = float(np.mean(glm_values)) if glm_values else np.nan
+            epoch_res[f"{pb}_{ab}"] = mi_ch
+    return epoch_res
+
+def _compute_pac_epoch_spatial(
+    ep_idx: int,
+    filtered_signals: Dict[str, np.ndarray],
+    phase_bands: List[str],
+    amp_bands: List[str],
+    freq_bands: Dict[str, Tuple[float, float]],
+    ch_names: List[str],
+    n_bins: int,
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]]
+) -> Dict[str, float]:
+    """Worker for PAC MI with spatial support."""
+    matrices = _compute_mi_matrices(ep_idx, filtered_signals, phase_bands, amp_bands, freq_bands, ch_names, n_bins)
+    record = {}
+    
+    for pair_label, mi_ch in matrices.items():
+        # Channels
+        if 'channels' in spatial_modes:
+            for c, ch in enumerate(ch_names):
+                col = NamingSchema.build("cfc", "full", pair_label, "ch", "mi", channel=ch)
+                record[col] = float(mi_ch[c])
+        
+        # ROI
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, idxs in roi_map.items():
+                if idxs:
+                    val = np.nanmean(mi_ch[idxs])
+                    col = NamingSchema.build("cfc", "full", pair_label, "roi", "mi", channel=roi_name)
+                    record[col] = float(val)
+        
+        # Global
+        if 'global' in spatial_modes:
+            val = np.nanmean(mi_ch)
+            col = NamingSchema.build("cfc", "full", pair_label, "global", "mi_mean")
+            record[col] = float(val)
             
+    return record
+
+
+def _compute_glm_pac_epoch_spatial(
+    ep_idx: int,
+    filtered_signals: Dict[str, np.ndarray],
+    phase_bands: List[str],
+    amp_bands: List[str],
+    freq_bands: Dict[str, Tuple[float, float]],
+    ch_names: List[str],
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]]
+) -> Dict[str, float]:
+    """Worker for GLM-PAC with spatial support."""
+    record = {}
+    for pb in phase_bands:
+        if pb not in filtered_signals: continue
+        p_phase = np.angle(filtered_signals[pb][ep_idx])
+        p_fmax = freq_bands[pb][1]
+        
+        for ab in amp_bands:
+            if ab not in filtered_signals: continue
+            if freq_bands[ab][0] <= p_fmax: continue
+            
+            a_amp = np.abs(filtered_signals[ab][ep_idx])
+            n_ch = len(ch_names)
+            glm_ch = np.zeros(n_ch)
+            for c in range(n_ch):
+                glm_ch[c] = _compute_glm_pac(p_phase[c], a_amp[c])
+            
+            pair_label = f"{pb}_{ab}"
+            # Channels
+            if 'channels' in spatial_modes:
+                for c, ch in enumerate(ch_names):
+                    col = NamingSchema.build("cfc", "full", pair_label, "ch", "glm_r2", channel=ch)
+                    record[col] = float(glm_ch[c])
+            
+            # ROI
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, idxs in roi_map.items():
+                    if idxs:
+                        val = np.nanmean(glm_ch[idxs])
+                        col = NamingSchema.build("cfc", "full", pair_label, "roi", "glm_r2", channel=roi_name)
+                        record[col] = float(val)
+            
+            # Global
+            if 'global' in spatial_modes:
+                val = np.nanmean(glm_ch)
+                col = NamingSchema.build("cfc", "full", pair_label, "global", "glm_r2_mean")
+                record[col] = float(val)
+                
     return record
 
 
@@ -227,22 +263,27 @@ def extract_modulation_index_pac(
     if not filtered_signals:
          return pd.DataFrame(), []
 
-    # Prepare data for parallel execution
-    # Convert filtered_signals dict to a more pickle-friendly format if needed,
-    # or just pass the dict if it contains numpy arrays (efficiently shared in 'processes' mode on Linux/Mac copy-on-write,
-    # but 'loky' pickles. Actually joblib uses memmapping for large arrays automatically).
-    
-    # We need to construct arguments for each epoch
-    
+    # Spatial info
+    spatial_modes = getattr(config, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
     records = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_pac_epoch)(
+        delayed(_compute_pac_epoch_spatial)(
             i, 
             filtered_signals, 
             phase_bands, 
             amp_bands, 
             freq_bands, 
             ch_names, 
-            n_bins
+            n_bins,
+            spatial_modes,
+            roi_map
         ) for i in range(n_epochs)
     )
     
@@ -278,9 +319,19 @@ def extract_glm_pac(
             if filt is not None:
                 filtered_signals[band] = hilbert(filt, axis=-1)
                 
+    # Spatial info
+    spatial_modes = getattr(config, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
     records = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_glm_pac_epoch)(
-            i, filtered_signals, phase_bands, amp_bands, freq_bands, ch_names
+        delayed(_compute_glm_pac_epoch_spatial)(
+            i, filtered_signals, phase_bands, amp_bands, freq_bands, ch_names, spatial_modes, roi_map
         ) for i in range(n_epochs)
     )
 
@@ -295,32 +346,47 @@ def _compute_phase_locking_nm(phase1: np.ndarray, phase2: np.ndarray, n: int, m:
     return float(plv)
 
 
-def _compute_ppc_epoch(
+def _compute_ppc_epoch_spatial(
     ep_idx: int,
     filtered_signals: Dict[str, np.ndarray],
     band_pairs: List[Tuple[str, str, int, int]],
-    ch_names: List[str]
+    ch_names: List[str],
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]]
 ) -> Dict[str, float]:
-    """Compute Phase-Phase Coupling for a single epoch (parallel worker)."""
+    """Worker for PPC with spatial support."""
     record = {}
     for b1, b2, n, m in band_pairs:
         if b1 not in filtered_signals or b2 not in filtered_signals: continue
         
-        p1_all = np.angle(filtered_signals[b1][ep_idx])
-        p2_all = np.angle(filtered_signals[b2][ep_idx])
-        
-        ppc_values = []
-        for ch_idx in range(len(ch_names)):
-            plv = _compute_phase_locking_nm(p1_all[ch_idx], p2_all[ch_idx], n, m)
-            if np.isfinite(plv):
-                ppc_values.append(plv)
-                
+        p1 = np.angle(filtered_signals[b1][ep_idx])
+        p2 = np.angle(filtered_signals[b2][ep_idx])
+        n_ch = len(ch_names)
+        ppc_ch = np.zeros(n_ch)
+        for c in range(n_ch):
+            ppc_ch[c] = _compute_phase_locking_nm(p1[c], p2[c], n, m)
+            
         pair_label = f"{b1}_{b2}_{n}to{m}"
-        col_mean = NamingSchema.build("cfc", "full", pair_label, "global", "ppc_mean")
-        col_max = NamingSchema.build("cfc", "full", pair_label, "global", "ppc_max")
-        record[col_mean] = float(np.mean(ppc_values)) if ppc_values else np.nan
-        record[col_max] = float(np.max(ppc_values)) if ppc_values else np.nan
+        # Channels
+        if 'channels' in spatial_modes:
+            for c, ch in enumerate(ch_names):
+                col = NamingSchema.build("cfc", "full", pair_label, "ch", "ppc", channel=ch)
+                record[col] = float(ppc_ch[c])
         
+        # ROI
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, idxs in roi_map.items():
+                if idxs:
+                    val = np.nanmean(ppc_ch[idxs])
+                    col = NamingSchema.build("cfc", "full", pair_label, "roi", "ppc", channel=roi_name)
+                    record[col] = float(val)
+        
+        # Global
+        if 'global' in spatial_modes:
+            val = np.nanmean(ppc_ch)
+            col = NamingSchema.build("cfc", "full", pair_label, "global", "ppc_mean")
+            record[col] = float(val)
+            
     return record
 
 
@@ -352,8 +418,18 @@ def extract_phase_phase_coupling(
             if filt is not None:
                 filtered_signals[band] = hilbert(filt, axis=-1)
                 
+    # Spatial info
+    spatial_modes = getattr(config, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
     records = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_ppc_epoch)(i, filtered_signals, band_pairs, ch_names) for i in range(n_epochs)
+        delayed(_compute_ppc_epoch_spatial)(i, filtered_signals, band_pairs, ch_names, spatial_modes, roi_map) for i in range(n_epochs)
     )
     
     if not records: return pd.DataFrame(), []
@@ -411,40 +487,55 @@ def _compute_bicoherence(x: np.ndarray, sfreq: float, fmax: float = 50.0, nperse
     return bicoherence, freqs_pos
 
 
-def _compute_bicoherence_epoch(
+def _compute_bicoherence_epoch_spatial(
     ep_idx: int,
     data: np.ndarray,
     sfreq: float,
     fmax: float,
-    ch_names: List[str]
+    ch_names: List[str],
+    spatial_modes: List[str],
+    roi_map: Dict[str, List[int]]
 ) -> Dict[str, float]:
-    """Compute bicoherence for a single epoch (parallel worker)."""
+    """Worker for bicoherence with spatial support."""
     record = {}
-    bic_values = []
-    # epoch data: (n_ch, n_times)
     epoch_data = data[ep_idx]
+    n_ch = len(ch_names)
     
-    for ch_idx in range(len(ch_names)):
+    # We want mean bicoherence per channel
+    bic_ch = np.zeros(n_ch)
+    peak_f1_ch = np.zeros(n_ch)
+    peak_f2_ch = np.zeros(n_ch)
+    
+    for c in range(n_ch):
         try:
-            bic, freqs = _compute_bicoherence(epoch_data[ch_idx], sfreq, fmax)
-            bic_values.append(bic)
-        except (ValueError, RuntimeError):
-            continue
+            bic, freqs = _compute_bicoherence(epoch_data[c], sfreq, fmax)
+            # Take mean over all freq pairs for this channel
+            bic_ch[c] = float(np.nanmean(bic))
+            idx = np.nanargmax(bic)
+            i_idx, j_idx = np.unravel_index(idx, bic.shape)
+            peak_f1_ch[c] = float(freqs[i_idx])
+            peak_f2_ch[c] = float(freqs[j_idx])
+        except Exception:
+            bic_ch[c] = np.nan
+            peak_f1_ch[c] = np.nan
+            peak_f2_ch[c] = np.nan
             
-    if bic_values:
-        mean_bic = np.nanmean(bic_values, axis=0)
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_mean")] = float(np.nanmean(mean_bic))
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_max")] = float(np.nanmax(mean_bic))
-        
-        idx = np.nanargmax(mean_bic)
-        i_idx, j_idx = np.unravel_index(idx, mean_bic.shape)
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_peak_f1")] = float(freqs[i_idx]) if i_idx < len(freqs) else np.nan
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_peak_f2")] = float(freqs[j_idx]) if j_idx < len(freqs) else np.nan
+    # Channels
+    if 'channels' in spatial_modes:
+        for c, ch in enumerate(ch_names):
+            col = NamingSchema.build("cfc", "full", "broadband", "ch", "bicoherence", channel=ch)
+            record[col] = bic_ch[c]
+    
+    # ROI
+    if 'roi' in spatial_modes and roi_map:
+        for roi_name, idxs in roi_map.items():
+            if idxs:
+                record[NamingSchema.build("cfc", "full", "broadband", "roi", "bicoherence", channel=roi_name)] = float(np.nanmean(bic_ch[idxs]))
+                
+    # Global
+    if 'global' in spatial_modes:
+        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_mean")] = float(np.nanmean(bic_ch))
 
-    else:
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_mean")] = np.nan
-        record[NamingSchema.build("cfc", "full", "broadband", "global", "bicoherence_max")] = np.nan
-        
     return record
 
 
@@ -462,8 +553,18 @@ def extract_bicoherence_features(
     n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_pac")
     fmax = min(freq_range[1], sfreq / 2 - 1)
     
+    # Spatial info
+    spatial_modes = getattr(config, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
     records = Parallel(n_jobs=n_jobs)(
-        delayed(_compute_bicoherence_epoch)(i, data, sfreq, fmax, ch_names) for i in range(n_epochs)
+        delayed(_compute_bicoherence_epoch_spatial)(i, data, sfreq, fmax, ch_names, spatial_modes, roi_map) for i in range(n_epochs)
     )
     
     return pd.DataFrame(records), list(records[0].keys()) if records else []

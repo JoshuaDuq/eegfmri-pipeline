@@ -12,7 +12,6 @@ from joblib import Parallel, delayed
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import (
     MIN_SAMPLES_DEFAULT,
-    STANDARD_SEGMENTS,
     get_segment_mask,
     validate_extractor_inputs,
 )
@@ -439,9 +438,10 @@ def extract_microstate_features(
         return pd.DataFrame(), [], None
     
     all_data = {}
-    
-    for seg_name in STANDARD_SEGMENTS:
-        mask = get_segment_mask(ctx.windows, seg_name)
+
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segments = get_segment_masks(epochs.times, ctx.windows, ctx.config)
+    for seg_name, mask in segments.items():
         if mask is None or np.sum(mask) < min_samples:
             continue
         data_seg = full_data[..., mask]
@@ -497,24 +497,21 @@ def extract_microstate_features_from_epochs(
     min_valid_fraction = float(config.get("feature_engineering.microstates.min_valid_fraction", 0.5))
     min_correlation = float(config.get("feature_engineering.microstates.min_correlation", 0.25))
 
-    from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-
-    spec = TimeWindowSpec(
-        times=epochs.times,
-        config=config,
-        sampling_rate=float(sfreq),
-        logger=logger,
-    )
-    baseline_mask = spec.get_mask("baseline")
-    ramp_mask = spec.get_mask("ramp")
-    plateau_mask = spec.get_mask("plateau")
-
-    if plateau_mask is None or not np.any(plateau_mask):
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segments = get_segment_masks(epochs.times, ctx.windows, config)
+    
+    if not segments:
         return pd.DataFrame(), [], None
 
-    data_plateau = full_data[..., plateau_mask]
-    if data_plateau.shape[-1] < min_samples:
-        return pd.DataFrame(), [], None
+    # Use the primary named segment for template extraction if available
+    primary_seg = ctx.name if ctx.name and ctx.name in segments else None
+    if primary_seg is None or primary_seg not in segments:
+        # Fallback to the first non-baseline segment if possible
+        candidates = [s for s in segments.keys() if s != "baseline"]
+        primary_seg = candidates[0] if candidates else list(segments.keys())[0]
+
+    primary_mask = segments[primary_seg]
+    data_primary = full_data[..., primary_mask]
 
     if fixed_templates is not None and fixed_template_ch_names is not None:
         templates = _reorder_templates_to_picks(
@@ -525,61 +522,30 @@ def extract_microstate_features_from_epochs(
             logger,
         )
     else:
-        templates = extract_templates_from_trials(data_plateau, sfreq, n_states, config)
+        templates = extract_templates_from_trials(data_primary, sfreq, n_states, config)
 
     if templates is None:
         return pd.DataFrame(), [], None
 
     all_data: Dict[str, List[float]] = {}
-
-    if baseline_mask is not None and int(np.sum(baseline_mask)) >= min_samples:
-        data_baseline = full_data[..., baseline_mask]
-        all_data.update(
-            _extract_microstates_for_segment(
-                data_baseline,
-                templates,
-                sfreq,
-                n_states,
-                "baseline",
-                n_jobs=n_jobs,
-                min_run_ms=min_run_ms,
-                gfp_min_percentile=gfp_min_percentile,
-                min_valid_fraction=min_valid_fraction,
-                min_correlation=min_correlation,
+    
+    for seg_label, mask in segments.items():
+        if mask is not None and int(np.sum(mask)) >= min_samples:
+            seg_data = full_data[..., mask]
+            all_data.update(
+                _extract_microstates_for_segment(
+                    seg_data,
+                    templates,
+                    sfreq,
+                    n_states,
+                    seg_label,
+                    n_jobs=n_jobs,
+                    min_run_ms=min_run_ms,
+                    gfp_min_percentile=gfp_min_percentile,
+                    min_valid_fraction=min_valid_fraction,
+                    min_correlation=min_correlation,
+                )
             )
-        )
-
-    if ramp_mask is not None and int(np.sum(ramp_mask)) >= min_samples:
-        data_ramp = full_data[..., ramp_mask]
-        all_data.update(
-            _extract_microstates_for_segment(
-                data_ramp,
-                templates,
-                sfreq,
-                n_states,
-                "ramp",
-                n_jobs=n_jobs,
-                min_run_ms=min_run_ms,
-                gfp_min_percentile=gfp_min_percentile,
-                min_valid_fraction=min_valid_fraction,
-                min_correlation=min_correlation,
-            )
-        )
-
-    all_data.update(
-        _extract_microstates_for_segment(
-            data_plateau,
-            templates,
-            sfreq,
-            n_states,
-            "plateau",
-            n_jobs=n_jobs,
-            min_run_ms=min_run_ms,
-            gfp_min_percentile=gfp_min_percentile,
-            min_valid_fraction=min_valid_fraction,
-            min_correlation=min_correlation,
-        )
-    )
 
     if not all_data:
         return pd.DataFrame(), [], templates

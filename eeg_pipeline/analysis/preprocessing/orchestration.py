@@ -3,7 +3,7 @@
 This module contains reusable, non-CLI orchestration for converting raw EEG to BIDS and
 merging behavioral data into BIDS events files.
 
-The pipeline layer (`eeg_pipeline.pipelines.preprocessing`) should delegate to these
+The pipeline layer (`eeg_pipeline.pipelines.utilities`) should delegate to these
 functions to keep pipeline modules thin.
 """
 

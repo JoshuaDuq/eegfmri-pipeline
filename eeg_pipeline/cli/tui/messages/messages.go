@@ -1,0 +1,145 @@
+package messages
+
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// =========================================================================
+// Application State Messages
+// =========================================================================
+
+// TickMsg is sent periodically for animations and progress updates
+type TickMsg struct{}
+
+// Tick creates a command that sends TickMsg periodically
+func Tick() tea.Cmd {
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+		return TickMsg{}
+	})
+}
+
+// =========================================================================
+// Execution Messages
+// =========================================================================
+
+// CommandStartedMsg indicates a command has started execution
+type CommandStartedMsg struct {
+	Operation     string
+	Subjects      []string
+	TotalSubjects int
+	OutputChan    chan string
+	DoneChan      chan error
+}
+
+// CommandDoneMsg indicates command execution has completed
+type CommandDoneMsg struct {
+	ExitCode int
+	Duration time.Duration
+	Success  bool
+	Error    error
+}
+
+// CommandOutputMsg contains a line of command output
+type CommandOutputMsg struct {
+	Line string
+}
+
+// StreamOutputMsg contains a line of streaming output during execution
+type StreamOutputMsg struct {
+	Line string
+}
+
+// LogCopiedMsg indicates log was copied to clipboard
+type LogCopiedMsg struct{}
+
+// =========================================================================
+// Subject Discovery Messages
+// =========================================================================
+
+// AvailabilityInfo holds availability status with last modified timestamp
+type AvailabilityInfo struct {
+	Available    bool    `json:"available"`
+	LastModified *string `json:"last_modified,omitempty"`
+}
+
+// FeatureAvailability holds per-feature and per-band availability with timestamps
+type FeatureAvailability struct {
+	Features map[string]AvailabilityInfo `json:"features,omitempty"`
+	Bands    map[string]AvailabilityInfo `json:"bands,omitempty"`
+}
+
+// SubjectInfo holds subject processing status
+type SubjectInfo struct {
+	ID                  string               `json:"id"`
+	HasEpochs           bool                 `json:"has_epochs"`
+	HasFeatures         bool                 `json:"has_features"`
+	AvailableBands      []string             `json:"available_bands,omitempty"`
+	FeatureAvailability *FeatureAvailability `json:"feature_availability,omitempty"`
+	EpochMetadata       map[string]float64   `json:"epoch_metadata,omitempty"`
+}
+
+// SubjectsLoadedMsg is sent when subject discovery completes
+type SubjectsLoadedMsg struct {
+	Subjects []SubjectInfo
+	Error    error
+}
+
+// SubjectStartedMsg indicates processing of a subject has started
+type SubjectStartedMsg struct {
+	Subject string
+	Current int
+	Total   int
+}
+
+// SubjectDoneMsg indicates processing of a subject has completed
+type SubjectDoneMsg struct {
+	Subject string
+	Success bool
+}
+
+// =========================================================================
+// Progress Tracking Messages
+// =========================================================================
+
+// ProgressUpdateMsg contains progress information for current operation
+type ProgressUpdateMsg struct {
+	Subject   string
+	Step      string
+	Current   int
+	Total     int
+	TotalSubj int
+	SubjIdx   int
+}
+
+// StepProgressMsg provides detailed progress for a specific step
+type StepProgressMsg struct {
+	Subject string
+	Step    string
+	Current int
+	Total   int
+	Pct     int
+}
+
+// =========================================================================
+// Logging Messages
+// =========================================================================
+
+// LogMsg contains a log message from command execution
+type LogMsg struct {
+	Level   string
+	Message string
+	Subject string
+}
+
+// =========================================================================
+// Cloud Messages (referenced from cloud package)
+// =========================================================================
+
+// Note: Cloud-related messages are defined in the cloud package to avoid
+// circular dependencies. These include:
+// - VMStatusMsg
+// - SyncCompleteMsg
+// - RunCompleteMsg
+// - PullCompleteMsg

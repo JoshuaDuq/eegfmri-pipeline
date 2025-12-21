@@ -21,7 +21,7 @@ from joblib import Parallel, delayed
 
 from eeg_pipeline.types import PrecomputedData
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.domain.features.constants import get_segment_mask, SEGMENT_PLATEAU, validate_precomputed
+from eeg_pipeline.domain.features.constants import get_segment_mask, validate_precomputed
 from eeg_pipeline.utils.config.loader import get_config_value, get_feature_constant
 
 
@@ -126,6 +126,16 @@ def extract_temporal_features_from_precomputed(
     windows = precomputed.windows
     masks = get_segment_masks(precomputed.times, windows, config)
 
+    # Spatial info
+    spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(precomputed.ch_names, roi_defs)
+
     records: List[Dict[str, float]] = []
     for ep_idx in range(precomputed.data.shape[0]):
         x = precomputed.data[ep_idx]
@@ -134,18 +144,32 @@ def extract_temporal_features_from_precomputed(
             if mask is None or not np.any(mask):
                 continue
             seg_x = x[:, mask]
-            var_mean = float(np.nanmean(np.nanvar(seg_x, axis=1)))
-            rms_mean = float(np.nanmean(np.sqrt(np.nanmean(seg_x**2, axis=1))))
-            ll_mean = (
-                float(np.nanmean(np.nanmean(np.abs(np.diff(seg_x, axis=1)), axis=1)))
-                if seg_x.shape[1] > 1
-                else np.nan
-            )
-            rec[NamingSchema.build("temporal", seg, "broadband", "global", "var_mean")] = var_mean
-            rec[NamingSchema.build("temporal", seg, "broadband", "global", "rms_mean")] = rms_mean
-            rec[
-                NamingSchema.build("temporal", seg, "broadband", "global", "line_length_mean")
-            ] = ll_mean
+            
+            # Compute per-channel
+            ch_vars = np.nanvar(seg_x, axis=1)
+            ch_rms = np.sqrt(np.nanmean(seg_x**2, axis=1))
+            ch_ll = np.nanmean(np.abs(np.diff(seg_x, axis=1)), axis=1) if seg_x.shape[1] > 1 else np.full(len(ch_vars), np.nan)
+            
+            # Channels
+            if 'channels' in spatial_modes:
+                for c, ch in enumerate(precomputed.ch_names):
+                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "var", channel=ch)] = float(ch_vars[c])
+                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "rms", channel=ch)] = float(ch_rms[c])
+                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "line_length", channel=ch)] = float(ch_ll[c])
+            
+            # ROI
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, idxs in roi_map.items():
+                    if idxs:
+                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "var_mean", channel=roi_name)] = float(np.nanmean(ch_vars[idxs]))
+                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "rms_mean", channel=roi_name)] = float(np.nanmean(ch_rms[idxs]))
+                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "line_length_mean", channel=roi_name)] = float(np.nanmean(ch_ll[idxs]))
+
+            # Global
+            if 'global' in spatial_modes:
+                rec[NamingSchema.build("temporal", seg, "broadband", "global", "var_mean")] = float(np.nanmean(ch_vars))
+                rec[NamingSchema.build("temporal", seg, "broadband", "global", "rms_mean")] = float(np.nanmean(ch_rms))
+                rec[NamingSchema.build("temporal", seg, "broadband", "global", "line_length_mean")] = float(np.nanmean(ch_ll))
         records.append(rec)
 
     if not records or all(len(r) == 0 for r in records):
@@ -181,31 +205,62 @@ def extract_band_ratios_from_precomputed(
     if plateau_mask is None or not np.any(plateau_mask):
         return pd.DataFrame(), []
 
+    # Spatial info
+    spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(precomputed.ch_names, roi_defs)
+
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     records: List[Dict[str, float]] = []
     for ep_idx in range(precomputed.data.shape[0]):
         rec: Dict[str, float] = {}
-        band_means: Dict[str, float] = {}
+        # band -> (n_ch,) mean power in plateau
+        band_power_ch = {}
         for band, bd in precomputed.band_data.items():
             p = bd.power[ep_idx]
-            band_means[band] = float(np.nanmean(p[:, plateau_mask]))
+            band_power_ch[band] = np.nanmean(p[:, plateau_mask], axis=1)
+
         for num, den in pairs:
-            if num not in band_means or den not in band_means:
+            if num not in band_power_ch or den not in band_power_ch:
                 continue
-            denom = band_means[den]
-            if not np.isfinite(denom) or denom <= eps:
-                ratio = np.nan
-            else:
-                ratio = float(band_means[num] / denom)
-            rec[
-                NamingSchema.build(
-                    "ratios",
-                    "plateau",
-                    f"{num}_{den}",
-                    "global",
-                    "power_ratio",
-                )
-            ] = ratio
+                
+            p_num = band_power_ch[num]
+            p_den = band_power_ch[den]
+            
+            with np.errstate(divide='ignore', invalid='ignore'):
+                r_ch = p_num / p_den
+                r_ch[p_den <= eps] = np.nan
+            
+            pair_label = f"{num}_{den}"
+            
+            # label to use for naming
+            seg_label = getattr(precomputed.windows, "name", "plateau") or "plateau"
+            
+            # Channels
+            if 'channels' in spatial_modes:
+                for c, ch in enumerate(precomputed.ch_names):
+                    col = NamingSchema.build("ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch)
+                    rec[col] = float(r_ch[c])
+            
+            # ROI
+            if 'roi' in spatial_modes and roi_map:
+                for roi_name, idxs in roi_map.items():
+                    if idxs:
+                        val = np.nanmean(r_ch[idxs])
+                        col = NamingSchema.build("ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name)
+                        rec[col] = float(val)
+            
+            # Global
+            if 'global' in spatial_modes:
+                val = np.nanmean(r_ch)
+                col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
+                rec[col] = float(val)
+
         records.append(rec)
 
     if not records or all(len(r) == 0 for r in records):
@@ -282,18 +337,14 @@ def extract_asymmetry_from_precomputed(
     if not pairs:
         pairs = default_pairs
 
-    segment_label = str(
-        get_config_value(precomputed.config, "feature_engineering.asymmetry.segment_label", "plateau")
-    )
+    segment_label = getattr(precomputed.windows, "name", "active") or "active"
 
     ch_map = {name: i for i, name in enumerate(precomputed.ch_names)}
     valid_pairs = [(l, r, ch_map[l], ch_map[r]) for l, r in pairs if l in ch_map and r in ch_map]
     if not valid_pairs:
         return pd.DataFrame(), []
 
-    mask = get_segment_mask(precomputed.windows, SEGMENT_PLATEAU)
-    if mask is None or not np.any(mask):
-        mask = get_segment_mask(precomputed.windows, "active")
+    mask = get_segment_mask(precomputed.windows, segment_label)
     if mask is None or not np.any(mask):
         mask = slice(None)
 
@@ -395,8 +446,9 @@ def extract_roi_features_from_precomputed(
                             "roi",
                             seg,
                             band,
-                            "global",
-                            f"{roi_name}_logratio_mean",
+                            "roi",
+                            "logratio_mean",
+                            channel=roi_name,
                         )
                     ] = logratio
         records.append(rec)

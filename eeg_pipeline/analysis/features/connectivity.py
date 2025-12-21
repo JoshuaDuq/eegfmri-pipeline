@@ -35,7 +35,7 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
     threshold_adjacency as _threshold_adjacency,
 )
 
-from eeg_pipeline.analysis.features.precompute import precompute_data
+from eeg_pipeline.analysis.features.preparation import precompute_data
 
 
 def extract_connectivity_features(
@@ -64,10 +64,14 @@ def extract_connectivity_features(
         except Exception:
             pass
 
+    # Only process the segment name from the context
+    ctx_name = getattr(ctx, "name", None)
+    segments = [ctx_name] if ctx_name else ["full"]
+
     return extract_connectivity_from_precomputed(
         precomputed,
         bands=bands,
-        segments=["baseline", "ramp", "plateau"],
+        segments=segments,
         config=ctx.config,
         logger=ctx.logger,
     )
@@ -180,11 +184,7 @@ def extract_connectivity_from_precomputed(
 
     segments_use = segments if segments is not None else ["baseline", "ramp", "plateau"]
     masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
-    seg_mask_map = {
-        "baseline": masks.get("baseline"),
-        "ramp": masks.get("ramp"),
-        "plateau": masks.get("plateau"),
-    }
+    seg_mask_map = {k: v for k, v in masks.items() if v is not None}
 
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)

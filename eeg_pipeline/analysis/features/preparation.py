@@ -51,7 +51,6 @@ def precompute_data(
     *,
     compute_bands: bool = True,
     compute_psd_data: bool = True,
-    n_plateau_windows: int = 5,
     windows_spec: Any = None,
 ) -> PrecomputedData:
     """
@@ -73,8 +72,6 @@ def precompute_data(
         Whether to precompute band-filtered data
     compute_psd : bool
         Whether to precompute PSD
-    n_plateau_windows : int
-        Number of temporal windows in plateau period
         
     Returns
     -------
@@ -126,7 +123,6 @@ def precompute_data(
             spec = TimeWindowSpec(times=times, config=config, sampling_rate=sfreq, logger=logger)
         precomputed.windows = time_windows_from_spec(
             spec,
-            n_plateau_windows=n_plateau_windows,
             logger=logger,
             strict=True,
         )
