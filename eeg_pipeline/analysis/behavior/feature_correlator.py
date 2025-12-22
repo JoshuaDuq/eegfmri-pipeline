@@ -764,7 +764,6 @@ class FeatureBehaviorCorrelator:
         
         Handles column naming patterns:
         - power_{segment}_{band}_ch_{channel}_{stat} (e.g., power_plateau_delta_ch_Fp2_logratio)
-        - pow_{band}_{channel} (legacy)
         """
         from eeg_pipeline.utils.analysis.tfr import get_rois
         
@@ -775,27 +774,32 @@ class FeatureBehaviorCorrelator:
         
         bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
         
-        def extract_channel_from_col(col: str, band: str) -> Optional[str]:
-            """Extract channel name from power column."""
-            # Pattern: power_{segment}_{band}_ch_{channel}_{stat}
-            match = re.search(rf"_{band}_ch_([A-Za-z0-9]+)_", col, re.IGNORECASE)
-            if match:
-                return match.group(1)
-            # Legacy: pow_{band}_{channel}
-            match = re.search(rf"pow_{band}_([A-Za-z0-9]+)$", col, re.IGNORECASE)
-            if match:
-                return match.group(1)
-            return None
+        parsed_cols: List[Tuple[str, str, str, str]] = []
+        col_to_channel: Dict[str, str] = {}
+        for col in power_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not (parsed.get("valid") and parsed.get("group") == "power"):
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            band = parsed.get("band")
+            segment = parsed.get("segment")
+            identifier = parsed.get("identifier")
+            if band and segment and identifier:
+                parsed_cols.append((str(col), str(band), str(segment), str(identifier)))
+                col_to_channel[str(col)] = str(identifier)
         
         method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
         records = []
         for band in bands:
-            # Find all columns for this band (plateau segment preferred for pain analysis)
-            band_cols = [c for c in power_df.columns 
-                        if f"_{band}_ch_" in c.lower() or f"pow_{band}_" in c.lower()]
+            band_l = str(band).lower()
+            band_cols = [col for col, b, _seg, _ch in parsed_cols if b.lower() == band_l]
             
             # Prefer plateau columns if available
-            plateau_cols = [c for c in band_cols if "plateau" in c.lower()]
+            plateau_cols = [
+                col for col, b, seg, _ch in parsed_cols
+                if b.lower() == band_l and seg.lower() == "plateau"
+            ]
             if plateau_cols:
                 band_cols = plateau_cols
             
@@ -805,7 +809,7 @@ class FeatureBehaviorCorrelator:
             for roi_name, patterns in roi_defs.items():
                 roi_cols = []
                 for col in band_cols:
-                    ch_name = extract_channel_from_col(col, band)
+                    ch_name = col_to_channel.get(col)
                     if ch_name is None:
                         continue
                     for pattern in patterns:

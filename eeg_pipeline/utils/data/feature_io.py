@@ -787,10 +787,6 @@ def export_fmri_regressors(
         _add_regressor(f"pow_{band}_mean", plateau_df[band_cols].mean(axis=1))
 
     if aper_df is not None and not aper_df.empty:
-        slope_cols_legacy = [c for c in aper_df.columns if str(c).startswith("aper_slope_")]
-        if slope_cols_legacy:
-            _add_regressor("aper_slope_mean", aper_df[slope_cols_legacy].mean(axis=1))
-
         slope_cols_v2 = [
             c
             for c in aper_df.columns

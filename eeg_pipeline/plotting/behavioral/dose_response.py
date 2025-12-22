@@ -68,13 +68,12 @@ def _get_bands_from_config(config) -> list:
 
 
 def _load_additional_features(deriv_root: Path, subject: str, logger: logging.Logger) -> Dict[str, pd.DataFrame]:
-    """Load additional feature files (aperiodic, microstates, ITPC)."""
+    """Load additional feature files (aperiodic, ITPC)."""
     features_dir = deriv_features_path(deriv_root, subject)
     additional = {}
     
     feature_files = {
         "aperiodic": "features_aperiodic.tsv",
-        "microstates": "features_microstates.tsv",
         "itpc": "features_itpc.tsv",
     }
     
@@ -220,11 +219,6 @@ def visualize_dose_response(
                 _plot_aperiodic_dose_response(
                     df_aper, temp_col, aper_cols, subject, aper_dir, saved_files, logger
                 )
-    
-    # =================================================================
-    # Microstate dose-response (DEPRECATED - skipped)
-    # =================================================================
-    # Microstate analysis has been deprecated. This section is intentionally empty.
     
     # =================================================================
     # ITPC dose-response

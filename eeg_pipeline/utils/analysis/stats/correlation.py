@@ -421,7 +421,7 @@ def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
 
 @dataclass
 class CorrelationResult:
-    """Single feature correlation result (legacy structure)."""
+    """Single feature correlation result."""
 
     feature: str
     band: str

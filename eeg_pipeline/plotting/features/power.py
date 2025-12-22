@@ -16,7 +16,7 @@ import seaborn as sns
 import mne
 from mne.viz import plot_topomap
 
-from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import get_band_color, save_fig
 from eeg_pipeline.utils.data.columns import (
     find_pain_column_in_events,
@@ -420,27 +420,6 @@ def _get_band_frequency_mask(tfr: Any, band: str, config: Any, logger: logging.L
 ###################################################################
 
 
-def plot_power_distributions(
-    pow_df: pd.DataFrame,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """Plot power distributions per frequency band.
-    
-    Args:
-        pow_df: DataFrame with power columns
-        bands: List of frequency band names
-        subject: Subject identifier
-        save_dir: Directory to save plots
-        logger: Logger instance
-        config: Configuration object
-    """
-    return
-
-
 def plot_channel_power_heatmap(
     pow_df: pd.DataFrame,
     bands: List[str],
@@ -469,7 +448,10 @@ def plot_channel_power_heatmap(
     
     for band in bands:
         band = str(band)
-        band_cols = power_cols_by_band.get(band, [])
+        band_cols = [
+            c for c in power_cols_by_band.get(band, [])
+            if NamingSchema.parse(str(c)).get("scope") == "ch"
+        ]
         if band_cols:
             band_data = pow_df[band_cols].mean(axis=0)
             band_means.append(band_data.values)
@@ -483,11 +465,6 @@ def plot_channel_power_heatmap(
                         if ident:
                             extracted.append(str(ident))
                             continue
-                    legacy = parse_legacy_power_feature_name(str(col))
-                    if legacy is not None:
-                        _legacy_band, legacy_ch = legacy
-                        extracted.append(str(legacy_ch))
-                        continue
                     extracted.append(str(col))
                 channel_names = extracted
     
@@ -1597,8 +1574,6 @@ def plot_power_topomaps_from_df(
                 if str(parsed.get("scope") or "") == "ch":
                     band_cols.append(c)
                 continue
-            if parse_legacy_power_feature_name(str(c)) is not None:
-                band_cols.append(c)
         if not band_cols:
             ax.axis('off')
             continue
@@ -1613,10 +1588,6 @@ def plot_power_topomaps_from_df(
                 if ident:
                     data_map[str(ident)] = val
                     continue
-            legacy = parse_legacy_power_feature_name(str(col))
-            if legacy is not None:
-                _legacy_band, legacy_ch = legacy
-                data_map[str(legacy_ch)] = val
         
         data_array = np.full(len(epochs_info.ch_names), np.nan)
         mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
@@ -1914,4 +1885,3 @@ def plot_band_power_topomaps(
     
     if logger:
         logger.info(f"Saved band power topomaps ({segment})")
-

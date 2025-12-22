@@ -447,7 +447,6 @@ def classify_feature(
         schema_group = parsed["group"]
         schema_group_map = {
             "conn": "connectivity",
-            "conn_legacy": "connectivity",
             "microstates": "microstate",
             "asymmetry": "roi",
             "comp": "complexity",

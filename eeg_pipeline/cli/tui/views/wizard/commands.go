@@ -250,7 +250,7 @@ func (m Model) BuildCommand() string {
 				}
 			}
 
-			// Time range (legacy single range for TFR)
+			// Time range (single range for TFR)
 			if len(m.TimeRanges) > 0 {
 				tr := m.TimeRanges[0]
 				if tr.Tmin != "" {

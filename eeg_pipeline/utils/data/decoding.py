@@ -659,14 +659,19 @@ def extract_channel_importance_from_coefficients(
     coef_matrix: np.ndarray,
     feature_names: List[str],
 ) -> pd.DataFrame:
-    from eeg_pipeline.domain.features.naming import parse_legacy_power_feature_name
+    from eeg_pipeline.domain.features.naming import NamingSchema
 
     channel_band_to_indices: Dict[Tuple[str, str], List[int]] = {}
     for idx, feat in enumerate(feature_names):
-        parsed = parse_legacy_power_feature_name(str(feat))
-        if parsed:
-            band, channel = parsed
-            channel_band_to_indices.setdefault((channel, band), []).append(idx)
+        parsed = NamingSchema.parse(str(feat))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        band = parsed.get("band")
+        channel = parsed.get("identifier")
+        if band and channel:
+            channel_band_to_indices.setdefault((str(channel), str(band)), []).append(idx)
 
     channel_to_all_indices: Dict[str, List[int]] = {}
     for (channel, _band), indices in channel_band_to_indices.items():

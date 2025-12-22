@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.stats import (
     get_correlation_method,
     compute_correlation,
@@ -56,14 +56,7 @@ def _process_band(
             ch_names.append(str(identifier))
             continue
 
-        legacy = parse_legacy_power_feature_name(name)
-        if legacy is None:
-            continue
-        legacy_band, legacy_ch = legacy
-        if str(legacy_band).lower() != band_l:
-            continue
-        cols.append(name)
-        ch_names.append(str(legacy_ch))
+        continue
 
     if not cols:
         return []
@@ -272,7 +265,6 @@ def run_power_topomap_correlations(
 __all__ = [
     "run_power_topomap_correlations",
 ]
-
 
 
 

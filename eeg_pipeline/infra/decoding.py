@@ -16,7 +16,7 @@ from scipy.stats import norm
 from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path, find_clean_epochs_path
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.infra.logging import get_logger
-from eeg_pipeline.domain.features.naming import parse_legacy_power_feature_name
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
@@ -257,17 +257,28 @@ def write_feature_importance_tsv(
 
     bands_set = set()
     for feat in feature_names:
-        parsed = parse_legacy_power_feature_name(feat)
-        if parsed:
-            bands_set.add(parsed[0])
+        parsed = NamingSchema.parse(str(feat))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        band = parsed.get("band")
+        identifier = parsed.get("identifier")
+        if band and identifier:
+            bands_set.add(str(band))
     bands = sorted(bands_set)
 
     band_ch_to_idx: dict = {}
     for idx, feat in enumerate(feature_names):
-        parsed = parse_legacy_power_feature_name(feat)
-        if parsed:
-            b, ch = parsed
-            band_ch_to_idx.setdefault(b, {}).setdefault(ch, []).append(idx)
+        parsed = NamingSchema.parse(str(feat))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        band = parsed.get("band")
+        channel = parsed.get("identifier")
+        if band and channel:
+            band_ch_to_idx.setdefault(str(band), {}).setdefault(str(channel), []).append(idx)
 
     coef_agg = np.nanmean(coef_matrix, axis=0) if aggregate == "signed" else np.nanmean(np.abs(coef_matrix), axis=0)
 

@@ -137,9 +137,4 @@ def get_segment_mask(windows: Any, segment_name: str) -> Optional[np.ndarray]:
     if hasattr(windows, "masks") and isinstance(windows.masks, dict):
         return windows.masks.get(segment_name)
 
-    # 3. Legacy attribute access
-    mask_attr = f"{segment_name}_mask"
-    if hasattr(windows, mask_attr):
-        return getattr(windows, mask_attr)
-
     return None

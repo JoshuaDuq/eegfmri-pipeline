@@ -14,16 +14,15 @@ Provides:
 - save_features_organized: I/O helpers
 - get_fine_time_bins, get_coarse_time_bins: Temporal bin generators
 - parse_feature_name: Parse NamingSchema v2 format
-- parse_legacy_power_feature_name: Backward compatibility for legacy power features
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -272,70 +271,6 @@ def parse_feature_name(name: str) -> FeatureMetadata:
     )
 
 
-def parse_legacy_power_feature_name(name: str) -> Optional[Tuple[str, str]]:
-    if not isinstance(name, str):
-        return None
-
-    if name.startswith("pow_"):
-        parts = name[4:].split("_")
-        if len(parts) < 2:
-            return None
-        band = parts[0]
-        channel = parts[1]
-        return band, channel
-
-    if name.startswith("power_") and "_ch_" in name:
-        parts = name.split("_")
-        if len(parts) < 6:
-            return None
-        band = parts[2]
-        if parts[3] != "ch":
-            return None
-        remainder = name.split("_ch_", 1)[-1]
-        if "_" not in remainder:
-            return None
-        channel = remainder.rsplit("_", 1)[0]
-        return band, channel
-
-    return None
-
-
-def infer_feature_metadata(name: str) -> Dict[str, Optional[str]]:
-    """Infer metadata from legacy feature names that don't match NamingSchema v2."""
-    result: Dict[str, Optional[str]] = {
-        "type": None,
-        "time": None,
-        "band": None,
-        "channel": None,
-        "channel_pair": None,
-        "statistic": None,
-    }
-    
-    if not isinstance(name, str):
-        return result
-    
-    legacy = parse_legacy_power_feature_name(name)
-    if legacy is not None:
-        band, channel = legacy
-        result["type"] = "power"
-        result["band"] = band
-        result["channel"] = channel
-        return result
-    
-    name_lower = name.lower()
-    for domain in DOMAINS:
-        if name_lower.startswith(domain):
-            result["type"] = domain
-            break
-    
-    for band in ["delta", "theta", "alpha", "beta", "gamma"]:
-        if band in name_lower:
-            result["band"] = band
-            break
-    
-    return result
-
-
 ###################################################################
 # Manifest Generation (Canonical)
 ###################################################################
@@ -382,16 +317,15 @@ def generate_manifest(
                 }
             )
         else:
-            legacy = infer_feature_metadata(name)
             features.append(
                 {
                     "name": name,
-                    "group": legacy.get("type", "unknown"),
-                    "segment": legacy.get("time", "unknown"),
-                    "band": legacy.get("band", "unknown"),
+                    "group": "unknown",
+                    "segment": "unknown",
+                    "band": "unknown",
                     "scope": "unknown",
-                    "identifier": legacy.get("channel") or legacy.get("channel_pair"),
-                    "statistic": legacy.get("statistic"),
+                    "identifier": None,
+                    "statistic": None,
                 }
             )
 
@@ -455,7 +389,6 @@ __all__ = [
     "get_coarse_time_bins",
     "get_all_time_bins",
     "parse_feature_name",
-    "parse_legacy_power_feature_name",
     "generate_manifest",
     "save_manifest",
     "save_features_organized",

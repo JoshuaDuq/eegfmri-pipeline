@@ -7,7 +7,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.domain.features.naming import NamingSchema, parse_legacy_power_feature_name
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.tsv import read_tsv
 
 
@@ -31,12 +31,7 @@ def infer_power_band(column_name: str, *, bands: Optional[List[str]] = None) -> 
         band = str(parsed.get("band") or "").lower()
         return band if band in bands_set else None
 
-    legacy = parse_legacy_power_feature_name(str(column_name))
-    if legacy is None:
-        return None
-    legacy_band, _legacy_ch = legacy
-    legacy_band = str(legacy_band).lower()
-    return legacy_band if legacy_band in bands_set else None
+    return None
 
 
 def get_power_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = None) -> Dict[str, List[str]]:
@@ -52,12 +47,6 @@ def get_power_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[str]] = 
                     band_cols.append(str(c))
                 continue
 
-            legacy = parse_legacy_power_feature_name(str(c))
-            if legacy is None:
-                continue
-            legacy_band, _legacy_ch = legacy
-            if str(legacy_band).lower() == str(band).lower():
-                band_cols.append(str(c))
         if band_cols:
             power_cols[band] = band_cols
 
@@ -78,7 +67,7 @@ def get_connectivity_columns_by_band(df: pd.DataFrame, *, bands: Optional[List[s
             parsed = NamingSchema.parse(str(c))
             if not parsed.get("valid"):
                 continue
-            if parsed.get("group") != "connectivity":
+            if parsed.get("group") != "conn":
                 continue
             if str(parsed.get("band") or "").lower() != band_l:
                 continue

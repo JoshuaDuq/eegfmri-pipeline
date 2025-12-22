@@ -66,7 +66,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         "--tmax",
         type=float,
         default=None,
-        help="End time in seconds for feature extraction window (deprecated: use --time-range)",
+        help="End time in seconds for feature extraction window",
     )
     parser.add_argument(
         "--time-range",

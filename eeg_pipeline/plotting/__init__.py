@@ -11,7 +11,6 @@ Submodules:
 
 Usage:
     # Import specific functions from submodules
-    from eeg_pipeline.plotting.features import plot_power_distributions
     from eeg_pipeline.plotting.behavioral import visualize_behavior_for_subjects
 
     # Or use high-level visualizers
@@ -20,7 +19,6 @@ Usage:
 Lazy Imports:
     Many plotting functions use lazy imports to reduce startup time.
     Access them directly from this module - they will be loaded on first use:
-    from eeg_pipeline.plotting import plot_power_distributions
 """
 
 # Configuration
@@ -65,7 +63,6 @@ def __getattr__(name: str):
         "compute_cluster_significance_from_combined": "core",
         "compute_significance_mask": "core",  # TFR significance mask (different from connectivity)
         # Features
-        "plot_power_distributions": "features",
         "plot_channel_power_heatmap": "features",
         "plot_power_time_courses": "features",
         "plot_power_spectral_density": "features",
@@ -159,4 +156,3 @@ def __getattr__(name: str):
         return getattr(module, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
