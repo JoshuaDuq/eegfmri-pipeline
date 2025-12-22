@@ -35,6 +35,7 @@ class FeatureContext:
     tmax: Optional[float] = None  # Custom time window end (seconds)
     name: Optional[str] = None  # Name of the current time range
     aggregation_method: str = "mean"  # Aggregation method: 'mean' or 'median'
+    explicit_windows: Optional[List[Dict[str, Any]]] = None  # User-defined time windows (TUI/CLI)
     
     # Pre-computed data (computed lazily)
     precomputed: Optional[PrecomputedData] = None
@@ -64,6 +65,7 @@ class FeatureContext:
                 sampling_rate=self.epochs.info["sfreq"],
                 logger=self.logger,
                 name=self.name,
+                explicit_windows=self.explicit_windows,
             )
             # Convert spec to TimeWindows dataclass
             self._windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
@@ -77,6 +79,17 @@ class FeatureContext:
                     "Missing required time windows for feature extraction: "
                     f"baseline_ok={baseline_ok}, active_ok={active_ok}. "
                     "Check time_frequency_analysis.baseline_window / active_window and epoch time range."
+                )
+
+        fail_on_missing_named = bool(
+            self.config.get("feature_engineering.validation.fail_on_missing_named_window", True)
+        )
+        if fail_on_missing_named and self.name and self._windows is not None:
+            named_mask = self._windows.get_mask(self.name)
+            if named_mask is None or not np.any(named_mask):
+                raise ValueError(
+                    f"Named time window '{self.name}' is missing or empty. "
+                    "Define it in feature_engineering.windows/custom windows or pass explicit ranges."
                 )
 
     @property
@@ -94,6 +107,8 @@ class FeatureContext:
     def set_precomputed(self, precomputed: Optional[PrecomputedData]) -> None:
         self.precomputed = precomputed
         self._precomputed_ready = precomputed is not None
+        if precomputed is not None:
+            precomputed.spatial_modes = list(self.spatial_modes) if self.spatial_modes else None
     
     @property
     def n_epochs(self) -> int:

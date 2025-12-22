@@ -37,7 +37,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "--source",
-        choices=["bids", "epochs", "features", "all"],
+        choices=["bids", "epochs", "features", "source_data", "all"],
         default="epochs",
         help="Discovery source for subjects (default: epochs)",
     )
@@ -79,11 +79,13 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
     
     if args.mode == "subjects":
         if args.source == "all":
-            sources = ["bids", "derivatives_epochs", "features"]
+            sources = ["bids", "derivatives_epochs", "features", "source_data"]
         elif args.source == "bids":
             sources = ["bids"]
         elif args.source == "features":
             sources = ["features"]
+        elif args.source == "source_data":
+            sources = ["source_data"]
         else:
             sources = ["derivatives_epochs"]
         

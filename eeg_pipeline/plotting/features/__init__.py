@@ -1,7 +1,7 @@
 """
 Features plotting module.
 
-Power, microstates, connectivity, phase, and aperiodic feature visualizations.
+Power, connectivity, phase, aperiodic, and complexity feature visualizations.
 """
 
 from __future__ import annotations
@@ -34,16 +34,6 @@ __all__ = [
     "plot_band_power_topomaps",
     "plot_spectral_slope_topomap",
     "plot_feature_importance_ranking",
-    # Microstate plotting
-    "plot_microstate_templates",
-    "plot_microstate_templates_by_pain",
-    "plot_microstate_templates_by_temperature",
-    "plot_microstate_coverage_by_pain",
-    "plot_microstate_temporal_evolution",
-    "plot_microstate_gfp_colored_by_state",
-    "plot_microstate_gfp_by_temporal_bins",
-    "plot_microstate_transition_network",
-    "plot_microstate_duration_distributions",
     # PAC plotting
     "plot_pac_summary",
     # Connectivity plotting
@@ -76,11 +66,6 @@ __all__ = [
     "FeaturePlotContext",
     # CFC visualizations
 
-    # Dynamics visualizations
-    "plot_autocorrelation_decay",
-    "plot_mse_complexity_curves",
-    "plot_neural_timescale_comparison",
-    "plot_dynamics_behavior_grid",
     # Quality visualizations
     "plot_feature_distribution_grid",
     "plot_outlier_trials_heatmap",
@@ -99,11 +84,9 @@ __all__ = [
     "plot_burst_duration_distribution",
     "plot_burst_amplitude_distribution",
     "plot_burst_summary_by_band",
-    "plot_gfp_by_band",
     "plot_power_fano_factor",
     "plot_power_logratio",
     "plot_gamma_ramp_bursts",
-    "plot_dynamics_by_condition",
 ]
 
 
@@ -122,16 +105,6 @@ def __getattr__(name: str):
         "plot_band_power_topomaps": "power",
         "plot_spectral_slope_topomap": "power",
         "plot_feature_importance_ranking": "power",
-        # Microstate plotting
-        "plot_microstate_templates": "microstates",
-        "plot_microstate_templates_by_pain": "microstates",
-        "plot_microstate_templates_by_temperature": "microstates",
-        "plot_microstate_coverage_by_pain": "microstates",
-        "plot_microstate_temporal_evolution": "microstates",
-        "plot_microstate_gfp_colored_by_state": "microstates",
-        "plot_microstate_gfp_by_temporal_bins": "microstates",
-        "plot_microstate_transition_network": "microstates",
-        "plot_microstate_duration_distributions": "microstates",
         # PAC plotting
         "plot_pac_summary": "phase",
         # Connectivity plotting
@@ -161,11 +134,6 @@ def __getattr__(name: str):
         # Visualization orchestration is exposed as top-level wrappers above
         # Context
         "FeaturePlotContext": "context",
-        # Dynamics visualizations
-        "plot_autocorrelation_decay": "dynamics",
-        "plot_mse_complexity_curves": "dynamics",
-        "plot_neural_timescale_comparison": "dynamics",
-        "plot_dynamics_behavior_grid": "dynamics",
         # Quality visualizations
         "plot_feature_distribution_grid": "quality",
         "plot_outlier_trials_heatmap": "quality",
@@ -184,11 +152,9 @@ def __getattr__(name: str):
         "plot_burst_duration_distribution": "burst",
         "plot_burst_amplitude_distribution": "burst",
         "plot_burst_summary_by_band": "burst",
-        "plot_gfp_by_band": "burst",
         "plot_power_fano_factor": "burst",
         "plot_power_logratio": "burst",
         "plot_gamma_ramp_bursts": "burst",
-        "plot_dynamics_by_condition": "burst",
     }
 
     module_name = _module_map.get(name)

@@ -33,7 +33,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
-    parser.add_argument("--fixed-templates", type=str, help="Path to .npz file containing fixed microstate templates")
     parser.add_argument(
         "--categories",
         nargs="+",
@@ -83,30 +82,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Aggregation method for spatial modes (default: mean)",
     )
     
-    # Microstate options
-    parser.add_argument(
-        "--n-microstates",
-        type=int,
-        default=None,
-        help="Number of microstate states (4-7, default: from config)",
-    )
-    parser.add_argument(
-        "--use-group-templates",
-        action="store_true",
-        default=None,
-        help="Use group-level microstate templates",
-    )
-    parser.add_argument(
-        "--no-group-templates",
-        action="store_true",
-        help="Do not use group-level microstate templates",
-    )
     
     # Connectivity options
     parser.add_argument(
         "--connectivity-measures",
         nargs="+",
-        choices=["wpli", "aec", "imcoh", "plv", "pli"],
+        choices=["wpli", "aec", "plv", "pli"],
         default=None,
         help="Connectivity measures to compute",
     )
@@ -147,13 +128,6 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Permutation entropy order (3-7, default: from config)",
     )
     
-    # Dynamics options
-    parser.add_argument(
-        "--burst-percentile",
-        type=int,
-        default=None,
-        help="Burst detection threshold percentile (50-95, default: 75)",
-    )
     return parser
 
 
@@ -168,14 +142,6 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     if args.mode == "compute":
         # Apply feature-specific overrides to config
-        if getattr(args, "n_microstates", None) is not None:
-            config["feature_engineering.microstates.n_states"] = args.n_microstates
-        
-        if getattr(args, "use_group_templates", False):
-            config["feature_engineering.microstates.use_group_templates"] = True
-        elif getattr(args, "no_group_templates", False):
-            config["feature_engineering.microstates.use_group_templates"] = False
-        
         if getattr(args, "connectivity_measures", None) is not None:
             config["feature_engineering.connectivity.measures"] = args.connectivity_measures
         
@@ -192,9 +158,6 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         if getattr(args, "pe_order", None) is not None:
             config["feature_engineering.complexity.pe_order"] = args.pe_order
         
-        if getattr(args, "burst_percentile", None) is not None:
-            config["feature_engineering.dynamics.burst_percentile"] = args.burst_percentile
-        
         # Prepare time ranges
         time_ranges = []
         if getattr(args, "time_range", None):
@@ -209,7 +172,6 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         pipeline.run_batch(
             subjects=subjects,
             task=task,
-            fixed_templates_path=Path(args.fixed_templates) if args.fixed_templates else None,
             feature_categories=categories,
             bands=getattr(args, "bands", None),
             spatial_modes=getattr(args, "spatial", None),

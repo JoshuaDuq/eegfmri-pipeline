@@ -16,30 +16,46 @@ from eeg_pipeline.infra.paths import deriv_features_path
 
 
 STANDARD_FEATURE_FILES = {
+    # Core spectral
     "power": "features_power.tsv",
-    "connectivity": "features_connectivity.parquet",
-    "microstates": "features_microstates.tsv",
+    "spectral": "features_spectral.tsv",
     "aperiodic": "features_aperiodic.tsv",
+    "erp": "features_erp.tsv",
+    "erds": "features_erds.tsv",
+    "ratios": "features_ratios.tsv",
+    "asymmetry": "features_asymmetry.tsv",
+    # Connectivity & phase
+    "connectivity": "features_connectivity.parquet",
     "itpc": "features_itpc.tsv",
     "pac": "features_pac_trials.tsv",
+    # Exploratory & QC
     "complexity": "features_complexity.tsv",
-    "dynamics": "features_dynamics.tsv",
-    "cfc": "features_cfc.tsv",
-    "precomputed": "features_precomputed.tsv",
+    "bursts": "features_bursts.tsv",
+    "quality": "features_quality.tsv",
+    "temporal": "features_temporal.tsv",
+    # Aggregate
     "all": "features_all.tsv",
 }
 
 FEATURE_FILE_DISPLAY_NAMES = {
+    # Core spectral
     "power": "Power Spectral Features",
-    "connectivity": "Connectivity Features",
-    "microstates": "Microstate Features",
+    "spectral": "Spectral Peak Features",
     "aperiodic": "Aperiodic (1/f) Features",
+    "erp": "ERP/LEP Time-Domain Features",
+    "erds": "Event-Related Desync/Sync",
+    "ratios": "Band Power Ratios",
+    "asymmetry": "Hemispheric Asymmetry",
+    # Connectivity & phase
+    "connectivity": "Connectivity Features",
     "itpc": "Inter-Trial Phase Coherence",
     "pac": "Phase-Amplitude Coupling",
+    # Exploratory & QC
     "complexity": "Complexity Features",
-    "dynamics": "Dynamics Features",
-    "cfc": "Cross-Frequency Coupling",
-    "precomputed": "Precomputed Features",
+    "bursts": "Burst Dynamics",
+    "quality": "Trial Quality Metrics",
+    "temporal": "Temporal Binned Features",
+    # Aggregate
     "all": "All Features Combined",
 }
 

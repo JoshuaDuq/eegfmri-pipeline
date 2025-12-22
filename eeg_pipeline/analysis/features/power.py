@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 import numpy as np
 import pandas as pd
 
@@ -14,6 +14,39 @@ def _prepare_tfr(tfr: Any, config: Any, logger: Any):
     if tfr_obj is None:
         return None, None, None, None, None
     return tfr_obj, tfr_obj.data, tfr_obj.freqs, tfr_obj.times, tfr_obj.info["ch_names"]
+
+def _build_baseline_arrays(
+    baseline_df: Optional[pd.DataFrame],
+    channel_names: List[str],
+) -> dict:
+    if baseline_df is None or baseline_df.empty:
+        return {}
+
+    baseline_map: dict = {}
+    for col in baseline_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "power" or parsed.get("segment") != "baseline":
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        band = parsed.get("band")
+        ch = parsed.get("identifier")
+        if not band or not ch:
+            continue
+        baseline_map.setdefault(band, {})[ch] = baseline_df[col].to_numpy(dtype=float)
+
+    n_epochs = len(baseline_df)
+    baseline_arrays = {}
+    for band, ch_map in baseline_map.items():
+        band_matrix = np.full((n_epochs, len(channel_names)), np.nan)
+        for idx, ch in enumerate(channel_names):
+            values = ch_map.get(ch)
+            if values is not None and len(values) == n_epochs:
+                band_matrix[:, idx] = values
+        baseline_arrays[band] = band_matrix
+    return baseline_arrays
 
 def extract_power_features(
     ctx: Any, # FeatureContext
@@ -68,30 +101,20 @@ def extract_power_features(
 
     n_epochs = len(tfr_data)
     
-    ctx_name = getattr(ctx, "name", None)
     def _get_tfr_mask(segment_name):
-        mask = make_mask_for_times(ctx.windows, segment_name, times)
-        # If mask is empty but name matches context name, use full window
-        if not np.any(mask) and segment_name == ctx_name:
-            return np.ones(len(times), dtype=bool)
-        return mask
+        return make_mask_for_times(ctx.windows, segment_name, times)
     
-
-    # Calculate Baseline Power per band/channel first (for normalization)
-    baseline_powers = {}
-    baseline_window = _get_tfr_mask("baseline")
-    has_baseline = np.any(baseline_window)
-    
-    if has_baseline:
-        for band, fmask in band_indices.items():
-            # Mean over freq, Mean over time
-            # tfr_data: (epochs, channels, freqs, times)
-            d = tfr_data[:, :, fmask, :][:, :, :, baseline_window]
-            # Average over time first (last axis) -> (epochs, channels, freqs)
-            # Then average over freq (axis 2) -> (epochs, channels)
-            # Note: TFR is usually Power values already.
-            p_base = np.nanmean(np.nanmean(d, axis=3), axis=2)
-            baseline_powers[band] = p_base
+    baseline_df = getattr(ctx, "baseline_df", None)
+    baseline_arrays = _build_baseline_arrays(baseline_df, channel_names)
+    require_baseline = bool(ctx.config.get("feature_engineering.power.require_baseline", True))
+    if require_baseline and not tfr_already_baselined:
+        if baseline_df is None or baseline_df.empty:
+            raise ValueError("Power features require baseline_df for log-ratio normalization.")
+        if len(baseline_df) != n_epochs:
+            raise ValueError(
+                "Baseline feature length mismatch for power normalization: "
+                f"{len(baseline_df)} vs {n_epochs}"
+            )
             
     # Determine segments to process: ONLY the one requested in context
     # unless no name is provided, in which case we fall back to 'full'
@@ -114,27 +137,29 @@ def extract_power_features(
         for band, fmask in band_indices.items():
             try:
                 d = tfr_data[:, :, fmask, :][:, :, :, mask]
-                
-                raw_power = np.nanmean(np.nanmean(d, axis=3), axis=2) # (n_epochs, n_channels)
-                eps_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
-                raw_power = np.maximum(raw_power, eps_psd)
+                segment_power = np.nanmean(np.nanmean(d, axis=3), axis=2)  # (n_epochs, n_channels)
 
                 if tfr_already_baselined:
-                    # Baseline normalization has already been applied at the TFR level.
-                    # Avoid computing a second log-ratio against a separately-estimated baseline.
-                    val_matrix = np.nanmean(np.nanmean(d, axis=3), axis=2)
+                    # Baselined at TFR level; preserve sign and scale.
+                    val_matrix = segment_power
                     stat_name = "baselined"
-                elif band in baseline_powers:
-                    base = baseline_powers[band]
-                    denom = base.copy()
-                    denom[denom == 0] = np.nan
-                    # Log-ratio
-                    val_matrix = np.log10(raw_power / denom)
-                    stat_name = "logratio"
                 else:
-                    # Fallback to raw log10 if no baseline
-                    val_matrix = np.log10(raw_power)
-                    stat_name = "log10raw"
+                    eps_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))
+                    raw_power = np.maximum(segment_power, eps_psd)
+                    base = baseline_arrays.get(band)
+                    if base is None or not np.isfinite(base).any():
+                        if require_baseline:
+                            raise ValueError(
+                                f"Missing baseline power for band '{band}'; "
+                                "set feature_engineering.power.require_baseline=false to allow raw log power."
+                            )
+                        val_matrix = np.log10(raw_power)
+                        stat_name = "log10raw"
+                    else:
+                        denom = base.copy()
+                        denom[denom <= 0] = np.nan
+                        val_matrix = np.log10(raw_power / denom)
+                        stat_name = "logratio"
 
                 # Per-channel (only if 'channels' in spatial_modes)
                 if 'channels' in spatial_modes:

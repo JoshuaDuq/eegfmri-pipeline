@@ -68,6 +68,30 @@ def compute_nonlinear_energy(x: np.ndarray) -> float:
     return float(np.mean(nle))
 
 
+def compute_gfp(data: np.ndarray) -> np.ndarray:
+    """
+    Compute Global Field Power (GFP) of multichannel data.
+    
+    GFP is defined as the spatial standard deviation across all channels 
+    at each time point. It represents the global activity level of the 
+    brain at that instant.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Multichannel data of shape (..., n_channels, n_times)
+    
+    Returns
+    -------
+    np.ndarray
+        GFP time series of shape (..., n_times)
+    """
+    if data.size == 0:
+        return np.array([])
+    # Standard deviation over the channel axis (assumed to be the second to last)
+    return np.nanstd(data, axis=-2)
+
+
 # =============================================================================
 # Complexity Metrics
 # =============================================================================
@@ -450,18 +474,3 @@ def compute_spectral_entropy(
     return se
 
 
-def compute_gfp(data: np.ndarray) -> np.ndarray:
-    """
-    Compute Global Field Power for all epochs.
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Input data (epochs, channels, times)
-        
-    Returns
-    -------
-    np.ndarray
-        GFP (epochs, times)
-    """
-    return np.std(data, axis=1)

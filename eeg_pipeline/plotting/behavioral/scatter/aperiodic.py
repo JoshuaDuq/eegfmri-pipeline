@@ -16,6 +16,8 @@ from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_table
 from eeg_pipeline.utils.data import load_precomputed_correlations
 from eeg_pipeline.infra.logging import get_subject_logger
+from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 def _extract_aperiodic_values(
@@ -93,6 +95,13 @@ def plot_aperiodic_roi_scatter(
     behavioral_config = get_plot_config(config).get_behavioral_config()
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
+    robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+    if robust_method is not None:
+        robust_method = str(robust_method).strip().lower() or None
+    method_label = format_correlation_method_label(
+        "spearman" if use_spearman else "pearson",
+        robust_method,
+    )
 
     aperiodic_plot_cfg = behavioral_config.get("aperiodic", {})
     segment = str(aperiodic_plot_cfg.get("segment", "baseline"))
@@ -112,9 +121,21 @@ def plot_aperiodic_roi_scatter(
         )
     data.features_df = aperiodic_df
 
-    rating_stats = load_precomputed_correlations(data.stats_dir, "aperiodic", "rating", logger)
+    rating_stats = load_precomputed_correlations(
+        data.stats_dir,
+        "aperiodic",
+        "rating",
+        logger,
+        method_label=method_label,
+    )
     temp_stats = (
-        load_precomputed_correlations(data.stats_dir, "aperiodic", "temperature", logger)
+        load_precomputed_correlations(
+            data.stats_dir,
+            "aperiodic",
+            "temperature",
+            logger,
+            method_label=method_label,
+        )
         if do_temp
         else None
     )

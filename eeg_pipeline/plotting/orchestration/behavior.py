@@ -20,6 +20,11 @@ from eeg_pipeline.plotting.behavioral.registry import (
     BehaviorPlotContext,
     BehaviorPlotManager,
 )
+from eeg_pipeline.utils.analysis.stats.correlation import (
+    format_correlation_method_label,
+    normalize_correlation_method,
+)
+from eeg_pipeline.utils.config.loader import get_config_value
 
 # Import plotters for side-effects: registers plot functions into BehaviorPlotRegistry.
 # This import must not call back into this module at import time.
@@ -48,9 +53,16 @@ def _build_behavior_plot_context(
     ensure_dir(plots_dir)
     ensure_dir(stats_dir)
 
-    stats_config = config.get("behavior_analysis", {}).get("statistics", {})
-    use_spearman = stats_config.get("correlation_method") == "spearman"
-    rating_stats, temp_stats = load_behavior_stats_files(stats_dir, logger)
+    raw_method = get_config_value(config, "behavior_analysis.statistics.correlation_method", None)
+    if raw_method is None:
+        raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
+    method = normalize_correlation_method(raw_method, default="spearman")
+    use_spearman = method == "spearman"
+    robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+    if robust_method is not None:
+        robust_method = str(robust_method).strip().lower() or None
+    method_label = format_correlation_method_label(method, robust_method)
+    rating_stats, temp_stats = load_behavior_stats_files(stats_dir, logger, method_label=method_label)
 
     return BehaviorPlotContext(
         subject=subject,
@@ -228,4 +240,3 @@ __all__ = [
     "visualize_subject_behavior",
     "visualize_behavior_for_subjects",
 ]
-

@@ -22,10 +22,6 @@ from eeg_pipeline.plotting.features.aperiodic import (
     plot_aperiodic_topomaps,
     plot_aperiodic_by_condition,
 )
-from eeg_pipeline.plotting.features.burst import (
-    plot_burst_summary_by_band,
-    plot_dynamics_by_condition,
-)
 from eeg_pipeline.plotting.features.connectivity import (
     plot_connectivity_by_condition,
     plot_connectivity_circle_by_condition,
@@ -33,13 +29,7 @@ from eeg_pipeline.plotting.features.connectivity import (
     plot_connectivity_network,
     plot_sliding_connectivity_trajectories,
 )
-from eeg_pipeline.plotting.features.dynamics import plot_autocorrelation_decay
 from eeg_pipeline.plotting.features.erds import plot_erds_temporal_evolution
-from eeg_pipeline.plotting.features.microstates import (
-    plot_microstate_by_condition,
-    plot_microstate_templates,
-    plot_microstate_transition_matrix,
-)
 from eeg_pipeline.plotting.features.phase import (
     plot_itpc_heatmap,
     plot_itpc_topomaps,
@@ -147,84 +137,6 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
             ["baseline", "plateau"],
         )
 
-
-###################################################################
-# Burst / Dynamics
-###################################################################
-
-
-@VisualizationRegistry.register("burst")
-def plot_burst_suite(ctx: FeaturePlotContext, saved_files):
-    df = ctx.dynamics_df if ctx.dynamics_df is not None else ctx.all_features
-    if df is None:
-        return
-
-    save_dir = ctx.subdir("dynamics")
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "burst_summary",
-        "dynamics",
-        None,
-        plot_burst_summary_by_band,
-        df,
-        save_dir / f"sub-{ctx.subject}_burst_summary.png",
-        config=ctx.config,
-    )
-
-    if ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "dynamics_by_condition",
-            "dynamics",
-            None,
-            plot_dynamics_by_condition,
-            df,
-            ctx.aligned_events,
-            ctx.subject,
-            save_dir,
-            ctx.config,
-        )
-
-    if ctx.dynamics_df is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "dynamics_band_segment_condition",
-            "dynamics",
-            None,
-            plot_band_segment_condition,
-            ctx.dynamics_df,
-            ctx.aligned_events,
-            ctx.subject,
-            save_dir,
-            ctx.logger,
-            ctx.config,
-            "dynamics",
-            "Dynamics",
-            ["baseline", "plateau"],
-        )
-
-
-@VisualizationRegistry.register("dynamics")
-def plot_dynamics(ctx: FeaturePlotContext, saved_files):
-    if ctx.dynamics_df is None:
-        return
-
-    dynamics_dir = ctx.subdir("dynamics")
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "autocorrelation_decay",
-        "dynamics",
-        None,
-        plot_autocorrelation_decay,
-        dynamics_df=ctx.dynamics_df,
-        save_path=dynamics_dir / f"sub-{ctx.subject}_autocorrelation_decay",
-    )
 
 
 ###################################################################
@@ -561,111 +473,6 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
         )
 
-
-###################################################################
-# Microstates
-###################################################################
-
-
-@VisualizationRegistry.register("microstates")
-def plot_microstate_templates_from_stats(ctx: FeaturePlotContext, saved_files):
-    if ctx.epochs is None or ctx.microstate_df is None:
-        return
-
-    n_microstates = int(ctx.config.get("feature_engineering.microstates.n_states", 4))
-
-    deriv_root = getattr(ctx.config, "deriv_root", None)
-    if deriv_root is None:
-        return
-
-    stats_dir = deriv_stats_path(deriv_root, ctx.subject)
-    template_path = stats_dir / f"microstates_templates_K{n_microstates}.npz"
-    if not template_path.exists():
-        return
-
-    try:
-        data = np.load(template_path)
-        ms_templates = data["templates"]
-        picks = mne.pick_types(
-            ctx.epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
-        )
-        info_eeg = mne.pick_info(ctx.epochs.info, picks)
-
-        def _do(save_dir):
-            plot_microstate_templates(
-                ms_templates,
-                info_eeg,
-                ctx.subject,
-                save_dir,
-                n_microstates,
-                ctx.logger,
-                ctx.config,
-            )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "microstate_templates",
-            "microstates",
-            None,
-            _do,
-            ctx.subdir("microstates"),
-        )
-    except Exception as e:
-        ctx.logger.error(f"Error loading/plotting microstates: {e}")
-
-
-@VisualizationRegistry.register("microstates")
-def plot_microstate_condition(ctx: FeaturePlotContext, saved_files):
-    if ctx.microstate_df is None or ctx.aligned_events is None:
-        return
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "microstate_by_condition",
-        "microstates",
-        None,
-        plot_microstate_by_condition,
-        microstate_df=ctx.microstate_df,
-        events_df=ctx.aligned_events,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("microstates"),
-        logger=ctx.logger,
-        config=ctx.config,
-    )
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "microstate_transition_matrix",
-        "microstates",
-        None,
-        plot_microstate_transition_matrix,
-        microstate_df=ctx.microstate_df,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("microstates"),
-        logger=ctx.logger,
-        config=ctx.config,
-    )
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "microstates_band_segment_condition",
-        "microstates",
-        None,
-        plot_band_segment_condition,
-        ctx.microstate_df,
-        ctx.aligned_events,
-        ctx.subject,
-        ctx.subdir("microstates"),
-        ctx.logger,
-        ctx.config,
-        "microstates",
-        "Microstates",
-        ["baseline", "plateau"],
-    )
 
 
 ###################################################################

@@ -89,6 +89,7 @@ def run_merge_behavior(
     bids_root: Path,
     source_root: Path,
     task: str,
+    subjects: Optional[List[str]] = None,
     event_prefixes: Optional[List[str]] = None,
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
@@ -98,6 +99,7 @@ def run_merge_behavior(
         bids_root=bids_root,
         source_root=source_root,
         task=task,
+        subjects=subjects,
         event_prefixes=event_prefixes,
         event_types=event_types,
         dry_run=dry_run,
@@ -219,11 +221,12 @@ class UtilityPipeline(PipelineBase):
         )
         
         progress.step("Merging behavior", current=2, total=total_steps)
-        self.logger.info(f"Running merge-behavior")
+        self.logger.info(f"Running merge-behavior for {len(subjects)} subjects")
         n_merged = run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=task,
+            subjects=subjects,
             event_prefixes=kwargs.get("event_prefixes"),
             event_types=kwargs.get("event_types"),
             dry_run=kwargs.get("dry_run", False),
@@ -269,6 +272,7 @@ class UtilityPipeline(PipelineBase):
     def run_merge_behavior(
         self,
         task: Optional[str] = None,
+        subjects: Optional[List[str]] = None,
         event_prefixes: Optional[List[str]] = None,
         event_types: Optional[List[str]] = None,
         dry_run: bool = False,
@@ -279,6 +283,7 @@ class UtilityPipeline(PipelineBase):
             bids_root=self.bids_root,
             source_root=self.source_root,
             task=task,
+            subjects=subjects,
             event_prefixes=event_prefixes,
             event_types=event_types,
             dry_run=dry_run,

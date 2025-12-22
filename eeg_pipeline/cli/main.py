@@ -14,7 +14,6 @@ Commands:
     utilities      Raw-to-BIDS conversion and behavior merge
     behavior       Brain-behavior correlation analysis
     features       Feature extraction from epochs
-    erp            Event-related potential analysis
     tfr            Time-frequency visualization
     decoding       ML-based prediction
 
@@ -62,8 +61,6 @@ Examples:
   python -m eeg_pipeline.cli.main features compute --subject 0001
   python -m eeg_pipeline.cli.main features visualize --subject 0001
 
-  # ERP: compute statistics
-  python -m eeg_pipeline.cli.main erp compute --subject 0001
 
   # TFR: visualize
   python -m eeg_pipeline.cli.main tfr visualize --subject 0001

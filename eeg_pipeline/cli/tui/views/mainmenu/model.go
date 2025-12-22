@@ -26,11 +26,10 @@ type pipelineItem struct {
 
 var pipelines = []pipelineItem{
 	{"Preprocessing", "Bad channels, ICA, epochs", "▸", "1"},
-	{"Features", "Extract power, connectivity, dynamics", "▸", "2"},
+	{"Features", "Extract EEG feature sets", "▸", "2"},
 	{"Behavior", "EEG-behavior correlation analysis", "▸", "3"},
-	{"ERP", "Event-related potential statistics", "▸", "4"},
-	{"TFR", "Time-frequency representations", "▸", "5"},
-	{"Decoding", "LOSO regression & classification", "▸", "6"},
+	{"TFR", "Time-frequency representations", "▸", "4"},
+	{"Decoding", "LOSO regression & classification", "▸", "5"},
 }
 
 type utilityItem struct {
@@ -79,7 +78,7 @@ func New() Model {
 	help := components.NewHelpOverlay("Keyboard Shortcuts", 50)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
-		{Key: "1-6", Description: "Quick select pipeline"},
+		{Key: "1-5", Description: "Quick select pipeline"},
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Select pipeline"},
@@ -96,6 +95,14 @@ func New() Model {
 		SelectedUtility:  -1,
 		Task:             "thermalactive",
 		helpOverlay:      help,
+	}
+}
+
+// SetCursor sets the pipeline cursor position (for restoring last selected pipeline)
+func (m *Model) SetCursor(idx int) {
+	if idx >= 0 && idx < len(pipelines) {
+		m.pipelineCursor = idx
+		m.inUtilities = false
 	}
 }
 
@@ -144,7 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleTab()
 		case "enter", " ":
 			return m.handleEnter()
-		case "1", "2", "3", "4", "5", "6":
+		case "1", "2", "3", "4", "5":
 			idx := int(msg.String()[0] - '1')
 			if idx >= 0 && idx < len(pipelines) {
 				m.inUtilities = false
@@ -357,7 +364,6 @@ func (m Model) renderHeader() string {
 		localIcon := localFrames[(m.ticker/5)%len(localFrames)]
 		envBadge = "  " + lipgloss.NewStyle().
 			Foreground(styles.Success).
-			Background(styles.BgBase).
 			Padding(0, 1).
 			Render(localIcon+" LOCAL")
 	}
@@ -561,7 +567,7 @@ func (m Model) renderFooter() string {
 	hints := []string{
 		styles.RenderKeyHint("↑↓", "Navigate"),
 		styles.RenderKeyHint("Tab", "Switch"),
-		styles.RenderKeyHint("1-6", "Pipeline"),
+		styles.RenderKeyHint("1-5", "Pipeline"),
 		styles.RenderKeyHint("C", "Combine"),
 		styles.RenderKeyHint("M", "Merge"),
 		styles.RenderKeyHint("R", "Raw2BIDS"),

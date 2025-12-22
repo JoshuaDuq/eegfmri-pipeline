@@ -27,6 +27,35 @@ def get_correlation_method(use_spearman: bool) -> str:
     return "spearman" if use_spearman else "pearson"
 
 
+_VALID_CORR_METHODS = {"spearman", "pearson"}
+
+
+def normalize_correlation_method(method: Optional[str], default: str = "spearman") -> str:
+    """Normalize correlation method names to supported values."""
+    if method is None:
+        return default
+    try:
+        cleaned = str(method).strip().lower()
+    except Exception:
+        return default
+    return cleaned if cleaned in _VALID_CORR_METHODS else default
+
+
+def format_correlation_method_label(method: Optional[str], robust_method: Optional[str] = None) -> str:
+    """Format the exact correlation method label for outputs."""
+    base = normalize_correlation_method(method, default="spearman")
+    if robust_method:
+        label = f"{base}_{robust_method}"
+    else:
+        label = base
+    try:
+        cleaned = str(label).strip().lower()
+    except Exception:
+        cleaned = "unknown"
+    cleaned = cleaned.replace(" ", "_")
+    return cleaned or "unknown"
+
+
 def compute_correlation(
     x: np.ndarray,
     y: np.ndarray,
@@ -219,6 +248,7 @@ def correlate_features_loop(
     rng = rng or np.random.default_rng()
     ci_level = get_ci_level(config)
 
+    method_label = format_correlation_method_label(method, robust_method)
     records = []
     for col in feature_df.columns:
         vals = pd.to_numeric(feature_df[col], errors="coerce").to_numpy()
@@ -272,7 +302,7 @@ def correlate_features_loop(
                 r,
                 p,
                 n,
-                method,
+                method_label,
                 identifier_type=identifier_type,
                 analysis_type=ft,
                 ci_low=ci_low,
@@ -304,6 +334,7 @@ def safe_correlation(
         config = ensure_config(config)
         min_samples = int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
     
+    method = normalize_correlation_method(method, default="spearman")
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
 
@@ -435,10 +466,12 @@ def run_pain_sensitivity_correlations(
     ratings: pd.Series,
     temperatures: pd.Series,
     method: str = "spearman",
+    robust_method: Optional[str] = None,
     min_samples: int = 10,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
     """Correlate features with pain sensitivity index."""
+    method_label = format_correlation_method_label(method, robust_method)
     def _align_psi_inputs() -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series]]:
         if features_df is None or features_df.empty or ratings is None or temperatures is None:
             return None, None, None
@@ -497,7 +530,13 @@ def run_pain_sensitivity_correlations(
     records = []
     for col in feat_valid.columns:
         vals = pd.to_numeric(feat_valid[col], errors="coerce").values
-        r, p, n = safe_correlation(vals, psi_valid.values, method, min_samples)
+        r, p, n = safe_correlation(
+            vals,
+            psi_valid.values,
+            method,
+            min_samples,
+            robust_method=robust_method,
+        )
 
         if np.isfinite(r):
             records.append({
@@ -506,6 +545,10 @@ def run_pain_sensitivity_correlations(
                 "p_psi": float(p),
                 "n": n,
                 "effect_interpretation": interpret_correlation(r),
+                "method": method,
+                "robust_method": robust_method,
+                "method_label": method_label,
+                "target": "pain_sensitivity",
             })
 
     if logger:
@@ -1480,4 +1523,3 @@ def correlate_single_feature(
         r_pf, p_pf = r_po, p_po
     
     return r_raw, p_raw, r_pt, p_pt, r_po, p_po, r_pf, p_pf, n_valid
-

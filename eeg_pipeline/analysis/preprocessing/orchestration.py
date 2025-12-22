@@ -252,6 +252,7 @@ def run_merge_behavior(
     bids_root: Path,
     source_root: Path,
     task: str,
+    subjects: Optional[List[str]] = None,
     event_prefixes: Optional[List[str]] = None,
     event_types: Optional[List[str]] = None,
     dry_run: bool = False,
@@ -268,6 +269,13 @@ def run_merge_behavior(
         ev_paths = sorted(bids_root.glob(pattern))
         if not ev_paths:
             log.info("No events found under %s for task '%s'", bids_root, task)
+            return 0
+
+    if subjects:
+        subj_set = {f"sub-{s}" if not s.startswith("sub-") else s for s in subjects}
+        ev_paths = [p for p in ev_paths if p.parts[-3] in subj_set]
+        if not ev_paths:
+            log.info("No matching events found for subjects: %s", sorted(subj_set))
             return 0
 
     n_ok = 0

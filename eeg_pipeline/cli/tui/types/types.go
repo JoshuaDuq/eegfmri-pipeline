@@ -7,7 +7,6 @@ const (
 	PipelinePreprocessing Pipeline = iota
 	PipelineFeatures
 	PipelineBehavior
-	PipelineERP
 	PipelineTFR
 	PipelineDecoding
 	PipelineCombineFeatures
@@ -27,7 +26,6 @@ func (p Pipeline) String() string {
 		"Preprocessing",
 		"Features",
 		"Behavior",
-		"ERP",
 		"TFR",
 		"Decoding",
 		"Combine Features",
@@ -45,7 +43,6 @@ func (p Pipeline) Description() string {
 		"Bad channels, ICA, epochs",
 		"Extract EEG features (power, connectivity...)",
 		"EEG-behavior correlation analysis",
-		"Event-related potential statistics",
 		"Time-frequency visualizations",
 		"LOSO regression & time generalization",
 		"Aggregate feature files into features_all.tsv",
@@ -126,7 +123,7 @@ func (p Pipeline) RequiresEpochs() bool {
 	switch p {
 	case PipelinePreprocessing, PipelineRawToBIDS:
 		return false // Works with raw BIDS data or source data
-	case PipelineFeatures, PipelineERP, PipelineTFR:
+	case PipelineFeatures, PipelineTFR:
 		return true // Need epochs
 	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures, PipelineMergeBehavior:
 		return false // Need features or other raw data
@@ -159,12 +156,14 @@ func (p Pipeline) ValidateSubject(s SubjectStatus) (valid bool, reason string) {
 // GetDataSource returns the appropriate data source for subject discovery
 func (p Pipeline) GetDataSource() string {
 	switch p {
-	case PipelinePreprocessing, PipelineRawToBIDS:
+	case PipelinePreprocessing, PipelineMergeBehavior:
 		return "bids" // Raw BIDS data or source folder (handled by CLI)
-	case PipelineFeatures, PipelineERP, PipelineTFR:
+	case PipelineRawToBIDS:
+		return "source_data" // Raw source data
+	case PipelineFeatures, PipelineTFR:
 		return "epochs" // Epoched data
-	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures, PipelineMergeBehavior:
-		return "features" // Extracted features or events
+	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures:
+		return "features" // Extracted features
 	default:
 		return "epochs" // Default to epochs
 	}

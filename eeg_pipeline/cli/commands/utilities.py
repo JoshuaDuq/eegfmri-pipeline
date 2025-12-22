@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, List
 
 from eeg_pipeline.cli.common import (
+    add_common_subject_args,
     add_task_arg,
     add_output_format_args,
     create_progress_reporter,
@@ -22,11 +23,11 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("mode", choices=["raw-to-bids", "merge-behavior", "combine-features"], help="Preprocessing mode")
+    add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
     parser.add_argument("--source-root", type=str, default=None)
     parser.add_argument("--bids-root", type=str, default=None)
-    parser.add_argument("--subjects", type=str, nargs="*", default=None)
     
     raw_group = parser.add_argument_group("raw-to-bids options")
     raw_group.add_argument("--montage", type=str, default="easycap-M1")
@@ -59,7 +60,7 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
         config._bids_root = Path(args.bids_root)
     
     pipeline = UtilityPipeline(config=config)
-    target_subjects = args.subjects or subjects or []
+    target_subjects = subjects or []
     
     if args.mode == "raw-to-bids":
         progress.start("utilities_raw_to_bids", target_subjects)

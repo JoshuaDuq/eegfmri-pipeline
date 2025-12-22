@@ -6,11 +6,16 @@ import "github.com/charmbracelet/lipgloss"
 // Helper Functions
 ///////////////////////////////////////////////////////////////////
 
-// RenderKeyHint formats a keyboard shortcut hint
+// RenderKeyHint formats a keyboard shortcut hint with pill-style key badge
 func RenderKeyHint(key, label string) string {
-	keyStyle := lipgloss.NewStyle().Foreground(Primary).Bold(true)
-	labelStyle := lipgloss.NewStyle().Foreground(TextDim)
-	return keyStyle.Render("["+key+"]") + labelStyle.Render(" "+label)
+	// Pill-style key badge
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(Accent).
+		Bold(true).
+		Padding(0, 1)
+	labelStyle := lipgloss.NewStyle().Foreground(TextDim).PaddingLeft(1)
+	return keyStyle.Render(key) + labelStyle.Render(label)
 }
 
 // RenderFooterHelp formats multiple keyboard hints for footer
@@ -42,28 +47,36 @@ func RenderStatusBadge(status string) string {
 	}
 }
 
-// RenderCheckbox returns a styled checkbox
+// RenderCheckbox returns a styled checkbox with modern circle icons
 func RenderCheckbox(checked, focused bool) string {
 	if checked && focused {
-		return SuccessStyle.Render("[" + CheckMark + "]")
+		// Selected + focused: filled circle with glow effect
+		return lipgloss.NewStyle().Foreground(Success).Bold(true).Render("◉")
 	} else if checked {
-		return lipgloss.NewStyle().Foreground(Success).Render("[" + CheckMark + "]")
+		// Selected: solid filled circle
+		return lipgloss.NewStyle().Foreground(Success).Render("●")
 	} else if focused {
-		return lipgloss.NewStyle().Foreground(Primary).Render("[ ]")
+		// Unselected + focused: ring with primary color
+		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("○")
 	}
-	return lipgloss.NewStyle().Foreground(Secondary).Render("[ ]")
+	// Unselected: subtle ring
+	return lipgloss.NewStyle().Foreground(Muted).Render("○")
 }
 
-// RenderRadio returns a styled radio button
+// RenderRadio returns a styled radio button with modern circle icons
 func RenderRadio(selected, focused bool) string {
 	if selected && focused {
-		return lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("(" + ActiveMark + ")")
+		// Selected + focused: accent colored filled circle
+		return lipgloss.NewStyle().Foreground(Accent).Bold(true).Render("◉")
 	} else if selected {
-		return lipgloss.NewStyle().Foreground(Primary).Render("(" + ActiveMark + ")")
+		// Selected: primary filled circle
+		return lipgloss.NewStyle().Foreground(Primary).Render("●")
 	} else if focused {
-		return lipgloss.NewStyle().Foreground(Primary).Render("( )")
+		// Unselected + focused: primary ring
+		return lipgloss.NewStyle().Foreground(Primary).Render("○")
 	}
-	return lipgloss.NewStyle().Foreground(Muted).Render("( )")
+	// Unselected: muted ring
+	return lipgloss.NewStyle().Foreground(Muted).Render("○")
 }
 
 // RenderValidationIndicator returns a validation status indicator
@@ -74,7 +87,7 @@ func RenderValidationIndicator(valid bool, reason string) string {
 	return InvalidIndicatorStyle.Render(WarningMark + " " + reason)
 }
 
-// RenderProgressBar creates a visual progress bar
+// RenderProgressBar creates a visual progress bar with polished edge caps
 func RenderProgressBar(progress float64, width int, showPct bool) string {
 	if width < 5 {
 		width = 5
@@ -83,16 +96,24 @@ func RenderProgressBar(progress float64, width int, showPct bool) string {
 		width = MaxProgressBarWidth
 	}
 
-	filled := int(progress * float64(width))
+	// Reserve space for caps
+	innerWidth := width - 2
+	filled := int(progress * float64(innerWidth))
 	if filled < 0 {
 		filled = 0
 	}
-	if filled > width {
-		filled = width
+	if filled > innerWidth {
+		filled = innerWidth
 	}
 
-	bar := ProgressFilledStyle.Render(repeatString("█", filled))
-	bar += ProgressEmptyStyle.Render(repeatString("░", width-filled))
+	// Build bar with edge caps for polished look
+	leftCap := lipgloss.NewStyle().Foreground(Primary).Render("▐")
+	rightCap := lipgloss.NewStyle().Foreground(Secondary).Render("▌")
+
+	bar := leftCap
+	bar += ProgressFilledStyle.Render(repeatString("█", filled))
+	bar += ProgressEmptyStyle.Render(repeatString("░", innerWidth-filled))
+	bar += rightCap
 
 	if showPct {
 		pct := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
@@ -184,9 +205,8 @@ func RenderHighlight(text string) string {
 // RenderCode renders text in a code style
 func RenderCode(text string) string {
 	return lipgloss.NewStyle().
-		Background(BgBase).
 		Foreground(Text).
-		Padding(0, 1).
+		Bold(true).
 		Render(text)
 }
 
@@ -332,7 +352,6 @@ func RenderStepIndicator(current, total int, tick int) string {
 		} else {
 			steps = append(steps, lipgloss.NewStyle().
 				Foreground(TextDim).
-				Background(Secondary).
 				Padding(0, 1).
 				Render(num))
 		}
@@ -364,14 +383,13 @@ func intersperse(elems []string, sep string) []string {
 func RenderInfoBox(title, content string, width int) string {
 	titleBar := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(Text).
-		Background(Secondary).
-		Padding(0, 1).
+		Foreground(Primary).
+		Underline(true).
 		Render(" " + title + " ")
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(Secondary).
+		BorderForeground(Muted).
 		Padding(0, 1).
 		Width(width)
 

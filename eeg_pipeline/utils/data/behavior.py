@@ -62,15 +62,26 @@ def load_stats_file_with_fallbacks(
 def load_behavior_stats_files(
     stats_dir: Path,
     logger: logging.Logger,
+    method_label: Optional[str] = None,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    method_suffix = f"_{method_label}" if method_label else ""
     rating_patterns = [
-        "corr_stats_pow_roi_vs_rating.tsv",
-        "corr_stats_power_roi_vs_rating.tsv",
+        f"corr_stats_pow_roi_vs_rating{method_suffix}.tsv",
+        f"corr_stats_power_roi_vs_rating{method_suffix}.tsv",
     ]
     temp_patterns = [
-        "corr_stats_pow_roi_vs_temp.tsv",
-        "corr_stats_power_roi_vs_temp.tsv",
+        f"corr_stats_pow_roi_vs_temp{method_suffix}.tsv",
+        f"corr_stats_power_roi_vs_temp{method_suffix}.tsv",
     ]
+    if method_label:
+        rating_patterns.extend([
+            "corr_stats_pow_roi_vs_rating.tsv",
+            "corr_stats_power_roi_vs_rating.tsv",
+        ])
+        temp_patterns.extend([
+            "corr_stats_pow_roi_vs_temp.tsv",
+            "corr_stats_power_roi_vs_temp.tsv",
+        ])
 
     rating_stats = load_stats_file_with_fallbacks(stats_dir, rating_patterns)
     temp_stats = load_stats_file_with_fallbacks(stats_dir, temp_patterns)
@@ -101,7 +112,7 @@ def load_subject_data_for_summary(
         try:
             from .feature_io import _load_features_and_targets
 
-            _temporal_df, power_df, _conn_df, ratings, _info = _load_features_and_targets(
+            _full_power_df, power_df, _conn_df, ratings, _info = _load_features_and_targets(
                 subject, task, deriv_root, config
             )
             ratings = pd.to_numeric(ratings, errors="coerce")

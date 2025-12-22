@@ -6,7 +6,7 @@ This package contains the core analysis logic for the EEG pipeline:
 Submodules:
 - behavior: Behavioral correlation analysis (EEG-pain correlations)
 - decoding: Machine learning decoding (LOSO CV, time generalization)
-- features: Feature extraction (power, connectivity, microstates, etc.)
+- features: Feature extraction (power, connectivity, ERDS, ERP, etc.)
 - preprocessing: BIDS conversion and event processing
 """
 

@@ -139,18 +139,12 @@ def extract_erds_from_precomputed(
                 all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
                 all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
 
-                all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
-                all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
-
                 record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
                 record[
                     NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)
                 ] = np.nan
                 record[
                     NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "early_late_diff", channel=ch_name)
                 ] = np.nan
                 record[
                     NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)

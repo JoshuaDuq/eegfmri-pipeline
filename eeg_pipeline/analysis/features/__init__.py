@@ -18,9 +18,8 @@ For fMRI prediction (optimized feature subset):
 Feature Groups
 --------------
 Available groups for `extract_precomputed_features`:
-    power, erds, spectral, gfp, connectivity, roi, temporal,
-    complexity, aperiodic, ratios, asymmetry, itpc, pac, cfc,
-    microstates, quality
+    power, erds, spectral, connectivity, complexity,
+    aperiodic, ratios, asymmetry, itpc, pac, quality
 
 Naming Convention
 -----------------
@@ -112,9 +111,7 @@ _LAZY_IMPORTS = {
     "parse_feature_name": "eeg_pipeline.domain.features.naming",  # Authoritative parser with FeatureMetadata
     
     # Constants and utilities (imported from their actual modules)
-    "build_roi_map": "eeg_pipeline.utils.analysis.channels",
     "pick_eeg_channels": "eeg_pipeline.utils.analysis.channels",
-    "compute_gfp": "eeg_pipeline.utils.analysis.signal_metrics",
     
     # Normalization
     "normalize_train_test": "normalization",
@@ -129,9 +126,6 @@ _LAZY_IMPORTS = {
     # Quality
     "compute_trial_quality_metrics": "quality",
     
-    # Microstates
-    "extract_microstate_features": "microstates",
-    "extract_microstate_features_from_epochs": "microstates",
 
     # Connectivity
     "extract_connectivity_features": "connectivity",
@@ -139,9 +133,7 @@ _LAZY_IMPORTS = {
 
     # Power
     "extract_power_features": "power",
-    "extract_spectral_extras_from_precomputed": "precomputed.spectral",
     "extract_asymmetry_from_precomputed": "precomputed.extras",
-    "extract_segment_power_from_precomputed": "precomputed.spectral",
 
     # Aperiodic
     "extract_aperiodic_features": "aperiodic",
@@ -152,18 +144,9 @@ _LAZY_IMPORTS = {
     "compute_pac_comodulograms": "phase",
     "extract_itpc_from_precomputed": "phase",
     
-    # Cross-frequency coupling
-    "extract_modulation_index_pac": "cfc",
-    "extract_phase_phase_coupling": "cfc",
-    "extract_pac_from_precomputed": "cfc",
-    "extract_all_cfc_features": "cfc",
     
     # Complexity
-    "extract_dynamics_features": "complexity",
     "extract_complexity_from_precomputed": "complexity",
-
-    # Dynamics (precomputed)
-    "extract_dynamics_from_precomputed": "dynamics",
 
     # ML presets
 

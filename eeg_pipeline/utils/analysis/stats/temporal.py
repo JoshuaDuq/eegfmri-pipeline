@@ -18,6 +18,7 @@ from eeg_pipeline.utils.analysis.stats import (
     compute_partial_corr,
     compute_cluster_correction_2d,
 )
+from eeg_pipeline.utils.analysis.stats.correlation import format_correlation_method_label
 from eeg_pipeline.utils.analysis.tfr import (
     clip_time_range,
     compute_tfr_morlet,
@@ -452,6 +453,7 @@ def _run_tf_correlations_core(
         **({"baseline_window": baseline_window} if baseline_window else {}),
     )
 
+    method_label = format_correlation_method_label("spearman" if use_spearman else "pearson", None)
     # Save TSV
     recs = []
     for f_i, freq in enumerate(freqs):
@@ -466,7 +468,9 @@ def _run_tf_correlations_core(
                 "p_cluster": float(p_c) if np.isfinite(p_c) else np.nan,
                 "cluster_id": int(c_labels[f_i, t_i]) if n_perm > 0 else 0,
                 "cluster_significant": bool(c_sig[f_i, t_i]) if n_perm > 0 else False,
-                "n": int(n_valid[f_i, t_i]), "method": "spearman" if use_spearman else "pearson",
+                "n": int(n_valid[f_i, t_i]),
+                "method": "spearman" if use_spearman else "pearson",
+                "method_label": method_label,
             })
     if recs:
         write_tsv(pd.DataFrame(recs), stats_dir / f"corr_stats_tf_{roi_label.lower()}{sfx}.tsv")
@@ -511,6 +515,7 @@ def _build_temporal_tsv_records(
     method: str,
 ) -> List[Dict[str, Any]]:
     """Build TSV records from temporal correlation results for global FDR."""
+    method_label = format_correlation_method_label(method, None)
     records = []
     corrs = res["correlations"]  # shape: (n_bands, n_windows, n_channels)
     pvals = res["p_values"]
@@ -537,6 +542,7 @@ def _build_temporal_tsv_records(
                     "p": float(p),
                     "n": int(n_valid[b_i, w_i, c_i]),
                     "method": method,
+                    "method_label": method_label,
                 })
     return records
 
@@ -686,8 +692,5 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> None:
         ctx.covariates_df,
         ctx.logger,
     )
-
-
-
 
 

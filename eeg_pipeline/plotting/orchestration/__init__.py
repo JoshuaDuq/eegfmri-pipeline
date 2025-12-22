@@ -1,10 +1,9 @@
 """Pipeline-level visualization entrypoints.
 
-Grouped orchestration functions for behavior, ERP, decoding, and TFR.
+Grouped orchestration functions for behavior, decoding, and TFR.
 """
 
 from .behavior import visualize_subject_behavior, visualize_behavior_for_subjects
-from .erp import visualize_subject_erp, visualize_erp_for_subjects
 from .decoding import (
     visualize_regression_results,
     visualize_time_generalization,
@@ -18,8 +17,6 @@ from .features import visualize_features, visualize_features_for_subjects
 __all__ = [
     "visualize_subject_behavior",
     "visualize_behavior_for_subjects",
-    "visualize_subject_erp",
-    "visualize_erp_for_subjects",
     "visualize_regression_results",
     "visualize_time_generalization",
     "visualize_model_comparisons",

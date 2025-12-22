@@ -28,8 +28,8 @@ func (m Model) renderConfirmation() string {
 	content.WriteString(lipgloss.NewStyle().Foreground(styles.Text).Render("You are about to execute:") + "\n\n")
 
 	cmdStyle := lipgloss.NewStyle().
-		Background(styles.BgBase).
 		Foreground(styles.Accent).
+		Bold(true).
 		Padding(0, 2)
 	content.WriteString("  " + cmdStyle.Render(m.BuildCommand()) + "\n\n")
 
@@ -111,8 +111,21 @@ func (m Model) renderComputationSelection() string {
 			count++
 		}
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("  %d of %d selected\n\n", count, len(m.computations))))
+
+	// Inline validation indicator
+	var statusIndicator string
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(m.computations))))
+	if count == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
 
 	for i, comp := range m.computations {
 		isSelected := m.computationSelected[i]
@@ -144,8 +157,21 @@ func (m Model) renderCategorySelection() string {
 			count++
 		}
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("  %d of %d selected\n\n", count, len(m.categories))))
+
+	// Inline validation indicator
+	var statusIndicator string
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(m.categories))))
+	if count == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
 
 	for i, cat := range m.categories {
 		isSelected := m.selected[i]
@@ -198,8 +224,21 @@ func (m Model) renderBandSelection() string {
 			count++
 		}
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("  %d of %d selected\n\n", count, len(m.bands))))
+
+	// Inline validation indicator
+	var statusIndicator string
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(m.bands))))
+	if count == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
 
 	for i, band := range m.bands {
 		isSelected := m.bandSelected[i]
@@ -438,13 +477,11 @@ func (m Model) renderTFRChannelSelection() string {
 		if i == 3 && m.tfrChannelMode == 3 {
 			inputStyle := lipgloss.NewStyle().
 				Foreground(styles.Text).
-				Background(lipgloss.Color("#333")).
 				Padding(0, 1).
 				MarginLeft(4)
 
 			if m.editingTfrChans {
 				inputStyle = inputStyle.
-					Background(lipgloss.Color("#444")).
 					Border(lipgloss.NormalBorder()).
 					BorderForeground(styles.Accent)
 			}
@@ -501,7 +538,9 @@ func (m Model) renderTimeRange() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		"  Define time ranges to be computed separately.\n") +
 		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  [A] Add range  [D] Delete range  [Space/Enter] Edit range\n\n"))
+			"  [A] Add range  [D] Delete range  [Space/Enter] Edit range\n") +
+		lipgloss.NewStyle().Foreground(styles.Muted).Render(
+			"  Suggested names: baseline, active, n1, n2, p2 (match your paradigm)\n\n"))
 
 	nameWidth := 15
 	valWidth := 10
@@ -655,14 +694,26 @@ func (m Model) renderSubjectSelection() string {
 		}
 	}
 
-	summary := fmt.Sprintf("  %d selected", selectedCount)
+	// Inline validation indicator
+	var statusIndicator string
+	if validCount >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	summary := fmt.Sprintf("%d selected", selectedCount)
 	if validCount < selectedCount {
 		summary += fmt.Sprintf(" (%d valid)", validCount)
 	}
 	if m.subjectFilter != "" {
 		summary += fmt.Sprintf(" | %d shown", len(filteredSubjects))
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(summary) + "\n\n")
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(summary))
+	if validCount == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
 
 	if len(filteredSubjects) == 0 {
 		if m.subjectFilter != "" {
@@ -796,19 +847,13 @@ func (m Model) renderReview() string {
 			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") + "\n")
 
 			var configs []string
-			if m.isCategorySelected("microstates") {
-				configs = append(configs, fmt.Sprintf("μstates=%d", m.nMicrostateStates))
-				if m.useGroupTemplates {
-					configs = append(configs, "group-templates")
-				}
-			}
 			if m.isCategorySelected("connectivity") {
 				measures := m.selectedConnectivityMeasures()
 				if len(measures) > 0 {
 					configs = append(configs, fmt.Sprintf("conn=%s", strings.Join(measures, "+")))
 				}
 			}
-			if m.isCategorySelected("pac") || m.isCategorySelected("cfc") {
+			if m.isCategorySelected("pac") {
 				configs = append(configs, fmt.Sprintf("pac=%.0f-%.0f/%.0f-%.0fHz",
 					m.pacPhaseMin, m.pacPhaseMax, m.pacAmpMin, m.pacAmpMax))
 			}
@@ -913,8 +958,46 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
+	// Default mode toggle with expand/collapse indicator
+	expandIcon := "▶"
+	expandHint := "Press Space to customize"
+	if !m.useDefaultAdvanced {
+		expandIcon = "▼"
+		expandHint = "Press Space to use defaults"
+	}
+
+	defaultLabel := lipgloss.NewStyle().Foreground(styles.Text).Width(20)
+	if m.advancedCursor == 0 && m.expandedOption < 0 {
+		defaultLabel = defaultLabel.Foreground(styles.Primary).Bold(true)
+	}
+
+	toggleStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	cursor := "  "
+	if m.advancedCursor == 0 && m.expandedOption < 0 {
+		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+	}
+
+	b.WriteString(cursor + toggleStyle.Render(expandIcon) + " " + defaultLabel.Render("Configuration"))
+	if m.useDefaultAdvanced {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("Using Defaults"))
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  — " + expandHint))
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("Custom"))
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  — " + expandHint))
+	}
+	b.WriteString("\n\n")
+
+	// When using defaults, show minimal summary, otherwise show full config
+	if m.useDefaultAdvanced {
+		// Collapsed summary - show what defaults will be used
+		summaryStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).MarginLeft(4)
+		b.WriteString(summaryStyle.Render("Default configuration will be used for all parameters.") + "\n")
+		b.WriteString(summaryStyle.Render("Select 'Customize' to modify individual settings.") + "\n")
+		return b.String()
+	}
+
+	// Expanded - show customization options
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	b.WriteString(infoStyle.Render("  Configure feature extraction parameters.") + "\n")
 	if m.expandedOption >= 0 {
 		b.WriteString(infoStyle.Render("  Press Space to toggle item, Esc to close.") + "\n\n")
 	} else {
@@ -925,42 +1008,14 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	// Build dynamic options list based on selected categories
+	// Note: cursor 0 = Configuration toggle (handled above), options start at cursor 1
 	options := []struct {
 		label      string
 		value      string
 		hint       string
 		expandable bool
 		expandIdx  int
-	}{
-		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization", false, -1},
-	}
-
-	// Microstate options (when microstates selected)
-	if m.isCategorySelected("microstates") {
-		options = append(options,
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"Microstate States", fmt.Sprintf("%d", m.nMicrostateStates), "Number of states (4-7)", false, -1},
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"Group Templates", m.boolToOnOff(m.useGroupTemplates), "Use group-level templates", false, -1},
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"Fixed Templates", m.pathDisplay(m.fixedTemplatesPath), "Path to template file", false, -1},
-		)
-	}
+	}{}
 
 	// Connectivity options (when connectivity selected)
 	if m.isCategorySelected("connectivity") {
@@ -973,8 +1028,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		}{"Connectivity", m.selectedConnectivityDisplay(), "Press Space to expand", true, 4})
 	}
 
-	// PAC/CFC options (when pac or cfc selected)
-	if m.isCategorySelected("pac") || m.isCategorySelected("cfc") {
+	// PAC options (when pac category selected)
+	if m.isCategorySelected("pac") {
 		options = append(options,
 			struct {
 				label      string
@@ -1015,19 +1070,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		}{"PE Order", fmt.Sprintf("%d", m.complexityPEOrder), "Permutation entropy order (3-7)", false, -1})
 	}
 
-	// Dynamics options (when dynamics_advanced selected)
-	if m.isCategorySelected("dynamics_advanced") {
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Burst Percentile", fmt.Sprintf("%d%%", m.burstPercentile), "Burst detection threshold (50-95)", false, -1})
-	}
-
 	for i, opt := range options {
-		isFocused := i == m.advancedCursor && m.expandedOption < 0
+		// Options list starts at cursor position 1 (position 0 is toggle header)
+		isFocused := (i+1) == m.advancedCursor && m.expandedOption < 0
 
 		// Build styles based on state
 		var labelStyle, valueStyle lipgloss.Style
@@ -1037,12 +1082,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
 		}
 
-		if m.useDefaultAdvanced && i > 0 {
-			labelStyle = labelStyle.Faint(true)
-			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-		} else {
-			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		}
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
 		cursor := "  "
 		if isFocused {
@@ -1160,7 +1200,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 		} else if m.editingNumber && isFocused {
 			// Highlight the editing field
-			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Background(styles.BgBase)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		} else {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
@@ -1244,13 +1284,6 @@ func (m Model) boolToOnOff(val bool) string {
 		return "ON"
 	}
 	return "OFF"
-}
-
-func (m Model) pathDisplay(path string) string {
-	if path == "" {
-		return "(none)"
-	}
-	return path
 }
 
 func (m Model) rngSeedDisplay() string {

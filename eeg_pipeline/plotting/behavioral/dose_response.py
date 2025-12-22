@@ -30,7 +30,6 @@ from eeg_pipeline.utils.data.features import (
     get_aperiodic_columns,
     get_connectivity_columns_by_band,
     get_itpc_columns_by_band,
-    get_microstate_columns,
     get_power_columns_by_band,
 )
 from eeg_pipeline.utils.data.manipulation import find_column
@@ -223,20 +222,9 @@ def visualize_dose_response(
                 )
     
     # =================================================================
-    # Microstate dose-response
+    # Microstate dose-response (DEPRECATED - skipped)
     # =================================================================
-    if "microstates" in additional_features:
-        df_ms = additional_features["microstates"].copy()
-        if len(df_ms) == len(temp_series):
-            df_ms[temp_col] = temp_series.values
-            ms_cols = get_microstate_columns(df_ms)
-            
-            if ms_cols:
-                ms_dir = output_dir / "microstates"
-                ensure_dir(ms_dir)
-                _plot_microstate_dose_response(
-                    df_ms, temp_col, ms_cols, subject, ms_dir, saved_files, logger
-                )
+    # Microstate analysis has been deprecated. This section is intentionally empty.
     
     # =================================================================
     # ITPC dose-response

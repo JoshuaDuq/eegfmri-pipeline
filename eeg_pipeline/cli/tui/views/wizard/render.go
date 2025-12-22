@@ -19,6 +19,11 @@ func (m Model) View() string {
 		return m.renderWithHelpOverlay()
 	}
 
+	// Command preview overlay
+	if m.showCommandPreview {
+		return m.renderCommandPreviewOverlay()
+	}
+
 	var b strings.Builder
 
 	b.WriteString(m.renderHeader())
@@ -63,6 +68,86 @@ func (m Model) View() string {
 	return b.String()
 }
 
+func (m Model) renderCommandPreviewOverlay() string {
+	var content strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		Render("◆ Execution Preview")
+	content.WriteString(title + "\n\n")
+
+	// Structured summary
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(14)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
+	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	// Pipeline
+	content.WriteString(labelStyle.Render("Pipeline:") + " " + accentStyle.Render(m.Pipeline.String()) + "\n")
+
+	// Mode
+	if len(m.modeOptions) > m.modeIndex {
+		content.WriteString(labelStyle.Render("Mode:") + " " + valueStyle.Render(m.modeOptions[m.modeIndex]) + "\n")
+	}
+
+	// Subject count
+	selectedCount := 0
+	for _, sel := range m.subjectSelected {
+		if sel {
+			selectedCount++
+		}
+	}
+	subjColor := styles.Success
+	if selectedCount == 0 {
+		subjColor = styles.Error
+	}
+	subjStyle := lipgloss.NewStyle().Foreground(subjColor).Bold(true)
+	content.WriteString(labelStyle.Render("Subjects:") + " " + subjStyle.Render(fmt.Sprintf("%d", selectedCount)) + "\n")
+
+	// Categories (for features pipeline)
+	if m.Pipeline == types.PipelineFeatures && len(m.selected) > 0 {
+		cats := m.SelectedCategories()
+		if len(cats) > 0 {
+			var chips string
+			for i, cat := range cats {
+				if i > 0 {
+					chips += ", "
+				}
+				chips += cat
+			}
+			content.WriteString(labelStyle.Render("Features:") + " " + valueStyle.Render(chips) + "\n")
+		}
+	}
+
+	// Divider
+	content.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", 40)) + "\n\n")
+
+	// Command
+	content.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("Command:") + "\n")
+	cmdStyle := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Padding(0, 1).
+		MarginLeft(2)
+	content.WriteString(cmdStyle.Render(m.BuildCommand()) + "\n\n")
+
+	content.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("Press P or Esc to close"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Primary).
+		Padding(1, 2).
+		Width(m.width - 20)
+
+	overlayPlaced := lipgloss.Place(
+		m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		box.Render(content.String()),
+	)
+
+	return overlayPlaced
+}
+
 func (m Model) renderWithHelpOverlay() string {
 	overlay := m.helpOverlay.View()
 
@@ -98,62 +183,60 @@ func (m Model) renderHeader() string {
 	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	title := accentStyle.Render("◆ ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
 
-	var stepper []string
+	// Minimal dot-based step indicator
+	var stepDots []string
 	for i := range m.steps {
-		stepName := stepNames[m.steps[i]]
-		if len(stepName) > 8 {
-			stepName = stepName[:7] + "."
-		}
-
 		if i < m.stepIndex {
-			style := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(styles.Success).
-				Bold(true).
-				Padding(0, 1)
-			stepper = append(stepper, style.Render(styles.CheckMark))
+			// Completed step
+			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Success).Render("●"))
 		} else if i == m.stepIndex {
-			frames := []string{"▸", "▹", "▸", "▹"}
-			frame := frames[(m.ticker/2)%len(frames)]
-			style := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(styles.Primary).
-				Bold(true).
-				Padding(0, 1)
-			stepper = append(stepper, style.Render(frame+" "+stepName))
+			// Current step - subtle pulse
+			frames := []string{"◉", "●", "◉", "◎"}
+			frame := frames[(m.ticker/3)%len(frames)]
+			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(frame))
 		} else {
-			style := lipgloss.NewStyle().
-				Foreground(styles.TextDim).
-				Background(styles.Secondary).
-				Padding(0, 1)
-			num := fmt.Sprintf(" %d ", i+1)
-			stepper = append(stepper, style.Render(num))
+			// Pending step
+			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Muted).Render("○"))
 		}
 	}
+	stepperLine := strings.Join(stepDots, " ")
 
-	var stepperLine string
-	for i, step := range stepper {
-		stepperLine += step
-		if i < len(stepper)-1 {
-			var connector string
-			if i < m.stepIndex {
-				connector = lipgloss.NewStyle().Foreground(styles.Success).Render("──")
-			} else if i == m.stepIndex {
-				connector = lipgloss.NewStyle().Foreground(styles.Primary).Render("──")
-			} else {
-				connector = lipgloss.NewStyle().Foreground(styles.Secondary).Render("──")
-			}
-			stepperLine += connector
-		}
-	}
-
-	stepTitle := lipgloss.NewStyle().
-		Foreground(styles.TextDim).
-		Italic(true).
+	// Current step name and progress
+	currentStepName := stepNames[m.CurrentStep]
+	stepInfo := lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Bold(true).
 		MarginLeft(2).
-		Render("Step " + fmt.Sprintf("%d", m.stepIndex+1) + " of " + fmt.Sprintf("%d", len(m.steps)))
+		Render(currentStepName)
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", stepperLine, stepTitle)
+	stepProgress := lipgloss.NewStyle().
+		Foreground(styles.TextDim).
+		Render(fmt.Sprintf(" (%d/%d)", m.stepIndex+1, len(m.steps)))
+
+	// Subject count badge - show how many subjects are selected
+	subjectBadge := ""
+	selectedCount := 0
+	for _, sel := range m.subjectSelected {
+		if sel {
+			selectedCount++
+		}
+	}
+	if selectedCount > 0 {
+		badgeStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Accent).
+			Bold(true).
+			Padding(0, 1).
+			MarginLeft(2)
+		subjectBadge = badgeStyle.Render(fmt.Sprintf("%d subjects", selectedCount))
+	} else if len(m.subjects) > 0 {
+		badgeStyle := lipgloss.NewStyle().
+			Foreground(styles.Warning).
+			MarginLeft(2)
+		subjectBadge = badgeStyle.Render("(no subjects selected)")
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", stepperLine, stepInfo, stepProgress, subjectBadge)
 }
 
 func (m Model) renderFooter() string {

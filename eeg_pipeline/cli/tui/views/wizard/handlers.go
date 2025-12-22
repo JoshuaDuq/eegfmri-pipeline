@@ -576,19 +576,19 @@ func (m *Model) validate() []string {
 				}
 			}
 
-			// Check for required 'baseline' if normalization-dependent features are selected
+			// Check for required 'baseline' if baseline-dependent features are selected
 			hasBaseline := names["baseline"]
 			needsBaseline := false
 			for i, cat := range m.categories {
 				if m.selected[i] {
-					if cat == "erds" || cat == "spectral_extras" || cat == "gfp" || cat == "ratios" {
+					if cat == "erds" || cat == "erp" || cat == "bursts" {
 						needsBaseline = true
 						break
 					}
 				}
 			}
 			if needsBaseline && !hasBaseline {
-				errors = append(errors, "Time range 'baseline' is required for ERDS/spectral features")
+				errors = append(errors, "Time range 'baseline' is required for baseline-normalized features (ERDS, ERP, bursts)")
 			}
 		}
 	}
@@ -630,13 +630,10 @@ func (m *Model) getAdvancedOptionCount() int {
 	case types.PipelineFeatures:
 		// Dynamic count based on selected categories
 		count := 1 // Always have "Use defaults"
-		if m.isCategorySelected("microstates") {
-			count += 3 // States, Group templates, Fixed templates
-		}
 		if m.isCategorySelected("connectivity") {
 			count += 1 // Connectivity measures
 		}
-		if m.isCategorySelected("pac") || m.isCategorySelected("cfc") {
+		if m.isCategorySelected("pac") {
 			count += 2 // Phase range, Amp range
 		}
 		if m.isCategorySelected("aperiodic") {
@@ -644,9 +641,6 @@ func (m *Model) getAdvancedOptionCount() int {
 		}
 		if m.isCategorySelected("complexity") {
 			count += 1 // PE order
-		}
-		if m.isCategorySelected("dynamics_advanced") {
-			count += 1 // Burst percentile
 		}
 		if count == 1 {
 			count = 2 // Ensure at least "Use defaults" shows
@@ -703,13 +697,10 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	var options []optionType
 	options = append(options, optUseDefaults)
 
-	if m.isCategorySelected("microstates") {
-		options = append(options, optMicrostateStates, optGroupTemplates, optFixedTemplates)
-	}
 	if m.isCategorySelected("connectivity") {
 		options = append(options, optConnectivity)
 	}
-	if m.isCategorySelected("pac") || m.isCategorySelected("cfc") {
+	if m.isCategorySelected("pac") {
 		options = append(options, optPACPhaseRange, optPACAmpRange)
 	}
 	if m.isCategorySelected("aperiodic") {
@@ -717,9 +708,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	}
 	if m.isCategorySelected("complexity") {
 		options = append(options, optPEOrder)
-	}
-	if m.isCategorySelected("dynamics_advanced") {
-		options = append(options, optBurstPercentile)
 	}
 
 	if m.advancedCursor >= len(options) {
@@ -730,22 +718,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optMicrostateStates:
-		m.nMicrostateStates++
-		if m.nMicrostateStates > 7 {
-			m.nMicrostateStates = 4
-		}
-		m.useDefaultAdvanced = false
-	case optGroupTemplates:
-		m.useGroupTemplates = !m.useGroupTemplates
-		m.useDefaultAdvanced = false
-	case optFixedTemplates:
-		if m.fixedTemplatesPath == "" {
-			m.fixedTemplatesPath = "<select file>"
-		} else {
-			m.fixedTemplatesPath = ""
-		}
-		m.useDefaultAdvanced = false
 	case optConnectivity:
 		m.expandedOption = 4
 		m.subCursor = 0
@@ -784,19 +756,6 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.complexityPEOrder++
 		if m.complexityPEOrder > 7 {
 			m.complexityPEOrder = 3
-		}
-		m.useDefaultAdvanced = false
-	case optBurstPercentile:
-		// Cycle through common percentiles: 75 -> 80 -> 90 -> 50 -> 75
-		switch m.burstPercentile {
-		case 75:
-			m.burstPercentile = 80
-		case 80:
-			m.burstPercentile = 90
-		case 90:
-			m.burstPercentile = 50
-		default:
-			m.burstPercentile = 75
 		}
 		m.useDefaultAdvanced = false
 	}
@@ -889,12 +848,7 @@ func (m *Model) commitNumberInput() {
 }
 
 func (m *Model) commitFeaturesNumber(val int) {
-	switch m.advancedCursor {
-	case 2: // N microstate states
-		if val >= 4 && val <= 7 {
-			m.nMicrostateStates = val
-		}
-	}
+	// No numeric fields for current features
 }
 
 func (m *Model) commitBehaviorNumber(val int) {

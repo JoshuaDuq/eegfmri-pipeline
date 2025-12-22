@@ -106,13 +106,11 @@ def _save_plot_manifest(
         for ftype in [
             "power",
             "connectivity",
-            "microstates",
             "pac",
             "itpc",
             "complexity",
             "burst",
             "aperiodic",
-            "dynamics",
             "summary",
             "erds",
         ]:

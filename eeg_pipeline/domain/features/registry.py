@@ -445,14 +445,18 @@ def classify_feature(
     parsed = NamingSchema.parse(column)
     if parsed.get("valid"):
         schema_group = parsed["group"]
-        if schema_group in {"conn", "conn_legacy"}:
-            feature_type = "connectivity"
-        elif schema_group == "microstates":
-            feature_type = "microstate"
-        elif schema_group == "asymmetry":
-            feature_type = "roi"
-        else:
-            feature_type = schema_group
+        schema_group_map = {
+            "conn": "connectivity",
+            "conn_legacy": "connectivity",
+            "microstates": "microstate",
+            "asymmetry": "roi",
+            "comp": "complexity",
+            "qual": "quality",
+            "ratio": "ratios",
+            "aper": "aperiodic",
+            "asym": "asymmetry",
+        }
+        feature_type = schema_group_map.get(schema_group, schema_group)
         subtype = parsed.get("segment", "unknown")
 
         meta.update(

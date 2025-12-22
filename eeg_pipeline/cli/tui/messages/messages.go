@@ -143,3 +143,6 @@ type LogMsg struct {
 // - SyncCompleteMsg
 // - RunCompleteMsg
 // - PullCompleteMsg
+
+// RefreshSubjectsMsg requests a reload of the subject list
+type RefreshSubjectsMsg struct{}

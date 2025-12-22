@@ -2,7 +2,7 @@
 Feature I/O Utilities.
 
 Consolidated module for loading and saving feature data including:
-- Feature bundle loading (power, microstates, connectivity, etc.)
+- Feature bundle loading (power, connectivity, etc.)
 - Feature saving and export functions
 - fMRI regressor exports
 - Microstate template management
@@ -149,15 +149,21 @@ class FeatureBundle:
     """Unified container for all feature tables loaded for a subject."""
 
     power_df: Optional[pd.DataFrame] = None
-    microstate_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
+    erp_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
     pac_trials_df: Optional[pd.DataFrame] = None
     pac_time_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     complexity_df: Optional[pd.DataFrame] = None
-    dynamics_df: Optional[pd.DataFrame] = None
+    bursts_df: Optional[pd.DataFrame] = None
+    quality_df: Optional[pd.DataFrame] = None
+    erds_df: Optional[pd.DataFrame] = None
+    spectral_df: Optional[pd.DataFrame] = None
+    ratios_df: Optional[pd.DataFrame] = None
+    asymmetry_df: Optional[pd.DataFrame] = None
+    temporal_df: Optional[pd.DataFrame] = None
     all_features_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
 
@@ -187,15 +193,21 @@ def load_feature_bundle(
 
     bundle = FeatureBundle(
         power_df=_safe_read_table(features_dir / "features_power.tsv", logger),
-        microstate_df=_safe_read_table(features_dir / "features_microstates.tsv", logger),
         connectivity_df=_safe_read_table(find_connectivity_features_path(deriv_root, subject), logger),
         aperiodic_df=_safe_read_table(features_dir / "features_aperiodic.tsv", logger),
+        erp_df=_safe_read_table(features_dir / "features_erp.tsv", logger),
         pac_df=_safe_read_table(features_dir / "features_pac.tsv", logger),
         pac_trials_df=_safe_read_table(features_dir / "features_pac_trials.tsv", logger),
         pac_time_df=_safe_read_table(features_dir / "features_pac_time.tsv", logger),
         itpc_df=_safe_read_table(features_dir / "features_itpc.tsv", logger),
         complexity_df=_safe_read_table(features_dir / "features_complexity.tsv", logger),
-        dynamics_df=_safe_read_table(features_dir / "features_dynamics.tsv", logger),
+        bursts_df=_safe_read_table(features_dir / "features_bursts.tsv", logger),
+        quality_df=_safe_read_table(features_dir / "features_quality.tsv", logger),
+        erds_df=_safe_read_table(features_dir / "features_erds.tsv", logger),
+        spectral_df=_safe_read_table(features_dir / "features_spectral.tsv", logger),
+        ratios_df=_safe_read_table(features_dir / "features_ratios.tsv", logger),
+        asymmetry_df=_safe_read_table(features_dir / "features_asymmetry.tsv", logger),
+        temporal_df=_safe_read_table(features_dir / "features_temporal.tsv", logger),
         all_features_df=_safe_read_table(features_dir / "features_all.tsv", logger),
     )
 
@@ -282,26 +294,38 @@ def save_all_features(
     baseline_cols: List[str],
     conn_df: Optional[pd.DataFrame],
     conn_cols: List[str],
-    ms_df: Optional[pd.DataFrame],
-    ms_cols: List[str],
     aper_df: Optional[pd.DataFrame],
     aper_cols: List[str],
-    itpc_df: Optional[pd.DataFrame],
-    itpc_cols: List[str],
-    pac_df: Optional[pd.DataFrame],
-    pac_trials_df: Optional[pd.DataFrame],
-    pac_time_df: Optional[pd.DataFrame],
-    aper_qc: Optional[Dict[str, Any]],
-    plateau_df: Optional[pd.DataFrame],
-    plateau_cols: Optional[List[str]],
-    y: pd.Series,
-    features_dir: Path,
-    logger: logging.Logger,
-    config,
+    erp_df: Optional[pd.DataFrame] = None,
+    erp_cols: Optional[List[str]] = None,
+    itpc_df: Optional[pd.DataFrame] = None,
+    itpc_cols: Optional[List[str]] = None,
+    temp_df: Optional[pd.DataFrame] = None,
+    temp_cols: Optional[List[str]] = None,
+    pac_df: Optional[pd.DataFrame] = None,
+    pac_trials_df: Optional[pd.DataFrame] = None,
+    pac_time_df: Optional[pd.DataFrame] = None,
+    aper_qc: Optional[Dict[str, Any]] = None,
+    plateau_df: Optional[pd.DataFrame] = None,
+    plateau_cols: Optional[List[str]] = None,
+    y: Optional[pd.Series] = None,
+    features_dir: Optional[Path] = None,
+    logger: Optional[logging.Logger] = None,
+    config: Any = None,
     comp_df: Optional[pd.DataFrame] = None,
     comp_cols: Optional[List[str]] = None,
+    bursts_df: Optional[pd.DataFrame] = None,
+    bursts_cols: Optional[List[str]] = None,
     spectral_df: Optional[pd.DataFrame] = None,
     spectral_cols: Optional[List[str]] = None,
+    erds_df: Optional[pd.DataFrame] = None,
+    erds_cols: Optional[List[str]] = None,
+    ratios_df: Optional[pd.DataFrame] = None,
+    ratios_cols: Optional[List[str]] = None,
+    asymmetry_df: Optional[pd.DataFrame] = None,
+    asymmetry_cols: Optional[List[str]] = None,
+    quality_df: Optional[pd.DataFrame] = None,
+    quality_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
     export_all: bool = True,
     suffix: Optional[str] = None,
@@ -397,22 +421,6 @@ def save_all_features(
                 )
         direct_cols.extend(list(baseline_df.columns))
 
-    if ms_df is not None and not ms_df.empty:
-        direct_blocks.append(ms_df)
-        if ms_cols:
-            if len(ms_cols) == len(ms_df.columns):
-                ms_df.columns = ms_cols
-            else:
-                logger.warning(
-                    "Microstate column mismatch: %d names vs %d columns. Using DataFrame names.",
-                    len(ms_cols),
-                    len(ms_df.columns),
-                )
-        direct_cols.extend(list(ms_df.columns))
-        ms_name = f"features_microstates_{suffix}.tsv" if suffix else "features_microstates.tsv"
-        ms_path = features_dir / ms_name
-        logger.info("Saving microstate features: %s", ms_path)
-        write_tsv(ms_df, ms_path)
 
     if aper_df is not None and not aper_df.empty:
         direct_blocks.append(aper_df)
@@ -430,6 +438,17 @@ def save_all_features(
         aper_path = features_dir / aper_name
         logger.info("Saving aperiodic features: %s", aper_path)
         write_tsv(aper_df, aper_path)
+
+    if erp_df is not None and not erp_df.empty:
+        direct_blocks.append(erp_df)
+        if erp_cols:
+            if len(erp_cols) == len(erp_df.columns):
+                erp_df.columns = erp_cols
+        direct_cols.extend(list(erp_df.columns))
+        erp_name = f"features_erp_{suffix}.tsv" if suffix else "features_erp.tsv"
+        erp_path = features_dir / erp_name
+        logger.info("Saving ERP/LEP features: %s", erp_path)
+        write_tsv(erp_df, erp_path)
 
     if itpc_df is not None and not itpc_df.empty:
         if itpc_cols and len(itpc_cols) == len(itpc_df.columns):
@@ -489,6 +508,17 @@ def save_all_features(
         logger.info("Saving complexity features: %s", comp_path)
         write_tsv(comp_df, comp_path)
 
+    if bursts_df is not None and not bursts_df.empty:
+        direct_blocks.append(bursts_df)
+        if bursts_cols:
+            if len(bursts_cols) == len(bursts_df.columns):
+                bursts_df.columns = bursts_cols
+        direct_cols.extend(list(bursts_df.columns))
+        bursts_name = f"features_bursts_{suffix}.tsv" if suffix else "features_bursts.tsv"
+        bursts_path = features_dir / bursts_name
+        logger.info("Saving burst features: %s", bursts_path)
+        write_tsv(bursts_df, bursts_path)
+
     if spectral_df is not None and not spectral_df.empty:
         direct_blocks.append(spectral_df)
         if spectral_cols:
@@ -499,6 +529,61 @@ def save_all_features(
         spec_path = features_dir / spec_name
         logger.info("Saving spectral features (IAF): %s", spec_path)
         write_tsv(spectral_df, spec_path)
+    
+    if temp_df is not None and not temp_df.empty:
+        direct_blocks.append(temp_df)
+        if temp_cols:
+            if len(temp_cols) == len(temp_df.columns):
+                temp_df.columns = temp_cols
+        direct_cols.extend(list(temp_df.columns))
+        temp_name = f"features_temporal_{suffix}.tsv" if suffix else "features_temporal.tsv"
+        temp_path = features_dir / temp_name
+        logger.info("Saving temporal features: %s", temp_path)
+        write_tsv(temp_df, temp_path)
+
+    if erds_df is not None and not erds_df.empty:
+        direct_blocks.append(erds_df)
+        if erds_cols:
+            if len(erds_cols) == len(erds_df.columns):
+                erds_df.columns = erds_cols
+        direct_cols.extend(list(erds_df.columns))
+        erds_name = f"features_erds_{suffix}.tsv" if suffix else "features_erds.tsv"
+        erds_path = features_dir / erds_name
+        logger.info("Saving ERDS features: %s", erds_path)
+        write_tsv(erds_df, erds_path)
+
+    if ratios_df is not None and not ratios_df.empty:
+        direct_blocks.append(ratios_df)
+        if ratios_cols:
+            if len(ratios_cols) == len(ratios_df.columns):
+                ratios_df.columns = ratios_cols
+        direct_cols.extend(list(ratios_df.columns))
+        ratios_name = f"features_ratios_{suffix}.tsv" if suffix else "features_ratios.tsv"
+        ratios_path = features_dir / ratios_name
+        logger.info("Saving power ratio features: %s", ratios_path)
+        write_tsv(ratios_df, ratios_path)
+
+    if asymmetry_df is not None and not asymmetry_df.empty:
+        direct_blocks.append(asymmetry_df)
+        if asymmetry_cols:
+            if len(asymmetry_cols) == len(asymmetry_df.columns):
+                asymmetry_df.columns = asymmetry_cols
+        direct_cols.extend(list(asymmetry_df.columns))
+        asym_name = f"features_asymmetry_{suffix}.tsv" if suffix else "features_asymmetry.tsv"
+        asym_path = features_dir / asym_name
+        logger.info("Saving asymmetry features: %s", asym_path)
+        write_tsv(asymmetry_df, asym_path)
+
+    if quality_df is not None and not quality_df.empty:
+        direct_blocks.append(quality_df)
+        if quality_cols:
+            if len(quality_cols) == len(quality_df.columns):
+                quality_df.columns = quality_cols
+        direct_cols.extend(list(quality_df.columns))
+        qual_name = f"features_quality_{suffix}.tsv" if suffix else "features_quality.tsv"
+        qual_path = features_dir / qual_name
+        logger.info("Saving quality metrics: %s", qual_path)
+        write_tsv(quality_df, qual_path)
 
 
     if aper_qc and aper_qc.get("freqs") is not None and aper_qc.get("slopes") is not None and aper_qc.get("offsets") is not None and aper_qc.get("r2") is not None:
@@ -655,7 +740,6 @@ def export_fmri_regressors(
     aligned_events: pd.DataFrame,
     plateau_df: pd.DataFrame,
     plateau_cols: List[str],
-    ms_df: Optional[pd.DataFrame],
     pac_trials_df: Optional[pd.DataFrame],
     aper_df: Optional[pd.DataFrame],
     y: pd.Series,
@@ -701,15 +785,6 @@ def export_fmri_regressors(
         if not band_cols:
             continue
         _add_regressor(f"pow_{band}_mean", plateau_df[band_cols].mean(axis=1))
-
-    if ms_df is not None and not ms_df.empty:
-        for col in ms_df.columns:
-            col_str = str(col)
-            if col_str.startswith("ms_coverage_") or col_str.startswith("ms_duration_"):
-                _add_regressor(col_str, ms_df[col])
-                continue
-            if col_str.startswith("microstates_") and ("_coverage_state" in col_str or "_duration_state" in col_str):
-                _add_regressor(col_str, ms_df[col])
 
     if aper_df is not None and not aper_df.empty:
         slope_cols_legacy = [c for c in aper_df.columns if str(c).startswith("aper_slope_")]
@@ -767,108 +842,6 @@ def export_fmri_regressors(
     return reg_df
 
 
-###################################################################
-# MICROSTATE TEMPLATE MANAGEMENT
-###################################################################
-
-def save_microstate_templates(
-    epochs: mne.Epochs,
-    templates: np.ndarray,
-    subject: str,
-    n_states: int,
-    deriv_root: Path,
-    logger: logging.Logger,
-) -> None:
-    if templates is None:
-        return
-
-    stats_dir = deriv_stats_path(deriv_root, subject)
-    ensure_dir(stats_dir)
-    template_path = stats_dir / f"microstates_templates_K{n_states}.npz"
-
-    picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
-    ch_names = [epochs.info["ch_names"][i] for i in picks]
-
-    np.savez_compressed(template_path, templates=templates, ch_names=np.array(ch_names), n_states=n_states)
-    logger.info("Saved microstate templates to %s", template_path)
-
-
-def load_group_microstate_templates(
-    deriv_root: Path,
-    n_states: int,
-    logger: logging.Logger,
-) -> Tuple[Optional[np.ndarray], Optional[List[str]]]:
-    group_path = (
-        deriv_root / "group" / "eeg" / "stats" / f"microstates_templates_group_K{n_states}.npz"
-    )
-    if not group_path.exists():
-        return None, None
-    try:
-        data = np.load(group_path, allow_pickle=True)
-        templates = data.get("templates")
-        ch_names = data.get("ch_names")
-        if templates is None or ch_names is None:
-            logger.warning("Group microstate templates found but missing templates/ch_names")
-            return None, None
-        logger.info("Loaded group microstate templates from %s", group_path)
-        return templates, list(ch_names)
-    except (OSError, IOError, ValueError, KeyError) as exc:
-        logger.warning("Failed to load group microstate templates from %s: %s", group_path, exc)
-        return None, None
-
-
-def compute_group_microstate_templates(
-    deriv_root: Path,
-    n_states: int,
-    logger: logging.Logger,
-) -> Tuple[Optional[np.ndarray], Optional[List[str]]]:
-    pattern = deriv_root / "sub-*" / "eeg" / "stats" / f"microstates_templates_K{n_states}.npz"
-    files = sorted(Path(p) for p in glob.glob(str(pattern)))
-    if not files:
-        logger.warning("No subject microstate templates found to build group template")
-        return None, None
-
-    templates_list = []
-    channel_sets = []
-    for f in files:
-        try:
-            data = np.load(f, allow_pickle=True)
-            templ = data.get("templates")
-            chs = data.get("ch_names")
-            if templ is None or chs is None:
-                continue
-            templates_list.append((templ, list(chs)))
-            channel_sets.append(set(chs.tolist()))
-        except (OSError, IOError, ValueError, KeyError) as exc:
-            logger.warning("Skipping template file %s: %s", f, exc)
-            continue
-
-    if not templates_list or not channel_sets:
-        logger.warning("No valid microstate templates to build group template")
-        return None, None
-
-    common_chs = sorted(set.intersection(*channel_sets))
-    if not common_chs:
-        logger.warning(
-            "No common channels across microstate templates; cannot build group template"
-        )
-        return None, None
-
-    aligned_templates = []
-    for templ, chs in templates_list:
-        indices = [chs.index(ch) for ch in common_chs]
-        aligned_templates.append(templ[:, indices])
-
-    stacked = np.stack(aligned_templates, axis=0)
-    group_templates = np.nanmean(stacked, axis=0)
-
-    out_dir = deriv_root / "group" / "eeg" / "stats"
-    ensure_dir(out_dir)
-    out_path = out_dir / f"microstates_templates_group_K{n_states}.npz"
-    np.savez_compressed(out_path, templates=group_templates, ch_names=np.array(common_chs), n_states=n_states)
-    logger.info("Saved group microstate templates to %s", out_path)
-
-    return group_templates, common_chs
 
 
 ###################################################################
@@ -997,12 +970,9 @@ __all__ = [
     # Saving
     "build_plateau_features",
     "combine_all_features",
-    "compute_group_microstate_templates",
     "export_fmri_regressors",
     "iterate_feature_columns",
-    "load_group_microstate_templates",
     "save_all_features",
     "save_dropped_trials_log",
-    "save_microstate_templates",
     "save_trial_alignment_manifest",
 ]

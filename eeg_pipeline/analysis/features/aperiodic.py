@@ -187,8 +187,9 @@ def _extract_aperiodic_for_segment(
         roi_defs = get_roi_definitions(config)
         if roi_defs:
             roi_map = build_roi_map(ch_names, roi_defs)
-    fmin = float(config.get("feature_engineering.constants.aperiodic_fmin", 2.0))
-    fmax = float(config.get("feature_engineering.constants.aperiodic_fmax", 40.0))
+    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    fmin = float(aperiodic_cfg.get("fmin", config.get("feature_engineering.constants.aperiodic_fmin", 2.0)))
+    fmax = float(aperiodic_cfg.get("fmax", config.get("feature_engineering.constants.aperiodic_fmax", 40.0)))
     
     try:
         spectrum = epochs.compute_psd(
@@ -315,14 +316,16 @@ def _extract_aperiodic_for_segment(
         # ROI Mean
         if 'roi' in spatial_modes and roi_map:
             for roi_name, ch_indices in roi_map.items():
-                if ch_indices:
-                    roi_vals = np.nanmean(matrix[:, ch_indices], axis=1)
+                if ch_indices and len(ch_indices) > 0:
+                    with np.errstate(all='ignore'):
+                        roi_vals = np.nanmean(matrix[:, ch_indices], axis=1)
                     col = NamingSchema.build("aperiodic", segment_name, band, "roi", stat, channel=roi_name)
                     data_dict[col] = roi_vals
                     
         # Global Mean
         if 'global' in spatial_modes:
-            global_vals = np.nanmean(matrix, axis=1)
+            with np.errstate(all='ignore'):
+                global_vals = np.nanmean(matrix, axis=1)
             col = NamingSchema.build("aperiodic", segment_name, band, "global", stat)
             data_dict[col] = global_vals
 

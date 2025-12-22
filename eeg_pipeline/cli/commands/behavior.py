@@ -48,8 +48,16 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--n-perm", type=int, default=None)
     compute_group.add_argument("--rng-seed", type=int, default=None)
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
+    compute_group.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Load and validate data only (no statistics). Still writes metadata and outputs manifest.",
+    )
     
-    feature_choices = ["power", "connectivity", "aperiodic", "dynamics", "complexity", "itpc", "microstates"]
+    feature_choices = [
+        "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
+        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+    ]
     compute_group.add_argument(
         "--correlations-features", nargs="+", choices=feature_choices, default=None,
         help="Feature categories for correlations analysis"
@@ -144,6 +152,7 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             subjects=subjects,
             task=task,
             bands=getattr(args, "bands", None),
+            validate_only=bool(getattr(args, "validate_only", False)),
             progress=progress,
         )
     elif args.mode == "visualize":

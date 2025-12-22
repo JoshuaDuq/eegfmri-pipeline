@@ -14,7 +14,7 @@ from typing import Any, List
 import numpy as np
 import mne
 
-from eeg_pipeline.types import PrecomputedData, PrecomputedQC
+from eeg_pipeline.types import PrecomputedData, PrecomputedQC, TimeWindows
 from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
 from eeg_pipeline.utils.analysis.spectral import compute_band_data, compute_psd
 from eeg_pipeline.utils.analysis.signal_metrics import compute_gfp
@@ -119,13 +119,17 @@ def precompute_data(
     # Compute time windows
     try:
         spec = windows_spec
-        if spec is None:
-            spec = TimeWindowSpec(times=times, config=config, sampling_rate=sfreq, logger=logger)
-        precomputed.windows = time_windows_from_spec(
-            spec,
-            logger=logger,
-            strict=True,
-        )
+        if isinstance(spec, TimeWindows):
+            precomputed.windows = spec
+        else:
+            if spec is None:
+                spec = TimeWindowSpec(times=times, config=config, sampling_rate=sfreq, logger=logger)
+            precomputed.windows = time_windows_from_spec(
+                spec,
+                logger=logger,
+                strict=True,
+            )
+
         precomputed.qc.time_windows = {
             "baseline_samples": int(np.sum(precomputed.windows.baseline_mask)),
             "active_samples": int(np.sum(precomputed.windows.active_mask)),

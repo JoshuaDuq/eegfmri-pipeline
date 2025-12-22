@@ -281,21 +281,6 @@ func (m Model) BuildCommand() string {
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
 
-	// Microstate options (only if microstates category selected)
-	if m.isCategorySelected("microstates") {
-		if m.fixedTemplatesPath != "" && m.fixedTemplatesPath != "<select file>" {
-			args = append(args, "--fixed-templates", m.fixedTemplatesPath)
-		}
-		if m.nMicrostateStates != 4 {
-			args = append(args, "--n-microstates", fmt.Sprintf("%d", m.nMicrostateStates))
-		}
-		if m.useGroupTemplates {
-			args = append(args, "--use-group-templates")
-		} else {
-			args = append(args, "--no-group-templates")
-		}
-	}
-
 	// Connectivity options (only if connectivity category selected)
 	if m.isCategorySelected("connectivity") {
 		measures := m.selectedConnectivityMeasures()
@@ -305,8 +290,8 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// PAC/CFC options (only if pac or cfc category selected)
-	if m.isCategorySelected("pac") || m.isCategorySelected("cfc") {
+	// PAC options (only if pac category selected)
+	if m.isCategorySelected("pac") {
 		// Only add if not default values
 		if m.pacPhaseMin != 4.0 || m.pacPhaseMax != 8.0 {
 			args = append(args, "--pac-phase-range",
@@ -333,13 +318,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	if m.isCategorySelected("complexity") {
 		if m.complexityPEOrder != 3 {
 			args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
-		}
-	}
-
-	// Dynamics options (only if dynamics_advanced category selected)
-	if m.isCategorySelected("dynamics_advanced") {
-		if m.burstPercentile != 75 {
-			args = append(args, "--burst-percentile", fmt.Sprintf("%d", m.burstPercentile))
 		}
 	}
 

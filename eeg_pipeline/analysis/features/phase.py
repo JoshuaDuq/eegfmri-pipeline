@@ -15,11 +15,9 @@ import numpy as np
 import pandas as pd
 import mne
 
-from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import validate_precomputed
-from eeg_pipeline.utils.analysis.tfr import get_tfr_config, resolve_tfr_workers, compute_adaptive_n_cycles
-from eeg_pipeline.utils.analysis.windowing import make_mask_for_times
+from eeg_pipeline.utils.analysis.windowing import make_mask_for_times, get_segment_masks
 from eeg_pipeline.utils.config.loader import get_frequency_bands
 
 # --- Helpers ---
@@ -27,7 +25,10 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands
 def _get_itpc_method(config: Any) -> str:
     method = str(config.get("feature_engineering.itpc.method", "loo")).strip().lower()
     if method not in {"loo", "global"}:
-        method = "loo"
+        raise ValueError(
+            "Invalid ITPC method. Supported values are 'loo' and 'global'. "
+            f"Got: {method!r}"
+        )
     return method
 
 def _compute_loo_itpc(data, train_mask=None):
@@ -79,31 +80,10 @@ def extract_phase_features(
             "Set feature_engineering.itpc.method='loo' for per-trial ITPC."
         )
     
-    # Ensure we have complex TFR
+    # Ensure we have complex TFR (computed upstream when ITPC/PAC requested)
     tfr = ctx.tfr_complex
     if tfr is None:
-        # Fallback logic: check if ctx.tfr has phase?
-        # Usually ctx.tfr is the Power TFR.
-        # We need to compute complex TFR here if missing.
-        ctx.logger.info("Computing Complex TFR for Phase features...")
-        try:
-            freq_min, freq_max, n_freqs, cyc_fac, decim, picks_tfr = get_tfr_config(config)
-            freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
-            n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=cyc_fac, config=config)
-            workers = resolve_tfr_workers(int(config.get("time_frequency_analysis.tfr.workers", -1)))
-            
-            tfr = epochs.compute_tfr(
-                method="morlet", freqs=freqs, n_cycles=n_cycles, decim=decim, 
-                picks=picks_tfr if picks_tfr else pick_eeg_channels(epochs)[0],
-                use_fft=True, return_itc=False, average=False, output="complex", n_jobs=workers
-            )
-            ctx.tfr_complex = tfr # Cache for later
-        except Exception as e:
-            ctx.logger.error(f"TFR Complex computation failed: {e}")
-            return pd.DataFrame(), []
-            
-    if tfr is None:
-        ctx.logger.warning("Phase: No complex TFR available; skipping extraction.")
+        ctx.logger.error("Phase: complex TFR missing; skipping extraction.")
         return pd.DataFrame(), []
     
     data = tfr.data # (epochs, ch, freq, time)
@@ -113,21 +93,30 @@ def extract_phase_features(
     
     # 1. ITPC (Trial-wise LOO)
     # ------------------------
-    # Compute full IOO map once
+    # Compute full LOO map once
     itpc_map = _compute_loo_itpc(data) #(epochs, ch, freq, time) (Real)
     
     freq_bands = get_frequency_bands(config)
     
     results = {}
+    spatial_modes = list(getattr(ctx, "spatial_modes", ["roi", "global"]))
+    roi_map = {}
+    if "roi" in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
     
-    # Iterate segments (baseline, ramp, plateau)
-    segments = ["plateau", "baseline"]
-    ramp_mask = ctx.windows.get_mask("ramp")
-    if ramp_mask is not None and np.any(ramp_mask):
-        segments.append("ramp")
+    segments = list(get_segment_masks(epochs.times, ctx.windows, config).keys())
+    if not segments:
+        segments = ["full"]
     
     for seg in segments:
-        seg_mask_tfr = make_mask_for_times(ctx.windows, seg, times)
+        if seg == "full":
+            seg_mask_tfr = np.ones_like(times, dtype=bool)
+        else:
+            seg_mask_tfr = make_mask_for_times(ctx.windows, seg, times)
             
         if not np.any(seg_mask_tfr): continue
         
@@ -146,18 +135,6 @@ def extract_phase_features(
             # Mean over freq -> (epochs, ch)
             itpc_band = np.mean(itpc_seg_mean_t[..., f_mask], axis=-1)
             
-            # Output generation based on spatial_modes
-            spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
-            
-            # Build ROI map if needed
-            roi_map = {}
-            if 'roi' in spatial_modes:
-                from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-                from eeg_pipeline.utils.analysis.channels import build_roi_map
-                roi_defs = get_roi_definitions(config)
-                if roi_defs:
-                    roi_map = build_roi_map(ch_names, roi_defs)
-
             # Per-channel
             if 'channels' in spatial_modes:
                 for i, ch in enumerate(ch_names):
@@ -178,12 +155,6 @@ def extract_phase_features(
                 col = NamingSchema.build("itpc", seg, band, "global", "val")
                 results[col] = global_val
                 
-    # 2. PAC (Optional)
-    # -----------------
-    # Implementation skipped for brevity unless explicitly requested.
-    # Plan said "PAC: (Optional)".
-    # I will stick to ITPC as primary.
-    
     if not results:
         return pd.DataFrame(), []
         
@@ -201,6 +172,7 @@ def compute_pac_comodulograms(
     *,
     segment_name: str = "plateau",
     segment_window: Optional[Tuple[float, float]] = None,
+    spatial_modes: Optional[List[str]] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
     Compute Phase-Amplitude Coupling (PAC) using Mean Vector Length (MVL).
@@ -231,8 +203,20 @@ def compute_pac_comodulograms(
         tfr_times = tfr_times[t_mask]
 
     n_times = data.shape[-1]
+    if n_times == 0:
+        logger.warning("PAC: no samples available for %s; skipping", segment_name)
+        return None, None, None, None, None
 
     pac_cfg = config.get("feature_engineering.pac", {}) if config is not None else {}
+    method = str(pac_cfg.get("method", "mvl")).strip().lower()
+    if method != "mvl":
+        raise ValueError(f"PAC: unsupported method '{method}'. Only 'mvl' is implemented.")
+    n_surrogates = int(pac_cfg.get("n_surrogates", 0))
+    if n_surrogates > 0:
+        raise ValueError(
+            "PAC: surrogate correction is not implemented. "
+            "Set feature_engineering.pac.n_surrogates=0."
+        )
     min_epochs = int(pac_cfg.get("min_epochs", 2))
     if n_epochs < min_epochs:
         logger.warning("PAC: insufficient epochs (%d < %d); skipping", n_epochs, min_epochs)
@@ -282,9 +266,6 @@ def compute_pac_comodulograms(
     # PAC: For each pair (fp, fa), compute |mean(A * expphi)|
     # We can't form the full (nep, nch, nph, namp, ntimes) tensor -> too big.
     
-    # Loop over channels to save memory
-    pac_results_agg = [] # For pac_df
-    
     # For trial-wise: we probably want specific band pairs?
     # e.g. Theta-Gamma, Alpha-Gamma matches.
     # Let's aggregate by standard bands for trial-wise output
@@ -293,7 +274,15 @@ def compute_pac_comodulograms(
     # Aggregated: (n_ch, n_phase, n_amp) - Mean over epochs and time
     # Trial-wise: (n_epochs, n_ch, n_phase, n_amp) - Mean over time
     
-    ch_names = info['ch_names']
+    # Use TFR's own channel names - they match the data dimensions
+    # (info passed in may have more channels than the TFR data)
+    tfr_ch_names = tfr_complex.info['ch_names']
+    if len(tfr_ch_names) != n_ch:
+        logger.warning(
+            "PAC channel count mismatch: TFR has %d channels but info has %d; using TFR channel list",
+            n_ch, len(tfr_ch_names)
+        )
+    ch_names = tfr_ch_names[:n_ch] if len(tfr_ch_names) >= n_ch else tfr_ch_names
     
     trials_pac_list = []
     pair_channel_data: Dict[str, np.ndarray] = {}
@@ -346,16 +335,7 @@ def compute_pac_comodulograms(
         mvl_complex /= n_times # Mean over time
         
         pac_val = np.abs(mvl_complex) # (n_epochs, n_phase, n_amp)
-        
-        # 1. Aggregated (mean over epochs) -> (n_phase, n_amp)
-        _ = np.mean(pac_val, axis=0)
-        
-        # Flatten for pac_df? 
-        # Usually pac_df is (freq_phase * freq_amp) rows, columns=channels?
-        # Or long format.
-        # Let's leave pac_df as None for now if not strictly needed, or simple summary.
-        # Ideally: pac_df has index (f_p, f_a), columns channels.
-        
+
         # Prepare per-pair PAC values
         for phase_band, amp_band, (pmin, pmax), (amin, amax) in valid_pairs:
             p_mask_band = (phase_freqs >= pmin) & (phase_freqs <= pmax)
@@ -377,13 +357,11 @@ def compute_pac_comodulograms(
             pair_channel_data[band_pair_name][:, ch_idx] = pair_vals
 
     # Spatial aggregation for PAC
-    spatial_modes = getattr(config if hasattr(config, 'get') else None, 'spatial_modes', ['roi', 'global'])
-    # config here might be a dict or a formal config object. In extract_phase_features it's ctx.config.
-    # In compute_pac_comodulograms, it's passed as 'config'.
-    
-    # Actually, let's just get it safely
-    if hasattr(config, "get"):
-        spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"])
+    if spatial_modes is None:
+        if hasattr(config, "get"):
+            spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"])
+        else:
+            spatial_modes = ["roi", "global"]
     
     # Build ROI map
     roi_map = {}
@@ -432,9 +410,9 @@ def extract_itpc_from_precomputed(
     
     ITPC = | (1/N) * sum( exp(i*phase) ) |
     """
+    logger = getattr(precomputed, "logger", None)
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
     if not is_valid:
-        logger = getattr(precomputed, "logger", None)
         if logger is not None:
             logger.warning("ITPC: %s; skipping extraction.", err_msg)
         return pd.DataFrame(), []
@@ -448,11 +426,10 @@ def extract_itpc_from_precomputed(
         )
         
     windows = precomputed.windows
-    masks = {
-        "baseline": windows.get_mask("baseline"),
-        "ramp": windows.get_mask("ramp"),
-        "plateau": windows.get_mask("plateau"),
-    }
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    masks = get_segment_masks(precomputed.times, windows, precomputed.config)
+    if not masks:
+        return pd.DataFrame(), []
     
     ch_names = precomputed.ch_names
     n_epochs = precomputed.data.shape[0]
@@ -479,9 +456,9 @@ def extract_itpc_from_precomputed(
         loo_itpc_t = np.abs(loo_means)  # (n_epochs, n_ch, n_times)
 
         # Get spatial modes and ROI map from precomputed or context
-        spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
+        spatial_modes = getattr(precomputed, "spatial_modes", None) or ["roi", "global"]
         roi_map = {}
-        if 'roi' in spatial_modes:
+        if "roi" in spatial_modes:
             from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
             from eeg_pipeline.utils.analysis.channels import build_roi_map
             roi_defs = get_roi_definitions(cfg)
@@ -519,3 +496,108 @@ def extract_itpc_from_precomputed(
     df = pd.DataFrame(results)
     return df, list(df.columns)
 
+
+def extract_pac_from_precomputed(
+    precomputed: Any,
+    config: Any,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Compute PAC using precomputed analytic signals.
+    
+    PAC(fp, fa) = | mean( A_fa * exp(i * phi_fp) ) | over time.
+    """
+    logger = getattr(precomputed, "logger", None)
+    config = config or getattr(precomputed, "config", None) or {}
+    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
+    if not is_valid:
+        if logger is not None:
+            logger.warning("PAC (precomputed): %s; skipping extraction.", err_msg)
+        return pd.DataFrame(), []
+
+    # Get PAC config
+    pac_cfg = config.get("feature_engineering.pac", {}) if hasattr(config, "get") else {}
+    method = str(pac_cfg.get("method", "mvl")).strip().lower()
+    if method != "mvl":
+        raise ValueError(f"PAC (precomputed): unsupported method '{method}'. Only 'mvl' is implemented.")
+    n_surrogates = int(pac_cfg.get("n_surrogates", 0))
+    if n_surrogates > 0:
+        raise ValueError(
+            "PAC (precomputed): surrogate correction is not implemented. "
+            "Set feature_engineering.pac.n_surrogates=0."
+        )
+    requested_pairs = pac_cfg.get("pairs", [("theta", "gamma"), ("alpha", "gamma")])
+    
+    # Get spatial modes and ROI map
+    spatial_modes = getattr(precomputed, "spatial_modes", None)
+    if spatial_modes is None:
+        spatial_modes = config.get("feature_engineering.spatial_modes", ["roi", "global"]) if hasattr(config, "get") else ["roi", "global"]
+    
+    # Standard bands for pair lookup
+    tf_bands = config.get("time_frequency_analysis.bands", {}) if hasattr(config, "get") else {}
+    
+    ch_names = precomputed.ch_names
+    n_epochs = precomputed.data.shape[0]
+    windows = precomputed.windows
+    segment_name = getattr(windows, "name", "plateau") or "plateau"
+    mask = getattr(windows, "active_mask", None)
+    
+    if mask is None or not np.any(mask):
+        return pd.DataFrame(), []
+
+    # Pre-calculate sqrt(power) for all bands to get amplitude
+    amplitudes = {}
+    phases = {}
+    for band, bd in precomputed.band_data.items():
+        if bd.power is not None:
+            # Power is (nep, nch, ntimes)
+            amplitudes[band] = np.sqrt(np.maximum(bd.power, 0))
+        if bd.phase is not None:
+            phases[band] = bd.phase
+
+    results = {}
+    
+    roi_map = {}
+    if 'roi' in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+
+    for p_band, a_band in requested_pairs:
+        if p_band not in phases or a_band not in amplitudes:
+            continue
+            
+        phi = phases[p_band][..., mask]
+        amp = amplitudes[a_band][..., mask]
+        
+        # PAC(trial, ch) = | mean( amp * exp(i*phi) ) | over time
+        mvl_complex = np.mean(amp * np.exp(1j * phi), axis=-1)
+        pac_val = np.abs(mvl_complex) # (n_epochs, n_ch)
+        
+        pair_label = f"{p_band}_{a_band}"
+        
+        # Channels
+        if 'channels' in spatial_modes:
+            for i, ch in enumerate(ch_names):
+                col = NamingSchema.build("pac", segment_name, pair_label, "ch", "val", channel=ch)
+                results[col] = pac_val[:, i]
+                
+        # ROI
+        if 'roi' in spatial_modes and roi_map:
+            for roi_name, idxs in roi_map.items():
+                if idxs:
+                    roi_val = np.nanmean(pac_val[:, idxs], axis=1)
+                    col = NamingSchema.build("pac", segment_name, pair_label, "roi", "val", channel=roi_name)
+                    results[col] = roi_val
+                    
+        # Global
+        if 'global' in spatial_modes:
+            global_val = np.nanmean(pac_val, axis=1)
+            col = NamingSchema.build("pac", segment_name, pair_label, "global", "val")
+            results[col] = global_val
+            
+    if not results:
+        return pd.DataFrame(), []
+        
+    df = pd.DataFrame(results)
+    return df, list(df.columns)

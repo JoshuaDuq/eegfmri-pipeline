@@ -38,6 +38,7 @@ DOMAINS = {
     "power": "power",         # Band power
     "spectral": "spectral",   # Peak frequency, IAF
     "aper": "aper",           # Aperiodic 1/f
+    "erp": "erp",             # ERP/LEP features
     "erds": "erds",           # Event-related desync/sync
     "ratio": "ratio",         # Band power ratios
     "asym": "asym",           # Hemispheric asymmetry
@@ -45,6 +46,7 @@ DOMAINS = {
     "itpc": "itpc",           # Inter-trial phase coherence
     "pac": "pac",             # Phase-amplitude coupling
     "comp": "comp",           # Complexity
+    "bursts": "bursts",       # Burst dynamics
     "qual": "qual",           # Quality metrics
 }
 
@@ -76,9 +78,12 @@ STATISTICS = {
     "diff": "diff",
     "onset": "onset",
     "peak": "peak",
+    "latency": "latency",
+    "latency_diff": "latency_diff",
     "duration": "duration",
     "auc": "auc",
     "count": "count",
+    "ptp": "ptp",
 }
 
 

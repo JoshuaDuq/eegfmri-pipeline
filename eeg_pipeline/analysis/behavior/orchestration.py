@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -15,10 +16,24 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
-from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
+    def _signature() -> str:
+        parts = []
+        for name, df in ctx.iter_feature_tables():
+            if df is None or df.empty:
+                continue
+            col_blob = ",".join(str(c) for c in df.columns)
+            parts.append(f"{name}:{df.shape[0]}:{df.shape[1]}:{col_blob}")
+        payload = "|".join(parts)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    signature = _signature()
+    if ctx._combined_features_df is not None and ctx._combined_features_signature == signature:
+        return ctx._combined_features_df
+
     dfs = []
     base_index = None
     for name, df in ctx.iter_feature_tables():
@@ -58,6 +73,8 @@ def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
         msg = f"Duplicate feature columns after combining: {dupes}"
         ctx.logger.error(msg)
         raise ValueError(msg)
+    ctx._combined_features_df = combined
+    ctx._combined_features_signature = signature
     return combined
 
 
@@ -76,18 +93,17 @@ def run_combine_features_utility(
     
     mapping = {
         "power": "features_power.tsv",
-        "microstates": "features_microstates.tsv",
         "connectivity": "features_connectivity.parquet",
         "aperiodic": "features_aperiodic.tsv",
         "itpc": "features_itpc.tsv",
         "pac": "features_pac.tsv",
         "complexity": "features_complexity.tsv",
-        "dynamics_advanced": "features_dynamics.tsv",
-        "cfc": "features_cfc.tsv",
+        "erds": "features_erds.tsv",
+        "spectral": "features_spectral.tsv",
         "ratios": "features_ratios.tsv",
         "asymmetry": "features_asymmetry.tsv",
         "quality": "features_quality.tsv",
-        "gfp": "features_gfp.tsv",
+        "temporal": "features_temporal.tsv",
     }
     
     count = 0
@@ -179,13 +195,10 @@ def add_change_scores(ctx: BehaviorContext) -> None:
 
     ctx.power_df = _augment(ctx.power_df)
     ctx.connectivity_df = _augment(ctx.connectivity_df)
-    ctx.microstates_df = _augment(ctx.microstates_df)
     ctx.aperiodic_df = _augment(ctx.aperiodic_df)
     ctx.itpc_df = _augment(ctx.itpc_df)
     ctx.pac_df = _augment(ctx.pac_df)
     ctx.complexity_df = _augment(ctx.complexity_df)
-    ctx.dynamics_df = _augment(ctx.dynamics_df)
-    ctx.cfc_df = _augment(ctx.cfc_df)
     ctx._change_scores_added = True
 
 
@@ -218,11 +231,15 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
     if config.compute_pain_sensitivity and ctx.temperature is not None:
         features = combine_features(ctx)
         if not features.empty:
+            robust_method = get_config_value(ctx.config, "behavior_analysis.robust_correlation", None)
+            if robust_method is not None:
+                robust_method = str(robust_method).strip().lower() or None
             psi_df = run_pain_sensitivity_correlations(
                 features_df=features,
                 ratings=ctx.targets,
                 temperatures=ctx.temperature,
                 method=config.method,
+                robust_method=robust_method,
                 min_samples=config.min_samples,
                 logger=ctx.logger,
             )
@@ -326,11 +343,224 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     return qc
 
 
-def write_analysis_metadata(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> None:
+def _ensure_method_columns(
+    df: pd.DataFrame,
+    method: str,
+    robust_method: Optional[str],
+    method_label: str,
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    if "method" not in df.columns:
+        df["method"] = method
+    if "robust_method" not in df.columns:
+        df["robust_method"] = robust_method
+    if "method_label" not in df.columns:
+        df["method_label"] = method_label
+    return df
+
+
+_STANDARD_COLUMNS = (
+    "analysis_type",
+    "feature_id",
+    "feature_type",
+    "target",
+    "method",
+    "robust_method",
+    "method_label",
+    "n",
+    "r",
+    "p_raw",
+    "p_primary",
+    "p_fdr",
+    "notes",
+)
+
+
+def _infer_feature_type(feature: str, config: Any) -> str:
+    from eeg_pipeline.domain.features.registry import classify_feature, get_feature_registry
+    try:
+        registry = get_feature_registry(config)
+        ftype, _, _ = classify_feature(feature, include_subtype=False, registry=registry)
+        return ftype
+    except Exception:
+        return "unknown"
+
+
+def _build_normalized_records(
+    ctx: BehaviorContext,
+    pipeline_config: Any,
+    results: Any,
+) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    method = pipeline_config.method
+    robust_method = pipeline_config.robust_method
+    method_label = pipeline_config.method_label
+
+    corr_df = getattr(results, "correlations", None)
+    if corr_df is not None and not corr_df.empty:
+        for _, row in corr_df.iterrows():
+            feature = row.get("feature")
+            feature_type = row.get("feature_type") or _infer_feature_type(str(feature), ctx.config)
+            target = row.get("target", "rating")
+            p_raw = row.get("p_raw", row.get("p_value", row.get("p")))
+            p_primary = row.get("p_primary", p_raw)
+            p_fdr = row.get("p_fdr", row.get("q_value"))
+            r_val = row.get("r_primary", row.get("r"))
+            records.append({
+                "analysis_type": "correlations",
+                "feature_id": feature,
+                "feature_type": feature_type,
+                "target": target,
+                "method": row.get("method", method),
+                "robust_method": row.get("robust_method", robust_method),
+                "method_label": row.get("method_label", method_label),
+                "n": row.get("n"),
+                "r": r_val,
+                "p_raw": p_raw,
+                "p_primary": p_primary,
+                "p_fdr": p_fdr,
+                "notes": None,
+            })
+
+    psi_df = getattr(results, "pain_sensitivity", None)
+    if psi_df is not None and not psi_df.empty:
+        for _, row in psi_df.iterrows():
+            feature = row.get("feature")
+            feature_type = row.get("feature_type") or _infer_feature_type(str(feature), ctx.config)
+            p_raw = row.get("p_psi", row.get("p_value"))
+            r_val = row.get("r_psi", row.get("r"))
+            records.append({
+                "analysis_type": "pain_sensitivity",
+                "feature_id": feature,
+                "feature_type": feature_type,
+                "target": row.get("target", "pain_sensitivity"),
+                "method": row.get("method", method),
+                "robust_method": row.get("robust_method", robust_method),
+                "method_label": row.get("method_label", method_label),
+                "n": row.get("n"),
+                "r": r_val,
+                "p_raw": p_raw,
+                "p_primary": p_raw,
+                "p_fdr": row.get("p_fdr", row.get("q_value")),
+                "notes": None,
+            })
+
+    cond_df = getattr(results, "condition_effects", None)
+    if cond_df is not None and not cond_df.empty:
+        for _, row in cond_df.iterrows():
+            feature = row.get("feature")
+            feature_type = row.get("feature_type") or _infer_feature_type(str(feature), ctx.config)
+            n_pain = row.get("n_pain")
+            n_nonpain = row.get("n_nonpain")
+            n_total = None
+            if pd.notna(n_pain) and pd.notna(n_nonpain):
+                n_total = int(n_pain) + int(n_nonpain)
+            records.append({
+                "analysis_type": "condition_effects",
+                "feature_id": feature,
+                "feature_type": feature_type,
+                "target": "pain_vs_nonpain",
+                "method": row.get("method", method),
+                "robust_method": row.get("robust_method", robust_method),
+                "method_label": row.get("method_label", method_label),
+                "n": n_total,
+                "r": row.get("hedges_g"),
+                "p_raw": row.get("p_value"),
+                "p_primary": row.get("p_value"),
+                "p_fdr": row.get("q_value"),
+                "notes": "hedges_g",
+            })
+
+    med_df = getattr(results, "mediation", None)
+    if med_df is not None and not med_df.empty:
+        for _, row in med_df.iterrows():
+            feature = row.get("mediator")
+            records.append({
+                "analysis_type": "mediation",
+                "feature_id": feature,
+                "feature_type": "mediator",
+                "target": "rating",
+                "method": method,
+                "robust_method": robust_method,
+                "method_label": method_label,
+                "n": None,
+                "r": row.get("indirect_effect"),
+                "p_raw": row.get("sobel_p"),
+                "p_primary": row.get("sobel_p"),
+                "p_fdr": None,
+                "notes": "indirect_effect",
+            })
+
+    mixed_df = getattr(results, "mixed_effects", None)
+    if mixed_df is not None and not mixed_df.empty:
+        for _, row in mixed_df.iterrows():
+            feature = row.get("feature")
+            behavior = row.get("behavior", "rating")
+            records.append({
+                "analysis_type": "mixed_effects",
+                "feature_id": feature,
+                "feature_type": row.get("feature_type", "mixed_effects"),
+                "target": behavior,
+                "method": method,
+                "robust_method": robust_method,
+                "method_label": method_label,
+                "n": row.get("n_observations"),
+                "r": row.get("fixed_effect"),
+                "p_raw": row.get("fixed_p"),
+                "p_primary": row.get("fixed_p"),
+                "p_fdr": row.get("fixed_p_fdr"),
+                "notes": "fixed_effect",
+            })
+
+    return records
+
+
+def _write_normalized_results(
+    ctx: BehaviorContext,
+    pipeline_config: Any,
+    results: Any,
+) -> Optional[Path]:
+    records = _build_normalized_records(ctx, pipeline_config, results)
+    if not records:
+        return None
+    df = pd.DataFrame(records)
+    df = df.reindex(columns=_STANDARD_COLUMNS)
+    path = ctx.stats_dir / "normalized_results.tsv"
+    from eeg_pipeline.infra.tsv import write_tsv
+    write_tsv(df, path)
+    return path
+
+
+def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
+    cov = ctx.covariates_df
+    if cov is None or cov.empty:
+        return {"status": "empty"}
+    return {
+        "status": "ok",
+        "columns": [str(c) for c in cov.columns],
+        "missing_fraction_by_column": {
+            str(c): float(pd.to_numeric(cov[c], errors="coerce").isna().mean()) for c in cov.columns
+        },
+    }
+
+
+def write_analysis_metadata(
+    ctx: BehaviorContext,
+    pipeline_config: Any,
+    results: Any,
+    stage_metrics: Optional[Dict[str, Any]] = None,
+    outputs_manifest: Optional[Path] = None,
+) -> None:
+    robust_method = pipeline_config.robust_method
+    method_label = pipeline_config.method_label
     payload: Dict[str, Any] = {
         "subject": ctx.subject,
         "task": ctx.task,
         "method": pipeline_config.method,
+        "method_label": method_label,
+        "robust_method": robust_method,
         "min_samples": pipeline_config.min_samples,
         "control_temperature": pipeline_config.control_temperature,
         "control_trial_order": pipeline_config.control_trial_order,
@@ -340,6 +570,21 @@ def write_analysis_metadata(ctx: BehaviorContext, pipeline_config: Any, results:
         "n_permutations": pipeline_config.n_permutations,
         "fdr_alpha": pipeline_config.fdr_alpha,
         "n_trials": ctx.n_trials,
+        "statistics_config": {
+            "method": pipeline_config.method,
+            "robust_method": robust_method,
+            "method_label": method_label,
+            "min_samples": pipeline_config.min_samples,
+            "bootstrap": pipeline_config.bootstrap,
+            "n_permutations": pipeline_config.n_permutations,
+            "fdr_alpha": pipeline_config.fdr_alpha,
+            "control_temperature": pipeline_config.control_temperature,
+            "control_trial_order": pipeline_config.control_trial_order,
+            "compute_change_scores": pipeline_config.compute_change_scores,
+            "compute_reliability": pipeline_config.compute_reliability,
+            "compute_bayes_factors": getattr(pipeline_config, "compute_bayes_factors", False),
+            "compute_loso_stability": getattr(pipeline_config, "compute_loso_stability", False),
+        },
         "outputs": {
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
             "has_pain_sensitivity": bool(getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty),
@@ -347,6 +592,28 @@ def write_analysis_metadata(ctx: BehaviorContext, pipeline_config: Any, results:
         },
         "qc": build_behavior_qc(ctx),
     }
+
+    payload["temperature_status"] = {
+        "available": bool(ctx.temperature is not None and ctx.temperature.notna().any()) if ctx.temperature is not None else False,
+        "control_enabled": bool(ctx.control_temperature),
+    }
+    if not payload["temperature_status"]["available"]:
+        payload["temperature_status"]["reason"] = "missing_temperature"
+
+    if not pipeline_config.compute_pain_sensitivity:
+        payload["pain_sensitivity_status"] = "disabled"
+    elif payload["temperature_status"]["available"]:
+        payload["pain_sensitivity_status"] = "computed" if payload["outputs"]["has_pain_sensitivity"] else "skipped"
+    else:
+        payload["pain_sensitivity_status"] = "skipped_no_temperature"
+
+    payload["covariates_qc"] = _summarize_covariates_qc(ctx)
+
+    if stage_metrics:
+        payload["stage_metrics"] = stage_metrics
+
+    if outputs_manifest is not None:
+        payload["outputs_manifest"] = str(outputs_manifest)
 
     if ctx.data_qc:
         payload["data_qc"] = ctx.data_qc
@@ -565,20 +832,44 @@ def stage_validate(ctx: BehaviorContext, config: Any) -> None:
         ctx.logger.warning(f"Hierarchical FDR failed: {exc}")
 
 
-def stage_export(ctx: BehaviorContext, results: Any) -> List[Path]:
+def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> List[Path]:
     from eeg_pipeline.infra.paths import ensure_dir
     from eeg_pipeline.infra.tsv import write_tsv
 
     ensure_dir(ctx.stats_dir)
     saved: List[Path] = []
+    robust_method = pipeline_config.robust_method
+    method_label = pipeline_config.method_label
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    if getattr(results, "correlations", None) is not None:
+        results.correlations = _ensure_method_columns(
+            results.correlations, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "pain_sensitivity", None) is not None:
+        results.pain_sensitivity = _ensure_method_columns(
+            results.pain_sensitivity, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "condition_effects", None) is not None:
+        results.condition_effects = _ensure_method_columns(
+            results.condition_effects, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "mediation", None) is not None:
+        results.mediation = _ensure_method_columns(
+            results.mediation, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "mixed_effects", None) is not None:
+        results.mixed_effects = _ensure_method_columns(
+            results.mixed_effects, pipeline_config.method, robust_method, method_label
+        )
 
     if getattr(results, "correlations", None) is not None and not results.correlations.empty:
-        path = ctx.stats_dir / "correlations.tsv"
+        path = ctx.stats_dir / f"correlations{method_suffix}.tsv"
         write_tsv(results.correlations, path)
         saved.append(path)
 
     if getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty:
-        path = ctx.stats_dir / "pain_sensitivity.tsv"
+        path = ctx.stats_dir / f"pain_sensitivity{method_suffix}.tsv"
         write_tsv(results.pain_sensitivity, path)
         saved.append(path)
 
@@ -592,9 +883,107 @@ def stage_export(ctx: BehaviorContext, results: Any) -> List[Path]:
         write_tsv(results.mediation, path)
         saved.append(path)
 
+    if getattr(results, "mixed_effects", None) is not None and not results.mixed_effects.empty:
+        path = ctx.stats_dir / "mixed_effects.tsv"
+        write_tsv(results.mixed_effects, path)
+        saved.append(path)
+
+    normalized_path = _write_normalized_results(ctx, pipeline_config, results)
+    if normalized_path is not None:
+        saved.append(normalized_path)
+
     summary = results.to_summary()
     (ctx.stats_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     saved.append(ctx.stats_dir / "summary.json")
 
     ctx.logger.info(f"Saved {len(saved)} output files")
     return saved
+
+
+def _infer_output_kind(name: str) -> str:
+    if name.startswith("corr_stats_"):
+        return "correlation_stats"
+    if name.startswith("correlations"):
+        return "correlations"
+    if name.startswith("pain_sensitivity"):
+        return "pain_sensitivity"
+    if name.startswith("condition_effects"):
+        return "condition_effects"
+    if name.startswith("mediation"):
+        return "mediation"
+    if name.startswith("mixed_effects"):
+        return "mixed_effects"
+    if name.startswith("normalized_results"):
+        return "normalized_results"
+    if name.startswith("summary"):
+        return "summary"
+    if name.startswith("analysis_metadata"):
+        return "analysis_metadata"
+    if name.startswith("time_frequency_correlation_data"):
+        return "time_frequency"
+    if name.startswith("temporal_correlations"):
+        return "temporal_correlations"
+    if name.startswith("hierarchical_fdr_summary"):
+        return "hierarchical_fdr_summary"
+    return "unknown"
+
+
+def _count_rows(path: Path) -> Optional[int]:
+    if path.suffix not in {".tsv", ".csv"}:
+        return None
+    try:
+        with path.open("r") as f:
+            header = f.readline()
+            if not header:
+                return 0
+            return sum(1 for _ in f)
+    except Exception:
+        return None
+
+
+def write_outputs_manifest(
+    ctx: BehaviorContext,
+    pipeline_config: Any,
+    results: Any,
+    stage_metrics: Optional[Dict[str, Any]] = None,
+) -> Path:
+    from datetime import datetime
+
+    outputs = []
+    for path in sorted(p for p in ctx.stats_dir.iterdir() if p.is_file() and p.name != "outputs_manifest.json"):
+        outputs.append({
+            "name": path.name,
+            "path": str(path),
+            "kind": _infer_output_kind(path.name),
+            "rows": _count_rows(path),
+            "size_bytes": int(path.stat().st_size),
+            "method_label": pipeline_config.method_label,
+        })
+
+    feature_types = [name for name, df in ctx.iter_feature_tables() if df is not None and not df.empty]
+
+    payload = {
+        "subject": ctx.subject,
+        "task": ctx.task,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "method": pipeline_config.method,
+        "robust_method": pipeline_config.robust_method,
+        "method_label": pipeline_config.method_label,
+        "n_trials": ctx.n_trials,
+        "feature_types": feature_types,
+        "feature_categories": ctx.feature_categories or [],
+        "feature_files": ctx.selected_feature_files or [],
+        "targets": {
+            "rating": bool(ctx.targets is not None and ctx.targets.notna().any()) if ctx.targets is not None else False,
+            "temperature": bool(ctx.temperature is not None and ctx.temperature.notna().any()) if ctx.temperature is not None else False,
+        },
+        "covariates_qc": ctx.data_qc.get("covariates_qc", {}),
+        "outputs": outputs,
+    }
+
+    if stage_metrics:
+        payload["stage_metrics"] = stage_metrics
+
+    path = ctx.stats_dir / "outputs_manifest.json"
+    path.write_text(json.dumps(payload, indent=2, default=str))
+    return path

@@ -84,14 +84,6 @@ epochs:
 # 4. ANALYSIS PARAMETERS
 ###################################################################
 
-# 4.1 ERP
-erp_analysis:
-  picks: "eeg"
-  combine: "gfp"
-  baseline_window: *baseline_window_erp
-  plot_colors:
-    pain: "crimson"
-    nonpain: "navy"
 
 # 4.2 Time-Frequency (TFR)
 time_frequency_analysis:
@@ -111,7 +103,13 @@ time_frequency_analysis:
 
 # 4.3 Feature Extraction
 feature_engineering:
-  feature_categories: ["power", "connectivity", "microstates", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "gfp", "spectral_extras", "temporal", "ratios", "asymmetry", "cfc", "dynamics_advanced"]
+  feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
+
+  validation:
+    fail_on_missing_named_window: true
+
+  power:
+    require_baseline: true
   
   constants:
     epsilon_std: *epsilon_std
@@ -124,16 +122,6 @@ feature_engineering:
     min_epochs_for_plv: 10
     min_edge_samples: 30
 
-  microstates:
-    n_states: 4
-    kmeans_n_init: 20
-    min_peak_distance_ms: 20.0
-    min_correlation: 0.25
-    gfp_min_percentile: 25.0
-    min_run_ms: 10.0
-    use_group_templates: true
-    build_group_templates: true
-
   aperiodic:
     fmin: 2.0
     fmax: 40.0
@@ -142,28 +130,41 @@ feature_engineering:
     min_fit_points: 5
 
   connectivity:
-    measures: ["wpli", "aec", "imcoh"]
+    measures: ["wpli", "aec"]
     aec_mode: "orth"
     graph_top_prop: 0.1
     sliding_window_len: 1.0
     sliding_window_step: 0.5
 
   pac:
-    estimators: ["tort", "plv", "cl_corr"]
+    method: "mvl"
     pairs: [["theta", "gamma"], ["alpha", "gamma"]]
     phase_range: [4.0, 8.0]
     amp_range: [30.0, 80.0]
-    n_surrogates: 200
-
-  dynamics:
-    burst_percentile: 75
-    dfa_scales: [4, 8, 16, 32, 64, 128, 256]
-    mse_scales: [1, 2, 4, 8, 16, 32]
+    min_epochs: 2
 
   complexity:
     pe_order: 3
-    sampen_m: 2
-    sampen_r_mult: 0.2
+    pe_delay: 1
+
+  erp:
+    baseline_correction: true
+    allow_no_baseline: false
+    components:
+      - name: "n1"
+        start: 0.10
+        end: 0.20
+      - name: "n2"
+        start: 0.20
+        end: 0.35
+      - name: "p2"
+        start: 0.35
+        end: 0.50
+
+  bursts:
+    bands: ["beta", "gamma"]
+    threshold_z: 2.0
+    min_duration_ms: 50
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
@@ -177,10 +178,85 @@ behavior_analysis:
     roi: 20
     default: 5
     edge: 15
-    temporal: 15
   min_trials:
     per_condition: 15
     for_tfr: 20
+  feature_registry:
+    files:
+      power: "features_power.tsv"
+      connectivity: "features_connectivity.parquet"
+      aperiodic: "features_aperiodic.tsv"
+      erp: "features_erp.tsv"
+      bursts: "features_bursts.tsv"
+      itpc: "features_itpc.tsv"
+      pac: "features_pac_trials.tsv"
+      complexity: "features_complexity.tsv"
+      quality: "features_quality.tsv"
+      erds: "features_erds.tsv"
+      spectral: "features_spectral.tsv"
+      ratios: "features_ratios.tsv"
+      asymmetry: "features_asymmetry.tsv"
+      temporal: "features_temporal.tsv"
+    source_to_feature_type:
+      power: "power"
+      connectivity: "connectivity"
+      aperiodic: "aperiodic"
+      erp: "erp"
+      bursts: "bursts"
+      itpc: "itpc"
+      pac: "pac"
+      complexity: "complexity"
+      quality: "quality"
+      erds: "erds"
+      spectral: "spectral"
+      ratios: "ratios"
+      asymmetry: "asymmetry"
+      temporal: "temporal"
+    feature_type_hierarchy:
+      power:
+        subtypes: ["baseline", "ramp", "plateau", "change", "roi", "global"]
+      connectivity:
+        subtypes: ["roi", "graph", "edge", "baseline", "plateau"]
+      aperiodic:
+        subtypes: ["slope", "offset"]
+      spectral:
+        subtypes: ["peak", "edge", "iaf"]
+      erp:
+        subtypes: ["n1", "p2", "n2", "p3", "ptp"]
+      itpc:
+        subtypes: ["baseline", "ramp", "plateau", "time"]
+      pac:
+        subtypes: ["trial", "time"]
+      complexity:
+        subtypes: ["lzc", "pe", "hjorth"]
+      quality:
+        subtypes: ["snr", "artifact"]
+      erds:
+        subtypes: ["percent", "db", "slope"]
+      ratios:
+        subtypes: ["ratio"]
+      asymmetry:
+        subtypes: ["hemisphere", "roi"]
+      temporal:
+        subtypes: ["bin"]
+      bursts:
+        subtypes: ["rate", "duration", "amplitude"]
+    feature_patterns:
+      erds: "^erds_([^_]+)_ch_([^_]+)_.+$"
+      band_ratio: "^ratio_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
+      temporal_stat: "^temporal_([^_]+)_ch_([^_]+)_.+$"
+      hjorth: "^hjorth_([^_]+)_([^_]+)$"
+      roi_power: "^power_([^_]+)_roi_([^_]+)_.+$"
+      roi_asymmetry: "^asym_([^_]+)_([^_]+)_.+$"
+      itpc: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"
+      aperiodic: "^aperiodic_([^_]+)_ch_([^_]+)_.+$"
+      powcorr: "^powcorr_([^_]+)_([^_]+)$"
+      conn_graph: "^conn_graph_([^_]+)_([^_]+)_([^_]+)$"
+      gfp: "^gfp_([^_]+)$"
+      power_segmented: "^power_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
+      connectivity_segmented: "^conn_([^_]+)_([^_]+)_([^_]+)_chpair_([^_]+)_.+$"
+      itpc_segmented: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"
+      dynamics_burst_segmented: "^bursts_([^_]+)_([^_]+)_([^_]+)_.+$"
 
 # 4.5 Decoding (ML)
 decoding:
@@ -264,7 +340,6 @@ plotting:
         figure_title: 12
     layout:
       tight_rect: [0, 0.03, 1, 1]
-      tight_rect_microstate: [0, 0.02, 1, 0.96]
 
   figure_sizes:
     standard: [10.0, 8.0]
@@ -318,15 +393,6 @@ plotting:
     aperiodic:
       width_per_column: 5.0
       height_per_row: 4.5
-    microstate:
-      width_per_state: 3.6
-      height_per_state: 3.2
-      width_per_condition: 4.0
-      gfp_scale_factor: 1e6
-    roi:
-      width_per_band: 3.2
-      height_per_roi: 2.5
-      width_per_metric: 4.0
     quality:
       width_per_plot: 3.0
       height_per_plot: 2.5

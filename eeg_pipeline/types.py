@@ -314,7 +314,8 @@ class TimeWindows:
         """Retrieve a boolean mask by semantic name."""
         if name is None:
             return self._empty_mask()
-        key = str(name).lower()
+        raw_key = str(name)
+        key = raw_key.lower()
 
         # 1. Check specialized fields
         if key in {"baseline", "pre", "prestim"}:
@@ -323,6 +324,8 @@ class TimeWindows:
             return self.active_mask
 
         # 2. Check generic dictionary
+        if raw_key in self.masks:
+            return self.masks[raw_key]
         if key in self.masks:
             return self.masks[key]
 
@@ -401,10 +404,12 @@ class PrecomputedData:
     config: Any = None
     logger: Any = None
     qc: PrecomputedQC = field(default_factory=PrecomputedQC)
+    spatial_modes: Optional[List[str]] = None
 
     def crop(self, tmin: float, tmax: float) -> PrecomputedData:
         """Create a new PrecomputedData object cropped to the time range."""
         from eeg_pipeline.utils.analysis.tfr import time_mask
+        from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
         
         mask = time_mask(self.times, tmin, tmax)
         if not np.any(mask):
@@ -424,6 +429,7 @@ class PrecomputedData:
             picks=self.picks,
             config=self.config,
             logger=self.logger,
+            spatial_modes=self.spatial_modes,
         )
         
         # Crop band data
@@ -441,12 +447,47 @@ class PrecomputedData:
         # Most extractors will recompute PSD if missing.
         cropped.psd_data = None 
             
-        # Recompute windows for the new time range
-        from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
+        # Recompute windows for the new time range (preserve explicit ranges if available)
+        explicit_windows = None
+        if self.windows is not None and getattr(self.windows, "ranges", None):
+            explicit_windows = [
+                {"name": name, "tmin": rng[0], "tmax": rng[1]}
+                for name, rng in self.windows.ranges.items()
+                if isinstance(rng, (list, tuple)) and len(rng) >= 2
+            ]
         try:
-            spec = TimeWindowSpec(times=new_times, config=self.config, sampling_rate=self.sfreq, logger=self.logger)
+            spec = TimeWindowSpec(
+                times=new_times,
+                config=self.config,
+                sampling_rate=self.sfreq,
+                logger=self.logger,
+                name=getattr(self.windows, "name", None) if self.windows is not None else None,
+                explicit_windows=explicit_windows,
+            )
             cropped.windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
         except Exception:
             cropped.windows = None
             
         return cropped
+
+    def with_windows(self, windows: Optional[TimeWindows]) -> PrecomputedData:
+        """Return a shallow copy with updated time windows."""
+        if windows is None:
+            return self
+
+        return PrecomputedData(
+            data=self.data,
+            times=self.times,
+            sfreq=self.sfreq,
+            ch_names=self.ch_names,
+            picks=self.picks,
+            windows=windows,
+            band_data=self.band_data,
+            psd_data=self.psd_data,
+            gfp=self.gfp,
+            gfp_band=self.gfp_band,
+            config=self.config,
+            logger=self.logger,
+            qc=self.qc,
+            spatial_modes=self.spatial_modes,
+        )

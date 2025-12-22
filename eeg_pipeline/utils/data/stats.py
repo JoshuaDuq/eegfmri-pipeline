@@ -23,11 +23,17 @@ def _build_correlation_stats_candidates(
     feature_type: str,
     target_suffix: str,
     target_suffix_alt: Optional[str],
+    method_label: Optional[str] = None,
 ) -> List[str]:
     """Build list of candidate filenames for precomputed correlation stats."""
-    candidates = [f"corr_stats_{feature_type}_vs_{target_suffix}.tsv"]
+    method_suffix = f"_{method_label}" if method_label else ""
+    candidates = [f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.tsv"]
     if target_suffix_alt:
-        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv")
+        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.tsv")
+    if method_label:
+        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix}.tsv")
+        if target_suffix_alt:
+            candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv")
     return candidates
 
 
@@ -36,6 +42,7 @@ def load_precomputed_correlations(
     feature_type: str,
     target: str,
     logger: Optional[logging.Logger] = None,
+    method_label: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     """
     Load precomputed correlation statistics from TSV files.
@@ -63,7 +70,12 @@ def load_precomputed_correlations(
     target_suffix = "rating" if "rating" in target.lower() else "temperature"
     target_suffix_alt = "temp" if target_suffix == "temperature" else None
 
-    candidates = _build_correlation_stats_candidates(feature_type, target_suffix, target_suffix_alt)
+    candidates = _build_correlation_stats_candidates(
+        feature_type,
+        target_suffix,
+        target_suffix_alt,
+        method_label=method_label,
+    )
     if not candidates:
         logger.warning(f"Unknown feature type for stats loading: {feature_type}")
         return None

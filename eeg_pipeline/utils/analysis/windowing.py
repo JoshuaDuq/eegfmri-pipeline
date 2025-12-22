@@ -292,9 +292,20 @@ class TimeWindowSpec:
                     break
             
             if not found:
-                # If name isn't in config, we treat it as an alias for the full available span
-                self._add_window(self.name, self.times[0], self.times[-1])
+                if str(self.name).strip().lower() in {"full", "all"}:
+                    self._add_window(self.name, self.times[0], self.times[-1])
+                else:
+                    self._add_empty_window(self.name, reason="missing_named_window")
             return
+
+        # 1b. Build active/plateau window if explicitly defined
+        active_def = (
+            feat_cfg.get("active_window")
+            or tf_cfg.get("active_window")
+            or tf_cfg.get("plateau_window")
+        )
+        if active_def and isinstance(active_def, (list, tuple)) and len(active_def) >= 2:
+            self._add_window("active", float(active_def[0]), float(active_def[1]))
 
         # 3. Batch windows: process 'custom_windows' if defined
         custom = feat_cfg.get("custom_windows", [])
@@ -344,6 +355,24 @@ class TimeWindowSpec:
             n_samples=int(n_samples),
             valid=valid,
             coverage=coverage
+        )
+
+    def _add_empty_window(self, name: str, reason: str = "empty_window") -> None:
+        """Register an empty window with metadata for validation."""
+        full_name = str(name)
+        if not full_name:
+            full_name = "unnamed"
+        if self.logger:
+            self.logger.error("Window '%s' is undefined; %s.", full_name, reason)
+        self.errors.append(f"{full_name}:{reason}")
+        self.masks[full_name] = np.zeros_like(self.times, dtype=bool)
+        self.metadata[full_name] = WindowMetadata(
+            start=np.nan,
+            end=np.nan,
+            clamped=False,
+            n_samples=0,
+            valid=False,
+            coverage=0.0,
         )
         
     def get_mask(self, name: str) -> np.ndarray:
@@ -403,18 +432,21 @@ def time_windows_from_spec(
     for k, meta in spec.metadata.items():
         ranges[k] = (float(meta.start), float(meta.end))
 
-    # Determine active mask/range - prefer 'active', then 'plateau', then first non-baseline
+    # Determine active mask/range - honor explicit named iteration first
     active_key = None
-    for key in ["active", "plateau"]:
-        if key in masks:
-            active_key = key
-            break
-    if active_key is None:
-        # Use first non-baseline window
-        for key in masks:
-            if key != "baseline":
+    if spec.name and spec.name in masks:
+        active_key = spec.name
+    else:
+        for key in ["active", "plateau"]:
+            if key in masks:
                 active_key = key
                 break
+        if active_key is None:
+            # Use first non-baseline window
+            for key in masks:
+                if key != "baseline":
+                    active_key = key
+                    break
 
     return TimeWindows(
         baseline_mask=spec.get_mask("baseline"),
@@ -493,7 +525,7 @@ def get_segment_masks(
     return out
 
 
-def make_mask_for_times(spec: "TimeWindowSpec", window_name: str, times: np.ndarray) -> np.ndarray:
+def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.ndarray:
     """Get a window mask aligned to an arbitrary time vector.
 
     Use this when downstream computations have a different time axis than the
@@ -505,9 +537,28 @@ def make_mask_for_times(spec: "TimeWindowSpec", window_name: str, times: np.ndar
         raise ValueError("times is required")
 
     spec_times = getattr(spec, "times", None)
-    if spec_times is not None and len(times) == len(spec_times):
-        return spec.get_mask(window_name)
+    if spec_times is not None and len(times) == len(spec_times) and hasattr(spec, "get_mask"):
+        mask = spec.get_mask(window_name)
+        if mask is not None and mask.shape == times.shape:
+            return mask
 
+    key = str(window_name).lower()
+
+    # TimeWindows path: use explicit ranges when time vectors differ
+    ranges = getattr(spec, "ranges", None)
+    if isinstance(ranges, dict):
+        window_range = ranges.get(key) or ranges.get(window_name)
+        if window_range is None:
+            if key in {"baseline", "pre", "prestim"}:
+                window_range = getattr(spec, "baseline_range", None)
+            elif key in {"active", "plateau", "stim", "task"}:
+                window_range = getattr(spec, "active_range", None)
+        if window_range is not None:
+            start, end = window_range
+            if np.isfinite(start) and np.isfinite(end) and end > start:
+                return (times >= float(start)) & (times < float(end))
+
+    # TimeWindowSpec path: use metadata if available
     meta = getattr(spec, "metadata", {}).get(window_name)
     if meta is None:
         return np.zeros_like(times, dtype=bool)

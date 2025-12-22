@@ -269,6 +269,7 @@ def compute_tfr_for_subject(
     deriv_root: Path,
     logger: logging.Logger,
     tfr_computed: Optional[mne.time_frequency.EpochsTFR] = None,
+    baseline_window: Optional[Tuple[float, float]] = None,
 ) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
     from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus  # local import to avoid circular deps
     # from eeg_pipeline.analysis.features.power import extract_baseline_power_features  # REMOVED
@@ -295,7 +296,10 @@ def compute_tfr_for_subject(
 
     times = np.asarray(tfr.times)
     tfr_analysis = config.get("time_frequency_analysis", {})
-    tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
+    if baseline_window is not None:
+        tfr_baseline_raw = tuple(baseline_window)
+    else:
+        tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
     min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
     b_start_time, b_end_time, b_idxs = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
@@ -2213,7 +2217,10 @@ def process_temporal_bin(
     if band_power is None:
         return None
     
-    column_names = [f"pow_{band}_{ch}_{time_label}" for ch in channel_names]
+    column_names = [
+        NamingSchema.build("power", time_label, band, "ch", "mean", channel=ch)
+        for ch in channel_names
+    ]
     return band_power, column_names
 
 
@@ -2356,4 +2363,6 @@ __all__ = [
     "apply_baseline_and_average",
     "restrict_epochs_to_roi",
     "apply_baseline_to_tfr",
+    "compute_tfr_morlet",
+    "process_temporal_bin",
 ]

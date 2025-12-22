@@ -27,7 +27,10 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
+from eeg_pipeline.utils.analysis.stats.correlation import (
+    normalize_correlation_method,
+    format_correlation_method_label,
+)
 from eeg_pipeline.utils.analysis.stats.reliability import get_subject_seed
 from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.analysis.behavior.orchestration import (
@@ -43,6 +46,7 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     stage_temporal as _stage_temporal_impl,
     stage_validate as _stage_validate_impl,
     write_analysis_metadata as _write_analysis_metadata_impl,
+    write_outputs_manifest,
 )
 
 
@@ -58,7 +62,6 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "cluster",
     "mediation",
     "mixed_effects",
-    "export",
 ]
 
 
@@ -97,7 +100,11 @@ class BehaviorPipelineConfig:
     compute_change_scores: bool = True
     compute_pain_sensitivity: bool = True
     compute_reliability: bool = False
+    compute_bayes_factors: bool = False
+    compute_loso_stability: bool = True
     bootstrap: int = 0
+    robust_method: Optional[str] = None
+    method_label: str = "spearman"
     
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
@@ -111,15 +118,27 @@ class BehaviorPipelineConfig:
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
+        raw_method = get_config_value(config, "behavior_analysis.statistics.correlation_method", None)
+        if raw_method is None:
+            raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
+        method = normalize_correlation_method(raw_method, default="spearman")
+        robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+        if robust_method is not None:
+            robust_method = str(robust_method).strip().lower() or None
+        method_label = format_correlation_method_label(method, robust_method)
         return cls(
-            method=get_config_value(config, "behavior_analysis.statistics.correlation_method", "spearman"),
+            method=method,
             min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
             control_temperature=bool(get_config_value(config, "behavior_analysis.control_temperature", True)),
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
             compute_change_scores=bool(get_config_value(config, "behavior_analysis.compute_change_scores", True)),
             compute_pain_sensitivity=bool(get_config_value(config, "behavior_analysis.compute_pain_sensitivity", True)),
             compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
+            compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False)),
+            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.loso_stability", True)),
             bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
+            robust_method=robust_method,
+            method_label=method_label,
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
             n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
             run_temporal_correlations=get_config_value(config, "behavior_analysis.time_frequency_heatmap.enabled", True),
@@ -201,7 +220,6 @@ class BehaviorPipeline(PipelineBase):
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
             self._run_correlations = comp_flags["correlations"]
-            self._run_export = comp_flags["export"]
             self.pipeline_config.run_condition_comparison = comp_flags["condition"]
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
             self.pipeline_config.run_cluster_tests = comp_flags["cluster"]
@@ -209,7 +227,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_mixed_effects = comp_flags["mixed_effects"]
             self.pipeline_config.compute_pain_sensitivity = comp_flags["pain_sensitivity"]
             self._run_validation = any(
-                comp_flags[key] for key in BEHAVIOR_COMPUTATION_FLAGS if key != "export"
+                comp_flags[key] for key in BEHAVIOR_COMPUTATION_FLAGS
             )
             
             selected = [k for k, v in comp_flags.items() if v]
@@ -238,11 +256,15 @@ class BehaviorPipeline(PipelineBase):
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
         from eeg_pipeline.cli.common import ProgressReporter
+        import sys
+        import time
+        import resource
         
         task = task or self.config.get("project.task", "thermalactive")
         
         # Initialize progress reporter
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        validate_only = bool(kwargs.get("validate_only", False))
         total_steps = 8  # 8 stages in the pipeline
         
         stats_dir = deriv_stats_path(self.deriv_root, subject)
@@ -282,78 +304,145 @@ class BehaviorPipeline(PipelineBase):
             control_trial_order=self.pipeline_config.control_trial_order,
             compute_change_scores=self.pipeline_config.compute_change_scores,
             compute_reliability=self.pipeline_config.compute_reliability,
+            stats_config=self.pipeline_config,
             feature_categories=self.feature_categories,
             selected_feature_files=self.feature_files,
         )
         
         results = BehaviorPipelineResults(subject=subject)
         
+        def _rss_mb() -> float:
+            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if sys.platform == "darwin":
+                return rss / (1024 * 1024)
+            return rss / 1024
+
+        stage_metrics = {}
+
+        def _record_stage(name: str, start_time: float, start_rss: float) -> None:
+            end_time = time.perf_counter()
+            end_rss = _rss_mb()
+            stage_metrics[name] = {
+                "duration_s": round(end_time - start_time, 4),
+                "rss_mb_start": round(start_rss, 3),
+                "rss_mb_end": round(end_rss, 3),
+                "rss_mb_delta": round(end_rss - start_rss, 3),
+            }
+
+        stage_start = time.perf_counter()
+        stage_rss = _rss_mb()
         progress.step("Loading data", current=1, total=total_steps)
         logger.info("Stage 1: Loading data...")
         if not _stage_load_impl(ctx):
             progress.error("load_failed", "Failed to load data")
+            _record_stage("load", stage_start, stage_rss)
+            return results
+        _record_stage("load", stage_start, stage_rss)
+
+        if validate_only:
+            progress.step("Validation only", current=2, total=total_steps)
+            logger.info("Validation-only mode: skipping computations.")
+            ctx.data_qc["validate_only"] = True
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            _stage_export_impl(ctx, self.pipeline_config, results)
+            _record_stage("export", stage_start, stage_rss)
+            outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"
+            try:
+                _write_analysis_metadata_impl(
+                    ctx, self.pipeline_config, results,
+                    stage_metrics=stage_metrics,
+                    outputs_manifest=outputs_manifest_path,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to write analysis metadata: {e}")
+            write_outputs_manifest(ctx, self.pipeline_config, results, stage_metrics)
+            progress.subject_done(f"sub-{subject}", success=True)
             return results
         
         if self._run_correlations:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Running correlations", current=2, total=total_steps)
             logger.info("Stage 2: Running unified correlations...")
             results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
+            _record_stage("correlations", stage_start, stage_rss)
         else:
             progress.step("Skipping correlations", current=2, total=total_steps)
             logger.info("Stage 2: Skipped correlations (CLI selection)")
         
         if self.pipeline_config.run_condition_comparison:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Condition comparison", current=3, total=total_steps)
             logger.info("Stage 3: Condition comparison...")
             results.condition_effects = _stage_condition_impl(ctx, self.pipeline_config)
+            _record_stage("condition", stage_start, stage_rss)
         else:
             progress.step("Skipping conditions", current=3, total=total_steps)
             logger.info("Stage 3: Skipped condition comparison (CLI selection)")
         
         if self.pipeline_config.run_temporal_correlations:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Temporal correlations", current=4, total=total_steps)
             logger.info("Stage 4: Temporal correlations...")
             _stage_temporal_impl(ctx)
+            _record_stage("temporal", stage_start, stage_rss)
         else:
             progress.step("Skipping temporal", current=4, total=total_steps)
             logger.info("Stage 4: Skipped temporal correlations (CLI selection)")
         
         if self.pipeline_config.run_cluster_tests:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Cluster permutation tests", current=5, total=total_steps)
             logger.info("Stage 5: Cluster permutation tests...")
             results.cluster = _stage_cluster_impl(ctx, self.pipeline_config)
+            _record_stage("cluster", stage_start, stage_rss)
         else:
             progress.step("Skipping cluster tests", current=5, total=total_steps)
             logger.info("Stage 5: Skipped cluster tests (CLI selection)")
         
         if self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Advanced analyses", current=6, total=total_steps)
             logger.info("Stage 6: Advanced analyses...")
             _stage_advanced_impl(ctx, self.pipeline_config, results)
+            _record_stage("advanced", stage_start, stage_rss)
         else:
             progress.step("Skipping advanced", current=6, total=total_steps)
             logger.info("Stage 6: Skipped advanced analyses (CLI selection)")
         
         if self._run_validation:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
             progress.step("Global FDR correction", current=7, total=total_steps)
             logger.info("Stage 7: Global FDR correction...")
             _stage_validate_impl(ctx, self.pipeline_config)
+            _record_stage("fdr", stage_start, stage_rss)
         else:
             progress.step("Skipping FDR", current=7, total=total_steps)
             logger.info("Stage 7: Skipped global FDR (no computations selected)")
         
-        if self._run_export:
-            progress.step("Saving results", current=8, total=total_steps)
-            logger.info("Stage 8: Saving results...")
-            _stage_export_impl(ctx, results)
-        else:
-            progress.step("Skipping export", current=8, total=total_steps)
-            logger.info("Stage 8: Skipped export (CLI selection)")
+        progress.step("Saving results", current=8, total=total_steps)
+        logger.info("Stage 8: Saving results...")
+        stage_start = time.perf_counter()
+        stage_rss = _rss_mb()
+        _stage_export_impl(ctx, self.pipeline_config, results)
+        _record_stage("export", stage_start, stage_rss)
 
+        outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"
         try:
-            _write_analysis_metadata_impl(ctx, self.pipeline_config, results)
+            _write_analysis_metadata_impl(
+                ctx, self.pipeline_config, results,
+                stage_metrics=stage_metrics,
+                outputs_manifest=outputs_manifest_path,
+            )
         except Exception as e:
             logger.warning(f"Failed to write analysis metadata: {e}")
+        write_outputs_manifest(ctx, self.pipeline_config, results, stage_metrics)
         
         summary = results.to_summary()
         logger.info(f"{'='*60}")

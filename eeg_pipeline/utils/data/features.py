@@ -134,24 +134,6 @@ def get_aperiodic_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     return aper_cols
 
 
-def get_microstate_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    ms_cols: Dict[str, List[str]] = {}
-
-    for metric in ["coverage", "duration", "occurrence", "gev"]:
-        cols: List[str] = []
-        for c in df.columns:
-            parsed = NamingSchema.parse(str(c))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != "microstates":
-                continue
-            stat = str(parsed.get("stat") or "")
-            if stat == metric or stat.endswith(f"_{metric}"):
-                cols.append(str(c))
-        if cols:
-            ms_cols[metric] = list(dict.fromkeys(cols))
-
-    return ms_cols
 
 
 ###################################################################
@@ -259,7 +241,6 @@ def align_feature_dataframes(
     pow_df: pd.DataFrame,
     baseline_df: pd.DataFrame,
     conn_df: Optional[pd.DataFrame],
-    ms_df: Optional[pd.DataFrame],
     aper_df: Optional[pd.DataFrame],
     y: pd.Series,
     aligned_events: pd.DataFrame,
@@ -272,7 +253,6 @@ def align_feature_dataframes(
 ) -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
-    Optional[pd.DataFrame],
     Optional[pd.DataFrame],
     Optional[pd.DataFrame],
     pd.Series,
@@ -292,7 +272,6 @@ def align_feature_dataframes(
                 _block_length(pow_df),
                 _block_length(baseline_df),
                 _block_length(conn_df),
-                _block_length(ms_df),
                 _block_length(aper_df),
                 len(y) if y is not None else None,
             ]
@@ -351,7 +330,6 @@ def align_feature_dataframes(
 
         combined_mask &= _finite_mask(pow_df)
         combined_mask &= _finite_mask(baseline_df)
-        combined_mask &= _finite_mask(ms_df)
         combined_mask &= _finite_mask(aper_df)
         combined_mask &= _finite_mask(y)
 
@@ -377,7 +355,6 @@ def align_feature_dataframes(
         pow_df = _safe_mask_apply(pow_df, "power")
         baseline_df = _safe_mask_apply(baseline_df, "baseline")
         conn_df = _safe_mask_apply(conn_df, "connectivity")
-        ms_df = _safe_mask_apply(ms_df, "microstates")
         aper_df = _safe_mask_apply(aper_df, "aperiodic")
         if y is not None and len(y) == n_mask:
             y = y.loc[drop_mask].reset_index(drop=True)
@@ -397,7 +374,6 @@ def align_feature_dataframes(
     register_feature_block("power", _is_valid_df(pow_df), block_registry, before_lengths)
     register_feature_block("baseline", _is_valid_df(baseline_df), block_registry, before_lengths)
     register_feature_block("connectivity", _is_valid_df(conn_df), block_registry, before_lengths)
-    register_feature_block("microstates", _is_valid_df(ms_df), block_registry, before_lengths)
     register_feature_block("aperiodic", _is_valid_df(aper_df), block_registry, before_lengths)
     register_feature_block("target", y, block_registry, before_lengths)
 
@@ -433,10 +409,6 @@ def align_feature_dataframes(
     if conn_df_aligned is not None:
         conn_df_aligned = conn_df_aligned.reset_index(drop=True)
 
-    ms_df_aligned = block_registry.get("microstates")
-    if ms_df_aligned is not None:
-        ms_df_aligned = ms_df_aligned.reset_index(drop=True)
-
     aper_df_aligned = block_registry.get("aperiodic")
     if aper_df_aligned is not None:
         aper_df_aligned = aper_df_aligned.reset_index(drop=True)
@@ -458,7 +430,6 @@ def align_feature_dataframes(
         "power": _get_length(pow_df_aligned),
         "baseline": _get_length(baseline_df_aligned),
         "connectivity": _get_length(conn_df_aligned),
-        "microstates": _get_length(ms_df_aligned),
         "aperiodic": _get_length(aper_df_aligned),
         "target": _get_length(y_aligned),
     }
@@ -484,7 +455,6 @@ def align_feature_dataframes(
         pow_df_aligned,
         baseline_df_aligned,
         conn_df_aligned,
-        ms_df_aligned,
         aper_df_aligned,
         y_aligned,
         retention_stats,
@@ -498,7 +468,6 @@ __all__ = [
     "get_connectivity_columns_by_band",
     "get_itpc_columns_by_band",
     "get_aperiodic_columns",
-    "get_microstate_columns",
     # Block registration
     "validate_trial_alignment_manifest",
     "register_feature_block",

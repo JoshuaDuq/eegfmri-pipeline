@@ -29,7 +29,6 @@ class Command:
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
 from eeg_pipeline.cli.commands.features import setup_features, run_features
-from eeg_pipeline.cli.commands.erp import setup_erp, run_erp
 from eeg_pipeline.cli.commands.tfr import setup_tfr, run_tfr
 from eeg_pipeline.cli.commands.decoding import setup_decoding, run_decoding
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
@@ -65,13 +64,6 @@ COMMANDS: List[Command] = [
         run=run_features,
     ),
     Command(
-        name="erp",
-        help="ERP analysis: compute statistics or visualize",
-        description="ERP pipeline: compute statistics or visualize ERPs",
-        setup=setup_erp,
-        run=run_erp,
-    ),
-    Command(
         name="tfr",
         help="TFR visualization: generate time-frequency representations",
         description="TFR pipeline: visualize time-frequency representations",
@@ -98,7 +90,7 @@ COMMANDS: List[Command] = [
         description="Utilities pipeline: convert raw EEG to BIDS or merge behavioral data",
         setup=setup_utilities,
         run=run_utilities,
-        requires_subjects=False,
+        requires_subjects=True,
     ),
     Command(
         name="info",

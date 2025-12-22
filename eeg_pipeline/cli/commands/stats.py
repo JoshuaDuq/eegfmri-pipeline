@@ -69,15 +69,18 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
         n_features = len(features_subjects)
         n_total = len(all_subjects)
         
-        feature_categories = ["power", "connectivity", "aperiodic", "dynamics", "complexity", "itpc", "microstates"]
+        feature_categories = [
+            "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
+            "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+        ]
         category_counts = {cat: 0 for cat in feature_categories}
         
         for subj in features_subjects:
             features_dir = deriv_features_path(deriv_root, subj)
             if features_dir.exists():
                 for cat in feature_categories:
-                    tsv_files = list(features_dir.glob(f"features_{cat}*.tsv"))
-                    if tsv_files:
+                    feature_files = list(features_dir.glob(f"features_{cat}*"))
+                    if feature_files:
                         category_counts[cat] += 1
         
         if n_total > 0:

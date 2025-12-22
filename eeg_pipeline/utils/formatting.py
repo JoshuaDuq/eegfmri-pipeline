@@ -175,14 +175,18 @@ def get_target_labels(target_type: str) -> Tuple[str, str]:
     return "log10(power/baseline [-5–0 s])", y_label
 
 
-def get_temporal_xlabel(time_label: str) -> str:
-    return f"log10(power/baseline) [{time_label} window]"
-
-
 def format_time_suffix(time_label: Optional[str]) -> str:
-    if time_label:
-        return f" ({time_label})"
-    return " (plateau)"
+    """Format time label as a title suffix."""
+    if time_label is None:
+        return ""
+    return f" ({time_label})"
+
+
+def get_temporal_xlabel(time_label: str) -> str:
+    """Get x-axis label for temporal power plots."""
+    return f"log10(power/baseline) — {time_label}"
+
+
 
 
 def build_file_updates_dict(
@@ -326,6 +330,6 @@ __all__ = [
     "format_roi_description",
     "get_residual_labels",
     "get_target_labels",
-    "get_temporal_xlabel",
     "format_time_suffix",
+    "get_temporal_xlabel",
 ]

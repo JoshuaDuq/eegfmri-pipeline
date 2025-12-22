@@ -19,6 +19,11 @@ from eeg_pipeline.plotting.io.figures import (
     get_behavior_footer as _get_behavior_footer,
     save_fig,
 )
+from eeg_pipeline.utils.analysis.stats.correlation import (
+    format_correlation_method_label,
+    normalize_correlation_method,
+)
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 def _get_behavioral_config(plot_cfg):
@@ -97,11 +102,27 @@ def _load_correlation_stats(
     plot_cfg = get_plot_config(config) if config is not None else None
     behavioral_config = _get_behavioral_config(plot_cfg) if plot_cfg is not None else {}
     target_rating = behavioral_config.get("target_rating", "rating")
+    method_label = None
+    if config is not None:
+        raw_method = get_config_value(config, "behavior_analysis.statistics.correlation_method", None)
+        if raw_method is None:
+            raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
+        method = normalize_correlation_method(raw_method, default="spearman")
+        robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+        if robust_method is not None:
+            robust_method = str(robust_method).strip().lower() or None
+        method_label = format_correlation_method_label(method, robust_method)
+    method_suffix = f"_{method_label}" if method_label else ""
 
     candidates = [
-        (target_rating, stats_dir / "correlations.tsv"),
-        (target_rating, stats_dir / "corr_stats_all_features_vs_rating.tsv"),
+        (target_rating, stats_dir / f"correlations{method_suffix}.tsv"),
+        (target_rating, stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"),
     ]
+    if method_label:
+        candidates.extend([
+            (target_rating, stats_dir / "correlations.tsv"),
+            (target_rating, stats_dir / "corr_stats_all_features_vs_rating.tsv"),
+        ])
 
     for target_label, path in candidates:
         if not path.exists():

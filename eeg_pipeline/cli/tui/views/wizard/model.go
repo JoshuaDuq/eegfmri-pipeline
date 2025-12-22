@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/eeg-pipeline/tui/components"
+	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 
@@ -29,10 +30,12 @@ type FeatureCategory struct {
 var behaviorComputations = []Computation{
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
-	{"condition", "Condition Comparison", "Compare conditions (e.g., task A vs task B)"},
+	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs plateau)"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
 	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
+	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling"},
+	{"export", "Export Results", "Export analysis results"},
 }
 
 type FrequencyBand struct {
@@ -71,7 +74,6 @@ type ConnectivityMeasure struct {
 var connectivityMeasures = []ConnectivityMeasure{
 	{"wpli", "wPLI", "Weighted phase lag index"},
 	{"aec", "AEC", "Amplitude envelope correlation"},
-	{"imcoh", "ImCoh", "Imaginary coherence"},
 	{"plv", "PLV", "Phase locking value"},
 	{"pli", "PLI", "Phase lag index"},
 }
@@ -87,16 +89,15 @@ var featureFileOptions = []FeatureFile{
 	{"power", "Power Features", "EEG power spectral features"},
 	{"connectivity", "Connectivity", "Functional connectivity features"},
 	{"aperiodic", "Aperiodic (1/f)", "Aperiodic spectral features"},
-	{"microstates", "Microstates", "EEG microstate features"},
 	{"itpc", "ITPC", "Inter-trial phase coherence"},
 	{"pac", "PAC", "Phase-amplitude coupling"},
-	{"cfc", "CFC", "Cross-frequency coupling (PAC+AAC+PPC)"},
 	{"complexity", "Complexity", "Complexity/entropy features"},
-	{"dynamics_advanced", "Dynamics", "Advanced dynamics/temporal features"},
 	{"ratios", "Ratios", "Band power ratios"},
 	{"asymmetry", "Asymmetry", "Hemispheric asymmetry"},
 	{"quality", "Quality", "Trial quality metrics"},
-	{"gfp", "GFP", "Global field power"},
+	{"temporal", "Temporal", "Time-resolved (binned) features"},
+	{"erds", "ERDS", "Event-related desynchronization/sync"},
+	{"spectral", "Spectral", "Peak frequency, spectral edge"},
 	{"all", "All Combined", "All features combined (features_all.tsv)"},
 }
 
@@ -188,6 +189,9 @@ type Model struct {
 	width  int
 	height int
 
+	// Command preview overlay
+	showCommandPreview bool
+
 	// Advanced configuration (shared)
 	useDefaultAdvanced bool // True = skip advanced config customization
 	advancedCursor     int  // Which config option is focused
@@ -201,9 +205,6 @@ type Model struct {
 	numberBuffer  string // Buffer for the number being typed
 
 	// Features pipeline advanced config
-	fixedTemplatesPath   string       // Path to fixed microstate templates
-	nMicrostateStates    int          // Number of microstate states (4-7)
-	useGroupTemplates    bool         // Use group templates for microstates
 	connectivityMeasures map[int]bool // Selected connectivity measures
 
 	// PAC/CFC configuration
@@ -218,9 +219,6 @@ type Model struct {
 
 	// Complexity configuration
 	complexityPEOrder int // Permutation entropy order (3-7)
-
-	// Dynamics configuration
-	burstPercentile int // Burst detection threshold percentile (50-95)
 
 	// Behavior pipeline advanced config
 	correlationMethod  string  // "spearman" or "pearson"
@@ -275,9 +273,6 @@ func New(pipeline types.Pipeline) Model {
 		useDefaultAdvanced:   true,
 		expandedOption:       -1, // No option expanded initially
 		connectivityMeasures: make(map[int]bool),
-		// Features defaults
-		nMicrostateStates: 4,
-		useGroupTemplates: true,
 		// PAC/CFC defaults (from config)
 		pacPhaseMin: 4.0,
 		pacPhaseMax: 8.0,
@@ -288,8 +283,6 @@ func New(pipeline types.Pipeline) Model {
 		aperiodicFmax: 40.0,
 		// Complexity defaults
 		complexityPEOrder: 3,
-		// Dynamics defaults
-		burstPercentile: 75,
 		// Behavior defaults
 		correlationMethod:  "spearman",
 		bootstrapSamples:   1000,
@@ -316,14 +309,15 @@ func New(pipeline types.Pipeline) Model {
 			"Generate visualizations",
 		}
 		m.categories = []string{
-			"power", "spectral", "aperiodic", "erds", "ratios", "asymmetry",
+			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
 			"connectivity", "itpc", "pac",
-			"complexity", "quality",
+			"complexity", "bursts", "quality", "temporal",
 		}
 		m.categoryDescs = []string{
 			"Band power (log-ratio)",
 			"Peak frequency, IAF",
 			"1/f spectral slope",
+			"ERP/LEP time-domain features",
 			"Event-related desync/sync",
 			"Band power ratios",
 			"Hemispheric asymmetry",
@@ -331,7 +325,9 @@ func New(pipeline types.Pipeline) Model {
 			"Inter-trial phase coh.",
 			"Phase-amplitude coupling",
 			"Signal complexity",
+			"Oscillatory burst dynamics",
 			"Trial quality metrics",
+			"Time-resolved (binned) features",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectMode,
@@ -391,14 +387,6 @@ func New(pipeline types.Pipeline) Model {
 			types.StepSelectSubjects,
 			types.StepReviewExecute,
 		}
-
-	case types.PipelineERP:
-		m.modeOptions = []string{styles.ModeCompute, styles.ModeVisualize}
-		m.modeDescriptions = []string{
-			"Compute ERP statistics",
-			"Generate ERP plots",
-		}
-		m.steps = []types.WizardStep{types.StepSelectMode, types.StepSelectSubjects, types.StepReviewExecute}
 
 	case types.PipelineTFR:
 		m.modeOptions = []string{styles.ModeVisualize}
@@ -533,6 +521,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 
 	case tea.KeyMsg:
+		// Handle command preview overlay first
+		if m.showCommandPreview {
+			if msg.String() == "p" || msg.String() == "P" || msg.String() == "esc" {
+				m.showCommandPreview = false
+			}
+			return m, nil
+		}
+
 		if m.showHelp {
 			if msg.String() == "?" || msg.String() == "esc" {
 				m.showHelp = false
@@ -714,6 +710,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "n":
 			m.selectNone()
+		case "p", "P":
+			// Toggle command preview overlay
+			m.showCommandPreview = !m.showCommandPreview
+		case "f5", "ctrl+r":
+			// Signal to parent to refresh subjects
+			m.subjectsLoading = true
+			return m, func() tea.Msg { return messages.RefreshSubjectsMsg{} }
 		}
 
 	case tea.WindowSizeMsg:

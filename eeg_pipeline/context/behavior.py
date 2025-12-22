@@ -72,6 +72,7 @@ class BehaviorContext:
     control_trial_order: bool = True
     compute_change_scores: bool = True
     compute_reliability: bool = True
+    stats_config: Optional[Any] = None
     feature_categories: Optional[List[str]] = None
     selected_feature_files: Optional[List[str]] = None  # Specific files to load (e.g., ["power", "aperiodic"])
     
@@ -80,13 +81,18 @@ class BehaviorContext:
     aligned_events: Optional[pd.DataFrame] = None
     power_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
-    microstates_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
+    erp_df: Optional[pd.DataFrame] = None
     complexity_df: Optional[pd.DataFrame] = None
-    dynamics_df: Optional[pd.DataFrame] = None
-    cfc_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
+    bursts_df: Optional[pd.DataFrame] = None
+    quality_df: Optional[pd.DataFrame] = None
+    erds_df: Optional[pd.DataFrame] = None
+    spectral_df: Optional[pd.DataFrame] = None
+    ratios_df: Optional[pd.DataFrame] = None
+    asymmetry_df: Optional[pd.DataFrame] = None
+    temporal_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
     temperature: Optional[pd.Series] = None
     temperature_column: Optional[str] = None
@@ -98,6 +104,8 @@ class BehaviorContext:
     data_qc: Dict[str, Any] = field(default_factory=dict)
     _data_loaded: bool = False
     _change_scores_added: bool = False
+    _combined_features_df: Optional[pd.DataFrame] = None
+    _combined_features_signature: Optional[str] = None
 
     @property
     def method(self) -> str:
@@ -191,18 +199,27 @@ class BehaviorContext:
             file_attr_map = {
                 "power": "power_df",
                 "connectivity": "connectivity_df",
-                "microstates": "microstates_df",
                 "aperiodic": "aperiodic_df",
+                "erp": "erp_df",
                 "itpc": "itpc_df",
                 "pac": "pac_df",
                 "complexity": "complexity_df",
-                "dynamics": "dynamics_df",
-                "cfc": "cfc_df",
+                "bursts": "bursts_df",
+                "quality": "quality_df",
+                "erds": "erds_df",
+                "spectral": "spectral_df",
+                "ratios": "ratios_df",
+                "asymmetry": "asymmetry_df",
+                "temporal": "temporal_df",
             }
             
             for key in self.selected_feature_files:
                 if key not in STANDARD_FEATURE_FILES:
                     self.logger.warning(f"Unknown feature file key: {key}")
+                    continue
+
+                if key == "all":
+                    self.logger.warning("Feature file key 'all' is not supported in behavior analysis; skipping.")
                     continue
                 
                 filename = STANDARD_FEATURE_FILES[key]
@@ -212,6 +229,11 @@ class BehaviorContext:
                     self.logger.warning(f"Feature file not found: {path}")
                     continue
                 
+                attr_name = file_attr_map.get(key)
+                if not attr_name:
+                    self.logger.warning(f"Feature file key '{key}' has no mapped context attribute; skipping.")
+                    continue
+
                 try:
                     if path.suffix == ".parquet":
                         import pandas as pd
@@ -219,16 +241,14 @@ class BehaviorContext:
                     else:
                         df = read_tsv(path)
                     
-                    attr_name = file_attr_map.get(key)
-                    if attr_name:
-                        current = getattr(self, attr_name)
-                        if current is None:
-                            setattr(self, attr_name, df)
-                        else:
-                            # Merge for precomputed-style attributes
-                            new_cols = [c for c in df.columns if c not in current.columns]
-                            if new_cols:
-                                setattr(self, attr_name, pd.concat([current, df[new_cols]], axis=1))
+                    current = getattr(self, attr_name)
+                    if current is None:
+                        setattr(self, attr_name, df)
+                    else:
+                        # Merge for precomputed-style attributes
+                        new_cols = [c for c in df.columns if c not in current.columns]
+                        if new_cols:
+                            setattr(self, attr_name, pd.concat([current, df[new_cols]], axis=1))
                     
                     self.logger.info(f"Loaded {key}: {df.shape[1]} columns, {df.shape[0]} rows")
                 except Exception as e:
@@ -259,14 +279,17 @@ class BehaviorContext:
             self.power_df = bundle.power_df
             self.connectivity_df = bundle.connectivity_df
             self.pac_df = bundle.pac_trials_df
-            self.microstates_df = bundle.microstate_df
             self.aperiodic_df = bundle.aperiodic_df
+            self.erp_df = bundle.erp_df
             self.itpc_df = bundle.itpc_df
-
             self.complexity_df = bundle.complexity_df
-            self.dynamics_df = bundle.dynamics_df
-            self.cfc_df = None  # Loaded via dedicated check if needed
-            
+            self.bursts_df = bundle.bursts_df
+            self.quality_df = bundle.quality_df
+            self.erds_df = bundle.erds_df
+            self.spectral_df = bundle.spectral_df
+            self.ratios_df = bundle.ratios_df
+            self.asymmetry_df = bundle.asymmetry_df
+            self.temporal_df = bundle.temporal_df
             self.targets = bundle.targets
 
         feature_counts = self._get_feature_counts()
@@ -296,13 +319,18 @@ class BehaviorContext:
         attr_map = {
             "power": self.power_df,
             "connectivity": self.connectivity_df,
-            "microstates": self.microstates_df,
             "aperiodic": self.aperiodic_df,
+            "erp": self.erp_df,
             "itpc": self.itpc_df,
             "pac": self.pac_df,
             "complexity": self.complexity_df,
-            "dynamics": self.dynamics_df,
-            "cfc": self.cfc_df,
+            "bursts": self.bursts_df,
+            "quality": self.quality_df,
+            "erds": self.erds_df,
+            "spectral": self.spectral_df,
+            "ratios": self.ratios_df,
+            "asymmetry": self.asymmetry_df,
+            "temporal": self.temporal_df,
         }
         return [(ft, attr_map.get(ft)) for ft in FEATURE_TYPES]
 
@@ -319,19 +347,31 @@ class BehaviorContext:
             return
 
         category_map = {
-            "power": "power_df", "connectivity": "connectivity_df",
-            "pac": "pac_df", "microstates": "microstates_df",
-            "aperiodic": "aperiodic_df", "itpc": "itpc_df",
-            "complexity": "complexity_df", "dynamics": "dynamics_df",
-            "cfc": "cfc_df",
-            "psychometrics": None, "temporal": None, "dose_response": None,
+            "power": "power_df",
+            "connectivity": "connectivity_df",
+            "spectral": "spectral_df",
+            "aperiodic": "aperiodic_df",
+            "erp": "erp_df",
+            "erds": "erds_df",
+            "ratios": "ratios_df",
+            "asymmetry": "asymmetry_df",
+            "itpc": "itpc_df",
+            "pac": "pac_df",
+            "complexity": "complexity_df",
+            "bursts": "bursts_df",
+            "quality": "quality_df",
+            "temporal": "temporal_df",
+            "psychometrics": None,
+            "dose_response": None,
         }
         keep_attrs = {category_map.get(cat) for cat in self.feature_categories if category_map.get(cat)}
 
         if keep_attrs:
             all_attrs = [
-                "power_df", "connectivity_df", "pac_df", "microstates_df", 
-                "aperiodic_df", "itpc_df", "complexity_df", "dynamics_df", "cfc_df"
+                "power_df", "connectivity_df", "spectral_df", "aperiodic_df",
+                "erp_df", "erds_df", "ratios_df", "asymmetry_df",
+                "itpc_df", "pac_df", "complexity_df", "bursts_df",
+                "quality_df", "temporal_df",
             ]
             for attr_name in all_attrs:
                 if attr_name not in keep_attrs:
@@ -417,31 +457,69 @@ class BehaviorContext:
     def _align_feature_tables(self) -> bool:
         """Align all feature tables to target index using iter_feature_tables."""
         base_index = self.targets.index
+        if not base_index.is_unique:
+            self.logger.error("Target index contains duplicates for sub-%s", self.subject)
+            return False
+
+        alignment_report: Dict[str, Any] = {}
 
         def align_df(name: str, df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
             if df is None or df.empty:
                 return df
+            if not df.index.is_unique:
+                self.logger.error("Feature table index contains duplicates for %s (sub-%s)", name, self.subject)
+                alignment_report[name] = {"status": "failed", "reason": "duplicate_index"}
+                return None
             if len(df) != len(base_index):
                 self.logger.error(
                     "Feature table length mismatch for %s: %s rows vs %s targets for sub-%s",
                     name, len(df), len(base_index), self.subject,
                 )
+                alignment_report[name] = {
+                    "status": "failed",
+                    "reason": "length_mismatch",
+                    "n_rows": int(len(df)),
+                    "n_targets": int(len(base_index)),
+                }
                 return None
             if not df.index.equals(base_index):
-                df = df.copy()
-                df.index = base_index
+                try:
+                    if df.index.sort_values().equals(base_index.sort_values()):
+                        df = df.loc[base_index]
+                        alignment_report[name] = {"status": "reindexed_by_label"}
+                    else:
+                        self.logger.error(
+                            "Feature table index mismatch for %s (sub-%s): cannot align indices",
+                            name, self.subject,
+                        )
+                        alignment_report[name] = {"status": "failed", "reason": "index_mismatch"}
+                        return None
+                except Exception as exc:
+                    self.logger.error(
+                        "Feature table index compare failed for %s (sub-%s): %s",
+                        name, self.subject, exc,
+                    )
+                    alignment_report[name] = {"status": "failed", "reason": "index_compare_failed"}
+                    return None
+            else:
+                alignment_report[name] = {"status": "aligned"}
             return df
 
         attr_map = {
             "power": "power_df",
             "connectivity": "connectivity_df",
-            "microstates": "microstates_df",
             "aperiodic": "aperiodic_df",
+            "erp": "erp_df",
             "itpc": "itpc_df",
             "pac": "pac_df",
             "complexity": "complexity_df",
-            "dynamics": "dynamics_df",
-            "cfc": "cfc_df",
+            "bursts": "bursts_df",
+            "quality": "quality_df",
+            "erds": "erds_df",
+            "spectral": "spectral_df",
+            "ratios": "ratios_df",
+            "asymmetry": "asymmetry_df",
+            "temporal": "temporal_df",
         }
         for name, attr in attr_map.items():
             setattr(self, attr, align_df(name, getattr(self, attr)))
@@ -449,6 +527,7 @@ class BehaviorContext:
         if all(df is None or df.empty for _, df in self.iter_feature_tables()):
             self.logger.error("All feature tables failed alignment for sub-%s", self.subject)
             return False
+        self.data_qc["alignment_checks"] = alignment_report
         return True
 
     def _build_covariates(self) -> None:
@@ -462,12 +541,26 @@ class BehaviorContext:
         self.temperature, self.temperature_column = extract_temperature_data(
             self.aligned_events, self.config
         )
-        self.covariates_df = build_covariate_matrix(
+        cov_raw = build_covariate_matrix(
             self.aligned_events, self.partial_covars, self.config
         )
-        self.covariates_df = self._sanitize_covariates(self.covariates_df)
+        cov_report = self._summarize_covariates(cov_raw)
+        self.covariates_df = self._sanitize_covariates(cov_raw)
+        drop_reasons = {}
+        if cov_raw is not None and not cov_raw.empty:
+            for col in cov_raw.columns:
+                series = pd.to_numeric(cov_raw[col], errors="coerce")
+                if series.isna().all():
+                    drop_reasons[str(col)] = "all_nan"
+                elif int(series.nunique(dropna=True)) <= 1:
+                    drop_reasons[str(col)] = "constant"
+        if drop_reasons:
+            cov_report["drop_reasons"] = drop_reasons
 
         self._setup_trial_order_covariate()
+        cov_report["trial_order_added"] = bool(
+            self.covariates_df is not None and "trial_index" in self.covariates_df.columns
+        )
 
         if (
             not self.control_temperature
@@ -478,6 +571,7 @@ class BehaviorContext:
         ):
             self.covariates_df = self.covariates_df.drop(columns=[self.temperature_column], errors="ignore")
             self.covariates_df = self._sanitize_covariates(self.covariates_df)
+            cov_report.setdefault("dropped_by_rule", []).append(self.temperature_column)
 
         self.covariates_without_temp_df = build_covariates_without_temp(
             self.covariates_df, self.temperature_column
@@ -487,6 +581,12 @@ class BehaviorContext:
                 self.covariates_without_temp_df = self.covariates_without_temp_df.copy()
                 self.covariates_without_temp_df.index = self.aligned_events.index
         self.covariates_without_temp_df = self._sanitize_covariates(self.covariates_without_temp_df)
+
+        cov_report["final_columns"] = [] if self.covariates_df is None else [str(c) for c in self.covariates_df.columns]
+        cov_report["dropped_columns"] = [
+            c for c in cov_report.get("raw_columns", []) if c not in cov_report.get("final_columns", [])
+        ]
+        self.data_qc["covariates_qc"] = cov_report
 
     def _sanitize_covariates(self, cov: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
         """Clean covariate DataFrame: convert to numeric, remove constants and NaN columns."""
@@ -508,6 +608,21 @@ class BehaviorContext:
         if constant_cols:
             cov = cov.drop(columns=constant_cols, errors="ignore")
         return None if cov.empty else cov
+
+    def _summarize_covariates(self, cov: Optional[pd.DataFrame]) -> Dict[str, Any]:
+        if cov is None or cov.empty:
+            return {"raw_columns": [], "column_stats": {}}
+        summary: Dict[str, Any] = {}
+        for col in cov.columns:
+            series = pd.to_numeric(cov[col], errors="coerce")
+            summary[str(col)] = {
+                "missing_fraction": float(series.isna().mean()),
+                "n_unique": int(series.nunique(dropna=True)),
+            }
+        return {
+            "raw_columns": [str(c) for c in cov.columns],
+            "column_stats": summary,
+        }
 
     def _setup_trial_order_covariate(self) -> None:
         """Setup trial order as a covariate if enabled and valid."""

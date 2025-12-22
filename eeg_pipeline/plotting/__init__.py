@@ -31,8 +31,6 @@ __all__ = [
     "get_plot_config",
     "PlotConfig",
     # High-level visualizers (lazy via __getattr__)
-    "visualize_subject_erp",
-    "visualize_erp_for_subjects",
     "visualize_features_for_subjects",
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
@@ -66,11 +64,6 @@ def __getattr__(name: str):
         "get_strict_mode": "core",
         "compute_cluster_significance_from_combined": "core",
         "compute_significance_mask": "core",  # TFR significance mask (different from connectivity)
-        # ERP
-        "erp_contrast_pain": "erp",
-        "erp_by_temperature": "erp",
-        "visualize_subject_erp": "erp",
-        "visualize_erp_for_subjects": "erp",
         # Features
         "plot_power_distributions": "features",
         "plot_channel_power_heatmap": "features",

@@ -458,7 +458,7 @@ def get_constants(section: str, config: Optional[Any] = None) -> Dict[str, Any]:
 
 def get_min_samples(config: Any, sample_type: str = "default") -> int:
     """Get minimum samples threshold from config."""
-    defaults = {"channel": 10, "roi": 20, "default": 5, "edge": 30, "temporal": 15}
+    defaults = {"channel": 10, "roi": 20, "default": 5, "edge": 30}
     if config is None:
         return defaults.get(sample_type, 5)
     return int(get_config_value(config, f"behavior_analysis.min_samples.{sample_type}",
@@ -517,9 +517,6 @@ def get_feature_constant(config: Any, constant_name: str, default: Any = None) -
         "MIN_VALID_FRACTION": "feature_engineering.constants.min_valid_fraction",
         "MIN_EPOCHS_FOR_PLV": "feature_engineering.constants.min_epochs_for_plv",
         "MIN_EDGE_SAMPLES": "feature_engineering.constants.min_edge_samples",
-        "MIN_EPOCHS_FOR_MICROSTATES": "feature_engineering.microstates.min_epochs_for_microstates",
-        "MAX_GFP_PEAKS_PER_EPOCH": "feature_engineering.microstates.max_gfp_peaks_per_epoch",
-        "MIN_SAMPLES_FOR_ENTROPY": "feature_engineering.complexity.min_samples_for_entropy",
         "DEFAULT_PE_ORDER": "feature_engineering.complexity.pe_order",
         "DEFAULT_PE_DELAY": "feature_engineering.complexity.pe_delay",
     }

@@ -14,15 +14,14 @@ var (
 
 	SectionTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(Secondary).
-				Padding(0, 1).
+				Foreground(Primary).
+				Underline(true).
 				MarginBottom(1)
 
 	CardStyle = lipgloss.NewStyle().
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Secondary)
+			BorderForeground(Muted)
 
 	SelectedStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -42,18 +41,18 @@ var (
 
 	BoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(Secondary).
+			BorderForeground(Muted).
 			Padding(0, 1)
 
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(TextDim).
 			MarginTop(1).
 			Border(lipgloss.NormalBorder(), true, false, false, false).
-			BorderForeground(Secondary).
+			BorderForeground(Muted).
 			PaddingTop(1)
 
 	ProgressFilledStyle = lipgloss.NewStyle().Foreground(Primary)
-	ProgressEmptyStyle  = lipgloss.NewStyle().Foreground(Secondary)
+	ProgressEmptyStyle  = lipgloss.NewStyle().Foreground(Muted)
 
 	ListItemStyle = lipgloss.NewStyle().
 			Foreground(Text).

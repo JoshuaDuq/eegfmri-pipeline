@@ -430,7 +430,6 @@ func (s *StatusBar) SetRight(items ...string) {
 
 func (s StatusBar) View() string {
 	style := lipgloss.NewStyle().
-		Background(styles.BgBase).
 		Foreground(styles.TextDim).
 		Width(s.Width)
 
@@ -594,8 +593,8 @@ func (t Table) View() string {
 	// Header
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Text).
-		Background(styles.Secondary)
+		Foreground(styles.Primary).
+		Underline(true)
 
 	var headerCells []string
 	for _, col := range t.Columns {

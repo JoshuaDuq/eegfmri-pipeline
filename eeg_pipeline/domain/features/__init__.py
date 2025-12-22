@@ -12,13 +12,18 @@ from eeg_pipeline.domain.features.registry import (
 FEATURE_TYPES = (
     "power",
     "connectivity",
-    "microstates",
     "aperiodic",
+    "complexity",
     "itpc",
     "pac",
-    "complexity",
-    "dynamics",
-    "cfc",
+    "quality",
+    "erds",
+    "spectral",
+    "ratios",
+    "asymmetry",
+    "temporal",
+    "erp",
+    "bursts",
 )
 
 

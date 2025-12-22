@@ -233,6 +233,8 @@ class FeatureExtractionResult:
     aper_df: Optional[pd.DataFrame] = None
     aper_cols: List[str] = field(default_factory=list)
     aper_qc: Optional[Any] = None
+    erp_df: Optional[pd.DataFrame] = None
+    erp_cols: List[str] = field(default_factory=list)
     phase_df: Optional[pd.DataFrame] = None
     phase_cols: List[str] = field(default_factory=list)
     itpc_trial_df: Optional[pd.DataFrame] = None
@@ -257,9 +259,15 @@ class FeatureExtractionResult:
     # Complexity features
     comp_df: Optional[pd.DataFrame] = None
     comp_cols: List[str] = field(default_factory=list)
+    # Burst features
+    bursts_df: Optional[pd.DataFrame] = None
+    bursts_cols: List[str] = field(default_factory=list)
     # Quality metrics
     quality_df: Optional[pd.DataFrame] = None
     quality_cols: List[str] = field(default_factory=list)
+    # Temporal binned features
+    temp_df: Optional[pd.DataFrame] = None
+    temp_cols: List[str] = field(default_factory=list)
 
 
 

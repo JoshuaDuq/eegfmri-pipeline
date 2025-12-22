@@ -476,6 +476,43 @@ class TestBehaviorComputePipeline:
         summary = results.to_summary()
         assert summary["n_features"] == 2
 
+    def test_behavior_export_manifest(self, mock_config):
+        from eeg_pipeline.analysis.behavior.orchestration import stage_export, write_outputs_manifest
+        from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig, BehaviorPipelineResults
+        from eeg_pipeline.context.behavior import BehaviorContext
+        from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
+        import logging
+
+        stats_dir = Path(tempfile.mkdtemp())
+        ctx = BehaviorContext(
+            subject="0001",
+            task="test",
+            config=mock_config,
+            logger=logging.getLogger("test"),
+            deriv_root=stats_dir,
+            stats_dir=stats_dir,
+            use_spearman=True,
+            bootstrap=0,
+            n_perm=0,
+            rng=np.random.default_rng(1),
+        )
+        pipeline_config = BehaviorPipelineConfig.from_config(mock_config)
+        results = BehaviorPipelineResults(subject="0001")
+        results.correlations = pd.DataFrame({
+            "feature": [f"{cat}_feat" for cat in FEATURE_CATEGORIES],
+            "feature_type": FEATURE_CATEGORIES,
+            "r": [0.2] * len(FEATURE_CATEGORIES),
+            "p_raw": [0.5] * len(FEATURE_CATEGORIES),
+            "n": [10] * len(FEATURE_CATEGORIES),
+        })
+
+        stage_export(ctx, pipeline_config, results)
+        manifest_path = write_outputs_manifest(ctx, pipeline_config, results)
+
+        assert manifest_path.exists()
+        corr_files = [p.name for p in stats_dir.iterdir() if p.name.startswith("correlations")]
+        assert any(pipeline_config.method_label in name for name in corr_files)
+
     def test_correlation_computation(self):
         from eeg_pipeline.utils.analysis.stats.correlation import (
             compute_correlation,

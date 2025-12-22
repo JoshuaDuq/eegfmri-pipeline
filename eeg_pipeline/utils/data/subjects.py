@@ -26,6 +26,22 @@ def _collect_subjects_from_bids(bids_root: Path) -> List[str]:
     return subjects
 
 
+def _collect_subjects_from_source_data(source_root: Path) -> List[str]:
+    """Collect all subjects from a source data directory."""
+    if not source_root.exists():
+        return []
+    subjects = []
+    # Support both 'sub-0001' and '0001' naming in source data
+    for sub_dir in sorted(source_root.glob("*")):
+        if sub_dir.is_dir():
+            name = sub_dir.name
+            if name.startswith("sub-"):
+                subjects.append(name[4:])
+            else:
+                subjects.append(name)
+    return subjects
+
+
 def _collect_subjects_from_derivatives_epochs(
     deriv_root: Path, 
     task: str, 
@@ -71,11 +87,19 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
     
     for pattern in search_patterns:
         for sub_dir in sorted(pattern):
-            eeg_feat = sub_dir / "features_power.tsv"
-            y_tsv = sub_dir / "target_vas_ratings.tsv"
-            if eeg_feat.exists() and y_tsv.exists():
-                sub_id = sub_dir.parts[-3].replace("sub-", "")
-                subjects.add(sub_id)
+            # Relaxed check: any feature file (tsv or parquet)
+            has_features = any(
+                f.suffix in {".tsv", ".parquet"} and f.name.startswith("features_")
+                for f in sub_dir.iterdir()
+            )
+            if has_features:
+                # Path parts are e.g. [..., 'sub-0001', 'eeg', 'features']
+                # so -3 is the subject ID
+                try:
+                    sub_id = sub_dir.parts[-3].replace("sub-", "")
+                    subjects.add(sub_id)
+                except (IndexError, AttributeError):
+                    continue
     
     return sorted(list(subjects))
 
@@ -90,7 +114,7 @@ def get_available_subjects(
     deriv_root: Optional[Path] = None,
     bids_root: Optional[Path] = None,
     task: Optional[str] = None,
-    discovery_sources: Optional[List[Literal["bids", "derivatives_epochs", "features"]]] = None,
+    discovery_sources: Optional[List[Literal["bids", "derivatives_epochs", "features", "source_data"]]] = None,
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     logger: Optional[logging.Logger] = None,
 ) -> List[str]:
@@ -129,6 +153,22 @@ def get_available_subjects(
         feature_subjects = _collect_subjects_from_features(deriv_root)
         discovered_subjects.append(("features", feature_subjects))
         logger.debug(f"Discovered {len(feature_subjects)} subjects from derivatives (features)")
+
+    if "source_data" in discovery_sources:
+        src_root = None
+        if hasattr(config, "source_root"):
+            src_root = config.source_root
+        else:
+            p_val = config.get("paths.source_data")
+            if p_val:
+                src_root = Path(p_val)
+            elif bids_root:
+                src_root = bids_root.parent / "source_data"
+        
+        if src_root:
+            source_subjects = _collect_subjects_from_source_data(src_root)
+            discovered_subjects.append(("source_data", source_subjects))
+            logger.debug(f"Discovered {len(source_subjects)} subjects from source data")
 
     if not discovered_subjects:
         logger.warning("No subjects discovered from any source")
@@ -192,6 +232,21 @@ def parse_subject_args(
 
     subjects: Optional[List[str]] = None
 
+    # Determine discovery sources based on command and arguments
+    sources = ["derivatives_epochs"]
+    if hasattr(args, "source") and args.source:
+        if args.source == "all":
+            sources = ["bids", "derivatives_epochs", "features", "source_data"]
+        elif args.source == "epochs":
+            sources = ["derivatives_epochs"]
+        else:
+            sources = [args.source]
+    elif hasattr(args, "mode"):
+        if args.mode == "raw-to-bids":
+            sources = ["source_data"]
+        elif args.mode in {"combine-features", "merge-behavior"}:
+            sources = ["features", "bids"]
+    
     if hasattr(args, "group") and args.group is not None:
         g = args.group.strip()
         if g.lower() in {"all", "*", "@all"}:
@@ -199,25 +254,19 @@ def parse_subject_args(
                 config=config,
                 deriv_root=deriv_root,
                 task=task,
-                discovery_sources=["derivatives_epochs"],
+                discovery_sources=sources,
                 logger=logger,
             )
         else:
-            candidates = [
+            subjects = [
                 s.strip() for s in g.replace(";", ",").replace(" ", ",").split(",") if s.strip()
             ]
-            subjects = []
-            for s in candidates:
-                if find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config) is not None:
-                    subjects.append(s)
-                else:
-                    logger.warning(f"--group subject '{s}' has no cleaned epochs; skipping")
     elif hasattr(args, "all_subjects") and args.all_subjects:
         subjects = get_available_subjects(
             config=config,
             deriv_root=deriv_root,
             task=task,
-            discovery_sources=["derivatives_epochs"],
+            discovery_sources=sources,
             logger=logger,
         )
     elif hasattr(args, "subject") and args.subject:

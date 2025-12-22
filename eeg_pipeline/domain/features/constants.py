@@ -12,6 +12,7 @@ FEATURE_CATEGORIES = [
     "power",          # Band power (log-ratio normalized)
     "spectral",       # Peak frequency, IAF, spectral edge
     "aperiodic",      # 1/f spectral slope (E/I balance)
+    "erp",            # Time-domain evoked features (ERP/LEP)
     "erds",           # Event-related (de)synchronization
     "ratios",         # Band power ratios (theta/beta, etc.)
     "asymmetry",      # Hemispheric power asymmetry
@@ -21,7 +22,9 @@ FEATURE_CATEGORIES = [
     "pac",            # Phase-amplitude coupling
     # Exploratory & QC
     "complexity",     # Signal complexity (exploratory)
+    "bursts",         # Burst dynamics (beta/gamma)
     "quality",        # Trial quality metrics
+    "temporal",       # Time-resolved (binned) features
 ]
 
 SPATIAL_MODES = [

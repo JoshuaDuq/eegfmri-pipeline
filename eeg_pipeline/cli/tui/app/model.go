@@ -32,7 +32,8 @@ const (
 
 // TUIState represents the persistent state of the TUI across sessions
 type TUIState struct {
-	TimeRanges []types.TimeRange `json:"time_ranges"`
+	TimeRanges   []types.TimeRange `json:"time_ranges"`
+	LastPipeline int               `json:"last_pipeline"`
 }
 
 // Model is the root application model
@@ -61,11 +62,27 @@ type Model struct {
 	persistentState TUIState
 }
 
-// New creates a new application model
 func New() Model {
-	// Determine repo root from executable location
+	// Determine repo root from executable location or current directory
 	exePath, _ := os.Executable()
 	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(exePath))))
+
+	// Check if this looks like the repo root (should contain eeg_pipeline folder)
+	if _, err := os.Stat(filepath.Join(repoRoot, "eeg_pipeline")); err != nil {
+		// Fallback to current working directory
+		cwd, err := os.Getwd()
+		if err == nil {
+			// Check if CWD or one of its parents is the repo root
+			checkDir := cwd
+			for i := 0; i < 3; i++ {
+				if _, err := os.Stat(filepath.Join(checkDir, "eeg_pipeline")); err == nil {
+					repoRoot = checkDir
+					break
+				}
+				checkDir = filepath.Dir(checkDir)
+			}
+		}
+	}
 
 	m := Model{
 		state:       StateEnvSelect,
@@ -79,6 +96,12 @@ func New() Model {
 	}
 
 	m.loadState()
+
+	// Restore last selected pipeline cursor position
+	if m.persistentState.LastPipeline >= 0 && m.persistentState.LastPipeline < 5 {
+		m.mainMenu.SetCursor(m.persistentState.LastPipeline)
+	}
+
 	return m
 }
 
@@ -245,6 +268,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.execution.AddOutput("Results pulled successfully.")
 		}
 		return m, nil
+
+	case messages.RefreshSubjectsMsg:
+		// Reload subjects when F5 is pressed in wizard
+		if m.state == StatePipelineWizard {
+			m.wizard.SetSubjectsLoading()
+			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+		}
+		return m, nil
 	}
 
 	// Delegate to current view
@@ -276,6 +307,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.mainMenu.SelectedPipeline >= 0 {
 			m.selectedPipeline = types.Pipeline(m.mainMenu.SelectedPipeline)
+
+			// Save last selected pipeline
+			m.persistentState.LastPipeline = m.mainMenu.SelectedPipeline
+			m.saveState()
+
 			m.wizard = wizard.New(m.selectedPipeline)
 			// Load persistent time ranges
 			m.wizard.SetTimeRanges(m.persistentState.TimeRanges)

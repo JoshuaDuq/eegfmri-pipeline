@@ -7,7 +7,6 @@ Pipeline Classes:
 - FeaturePipeline: Feature extraction (TFR-based and precomputed)
 - BehaviorPipeline: EEG-behavior correlation analysis
 - DecodingPipeline: ML-based prediction (LOSO, time-generalization)
-- ErpPipeline: Event-related potential analysis
 - PreprocessingPipeline: Bad channels, ICA, epochs
 
 Preprocessing Functions:
@@ -19,11 +18,6 @@ from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.pipelines.utilities import (
     run_raw_to_bids,
     run_merge_behavior,
-)
-from eeg_pipeline.pipelines.erp import (
-    ErpPipeline,
-    get_erp_config,
-    load_and_prepare_epochs,
 )
 from eeg_pipeline.pipelines.features import (
     FeaturePipeline,
@@ -47,10 +41,6 @@ __all__ = [
     "UtilityPipeline",
     "run_raw_to_bids",
     "run_merge_behavior",
-    # ERP
-    "ErpPipeline",
-    "get_erp_config",
-    "load_and_prepare_epochs",
     # Features
     "FeaturePipeline",
     "extract_all_features",

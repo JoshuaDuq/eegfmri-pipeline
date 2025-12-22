@@ -2,17 +2,13 @@
 Extra Precomputed Feature Extractors.
 
 Consolidated module for smaller/specialized precomputed feature extractors:
-- GFP (Global Field Power)
-- Temporal (variance, RMS, line length)
 - Band ratios
 - Hemispheric asymmetry
-- ROI aggregations
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -63,119 +59,6 @@ def validate_window_masks(
             return False
 
     return True
-
-
-###################################################################
-# GFP FEATURES
-###################################################################
-
-def extract_gfp_from_precomputed(
-    precomputed: PrecomputedData,
-    config: Any,
-) -> Tuple[pd.DataFrame, List[str]]:
-    logger = getattr(precomputed, "logger", None)
-    if precomputed.data is None or precomputed.windows is None:
-        if logger is not None:
-            logger.warning("GFP: No data or windows available; skipping extraction.")
-        return pd.DataFrame(), []
-
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-
-    windows = precomputed.windows
-    masks = get_segment_masks(precomputed.times, windows, config)
-
-    records: List[Dict[str, float]] = []
-    for ep_idx in range(precomputed.data.shape[0]):
-        x = precomputed.data[ep_idx]
-        gfp_t = np.nanstd(x, axis=0)
-        rec: Dict[str, float] = {}
-        for seg, mask in masks.items():
-            if mask is None or not np.any(mask):
-                continue
-            vals = gfp_t[mask]
-            rec[NamingSchema.build("gfp", seg, "broadband", "global", "mean")] = float(
-                np.nanmean(vals)
-            )
-            rec[NamingSchema.build("gfp", seg, "broadband", "global", "max")] = float(
-                np.nanmax(vals)
-            )
-        records.append(rec)
-
-    if not records or all(len(r) == 0 for r in records):
-        return pd.DataFrame(), []
-    df = pd.DataFrame(records)
-    return df, list(df.columns)
-
-
-###################################################################
-# TEMPORAL FEATURES
-###################################################################
-
-def extract_temporal_features_from_precomputed(
-    precomputed: PrecomputedData,
-    config: Any,
-) -> Tuple[pd.DataFrame, List[str]]:
-    logger = getattr(precomputed, "logger", None)
-    if precomputed.data is None or precomputed.windows is None:
-        if logger is not None:
-            logger.warning("Temporal: No data or windows available; skipping extraction.")
-        return pd.DataFrame(), []
-
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-
-    windows = precomputed.windows
-    masks = get_segment_masks(precomputed.times, windows, config)
-
-    # Spatial info
-    spatial_modes = getattr(precomputed, 'spatial_modes', ['roi', 'global'])
-    roi_map = {}
-    if 'roi' in spatial_modes:
-        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
-        from eeg_pipeline.utils.analysis.channels import build_roi_map
-        roi_defs = get_roi_definitions(config)
-        if roi_defs:
-            roi_map = build_roi_map(precomputed.ch_names, roi_defs)
-
-    records: List[Dict[str, float]] = []
-    for ep_idx in range(precomputed.data.shape[0]):
-        x = precomputed.data[ep_idx]
-        rec: Dict[str, float] = {}
-        for seg, mask in masks.items():
-            if mask is None or not np.any(mask):
-                continue
-            seg_x = x[:, mask]
-            
-            # Compute per-channel
-            ch_vars = np.nanvar(seg_x, axis=1)
-            ch_rms = np.sqrt(np.nanmean(seg_x**2, axis=1))
-            ch_ll = np.nanmean(np.abs(np.diff(seg_x, axis=1)), axis=1) if seg_x.shape[1] > 1 else np.full(len(ch_vars), np.nan)
-            
-            # Channels
-            if 'channels' in spatial_modes:
-                for c, ch in enumerate(precomputed.ch_names):
-                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "var", channel=ch)] = float(ch_vars[c])
-                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "rms", channel=ch)] = float(ch_rms[c])
-                    rec[NamingSchema.build("temporal", seg, "broadband", "ch", "line_length", channel=ch)] = float(ch_ll[c])
-            
-            # ROI
-            if 'roi' in spatial_modes and roi_map:
-                for roi_name, idxs in roi_map.items():
-                    if idxs:
-                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "var_mean", channel=roi_name)] = float(np.nanmean(ch_vars[idxs]))
-                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "rms_mean", channel=roi_name)] = float(np.nanmean(ch_rms[idxs]))
-                        rec[NamingSchema.build("temporal", seg, "broadband", "roi", "line_length_mean", channel=roi_name)] = float(np.nanmean(ch_ll[idxs]))
-
-            # Global
-            if 'global' in spatial_modes:
-                rec[NamingSchema.build("temporal", seg, "broadband", "global", "var_mean")] = float(np.nanmean(ch_vars))
-                rec[NamingSchema.build("temporal", seg, "broadband", "global", "rms_mean")] = float(np.nanmean(ch_rms))
-                rec[NamingSchema.build("temporal", seg, "broadband", "global", "line_length_mean")] = float(np.nanmean(ch_ll))
-        records.append(rec)
-
-    if not records or all(len(r) == 0 for r in records):
-        return pd.DataFrame(), []
-    df = pd.DataFrame(records)
-    return df, list(df.columns)
 
 
 ###################################################################
@@ -373,97 +256,8 @@ def extract_asymmetry_from_precomputed(
     return df, list(df.columns)
 
 
-###################################################################
-# ROI FEATURES
-###################################################################
-
-def _compile_roi_indices(ch_names: List[str], roi_defs: Dict[str, List[str]]) -> Dict[str, List[int]]:
-    out: Dict[str, List[int]] = {}
-    for roi_name, patterns in (roi_defs or {}).items():
-        indices: List[int] = []
-        compiled = [re.compile(p) for p in patterns] if isinstance(patterns, list) else []
-        for idx, ch in enumerate(ch_names):
-            if any(rgx.match(ch) for rgx in compiled):
-                indices.append(idx)
-        if indices:
-            out[str(roi_name)] = indices
-    return out
-
-
-def extract_roi_features_from_precomputed(
-    precomputed: PrecomputedData,
-    bands: List[str],
-    config: Any,
-) -> Tuple[pd.DataFrame, List[str]]:
-    is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
-    if not is_valid:
-        logger = getattr(precomputed, "logger", None)
-        if logger is not None:
-            logger.warning("ROI: %s; skipping extraction.", err_msg)
-        return pd.DataFrame(), []
-
-    roi_defs = get_config_value(config, "time_frequency_analysis.rois", {})
-    roi_to_idx = _compile_roi_indices(precomputed.ch_names, roi_defs)
-    if not roi_to_idx:
-        return pd.DataFrame(), []
-
-    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-
-    windows = precomputed.windows
-    masks = get_segment_masks(precomputed.times, windows, config)
-    baseline_mask = masks.get("baseline")
-    segments: Dict[str, Optional[np.ndarray]] = {
-        "ramp": masks.get("ramp"),
-        "plateau": masks.get("plateau"),
-    }
-    epsilon = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
-
-    if baseline_mask is None or not np.any(baseline_mask):
-        return pd.DataFrame(), []
-
-    records: List[Dict[str, float]] = []
-    for ep_idx in range(precomputed.data.shape[0]):
-        rec: Dict[str, float] = {}
-        for band in bands:
-            if band not in precomputed.band_data:
-                continue
-            power = precomputed.band_data[band].power[ep_idx]
-            base_ch = np.nanmean(power[:, baseline_mask], axis=1)
-            for roi_name, idxs in roi_to_idx.items():
-                base = float(np.nanmean(base_ch[idxs]))
-                base = base if np.isfinite(base) and base > epsilon else np.nan
-                for seg, mask in segments.items():
-                    if mask is None or not np.any(mask):
-                        continue
-                    seg_ch = np.nanmean(power[:, mask], axis=1)
-                    seg_val = float(np.nanmean(seg_ch[idxs]))
-                    if np.isfinite(base) and base > epsilon and np.isfinite(seg_val):
-                        logratio = float(np.log10(seg_val / base))
-                    else:
-                        logratio = np.nan
-                    rec[
-                        NamingSchema.build(
-                            "roi",
-                            seg,
-                            band,
-                            "roi",
-                            "logratio_mean",
-                            channel=roi_name,
-                        )
-                    ] = logratio
-        records.append(rec)
-
-    if not records or all(len(r) == 0 for r in records):
-        return pd.DataFrame(), []
-    df = pd.DataFrame(records)
-    return df, list(df.columns)
-
-
 __all__ = [
     "validate_window_masks",
-    "extract_gfp_from_precomputed",
-    "extract_temporal_features_from_precomputed",
     "extract_band_ratios_from_precomputed",
     "extract_asymmetry_from_precomputed",
-    "extract_roi_features_from_precomputed",
 ]

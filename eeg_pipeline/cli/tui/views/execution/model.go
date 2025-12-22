@@ -772,16 +772,56 @@ func (m Model) renderCompletionSummary() string {
 	}
 	b.WriteString(labelStyle.Render("Log:") + valueStyle.Render(logCount) + "\n")
 
-	// Add quick action hint
+	// Add quick action buttons
+	b.WriteString("\n")
 	switch m.Status {
 	case StatusSuccess:
-		b.WriteString("\n")
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-		b.WriteString(hintStyle.Render("Press Enter to return to menu, or C to copy log"))
+		// Styled action buttons for success
+		enterBtn := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Success).
+			Bold(true).
+			Padding(0, 1).
+			Render("[Enter] Menu")
+		copyBtn := lipgloss.NewStyle().
+			Foreground(styles.Text).
+			Background(styles.Secondary).
+			Padding(0, 1).
+			Render("[C] Copy Log")
+		b.WriteString(enterBtn + "  " + copyBtn)
 	case StatusFailed:
-		b.WriteString("\n")
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-		b.WriteString(hintStyle.Render("Press R to retry, C to copy log, or Enter to return"))
+		// Prominent action buttons for failure - recovery options highlighted
+		retryBtn := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Warning).
+			Bold(true).
+			Padding(0, 1).
+			Render("[R] Retry")
+		copyBtn := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(styles.Error).
+			Bold(true).
+			Padding(0, 1).
+			Render("[C] Copy Log")
+		menuBtn := lipgloss.NewStyle().
+			Foreground(styles.Text).
+			Background(styles.Secondary).
+			Padding(0, 1).
+			Render("[Enter] Menu")
+		b.WriteString(retryBtn + "  " + copyBtn + "  " + menuBtn)
+	case StatusCancelled:
+		retryBtn := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Accent).
+			Bold(true).
+			Padding(0, 1).
+			Render("[R] Retry")
+		menuBtn := lipgloss.NewStyle().
+			Foreground(styles.Text).
+			Background(styles.Secondary).
+			Padding(0, 1).
+			Render("[Enter] Menu")
+		b.WriteString(retryBtn + "  " + menuBtn)
 	}
 
 	// Summary card styling
@@ -827,9 +867,8 @@ func (m Model) renderHeader() string {
 
 	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Text).
-		Background(borderColor).
-		Padding(0, 2).
+		Foreground(borderColor).
+		Underline(true).
 		Render(title)
 
 	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, header)
@@ -953,8 +992,8 @@ func (m Model) renderLogSection() string {
 	if m.searchMode || m.searchQuery != "" {
 		searchIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("🔍 ")
 		inputStyle := lipgloss.NewStyle().
-			Background(styles.Secondary).
 			Foreground(styles.Text).
+			Underline(true).
 			Padding(0, 1)
 
 		query := m.searchQuery
@@ -1097,7 +1136,7 @@ func (m Model) renderStatus() string {
 	case StatusCancelled:
 		return style.Background(styles.Muted).Foreground(lipgloss.Color("#FFFFFF")).Render(" CANCELLED ")
 	default:
-		return style.Background(styles.Secondary).Foreground(styles.Text).Render(" PENDING ")
+		return style.Foreground(styles.Muted).Render(" PENDING ")
 	}
 }
 

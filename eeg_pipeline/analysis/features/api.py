@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 from eeg_pipeline.context.features import FeatureContext
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.utils.data.feature_io import load_group_microstate_templates
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.utils.validation import validate_epochs
 from eeg_pipeline.utils.progress import PipelineProgress
@@ -32,10 +31,12 @@ from eeg_pipeline.analysis.features.phase import (
     compute_pac_comodulograms,
     extract_itpc_from_precomputed,
     extract_phase_features,
+    extract_pac_from_precomputed,
 )
-from eeg_pipeline.analysis.features.cfc import extract_pac_from_precomputed
 from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_features
 from eeg_pipeline.analysis.features.complexity import extract_complexity_from_precomputed
+from eeg_pipeline.analysis.features.erp import extract_erp_features
+from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.analysis.features.connectivity import extract_connectivity_features
 from eeg_pipeline.analysis.features.power import extract_power_features
 from eeg_pipeline.analysis.features.preparation import precompute_data
@@ -43,6 +44,7 @@ from eeg_pipeline.analysis.features.quality import (
     compute_trial_quality_metrics,
     extract_quality_features,
 )
+from eeg_pipeline.analysis.features.temporal import extract_temporal_features
 from eeg_pipeline.utils.analysis.tfr import (
     compute_tfr_for_subject,
     get_tfr_config,
@@ -64,7 +66,7 @@ def filter_features_by_spatial_modes(
     - '_global_' or '_global': global features (include if 'global' in spatial_modes)
     - '_roi_' or ROI name patterns: ROI features (include if 'roi' in spatial_modes)
     
-    Non-spatial features (e.g., microstate coverage) are always included.
+    Non-spatial features are always included.
     """
     if not spatial_modes or df is None or getattr(df, 'empty', True):
         return df
@@ -82,16 +84,19 @@ def filter_features_by_spatial_modes(
         
         # Check if column is spatial (per-channel, global, or ROI)
         is_per_channel = '_ch_' in col_str
+        is_channel_pair = '_chpair_' in col_str
         is_global = '_global_' in col_str or col_str.endswith('_global')
         is_roi = '_roi_' in col_str or any(f'_{roi}_' in col_str or col_str.endswith(f'_{roi}') for roi in roi_names)
         
         # If not a spatial column, always keep it
-        if not is_per_channel and not is_global and not is_roi:
+        if not is_per_channel and not is_channel_pair and not is_global and not is_roi:
             cols_to_keep.append(col)
             continue
         
         # Check if this spatial type is in the selected modes
         if is_per_channel and 'channels' in spatial_modes:
+            cols_to_keep.append(col)
+        elif is_channel_pair and 'channels' in spatial_modes:
             cols_to_keep.append(col)
         elif is_global and 'global' in spatial_modes:
             cols_to_keep.append(col)
@@ -116,7 +121,6 @@ def extract_all_features(
         ctx.logger.info(f"Spatial aggregation modes: {', '.join(ctx.spatial_modes)}")
     
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
-    n_microstates = int(ctx.config.get("feature_engineering.microstates.n_states", 4))
     
     # We will compute counts based on the intended range if possible
     # but some extractors use ctx.epochs directly
@@ -131,11 +135,10 @@ def extract_all_features(
 
     # Categories that need precomputed intermediate data
     precompute_categories = {
-        "connectivity", "erds", "gfp", "spectral_extras", "temporal",
-        "ratios", "asymmetry", "cfc", "dynamics_advanced",
+        "connectivity", "erds", "ratios", "asymmetry", "complexity", "bursts",
     }
     # Categories that require baseline for normalization - do NOT crop precomputed data for these
-    baseline_dependent_categories = {"erds", "spectral_extras", "gfp", "ratios"}
+    baseline_dependent_categories = {"erds", "bursts"}
     
     precomputed_data = None
     needs_precompute = bool(precompute_categories & set(ctx.feature_categories))
@@ -159,7 +162,7 @@ def extract_all_features(
             relevant_cats = sorted(list(precompute_categories & set(ctx.feature_categories)))
             ctx.logger.info(f"Computing shared intermediate data for: {', '.join(relevant_cats)}...")
             compute_psd_data = bool(
-                any(c in ctx.feature_categories for c in ["spectral_extras", "erds", "aperiodic", "cfc", "dynamics_advanced"])
+                any(c in ctx.feature_categories for c in ["erds", "aperiodic", "spectral"])
             )
             precomputed_data = precompute_data(
                 working_epochs,
@@ -170,6 +173,53 @@ def extract_all_features(
                 compute_psd_data=compute_psd_data,
             )
             ctx.set_precomputed(precomputed_data)
+
+    if precomputed_data is not None and ctx.windows is not None:
+        aligned_windows = None
+        try:
+            ctx_times = getattr(ctx.windows, "times", None)
+            if ctx_times is not None and len(precomputed_data.times) == len(ctx_times) and np.allclose(
+                precomputed_data.times,
+                ctx_times,
+                atol=0,
+                rtol=0,
+            ):
+                aligned_windows = ctx.windows
+            else:
+                ranges = getattr(ctx.windows, "ranges", None)
+                if ranges:
+                    explicit = [
+                        {"name": name, "tmin": rng[0], "tmax": rng[1]}
+                        for name, rng in ranges.items()
+                        if isinstance(rng, (list, tuple)) and len(rng) >= 2
+                    ]
+                else:
+                    explicit = None
+
+                if explicit:
+                    from eeg_pipeline.utils.analysis.windowing import (
+                        TimeWindowSpec,
+                        time_windows_from_spec,
+                    )
+
+                    spec = TimeWindowSpec(
+                        times=precomputed_data.times,
+                        config=ctx.config,
+                        sampling_rate=float(getattr(precomputed_data, "sfreq", 1.0)),
+                        logger=ctx.logger,
+                        name=ctx.name,
+                        explicit_windows=explicit,
+                    )
+                    aligned_windows = time_windows_from_spec(spec, logger=ctx.logger, strict=False)
+        except Exception as exc:
+            ctx.logger.warning("Failed to align precomputed windows with context: %s", exc)
+
+        if aligned_windows is not None:
+            precomputed_data = precomputed_data.with_windows(aligned_windows)
+            ctx.set_precomputed(precomputed_data)
+
+    if precomputed_data is not None:
+        precomputed_data.spatial_modes = list(ctx.spatial_modes) if ctx.spatial_modes else None
 
     def _check_length(name: str, df: Optional[pd.DataFrame]) -> None:
         if df is None or getattr(df, "empty", False):
@@ -186,7 +236,7 @@ def extract_all_features(
 
     results = FeatureExtractionResult()
 
-    tfr_dependent_categories = {"power", "itpc", "pac"}
+    tfr_dependent_categories = {"power", "itpc", "pac", "temporal"}
     needs_tfr = bool(tfr_dependent_categories & set(ctx.feature_categories))
 
     tfr_complex = None
@@ -216,6 +266,12 @@ def extract_all_features(
 
         # CRITICAL: Compute TFR on FULL epochs to avoid "wavelet longer than signal" errors,
         # then we will crop the TFR result if a time range is requested.
+        baseline_override = None
+        if ctx.windows is not None:
+            b_start_override, b_end_override = ctx.windows.baseline_range
+            if np.isfinite(b_start_override) and np.isfinite(b_end_override):
+                baseline_override = (float(b_start_override), float(b_end_override))
+
         tfr, baseline_df, baseline_cols, b_start, b_end = compute_tfr_for_subject(
             ctx.epochs, # Full epochs
             ctx.aligned_events,
@@ -225,6 +281,7 @@ def extract_all_features(
             ctx.deriv_root,
             ctx.logger,
             tfr_computed=tfr_power,
+            baseline_window=baseline_override,
         )
         
         if tfr is None:
@@ -310,6 +367,13 @@ def extract_all_features(
         results.aper_cols = aper_cols
         results.aper_qc = qc_payload
 
+    if "erp" in ctx.feature_categories:
+        progress.step(message="Extracting ERP/LEP features...")
+        erp_df, erp_cols = extract_erp_features(ctx)
+        _check_length("ERP", erp_df)
+        results.erp_df = erp_df
+        results.erp_cols = erp_cols
+
     if "complexity" in ctx.feature_categories:
         progress.step(message="Extracting complexity features...")
         if precomputed_data is not None:
@@ -317,6 +381,13 @@ def extract_all_features(
             _check_length("Complexity", comp_df)
             results.comp_df = comp_df
             results.comp_cols = comp_cols
+
+    if "bursts" in ctx.feature_categories:
+        progress.step(message="Extracting burst features...")
+        bursts_df, bursts_cols = extract_burst_features(ctx, power_bands)
+        _check_length("Bursts", bursts_df)
+        results.bursts_df = bursts_df
+        results.bursts_cols = bursts_cols
 
     if "itpc" in ctx.feature_categories or "phase" in ctx.feature_categories:
         progress.step(message="Extracting phase features...")
@@ -336,10 +407,19 @@ def extract_all_features(
             freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
             freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
 
-            plateau_meta = ctx.windows.metadata.get("plateau") if ctx.windows is not None else None
-            plateau_window = None
-            if plateau_meta is not None and getattr(plateau_meta, "valid", False):
-                plateau_window = (float(plateau_meta.start), float(plateau_meta.end))
+            segment_window = None
+            segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
+            if ctx.windows is not None:
+                if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
+                    seg_range = ctx.windows.ranges.get(ctx.name)
+                else:
+                    seg_range = ctx.windows.ranges.get("plateau") or ctx.windows.ranges.get("active")
+                    if seg_range is None and ctx.windows.active_range is not None:
+                        ar = ctx.windows.active_range
+                        if np.isfinite(ar[0]) and np.isfinite(ar[1]):
+                            seg_range = ar
+                if seg_range is not None:
+                    segment_window = (float(seg_range[0]), float(seg_range[1]))
 
             pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
                 tfr_complex,
@@ -348,8 +428,9 @@ def extract_all_features(
                 ctx.epochs.info,
                 ctx.config,
                 ctx.logger,
-                segment_name="plateau",
-                segment_window=plateau_window,
+                segment_name=segment_label,
+                segment_window=segment_window,
+                spatial_modes=ctx.spatial_modes,
             )
             _check_length("PAC trials", pac_trials_df)
             _check_length("PAC time-resolved", pac_time_df)
@@ -407,12 +488,23 @@ def extract_all_features(
         results.quality_df = qual_df
         results.quality_cols = qual_cols
 
+    # Temporal features (binned)
+    if "temporal" in ctx.feature_categories:
+        progress.step(message="Extracting temporal binned features...")
+        temp_df, temp_cols = extract_temporal_features(ctx, power_bands)
+        _check_length("Temporal", temp_df)
+        results.temp_df = temp_df
+        results.temp_cols = temp_cols
+
     # Apply spatial mode filtering to all feature DataFrames
     if ctx.spatial_modes:
         ctx.logger.info(f"Filtering features by spatial modes: {ctx.spatial_modes}")
         if results.pow_df is not None:
             results.pow_df = filter_features_by_spatial_modes(results.pow_df, ctx.spatial_modes, ctx.config)
             results.pow_cols = list(results.pow_df.columns) if results.pow_df is not None else []
+        if results.erp_df is not None:
+            results.erp_df = filter_features_by_spatial_modes(results.erp_df, ctx.spatial_modes, ctx.config)
+            results.erp_cols = list(results.erp_df.columns) if results.erp_df is not None else []
         if results.aper_df is not None:
             results.aper_df = filter_features_by_spatial_modes(results.aper_df, ctx.spatial_modes, ctx.config)
             results.aper_cols = list(results.aper_df.columns) if results.aper_df is not None else []
@@ -422,9 +514,15 @@ def extract_all_features(
         if results.comp_df is not None:
             results.comp_df = filter_features_by_spatial_modes(results.comp_df, ctx.spatial_modes, ctx.config)
             results.comp_cols = list(results.comp_df.columns) if results.comp_df is not None else []
+        if results.bursts_df is not None:
+            results.bursts_df = filter_features_by_spatial_modes(results.bursts_df, ctx.spatial_modes, ctx.config)
+            results.bursts_cols = list(results.bursts_df.columns) if results.bursts_df is not None else []
         if results.spectral_df is not None:
             results.spectral_df = filter_features_by_spatial_modes(results.spectral_df, ctx.spatial_modes, ctx.config)
             results.spectral_cols = list(results.spectral_df.columns) if results.spectral_df is not None else []
+        if results.temp_df is not None:
+            results.temp_df = filter_features_by_spatial_modes(results.temp_df, ctx.spatial_modes, ctx.config)
+            results.temp_cols = list(results.temp_df.columns) if results.temp_df is not None else []
 
     progress.finish()
     return results
@@ -489,16 +587,7 @@ def extract_precomputed_features(
 
     if "spectral" in feature_groups:
         logger.info("Extracting spectral power features...")
-        n_jobs_spectral = int(config.get("feature_engineering.parallel.n_jobs_bands", -1))
         df, cols, qc = extract_power_from_precomputed(precomputed, bands)
-        extra_df, extra_cols = extract_spectral_extras_from_precomputed(precomputed, bands, n_jobs=n_jobs_spectral)
-        seg_df, seg_cols = extract_segment_power_from_precomputed(precomputed, bands, n_jobs=n_jobs_spectral)
-        if not extra_df.empty:
-            df = pd.concat([df, extra_df], axis=1) if not df.empty else extra_df
-            cols.extend(extra_cols)
-        if not seg_df.empty:
-            df = pd.concat([df, seg_df], axis=1) if not df.empty else seg_df
-            cols.extend(seg_cols)
         if not df.empty:
             result.features["spectral"] = FeatureSet(df, cols, "spectral")
             result.qc["spectral"] = qc
@@ -534,29 +623,6 @@ def extract_precomputed_features(
         else:
             result.qc["connectivity"] = {"skipped_reason": "empty_result"}
 
-    if "gfp" in feature_groups:
-        logger.info("Extracting GFP features...")
-        gfp_df, gfp_cols = extract_gfp_from_precomputed(precomputed, config)
-        if not gfp_df.empty:
-            result.features["gfp"] = FeatureSet(gfp_df, gfp_cols, "gfp")
-        else:
-            result.qc["gfp"] = {"skipped_reason": "empty_result"}
-
-    if "roi" in feature_groups:
-        logger.info("Extracting ROI-aggregated features...")
-        roi_df, roi_cols = extract_roi_features_from_precomputed(precomputed, bands, config)
-        if not roi_df.empty:
-            result.features["roi"] = FeatureSet(roi_df, roi_cols, "roi")
-        else:
-            result.qc["roi"] = {"skipped_reason": "empty_result"}
-
-    if "temporal" in feature_groups:
-        logger.info("Extracting temporal (time-domain) features...")
-        tmp_df, tmp_cols = extract_temporal_features_from_precomputed(precomputed, config)
-        if not tmp_df.empty:
-            result.features["temporal"] = FeatureSet(tmp_df, tmp_cols, "temporal")
-        else:
-            result.qc["temporal"] = {"skipped_reason": "empty_result"}
 
     if "ratios" in feature_groups:
         logger.info("Extracting band ratio features...")
@@ -566,19 +632,6 @@ def extract_precomputed_features(
         else:
             result.qc["ratios"] = {"skipped_reason": "empty_result"}
 
-    if "microstates" in feature_groups:
-        logger.info("Extracting microstate features...")
-        n_states = int(config.get("feature_engineering.microstates.n_states", 4))
-        ms_df, ms_cols, _ = extract_microstate_features_from_epochs(
-            epochs,
-            n_states,
-            config,
-            logger,
-        )
-        if not ms_df.empty:
-            result.features["microstates"] = FeatureSet(ms_df, ms_cols, "microstates")
-        else:
-            result.qc["microstates"] = {"skipped_reason": "empty_result"}
 
     if "pac" in feature_groups:
         logger.info("Extracting PAC features from precomputed analytic signals...")
@@ -588,29 +641,7 @@ def extract_precomputed_features(
         else:
             result.qc["pac"] = {"skipped_reason": "empty_result"}
 
-    if "cfc" in feature_groups:
-        logger.info("Extracting CFC features...")
-        cfc_df, cfc_cols = extract_all_cfc_features(
-            epochs,
-            config,
-            logger,
-            include_pac=True,
-            include_aac=True,
-            include_ppc=True,
-        )
-        if not cfc_df.empty:
-            result.features["cfc"] = FeatureSet(cfc_df, cfc_cols, "cfc")
-        else:
-            result.qc["cfc"] = {"skipped_reason": "empty_result"}
 
-    if "dynamics_advanced" in feature_groups:
-        logger.info("Extracting advanced dynamics from precomputed data...")
-        n_jobs_dynamics = int(config.get("feature_engineering.parallel.n_jobs_temporal", -1))
-        dyn_df, dyn_cols = extract_dynamics_from_precomputed(precomputed, n_jobs=n_jobs_dynamics)
-        if not dyn_df.empty:
-            result.features["dynamics_advanced"] = FeatureSet(dyn_df, dyn_cols, "dynamics_advanced")
-        else:
-            result.qc["dynamics_advanced"] = {"skipped_reason": "empty_result"}
 
     if "itpc" in feature_groups:
         logger.info("Extracting ITPC from precomputed phases...")
@@ -630,7 +661,7 @@ def extract_precomputed_features(
             result.qc["asymmetry"] = {"skipped_reason": "empty_result"}
 
     if "complexity" in feature_groups:
-        logger.info("Computing complexity metrics (LZC, entropy, DFA-lite)...")
+        logger.info("Computing complexity metrics (LZC, permutation entropy)...")
         n_jobs_complexity = int(config.get("feature_engineering.parallel.n_jobs_complexity", -1))
         comp_df, comp_cols = extract_complexity_from_precomputed(precomputed, n_jobs=n_jobs_complexity)
         if not comp_df.empty:

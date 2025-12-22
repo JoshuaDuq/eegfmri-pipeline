@@ -26,6 +26,9 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
     align_features_and_targets,
     build_temp_record_unified,
     compute_roi_correlation_stats,
+    format_correlation_method_label,
+    normalize_correlation_method,
+    safe_correlation,
 )
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
@@ -66,6 +69,7 @@ class CorrelationConfig:
     filter_threshold: float = 0.0
     compute_bayes_factor: bool = False
     robust_method: Optional[str] = None  # "percentage_bend", "winsorized", "shepherd"
+    method_label: Optional[str] = None
     compute_loso_stability: bool = False
     compute_reliability: bool = False
     covariates_df: Optional[pd.DataFrame] = None
@@ -87,9 +91,12 @@ class CorrelationConfig:
         ctx : BehaviorContext, optional
             If provided, runtime overrides from context take precedence.
         """
-        method = get_config_value(
-            config, "behavior_analysis.statistics.correlation_method", "spearman"
+        raw_method = get_config_value(
+            config, "behavior_analysis.statistics.correlation_method", None
         )
+        if raw_method is None:
+            raw_method = get_config_value(config, "behavior_analysis.correlation_method", "spearman")
+        method = normalize_correlation_method(raw_method, default="spearman")
         min_samples = get_min_samples(config, "channel")
         fdr_alpha = float(get_config_value(
             config, "behavior_analysis.statistics.fdr_alpha",
@@ -99,17 +106,21 @@ class CorrelationConfig:
         n_permutations = int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000))
         compute_bayes_factor = bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False))
         robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+        if robust_method is not None:
+            robust_method = str(robust_method).strip().lower() or None
         compute_loso_stability = bool(get_config_value(config, "behavior_analysis.loso_stability", True))
         compute_reliability = bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False))
         n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
         
         if ctx is not None:
-            method = ctx.method or method
+            method = normalize_correlation_method(ctx.method or method, default=method)
             min_samples = ctx.min_samples_channel or min_samples
             n_bootstrap = ctx.bootstrap if ctx.bootstrap is not None else n_bootstrap
             n_permutations = ctx.n_perm if ctx.n_perm is not None else n_permutations
             compute_reliability = ctx.compute_reliability
         
+        method_label = format_correlation_method_label(method, robust_method)
+
         return cls(
             method=method,
             min_samples=min_samples,
@@ -119,6 +130,7 @@ class CorrelationConfig:
             rng=ctx.rng if ctx else None,
             compute_bayes_factor=compute_bayes_factor,
             robust_method=robust_method,
+            method_label=method_label,
             compute_loso_stability=compute_loso_stability,
             compute_reliability=compute_reliability,
             covariates_df=ctx.covariates_df if ctx else None,
@@ -133,6 +145,31 @@ class CorrelationConfig:
     @classmethod
     def from_context(cls, ctx: BehaviorContext) -> "CorrelationConfig":
         """Context-aware configuration that honors runtime overrides."""
+        if getattr(ctx, "stats_config", None) is not None:
+            stats_cfg = ctx.stats_config
+            robust_method = getattr(stats_cfg, "robust_method", None)
+            method_label = format_correlation_method_label(stats_cfg.method, robust_method)
+            return cls(
+                method=stats_cfg.method,
+                min_samples=stats_cfg.min_samples,
+                fdr_alpha=stats_cfg.fdr_alpha,
+                n_bootstrap=stats_cfg.bootstrap,
+                n_permutations=stats_cfg.n_permutations,
+                rng=ctx.rng,
+                compute_bayes_factor=bool(getattr(stats_cfg, "compute_bayes_factors", False)),
+                robust_method=robust_method,
+                method_label=method_label,
+                compute_loso_stability=bool(getattr(stats_cfg, "compute_loso_stability", True)),
+                compute_reliability=ctx.compute_reliability,
+                covariates_df=ctx.covariates_df,
+                covariates_without_temp_df=ctx.covariates_without_temp_df,
+                temperature_series=ctx.temperature if ctx.control_temperature else None,
+                groups=ctx.group_ids,
+                control_temperature=ctx.control_temperature,
+                control_trial_order=ctx.control_trial_order,
+                n_jobs=int(getattr(stats_cfg, "n_jobs", -1)),
+            )
+
         return cls.from_config(ctx.config or {}, ctx=ctx)
 
 
@@ -176,6 +213,9 @@ def _build_base_record(
     n_valid: int,
     method: str,
     n_covariates: int,
+    robust_method: Optional[str],
+    method_label: str,
+    target_name: str,
 ) -> Dict[str, Any]:
     """Build base correlation record with raw statistics."""
     return {
@@ -185,6 +225,9 @@ def _build_base_record(
         "p": float(p),
         "n": n_valid,
         "method": method,
+        "robust_method": robust_method,
+        "method_label": method_label,
+        "target": target_name,
         "r_raw": float(r),
         "p_raw": float(p),
         "p_value": float(p),
@@ -386,6 +429,9 @@ def _process_single_column(
     loso_groups: Optional[np.ndarray],
     perm_groups: Optional[np.ndarray],
     config_method: str,
+    config_robust_method: Optional[str],
+    config_method_label: str,
+    target_name: str,
     config_min_samples: int,
     config_n_permutations: int,
     config_n_bootstrap: int,
@@ -401,12 +447,17 @@ def _process_single_column(
     
     rng = np.random.default_rng(config_rng_seed)
     
-    r, p, n_valid = safe_correlation(col_values, targets_aligned, config_method, config_min_samples)
+    r, p, n_valid = safe_correlation(
+        col_values, targets_aligned, config_method, config_min_samples, robust_method=config_robust_method
+    )
     if not np.isfinite(r):
         return None
     
     n_cov = int(cov_aligned.shape[1]) if cov_aligned is not None else 0
-    record = _build_base_record(col_name, feature_type, r, p, n_valid, config_method, n_cov)
+    record = _build_base_record(
+        col_name, feature_type, r, p, n_valid, config_method, n_cov,
+        config_robust_method, config_method_label, target_name
+    )
     
     feature_series = pd.Series(col_values)
     target_series = pd.Series(targets_aligned)
@@ -524,7 +575,9 @@ class FeatureBehaviorCorrelator:
         self.logger.info(f"Correlating features with {target_name}... (n_jobs={n_jobs_actual})")
         
         def _corr_with_groups(df, tvals, cfg, name):
-            return self._correlate_df(df, tvals, cfg, name, subject_ids=cfg.groups)
+            return self._correlate_df(
+                df, tvals, cfg, name, target_name=target_name, subject_ids=cfg.groups
+            )
 
         # Parallel correlation across feature types
         results = parallel_feature_types(
@@ -548,6 +601,7 @@ class FeatureBehaviorCorrelator:
         targets: pd.Series,
         config: CorrelationConfig,
         feature_type: str,
+        target_name: str = "rating",
         subject_ids: Optional[np.ndarray] = None,
     ) -> FeatureCorrelationResult:
         """Correlate a single feature dataframe using core function."""
@@ -615,6 +669,9 @@ class FeatureBehaviorCorrelator:
                 loso_groups_arr,
                 perm_groups_arr,
                 config.method,
+                config.robust_method,
+                config.method_label or format_correlation_method_label(config.method, config.robust_method),
+                target_name,
                 config.min_samples,
                 config.n_permutations,
                 config.n_bootstrap,
@@ -673,10 +730,12 @@ class FeatureBehaviorCorrelator:
         results: Dict[str, FeatureCorrelationResult],
         target_name: str = "rating",
         apply_fdr: bool = True,
+        method_label: Optional[str] = None,
     ) -> List[Path]:
         """Save correlation results to TSV files."""
         self.stats_dir.mkdir(parents=True, exist_ok=True)
         saved_files = []
+        method_suffix = f"_{method_label}" if method_label else ""
 
         for name, result in results.items():
             if result.n_features == 0:
@@ -688,7 +747,7 @@ class FeatureBehaviorCorrelator:
             if "target" not in df.columns:
                 df["target"] = target_name
 
-            path = self.stats_dir / f"corr_stats_{name}_vs_{target_name}.tsv"
+            path = self.stats_dir / f"corr_stats_{name}_vs_{target_name}{method_suffix}.tsv"
             save_correlation_results(df, path)
             saved_files.append(path)
 
@@ -728,6 +787,7 @@ class FeatureBehaviorCorrelator:
                 return match.group(1)
             return None
         
+        method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
         records = []
         for band in bands:
             # Find all columns for this band (plateau segment preferred for pain analysis)
@@ -762,34 +822,50 @@ class FeatureBehaviorCorrelator:
                 if valid.sum() < corr_config.min_samples:
                     continue
                 
-                r, p = compute_correlation(
-                    roi_vals[valid].values, targets[valid].values,
-                    corr_config.method
+                r, p, n = safe_correlation(
+                    roi_vals[valid].values,
+                    targets[valid].values,
+                    corr_config.method,
+                    corr_config.min_samples,
+                    robust_method=corr_config.robust_method,
                 )
+                if not np.isfinite(r):
+                    continue
                 
                 records.append({
                     "roi": roi_name,
                     "band": band,
                     "r": r,
                     "p": p,
-                    "n": int(valid.sum()),
+                    "n": n,
                     "method": corr_config.method,
+                    "robust_method": corr_config.robust_method,
+                    "method_label": method_label,
+                    "target": target_name,
                 })
             
             overall_vals = power_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
             valid = overall_vals.notna() & targets.notna()
             if valid.sum() >= corr_config.min_samples:
-                r, p = compute_correlation(
-                    overall_vals[valid].values, targets[valid].values,
-                    corr_config.method
+                r, p, n = safe_correlation(
+                    overall_vals[valid].values,
+                    targets[valid].values,
+                    corr_config.method,
+                    corr_config.min_samples,
+                    robust_method=corr_config.robust_method,
                 )
+                if not np.isfinite(r):
+                    continue
                 records.append({
                     "roi": "overall",
                     "band": band,
                     "r": r,
                     "p": p,
-                    "n": int(valid.sum()),
+                    "n": n,
                     "method": corr_config.method,
+                    "robust_method": corr_config.robust_method,
+                    "method_label": method_label,
+                    "target": target_name,
                 })
         
         if not records:
@@ -810,7 +886,8 @@ class FeatureBehaviorCorrelator:
         elif corr_config.apply_fdr:
             df["p_fdr"] = fdr_bh(df["p"].to_numpy())
         suffix = "rating" if "rating" in target_name.lower() else "temp"
-        path = self.stats_dir / f"corr_stats_pow_roi_vs_{suffix}.tsv"
+        method_suffix = f"_{method_label}" if method_label else ""
+        path = self.stats_dir / f"corr_stats_pow_roi_vs_{suffix}{method_suffix}.tsv"
         write_tsv(df, path)
         self.logger.info(f"Saved ROI correlations: {path.name} ({len(df)} rows)")
         return df
@@ -836,10 +913,11 @@ class FeatureBehaviorCorrelator:
 
         all_records = []
         metadata = {"n_feature_types": len(self._feature_dfs)}
+        method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
 
         if rating_series is not None and len(rating_series) > 0:
             rating_results = self.correlate_all(rating_series, "rating", corr_config)
-            self.save_results(rating_results, "rating")
+            self.save_results(rating_results, "rating", method_label=method_label)
 
             for name, result in rating_results.items():
                 metadata[f"{name}_n_features"] = result.n_features
@@ -854,7 +932,7 @@ class FeatureBehaviorCorrelator:
         min_samples_default = get_min_samples(self.config, "default")
         if temperature_series is not None and len(temperature_series.dropna()) > min_samples_default:
             temp_results = self.correlate_all(temperature_series, "temperature", corr_config)
-            self.save_results(temp_results, "temperature")
+            self.save_results(temp_results, "temperature", method_label=method_label)
             
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
@@ -869,7 +947,8 @@ class FeatureBehaviorCorrelator:
                 else:
                     p_for_fdr = pd.to_numeric(combined_df["p_primary"], errors="coerce").to_numpy()
                 combined_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
-            combined_path = self.stats_dir / "corr_stats_all_features_vs_rating.tsv"
+            method_suffix = f"_{method_label}" if method_label else ""
+            combined_path = self.stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
             save_correlation_results(combined_df, combined_path)
 
         alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
@@ -904,24 +983,9 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     
     # Inject loaded data from context so context is the source of truth for data loading.
     # Keys here should match registry feature file types where possible.
-    if ctx.power_df is not None:
-        correlator._feature_dfs["power"] = ctx.power_df
-    if ctx.connectivity_df is not None:
-        correlator._feature_dfs["connectivity"] = ctx.connectivity_df
-    if ctx.microstates_df is not None:
-        correlator._feature_dfs["microstates"] = ctx.microstates_df
-    if ctx.aperiodic_df is not None:
-        correlator._feature_dfs["aperiodic"] = ctx.aperiodic_df
-    if ctx.itpc_df is not None:
-        correlator._feature_dfs["itpc"] = ctx.itpc_df
-    if ctx.pac_df is not None:
-        correlator._feature_dfs["pac"] = ctx.pac_df
-    if ctx.complexity_df is not None:
-        correlator._feature_dfs["complexity"] = ctx.complexity_df
-    if ctx.dynamics_df is not None:
-        correlator._feature_dfs["dynamics"] = ctx.dynamics_df
-    if ctx.cfc_df is not None:
-        correlator._feature_dfs["cfc"] = ctx.cfc_df
+    for name, df in ctx.iter_feature_tables():
+        if df is not None and not df.empty:
+            correlator._feature_dfs[name] = df
     
     # Mark as loaded so it doesn't try to reload from registry files
     correlator._loaded = True
@@ -978,6 +1042,7 @@ def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
                                 metadata={"reason": "No pain-relevant features"})
 
     corr_config = CorrelationConfig.from_context(ctx)
+    method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
     all_records = []
 
     for name, df in pain_features.items():
@@ -986,7 +1051,11 @@ def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
 
     if all_records:
         df = pd.DataFrame(all_records)
-        save_correlation_results(df, ctx.stats_dir / "corr_stats_pain_relevant_vs_rating.tsv")
+        method_suffix = f"_{method_label}" if method_label else ""
+        save_correlation_results(
+            df,
+            ctx.stats_dir / f"corr_stats_pain_relevant_vs_rating{method_suffix}.tsv",
+        )
 
     alpha = float(get_config_value(ctx.config, "statistics.sig_alpha", 0.05))
     n_sig = sum(1 for r in all_records if r.get("p", 1) < alpha)

@@ -246,9 +246,8 @@ func (m Model) renderSubjectProgress() string {
 	// Section header
 	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Text).
-		Background(styles.Secondary).
-		Padding(0, 1).
+		Foreground(styles.Primary).
+		Underline(true).
 		Render(" SUBJECTS ")
 	b.WriteString("  " + header + "\n\n")
 
@@ -322,9 +321,8 @@ func (m Model) renderFeatureCategories() string {
 	// Section header
 	header := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Text).
-		Background(styles.Secondary).
-		Padding(0, 1).
+		Foreground(styles.Primary).
+		Underline(true).
 		Render(" FEATURE CATEGORIES ")
 	b.WriteString("  " + header + "\n\n")
 
@@ -338,7 +336,10 @@ func (m Model) renderFeatureCategories() string {
 		total = m.stats.TotalSubjects
 	}
 
-	categories := []string{"power", "connectivity", "aperiodic", "dynamics", "complexity", "itpc", "microstates"}
+	categories := []string{
+		"power", "connectivity", "aperiodic", "bursts", "complexity",
+		"itpc", "pac", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+	}
 
 	for _, cat := range categories {
 		count, ok := m.stats.FeatureCategories[cat]
@@ -376,10 +377,17 @@ func (m Model) getCategoryIcon(cat string) string {
 		"power":        "▸",
 		"connectivity": "▸",
 		"aperiodic":    "▸",
-		"dynamics":     "▸",
-		"complexity":   "▸",
-		"itpc":         "▸",
-		"microstates":  "▸",
+
+		"bursts":     "▸",
+		"complexity": "▸",
+		"itpc":       "▸",
+		"pac":        "▸",
+		"quality":    "▸",
+		"erds":       "▸",
+		"spectral":   "▸",
+		"ratios":     "▸",
+		"asymmetry":  "▸",
+		"temporal":   "▸",
 	}
 	if icon, ok := icons[cat]; ok {
 		return icon

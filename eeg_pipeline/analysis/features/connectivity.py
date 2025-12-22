@@ -64,9 +64,23 @@ def extract_connectivity_features(
         except Exception:
             pass
 
-    # Only process the segment name from the context
+    # Only process the segment name from the context (fallback to active/full)
     ctx_name = getattr(ctx, "name", None)
-    segments = [ctx_name] if ctx_name else ["full"]
+    segments: List[str] = []
+    if ctx_name:
+        segments = [ctx_name]
+    elif getattr(ctx, "windows", None) is not None:
+        for key in ("active", "plateau"):
+            mask = ctx.windows.get_mask(key)
+            if mask is not None and np.any(mask):
+                segments = [key]
+                break
+        if not segments:
+            mask_names = [k for k in ctx.windows.masks.keys() if k != "baseline"]
+            if mask_names:
+                segments = [mask_names[0]]
+    if not segments:
+        segments = ["full"]
 
     return extract_connectivity_from_precomputed(
         precomputed,
@@ -80,7 +94,13 @@ def extract_connectivity_features(
 # Precomputed Data Extractors (Moved from pipeline.py)
 # =============================================================================
 
-def _graph_metrics(adj: np.ndarray, measure: str, band: str, conn_cfg: Dict[str, Any]) -> Dict[str, float]:
+def _graph_metrics(
+    adj: np.ndarray,
+    measure: str,
+    band: str,
+    segment_name: str,
+    conn_cfg: Dict[str, Any],
+) -> Dict[str, float]:
     adj = np.asarray(adj, dtype=float)
     adj[~np.isfinite(adj)] = 0.0
     np.fill_diagonal(adj, 0.0)
@@ -122,10 +142,9 @@ def _graph_metrics(adj: np.ndarray, measure: str, band: str, conn_cfg: Dict[str,
         smallworld = np.nan
 
     return {
-        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_geff"): geff,
-        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_clust"): clust,
-        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_pc"): np.nan,
-        NamingSchema.build("conn", "plateau", band, "global", f"{measure}_smallworld"): smallworld,
+        NamingSchema.build("conn", segment_name, band, "global", f"{measure}_geff"): geff,
+        NamingSchema.build("conn", segment_name, band, "global", f"{measure}_clust"): clust,
+        NamingSchema.build("conn", segment_name, band, "global", f"{measure}_smallworld"): smallworld,
     }
 
 def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
@@ -162,29 +181,36 @@ def extract_connectivity_from_precomputed(
 
     enable_wpli = bool(conn_cfg.get("enable_wpli", True))
     enable_aec = bool(conn_cfg.get("enable_aec", True))
-    enable_pli_bundle = bool(conn_cfg.get("enable_pli", False))
-    enable_plv = bool(conn_cfg.get("enable_plv", enable_pli_bundle))
+    enable_plv = bool(conn_cfg.get("enable_plv", False))
     enable_pli = bool(conn_cfg.get("enable_pli", False))
-    enable_imcoh = bool(conn_cfg.get("enable_imcoh", False))
     enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", True))
 
-    phase_measures: List[str] = []
-    if enable_wpli:
-        phase_measures.append("wpli")
-    if enable_plv:
-        phase_measures.append("plv")
-    if enable_pli:
-        phase_measures.append("pli")
+    supported_measures = {"wpli", "aec", "plv", "pli"}
+    measures_cfg = conn_cfg.get("measures")
+    if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
+        measures = {str(m).strip().lower() for m in measures_cfg}
+        unknown = measures - supported_measures
+        if unknown and logger is not None:
+            logger.warning(
+                "Connectivity: unsupported measures %s; ignoring.",
+                ",".join(sorted(unknown)),
+            )
+        measures = measures & supported_measures
+        enable_wpli = "wpli" in measures
+        enable_aec = "aec" in measures
+        enable_plv = "plv" in measures
+        enable_pli = "pli" in measures
 
-    if enable_imcoh and logger is not None:
-        logger.warning(
-            "Connectivity: enable_imcoh=True is not supported in the trial-wise mne-connectivity backend; skipping. "
-            "Consider using ciplv or a connectivity-over-epochs method if you need an imcoh-like metric."
-        )
+    phase_measures = [m for m, enabled in (("wpli", enable_wpli), ("plv", enable_plv), ("pli", enable_pli)) if enabled]
 
-    segments_use = segments if segments is not None else ["baseline", "ramp", "plateau"]
+    if not phase_measures and not enable_aec:
+        if logger is not None:
+            logger.warning("Connectivity: no supported measures selected; skipping extraction.")
+        return pd.DataFrame(), []
+
     masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     seg_mask_map = {k: v for k, v in masks.items() if v is not None}
+    segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
 
     ch_names = list(getattr(precomputed, "ch_names", []))
     n_channels = len(ch_names)
@@ -329,7 +355,7 @@ def extract_connectivity_from_precomputed(
         glob_col = f"conn_{seg_name}_{band}_global_{method}_mean"
         parts.append(pd.DataFrame({glob_col: np.nanmean(con_vals, axis=1)}))
 
-        if enable_graph_metrics and seg_name == "plateau":
+        if enable_graph_metrics:
             if logger is not None:
                 logger.info(
                     "Connectivity graph metrics (phase): seg=%s band=%s method=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
@@ -344,7 +370,7 @@ def extract_connectivity_from_precomputed(
                 adj = np.zeros((n_channels, n_channels), dtype=float)
                 adj[pair_i, pair_j] = con_vals[ep_idx]
                 adj[pair_j, pair_i] = con_vals[ep_idx]
-                return _graph_metrics(adj, method, band, conn_cfg)
+                return _graph_metrics(adj, method, band, seg_name, conn_cfg)
 
             if graph_n_jobs == 1:
                 graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
@@ -361,9 +387,15 @@ def extract_connectivity_from_precomputed(
 
     def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
         t0 = time.perf_counter()
+        aec_mode = str(conn_cfg.get("aec_mode", "orth")).strip().lower()
+        orthogonalize = "pairwise"
+        if aec_mode in {"none", "raw", "no"}:
+            orthogonalize = False
+        elif aec_mode in {"sym", "symmetric"}:
+            orthogonalize = "sym"
         ec = envelope_correlation(
             analytic_seg,
-            orthogonalize="pairwise",
+            orthogonalize=orthogonalize,
             log=False,
             absolute=True,
         )
@@ -413,7 +445,7 @@ def extract_connectivity_from_precomputed(
         glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
         parts.append(pd.DataFrame({glob_col: np.nanmean(aec_vals, axis=1)}))
 
-        if enable_graph_metrics and seg_name == "plateau":
+        if enable_graph_metrics:
             if logger is not None:
                 logger.info(
                     "Connectivity graph metrics (aec): seg=%s band=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
@@ -427,7 +459,7 @@ def extract_connectivity_from_precomputed(
                 adj = np.zeros((n_channels, n_channels), dtype=float)
                 adj[pair_i, pair_j] = aec_vals[ep_idx]
                 adj[pair_j, pair_i] = aec_vals[ep_idx]
-                return _graph_metrics(adj, "aec", band, conn_cfg)
+                return _graph_metrics(adj, "aec", band, seg_name, conn_cfg)
 
             if graph_n_jobs == 1:
                 graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
@@ -442,7 +474,10 @@ def extract_connectivity_from_precomputed(
     tasks: List[Tuple[str, Tuple[Any, ...]]] = []
     for seg_name in segments_use:
         seg_mask = seg_mask_map.get(seg_name)
-        seg_data = _slice_epochs(precomputed.data, seg_mask)
+        if seg_mask is None and seg_name == "full":
+            seg_data = precomputed.data
+        else:
+            seg_data = _slice_epochs(precomputed.data, seg_mask)
         if seg_data is None:
             continue
         if seg_data.shape[-1] < min_segment_samples:

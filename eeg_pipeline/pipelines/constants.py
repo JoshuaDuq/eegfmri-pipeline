@@ -32,20 +32,34 @@ FEATURE_CATEGORIES: List[str] = [
     "power",
     "connectivity",
     "aperiodic",
-    "dynamics",
+    "erp",
     "complexity",
+    "bursts",
     "itpc",
-    "microstates",
+    "pac",
+    "quality",
+    "erds",
+    "spectral",
+    "ratios",
+    "asymmetry",
+    "temporal",
 ]
 
 FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
     "power": "Band power features (theta, alpha, beta, gamma)",
     "connectivity": "Phase connectivity metrics",
     "aperiodic": "1/f spectral slope parameters",
-    "dynamics": "Temporal dynamics (GFP, bursts)",
+    "erp": "ERP/LEP time-domain features",
     "complexity": "Signal complexity measures",
+    "bursts": "Oscillatory burst dynamics",
     "itpc": "Inter-trial phase coherence",
-    "microstates": "Microstate features",
+    "pac": "Phase-amplitude coupling",
+    "quality": "Data quality and artifact metrics",
+    "erds": "Event-related (de)synchronization",
+    "spectral": "Spectral edge and other freq metrics",
+    "ratios": "Power ratios (e.g., theta/beta)",
+    "asymmetry": "Inter-hemispheric asymmetry",
+    "temporal": "Time-resolved features (sliding windows)",
 }
 
 
@@ -57,7 +71,6 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "cluster",
     "mediation",
     "mixed_effects",
-    "export",
 ]
 
 BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
@@ -68,28 +81,27 @@ BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
     "cluster": "Cluster-based permutation tests",
     "mediation": "Path analysis and mediation models",
     "mixed_effects": "Mixed-effects modeling",
-    "export": "Export results",
 }
 
 
 FEATURE_VISUALIZE_CATEGORIES: List[str] = [
     "power",
     "connectivity",
-    "microstates",
     "aperiodic",
     "itpc",
     "pac",
-    "dynamics",
-    "burst",
+    "quality",
     "erds",
     "complexity",
+    "spectral",
+    "ratios",
+    "asymmetry",
 ]
 
 
 BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "psychometrics",
     "power",
-    "dynamics",
     "aperiodic",
     "connectivity",
     "itpc",
