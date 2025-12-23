@@ -569,7 +569,7 @@ def _run_temporal_by_condition_core(
     min_trials = int(get_config_value(
         config, "behavior_analysis.temporal_correlation_topomaps.min_trials_per_condition", 5
     ))
-    plateau = tuple(config.get("time_frequency_analysis.plateau_window"))
+    active = tuple(config.get("time_frequency_analysis.active_window"))
 
     tfr = compute_tfr_morlet(epochs, config, logger=logger)
     if tfr is None:
@@ -577,7 +577,7 @@ def _run_temporal_by_condition_core(
     apply_baseline_to_tfr(tfr, config, logger)
 
     times = np.asarray(tfr.times)
-    clipped = clip_time_range(times, plateau[0], plateau[1])
+    clipped = clip_time_range(times, active[0], active[1])
     if clipped is None:
         return
     win_s, win_e = build_time_windows_fixed_size_clamped(clipped[0], clipped[1], win_ms / 1000.0)

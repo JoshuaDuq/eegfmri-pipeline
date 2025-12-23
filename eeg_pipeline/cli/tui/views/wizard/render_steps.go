@@ -149,7 +149,11 @@ func (m Model) renderComputationSelection() string {
 
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" FEATURE CATEGORIES ") + "\n\n")
+	title := " FEATURE CATEGORIES "
+	if m.CurrentStep == types.StepSelectPlotCategories {
+		title = " PLOT CATEGORIES "
+	}
+	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
 
 	count := 0
 	for _, sel := range m.selected {
@@ -372,142 +376,187 @@ func (m Model) renderFeatureFileSelection() string {
 	return b.String()
 }
 
-func (m Model) renderTFRVizTypeSelection() string {
+func (m Model) renderPlotSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" VISUALIZATION TYPE ") + "\n\n")
+	b.WriteString(styles.SectionTitleStyle.Render(" PLOT SELECTION ") + "\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Select the type of time-frequency visualization.\n\n"))
+		"  Select the plots to generate. Details for the focused item are shown below.\n") +
+		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
+			"  Use ↑/↓ to navigate, Space to toggle, and A/N to select all/none.\n\n"))
 
-	vizDescriptions := []string{
-		"Time-frequency representations showing power over time and frequency",
-		"Topographic maps showing spatial distribution at specific times/frequencies",
+	// Calculate counts
+	count := 0
+	for _, sel := range m.plotSelected {
+		if sel {
+			count++
+		}
 	}
 
-	for i, vizType := range m.tfrVizTypes {
-		isFocused := i == m.tfrVizType
+	visibleItems := []int{}
+	for i, plot := range m.plotItems {
+		if m.IsPlotCategorySelected(plot.Group) {
+			visibleItems = append(visibleItems, i)
+		}
+	}
 
-		var prefix string
-		if isFocused {
-			prefix = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		} else {
-			prefix = "  "
+	var statusIndicator string
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(visibleItems))))
+	if count == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
+
+	// Determine visible area for scrolling
+	// Total height minus overhead (approx 18-20 lines)
+	maxLines := m.height - 18
+	if maxLines < 10 {
+		maxLines = 10 // Minimum window
+	}
+
+	// Group-aware rendering
+	currentGroup := ""
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	// Collect all lines to render for the list
+	type listLine struct {
+		isHeader bool
+		text     string
+		itemIdx  int // -1 if header
+	}
+	var lines []listLine
+
+	for i, plot := range m.plotItems {
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
 		}
 
-		var indicator string
-		if isFocused {
-			indicator = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("●")
-		} else {
-			indicator = lipgloss.NewStyle().Foreground(styles.TextDim).Render("○")
+		if plot.Group != currentGroup {
+			lines = append(lines, listLine{true, groupStyle.Render(" " + strings.ToUpper(plot.Group) + " "), -1})
+			currentGroup = plot.Group
 		}
+
+		isSelected := m.plotSelected[i]
+		isFocused := i == m.plotCursor
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
 		if isFocused {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
 		}
 
-		b.WriteString(prefix + indicator + nameStyle.Render(vizType) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(4).Render(vizDescriptions[i]) + "\n\n")
+		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
+	}
+
+	// Ensure offset is valid (don't mutate here, just use it safely)
+	offset := m.plotOffset
+	if offset > len(lines)-maxLines && len(lines) > maxLines {
+		offset = len(lines) - maxLines
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Render the windowed list
+	if offset > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more items above ...", offset)) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+
+	for i := offset; i < len(lines) && i < offset+maxLines; i++ {
+		b.WriteString(" " + lines[i].text + "\n")
+	}
+
+	// More indicator
+	if offset+maxLines < len(lines) {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more items below ...", len(lines)-(offset+maxLines))) + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+
+	// Details Pane (for focused item)
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.Repeat("─", 60)) + "\n")
+
+	plot := m.plotItems[m.plotCursor]
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(" Plot Details: ") +
+		lipgloss.NewStyle().Foreground(styles.Text).Render(plot.Name) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(2).Render(plot.Description) + "\n")
+
+	if len(plot.RequiredFiles) > 0 {
+		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+		b.WriteString(reqStyle.Render("Requires: "+strings.Join(plot.RequiredFiles, ", ")) + "\n")
 	}
 
 	return b.String()
 }
 
-func (m Model) renderTFRChannelSelection() string {
+func (m Model) renderPlotConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" TFR CHANNEL SELECTION ") + "\n\n")
+	b.WriteString(styles.SectionTitleStyle.Render(" PLOT OUTPUT ") + "\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Select which channels to visualize in TFR plots.\n") +
-		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  Use ↑/↓ to select mode. For 'Specific', press Space to enter channel names.\n\n"))
+		"  Configure output formats and resolution. Use Space to toggle/cycle.\n\n"))
 
-	for i, mode := range m.tfrChannelModes {
-		isFocused := i == m.tfrChannelMode
+	options := m.getPlotConfigOptions()
+	labelWidth := 16
 
-		var prefix string
+	for i, opt := range options {
+		isFocused := i == m.plotConfigCursor
+		cursor := "  "
 		if isFocused {
-			prefix = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		} else {
-			prefix = "  "
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
 
-		var indicator string
+		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelWidth)
 		if isFocused {
-			indicator = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("●")
-		} else {
-			indicator = lipgloss.NewStyle().Foreground(styles.TextDim).Render("○")
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
 		}
 
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		if isFocused {
-			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			valueStyle = valueStyle.Foreground(styles.Accent).Bold(true)
 		}
 
-		b.WriteString(prefix + indicator + nameStyle.Render(mode) + "\n")
-
-		// Show ROI selection when ROI mode is selected
-		if i == 0 && m.tfrChannelMode == 0 {
-			b.WriteString("\n")
-			roiCount := 0
-			for _, sel := range m.tfrROISelected {
-				if sel {
-					roiCount++
-				}
+		var label, value string
+		switch opt {
+		case optPlotPNG:
+			label = "PNG"
+			value = m.boolToOnOff(m.plotFormatSelected["png"])
+		case optPlotSVG:
+			label = "SVG"
+			value = m.boolToOnOff(m.plotFormatSelected["svg"])
+		case optPlotPDF:
+			label = "PDF"
+			value = m.boolToOnOff(m.plotFormatSelected["pdf"])
+		case optPlotDPI:
+			label = "Figure DPI"
+			if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
+				value = fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex])
+			} else {
+				value = "default"
 			}
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(4).Render(
-				fmt.Sprintf("Select ROIs (%d/%d):\n", roiCount, len(m.tfrROIs))))
-
-			for j, roi := range m.tfrROIs {
-				isSelected := m.tfrROISelected[roi]
-				isROIFocused := m.tfrChannelMode == 0 && j == m.tfrROICursor
-
-				checkbox := styles.RenderCheckbox(isSelected, isROIFocused)
-
-				roiNameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
-				if isROIFocused {
-					roiNameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
-				}
-
-				b.WriteString("    " + checkbox + roiNameStyle.Render(roi) + "\n")
+		case optPlotSaveDPI:
+			label = "Savefig DPI"
+			if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
+				value = fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex])
+			} else {
+				value = "default"
 			}
+		case optPlotSharedColorbar:
+			label = "Shared Colorbar"
+			value = m.boolToOnOff(m.plotSharedColorbar)
 		}
 
-		// Show channel input field for "Specific Channels" mode
-		if i == 3 && m.tfrChannelMode == 3 {
-			inputStyle := lipgloss.NewStyle().
-				Foreground(styles.Text).
-				Padding(0, 1).
-				MarginLeft(4)
-
-			if m.editingTfrChans {
-				inputStyle = inputStyle.
-					Border(lipgloss.NormalBorder()).
-					BorderForeground(styles.Accent)
-			}
-
-			label := lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(4).Render("Channels: ")
-			value := m.tfrSpecificChans
-			if value == "" && !m.editingTfrChans {
-				value = "(press Space to enter, e.g. Cz, Fz, Pz)"
-			}
-			if m.editingTfrChans {
-				value += "_"
-			}
-			b.WriteString(label + inputStyle.Render(value) + "\n")
-		}
+		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value) + "\n")
 	}
-
-	// Description of modes
-	b.WriteString("\n")
-	descriptions := map[int]string{
-		0: "ROI: Visualize by predefined regions of interest",
-		1: "Global: Scalp-mean across all channels",
-		2: "All Channels: Individual plots for each channel",
-		3: "Specific: Enter comma-separated channel names",
-	}
-	desc := descriptions[m.tfrChannelMode]
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(2).Render(desc))
 
 	return b.String()
 }
@@ -685,7 +734,13 @@ func (m Model) renderSubjectSelection() string {
 			selectedCount++
 			for _, s := range m.subjects {
 				if s.ID == subjID {
-					if valid, _ := m.Pipeline.ValidateSubject(s); valid {
+					valid := false
+					if m.Pipeline == types.PipelinePlotting {
+						valid, _ = m.validatePlottingSubject(s)
+					} else if ok, _ := m.Pipeline.ValidateSubject(s); ok {
+						valid = true
+					}
+					if valid {
 						validCount++
 					}
 					break
@@ -749,6 +804,9 @@ func (m Model) renderSubjectSelection() string {
 		b.WriteString(checkbox + nameStyle.Render(s.ID))
 
 		valid, reason := m.Pipeline.ValidateSubject(s)
+		if m.Pipeline == types.PipelinePlotting {
+			valid, reason = m.validatePlottingSubject(s)
+		}
 		if !valid {
 			indicator := lipgloss.NewStyle().Foreground(styles.Warning).Render(" " + styles.WarningMark + " " + reason)
 			b.WriteString(indicator)
@@ -890,6 +948,50 @@ func (m Model) renderReview() string {
 			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Features:") + "\n")
 			card.WriteString("     " + chips + "\n")
 		}
+	} else if m.Pipeline == types.PipelinePlotting {
+		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Plots:") + "\n")
+		grouped := make(map[string][]string)
+		for i, plot := range m.plotItems {
+			if !m.plotSelected[i] {
+				continue
+			}
+			grouped[plot.Group] = append(grouped[plot.Group], plot.Name)
+		}
+		var groupOrder []string
+		for _, plot := range m.plotItems {
+			if _, ok := grouped[plot.Group]; ok {
+				found := false
+				for _, g := range groupOrder {
+					if g == plot.Group {
+						found = true
+						break
+					}
+				}
+				if !found {
+					groupOrder = append(groupOrder, plot.Group)
+				}
+			}
+		}
+		for _, group := range groupOrder {
+			names := grouped[group]
+			if len(names) == 0 {
+				continue
+			}
+			card.WriteString("     " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.ToUpper(group)+": ") +
+				valueStyle.Render(strings.Join(names, ", ")) + "\n")
+		}
+
+		formats := m.SelectedPlotFormats()
+		dpi := "default"
+		if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
+			dpi = fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex])
+		}
+		savefigDpi := "default"
+		if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
+			savefigDpi = fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex])
+		}
+		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Output:") +
+			valueStyle.Render(fmt.Sprintf("%s | dpi=%s | savefig=%s", strings.Join(formats, ", "), dpi, savefigDpi)) + "\n")
 	}
 
 	b.WriteString(styles.CardStyle.Width(m.width-10).Render(card.String()) + "\n\n")
@@ -1017,7 +1119,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		expandIdx  int
 	}{}
 
-	// Connectivity options (when connectivity selected)
+	// Connectivity options
 	if m.isCategorySelected("connectivity") {
 		options = append(options, struct {
 			label      string
@@ -1026,9 +1128,43 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			expandable bool
 			expandIdx  int
 		}{"Connectivity", m.selectedConnectivityDisplay(), "Press Space to expand", true, 4})
+
+		outLevel := "full"
+		if m.connOutputLevel == 1 {
+			outLevel = "global_only"
+		}
+		options = append(options, struct {
+			label      string
+			value      string
+			hint       string
+			expandable bool
+			expandIdx  int
+		}{"Conn Output", outLevel, "full / global_only", false, -1})
+
+		options = append(options, struct {
+			label      string
+			value      string
+			hint       string
+			expandable bool
+			expandIdx  int
+		}{"Graph Metrics", m.boolToOnOff(m.connGraphMetrics), "Enable network analysis", false, -1})
+
+		aecModes := []string{"orth", "none", "sym"}
+		aecVal := "unknown"
+		if m.connAECMode < len(aecModes) {
+			aecVal = aecModes[m.connAECMode]
+		}
+		options = append(options, struct {
+			label      string
+			value      string
+			hint       string
+			expandable bool
+			expandIdx  int
+		}{"AEC Mode", aecVal, "Orthogonalization mode", false, -1})
+
 	}
 
-	// PAC options (when pac category selected)
+	// PAC options
 	if m.isCategorySelected("pac") {
 		options = append(options,
 			struct {
@@ -1048,7 +1184,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		)
 	}
 
-	// Aperiodic options (when aperiodic selected)
+	// Aperiodic options
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, struct {
 			label      string
@@ -1059,7 +1195,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		}{"Aperiodic Range", fmt.Sprintf("%.1f-%.1f Hz", m.aperiodicFmin, m.aperiodicFmax), "Spectral fit range", false, -1})
 	}
 
-	// Complexity options (when complexity selected)
+	// Complexity options
 	if m.isCategorySelected("complexity") {
 		options = append(options, struct {
 			label      string
@@ -1068,6 +1204,62 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			expandable bool
 			expandIdx  int
 		}{"PE Order", fmt.Sprintf("%d", m.complexityPEOrder), "Permutation entropy order (3-7)", false, -1})
+	}
+
+	// ERP options
+	if m.isCategorySelected("erp") {
+		options = append(options,
+			struct {
+				label      string
+				value      string
+				hint       string
+				expandable bool
+				expandIdx  int
+			}{"ERP Baseline", m.boolToOnOff(m.erpBaselineCorrection), "Use baseline correction", false, -1},
+		)
+	}
+
+	// Burst options
+	if m.isCategorySelected("bursts") {
+		options = append(options,
+			struct {
+				label      string
+				value      string
+				hint       string
+				expandable bool
+				expandIdx  int
+			}{"Burst Threshold", fmt.Sprintf("%.1f z", m.burstThresholdZ), "Z-score threshold", false, -1},
+		)
+	}
+
+	// Power options
+	if m.isCategorySelected("power") {
+		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
+		modeVal := "unknown"
+		if m.powerBaselineMode < len(modes) {
+			modeVal = modes[m.powerBaselineMode]
+		}
+
+		options = append(options,
+			struct {
+				label      string
+				value      string
+				hint       string
+				expandable bool
+				expandIdx  int
+			}{"Power Mode", modeVal, "Normalization method", false, -1},
+		)
+	}
+
+	// Spectral options
+	if m.isCategorySelected("spectral") {
+		options = append(options, struct {
+			label      string
+			value      string
+			hint       string
+			expandable bool
+			expandIdx  int
+		}{"Spectral Edge", fmt.Sprintf("%.0f%%", m.spectralEdgePercentile*100), "Percentile for SEF", false, -1})
 	}
 
 	for i, opt := range options {
@@ -1160,12 +1352,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	// Override with input buffer if editing that field
 	if m.editingNumber {
 		inputDisplay := m.numberBuffer + "█"
-		switch m.advancedCursor {
-		case 2:
+		if m.isCurrentlyEditing(optBootstrap) {
 			bootstrapVal = inputDisplay
-		case 3:
+		} else if m.isCurrentlyEditing(optNPerm) {
 			permutationsVal = inputDisplay
-		case 4:
+		} else if m.isCurrentlyEditing(optRNGSeed) {
 			rngSeedVal = inputDisplay
 		}
 	}
@@ -1228,15 +1419,31 @@ func (m Model) renderDecodingAdvancedConfig() string {
 	labelWidth := 22
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
+	permutationsVal := fmt.Sprintf("%d", m.decodingNPerm)
+	innerSplitsVal := fmt.Sprintf("%d", m.innerSplits)
+	rngSeedVal := m.rngSeedDisplay()
+
+	// Override with input buffer if editing that field
+	if m.editingNumber {
+		inputDisplay := m.numberBuffer + "█"
+		if m.isCurrentlyEditing(optDecodingNPerm) {
+			permutationsVal = inputDisplay
+		} else if m.isCurrentlyEditing(optDecodingInnerSplits) {
+			innerSplitsVal = inputDisplay
+		} else if m.isCurrentlyEditing(optRNGSeed) {
+			rngSeedVal = inputDisplay
+		}
+	}
+
 	options := []struct {
 		label string
 		value string
 		hint  string
 	}{
 		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
-		{"Permutations", fmt.Sprintf("%d", m.decodingNPerm), "0=disabled, 100+ for p-values"},
-		{"Inner CV Splits", fmt.Sprintf("%d", m.innerSplits), "Cross-validation folds"},
-		{"RNG Seed", m.rngSeedDisplay(), "0=project default"},
+		{"Permutations", permutationsVal, "0=disabled, 100+ for p-values"},
+		{"Inner CV Splits", innerSplitsVal, "Cross-validation folds"},
+		{"RNG Seed", rngSeedVal, "0=project default"},
 		{"Skip Time-Gen", m.boolToOnOff(m.skipTimeGen), "Skip time generalization"},
 	}
 
@@ -1253,6 +1460,9 @@ func (m Model) renderDecodingAdvancedConfig() string {
 		if m.useDefaultAdvanced && i > 0 {
 			labelStyle = labelStyle.Faint(true)
 			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		} else if m.editingNumber && isFocused {
+			// Highlight the editing field
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		} else {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}

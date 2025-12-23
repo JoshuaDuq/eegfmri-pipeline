@@ -70,7 +70,7 @@ def extract_connectivity_features(
     if ctx_name:
         segments = [ctx_name]
     elif getattr(ctx, "windows", None) is not None:
-        for key in ("active", "plateau"):
+        for key in ("active", "active"):
             mask = ctx.windows.get_mask(key)
             if mask is not None and np.any(mask):
                 segments = [key]
@@ -264,6 +264,7 @@ def extract_connectivity_from_precomputed(
         if n_times <= 0:
             return np.ones_like(freqs_hz, dtype=float)
 
+        duration = float(n_times) / sfreq_hz
         default_cycles = 7.0
         try:
             base = float(base_n_cycles) if base_n_cycles is not None else default_cycles
@@ -271,11 +272,14 @@ def extract_connectivity_from_precomputed(
             base = default_cycles
 
         freqs_hz = np.asarray(freqs_hz, dtype=float)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            max_cycles = 0.5 * (float(n_times) * freqs_hz / float(sfreq_hz))
-        max_cycles = np.where(np.isfinite(max_cycles), max_cycles, 1.0)
-        max_cycles = np.maximum(max_cycles, 1.0)
-        return np.minimum(base, max_cycles)
+        # MNE requirement: n_cycles / freqs < duration
+        # We use a safety factor of 0.9 to be sure
+        max_cycles = 0.9 * duration * freqs_hz
+        
+        # We cap at base, but ensure it's at least 1.0 if possible
+        # If 1.0 is still too large, we'll return a value that MNE might still reject,
+        # so we should also filter the frequencies themselves later.
+        return np.minimum(base, np.maximum(max_cycles, 0.5))
 
     def _slice_epochs(arr_3d: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
         if mask is None:
@@ -316,22 +320,27 @@ def extract_connectivity_from_precomputed(
 
     def _phase_task(seg_name: str, band: str, method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any) -> pd.DataFrame:
         t0 = time.perf_counter()
-        con = spectral_connectivity_time(
-            seg_data,
-            freqs=freqs,
-            method=method,
-            indices=indices,
-            sfreq=sfreq,
-            fmin=fmin,
-            fmax=fmax,
-            average=False,
-            faverage=True,
-            mode=conn_mode,
-            n_cycles=use_n_cycles,
-            decim=decim,
-            n_jobs=inner_n_jobs,
-            verbose=False,
-        )
+        try:
+            con = spectral_connectivity_time(
+                seg_data,
+                freqs=freqs,
+                method=method,
+                indices=indices,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                average=False,
+                faverage=True,
+                mode=conn_mode,
+                n_cycles=use_n_cycles,
+                decim=decim,
+                n_jobs=inner_n_jobs,
+                verbose=False,
+            )
+        except Exception as e:
+            if logger is not None:
+                logger.warning(f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}")
+            return pd.DataFrame()
 
         con_data = np.asarray(con.get_data())
         if con_data.ndim == 2:
@@ -495,11 +504,27 @@ def extract_connectivity_from_precomputed(
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                 continue
 
+            # Skip band if segment is too short for these frequencies
+            seg_duration = float(seg_data.shape[-1]) / sfreq
+            # Min frequency required for n_cycles=1 to fit in duration
+            min_viable_freq = 1.0 / seg_duration
+            if fmax < min_viable_freq:
+                if logger is not None:
+                    logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (fmax {fmax} < min_viable {min_viable_freq:.2f}Hz)")
+                continue
+
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
+            
+            # Filter freqs to those that actually fit
+            viable_mask = freqs >= min_viable_freq
+            if not np.any(viable_mask):
+                continue
+            freqs = freqs[viable_mask]
+
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet":
                 use_n_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, int(seg_data.shape[-1]))
-
+            
             for method in phase_measures:
                 tasks.append(("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles)))
 

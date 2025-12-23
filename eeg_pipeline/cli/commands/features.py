@@ -127,6 +127,25 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         help="Permutation entropy order (3-7, default: from config)",
     )
+
+    # ERP options
+    parser.add_argument("--erp-baseline", action="store_true", default=None, help="Enable baseline correction for ERP")
+    parser.add_argument("--no-erp-baseline", action="store_false", dest="erp_baseline", help="Disable baseline correction for ERP")
+
+    # Burst options
+    parser.add_argument("--burst-threshold", type=float, default=None, help="Z-score threshold for burst detection")
+
+    # Power options
+    parser.add_argument("--power-baseline-mode", choices=["logratio", "mean", "ratio", "zscore", "zlogratio"], default=None, help="Baseline normalization mode for power")
+
+    # Spectral options
+    parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
+
+    # Connectivity options (extend)
+    parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
+    parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
+    parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
+    parser.add_argument("--conn-aec-mode", choices=["orth", "sym", "none"], default=None, help="AEC orthogonalization mode")
     
     return parser
 
@@ -157,6 +176,25 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         
         if getattr(args, "pe_order", None) is not None:
             config["feature_engineering.complexity.pe_order"] = args.pe_order
+
+        if getattr(args, "erp_baseline", None) is not None:
+            config["feature_engineering.erp.baseline_correction"] = args.erp_baseline
+        
+        if getattr(args, "burst_threshold", None) is not None:
+            config["feature_engineering.bursts.threshold_z"] = args.burst_threshold
+
+        if getattr(args, "power_baseline_mode", None) is not None:
+            config["time_frequency_analysis.baseline_mode"] = args.power_baseline_mode
+            
+        if getattr(args, "spectral_edge_percentile", None) is not None:
+            config["feature_engineering.spectral.edge_percentile"] = args.spectral_edge_percentile
+
+        if getattr(args, "conn_output_level", None) is not None:
+            config["feature_engineering.connectivity.output_level"] = args.conn_output_level
+        if args.conn_graph_metrics is not None:
+            config["feature_engineering.connectivity.enable_graph_metrics"] = args.conn_graph_metrics
+        if getattr(args, "conn_aec_mode", None) is not None:
+            config["feature_engineering.connectivity.aec_mode"] = args.conn_aec_mode
         
         # Prepare time ranges
         time_ranges = []

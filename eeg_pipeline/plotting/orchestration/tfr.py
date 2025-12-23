@@ -28,7 +28,7 @@ from eeg_pipeline.plotting.tfr.contrasts import plot_bands_pain_temp_contrasts
 from eeg_pipeline.plotting.tfr.topomaps import (
     plot_topomap_grid_baseline_temps,
     plot_pain_nonpain_temporal_topomaps_diff_allbands,
-    plot_temporal_topomaps_allbands_plateau,
+    plot_temporal_topomaps_allbands_active,
 )
 from eeg_pipeline.plotting.tfr.band_evolution import visualize_band_evolution
 
@@ -44,7 +44,7 @@ def _plot_topomaps(
     plots_dir: Path,
     config,
     baseline_window,
-    plateau_window,
+    active_window,
     logger: logging.Logger,
 ) -> None:
     """Plot all topomap visualizations."""
@@ -54,7 +54,7 @@ def _plot_topomaps(
         plots_dir,
         config=config,
         baseline=baseline_window,
-        plateau_window=plateau_window,
+        active_window=active_window,
         logger=logger,
     )
 
@@ -64,7 +64,7 @@ def _plot_topomaps(
         plots_dir,
         config=config,
         baseline=baseline_window,
-        plateau_window=plateau_window,
+        active_window=active_window,
         logger=logger,
     )
 
@@ -77,19 +77,19 @@ def _plot_topomaps(
         plots_dir,
         config=config,
         baseline=baseline_window,
-        plateau_window=plateau_window,
+        active_window=active_window,
         window_size_ms=window_size_ms,
         logger=logger,
     )
 
-    window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_plateau.window_count", 5)
-    plot_temporal_topomaps_allbands_plateau(
+    window_count = config.get("erp_analysis.topomap_windows.temporal_allbands_active.window_count", 5)
+    plot_temporal_topomaps_allbands_active(
         power,
         events_df,
         plots_dir,
         config=config,
         baseline=baseline_window,
-        plateau_window=plateau_window,
+        active_window=active_window,
         window_count=window_count,
         logger=logger,
     )
@@ -139,7 +139,7 @@ def visualize_subject_tfr(
     tfr_analysis = config.get("time_frequency_analysis", {})
     baseline_window_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     baseline_window = validate_baseline_window_pre_stimulus(baseline_window_raw, logger=logger)
-    plateau_window = tuple(tfr_analysis.get("plateau_window", [3.0, 10.5]))
+    active_window = tuple(tfr_analysis.get("active_window", [3.0, 10.5]))
 
     power = compute_tfr_for_visualization(epochs, config, logger)
 
@@ -182,7 +182,7 @@ def visualize_subject_tfr(
             return
 
         if "topomaps" in plots_to_run:
-            _plot_topomaps(power, events_df, plots_dir, config, baseline_window, plateau_window, logger)
+            _plot_topomaps(power, events_df, plots_dir, config, baseline_window, active_window, logger)
 
         logger.info(f"TFR topomap visualizations saved to {plots_dir}")
         return
@@ -194,7 +194,7 @@ def visualize_subject_tfr(
             plots_dir,
             config=config,
             baseline=baseline_window,
-            plateau_window=plateau_window,
+            active_window=active_window,
             subject=subject,
             task=task,
             logger=logger,
@@ -208,7 +208,7 @@ def visualize_subject_tfr(
             plots_dir,
             config=config,
             baseline=baseline_window,
-            plateau_window=plateau_window,
+            active_window=active_window,
             logger=logger,
             subject=subject,
         )
@@ -249,7 +249,7 @@ def visualize_subject_tfr(
 
     if "topomaps" in plots_to_run and events_df is not None:
         logger.info("Plotting topomaps...")
-        _plot_topomaps(power, events_df, plots_dir, config, baseline_window, plateau_window, logger)
+        _plot_topomaps(power, events_df, plots_dir, config, baseline_window, active_window, logger)
 
     if "band_evolution" in plots_to_run and events_df is not None:
         logger.info("Plotting band power evolution...")
@@ -259,7 +259,7 @@ def visualize_subject_tfr(
             plots_dir,
             config=config,
             baseline=baseline_window,
-            plateau_window=plateau_window,
+            active_window=active_window,
             logger=logger,
         )
 
@@ -277,6 +277,7 @@ def _visualize_single_subject(
     config,
     tfr_roi_only: bool,
     tfr_topomaps_only: bool,
+    plots: Optional[List[str]],
     deriv_root: Path,
 ) -> Optional[str]:
     """Worker function for parallel TFR visualization."""
@@ -294,6 +295,7 @@ def _visualize_single_subject(
             logger,
             tfr_roi_only=tfr_roi_only,
             tfr_topomaps_only=tfr_topomaps_only,
+            plots=plots,
             deriv_root=deriv_root,
         )
         return subject
@@ -310,6 +312,7 @@ def visualize_tfr_for_subjects(
     logger: Optional[logging.Logger] = None,
     tfr_roi_only: bool = False,
     tfr_topomaps_only: bool = False,
+    plots: Optional[List[str]] = None,
     n_jobs: Optional[int] = None,
 ) -> None:
     """Batch process TFR visualizations for multiple subjects."""
@@ -354,6 +357,7 @@ def visualize_tfr_for_subjects(
                 logger,
                 tfr_roi_only=tfr_roi_only,
                 tfr_topomaps_only=tfr_topomaps_only,
+                plots=plots,
                 deriv_root=effective_deriv_root,
             )
     else:
@@ -368,6 +372,7 @@ def visualize_tfr_for_subjects(
                 config,
                 tfr_roi_only,
                 tfr_topomaps_only,
+                plots,
                 effective_deriv_root,
             )
             for subject in subjects
@@ -382,4 +387,3 @@ __all__ = [
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
 ]
-

@@ -385,7 +385,7 @@ def plot_topomap_grid_baseline_temps(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> None:
     """Plot topomap grid showing baseline percent change by temperature.
@@ -399,7 +399,7 @@ def plot_topomap_grid_baseline_temps(
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
     """
     baseline = _get_baseline_window(config, baseline)
@@ -427,7 +427,7 @@ def plot_topomap_grid_baseline_temps(
         return
 
     times_corr = np.asarray(tfr_avg_all_corr.times)
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     tmin = float(max(times_corr.min(), tmin_req))
     tmax = float(min(times_corr.max(), tmax_req))
 
@@ -514,7 +514,7 @@ def plot_topomap_grid_baseline_temps(
         )
 
     fig.suptitle(
-        f"Topomaps by temperature: % change from baseline over plateau t=[{tmin:.1f}, {tmax:.1f}] s",
+        f"Topomaps by temperature: % change from baseline over active window t=[{tmin:.1f}, {tmax:.1f}] s",
         fontsize=plot_cfg.font.figure_title,
     )
     _channels_save_fig(fig, out_dir, "topomap_grid_bands_alltrials_plus_temperatures_baseline_percent.png", config=config, logger=logger, baseline_used=baseline_used)
@@ -526,7 +526,7 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     window_size_ms: float = 100.0,
     logger: Optional[logging.Logger] = None,
 ) -> None:
@@ -541,7 +541,7 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         window_size_ms: Size of each time window in milliseconds
         logger: Optional logger instance
     """
@@ -632,7 +632,7 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
                     log(f"{e}. Skipping temperature contrast.", logger, "warning")
 
     times = np.asarray(tfr_pain.times)
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     clipped = clip_time_range(times, tmin_req, tmax_req)
     if clipped is None:
         log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
@@ -667,20 +667,20 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     )
 
 
-def plot_temporal_topomaps_allbands_plateau(
+def plot_temporal_topomaps_allbands_active(
     tfr: "mne.time_frequency.EpochsTFR",
     events_df: Optional[pd.DataFrame],
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     window_count: int = 5,
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Plot temporal topomaps over plateau window with fixed window count.
+    """Plot temporal topomaps over active window with fixed window count.
     
     Creates temporal topomap sequences showing pain-nonpain differences across
-    a fixed number of time windows over the plateau period.
+    a fixed number of time windows over the active period.
     
     Args:
         tfr: MNE EpochsTFR object
@@ -688,7 +688,7 @@ def plot_temporal_topomaps_allbands_plateau(
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         window_count: Number of time windows to create
         logger: Optional logger instance
     """
@@ -720,7 +720,7 @@ def plot_temporal_topomaps_allbands_plateau(
         log("One of the groups has zero trials; skipping temporal topomaps.", logger, "warning")
         return
 
-    log(f"Temporal topomaps (plateau, all bands): pain={int(pain_mask.sum())}, non-pain={int(non_mask.sum())} trials.", logger)
+    log(f"Temporal topomaps (active, all bands): pain={int(pain_mask.sum())}, non-pain={int(non_mask.sum())} trials.", logger)
 
     tfr_sub = create_tfr_subset(tfr, n)
     aligned = _align_and_trim_masks(
@@ -779,7 +779,7 @@ def plot_temporal_topomaps_allbands_plateau(
                     log(f"{e}. Skipping temperature contrast.", logger, "warning")
 
     times = np.asarray(tfr_pain.times)
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     clipped = clip_time_range(times, tmin_req, tmax_req)
     if clipped is None:
         log(f"No valid time interval within data range; skipping temporal topomaps (available [{times.min():.2f}, {times.max():.2f}] s).", logger, "warning")
@@ -793,14 +793,14 @@ def plot_temporal_topomaps_allbands_plateau(
     window_starts, window_ends = build_time_windows_fixed_count(tmin_clip, tmax_clip, window_count)
     n_windows = len(window_starts)
     window_size_eff = float((tmax_clip - tmin_clip) / n_windows) if n_windows > 0 else 0.0
-    log(f"Creating temporal topomaps over plateau [{tmin_clip:.2f}, {tmax_clip:.2f}] s using {n_windows} windows (~{window_size_eff:.2f}s each).", logger)
+    log(f"Creating temporal topomaps over active window [{tmin_clip:.2f}, {tmax_clip:.2f}] s using {n_windows} windows (~{window_size_eff:.2f}s each).", logger)
 
     if n_windows == 0:
         log("No valid windows created; skipping.", logger, "warning")
         return
 
-    window_label = f"plateau {tmin_clip:.0f}–{tmax_clip:.0f}s; {n_windows} windows @ {window_size_eff:.2f}s"
-    filename_base = "temporal_topomaps_plateau_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
+    window_label = f"active {tmin_clip:.0f}–{tmax_clip:.0f}s; {n_windows} windows @ {window_size_eff:.2f}s"
+    filename_base = "temporal_topomaps_active_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
         tfr_pain, tfr_non, tfr_sub_stats, tfr_max, tfr_min,

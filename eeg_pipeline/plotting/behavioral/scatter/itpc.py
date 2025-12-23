@@ -29,7 +29,7 @@ def _extract_itpc_columns(features_df: pd.DataFrame, band: str, roi_channels: Li
             continue
         if parsed.get("group") != "itpc":
             continue
-        if parsed.get("segment") != "plateau":
+        if parsed.get("segment") != "active":
             continue
         if parsed.get("band") != band:
             continue

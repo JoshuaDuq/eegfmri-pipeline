@@ -395,7 +395,7 @@ def load_epochs_with_targets(
     return out, common_channels
 
 
-def load_plateau_matrix(
+def load_active_matrix(
     subjects: List[str],
     task: str,
     deriv_root: Path,

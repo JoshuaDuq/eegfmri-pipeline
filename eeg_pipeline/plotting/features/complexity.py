@@ -14,13 +14,12 @@ from typing import Optional, List, Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import stats
 
+from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import (
-    compute_cohens_d,
     get_band_names,
     get_band_colors,
     get_condition_colors,
@@ -31,59 +30,144 @@ from eeg_pipeline.plotting.features.utils import (
 # Permutation Entropy Plots
 ###################################################################
 
+def _get_complexity_segments(features_df: pd.DataFrame) -> List[str]:
+    segments = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "comp":
+            continue
+        segment = str(parsed.get("segment") or "")
+        if segment:
+            segments.add(segment)
+    return sorted(segments)
 
-def plot_hjorth_by_band(
+
+def _select_complexity_segment(features_df: pd.DataFrame, preferred: str = "active") -> Optional[str]:
+    segments = _get_complexity_segments(features_df)
+    if not segments:
+        return None
+    if preferred in segments:
+        return preferred
+    return segments[0]
+
+
+def _collect_complexity_values(
+    features_df: pd.DataFrame,
+    *,
+    band: str,
+    segment: str,
+    stat: str,
+    scope: str = "global",
+) -> np.ndarray:
+    cols: List[str] = []
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "comp":
+            continue
+        if str(parsed.get("segment") or "") != str(segment):
+            continue
+        if str(parsed.get("band") or "") != str(band):
+            continue
+        if scope and str(parsed.get("scope") or "") != str(scope):
+            continue
+        if str(parsed.get("stat") or "") != str(stat):
+            continue
+        cols.append(str(col))
+
+    if cols:
+        if len(cols) == 1:
+            series = pd.to_numeric(features_df[cols[0]], errors="coerce")
+        else:
+            series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+        vals = series.dropna().values
+        return vals[np.isfinite(vals)]
+
+    if scope == "global":
+        return _collect_complexity_values(
+            features_df,
+            band=band,
+            segment=segment,
+            stat=stat,
+            scope="ch",
+        )
+
+    return np.array([])
+
+
+def plot_complexity_by_band(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
     config: Any = None,
     figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
-    """Hjorth mobility across frequency bands."""
+    """LZC and permutation entropy distributions across frequency bands."""
     plot_cfg = get_plot_config(config)
     if figsize is None:
         figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    data_list = []
-    positions = []
-    colors = []
-    
+
     bands = get_band_names(config)
     band_colors = get_band_colors(config)
-    for i, band in enumerate(bands):
-        cols = [c for c in features_df.columns if f"_{band}_" in c and "hjorth_mobility" in c]
-        if cols:
-            vals = features_df[cols].values.flatten()
-            vals = vals[np.isfinite(vals)]
-            if len(vals) > 0:
-                data_list.append(vals)
-                positions.append(i)
-                colors.append(band_colors[band])
-    
-    if data_list:
-        parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
-        
-        for i, pc in enumerate(parts.get("bodies", [])):
-            pc.set_facecolor(colors[i])
-            pc.set_alpha(0.6)
-        
-        for i, (pos, vals) in enumerate(zip(positions, data_list)):
-            jitter = np.random.uniform(-0.1, 0.1, len(vals))
-            ax.scatter(pos + jitter, vals, c=colors[i], alpha=0.2, s=5)
-    
-    ax.set_xticks(range(len(bands)))
-    ax.set_xticklabels([b.capitalize() for b in bands])
-    ax.set_xlabel("Frequency Band")
-    ax.set_ylabel("Hjorth Mobility")
-    ax.set_title("Hjorth Mobility by Frequency Band")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    
+    segment = _select_complexity_segment(features_df, preferred="active")
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    metrics = [("lzc", "LZC"), ("pe", "PE")]
+    for ax, (stat, label) in zip(axes, metrics):
+        data_list = []
+        positions = []
+        colors = []
+
+        if segment is not None:
+            for i, band in enumerate(bands):
+                vals = _collect_complexity_values(
+                    features_df,
+                    band=band,
+                    segment=segment,
+                    stat=stat,
+                    scope="global",
+                )
+                if vals.size > 0:
+                    data_list.append(vals)
+                    positions.append(i)
+                    colors.append(band_colors[band])
+
+        if data_list:
+            parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
+            for i, pc in enumerate(parts.get("bodies", [])):
+                pc.set_facecolor(colors[i])
+                pc.set_alpha(0.6)
+            for i, (pos, vals) in enumerate(zip(positions, data_list)):
+                jitter = np.random.uniform(-0.1, 0.1, len(vals))
+                ax.scatter(pos + jitter, vals, c=colors[i], alpha=0.2, s=5)
+            ax.set_xticks(range(len(bands)))
+            ax.set_xticklabels([b.capitalize() for b in bands])
+        else:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            ax.set_xticks([])
+
+        ax.set_xlabel("Frequency Band")
+        ax.set_ylabel(label)
+        ax.set_title(f"{label} by Band")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    seg_label = segment if segment is not None else "unknown"
+    fig.suptitle(
+        f"Complexity by Band ({seg_label})",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=1.02,
+    )
+
     plt.tight_layout()
     save_fig(fig, save_path)
     plt.close(fig)
-    
+
     return fig
 
 
@@ -95,9 +179,9 @@ def plot_complexity_by_condition(
     config: Any = None,
     figsize: Optional[Tuple[float, float]] = None,
 ) -> plt.Figure:
-    """Complexity metrics by condition and timing (baseline vs plateau).
+    """Complexity metrics by condition and timing (baseline vs active).
     
-    Grid: rows = timing (baseline/plateau), cols = complexity metrics.
+    Grid: rows = timing (baseline/active), cols = complexity metrics.
     
     Statistical improvements:
     - Shows both raw p-value and FDR-corrected q-value
@@ -112,11 +196,14 @@ def plot_complexity_by_condition(
         return fig
     
     plot_cfg = get_plot_config(config)
+    measures = [
+        ("lzc", "LZC"),
+        ("pe", "PE"),
+    ]
     if figsize is None:
-        # 3 columns, 2 rows
         width_per_col = float(plot_cfg.plot_type_configs.get("complexity", {}).get("width_per_measure", 4.5))
         height_per_row = float(plot_cfg.plot_type_configs.get("complexity", {}).get("height_per_segment", 4.0))
-        figsize = (width_per_col * 3, height_per_row * 2)
+        figsize = (width_per_col * len(measures), height_per_row * 2)
     
     from eeg_pipeline.utils.config.loader import get_config_value
     from .utils import (
@@ -127,28 +214,32 @@ def plot_complexity_by_condition(
     )
     
     baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
     
     segment_labels = {
         "baseline": ("BASELINE", f"{baseline_window[0]:.1f} to {baseline_window[1]:.1f}s"),
-        "plateau": ("PLATEAU", f"{plateau_window[0]:.1f} to {plateau_window[1]:.1f}s")
+        "active": ("ACTIVE", f"{active_window[0]:.1f} to {active_window[1]:.1f}s")
     }
     segments = list(segment_labels.keys())
 
-    measures = [
-        ("_lzc", "LZC"),
-        ("hjorth_mobility", "Mobility"),
-        ("hjorth_complexity", "Complexity")
-    ]
-    
     all_stats = []
     all_pvals = []
     cell_data = {}
     
     for row_idx, segment in enumerate(segments):
-        for col_idx, (pattern, label) in enumerate(measures):
-            cols = [c for c in features_df.columns 
-                   if pattern in c and f"_{segment}_" in c]
+        for col_idx, (stat, label) in enumerate(measures):
+            cols = []
+            for c in features_df.columns:
+                parsed = NamingSchema.parse(str(c))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != "comp":
+                    continue
+                if str(parsed.get("segment") or "") != str(segment):
+                    continue
+                if str(parsed.get("stat") or "") != str(stat):
+                    continue
+                cols.append(str(c))
             
             if not cols:
                 cell_data[(row_idx, col_idx)] = None
@@ -200,7 +291,7 @@ def plot_complexity_by_condition(
     
     for row_idx, segment in enumerate(segments):
         seg_name, seg_time = segment_labels[segment]
-        for col_idx, (pattern, label) in enumerate(measures):
+        for col_idx, (stat, label) in enumerate(measures):
             ax = axes[row_idx, col_idx]
             
             data = cell_data.get((row_idx, col_idx))
@@ -254,7 +345,7 @@ def plot_complexity_by_condition(
     
     n_pain = int(pain_mask.sum())
     n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(f"Complexity by Condition: Baseline vs Plateau (sub-{subject})\nN: {n_nonpain} non-pain, {n_pain} pain", 
+    fig.suptitle(f"Complexity by Condition: Baseline vs Active (sub-{subject})\nN: {n_nonpain} non-pain, {n_pain} pain", 
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
     
     n_tests = len([p for p in all_pvals if np.isfinite(p)])
@@ -276,6 +367,6 @@ def plot_complexity_by_condition(
 
 
 __all__ = [
-    "plot_hjorth_by_band",
+    "plot_complexity_by_band",
     "plot_complexity_by_condition",
 ]

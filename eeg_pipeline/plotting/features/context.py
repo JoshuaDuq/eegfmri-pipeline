@@ -45,15 +45,20 @@ class FeaturePlotContext:
     aligned_events: Optional[pd.DataFrame] = None
     
     power_df: Optional[pd.DataFrame] = None
-    microstate_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
+    aperiodic_df: Optional[pd.DataFrame] = None
+    erds_df: Optional[pd.DataFrame] = None
+    bursts_df: Optional[pd.DataFrame] = None
+    quality_df: Optional[pd.DataFrame] = None
+    spectral_df: Optional[pd.DataFrame] = None
+    ratios_df: Optional[pd.DataFrame] = None
+    asymmetry_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
     complexity_df: Optional[pd.DataFrame] = None
-    dynamics_df: Optional[pd.DataFrame] = None
-    aperiodic_df: Optional[pd.DataFrame] = None
     pac_trials_df: Optional[pd.DataFrame] = None
     pac_time_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
+    temporal_df: Optional[pd.DataFrame] = None
     all_features: Optional[pd.DataFrame] = None
     
     epochs: Optional[mne.Epochs] = None
@@ -83,14 +88,19 @@ class FeaturePlotContext:
         
         self.power_df = bundle.power_df
         self.connectivity_df = bundle.connectivity_df
-        self.complexity_df = bundle.complexity_df
-        self.dynamics_df = bundle.dynamics_df
         self.aperiodic_df = bundle.aperiodic_df
-        self.microstate_df = bundle.microstate_df
+        self.erds_df = bundle.erds_df
+        self.bursts_df = bundle.bursts_df
+        self.quality_df = bundle.quality_df
+        self.spectral_df = bundle.spectral_df
+        self.ratios_df = bundle.ratios_df
+        self.asymmetry_df = bundle.asymmetry_df
+        self.complexity_df = bundle.complexity_df
         self.pac_df = bundle.pac_df
         self.pac_trials_df = bundle.pac_trials_df
         self.pac_time_df = bundle.pac_time_df
         self.itpc_df = bundle.itpc_df
+        self.temporal_df = bundle.temporal_df
         self.all_features = bundle.all_features_df
         
         if self.all_features is not None:
@@ -146,13 +156,13 @@ class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
         preferred_order = [
             "power",
             "connectivity",
-            "microstates",
-            "pac",
             "complexity",
-            "burst",
-            "erds",
             "aperiodic",
+            "erds",
             "itpc",
+            "pac",
+            "erp",
+            "quality",
         ]
 
         ordered = [c for c in preferred_order if c in categories]

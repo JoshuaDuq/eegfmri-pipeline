@@ -39,19 +39,19 @@ func (m Model) View() string {
 		b.WriteString(m.renderModeSelection())
 	case types.StepSelectComputations:
 		b.WriteString(m.renderComputationSelection())
-	case types.StepConfigureOptions:
-		// Features pipeline only
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline or Plotting pipeline categories
 		b.WriteString(m.renderCategorySelection())
+	case types.StepSelectPlots:
+		b.WriteString(m.renderPlotSelection())
+	case types.StepPlotConfig:
+		b.WriteString(m.renderPlotConfig())
 	case types.StepSelectBands:
 		b.WriteString(m.renderBandSelection())
 	case types.StepSelectFeatureFiles:
 		b.WriteString(m.renderFeatureFileSelection())
 	case types.StepSelectSpatial:
 		b.WriteString(m.renderSpatialSelection())
-	case types.StepTFRVizType:
-		b.WriteString(m.renderTFRVizTypeSelection())
-	case types.StepTFRChannels:
-		b.WriteString(m.renderTFRChannelSelection())
 	case types.StepTimeRange:
 		b.WriteString(m.renderTimeRange())
 	case types.StepAdvancedConfig:
@@ -60,6 +60,11 @@ func (m Model) View() string {
 		b.WriteString(m.renderSubjectSelection())
 	case types.StepReviewExecute:
 		b.WriteString(m.renderReview())
+	}
+
+	if len(m.validationErrors) > 0 && m.CurrentStep != types.StepReviewExecute {
+		b.WriteString("\n")
+		b.WriteString(m.renderStepValidationErrors())
 	}
 
 	b.WriteString("\n")
@@ -118,6 +123,12 @@ func (m Model) renderCommandPreviewOverlay() string {
 			content.WriteString(labelStyle.Render("Features:") + " " + valueStyle.Render(chips) + "\n")
 		}
 	}
+	if m.Pipeline == types.PipelinePlotting {
+		plots := m.SelectedPlotIDs()
+		if len(plots) > 0 {
+			content.WriteString(labelStyle.Render("Plots:") + " " + valueStyle.Render(fmt.Sprintf("%d selected", len(plots))) + "\n")
+		}
+	}
 
 	// Divider
 	content.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", 40)) + "\n\n")
@@ -166,18 +177,19 @@ func (m Model) renderWithHelpOverlay() string {
 
 func (m Model) renderHeader() string {
 	stepNames := map[types.WizardStep]string{
-		types.StepSelectMode:         "Mode",
-		types.StepSelectComputations: "Analyses",
-		types.StepSelectFeatureFiles: "Files",
-		types.StepConfigureOptions:   "Features",
-		types.StepSelectBands:        "Bands",
-		types.StepSelectSpatial:      "Spatial",
-		types.StepTFRVizType:         "Viz Type",
-		types.StepTFRChannels:        "Channels",
-		types.StepTimeRange:          "Time",
-		types.StepAdvancedConfig:     "Advanced",
-		types.StepSelectSubjects:     "Subjects",
-		types.StepReviewExecute:      "Review",
+		types.StepSelectMode:           "Mode",
+		types.StepSelectComputations:   "Analyses",
+		types.StepSelectFeatureFiles:   "Files",
+		types.StepConfigureOptions:     "Features",
+		types.StepSelectBands:          "Bands",
+		types.StepSelectSpatial:        "Spatial",
+		types.StepTimeRange:            "Time",
+		types.StepAdvancedConfig:       "Advanced",
+		types.StepSelectPlots:          "Plots",
+		types.StepSelectPlotCategories: "Categories",
+		types.StepPlotConfig:           "Plot Config",
+		types.StepSelectSubjects:       "Subjects",
+		types.StepReviewExecute:        "Review",
 	}
 
 	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -243,13 +255,13 @@ func (m Model) renderFooter() string {
 	var hints []string
 
 	switch m.CurrentStep {
-	case types.StepSelectMode, types.StepTFRVizType:
+	case types.StepSelectMode:
 		hints = []string{
 			styles.RenderKeyHint("↑/↓", "Navigate"),
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
-	case types.StepSelectComputations, types.StepConfigureOptions, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles:
+	case types.StepSelectComputations, types.StepConfigureOptions, types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots:
 		hints = []string{
 			styles.RenderKeyHint("Space", "Toggle"),
 			styles.RenderKeyHint("A", "All"),
@@ -257,19 +269,12 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
-	case types.StepTFRChannels:
-		if m.editingTfrChans {
-			hints = []string{
-				styles.RenderKeyHint("Type", "Enter Channels"),
-				styles.RenderKeyHint("Enter/Esc", "Done"),
-			}
-		} else {
-			hints = []string{
-				styles.RenderKeyHint("↑/↓", "Select Mode"),
-				styles.RenderKeyHint("Space", "Edit Channels"),
-				styles.RenderKeyHint("Enter", "Next"),
-				styles.RenderKeyHint("Esc", "Back"),
-			}
+	case types.StepPlotConfig:
+		hints = []string{
+			styles.RenderKeyHint("Space", "Toggle/Cycle"),
+			styles.RenderKeyHint("↑/↓", "Navigate"),
+			styles.RenderKeyHint("Enter", "Next"),
+			styles.RenderKeyHint("Esc", "Back"),
 		}
 	case types.StepTimeRange:
 		hints = []string{
@@ -317,4 +322,18 @@ func (m Model) renderFooter() string {
 
 	separator := "  "
 	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+}
+func (m Model) renderStepValidationErrors() string {
+	if len(m.validationErrors) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, err := range m.validationErrors {
+		// Single line error with warning mark
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(styles.Error).
+			Bold(true).
+			Render(fmt.Sprintf("  %s %s", styles.WarningMark, err)) + "\n")
+	}
+	return b.String()
 }

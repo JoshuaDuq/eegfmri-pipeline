@@ -320,7 +320,7 @@ class TimeWindows:
         # 1. Check specialized fields
         if key in {"baseline", "pre", "prestim"}:
             return self.baseline_mask
-        if key in {"plateau", "active", "stim", "task"}:
+        if key in {"active", "stim", "task"}:
             return self.active_mask
 
         # 2. Check generic dictionary

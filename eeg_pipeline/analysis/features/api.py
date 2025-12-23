@@ -413,7 +413,7 @@ def extract_all_features(
                 if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
                     seg_range = ctx.windows.ranges.get(ctx.name)
                 else:
-                    seg_range = ctx.windows.ranges.get("plateau") or ctx.windows.ranges.get("active")
+                    seg_range = ctx.windows.ranges.get("active") or ctx.windows.ranges.get("active")
                     if seg_range is None and ctx.windows.active_range is not None:
                         ar = ctx.windows.active_range
                         if np.isfinite(ar[0]) and np.isfinite(ar[1]):

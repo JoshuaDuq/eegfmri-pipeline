@@ -61,7 +61,7 @@ def extract_power_from_precomputed(
             total_channels = len(precomputed.ch_names)
             all_power_full: List[float] = []
 
-            seg_label = getattr(windows, "name", "plateau") or "plateau"
+            seg_label = getattr(windows, "name", "active") or "active"
 
             for ch_idx, ch_name in enumerate(precomputed.ch_names):
                 baseline_power, baseline_frac, _, baseline_total = nanmean_with_fraction(

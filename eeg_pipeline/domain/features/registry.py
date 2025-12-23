@@ -194,8 +194,8 @@ def _classify_subtype(
     if feature_type == "power":
         if "baseline" in col_lower:
             return "baseline"
-        if "plateau" in col_lower:
-            return "plateau"
+        if "active" in col_lower:
+            return "active"
         if "roi" in col_lower:
             return "roi"
         return "direct"
@@ -472,8 +472,8 @@ def classify_feature(
         if feature_type == "power":
             if subtype == "baseline":
                 meta["subtype"] = "baseline"
-            elif subtype == "plateau":
-                meta["subtype"] = "plateau"
+            elif subtype == "active":
+                meta["subtype"] = "active"
 
         if feature_type == "roi" and schema_group == "asymmetry":
             meta["subtype"] = "asymmetry"

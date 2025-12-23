@@ -46,7 +46,18 @@ def generate_feature_report(ctx: Any, saved_files: Dict[str, Path]) -> Path:
     
     # 2. Add Plots
     # logical order
-    sections_order = ["Summary", "Power", "Microstates", "Connectivity", "PAC", "Complexity", "ERDS", "Dynamics", "Aperiodic"]
+    sections_order = [
+        "Summary",
+        "Quality",
+        "Power",
+        "Connectivity",
+        "Aperiodic",
+        "Complexity",
+        "ERDS",
+        "ITPC",
+        "PAC",
+        "ERP",
+    ]
     
     for name, path in saved_files.items():
         if not path.exists():

@@ -86,31 +86,31 @@ def freq_mask(freqs: np.ndarray, fmin: float, fmax: float) -> np.ndarray:
 def sliding_window_centers(config: Any, n_windows: int) -> np.ndarray:
     """
     Compute centers of sliding windows for connectivity features based on config.
-    Uses plateau start/end and window length/step to cap window count.
+    Uses active start/end and window length/step to cap window count.
     """
     feat_cfg = config.get("feature_engineering.features", {})
-    plateau_default = config.get("time_frequency_analysis.plateau_window", [0.0, 0.0])
+    active_default = config.get("time_frequency_analysis.active_window", [0.0, 0.0])
     
-    plateau_window = feat_cfg.get("plateau_window", plateau_default)
-    if isinstance(plateau_window, (list, tuple)) and len(plateau_window) >= 2:
-        plateau_start = float(plateau_window[0])
-        plateau_end = float(plateau_window[1])
+    active_window = feat_cfg.get("active_window", active_default)
+    if isinstance(active_window, (list, tuple)) and len(active_window) >= 2:
+        active_start = float(active_window[0])
+        active_end = float(active_window[1])
     else:
-        plateau_start = float(plateau_default[0])
-        plateau_end = float(plateau_default[1])
+        active_start = float(active_default[0])
+        active_end = float(active_default[1])
 
     conn_cfg = config.get("feature_engineering.connectivity", {})
     win_len = float(conn_cfg.get("sliding_window_len", 1.0))
     win_step = float(conn_cfg.get("sliding_window_step", 0.5))
 
-    if plateau_end <= plateau_start:
+    if active_end <= active_start:
         return np.array([])
 
-    max_windows = int(np.floor((plateau_end - plateau_start - win_len) / win_step) + 1)
+    max_windows = int(np.floor((active_end - active_start - win_len) / win_step) + 1)
     max_windows = max(0, max_windows)
     n_use = min(n_windows, max_windows)
 
-    centers = plateau_start + np.arange(n_use) * win_step + (win_len / 2.0)
+    centers = active_start + np.arange(n_use) * win_step + (win_len / 2.0)
     return centers
 
 
@@ -298,11 +298,10 @@ class TimeWindowSpec:
                     self._add_empty_window(self.name, reason="missing_named_window")
             return
 
-        # 1b. Build active/plateau window if explicitly defined
+        # 1b. Build active window if explicitly defined
         active_def = (
             feat_cfg.get("active_window")
             or tf_cfg.get("active_window")
-            or tf_cfg.get("plateau_window")
         )
         if active_def and isinstance(active_def, (list, tuple)) and len(active_def) >= 2:
             self._add_window("active", float(active_def[0]), float(active_def[1]))
@@ -380,12 +379,12 @@ class TimeWindowSpec:
         return self.masks.get(name, np.zeros_like(self.times, dtype=bool))
         
     def get_sliding_windows(self, length: float, step: float) -> List[Tuple[str, np.ndarray]]:
-        """Generate sliding windows within the plateau."""
-        if "plateau" not in self.metadata or not self.metadata["plateau"].valid:
+        """Generate sliding windows within the active window."""
+        if "active" not in self.metadata or not self.metadata["active"].valid:
             return []
             
-        p_start = self.metadata["plateau"].start
-        p_end = self.metadata["plateau"].end
+        p_start = self.metadata["active"].start
+        p_end = self.metadata["active"].end
         
         windows = []
         curr = p_start
@@ -410,8 +409,8 @@ def time_windows_from_spec(
 ) -> TimeWindows:
     """Create a TimeWindows object from a specification."""
     baseline_meta = spec.metadata.get("baseline")
-    # Prefer 'active' (paradigm-neutral) over 'plateau' (experiment-specific)
-    active_meta = spec.metadata.get("active") or spec.metadata.get("plateau")
+    # Prefer 'active' (paradigm-neutral)
+    active_meta = spec.metadata.get("active")
     
     # Check if we at least have ONE valid window
     valid_any = any(m.valid for m in spec.metadata.values())
@@ -437,7 +436,7 @@ def time_windows_from_spec(
     if spec.name and spec.name in masks:
         active_key = spec.name
     else:
-        for key in ["active", "plateau"]:
+        for key in ["active"]:
             if key in masks:
                 active_key = key
                 break
@@ -468,22 +467,22 @@ def time_windows_from_spec(
 ###################################################################
 
 
-def get_pain_window(constants=None, config: Optional[Any] = None) -> Tuple[float, float]:
-    """Get the plateau/pain window from config or constants."""
+def get_active_window(constants=None, config: Optional[Any] = None) -> Tuple[float, float]:
+    """Get the active/pain window from config or constants."""
     if config is not None:
-        plateau_window = config.get("time_frequency_analysis.plateau_window")
-        return tuple(plateau_window)
+        active_window = config.get("time_frequency_analysis.active_window")
+        return tuple(active_window)
     
     if constants is None:
         raise ValueError("Either constants or config must be provided to get_pain_window")
     
-    if "PLATEAU_WINDOW" not in constants:
+    if "ACTIVE_WINDOW" not in constants:
         raise KeyError(
-            "PLATEAU_WINDOW not found in constants. "
-            "Use PLATEAU_WINDOW (tuple) not PLATEAU_END (float)"
+            "ACTIVE_WINDOW not found in constants. "
+            "Use ACTIVE_WINDOW (tuple) not ACTIVE_END (float)"
         )
     
-    return constants["PLATEAU_WINDOW"]
+    return constants["ACTIVE_WINDOW"]
 
 
 ###################################################################
@@ -508,7 +507,7 @@ def get_segment_masks(
         if np.any(windows.baseline_mask):
             out["baseline"] = windows.baseline_mask
 
-    # 3. Add active/plateau explicitly if not already in masks
+    # 3. Add active explicitly if not already in masks
     if windows.active_mask is not None:
         name = getattr(windows, "name", "active") or "active"
         if name not in out and np.any(windows.active_mask):
@@ -551,7 +550,7 @@ def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.nd
         if window_range is None:
             if key in {"baseline", "pre", "prestim"}:
                 window_range = getattr(spec, "baseline_range", None)
-            elif key in {"active", "plateau", "stim", "task"}:
+            elif key in {"active", "stim", "task"}:
                 window_range = getattr(spec, "active_range", None)
         if window_range is not None:
             start, end = window_range

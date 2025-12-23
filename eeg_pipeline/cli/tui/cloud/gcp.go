@@ -1,7 +1,7 @@
 package cloud
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -141,19 +141,19 @@ func StopVM(cfg Config) tea.Cmd {
 }
 
 // SyncToRemote syncs code and data to the remote VM
-func SyncToRemote(cfg Config, repoRoot string) tea.Cmd {
+func SyncToRemote(ctx context.Context, cfg Config, repoRoot string) tea.Cmd {
 	return func() tea.Msg {
 		startTime := time.Now()
 
 		if cfg.SyncCode {
-			if err := syncCode(cfg, repoRoot); err != nil {
+			if err := syncCode(ctx, cfg, repoRoot); err != nil {
 				return SyncCompleteMsg{Error: err, Duration: time.Since(startTime)}
 			}
 		}
 
 		if cfg.SyncData {
 			dataDir := filepath.Join(repoRoot, "eeg_pipeline", "data")
-			if err := syncData(cfg, dataDir); err != nil {
+			if err := syncData(ctx, cfg, dataDir); err != nil {
 				return SyncCompleteMsg{Error: err, Duration: time.Since(startTime)}
 			}
 		}
@@ -163,7 +163,7 @@ func SyncToRemote(cfg Config, repoRoot string) tea.Cmd {
 }
 
 // RunRemoteCommand runs a pipeline command on the remote VM
-func RunRemoteCommand(cfg Config, pipelineCmd string) tea.Cmd {
+func RunRemoteCommand(ctx context.Context, cfg Config, pipelineCmd string) tea.Cmd {
 	return func() tea.Msg {
 		startTime := time.Now()
 
@@ -176,43 +176,24 @@ func RunRemoteCommand(cfg Config, pipelineCmd string) tea.Cmd {
 
 		fullCmd := fmt.Sprintf("%s && python3 -m eeg_pipeline %s", prefix, pipelineCmd)
 
-		cmd := exec.Command("ssh", cfg.getRemoteTarget(), fullCmd)
+		cmd := exec.CommandContext(ctx, "ssh", cfg.getRemoteTarget(), fullCmd)
 
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return RunCompleteMsg{ExitCode: 1, Error: err, Duration: time.Since(startTime)}
-		}
-
-		if err := cmd.Start(); err != nil {
-			return RunCompleteMsg{ExitCode: 1, Error: err, Duration: time.Since(startTime)}
-		}
-
-		// Read output
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			// In a real implementation, we'd send these as messages
-			// For now, just consume
-			_ = scanner.Text()
-		}
-
-		err = cmd.Wait()
-		duration := time.Since(startTime)
-
-		exitCode := 0
-		if err != nil {
+		if err := cmd.Run(); err != nil {
+			exitCode := 0
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
 			} else {
 				exitCode = 1
 			}
+			return RunCompleteMsg{ExitCode: exitCode, Error: err, Duration: time.Since(startTime)}
 		}
 
-		return RunCompleteMsg{ExitCode: exitCode, Duration: duration}
+		return RunCompleteMsg{ExitCode: 0, Duration: time.Since(startTime)}
 	}
 }
 
 // PullDerivatives pulls results from the remote VM
-func PullDerivatives(cfg Config, localDataDir string) tea.Cmd {
+func PullDerivatives(ctx context.Context, cfg Config, localDataDir string) tea.Cmd {
 	return func() tea.Msg {
 		startTime := time.Now()
 
@@ -229,7 +210,7 @@ func PullDerivatives(cfg Config, localDataDir string) tea.Cmd {
 			remote, local,
 		}
 
-		cmd := exec.Command("rsync", args...)
+		cmd := exec.CommandContext(ctx, "rsync", args...)
 		if err := cmd.Run(); err != nil {
 			return PullCompleteMsg{Error: err, Duration: time.Since(startTime)}
 		}
@@ -246,7 +227,7 @@ func (cfg Config) getRemoteTarget() string {
 	return cfg.RemoteHost
 }
 
-func syncCode(cfg Config, repoRoot string) error {
+func syncCode(ctx context.Context, cfg Config, repoRoot string) error {
 	remote := fmt.Sprintf("%s:%s/", cfg.getRemoteTarget(), cfg.RemoteBase)
 
 	args := []string{
@@ -262,11 +243,11 @@ func syncCode(cfg Config, repoRoot string) error {
 		repoRoot + "/", remote,
 	}
 
-	cmd := exec.Command("rsync", args...)
+	cmd := exec.CommandContext(ctx, "rsync", args...)
 	return cmd.Run()
 }
 
-func syncData(cfg Config, dataDir string) error {
+func syncData(ctx context.Context, cfg Config, dataDir string) error {
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		return nil // Skip if data dir doesn't exist
 	}
@@ -279,6 +260,6 @@ func syncData(cfg Config, dataDir string) error {
 		dataDir + "/", remote,
 	}
 
-	cmd := exec.Command("rsync", args...)
+	cmd := exec.CommandContext(ctx, "rsync", args...)
 	return cmd.Run()
 }

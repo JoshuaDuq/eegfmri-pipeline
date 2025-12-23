@@ -53,7 +53,7 @@ def plot_power_by_condition(
 ) -> None:
     """Compare power between conditions per band and timing segment.
     
-    Creates a grid: rows = timing (baseline/plateau), cols = frequency bands.
+    Creates a grid: rows = timing (baseline/active), cols = frequency bands.
     Each cell shows pain vs non-pain box+strip comparison.
     
     Statistical improvements:
@@ -78,13 +78,13 @@ def plot_power_by_condition(
     )
     
     baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
     
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
     
     segment_labels = {
         "baseline": ("BASELINE", f"{baseline_window[0]:.1f} to {baseline_window[1]:.1f}s"),
-        "plateau": ("PLATEAU", f"{plateau_window[0]:.1f} to {plateau_window[1]:.1f}s")
+        "active": ("ACTIVE", f"{active_window[0]:.1f} to {active_window[1]:.1f}s")
     }
     segments = list(segment_labels.keys())
     
@@ -311,31 +311,31 @@ def _validate_epochs_tfr(tfr: Any, function_name: str, logger: logging.Logger) -
     return True
 
 
-def _get_plateau_window(config: Any) -> List[float]:
-    """Get plateau window from config."""
+def _get_active_window(config: Any) -> List[float]:
+    """Get active window from config."""
     from eeg_pipeline.utils.config.loader import get_config_value
-    return get_config_value(config, "plateau_window", [3.0, 10.5])
+    return get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
 
 
-def _crop_tfr_to_plateau(tfr: Any, plateau_window: List[float], logger: logging.Logger) -> Optional[Any]:
-    """Crop TFR to plateau window.
+def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Logger) -> Optional[Any]:
+    """Crop TFR to active window.
     
     Args:
         tfr: TFR object to crop
-        plateau_window: List of [start, end] times
+        active_window: List of [start, end] times
         logger: Logger instance
     
     Returns:
         Cropped TFR or None if window is invalid
     """
     times = np.asarray(tfr.times)
-    plateau_start = float(plateau_window[0])
-    plateau_end = float(plateau_window[1])
-    tmin = max(times.min(), plateau_start)
-    tmax = min(times.max(), plateau_end)
+    active_start = float(active_window[0])
+    active_end = float(active_window[1])
+    tmin = max(times.min(), active_start)
+    tmax = min(times.max(), active_end)
     
     if tmax <= tmin:
-        logger.warning("Invalid plateau window; skipping PSD")
+        logger.warning("Invalid active window; skipping PSD")
         return None
     
     return tfr.copy().crop(tmin, tmax)
@@ -646,7 +646,7 @@ def _plot_psd_by_temperature(
     fig, ax = plt.subplots(figsize=fig_size)
     temp_colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
     
-    plateau_window = _get_plateau_window(config)
+    active_window = _get_active_window(config)
     from eeg_pipeline.utils.config.loader import get_config_value
     tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
@@ -660,7 +660,7 @@ def _plot_psd_by_temperature(
             
         tfr_temp_avg = tfr_epochs[temp_mask].average()
         apply_baseline_and_crop(tfr_temp_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        tfr_temp_win = _crop_tfr_to_plateau(tfr_temp_avg, plateau_window, logger)
+        tfr_temp_win = _crop_tfr_to_active(tfr_temp_avg, active_window, logger)
         
         if tfr_temp_win is None:
             continue
@@ -689,7 +689,7 @@ def _plot_psd_by_temperature(
     
     footer_text = (
         f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Plateau: [{plateau_window[0]:.1f}, {plateau_window[1]:.1f}]s | "
+        f"Active: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
         f"Total: n={len(tfr_epochs)} trials"
     )
     fig.text(
@@ -788,7 +788,7 @@ def plot_power_spectral_density(
     """
     _validate_epochs_tfr(tfr, "plot_power_spectral_density", logger)
     
-    plateau_window = _get_plateau_window(config)
+    active_window = _get_active_window(config)
     from eeg_pipeline.utils.config.loader import get_config_value
     tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
@@ -810,7 +810,7 @@ def plot_power_spectral_density(
     
     tfr_avg = tfr.copy().average()
     apply_baseline_and_crop(tfr_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-    tfr_win = _crop_tfr_to_plateau(tfr_avg, plateau_window, logger)
+    tfr_win = _crop_tfr_to_active(tfr_avg, active_window, logger)
     
     if tfr_win is not None:
         _plot_psd_overall(tfr_win, subject, save_dir, logger, config)
@@ -845,7 +845,7 @@ def plot_power_spectral_density_by_pain(
         logger.warning("No pain binary column found")
         return
     
-    plateau_window = _get_plateau_window(config)
+    active_window = _get_active_window(config)
     from eeg_pipeline.utils.config.loader import get_config_value
     tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
     
@@ -880,7 +880,7 @@ def plot_power_spectral_density_by_pain(
             
         tfr_cond_avg = tfr[mask].average()
         apply_baseline_and_crop(tfr_cond_avg, baseline=tfr_baseline, mode="logratio", logger=logger)
-        tfr_cond_win = _crop_tfr_to_plateau(tfr_cond_avg, plateau_window, logger)
+        tfr_cond_win = _crop_tfr_to_active(tfr_cond_avg, active_window, logger)
         
         if tfr_cond_win is None:
             continue
@@ -908,7 +908,7 @@ def plot_power_spectral_density_by_pain(
     
     footer_text = (
         f"Baseline: [{tfr_baseline[0]:.2f}, {tfr_baseline[1]:.2f}]s | "
-        f"Plateau: [{plateau_window[0]:.1f}, {plateau_window[1]:.1f}]s | "
+        f"Active: [{active_window[0]:.1f}, {active_window[1]:.1f}]s | "
         f"Total: n={len(tfr)} trials"
     )
     fig.text(
@@ -1089,16 +1089,16 @@ def plot_inter_band_spatial_power_correlation(tfr, subject, save_dir, logger, co
     n_bands = len(band_names)
     
     times = np.asarray(tfr.times)
-    plateau_window = config.get("time_frequency_analysis.plateau_window", [3.0, 10.5])
-    plateau_start = float(plateau_window[0])
-    plateau_end = float(plateau_window[1])
-    tmin_clip = float(max(times.min(), plateau_start))
-    tmax_clip = float(min(times.max(), plateau_end))
+    active_window = config.get("time_frequency_analysis.active_window", [3.0, 10.5])
+    active_start = float(active_window[0])
+    active_end = float(active_window[1])
+    tmin_clip = float(max(times.min(), active_start))
+    tmax_clip = float(min(times.max(), active_end))
     
     if not np.isfinite(tmin_clip) or not np.isfinite(tmax_clip) or (tmax_clip <= tmin_clip):
         logger.warning(
-            f"Skipping inter-band spatial power correlation: invalid plateau within data range "
-            f"(requested [{plateau_start}, {plateau_end}] s, "
+            f"Skipping inter-band spatial power correlation: invalid active within data range "
+            f"(requested [{active_start}, {active_end}] s, "
             f"available [{times.min():.2f}, {times.max():.2f}] s)"
         )
         return
@@ -1739,20 +1739,40 @@ def plot_feature_importance_ranking(
     feature_names = [f[0][:30] + "..." if len(f[0]) > 30 else f[0] for f in sorted_features]
     feature_vars = [f[1] for f in sorted_features]
     
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
+    group_map = {
+        "power": "power",
+        "conn": "connectivity",
+        "aperiodic": "aperiodic",
+        "erds": "erds",
+        "itpc": "itpc",
+        "pac": "pac",
+        "comp": "complexity",
+        "quality": "quality",
+        "spectral": "spectral",
+        "temporal": "temporal",
+        "ratio": "ratios",
+        "asym": "asymmetry",
+        "bursts": "bursts",
+    }
+
     feature_types = []
     for f in sorted_features:
         name = f[0]
+        parsed = NamingSchema.parse(str(name))
+        if parsed.get("valid"):
+            feature_types.append(group_map.get(parsed.get("group"), "other"))
+            continue
         if name.startswith("power_"):
             feature_types.append("power")
-        elif "wpli_" in name or "aec_" in name:
+        elif name.startswith("conn_") or "wpli_" in name or "aec_" in name:
             feature_types.append("connectivity")
-        elif "ms_" in name or "microstate_" in name:
-            feature_types.append("microstate")
-        elif "aper_" in name:
+        elif name.startswith("aper_") or "aperiodic" in name:
             feature_types.append("aperiodic")
-        elif "itpc_" in name:
+        elif name.startswith("itpc_"):
             feature_types.append("itpc")
-        elif "pac_" in name:
+        elif name.startswith("pac_"):
             feature_types.append("pac")
         else:
             feature_types.append("other")
@@ -1760,10 +1780,17 @@ def plot_feature_importance_ranking(
     type_colors = {
         "power": "#3B82F6",
         "connectivity": "#22C55E",
-        "microstate": "#F59E0B",
         "aperiodic": "#8B5CF6",
+        "erds": "#F97316",
         "itpc": "#EC4899",
         "pac": "#14B8A6",
+        "complexity": "#F59E0B",
+        "quality": "#0EA5E9",
+        "spectral": "#10B981",
+        "temporal": "#6366F1",
+        "ratios": "#A855F7",
+        "asymmetry": "#F43F5E",
+        "bursts": "#D97706",
         "other": "#6B7280",
     }
     colors = [type_colors.get(t, "#6B7280") for t in feature_types]
@@ -1805,7 +1832,7 @@ def plot_band_power_topomaps(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
-    segment: str = "plateau",
+    segment: str = "active",
 ) -> None:
     """Band power topomaps showing spatial distribution per frequency band.
     

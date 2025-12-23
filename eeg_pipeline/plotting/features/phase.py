@@ -17,7 +17,6 @@ import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
-from eeg_pipeline.utils.data.columns import get_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
@@ -275,16 +274,18 @@ def _parse_itpc_columns(columns):
     Returns:
         List of tuples (col_name, band, time_bin, channel)
     """
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
     parsed = []
     for col in columns:
-        if not isinstance(col, str) or not col.startswith("itpc_"):
+        parsed_name = NamingSchema.parse(str(col))
+        if not parsed_name.get("valid"):
             continue
-        parts = col.split("_")
-        if len(parts) < 4:
+        if parsed_name.get("group") != "itpc":
             continue
-        band = parts[1]
-        time_bin = parts[-1]
-        channel = "_".join(parts[2:-1])
+        band = parsed_name.get("band")
+        time_bin = parsed_name.get("segment")
+        channel = parsed_name.get("identifier")
         parsed.append((col, band, time_bin, channel))
     return parsed
 
@@ -312,45 +313,81 @@ def plot_itpc_by_condition(
     if pain_mask is None:
         return
     
+    from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.plotting.features.utils import (
         compute_condition_stats,
         apply_fdr_correction,
         format_stats_annotation,
         format_footer_annotation,
+        get_band_colors,
+        get_band_names,
+        get_condition_colors,
     )
-    
+
     condition_colors = get_condition_colors(config)
-    from .utils import get_band_colors
     band_colors = get_band_colors(config)
-    
+
+    itpc_entries = []
+    band_set = set()
+    segment_set = set()
+    for col in itpc_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "itpc":
+            continue
+        segment = parsed.get("segment")
+        band = parsed.get("band")
+        if not segment or not band:
+            continue
+        itpc_entries.append(
+            (
+                str(col),
+                str(band),
+                str(segment),
+                str(parsed.get("scope") or ""),
+            )
+        )
+        band_set.add(str(band))
+        segment_set.add(str(segment))
+
+    if not itpc_entries or not band_set:
+        return
+
+    segment = "active" if "active" in segment_set else sorted(segment_set)[0]
+    itpc_entries = [e for e in itpc_entries if e[2] == segment]
+    band_set = {e[1] for e in itpc_entries}
+
+    band_order = get_band_names(config)
+    bands = [b for b in band_order if b in band_set]
+    bands += [b for b in sorted(band_set) if b not in bands]
+    if not bands:
+        return
+
     plot_cfg = get_plot_config(config)
     n_bands = len(bands)
-    
+
     # Calculate figure size dynamically
     width_per_band = float(plot_cfg.plot_type_configs.get("itpc", {}).get("width_per_band_box", 4.0))
     fig_height = float(plot_cfg.plot_type_configs.get("itpc", {}).get("height_box", 5.0))
     figsize = (width_per_band * n_bands, fig_height)
-    
-    itpc_cols = [c for c in itpc_df.columns if c.startswith("itpc_")]
-    if not itpc_cols:
-        return
-    
-    bands = sorted(set([c.split("_")[1] for c in itpc_cols if len(c.split("_")) > 1]))
-    if not bands:
-        return
     
     all_stats = []
     all_pvals = []
     band_data = {}
     
     for band in bands:
-        band_cols = [c for c in itpc_cols if f"itpc_{band}_" in c]
+        band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "global"]
+        if not band_cols:
+            band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "roi"]
+        if not band_cols:
+            band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "ch"]
         
         if not band_cols:
             band_data[band] = None
             continue
         
-        mean_itpc = itpc_df[band_cols].mean(axis=1)
+        mean_itpc = itpc_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
         vals_pain = mean_itpc[pain_mask].dropna().values
         vals_nonpain = mean_itpc[~pain_mask].dropna().values
         
@@ -390,7 +427,6 @@ def plot_itpc_by_condition(
     else:
         n_significant = 0
     
-    n_bands = len(bands)
     fig, axes = plt.subplots(1, n_bands, figsize=figsize, squeeze=False)
     axes = axes.flatten()
     
@@ -445,8 +481,12 @@ def plot_itpc_by_condition(
     
     n_pain = int(pain_mask.sum())
     n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(f"ITPC by Condition (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
+    fig.suptitle(
+        f"ITPC by Condition ({segment}, sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=1.02,
+    )
     
     n_tests = len([p for p in all_pvals if np.isfinite(p)])
     footer = format_footer_annotation(
@@ -799,8 +839,8 @@ def convert_pac_wide_to_long(pac_df: pd.DataFrame, logger: Optional[logging.Logg
     
     # Iterate columns
     for col in pac_df.columns:
-        # Expected: pac_plateau_theta_beta_ch_Fp1_pac
-        # or pac_plateau_theta_beta_ch_Fp1_mi
+        # Expected: pac_active_theta_beta_ch_Fp1_pac
+        # or pac_active_theta_beta_ch_Fp1_mi
         if not str(col).startswith('pac_'):
             continue
             

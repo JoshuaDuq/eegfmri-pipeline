@@ -14,6 +14,7 @@ Available commands:
 - tfr: Time-frequency visualization
 - decoding: ML-based prediction
 - preprocessing: Raw-to-BIDS and behavior merge
+- plotting: Curated visualization suites
 """
 
 from eeg_pipeline.cli.commands import COMMANDS, Command, get_command

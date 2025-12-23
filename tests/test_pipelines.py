@@ -88,11 +88,11 @@ def synthetic_feature_df():
     rng = np.random.default_rng(42)
     
     return pd.DataFrame({
-        "power_plateau_alpha_global_mean": rng.standard_normal(n_trials),
-        "power_plateau_beta_global_mean": rng.standard_normal(n_trials),
-        "power_plateau_theta_global_mean": rng.standard_normal(n_trials),
-        "power_plateau_delta_global_mean": rng.standard_normal(n_trials),
-        "connectivity_plateau_alpha_chpair_F3-F4_wpli": rng.uniform(0, 1, n_trials),
+        "power_active_alpha_global_mean": rng.standard_normal(n_trials),
+        "power_active_beta_global_mean": rng.standard_normal(n_trials),
+        "power_active_theta_global_mean": rng.standard_normal(n_trials),
+        "power_active_delta_global_mean": rng.standard_normal(n_trials),
+        "connectivity_active_alpha_chpair_F3-F4_wpli": rng.uniform(0, 1, n_trials),
         "microstate_coverage_state0": rng.uniform(0, 0.5, n_trials),
         "microstate_coverage_state1": rng.uniform(0, 0.5, n_trials),
         "aperiodic_1f_exponent_global": rng.uniform(0.5, 2.0, n_trials),
@@ -317,7 +317,7 @@ class TestFeatureComputePipeline:
         config = {
             "time_frequency_analysis": {
                 "baseline_window": [-0.5, 0],
-                "plateau_window": [0.5, 1.5],
+                "active_window": [0.5, 1.5],
             },
             "feature_engineering": {
                 "features": {"ramp_end": 0.5},
@@ -325,7 +325,7 @@ class TestFeatureComputePipeline:
         }
 
         spec = TimeWindowSpec(times=times, config=config, sampling_rate=100.0)
-        windows = time_windows_from_spec(spec, n_plateau_windows=2, strict=True)
+        windows = time_windows_from_spec(spec, n_active_windows=2, strict=True)
 
         assert windows.baseline_mask is not None
         assert windows.active_mask is not None
@@ -845,11 +845,11 @@ class TestTFRVisualizePipeline:
     def test_topomap_plotting(self):
         from eeg_pipeline.plotting.tfr import (
             plot_topomap_grid_baseline_temps,
-            plot_temporal_topomaps_allbands_plateau,
+            plot_temporal_topomaps_allbands_active,
         )
 
         assert callable(plot_topomap_grid_baseline_temps)
-        assert callable(plot_temporal_topomaps_allbands_plateau)
+        assert callable(plot_temporal_topomaps_allbands_active)
 
     def test_channel_plotting(self):
         from eeg_pipeline.plotting.tfr import (
@@ -977,20 +977,20 @@ class TestDomainUtilities:
 
         name = NamingSchema.build(
             group="power",
-            segment="plateau",
+            segment="active",
             band="alpha",
             scope="global",
             stat="mean",
         )
 
         assert "power" in name
-        assert "plateau" in name
+        assert "active" in name
         assert "alpha" in name
 
     def test_naming_schema_parse(self):
         from eeg_pipeline.domain.features.naming import NamingSchema
 
-        name = "power_plateau_alpha_global_mean"
+        name = "power_active_alpha_global_mean"
         result = NamingSchema.parse(name)
 
         assert result is not None
@@ -1011,7 +1011,7 @@ class TestDomainUtilities:
         from eeg_pipeline.domain.features.registry import classify_feature
 
         feature_type, subtype, meta = classify_feature(
-            "power_plateau_alpha_global_mean"
+            "power_active_alpha_global_mean"
         )
 
         assert feature_type is not None
@@ -1025,8 +1025,8 @@ class TestDomainUtilities:
         )
 
         df = pd.DataFrame({
-            "power_plateau_alpha_global_mean": [1, 2, 3],
-            "power_plateau_beta_global_mean": [1, 2, 3],
+            "power_active_alpha_global_mean": [1, 2, 3],
+            "power_active_beta_global_mean": [1, 2, 3],
             "aperiodic_1f_exponent_global": [1, 2, 3],
             "microstate_coverage_A": [0.3, 0.4, 0.5],
         })
@@ -1035,7 +1035,7 @@ class TestDomainUtilities:
         assert "alpha" in power_cols
         assert "beta" in power_cols
 
-        band = infer_power_band("power_plateau_alpha_global_mean")
+        band = infer_power_band("power_active_alpha_global_mean")
         assert band == "alpha"
 
 

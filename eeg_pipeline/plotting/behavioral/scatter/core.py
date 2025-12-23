@@ -351,7 +351,7 @@ def _get_target_suffix(target_type: str, config=None) -> str:
 
 
 def _get_time_suffix(time_label: Optional[str]) -> str:
-    return f"_{time_label}" if time_label else "_plateau"
+    return f"_{time_label}" if time_label else "_active"
 
 
 def _get_base_filename(band: str, target_type: str, roi_name: str, config=None) -> str:
@@ -746,7 +746,7 @@ def plot_target_correlations(
 
     diagnostics_title = _get_title_components(
         band_title, target_type, roi_name, None
-    ).replace(" (plateau)", "")
+    ).replace(" (active)", "")
     plot_regression_residual_diagnostics(
         x_data=power_vals,
         y_data=target_vals,

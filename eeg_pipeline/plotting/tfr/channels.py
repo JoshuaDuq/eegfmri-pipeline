@@ -74,26 +74,26 @@ def _pick_central_channel(info, preferred: str = "Cz", logger: Optional[logging.
     return fallback
 
 
-def _compute_plateau_statistics(
+def _compute_active_statistics(
     arr: np.ndarray,
     times: np.ndarray,
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     config,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[float, float, np.ndarray]:
-    """Compute statistics for a plateau window in TFR data.
+    """Compute statistics for a active window in TFR data.
     
     Args:
         arr: TFR data array (freqs x times)
         times: Time points array
-        plateau_window: Tuple of (tmin, tmax) for plateau window
+        active_window: Tuple of (tmin, tmax) for active window
         config: Configuration object
         logger: Optional logger instance
         
     Returns:
         Tuple of (mean, percentage_change, time_mask)
     """
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     strict_mode = get_strict_mode(config)
     if strict_mode:
         tmask = time_mask_strict(times, tmin_req, tmax_req)
@@ -297,7 +297,7 @@ def plot_cz_all_trials(
     out_dir: Path,
     config,
     baseline: Tuple[Optional[float], Optional[float]],
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
@@ -309,7 +309,7 @@ def plot_cz_all_trials(
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
         subject: Optional subject identifier
         task: Optional task identifier
@@ -321,7 +321,7 @@ def plot_cz_all_trials(
     arr = np.asarray(tfr_avg.data[ch_idx])
     vabs = robust_sym_vlim(arr)
     times = np.asarray(tfr_avg.times)
-    _, pct, _ = _compute_plateau_statistics(arr, times, plateau_window, config, logger)
+    _, pct, _ = _compute_active_statistics(arr, times, active_window, config, logger)
 
     _plot_single_tfr_figure(
         tfr_avg, central_ch, (-vabs, +vabs),

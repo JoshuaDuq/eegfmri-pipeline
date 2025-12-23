@@ -125,6 +125,21 @@ class ConfigDict(dict):
     def get(self, key: str, default: Any = None) -> Any:
         return get_nested_value(self, key, default)
     
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Support dot-notation for setting nested values."""
+        if "." not in key:
+            super().__setitem__(key, value)
+            return
+
+        keys = key.split('.')
+        current = self
+        for i, k in enumerate(keys[:-1]):
+            if k not in current or not isinstance(current[k], dict):
+                current[k] = {}
+            current = current[k]
+        
+        current[keys[-1]] = value
+
     def __getattr__(self, key: str) -> Any:
         """Attribute-style access for config values.
 
@@ -140,6 +155,7 @@ class ConfigDict(dict):
             value = self[key]
             return ConfigDict(value) if isinstance(value, dict) else value
         
+        # Check for paths and project sections
         paths_value = get_nested_value(self, f"paths.{key}", None)
         if paths_value is not None:
             return Path(paths_value) if isinstance(paths_value, str) else paths_value

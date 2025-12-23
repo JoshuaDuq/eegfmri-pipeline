@@ -42,7 +42,7 @@ __all__ = [
     # Subject-level scatter and correlation plots
     "plot_psychometrics",
     "plot_power_roi_scatter",
-    "plot_dynamics_roi_scatter",
+    "plot_complexity_roi_scatter",
     "plot_aperiodic_roi_scatter",
     "plot_connectivity_roi_scatter",
     "plot_itpc_roi_scatter",
@@ -82,7 +82,7 @@ def __getattr__(name: str):
         # Subject-level scatter and correlation plots
         "plot_psychometrics": "scatter",
         "plot_power_roi_scatter": "scatter",
-        "plot_dynamics_roi_scatter": "scatter",
+        "plot_complexity_roi_scatter": "scatter",
         "plot_aperiodic_roi_scatter": "scatter",
         "plot_connectivity_roi_scatter": "scatter",
         "plot_itpc_roi_scatter": "scatter",

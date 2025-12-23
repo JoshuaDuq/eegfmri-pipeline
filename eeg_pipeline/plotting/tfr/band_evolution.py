@@ -655,10 +655,10 @@ def plot_band_power_summary(
     save_dir: Path,
     config: Any,
     baseline: Tuple[float, float] = (-2.0, 0.0),
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Path]:
-    """Create summary bar plot of mean plateau power by band and condition.
+    """Create summary bar plot of mean active power by band and condition.
     
     Question: "What is the overall pattern of power changes across bands and conditions?"
     
@@ -668,7 +668,7 @@ def plot_band_power_summary(
         save_dir: Directory to save plots
         config: Configuration object
         baseline: Baseline window
-        plateau_window: Plateau window for averaging
+        active_window: Active window for averaging
         logger: Logger instance
         
     Returns:
@@ -683,7 +683,7 @@ def plot_band_power_summary(
     masks = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     
-    # Compute mean plateau power for each band and condition
+    # Compute mean active power for each band and condition
     summary_data = []
     
     for band in BANDS:
@@ -693,24 +693,24 @@ def plot_band_power_summary(
         
         power_bl = _apply_baseline(power, times, baseline)
         
-        # Get plateau indices
-        plateau_mask = (times >= plateau_window[0]) & (times <= plateau_window[1])
-        if not np.any(plateau_mask):
+        # Get active indices
+        active_mask = (times >= active_window[0]) & (times <= active_window[1])
+        if not np.any(active_mask):
             continue
         
         for cond, mask in masks.items():
             if mask.sum() < 3:
                 continue
             
-            cond_power = power_bl[mask][:, plateau_mask]
-            mean_plateau = np.nanmean(cond_power)
-            sem_plateau = np.nanstd(cond_power.mean(axis=1)) / np.sqrt(mask.sum())
+            cond_power = power_bl[mask][:, active_mask]
+            mean_active = np.nanmean(cond_power)
+            sem_active = np.nanstd(cond_power.mean(axis=1)) / np.sqrt(mask.sum())
             
             summary_data.append({
                 'band': band,
                 'condition': cond,
-                'mean': mean_plateau,
-                'sem': sem_plateau,
+                'mean': mean_active,
+                'sem': sem_active,
                 'n': mask.sum(),
             })
     
@@ -746,7 +746,7 @@ def plot_band_power_summary(
         ax.set_xticks(x)
         ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.set_ylabel('Mean Plateau Power (% change)', fontsize=10)
+        ax.set_ylabel('Mean Active Power (% change)', fontsize=10)
         ax.set_title('A. Pain vs Non-Pain', fontweight='bold', loc='left', fontsize=11)
         ax.legend(fontsize=9)
     
@@ -774,7 +774,7 @@ def plot_band_power_summary(
         ax.set_xticks(x)
         ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.set_ylabel('Mean Plateau Power (% change)', fontsize=10)
+        ax.set_ylabel('Mean Active Power (% change)', fontsize=10)
         ax.set_title('B. High vs Low Temperature', fontweight='bold', loc='left', fontsize=11)
         ax.legend(fontsize=9)
     
@@ -803,7 +803,7 @@ def visualize_band_evolution(
     save_dir: Path,
     config: Any,
     baseline: Tuple[float, float] = (-2.0, 0.0),
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Path]:
     """Generate all band power evolution visualizations.
@@ -814,7 +814,7 @@ def visualize_band_evolution(
         save_dir: Directory to save plots
         config: Configuration object
         baseline: Baseline window
-        plateau_window: Plateau window
+        active_window: Active window
         logger: Logger instance
         
     Returns:
@@ -853,7 +853,7 @@ def visualize_band_evolution(
     
     # 5. Summary bar plot
     saved = plot_band_power_summary(
-        tfr, events_df, save_dir, config, baseline, plateau_window, logger
+        tfr, events_df, save_dir, config, baseline, active_window, logger
     )
     all_saved.update(saved)
     

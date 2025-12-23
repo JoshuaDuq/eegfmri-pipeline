@@ -2,12 +2,14 @@ package execution
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -98,6 +100,7 @@ type Model struct {
 
 	// Internal
 	cmd        *exec.Cmd
+	cancel     context.CancelFunc
 	outputChan chan string
 	doneChan   chan error
 
@@ -146,6 +149,7 @@ func NewWithRoot(command string, repoRoot string) Model {
 ///////////////////////////////////////////////////////////////////
 
 type CommandStartedMsg struct {
+	Cmd        *exec.Cmd
 	OutputChan chan string
 	DoneChan   chan error
 }
@@ -157,7 +161,6 @@ type CommandStartedMsg struct {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.tick(),
-		m.startCommandAsync(),
 	)
 }
 
@@ -167,7 +170,10 @@ func (m Model) tick() tea.Cmd {
 	})
 }
 
-func (m Model) startCommandAsync() tea.Cmd {
+func (m *Model) Start() tea.Cmd {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
 	return func() tea.Msg {
 		parts := strings.Fields(m.Command)
 		if len(parts) == 0 {
@@ -193,15 +199,19 @@ func (m Model) startCommandAsync() tea.Cmd {
 		}
 
 		pyCmd := executor.GetPythonCommand(m.RepoRoot)
-		cmd := exec.Command(pyCmd, args...)
+		cmd := exec.CommandContext(ctx, pyCmd, args...)
 		cmd.Dir = m.RepoRoot
 		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
 
+		// Use process group to ensure all sub-processes are killed
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			cmd = exec.Command("python3", args...)
+			cmd = exec.CommandContext(ctx, "python3", args...)
 			cmd.Dir = m.RepoRoot
 			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			stdout, err = cmd.StdoutPipe()
 			if err != nil {
 				return messages.CommandDoneMsg{ExitCode: 1, Error: err}
@@ -235,8 +245,15 @@ func (m Model) startCommandAsync() tea.Cmd {
 			doneChan <- cmd.Wait()
 		}()
 
-		return CommandStartedMsg{OutputChan: outputChan, DoneChan: doneChan}
+		return CommandStartedMsg{Cmd: cmd, OutputChan: outputChan, DoneChan: doneChan}
 	}
+}
+
+// GetContext returns a context that is cancelled when the user cancels the execution
+func (m *Model) GetContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	return ctx
 }
 
 func (m Model) listenForOutput() tea.Cmd {
@@ -281,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case CommandStartedMsg:
+		m.cmd = msg.Cmd
 		m.outputChan = msg.OutputChan
 		m.doneChan = msg.DoneChan
 		m.Status = StatusRunning
@@ -375,8 +393,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.Status = StatusCancelled
 			m.EndTime = time.Now()
+			if m.cancel != nil {
+				m.cancel()
+			}
 			if m.cmd != nil && m.cmd.Process != nil {
-				m.cmd.Process.Kill()
+				// Kill the whole process group
+				syscall.Kill(-m.cmd.Process.Pid, syscall.SIGKILL)
 			}
 			return m, nil
 		case "c":

@@ -59,7 +59,7 @@ def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     return None
 
 
-def build_plateau_features(
+def build_active_features(
     pow_df: pd.DataFrame,
     pow_cols: List[str],
     baseline_df: pd.DataFrame,
@@ -68,7 +68,7 @@ def build_plateau_features(
     power_bands: List[str],
     logger: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
-    """Construct plateau-averaged band power DataFrame.
+    """Construct active-averaged band power DataFrame.
     
     Args:
         pow_df: DataFrame containing power features
@@ -80,10 +80,10 @@ def build_plateau_features(
         logger: Logger instance
     
     Returns:
-        Tuple of (plateau DataFrame, list of plateau column names)
+        Tuple of (active DataFrame, list of active column names)
     """
     col_name_to_series = {}
-    plateau_cols = []
+    active_cols = []
 
     def _first_present(candidates: List[str]) -> Optional[str]:
         for name in candidates:
@@ -95,15 +95,15 @@ def build_plateau_features(
         for ch in ch_names:
             preferred = _first_present(
                 [
-                    f"power_plateau_{band}_ch_{ch}_logratio",
-                    f"power_plateau_{band}_ch_{ch}_log10raw",
-                    f"pow_{band}_{ch}_plateau",
+                    f"power_active_{band}_ch_{ch}_logratio",
+                    f"power_active_{band}_ch_{ch}_log10raw",
+                    f"pow_{band}_{ch}_active",
                 ]
             )
             if preferred is not None:
                 out_name = preferred
                 col_name_to_series[out_name] = pow_df[preferred]
-                plateau_cols.append(out_name)
+                active_cols.append(out_name)
                 continue
 
             early = _first_present(
@@ -129,12 +129,12 @@ def build_plateau_features(
             )
 
             if early is not None and mid is not None and late is not None:
-                plateau_val = pow_df[[early, mid, late]].mean(axis=1)
+                active_val = pow_df[[early, mid, late]].mean(axis=1)
 
                 stat = "logratio" if any(s.endswith("_logratio") for s in [early, mid, late]) else "log10raw"
-                out_name = f"power_plateau_{band}_ch_{ch}_{stat}"
-                col_name_to_series[out_name] = plateau_val
-                plateau_cols.append(out_name)
+                out_name = f"power_active_{band}_ch_{ch}_{stat}"
+                col_name_to_series[out_name] = active_val
+                active_cols.append(out_name)
 
         if not baseline_df.empty:
             for ch in ch_names:
@@ -148,11 +148,11 @@ def build_plateau_features(
                         break
                 if baseline_col is not None:
                     col_name_to_series[baseline_col] = baseline_df[baseline_col]
-                    plateau_cols.append(baseline_col)
+                    active_cols.append(baseline_col)
 
-    plateau_df = pd.DataFrame(col_name_to_series)
-    plateau_df = plateau_df.reindex(columns=plateau_cols)
-    return plateau_df, plateau_cols
+    active_df = pd.DataFrame(col_name_to_series)
+    active_df = active_df.reindex(columns=active_cols)
+    return active_df, active_cols
 
 
 ###################################################################

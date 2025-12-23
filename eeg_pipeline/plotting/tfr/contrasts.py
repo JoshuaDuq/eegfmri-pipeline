@@ -598,7 +598,7 @@ def contrast_maxmin_temperature(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> None:
     """Plot max vs min temperature contrast topomaps.
@@ -612,7 +612,7 @@ def contrast_maxmin_temperature(
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
     """
     baseline = _get_baseline_window(config, baseline)
@@ -669,7 +669,7 @@ def contrast_maxmin_temperature(
     apply_baseline_and_crop(tfr_max, baseline=baseline_used, mode="logratio", logger=logger)
 
     times = np.asarray(tfr_max.times)
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     tmin_eff = float(max(times.min(), tmin_req))
     tmax_eff = float(min(times.max(), tmax_req))
     tmin, tmax = tmin_eff, tmax_eff
@@ -774,7 +774,7 @@ def plot_bands_pain_temp_contrasts(
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> None:
     """Plot combined pain and temperature contrast topomaps.
@@ -788,7 +788,7 @@ def plot_bands_pain_temp_contrasts(
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
     """
     baseline = _get_baseline_window(config, baseline)
@@ -862,7 +862,7 @@ def plot_bands_pain_temp_contrasts(
     apply_baseline_and_crop(tfr_max, baseline=baseline, mode="logratio", logger=logger)
 
     times = np.asarray(tfr_pain.times)
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     tmin_eff = float(max(times.min(), tmin_req))
     tmax_eff = float(min(times.max(), tmax_req))
     tmin, tmax = tmin_eff, tmax_eff
@@ -991,7 +991,7 @@ def contrast_pain_nonpain(
     out_dir: Path,
     config,
     baseline: Tuple[Optional[float], Optional[float]],
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
 ) -> None:
@@ -1007,12 +1007,12 @@ def contrast_pain_nonpain(
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
         subject: Optional subject identifier
     """
     from .scalpmean import _prepare_pain_contrast_data
-    from .channels import _pick_central_channel, _plot_single_tfr_figure, _compute_plateau_statistics
+    from .channels import _pick_central_channel, _plot_single_tfr_figure, _compute_active_statistics
     from .topomaps import _add_roi_annotations
     
     pain_col = get_pain_column_from_config(config, events_df)
@@ -1037,8 +1037,8 @@ def contrast_pain_nonpain(
     vabs_pn = robust_sym_vlim([arr_pain, arr_non])
     
     times = np.asarray(tfr_pain.times)
-    _, pct_pain, _ = _compute_plateau_statistics(arr_pain, times, plateau_window, config, logger)
-    _, pct_non, _ = _compute_plateau_statistics(arr_non, times, plateau_window, config, logger)
+    _, pct_pain, _ = _compute_active_statistics(arr_pain, times, active_window, config, logger)
+    _, pct_non, _ = _compute_active_statistics(arr_non, times, active_window, config, logger)
     
     _plot_single_tfr_figure(
         tfr_pain, central_ch, (-vabs_pn, +vabs_pn),
@@ -1058,7 +1058,7 @@ def contrast_pain_nonpain(
     
     arr_diff = np.asarray(arr_pain) - np.asarray(arr_non)
     vabs_diff = robust_sym_vlim(arr_diff)
-    _, pct_diff, _ = _compute_plateau_statistics(arr_diff, times, plateau_window, config, logger)
+    _, pct_diff, _ = _compute_active_statistics(arr_diff, times, active_window, config, logger)
     
     _plot_single_tfr_figure(
         tfr_diff, central_ch, (-vabs_diff, +vabs_diff),
@@ -1067,8 +1067,8 @@ def contrast_pain_nonpain(
     )
 
     times = np.asarray(tfr_pain.times)
-    tmin_eff = float(max(np.min(times), plateau_window[0]))
-    tmax_eff = float(min(np.max(times), plateau_window[1]))
+    tmin_eff = float(max(np.min(times), active_window[0]))
+    tmax_eff = float(min(np.max(times), active_window[1]))
     fmax_available = float(np.max(tfr_pain.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
     tmin, tmax = tmin_eff, tmax_eff

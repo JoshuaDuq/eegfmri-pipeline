@@ -34,7 +34,7 @@ from eeg_pipeline.infra.paths import (
 from eeg_pipeline.infra.tsv import read_table, read_tsv, write_parquet, write_tsv
 
 from .features import infer_power_band
-from .manipulation import build_plateau_features
+from .manipulation import build_active_features
 
 
 ###################################################################
@@ -85,16 +85,16 @@ def _load_features_and_targets(
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     feats_dir = deriv_features_path(deriv_root, subject)
     temporal_path = feats_dir / "features_power.tsv"
-    plateau_path = feats_dir / "features_power_plateau.tsv"
+    active_path = feats_dir / "features_power_active.tsv"
     conn_path = find_connectivity_features_path(deriv_root, subject)
     y_path = feats_dir / "target_vas_ratings.tsv"
 
-    power_path = plateau_path if plateau_path.exists() else temporal_path
+    power_path = active_path if active_path.exists() else temporal_path
     if not power_path.exists() or not y_path.exists():
         raise FileNotFoundError(f"Missing features or targets for sub-{subject}. Expected at {feats_dir}")
 
     temporal_df = read_table(temporal_path) if temporal_path.exists() else None
-    plateau_df = read_table(power_path)
+    active_df = read_table(power_path)
     conn_df = read_table(conn_path) if conn_path.exists() else None
     y_df = read_table(y_path)
 
@@ -120,9 +120,9 @@ def _load_features_and_targets(
             raise FileNotFoundError(f"Could not locate clean epochs for sub-{subject}, task-{task}")
 
     n_samples = len(y)
-    if len(plateau_df) != n_samples:
+    if len(active_df) != n_samples:
         raise ValueError(
-            f"Length mismatch: plateau features ({len(plateau_df)} rows) != target ratings ({n_samples} rows) "
+            f"Length mismatch: active features ({len(active_df)} rows) != target ratings ({n_samples} rows) "
             f"for sub-{subject}, task-{task}"
         )
 
@@ -138,7 +138,7 @@ def _load_features_and_targets(
             f"for sub-{subject}, task-{task}"
         )
 
-    return temporal_df, plateau_df, conn_df, y, getattr(epochs, "info", None)
+    return temporal_df, active_df, conn_df, y, getattr(epochs, "info", None)
 
 
 
@@ -306,8 +306,8 @@ def save_all_features(
     pac_trials_df: Optional[pd.DataFrame] = None,
     pac_time_df: Optional[pd.DataFrame] = None,
     aper_qc: Optional[Dict[str, Any]] = None,
-    plateau_df: Optional[pd.DataFrame] = None,
-    plateau_cols: Optional[List[str]] = None,
+    active_df: Optional[pd.DataFrame] = None,
+    active_cols: Optional[List[str]] = None,
     y: Optional[pd.Series] = None,
     features_dir: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
@@ -627,14 +627,14 @@ def save_all_features(
         write_tsv(direct_df, eeg_direct_path)
         write_tsv(pd.Series(direct_cols, name="feature").to_frame(), eeg_direct_cols_path)
 
-    if plateau_df is not None and not plateau_df.empty:
-        plateau_name = f"features_power_plateau_{suffix}.tsv" if suffix else "features_power_plateau.tsv"
-        p_cols_name = f"features_power_plateau_columns_{suffix}.tsv" if suffix else "features_power_plateau_columns.tsv"
-        plateau_path = features_dir / plateau_name
-        plateau_cols_path = features_dir / p_cols_name
-        logger.info("Saving plateau-averaged EEG features: %s", plateau_path)
-        write_tsv(plateau_df, plateau_path)
-        write_tsv(pd.Series(plateau_cols or [], name="feature").to_frame(), plateau_cols_path)
+    if active_df is not None and not active_df.empty:
+        active_name = f"features_power_active_{suffix}.tsv" if suffix else "features_power_active.tsv"
+        p_cols_name = f"features_power_active_columns_{suffix}.tsv" if suffix else "features_power_active_columns.tsv"
+        active_path = features_dir / active_name
+        active_cols_path = features_dir / p_cols_name
+        logger.info("Saving active-averaged EEG features: %s", active_path)
+        write_tsv(active_df, active_path)
+        write_tsv(pd.Series(active_cols or [], name="feature").to_frame(), active_cols_path)
 
     if conn_df is not None and not conn_df.empty:
         if conn_cols:
@@ -738,8 +738,8 @@ def _extract_onset_duration(
 
 def export_fmri_regressors(
     aligned_events: pd.DataFrame,
-    plateau_df: pd.DataFrame,
-    plateau_cols: List[str],
+    active_df: pd.DataFrame,
+    active_cols: List[str],
     pac_trials_df: Optional[pd.DataFrame],
     aper_df: Optional[pd.DataFrame],
     y: pd.Series,
@@ -779,12 +779,12 @@ def export_fmri_regressors(
     for band in power_bands:
         band_cols = [
             c
-            for c in plateau_cols
+            for c in active_cols
             if infer_power_band(c, bands=power_bands) == band
         ]
         if not band_cols:
             continue
-        _add_regressor(f"pow_{band}_mean", plateau_df[band_cols].mean(axis=1))
+        _add_regressor(f"pow_{band}_mean", active_df[band_cols].mean(axis=1))
 
     if aper_df is not None and not aper_df.empty:
         slope_cols_v2 = [
@@ -964,7 +964,7 @@ __all__ = [
     "load_subject_features",
     "_load_features_and_targets",
     # Saving
-    "build_plateau_features",
+    "build_active_features",
     "combine_all_features",
     "export_fmri_regressors",
     "iterate_feature_columns",

@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Tuple, Any
 import numpy as np
 import pandas as pd
 import mne
+import warnings
 from scipy import stats
 from joblib import Parallel, delayed
 
@@ -317,14 +318,16 @@ def _extract_aperiodic_for_segment(
         if 'roi' in spatial_modes and roi_map:
             for roi_name, ch_indices in roi_map.items():
                 if ch_indices and len(ch_indices) > 0:
-                    with np.errstate(all='ignore'):
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", category=RuntimeWarning)
                         roi_vals = np.nanmean(matrix[:, ch_indices], axis=1)
                     col = NamingSchema.build("aperiodic", segment_name, band, "roi", stat, channel=roi_name)
                     data_dict[col] = roi_vals
                     
         # Global Mean
         if 'global' in spatial_modes:
-            with np.errstate(all='ignore'):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
                 global_vals = np.nanmean(matrix, axis=1)
             col = NamingSchema.build("aperiodic", segment_name, band, "global", stat)
             data_dict[col] = global_vals
@@ -404,9 +407,9 @@ def extract_aperiodic_features(
     
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
     qc_payload["segments_computed"] = segments_done
-    plateau_qc = qc_payload.get("segments", {}).get("plateau")
+    active_qc = qc_payload.get("segments", {}).get("active")
     baseline_qc = qc_payload.get("segments", {}).get("baseline")
-    chosen = plateau_qc or baseline_qc
+    chosen = active_qc or baseline_qc
     if chosen:
         qc_payload["freqs"] = chosen.get("freqs")
         qc_payload["residual_mean"] = chosen.get("residual_mean")
@@ -453,8 +456,8 @@ def extract_aperiodic_features_from_epochs(
     from eeg_pipeline.utils.config.loader import get_config_value
 
     ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
-    plateau_window = get_config_value(config, "time_frequency_analysis.plateau_window", [3.0, 10.5])
-    plateau = _clamp_window((float(plateau_window[0]), float(plateau_window[1])))
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active = _clamp_window((float(active_window[0]), float(active_window[1])))
     ramp = _clamp_window((0.0, ramp_end))
 
     all_data: Dict[str, np.ndarray] = {}
@@ -493,23 +496,23 @@ def extract_aperiodic_features_from_epochs(
                 all_data.update(ramp_data)
                 segments_done.append("ramp")
 
-    if plateau is not None:
-        plateau_mask = (times >= plateau[0]) & (times <= plateau[1])
-        if int(np.sum(plateau_mask)) >= min_samples:
-            plateau_data = _extract_aperiodic_for_segment(
+    if active is not None:
+        active_mask = (times >= active[0]) & (times <= active[1])
+        if int(np.sum(active_mask)) >= min_samples:
+            active_data = _extract_aperiodic_for_segment(
                 epochs,
                 picks,
                 ch_names,
-                "plateau",
-                plateau[0],
-                plateau[1],
+                "active",
+                active[0],
+                active[1],
                 bands,
                 config,
                 logger,
             )
-            if plateau_data:
-                all_data.update(plateau_data)
-                segments_done.append("plateau")
+            if active_data:
+                all_data.update(active_data)
+                segments_done.append("active")
 
     if not all_data:
         return pd.DataFrame(), [], {"skipped_reason": "empty_result"}
@@ -518,6 +521,6 @@ def extract_aperiodic_features_from_epochs(
     qc_payload = {
         "segments_computed": sorted(set(segments_done)),
         "baseline_window": (float(baseline[0]), float(baseline[1])),
-        "plateau_window": (float(plateau[0]), float(plateau[1])) if plateau is not None else None,
+        "active_window": (float(active[0]), float(active[1])) if active is not None else None,
     }
     return df, list(df.columns), qc_payload

@@ -180,7 +180,7 @@ def compute_band_correlations(
 
     import re
 
-    # Example: power_plateau_alpha_ch_Fz_logratio
+    # Example: power_active_alpha_ch_Fz_logratio
     pattern = re.compile(rf"^power_[^_]+_{re.escape(band_l)}_ch_(.+?)_", re.IGNORECASE)
     band_cols: List[str] = []
     ch_names: List[str] = []

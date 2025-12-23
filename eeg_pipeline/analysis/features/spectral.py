@@ -249,7 +249,7 @@ def extract_spectral_features(
         if ctx.name in segment_masks:
             segments = [ctx.name]
     if not segments and segment_masks:
-        for key in ("active", "plateau"):
+        for key in ("active", "active"):
             if key in segment_masks:
                 segments = [key]
                 break

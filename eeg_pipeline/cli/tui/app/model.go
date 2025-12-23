@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -98,7 +99,7 @@ func New() Model {
 	m.loadState()
 
 	// Restore last selected pipeline cursor position
-	if m.persistentState.LastPipeline >= 0 && m.persistentState.LastPipeline < 5 {
+	if m.persistentState.LastPipeline >= 0 && m.persistentState.LastPipeline < 6 {
 		m.mainMenu.SetCursor(m.persistentState.LastPipeline)
 	}
 
@@ -172,7 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Pull results (cloud mode only)
 			if m.state == StateExecution && m.execution.IsDone() && m.environment == environment.EnvGoogleCloud {
 				dataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
-				return m, cloud.PullDerivatives(m.cloudConfig, dataDir)
+				return m, cloud.PullDerivatives(context.Background(), m.cloudConfig, dataDir)
 			}
 		}
 
@@ -244,18 +245,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.execution.AddOutput("Sync complete. Running pipeline...")
 		// Now run the actual command
 		cmd := m.wizard.BuildCommand()
-		return m, cloud.RunRemoteCommand(m.cloudConfig, cmd)
+		return m, cloud.RunRemoteCommand(m.execution.GetContext(), m.cloudConfig, cmd)
 
 	case cloud.RunCompleteMsg:
 		if msg.Error != nil {
 			m.execution.SetStatus(execution.StatusFailed)
 		} else if msg.ExitCode == 0 {
 			m.execution.SetStatus(execution.StatusSuccess)
-			// Auto-pull if configured
-			if m.cloudConfig.AutoPull && m.environment == environment.EnvGoogleCloud {
-				dataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
-				return m, cloud.PullDerivatives(m.cloudConfig, dataDir)
-			}
+			m.execution.AddOutput("Pipeline run complete. Pulling results...")
+			localDataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
+			return m, cloud.PullDerivatives(m.execution.GetContext(), m.cloudConfig, localDataDir)
 		} else {
 			m.execution.SetStatus(execution.StatusFailed)
 		}
@@ -358,11 +357,11 @@ func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	if m.environment == environment.EnvGoogleCloud {
 		// Cloud mode: sync first, then run
 		m.execution.AddOutput("Syncing code to remote VM...")
-		return m, cloud.SyncToRemote(m.cloudConfig, m.repoRoot)
+		return m, cloud.SyncToRemote(m.execution.GetContext(), m.cloudConfig, m.repoRoot)
 	}
 
 	// Local mode: run directly
-	return m, m.execution.Init()
+	return m, m.execution.Start()
 }
 
 // handleEscape handles the escape key

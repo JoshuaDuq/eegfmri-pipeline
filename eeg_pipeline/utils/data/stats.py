@@ -52,7 +52,7 @@ def load_precomputed_correlations(
     stats_dir : Path
         Directory containing correlation stats TSV files
     feature_type : str
-        Type of feature: "power", "aperiodic", "connectivity", "itpc", "dynamics", "power_roi"
+        Type of feature: "power", "aperiodic", "connectivity", "itpc", "complexity", "power_roi"
     target : str
         Correlation target: "rating" or "temperature"
     logger : Logger, optional
@@ -149,7 +149,7 @@ def load_subject_scatter_data(
     partial_covars: Optional[List[str]] = None,
 ) -> Tuple[
     Optional[pd.DataFrame],  # temporal_df
-    Optional[pd.DataFrame],  # plateau_df (power)
+    Optional[pd.DataFrame],  # active_df (power)
     Optional[pd.DataFrame],  # y (target)
     Optional[Any],           # info
     Optional[pd.Series],     # temp_series
@@ -162,7 +162,7 @@ def load_subject_scatter_data(
     Load all data required for subject behavioral scatter plots.
     
     Returns 9-tuple:
-        temporal_df, plateau_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
+        temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
     """
     from .feature_io import _load_features_and_targets
     from .epochs import load_epochs_for_analysis
@@ -181,7 +181,7 @@ def load_subject_scatter_data(
             config=config
         )
         
-        temporal_df, plateau_df, conn_df, y, info = _load_features_and_targets(
+        temporal_df, active_df, conn_df, y, info = _load_features_and_targets(
             subject, task, deriv_root, config, epochs=epochs
         )
         
@@ -194,7 +194,7 @@ def load_subject_scatter_data(
         Z_df_full, Z_df_temp = _build_covariate_matrices(aligned_events, partial_covars, temp_col, config)
         roi_map = build_rois_from_info(info, config)
         
-        return temporal_df, plateau_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
+        return temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
         
     except Exception as e:
         logger.error(f"Failed to load scatter data for sub-{subject}: {e}")

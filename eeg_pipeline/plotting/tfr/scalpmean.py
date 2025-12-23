@@ -44,26 +44,26 @@ from ..core.topomaps import create_scalpmean_tfr_from_existing
 ###################################################################
 
 
-def _compute_plateau_statistics(
+def _compute_active_statistics(
     arr: np.ndarray,
     times: np.ndarray,
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     config,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[float, float, np.ndarray]:
-    """Compute statistics for a plateau window in TFR data.
+    """Compute statistics for a active window in TFR data.
     
     Args:
         arr: TFR data array (freqs x times)
         times: Time points array
-        plateau_window: Tuple of (tmin, tmax) for plateau window
+        active_window: Tuple of (tmin, tmax) for active window
         config: Configuration object
         logger: Optional logger instance
         
     Returns:
         Tuple of (mean, percentage_change, time_mask)
     """
-    tmin_req, tmax_req = plateau_window
+    tmin_req, tmax_req = active_window
     strict_mode = get_strict_mode(config)
     if strict_mode:
         tmask = time_mask_strict(times, tmin_req, tmax_req)
@@ -302,7 +302,7 @@ def plot_scalpmean_all_trials(
     out_dir: Path,
     config,
     baseline: Tuple[Optional[float], Optional[float]],
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
@@ -314,7 +314,7 @@ def plot_scalpmean_all_trials(
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
         subject: Optional subject identifier
         task: Optional task identifier
@@ -331,7 +331,7 @@ def plot_scalpmean_all_trials(
     times = np.asarray(tfr_sm.times)
     arr = np.asarray(tfr_sm.data[0])
     vabs = robust_sym_vlim(arr)
-    _, pct, _ = _compute_plateau_statistics(arr, times, plateau_window, config, logger)
+    _, pct, _ = _compute_active_statistics(arr, times, active_window, config, logger)
     
     _plot_scalpmean_tfr(
         tfr_sm,
@@ -348,7 +348,7 @@ def contrast_scalpmean_pain_nonpain(
     out_dir: Path,
     config,
     baseline: Tuple[Optional[float], Optional[float]],
-    plateau_window: Tuple[float, float],
+    active_window: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
@@ -363,7 +363,7 @@ def contrast_scalpmean_pain_nonpain(
         out_dir: Output directory path
         config: Configuration object
         baseline: Baseline window tuple (tmin, tmax)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
         subject: Optional subject identifier
         task: Optional task identifier
@@ -400,9 +400,9 @@ def contrast_scalpmean_pain_nonpain(
     vabs_diff = robust_sym_vlim(arr_diff)
 
     times = np.asarray(tfr_pain.times)
-    _, pct_pain, tmask = _compute_plateau_statistics(arr_pain, times, plateau_window, config, logger)
-    _, pct_non, _ = _compute_plateau_statistics(arr_non, times, plateau_window, config, logger)
-    _, pct_diff, _ = _compute_plateau_statistics(arr_diff, times, plateau_window, config, logger)
+    _, pct_pain, tmask = _compute_active_statistics(arr_pain, times, active_window, config, logger)
+    _, pct_non, _ = _compute_active_statistics(arr_non, times, active_window, config, logger)
+    _, pct_diff, _ = _compute_active_statistics(arr_diff, times, active_window, config, logger)
 
     _plot_scalpmean_tfr(
         tfr_pain_sm, f"Scalp-averaged TFR — Pain (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_pain:+.0f}%",

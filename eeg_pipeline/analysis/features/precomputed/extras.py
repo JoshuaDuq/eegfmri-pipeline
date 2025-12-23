@@ -84,8 +84,8 @@ def extract_band_ratios_from_precomputed(
     if not pairs:
         return pd.DataFrame(), []
 
-    plateau_mask = getattr(precomputed.windows, "active_mask", None)
-    if plateau_mask is None or not np.any(plateau_mask):
+    active_mask = getattr(precomputed.windows, "active_mask", None)
+    if active_mask is None or not np.any(active_mask):
         return pd.DataFrame(), []
 
     # Spatial info
@@ -102,11 +102,11 @@ def extract_band_ratios_from_precomputed(
     records: List[Dict[str, float]] = []
     for ep_idx in range(precomputed.data.shape[0]):
         rec: Dict[str, float] = {}
-        # band -> (n_ch,) mean power in plateau
+        # band -> (n_ch,) mean power in active
         band_power_ch = {}
         for band, bd in precomputed.band_data.items():
             p = bd.power[ep_idx]
-            band_power_ch[band] = np.nanmean(p[:, plateau_mask], axis=1)
+            band_power_ch[band] = np.nanmean(p[:, active_mask], axis=1)
 
         for num, den in pairs:
             if num not in band_power_ch or den not in band_power_ch:
@@ -122,7 +122,7 @@ def extract_band_ratios_from_precomputed(
             pair_label = f"{num}_{den}"
             
             # label to use for naming
-            seg_label = getattr(precomputed.windows, "name", "plateau") or "plateau"
+            seg_label = getattr(precomputed.windows, "name", "active") or "active"
             
             # Channels
             if 'channels' in spatial_modes:

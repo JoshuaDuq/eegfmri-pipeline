@@ -106,13 +106,14 @@ def _save_plot_manifest(
         for ftype in [
             "power",
             "connectivity",
-            "pac",
-            "itpc",
-            "complexity",
-            "burst",
             "aperiodic",
-            "summary",
             "erds",
+            "itpc",
+            "pac",
+            "complexity",
+            "quality",
+            "erp",
+            "summary",
         ]:
             if f"/{ftype}/" in path_str or f"\\{ftype}\\" in path_str:
                 feature_type = ftype

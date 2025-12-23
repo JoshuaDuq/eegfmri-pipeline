@@ -47,6 +47,11 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--bootstrap", type=int, default=0)
     compute_group.add_argument("--n-perm", type=int, default=None)
     compute_group.add_argument("--rng-seed", type=int, default=None)
+    compute_group.add_argument("--control-temperature", action="store_true", default=None)
+    compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
+    compute_group.add_argument("--control-trial-order", action="store_true", default=None)
+    compute_group.add_argument("--no-control-trial-order", action="store_false", dest="control_trial_order")
+    compute_group.add_argument("--fdr-alpha", type=float, default=None)
     compute_group.add_argument("--computations", nargs="+", choices=BEHAVIOR_COMPUTATIONS, default=None)
     compute_group.add_argument(
         "--validate-only",
@@ -125,6 +130,13 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             config.setdefault("behavior_analysis", {}).setdefault("statistics", {})["n_permutations"] = args.n_perm
         if rng_seed is not None:
             config.setdefault("project", {})["random_state"] = rng_seed
+        if getattr(args, "control_temperature", None) is not None:
+            config.setdefault("behavior_analysis", {})["control_temperature"] = args.control_temperature
+        if getattr(args, "control_trial_order", None) is not None:
+            config.setdefault("behavior_analysis", {})["control_trial_order"] = args.control_trial_order
+        if getattr(args, "fdr_alpha", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("statistics", {})["fdr_alpha"] = args.fdr_alpha
+
         
         computation_features = {}
         if getattr(args, "correlations_features", None):

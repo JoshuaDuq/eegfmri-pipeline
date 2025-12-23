@@ -1260,35 +1260,35 @@ def validate_baseline_indices(
     return b_start, b_end, idx
 
 
-def validate_plateau_window_for_times(
+def validate_active_window_for_times(
     times: np.ndarray,
-    plateau_window: Optional[Tuple[float, float]] = None,
+    active_window: Optional[Tuple[float, float]] = None,
     logger: Optional[logging.Logger] = None,
     config=None,
 ) -> Tuple[float, float, np.ndarray]:
     config = ensure_config(config)
     
-    if plateau_window is None:
-        plateau_window = tuple(config.get("time_frequency_analysis.plateau_window"))
+    if active_window is None:
+        active_window = tuple(config.get("time_frequency_analysis.active_window"))
     
-    plateau_start, plateau_end = plateau_window
+    active_start, active_end = active_window
     
-    if plateau_start >= plateau_end:
+    if active_start >= active_end:
         raise ValueError(
-            f"Plateau window invalid: start ({plateau_start}) must be < end ({plateau_end})"
+            f"Active window invalid: start ({active_start}) must be < end ({active_end})"
         )
     
-    if plateau_start < 0:
+    if active_start < 0:
         raise ValueError(
-            f"Plateau window must start at or after stimulus onset (0 s), got start={plateau_start}"
+            f"Active window must start at or after stimulus onset (0 s), got start={active_start}"
         )
     
-    mask = (times >= plateau_start) & (times < plateau_end)
+    mask = (times >= active_start) & (times < active_end)
     idx = np.where(mask)[0]
     
     if len(idx) < 1:
         raise ValueError(
-            f"Plateau window [{plateau_start:.3f}, {plateau_end:.3f}] s contains no samples "
+            f"Active window [{active_start:.3f}, {active_end:.3f}] s contains no samples "
             f"for time range [{times.min():.3f}, {times.max():.3f}] s"
         )
     
@@ -1296,12 +1296,12 @@ def validate_plateau_window_for_times(
         actual_tmin = float(times[idx[0]])
         actual_tmax = float(times[idx[-1]])
         logger.info(
-            f"Plateau window [{plateau_start:.3f}, {plateau_end:.3f}] s maps to "
+            f"Active window [{active_start:.3f}, {active_end:.3f}] s maps to "
             f"indices [{idx[0]}, {idx[-1]}] with actual timespan [{actual_tmin:.3f}, {actual_tmax:.3f}] s "
             f"(n_samples={len(idx)})"
         )
     
-    return plateau_start, plateau_end, idx
+    return active_start, active_end, idx
 
 
 def _check_baseline_already_applied(
@@ -1576,7 +1576,7 @@ def extract_epochwise_channel_values(tfr_epochs, fmin: float, fmax: float, tmin:
     return data.mean(axis=(2, 3))
 
 
-def effective_plateau_window(
+def effective_active_window(
     times: np.ndarray,
     requested: Tuple[float, float]
 ) -> Tuple[Optional[float], Optional[float], np.ndarray]:
@@ -2324,7 +2324,7 @@ __all__ = [
     "log_baseline_qc",
     "average_tfr_band",
     "extract_epochwise_channel_values",
-    "effective_plateau_window",
+    "effective_active_window",
     "band_time_masks",
     "time_mask",
     "freq_mask",

@@ -56,7 +56,7 @@ from eeg_pipeline.utils.data.decoding import (
     load_kept_indices,
 )
 from eeg_pipeline.utils.data.decoding import load_epochs_with_targets
-from eeg_pipeline.utils.data.decoding import load_plateau_matrix
+from eeg_pipeline.utils.data.decoding import load_active_matrix
 from eeg_pipeline.utils.config.loader import load_config
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.infra.paths import ensure_dir
@@ -690,8 +690,8 @@ def run_regression_decoding(
     results_root: Path,
     logger: logging.Logger,
 ) -> Path:
-    """Run LOSO regression decoding on plateau features."""
-    X, y, groups, _feature_names, meta = load_plateau_matrix(subjects, task, deriv_root, config, logger)
+    """Run LOSO regression decoding on active features."""
+    X, y, groups, _feature_names, meta = load_active_matrix(subjects, task, deriv_root, config, logger)
 
     results_dir = results_root / "regression"
     plots_dir = results_dir / "plots"

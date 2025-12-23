@@ -86,11 +86,11 @@ def time_generalization_regression(
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
 
-    plateau_window = tuple(config_local.get("decoding.analysis.time_generalization.plateau_window", [3.0, 10.5]))
+    active_window = tuple(config_local.get("decoding.analysis.time_generalization.active_window", [3.0, 10.5]))
     window_len = config_local.get("decoding.analysis.time_generalization.window_len", 0.75)
     step = config_local.get("decoding.analysis.time_generalization.step", 0.25)
 
-    tmin_pl, tmax_pl = plateau_window
+    tmin_pl, tmax_pl = active_window
     windows = build_time_windows(window_len, step, tmin_pl, tmax_pl)
 
     if not windows:

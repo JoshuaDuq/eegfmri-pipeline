@@ -170,7 +170,7 @@ def compute_pac_comodulograms(
     config: Any,
     logger: logging.Logger,
     *,
-    segment_name: str = "plateau",
+    segment_name: str = "active",
     segment_window: Optional[Tuple[float, float]] = None,
     spatial_modes: Optional[List[str]] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
@@ -537,7 +537,7 @@ def extract_pac_from_precomputed(
     ch_names = precomputed.ch_names
     n_epochs = precomputed.data.shape[0]
     windows = precomputed.windows
-    segment_name = getattr(windows, "name", "plateau") or "plateau"
+    segment_name = getattr(windows, "name", "active") or "active"
     mask = getattr(windows, "active_mask", None)
     
     if mask is None or not np.any(mask):

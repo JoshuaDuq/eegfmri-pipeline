@@ -86,13 +86,25 @@ func (m Model) SelectedFeatureFiles() []string {
 	return result
 }
 
-func (m Model) SelectedTFRROIs() []string {
+func (m Model) SelectedPlotIDs() []string {
 	var result []string
-	for _, roi := range m.tfrROIs {
-		if m.tfrROISelected[roi] {
-			result = append(result, roi)
+	for i, plot := range m.plotItems {
+		if m.plotSelected[i] {
+			result = append(result, plot.ID)
 		}
 	}
+	sort.Strings(result)
+	return result
+}
+
+func (m Model) SelectedPlotFormats() []string {
+	var result []string
+	for _, format := range m.plotFormats {
+		if m.plotFormatSelected[format] {
+			result = append(result, format)
+		}
+	}
+	sort.Strings(result)
 	return result
 }
 
@@ -137,6 +149,32 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, m.modeOptions[m.modeIndex])
 	}
 
+	if m.Pipeline == types.PipelinePlotting {
+		selectedPlots := m.SelectedPlotIDs()
+		if len(selectedPlots) > 0 && len(selectedPlots) < len(m.plotItems) {
+			parts = append(parts, "--plots")
+			parts = append(parts, selectedPlots...)
+		}
+
+		formats := m.SelectedPlotFormats()
+		if len(formats) > 0 {
+			parts = append(parts, "--formats")
+			parts = append(parts, formats...)
+		}
+
+		if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
+			parts = append(parts, "--dpi", fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex]))
+		}
+
+		if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
+			parts = append(parts, "--savefig-dpi", fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex]))
+		}
+
+		if !m.plotSharedColorbar {
+			parts = append(parts, "--no-shared-colorbar")
+		}
+	}
+
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		// Computations (analyses to run)
 		comps := m.SelectedComputations()
@@ -159,19 +197,21 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--categories")
 			parts = append(parts, featureFiles...)
 		}
-	} else if m.Pipeline == types.PipelineMergeBehavior || m.Pipeline == types.PipelineRawToBIDS {
+	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS {
 		mode := "merge-behavior"
 		if m.Pipeline == types.PipelineRawToBIDS {
 			mode = "raw-to-bids"
 		}
 		parts = []string{"eeg-pipeline", "utilities", mode}
-	} else {
+	} else if m.Pipeline != types.PipelinePlotting {
 		// Features pipeline category selection
 		cats := m.SelectedCategories()
 		if len(cats) > 0 && len(cats) < len(m.categories) {
 			parts = append(parts, "--categories")
 			parts = append(parts, cats...)
 		}
+	} else {
+		// Plotting pipeline handled above
 	}
 
 	if (m.Pipeline == types.PipelineFeatures || m.Pipeline == types.PipelineBehavior) && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -216,53 +256,6 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	// TFR-specific options
-	if m.Pipeline == types.PipelineTFR {
-		// Visualization type: 0=TFR, 1=Topomap
-		if m.tfrVizType == 1 {
-			// Topomap mode
-			parts = append(parts, "--tfr-topomaps-only")
-		} else {
-			// TFR mode: add channel/ROI options
-			// Bands
-			bands := m.SelectedBands()
-			if len(bands) > 0 && len(bands) < len(m.bands) {
-				parts = append(parts, "--bands")
-				parts = append(parts, bands...)
-			}
-
-			// Channel mode
-			switch m.tfrChannelMode {
-			case 0: // ROI
-				parts = append(parts, "--tfr-roi")
-				// Add selected ROIs
-				selectedROIs := m.SelectedTFRROIs()
-				if len(selectedROIs) > 0 && len(selectedROIs) < len(m.tfrROIs) {
-					parts = append(parts, "--rois", strings.Join(selectedROIs, ","))
-				}
-			case 1: // Global/scalp-mean - default behavior
-				// No specific flag needed, this is default
-			case 2: // All channels
-				parts = append(parts, "--all-channels")
-			case 3: // Specific channels
-				if m.tfrSpecificChans != "" {
-					parts = append(parts, "--channels", m.tfrSpecificChans)
-				}
-			}
-
-			// Time range (single range for TFR)
-			if len(m.TimeRanges) > 0 {
-				tr := m.TimeRanges[0]
-				if tr.Tmin != "" {
-					parts = append(parts, "--tmin", tr.Tmin)
-				}
-				if tr.Tmax != "" {
-					parts = append(parts, "--tmax", tr.Tmax)
-				}
-			}
-		}
-	}
-
 	subjs := m.SelectedSubjectIDs()
 	if len(subjs) == 0 || len(subjs) == len(m.subjects) {
 		parts = append(parts, "--all-subjects")
@@ -281,18 +274,33 @@ func (m Model) BuildCommand() string {
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
 
-	// Connectivity options (only if connectivity category selected)
+	// Connectivity options
 	if m.isCategorySelected("connectivity") {
 		measures := m.selectedConnectivityMeasures()
 		if len(measures) > 0 {
 			args = append(args, "--connectivity-measures")
 			args = append(args, measures...)
 		}
+		if m.connOutputLevel != 0 {
+			val := "full"
+			if m.connOutputLevel == 1 {
+				val = "global_only"
+			}
+			args = append(args, "--conn-output-level", val)
+		}
+		if !m.connGraphMetrics {
+			args = append(args, "--no-conn-graph-metrics")
+		}
+		if m.connAECMode != 0 {
+			modes := []string{"orth", "none", "sym"}
+			if m.connAECMode < len(modes) {
+				args = append(args, "--conn-aec-mode", modes[m.connAECMode])
+			}
+		}
 	}
 
-	// PAC options (only if pac category selected)
+	// PAC options
 	if m.isCategorySelected("pac") {
-		// Only add if not default values
 		if m.pacPhaseMin != 4.0 || m.pacPhaseMax != 8.0 {
 			args = append(args, "--pac-phase-range",
 				fmt.Sprintf("%.1f", m.pacPhaseMin),
@@ -305,7 +313,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Aperiodic options (only if aperiodic category selected)
+	// Aperiodic options
 	if m.isCategorySelected("aperiodic") {
 		if m.aperiodicFmin != 2.0 || m.aperiodicFmax != 40.0 {
 			args = append(args, "--aperiodic-range",
@@ -314,10 +322,41 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Complexity options (only if complexity category selected)
+	// Complexity options
 	if m.isCategorySelected("complexity") {
 		if m.complexityPEOrder != 3 {
 			args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
+		}
+	}
+
+	// ERP options
+	if m.isCategorySelected("erp") {
+		if !m.erpBaselineCorrection {
+			args = append(args, "--no-erp-baseline")
+		}
+	}
+
+	// Burst options
+	if m.isCategorySelected("bursts") {
+		if m.burstThresholdZ != 2.0 {
+			args = append(args, "--burst-threshold", fmt.Sprintf("%.1f", m.burstThresholdZ))
+		}
+	}
+
+	// Power options
+	if m.isCategorySelected("power") {
+		if m.powerBaselineMode != 0 {
+			modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
+			if m.powerBaselineMode < len(modes) {
+				args = append(args, "--power-baseline-mode", modes[m.powerBaselineMode])
+			}
+		}
+	}
+
+	// Spectral options
+	if m.isCategorySelected("spectral") {
+		if m.spectralEdgePercentile != 0.95 {
+			args = append(args, "--spectral-edge-percentile", fmt.Sprintf("%.2f", m.spectralEdgePercentile))
 		}
 	}
 
@@ -344,8 +383,17 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--rng-seed", fmt.Sprintf("%d", m.rngSeed))
 	}
 
-	// Note: control_temperature, control_trial_order, fdr_alpha require config override
-	// These could be passed as --config-override in future
+	if !m.controlTemperature {
+		args = append(args, "--no-control-temperature")
+	}
+
+	if !m.controlTrialOrder {
+		args = append(args, "--no-control-trial-order")
+	}
+
+	if m.fdrAlpha != 0.05 {
+		args = append(args, "--fdr-alpha", fmt.Sprintf("%.2f", m.fdrAlpha))
+	}
 
 	return args
 }

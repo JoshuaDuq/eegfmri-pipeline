@@ -4,7 +4,7 @@ EEG Pipeline Plotting Module.
 Submodules:
 - core: Shared utilities (colorbars, annotations, significance)
 - erp: Event-related potential plots
-- features: Feature distribution and microstate plots
+- features: Feature distribution plots
 - tfr: Time-frequency representation plots
 - behavioral: Brain-behavior correlation plots
 - decoding: ML decoding performance plots
@@ -30,6 +30,8 @@ __all__ = [
     "PlotConfig",
     # High-level visualizers (lazy via __getattr__)
     "visualize_features_for_subjects",
+    "visualize_subject_erp",
+    "visualize_erp_for_subjects",
     "visualize_subject_tfr",
     "visualize_tfr_for_subjects",
     "visualize_subject_behavior",
@@ -38,7 +40,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy import for backward compatibility with all plotting functions."""
+    """Lazy import for plotting functions."""
     # Map function names to their submodules
     _module_map = {
         # Core
@@ -70,15 +72,6 @@ def __getattr__(name: str):
         "plot_power_time_course_by_temperature": "features",
         "plot_trial_power_variability": "features",
         "plot_inter_band_spatial_power_correlation": "features",
-        "plot_microstate_templates": "features",
-        "plot_microstate_templates_by_pain": "features",
-        "plot_microstate_templates_by_temperature": "features",
-        "plot_microstate_coverage_by_pain": "features",
-        "plot_microstate_temporal_evolution": "features",
-        "plot_microstate_gfp_colored_by_state": "features",
-        "plot_microstate_gfp_by_temporal_bins": "features",
-        "plot_microstate_transition_network": "features",
-        "plot_microstate_duration_distributions": "features",
         "plot_connectivity_circle_for_band": "features",
         "plot_sliding_connectivity_trajectories": "features",
         "plot_sliding_degree_heatmap": "features",
@@ -101,6 +94,9 @@ def __getattr__(name: str):
         "plot_aperiodic_run_trajectories": "features",
         "plot_aperiodic_topomaps": "features",
         "plot_aperiodic_vs_pain": "features",
+        # ERP
+        "visualize_subject_erp": "erp",
+        "visualize_erp_for_subjects": "erp",
         # TFR
         "plot_cz_all_trials_raw": "tfr",
         "plot_cz_all_trials": "tfr",
@@ -113,7 +109,7 @@ def __getattr__(name: str):
         "plot_rois_all_trials": "tfr",
         "plot_topomap_grid_baseline_temps": "tfr",
         "plot_pain_nonpain_temporal_topomaps_diff_allbands": "tfr",
-        "plot_temporal_topomaps_allbands_plateau": "tfr",
+        "plot_temporal_topomaps_allbands_active": "tfr",
         "visualize_subject_tfr": "tfr",
         "visualize_tfr_for_subjects": "tfr",
         # Behavioral
@@ -125,8 +121,6 @@ def __getattr__(name: str):
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "plot_pain_nonpain_clusters": "behavioral",
 
-        "plot_pac_behavior_correlations": "behavioral",
-        "plot_itpc_rating_scatter_grid": "behavioral",
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
         # Decoding

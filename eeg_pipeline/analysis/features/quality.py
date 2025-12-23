@@ -9,7 +9,7 @@ Quality metrics for evaluating signal integrity per trial:
 - Peak-to-Peak Amplitude
 - Finite Fraction (Missing data)
 
-Computed on 'baseline' and 'plateau' windows.
+Computed on 'baseline' and 'active' windows.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def extract_quality_features(
     n_epochs = len(full_data)
     
     # Segments
-    segments = ["baseline", "plateau"]
+    segments = ["baseline", "active"]
     # Check if window exists
     
     for seg in segments:

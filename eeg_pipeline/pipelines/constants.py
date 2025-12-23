@@ -28,6 +28,12 @@ FREQUENCY_BAND_RANGES: Dict[str, tuple] = {
 }
 
 
+MANDATORY_TIME_WINDOWS: List[str] = [
+    "baseline",
+    "active",
+]
+
+
 FEATURE_CATEGORIES: List[str] = [
     "power",
     "connectivity",
@@ -76,7 +82,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
 BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
     "correlations": "EEG-rating correlations",
     "pain_sensitivity": "Individual pain sensitivity analysis",
-    "condition": "Compare conditions (e.g., ramp vs plateau)",
+    "condition": "Compare conditions (e.g., ramp vs active)",
     "temporal": "Time-resolved correlation analysis",
     "cluster": "Cluster-based permutation tests",
     "mediation": "Path analysis and mediation models",

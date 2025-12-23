@@ -2,7 +2,7 @@
 TFR quality control plotting functions.
 
 Functions for creating quality control visualizations for time-frequency
-representations, including baseline vs plateau comparisons.
+representations, including baseline vs active comparisons.
 """
 
 from __future__ import annotations
@@ -32,26 +32,26 @@ from .channels import _save_fig
 ###################################################################
 
 
-def qc_baseline_plateau_power(
+def qc_baseline_active_power(
     tfr,
     out_dir: Path,
     config,
     baseline: Optional[Tuple[Optional[float], Optional[float]]] = None,
-    plateau_window: Tuple[float, float] = (3.0, 10.5),
+    active_window: Tuple[float, float] = (3.0, 10.5),
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Create quality control plots comparing baseline vs plateau power.
+    """Create quality control plots comparing baseline vs active power.
     
     Generates histograms and summary statistics comparing power during baseline
-    and plateau periods across frequency bands. Creates topomap visualizations
-    showing percentage change from baseline to plateau.
+    and active periods across frequency bands. Creates topomap visualizations
+    showing percentage change from baseline to active.
     
     Args:
         tfr: MNE TFR object (EpochsTFR or AverageTFR)
         out_dir: Output directory path
         config: Configuration object
         baseline: Optional baseline window tuple (defaults to config)
-        plateau_window: Plateau window tuple for statistics
+        active_window: Active window tuple for statistics
         logger: Optional logger instance
     """
     baseline = _get_baseline_window(config, baseline)
@@ -74,10 +74,10 @@ def qc_baseline_plateau_power(
     b_start, b_end, tmask_base_idx = validate_baseline_indices(times, baseline, min_samples=min_baseline_samples, logger=logger)
     tmask_base = np.zeros(len(times), dtype=bool)
     tmask_base[tmask_base_idx] = True
-    tmask_plat = (times >= plateau_window[0]) & (times < plateau_window[1])
+    tmask_plat = (times >= active_window[0]) & (times < active_window[1])
 
     if not np.any(tmask_plat):
-        log(f"QC skipped: plateau samples={int(tmask_plat.sum())}", logger, "warning")
+        log(f"QC skipped: active samples={int(tmask_plat.sum())}", logger, "warning")
         return
 
     tfr_avg = tfr.average() if isinstance(tfr, mne.time_frequency.EpochsTFR) else tfr
@@ -120,14 +120,14 @@ def qc_baseline_plateau_power(
         axes[0].set_xlabel("Power (a.u.)")
         axes[0].set_ylabel("Count")
         axes[1].hist(pct_change, bins=histogram_bins, color="tab:orange", alpha=histogram_alpha)
-        axes[1].set_title(f"% signal change (plateau vs baseline) — {band}")
+        axes[1].set_title(f"% signal change (active vs baseline) — {band}")
         axes[1].set_xlabel("% change")
         axes[1].set_ylabel("Count")
         fig.suptitle(
-            f"Baseline vs Plateau QC — {band}\n(baseline={b_start:.2f}–{b_end:.2f}s; plateau={plateau_window[0]:.2f}–{plateau_window[1]:.2f}s)",
+            f"Baseline vs Active QC — {band}\n(baseline={b_start:.2f}–{b_end:.2f}s; active={active_window[0]:.2f}–{active_window[1]:.2f}s)",
             fontsize=font_sizes["ylabel"],
         )
-        _save_fig(fig, qc_dir, f"qc_baseline_plateau_hist_{band}.png", config=config, logger=logger)
+        _save_fig(fig, qc_dir, f"qc_baseline_active_hist_{band}.png", config=config, logger=logger)
 
         topo_vals = None
         if tfr_avg is not None:
@@ -137,8 +137,8 @@ def qc_baseline_plateau_power(
                 tfr_avg,
                 fmin=fmin_eff,
                 fmax=fmax_eff,
-                tmin=float(plateau_window[0]),
-                tmax=float(plateau_window[1]),
+                tmin=float(active_window[0]),
+                tmax=float(active_window[1]),
             )
             topo_base = average_tfr_band(
                 tfr_avg,
@@ -159,12 +159,12 @@ def qc_baseline_plateau_power(
             "band": band,
             "baseline_mean": float(np.nanmean(base_flat)),
             "baseline_median": float(np.nanmedian(base_flat)),
-            "plateau_mean": float(np.nanmean(plat_flat)),
-            "plateau_median": float(np.nanmedian(plat_flat)),
+            "active_mean": float(np.nanmean(plat_flat)),
+            "active_median": float(np.nanmedian(plat_flat)),
             "pct_change_mean": float(np.nanmean(pct_change)),
             "pct_change_median": float(np.nanmedian(pct_change)),
             "n_baseline_samples": int(tmask_base.sum()),
-            "n_plateau_samples": int(tmask_plat.sum()),
+            "n_active_samples": int(tmask_plat.sum()),
         }
         if topo_vals is not None and np.isfinite(topo_vals).any():
             row["pct_change_mean_topomap"] = float(np.nanmean(topo_vals))
@@ -176,12 +176,12 @@ def qc_baseline_plateau_power(
 
     if rows:
         df = pd.DataFrame(rows)
-        df_path = qc_dir / "qc_baseline_plateau_summary.tsv"
+        df_path = qc_dir / "qc_baseline_active_summary.tsv"
         df.to_csv(df_path, sep="\t", index=False)
         log(f"Saved QC summary: {df_path}", logger)
 
 
 __all__ = [
-    "qc_baseline_plateau_power",
+    "qc_baseline_active_power",
 ]
 

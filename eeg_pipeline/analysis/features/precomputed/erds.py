@@ -76,7 +76,7 @@ def extract_erds_from_precomputed(
     times = precomputed.times
     active_times = times[windows.active_mask]
 
-    segment_label = getattr(windows, "name", "plateau") or "plateau"
+    segment_label = getattr(windows, "name", "active") or "active"
     for ep_idx in range(n_epochs):
         record: Dict[str, float] = {}
 

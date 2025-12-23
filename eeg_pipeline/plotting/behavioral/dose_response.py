@@ -5,7 +5,7 @@ Dose-Response Relationship Visualizations
 Scientific Question: Is there a monotonic relationship between
 stimulus intensity and neural response?
 
-Plots for each feature type (power, connectivity, aperiodic, microstates):
+Plots for each feature type (power, connectivity, aperiodic, ITPC):
 1. Dose-response curves (temperature vs feature)
 2. Nonlinearity test (linear vs polynomial fit)
 3. Threshold detection (inflection points, derivatives)
@@ -136,7 +136,7 @@ def visualize_dose_response(
     ensure_dir(output_dir)
     
     # Load data using shared loader
-    # Returns 9-tuple: temporal_df, plateau_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
+    # Returns 9-tuple: temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
     _, pow_df, _, _, temp_series, _, _, _, conn_df = load_subject_scatter_data(
         subject, task, deriv_root, config, logger
     )
@@ -573,7 +573,7 @@ def _plot_threshold_detection(
 
 
 # =============================================================================
-# Aperiodic and Microstate Specific Plots
+# Aperiodic-specific plots
 # =============================================================================
 
 
@@ -658,84 +658,3 @@ def _plot_aperiodic_dose_response(
     saved_files["aperiodic_dose_response"] = path
     logger.info("Created aperiodic dose-response plot")
 
-
-def _plot_microstate_dose_response(
-    df: pd.DataFrame,
-    temp_col: str,
-    ms_cols: Dict[str, List[str]],
-    subject: str,
-    output_dir: Path,
-    saved_files: Dict[str, Path],
-    logger: logging.Logger,
-) -> None:
-    """Plot dose-response curves for microstate metrics (coverage, duration)."""
-    n_metrics = len(ms_cols)
-    if n_metrics == 0:
-        return
-    
-    fig, axes = plt.subplots(1, min(n_metrics, 4), figsize=(4 * min(n_metrics, 4), 5))
-    if n_metrics == 1:
-        axes = [axes]
-    
-    temps = pd.to_numeric(df[temp_col], errors="coerce")
-    unique_temps = np.sort(temps.dropna().unique())
-    
-    if len(unique_temps) < 2:
-        plt.close(fig)
-        return
-    
-    metric_colors = {"coverage": "#55A868", "duration": "#C44E52", "occurrence": "#8172B2", "gev": "#CCB974"}
-    
-    for idx, (metric, cols) in enumerate(ms_cols.items()):
-        if idx >= 4:
-            break
-        ax = axes[idx]
-        
-        metric_values = df[cols].mean(axis=1)
-        
-        temp_means = []
-        temp_sems = []
-        for t in unique_temps:
-            mask = temps == t
-            if mask.sum() > 0:
-                temp_means.append(metric_values[mask].mean())
-                temp_sems.append(metric_values[mask].std() / np.sqrt(mask.sum()))
-            else:
-                temp_means.append(np.nan)
-                temp_sems.append(np.nan)
-        
-        temp_means = np.array(temp_means)
-        temp_sems = np.array(temp_sems)
-        
-        color = metric_colors.get(metric, "#333333")
-        ax.errorbar(
-            unique_temps, temp_means, yerr=temp_sems,
-            fmt='o-', color=color, capsize=4, capthick=1.5,
-            markersize=8, linewidth=2
-        )
-        
-        valid = ~np.isnan(temp_means)
-        if valid.sum() >= 3:
-            x_valid = unique_temps[valid]
-            y_valid = temp_means[valid]
-            slope, intercept, r_val, p_val, _ = stats.linregress(x_valid, y_valid)
-            x_fit = np.linspace(x_valid.min(), x_valid.max(), 100)
-            y_fit = slope * x_fit + intercept
-            ax.plot(x_fit, y_fit, '--', color='gray', alpha=0.7, linewidth=1.5)
-            ax.text(0.05, 0.95, f"r = {r_val:.3f}\np = {p_val:.3f}",
-                   transform=ax.transAxes, fontsize=9, verticalalignment="top",
-                   bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
-        
-        ax.set_xlabel("Temperature (°C)", fontsize=10)
-        ax.set_ylabel(f"Mean {metric.title()}", fontsize=10)
-        ax.set_title(f"Microstate {metric.title()}", fontsize=11, fontweight="bold")
-        ax.grid(True, alpha=0.3)
-    
-    fig.suptitle(f"Microstate Dose-Response (sub-{subject})", fontsize=13, fontweight="bold", y=1.02)
-    plt.tight_layout()
-    
-    path = output_dir / f"sub-{subject}_microstate_dose_response.png"
-    save_fig(fig, path)
-    plt.close(fig)
-    saved_files["microstate_dose_response"] = path
-    logger.info("Created microstate dose-response plot")

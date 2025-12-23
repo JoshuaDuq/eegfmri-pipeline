@@ -214,9 +214,9 @@ behavior_analysis:
       temporal: "temporal"
     feature_type_hierarchy:
       power:
-        subtypes: ["baseline", "ramp", "plateau", "change", "roi", "global"]
+        subtypes: ["baseline", "ramp", "active", "change", "roi", "global"]
       connectivity:
-        subtypes: ["roi", "graph", "edge", "baseline", "plateau"]
+        subtypes: ["roi", "graph", "edge", "baseline", "active"]
       aperiodic:
         subtypes: ["slope", "offset"]
       spectral:
@@ -224,7 +224,7 @@ behavior_analysis:
       erp:
         subtypes: ["n1", "p2", "n2", "p3", "ptp"]
       itpc:
-        subtypes: ["baseline", "ramp", "plateau", "time"]
+        subtypes: ["baseline", "ramp", "active", "time"]
       pac:
         subtypes: ["trial", "time"]
       complexity:

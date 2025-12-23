@@ -50,7 +50,7 @@ def _extract_aperiodic_data(
     for ch_name in info.ch_names:
         col = NamingSchema.build(
             "aperiodic",
-            "plateau",
+            "active",
             "broadband",
             "ch",
             metric,
@@ -294,7 +294,7 @@ def plot_aperiodic_topomaps(
                 min_samples = int(config.get("statistics.min_samples_per_channel", 5))
                 for ch in common_chs:
                     # Try new naming first
-                    col_new = f"aperiodic_plateau_broadband_ch_{ch}_{metric}"
+                    col_new = f"aperiodic_active_broadband_ch_{ch}_{metric}"
                     col_old = f"aper_{metric}_{ch}"
                     col = col_new if col_new in features_df.columns else col_old
                     if col not in features_df.columns:
@@ -322,7 +322,7 @@ def plot_aperiodic_topomaps(
                 all_pvals.extend([p for p in p_vals if np.isfinite(p)])
                 
                 def get_col(ch, metric):
-                    c_new = f"aperiodic_plateau_broadband_ch_{ch}_{metric}"
+                    c_new = f"aperiodic_active_broadband_ch_{ch}_{metric}"
                     c_old = f"aper_{metric}_{ch}"
                     return c_new if c_new in features_df.columns else c_old
                 

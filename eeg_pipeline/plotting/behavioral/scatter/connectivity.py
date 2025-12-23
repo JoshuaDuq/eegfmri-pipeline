@@ -129,7 +129,7 @@ def plot_connectivity_roi_scatter(
     )
 
     conn_plot_cfg = behavioral_config.get("connectivity", {})
-    segment = str(conn_plot_cfg.get("segment", "plateau"))
+    segment = str(conn_plot_cfg.get("segment", "active"))
     metrics = conn_plot_cfg.get("metrics", ["wpli_mean", "aec_mean"])
     if not isinstance(metrics, list) or not metrics:
         raise ValueError("plotting.behavioral.connectivity.metrics must be a non-empty list")

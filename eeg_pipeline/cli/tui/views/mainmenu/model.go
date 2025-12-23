@@ -27,9 +27,9 @@ type pipelineItem struct {
 var pipelines = []pipelineItem{
 	{"Preprocessing", "Bad channels, ICA, epochs", "▸", "1"},
 	{"Features", "Extract EEG feature sets", "▸", "2"},
-	{"Behavior", "EEG-behavior correlation analysis", "▸", "3"},
-	{"TFR", "Time-frequency representations", "▸", "4"},
-	{"Decoding", "LOSO regression & classification", "▸", "5"},
+	{"Behavior", "EEG-behavior analysis", "▸", "3"},
+	{"Decoding", "LOSO regression & classification", "▸", "4"},
+	{"Plotting", "Curate and export visualization suites", "▸", "5"},
 }
 
 type utilityItem struct {
@@ -40,7 +40,7 @@ type utilityItem struct {
 
 var utilities = []utilityItem{
 	{"Combine Features", "Merge all feature files into features_all.tsv", "C"},
-	{"Merge Behavior", "Merge behavioral data into BIDS events files", "M"},
+	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files", "M"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format", "R"},
 }
 
@@ -164,7 +164,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.utilityCursor = 0
 			m.SelectedUtility = 0
 		case "m", "M":
-			// Quick select Merge Behavior utility
+			// Quick select Merge PsychoPy Data utility
 			m.inUtilities = true
 			m.utilityCursor = 1
 			m.SelectedUtility = 1
@@ -234,7 +234,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		case 0:
 			m.SelectedPipeline = int(types.PipelineCombineFeatures)
 		case 1:
-			m.SelectedPipeline = int(types.PipelineMergeBehavior)
+			m.SelectedPipeline = int(types.PipelineMergePsychoPyData)
 		case 2:
 			m.SelectedPipeline = int(types.PipelineRawToBIDS)
 		}

@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/eeg-pipeline/tui/components"
@@ -30,7 +31,7 @@ type FeatureCategory struct {
 var behaviorComputations = []Computation{
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
-	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs plateau)"},
+	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
 	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
@@ -101,6 +102,63 @@ var featureFileOptions = []FeatureFile{
 	{"all", "All Combined", "All features combined (features_all.tsv)"},
 }
 
+type PlotItem struct {
+	ID               string
+	Group            string
+	Name             string
+	Description      string
+	RequiredFiles    []string
+	RequiresEpochs   bool
+	RequiresFeatures bool
+}
+
+var plotItems = []PlotItem{
+	// Features
+	{"features_power", "Features", "Power", "Band power summaries and topomaps", []string{"features_power.tsv"}, false, true},
+	{"features_connectivity", "Features", "Connectivity", "Connectivity heatmaps and network views", []string{"features_connectivity.parquet"}, false, true},
+	{"features_aperiodic", "Features", "Aperiodic", "1/f spectral slope diagnostics", []string{"features_aperiodic.tsv"}, false, true},
+	{"features_itpc", "Features", "ITPC", "Inter-trial phase coherence plots", []string{"features_itpc.tsv"}, false, true},
+	{"features_pac", "Features", "PAC", "Phase-amplitude coupling plots", []string{"features_pac_trials.tsv"}, false, true},
+	{"features_erds", "Features", "ERDS", "Event-related desync/sync plots", []string{"features_erds.tsv"}, false, true},
+	// Behavior
+	{"behavior_psychometrics", "Behavior", "Psychometrics", "Rating distributions and psychometrics", []string{"events.tsv", "features_power.tsv"}, false, true},
+	{"behavior_power_scatter", "Behavior", "Power ROI Scatter", "Power vs behavior scatter plots", []string{"features_power.tsv", "stats/corr_stats_power_*"}, false, true},
+	{"behavior_complexity_scatter", "Behavior", "Complexity Scatter", "Complexity vs behavior scatter plots", []string{"features_complexity.tsv"}, false, true},
+	{"behavior_aperiodic_scatter", "Behavior", "Aperiodic Scatter", "Aperiodic vs behavior scatter plots", []string{"features_aperiodic.tsv"}, false, true},
+	{"behavior_connectivity_scatter", "Behavior", "Connectivity Scatter", "Connectivity vs behavior scatter plots", []string{"features_connectivity.parquet"}, false, true},
+	{"behavior_itpc_scatter", "Behavior", "ITPC Scatter", "ITPC vs behavior scatter plots", []string{"features_itpc.tsv"}, false, true},
+	{"behavior_temporal_topomaps", "Behavior", "Temporal Topomaps", "Temporal correlation topomaps", []string{"stats/temporal_*"}, false, true},
+	{"behavior_pain_clusters", "Behavior", "Pain Clusters", "Cluster-based temporal contrasts", []string{"stats/cluster_*"}, false, true},
+	{"behavior_dose_response", "Behavior", "Dose-Response", "Induced dose-response curves", []string{"stats/correlations.tsv", "events.tsv"}, false, true},
+	{"behavior_mediation", "Behavior", "Mediation", "Mediation path diagrams", []string{"stats/mediation.tsv"}, false, true},
+	{"behavior_top_predictors", "Behavior", "Top Predictors", "Summary of top behavioral predictors", []string{"stats/correlations.tsv"}, false, true},
+	// TFR
+	{"tfr_scalpmean", "TFR", "Scalp-Mean", "Scalp-mean TFR plots", []string{"epochs/*.fif"}, true, false},
+	{"tfr_scalpmean_contrast", "TFR", "Scalp-Mean Contrast", "Pain vs non-pain contrasts", []string{"epochs/*.fif", "events.tsv"}, true, false},
+	{"tfr_channels", "TFR", "Channels", "Channel-level TFR plots", []string{"epochs/*.fif"}, true, false},
+	{"tfr_channels_contrast", "TFR", "Channels Contrast", "Channel-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false},
+	{"tfr_rois", "TFR", "ROIs", "ROI-level TFR plots", []string{"epochs/*.fif"}, true, false},
+	{"tfr_rois_contrast", "TFR", "ROI Contrast", "ROI-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false},
+	{"tfr_topomaps", "TFR", "Topomaps", "Time-frequency topomaps", []string{"epochs/*.fif", "events.tsv"}, true, false},
+	{"tfr_band_evolution", "TFR", "Band Evolution", "Band evolution over time", []string{"epochs/*.fif"}, true, false},
+	// ERP
+	{"erp_butterfly", "ERP", "Butterfly", "Butterfly ERP plots (all channels)", []string{"epochs/*.fif"}, true, false},
+	{"erp_roi", "ERP", "ROI Waveforms", "ROI-based ERP waveforms", []string{"epochs/*.fif"}, true, false},
+	{"erp_contrast", "ERP", "Contrast", "ERP condition contrasts (Pain vs No-Pain)", []string{"epochs/*.fif", "events.tsv"}, true, false},
+	{"erp_topomaps", "ERP", "Topomaps", "ERP spatial distributions", []string{"epochs/*.fif"}, true, false},
+	// Decoding
+	{"decoding_regression_plots", "Decoding", "Regression Plots", "LOSO regression diagnostics", []string{"decoding/regression/loso_predictions.tsv"}, false, true},
+	{"decoding_timegen_plots", "Decoding", "Time-Generalization", "Time-generalization matrices", []string{"decoding/time_generalization/time_generalization_regression.npz"}, false, true},
+}
+
+var plotCategories = []FeatureCategory{
+	{"ERP", "Event-Related Potentials", "Waveforms, butterfly plots, and topo contrasts"},
+	{"TFR", "Time-Frequency", "Time-frequency representations and topomaps"},
+	{"Behavior", "EEG-Behavior", "Correlation scatter plots and psychometrics"},
+	{"Decoding", "Decoding", "Regression diagnostics and time-generalization"},
+	{"Features", "Feature Overviews", "General feature distribution and QC plots"},
+}
+
 ///////////////////////////////////////////////////////////////////
 // Model
 ///////////////////////////////////////////////////////////////////
@@ -151,18 +209,20 @@ type Model struct {
 	featureFileSelected map[string]bool
 	featureFileCursor   int
 
-	// TFR visualization options
-	tfrVizType       int      // 0=TFR, 1=Topomap
-	tfrVizTypes      []string // ["TFR", "Topomap"]
-	tfrChannelMode   int      // 0=ROI, 1=Global, 2=All Channels, 3=Specific
-	tfrChannelModes  []string
-	tfrSpecificChans string // Comma-separated channel names for specific mode
-	editingTfrChans  bool   // Whether user is editing the channel input
+	// Plotting pipeline selection
+	plotItems    []PlotItem
+	plotSelected map[int]bool
+	plotCursor   int
+	plotOffset   int // Scroll offset for plots
 
-	// TFR ROI selection (when channel mode is ROI)
-	tfrROIs        []string        // Available ROIs from config
-	tfrROISelected map[string]bool // Which ROIs are selected
-	tfrROICursor   int
+	// Plotting output configuration
+	plotFormats         []string
+	plotFormatSelected  map[string]bool
+	plotDpiOptions      []int
+	plotDpiIndex        int
+	plotSavefigDpiIndex int
+	plotSharedColorbar  bool
+	plotConfigCursor    int
 
 	// Subject selection
 	subjects         []types.SubjectStatus
@@ -219,6 +279,23 @@ type Model struct {
 
 	// Complexity configuration
 	complexityPEOrder int // Permutation entropy order (3-7)
+
+	// ERP configuration
+	erpBaselineCorrection bool
+
+	// Burst configuration
+	burstThresholdZ float64
+
+	// Power configuration
+	powerBaselineMode int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
+
+	// Spectral configuration
+	spectralEdgePercentile float64
+
+	// Connectivity configuration
+	connOutputLevel  int // 0: full, 1: global_only
+	connGraphMetrics bool
+	connAECMode      int // 0: orth, 1: none, 2: sym
 
 	// Behavior pipeline advanced config
 	correlationMethod  string  // "spearman" or "pearson"
@@ -283,6 +360,18 @@ func New(pipeline types.Pipeline) Model {
 		aperiodicFmax: 40.0,
 		// Complexity defaults
 		complexityPEOrder: 3,
+		// ERP defaults
+		erpBaselineCorrection: true,
+		// Burst defaults
+		burstThresholdZ: 2.0,
+		// Power defaults
+		powerBaselineMode: 0,
+		// Spectral defaults
+		spectralEdgePercentile: 0.95,
+		// Connectivity defaults
+		connOutputLevel:  0,
+		connGraphMetrics: true,
+		connAECMode:      0,
 		// Behavior defaults
 		correlationMethod:  "spearman",
 		bootstrapSamples:   1000,
@@ -295,10 +384,22 @@ func New(pipeline types.Pipeline) Model {
 		decodingNPerm: 0,
 		innerSplits:   3,
 		skipTimeGen:   false,
+		plotSelected:  make(map[int]bool),
+		plotFormats:   []string{"png", "svg", "pdf"},
+		plotFormatSelected: map[string]bool{
+			"png": true,
+			"svg": true,
+		},
+		plotDpiOptions:      []int{150, 300, 600},
+		plotDpiIndex:        1,
+		plotSavefigDpiIndex: 2,
 	}
 
 	// Time ranges
-	m.TimeRanges = []types.TimeRange{}
+	m.TimeRanges = []types.TimeRange{
+		{Name: "baseline", Tmin: "", Tmax: ""},
+		{Name: "active", Tmin: "", Tmax: ""},
+	}
 	m.editingRangeIdx = -1
 
 	switch pipeline {
@@ -330,7 +431,6 @@ func New(pipeline types.Pipeline) Model {
 			"Time-resolved (binned) features",
 		}
 		m.steps = []types.WizardStep{
-			types.StepSelectMode,
 			types.StepSelectSubjects,   // Moved up - subject selection first to assess data availability
 			types.StepConfigureOptions, // Category selection
 			types.StepSelectBands,
@@ -362,7 +462,6 @@ func New(pipeline types.Pipeline) Model {
 		// Default: select "all" combined features
 		m.featureFileSelected["all"] = true
 		m.steps = []types.WizardStep{
-			types.StepSelectMode,
 			types.StepSelectSubjects,
 			types.StepSelectComputations,
 			types.StepSelectFeatureFiles,
@@ -382,54 +481,9 @@ func New(pipeline types.Pipeline) Model {
 			"Binary classification",
 		}
 		m.steps = []types.WizardStep{
-			types.StepSelectMode,
 			types.StepAdvancedConfig,
 			types.StepSelectSubjects,
 			types.StepReviewExecute,
-		}
-
-	case types.PipelineTFR:
-		m.modeOptions = []string{styles.ModeVisualize}
-		m.modeDescriptions = []string{"Generate TFR plots"}
-
-		// Initialize TFR visualization types
-		m.tfrVizTypes = []string{"TFR (Time-Frequency)", "Topomaps"}
-		m.tfrVizType = 0 // Default: TFR
-
-		// Initialize TFR channel modes
-		m.tfrChannelModes = []string{"ROI", "Global (Scalp Mean)", "All Channels", "Specific Channels"}
-		m.tfrChannelMode = 0 // Default: ROI
-		m.tfrSpecificChans = ""
-
-		// Initialize ROIs from config (these match eeg_config.yaml)
-		m.tfrROIs = []string{
-			"Frontal",
-			"Central",
-			"Parietal",
-			"Occipital",
-			"Temporal_L",
-			"Temporal_R",
-			"Midline",
-		}
-		m.tfrROISelected = make(map[string]bool)
-		for _, roi := range m.tfrROIs {
-			m.tfrROISelected[roi] = true // All selected by default
-		}
-		m.tfrROICursor = 0
-
-		m.steps = []types.WizardStep{
-			types.StepSelectMode,
-			types.StepTFRVizType,  // NEW: TFR vs Topomap
-			types.StepSelectBands, // For TFR: band selection
-			types.StepTFRChannels, // For TFR: channel/ROI selection
-			types.StepTimeRange,
-			types.StepSelectSubjects,
-			types.StepReviewExecute,
-		}
-
-		// Default: all bands selected
-		for i := range frequencyBands {
-			m.bandSelected[i] = true
 		}
 
 	case types.PipelinePreprocessing:
@@ -441,7 +495,6 @@ func New(pipeline types.Pipeline) Model {
 			"Epoch creation only",
 		}
 		m.steps = []types.WizardStep{
-			types.StepSelectMode,
 			types.StepSelectSubjects,
 			types.StepReviewExecute,
 		}
@@ -469,9 +522,9 @@ func New(pipeline types.Pipeline) Model {
 			types.StepReviewExecute,
 		}
 
-	case types.PipelineMergeBehavior:
+	case types.PipelineMergePsychoPyData:
 		m.modeOptions = []string{"merge-behavior"}
-		m.modeDescriptions = []string{"Merge behavioral data into BIDS events"}
+		m.modeDescriptions = []string{"Merge PsychoPy data into BIDS events files"}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepReviewExecute,
@@ -483,6 +536,32 @@ func New(pipeline types.Pipeline) Model {
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepReviewExecute,
+		}
+
+	case types.PipelinePlotting:
+		m.modeOptions = []string{styles.ModeVisualize}
+		m.modeDescriptions = []string{"Generate selected visualization suites"}
+		m.plotItems = plotItems
+		for i := range m.plotItems {
+			m.plotSelected[i] = true
+		}
+		m.plotSharedColorbar = true
+
+		// Initialize categories for plotting
+		m.categories = make([]string, len(plotCategories))
+		m.categoryDescs = make([]string, len(plotCategories))
+		for i, cat := range plotCategories {
+			m.categories[i] = cat.Name
+			m.categoryDescs[i] = cat.Description
+			m.selected[i] = true // All selected by default
+		}
+
+		m.steps = []types.WizardStep{
+			types.StepSelectSubjects,
+			types.StepSelectPlotCategories,
+			types.StepSelectPlots,
+			types.StepPlotConfig,
+			types.StepReviewExecute, // Review & Execute should be the last step
 		}
 
 	default:
@@ -638,28 +717,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle TFR specific channels input
-		if m.editingTfrChans {
-			switch msg.String() {
-			case "esc", "enter":
-				m.editingTfrChans = false
-			case "backspace":
-				if len(m.tfrSpecificChans) > 0 {
-					m.tfrSpecificChans = m.tfrSpecificChans[:len(m.tfrSpecificChans)-1]
-				}
-			default:
-				// Accept alphanumeric, comma, space, underscore, hyphen
-				r := msg.String()
-				if len(r) == 1 && ((r >= "a" && r <= "z") ||
-					(r >= "A" && r <= "Z") ||
-					(r >= "0" && r <= "9") ||
-					r == "," || r == " " || r == "_" || r == "-") {
-					m.tfrSpecificChans += r
-				}
-			}
-			return m, nil
-		}
-
 		switch msg.String() {
 		case "?":
 			m.showHelp = true
@@ -683,11 +740,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleEnter()
 		case "a":
 			if m.CurrentStep == types.StepTimeRange && m.editingRangeIdx == -1 {
-				// Always suggest "baseline" first since it's required for normalization
-				newName := "range"
-				if len(m.TimeRanges) == 0 {
-					newName = "baseline"
-				}
+				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
 				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
 				m.timeRangeCursor = len(m.TimeRanges) - 1
 				m.editingRangeIdx = m.timeRangeCursor
@@ -723,9 +776,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.helpOverlay.Width = min(50, m.width-10)
+		if m.CurrentStep == types.StepSelectPlots {
+			m.UpdatePlotOffset()
+		}
+	}
+
+	// Always update plot offset if in that step to ensure it's in sync
+	if m.CurrentStep == types.StepSelectPlots {
+		m.UpdatePlotOffset()
 	}
 
 	return m, nil
+}
+
+// UpdatePlotOffset calculates and updates the scrolling offset for the plots list
+func (m *Model) UpdatePlotOffset() {
+	// Total height minus overhead (approx 18-20 lines)
+	maxLines := m.height - 18
+	if maxLines < 10 {
+		maxLines = 10 // Minimum window
+	}
+
+	// Reconstruct the list logic to find cursor position
+	currentGroup := ""
+	lineIdx := 0
+	cursorLine := -1
+
+	for i, plot := range m.plotItems {
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
+		}
+
+		if plot.Group != currentGroup {
+			lineIdx++ // Group header
+			currentGroup = plot.Group
+		}
+
+		if i == m.plotCursor {
+			cursorLine = lineIdx
+		}
+		lineIdx++ // Item line
+	}
+
+	if cursorLine == -1 {
+		return
+	}
+
+	// Adjust offset
+	if cursorLine < m.plotOffset {
+		m.plotOffset = cursorLine
+	} else if cursorLine >= m.plotOffset+maxLines {
+		m.plotOffset = cursorLine - maxLines + 1
+	}
+
+	// Bound check
+	if m.plotOffset < 0 {
+		m.plotOffset = 0
+	}
+	if lineIdx > maxLines && m.plotOffset > lineIdx-maxLines {
+		m.plotOffset = lineIdx - maxLines
+	}
 }
 
 func min(a, b int) int {
@@ -787,4 +897,147 @@ func (m *Model) SetTimeRanges(ranges []types.TimeRange) {
 	if len(ranges) > 0 {
 		m.TimeRanges = ranges
 	}
+}
+
+///////////////////////////////////////////////////////////////////
+// Advanced Options Helpers
+///////////////////////////////////////////////////////////////////
+
+type optionType int
+
+const (
+	// Feature Pipeline Advanced Options
+	optUseDefaults optionType = iota
+	optMicrostateStates
+	optGroupTemplates
+	optFixedTemplates
+	optConnectivity
+	optPACPhaseRange
+	optPACAmpRange
+	optAperiodicRange
+	optPEOrder
+	optBurstPercentile
+	optERPBaseline
+	optBurstThreshold
+	optPowerBaselineMode
+	optSpectralEdge
+	optConnOutputLevel
+	optConnGraphMetrics
+	optConnAECMode
+	// Behavior options
+	optCorrMethod
+	optBootstrap
+	optNPerm
+	optRNGSeed
+	optControlTemp
+	optControlOrder
+	optFDRAlpha
+	// Plotting options
+	optPlotPNG
+	optPlotSVG
+	optPlotPDF
+	optPlotDPI
+	optPlotSaveDPI
+	optPlotSharedColorbar
+	// Decoding options
+	optDecodingNPerm
+	optDecodingInnerSplits
+	optDecodingSkipTimeGen
+)
+
+// getFeaturesOptions returns the active advanced options for the features pipeline
+func (m Model) getFeaturesOptions() []optionType {
+	var options []optionType
+	options = append(options, optUseDefaults)
+
+	if m.isCategorySelected("connectivity") {
+		options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnAECMode)
+	}
+
+	if m.isCategorySelected("pac") {
+		options = append(options, optPACPhaseRange, optPACAmpRange)
+	}
+	if m.isCategorySelected("aperiodic") {
+		options = append(options, optAperiodicRange)
+	}
+	if m.isCategorySelected("complexity") {
+		options = append(options, optPEOrder)
+	}
+	if m.isCategorySelected("erp") {
+		options = append(options, optERPBaseline)
+	}
+	if m.isCategorySelected("bursts") {
+		options = append(options, optBurstThreshold)
+	}
+	if m.isCategorySelected("power") {
+		options = append(options, optPowerBaselineMode)
+	}
+	if m.isCategorySelected("spectral") {
+		options = append(options, optSpectralEdge)
+	}
+
+	return options
+}
+
+func (m Model) getBehaviorOptions() []optionType {
+	return []optionType{
+		optUseDefaults,
+		optCorrMethod,
+		optBootstrap,
+		optNPerm,
+		optRNGSeed,
+		optControlTemp,
+		optControlOrder,
+		optFDRAlpha,
+	}
+}
+
+func (m Model) getPlotConfigOptions() []optionType {
+	options := []optionType{
+		optPlotPNG,
+		optPlotSVG,
+		optPlotPDF,
+		optPlotDPI,
+		optPlotSaveDPI,
+	}
+
+	// Dynamic options based on selected plots/categories
+	if m.isCategorySelected("TFR") || m.isCategorySelected("Features") {
+		// ITPC and PAC settings
+		options = append(options, optPlotSharedColorbar)
+	}
+
+	return options
+}
+
+func (m Model) getDecodingOptions() []optionType {
+	return []optionType{
+		optUseDefaults,
+		optDecodingNPerm,
+		optDecodingInnerSplits,
+		optRNGSeed,
+		optDecodingSkipTimeGen,
+	}
+}
+
+func (m Model) isCurrentlyEditing(opt optionType) bool {
+
+	if !m.editingNumber {
+		return false
+	}
+	var options []optionType
+	switch m.Pipeline {
+	case types.PipelineFeatures:
+		options = m.getFeaturesOptions()
+	case types.PipelineBehavior:
+		options = m.getBehaviorOptions()
+	case types.PipelineDecoding:
+		options = m.getDecodingOptions()
+	default:
+		return false
+	}
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return false
+	}
+	return options[m.advancedCursor] == opt
 }

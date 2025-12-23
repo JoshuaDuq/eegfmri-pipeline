@@ -397,12 +397,12 @@ def compute_pain_sensitivity_index(
 
 
 def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
-    """Compute plateau - baseline change for matching feature pairs."""
+    """Compute active - baseline change for matching feature pairs."""
     baseline_cols = [c for c in features_df.columns if "_baseline_" in c]
 
     change_data: Dict[str, np.ndarray] = {}
     for bl_col in baseline_cols:
-        pl_col = bl_col.replace("_baseline_", "_plateau_")
+        pl_col = bl_col.replace("_baseline_", "_active_")
         if pl_col in features_df.columns:
             bl_vals = features_df[bl_col].values
             pl_vals = features_df[pl_col].values

@@ -763,7 +763,7 @@ class FeatureBehaviorCorrelator:
         """Compute ROI-level power correlations by averaging channels within ROIs.
         
         Handles column naming patterns:
-        - power_{segment}_{band}_ch_{channel}_{stat} (e.g., power_plateau_delta_ch_Fp2_logratio)
+        - power_{segment}_{band}_ch_{channel}_{stat} (e.g., power_active_delta_ch_Fp2_logratio)
         """
         from eeg_pipeline.utils.analysis.tfr import get_rois
         
@@ -795,13 +795,13 @@ class FeatureBehaviorCorrelator:
             band_l = str(band).lower()
             band_cols = [col for col, b, _seg, _ch in parsed_cols if b.lower() == band_l]
             
-            # Prefer plateau columns if available
-            plateau_cols = [
+            # Prefer active columns if available
+            active_cols = [
                 col for col, b, seg, _ch in parsed_cols
-                if b.lower() == band_l and seg.lower() == "plateau"
+                if b.lower() == band_l and seg.lower() == "active"
             ]
-            if plateau_cols:
-                band_cols = plateau_cols
+            if active_cols:
+                band_cols = active_cols
             
             if not band_cols:
                 continue

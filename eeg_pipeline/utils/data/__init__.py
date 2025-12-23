@@ -15,7 +15,7 @@ from .feature_io import (
     iterate_feature_columns,
 )
 from .behavior import load_behavior_plot_features, load_behavior_stats_files, load_stats_file_with_fallbacks
-from .decoding import load_plateau_matrix, load_epoch_windows, load_epochs_with_targets
+from .decoding import load_active_matrix, load_epoch_windows, load_epochs_with_targets
 from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 from .stats import (
     load_precomputed_correlations,
@@ -37,7 +37,7 @@ from .features import align_feature_dataframes
 from .manipulation import (
     find_column,
     reorder_pivot,
-    build_plateau_features,
+    build_active_features,
     flatten_lower_triangles,
     prepare_topomap_correlation_data,
 )
@@ -64,7 +64,7 @@ __all__ = [
     "load_behavior_stats_files",
     "align_feature_dataframes",
     "export_fmri_regressors",
-    "build_plateau_features",
+    "build_active_features",
     "save_all_features",
     "save_all_features",
     "save_trial_alignment_manifest",
@@ -76,7 +76,7 @@ __all__ = [
     "prepare_topomap_correlation_data",
     "load_stats_file_with_fallbacks",
     "load_epochs_with_targets",
-    "load_plateau_matrix",
+    "load_active_matrix",
     "load_epoch_windows",
     "compute_aligned_data_length",
     "extract_pain_vector_array",

@@ -53,11 +53,11 @@ def extract_power_features(
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
-    Extract power features for all defined segments (baseline, ramp, plateau, etc.).
+    Extract power features for all defined segments (baseline, ramp, active, etc.).
     
     Computes:
     - Raw power for baseline (if available) - internalized for normalization
-    - Log-ratio power for active segments (ramp, plateau, bins) relative to baseline
+    - Log-ratio power for active segments (ramp, active, bins) relative to baseline
     - Global mean power per band
     - ROI mean power per band (if spatial_modes includes 'roi')
     """

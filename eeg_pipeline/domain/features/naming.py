@@ -177,15 +177,15 @@ class NamingSchema:
 
 
 def get_fine_time_bins(
-    plateau_start: float = 3.0,
-    plateau_end: float = 10.5,
+    active_start: float = 3.0,
+    active_end: float = 10.5,
     n_bins: int = 7,
 ) -> List[Dict[str, Any]]:
     """Generate fine temporal bins for HRF modeling."""
-    duration = (plateau_end - plateau_start) / n_bins
+    duration = (active_end - active_start) / n_bins
     bins = []
     for i in range(n_bins):
-        start = plateau_start + i * duration
+        start = active_start + i * duration
         end = start + duration
         bins.append(
             {

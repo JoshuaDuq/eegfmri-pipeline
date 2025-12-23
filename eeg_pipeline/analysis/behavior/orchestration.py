@@ -178,7 +178,7 @@ def run_combine_features_utility(
 
 
 def add_change_scores(ctx: BehaviorContext) -> None:
-    """Compute and append change scores (plateau-baseline) once per context."""
+    """Compute and append change scores (active-baseline) once per context."""
     if ctx._change_scores_added or not ctx.compute_change_scores:
         return
 

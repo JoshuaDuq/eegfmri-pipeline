@@ -3,6 +3,7 @@ package wizard
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
@@ -24,10 +25,15 @@ func (m *Model) resetCursorsForStep() {
 	m.bandCursor = 0
 	m.spatialCursor = 0
 	m.featureFileCursor = 0
-	m.tfrROICursor = 0
 	m.advancedCursor = 0
 	m.subCursor = 0
 	m.expandedOption = -1
+	m.plotCursor = 0
+	m.plotOffset = 0
+	if m.CurrentStep == types.StepSelectPlots {
+		m.plotCursor = m.findNextVisiblePlot(-1, 1) // Start at first visible if possible
+	}
+	m.plotConfigCursor = 0
 
 	// Reset any editing states
 	m.filteringSubject = false
@@ -36,7 +42,6 @@ func (m *Model) resetCursorsForStep() {
 	m.numberBuffer = ""
 	m.editingRangeIdx = -1
 	m.editingField = 0
-	m.editingTfrChans = false
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -57,14 +62,8 @@ func (m *Model) handleUp() {
 		} else {
 			m.computationCursor = len(m.computations) - 1
 		}
-	case types.StepTFRVizType:
-		if m.tfrVizType > 0 {
-			m.tfrVizType--
-		} else {
-			m.tfrVizType = len(m.tfrVizTypes) - 1
-		}
-	case types.StepConfigureOptions:
-		// Features pipeline category selection
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline category selection or Plotting pipeline category selection
 		if m.categoryIndex > 0 {
 			m.categoryIndex--
 		} else {
@@ -88,30 +87,23 @@ func (m *Model) handleUp() {
 		} else if len(m.featureFiles) > 0 {
 			m.featureFileCursor = len(m.featureFiles) - 1
 		}
+	case types.StepSelectPlots:
+		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, -1)
+	case types.StepPlotConfig:
+		options := m.getPlotConfigOptions()
+		if len(options) == 0 {
+			break
+		}
+		if m.plotConfigCursor > 0 {
+			m.plotConfigCursor--
+		} else {
+			m.plotConfigCursor = len(options) - 1
+		}
 	case types.StepSelectSpatial:
 		if m.spatialCursor > 0 {
 			m.spatialCursor--
 		} else {
 			m.spatialCursor = len(spatialModes) - 1
-		}
-	case types.StepTFRChannels:
-		if !m.editingTfrChans {
-			// If in ROI mode, navigate ROIs; otherwise navigate modes
-			if m.tfrChannelMode == 0 && len(m.tfrROIs) > 0 {
-				// Navigate within ROI list
-				if m.tfrROICursor > 0 {
-					m.tfrROICursor--
-				} else {
-					m.tfrROICursor = len(m.tfrROIs) - 1
-				}
-			} else {
-				// Navigate channel modes
-				if m.tfrChannelMode > 0 {
-					m.tfrChannelMode--
-				} else {
-					m.tfrChannelMode = len(m.tfrChannelModes) - 1
-				}
-			}
 		}
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
@@ -164,14 +156,8 @@ func (m *Model) handleDown() {
 		} else {
 			m.computationCursor = 0
 		}
-	case types.StepTFRVizType:
-		if m.tfrVizType < len(m.tfrVizTypes)-1 {
-			m.tfrVizType++
-		} else {
-			m.tfrVizType = 0
-		}
-	case types.StepConfigureOptions:
-		// Features pipeline category selection
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline category selection or Plotting pipeline category selection
 		if m.categoryIndex < len(m.categories)-1 {
 			m.categoryIndex++
 		} else {
@@ -195,30 +181,23 @@ func (m *Model) handleDown() {
 		} else {
 			m.featureFileCursor = 0
 		}
+	case types.StepSelectPlots:
+		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
+	case types.StepPlotConfig:
+		options := m.getPlotConfigOptions()
+		if len(options) == 0 {
+			break
+		}
+		if m.plotConfigCursor < len(options)-1 {
+			m.plotConfigCursor++
+		} else {
+			m.plotConfigCursor = 0
+		}
 	case types.StepSelectSpatial:
 		if m.spatialCursor < len(spatialModes)-1 {
 			m.spatialCursor++
 		} else {
 			m.spatialCursor = 0
-		}
-	case types.StepTFRChannels:
-		if !m.editingTfrChans {
-			// If in ROI mode, navigate ROIs; otherwise navigate modes
-			if m.tfrChannelMode == 0 && len(m.tfrROIs) > 0 {
-				// Navigate within ROI list
-				if m.tfrROICursor < len(m.tfrROIs)-1 {
-					m.tfrROICursor++
-				} else {
-					m.tfrROICursor = 0
-				}
-			} else {
-				// Navigate channel modes
-				if m.tfrChannelMode < len(m.tfrChannelModes)-1 {
-					m.tfrChannelMode++
-				} else {
-					m.tfrChannelMode = 0
-				}
-			}
 		}
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
@@ -258,25 +237,9 @@ func (m *Model) handleDown() {
 }
 
 func (m *Model) handleLeft() {
-	// TFR: switch to previous channel mode
-	if m.CurrentStep == types.StepTFRChannels && !m.editingTfrChans {
-		if m.tfrChannelMode > 0 {
-			m.tfrChannelMode--
-		} else {
-			m.tfrChannelMode = len(m.tfrChannelModes) - 1
-		}
-	}
 }
 
 func (m *Model) handleRight() {
-	// TFR: switch to next channel mode
-	if m.CurrentStep == types.StepTFRChannels && !m.editingTfrChans {
-		if m.tfrChannelMode < len(m.tfrChannelModes)-1 {
-			m.tfrChannelMode++
-		} else {
-			m.tfrChannelMode = 0
-		}
-	}
 }
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
@@ -288,38 +251,18 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// For visualize mode, skip directly to subjects (most compute-only steps are irrelevant)
-	if m.CurrentStep == types.StepSelectMode {
-		isVisualize := len(m.modeOptions) > 0 && m.modeOptions[m.modeIndex] == styles.ModeVisualize
-		if isVisualize && (m.Pipeline == types.PipelineBehavior || m.Pipeline == types.PipelineFeatures) {
-			for i, step := range m.steps {
-				if step == types.StepSelectSubjects {
-					m.stepIndex = i
-					m.CurrentStep = step
-					m.resetCursorsForStep() // Reset cursors when jumping to step
-					return m, tea.ClearScreen
-				}
-			}
-		}
+	// Per-step validation
+	errors := m.validateStep()
+	if len(errors) > 0 {
+		m.validationErrors = errors
+		return m, nil
 	}
+	m.validationErrors = nil // Clear if valid
 
 	if m.stepIndex < len(m.steps)-1 {
 		m.stepIndex++
 		m.CurrentStep = m.steps[m.stepIndex]
-		m.resetCursorsForStep() // Reset cursors when entering new step
-
-		// Skip advanced config step if in visualize mode (compute-only options)
-		if m.CurrentStep == types.StepAdvancedConfig {
-			isVisualize := len(m.modeOptions) > 0 && m.modeOptions[m.modeIndex] == styles.ModeVisualize
-			if isVisualize {
-				// Skip to next step
-				if m.stepIndex < len(m.steps)-1 {
-					m.stepIndex++
-					m.CurrentStep = m.steps[m.stepIndex]
-					m.resetCursorsForStep() // Reset again for the skipped-to step
-				}
-			}
-		}
+		m.resetCursorsForStep()
 
 		if m.CurrentStep == types.StepReviewExecute {
 			m.validationErrors = m.validate()
@@ -328,12 +271,101 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	return m, tea.ClearScreen
 }
 
+func (m *Model) validateStep() []string {
+	var errors []string
+	switch m.CurrentStep {
+	case types.StepSelectSubjects:
+		count := 0
+		for _, sel := range m.subjectSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one subject")
+		}
+	case types.StepSelectComputations:
+		count := 0
+		for _, sel := range m.computationSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one analysis to run")
+		}
+	case types.StepSelectFeatureFiles:
+		count := 0
+		for _, sel := range m.featureFileSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one feature file to load")
+		}
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		count := 0
+		for _, sel := range m.selected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one category")
+		}
+	case types.StepSelectBands:
+		count := 0
+		for _, sel := range m.bandSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one frequency band")
+		}
+	case types.StepSelectPlots:
+		count := 0
+		for _, sel := range m.plotSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one plot to generate")
+		}
+	case types.StepSelectSpatial:
+		count := 0
+		for _, sel := range m.spatialSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one spatial mode")
+		}
+	case types.StepTimeRange:
+		errors = m.validateTimeRanges()
+	case types.StepPlotConfig:
+		count := 0
+		for _, sel := range m.plotFormatSelected {
+			if sel {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one output format (PNG, SVG, or PDF)")
+		}
+	}
+	return errors
+}
+
 func (m *Model) handleSpace() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
 		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
-	case types.StepConfigureOptions:
-		// Features pipeline category selection
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline category selection or Plotting pipeline category selection
 		m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
 	case types.StepSelectSubjects:
 		if m.subjectCursor < len(m.subjects) {
@@ -348,17 +380,37 @@ func (m *Model) handleSpace() {
 			key := m.featureFiles[m.featureFileCursor].Key
 			m.featureFileSelected[key] = !m.featureFileSelected[key]
 		}
+	case types.StepSelectPlots:
+		if m.plotCursor < len(m.plotItems) {
+			m.plotSelected[m.plotCursor] = !m.plotSelected[m.plotCursor]
+		}
+	case types.StepPlotConfig:
+		options := m.getPlotConfigOptions()
+		if m.plotConfigCursor < 0 || m.plotConfigCursor >= len(options) {
+			break
+		}
+		opt := options[m.plotConfigCursor]
+		switch opt {
+		case optPlotPNG:
+			m.plotFormatSelected["png"] = !m.plotFormatSelected["png"]
+		case optPlotSVG:
+			m.plotFormatSelected["svg"] = !m.plotFormatSelected["svg"]
+		case optPlotPDF:
+			m.plotFormatSelected["pdf"] = !m.plotFormatSelected["pdf"]
+		case optPlotDPI:
+			if len(m.plotDpiOptions) > 0 {
+				m.plotDpiIndex = (m.plotDpiIndex + 1) % len(m.plotDpiOptions)
+			}
+		case optPlotSaveDPI:
+			if len(m.plotDpiOptions) > 0 {
+				m.plotSavefigDpiIndex = (m.plotSavefigDpiIndex + 1) % len(m.plotDpiOptions)
+			}
+		case optPlotSharedColorbar:
+			m.plotSharedColorbar = !m.plotSharedColorbar
+		}
+
 	case types.StepSelectSpatial:
 		m.spatialSelected[m.spatialCursor] = !m.spatialSelected[m.spatialCursor]
-	case types.StepTFRChannels:
-		// In ROI mode, toggle selected ROI
-		if m.tfrChannelMode == 0 && m.tfrROICursor < len(m.tfrROIs) {
-			roi := m.tfrROIs[m.tfrROICursor]
-			m.tfrROISelected[roi] = !m.tfrROISelected[roi]
-		} else if m.tfrChannelMode == 3 {
-			// Specific channels mode: toggle editing
-			m.editingTfrChans = !m.editingTfrChans
-		}
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
 			// Commit and move to next field, or exit if at end
@@ -383,8 +435,8 @@ func (m *Model) selectAll() {
 		for i := range m.computations {
 			m.computationSelected[i] = true
 		}
-	case types.StepConfigureOptions:
-		// Features pipeline category selection
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline or Plotting categories selection
 		for i := range m.categories {
 			m.selected[i] = true
 		}
@@ -405,11 +457,10 @@ func (m *Model) selectAll() {
 		for _, f := range m.featureFiles {
 			m.featureFileSelected[f.Key] = true
 		}
-	case types.StepTFRChannels:
-		// Select all ROIs when in ROI mode
-		if m.tfrChannelMode == 0 {
-			for _, roi := range m.tfrROIs {
-				m.tfrROISelected[roi] = true
+	case types.StepSelectPlots:
+		for i, plot := range m.plotItems {
+			if m.IsPlotCategorySelected(plot.Group) {
+				m.plotSelected[i] = true
 			}
 		}
 	}
@@ -419,8 +470,8 @@ func (m *Model) selectNone() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
 		m.computationSelected = make(map[int]bool)
-	case types.StepConfigureOptions:
-		// Features pipeline category selection
+	case types.StepConfigureOptions, types.StepSelectPlotCategories:
+		// Features pipeline or Plotting categories selection
 		m.selected = make(map[int]bool)
 	case types.StepSelectSubjects:
 		m.subjectSelected = make(map[string]bool)
@@ -431,10 +482,11 @@ func (m *Model) selectNone() {
 		m.spatialSelected = make(map[int]bool)
 	case types.StepSelectFeatureFiles:
 		m.featureFileSelected = make(map[string]bool)
-	case types.StepTFRChannels:
-		// Clear all ROIs when in ROI mode
-		if m.tfrChannelMode == 0 {
-			m.tfrROISelected = make(map[string]bool)
+	case types.StepSelectPlots:
+		for i, plot := range m.plotItems {
+			if m.IsPlotCategorySelected(plot.Group) {
+				m.plotSelected[i] = false
+			}
 		}
 	}
 }
@@ -463,36 +515,9 @@ func (m *Model) GoBack() bool {
 			m.filteringSubject = false
 		}
 
-		// Check if we should skip compute-only steps when going back
-		isVisualize := len(m.modeOptions) > 0 && m.modeOptions[m.modeIndex] == styles.ModeVisualize
-		if isVisualize && (m.Pipeline == types.PipelineBehavior || m.Pipeline == types.PipelineFeatures) {
-			// In visualize mode, skip compute-only steps when going back
-			if m.CurrentStep == types.StepSelectSubjects {
-				// Go directly back to mode selection
-				for i, step := range m.steps {
-					if step == types.StepSelectMode {
-						m.stepIndex = i
-						m.CurrentStep = step
-						m.resetCursorsForStep() // Reset cursors when jumping back
-						return true
-					}
-				}
-			}
-		}
-
 		m.stepIndex--
 		m.CurrentStep = m.steps[m.stepIndex]
 		m.resetCursorsForStep() // Reset cursors when going back
-
-		// Skip advanced config step when going back in visualize mode
-		if m.CurrentStep == types.StepAdvancedConfig && isVisualize {
-			if m.stepIndex > 0 {
-				m.stepIndex--
-				m.CurrentStep = m.steps[m.stepIndex]
-				m.resetCursorsForStep() // Reset again for the skipped-to step
-			}
-		}
-
 		return true
 	}
 	return false
@@ -512,7 +537,11 @@ func (m *Model) validate() []string {
 			selectedCount++
 			for _, s := range m.subjects {
 				if s.ID == subjID {
-					if valid, reason := m.Pipeline.ValidateSubject(s); !valid {
+					valid, reason := m.Pipeline.ValidateSubject(s)
+					if m.Pipeline == types.PipelinePlotting {
+						valid, reason = m.validatePlottingSubject(s)
+					}
+					if !valid {
 						errors = append(errors, fmt.Sprintf("Subject %s: %s", subjID, reason))
 					} else {
 						validCount++
@@ -551,46 +580,7 @@ func (m *Model) validate() []string {
 		}
 
 		// Validate time range selection
-		if len(m.TimeRanges) == 0 {
-			errors = append(errors, "No time ranges defined")
-		} else {
-			names := make(map[string]bool)
-			for _, tr := range m.TimeRanges {
-				if tr.Name == "" {
-					errors = append(errors, "All time ranges must have a name")
-					break
-				}
-				if names[tr.Name] {
-					errors = append(errors, fmt.Sprintf("Duplicate time range name: %s", tr.Name))
-					break
-				}
-				names[tr.Name] = true
-
-				// Check if numeric values are valid (start < end)
-				if tr.Tmin != "" && tr.Tmax != "" {
-					tmin, errMin := strconv.ParseFloat(tr.Tmin, 64)
-					tmax, errMax := strconv.ParseFloat(tr.Tmax, 64)
-					if errMin == nil && errMax == nil && tmin > tmax {
-						errors = append(errors, fmt.Sprintf("Range '%s': Start time (%.3f) must be less than end time (%.3f)", tr.Name, tmin, tmax))
-					}
-				}
-			}
-
-			// Check for required 'baseline' if baseline-dependent features are selected
-			hasBaseline := names["baseline"]
-			needsBaseline := false
-			for i, cat := range m.categories {
-				if m.selected[i] {
-					if cat == "erds" || cat == "erp" || cat == "bursts" {
-						needsBaseline = true
-						break
-					}
-				}
-			}
-			if needsBaseline && !hasBaseline {
-				errors = append(errors, "Time range 'baseline' is required for baseline-normalized features (ERDS, ERP, bursts)")
-			}
-		}
+		errors = append(errors, m.validateTimeRanges()...)
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -617,7 +607,118 @@ func (m *Model) validate() []string {
 		}
 	}
 
+	if m.Pipeline == types.PipelinePlotting {
+		plotCount := 0
+		for _, selected := range m.plotSelected {
+			if selected {
+				plotCount++
+			}
+		}
+		if plotCount == 0 {
+			errors = append(errors, "No plots selected")
+		}
+		formatCount := 0
+		for _, selected := range m.plotFormatSelected {
+			if selected {
+				formatCount++
+			}
+		}
+		if formatCount == 0 {
+			errors = append(errors, "No output formats selected")
+		}
+	}
+
 	return errors
+}
+
+func (m *Model) validateTimeRanges() []string {
+	var errors []string
+
+	if len(m.TimeRanges) == 0 {
+		errors = append(errors, "No time ranges defined")
+		return errors
+	}
+
+	names := make(map[string]bool)
+	for _, tr := range m.TimeRanges {
+		if tr.Name == "" {
+			errors = append(errors, "All time ranges must have a name")
+			continue
+		}
+		if names[tr.Name] {
+			errors = append(errors, fmt.Sprintf("Duplicate time range name: %s", tr.Name))
+			continue
+		}
+		names[tr.Name] = true
+
+		// Check if numeric values are valid (start < end)
+		if tr.Tmin != "" && tr.Tmax != "" {
+			tmin, errMin := strconv.ParseFloat(tr.Tmin, 64)
+			tmax, errMax := strconv.ParseFloat(tr.Tmax, 64)
+			if errMin == nil && errMax == nil && tmin >= tmax {
+				errors = append(errors, fmt.Sprintf("Range '%s': Start time (%.3f) must be less than end time (%.3f)", tr.Name, tmin, tmax))
+			}
+		}
+	}
+
+	// Check for required 'baseline' and 'active'
+	hasBaseline := names["baseline"]
+	hasActive := names["active"]
+
+	if !hasBaseline {
+		errors = append(errors, "Time range 'baseline' is required")
+	}
+	if !hasActive {
+		errors = append(errors, "Time range 'active' is required")
+	}
+
+	// Validate that baseline and active have values
+	for _, tr := range m.TimeRanges {
+		if (tr.Name == "baseline" || tr.Name == "active") && (tr.Tmin == "" || tr.Tmax == "") {
+			errors = append(errors, fmt.Sprintf("Time range '%s' must have both start and end times defined", tr.Name))
+		}
+	}
+
+	needsBaseline := false
+	for i, cat := range m.categories {
+		if m.selected[i] {
+			if cat == "erds" || cat == "erp" || cat == "bursts" {
+				needsBaseline = true
+				break
+			}
+		}
+	}
+	if needsBaseline && !hasBaseline {
+		errors = append(errors, "Time range 'baseline' is required for baseline-normalized features (ERDS, ERP, bursts)")
+	}
+
+	return errors
+}
+
+func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool) {
+	for i, plot := range m.plotItems {
+		if !m.plotSelected[i] {
+			continue
+		}
+		if plot.RequiresEpochs {
+			requiresEpochs = true
+		}
+		if plot.RequiresFeatures {
+			requiresFeatures = true
+		}
+	}
+	return requiresEpochs, requiresFeatures
+}
+
+func (m Model) validatePlottingSubject(s types.SubjectStatus) (bool, string) {
+	requiresEpochs, requiresFeatures := m.plotRequirements()
+	if requiresEpochs && !s.HasEpochs {
+		return false, "missing epochs"
+	}
+	if requiresFeatures && !s.HasFeatures {
+		return false, "missing features"
+	}
+	return true, ""
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -628,30 +729,12 @@ func (m *Model) validate() []string {
 func (m *Model) getAdvancedOptionCount() int {
 	switch m.Pipeline {
 	case types.PipelineFeatures:
-		// Dynamic count based on selected categories
-		count := 1 // Always have "Use defaults"
-		if m.isCategorySelected("connectivity") {
-			count += 1 // Connectivity measures
-		}
-		if m.isCategorySelected("pac") {
-			count += 2 // Phase range, Amp range
-		}
-		if m.isCategorySelected("aperiodic") {
-			count += 1 // Aperiodic range
-		}
-		if m.isCategorySelected("complexity") {
-			count += 1 // PE order
-		}
-		if count == 1 {
-			count = 2 // Ensure at least "Use defaults" shows
-		}
-		return count
+		return len(m.getFeaturesOptions())
 	case types.PipelineBehavior:
-		// Use defaults, Correlation method, Bootstrap, N permutations, RNG seed, Control temperature, Control trial order, FDR alpha
-		return 8
+		return len(m.getBehaviorOptions())
+
 	case types.PipelineDecoding:
-		// Use defaults, N permutations, Inner splits, RNG seed, Skip time-gen
-		return 5
+		return len(m.getDecodingOptions())
 	default:
 		return 1
 	}
@@ -680,35 +763,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	}
 
 	// Build dynamic option list to match cursor position to option type
-	type optionType int
-	const (
-		optUseDefaults optionType = iota
-		optMicrostateStates
-		optGroupTemplates
-		optFixedTemplates
-		optConnectivity
-		optPACPhaseRange
-		optPACAmpRange
-		optAperiodicRange
-		optPEOrder
-		optBurstPercentile
-	)
-
-	var options []optionType
-	options = append(options, optUseDefaults)
-
-	if m.isCategorySelected("connectivity") {
-		options = append(options, optConnectivity)
-	}
-	if m.isCategorySelected("pac") {
-		options = append(options, optPACPhaseRange, optPACAmpRange)
-	}
-	if m.isCategorySelected("aperiodic") {
-		options = append(options, optAperiodicRange)
-	}
-	if m.isCategorySelected("complexity") {
-		options = append(options, optPEOrder)
-	}
+	options := m.getFeaturesOptions()
 
 	if m.advancedCursor >= len(options) {
 		return
@@ -758,36 +813,78 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.complexityPEOrder = 3
 		}
 		m.useDefaultAdvanced = false
+	case optERPBaseline:
+		m.erpBaselineCorrection = !m.erpBaselineCorrection
+		m.useDefaultAdvanced = false
+	case optBurstThreshold:
+		if m.burstThresholdZ == 1.5 {
+			m.burstThresholdZ = 2.0
+		} else if m.burstThresholdZ == 2.0 {
+			m.burstThresholdZ = 2.5
+		} else if m.burstThresholdZ == 2.5 {
+			m.burstThresholdZ = 3.0
+		} else {
+			m.burstThresholdZ = 1.5
+		}
+		m.useDefaultAdvanced = false
+	case optPowerBaselineMode:
+		m.powerBaselineMode = (m.powerBaselineMode + 1) % 5
+		m.useDefaultAdvanced = false
+	case optSpectralEdge:
+		if m.spectralEdgePercentile == 0.90 {
+			m.spectralEdgePercentile = 0.95
+		} else if m.spectralEdgePercentile == 0.95 {
+			m.spectralEdgePercentile = 0.99
+		} else {
+			m.spectralEdgePercentile = 0.90
+		}
+		m.useDefaultAdvanced = false
+	case optConnOutputLevel:
+		m.connOutputLevel = (m.connOutputLevel + 1) % 2
+		m.useDefaultAdvanced = false
+	case optConnGraphMetrics:
+		m.connGraphMetrics = !m.connGraphMetrics
+		m.useDefaultAdvanced = false
+	case optConnAECMode:
+		m.connAECMode = (m.connAECMode + 1) % 3
+		m.useDefaultAdvanced = false
 	}
+
 }
 
 func (m *Model) toggleBehaviorAdvancedOption() {
-	switch m.advancedCursor {
-	case 0: // Use defaults
+	options := m.getBehaviorOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case 1: // Correlation method
+	case optCorrMethod:
 		if m.correlationMethod == "spearman" {
 			m.correlationMethod = "pearson"
 		} else {
 			m.correlationMethod = "spearman"
 		}
 		m.useDefaultAdvanced = false
-	case 2: // Bootstrap samples - enter edit mode to type number
+	case optBootstrap:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case 3: // N permutations - enter edit mode to type number
+	case optNPerm:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case 4: // RNG seed - enter edit mode to type number
+	case optRNGSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case 5: // Control temperature
+	case optControlTemp:
 		m.controlTemperature = !m.controlTemperature
 		m.useDefaultAdvanced = false
-	case 6: // Control trial order
+	case optControlOrder:
 		m.controlTrialOrder = !m.controlTrialOrder
 		m.useDefaultAdvanced = false
-	case 7: // FDR alpha - cycle through common values
+	case optFDRAlpha:
 		switch m.fdrAlpha {
 		case 0.05:
 			m.fdrAlpha = 0.01
@@ -803,19 +900,19 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 }
 
 func (m *Model) toggleDecodingAdvancedOption() {
-	switch m.advancedCursor {
-	case 0: // Use defaults
+	options := m.getDecodingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case 1: // N permutations - enter edit mode to type number
+	case optDecodingNPerm, optDecodingInnerSplits, optRNGSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case 2: // Inner splits - enter edit mode to type number
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case 3: // RNG seed - enter edit mode to type number
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case 4: // Skip time-gen
+	case optDecodingSkipTimeGen:
 		m.skipTimeGen = !m.skipTimeGen
 		m.useDefaultAdvanced = false
 	}
@@ -848,20 +945,34 @@ func (m *Model) commitNumberInput() {
 }
 
 func (m *Model) commitFeaturesNumber(val int) {
-	// No numeric fields for current features
+	// Re-build the same options slice as toggleFeaturesAdvancedOption to find current opt
+	options := m.getFeaturesOptions()
+
+	if m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	_ = opt // No numeric fields currently
 }
 
 func (m *Model) commitBehaviorNumber(val int) {
-	switch m.advancedCursor {
-	case 2: // Bootstrap samples
+	options := m.getBehaviorOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optBootstrap:
 		if val >= 0 {
 			m.bootstrapSamples = val
 		}
-	case 3: // N permutations
+	case optNPerm:
 		if val >= 0 {
 			m.nPermutations = val
 		}
-	case 4: // RNG seed
+	case optRNGSeed:
 		if val >= 0 {
 			m.rngSeed = val
 		}
@@ -869,24 +980,86 @@ func (m *Model) commitBehaviorNumber(val int) {
 }
 
 func (m *Model) commitDecodingNumber(val int) {
-	switch m.advancedCursor {
-	case 1: // N permutations
+	options := m.getDecodingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optDecodingNPerm:
 		if val >= 0 {
 			m.decodingNPerm = val
 		}
-	case 2: // Inner splits
+	case optDecodingInnerSplits:
 		if val >= 2 {
 			m.innerSplits = val
 		}
-	case 3: // RNG seed
+	case optRNGSeed:
 		if val >= 0 {
 			m.rngSeed = val
 		}
 	}
 }
 
+// findNextVisiblePlot finds the next plot index in a visible category
+func (m Model) findNextVisiblePlot(current int, delta int) int {
+	if len(m.plotItems) == 0 {
+		return 0
+	}
+
+	// Try to find one
+	next := current
+	if next < 0 {
+		next = len(m.plotItems) - 1
+	}
+
+	for i := 0; i < len(m.plotItems); i++ {
+		next = (next + delta + len(m.plotItems)) % len(m.plotItems)
+		if m.IsPlotCategorySelected(m.plotItems[next].Group) {
+			return next
+		}
+	}
+	return current
+}
+
 // startNumberEdit enters editing mode for the current field
 func (m *Model) startNumberEdit() {
 	m.editingNumber = true
 	m.numberBuffer = ""
+}
+
+// IsPlotCategorySelected checks if a plot group/category is selected
+func (m Model) IsPlotCategorySelected(group string) bool {
+	// If not in Plotting pipeline or no Categories step, assume all selected
+	hasCategoryStep := false
+	for _, s := range m.steps {
+		if s == types.StepSelectPlotCategories {
+			hasCategoryStep = true
+			break
+		}
+	}
+
+	if m.Pipeline != types.PipelinePlotting || !hasCategoryStep {
+		return true
+	}
+
+	// plotCategories are defined in model.go
+	for i, cat := range plotCategories {
+		if strings.EqualFold(cat.Key, group) {
+			return m.selected[i]
+		}
+	}
+	return false
+}
+
+// SelectedPlotCategoryKeys returns the keys of selected plot categories
+func (m Model) SelectedPlotCategoryKeys() []string {
+	var keys []string
+	for i, cat := range plotCategories {
+		if m.selected[i] {
+			keys = append(keys, cat.Key)
+		}
+	}
+	return keys
 }

@@ -73,20 +73,13 @@ __all__ = [
     "plot_reliability_summary",
     "plot_quality_summary_dashboard",
     # Complexity visualizations (new)
-    "plot_hjorth_by_band",
+    "plot_complexity_by_band",
     "plot_complexity_by_condition",
     # ERDS visualizations
     "plot_erds_temporal_evolution",
     "plot_erds_latency_distribution",
     "plot_erds_erd_ers_separation",
     "plot_erds_global_summary",
-    # Burst/Dynamics visualizations (new)
-    "plot_burst_duration_distribution",
-    "plot_burst_amplitude_distribution",
-    "plot_burst_summary_by_band",
-    "plot_power_fano_factor",
-    "plot_power_logratio",
-    "plot_gamma_ramp_bursts",
 ]
 
 
@@ -141,20 +134,13 @@ def __getattr__(name: str):
         "plot_reliability_summary": "quality",
         "plot_quality_summary_dashboard": "quality",
         # Complexity visualizations
-        "plot_hjorth_by_band": "complexity",
+        "plot_complexity_by_band": "complexity",
         "plot_complexity_by_condition": "complexity",
         # ERDS visualizations
         "plot_erds_temporal_evolution": "erds",
         "plot_erds_latency_distribution": "erds",
         "plot_erds_erd_ers_separation": "erds",
         "plot_erds_global_summary": "erds",
-        # Burst/Dynamics visualizations
-        "plot_burst_duration_distribution": "burst",
-        "plot_burst_amplitude_distribution": "burst",
-        "plot_burst_summary_by_band": "burst",
-        "plot_power_fano_factor": "burst",
-        "plot_power_logratio": "burst",
-        "plot_gamma_ramp_bursts": "burst",
     }
 
     module_name = _module_map.get(name)

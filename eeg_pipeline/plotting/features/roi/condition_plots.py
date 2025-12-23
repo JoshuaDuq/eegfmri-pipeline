@@ -40,7 +40,7 @@ def plot_power_by_roi_band_condition(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Power by ROI, Band, and Condition (plateau timing).
+    """Power by ROI, Band, and Condition (active timing).
 
     Creates a grid: rows = ROIs (9), cols = frequency bands (5).
     Each cell shows pain vs non-pain box+strip comparison.
@@ -56,8 +56,8 @@ def plot_power_by_roi_band_condition(
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    plateau_label = f"{plateau_window[0]:.1f}-{plateau_window[1]:.1f}s"
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -91,7 +91,7 @@ def plot_power_by_roi_band_condition(
                     continue
                 if parsed.get("group") != "power":
                     continue
-                if parsed.get("segment") != "plateau":
+                if parsed.get("segment") != "active":
                     continue
                 if parsed.get("band") != band:
                     continue
@@ -223,7 +223,7 @@ def plot_power_by_roi_band_condition(
 
     title = (
         "Band Power by ROI: Pain vs Non-Pain Condition Comparison\n"
-        f"Plateau Phase ({plateau_label}), Baseline-Normalized dB\n"
+        f"Active Phase ({active_label}), Baseline-Normalized dB\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -246,7 +246,7 @@ def plot_power_by_roi_band_condition(
         )
 
 
-def plot_dynamics_by_roi_band_condition(
+def plot_complexity_by_roi_band_condition(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
     subject: str,
@@ -255,7 +255,7 @@ def plot_dynamics_by_roi_band_condition(
     config: Any,
     metric: str = "lzc",
 ) -> None:
-    """Complexity (LZC/PE/Hjorth) by ROI, Band, and Condition.
+    """Complexity (LZC/PE) by ROI, Band, and Condition.
 
     Creates a grid: rows = ROIs (9), cols = frequency bands (5).
     FDR-corrected significance markers applied across all tests.
@@ -270,8 +270,8 @@ def plot_dynamics_by_roi_band_condition(
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    plateau_label = f"{plateau_window[0]:.1f}-{plateau_window[1]:.1f}s"
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -287,10 +287,17 @@ def plot_dynamics_by_roi_band_condition(
     metric_labels = {
         "lzc": "Lempel-Ziv Complexity",
         "pe": "Permutation Entropy",
-        "hjorth_mobility": "Hjorth Mobility",
-        "hjorth_complexity": "Hjorth Complexity",
     }
     metric_label = metric_labels.get(metric, metric.upper())
+
+    segments = []
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "comp":
+            segment = str(parsed.get("segment") or "")
+            if segment:
+                segments.append(segment)
+    segment = "active" if "active" in segments else (segments[0] if segments else "active")
 
     plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
     all_pvalues = []
@@ -303,25 +310,29 @@ def plot_dynamics_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
 
-            metric_cols = [
-                c
-                for c in features_df.columns
-                if f"dynamics_plateau_{band}_" in c and f"_{metric}" in c
-            ]
-            if metric_cols:
-                roi_metric_cols = [
-                    c
-                    for c in metric_cols
-                    if any(
-                        f"_ch_{ch}_" in c or c.endswith(f"_ch_{ch}") for ch in roi_channels
-                    )
-                ]
-                if roi_metric_cols:
-                    roi_vals = features_df[roi_metric_cols].mean(axis=1)
-                else:
-                    roi_vals = pd.Series([np.nan] * len(features_df))
-            else:
-                roi_vals = pd.Series([np.nan] * len(features_df))
+            roi_vals = pd.Series([np.nan] * len(features_df))
+            roi_set = set(roi_channels)
+            cols: List[str] = []
+            for c in features_df.columns:
+                parsed = NamingSchema.parse(str(c))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != "comp":
+                    continue
+                if str(parsed.get("segment") or "") != segment:
+                    continue
+                if str(parsed.get("band") or "") != str(band):
+                    continue
+                if str(parsed.get("scope") or "") != "ch":
+                    continue
+                if str(parsed.get("stat") or "") != str(metric):
+                    continue
+                if str(parsed.get("identifier") or "") not in roi_set:
+                    continue
+                cols.append(str(c))
+
+            if cols:
+                roi_vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
             vals_nonpain = roi_vals[~pain_mask].dropna().values
             vals_pain = roi_vals[pain_mask].dropna().values
@@ -440,7 +451,7 @@ def plot_dynamics_by_roi_band_condition(
 
     title = (
         f"{metric_label} by ROI: Pain vs Non-Pain Condition Comparison\n"
-        f"Plateau Phase ({plateau_label})\n"
+        f"Active Phase ({active_label})\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -486,8 +497,8 @@ def plot_aperiodic_by_roi_condition(
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    plateau_label = f"{plateau_window[0]:.1f}-{plateau_window[1]:.1f}s"
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -515,7 +526,7 @@ def plot_aperiodic_by_roi_condition(
 
             cols = []
             for col in features_df.columns:
-                if f"aperiodic_plateau_broadband_ch_" in col and f"_{metric}" in col:
+                if f"aperiodic_active_broadband_ch_" in col and f"_{metric}" in col:
                     for ch in roi_channels:
                         if f"_ch_{ch}_" in col:
                             cols.append(col)
@@ -639,7 +650,7 @@ def plot_aperiodic_by_roi_condition(
 
     title = (
         "Aperiodic 1/f Parameters by ROI: Pain vs Non-Pain Comparison\n"
-        f"Plateau Phase ({plateau_label})\n"
+        f"Active Phase ({active_label})\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -686,8 +697,8 @@ def plot_connectivity_by_roi_band_condition(
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    plateau_label = f"{plateau_window[0]:.1f}-{plateau_window[1]:.1f}s"
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -716,13 +727,13 @@ def plot_connectivity_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             ax = axes[row_idx, col_idx]
 
-            roi_vals = aggregate_connectivity_by_roi(features_df, f"conn_plateau_{band}_", roi_channels)
+            roi_vals = aggregate_connectivity_by_roi(features_df, f"conn_active_{band}_", roi_channels)
 
             if measure != "wpli":
                 measure_cols = [
                     c
                     for c in features_df.columns
-                    if f"conn_plateau_{band}_" in c and f"_{measure}" in c
+                    if f"conn_active_{band}_" in c and f"_{measure}" in c
                 ]
                 if measure_cols:
                     roi_measure_cols = []
@@ -825,7 +836,7 @@ def plot_connectivity_by_roi_band_condition(
     n_pain = int(pain_mask.sum())
     n_nonpain = int((~pain_mask).sum())
     fig.suptitle(
-        f"Within-ROI {measure_label} by Band: Plateau ({plateau_label}) (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
+        f"Within-ROI {measure_label} by Band: Active ({active_label}) (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
         y=1.01,
@@ -853,7 +864,7 @@ def plot_itpc_by_roi_band_condition(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
-    segment: str = "plateau",
+    segment: str = "active",
 ) -> None:
     """ITPC by ROI, Band, and Condition.
 
@@ -871,8 +882,8 @@ def plot_itpc_by_roi_band_condition(
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    plateau_label = f"{plateau_window[0]:.1f}-{plateau_window[1]:.1f}s"
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -1035,7 +1046,7 @@ def plot_itpc_by_roi_band_condition(
 
     title = (
         "Inter-Trial Phase Coherence by ROI: Pain vs Non-Pain Comparison\n"
-        f"Plateau Phase ({plateau_label}), LOO-ITPC\n"
+        f"Active Phase ({active_label}), LOO-ITPC\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1058,17 +1069,17 @@ def plot_itpc_by_roi_band_condition(
         )
 
 
-def plot_itpc_plateau_vs_baseline(
+def plot_itpc_active_vs_baseline(
     features_df: pd.DataFrame,
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """ITPC Plateau vs Baseline Paired Comparison.
+    """ITPC Active vs Baseline Paired Comparison.
 
     Shows whether thermal stimulation evokes phase-locked responses.
-    Paired comparison: each y-point is same trial (baseline vs plateau).
+    Paired comparison: each y-point is same trial (baseline vs active).
     """
 
     if features_df is None or features_df.empty:
@@ -1077,8 +1088,8 @@ def plot_itpc_plateau_vs_baseline(
     from eeg_pipeline.utils.config.loader import get_config_value
     from scipy.stats import wilcoxon
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    baseline_window = get_config_value(config, "baseline_window", [-3.0, -0.5])
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -1107,39 +1118,39 @@ def plot_itpc_plateau_vs_baseline(
             baseline_cols = [
                 c for c in features_df.columns if f"itpc_baseline_{band}_ch_" in c
             ]
-            plateau_cols = [
-                c for c in features_df.columns if f"itpc_plateau_{band}_ch_" in c
+            active_cols = [
+                c for c in features_df.columns if f"itpc_active_{band}_ch_" in c
             ]
 
             vals_baseline = np.array([])
-            vals_plateau = np.array([])
+            vals_active = np.array([])
 
-            if baseline_cols and plateau_cols:
+            if baseline_cols and active_cols:
                 roi_baseline_cols = [
                     c for c in baseline_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
                 ]
-                roi_plateau_cols = [
-                    c for c in plateau_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
+                roi_active_cols = [
+                    c for c in active_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
                 ]
 
-                if roi_baseline_cols and roi_plateau_cols:
+                if roi_baseline_cols and roi_active_cols:
                     vals_baseline = (
                         features_df[roi_baseline_cols].mean(axis=1).dropna().values
                     )
-                    vals_plateau = (
-                        features_df[roi_plateau_cols].mean(axis=1).dropna().values
+                    vals_active = (
+                        features_df[roi_active_cols].mean(axis=1).dropna().values
                     )
 
-            plot_data[key] = (vals_baseline, vals_plateau)
+            plot_data[key] = (vals_baseline, vals_active)
 
             if (
                 len(vals_baseline) > 5
-                and len(vals_plateau) > 5
-                and len(vals_baseline) == len(vals_plateau)
+                and len(vals_active) > 5
+                and len(vals_baseline) == len(vals_active)
             ):
                 try:
-                    _, p = wilcoxon(vals_plateau, vals_baseline)
-                    diff = vals_plateau - vals_baseline
+                    _, p = wilcoxon(vals_active, vals_baseline)
+                    diff = vals_active - vals_baseline
                     pooled_std = np.std(diff, ddof=1)
                     d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
                     all_pvalues.append(p)
@@ -1162,9 +1173,9 @@ def plot_itpc_plateau_vs_baseline(
         for col_idx, band in enumerate(bands):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_baseline, vals_plateau = plot_data[key]
+            vals_baseline, vals_active = plot_data[key]
 
-            if len(vals_baseline) == 0 or len(vals_plateau) == 0:
+            if len(vals_baseline) == 0 or len(vals_active) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -1179,7 +1190,7 @@ def plot_itpc_plateau_vs_baseline(
                 continue
 
             bp = ax.boxplot(
-                [vals_baseline, vals_plateau],
+                [vals_baseline, vals_active],
                 positions=[0, 1],
                 widths=0.4,
                 patch_artist=True,
@@ -1197,24 +1208,24 @@ def plot_itpc_plateau_vs_baseline(
                 s=6,
             )
             ax.scatter(
-                1 + np.random.uniform(-0.08, 0.08, len(vals_plateau)),
-                vals_plateau,
+                1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
+                vals_active,
                 c="#d62728",
                 alpha=0.3,
                 s=6,
             )
 
-            if len(vals_baseline) == len(vals_plateau) and len(vals_baseline) <= 100:
+            if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
                 for i in range(len(vals_baseline)):
                     ax.plot(
                         [0, 1],
-                        [vals_baseline[i], vals_plateau[i]],
+                        [vals_baseline[i], vals_active[i]],
                         c="gray",
                         alpha=0.15,
                         lw=0.5,
                     )
 
-            all_vals = np.concatenate([vals_baseline, vals_plateau])
+            all_vals = np.concatenate([vals_baseline, vals_active])
             ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
             yrange = ymax - ymin if ymax > ymin else 0.1
             ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.25 * yrange)
@@ -1254,9 +1265,9 @@ def plot_itpc_plateau_vs_baseline(
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "ITPC Plateau vs Baseline by ROI: Paired Comparison\n"
+        "ITPC Active vs Baseline by ROI: Paired Comparison\n"
         f"Baseline ({baseline_window[0]:.1f}-{baseline_window[1]:.1f}s) vs "
-        f"Plateau ({plateau_window[0]:.1f}-{plateau_window[1]:.1f}s)\n"
+        f"Active ({active_window[0]:.1f}-{active_window[1]:.1f}s)\n"
         f"Subject: {subject} | Wilcoxon signed-rank | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1265,7 +1276,7 @@ def plot_itpc_plateau_vs_baseline(
     plt.tight_layout()
     save_fig(
         fig,
-        save_dir / f"sub-{subject}_itpc_plateau_vs_baseline",
+        save_dir / f"sub-{subject}_itpc_active_vs_baseline",
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
@@ -1275,7 +1286,7 @@ def plot_itpc_plateau_vs_baseline(
 
     if logger:
         logger.info(
-            f"Saved ITPC plateau vs baseline plot ({n_sig}/{n_tests} FDR significant)"
+            f"Saved ITPC active vs baseline plot ({n_sig}/{n_tests} FDR significant)"
         )
 
 
@@ -1290,7 +1301,7 @@ def plot_pac_by_roi_condition(
     """PAC by ROI × Frequency Pair × Condition.
 
     Shows phase-amplitude coupling for different band pairs.
-    PAC columns: pac_plateau_{phase}_{amp}_ch_{channel}_val
+    PAC columns: pac_active_{phase}_{amp}_ch_{channel}_val
     """
 
     if features_df is None or features_df.empty or events_df is None:
@@ -1330,7 +1341,7 @@ def plot_pac_by_roi_condition(
         for col_idx, pair in enumerate(pac_pairs):
             key = (row_idx, col_idx)
 
-            pac_cols = [c for c in features_df.columns if f"pac_plateau_{pair}_ch_" in c]
+            pac_cols = [c for c in features_df.columns if f"pac_active_{pair}_ch_" in c]
 
             vals_nonpain = np.array([])
             vals_pain = np.array([])
@@ -1463,7 +1474,7 @@ def plot_pac_by_roi_condition(
 
     title = (
         "Phase-Amplitude Coupling by ROI: Pain vs Non-Pain Comparison\n"
-        "Plateau Phase, MVL Method\n"
+        "Active Phase, MVL Method\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1497,7 +1508,7 @@ def plot_band_segment_condition(
 ) -> None:
     """Unified Band × Segment × Condition plot.
 
-    Creates grid: rows = frequency bands, columns = segments (baseline, plateau).
+    Creates grid: rows = frequency bands, columns = segments (baseline, active).
     Each cell shows mean across ALL channels, comparing pain vs non-pain.
     """
 
@@ -1509,7 +1520,7 @@ def plot_band_segment_condition(
         return
 
     if segments is None:
-        segments = ["baseline", "plateau"]
+        segments = ["baseline", "active"]
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
     n_bands = len(bands)
@@ -1685,17 +1696,17 @@ def plot_band_segment_condition(
         )
 
 
-def plot_power_plateau_vs_baseline(
+def plot_power_active_vs_baseline(
     features_df: pd.DataFrame,
     subject: str,
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Power Plateau vs Baseline Paired Comparison.
+    """Power Active vs Baseline Paired Comparison.
 
     Uses paired Wilcoxon signed-rank test for within-trial comparison.
-    Shows whether power changes from baseline to plateau period.
+    Shows whether power changes from baseline to active period.
     """
 
     if features_df is None or features_df.empty:
@@ -1704,8 +1715,8 @@ def plot_power_plateau_vs_baseline(
     from eeg_pipeline.utils.config.loader import get_config_value
     from scipy.stats import wilcoxon
 
-    plateau_window = get_config_value(config, "plateau_window", [3.0, 10.5])
-    baseline_window = get_config_value(config, "baseline_window", [-3.0, -0.5])
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
     n_bands = len(bands)
@@ -1716,25 +1727,25 @@ def plot_power_plateau_vs_baseline(
 
     for band_idx, band in enumerate(bands):
         baseline_cols = [c for c in features_df.columns if f"power_baseline_{band}_ch_" in c]
-        plateau_cols = [c for c in features_df.columns if f"power_plateau_{band}_ch_" in c]
+        active_cols = [c for c in features_df.columns if f"power_active_{band}_ch_" in c]
 
         vals_baseline = np.array([])
-        vals_plateau = np.array([])
+        vals_active = np.array([])
 
-        if baseline_cols and plateau_cols:
+        if baseline_cols and active_cols:
             vals_baseline = features_df[baseline_cols].mean(axis=1).dropna().values
-            vals_plateau = features_df[plateau_cols].mean(axis=1).dropna().values
+            vals_active = features_df[active_cols].mean(axis=1).dropna().values
 
-        plot_data[band_idx] = (vals_baseline, vals_plateau)
+        plot_data[band_idx] = (vals_baseline, vals_active)
 
         if (
             len(vals_baseline) > 5
-            and len(vals_plateau) > 5
-            and len(vals_baseline) == len(vals_plateau)
+            and len(vals_active) > 5
+            and len(vals_baseline) == len(vals_active)
         ):
             try:
-                _, p = wilcoxon(vals_plateau, vals_baseline)
-                diff = vals_plateau - vals_baseline
+                _, p = wilcoxon(vals_active, vals_baseline)
+                diff = vals_active - vals_baseline
                 pooled_std = np.std(diff, ddof=1)
                 d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
                 all_pvalues.append(p)
@@ -1753,9 +1764,9 @@ def plot_power_plateau_vs_baseline(
 
     for band_idx, band in enumerate(bands):
         ax = axes[band_idx]
-        vals_baseline, vals_plateau = plot_data[band_idx]
+        vals_baseline, vals_active = plot_data[band_idx]
 
-        if len(vals_baseline) == 0 or len(vals_plateau) == 0:
+        if len(vals_baseline) == 0 or len(vals_active) == 0:
             ax.text(
                 0.5,
                 0.5,
@@ -1769,7 +1780,7 @@ def plot_power_plateau_vs_baseline(
             ax.set_xticks([])
             continue
 
-        bp = ax.boxplot([vals_baseline, vals_plateau], positions=[0, 1], widths=0.4, patch_artist=True)
+        bp = ax.boxplot([vals_baseline, vals_active], positions=[0, 1], widths=0.4, patch_artist=True)
         bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
         bp["boxes"][0].set_alpha(0.6)
         bp["boxes"][1].set_facecolor(condition_colors["pain"])
@@ -1783,18 +1794,18 @@ def plot_power_plateau_vs_baseline(
             s=6,
         )
         ax.scatter(
-            1 + np.random.uniform(-0.08, 0.08, len(vals_plateau)),
-            vals_plateau,
+            1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
+            vals_active,
             c=condition_colors["pain"],
             alpha=0.3,
             s=6,
         )
 
-        if len(vals_baseline) == len(vals_plateau) and len(vals_baseline) <= 100:
+        if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
             for i in range(len(vals_baseline)):
-                ax.plot([0, 1], [vals_baseline[i], vals_plateau[i]], c="gray", alpha=0.15, lw=0.5)
+                ax.plot([0, 1], [vals_baseline[i], vals_active[i]], c="gray", alpha=0.15, lw=0.5)
 
-        all_vals = np.concatenate([vals_baseline, vals_plateau])
+        all_vals = np.concatenate([vals_baseline, vals_active])
         ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
         yrange = ymax - ymin if ymax > ymin else 0.1
         ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
@@ -1813,7 +1824,7 @@ def plot_power_plateau_vs_baseline(
             )
 
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Baseline", "Plateau"], fontsize=9)
+        ax.set_xticklabels(["Baseline", "Active"], fontsize=9)
         ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, None))
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -1822,7 +1833,7 @@ def plot_power_plateau_vs_baseline(
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "Band Power: Baseline vs Plateau (Paired Comparison)\n"
+        "Band Power: Baseline vs Active (Paired Comparison)\n"
         f"Subject: {subject} | Wilcoxon signed-rank | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1831,7 +1842,7 @@ def plot_power_plateau_vs_baseline(
     plt.tight_layout()
     save_fig(
         fig,
-        save_dir / f"sub-{subject}_power_plateau_vs_baseline",
+        save_dir / f"sub-{subject}_power_active_vs_baseline",
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
@@ -1840,7 +1851,7 @@ def plot_power_plateau_vs_baseline(
     plt.close(fig)
 
     if logger:
-        logger.info(f"Saved Power plateau vs baseline plot ({n_sig}/{n_tests} FDR significant)")
+        logger.info(f"Saved Power active vs baseline plot ({n_sig}/{n_tests} FDR significant)")
 
 
 def plot_temporal_evolution(
@@ -1853,7 +1864,7 @@ def plot_temporal_evolution(
     feature_prefix: str = "power",
     feature_label: str = "Band Power",
 ) -> None:
-    """Temporal Evolution: Early vs Mid vs Late Plateau."""
+    """Temporal Evolution: Early vs Mid vs Late Active."""
 
     if features_df is None or features_df.empty or events_df is None:
         return
@@ -1950,13 +1961,13 @@ def plot_temporal_evolution(
 
 __all__ = [
     "plot_power_by_roi_band_condition",
-    "plot_dynamics_by_roi_band_condition",
+    "plot_complexity_by_roi_band_condition",
     "plot_aperiodic_by_roi_condition",
     "plot_connectivity_by_roi_band_condition",
     "plot_itpc_by_roi_band_condition",
-    "plot_itpc_plateau_vs_baseline",
+    "plot_itpc_active_vs_baseline",
     "plot_pac_by_roi_condition",
     "plot_band_segment_condition",
-    "plot_power_plateau_vs_baseline",
+    "plot_power_active_vs_baseline",
     "plot_temporal_evolution",
 ]

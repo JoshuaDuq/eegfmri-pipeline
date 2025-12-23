@@ -33,6 +33,7 @@ from eeg_pipeline.cli.commands.tfr import setup_tfr, run_tfr
 from eeg_pipeline.cli.commands.decoding import setup_decoding, run_decoding
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
 from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
+from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
@@ -76,6 +77,13 @@ COMMANDS: List[Command] = [
         description="Run EEG decoding (LOSO regression + time-generalization)",
         setup=setup_decoding,
         run=run_decoding,
+    ),
+    Command(
+        name="plotting",
+        help="Plotting pipeline: curate visualization suites",
+        description="Plotting pipeline: select and render visualization suites",
+        setup=setup_plotting,
+        run=run_plotting,
     ),
     Command(
         name="preprocessing",

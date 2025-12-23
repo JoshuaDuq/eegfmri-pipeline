@@ -82,7 +82,7 @@ def _build_behavior_plot_context(
 CATEGORY_TO_PLOTS = {
     "psychometrics": ["psychometrics"],
     "power": ["power_roi_scatter"],
-    "dynamics": ["dynamics_scatter"],
+    "complexity": ["complexity_scatter"],
     "aperiodic": ["aperiodic_scatter"],
     "connectivity": ["connectivity_scatter"],
     "itpc": ["itpc_scatter"],
@@ -130,7 +130,7 @@ def visualize_subject_behavior(
         plot_names = [
             "psychometrics",
             "power_roi_scatter",
-            "dynamics_scatter",
+            "complexity_scatter",
             "aperiodic_scatter",
             "connectivity_scatter",
             "itpc_scatter",
@@ -144,7 +144,7 @@ def visualize_subject_behavior(
         plot_names = plots if plots is not None else [
             "psychometrics",
             "power_roi_scatter",
-            "dynamics_scatter",
+            "complexity_scatter",
             "aperiodic_scatter",
             "connectivity_scatter",
             "itpc_scatter",

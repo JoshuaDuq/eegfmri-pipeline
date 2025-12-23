@@ -149,7 +149,7 @@ def plot_power_roi_scatter(
                         continue
                     if str(parsed.get("band") or "") != str(band):
                         continue
-                    if str(parsed.get("segment") or "") != "plateau":
+                    if str(parsed.get("segment") or "") != "active":
                         continue
                     if str(parsed.get("scope") or "") != "ch":
                         continue

@@ -49,7 +49,7 @@ from eeg_pipeline.analysis.decoding.pipelines import (
 )
 
 # Data loading (canonical location: eeg_pipeline.utils.data.decoding)
-from eeg_pipeline.utils.data.decoding import load_epoch_windows, load_plateau_matrix
+from eeg_pipeline.utils.data.decoding import load_epoch_windows, load_active_matrix
 
 # Cross-validation orchestration (high-level CV strategies)
 # Canonical pipeline class is in eeg_pipeline.pipelines.decoding
@@ -132,7 +132,7 @@ __all__ = [
     "build_elasticnet_param_grid",
     "build_rf_param_grid",
     # Data
-    "load_plateau_matrix",
+    "load_active_matrix",
     "load_epoch_windows",
     # CV implementations
     "nested_loso_predictions",

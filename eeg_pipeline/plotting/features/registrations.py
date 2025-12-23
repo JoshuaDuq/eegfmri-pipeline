@@ -13,10 +13,11 @@ import mne
 
 from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry
 from eeg_pipeline.plotting.core.runner import safe_plot
-from eeg_pipeline.infra.paths import deriv_stats_path
+from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
 from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
+from eeg_pipeline.domain.features.naming import NamingSchema
 
 from eeg_pipeline.plotting.features.aperiodic import (
     plot_aperiodic_topomaps,
@@ -30,6 +31,15 @@ from eeg_pipeline.plotting.features.connectivity import (
     plot_sliding_connectivity_trajectories,
 )
 from eeg_pipeline.plotting.features.erds import plot_erds_temporal_evolution
+from eeg_pipeline.plotting.features.quality import (
+    plot_feature_distribution_grid,
+    plot_outlier_trials_heatmap,
+    plot_snr_distribution,
+)
+from eeg_pipeline.plotting.features.complexity import (
+    plot_complexity_by_condition,
+    plot_complexity_by_band,
+)
 from eeg_pipeline.plotting.features.phase import (
     plot_itpc_heatmap,
     plot_itpc_topomaps,
@@ -38,6 +48,7 @@ from eeg_pipeline.plotting.features.phase import (
     plot_pac_by_condition,
     plot_pac_comodulograms,
     plot_pac_time_ribbons,
+    convert_pac_wide_to_long,
 )
 from eeg_pipeline.plotting.features.power import (
     plot_power_by_condition,
@@ -53,11 +64,17 @@ from eeg_pipeline.plotting.features.roi import (
     plot_band_segment_condition,
     plot_connectivity_by_roi_band_condition,
     plot_itpc_by_roi_band_condition,
-    plot_itpc_plateau_vs_baseline,
+    plot_itpc_active_vs_baseline,
     plot_pac_by_roi_condition,
     plot_power_by_roi_band_condition,
-    plot_power_plateau_vs_baseline,
+    plot_power_active_vs_baseline,
     plot_temporal_evolution,
+)
+from eeg_pipeline.plotting.erp import (
+    plot_butterfly_erp,
+    plot_roi_erp,
+    plot_erp_contrast,
+    plot_erp_topomaps,
 )
 
 
@@ -118,25 +135,6 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
                 logger=ctx.logger,
                 config=ctx.config,
             )
-
-        safe_plot(
-            ctx,
-            saved_files,
-            "aperiodic_band_segment_condition",
-            "aperiodic",
-            None,
-            plot_band_segment_condition,
-            ctx.aperiodic_df,
-            ctx.aligned_events,
-            ctx.subject,
-            aper_dir,
-            ctx.logger,
-            ctx.config,
-            "aperiodic",
-            "Aperiodic (1/f)",
-            ["baseline", "plateau"],
-        )
-
 
 
 ###################################################################
@@ -293,25 +291,6 @@ def plot_connectivity_condition(ctx: FeaturePlotContext, saved_files):
             measure=measure,
         )
 
-    safe_plot(
-        ctx,
-        saved_files,
-        "conn_band_segment_condition",
-        "connectivity",
-        None,
-        plot_band_segment_condition,
-        ctx.connectivity_df,
-        ctx.aligned_events,
-        ctx.subject,
-        ctx.subdir("connectivity"),
-        ctx.logger,
-        ctx.config,
-        "conn_plv",
-        "Connectivity (PLV)",
-        ["baseline", "plateau"],
-    )
-
-
 ###################################################################
 # ERDS
 ###################################################################
@@ -319,7 +298,7 @@ def plot_connectivity_condition(ctx: FeaturePlotContext, saved_files):
 
 @VisualizationRegistry.register("erds")
 def plot_erds(ctx: FeaturePlotContext, saved_files):
-    if ctx.dynamics_df is None:
+    if ctx.erds_df is None:
         return
 
     erds_dir = ctx.subdir("erds")
@@ -331,10 +310,50 @@ def plot_erds(ctx: FeaturePlotContext, saved_files):
         "erds",
         None,
         plot_erds_temporal_evolution,
-        features_df=ctx.dynamics_df,
+        features_df=ctx.erds_df,
         save_path=erds_dir / f"sub-{ctx.subject}_erds_temporal_evolution",
         config=ctx.config,
     )
+
+
+###################################################################
+# Complexity
+###################################################################
+
+
+@VisualizationRegistry.register("complexity")
+def plot_complexity(ctx: FeaturePlotContext, saved_files):
+    if ctx.complexity_df is None:
+        return
+
+    comp_dir = ctx.subdir("complexity")
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "complexity_by_band",
+        "complexity",
+        None,
+        plot_complexity_by_band,
+        features_df=ctx.complexity_df,
+        save_path=comp_dir / f"sub-{ctx.subject}_complexity_by_band",
+        config=ctx.config,
+    )
+
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "complexity_by_condition",
+            "complexity",
+            None,
+            plot_complexity_by_condition,
+            features_df=ctx.complexity_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_path=comp_dir / f"sub-{ctx.subject}_complexity_by_condition",
+            config=ctx.config,
+        )
 
 
 ###################################################################
@@ -438,17 +457,17 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             "itpc",
             "ITPC",
-            ["baseline", "plateau"],
+            ["baseline", "active"],
         )
 
     if ctx.itpc_df is not None:
         safe_plot(
             ctx,
             saved_files,
-            "itpc_plateau_vs_baseline",
+            "itpc_active_vs_baseline",
             "itpc",
             None,
-            plot_itpc_plateau_vs_baseline,
+            plot_itpc_active_vs_baseline,
             ctx.itpc_df,
             ctx.subject,
             itpc_dir,
@@ -482,7 +501,8 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
 
 @VisualizationRegistry.register("pac")
 def pac_summary(ctx: FeaturePlotContext, saved_files):
-    if ctx.pac_df is None:
+    pac_source = ctx.pac_df if ctx.pac_df is not None else ctx.pac_trials_df
+    if pac_source is None:
         return
 
     safe_plot(
@@ -492,7 +512,7 @@ def pac_summary(ctx: FeaturePlotContext, saved_files):
         "pac",
         None,
         plot_pac_summary,
-        pac_df=ctx.pac_df,
+        pac_df=pac_source,
         subject=ctx.subject,
         save_dir=ctx.subdir("pac"),
         logger=ctx.logger,
@@ -503,8 +523,10 @@ def pac_summary(ctx: FeaturePlotContext, saved_files):
 @VisualizationRegistry.register("pac")
 def pac_suite(ctx: FeaturePlotContext, saved_files):
     pac_dir = ctx.subdir("pac")
-
-    if ctx.pac_df is not None:
+    pac_long = ctx.pac_df
+    if pac_long is None and ctx.pac_trials_df is not None:
+        pac_long = convert_pac_wide_to_long(ctx.pac_trials_df, logger=ctx.logger)
+    if pac_long is not None:
         safe_plot(
             ctx,
             saved_files,
@@ -512,7 +534,7 @@ def pac_suite(ctx: FeaturePlotContext, saved_files):
             "pac",
             None,
             plot_pac_comodulograms,
-            ctx.pac_df,
+            pac_long,
             ctx.subject,
             pac_dir,
             ctx.logger,
@@ -645,17 +667,17 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             "power",
             "Band Power",
-            ["baseline", "plateau"],
+            ["baseline", "active"],
         )
 
     if ctx.all_features is not None:
         safe_plot(
             ctx,
             saved_files,
-            "power_plateau_vs_baseline",
+            "power_active_vs_baseline",
             "power",
             None,
-            plot_power_plateau_vs_baseline,
+            plot_power_active_vs_baseline,
             ctx.all_features,
             ctx.subject,
             ctx.subdir("power"),
@@ -743,7 +765,7 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
         safe_plot(
             ctx,
             saved_files,
-            "band_power_topomaps_plateau",
+            "band_power_topomaps_active",
             "power",
             None,
             plot_band_power_topomaps,
@@ -754,7 +776,7 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
             save_dir=ctx.subdir("power"),
             logger=ctx.logger,
             config=ctx.config,
-            segment="plateau",
+            segment="active",
         )
 
         safe_plot(
@@ -808,8 +830,151 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
 
 
 ###################################################################
+# ERP
+###################################################################
+
+
+@VisualizationRegistry.register("erp")
+def erp_suite(ctx: FeaturePlotContext, saved_files):
+    if ctx.epochs is None:
+        return
+
+    erp_dir = ctx.subdir("erp")
+    
+    # Conditions for contrast
+    conditions = {"pain": "pain == 1", "nopain": "pain == 0"}
+    available_conditions = {}
+    if ctx.aligned_events is not None:
+        for name, query in conditions.items():
+            try:
+                if len(ctx.epochs[query]) > 0:
+                    available_conditions[name] = query
+            except Exception:
+                continue
+    conditions = available_conditions if available_conditions else None
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "erp_butterfly",
+        "erp",
+        None,
+        plot_butterfly_erp,
+        ctx.epochs,
+        ctx.subject,
+        erp_dir,
+        ctx.config,
+        ctx.logger,
+        conditions=conditions,
+    )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "erp_roi",
+        "erp",
+        None,
+        plot_roi_erp,
+        ctx.epochs,
+        ctx.subject,
+        erp_dir,
+        ctx.config,
+        ctx.logger,
+        conditions=conditions,
+    )
+
+    if conditions and len(conditions) >= 2:
+        safe_plot(
+            ctx,
+            saved_files,
+            "erp_contrast",
+            "erp",
+            None,
+            plot_erp_contrast,
+            ctx.epochs,
+            ctx.subject,
+            erp_dir,
+            ctx.config,
+            ctx.logger,
+        )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "erp_topomaps",
+        "erp",
+        None,
+        plot_erp_topomaps,
+        ctx.epochs,
+        ctx.subject,
+        erp_dir,
+        ctx.config,
+        ctx.logger,
+        conditions=conditions,
+    )
+
+
+###################################################################
 # Summary / Quality
 ###################################################################
 
 
+@VisualizationRegistry.register("quality")
+def quality_suite(ctx: FeaturePlotContext, saved_files):
+    if ctx.quality_df is None:
+        return
 
+    quality_dir = ctx.subdir("quality")
+    ensure_dir(quality_dir)
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "quality_feature_distributions",
+        "quality",
+        None,
+        plot_feature_distribution_grid,
+        ctx.quality_df,
+        quality_dir / f"sub-{ctx.subject}_quality_feature_distributions",
+        config=ctx.config,
+    )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "quality_outlier_heatmap",
+        "quality",
+        None,
+        plot_outlier_trials_heatmap,
+        ctx.quality_df,
+        quality_dir / f"sub-{ctx.subject}_quality_outlier_heatmap",
+        config=ctx.config,
+    )
+
+    snr_col = None
+    for col in ctx.quality_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "quality":
+            continue
+        if parsed.get("scope") != "global":
+            continue
+        if parsed.get("stat") == "snr":
+            snr_col = str(col)
+            if parsed.get("segment") == "active":
+                break
+
+    if snr_col is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "quality_snr_distribution",
+            "quality",
+            None,
+            plot_snr_distribution,
+            ctx.quality_df,
+            quality_dir / f"sub-{ctx.subject}_quality_snr_distribution",
+            snr_col=snr_col,
+            config=ctx.config,
+        )

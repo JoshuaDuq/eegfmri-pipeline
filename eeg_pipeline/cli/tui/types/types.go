@@ -7,10 +7,10 @@ const (
 	PipelinePreprocessing Pipeline = iota
 	PipelineFeatures
 	PipelineBehavior
-	PipelineTFR
 	PipelineDecoding
+	PipelinePlotting
 	PipelineCombineFeatures
-	PipelineMergeBehavior
+	PipelineMergePsychoPyData
 	PipelineRawToBIDS
 )
 
@@ -26,10 +26,10 @@ func (p Pipeline) String() string {
 		"Preprocessing",
 		"Features",
 		"Behavior",
-		"TFR",
 		"Decoding",
+		"Plotting",
 		"Combine Features",
-		"Merge Behavior",
+		"Merge PsychoPy Data",
 		"Raw to BIDS",
 	}
 	if int(p) < len(names) {
@@ -42,11 +42,11 @@ func (p Pipeline) Description() string {
 	descriptions := []string{
 		"Bad channels, ICA, epochs",
 		"Extract EEG features (power, connectivity...)",
-		"EEG-behavior correlation analysis",
-		"Time-frequency visualizations",
+		"EEG-behavior analysis",
 		"LOSO regression & time generalization",
+		"Generate curated visualization suites",
 		"Aggregate feature files into features_all.tsv",
-		"Merge behavioral data into BIDS events",
+		"Merge PsychoPy data into BIDS events files",
 		"Convert raw BrainVision data to BIDS",
 	}
 	if int(p) < len(descriptions) {
@@ -59,16 +59,17 @@ func (p Pipeline) Description() string {
 type WizardStep int
 
 const (
-	StepSelectMode         WizardStep = iota
-	StepSelectComputations            // For behavior: which analyses to run
-	StepSelectFeatureFiles            // For behavior & combine-features: which feature files to load
-	StepConfigureOptions              // Category selection (features) or per-computation features
-	StepSelectBands                   // Frequency band selection (features)
-	StepSelectSpatial                 // Spatial aggregation mode (roi/channels/global)
-	StepTFRVizType                    // TFR: viz type selection (TFR/Topomap)
-	StepTFRChannels                   // TFR: channel selection (roi/global/all/specific)
-	StepTimeRange                     // Time range input for feature extraction
-	StepAdvancedConfig                // Advanced pipeline configuration
+	StepSelectMode           WizardStep = iota
+	StepSelectComputations              // For behavior: which analyses to run
+	StepSelectFeatureFiles              // For behavior & combine-features: which feature files to load
+	StepConfigureOptions                // Category selection (features) or per-computation features
+	StepSelectBands                     // Frequency band selection (features)
+	StepSelectSpatial                   // Spatial aggregation mode (roi/channels/global)
+	StepTimeRange                       // Time range input for feature extraction
+	StepAdvancedConfig                  // Advanced pipeline configuration
+	StepSelectPlots                     // Plotting: plot selection
+	StepSelectPlotCategories            // Plotting: category selection (ERP, TFR, etc.)
+	StepPlotConfig                      // Plotting: output config
 	StepSelectSubjects
 	StepReviewExecute
 )
@@ -81,10 +82,11 @@ func (s WizardStep) String() string {
 		"Configure Options",
 		"Select Bands",
 		"Select Spatial",
-		"TFR Viz Type",
-		"TFR Channels",
 		"Time Range",
 		"Advanced Config",
+		"Select Plots",
+		"Select Plot Categories",
+		"Plot Config",
 		"Select Subjects",
 		"Review & Execute",
 	}
@@ -123,9 +125,9 @@ func (p Pipeline) RequiresEpochs() bool {
 	switch p {
 	case PipelinePreprocessing, PipelineRawToBIDS:
 		return false // Works with raw BIDS data or source data
-	case PipelineFeatures, PipelineTFR:
+	case PipelineFeatures:
 		return true // Need epochs
-	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures, PipelineMergeBehavior:
+	case PipelineBehavior, PipelineDecoding, PipelinePlotting, PipelineCombineFeatures, PipelineMergePsychoPyData:
 		return false // Need features or other raw data
 	default:
 		return false
@@ -156,14 +158,16 @@ func (p Pipeline) ValidateSubject(s SubjectStatus) (valid bool, reason string) {
 // GetDataSource returns the appropriate data source for subject discovery
 func (p Pipeline) GetDataSource() string {
 	switch p {
-	case PipelinePreprocessing, PipelineMergeBehavior:
+	case PipelinePreprocessing, PipelineMergePsychoPyData:
 		return "bids" // Raw BIDS data or source folder (handled by CLI)
 	case PipelineRawToBIDS:
 		return "source_data" // Raw source data
-	case PipelineFeatures, PipelineTFR:
+	case PipelineFeatures:
 		return "epochs" // Epoched data
 	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures:
 		return "features" // Extracted features
+	case PipelinePlotting:
+		return "all" // Mixed plot types across derivatives
 	default:
 		return "epochs" // Default to epochs
 	}
