@@ -338,7 +338,7 @@ func (m Model) renderFeatureCategories() string {
 
 	categories := []string{
 		"power", "connectivity", "aperiodic", "bursts", "complexity",
-		"itpc", "pac", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+		"itpc", "pac", "quality", "erds", "spectral", "ratios", "asymmetry",
 	}
 
 	for _, cat := range categories {
@@ -387,7 +387,6 @@ func (m Model) getCategoryIcon(cat string) string {
 		"spectral":   "▸",
 		"ratios":     "▸",
 		"asymmetry":  "▸",
-		"temporal":   "▸",
 	}
 	if icon, ok := icons[cat]; ok {
 		return icon

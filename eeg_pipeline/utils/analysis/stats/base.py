@@ -42,11 +42,19 @@ class CorrelationStats:
 def get_statistics_constants(config=None):
     """Load statistics constants from config."""
     if get_constants is not None:
-        constants = get_constants("statistics", config)
-        constants["cluster_structure_2d"] = np.array(
-            constants["cluster_structure_2d"], dtype=int
-        )
-        return constants
+        try:
+            constants = get_constants("statistics", config)
+            if "cluster_structure_2d" in constants:
+                constants["cluster_structure_2d"] = np.array(
+                    constants["cluster_structure_2d"], dtype=int
+                )
+            # Ensure critical keys have defaults if missing from the returned constants
+            if "min_samples_for_correlation" not in constants:
+                constants["min_samples_for_correlation"] = 5
+            return constants
+        except ValueError:
+            # Fallback to secondary mechanism if section is missing
+            pass
 
     config = ensure_config(config)
     if config is None:
@@ -54,10 +62,19 @@ def get_statistics_constants(config=None):
 
     constants = config.get("statistics.constants")
     if constants is None:
-        raise ValueError("statistics.constants not found in config.")
+        return {
+            "min_samples_for_correlation": 5,
+            "fisher_z_clip_min": -0.999999,
+            "fisher_z_clip_max": 0.999999,
+        }
 
     result = dict(constants)
-    result["cluster_structure_2d"] = np.array(constants["cluster_structure_2d"], dtype=int)
+    if "cluster_structure_2d" in result:
+        result["cluster_structure_2d"] = np.array(result["cluster_structure_2d"], dtype=int)
+    
+    if "min_samples_for_correlation" not in result:
+        result["min_samples_for_correlation"] = 5
+        
     return result
 
 

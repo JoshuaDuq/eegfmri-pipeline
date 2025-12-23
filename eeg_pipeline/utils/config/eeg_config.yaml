@@ -104,6 +104,7 @@ time_frequency_analysis:
 # 4.3 Feature Extraction
 feature_engineering:
   feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
+  create_combined_features: false
 
   validation:
     fail_on_missing_named_window: true
@@ -121,6 +122,14 @@ feature_engineering:
     min_valid_fraction: 0.5
     min_epochs_for_plv: 10
     min_edge_samples: 30
+
+  spectral:
+    ratio_pairs:
+      - [theta, beta]       
+      - [theta, alpha]    
+      - [alpha, beta]     
+      - [delta, alpha]     
+      - [delta, theta]      
 
   aperiodic:
     fmin: 2.0
@@ -196,7 +205,6 @@ behavior_analysis:
       spectral: "features_spectral.tsv"
       ratios: "features_ratios.tsv"
       asymmetry: "features_asymmetry.tsv"
-      temporal: "features_temporal.tsv"
     source_to_feature_type:
       power: "power"
       connectivity: "connectivity"
@@ -211,7 +219,6 @@ behavior_analysis:
       spectral: "spectral"
       ratios: "ratios"
       asymmetry: "asymmetry"
-      temporal: "temporal"
     feature_type_hierarchy:
       power:
         subtypes: ["baseline", "ramp", "active", "change", "roi", "global"]
@@ -237,14 +244,11 @@ behavior_analysis:
         subtypes: ["ratio"]
       asymmetry:
         subtypes: ["hemisphere", "roi"]
-      temporal:
-        subtypes: ["bin"]
       bursts:
         subtypes: ["rate", "duration", "amplitude"]
     feature_patterns:
       erds: "^erds_([^_]+)_ch_([^_]+)_.+$"
       band_ratio: "^ratio_([^_]+)_([^_]+)_ch_([^_]+)_.+$"
-      temporal_stat: "^temporal_([^_]+)_ch_([^_]+)_.+$"
       hjorth: "^hjorth_([^_]+)_([^_]+)$"
       roi_power: "^power_([^_]+)_roi_([^_]+)_.+$"
       roi_asymmetry: "^asym_([^_]+)_([^_]+)_.+$"
@@ -407,9 +411,6 @@ plotting:
       bursts:
         metrics: ["rate", "count", "duration_mean", "amp_mean", "fraction"]
       pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
-      temporal:
-        time_bins: ["coarse_early", "coarse_mid", "coarse_late"]
-        time_labels: ["Early", "Mid", "Late"]
 
 ###################################################################
 # 7. SYSTEM & LOGGING

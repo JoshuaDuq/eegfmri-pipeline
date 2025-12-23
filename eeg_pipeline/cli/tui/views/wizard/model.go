@@ -96,7 +96,6 @@ var featureFileOptions = []FeatureFile{
 	{"ratios", "Ratios", "Band power ratios"},
 	{"asymmetry", "Asymmetry", "Hemispheric asymmetry"},
 	{"quality", "Quality", "Trial quality metrics"},
-	{"temporal", "Temporal", "Time-resolved (binned) features"},
 	{"erds", "ERDS", "Event-related desynchronization/sync"},
 	{"spectral", "Spectral", "Peak frequency, spectral edge"},
 	{"all", "All Combined", "All features combined (features_all.tsv)"},
@@ -412,7 +411,7 @@ func New(pipeline types.Pipeline) Model {
 		m.categories = []string{
 			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
 			"connectivity", "itpc", "pac",
-			"complexity", "bursts", "quality", "temporal",
+			"complexity", "bursts", "quality",
 		}
 		m.categoryDescs = []string{
 			"Band power (log-ratio)",
@@ -428,7 +427,6 @@ func New(pipeline types.Pipeline) Model {
 			"Signal complexity",
 			"Oscillatory burst dynamics",
 			"Trial quality metrics",
-			"Time-resolved (binned) features",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,   // Moved up - subject selection first to assess data availability
@@ -738,6 +736,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleSpace()
 		case "enter":
 			return m.handleEnter()
+		case "tab":
+			m.handleTab()
 		case "a":
 			if m.CurrentStep == types.StepTimeRange && m.editingRangeIdx == -1 {
 				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)

@@ -177,7 +177,7 @@ class UtilityPipeline(PipelineBase):
         """Run feature combination for multiple subjects."""
         from eeg_pipeline.infra.paths import resolve_deriv_root
         
-        deriv_root = resolve_deriv_root(self.config)
+        deriv_root = resolve_deriv_root(config=self.config)
         progress = kwargs.get("progress")
         
         return _run_combine_features(

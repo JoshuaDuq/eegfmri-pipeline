@@ -1,5 +1,5 @@
 """
-EEG/fMRI Analysis Pipeline
+EEG Analysis Pipeline
 
 A comprehensive pipeline for EEG data processing, feature extraction,
 behavioral correlation analysis, and machine learning decoding.

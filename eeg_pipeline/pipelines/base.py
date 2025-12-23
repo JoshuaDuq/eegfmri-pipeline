@@ -61,6 +61,10 @@ class PipelineBase(ABC):
         if task is None:
             raise ValueError("Missing required config value: project.task")
 
+        progress = kwargs.get("progress")
+        if progress is not None and hasattr(progress, "start"):
+            progress.start(self.name, subjects)
+
         ledger: List[Dict[str, Any]] = []
         ledger_path = ledger_path or (self.deriv_root / "logs" / f"{self.name}_batch_ledger.tsv")
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,37 +85,39 @@ class PipelineBase(ABC):
                 )
             ledger_path.write_text("\n".join(rows))
 
-        with BatchProgress(subjects=subjects, logger=self.logger, desc=self.name.title()) as batch:
-            for subject in subjects:
-                start_time = batch.start_subject(subject)
-                try:
-                    self.process_subject(subject, task=task, **kwargs)
-                    batch.finish_subject(subject, start_time)
-                    ledger.append(
-                        {
-                            "subject": subject,
-                            "status": "success",
-                            "duration_s": round(time.time() - start_time, 3),
-                        }
-                    )
-                except Exception as exc:
-                    tb_path = _write_traceback(subject)
-                    self.logger.error(f"Failed sub-{subject}: {exc} (traceback -> {tb_path})")
-                    batch.finish_subject(subject, start_time)
-                    ledger.append(
-                        {
-                            "subject": subject,
-                            "status": "failed",
-                            "duration_s": round(time.time() - start_time, 3),
-                            "error": str(exc),
-                            "traceback_path": tb_path,
-                        }
-                    )
-                    if fail_fast:
-                        _write_ledger(ledger)
-                        raise
-
-        _write_ledger(ledger)
+        try:
+            with BatchProgress(subjects=subjects, logger=self.logger, desc=self.name.title()) as batch:
+                for subject in subjects:
+                    start_time = batch.start_subject(subject)
+                    try:
+                        self.process_subject(subject, task=task, **kwargs)
+                        batch.finish_subject(subject, start_time)
+                        ledger.append(
+                            {
+                                "subject": subject,
+                                "status": "success",
+                                "duration_s": round(time.time() - start_time, 3),
+                            }
+                        )
+                    except Exception as exc:
+                        tb_path = _write_traceback(subject)
+                        self.logger.error(f"Failed sub-{subject}: {exc} (traceback -> {tb_path})")
+                        batch.finish_subject(subject, start_time)
+                        ledger.append(
+                            {
+                                "subject": subject,
+                                "status": "failed",
+                                "duration_s": round(time.time() - start_time, 3),
+                                "error": str(exc),
+                                "traceback_path": tb_path,
+                            }
+                        )
+                        if fail_fast:
+                            if progress is not None and hasattr(progress, "complete"):
+                                progress.complete(success=False)
+                            raise
+        finally:
+            _write_ledger(ledger)
 
         failed_subjects = [row["subject"] for row in ledger if row.get("status") == "failed"]
         if failed_subjects:
@@ -120,10 +126,15 @@ class PipelineBase(ABC):
                 f"(ledger: {ledger_path})"
             )
             if len(failed_subjects) == len(subjects):
+                if progress is not None and hasattr(progress, "complete"):
+                    progress.complete(success=False)
                 raise RuntimeError("All subjects failed; see ledger for details.")
 
         if len(subjects) >= 2:
             self.run_group_level(subjects, task=task, **kwargs)
+
+        if progress is not None and hasattr(progress, "complete"):
+            progress.complete(success=(len(failed_subjects) == 0))
 
         return ledger
 

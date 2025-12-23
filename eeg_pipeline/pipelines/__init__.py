@@ -23,7 +23,6 @@ from eeg_pipeline.pipelines.features import (
     FeaturePipeline,
     extract_all_features,
     extract_precomputed_features,
-    extract_fmri_prediction_features,
 )
 from eeg_pipeline.pipelines.behavior import (
     BehaviorPipeline,
@@ -45,7 +44,6 @@ __all__ = [
     "FeaturePipeline",
     "extract_all_features",
     "extract_precomputed_features",
-    "extract_fmri_prediction_features",
     # Behavior
     "BehaviorPipeline",
     "BehaviorPipelineConfig",

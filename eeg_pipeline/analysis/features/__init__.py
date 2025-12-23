@@ -3,7 +3,7 @@ EEG Feature Extraction Package
 ==============================
 
 Efficient feature extraction for EEG analysis, optimized for pain research
-and EEG-fMRI integration.
+and pain research.
 
 Quick Start
 -----------
@@ -11,9 +11,6 @@ Quick Start
 >>> result = extract_precomputed_features(epochs, bands, config, logger)
 >>> df = result.get_combined_df()
 
-For fMRI prediction (optimized feature subset):
->>> from eeg_pipeline.analysis.features import extract_fmri_prediction_features
->>> result = extract_fmri_prediction_features(epochs, config, logger)
 
 Feature Groups
 --------------
@@ -72,7 +69,6 @@ from eeg_pipeline.domain.features.naming import (
 __all__ = [
     # Main extraction functions
     "extract_precomputed_features",
-    "extract_fmri_prediction_features",
     "extract_all_features",
     "ExtractionResult",
     "FeatureSet",
@@ -156,7 +152,6 @@ _LAZY_IMPORTS = {
     "extract_features_for_subjects": "eeg_pipeline.pipelines.features",
     "extract_all_features": "eeg_pipeline.analysis.features.api",
     "extract_precomputed_features": "eeg_pipeline.analysis.features.api",
-    "extract_fmri_prediction_features": "eeg_pipeline.analysis.features.api",
 }
 
 

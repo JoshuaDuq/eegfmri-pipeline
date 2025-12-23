@@ -44,7 +44,7 @@ from eeg_pipeline.analysis.features.quality import (
     compute_trial_quality_metrics,
     extract_quality_features,
 )
-from eeg_pipeline.analysis.features.temporal import extract_temporal_features
+
 from eeg_pipeline.utils.analysis.tfr import (
     compute_tfr_for_subject,
     get_tfr_config,
@@ -236,7 +236,7 @@ def extract_all_features(
 
     results = FeatureExtractionResult()
 
-    tfr_dependent_categories = {"power", "itpc", "pac", "temporal"}
+    tfr_dependent_categories = {"power", "itpc", "pac"}
     needs_tfr = bool(tfr_dependent_categories & set(ctx.feature_categories))
 
     tfr_complex = None
@@ -488,13 +488,7 @@ def extract_all_features(
         results.quality_df = qual_df
         results.quality_cols = qual_cols
 
-    # Temporal features (binned)
-    if "temporal" in ctx.feature_categories:
-        progress.step(message="Extracting temporal binned features...")
-        temp_df, temp_cols = extract_temporal_features(ctx, power_bands)
-        _check_length("Temporal", temp_df)
-        results.temp_df = temp_df
-        results.temp_cols = temp_cols
+
 
     # Apply spatial mode filtering to all feature DataFrames
     if ctx.spatial_modes:
@@ -520,9 +514,7 @@ def extract_all_features(
         if results.spectral_df is not None:
             results.spectral_df = filter_features_by_spatial_modes(results.spectral_df, ctx.spatial_modes, ctx.config)
             results.spectral_cols = list(results.spectral_df.columns) if results.spectral_df is not None else []
-        if results.temp_df is not None:
-            results.temp_df = filter_features_by_spatial_modes(results.temp_df, ctx.spatial_modes, ctx.config)
-            results.temp_cols = list(results.temp_df.columns) if results.temp_df is not None else []
+
 
     progress.finish()
     return results
@@ -681,28 +673,10 @@ def extract_precomputed_features(
     return result
 
 
-def extract_fmri_prediction_features(
-    epochs: "mne.Epochs",
-    config: Any,
-    logger: Any,
-    events_df: Optional[pd.DataFrame] = None,
-) -> ExtractionResult:
-    feature_groups = ["spectral", "aperiodic", "erds"]
-    bands = get_frequency_band_names(config)
-
-    return extract_precomputed_features(
-        epochs,
-        bands,
-        config,
-        logger,
-        feature_groups=feature_groups,
-        events_df=events_df,
-    )
 
 
 __all__ = [
     "extract_all_features",
     "extract_precomputed_features",
-    "extract_fmri_prediction_features",
     "resolve_feature_categories",
 ]

@@ -21,7 +21,6 @@ FEATURE_TYPES = (
     "spectral",
     "ratios",
     "asymmetry",
-    "temporal",
     "erp",
     "bursts",
 )

@@ -236,6 +236,27 @@ func (m *Model) handleDown() {
 	}
 }
 
+func (m *Model) handleTab() {
+	switch m.CurrentStep {
+	case types.StepAdvancedConfig:
+		if m.expandedOption >= 0 {
+			// Collapse and move to next primary option
+			m.expandedOption = -1
+			m.subCursor = 0
+			optCount := m.getAdvancedOptionCount()
+			if m.advancedCursor < optCount-1 {
+				m.advancedCursor++
+			} else {
+				m.advancedCursor = 0
+			}
+		} else {
+			m.handleDown()
+		}
+	default:
+		m.handleDown()
+	}
+}
+
 func (m *Model) handleLeft() {
 }
 
@@ -817,13 +838,14 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.erpBaselineCorrection = !m.erpBaselineCorrection
 		m.useDefaultAdvanced = false
 	case optBurstThreshold:
-		if m.burstThresholdZ == 1.5 {
+		switch m.burstThresholdZ {
+		case 1.5:
 			m.burstThresholdZ = 2.0
-		} else if m.burstThresholdZ == 2.0 {
+		case 2.0:
 			m.burstThresholdZ = 2.5
-		} else if m.burstThresholdZ == 2.5 {
+		case 2.5:
 			m.burstThresholdZ = 3.0
-		} else {
+		default:
 			m.burstThresholdZ = 1.5
 		}
 		m.useDefaultAdvanced = false
@@ -831,11 +853,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.powerBaselineMode = (m.powerBaselineMode + 1) % 5
 		m.useDefaultAdvanced = false
 	case optSpectralEdge:
-		if m.spectralEdgePercentile == 0.90 {
+		switch m.spectralEdgePercentile {
+		case 0.90:
 			m.spectralEdgePercentile = 0.95
-		} else if m.spectralEdgePercentile == 0.95 {
+		case 0.95:
 			m.spectralEdgePercentile = 0.99
-		} else {
+		default:
 			m.spectralEdgePercentile = 0.90
 		}
 		m.useDefaultAdvanced = false
@@ -944,7 +967,7 @@ func (m *Model) commitNumberInput() {
 	m.useDefaultAdvanced = false
 }
 
-func (m *Model) commitFeaturesNumber(val int) {
+func (m *Model) commitFeaturesNumber(_ int) {
 	// Re-build the same options slice as toggleFeaturesAdvancedOption to find current opt
 	options := m.getFeaturesOptions()
 

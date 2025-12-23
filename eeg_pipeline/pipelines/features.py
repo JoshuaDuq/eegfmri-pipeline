@@ -7,7 +7,7 @@ This module consolidates all feature extraction entry points:
 - FeaturePipeline: PipelineBase subclass for batch processing
 - extract_all_features: TFR-based feature extraction
 - extract_precomputed_features: Precomputed-based feature extraction
-- extract_fmri_prediction_features: fMRI-optimized subset
+- extract_precomputed_features: Precomputed-based feature extraction
 
 The pipeline class selects TFR vs precomputed mode internally based on config.
 
@@ -44,7 +44,6 @@ from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import align_feature_dataframes
 from eeg_pipeline.utils.data.feature_io import (
-    export_fmri_regressors,
     save_all_features,
     save_dropped_trials_log,
     save_trial_alignment_manifest,
@@ -54,7 +53,6 @@ from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.analysis.features.api import (
     extract_all_features as _extract_all_features,
     extract_precomputed_features as _extract_precomputed_features,
-    extract_fmri_prediction_features as _extract_fmri_prediction_features,
 )
 from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.analysis.features.results import (
@@ -105,13 +103,6 @@ def extract_precomputed_features(
     )
 
 
-def extract_fmri_prediction_features(
-    epochs: "mne.Epochs",
-    config: Any,
-    logger: Any,
-    events_df: Optional[pd.DataFrame] = None,
-) -> ExtractionResult:
-    return _extract_fmri_prediction_features(epochs, config, logger, events_df=events_df)
 
 
 ###################################################################
@@ -145,21 +136,31 @@ class FeaturePipeline(PipelineBase):
         # Initialize progress reporter
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         
-        # Calculate total steps: load + per-category extraction + align + save
-        total_steps = 2 + len(feature_categories) + 2  # load, categories, align, save
-        
         self.logger.info(f"=== Feature extraction: sub-{subject}, task-{task} ===")
         self.logger.info("Feature categories: %s", ", ".join(feature_categories))
         
         progress.subject_start(f"sub-{subject}")
-        progress.step("Initializing", current=1, total=total_steps)
         
         features_dir = deriv_features_path(self.deriv_root, subject)
         ensure_dir(features_dir)
         
         setup_matplotlib(self.config)
 
-        progress.step("Loading epochs", current=2, total=total_steps)
+        # Determine time ranges early to calculate total steps
+        explicit_windows = kwargs.get("time_ranges")
+        time_ranges_raw = list(explicit_windows) if explicit_windows else None
+        if not time_ranges_raw:
+            time_ranges_raw = [
+                {"name": None, "tmin": kwargs.get("tmin"), "tmax": kwargs.get("tmax")}
+            ]
+        
+        # Calculate total steps dynamically: load + 3 per time range (extract, align, save)
+        n_ranges = len(time_ranges_raw)
+        total_steps = 1 + (n_ranges * 3)
+        current_step = 0
+
+        current_step += 1
+        progress.step("Loading epochs", current=current_step, total=total_steps)
         epochs, aligned_events = load_epochs_for_analysis(
             subject, task, align="strict", preload=True,
             deriv_root=self.deriv_root, logger=self.logger, config=self.config,
@@ -197,28 +198,14 @@ class FeaturePipeline(PipelineBase):
             fixed_template_ch_names = data.get("ch_names")
             self.logger.info(f"Loaded fixed templates from {fixed_templates_path}")
 
-        # Determine time ranges to process
-        explicit_windows = kwargs.get("time_ranges")
-        time_ranges = list(explicit_windows) if explicit_windows else None
-        if not time_ranges:
-            time_ranges = [
-                {"name": None, "tmin": kwargs.get("tmin"), "tmax": kwargs.get("tmax")}
-            ]
-
-        # Avoid redundant baseline-only extraction when other windows exist
+        # Time ranges already determined above for step calculation
+        time_ranges = time_ranges_raw
         ranges_to_process = time_ranges
-        if explicit_windows:
-            non_baseline = [
-                tr for tr in time_ranges
-                if str(tr.get("name", "")).lower() != "baseline"
-            ]
-            if non_baseline:
-                ranges_to_process = non_baseline
 
         # Optimization: Pre-compute TFR on full epochs if we have multiple ranges
         # and TFR is needed for the requested categories.
         tfr_full = None
-        tfr_categories = {"power", "itpc", "pac", "temporal"}
+        tfr_categories = {"power", "itpc", "pac"}
         if len(time_ranges) > 1 and any(cat in feature_categories for cat in tfr_categories):
             from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
             self.logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
@@ -295,9 +282,10 @@ class FeaturePipeline(PipelineBase):
             # Pass progress reporter to context
             ctx.progress = progress
             ctx.total_steps = total_steps
-            ctx.current_step = 2
+            ctx.current_step = current_step
 
-            progress.step(f"Extracting features ({name or 'full'})", current=3, total=total_steps)
+            current_step += 1
+            progress.step(f"Extracting features ({name or 'full'})", current=current_step, total=total_steps)
             features = extract_all_features(ctx)
 
             pow_df = features.pow_df
@@ -328,7 +316,8 @@ class FeaturePipeline(PipelineBase):
 
             power_bands = get_frequency_band_names(self.config)
 
-            progress.step(f"Aligning features ({name or 'full'})", current=total_steps - 1, total=total_steps)
+            current_step += 1
+            progress.step(f"Aligning features ({name or 'full'})", current=current_step, total=total_steps)
             self.logger.info(f"Aligning features for {range_info}...")
 
             critical_features = ["target"]
@@ -350,7 +339,6 @@ class FeaturePipeline(PipelineBase):
                 "ratios": features.ratios_df,
                 "asymmetry": features.asymmetry_df,
                 "quality": features.quality_df,
-                "temporal": features.temp_df,
             }
             extra_blocks = {k: v for k, v in extra_blocks.items() if v is not None and not getattr(v, "empty", False)}
 
@@ -381,7 +369,6 @@ class FeaturePipeline(PipelineBase):
             features.ratios_df = extra_aligned.get("ratios", features.ratios_df)
             features.asymmetry_df = extra_aligned.get("asymmetry", features.asymmetry_df)
             features.quality_df = extra_aligned.get("quality", features.quality_df)
-            features.temp_df = extra_aligned.get("temporal", features.temp_df)
 
             feature_qc: Dict[str, Any] = {}
             if features.aper_qc is not None:
@@ -392,7 +379,8 @@ class FeaturePipeline(PipelineBase):
                 except TypeError:
                     feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
 
-            progress.step(f"Saving features ({name or 'full'})", current=total_steps, total=total_steps)
+            current_step += 1
+            progress.step(f"Saving features ({name or 'full'})", current=current_step, total=total_steps)
             
             should_combine = self.config.get("feature_engineering.create_combined_features", False)
             combined_df = save_all_features(
@@ -408,8 +396,6 @@ class FeaturePipeline(PipelineBase):
                 erp_cols=erp_cols,
                 itpc_df=itpc_df,
                 itpc_cols=itpc_cols,
-                temp_df=features.temp_df,
-                temp_cols=features.temp_cols,
                 pac_df=pac_df,
                 pac_trials_df=pac_trials_df,
                 pac_time_df=pac_time_df,
@@ -437,12 +423,6 @@ class FeaturePipeline(PipelineBase):
                 suffix=suffix,
             )
 
-            if not suffix and self.config.get("feature_engineering.export_fmri_regressors", False):
-                export_fmri_regressors(
-                    aligned_events, pow_df_aligned, pow_cols, None,
-                    features.pac_trials_df, aper_df_aligned, y_aligned,
-                    power_bands, subject, task, features_dir, self.config, self.logger,
-                )
 
             n_trials = len(y_aligned)
             n_pow = pow_df_aligned.shape[1] if pow_df_aligned is not None else 0
@@ -500,7 +480,6 @@ __all__ = [
     "extract_features_for_subjects",
     "extract_all_features",
     "extract_precomputed_features",
-    "extract_fmri_prediction_features",
     "FeatureExtractionResult",
     "ExtractionResult",
     "FeatureSet",

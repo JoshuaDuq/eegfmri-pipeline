@@ -458,7 +458,7 @@ def _plot_partial_residuals(
     residual_xlabel, residual_ylabel = get_residual_labels(method_code, target_type)
     title = f"Partial residuals — {band_title} vs {target_type} — {roi_name}"
     output_path = output_dir / get_output_filename(
-        band_title.lower(), target_type, roi_name, "partial"
+        band_title.lower(), target_type, roi_name, "partial", config=config
     )
 
     generate_correlation_scatter(
@@ -500,7 +500,9 @@ def _plot_single_temporal_correlation(
     config,
     roi_channels: Optional[List[str]],
 ) -> None:
-    config = config or _get_default_config()
+    if config is None:
+        from eeg_pipeline.utils.config.loader import load_config
+        config = load_config()
     plot_cfg = get_plot_config(config)
     behavioral_config = plot_cfg.get_behavioral_config()
     min_samples_for_plot = plot_cfg.validation.get("min_samples_for_plot", 5)
@@ -529,7 +531,7 @@ def _plot_single_temporal_correlation(
     title = _get_title_components(band_title, target_type, roi_name, time_label)
 
     output_path = output_dir / get_output_filename(
-        band, target_type, roi_name, "scatter", time_label
+        band, target_type, roi_name, "scatter", time_label, config=config
     )
 
     generate_correlation_scatter(
@@ -553,7 +555,7 @@ def _plot_single_temporal_correlation(
     )
 
     qc_output_path = output_dir / get_output_filename(
-        band, target_type, roi_name, "residual_qc", time_label
+        band, target_type, roi_name, "residual_qc", time_label, config=config
     )
 
     plot_residual_qc(
@@ -683,7 +685,7 @@ def plot_target_correlations(
     title = _get_title_components(band_title, target_type, roi_name)
 
     output_path = output_dir / get_output_filename(
-        band, target_type, roi_name, "scatter"
+        band, target_type, roi_name, "scatter", config=config
     )
 
     generate_correlation_scatter(
@@ -707,7 +709,7 @@ def plot_target_correlations(
     )
 
     qc_output_path = output_dir / get_output_filename(
-        band, target_type, roi_name, "residual_qc"
+        band, target_type, roi_name, "residual_qc", config=config
     )
 
     plot_residual_qc(
@@ -741,7 +743,7 @@ def plot_target_correlations(
         )
 
     diagnostics_output_path = output_dir / get_output_filename(
-        band, target_type, roi_name, "residual_diagnostics"
+        band, target_type, roi_name, "residual_diagnostics", config=config
     )
 
     diagnostics_title = _get_title_components(

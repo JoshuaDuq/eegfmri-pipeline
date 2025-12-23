@@ -496,22 +496,21 @@ func (m *Model) processOutputLine(line string) {
 				m.OperationCurrent = event.Current
 				m.OperationTotal = event.Total
 
-				// For pipelines with per-subject iteration
-				if m.SubjectTotal > 1 && event.Total > 0 {
-					if event.Pct > 0 {
-						stepPct := float64(event.Pct) / 100.0
-						subjProgress := float64(m.SubjectCurrent-1) / float64(m.SubjectTotal)
-						stepContrib := stepPct / float64(m.SubjectTotal)
-						m.Progress = clampProgress(subjProgress + stepContrib)
-					} else {
-						subjProgress := float64(m.SubjectCurrent-1) / float64(m.SubjectTotal)
-						stepContrib := (float64(event.Current) / float64(event.Total)) / float64(m.SubjectTotal)
-						m.Progress = clampProgress(subjProgress + stepContrib)
-					}
-				} else if event.Total > 0 {
+				hasStepProgress := event.Total > 0
+				stepFraction := 0.0
+				if hasStepProgress {
+					stepFraction = float64(event.Current) / float64(event.Total)
+				}
+				useSubjectProgress := m.SubjectTotal > 0 && m.SubjectCurrent > 0
+
+				// For pipelines with per-subject iteration, distribute step progress across subjects
+				if useSubjectProgress && hasStepProgress {
+					subjProgress := float64(m.SubjectCurrent-1) / float64(m.SubjectTotal)
+					stepContrib := stepFraction / float64(m.SubjectTotal)
+					m.Progress = clampProgress(subjProgress + stepContrib)
+				} else if hasStepProgress {
 					// For pipelines without per-subject iteration (e.g., decoding, utilities)
-					// Progress is based purely on step progress
-					m.Progress = clampProgress(float64(event.Current) / float64(event.Total))
+					m.Progress = clampProgress(stepFraction)
 				} else if event.Pct > 0 {
 					// Fallback to explicit percentage
 					m.Progress = clampProgress(float64(event.Pct) / 100.0)
@@ -528,6 +527,9 @@ func (m *Model) processOutputLine(line string) {
 			case "log":
 				m.addLog(event.Message)
 			case "complete":
+				if m.SubjectTotal > 0 && m.SubjectCurrent == 0 {
+					m.SubjectCurrent = m.SubjectTotal
+				}
 				m.Progress = 1.0
 			}
 			return
@@ -765,7 +767,7 @@ func (m Model) renderCompletionSummary() string {
 	b.WriteString(labelStyle.Render("Duration:") + valueStyle.Render(durationStr) + "\n")
 
 	// Subjects processed
-	if m.SubjectTotal > 0 {
+	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
 		subjProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
 		subjInfo := fmt.Sprintf("%d of %d (%.0f%%)", m.SubjectCurrent, m.SubjectTotal, subjProgress*100)
 		b.WriteString(labelStyle.Render("Subjects:") + valueStyle.Render(subjInfo) + "\n")
@@ -938,7 +940,7 @@ func (m Model) renderProgressSection() string {
 	b.WriteString("  " + progressLabel + m.renderAnimatedProgressBar(m.Progress, m.width-22) + "\n")
 
 	// Subject counter with visual indicator
-	if m.SubjectTotal > 0 {
+	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
 		subjectProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
 
 		// Create a mini visual representation

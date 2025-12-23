@@ -4,7 +4,6 @@ Feature I/O Utilities.
 Consolidated module for loading and saving feature data including:
 - Feature bundle loading (power, connectivity, etc.)
 - Feature saving and export functions
-- fMRI regressor exports
 - Microstate template management
 """
 
@@ -163,7 +162,6 @@ class FeatureBundle:
     spectral_df: Optional[pd.DataFrame] = None
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
-    temporal_df: Optional[pd.DataFrame] = None
     all_features_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
 
@@ -207,7 +205,6 @@ def load_feature_bundle(
         spectral_df=_safe_read_table(features_dir / "features_spectral.tsv", logger),
         ratios_df=_safe_read_table(features_dir / "features_ratios.tsv", logger),
         asymmetry_df=_safe_read_table(features_dir / "features_asymmetry.tsv", logger),
-        temporal_df=_safe_read_table(features_dir / "features_temporal.tsv", logger),
         all_features_df=_safe_read_table(features_dir / "features_all.tsv", logger),
     )
 
@@ -300,8 +297,6 @@ def save_all_features(
     erp_cols: Optional[List[str]] = None,
     itpc_df: Optional[pd.DataFrame] = None,
     itpc_cols: Optional[List[str]] = None,
-    temp_df: Optional[pd.DataFrame] = None,
-    temp_cols: Optional[List[str]] = None,
     pac_df: Optional[pd.DataFrame] = None,
     pac_trials_df: Optional[pd.DataFrame] = None,
     pac_time_df: Optional[pd.DataFrame] = None,
@@ -395,9 +390,11 @@ def save_all_features(
 
     direct_blocks = []
     direct_cols: List[str] = []
+    full_blocks = []
 
     if pow_df is not None:
         direct_blocks.append(pow_df)
+        full_blocks.append(pow_df)
         if len(pow_cols) == len(pow_df.columns):
             pow_df.columns = pow_cols
         else:
@@ -410,6 +407,7 @@ def save_all_features(
 
     if baseline_df is not None and not baseline_df.empty:
         direct_blocks.append(baseline_df)
+        full_blocks.append(baseline_df)
         if baseline_cols:
             if len(baseline_cols) == len(baseline_df.columns):
                 baseline_df.columns = baseline_cols
@@ -423,7 +421,7 @@ def save_all_features(
 
 
     if aper_df is not None and not aper_df.empty:
-        direct_blocks.append(aper_df)
+        full_blocks.append(aper_df)
         if aper_cols:
             if len(aper_cols) == len(aper_df.columns):
                 aper_df.columns = aper_cols
@@ -433,28 +431,25 @@ def save_all_features(
                     len(aper_cols),
                     len(aper_df.columns),
                 )
-        direct_cols.extend(list(aper_df.columns))
         aper_name = f"features_aperiodic_{suffix}.tsv" if suffix else "features_aperiodic.tsv"
         aper_path = features_dir / aper_name
         logger.info("Saving aperiodic features: %s", aper_path)
         write_tsv(aper_df, aper_path)
 
     if erp_df is not None and not erp_df.empty:
-        direct_blocks.append(erp_df)
+        full_blocks.append(erp_df)
         if erp_cols:
             if len(erp_cols) == len(erp_df.columns):
                 erp_df.columns = erp_cols
-        direct_cols.extend(list(erp_df.columns))
         erp_name = f"features_erp_{suffix}.tsv" if suffix else "features_erp.tsv"
         erp_path = features_dir / erp_name
         logger.info("Saving ERP/LEP features: %s", erp_path)
         write_tsv(erp_df, erp_path)
 
     if itpc_df is not None and not itpc_df.empty:
+        full_blocks.append(itpc_df)
         if itpc_cols and len(itpc_cols) == len(itpc_df.columns):
             itpc_df.columns = itpc_cols
-        direct_blocks.append(itpc_df)
-        direct_cols.extend(list(itpc_df.columns))
         itpc_name = f"features_itpc_{suffix}.tsv" if suffix else "features_itpc.tsv"
         itpc_path = features_dir / itpc_name
         logger.info("Saving ITPC features (channel x band x segment): %s", itpc_path)
@@ -471,8 +466,7 @@ def save_all_features(
         pac_trials_path = features_dir / pac_trials_name
         logger.info("Saving PAC per-trial values: %s", pac_trials_path)
         write_tsv(pac_trials_df, pac_trials_path)
-        direct_blocks.append(pac_trials_df)
-        direct_cols.extend(list(pac_trials_df.columns))
+        full_blocks.append(pac_trials_df)
 
     if pac_time_df is not None and not pac_time_df.empty:
         pac_time_name = f"features_pac_time_{suffix}.tsv" if suffix else "features_pac_time.tsv"
@@ -483,8 +477,7 @@ def save_all_features(
         try:
             n_trials = len(y) if y is not None else None
             if n_trials is not None and len(pac_time_df) == n_trials:
-                direct_blocks.append(pac_time_df)
-                direct_cols.extend(list(pac_time_df.columns))
+                full_blocks.append(pac_time_df)
             else:
                 logger.info(
                     "PAC time-resolved output is not trial-aligned (rows=%d, trials=%s); excluding from features_all.tsv",
@@ -498,88 +491,70 @@ def save_all_features(
             )
 
     if comp_df is not None and not comp_df.empty:
-        direct_blocks.append(comp_df)
+        full_blocks.append(comp_df)
         if comp_cols:
             if len(comp_cols) == len(comp_df.columns):
                 comp_df.columns = comp_cols
-        direct_cols.extend(list(comp_df.columns))
         comp_name = f"features_complexity_{suffix}.tsv" if suffix else "features_complexity.tsv"
         comp_path = features_dir / comp_name
         logger.info("Saving complexity features: %s", comp_path)
         write_tsv(comp_df, comp_path)
 
     if bursts_df is not None and not bursts_df.empty:
-        direct_blocks.append(bursts_df)
+        full_blocks.append(bursts_df)
         if bursts_cols:
             if len(bursts_cols) == len(bursts_df.columns):
                 bursts_df.columns = bursts_cols
-        direct_cols.extend(list(bursts_df.columns))
         bursts_name = f"features_bursts_{suffix}.tsv" if suffix else "features_bursts.tsv"
         bursts_path = features_dir / bursts_name
         logger.info("Saving burst features: %s", bursts_path)
         write_tsv(bursts_df, bursts_path)
 
     if spectral_df is not None and not spectral_df.empty:
-        direct_blocks.append(spectral_df)
+        full_blocks.append(spectral_df)
         if spectral_cols:
             if len(spectral_cols) == len(spectral_df.columns):
                 spectral_df.columns = spectral_cols
-        direct_cols.extend(list(spectral_df.columns))
         spec_name = f"features_spectral_{suffix}.tsv" if suffix else "features_spectral.tsv"
         spec_path = features_dir / spec_name
         logger.info("Saving spectral features (IAF): %s", spec_path)
         write_tsv(spectral_df, spec_path)
     
-    if temp_df is not None and not temp_df.empty:
-        direct_blocks.append(temp_df)
-        if temp_cols:
-            if len(temp_cols) == len(temp_df.columns):
-                temp_df.columns = temp_cols
-        direct_cols.extend(list(temp_df.columns))
-        temp_name = f"features_temporal_{suffix}.tsv" if suffix else "features_temporal.tsv"
-        temp_path = features_dir / temp_name
-        logger.info("Saving temporal features: %s", temp_path)
-        write_tsv(temp_df, temp_path)
-
     if erds_df is not None and not erds_df.empty:
-        direct_blocks.append(erds_df)
+        full_blocks.append(erds_df)
         if erds_cols:
             if len(erds_cols) == len(erds_df.columns):
                 erds_df.columns = erds_cols
-        direct_cols.extend(list(erds_df.columns))
         erds_name = f"features_erds_{suffix}.tsv" if suffix else "features_erds.tsv"
         erds_path = features_dir / erds_name
         logger.info("Saving ERDS features: %s", erds_path)
         write_tsv(erds_df, erds_path)
 
     if ratios_df is not None and not ratios_df.empty:
-        direct_blocks.append(ratios_df)
+        full_blocks.append(ratios_df)
         if ratios_cols:
             if len(ratios_cols) == len(ratios_df.columns):
                 ratios_df.columns = ratios_cols
-        direct_cols.extend(list(ratios_df.columns))
         ratios_name = f"features_ratios_{suffix}.tsv" if suffix else "features_ratios.tsv"
         ratios_path = features_dir / ratios_name
         logger.info("Saving power ratio features: %s", ratios_path)
         write_tsv(ratios_df, ratios_path)
 
     if asymmetry_df is not None and not asymmetry_df.empty:
-        direct_blocks.append(asymmetry_df)
+        full_blocks.append(asymmetry_df)
         if asymmetry_cols:
             if len(asymmetry_cols) == len(asymmetry_df.columns):
                 asymmetry_df.columns = asymmetry_cols
-        direct_cols.extend(list(asymmetry_df.columns))
         asym_name = f"features_asymmetry_{suffix}.tsv" if suffix else "features_asymmetry.tsv"
         asym_path = features_dir / asym_name
         logger.info("Saving asymmetry features: %s", asym_path)
         write_tsv(asymmetry_df, asym_path)
 
     if quality_df is not None and not quality_df.empty:
-        direct_blocks.append(quality_df)
+        full_blocks.append(quality_df)
         if quality_cols:
             if len(quality_cols) == len(quality_df.columns):
                 quality_df.columns = quality_cols
-        direct_cols.extend(list(quality_df.columns))
         qual_name = f"features_quality_{suffix}.tsv" if suffix else "features_quality.tsv"
         qual_path = features_dir / qual_name
         logger.info("Saving quality metrics: %s", qual_path)
@@ -659,11 +634,8 @@ def save_all_features(
             len(conn_df.columns),
         )
 
-    blocks = []
+    blocks = full_blocks
     cols_all: List[str] = []
-    if not direct_df.empty:
-        blocks.append(direct_df)
-        cols_all.extend(list(direct_df.columns))
 
     if blocks:
         combined_df = pd.concat(blocks, axis=1)
@@ -713,129 +685,6 @@ def save_all_features(
     return combined_df
 
 
-def _extract_onset_duration(
-    aligned_events: pd.DataFrame,
-    logger: logging.Logger,
-    n_fallback: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    n_trials = len(aligned_events) if aligned_events is not None else n_fallback
-    onset = None
-    duration = None
-    if aligned_events is not None:
-        if "onset" in aligned_events.columns:
-            onset = pd.to_numeric(aligned_events["onset"], errors="coerce")
-        if "duration" in aligned_events.columns:
-            duration = pd.to_numeric(aligned_events["duration"], errors="coerce")
-    if onset is None:
-        onset = pd.Series(np.arange(n_trials, dtype=float))
-        logger.warning("Onset column missing; using 0..n-1 as placeholder onsets for regressors.")
-    if duration is None:
-        duration = pd.Series(np.zeros(n_trials, dtype=float))
-    onset = onset.ffill().bfill().fillna(0.0).astype(float)
-    duration = duration.fillna(0.0).astype(float)
-    return onset.to_numpy(), duration.to_numpy()
-
-
-def export_fmri_regressors(
-    aligned_events: pd.DataFrame,
-    active_df: pd.DataFrame,
-    active_cols: List[str],
-    pac_trials_df: Optional[pd.DataFrame],
-    aper_df: Optional[pd.DataFrame],
-    y: pd.Series,
-    power_bands: List[str],
-    subject: str,
-    task: str,
-    features_dir: Path,
-    config,
-    logger: logging.Logger,
-) -> Optional[pd.DataFrame]:
-    if aligned_events is None or aligned_events.empty:
-        logger.warning("Cannot export fMRI regressors: aligned_events is empty.")
-        return None
-
-    n_trials = len(aligned_events)
-    onset, duration = _extract_onset_duration(aligned_events, logger, n_trials)
-    rating = pd.to_numeric(y, errors="coerce") if y is not None else pd.Series(np.full(n_trials, np.nan))
-
-    reg_df = pd.DataFrame({"onset": onset, "duration": duration, "rating": rating})
-    reg_values: Dict[str, pd.Series] = {}
-
-    def _add_regressor(name: str, series: Any) -> None:
-        if series is None:
-            return
-        ser = pd.to_numeric(series, errors="coerce")
-        if len(ser) != n_trials:
-            logger.warning(
-                "Regressor %s length mismatch (got %d, expected %d); skipping.",
-                name,
-                len(ser),
-                n_trials,
-            )
-            return
-        reg_df[name] = ser
-        reg_values[name] = ser
-
-    for band in power_bands:
-        band_cols = [
-            c
-            for c in active_cols
-            if infer_power_band(c, bands=power_bands) == band
-        ]
-        if not band_cols:
-            continue
-        _add_regressor(f"pow_{band}_mean", active_df[band_cols].mean(axis=1))
-
-    if aper_df is not None and not aper_df.empty:
-        slope_cols_v2 = [
-            c
-            for c in aper_df.columns
-            if str(c).startswith("aperiodic_") and str(c).endswith("_slope") and "_ch_" in str(c)
-        ]
-        if slope_cols_v2:
-            _add_regressor("aperiodic_slope_mean", aper_df[slope_cols_v2].mean(axis=1))
-
-        offset_cols_v2 = [
-            c
-            for c in aper_df.columns
-            if str(c).startswith("aperiodic_") and str(c).endswith("_offset") and "_ch_" in str(c)
-        ]
-        if offset_cols_v2:
-            _add_regressor("aperiodic_offset_mean", aper_df[offset_cols_v2].mean(axis=1))
-
-    if (
-        pac_trials_df is not None
-        and not pac_trials_df.empty
-        and "trial" in pac_trials_df.columns
-        and "pac" in pac_trials_df.columns
-    ):
-        pac_vals = np.full(n_trials, np.nan, dtype=float)
-        for trial_idx, val in pac_trials_df.groupby("trial")["pac"].mean().items():
-            try:
-                t = int(trial_idx)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= t < n_trials:
-                pac_vals[t] = float(val)
-        _add_regressor("pac_mean", pac_vals)
-
-    if len(reg_df.columns) <= 3:
-        logger.warning("No regressors were added; skipping fMRI regressor export.")
-        return None
-
-    reg_dir = features_dir / "fmri_regressors"
-    ensure_dir(reg_dir)
-
-    combined_path = reg_dir / f"sub-{subject}_task-{task}_fmri_regressors.tsv"
-    write_tsv(reg_df, combined_path)
-
-    for name, series in reg_values.items():
-        reg_path = reg_dir / f"sub-{subject}_task-{task}_regressor_{sanitize_label(name)}.tsv"
-        reg_out = pd.DataFrame({"onset": onset, "duration": duration, "amplitude": series})
-        write_tsv(reg_out, reg_path)
-
-    logger.info("Saved %d fMRI regressors to %s", len(reg_values), reg_dir)
-    return reg_df
 
 
 
@@ -966,7 +815,6 @@ __all__ = [
     # Saving
     "build_active_features",
     "combine_all_features",
-    "export_fmri_regressors",
     "iterate_feature_columns",
     "save_all_features",
     "save_dropped_trials_log",

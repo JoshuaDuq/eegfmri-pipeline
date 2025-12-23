@@ -292,11 +292,9 @@ class TestFeatureComputePipeline:
     def test_precomputed_feature_extraction_api(self):
         from eeg_pipeline.analysis.features.api import (
             extract_precomputed_features,
-            extract_fmri_prediction_features,
         )
 
         assert callable(extract_precomputed_features)
-        assert callable(extract_fmri_prediction_features)
 
     def test_feature_io_utilities(self):
         from eeg_pipeline.utils.data.feature_io import (

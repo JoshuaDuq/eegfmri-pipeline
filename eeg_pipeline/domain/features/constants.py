@@ -24,7 +24,6 @@ FEATURE_CATEGORIES = [
     "complexity",     # Signal complexity (exploratory)
     "bursts",         # Burst dynamics (beta/gamma)
     "quality",        # Trial quality metrics
-    "temporal",       # Time-resolved (binned) features
 ]
 
 SPATIAL_MODES = [

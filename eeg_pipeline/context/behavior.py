@@ -269,6 +269,24 @@ class BehaviorContext:
                         numeric_cols = targets_df.select_dtypes(include=[np.number]).columns
                         if len(numeric_cols) > 0:
                             self.targets = pd.to_numeric(targets_df[numeric_cols[0]], errors="coerce")
+            elif self.aligned_events is not None:
+                target_columns = list(self.config.get("event_columns.rating", []) or []) if self.config is not None else []
+                target_col = pick_target_column(self.aligned_events, target_columns=target_columns)
+                if target_col:
+                    self.targets = pd.to_numeric(self.aligned_events[target_col], errors="coerce")
+                    self.logger.info(
+                        "Targets loaded from events column '%s' (target_vas_ratings.tsv missing)",
+                        target_col,
+                    )
+                else:
+                    numeric_cols = self.aligned_events.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        fallback_col = numeric_cols[0]
+                        self.targets = pd.to_numeric(self.aligned_events[fallback_col], errors="coerce")
+                        self.logger.info(
+                            "Targets loaded from events numeric column '%s' (target_vas_ratings.tsv missing)",
+                            fallback_col,
+                        )
         else:
             # Default: load all via bundle (existing behavior)
             bundle = load_feature_bundle(
@@ -291,6 +309,25 @@ class BehaviorContext:
             self.asymmetry_df = bundle.asymmetry_df
             self.temporal_df = bundle.temporal_df
             self.targets = bundle.targets
+
+            if (self.targets is None or len(self.targets) == 0) and self.aligned_events is not None:
+                target_columns = list(self.config.get("event_columns.rating", []) or []) if self.config is not None else []
+                target_col = pick_target_column(self.aligned_events, target_columns=target_columns)
+                if target_col:
+                    self.targets = pd.to_numeric(self.aligned_events[target_col], errors="coerce")
+                    self.logger.info(
+                        "Targets loaded from events column '%s' (bundle targets missing)",
+                        target_col,
+                    )
+                else:
+                    numeric_cols = self.aligned_events.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        fallback_col = numeric_cols[0]
+                        self.targets = pd.to_numeric(self.aligned_events[fallback_col], errors="coerce")
+                        self.logger.info(
+                            "Targets loaded from events numeric column '%s' (bundle targets missing)",
+                            fallback_col,
+                        )
 
         feature_counts = self._get_feature_counts()
         if all(count == 0 for count in feature_counts.values()):

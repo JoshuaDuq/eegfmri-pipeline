@@ -325,7 +325,7 @@ def ensure_derivatives_dataset_description(
         "DatasetType": "derivative",
         "GeneratedBy": [
             {
-                "Name": "EEG_fMRI_Analysis Pipeline",
+                "Name": "Thermal_Pain_EEG_Pipeline",
                 "Version": "unknown",
                 "Description": "Custom EEG analysis (ERP, TFR, features, decoding)",
             }

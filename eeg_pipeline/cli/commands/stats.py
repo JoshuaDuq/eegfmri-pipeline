@@ -71,7 +71,7 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
         
         feature_categories = [
             "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
-            "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+            "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
         ]
         category_counts = {cat: 0 for cat in feature_categories}
         

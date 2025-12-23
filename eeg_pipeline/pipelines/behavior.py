@@ -265,7 +265,21 @@ class BehaviorPipeline(PipelineBase):
         # Initialize progress reporter
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         validate_only = bool(kwargs.get("validate_only", False))
-        total_steps = 8  # 8 stages in the pipeline
+        
+        # Calculate total steps dynamically based on enabled stages
+        run_advanced = self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects
+        enabled_stages = [
+            True,  # Load (always runs)
+            self._run_correlations,
+            self.pipeline_config.run_condition_comparison,
+            self.pipeline_config.run_temporal_correlations,
+            self.pipeline_config.run_cluster_tests,
+            run_advanced,
+            self._run_validation,
+            True,  # Export (always runs)
+        ]
+        total_steps = sum(enabled_stages) if not validate_only else 2
+        current_step = 0
         
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
@@ -331,8 +345,9 @@ class BehaviorPipeline(PipelineBase):
 
         stage_start = time.perf_counter()
         stage_rss = _rss_mb()
-        progress.step("Loading data", current=1, total=total_steps)
-        logger.info("Stage 1: Loading data...")
+        current_step += 1
+        progress.step("Loading data", current=current_step, total=total_steps)
+        logger.info("Loading data...")
         if not _stage_load_impl(ctx):
             progress.error("load_failed", "Failed to load data")
             _record_stage("load", stage_start, stage_rss)
@@ -340,7 +355,8 @@ class BehaviorPipeline(PipelineBase):
         _record_stage("load", stage_start, stage_rss)
 
         if validate_only:
-            progress.step("Validation only", current=2, total=total_steps)
+            current_step += 1
+            progress.step("Exporting validation", current=current_step, total=total_steps)
             logger.info("Validation-only mode: skipping computations.")
             ctx.data_qc["validate_only"] = True
             stage_start = time.perf_counter()
@@ -363,71 +379,60 @@ class BehaviorPipeline(PipelineBase):
         if self._run_correlations:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Running correlations", current=2, total=total_steps)
-            logger.info("Stage 2: Running unified correlations...")
+            current_step += 1
+            progress.step("Running correlations", current=current_step, total=total_steps)
+            logger.info("Running correlations...")
             results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
             _record_stage("correlations", stage_start, stage_rss)
-        else:
-            progress.step("Skipping correlations", current=2, total=total_steps)
-            logger.info("Stage 2: Skipped correlations (CLI selection)")
         
         if self.pipeline_config.run_condition_comparison:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Condition comparison", current=3, total=total_steps)
-            logger.info("Stage 3: Condition comparison...")
+            current_step += 1
+            progress.step("Condition comparison", current=current_step, total=total_steps)
+            logger.info("Running condition comparison...")
             results.condition_effects = _stage_condition_impl(ctx, self.pipeline_config)
             _record_stage("condition", stage_start, stage_rss)
-        else:
-            progress.step("Skipping conditions", current=3, total=total_steps)
-            logger.info("Stage 3: Skipped condition comparison (CLI selection)")
         
         if self.pipeline_config.run_temporal_correlations:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Temporal correlations", current=4, total=total_steps)
-            logger.info("Stage 4: Temporal correlations...")
+            current_step += 1
+            progress.step("Temporal correlations", current=current_step, total=total_steps)
+            logger.info("Running temporal correlations...")
             _stage_temporal_impl(ctx)
             _record_stage("temporal", stage_start, stage_rss)
-        else:
-            progress.step("Skipping temporal", current=4, total=total_steps)
-            logger.info("Stage 4: Skipped temporal correlations (CLI selection)")
         
         if self.pipeline_config.run_cluster_tests:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Cluster permutation tests", current=5, total=total_steps)
-            logger.info("Stage 5: Cluster permutation tests...")
+            current_step += 1
+            progress.step("Cluster permutation tests", current=current_step, total=total_steps)
+            logger.info("Running cluster permutation tests...")
             results.cluster = _stage_cluster_impl(ctx, self.pipeline_config)
             _record_stage("cluster", stage_start, stage_rss)
-        else:
-            progress.step("Skipping cluster tests", current=5, total=total_steps)
-            logger.info("Stage 5: Skipped cluster tests (CLI selection)")
         
-        if self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects:
+        if run_advanced:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Advanced analyses", current=6, total=total_steps)
-            logger.info("Stage 6: Advanced analyses...")
+            current_step += 1
+            progress.step("Advanced analyses", current=current_step, total=total_steps)
+            logger.info("Running advanced analyses...")
             _stage_advanced_impl(ctx, self.pipeline_config, results)
             _record_stage("advanced", stage_start, stage_rss)
-        else:
-            progress.step("Skipping advanced", current=6, total=total_steps)
-            logger.info("Stage 6: Skipped advanced analyses (CLI selection)")
         
         if self._run_validation:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
-            progress.step("Global FDR correction", current=7, total=total_steps)
-            logger.info("Stage 7: Global FDR correction...")
+            current_step += 1
+            progress.step("Global FDR correction", current=current_step, total=total_steps)
+            logger.info("Running global FDR correction...")
             _stage_validate_impl(ctx, self.pipeline_config)
             _record_stage("fdr", stage_start, stage_rss)
-        else:
-            progress.step("Skipping FDR", current=7, total=total_steps)
-            logger.info("Stage 7: Skipped global FDR (no computations selected)")
         
-        progress.step("Saving results", current=8, total=total_steps)
-        logger.info("Stage 8: Saving results...")
+        current_step += 1
+        progress.step("Saving results", current=current_step, total=total_steps)
+        logger.info("Saving results...")
         stage_start = time.perf_counter()
         stage_rss = _rss_mb()
         _stage_export_impl(ctx, self.pipeline_config, results)

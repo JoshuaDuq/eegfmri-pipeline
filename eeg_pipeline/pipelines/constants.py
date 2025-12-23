@@ -48,7 +48,6 @@ FEATURE_CATEGORIES: List[str] = [
     "spectral",
     "ratios",
     "asymmetry",
-    "temporal",
 ]
 
 FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
@@ -65,7 +64,6 @@ FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
     "spectral": "Spectral edge and other freq metrics",
     "ratios": "Power ratios (e.g., theta/beta)",
     "asymmetry": "Inter-hemispheric asymmetry",
-    "temporal": "Time-resolved features (sliding windows)",
 }
 
 

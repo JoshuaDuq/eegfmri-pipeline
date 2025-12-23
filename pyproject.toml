@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "eeg-pipeline"
 version = "0.0.0"
-description = "EEG/fMRI analysis pipeline"
+description = "EEG analysis pipeline for pain research"
 readme = "README.md"
 requires-python = ">=3.9"
 

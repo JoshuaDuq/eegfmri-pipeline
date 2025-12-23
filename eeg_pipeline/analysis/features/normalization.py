@@ -8,7 +8,7 @@ Standardized normalization methods for EEG features:
 - Min-max scaling
 - Rank transformation
 - Condition-aware normalization
-- Run-wise normalization (for fMRI scanner drift)
+- Run-wise normalization (for scanner drift)
 """
 
 from __future__ import annotations

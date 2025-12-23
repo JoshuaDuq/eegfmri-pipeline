@@ -61,7 +61,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     
     feature_choices = [
         "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
-        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "temporal",
+        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
     ]
     compute_group.add_argument(
         "--correlations-features", nargs="+", choices=feature_choices, default=None,

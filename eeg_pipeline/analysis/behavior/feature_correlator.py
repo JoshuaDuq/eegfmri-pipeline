@@ -180,6 +180,8 @@ class FeatureCorrelationResult:
     feature_type: str
     n_features: int
     n_significant: int
+    n_total: int = 0
+    n_dropped: int = 0
     records: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dataframe(self) -> pd.DataFrame:
@@ -205,12 +207,43 @@ class ColumnProcessorParams:
     compute_reliability: bool
 
 
+def _infer_min_samples_for_column(
+    col_name: str,
+    feature_type: str,
+    config: Any,
+) -> int:
+    parsed = NamingSchema.parse(str(col_name))
+    if parsed.get("valid"):
+        scope = str(parsed.get("scope") or "")
+        if scope == "chpair":
+            return get_min_samples(config, "edge")
+        if scope == "roi":
+            return get_min_samples(config, "roi")
+        if scope == "ch":
+            return get_min_samples(config, "channel")
+        return get_min_samples(config, "default")
+
+    name = str(col_name)
+    if "_chpair_" in name:
+        return get_min_samples(config, "edge")
+    if "_roi_" in name:
+        return get_min_samples(config, "roi")
+    if "_ch_" in name:
+        return get_min_samples(config, "channel")
+    if feature_type == "connectivity":
+        return get_min_samples(config, "edge")
+    return get_min_samples(config, "default")
+
+
 def _build_base_record(
     col_name: str,
     feature_type: str,
     r: float,
     p: float,
     n_valid: int,
+    n_total: int,
+    missing_fraction: float,
+    variance: float,
     method: str,
     n_covariates: int,
     robust_method: Optional[str],
@@ -224,6 +257,9 @@ def _build_base_record(
         "r": float(r),
         "p": float(p),
         "n": n_valid,
+        "n_total": int(n_total),
+        "missing_fraction": float(missing_fraction),
+        "variance": float(variance) if np.isfinite(variance) else np.nan,
         "method": method,
         "robust_method": robust_method,
         "method_label": method_label,
@@ -424,6 +460,10 @@ def _process_single_column(
     col_values: np.ndarray,
     feature_type: str,
     targets_aligned: np.ndarray,
+    column_min_samples: int,
+    n_total: int,
+    missing_fraction: float,
+    variance: float,
     cov_aligned: Optional[pd.DataFrame],
     temp_aligned: Optional[pd.Series],
     loso_groups: Optional[np.ndarray],
@@ -432,7 +472,6 @@ def _process_single_column(
     config_robust_method: Optional[str],
     config_method_label: str,
     target_name: str,
-    config_min_samples: int,
     config_n_permutations: int,
     config_n_bootstrap: int,
     config_rng_seed: int,
@@ -448,14 +487,23 @@ def _process_single_column(
     rng = np.random.default_rng(config_rng_seed)
     
     r, p, n_valid = safe_correlation(
-        col_values, targets_aligned, config_method, config_min_samples, robust_method=config_robust_method
+        col_values, targets_aligned, config_method, column_min_samples, robust_method=config_robust_method
     )
     if not np.isfinite(r):
         return None
     
     n_cov = int(cov_aligned.shape[1]) if cov_aligned is not None else 0
     record = _build_base_record(
-        col_name, feature_type, r, p, n_valid, config_method, n_cov,
+        col_name,
+        feature_type,
+        r,
+        p,
+        n_valid,
+        n_total,
+        missing_fraction,
+        variance,
+        config_method,
+        n_cov,
         config_robust_method, config_method_label, target_name
     )
     
@@ -478,7 +526,7 @@ def _process_single_column(
         try:
             _add_partial_correlations(
                 record, feature_series, target_series, cov_aligned, temp_aligned,
-                config_method, feature_type, config_min_samples
+                config_method, feature_type, column_min_samples
             )
         except Exception as exc:
             record["partial_corr_error"] = str(exc)
@@ -591,7 +639,11 @@ class FeatureBehaviorCorrelator:
         
         for name, result in results.items():
             if result.n_features > 0:
-                self.logger.debug(f"  {name}: {result.n_features} features, {result.n_significant} sig")
+                dropped = result.n_dropped
+                total = result.n_total or (result.n_features + dropped)
+                self.logger.debug(
+                    f"  {name}: {result.n_features}/{total} tested, {dropped} dropped, {result.n_significant} sig"
+                )
 
         return results
 
@@ -608,8 +660,9 @@ class FeatureBehaviorCorrelator:
         if df is None or df.empty or targets is None or len(targets) == 0:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
+        min_samples_align = get_min_samples(self.config, "default")
         df_aligned, targets_aligned = align_features_and_targets(
-            df, targets, config.min_samples, self.logger
+            df, targets, min_samples_align, self.logger
         )
         if df_aligned is None or targets_aligned is None:
             return FeatureCorrelationResult(feature_type, 0, 0)
@@ -642,7 +695,6 @@ class FeatureBehaviorCorrelator:
                 self.logger.debug(f"Permutation group alignment failed: {exc}")
         
         # Parallel column processing - all computation done in _process_single_column
-        n_cols = len(df_aligned.columns)
         n_jobs_actual = config.n_jobs
         if n_jobs_actual == -1:
             n_jobs_actual = max(1, cpu_count() - 1)
@@ -652,18 +704,55 @@ class FeatureBehaviorCorrelator:
             base_seed = int(config.rng.integers(0, 2**31))
         
         targets_arr = targets_aligned.values if hasattr(targets_aligned, 'values') else np.asarray(targets_aligned)
+        n_total = int(len(targets_arr))
         loso_groups_arr = loso_groups if loso_groups is not None else None
         perm_groups_arr = perm_groups if perm_groups is not None else None
         
         # Prepare arguments for each column (no pre-computed records needed)
         col_args = []
+        screening_records = []
         for i, col_name in enumerate(df_aligned.columns):
             col_values = pd.to_numeric(df_aligned[col_name], errors="coerce").values
+            min_samples = _infer_min_samples_for_column(col_name, feature_type, self.config)
+            valid_mask = np.isfinite(col_values) & np.isfinite(targets_arr)
+            n_valid = int(valid_mask.sum())
+            missing_fraction = 1.0 - (float(n_valid) / n_total) if n_total else 1.0
+            variance = float(np.nanvar(col_values[valid_mask])) if n_valid > 1 else np.nan
+            status = "kept"
+            reason = None
+            if n_valid < min_samples:
+                status = "dropped"
+                reason = "insufficient_samples"
+            elif not np.isfinite(variance) or np.isclose(variance, 0.0):
+                status = "dropped"
+                reason = "zero_variance"
+
+            screening_records.append(
+                {
+                    "feature": str(col_name),
+                    "feature_type": feature_type,
+                    "min_samples": int(min_samples),
+                    "n_valid": int(n_valid),
+                    "n_total": int(n_total),
+                    "missing_fraction": float(missing_fraction),
+                    "variance": float(variance) if np.isfinite(variance) else np.nan,
+                    "status": status,
+                    "reason": reason,
+                }
+            )
+
+            if status != "kept":
+                continue
+
             col_args.append((
                 col_name,
                 col_values,
                 feature_type,
                 targets_arr,
+                min_samples,
+                n_total,
+                missing_fraction,
+                variance,
                 cov_aligned,
                 temp_aligned,
                 loso_groups_arr,
@@ -672,7 +761,6 @@ class FeatureBehaviorCorrelator:
                 config.robust_method,
                 config.method_label or format_correlation_method_label(config.method, config.robust_method),
                 target_name,
-                config.min_samples,
                 config.n_permutations,
                 config.n_bootstrap,
                 base_seed + i,
@@ -682,6 +770,16 @@ class FeatureBehaviorCorrelator:
                 config.compute_loso_stability,
                 config.compute_reliability,
             ))
+
+        if screening_records and self.stats_dir is not None:
+            try:
+                screen_df = pd.DataFrame(screening_records)
+                screen_path = self.stats_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
+                write_tsv(screen_df, screen_path)
+            except Exception as exc:
+                self.logger.debug(f"Failed to write screening report: {exc}")
+
+        n_cols = len(col_args)
         
         # Use parallel processing when beneficial (>10 columns and n_jobs > 1)
         if n_jobs_actual > 1 and n_cols > 10:
@@ -723,7 +821,15 @@ class FeatureBehaviorCorrelator:
             for rec in record_dicts
             if pd.notna(rec.get("p_primary", np.nan)) and float(rec.get("p_primary")) < alpha
         )
-        return FeatureCorrelationResult(feature_type, len(df.columns), n_sig, record_dicts)
+        n_dropped = len(df_aligned.columns) - len(col_args)
+        return FeatureCorrelationResult(
+            feature_type,
+            len(record_dicts),
+            n_sig,
+            n_total=len(df_aligned.columns),
+            n_dropped=n_dropped,
+            records=record_dicts,
+        )
     
     def save_results(
         self,
@@ -925,6 +1031,8 @@ class FeatureBehaviorCorrelator:
 
             for name, result in rating_results.items():
                 metadata[f"{name}_n_features"] = result.n_features
+                metadata[f"{name}_n_total"] = result.n_total or result.n_features
+                metadata[f"{name}_n_dropped"] = result.n_dropped
                 metadata[f"{name}_n_significant"] = result.n_significant
                 all_records.extend(result.records)
             

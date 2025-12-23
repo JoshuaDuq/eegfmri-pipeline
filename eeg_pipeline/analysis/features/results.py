@@ -265,9 +265,7 @@ class FeatureExtractionResult:
     # Quality metrics
     quality_df: Optional[pd.DataFrame] = None
     quality_cols: List[str] = field(default_factory=list)
-    # Temporal binned features
-    temp_df: Optional[pd.DataFrame] = None
-    temp_cols: List[str] = field(default_factory=list)
+
 
 
 

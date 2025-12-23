@@ -157,7 +157,8 @@ def run_combine_features_utility(
             combined = pd.concat(dfs, axis=1)
             # Basic sanity check
             if combined.columns.duplicated().any():
-                logger.warning(f"Duplicate columns found while combining features for sub-{subj}; keep first occurrences")
+                dupes = combined.columns[combined.columns.duplicated()].unique().tolist()
+                logger.warning(f"Duplicate columns found while combining features for sub-{subj}: {dupes[:10]}...; keep first occurrences")
                 combined = combined.loc[:, ~combined.columns.duplicated()]
             
             out_path = features_dir / "features_all.tsv"
@@ -915,6 +916,8 @@ def _infer_output_kind(name: str) -> str:
         return "mixed_effects"
     if name.startswith("normalized_results"):
         return "normalized_results"
+    if name.startswith("feature_screening"):
+        return "feature_screening"
     if name.startswith("summary"):
         return "summary"
     if name.startswith("analysis_metadata"):

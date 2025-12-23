@@ -129,14 +129,6 @@ PLOT_CATALOG: List[PlotDefinition] = [
         feature_categories=["bursts"],
     ),
     PlotDefinition(
-        "features_temporal",
-        "features",
-        "Temporal",
-        "Temporal evolution across active bins",
-        ["features_temporal.tsv"],
-        feature_categories=["temporal"],
-    ),
-    PlotDefinition(
         "features_erp",
         "features",
         "ERP",

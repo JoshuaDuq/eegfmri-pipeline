@@ -41,8 +41,7 @@ def _empty_feature_availability() -> dict:
     """Return feature availability dict with all features marked as unavailable."""
     all_categories = [
         "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
-        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
-        "temporal", "all"
+        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "all"
     ]
     all_bands = ["delta", "theta", "alpha", "beta", "gamma"]
     
@@ -76,7 +75,6 @@ def detect_feature_availability(features_dir) -> dict:
         "spectral": ["features_spectral*.tsv"],
         "ratios": ["features_ratios*.tsv"],
         "asymmetry": ["features_asymmetry*.tsv"],
-        "temporal": ["features_temporal*.tsv"],
         "all": ["features_all.tsv"],
     }
     
