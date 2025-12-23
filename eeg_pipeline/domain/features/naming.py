@@ -151,20 +151,31 @@ class NamingSchema:
         if len(parts) < 5:
             return {"valid": False}
 
+        scope_tokens = {"global", "ch", "chpair", "roi"}
         try:
+            scope_idx = None
+            for idx in range(2, len(parts)):
+                if parts[idx] in scope_tokens:
+                    scope_idx = idx
+                    break
+            if scope_idx is None:
+                return {"valid": False}
+
             res = {
                 "group": parts[0],
                 "segment": parts[1],
-                "band": parts[2],
-                "scope": parts[3],
+                "band": "_".join(parts[2:scope_idx]),
+                "scope": parts[scope_idx],
                 "valid": True,
             }
 
             if res["scope"] == "global":
-                res["stat"] = "_".join(parts[4:])
+                res["stat"] = "_".join(parts[scope_idx + 1 :])
             elif res["scope"] in ["ch", "chpair", "roi"]:
-                res["identifier"] = parts[4]
-                res["stat"] = "_".join(parts[5:])
+                if scope_idx + 1 >= len(parts):
+                    return {"valid": False}
+                res["identifier"] = parts[scope_idx + 1]
+                res["stat"] = "_".join(parts[scope_idx + 2 :])
 
             return res
         except IndexError:

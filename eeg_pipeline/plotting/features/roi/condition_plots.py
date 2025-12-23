@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,9 @@ from eeg_pipeline.plotting.features.utils import (
     get_band_names,
     get_condition_colors,
     get_significance_color,
+    collect_named_series,
+    get_named_segments,
+    get_named_bands,
 )
 
 from .core import (
@@ -30,6 +33,88 @@ from .core import (
     get_roi_channels,
     get_roi_definitions,
 )
+
+
+def _get_named_identifiers(
+    features_df: pd.DataFrame,
+    *,
+    group: str,
+    segment: str,
+    scope: str,
+    band: Optional[str] = None,
+) -> List[str]:
+    identifiers = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != group:
+            continue
+        if str(parsed.get("segment") or "") != str(segment):
+            continue
+        if str(parsed.get("scope") or "") != str(scope):
+            continue
+        if band and str(parsed.get("band") or "") != str(band):
+            continue
+        identifier = parsed.get("identifier")
+        if identifier:
+            identifiers.add(str(identifier))
+    return sorted(identifiers)
+
+
+def _collect_roi_series(
+    features_df: pd.DataFrame,
+    *,
+    group: str,
+    segment: str,
+    band: str,
+    roi_name: str,
+    roi_channels: Optional[List[str]] = None,
+    stat_preference: Optional[List[str]] = None,
+) -> pd.Series:
+    stat_preference = list(stat_preference or [])
+    if not stat_preference:
+        stat_preference = ["val"]
+
+    roi_series, _, _ = collect_named_series(
+        features_df,
+        group=group,
+        segment=segment,
+        band=band,
+        identifier=roi_name,
+        stat_preference=stat_preference,
+        scope_preference=["roi"],
+    )
+    if not roi_series.empty:
+        return roi_series
+
+    if not roi_channels:
+        return pd.Series(dtype=float)
+
+    roi_set = set(roi_channels)
+    for stat in stat_preference:
+        cols = []
+        for col in features_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != group:
+                continue
+            if str(parsed.get("segment") or "") != str(segment):
+                continue
+            if str(parsed.get("band") or "") != str(band):
+                continue
+            if str(parsed.get("scope") or "") != "ch":
+                continue
+            if str(parsed.get("stat") or "") != str(stat):
+                continue
+            identifier = str(parsed.get("identifier") or "")
+            if identifier and identifier in roi_set:
+                cols.append(str(col))
+        if cols:
+            return features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+
+    return pd.Series(dtype=float)
 
 
 def plot_power_by_roi_band_condition(
@@ -49,26 +134,45 @@ def plot_power_by_roi_band_condition(
 
     if features_df is None or features_df.empty or events_df is None:
         return
+    if len(features_df) != len(events_df):
+        if logger:
+            logger.warning(
+                "ITPC ROI plot skipped: %d feature rows vs %d events",
+                len(features_df),
+                len(events_df),
+            )
+        return
 
     pain_mask = extract_pain_mask(events_df, config)
     if pain_mask is None:
         return
 
-    from eeg_pipeline.utils.config.loader import get_config_value
+    segments = get_named_segments(features_df, group="itpc")
+    if not segments:
+        return
+    if segment not in segments:
+        segment = "active" if "active" in segments else segments[0]
 
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    bands = get_named_bands(features_df, group="itpc", segment=segment)
+    if not bands:
+        return
+    band_order = get_band_names(config)
+    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
 
     rois = get_roi_definitions(config)
-    if not rois:
+    data_rois = _get_named_identifiers(features_df, group="itpc", segment=segment, scope="roi")
+    if rois:
+        roi_names = list(rois.keys())
+    else:
+        roi_names = data_rois
+    if not roi_names:
         if logger:
-            logger.warning("No ROI definitions found in config")
+            logger.warning("No ROI names found for ITPC plot")
         return
 
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
-    bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    roi_names = list(rois.keys())
+    _, band_colors, condition_colors = _get_bands_and_palettes(config)
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -136,7 +240,12 @@ def plot_power_by_roi_band_condition(
 
     width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
     height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
+    fig, axes = plt.subplots(
+        n_rois,
+        n_bands,
+        figsize=(width_per_col * n_bands, height_per_row * n_rois),
+        squeeze=False,
+    )
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -364,7 +473,12 @@ def plot_complexity_by_roi_band_condition(
     plot_cfg = get_plot_config(config)
     width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
     height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
+    fig, axes = plt.subplots(
+        n_rois,
+        n_bands,
+        figsize=(width_per_col * n_bands, height_per_row * n_rois),
+        squeeze=False,
+    )
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -875,26 +989,46 @@ def plot_itpc_by_roi_band_condition(
 
     if features_df is None or features_df.empty or events_df is None:
         return
+    if len(features_df) != len(events_df):
+        if logger:
+            logger.warning(
+                "ITPC ROI plot skipped: %d feature rows vs %d events",
+                len(features_df),
+                len(events_df),
+            )
+        return
 
     pain_mask = extract_pain_mask(events_df, config)
     if pain_mask is None:
         return
 
-    from eeg_pipeline.utils.config.loader import get_config_value
+    segments = get_named_segments(features_df, group="itpc")
+    if not segments:
+        return
+    if segment not in segments:
+        segment = "active" if "active" in segments else segments[0]
+    segment_label = segment.replace("_", " ").title()
 
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    bands = get_named_bands(features_df, group="itpc", segment=segment)
+    if not bands:
+        return
+    band_order = get_band_names(config)
+    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
 
     rois = get_roi_definitions(config)
-    if not rois:
+    data_rois = _get_named_identifiers(features_df, group="itpc", segment=segment, scope="roi")
+    if rois:
+        roi_names = list(rois.keys())
+    else:
+        roi_names = data_rois
+    if not roi_names:
         if logger:
-            logger.warning("No ROI definitions found in config")
+            logger.warning("No ROI names found for ITPC plot")
         return
 
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
-    bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    roi_names = list(rois.keys())
+    _, band_colors, condition_colors = _get_bands_and_palettes(config)
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -902,26 +1036,27 @@ def plot_itpc_by_roi_band_condition(
     all_pvalues = []
     pvalue_keys = []
 
+    stat_preference = ["val", "mean", "avg", "value"]
+
     for row_idx, roi_name in enumerate(roi_names):
-        roi_patterns = rois[roi_name]
-        roi_channels = get_roi_channels(roi_patterns, all_channels)
+        roi_channels = []
+        if rois and roi_name in rois:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
 
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
 
-            itpc_cols = [c for c in features_df.columns if f"itpc_{segment}_{band}_ch_" in c]
-            if itpc_cols:
-                roi_itpc_cols = [
-                    c
-                    for c in itpc_cols
-                    if any(f"_ch_{ch}_" in c or c.endswith(f"_ch_{ch}") for ch in roi_channels)
-                ]
-                if roi_itpc_cols:
-                    roi_vals = features_df[roi_itpc_cols].mean(axis=1)
-                else:
-                    roi_vals = pd.Series([np.nan] * len(features_df))
-            else:
-                roi_vals = pd.Series([np.nan] * len(features_df))
+            roi_vals = _collect_roi_series(
+                features_df,
+                group="itpc",
+                segment=segment,
+                band=band,
+                roi_name=roi_name,
+                roi_channels=roi_channels,
+                stat_preference=stat_preference,
+            )
+            if roi_vals.empty:
+                roi_vals = pd.Series([np.nan] * len(features_df), index=features_df.index)
 
             vals_nonpain = roi_vals[~pain_mask].dropna().values
             vals_pain = roi_vals[pain_mask].dropna().values
@@ -1046,7 +1181,7 @@ def plot_itpc_by_roi_band_condition(
 
     title = (
         "Inter-Trial Phase Coherence by ROI: Pain vs Non-Pain Comparison\n"
-        f"Active Phase ({active_label}), LOO-ITPC\n"
+        f"Segment ({segment_label}), LOO-ITPC\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1088,19 +1223,39 @@ def plot_itpc_active_vs_baseline(
     from eeg_pipeline.utils.config.loader import get_config_value
     from scipy.stats import wilcoxon
 
+    segments = get_named_segments(features_df, group="itpc")
+    if not segments or "baseline" not in segments or "active" not in segments:
+        if logger:
+            logger.warning("ITPC baseline/active segments not found; skipping plot")
+        return
+    baseline_segment = "baseline"
+    active_segment = "active"
+
+    bands_active = set(get_named_bands(features_df, group="itpc", segment=active_segment))
+    bands_baseline = set(get_named_bands(features_df, group="itpc", segment=baseline_segment))
+    bands = sorted(bands_active & bands_baseline) if bands_active and bands_baseline else []
+    if not bands:
+        return
+    band_order = get_band_names(config)
+    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
+
     active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
     baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
 
     rois = get_roi_definitions(config)
-    if not rois:
+    data_rois = _get_named_identifiers(features_df, group="itpc", segment=active_segment, scope="roi")
+    if rois:
+        roi_names = list(rois.keys())
+    else:
+        roi_names = data_rois
+    if not roi_names:
         if logger:
-            logger.warning("No ROI definitions found")
+            logger.warning("No ROI names found for ITPC baseline plot")
         return
 
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
-    bands, band_colors, _ = _get_bands_and_palettes(config)
-    roi_names = list(rois.keys())
+    _, band_colors, _ = _get_bands_and_palettes(config)
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -1108,38 +1263,42 @@ def plot_itpc_active_vs_baseline(
     all_pvalues = []
     pvalue_keys = []
 
+    stat_preference = ["val", "mean", "avg", "value"]
+
     for row_idx, roi_name in enumerate(roi_names):
-        roi_patterns = rois[roi_name]
-        roi_channels = get_roi_channels(roi_patterns, all_channels)
+        roi_channels = []
+        if rois and roi_name in rois:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
 
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
 
-            baseline_cols = [
-                c for c in features_df.columns if f"itpc_baseline_{band}_ch_" in c
-            ]
-            active_cols = [
-                c for c in features_df.columns if f"itpc_active_{band}_ch_" in c
-            ]
+            baseline_series = _collect_roi_series(
+                features_df,
+                group="itpc",
+                segment=baseline_segment,
+                band=band,
+                roi_name=roi_name,
+                roi_channels=roi_channels,
+                stat_preference=stat_preference,
+            )
+            active_series = _collect_roi_series(
+                features_df,
+                group="itpc",
+                segment=active_segment,
+                band=band,
+                roi_name=roi_name,
+                roi_channels=roi_channels,
+                stat_preference=stat_preference,
+            )
 
-            vals_baseline = np.array([])
-            vals_active = np.array([])
-
-            if baseline_cols and active_cols:
-                roi_baseline_cols = [
-                    c for c in baseline_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
-                ]
-                roi_active_cols = [
-                    c for c in active_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
-                ]
-
-                if roi_baseline_cols and roi_active_cols:
-                    vals_baseline = (
-                        features_df[roi_baseline_cols].mean(axis=1).dropna().values
-                    )
-                    vals_active = (
-                        features_df[roi_active_cols].mean(axis=1).dropna().values
-                    )
+            if baseline_series.empty or active_series.empty:
+                vals_baseline = np.array([])
+                vals_active = np.array([])
+            else:
+                valid_mask = baseline_series.notna() & active_series.notna()
+                vals_baseline = baseline_series[valid_mask].to_numpy(dtype=float)
+                vals_active = active_series[valid_mask].to_numpy(dtype=float)
 
             plot_data[key] = (vals_baseline, vals_active)
 
@@ -1306,54 +1465,87 @@ def plot_pac_by_roi_condition(
 
     if features_df is None or features_df.empty or events_df is None:
         return
+    if len(features_df) != len(events_df):
+        if logger:
+            logger.warning(
+                "PAC ROI plot skipped: %d feature rows vs %d events",
+                len(features_df),
+                len(events_df),
+            )
+        return
 
     pain_mask = extract_pain_mask(events_df, config)
     if pain_mask is None:
         return
 
+    segments = get_named_segments(features_df, group="pac")
+    if not segments:
+        return
+    segment = "active" if "active" in segments else segments[0]
+
+    pairs = get_named_bands(features_df, group="pac", segment=segment)
+    if not pairs:
+        return
+
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
+    if cfg_pairs is None:
+        cfg_pairs = get_config_value(config, "feature_engineering.pac.pairs", None)
+    ordered_pairs = []
+    for entry in cfg_pairs or []:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            ordered_pairs.append(f"{entry[0]}_{entry[1]}")
+        elif isinstance(entry, str):
+            ordered_pairs.append(entry)
+    if ordered_pairs:
+        pairs = [p for p in ordered_pairs if p in pairs] + [p for p in pairs if p not in ordered_pairs]
+
     rois = get_roi_definitions(config)
-    if not rois:
+    data_rois = _get_named_identifiers(features_df, group="pac", segment=segment, scope="roi")
+    if rois:
+        roi_names = list(rois.keys())
+    else:
+        roi_names = data_rois
+    if not roi_names:
         return
 
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    pac_pairs = get_config_value(
-        config,
-        "plotting.plots.features.pac_pairs",
-        ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"],
-    )
-
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
-    roi_names = list(rois.keys())
     n_rois = len(roi_names)
-    n_pairs = len(pac_pairs)
+    n_pairs = len(pairs)
 
     plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
     all_pvalues = []
     pvalue_keys = []
 
-    for row_idx, roi_name in enumerate(roi_names):
-        roi_patterns = rois[roi_name]
-        roi_channels = get_roi_channels(roi_patterns, all_channels)
+    stat_preference = ["val", "mean", "avg", "value"]
 
-        for col_idx, pair in enumerate(pac_pairs):
+    for row_idx, roi_name in enumerate(roi_names):
+        roi_channels = []
+        if rois and roi_name in rois:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+
+        for col_idx, pair in enumerate(pairs):
             key = (row_idx, col_idx)
 
-            pac_cols = [c for c in features_df.columns if f"pac_active_{pair}_ch_" in c]
+            roi_vals = _collect_roi_series(
+                features_df,
+                group="pac",
+                segment=segment,
+                band=pair,
+                roi_name=roi_name,
+                roi_channels=roi_channels,
+                stat_preference=stat_preference,
+            )
 
-            vals_nonpain = np.array([])
-            vals_pain = np.array([])
-
-            if pac_cols:
-                roi_pac_cols = [
-                    c for c in pac_cols if any(f"_ch_{ch}_" in c for ch in roi_channels)
-                ]
-                if roi_pac_cols:
-                    roi_vals = features_df[roi_pac_cols].mean(axis=1)
-                    vals_nonpain = roi_vals[~pain_mask].dropna().values
-                    vals_pain = roi_vals[pain_mask].dropna().values
+            if roi_vals.empty:
+                vals_nonpain = np.array([])
+                vals_pain = np.array([])
+            else:
+                vals_nonpain = roi_vals[~pain_mask].dropna().values
+                vals_pain = roi_vals[pain_mask].dropna().values
 
             plot_data[key] = (vals_nonpain, vals_pain)
 
@@ -1381,7 +1573,7 @@ def plot_pac_by_roi_condition(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_rois, n_pairs, figsize=(12, 2.5 * n_rois))
+    fig, axes = plt.subplots(n_rois, n_pairs, figsize=(12, 2.5 * n_rois), squeeze=False)
 
     base_palette = (
         list(band_colors.values()) if band_colors else ["#440154", "#3b528b", "#21918c", "#fde725"]
@@ -1389,7 +1581,7 @@ def plot_pac_by_roi_condition(
     pair_colors = [base_palette[i % len(base_palette)] for i in range(n_pairs)]
 
     for row_idx, roi_name in enumerate(roi_names):
-        for col_idx, pair in enumerate(pac_pairs):
+        for col_idx, pair in enumerate(pairs):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
             vals_nonpain, vals_pain = plot_data[key]
@@ -1474,7 +1666,7 @@ def plot_pac_by_roi_condition(
 
     title = (
         "Phase-Amplitude Coupling by ROI: Pain vs Non-Pain Comparison\n"
-        "Active Phase, MVL Method\n"
+        f"Segment ({segment.replace('_', ' ').title()}), MVL Method\n"
         f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
@@ -1504,7 +1696,9 @@ def plot_band_segment_condition(
     config: Any,
     feature_prefix: str,
     feature_label: str,
-    segments: List[str] = None,
+    segments: Optional[List[str]] = None,
+    stat_preference: Optional[List[str]] = None,
+    scope_preference: Optional[List[str]] = None,
 ) -> None:
     """Unified Band × Segment × Condition plot.
 
@@ -1521,10 +1715,37 @@ def plot_band_segment_condition(
 
     if segments is None:
         segments = ["baseline", "active"]
+    available_segments = get_named_segments(features_df, group=feature_prefix)
+    if available_segments:
+        filtered = [seg for seg in segments if seg in available_segments]
+        segments = filtered if filtered else available_segments
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
     n_bands = len(bands)
     n_segments = len(segments)
+
+    if stat_preference is None:
+        stat_preference = {
+            "power": [
+                "logratio",
+                "logratio_mean",
+                "baselined",
+                "baselined_mean",
+                "log10raw",
+                "log10raw_mean",
+                "mean",
+                "val",
+            ],
+            "itpc": ["val"],
+            "spectral": ["peak_freq", "peak_power", "center_freq", "bandwidth", "entropy"],
+            "aperiodic": ["slope", "offset", "powcorr"],
+            "ratios": ["power_ratio"],
+            "asymmetry": ["index", "logdiff"],
+            "comp": ["lzc", "pe"],
+            "bursts": ["rate", "count", "duration_mean", "amp_mean", "fraction"],
+        }.get(feature_prefix, [])
+    if scope_preference is None:
+        scope_preference = ["global", "roi", "ch", "chpair"]
 
     plot_data = {}
     all_pvalues = []
@@ -1534,16 +1755,20 @@ def plot_band_segment_condition(
         for col_idx, segment in enumerate(segments):
             key = (row_idx, col_idx)
 
-            pattern = f"{feature_prefix}_{segment}_{band}_ch_"
-            cols = [c for c in features_df.columns if pattern in c]
-
             vals_nonpain = np.array([])
             vals_pain = np.array([])
 
-            if cols:
-                mean_vals = features_df[cols].mean(axis=1)
-                vals_nonpain = mean_vals[~pain_mask].dropna().values
-                vals_pain = mean_vals[pain_mask].dropna().values
+            series, _, _ = collect_named_series(
+                features_df,
+                group=feature_prefix,
+                segment=segment,
+                band=band,
+                stat_preference=stat_preference,
+                scope_preference=scope_preference,
+            )
+            if not series.empty:
+                vals_nonpain = series[~pain_mask].dropna().values
+                vals_pain = series[pain_mask].dropna().values
 
             plot_data[key] = (vals_nonpain, vals_pain)
 
@@ -1879,7 +2104,37 @@ def plot_temporal_evolution(
     time_bins = temporal_cfg.get("time_bins", ["coarse_early", "coarse_mid", "coarse_late"])
     time_labels = temporal_cfg.get("time_labels", ["Early", "Mid", "Late"])
 
+    available_segments = get_named_segments(features_df, group=feature_prefix)
+    if available_segments:
+        filtered_bins = [seg for seg in time_bins if seg in available_segments]
+        if filtered_bins:
+            time_bins = filtered_bins
+        else:
+            time_bins = available_segments
+            time_labels = [seg.replace("_", " ").title() for seg in time_bins]
+
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
+
+    stat_preference = {
+        "power": [
+            "logratio",
+            "logratio_mean",
+            "baselined",
+            "baselined_mean",
+            "log10raw",
+            "log10raw_mean",
+            "mean",
+            "val",
+        ],
+        "itpc": ["val"],
+        "spectral": ["peak_freq", "peak_power", "center_freq", "bandwidth", "entropy"],
+        "aperiodic": ["slope", "offset", "powcorr"],
+        "ratios": ["power_ratio"],
+        "asymmetry": ["index", "logdiff"],
+        "comp": ["lzc", "pe"],
+        "bursts": ["rate", "count", "duration_mean", "amp_mean", "fraction"],
+    }.get(feature_prefix, [])
+    scope_preference = ["global", "roi", "ch", "chpair"]
 
     plot_cfg = get_plot_config(config)
     fig, axes = plt.subplots(len(bands), 1, figsize=(8, 3 * len(bands)), sharex=True)
@@ -1891,12 +2146,17 @@ def plot_temporal_evolution(
         pain_sems, nonpain_sems = [], []
 
         for time_bin in time_bins:
-            cols = [c for c in features_df.columns if f"{feature_prefix}_{time_bin}_{band}_ch_" in c]
-
-            if cols:
-                mean_vals = features_df[cols].mean(axis=1)
-                pain_vals = mean_vals[pain_mask].dropna().values
-                nonpain_vals = mean_vals[~pain_mask].dropna().values
+            series, _, _ = collect_named_series(
+                features_df,
+                group=feature_prefix,
+                segment=time_bin,
+                band=band,
+                stat_preference=stat_preference,
+                scope_preference=scope_preference,
+            )
+            if not series.empty:
+                pain_vals = series[pain_mask].dropna().values
+                nonpain_vals = series[~pain_mask].dropna().values
 
                 pain_means.append(np.mean(pain_vals) if len(pain_vals) > 0 else np.nan)
                 nonpain_means.append(np.mean(nonpain_vals) if len(nonpain_vals) > 0 else np.nan)

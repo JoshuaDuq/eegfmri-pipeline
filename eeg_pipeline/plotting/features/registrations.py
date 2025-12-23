@@ -30,7 +30,12 @@ from eeg_pipeline.plotting.features.connectivity import (
     plot_connectivity_network,
     plot_sliding_connectivity_trajectories,
 )
-from eeg_pipeline.plotting.features.erds import plot_erds_temporal_evolution
+from eeg_pipeline.plotting.features.erds import (
+    plot_erds_temporal_evolution,
+    plot_erds_latency_distribution,
+    plot_erds_erd_ers_separation,
+    plot_erds_global_summary,
+)
 from eeg_pipeline.plotting.features.quality import (
     plot_feature_distribution_grid,
     plot_outlier_trials_heatmap,
@@ -39,6 +44,22 @@ from eeg_pipeline.plotting.features.quality import (
 from eeg_pipeline.plotting.features.complexity import (
     plot_complexity_by_condition,
     plot_complexity_by_band,
+)
+from eeg_pipeline.plotting.features.spectral import (
+    plot_spectral_summary,
+    plot_spectral_edge_frequency,
+)
+from eeg_pipeline.plotting.features.ratios import (
+    plot_ratios_by_pair,
+    plot_ratios_by_condition,
+)
+from eeg_pipeline.plotting.features.asymmetry import (
+    plot_asymmetry_by_band,
+    plot_asymmetry_by_condition,
+)
+from eeg_pipeline.plotting.features.bursts import (
+    plot_bursts_by_band,
+    plot_bursts_by_condition,
 )
 from eeg_pipeline.plotting.features.phase import (
     plot_itpc_heatmap,
@@ -63,12 +84,12 @@ from eeg_pipeline.plotting.features.roi import (
     plot_aperiodic_by_roi_condition,
     plot_band_segment_condition,
     plot_connectivity_by_roi_band_condition,
+    plot_temporal_evolution,
     plot_itpc_by_roi_band_condition,
     plot_itpc_active_vs_baseline,
     plot_pac_by_roi_condition,
     plot_power_by_roi_band_condition,
     plot_power_active_vs_baseline,
-    plot_temporal_evolution,
 )
 from eeg_pipeline.plotting.erp import (
     plot_butterfly_erp,
@@ -134,6 +155,42 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
                 save_dir=aper_dir,
                 logger=ctx.logger,
                 config=ctx.config,
+            )
+
+            safe_plot(
+                ctx,
+                saved_files,
+                "aperiodic_band_segment_condition",
+                "aperiodic",
+                None,
+                plot_band_segment_condition,
+                ctx.all_features,
+                ctx.aligned_events,
+                ctx.subject,
+                aper_dir,
+                ctx.logger,
+                ctx.config,
+                "aperiodic",
+                "Aperiodic",
+                ["baseline", "active"],
+            )
+
+        if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+            safe_plot(
+                ctx,
+                saved_files,
+                "aperiodic_temporal_evolution",
+                "aperiodic",
+                None,
+                plot_temporal_evolution,
+                ctx.all_features,
+                ctx.aligned_events,
+                ctx.subject,
+                aper_dir,
+                ctx.logger,
+                ctx.config,
+                "aperiodic",
+                "Aperiodic",
             )
 
 
@@ -315,6 +372,42 @@ def plot_erds(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
+    safe_plot(
+        ctx,
+        saved_files,
+        "erds_latency_distribution",
+        "erds",
+        None,
+        plot_erds_latency_distribution,
+        features_df=ctx.erds_df,
+        save_path=erds_dir / f"sub-{ctx.subject}_erds_latency_distribution",
+        config=ctx.config,
+    )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "erds_erd_ers_separation",
+        "erds",
+        None,
+        plot_erds_erd_ers_separation,
+        features_df=ctx.erds_df,
+        save_path=erds_dir / f"sub-{ctx.subject}_erds_erd_ers_separation",
+        config=ctx.config,
+    )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "erds_global_summary",
+        "erds",
+        None,
+        plot_erds_global_summary,
+        features_df=ctx.erds_df,
+        save_path=erds_dir / f"sub-{ctx.subject}_erds_global_summary",
+        config=ctx.config,
+    )
+
 
 ###################################################################
 # Complexity
@@ -354,6 +447,377 @@ def plot_complexity(ctx: FeaturePlotContext, saved_files):
             save_path=comp_dir / f"sub-{ctx.subject}_complexity_by_condition",
             config=ctx.config,
         )
+
+    if ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "complexity_band_segment_condition",
+            "complexity",
+            None,
+            plot_band_segment_condition,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            comp_dir,
+            ctx.logger,
+            ctx.config,
+            "comp",
+            "Complexity",
+            ["baseline", "active"],
+        )
+
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "complexity_temporal_evolution",
+            "complexity",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            comp_dir,
+            ctx.logger,
+            ctx.config,
+            "comp",
+            "Complexity",
+        )
+
+###################################################################
+# Spectral
+###################################################################
+
+
+@VisualizationRegistry.register("spectral")
+def plot_spectral(ctx: FeaturePlotContext, saved_files):
+    if ctx.spectral_df is None:
+        return
+
+    spectral_dir = ctx.subdir("spectral")
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "spectral_summary",
+        "spectral",
+        None,
+        plot_spectral_summary,
+        features_df=ctx.spectral_df,
+        save_path=spectral_dir / f"sub-{ctx.subject}_spectral_summary",
+        config=ctx.config,
+    )
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "spectral_edge_frequency",
+        "spectral",
+        None,
+        plot_spectral_edge_frequency,
+        features_df=ctx.spectral_df,
+        save_path=spectral_dir / f"sub-{ctx.subject}_spectral_edge_frequency",
+        config=ctx.config,
+    )
+
+    if ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "spectral_band_segment_condition",
+            "spectral",
+            None,
+            plot_band_segment_condition,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            spectral_dir,
+            ctx.logger,
+            ctx.config,
+            "spectral",
+            "Spectral Peak",
+            ["baseline", "active"],
+        )
+
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "spectral_temporal_evolution",
+            "spectral",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            spectral_dir,
+            ctx.logger,
+            ctx.config,
+            "spectral",
+            "Spectral Peak",
+        )
+
+
+###################################################################
+# Ratios
+###################################################################
+
+
+@VisualizationRegistry.register("ratios")
+def plot_ratios(ctx: FeaturePlotContext, saved_files):
+    if ctx.ratios_df is None:
+        return
+
+    ratios_dir = ctx.subdir("ratios")
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "ratios_by_pair",
+        "ratios",
+        None,
+        plot_ratios_by_pair,
+        features_df=ctx.ratios_df,
+        save_path=ratios_dir / f"sub-{ctx.subject}_ratios_by_pair",
+        config=ctx.config,
+    )
+
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "ratios_by_condition",
+            "ratios",
+            None,
+            plot_ratios_by_condition,
+            features_df=ctx.ratios_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_path=ratios_dir / f"sub-{ctx.subject}_ratios_by_condition",
+            config=ctx.config,
+        )
+
+    if ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "ratios_band_segment_condition",
+            "ratios",
+            None,
+            plot_band_segment_condition,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            ratios_dir,
+            ctx.logger,
+            ctx.config,
+            "ratios",
+            "Band Ratios",
+            ["baseline", "active"],
+        )
+
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "ratios_temporal_evolution",
+            "ratios",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            ratios_dir,
+            ctx.logger,
+            ctx.config,
+            "ratios",
+            "Band Ratios",
+        )
+
+
+###################################################################
+# Asymmetry
+###################################################################
+
+
+@VisualizationRegistry.register("asymmetry")
+def plot_asymmetry(ctx: FeaturePlotContext, saved_files):
+    if ctx.asymmetry_df is None:
+        return
+
+    asym_dir = ctx.subdir("asymmetry")
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "asymmetry_by_band",
+        "asymmetry",
+        None,
+        plot_asymmetry_by_band,
+        features_df=ctx.asymmetry_df,
+        save_path=asym_dir / f"sub-{ctx.subject}_asymmetry_by_band",
+        config=ctx.config,
+    )
+
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "asymmetry_by_condition",
+            "asymmetry",
+            None,
+            plot_asymmetry_by_condition,
+            features_df=ctx.asymmetry_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_path=asym_dir / f"sub-{ctx.subject}_asymmetry_by_condition",
+            config=ctx.config,
+        )
+
+    if ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "asymmetry_band_segment_condition",
+            "asymmetry",
+            None,
+            plot_band_segment_condition,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            asym_dir,
+            ctx.logger,
+            ctx.config,
+            "asymmetry",
+            "Hemispheric Asymmetry",
+            ["baseline", "active"],
+        )
+
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "asymmetry_temporal_evolution",
+            "asymmetry",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            asym_dir,
+            ctx.logger,
+            ctx.config,
+            "asymmetry",
+            "Hemispheric Asymmetry",
+        )
+
+
+###################################################################
+# Bursts
+###################################################################
+
+
+@VisualizationRegistry.register("bursts")
+def plot_bursts(ctx: FeaturePlotContext, saved_files):
+    if ctx.bursts_df is None:
+        return
+
+    bursts_dir = ctx.subdir("bursts")
+
+    safe_plot(
+        ctx,
+        saved_files,
+        "bursts_by_band",
+        "bursts",
+        None,
+        plot_bursts_by_band,
+        features_df=ctx.bursts_df,
+        save_path=bursts_dir / f"sub-{ctx.subject}_bursts_by_band",
+        config=ctx.config,
+    )
+
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "bursts_by_condition",
+            "bursts",
+            None,
+            plot_bursts_by_condition,
+            features_df=ctx.bursts_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_path=bursts_dir / f"sub-{ctx.subject}_bursts_by_condition",
+            config=ctx.config,
+        )
+
+    if ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "burst_band_segment_condition",
+            "bursts",
+            None,
+            plot_band_segment_condition,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            bursts_dir,
+            ctx.logger,
+            ctx.config,
+            "bursts",
+            "Burst Dynamics",
+            ["baseline", "active"],
+        )
+
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "burst_temporal_evolution",
+            "bursts",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            bursts_dir,
+            ctx.logger,
+            ctx.config,
+            "bursts",
+            "Burst Dynamics",
+        )
+
+
+###################################################################
+# Temporal
+###################################################################
+
+
+@VisualizationRegistry.register("temporal")
+def plot_temporal(ctx: FeaturePlotContext, saved_files):
+    temporal_df = ctx.temporal_df
+    if temporal_df is None or ctx.aligned_events is None:
+        return
+
+    temporal_dir = ctx.subdir("temporal")
+    safe_plot(
+        ctx,
+        saved_files,
+        "temporal_evolution",
+        "temporal",
+        None,
+        plot_temporal_evolution,
+        temporal_df,
+        ctx.aligned_events,
+        ctx.subject,
+        temporal_dir,
+        ctx.logger,
+        ctx.config,
+        feature_prefix="power",
+        feature_label="Band Power",
+    )
 
 
 ###################################################################
@@ -460,6 +924,24 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ["baseline", "active"],
         )
 
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "itpc_temporal_evolution",
+            "itpc",
+            None,
+            plot_temporal_evolution,
+            ctx.all_features,
+            ctx.aligned_events,
+            ctx.subject,
+            itpc_dir,
+            ctx.logger,
+            ctx.config,
+            "itpc",
+            "ITPC",
+        )
+
     if ctx.itpc_df is not None:
         safe_plot(
             ctx,
@@ -525,7 +1007,7 @@ def pac_suite(ctx: FeaturePlotContext, saved_files):
     pac_dir = ctx.subdir("pac")
     pac_long = ctx.pac_df
     if pac_long is None and ctx.pac_trials_df is not None:
-        pac_long = convert_pac_wide_to_long(ctx.pac_trials_df, logger=ctx.logger)
+        pac_long = convert_pac_wide_to_long(ctx.pac_trials_df, logger=ctx.logger, config=ctx.config)
     if pac_long is not None:
         safe_plot(
             ctx,
@@ -685,7 +1167,7 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
             ctx.config,
         )
 
-    if ctx.all_features is not None and ctx.aligned_events is not None:
+    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
         safe_plot(
             ctx,
             saved_files,

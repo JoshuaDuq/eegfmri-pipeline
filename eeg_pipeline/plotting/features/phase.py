@@ -20,7 +20,6 @@ from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
-from scipy import stats
 
 
 def plot_itpc_heatmap(
@@ -113,38 +112,68 @@ def plot_itpc_topomaps(
     if required_cols.issubset(set(itpc_df.columns)):
         df_long = itpc_df
     else:
-        # Convert from wide format: itpc_{segment}_{band}_ch_{channel}_val
-        itpc_cols = [c for c in itpc_df.columns if c.startswith("itpc_") and "_ch_" in c]
-        if not itpc_cols:
-            log_if_present(logger, "warning", "No ITPC columns found in wide format; skipping topomaps")
-            return
-        
+        from eeg_pipeline.domain.features.naming import NamingSchema
+
         rows = []
-        for col in itpc_cols:
-            # Parse column name: itpc_{segment}_{band}_ch_{channel}_val
-            parts = col.replace("itpc_", "").replace("_val", "").split("_ch_")
-            if len(parts) != 2:
+        for col in itpc_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
                 continue
-            segment_band = parts[0]
-            channel = parts[1]
-            # Split segment and band
-            sb_parts = segment_band.split("_")
-            if len(sb_parts) >= 2:
-                segment = sb_parts[0]
-                band = "_".join(sb_parts[1:])  # Handle multi-word bands
-                # Use mean across trials as the ITPC value for topomap
-                itpc_val = itpc_df[col].mean()
-                rows.append({
-                    "channel": channel,
-                    "band": band,
-                    "time_bin": segment,  # Use segment as time_bin
-                    "itpc": itpc_val
-                })
-        
+            if parsed.get("group") != "itpc":
+                continue
+            if parsed.get("scope") != "ch":
+                continue
+            if parsed.get("stat") not in ("val", "mean", "avg", "value"):
+                continue
+            band = parsed.get("band")
+            segment = parsed.get("segment")
+            channel = parsed.get("identifier")
+            if not band or not segment or not channel:
+                continue
+            itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
+            rows.append(
+                {
+                    "channel": str(channel),
+                    "band": str(band),
+                    "time_bin": str(segment),
+                    "itpc": itpc_val,
+                }
+            )
+
+        if not rows:
+            # Convert from wide format: itpc_{segment}_{band}_ch_{channel}_val
+            itpc_cols = [c for c in itpc_df.columns if c.startswith("itpc_") and "_ch_" in c]
+            if not itpc_cols:
+                log_if_present(logger, "warning", "No ITPC columns found in wide format; skipping topomaps")
+                return
+
+            for col in itpc_cols:
+                # Parse column name: itpc_{segment}_{band}_ch_{channel}_val
+                parts = col.replace("itpc_", "").replace("_val", "").split("_ch_")
+                if len(parts) != 2:
+                    continue
+                segment_band = parts[0]
+                channel = parts[1]
+                # Split segment and band
+                sb_parts = segment_band.split("_")
+                if len(sb_parts) >= 2:
+                    segment = sb_parts[0]
+                    band = "_".join(sb_parts[1:])  # Handle multi-word bands
+                    # Use mean across trials as the ITPC value for topomap
+                    itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
+                    rows.append(
+                        {
+                            "channel": channel,
+                            "band": band,
+                            "time_bin": segment,
+                            "itpc": itpc_val,
+                        }
+                    )
+
         if not rows:
             log_if_present(logger, "warning", "Could not parse ITPC columns; skipping topomaps")
             return
-        
+
         df_long = pd.DataFrame(rows)
 
     plot_cfg = get_plot_config(config)
@@ -308,7 +337,15 @@ def plot_itpc_by_condition(
     """
     if itpc_df is None or itpc_df.empty or events_df is None:
         return
-    
+
+    if len(itpc_df) != len(events_df):
+        log_if_present(
+            logger,
+            "warning",
+            f"ITPC by condition skipped: {len(itpc_df)} rows vs {len(events_df)} events",
+        )
+        return
+
     pain_mask = extract_pain_mask(events_df, config)
     if pain_mask is None:
         return
@@ -740,88 +777,196 @@ def plot_pac_by_condition(
     """Compare PAC between Pain and Non-pain using box+strip plots."""
     if pac_trials_df is None or pac_trials_df.empty or events_df is None:
         return
+    if len(pac_trials_df) != len(events_df):
+        log_if_present(
+            logger,
+            "warning",
+            f"PAC by condition skipped: {len(pac_trials_df)} rows vs {len(events_df)} events",
+        )
+        return
 
     pain_mask = extract_pain_mask(events_df, config)
     if pain_mask is None:
         return
-    
-    # Check if DataFrame has required 'roi' column (long format)
-    if 'roi' not in pac_trials_df.columns:
-        log_if_present(logger, "debug", "PAC DataFrame missing 'roi' column - skipping condition plot")
+
+    from eeg_pipeline.plotting.features.utils import (
+        get_named_segments,
+        get_named_bands,
+        collect_named_series,
+        compute_condition_stats,
+        apply_fdr_correction,
+        format_stats_annotation,
+        format_footer_annotation,
+        get_condition_colors,
+    )
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    segments = get_named_segments(pac_trials_df, group="pac")
+    if not segments:
         return
-        
-    if len(pac_trials_df) % len(events_df) != 0:
+    segment = "active" if "active" in segments else segments[0]
+
+    pairs = get_named_bands(pac_trials_df, group="pac", segment=segment)
+    if not pairs:
         return
-    
-    rois = sorted(pac_trials_df['roi'].unique())
-    n_rois = len(rois)
-    if n_rois == 0:
-        return
-    
-    condition_colors = get_condition_colors(config)
+
+    cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
+    if cfg_pairs is None:
+        cfg_pairs = get_config_value(config, "feature_engineering.pac.pairs", None)
+    ordered_pairs = []
+    for entry in cfg_pairs or []:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            ordered_pairs.append(f"{entry[0]}_{entry[1]}")
+        elif isinstance(entry, str):
+            ordered_pairs.append(entry)
+    if ordered_pairs:
+        pairs = [p for p in ordered_pairs if p in pairs] + [p for p in pairs if p not in ordered_pairs]
+
     plot_cfg = get_plot_config(config)
-    
-    # Calculate figure size dynamically
-    width_per_roi = float(plot_cfg.plot_type_configs.get("pac", {}).get("width_per_roi", 4.0))
+    condition_colors = get_condition_colors(config)
+
+    width_per_pair = float(plot_cfg.plot_type_configs.get("pac", {}).get("width_per_roi", 4.0))
     fig_height = float(plot_cfg.plot_type_configs.get("pac", {}).get("height_box", 5.0))
-    fig, axes = plt.subplots(1, n_rois, figsize=(width_per_roi * n_rois, fig_height), squeeze=False)
+    fig, axes = plt.subplots(1, len(pairs), figsize=(width_per_pair * len(pairs), fig_height), squeeze=False)
     axes = axes.flatten()
-        
-    for i, roi in enumerate(rois):
-        ax = axes[i]
-        
-        df_roi = pac_trials_df[pac_trials_df['roi'] == roi]
-        
-        if 'trial_idx' not in df_roi.columns:
-            ax.text(0.5, 0.5, "No trial data", ha="center", va="center", transform=ax.transAxes)
-            continue
-            
-        trial_pac = df_roi.groupby('trial_idx')['pac'].mean().reindex(range(len(events_df)), fill_value=np.nan)
-        
-        vals_pain = trial_pac[pain_mask].dropna().values
-        vals_nonpain = trial_pac[~pain_mask].dropna().values
-        
-        if len(vals_pain) < 3 or len(vals_nonpain) < 3:
+
+    all_stats = []
+    all_pvals = []
+    pair_data = {}
+
+    stat_preference = ["val", "mean", "avg", "value"]
+
+    for pair in pairs:
+        series, _, _ = collect_named_series(
+            pac_trials_df,
+            group="pac",
+            segment=segment,
+            band=pair,
+            stat_preference=stat_preference,
+            scope_preference=["global", "roi", "ch"],
+        )
+        vals_pain = series[pain_mask].dropna().values
+        vals_nonpain = series[~pain_mask].dropna().values
+        if len(vals_pain) >= 3 and len(vals_nonpain) >= 3:
+            stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
+            all_stats.append(stats_result)
+            all_pvals.append(stats_result["p_raw"])
+            pair_data[pair] = (vals_nonpain, vals_pain, stats_result, len(all_stats) - 1)
+        else:
+            pair_data[pair] = (vals_nonpain, vals_pain, None, None)
+
+    if all_pvals:
+        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
+        if valid_pvals:
+            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
+            q_idx = 0
+            for i, p in enumerate(all_pvals):
+                if np.isfinite(p):
+                    all_stats[i]["q_fdr"] = qvals[q_idx]
+                    all_stats[i]["fdr_significant"] = rejected[q_idx]
+                    q_idx += 1
+            n_significant = int(np.sum(rejected))
+        else:
+            n_significant = 0
+    else:
+        n_significant = 0
+
+    for idx, pair in enumerate(pairs):
+        ax = axes[idx]
+        vals_nonpain, vals_pain, stats_result, _ = pair_data[pair]
+
+        if len(vals_nonpain) < 3 or len(vals_pain) < 3:
             ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center", transform=ax.transAxes)
+            ax.set_xticks([])
             continue
-        
+
         bp = ax.boxplot([vals_nonpain, vals_pain], positions=[0, 1], widths=0.4, patch_artist=True)
         bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
         bp["boxes"][0].set_alpha(0.6)
         bp["boxes"][1].set_facecolor(condition_colors["pain"])
         bp["boxes"][1].set_alpha(0.6)
-        
-        ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
-                  vals_nonpain, c=condition_colors["nonpain"], alpha=0.4, s=12)
-        ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
-                  vals_pain, c=condition_colors["pain"], alpha=0.4, s=12)
-        
-        try:
-            _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
-            sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
-            if sig:
-                ax.text(0.5, 0.95, f"p={p:.3f}{sig}", ha="center", va="top", 
-                       transform=ax.transAxes, fontsize=plot_cfg.font.large)
-        except ValueError:
-            pass
-        
+
+        ax.scatter(
+            np.random.uniform(-0.1, 0.1, len(vals_nonpain)),
+            vals_nonpain,
+            c=condition_colors["nonpain"],
+            alpha=0.4,
+            s=12,
+        )
+        ax.scatter(
+            1 + np.random.uniform(-0.1, 0.1, len(vals_pain)),
+            vals_pain,
+            c=condition_colors["pain"],
+            alpha=0.4,
+            s=12,
+        )
+
+        if stats_result is not None:
+            annotation = format_stats_annotation(
+                p_raw=stats_result["p_raw"],
+                q_fdr=stats_result.get("q_fdr"),
+                cohens_d=stats_result["cohens_d"],
+                ci_low=stats_result["ci_low"],
+                ci_high=stats_result["ci_high"],
+                compact=True,
+            )
+            text_color = plot_cfg.style.colors.significant if stats_result.get("fdr_significant", False) else plot_cfg.style.colors.gray
+            ax.text(
+                0.5,
+                0.98,
+                annotation,
+                ha="center",
+                va="top",
+                transform=ax.transAxes,
+                fontsize=plot_cfg.font.annotation,
+                color=text_color,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8),
+            )
+
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Non-pain", "Pain"], fontsize=plot_cfg.font.large)
+        ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.large)
         ax.set_ylabel("Mean PAC")
-        ax.set_title(f"ROI: {roi[:15]}" if len(roi) > 15 else f"ROI: {roi}", fontsize=plot_cfg.font.title)
+        ax.set_title(pair.replace("_", "→"), fontsize=plot_cfg.font.title, fontweight="bold")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-    
-    fig.suptitle("PAC by Condition", fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-        
-    plt.tight_layout()
-    save_fig(fig, save_dir / f"sub-{subject}_pac_by_condition", 
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi)
+
+    n_pain = int(pain_mask.sum())
+    n_nonpain = int((~pain_mask).sum())
+    fig.suptitle(
+        f"PAC by Condition ({segment.replace('_', ' ').title()}, sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
+        fontsize=plot_cfg.font.figure_title,
+        fontweight="bold",
+        y=1.02,
+    )
+
+    n_tests = len([p for p in all_pvals if np.isfinite(p)])
+    footer = format_footer_annotation(
+        n_tests=n_tests,
+        correction_method="FDR-BH",
+        alpha=0.05,
+        n_significant=n_significant,
+        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant",
+    )
+    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+    save_fig(
+        fig,
+        save_dir / f"sub-{subject}_pac_by_condition",
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
     plt.close(fig)
     log_if_present(logger, "info", "Saved PAC by condition comparison")
 
 
-def convert_pac_wide_to_long(pac_df: pd.DataFrame, logger: Optional[logging.Logger] = None) -> Optional[pd.DataFrame]:
+def convert_pac_wide_to_long(
+    pac_df: pd.DataFrame,
+    logger: Optional[logging.Logger] = None,
+    config: Any = None,
+) -> Optional[pd.DataFrame]:
     """Convert PAC data from wide format to long format for comodulograms.
     
     This function parses standard PAC column names (pac_segment_phase_amp_ch_stat)
@@ -830,58 +975,65 @@ def convert_pac_wide_to_long(pac_df: pd.DataFrame, logger: Optional[logging.Logg
     """
     records = []
     
-    # Heuristic mapping if real freqs not in name
-    # If the band naming scheme changes, this needs update or config lookup
-    # This assumes standard "delta", "theta", etc. names.
-    # It attempts to map them to center frequencies.
-    phase_freq_map = {'delta': 2.5, 'theta': 6, 'alpha': 10, 'beta': 20, 'gamma': 40}
-    amp_freq_map = {'delta': 2.5, 'theta': 6, 'alpha': 10, 'beta': 20, 'gamma': 40}
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    band_defs = get_config_value(config, "time_frequency_analysis.bands", {}) or {}
+    center_freq_map = {}
+    for band, bounds in band_defs.items():
+        try:
+            low, high = float(bounds[0]), float(bounds[1])
+        except Exception:
+            continue
+        center_freq_map[str(band)] = (low + high) / 2.0
+
+    if not center_freq_map:
+        center_freq_map = {"delta": 2.5, "theta": 6, "alpha": 10, "beta": 20, "gamma": 40}
     
     # Iterate columns
     for col in pac_df.columns:
-        # Expected: pac_active_theta_beta_ch_Fp1_pac
-        # or pac_active_theta_beta_ch_Fp1_mi
-        if not str(col).startswith('pac_'):
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "pac":
+            band_pair = str(parsed.get("band") or "")
+        else:
+            # Expected: pac_active_theta_beta_ch_Fp1_pac
+            # or pac_active_theta_beta_ch_Fp1_mi
+            if not str(col).startswith('pac_'):
+                continue
+
+            parts = str(col).split('_')
+            band_pair = ""
+            # parts: [pac, <segment>, <phase>, <amp>, ..., val]
+            # We need identifying band names.
+            # Heuristic: look for band names in parts
+            parts_bands = [p for p in parts if p in center_freq_map]
+            if len(parts_bands) >= 2:
+                band_pair = f"{parts_bands[0]}_{parts_bands[1]}"
+
+        if not band_pair or "_" not in band_pair:
             continue
-            
-        parts = str(col).split('_')
-        # parts: [pac, <segment>, <phase>, <amp>, ..., val]
-        # We need identifying band names.
-        
-        # Heuristic: look for band names in parts
-        phase_band = None
-        amp_band = None
-        
-        # Try to find bands from known maps
-        # Note: this is fragile if band names are non-standard or duplicates
-        # We assume order: phase then amp
-        parts_bands = [p for p in parts if p in phase_freq_map]
-        if len(parts_bands) >= 2:
-            phase_band = parts_bands[0]
-            amp_band = parts_bands[1]
-        
-        if not phase_band or not amp_band:
+
+        phase_band, amp_band = band_pair.split("_", 1)
+        if phase_band not in center_freq_map or amp_band not in center_freq_map:
             continue
             
         # ROI?
         # Look for "ch" or "ch_"
         roi = "Global"
+        parts = str(col).split('_')
         if "ch" in parts:
             idx = parts.index("ch")
             if idx + 1 < len(parts):
-                roi = parts[idx+1]
+                roi = parts[idx + 1]
         elif any(p.startswith("chpair") for p in parts):
-             # PAC usually done per channel but could be cross-channel
-             # If cross-channel, maybe skip or handle
-             continue
+            continue
              
-        val = pac_df[col].mean() # Average over trials if multiple rows, or single row
+        val = pac_df[col].mean()
         
         if pd.notna(val):
             records.append({
                 'roi': roi,
-                'phase_freq': phase_freq_map[phase_band],
-                'amp_freq': amp_freq_map[amp_band],
+                'phase_freq': center_freq_map[phase_band],
+                'amp_freq': center_freq_map[amp_band],
                 'pac': val
             })
             

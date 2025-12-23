@@ -162,6 +162,7 @@ def select_named_columns(
     group: str,
     segment: str,
     band: str,
+    identifier: Optional[str] = None,
     stat_preference: Optional[List[str]] = None,
     scope_preference: Optional[List[str]] = None,
 ) -> Tuple[List[str], Optional[str], Optional[str]]:
@@ -191,6 +192,8 @@ def select_named_columns(
                     continue
                 if scope and str(parsed.get("scope") or "") != str(scope):
                     continue
+                if identifier is not None and str(parsed.get("identifier") or "") != str(identifier):
+                    continue
                 if stat and str(parsed.get("stat") or "") != str(stat):
                     continue
                 cols.append(str(col))
@@ -205,6 +208,7 @@ def collect_named_series(
     group: str,
     segment: str,
     band: str,
+    identifier: Optional[str] = None,
     stat_preference: Optional[List[str]] = None,
     scope_preference: Optional[List[str]] = None,
 ) -> Tuple[pd.Series, Optional[str], Optional[str]]:
@@ -214,6 +218,7 @@ def collect_named_series(
         group=group,
         segment=segment,
         band=band,
+        identifier=identifier,
         stat_preference=stat_preference,
         scope_preference=scope_preference,
     )
@@ -758,4 +763,3 @@ def compute_variability_metrics(
         "iqr": float(iqr),
         "mad": float(mad),
     }
-

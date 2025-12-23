@@ -1,7 +1,8 @@
 """
 Features plotting module.
 
-Power, connectivity, phase, aperiodic, and complexity feature visualizations.
+Power, connectivity, phase, aperiodic, complexity, spectral, ratios, asymmetry,
+bursts, and temporal feature visualizations.
 """
 
 from __future__ import annotations
@@ -80,6 +81,18 @@ __all__ = [
     "plot_erds_latency_distribution",
     "plot_erds_erd_ers_separation",
     "plot_erds_global_summary",
+    # Spectral visualizations
+    "plot_spectral_summary",
+    "plot_spectral_edge_frequency",
+    # Ratio visualizations
+    "plot_ratios_by_pair",
+    "plot_ratios_by_condition",
+    # Asymmetry visualizations
+    "plot_asymmetry_by_band",
+    "plot_asymmetry_by_condition",
+    # Burst visualizations
+    "plot_bursts_by_band",
+    "plot_bursts_by_condition",
 ]
 
 
@@ -141,6 +154,18 @@ def __getattr__(name: str):
         "plot_erds_latency_distribution": "erds",
         "plot_erds_erd_ers_separation": "erds",
         "plot_erds_global_summary": "erds",
+        # Spectral visualizations
+        "plot_spectral_summary": "spectral",
+        "plot_spectral_edge_frequency": "spectral",
+        # Ratio visualizations
+        "plot_ratios_by_pair": "ratios",
+        "plot_ratios_by_condition": "ratios",
+        # Asymmetry visualizations
+        "plot_asymmetry_by_band": "asymmetry",
+        "plot_asymmetry_by_condition": "asymmetry",
+        # Burst visualizations
+        "plot_bursts_by_band": "bursts",
+        "plot_bursts_by_condition": "bursts",
     }
 
     module_name = _module_map.get(name)

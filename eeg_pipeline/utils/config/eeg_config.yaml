@@ -399,6 +399,17 @@ plotting:
     complexity:
       width_per_measure: 4.5
       height_per_segment: 4.0
+    features:
+      spectral:
+        metrics: ["peak_freq", "center_freq", "bandwidth", "entropy", "peak_power", "logratio_mean", "logratio_std", "slope"]
+      asymmetry:
+        stat: "index"
+      bursts:
+        metrics: ["rate", "count", "duration_mean", "amp_mean", "fraction"]
+      pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
+      temporal:
+        time_bins: ["coarse_early", "coarse_mid", "coarse_late"]
+        time_labels: ["Early", "Mid", "Late"]
 
 ###################################################################
 # 7. SYSTEM & LOGGING
