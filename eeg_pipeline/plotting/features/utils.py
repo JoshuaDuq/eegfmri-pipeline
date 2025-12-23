@@ -27,6 +27,7 @@ from eeg_pipeline.utils.analysis.stats.bootstrap import (
     bootstrap_mean_diff_ci as _bootstrap_mean_diff_ci,
 )
 from eeg_pipeline.utils.analysis.stats.validation import check_normality_shapiro
+from eeg_pipeline.domain.features.naming import NamingSchema
 
 
 ###################################################################
@@ -108,6 +109,122 @@ def get_numeric_feature_columns(
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     return [c for c in numeric_cols if c not in exclude_set]
+
+
+def get_named_segments(
+    df: pd.DataFrame,
+    *,
+    group: Optional[str] = None,
+) -> List[str]:
+    """Return available NamingSchema segments for a feature group."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    segments = set()
+    for col in df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if group and parsed.get("group") != group:
+            continue
+        segment = parsed.get("segment")
+        if segment:
+            segments.add(str(segment))
+    return sorted(segments)
+
+
+def get_named_bands(
+    df: pd.DataFrame,
+    *,
+    group: Optional[str] = None,
+    segment: Optional[str] = None,
+) -> List[str]:
+    """Return available NamingSchema bands for a feature group/segment."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return []
+    bands = set()
+    for col in df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if group and parsed.get("group") != group:
+            continue
+        if segment and str(parsed.get("segment") or "") != str(segment):
+            continue
+        band = parsed.get("band")
+        if band:
+            bands.add(str(band))
+    return sorted(bands)
+
+
+def select_named_columns(
+    df: pd.DataFrame,
+    *,
+    group: str,
+    segment: str,
+    band: str,
+    stat_preference: Optional[List[str]] = None,
+    scope_preference: Optional[List[str]] = None,
+) -> Tuple[List[str], Optional[str], Optional[str]]:
+    """Return columns and matched scope/stat for NamingSchema features."""
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return [], None, None
+
+    stat_preference = list(stat_preference or [])
+    scope_preference = list(scope_preference or [])
+    if not stat_preference:
+        stat_preference = [None]
+    if not scope_preference:
+        scope_preference = [None]
+
+    for scope in scope_preference:
+        for stat in stat_preference:
+            cols = []
+            for col in df.columns:
+                parsed = NamingSchema.parse(str(col))
+                if not parsed.get("valid"):
+                    continue
+                if parsed.get("group") != group:
+                    continue
+                if str(parsed.get("segment") or "") != str(segment):
+                    continue
+                if str(parsed.get("band") or "") != str(band):
+                    continue
+                if scope and str(parsed.get("scope") or "") != str(scope):
+                    continue
+                if stat and str(parsed.get("stat") or "") != str(stat):
+                    continue
+                cols.append(str(col))
+            if cols:
+                return cols, scope, stat
+    return [], None, None
+
+
+def collect_named_series(
+    df: pd.DataFrame,
+    *,
+    group: str,
+    segment: str,
+    band: str,
+    stat_preference: Optional[List[str]] = None,
+    scope_preference: Optional[List[str]] = None,
+) -> Tuple[pd.Series, Optional[str], Optional[str]]:
+    """Return per-trial series aggregated across matching NamingSchema columns."""
+    cols, scope, stat = select_named_columns(
+        df,
+        group=group,
+        segment=segment,
+        band=band,
+        stat_preference=stat_preference,
+        scope_preference=scope_preference,
+    )
+    if not cols:
+        return pd.Series(dtype=float), None, None
+
+    if len(cols) == 1:
+        series = pd.to_numeric(df[cols[0]], errors="coerce")
+    else:
+        series = df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return series, scope, stat
 
 
 ###################################################################
@@ -641,5 +758,4 @@ def compute_variability_metrics(
         "iqr": float(iqr),
         "mad": float(mad),
     }
-
 
