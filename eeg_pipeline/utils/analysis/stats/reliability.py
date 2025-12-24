@@ -387,6 +387,7 @@ def compute_hierarchical_fdr_summary(
     stats_dir,
     alpha: float = 0.05,
     config: Optional[Any] = None,
+    include_glob: Union[str, Iterable[str]] = "corr_stats_*.tsv",
 ) -> pd.DataFrame:
     """Compute hierarchical FDR summary from stats directory.
     
@@ -400,6 +401,8 @@ def compute_hierarchical_fdr_summary(
         FDR threshold.
     config : Any, optional
         Pipeline configuration.
+    include_glob : str or Iterable[str]
+        Glob pattern(s) for files to include.
     
     Returns
     -------
@@ -412,6 +415,15 @@ def compute_hierarchical_fdr_summary(
     
     stats_dir = Path(stats_dir)
     
+    if isinstance(include_glob, str):
+        files = list(stats_dir.glob(include_glob))
+    else:
+        files = []
+        for pat in include_glob:
+            files.extend(list(stats_dir.glob(pat)))
+        seen = set()
+        files = [f for f in files if not (f in seen or seen.add(f))]
+
     def _extract_feature_family(family: str) -> str:
         if "|features:" in family:
             return str(family.split("|features:", 1)[1]).strip()
@@ -419,7 +431,7 @@ def compute_hierarchical_fdr_summary(
 
     # Group files by feature family, using the same inference as apply_global_fdr
     analysis_groups: Dict[str, List[Path]] = {}
-    for fpath in stats_dir.glob("corr_stats_*.tsv"):
+    for fpath in files:
         df = read_tsv(fpath)
         if df is None or df.empty:
             continue

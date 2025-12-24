@@ -57,7 +57,7 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
     if args.source_root:
         config.setdefault("paths", {})["source_data"] = args.source_root
     if args.bids_root:
-        config._bids_root = Path(args.bids_root)
+        config.setdefault("paths", {})["bids_root"] = str(Path(args.bids_root))
     
     pipeline = UtilityPipeline(config=config)
     target_subjects = subjects or []

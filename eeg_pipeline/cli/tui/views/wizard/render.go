@@ -37,6 +37,7 @@ func (m Model) View() string {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
 		b.WriteString(m.renderModeSelection())
+
 	case types.StepSelectComputations:
 		b.WriteString(m.renderComputationSelection())
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
@@ -177,7 +178,8 @@ func (m Model) renderWithHelpOverlay() string {
 
 func (m Model) renderHeader() string {
 	stepNames := map[types.WizardStep]string{
-		types.StepSelectMode:           "Mode",
+		types.StepSelectMode: "Mode",
+
 		types.StepSelectComputations:   "Analyses",
 		types.StepSelectFeatureFiles:   "Files",
 		types.StepConfigureOptions:     "Features",
@@ -254,6 +256,26 @@ func (m Model) renderHeader() string {
 func (m Model) renderFooter() string {
 	var hints []string
 
+	if m.editingText {
+		hints = []string{
+			styles.RenderKeyHint("Type", "Edit"),
+			styles.RenderKeyHint("Enter", "Save"),
+			styles.RenderKeyHint("Esc", "Cancel"),
+		}
+		separator := "  "
+		return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+	}
+
+	if m.editingNumber {
+		hints = []string{
+			styles.RenderKeyHint("Type", "Enter Number"),
+			styles.RenderKeyHint("Enter", "Save"),
+			styles.RenderKeyHint("Esc", "Cancel"),
+		}
+		separator := "  "
+		return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+	}
+
 	switch m.CurrentStep {
 	case types.StepSelectMode:
 		hints = []string{
@@ -261,6 +283,7 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
+
 	case types.StepSelectComputations, types.StepConfigureOptions, types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots:
 		hints = []string{
 			styles.RenderKeyHint("Space", "Toggle"),

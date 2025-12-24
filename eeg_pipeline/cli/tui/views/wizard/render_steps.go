@@ -883,6 +883,12 @@ func (m Model) renderReview() string {
 	}
 	card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Subjects:") + subjectBadge + "\n")
 
+	taskLabel := m.task
+	if taskLabel == "" {
+		taskLabel = "default"
+	}
+	card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Task:") + valueStyle.Render(taskLabel) + "\n")
+
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		cats := m.SelectedCategories()
 		var chips string
@@ -910,20 +916,33 @@ func (m Model) renderReview() string {
 				if len(measures) > 0 {
 					configs = append(configs, fmt.Sprintf("conn=%s", strings.Join(measures, "+")))
 				}
+				configs = append(configs, fmt.Sprintf("conn_win=%.1fs/%.1fs", m.connWindowLen, m.connWindowStep))
 			}
 			if m.isCategorySelected("pac") {
-				configs = append(configs, fmt.Sprintf("pac=%.0f-%.0f/%.0f-%.0fHz",
-					m.pacPhaseMin, m.pacPhaseMax, m.pacAmpMin, m.pacAmpMax))
+				methods := []string{"mvl", "kl", "tort", "ozkurt"}
+				configs = append(configs, fmt.Sprintf("pac=%s@%.0f-%.0f/%.0f-%.0fHz",
+					methods[m.pacMethod], m.pacPhaseMin, m.pacPhaseMax, m.pacAmpMin, m.pacAmpMax))
 			}
 			if m.isCategorySelected("aperiodic") {
-				configs = append(configs, fmt.Sprintf("aper=%.0f-%.0fHz", m.aperiodicFmin, m.aperiodicFmax))
+				configs = append(configs, fmt.Sprintf("aper=%.0f-%.0fHz(z=%.1f)", m.aperiodicFmin, m.aperiodicFmax, m.aperiodicPeakZ))
 			}
-			if m.isCategorySelected("complexity") && m.complexityPEOrder != 3 {
-				configs = append(configs, fmt.Sprintf("PE=%d", m.complexityPEOrder))
+			if m.isCategorySelected("complexity") {
+				configs = append(configs, fmt.Sprintf("PE=%d(d=%d)", m.complexityPEOrder, m.complexityPEDelay))
 			}
+			if m.isCategorySelected("bursts") {
+				configs = append(configs, fmt.Sprintf("bursts=%.1fz/%dms", m.burstThresholdZ, m.burstMinDuration))
+			}
+			if m.isCategorySelected("power") {
+				modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
+				configs = append(configs, fmt.Sprintf("power=%s", modes[m.powerBaselineMode]))
+			}
+			if m.isCategorySelected("erp") {
+				configs = append(configs, fmt.Sprintf("erp_baseline=%v", m.erpBaselineCorrection))
+			}
+			configs = append(configs, fmt.Sprintf("min_epochs=%d", m.minEpochsForFeatures))
 
 			if len(configs) > 0 {
-				card.WriteString("     " + configStyle.Render(strings.Join(configs, ", ")) + "\n")
+				card.WriteString("     " + configStyle.Render(strings.Join(configs, " | ")) + "\n")
 			}
 		}
 	} else if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -992,6 +1011,99 @@ func (m Model) renderReview() string {
 		}
 		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Output:") +
 			valueStyle.Render(fmt.Sprintf("%s | dpi=%s | savefig=%s", strings.Join(formats, ", "), dpi, savefigDpi)) + "\n")
+	} else if m.Pipeline == types.PipelinePreprocessing {
+		if m.bidsRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
+		}
+		if m.derivRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Deriv Root:") + valueStyle.Render(m.derivRoot) + "\n")
+		}
+
+		if !m.useDefaultAdvanced {
+			var opts []string
+			if !m.prepUsePyprep {
+				opts = append(opts, "pyprep=off")
+			}
+			if !m.prepUseIcalabel {
+				opts = append(opts, "icalabel=off")
+			}
+			if m.prepNJobs != 1 {
+				opts = append(opts, fmt.Sprintf("n_jobs=%d", m.prepNJobs))
+			}
+			if m.prepResample != 500 {
+				opts = append(opts, fmt.Sprintf("resample=%dHz", m.prepResample))
+			}
+			if m.prepLFreq != 0.1 || m.prepHFreq != 100.0 {
+				opts = append(opts, fmt.Sprintf("filter=%.1f-%.1fHz", m.prepLFreq, m.prepHFreq))
+			}
+			if m.prepICAMethod != 0 {
+				method := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+				opts = append(opts, fmt.Sprintf("ica=%s", method))
+			}
+			if m.prepEpochsTmin != -5.0 || m.prepEpochsTmax != 12.0 {
+				opts = append(opts, fmt.Sprintf("epochs=%.1f/%.1fs", m.prepEpochsTmin, m.prepEpochsTmax))
+			}
+
+			if len(opts) > 0 {
+				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
+					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
+			}
+		}
+	} else if m.Pipeline == types.PipelineRawToBIDS {
+		if m.sourceRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Source Root:") + valueStyle.Render(m.sourceRoot) + "\n")
+		}
+		if m.bidsRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
+		}
+		if !m.useDefaultAdvanced {
+			var opts []string
+			if m.rawMontage != "" {
+				opts = append(opts, fmt.Sprintf("montage=%s", m.rawMontage))
+			}
+			if m.rawLineFreq != 60 {
+				opts = append(opts, fmt.Sprintf("line=%dHz", m.rawLineFreq))
+			}
+			if m.rawOverwrite {
+				opts = append(opts, "overwrite")
+			}
+			if m.rawZeroBaseOnsets {
+				opts = append(opts, "zero-base")
+			}
+			if m.rawTrimToFirstVolume {
+				opts = append(opts, "trim")
+			}
+			if m.rawEventPrefixes != "" {
+				opts = append(opts, fmt.Sprintf("prefixes=%s", m.rawEventPrefixes))
+			}
+			if m.rawKeepAnnotations {
+				opts = append(opts, "keep-annotations")
+			}
+			if len(opts) > 0 {
+				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
+					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
+			}
+		}
+	} else if m.Pipeline == types.PipelineMergePsychoPyData {
+		if m.sourceRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Source Root:") + valueStyle.Render(m.sourceRoot) + "\n")
+		}
+		if m.bidsRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
+		}
+		if !m.useDefaultAdvanced {
+			var opts []string
+			if m.mergeEventPrefixes != "" {
+				opts = append(opts, fmt.Sprintf("prefixes=%s", m.mergeEventPrefixes))
+			}
+			if m.mergeEventTypes != "" {
+				opts = append(opts, fmt.Sprintf("types=%s", m.mergeEventTypes))
+			}
+			if len(opts) > 0 {
+				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
+					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
+			}
+		}
 	}
 
 	b.WriteString(styles.CardStyle.Width(m.width-10).Render(card.String()) + "\n\n")
@@ -1051,6 +1163,12 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderBehaviorAdvancedConfig()
 	case types.PipelineDecoding:
 		return m.renderDecodingAdvancedConfig()
+	case types.PipelinePreprocessing:
+		return m.renderPreprocessingAdvancedConfig()
+	case types.PipelineRawToBIDS:
+		return m.renderRawToBidsAdvancedConfig()
+	case types.PipelineMergePsychoPyData:
+		return m.renderMergeBehaviorAdvancedConfig()
 	default:
 		return m.renderDefaultAdvancedConfig()
 	}
@@ -1060,7 +1178,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
-	// Default mode toggle with expand/collapse indicator
+	// Default mode toggle (Cursor 0)
 	expandIcon := "▶"
 	expandHint := "Press Space to customize"
 	if !m.useDefaultAdvanced {
@@ -1068,18 +1186,15 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		expandHint = "Press Space to use defaults"
 	}
 
-	defaultLabel := lipgloss.NewStyle().Foreground(styles.Text).Width(20)
-	if m.advancedCursor == 0 && m.expandedOption < 0 {
-		defaultLabel = defaultLabel.Foreground(styles.Primary).Bold(true)
-	}
-
+	defaultStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(20)
 	toggleStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 	cursor := "  "
 	if m.advancedCursor == 0 && m.expandedOption < 0 {
 		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		defaultStyle = defaultStyle.Foreground(styles.Primary).Bold(true)
 	}
 
-	b.WriteString(cursor + toggleStyle.Render(expandIcon) + " " + defaultLabel.Render("Configuration"))
+	b.WriteString(cursor + toggleStyle.Render(expandIcon) + " " + defaultStyle.Render("Configuration"))
 	if m.useDefaultAdvanced {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("Using Defaults"))
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  — " + expandHint))
@@ -1089,184 +1204,168 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 	b.WriteString("\n\n")
 
-	// When using defaults, show minimal summary, otherwise show full config
 	if m.useDefaultAdvanced {
-		// Collapsed summary - show what defaults will be used
 		summaryStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).MarginLeft(4)
 		b.WriteString(summaryStyle.Render("Default configuration will be used for all parameters.") + "\n")
 		b.WriteString(summaryStyle.Render("Select 'Customize' to modify individual settings.") + "\n")
 		return b.String()
 	}
 
-	// Expanded - show customization options
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	if m.expandedOption >= 0 {
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("  Type a number, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.expandedOption >= 0 {
 		b.WriteString(infoStyle.Render("  Press Space to toggle item, Esc to close.") + "\n\n")
 	} else {
 		b.WriteString(infoStyle.Render("  Press Space to toggle/expand, Enter to proceed.") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := 20
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
 
-	// Build dynamic options list based on selected categories
-	// Note: cursor 0 = Configuration toggle (handled above), options start at cursor 1
-	options := []struct {
+	// Prepare values for display
+	peOrderVal := fmt.Sprintf("%d", m.complexityPEOrder)
+	peDelayVal := fmt.Sprintf("%d", m.complexityPEDelay)
+	burstThreshVal := fmt.Sprintf("%.1f z", m.burstThresholdZ)
+	burstMinDurVal := fmt.Sprintf("%d ms", m.burstMinDuration)
+	erpBaselineVal := m.boolToOnOff(m.erpBaselineCorrection)
+	powerBaselineVal := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}[m.powerBaselineMode]
+	spectralEdgeVal := fmt.Sprintf("%.0f%%", m.spectralEdgePercentile*100)
+	connOutputVal := []string{"full", "global_only"}[m.connOutputLevel]
+	connGraphVal := m.boolToOnOff(m.connGraphMetrics)
+	connGraphPropVal := fmt.Sprintf("%.2f", m.connGraphProp)
+	connWindowLenVal := fmt.Sprintf("%.1f s", m.connWindowLen)
+	connWindowStepVal := fmt.Sprintf("%.1f s", m.connWindowStep)
+	connAecVal := []string{"orth", "none", "sym"}[m.connAECMode]
+	pacPhaseVal := fmt.Sprintf("%.1f-%.1f Hz", m.pacPhaseMin, m.pacPhaseMax)
+	pacAmpVal := fmt.Sprintf("%.1f-%.1f Hz", m.pacAmpMin, m.pacAmpMax)
+	pacMethodVal := []string{"mvl", "kl", "tort", "ozkurt"}[m.pacMethod]
+	pacMinEpochsVal := fmt.Sprintf("%d", m.pacMinEpochs)
+	aperiodicRangeVal := fmt.Sprintf("%.1f-%.1f Hz", m.aperiodicFmin, m.aperiodicFmax)
+	aperiodicPeakZVal := fmt.Sprintf("%.1f", m.aperiodicPeakZ)
+	aperiodicR2Val := fmt.Sprintf("%.2f", m.aperiodicMinR2)
+	aperiodicPointsVal := fmt.Sprintf("%d", m.aperiodicMinPoints)
+	minEpochsVal := fmt.Sprintf("%d", m.minEpochsForFeatures)
+
+	// Input overrides
+	if m.editingNumber {
+		buffer := m.numberBuffer + "█"
+		switch {
+		case m.isCurrentlyEditing(optPEOrder):
+			peOrderVal = buffer
+		case m.isCurrentlyEditing(optPEDelay):
+			peDelayVal = buffer
+		case m.isCurrentlyEditing(optBurstThreshold):
+			burstThreshVal = buffer
+		case m.isCurrentlyEditing(optBurstMinDuration):
+			burstMinDurVal = buffer
+		case m.isCurrentlyEditing(optConnGraphProp):
+			connGraphPropVal = buffer
+		case m.isCurrentlyEditing(optConnWindowLen):
+			connWindowLenVal = buffer
+		case m.isCurrentlyEditing(optConnWindowStep):
+			connWindowStepVal = buffer
+		case m.isCurrentlyEditing(optPACMinEpochs):
+			pacMinEpochsVal = buffer
+		case m.isCurrentlyEditing(optAperiodicPeakZ):
+			aperiodicPeakZVal = buffer
+		case m.isCurrentlyEditing(optAperiodicMinR2):
+			aperiodicR2Val = buffer
+		case m.isCurrentlyEditing(optAperiodicMinPoints):
+			aperiodicPointsVal = buffer
+		case m.isCurrentlyEditing(optMinEpochs):
+			minEpochsVal = buffer
+		}
+	}
+
+	type featOption struct {
 		label      string
 		value      string
 		hint       string
+		group      string
 		expandable bool
 		expandIdx  int
-	}{}
-
-	// Connectivity options
-	if m.isCategorySelected("connectivity") {
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Connectivity", m.selectedConnectivityDisplay(), "Press Space to expand", true, 4})
-
-		outLevel := "full"
-		if m.connOutputLevel == 1 {
-			outLevel = "global_only"
-		}
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Conn Output", outLevel, "full / global_only", false, -1})
-
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Graph Metrics", m.boolToOnOff(m.connGraphMetrics), "Enable network analysis", false, -1})
-
-		aecModes := []string{"orth", "none", "sym"}
-		aecVal := "unknown"
-		if m.connAECMode < len(aecModes) {
-			aecVal = aecModes[m.connAECMode]
-		}
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"AEC Mode", aecVal, "Orthogonalization mode", false, -1})
-
 	}
 
-	// PAC options
+	var options []featOption
+
+	if m.isCategorySelected("connectivity") {
+		options = append(options,
+			featOption{"Connectivity", m.selectedConnectivityDisplay(), "Select measures", "Connectivity", true, 4},
+			featOption{"Output Level", connOutputVal, "full / global_only", "", false, -1},
+			featOption{"Graph Metrics", connGraphVal, "Toggles metric computation", "", false, -1},
+			featOption{"Graph Threshold", connGraphPropVal, "Top edges density", "", false, -1},
+			featOption{"Window length", connWindowLenVal, "Seconds per slice", "", false, -1},
+			featOption{"Window step", connWindowStepVal, "Overlap amount", "", false, -1},
+			featOption{"AEC Mode", connAecVal, "orth/none/sym", "", false, -1},
+		)
+	}
+
 	if m.isCategorySelected("pac") {
 		options = append(options,
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"PAC Phase Range", fmt.Sprintf("%.1f-%.1f Hz", m.pacPhaseMin, m.pacPhaseMax), "Low-freq phase band", false, -1},
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"PAC Amp Range", fmt.Sprintf("%.1f-%.1f Hz", m.pacAmpMin, m.pacAmpMax), "High-freq amplitude band", false, -1},
+			featOption{"Phase range", pacPhaseVal, "Frequencies for phase", "PAC / CFC", false, -1},
+			featOption{"Amp range", pacAmpVal, "Frequencies for amplitude", "", false, -1},
+			featOption{"PAC Method", pacMethodVal, "Algorithm type", "", false, -1},
+			featOption{"Min Epochs", pacMinEpochsVal, "Minimum required", "", false, -1},
 		)
 	}
 
-	// Aperiodic options
 	if m.isCategorySelected("aperiodic") {
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Aperiodic Range", fmt.Sprintf("%.1f-%.1f Hz", m.aperiodicFmin, m.aperiodicFmax), "Spectral fit range", false, -1})
-	}
-
-	// Complexity options
-	if m.isCategorySelected("complexity") {
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"PE Order", fmt.Sprintf("%d", m.complexityPEOrder), "Permutation entropy order (3-7)", false, -1})
-	}
-
-	// ERP options
-	if m.isCategorySelected("erp") {
 		options = append(options,
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"ERP Baseline", m.boolToOnOff(m.erpBaselineCorrection), "Use baseline correction", false, -1},
+			featOption{"Fit range", aperiodicRangeVal, "Frequencies to fit", "Aperiodic Fit", false, -1},
+			featOption{"Peak Z-thresh", aperiodicPeakZVal, "Peak rejection", "", false, -1},
+			featOption{"Min R2", aperiodicR2Val, "Minimum fit quality", "", false, -1},
+			featOption{"Min Points", aperiodicPointsVal, "Minimum bins required", "", false, -1},
 		)
 	}
 
-	// Burst options
+	if m.isCategorySelected("complexity") {
+		options = append(options,
+			featOption{"PE Order", peOrderVal, "Symbol length (3-7)", "Complexity", false, -1},
+			featOption{"PE Delay", peDelayVal, "Sample lag", "", false, -1},
+		)
+	}
+
 	if m.isCategorySelected("bursts") {
 		options = append(options,
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"Burst Threshold", fmt.Sprintf("%.1f z", m.burstThresholdZ), "Z-score threshold", false, -1},
+			featOption{"Threshold Z", burstThreshVal, "Amplitude trigger", "Burst Detection", false, -1},
+			featOption{"Min Duration", burstMinDurVal, "Minimum length", "", false, -1},
 		)
 	}
 
-	// Power options
 	if m.isCategorySelected("power") {
-		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
-		modeVal := "unknown"
-		if m.powerBaselineMode < len(modes) {
-			modeVal = modes[m.powerBaselineMode]
-		}
-
 		options = append(options,
-			struct {
-				label      string
-				value      string
-				hint       string
-				expandable bool
-				expandIdx  int
-			}{"Power Mode", modeVal, "Normalization method", false, -1},
+			featOption{"Baseline mode", powerBaselineVal, "Normalization type", "Power", false, -1},
 		)
 	}
 
-	// Spectral options
 	if m.isCategorySelected("spectral") {
-		options = append(options, struct {
-			label      string
-			value      string
-			hint       string
-			expandable bool
-			expandIdx  int
-		}{"Spectral Edge", fmt.Sprintf("%.0f%%", m.spectralEdgePercentile*100), "Percentile for SEF", false, -1})
+		options = append(options, featOption{"Spectral Edge", spectralEdgeVal, "Percentile for SEF", "Spectral", false, -1})
 	}
+
+	if m.isCategorySelected("erp") {
+		options = append(options,
+			featOption{"ERP baseline", erpBaselineVal, "Subtract baseline mean", "ERP", false, -1},
+		)
+	}
+
+	options = append(options,
+		featOption{"Export All", m.boolToOnOff(m.exportAllFeatures), "Save combined file", "Validation & Storage", false, -1},
+		featOption{"Min Epochs", minEpochsVal, "Global minimum required", "Execution", false, -1},
+	)
 
 	for i, opt := range options {
-		// Options list starts at cursor position 1 (position 0 is toggle header)
-		isFocused := (i+1) == m.advancedCursor && m.expandedOption < 0
+		if opt.group != "" {
+			b.WriteString("\n " + groupStyle.Render(opt.group) + "\n")
+		}
 
-		// Build styles based on state
+		isFocused := (i+1) == m.advancedCursor && m.expandedOption < 0
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
@@ -1276,17 +1375,14 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
-		}
-
 		// Show expand indicator for expandable options
 		expandIndicator := ""
-		if opt.expandable && m.expandedOption != opt.expandIdx {
-			expandIndicator = " [+]"
-		} else if opt.expandable && m.expandedOption == opt.expandIdx {
-			expandIndicator = " [-]"
+		if opt.expandable {
+			if m.expandedOption != opt.expandIdx {
+				expandIndicator = " [+]"
+			} else {
+				expandIndicator = " [-]"
+			}
 		}
 
 		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value+expandIndicator))
@@ -1341,43 +1437,93 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("  Press Space to edit values, Enter to proceed.") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := 24
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
-	// Build option values, showing input buffer when editing
-	bootstrapVal := fmt.Sprintf("%d", m.bootstrapSamples)
-	permutationsVal := fmt.Sprintf("%d", m.nPermutations)
-	rngSeedVal := m.rngSeedDisplay()
+	// Get the dynamic options based on selected computations
+	options := m.getBehaviorOptions()
 
-	// Override with input buffer if editing that field
-	if m.editingNumber {
+	// Prepare values for options
+	getOptionDisplay := func(opt optionType) (string, string, string) {
 		inputDisplay := m.numberBuffer + "█"
-		if m.isCurrentlyEditing(optBootstrap) {
-			bootstrapVal = inputDisplay
-		} else if m.isCurrentlyEditing(optNPerm) {
-			permutationsVal = inputDisplay
-		} else if m.isCurrentlyEditing(optRNGSeed) {
-			rngSeedVal = inputDisplay
-		}
-	}
 
-	options := []struct {
-		label string
-		value string
-		hint  string
-	}{
-		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
-		{"Correlation Method", m.correlationMethod, "spearman (robust) / pearson"},
-		{"Bootstrap Samples", bootstrapVal, "Type a number (0=disabled)"},
-		{"Permutations", permutationsVal, "Type a number"},
-		{"RNG Seed", rngSeedVal, "Type a number (0=default)"},
-		{"Control Temperature", m.boolToOnOff(m.controlTemperature), "Partial correlation covariate"},
-		{"Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "Order effects covariate"},
-		{"FDR Alpha", fmt.Sprintf("%.2f", m.fdrAlpha), "Multiple comparison threshold"},
+		switch opt {
+		case optUseDefaults:
+			return "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
+		case optCorrMethod:
+			return "Correlation Method", m.correlationMethod, "spearman (robust) / pearson"
+		case optBootstrap:
+			val := fmt.Sprintf("%d", m.bootstrapSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optBootstrap) {
+				val = inputDisplay
+			}
+			return "Bootstrap Samples", val, "Type a number (0=disabled)"
+		case optNPerm:
+			val := fmt.Sprintf("%d", m.nPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optNPerm) {
+				val = inputDisplay
+			}
+			return "Permutations", val, "Type a number"
+		case optRNGSeed:
+			val := m.rngSeedDisplay()
+			if m.editingNumber && m.isCurrentlyEditing(optRNGSeed) {
+				val = inputDisplay
+			}
+			return "RNG Seed", val, "Type a number (0=default)"
+		case optControlTemp:
+			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "Partial correlation covariate"
+		case optControlOrder:
+			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "Order effects covariate"
+		case optFDRAlpha:
+			return "FDR Alpha", fmt.Sprintf("%.2f", m.fdrAlpha), "Multiple comparison threshold"
+		// Cluster options
+		case optClusterThreshold:
+			return "Cluster Threshold", fmt.Sprintf("%.3f", m.clusterThreshold), "Forming threshold for clusters"
+		case optClusterMinSize:
+			val := fmt.Sprintf("%d", m.clusterMinSize)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterMinSize) {
+				val = inputDisplay
+			}
+			return "Cluster Min Size", val, "Minimum cluster size"
+		case optClusterTail:
+			tailStr := "two-tailed"
+			if m.clusterTail == 1 {
+				tailStr = "upper"
+			} else if m.clusterTail == -1 {
+				tailStr = "lower"
+			}
+			return "Cluster Tail", tailStr, "Test direction"
+		// Mediation options
+		case optMediationBootstrap:
+			val := fmt.Sprintf("%d", m.mediationBootstrap)
+			if m.editingNumber && m.isCurrentlyEditing(optMediationBootstrap) {
+				val = inputDisplay
+			}
+			return "Mediation Bootstrap", val, "Bootstrap iterations"
+		case optMediationMaxMediators:
+			val := fmt.Sprintf("%d", m.mediationMaxMediators)
+			if m.editingNumber && m.isCurrentlyEditing(optMediationMaxMediators) {
+				val = inputDisplay
+			}
+			return "Max Mediators", val, "Maximum mediators to test"
+		// Mixed effects options
+		case optMixedMaxFeatures:
+			val := fmt.Sprintf("%d", m.mixedMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optMixedMaxFeatures) {
+				val = inputDisplay
+			}
+			return "Mixed Effects Features", val, "Maximum features to include"
+		// Condition options
+		case optConditionEffectThreshold:
+			return "Effect Size Threshold", fmt.Sprintf("%.1f", m.conditionEffectThreshold), "Minimum Cohen's d to report"
+		default:
+			return "Unknown", "", ""
+		}
 	}
 
 	for i, opt := range options {
 		isFocused := i == m.advancedCursor
+		label, value, hint := getOptionDisplay(opt)
 
 		var labelStyle, valueStyle lipgloss.Style
 		if isFocused {
@@ -1390,7 +1536,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			labelStyle = labelStyle.Faint(true)
 			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 		} else if m.editingNumber && isFocused {
-			// Highlight the editing field
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		} else {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -1401,8 +1546,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
 		}
 
-		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
-		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+		b.WriteString("  " + hintStyle.Render(hint) + "\n")
 	}
 
 	return b.String()
@@ -1473,6 +1618,263 @@ func (m Model) renderDecodingAdvancedConfig() string {
 		}
 
 		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderPreprocessingAdvancedConfig() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("  Type a number, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("  Customize preprocessing controls.") + "\n")
+		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+	}
+
+	labelWidth := 22
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
+
+	// Build values for display
+	nJobsVal := fmt.Sprintf("%d", m.prepNJobs)
+	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
+	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
+	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
+	notchVal := fmt.Sprintf("%d Hz", m.prepNotch)
+	icaMethodVal := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+	icaCompVal := fmt.Sprintf("%.2f", m.prepICAComp)
+	probThreshVal := fmt.Sprintf("%.1f", m.prepProbThresh)
+	tminVal := fmt.Sprintf("%.1f s", m.prepEpochsTmin)
+	tmaxVal := fmt.Sprintf("%.1f s", m.prepEpochsTmax)
+
+	// Input overrides
+	if m.editingNumber {
+		buffer := m.numberBuffer + "█"
+		switch {
+		case m.isCurrentlyEditing(optPrepNJobs):
+			nJobsVal = buffer
+		case m.isCurrentlyEditing(optPrepResample):
+			resampleVal = buffer
+		case m.isCurrentlyEditing(optPrepLFreq):
+			lFreqVal = buffer
+		case m.isCurrentlyEditing(optPrepHFreq):
+			hFreqVal = buffer
+		case m.isCurrentlyEditing(optPrepNotch):
+			notchVal = buffer
+		case m.isCurrentlyEditing(optPrepICAComp):
+			icaCompVal = buffer
+		case m.isCurrentlyEditing(optPrepProbThresh):
+			probThreshVal = buffer
+		case m.isCurrentlyEditing(optPrepEpochsTmin):
+			tminVal = buffer
+		case m.isCurrentlyEditing(optPrepEpochsTmax):
+			tmaxVal = buffer
+		}
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+		group string
+	}{
+		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization", ""},
+
+		{"Use PyPREP", m.boolToOnOff(m.prepUsePyprep), "Bad channel detection", "Preprocessing Controls"},
+		{"Use ICA Label", m.boolToOnOff(m.prepUseIcalabel), "mne-icalabel classification", ""},
+		{"N Jobs", nJobsVal, "Parallel jobs for bad channels", ""},
+
+		{"Resample", resampleVal, "Resampling frequency", "Filtering"},
+		{"L-Freq", lFreqVal, "High-pass filter", ""},
+		{"H-Freq", hFreqVal, "Low-pass filter", ""},
+		{"Notch", notchVal, "Line noise filter", ""},
+
+		{"ICA Method", icaMethodVal, "Algorithm (fastica/infomax/picard)", "ICA Fitting"},
+		{"ICA Components", icaCompVal, "Components or variance fraction", ""},
+		{"Prob. Threshold", probThreshVal, "Label classification threshold", ""},
+
+		{"Epochs Tmin", tminVal, "Start of epoch", "Epoching"},
+		{"Epochs Tmax", tmaxVal, "End of epoch", ""},
+	}
+
+	for i, opt := range options {
+		if opt.group != "" {
+			b.WriteString("\n " + groupStyle.Render(opt.group) + "\n")
+		}
+
+		isFocused := i == m.advancedCursor
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.useDefaultAdvanced && i > 0 {
+			labelStyle = labelStyle.Faint(true)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderRawToBidsAdvancedConfig() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	if m.editingNumber || m.editingText {
+		b.WriteString(infoStyle.Render("  Press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("  Customize raw-to-BIDS conversion options.") + "\n")
+		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+	}
+
+	labelWidth := 22
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	montageVal := m.rawMontage
+	if m.editingText && m.editingTextField == textFieldRawMontage {
+		montageVal = m.textBuffer + "█"
+	}
+
+	prefixVal := m.rawEventPrefixes
+	if m.editingText && m.editingTextField == textFieldRawEventPrefixes {
+		prefixVal = m.textBuffer + "█"
+	}
+
+	lineFreqVal := fmt.Sprintf("%d", m.rawLineFreq)
+	if m.editingNumber && m.isCurrentlyEditing(optRawLineFreq) {
+		lineFreqVal = m.numberBuffer + "█"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
+		{"Montage", montageVal, "Type to edit"},
+		{"Line Freq", lineFreqVal, "Type a number (Hz)"},
+		{"Overwrite", m.boolToOnOff(m.rawOverwrite), "Replace existing BIDS files"},
+		{"Zero Base Onsets", m.boolToOnOff(m.rawZeroBaseOnsets), "Start events at t=0"},
+		{"Trim to First Volume", m.boolToOnOff(m.rawTrimToFirstVolume), "Trim EEG to fMRI start"},
+		{"Event Prefixes", prefixVal, "Comma-separated (optional)"},
+		{"Keep Annotations", m.boolToOnOff(m.rawKeepAnnotations), "Keep all raw annotations"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.useDefaultAdvanced && i > 0 {
+			labelStyle = labelStyle.Faint(true)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		displayVal := opt.value
+		if displayVal == "" {
+			displayVal = "(none)"
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(displayVal))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderMergeBehaviorAdvancedConfig() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	if m.editingText {
+		b.WriteString(infoStyle.Render("  Press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("  Configure merge-behavior filters.") + "\n")
+		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+	}
+
+	labelWidth := 22
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	prefixVal := m.mergeEventPrefixes
+	if m.editingText && m.editingTextField == textFieldMergeEventPrefixes {
+		prefixVal = m.textBuffer + "█"
+	}
+	typeVal := m.mergeEventTypes
+	if m.editingText && m.editingTextField == textFieldMergeEventTypes {
+		typeVal = m.textBuffer + "█"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
+		{"Event Prefixes", prefixVal, "Comma-separated (optional)"},
+		{"Event Types", typeVal, "Comma-separated (optional)"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.useDefaultAdvanced && i > 0 {
+			labelStyle = labelStyle.Faint(true)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		displayVal := opt.value
+		if displayVal == "" {
+			displayVal = "(none)"
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(displayVal))
 		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
 	}
 

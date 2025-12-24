@@ -10,10 +10,15 @@ from eeg_pipeline.cli.common import (
     add_common_subject_args,
     add_task_arg,
     add_output_format_args,
+    add_path_args,
     create_progress_reporter,
     resolve_task,
 )
-from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES, SPATIAL_MODES
+from eeg_pipeline.pipelines.constants import (
+    FEATURE_CATEGORIES,
+    FREQUENCY_BANDS,
+)
+from eeg_pipeline.domain.features.constants import SPATIAL_MODES
 from eeg_pipeline.cli.commands.base import FEATURE_VISUALIZE_CATEGORIES
 
 FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES + [
@@ -44,7 +49,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument(
         "--bands",
         nargs="+",
-        choices=["delta", "theta", "alpha", "beta", "gamma"],
+        choices=FREQUENCY_BANDS,
         default=None,
         help="Frequency bands to compute (default: all)",
     )
@@ -147,6 +152,28 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
     parser.add_argument("--conn-aec-mode", choices=["orth", "sym", "none"], default=None, help="AEC orthogonalization mode")
     
+    # New Advanced Options
+    
+    parser.add_argument("--aperiodic-peak-z", type=float, default=None, help="Peak rejection Z-threshold for aperiodic fit")
+    parser.add_argument("--aperiodic-min-r2", type=float, default=None, help="Minimum R2 for aperiodic fit")
+    parser.add_argument("--aperiodic-min-points", type=int, default=None, help="Minimum fit points for aperiodic")
+    
+    parser.add_argument("--conn-graph-prop", type=float, default=None, help="Proportion of top edges to keep for graph metrics")
+    parser.add_argument("--conn-window-len", type=float, default=None, help="Sliding window length (s) for connectivity")
+    parser.add_argument("--conn-window-step", type=float, default=None, help="Sliding window step (s) for connectivity")
+    
+    parser.add_argument("--pac-method", choices=["mvl", "kl", "tort", "ozkurt"], default=None, help="PAC estimation method")
+    parser.add_argument("--pac-min-epochs", type=int, default=None, help="Minimum epochs for PAC computation")
+    
+    parser.add_argument("--pe-delay", type=int, default=None, help="Permutation entropy delay")
+    parser.add_argument("--burst-min-duration", type=int, default=None, help="Minimum burst duration (ms)")
+    
+    parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
+    parser.add_argument("--export-all", action="store_true", default=None, help="Export all features into a single file")
+    parser.add_argument("--no-export-all", action="store_false", dest="export_all", help="Don't export all features into a single file")
+    
+    add_path_args(parser)
+    
     return parser
 
 
@@ -158,6 +185,11 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
+    
+    if getattr(args, "bids_root", None):
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "deriv_root", None):
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
     
     if args.mode == "compute":
         # Apply feature-specific overrides to config
@@ -195,6 +227,38 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             config["feature_engineering.connectivity.enable_graph_metrics"] = args.conn_graph_metrics
         if getattr(args, "conn_aec_mode", None) is not None:
             config["feature_engineering.connectivity.aec_mode"] = args.conn_aec_mode
+            
+        # New Overrides
+            
+        if getattr(args, "aperiodic_peak_z", None) is not None:
+            config["feature_engineering.aperiodic.peak_rejection_z"] = args.aperiodic_peak_z
+        if getattr(args, "aperiodic_min_r2", None) is not None:
+            config["feature_engineering.aperiodic.min_r2"] = args.aperiodic_min_r2
+        if getattr(args, "aperiodic_min_points", None) is not None:
+            config["feature_engineering.aperiodic.min_fit_points"] = args.aperiodic_min_points
+            
+        if getattr(args, "conn_graph_prop", None) is not None:
+            config["feature_engineering.connectivity.graph_top_prop"] = args.conn_graph_prop
+        if getattr(args, "conn_window_len", None) is not None:
+            config["feature_engineering.connectivity.sliding_window_len"] = args.conn_window_len
+        if getattr(args, "conn_window_step", None) is not None:
+            config["feature_engineering.connectivity.sliding_window_step"] = args.conn_window_step
+            
+        if getattr(args, "pac_method", None) is not None:
+            config["feature_engineering.pac.method"] = args.pac_method
+        if getattr(args, "pac_min_epochs", None) is not None:
+            config["feature_engineering.pac.min_epochs"] = args.pac_min_epochs
+            
+        if getattr(args, "pe_delay", None) is not None:
+            config["feature_engineering.complexity.pe_delay"] = args.pe_delay
+        if getattr(args, "burst_min_duration", None) is not None:
+            config["feature_engineering.bursts.min_duration_ms"] = args.burst_min_duration
+            
+        if getattr(args, "min_epochs", None) is not None:
+            config["feature_engineering.constants.min_epochs_for_features"] = args.min_epochs
+            
+        if args.export_all is not None:
+            config["feature_engineering.create_combined_features"] = args.export_all
         
         # Prepare time ranges
         time_ranges = []

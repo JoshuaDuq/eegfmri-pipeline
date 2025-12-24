@@ -62,9 +62,9 @@ if TYPE_CHECKING:
     from eeg_pipeline.context.behavior import BehaviorContext
 
 
-def run_cluster_test_from_context(ctx: "BehaviorContext") -> None:
+def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Run pain vs non-pain cluster test using pre-loaded context data."""
-    _run_cluster_test_core(
+    return _run_cluster_test_core(
         ctx.subject,
         ctx.epochs,
         ctx.aligned_events,

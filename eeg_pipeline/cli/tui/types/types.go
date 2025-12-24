@@ -60,6 +60,7 @@ type WizardStep int
 
 const (
 	StepSelectMode           WizardStep = iota
+	StepProjectSetup                    // Project/task/path setup
 	StepSelectComputations              // For behavior: which analyses to run
 	StepSelectFeatureFiles              // For behavior & combine-features: which feature files to load
 	StepConfigureOptions                // Category selection (features) or per-computation features
@@ -77,6 +78,7 @@ const (
 func (s WizardStep) String() string {
 	names := []string{
 		"Select Mode",
+		"Project Setup",
 		"Select Computations",
 		"Select Feature Files",
 		"Configure Options",

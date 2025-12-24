@@ -19,13 +19,7 @@ FREQUENCY_BANDS: List[str] = [
     "gamma",
 ]
 
-FREQUENCY_BAND_RANGES: Dict[str, tuple] = {
-    "delta": (1.0, 3.9),
-    "theta": (4.0, 7.9),
-    "alpha": (8.0, 12.9),
-    "beta": (13.0, 30.0),
-    "gamma": (30.1, 80.0),
-}
+# Removed hardcoded FREQUENCY_BAND_RANGES. Ranges should be fetched from config.
 
 
 MANDATORY_TIME_WINDOWS: List[str] = [
@@ -146,7 +140,7 @@ def get_definitions_dict() -> Dict:
     """Return all definitions as a dictionary for JSON export."""
     return {
         "frequency_bands": [
-            {"key": band, "name": band.title(), "description": f"{FREQUENCY_BAND_RANGES[band][0]}-{FREQUENCY_BAND_RANGES[band][1]} Hz"}
+            {"key": band, "name": band.title(), "description": f"{band.title()} frequency band"}
             for band in FREQUENCY_BANDS
         ],
         "feature_categories": [

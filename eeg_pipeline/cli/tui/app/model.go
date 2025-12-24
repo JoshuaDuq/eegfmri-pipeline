@@ -13,6 +13,7 @@ import (
 	"github.com/eeg-pipeline/tui/types"
 	"github.com/eeg-pipeline/tui/views/environment"
 	"github.com/eeg-pipeline/tui/views/execution"
+	"github.com/eeg-pipeline/tui/views/globalsetup"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
 	"github.com/eeg-pipeline/tui/views/wizard"
 
@@ -29,6 +30,7 @@ const (
 	StatePipelineWizard
 	StateExecution
 	StateResults
+	StateGlobalSetup
 )
 
 // TUIState represents the persistent state of the TUI across sessions
@@ -47,6 +49,7 @@ type Model struct {
 	mainMenu  mainmenu.Model
 	wizard    wizard.Model
 	execution execution.Model
+	global    globalsetup.Model
 
 	// Shared state
 	width       int
@@ -140,7 +143,10 @@ func (m *Model) saveState() {
 
 // Init implements tea.Model
 func (m Model) Init() tea.Cmd {
-	return m.envSelect.Init()
+	return tea.Batch(
+		m.envSelect.Init(),
+		executor.LoadConfigSummary(m.repoRoot),
+	)
 }
 
 // Update implements tea.Model
@@ -193,6 +199,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		newExec, _ := m.execution.Update(msg)
 		m.execution = newExec.(execution.Model)
+
+		newGlobal, _ := m.global.Update(msg)
+		m.global = newGlobal.(globalsetup.Model)
 
 	case messages.SubjectsLoadedMsg:
 		if msg.Error != nil {
@@ -275,6 +284,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
 		}
 		return m, nil
+	case messages.ConfigLoadedMsg:
+		if msg.Error != nil {
+			return m, nil
+		}
+		m.wizard.SetConfigSummary(msg.Summary)
+		if msg.Summary.Task != "" && msg.Summary.Task != m.task {
+			m.task = msg.Summary.Task
+			if m.environment == environment.EnvGoogleCloud {
+				m.mainMenu.Task = m.task + " [Cloud]"
+			} else {
+				m.mainMenu.Task = m.task
+			}
+			if m.state == StatePipelineWizard {
+				m.wizard.SetSubjectsLoading()
+				return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+			}
+		}
+		return m, nil
+	case messages.TaskUpdatedMsg:
+		if msg.Task != "" && msg.Task != m.task {
+			m.task = msg.Task
+			if m.environment == environment.EnvGoogleCloud {
+				m.mainMenu.Task = m.task + " [Cloud]"
+			} else {
+				m.mainMenu.Task = m.task
+			}
+			if m.state == StatePipelineWizard {
+				m.wizard.SetSubjectsLoading()
+				return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+			}
+		}
+		return m, nil
+	case messages.ConfigKeysLoadedMsg:
+		if msg.Error != nil {
+			return m, nil
+		}
+		switch m.state {
+		case StateGlobalSetup:
+			m.global.SetConfigValues(msg.Values)
+		case StatePipelineWizard:
+			m.wizard.ApplyConfigKeys(msg.Values)
+		}
+		return m, nil
 	}
 
 	// Delegate to current view
@@ -317,7 +369,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.wizard.SetSubjectsLoading()
 			m.pushState(StatePipelineWizard)
 			m.mainMenu.SelectedPipeline = -1
-			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+			return m, tea.Batch(
+				executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
+				executor.LoadConfigSummary(m.repoRoot),
+				executor.LoadConfigKeys(m.repoRoot, []string{"time_frequency_analysis.bands"}),
+			)
+		}
+		if m.mainMenu.SelectedUtility == mainmenu.UtilityGlobalSetup {
+			m.mainMenu.SelectedUtility = -1
+			m.global = globalsetup.New(m.repoRoot)
+			m.global.SetSize(m.width, m.height)
+			m.state = StateGlobalSetup
+			return m, executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys())
 		}
 
 	case StatePipelineWizard:
@@ -336,6 +399,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.wizard.ReadyToExecute {
 			command := m.wizard.BuildCommand()
 			return m.startExecution(command)
+		}
+
+	case StateGlobalSetup:
+		var newGlobal tea.Model
+		newGlobal, cmd = m.global.Update(msg)
+		m.global = newGlobal.(globalsetup.Model)
+		if m.global.Done {
+			m.state = StateMainMenu
+			return m, executor.LoadConfigSummary(m.repoRoot)
 		}
 
 	case StateExecution:
@@ -378,6 +450,9 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 			return m, tea.ClearScreen
 		}
 		return m.popState()
+	case StateGlobalSetup:
+		m.state = StateMainMenu
+		return m, nil
 	case StateExecution:
 		if m.execution.IsDone() {
 			return m.popState()
@@ -418,6 +493,8 @@ func (m Model) View() string {
 		content = m.mainMenu.View()
 	case StatePipelineWizard:
 		content = m.wizard.View()
+	case StateGlobalSetup:
+		content = m.global.View()
 	case StateExecution:
 		content = m.execution.View()
 	case StateResults:

@@ -48,6 +48,23 @@ def add_task_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_path_args(parser: argparse.ArgumentParser) -> None:
+    """Add BIDS and derivatives path override arguments."""
+    path_group = parser.add_argument_group("Path overrides")
+    path_group.add_argument(
+        "--bids-root",
+        type=str,
+        default=None,
+        help="Override BIDS root path (default from config)",
+    )
+    path_group.add_argument(
+        "--deriv-root",
+        type=str,
+        default=None,
+        help="Override derivatives root path (default from config)",
+    )
+
+
 def add_output_format_args(parser: argparse.ArgumentParser) -> None:
     """Add JSON/format output arguments to a parser."""
     parser.add_argument(

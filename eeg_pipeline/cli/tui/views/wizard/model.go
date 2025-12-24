@@ -2,6 +2,8 @@ package wizard
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/eeg-pipeline/tui/components"
@@ -36,7 +38,6 @@ var behaviorComputations = []Computation{
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
 	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
 	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling"},
-	{"export", "Export Results", "Export analysis results"},
 }
 
 type FrequencyBand struct {
@@ -46,11 +47,11 @@ type FrequencyBand struct {
 }
 
 var frequencyBands = []FrequencyBand{
-	{"delta", "Delta", "1.0-3.9 Hz"},
-	{"theta", "Theta", "4.0-7.9 Hz"},
-	{"alpha", "Alpha", "8.0-12.9 Hz"},
-	{"beta", "Beta", "13.0-30.0 Hz"},
-	{"gamma", "Gamma", "30.1-80.0 Hz"},
+	{"delta", "Delta", "Delta band"},
+	{"theta", "Theta", "Theta band"},
+	{"alpha", "Alpha", "Alpha band"},
+	{"beta", "Beta", "Beta band"},
+	{"gamma", "Gamma", "Gamma band"},
 }
 
 type SpatialMode struct {
@@ -111,6 +112,20 @@ type PlotItem struct {
 	RequiresFeatures bool
 }
 
+type textField int
+
+const (
+	textFieldNone textField = iota
+	textFieldTask
+	textFieldBidsRoot
+	textFieldDerivRoot
+	textFieldSourceRoot
+	textFieldRawMontage
+	textFieldRawEventPrefixes
+	textFieldMergeEventPrefixes
+	textFieldMergeEventTypes
+)
+
 var plotItems = []PlotItem{
 	// Features
 	{"features_power", "Features", "Power", "Band power summaries and topomaps", []string{"features_power.tsv"}, false, true},
@@ -119,6 +134,13 @@ var plotItems = []PlotItem{
 	{"features_itpc", "Features", "ITPC", "Inter-trial phase coherence plots", []string{"features_itpc.tsv"}, false, true},
 	{"features_pac", "Features", "PAC", "Phase-amplitude coupling plots", []string{"features_pac_trials.tsv"}, false, true},
 	{"features_erds", "Features", "ERDS", "Event-related desync/sync plots", []string{"features_erds.tsv"}, false, true},
+	{"features_complexity", "Features", "Complexity", "Complexity distributions and condition comparisons", []string{"features_complexity.tsv"}, false, true},
+	{"features_quality", "Features", "Quality", "Feature quality diagnostics and outlier views", []string{"features_quality.tsv"}, false, true},
+	{"features_spectral", "Features", "Spectral", "Spectral peak and edge features", []string{"features_spectral.tsv"}, false, true},
+	{"features_ratios", "Features", "Ratios", "Band power ratios", []string{"features_ratios.tsv"}, false, true},
+	{"features_asymmetry", "Features", "Asymmetry", "Hemispheric asymmetry indices", []string{"features_asymmetry.tsv"}, false, true},
+	{"features_bursts", "Features", "Bursts", "Oscillatory burst dynamics", []string{"features_bursts.tsv"}, false, true},
+	{"features_erp", "Features", "ERP", "ERP visualizations from epochs", []string{"epochs/*.fif"}, true, true},
 	// Behavior
 	{"behavior_psychometrics", "Behavior", "Psychometrics", "Rating distributions and psychometrics", []string{"events.tsv", "features_power.tsv"}, false, true},
 	{"behavior_power_scatter", "Behavior", "Power ROI Scatter", "Power vs behavior scatter plots", []string{"features_power.tsv", "stats/corr_stats_power_*"}, false, true},
@@ -155,7 +177,7 @@ var plotCategories = []FeatureCategory{
 	{"TFR", "Time-Frequency", "Time-frequency representations and topomaps"},
 	{"Behavior", "EEG-Behavior", "Correlation scatter plots and psychometrics"},
 	{"Decoding", "Decoding", "Regression diagnostics and time-generalization"},
-	{"Features", "Feature Overviews", "General feature distribution and QC plots"},
+	{"Features", "Feature Visualizations", "General feature distribution and QC plots"},
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -167,6 +189,12 @@ type Model struct {
 	CurrentStep types.WizardStep
 	steps       []types.WizardStep
 	stepIndex   int
+
+	// Project setup (received from global config)
+	task       string
+	bidsRoot   string
+	derivRoot  string
+	sourceRoot string
 
 	// Mode selection
 	modeOptions      []string
@@ -263,37 +291,55 @@ type Model struct {
 	editingNumber bool   // True when typing a number
 	numberBuffer  string // Buffer for the number being typed
 
+	// Text input mode for string config values
+	editingText      bool
+	textBuffer       string
+	editingTextField textField
+
 	// Features pipeline advanced config
 	connectivityMeasures map[int]bool // Selected connectivity measures
 
 	// PAC/CFC configuration
-	pacPhaseMin float64 // Min phase frequency (Hz)
-	pacPhaseMax float64 // Max phase frequency (Hz)
-	pacAmpMin   float64 // Min amplitude frequency (Hz)
-	pacAmpMax   float64 // Max amplitude frequency (Hz)
+	pacPhaseMin  float64 // Min phase frequency (Hz)
+	pacPhaseMax  float64 // Max phase frequency (Hz)
+	pacAmpMin    float64 // Min amplitude frequency (Hz)
+	pacAmpMax    float64 // Max amplitude frequency (Hz)
+	pacMethod    int     // 0: mvl, 1: kl, 2: tort, 3: ozkurt
+	pacMinEpochs int
 
 	// Aperiodic configuration
-	aperiodicFmin float64 // Min frequency for aperiodic fit
-	aperiodicFmax float64 // Max frequency for aperiodic fit
+	aperiodicFmin      float64 // Min frequency for aperiodic fit
+	aperiodicFmax      float64 // Max frequency for aperiodic fit
+	aperiodicPeakZ     float64
+	aperiodicMinR2     float64
+	aperiodicMinPoints int
 
 	// Complexity configuration
 	complexityPEOrder int // Permutation entropy order (3-7)
+	complexityPEDelay int
 
 	// ERP configuration
 	erpBaselineCorrection bool
 
 	// Burst configuration
-	burstThresholdZ float64
+	burstThresholdZ  float64
+	burstMinDuration int // ms
 
 	// Power configuration
 	powerBaselineMode int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
 
 	// Spectral configuration
 	spectralEdgePercentile float64
+	// Validation & Generic
+	minEpochsForFeatures int
+	exportAllFeatures    bool
 
 	// Connectivity configuration
 	connOutputLevel  int // 0: full, 1: global_only
 	connGraphMetrics bool
+	connGraphProp    float64
+	connWindowLen    float64
+	connWindowStep   float64
 	connAECMode      int // 0: orth, 1: none, 2: sym
 
 	// Behavior pipeline advanced config
@@ -304,11 +350,47 @@ type Model struct {
 	controlTemperature bool    // Include temperature as covariate
 	controlTrialOrder  bool    // Include trial order as covariate
 	fdrAlpha           float64 // FDR correction threshold
+	// Cluster-specific
+	clusterThreshold float64 // Forming threshold for clusters
+	clusterMinSize   int     // Minimum cluster size
+	clusterTail      int     // 0=two-tailed, 1=upper, -1=lower
+	// Mediation-specific
+	mediationBootstrap    int // Bootstrap iterations for mediation
+	mediationMaxMediators int // Max mediators to test
+	// Mixed effects-specific
+	mixedMaxFeatures int // Max features for mixed effects
+	// Condition-specific
+	conditionEffectThreshold float64 // Min effect size to report
 
 	// Decoding pipeline advanced config
 	decodingNPerm int  // Permutations for significance test
 	innerSplits   int  // CV inner splits
 	skipTimeGen   bool // Skip time generalization
+
+	// Preprocessing pipeline advanced config
+	prepUsePyprep   bool
+	prepUseIcalabel bool
+	prepNJobs       int
+	prepResample    int
+	prepLFreq       float64
+	prepHFreq       float64
+	prepNotch       int
+	prepICAMethod   int // 0: fastica, 1: infomax, 2: picard
+	prepICAComp     float64
+	prepProbThresh  float64
+	prepEpochsTmin  float64
+	prepEpochsTmax  float64
+
+	// Utilities (raw-to-bids/merge) advanced config
+	rawMontage           string
+	rawLineFreq          int
+	rawOverwrite         bool
+	rawZeroBaseOnsets    bool
+	rawTrimToFirstVolume bool
+	rawEventPrefixes     string
+	rawKeepAnnotations   bool
+	mergeEventPrefixes   string
+	mergeEventTypes      string
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -350,19 +432,26 @@ func New(pipeline types.Pipeline) Model {
 		expandedOption:       -1, // No option expanded initially
 		connectivityMeasures: make(map[int]bool),
 		// PAC/CFC defaults (from config)
-		pacPhaseMin: 4.0,
-		pacPhaseMax: 8.0,
-		pacAmpMin:   30.0,
-		pacAmpMax:   80.0,
+		pacPhaseMin:  4.0,
+		pacPhaseMax:  8.0,
+		pacAmpMin:    30.0,
+		pacAmpMax:    80.0,
+		pacMethod:    0,
+		pacMinEpochs: 2,
 		// Aperiodic defaults
-		aperiodicFmin: 2.0,
-		aperiodicFmax: 40.0,
+		aperiodicFmin:      2.0,
+		aperiodicFmax:      40.0,
+		aperiodicPeakZ:     3.5,
+		aperiodicMinR2:     0.6,
+		aperiodicMinPoints: 5,
 		// Complexity defaults
 		complexityPEOrder: 3,
+		complexityPEDelay: 1,
 		// ERP defaults
 		erpBaselineCorrection: true,
 		// Burst defaults
-		burstThresholdZ: 2.0,
+		burstThresholdZ:  2.0,
+		burstMinDuration: 50,
 		// Power defaults
 		powerBaselineMode: 0,
 		// Spectral defaults
@@ -370,7 +459,13 @@ func New(pipeline types.Pipeline) Model {
 		// Connectivity defaults
 		connOutputLevel:  0,
 		connGraphMetrics: true,
+		connGraphProp:    0.1,
+		connWindowLen:    1.0,
+		connWindowStep:   0.5,
 		connAECMode:      0,
+		// Validation & Generic
+		minEpochsForFeatures: 10,
+		exportAllFeatures:    false,
 		// Behavior defaults
 		correlationMethod:  "spearman",
 		bootstrapSamples:   1000,
@@ -379,6 +474,17 @@ func New(pipeline types.Pipeline) Model {
 		controlTemperature: true,
 		controlTrialOrder:  false,
 		fdrAlpha:           0.05,
+		// Cluster defaults
+		clusterThreshold: 0.05,
+		clusterMinSize:   2,
+		clusterTail:      0,
+		// Mediation defaults
+		mediationBootstrap:    1000,
+		mediationMaxMediators: 20,
+		// Mixed effects defaults
+		mixedMaxFeatures: 50,
+		// Condition defaults
+		conditionEffectThreshold: 0.5,
 		// Decoding defaults
 		decodingNPerm: 0,
 		innerSplits:   3,
@@ -392,6 +498,31 @@ func New(pipeline types.Pipeline) Model {
 		plotDpiOptions:      []int{150, 300, 600},
 		plotDpiIndex:        1,
 		plotSavefigDpiIndex: 2,
+
+		// Preprocessing defaults
+		prepUsePyprep:   true,
+		prepUseIcalabel: true,
+		prepNJobs:       1,
+		prepResample:    500,
+		prepLFreq:       0.1,
+		prepHFreq:       100.0,
+		prepNotch:       60,
+		prepICAMethod:   0,
+		prepICAComp:     0.99,
+		prepProbThresh:  0.8,
+		prepEpochsTmin:  -5.0,
+		prepEpochsTmax:  12.0,
+
+		// Utilities defaults
+		rawMontage:           "easycap-M1",
+		rawLineFreq:          60,
+		rawOverwrite:         false,
+		rawZeroBaseOnsets:    false,
+		rawTrimToFirstVolume: false,
+		rawEventPrefixes:     "",
+		rawKeepAnnotations:   false,
+		mergeEventPrefixes:   "",
+		mergeEventTypes:      "",
 	}
 
 	// Time ranges
@@ -403,10 +534,9 @@ func New(pipeline types.Pipeline) Model {
 
 	switch pipeline {
 	case types.PipelineFeatures:
-		m.modeOptions = []string{styles.ModeCompute, styles.ModeVisualize}
+		m.modeOptions = []string{styles.ModeCompute}
 		m.modeDescriptions = []string{
-			"Extract features from epochs",
-			"Generate visualizations",
+			"Extract EEG feature sets",
 		}
 		m.categories = []string{
 			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
@@ -429,7 +559,7 @@ func New(pipeline types.Pipeline) Model {
 			"Trial quality metrics",
 		}
 		m.steps = []types.WizardStep{
-			types.StepSelectSubjects,   // Moved up - subject selection first to assess data availability
+			types.StepSelectSubjects,
 			types.StepConfigureOptions, // Category selection
 			types.StepSelectBands,
 			types.StepSelectSpatial,
@@ -445,10 +575,9 @@ func New(pipeline types.Pipeline) Model {
 		m.spatialSelected[2] = true // global
 
 	case types.PipelineBehavior:
-		m.modeOptions = []string{styles.ModeCompute, styles.ModeVisualize}
+		m.modeOptions = []string{styles.ModeCompute}
 		m.modeDescriptions = []string{
 			"Compute EEG-behavior correlations",
-			"Generate correlation plots",
 		}
 		m.computations = behaviorComputations
 		for i := range behaviorComputations {
@@ -459,6 +588,7 @@ func New(pipeline types.Pipeline) Model {
 		m.featureFileSelected = make(map[string]bool)
 		// Default: select "all" combined features
 		m.featureFileSelected["all"] = true
+
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepSelectComputations,
@@ -479,8 +609,8 @@ func New(pipeline types.Pipeline) Model {
 			"Binary classification",
 		}
 		m.steps = []types.WizardStep{
-			types.StepAdvancedConfig,
 			types.StepSelectSubjects,
+			types.StepAdvancedConfig,
 			types.StepReviewExecute,
 		}
 
@@ -494,6 +624,8 @@ func New(pipeline types.Pipeline) Model {
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
+			types.StepSelectMode,
+			types.StepAdvancedConfig,
 			types.StepReviewExecute,
 		}
 
@@ -525,6 +657,7 @@ func New(pipeline types.Pipeline) Model {
 		m.modeDescriptions = []string{"Merge PsychoPy data into BIDS events files"}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
+			types.StepAdvancedConfig,
 			types.StepReviewExecute,
 		}
 
@@ -533,6 +666,7 @@ func New(pipeline types.Pipeline) Model {
 		m.modeDescriptions = []string{"Convert raw EEG data to BIDS format"}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
+			types.StepAdvancedConfig,
 			types.StepReviewExecute,
 		}
 
@@ -541,7 +675,7 @@ func New(pipeline types.Pipeline) Model {
 		m.modeDescriptions = []string{"Generate selected visualization suites"}
 		m.plotItems = plotItems
 		for i := range m.plotItems {
-			m.plotSelected[i] = true
+			m.plotSelected[i] = false
 		}
 		m.plotSharedColorbar = true
 
@@ -551,7 +685,7 @@ func New(pipeline types.Pipeline) Model {
 		for i, cat := range plotCategories {
 			m.categories[i] = cat.Name
 			m.categoryDescs[i] = cat.Description
-			m.selected[i] = true // All selected by default
+			m.selected[i] = false // Start unselected
 		}
 
 		m.steps = []types.WizardStep{
@@ -563,9 +697,9 @@ func New(pipeline types.Pipeline) Model {
 		}
 
 	default:
-		m.modeOptions = []string{styles.ModeCompute, styles.ModeVisualize}
-		m.modeDescriptions = []string{"Run computation", "Generate visualizations"}
-		m.steps = []types.WizardStep{types.StepSelectMode, types.StepSelectSubjects, types.StepReviewExecute}
+		m.modeOptions = []string{styles.ModeCompute}
+		m.modeDescriptions = []string{"Run computation"}
+		m.steps = []types.WizardStep{types.StepSelectSubjects, types.StepReviewExecute}
 	}
 
 	if len(m.steps) > 0 {
@@ -646,6 +780,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle text input mode for editable fields
+		if m.editingText {
+			switch msg.String() {
+			case "esc":
+				m.editingText = false
+				m.textBuffer = ""
+				m.editingTextField = textFieldNone
+			case "enter":
+				m.commitTextInput()
+				m.editingText = false
+				m.textBuffer = ""
+				m.editingTextField = textFieldNone
+				return m, nil
+			case "backspace":
+				if len(m.textBuffer) > 0 {
+					m.textBuffer = m.textBuffer[:len(m.textBuffer)-1]
+				}
+			default:
+				if len(msg.String()) == 1 {
+					m.textBuffer += msg.String()
+				}
+			}
+			return m, nil
+		}
+
 		// Handle number input mode for advanced config
 		if m.editingNumber {
 			switch msg.String() {
@@ -661,9 +820,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.numberBuffer = m.numberBuffer[:len(m.numberBuffer)-1]
 				}
 			default:
-				// Only accept digits
-				if len(msg.String()) == 1 && msg.String() >= "0" && msg.String() <= "9" {
-					m.numberBuffer += msg.String()
+				// Accept digits, decimal point, and minus sign
+				char := msg.String()
+				if len(char) == 1 && (char >= "0" && char <= "9" || char == "." || char == "-") {
+					m.numberBuffer += char
 				}
 			}
 			return m, nil
@@ -763,6 +923,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "n":
 			m.selectNone()
+
 		case "p", "P":
 			// Toggle command preview overlay
 			m.showCommandPreview = !m.showCommandPreview
@@ -899,6 +1060,135 @@ func (m *Model) SetTimeRanges(ranges []types.TimeRange) {
 	}
 }
 
+func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
+	if m.task == "" && summary.Task != "" {
+		m.task = summary.Task
+	}
+	if m.bidsRoot == "" && summary.BidsRoot != "" {
+		m.bidsRoot = summary.BidsRoot
+	}
+	if m.derivRoot == "" && summary.DerivRoot != "" {
+		m.derivRoot = summary.DerivRoot
+	}
+	if m.sourceRoot == "" && summary.SourceRoot != "" {
+		m.sourceRoot = summary.SourceRoot
+	}
+	if summary.PreprocessingNJobs > 0 {
+		m.prepNJobs = summary.PreprocessingNJobs
+	}
+}
+
+func (m *Model) startTextEdit(field textField) {
+	m.editingTextField = field
+	m.textBuffer = m.getTextFieldValue(field)
+	m.editingText = true
+}
+
+func (m *Model) commitTextInput() {
+	m.setTextFieldValue(m.editingTextField, m.textBuffer)
+}
+
+func (m Model) getTextFieldValue(field textField) string {
+	switch field {
+	case textFieldTask:
+		return m.task
+	case textFieldBidsRoot:
+		return m.bidsRoot
+	case textFieldDerivRoot:
+		return m.derivRoot
+	case textFieldSourceRoot:
+		return m.sourceRoot
+	case textFieldRawMontage:
+		return m.rawMontage
+	case textFieldRawEventPrefixes:
+		return m.rawEventPrefixes
+	case textFieldMergeEventPrefixes:
+		return m.mergeEventPrefixes
+	case textFieldMergeEventTypes:
+		return m.mergeEventTypes
+	default:
+		return ""
+	}
+}
+
+func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
+	raw, ok := values["time_frequency_analysis.bands"]
+	if !ok {
+		return
+	}
+	bands := parseConfigBands(raw)
+	if len(bands) == 0 {
+		return
+	}
+
+	m.bands = bands
+	m.bandSelected = make(map[int]bool)
+	for i := range m.bands {
+		m.bandSelected[i] = true
+	}
+	m.bandCursor = 0
+}
+
+func parseConfigBands(value interface{}) []FrequencyBand {
+	raw, ok := value.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var bands []FrequencyBand
+	for _, name := range names {
+		entry, ok := raw[name].([]interface{})
+		if !ok || len(entry) < 2 {
+			continue
+		}
+		low, okLow := entry[0].(float64)
+		high, okHigh := entry[1].(float64)
+		if !okLow || !okHigh {
+			continue
+		}
+		bands = append(bands, FrequencyBand{
+			Key:         name,
+			Name:        titleCase(name),
+			Description: fmt.Sprintf("%.1f-%.1f Hz", low, high),
+		})
+	}
+	return bands
+}
+
+func titleCase(value string) string {
+	if value == "" {
+		return value
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func (m *Model) setTextFieldValue(field textField, value string) {
+	value = strings.TrimSpace(value)
+	switch field {
+	case textFieldTask:
+		m.task = value
+	case textFieldBidsRoot:
+		m.bidsRoot = value
+	case textFieldDerivRoot:
+		m.derivRoot = value
+	case textFieldSourceRoot:
+		m.sourceRoot = value
+	case textFieldRawMontage:
+		m.rawMontage = value
+	case textFieldRawEventPrefixes:
+		m.rawEventPrefixes = value
+	case textFieldMergeEventPrefixes:
+		m.mergeEventPrefixes = value
+	case textFieldMergeEventTypes:
+		m.mergeEventTypes = value
+	}
+}
+
 ///////////////////////////////////////////////////////////////////
 // Advanced Options Helpers
 ///////////////////////////////////////////////////////////////////
@@ -914,17 +1204,29 @@ const (
 	optConnectivity
 	optPACPhaseRange
 	optPACAmpRange
+	optPACMethod
+	optPACMinEpochs
 	optAperiodicRange
+	optAperiodicPeakZ
+	optAperiodicMinR2
+	optAperiodicMinPoints
 	optPEOrder
+	optPEDelay
 	optBurstPercentile
 	optERPBaseline
 	optBurstThreshold
+	optBurstMinDuration
 	optPowerBaselineMode
 	optSpectralEdge
 	optConnOutputLevel
 	optConnGraphMetrics
+	optConnGraphProp
+	optConnWindowLen
+	optConnWindowStep
 	optConnAECMode
-	// Behavior options
+	optMinEpochs
+	optExportAll
+	// Behavior options - General
 	optCorrMethod
 	optBootstrap
 	optNPerm
@@ -932,6 +1234,17 @@ const (
 	optControlTemp
 	optControlOrder
 	optFDRAlpha
+	// Behavior options - Cluster
+	optClusterThreshold
+	optClusterMinSize
+	optClusterTail
+	// Behavior options - Mediation
+	optMediationBootstrap
+	optMediationMaxMediators
+	// Behavior options - Mixed Effects
+	optMixedMaxFeatures
+	// Behavior options - Condition
+	optConditionEffectThreshold
 	// Plotting options
 	optPlotPNG
 	optPlotSVG
@@ -943,6 +1256,30 @@ const (
 	optDecodingNPerm
 	optDecodingInnerSplits
 	optDecodingSkipTimeGen
+	// Preprocessing options
+	optPrepUsePyprep
+	optPrepUseIcalabel
+	optPrepNJobs
+	optPrepResample
+	optPrepLFreq
+	optPrepHFreq
+	optPrepNotch
+	optPrepICAMethod
+	optPrepICAComp
+	optPrepProbThresh
+	optPrepEpochsTmin
+	optPrepEpochsTmax
+	// Raw-to-BIDS options
+	optRawMontage
+	optRawLineFreq
+	optRawOverwrite
+	optRawZeroBaseOnsets
+	optRawTrimToFirstVolume
+	optRawEventPrefixes
+	optRawKeepAnnotations
+	// Merge-behavior options
+	optMergeEventPrefixes
+	optMergeEventTypes
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -951,23 +1288,23 @@ func (m Model) getFeaturesOptions() []optionType {
 	options = append(options, optUseDefaults)
 
 	if m.isCategorySelected("connectivity") {
-		options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnAECMode)
+		options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnGraphProp, optConnWindowLen, optConnWindowStep, optConnAECMode)
 	}
 
 	if m.isCategorySelected("pac") {
-		options = append(options, optPACPhaseRange, optPACAmpRange)
+		options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs)
 	}
 	if m.isCategorySelected("aperiodic") {
-		options = append(options, optAperiodicRange)
+		options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints)
 	}
 	if m.isCategorySelected("complexity") {
-		options = append(options, optPEOrder)
+		options = append(options, optPEOrder, optPEDelay)
 	}
 	if m.isCategorySelected("erp") {
 		options = append(options, optERPBaseline)
 	}
 	if m.isCategorySelected("bursts") {
-		options = append(options, optBurstThreshold)
+		options = append(options, optBurstThreshold, optBurstMinDuration)
 	}
 	if m.isCategorySelected("power") {
 		options = append(options, optPowerBaselineMode)
@@ -976,11 +1313,59 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optSpectralEdge)
 	}
 
+	options = append(options,
+		optExportAll,
+		optMinEpochs,
+	)
+
 	return options
 }
 
-func (m Model) getBehaviorOptions() []optionType {
+// getPreprocessingOptions returns advanced options for preprocessing
+func (m Model) getPreprocessingOptions() []optionType {
+	mode := m.modeOptions[m.modeIndex]
+	options := []optionType{optUseDefaults}
+
+	if mode == "full" || mode == "bad-channels" {
+		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch)
+	}
+
+	if mode == "full" || mode == "ica" {
+		options = append(options, optPrepICAMethod, optPrepICAComp, optPrepUseIcalabel, optPrepProbThresh)
+	}
+
+	if mode == "full" || mode == "epochs" {
+		options = append(options, optPrepEpochsTmin, optPrepEpochsTmax)
+	}
+
+	return options
+}
+
+// getRawToBidsOptions returns advanced options for raw-to-bids
+func (m Model) getRawToBidsOptions() []optionType {
 	return []optionType{
+		optUseDefaults,
+		optRawMontage,
+		optRawLineFreq,
+		optRawOverwrite,
+		optRawZeroBaseOnsets,
+		optRawTrimToFirstVolume,
+		optRawEventPrefixes,
+		optRawKeepAnnotations,
+	}
+}
+
+// getMergeBehaviorOptions returns advanced options for merge-behavior
+func (m Model) getMergeBehaviorOptions() []optionType {
+	return []optionType{
+		optUseDefaults,
+		optMergeEventPrefixes,
+		optMergeEventTypes,
+	}
+}
+
+func (m Model) getBehaviorOptions() []optionType {
+	options := []optionType{
 		optUseDefaults,
 		optCorrMethod,
 		optBootstrap,
@@ -990,6 +1375,28 @@ func (m Model) getBehaviorOptions() []optionType {
 		optControlOrder,
 		optFDRAlpha,
 	}
+
+	// Add cluster options if cluster computation is selected
+	if m.isComputationSelected("cluster") {
+		options = append(options, optClusterThreshold, optClusterMinSize, optClusterTail)
+	}
+
+	// Add mediation options if mediation computation is selected
+	if m.isComputationSelected("mediation") {
+		options = append(options, optMediationBootstrap, optMediationMaxMediators)
+	}
+
+	// Add mixed effects options if mixed_effects computation is selected
+	if m.isComputationSelected("mixed_effects") {
+		options = append(options, optMixedMaxFeatures)
+	}
+
+	// Add condition options if condition computation is selected
+	if m.isComputationSelected("condition") {
+		options = append(options, optConditionEffectThreshold)
+	}
+
+	return options
 }
 
 func (m Model) getPlotConfigOptions() []optionType {
@@ -1033,6 +1440,10 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 		options = m.getBehaviorOptions()
 	case types.PipelineDecoding:
 		options = m.getDecodingOptions()
+	case types.PipelinePreprocessing:
+		options = m.getPreprocessingOptions()
+	case types.PipelineRawToBIDS:
+		options = m.getRawToBidsOptions()
 	default:
 		return false
 	}

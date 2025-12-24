@@ -38,7 +38,15 @@ type utilityItem struct {
 	shortcut    string
 }
 
+const (
+	UtilityGlobalSetup = iota
+	UtilityCombineFeatures
+	UtilityMergePsychopy
+	UtilityRawToBids
+)
+
 var utilities = []utilityItem{
+	{"Global Setup", "Configure global defaults and paths", "G"},
 	{"Combine Features", "Merge all feature files into features_all.tsv", "C"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files", "M"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format", "R"},
@@ -57,11 +65,8 @@ type Model struct {
 	width            int
 	height           int
 
-	SubjectCount  int
-	FeaturesDone  int
-	FeaturesTotal int
-	Task          string
-	IsCloud       bool
+	Task    string
+	IsCloud bool
 
 	// Help overlay
 	helpOverlay components.HelpOverlay
@@ -82,6 +87,7 @@ func New() Model {
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Select pipeline"},
+		{Key: "G", Description: "Open Global Setup"},
 		{Key: "?", Description: "Toggle help"},
 	})
 	help.AddSection("General", []components.HelpItem{
@@ -161,18 +167,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c", "C":
 			// Quick select Combine Features utility
 			m.inUtilities = true
-			m.utilityCursor = 0
-			m.SelectedUtility = 0
+			m.utilityCursor = UtilityCombineFeatures
+			m.SelectedUtility = UtilityCombineFeatures
 		case "m", "M":
 			// Quick select Merge PsychoPy Data utility
 			m.inUtilities = true
-			m.utilityCursor = 1
-			m.SelectedUtility = 1
+			m.utilityCursor = UtilityMergePsychopy
+			m.SelectedUtility = UtilityMergePsychopy
 		case "r", "R":
 			// Quick select Raw to BIDS utility
 			m.inUtilities = true
-			m.utilityCursor = 2
-			m.SelectedUtility = 2
+			m.utilityCursor = UtilityRawToBids
+			m.SelectedUtility = UtilityRawToBids
+		case "g", "G":
+			// Quick select Global Setup
+			m.inUtilities = true
+			m.utilityCursor = UtilityGlobalSetup
+			m.SelectedUtility = UtilityGlobalSetup
 		}
 
 	case tea.WindowSizeMsg:
@@ -231,11 +242,14 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.inUtilities {
 		// Map utility items to pipeline types for wizard launching
 		switch m.utilityCursor {
-		case 0:
+		case UtilityGlobalSetup:
+			m.SelectedUtility = UtilityGlobalSetup
+			return m, nil
+		case UtilityCombineFeatures:
 			m.SelectedPipeline = int(types.PipelineCombineFeatures)
-		case 1:
+		case UtilityMergePsychopy:
 			m.SelectedPipeline = int(types.PipelineMergePsychoPyData)
-		case 2:
+		case UtilityRawToBids:
 			m.SelectedPipeline = int(types.PipelineRawToBIDS)
 		}
 	} else {
@@ -263,7 +277,6 @@ func (m Model) View() string {
 	// Main Content - Dual Column Layout
 	pipelinesCol := m.renderPipelinesColumn()
 	utilitiesCol := m.renderUtilitiesColumn()
-	sidebarCol := m.renderSidebar()
 
 	leftContent := pipelinesCol + "\n" + utilitiesCol
 	leftWidth := (m.width - 10) * 2 / 3
@@ -276,9 +289,7 @@ func (m Model) View() string {
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.CardStyle.Width(leftWidth).Render(leftContent),
-		"  ",
-		styles.CardStyle.Width(rightWidth).Render(sidebarCol),
+		styles.CardStyle.Width(m.width-10).Render(leftContent),
 	)
 
 	b.WriteString(content + "\n\n")
@@ -315,12 +326,9 @@ func (m Model) renderBaseView() string {
 	b.WriteString("\n\n")
 
 	pipelinesCol := m.renderPipelinesColumn()
-	sidebarCol := m.renderSidebar()
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.CardStyle.Width(52).Render(pipelinesCol),
-		"  ",
-		styles.CardStyle.Width(26).Render(sidebarCol),
+		styles.CardStyle.Width(m.width-10).Render(pipelinesCol),
 	)
 	b.WriteString(content)
 	return b.String()
@@ -493,74 +501,6 @@ func (m Model) renderPipelineItem(_ int, p pipelineItem, selected bool) string {
 	item.WriteString("       " + descStyle.Render(p.description) + "\n")
 
 	return item.String()
-}
-
-func (m Model) renderSidebar() string {
-	var lines []string
-
-	// Status section
-	header := lipgloss.JoinHorizontal(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(styles.Accent).Render("▸ "),
-		styles.SectionTitleStyle.Render(" STATUS "),
-	)
-	lines = append(lines, header)
-	lines = append(lines, "")
-
-	// Subject count with animated indicator when loading
-	subjectValue := m.formatSubjectCount()
-	lines = append(lines, m.renderStatusRow("Subjects", subjectValue))
-
-	// Task info
-	lines = append(lines, m.renderStatusRow("Task", m.Task))
-
-	lines = append(lines, "")
-
-	// Quick stats section
-	statsHeader := lipgloss.JoinHorizontal(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(styles.Accent).Render("▸ "),
-		styles.SectionTitleStyle.Render(" STATS "),
-	)
-	lines = append(lines, statsHeader)
-	lines = append(lines, "")
-
-	// Feature progress
-	if m.FeaturesTotal > 0 {
-		pct := float64(m.FeaturesDone) / float64(m.FeaturesTotal) * 100
-		progressBar := m.renderMiniProgress(pct / 100)
-		lines = append(lines, "  "+progressBar)
-		lines = append(lines, m.renderStatusRow("Features", fmt.Sprintf("%.0f%%", pct)))
-	} else {
-		lines = append(lines, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("  No cache"))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) renderStatusRow(label, value string) string {
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10)
-	return "  " + labelStyle.Render(label) + " " + value
-}
-
-func (m Model) formatSubjectCount() string {
-	if m.SubjectCount == 0 {
-		// Animated loading indicator
-		frames := []string{"◐", "◓", "◑", "◒"}
-		frame := frames[m.ticker%len(frames)]
-		return lipgloss.NewStyle().Foreground(styles.Accent).Render(frame + " probing...")
-	}
-	return lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(fmt.Sprintf("%d", m.SubjectCount))
-}
-
-func (m Model) renderMiniProgress(pct float64) string {
-	width := 16
-	filled := int(pct * float64(width))
-	if filled > width {
-		filled = width
-	}
-
-	bar := lipgloss.NewStyle().Foreground(styles.Success).Render(strings.Repeat("█", filled))
-	empty := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("░", width-filled))
-	return bar + empty
 }
 
 func (m Model) renderFooter() string {

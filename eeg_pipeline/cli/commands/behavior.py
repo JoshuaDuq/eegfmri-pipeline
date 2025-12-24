@@ -9,6 +9,7 @@ from eeg_pipeline.cli.common import (
     add_common_subject_args,
     add_task_arg,
     add_output_format_args,
+    add_path_args,
     resolve_task,
     create_progress_reporter,
 )
@@ -103,11 +104,33 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Frequency bands to use for analysis (default: all)",
     )
     
+    # Cluster-specific options
+    cluster_group = parser.add_argument_group("Cluster permutation options")
+    cluster_group.add_argument("--cluster-threshold", type=float, default=None, help="Cluster forming threshold")
+    cluster_group.add_argument("--cluster-min-size", type=int, default=None, help="Minimum cluster size")
+    cluster_group.add_argument("--cluster-tail", type=int, choices=[-1, 0, 1], default=None, help="Test tail: 0=two-tailed, 1=upper, -1=lower")
+    
+    # Mediation-specific options
+    mediation_group = parser.add_argument_group("Mediation analysis options")
+    mediation_group.add_argument("--mediation-bootstrap", type=int, default=None, help="Bootstrap iterations for mediation")
+    mediation_group.add_argument("--mediation-max-mediators", type=int, default=None, help="Maximum mediators to test")
+    
+    # Mixed effects-specific options
+    mixed_group = parser.add_argument_group("Mixed effects options")
+    mixed_group.add_argument("--mixed-max-features", type=int, default=None, help="Maximum features for mixed effects")
+    
+    # Condition-specific options
+    condition_group = parser.add_argument_group("Condition comparison options")
+    condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
+    
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
     plot_group.add_argument("--plots", nargs="+", metavar="PLOT")
     plot_group.add_argument("--all-plots", action="store_true")
     visualize_group.add_argument("--skip-scatter", action="store_true")
+
+    add_path_args(parser)
+
     return parser
 
 
@@ -119,6 +142,11 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
+    
+    if getattr(args, "bids_root", None):
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "deriv_root", None):
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
     
     if args.mode == "compute":
         rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
@@ -137,6 +165,27 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         if getattr(args, "fdr_alpha", None) is not None:
             config.setdefault("behavior_analysis", {}).setdefault("statistics", {})["fdr_alpha"] = args.fdr_alpha
 
+        # Cluster-specific options
+        if getattr(args, "cluster_threshold", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("cluster", {})["forming_threshold"] = args.cluster_threshold
+        if getattr(args, "cluster_min_size", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("cluster", {})["min_cluster_size"] = args.cluster_min_size
+        if getattr(args, "cluster_tail", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("cluster", {})["tail"] = args.cluster_tail
+        
+        # Mediation-specific options
+        if getattr(args, "mediation_bootstrap", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("mediation", {})["n_bootstrap"] = args.mediation_bootstrap
+        if getattr(args, "mediation_max_mediators", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("mediation", {})["max_mediators"] = args.mediation_max_mediators
+        
+        # Mixed effects-specific options
+        if getattr(args, "mixed_max_features", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("mixed_effects", {})["max_features"] = args.mixed_max_features
+        
+        # Condition-specific options
+        if getattr(args, "condition_effect_threshold", None) is not None:
+            config.setdefault("behavior_analysis", {}).setdefault("condition", {})["effect_size_threshold"] = args.condition_effect_threshold
         
         computation_features = {}
         if getattr(args, "correlations_features", None):

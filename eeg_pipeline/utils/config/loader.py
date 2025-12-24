@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Optional, Union, Tuple, List
+import json
 import yaml
 import os
 
@@ -96,6 +97,45 @@ def _resolve_paths_recursive(obj: Any, config_dir: Path, project_root: Path) -> 
         for item in obj:
             if isinstance(item, (dict, list)):
                 _resolve_paths_recursive(item, config_dir, project_root)
+
+
+###################################################################
+# TUI Overrides (JSON) Support
+###################################################################
+
+
+def _get_overrides_path(config_path: Path) -> Path:
+    env_path = os.getenv("EEG_PIPELINE_TUI_OVERRIDES")
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+    project_root = Path(__file__).resolve().parents[3]
+    return project_root / "eeg_pipeline" / "data" / "derivatives" / ".tui_overrides.json"
+
+
+def _merge_overrides(base: Dict[str, Any], overrides: Dict[str, Any]) -> None:
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge_overrides(base[key], value)
+        else:
+            base[key] = value
+
+
+def _apply_config_overrides(config: Dict[str, Any], config_path: Path) -> Dict[str, Any]:
+    overrides_path = _get_overrides_path(config_path)
+    if not overrides_path.exists():
+        return config
+
+    try:
+        with open(overrides_path, "r", encoding="utf-8") as handle:
+            overrides = json.load(handle) or {}
+    except (OSError, json.JSONDecodeError):
+        return config
+
+    if not isinstance(overrides, dict):
+        return config
+
+    _merge_overrides(config, overrides)
+    return resolve_config_paths(config, config_path)
 
 
 ###################################################################
@@ -215,7 +255,8 @@ def _load_config_from_file(config_path: Path) -> Dict[str, Any]:
             f"got {type(config).__name__}"
         )
     
-    return resolve_config_paths(config, config_path)
+    config = resolve_config_paths(config, config_path)
+    return _apply_config_overrides(config, config_path)
 
 
 def _apply_thread_limits(config: Dict[str, Any]) -> None:

@@ -85,6 +85,14 @@ For detailed help on each subcommand:
         return 1
     
     config = load_config()
+
+    if getattr(args, "bids_root", None):
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "source_root", None):
+        config.setdefault("paths", {})["source_data"] = args.source_root
+    if getattr(args, "deriv_root", None):
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+
     deriv_root = get_deriv_root(config)
     
     cmd = get_command(args.command)

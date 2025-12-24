@@ -40,6 +40,9 @@ func (m *Model) resetCursorsForStep() {
 	m.subjectFilter = ""
 	m.editingNumber = false
 	m.numberBuffer = ""
+	m.editingText = false
+	m.textBuffer = ""
+	m.editingTextField = textFieldNone
 	m.editingRangeIdx = -1
 	m.editingField = 0
 }
@@ -56,6 +59,7 @@ func (m *Model) handleUp() {
 		} else {
 			m.modeIndex = len(m.modeOptions) - 1
 		}
+
 	case types.StepSelectComputations:
 		if m.computationCursor > 0 {
 			m.computationCursor--
@@ -150,6 +154,7 @@ func (m *Model) handleDown() {
 		} else {
 			m.modeIndex = 0
 		}
+
 	case types.StepSelectComputations:
 		if m.computationCursor < len(m.computations)-1 {
 			m.computationCursor++
@@ -283,6 +288,42 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	if m.stepIndex < len(m.steps)-1 {
 		m.stepIndex++
 		m.CurrentStep = m.steps[m.stepIndex]
+
+		// Dynamic step skipping based on pipeline and mode
+		for m.stepIndex < len(m.steps)-1 {
+			skip := false
+			switch m.Pipeline {
+			case types.PipelineFeatures:
+				mode := m.modeOptions[m.modeIndex]
+				switch mode {
+				case "combine":
+					// For combine, only Subjects and Execute are needed
+					if m.CurrentStep != types.StepReviewExecute && m.CurrentStep != types.StepSelectSubjects && m.CurrentStep != types.StepSelectMode {
+						skip = true
+					}
+				case styles.ModeVisualize:
+					// For visualize, skip bands, spatial, time, and advanced config (handled by specialized plotting pipeline)
+					if m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepSelectSpatial || m.CurrentStep == types.StepTimeRange || m.CurrentStep == types.StepAdvancedConfig {
+						skip = true
+					}
+				}
+			case types.PipelineBehavior:
+				mode := m.modeOptions[m.modeIndex]
+				if mode == styles.ModeVisualize {
+					// For visualize, skip computations selection, features selection, bands, and advanced config
+					if m.CurrentStep == types.StepSelectComputations || m.CurrentStep == types.StepSelectFeatureFiles || m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepAdvancedConfig {
+						skip = true
+					}
+				}
+			}
+
+			if !skip {
+				break
+			}
+			m.stepIndex++
+			m.CurrentStep = m.steps[m.stepIndex]
+		}
+
 		m.resetCursorsForStep()
 
 		if m.CurrentStep == types.StepReviewExecute {
@@ -295,6 +336,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 func (m *Model) validateStep() []string {
 	var errors []string
 	switch m.CurrentStep {
+
 	case types.StepSelectSubjects:
 		count := 0
 		for _, sel := range m.subjectSelected {
@@ -405,6 +447,7 @@ func (m *Model) handleSpace() {
 		if m.plotCursor < len(m.plotItems) {
 			m.plotSelected[m.plotCursor] = !m.plotSelected[m.plotCursor]
 		}
+
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
 		if m.plotConfigCursor < 0 || m.plotConfigCursor >= len(options) {
@@ -538,6 +581,39 @@ func (m *Model) GoBack() bool {
 
 		m.stepIndex--
 		m.CurrentStep = m.steps[m.stepIndex]
+
+		// Dynamic step skipping (reverse)
+		for m.stepIndex > 0 {
+			skip := false
+			switch m.Pipeline {
+			case types.PipelineFeatures:
+				mode := m.modeOptions[m.modeIndex]
+				switch mode {
+				case "combine":
+					if m.CurrentStep != types.StepReviewExecute && m.CurrentStep != types.StepSelectSubjects && m.CurrentStep != types.StepSelectMode {
+						skip = true
+					}
+				case styles.ModeVisualize:
+					if m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepSelectSpatial || m.CurrentStep == types.StepTimeRange || m.CurrentStep == types.StepAdvancedConfig {
+						skip = true
+					}
+				}
+			case types.PipelineBehavior:
+				mode := m.modeOptions[m.modeIndex]
+				if mode == styles.ModeVisualize {
+					if m.CurrentStep == types.StepSelectComputations || m.CurrentStep == types.StepSelectFeatureFiles || m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepAdvancedConfig {
+						skip = true
+					}
+				}
+			}
+
+			if !skip {
+				break
+			}
+			m.stepIndex--
+			m.CurrentStep = m.steps[m.stepIndex]
+		}
+
 		m.resetCursorsForStep() // Reset cursors when going back
 		return true
 	}
@@ -629,13 +705,7 @@ func (m *Model) validate() []string {
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
-		plotCount := 0
-		for _, selected := range m.plotSelected {
-			if selected {
-				plotCount++
-			}
-		}
-		if plotCount == 0 {
+		if len(m.SelectedPlotIDs()) == 0 {
 			errors = append(errors, "No plots selected")
 		}
 		formatCount := 0
@@ -718,7 +788,7 @@ func (m *Model) validateTimeRanges() []string {
 
 func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool) {
 	for i, plot := range m.plotItems {
-		if !m.plotSelected[i] {
+		if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
 			continue
 		}
 		if plot.RequiresEpochs {
@@ -756,6 +826,12 @@ func (m *Model) getAdvancedOptionCount() int {
 
 	case types.PipelineDecoding:
 		return len(m.getDecodingOptions())
+	case types.PipelinePreprocessing:
+		return len(m.getPreprocessingOptions())
+	case types.PipelineRawToBIDS:
+		return len(m.getRawToBidsOptions())
+	case types.PipelineMergePsychoPyData:
+		return len(m.getMergeBehaviorOptions())
 	default:
 		return 1
 	}
@@ -770,6 +846,12 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleBehaviorAdvancedOption()
 	case types.PipelineDecoding:
 		m.toggleDecodingAdvancedOption()
+	case types.PipelinePreprocessing:
+		m.togglePreprocessingAdvancedOption()
+	case types.PipelineRawToBIDS:
+		m.toggleRawToBidsAdvancedOption()
+	case types.PipelineMergePsychoPyData:
+		m.toggleMergeBehaviorAdvancedOption()
 	}
 }
 
@@ -818,6 +900,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.pacAmpMin, m.pacAmpMax = 30.0, 80.0 // default gamma
 		}
 		m.useDefaultAdvanced = false
+	case optPACMethod:
+		m.pacMethod = (m.pacMethod + 1) % 4
+		m.useDefaultAdvanced = false
+	case optPACMinEpochs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optAperiodicRange:
 		// Cycle through common aperiodic ranges: standard(2-40) -> narrow(3-30) -> broad(1-50) -> standard
 		if m.aperiodicFmin == 2.0 && m.aperiodicFmax == 40.0 {
@@ -828,11 +916,17 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.aperiodicFmin, m.aperiodicFmax = 2.0, 40.0 // standard
 		}
 		m.useDefaultAdvanced = false
+	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optPEOrder:
 		m.complexityPEOrder++
 		if m.complexityPEOrder > 7 {
 			m.complexityPEOrder = 3
 		}
+		m.useDefaultAdvanced = false
+	case optPEDelay:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optERPBaseline:
 		m.erpBaselineCorrection = !m.erpBaselineCorrection
@@ -848,6 +942,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		default:
 			m.burstThresholdZ = 1.5
 		}
+		m.useDefaultAdvanced = false
+	case optBurstMinDuration:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPowerBaselineMode:
 		m.powerBaselineMode = (m.powerBaselineMode + 1) % 5
@@ -868,8 +965,17 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optConnGraphMetrics:
 		m.connGraphMetrics = !m.connGraphMetrics
 		m.useDefaultAdvanced = false
+	case optConnGraphProp, optConnWindowLen, optConnWindowStep:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optConnAECMode:
 		m.connAECMode = (m.connAECMode + 1) % 3
+		m.useDefaultAdvanced = false
+	case optExportAll:
+		m.exportAllFeatures = !m.exportAllFeatures
+		m.useDefaultAdvanced = false
+	case optMinEpochs:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	}
 
@@ -919,6 +1025,55 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.fdrAlpha = 0.05
 		}
 		m.useDefaultAdvanced = false
+	// Cluster options
+	case optClusterThreshold:
+		switch m.clusterThreshold {
+		case 0.05:
+			m.clusterThreshold = 0.01
+		case 0.01:
+			m.clusterThreshold = 0.001
+		case 0.001:
+			m.clusterThreshold = 0.05
+		default:
+			m.clusterThreshold = 0.05
+		}
+		m.useDefaultAdvanced = false
+	case optClusterMinSize:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optClusterTail:
+		switch m.clusterTail {
+		case 0:
+			m.clusterTail = 1
+		case 1:
+			m.clusterTail = -1
+		case -1:
+			m.clusterTail = 0
+		default:
+			m.clusterTail = 0
+		}
+		m.useDefaultAdvanced = false
+	// Mediation options
+	case optMediationBootstrap, optMediationMaxMediators:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Mixed effects options
+	case optMixedMaxFeatures:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Condition options
+	case optConditionEffectThreshold:
+		switch m.conditionEffectThreshold {
+		case 0.5:
+			m.conditionEffectThreshold = 0.8
+		case 0.8:
+			m.conditionEffectThreshold = 0.2
+		case 0.2:
+			m.conditionEffectThreshold = 0.5
+		default:
+			m.conditionEffectThreshold = 0.5
+		}
+		m.useDefaultAdvanced = false
 	}
 }
 
@@ -941,6 +1096,84 @@ func (m *Model) toggleDecodingAdvancedOption() {
 	}
 }
 
+func (m *Model) togglePreprocessingAdvancedOption() {
+	options := m.getPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optPrepUsePyprep:
+		m.prepUsePyprep = !m.prepUsePyprep
+		m.useDefaultAdvanced = false
+	case optPrepUseIcalabel:
+		m.prepUseIcalabel = !m.prepUseIcalabel
+		m.useDefaultAdvanced = false
+	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepICAMethod:
+		m.prepICAMethod = (m.prepICAMethod + 1) % 3
+		m.useDefaultAdvanced = false
+	}
+}
+
+func (m *Model) toggleRawToBidsAdvancedOption() {
+	options := m.getRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optRawMontage:
+		m.startTextEdit(textFieldRawMontage)
+		m.useDefaultAdvanced = false
+	case optRawLineFreq:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optRawOverwrite:
+		m.rawOverwrite = !m.rawOverwrite
+		m.useDefaultAdvanced = false
+	case optRawZeroBaseOnsets:
+		m.rawZeroBaseOnsets = !m.rawZeroBaseOnsets
+		m.useDefaultAdvanced = false
+	case optRawTrimToFirstVolume:
+		m.rawTrimToFirstVolume = !m.rawTrimToFirstVolume
+		m.useDefaultAdvanced = false
+	case optRawEventPrefixes:
+		m.startTextEdit(textFieldRawEventPrefixes)
+		m.useDefaultAdvanced = false
+	case optRawKeepAnnotations:
+		m.rawKeepAnnotations = !m.rawKeepAnnotations
+		m.useDefaultAdvanced = false
+	}
+}
+
+func (m *Model) toggleMergeBehaviorAdvancedOption() {
+	options := m.getMergeBehaviorOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optMergeEventPrefixes:
+		m.startTextEdit(textFieldMergeEventPrefixes)
+		m.useDefaultAdvanced = false
+	case optMergeEventTypes:
+		m.startTextEdit(textFieldMergeEventTypes)
+		m.useDefaultAdvanced = false
+	}
+}
+
 ///////////////////////////////////////////////////////////////////
 // Number Input Helpers
 ///////////////////////////////////////////////////////////////////
@@ -951,7 +1184,7 @@ func (m *Model) commitNumberInput() {
 		return
 	}
 
-	val, err := strconv.Atoi(m.numberBuffer)
+	val, err := strconv.ParseFloat(m.numberBuffer, 64)
 	if err != nil {
 		return // Invalid number, ignore
 	}
@@ -963,11 +1196,15 @@ func (m *Model) commitNumberInput() {
 		m.commitBehaviorNumber(val)
 	case types.PipelineDecoding:
 		m.commitDecodingNumber(val)
+	case types.PipelinePreprocessing:
+		m.commitPreprocessingNumber(val)
+	case types.PipelineRawToBIDS:
+		m.commitRawToBidsNumber(val)
 	}
 	m.useDefaultAdvanced = false
 }
 
-func (m *Model) commitFeaturesNumber(_ int) {
+func (m *Model) commitFeaturesNumber(val float64) {
 	// Re-build the same options slice as toggleFeaturesAdvancedOption to find current opt
 	options := m.getFeaturesOptions()
 
@@ -976,10 +1213,31 @@ func (m *Model) commitFeaturesNumber(_ int) {
 	}
 
 	opt := options[m.advancedCursor]
-	_ = opt // No numeric fields currently
+	switch opt {
+	case optAperiodicPeakZ:
+		m.aperiodicPeakZ = val
+	case optAperiodicMinR2:
+		m.aperiodicMinR2 = val
+	case optAperiodicMinPoints:
+		m.aperiodicMinPoints = int(val)
+	case optPACMinEpochs:
+		m.pacMinEpochs = int(val)
+	case optPEDelay:
+		m.complexityPEDelay = int(val)
+	case optBurstMinDuration:
+		m.burstMinDuration = int(val)
+	case optMinEpochs:
+		m.minEpochsForFeatures = int(val)
+	case optConnGraphProp:
+		m.connGraphProp = val
+	case optConnWindowLen:
+		m.connWindowLen = val
+	case optConnWindowStep:
+		m.connWindowStep = val
+	}
 }
 
-func (m *Model) commitBehaviorNumber(val int) {
+func (m *Model) commitBehaviorNumber(val float64) {
 	options := m.getBehaviorOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
@@ -989,20 +1247,36 @@ func (m *Model) commitBehaviorNumber(val int) {
 	switch opt {
 	case optBootstrap:
 		if val >= 0 {
-			m.bootstrapSamples = val
+			m.bootstrapSamples = int(val)
 		}
 	case optNPerm:
 		if val >= 0 {
-			m.nPermutations = val
+			m.nPermutations = int(val)
 		}
 	case optRNGSeed:
 		if val >= 0 {
-			m.rngSeed = val
+			m.rngSeed = int(val)
+		}
+	case optClusterMinSize:
+		if val >= 1 {
+			m.clusterMinSize = int(val)
+		}
+	case optMediationBootstrap:
+		if val >= 0 {
+			m.mediationBootstrap = int(val)
+		}
+	case optMediationMaxMediators:
+		if val >= 1 {
+			m.mediationMaxMediators = int(val)
+		}
+	case optMixedMaxFeatures:
+		if val >= 1 {
+			m.mixedMaxFeatures = int(val)
 		}
 	}
 }
 
-func (m *Model) commitDecodingNumber(val int) {
+func (m *Model) commitDecodingNumber(val float64) {
 	options := m.getDecodingOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
@@ -1012,15 +1286,69 @@ func (m *Model) commitDecodingNumber(val int) {
 	switch opt {
 	case optDecodingNPerm:
 		if val >= 0 {
-			m.decodingNPerm = val
+			m.decodingNPerm = int(val)
 		}
 	case optDecodingInnerSplits:
 		if val >= 2 {
-			m.innerSplits = val
+			m.innerSplits = int(val)
 		}
 	case optRNGSeed:
 		if val >= 0 {
-			m.rngSeed = val
+			m.rngSeed = int(val)
+		}
+	}
+}
+
+func (m *Model) commitPreprocessingNumber(val float64) {
+	options := m.getPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optPrepNJobs:
+		if val >= 1 {
+			m.prepNJobs = int(val)
+		}
+	case optPrepResample:
+		if val > 0 {
+			m.prepResample = int(val)
+		}
+	case optPrepLFreq:
+		m.prepLFreq = val
+	case optPrepHFreq:
+		m.prepHFreq = val
+	case optPrepNotch:
+		if val > 0 {
+			m.prepNotch = int(val)
+		}
+	case optPrepICAComp:
+		if val > 0 {
+			m.prepICAComp = val
+		}
+	case optPrepProbThresh:
+		if val >= 0 && val <= 1 {
+			m.prepProbThresh = val
+		}
+	case optPrepEpochsTmin:
+		m.prepEpochsTmin = val
+	case optPrepEpochsTmax:
+		m.prepEpochsTmax = val
+	}
+}
+
+func (m *Model) commitRawToBidsNumber(val float64) {
+	options := m.getRawToBidsOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optRawLineFreq:
+		if val > 0 {
+			m.rawLineFreq = int(val)
 		}
 	}
 }

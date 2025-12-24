@@ -528,7 +528,12 @@ def _write_normalized_results(
         return None
     df = pd.DataFrame(records)
     df = df.reindex(columns=_STANDARD_COLUMNS)
-    path = ctx.stats_dir / "normalized_results.tsv"
+    
+    # Build feature suffix from selected feature files or categories
+    feature_files = ctx.selected_feature_files or ctx.feature_categories or []
+    feature_suffix = "_" + "_".join(sorted(feature_files)) if feature_files else ""
+    
+    path = ctx.stats_dir / f"normalized_results{feature_suffix}.tsv"
     from eeg_pipeline.infra.tsv import write_tsv
     write_tsv(df, path)
     return path
@@ -694,7 +699,7 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     )
 
 
-def stage_temporal(ctx: BehaviorContext) -> None:
+def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     from eeg_pipeline.analysis.behavior.api import (
         compute_time_frequency_from_context,
         compute_temporal_from_context,
@@ -702,17 +707,19 @@ def stage_temporal(ctx: BehaviorContext) -> None:
     )
 
     status = {"time_frequency": "success", "temporal": "success", "topomap": "success"}
+    tf_results = None
+    temporal_results = None
 
     ctx.logger.info("Computing time-frequency correlations...")
     try:
-        compute_time_frequency_from_context(ctx)
+        tf_results = compute_time_frequency_from_context(ctx)
     except Exception as exc:
         status["time_frequency"] = f"failed: {exc}"
         ctx.logger.error(f"Time-frequency correlations failed: {exc}")
 
     ctx.logger.info("Computing temporal correlations by condition...")
     try:
-        compute_temporal_from_context(ctx)
+        temporal_results = compute_temporal_from_context(ctx)
     except Exception as exc:
         status["temporal"] = f"failed: {exc}"
         ctx.logger.error(f"Temporal correlations failed: {exc}")
@@ -739,6 +746,8 @@ def stage_temporal(ctx: BehaviorContext) -> None:
     failed = {k: v for k, v in status.items() if v != "success"}
     if failed:
         ctx.logger.info(f"Temporal stage status: {failed}")
+    
+    return tf_results, temporal_results
 
 
 def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
@@ -748,8 +757,8 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
     ctx.n_perm = config.n_permutations
 
     try:
-        run_cluster_test_from_context(ctx)
-        return {"status": "completed"}
+        results = run_cluster_test_from_context(ctx)
+        return results if results else {"status": "completed"}
     except Exception as exc:
         ctx.logger.warning(f"Cluster tests failed: {exc}")
         return {"status": "failed", "error": str(exc)}
@@ -766,28 +775,39 @@ def _get_feature_columns(df: pd.DataFrame) -> List[str]:
 def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis, run_multilevel_correlation_analysis
 
-    features = combine_features(ctx)
+    features = combine_features(ctx).copy()
     if features.empty:
         return
+
+    # Add targets and temperature to the dataframe for analysis
+    if ctx.targets is not None:
+        features["rating"] = ctx.targets.values
+    if ctx.temperature is not None:
+        features["temperature"] = ctx.temperature.values
+    
+    features["subject"] = ctx.subject
 
     feature_cols = _get_feature_columns(features)
     if not feature_cols:
         return
 
     if config.run_mediation:
-        ctx.logger.info("Running mediation analysis...")
-        n_bootstrap = get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
-        variances = features[feature_cols].var()
-        mediators = variances.nlargest(20).index.tolist()
-        results.mediation = run_mediation_analysis(
-            features,
-            "temperature",
-            mediators,
-            "rating",
-            n_bootstrap=n_bootstrap,
-        )
+        if "temperature" in features.columns and "rating" in features.columns:
+            ctx.logger.info("Running mediation analysis...")
+            n_bootstrap = get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
+            variances = features[feature_cols].var()
+            mediators = variances.nlargest(20).index.tolist()
+            results.mediation = run_mediation_analysis(
+                features,
+                "temperature",
+                mediators,
+                "rating",
+                n_bootstrap=n_bootstrap,
+            )
+        else:
+            ctx.logger.warning("Skipping mediation: 'temperature' or 'rating' missing.")
 
-    if config.run_mixed_effects and "subject" in features.columns:
+    if config.run_mixed_effects and "subject" in features.columns and "rating" in features.columns:
         ctx.logger.info("Running mixed-effects analysis...")
         results.mixed_effects = run_multilevel_correlation_analysis(
             features,
@@ -798,19 +818,138 @@ def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
         )
 
 
-def stage_validate(ctx: BehaviorContext, config: Any) -> None:
+def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = None) -> None:
     from eeg_pipeline.utils.analysis.stats.fdr import apply_global_fdr
     from eeg_pipeline.utils.analysis.stats.reliability import compute_hierarchical_fdr_summary
 
     fdr_alpha = config.fdr_alpha
 
+    # Determine which analysis files to include in FDR based on current computation flags
+    patterns = []
+    
+    # 1. Condition effects
+    if getattr(config, "run_condition_comparison", False):
+        patterns.append("condition_effects*.tsv")
+        
+    # 2. Mediation and Mixed Effects
+    if getattr(config, "run_mediation", False):
+        patterns.append("mediation*.tsv")
+    if getattr(config, "run_mixed_effects", False):
+        patterns.append("mixed_effects*.tsv")
+
+    # 3. Correlations and Pain Sensitivity
+    # We include these if they were requested. 
+    # Note: ctx.selected_feature_files tracks which feature categories were loaded for correlation-style analyses.
+    include_cats = ctx.selected_feature_files or ctx.feature_categories
+    
+    # Check if correlations or pain sensitivity were requested (using heuristic or explicit flags)
+    # The orchestration layer usually has these flags in config.
+    run_corrs = getattr(config, "run_correlations", True) # Default to True if not explicit, but check config
+    run_psi = getattr(config, "compute_pain_sensitivity", False)
+
+    if include_cats:
+        for cat in include_cats:
+            if run_corrs:
+                patterns.append(f"corr_stats_{cat}_vs_*.tsv")
+            if run_psi:
+                patterns.append(f"pain_sensitivity_{cat}*.tsv")
+        
+        # Always include 'all_features' and base 'pain_sensitivity' if they might have been written
+        if run_corrs:
+            patterns.append("corr_stats_all_features_vs_*.tsv")
+        if run_psi:
+            patterns.append("pain_sensitivity_*.tsv")
+    elif run_corrs or run_psi:
+        # Fallback if no specific categories selected
+        if run_corrs:
+            patterns.append("corr_stats_*.tsv")
+        if run_psi:
+            patterns.append("pain_sensitivity_*.tsv")
+
+    # 4. Temporal and Time-Frequency
+    if getattr(config, "run_temporal_correlations", False):
+        patterns.extend([
+            "corr_stats_tf_*.tsv",
+            "corr_stats_temporal_*.tsv",
+            "*_topomap_*_correlations_*.tsv"
+        ])
+
+    # 5. Cluster Tests
+    if getattr(config, "run_cluster_tests", False):
+        patterns.append("cluster_results_*.tsv")
+
+    # Remove duplicates
+    patterns = list(set(patterns))
+    
+    # If no specific patterns were identified but we're in validation, 
+    # it means all specific modules were disabled. 
+    # We only use the broad fallback if absolutely no patterns were added.
+    if not patterns:
+        patterns = ["corr_stats_*.tsv", "condition_effects.tsv", "pain_sensitivity_*.tsv"]
+
     ctx.logger.info("Applying global FDR correction...")
-    apply_global_fdr(
+    summary = apply_global_fdr(
         ctx.stats_dir,
         alpha=fdr_alpha,
         logger=ctx.logger,
-        include_glob="corr_stats_*.tsv",
+        include_glob=patterns,
     )
+
+    # 4. If results object is provided, update its dataframes with global FDR info
+    if results is not None:
+        from eeg_pipeline.infra.tsv import read_tsv
+        from eeg_pipeline.utils.analysis.stats.fdr import select_p_column_for_fdr
+        
+        # Mapping of result types to files
+        mapping = {
+            "correlations": "correlations*.tsv",
+            "pain_sensitivity": "pain_sensitivity*.tsv",
+            "condition_effects": "condition_effects*.tsv",
+            "tf": "corr_stats_tf_*.tsv",
+            "temporal": "corr_stats_temporal_*.tsv",
+            "cluster": "cluster_results_*.tsv",
+            "mediation": "mediation*.tsv",
+            "mixed_effects": "mixed_effects*.tsv",
+        }
+        
+        for attr, pattern in mapping.items():
+            current_value = getattr(results, attr, None)
+            if current_value is None:
+                continue
+                
+            match_files = list(ctx.stats_dir.glob(pattern))
+            if not match_files:
+                continue
+            
+            for fpath in match_files:
+                df_disk = read_tsv(fpath)
+                if df_disk is None or "q_global" not in df_disk.columns:
+                    continue
+
+                if isinstance(current_value, pd.DataFrame):
+                    if current_value.empty: continue
+                    merge_cols = [c for c in ["feature", "feature_id", "target", "mediator"] if c in df_disk.columns]
+                    if merge_cols:
+                        if "q_global" in current_value.columns:
+                            current_value = current_value.drop(columns=["q_global"])
+                        current_value = pd.merge(current_value, df_disk[merge_cols + ["q_global"]], on=merge_cols, how="left")
+                        setattr(results, attr, current_value)
+                    elif len(current_value) == len(df_disk):
+                        current_value["q_global"] = df_disk["q_global"].values
+                        setattr(results, attr, current_value)
+                elif isinstance(current_value, dict):
+                    # For cluster, find the band from filename if possible
+                    if attr == "cluster":
+                        band_name = fpath.stem.replace("cluster_results_", "")
+                        if band_name in current_value and "cluster_records" in current_value[band_name]:
+                            recs = current_value[band_name]["cluster_records"]
+                            if len(recs) == len(df_disk):
+                                for r, q in zip(recs, df_disk["q_global"]):
+                                    r["q_global"] = q
+                    else:
+                        # For temporal/tf summary dicts
+                        current_value["n_sig_fdr"] = int((df_disk["q_global"] < fdr_alpha).sum())
+                        setattr(results, attr, current_value)
 
     ctx.logger.info("Computing hierarchical FDR summary...")
     try:
@@ -818,6 +957,7 @@ def stage_validate(ctx: BehaviorContext, config: Any) -> None:
             ctx.stats_dir,
             alpha=fdr_alpha,
             config=ctx.config,
+            include_glob=patterns,
         )
         if not hier_summary.empty:
             hier_path = ctx.stats_dir / "hierarchical_fdr_summary.tsv"
@@ -842,6 +982,10 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
     robust_method = pipeline_config.robust_method
     method_label = pipeline_config.method_label
     method_suffix = f"_{method_label}" if method_label else ""
+    
+    # Build feature suffix from selected feature files or categories
+    feature_files = ctx.selected_feature_files or ctx.feature_categories or []
+    feature_suffix = "_" + "_".join(sorted(feature_files)) if feature_files else ""
 
     if getattr(results, "correlations", None) is not None:
         results.correlations = _ensure_method_columns(
@@ -865,27 +1009,27 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
         )
 
     if getattr(results, "correlations", None) is not None and not results.correlations.empty:
-        path = ctx.stats_dir / f"correlations{method_suffix}.tsv"
+        path = ctx.stats_dir / f"correlations{feature_suffix}{method_suffix}.tsv"
         write_tsv(results.correlations, path)
         saved.append(path)
 
     if getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty:
-        path = ctx.stats_dir / f"pain_sensitivity{method_suffix}.tsv"
+        path = ctx.stats_dir / f"pain_sensitivity{feature_suffix}{method_suffix}.tsv"
         write_tsv(results.pain_sensitivity, path)
         saved.append(path)
 
     if getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty:
-        path = ctx.stats_dir / "condition_effects.tsv"
+        path = ctx.stats_dir / f"condition_effects{feature_suffix}.tsv"
         write_tsv(results.condition_effects, path)
         saved.append(path)
 
     if getattr(results, "mediation", None) is not None and not results.mediation.empty:
-        path = ctx.stats_dir / "mediation.tsv"
+        path = ctx.stats_dir / f"mediation{feature_suffix}.tsv"
         write_tsv(results.mediation, path)
         saved.append(path)
 
     if getattr(results, "mixed_effects", None) is not None and not results.mixed_effects.empty:
-        path = ctx.stats_dir / "mixed_effects.tsv"
+        path = ctx.stats_dir / f"mixed_effects{feature_suffix}.tsv"
         write_tsv(results.mixed_effects, path)
         saved.append(path)
 

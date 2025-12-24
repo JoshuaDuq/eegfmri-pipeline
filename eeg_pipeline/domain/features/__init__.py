@@ -23,6 +23,7 @@ FEATURE_TYPES = (
     "asymmetry",
     "erp",
     "bursts",
+    "temporal",
 )
 
 

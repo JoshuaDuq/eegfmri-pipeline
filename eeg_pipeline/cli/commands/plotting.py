@@ -10,6 +10,7 @@ from eeg_pipeline.cli.common import (
     add_common_subject_args,
     add_task_arg,
     add_output_format_args,
+    add_path_args,
     create_progress_reporter,
     resolve_task,
     get_deriv_root,
@@ -394,6 +395,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--savefig-dpi", type=int, default=None, help="Savefig DPI (default from config)")
     parser.add_argument("--shared-colorbar", action="store_true", default=None, help="Use shared colorbar across subplots")
     parser.add_argument("--no-shared-colorbar", action="store_false", dest="shared_colorbar", help="Disable shared colorbar")
+    add_path_args(parser)
     return parser
 
 
@@ -431,6 +433,11 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         visualize_regression_from_disk,
         visualize_time_generalization_from_disk,
     )
+
+    if getattr(args, "bids_root", None):
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "deriv_root", None):
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
 
     plot_ids = _resolve_plot_ids(args)
     if not plot_ids:

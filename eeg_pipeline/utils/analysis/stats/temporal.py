@@ -476,6 +476,11 @@ def _run_tf_correlations_core(
         write_tsv(pd.DataFrame(recs), stats_dir / f"corr_stats_tf_{roi_label.lower()}{sfx}.tsv")
 
     logger.info(f"Saved TF correlations: shape={corrs.shape}, info_bins={len(info_bins)}")
+    
+    return {
+        "n_tests": len(info_bins),
+        "n_sig_raw": int((pvals[np.isfinite(pvals)] < 0.05).sum()) if pvals is not None else 0,
+    }
 
 
 def compute_time_frequency_correlations(
@@ -502,7 +507,7 @@ def compute_time_frequency_correlations(
         if avail:
             cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
 
-    _run_tf_correlations_core(
+    return _run_tf_correlations_core(
         subject, epochs, events, y, deriv_stats_path(deriv_root, subject),
         config, use_spearman, cov_df, logger,
     )
@@ -635,6 +640,16 @@ def _run_temporal_by_condition_core(
         logger.info(f"Saved temporal correlation TSV for global FDR: {len(all_tsv_records)} tests -> {tsv_path.name}")
 
     logger.info("Temporal correlations by condition completed")
+    
+    n_tests = len(all_tsv_records)
+    n_sig = 0
+    if all_tsv_records:
+        n_sig = sum(1 for r in all_tsv_records if r.get("p", 1.0) < 0.05)
+        
+    return {
+        "n_tests": n_tests,
+        "n_sig_raw": n_sig,
+    }
 
 
 def compute_temporal_correlations_by_condition(
@@ -660,14 +675,14 @@ def compute_temporal_correlations_by_condition(
         avail = [c for c in partial_covars if c in events.columns]
         if avail:
             cov_df = events[avail].apply(pd.to_numeric, errors="coerce")
-    _run_temporal_by_condition_core(
+    return _run_temporal_by_condition_core(
         epochs, events, y, deriv_stats_path(deriv_root, subject), config, use_spearman, cov_df, logger
     )
 
 
-def compute_time_frequency_from_context(ctx: "BehaviorContext") -> None:
+def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Run time-frequency correlations using pre-loaded context data."""
-    _run_tf_correlations_core(
+    return _run_tf_correlations_core(
         ctx.subject,
         ctx.epochs,
         ctx.aligned_events,
@@ -680,9 +695,9 @@ def compute_time_frequency_from_context(ctx: "BehaviorContext") -> None:
     )
 
 
-def compute_temporal_from_context(ctx: "BehaviorContext") -> None:
+def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Compute temporal correlations by condition using pre-loaded data."""
-    _run_temporal_by_condition_core(
+    return _run_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,
         ctx.targets,

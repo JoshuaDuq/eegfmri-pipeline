@@ -752,13 +752,13 @@ def _run_cluster_test_core(
     config,
     logger: logging.Logger,
     n_perm: int,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """Core implementation for pain vs. non-pain cluster test."""
     from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi
 
     if epochs is None or aligned_events is None:
         logger.warning("Cannot run pain vs. non-pain cluster test: epochs or events unavailable.")
-        return
+        return None
 
     if not epochs.preload:
         epochs.load_data()
@@ -770,7 +770,7 @@ def _run_cluster_test_core(
     pain_col = get_pain_column_from_config(config, aligned_events)
     if pain_col is None or pain_col not in aligned_events.columns:
         logger.warning("Pain column not found; skipping pain vs. non-pain cluster test.")
-        return
+        return None
 
     pain_series = pd.to_numeric(aligned_events[pain_col], errors="coerce")
     valid_pain_mask = pain_series.isin([0, 1])
@@ -783,27 +783,27 @@ def _run_cluster_test_core(
 
     if len(pain_series) == 0:
         logger.warning("No valid pain trials remain; skipping cluster test.")
-        return
+        return None
 
     try:
         pain_values, _ = validate_pain_binary_values(pain_series, pain_col, logger=logger)
     except ValueError as exc:
         logger.error(f"Pain column validation failed: {exc}")
-        return
+        return None
 
     pain_mask = np.asarray(pain_values == 1, dtype=bool)
     nonpain_mask = np.asarray(pain_values == 0, dtype=bool)
 
     if pain_mask.sum() < 2 or nonpain_mask.sum() < 2:
         logger.warning(f"Insufficient trials (pain={int(pain_mask.sum())}, non-pain={int(nonpain_mask.sum())}); skipping.")
-        return
+        return None
 
     stats_cfg = config.get("behavior_analysis.statistics", {})
     n_perm = n_perm if n_perm > 0 else int(stats_cfg.get("n_permutations", 100))
     alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
     bands = get_bands_for_tfr(max_freq_available=get_tfr_config(config)[1], config=config)
 
-    compute_pain_nonpain_time_cluster_test(
+    return compute_pain_nonpain_time_cluster_test(
         subject=subject,
         pain_epochs=epochs_roi[pain_mask],
         nonpain_epochs=epochs_roi[nonpain_mask],

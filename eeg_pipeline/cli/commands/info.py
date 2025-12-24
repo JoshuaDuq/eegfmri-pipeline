@@ -47,6 +47,12 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         dest="output_json",
         help="Output in JSON format",
     )
+    parser.add_argument(
+        "--keys",
+        nargs="*",
+        default=None,
+        help="Config keys to fetch (config mode only)",
+    )
     return parser
 
 
@@ -212,7 +218,14 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
             print(f"\nTotal: {len(results)} feature files")
     
     elif args.mode == "config":
-        if args.target:
+        if args.keys:
+            values = {key: config.get(key) for key in args.keys}
+            if args.output_json:
+                print(json_module.dumps(values, indent=2))
+            else:
+                for key, value in values.items():
+                    print(f"{key}: {value}")
+        elif args.target:
             value = config.get(args.target)
             if args.output_json:
                 print(json_module.dumps({args.target: value}))
@@ -222,7 +235,9 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
             summary = {
                 "bids_root": str(config.bids_root) if hasattr(config, "bids_root") else None,
                 "deriv_root": str(deriv_root),
+                "source_root": config.get("paths.source_data"),
                 "task": task,
+                "preprocessing_n_jobs": config.get("preprocessing.n_jobs", 1),
                 "n_subjects": len(config.subjects) if hasattr(config, "subjects") and config.subjects else 0,
             }
             if args.output_json:

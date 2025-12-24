@@ -67,6 +67,7 @@ preprocessing:
   h_freq: 100
   notch_freq: 60
   line_freq: 60
+  n_jobs: 1
 
 ica:
   method: "fastica"
@@ -100,6 +101,23 @@ time_frequency_analysis:
     decim: 4
     workers: -1
   rois: *roi_definitions
+  
+  constants:
+    # Baseline processing
+    epsilon_baseline: 1.0e-10
+    min_epochs_for_tfr: 10
+    min_baseline_samples: 10
+    baseline_precision: 1.0e-6
+    baseline_sentinel: "BASELINED:"
+    min_log_value: 1.0e-12
+    min_divisor: 1.0e-12
+    mad_scaling_factor: 1.4826
+    # Frequency resolution validation
+    low_freq_threshold: 15.0
+    low_cycles_warning_threshold: 4.0
+    freq_threshold_for_time_res: 8.0
+    # Statistics
+    min_samples_for_stats: 5
 
 # 4.3 Feature Extraction
 feature_engineering:
@@ -180,8 +198,71 @@ behavior_analysis:
   correlation_method: "spearman"
   pooling_strategy: "within_subject_centered"
   control_temperature: true
+  control_trial_order: true
   bootstrap: 1000
+  n_jobs: -1
   targets: ["pain_rating", "temperature", "pain_binary"]
+  
+  # Statistics
+  statistics:
+    fdr_alpha: 0.05
+    n_permutations: 1000
+    compute_reliability: false
+    default_n_bootstrap: 1000
+  
+  # Correlations computation
+  correlations:
+    enabled: true
+    compute_change_scores: true
+    loso_stability: true
+    compute_bayes_factors: false
+  
+  # Pain sensitivity computation
+  pain_sensitivity:
+    enabled: true
+    min_trials: 10
+  
+  # Condition comparison computation
+  condition:
+    enabled: true
+    fail_fast: true
+    effect_size_threshold: 0.5  # Minimum Cohen's d to report
+    min_trials_per_condition: 10
+  
+  # Temporal correlations computation  
+  temporal:
+    enabled: true
+    time_resolution_ms: 50
+    time_range_ms: [-200, 1000]
+    smooth_window_ms: 100
+  
+  # Time-frequency heatmap computation
+  time_frequency_heatmap:
+    enabled: true
+    freqs: [4, 8, 13, 30, 45]
+    time_resolution_ms: 100
+  
+  # Cluster permutation tests
+  cluster:
+    enabled: false
+    n_permutations: 1000
+    forming_threshold: 0.05
+    min_cluster_size: 2
+    tail: 0  # 0=two-tailed, 1=upper, -1=lower
+  
+  # Mediation analysis
+  mediation:
+    enabled: false
+    n_bootstrap: 1000
+    min_effect_size: 0.05
+    max_mediators: 20
+  
+  # Mixed effects modeling
+  mixed_effects:
+    enabled: false
+    random_effects: "intercept"  # "intercept" or "slope"
+    max_features: 50
+  
   min_samples:
     channel: 10
     roi: 20
@@ -320,6 +401,11 @@ visualization:
     q_low: 0.01
     q_high: 0.99
     cap: 0.25
+  
+  footer_templates:
+    tfr_baseline: "Baseline: {baseline}"
+    behavior: "Method: {method} | FDR α={fdr_alpha:.2f}"
+    preprocessing: "Pipeline: {pipeline} | Reference: {reference}"
 
 # New Orchestrated Plotting Config
 plotting:
@@ -378,6 +464,19 @@ plotting:
         thick: 1.0
 
   plots:
+    topomap:
+      contours: 6
+      colormap: "RdBu_r"
+      colorbar_fraction: 0.05
+      colorbar_pad: 0.05
+      diff_annotation_enabled: true
+      annotate_descriptive: false
+      sig_mask_params:
+        marker: "o"
+        markerfacecolor: "none"
+        markeredgecolor: "g"
+        linewidth: 0.8
+        markersize: 3
     tfr:
       log_base: *log_base
       percentage_multiplier: *percentage_multiplier

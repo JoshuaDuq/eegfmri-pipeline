@@ -375,12 +375,7 @@ def _analyze_single_feature_mediation(
     mask = np.isfinite(X) & np.isfinite(M_values) & np.isfinite(Y)
     if mask.sum() < 20:
         return None
-    
-    r_xm, _ = stats.spearmanr(X[mask], M_values[mask])
-    r_my, _ = stats.spearmanr(M_values[mask], Y[mask])
-    
-    if abs(r_xm) < min_effect_size or abs(r_my) < min_effect_size:
-        return None
+    # Run bootstrap mediation
     
     rng = np.random.default_rng(rng_seed)
     result = run_full_mediation_analysis(
@@ -393,9 +388,7 @@ def _analyze_single_feature_mediation(
         n_jobs=1,  # Avoid nested parallelism
     )
     
-    if result.is_significant_mediation():
-        return result
-    return None
+    return result
 
 
 def analyze_mediation_for_features(
@@ -473,11 +466,13 @@ def analyze_mediation_for_features(
     
     results = [r for r in results_raw if r is not None]
     
+    n_sig = sum(1 for r in results if r.is_significant_mediation())
     for result in results:
-        logger.info(f"Significant mediation: {result.m_label} (ab={result.ab:.3f}, "
-                   f"CI=[{result.ci_ab_low:.3f}, {result.ci_ab_high:.3f}])")
+        if result.is_significant_mediation():
+            logger.info(f"Significant mediation: {result.m_label} (ab={result.ab:.3f}, "
+                       f"CI=[{result.ci_ab_low:.3f}, {result.ci_ab_high:.3f}])")
     
-    logger.info(f"Found {len(results)} significant mediators out of {n_features} tested")
+    logger.info(f"Obtained results for {len(results)} mediators ({n_sig} significant) out of {n_features} tested")
     return results
 
 

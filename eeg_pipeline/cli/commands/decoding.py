@@ -13,6 +13,7 @@ from eeg_pipeline.cli.common import (
     validate_subjects_not_empty,
     validate_min_subjects,
     create_progress_reporter,
+    add_path_args,
     MIN_SUBJECTS_KEY,
     MIN_SUBJECTS_FOR_DECODING,
 )
@@ -34,6 +35,7 @@ def setup_decoding(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--outer-jobs", type=int, default=1)
     parser.add_argument("--rng-seed", type=int, default=None)
     parser.add_argument("--skip-time-gen", action="store_true")
+    add_path_args(parser)
     return parser
 
 
@@ -47,6 +49,12 @@ def run_decoding(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     
     progress = create_progress_reporter(args)
     task = resolve_task(args.task, config)
+
+    if getattr(args, "bids_root", None):
+        config.setdefault("paths", {})["bids_root"] = args.bids_root
+    if getattr(args, "deriv_root", None):
+        config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+
     rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
     
     pipeline = DecodingPipeline(config=config)

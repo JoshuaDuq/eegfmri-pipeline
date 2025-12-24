@@ -11,48 +11,6 @@ from nilearn.plotting import plot_connectome as nilearn_plot_connectome, plot_ma
 from . import utils
 
 
-###################################################################
-# Group-Level Feature Plots
-###################################################################
-
-def group_plot_features(out_path, task):
-    report = mne.Report()
-    report.add_section("Peak alpha power and COG", level=1)
-
-    features = pd.read_csv(
-        os.path.join(out_path, f"task-{task}_features_frame.tsv"), sep="\t"
-    )
-
-    fig = plt.figure(figsize=(10, 5))
-    sns.violinplot(
-        features["alpha_cog_global"],
-        label="Global",
-    )
-    sns.swarmplot(
-        features["alpha_cog_global"],
-        label="Global",
-    )
-    plt.figure(figsize=(10, 5))
-    sns.histplot(
-        features["alpha_peak_somato"],
-        bins=20,
-        kde=True,
-        color="red",
-        label="Somatosensory",
-    )
-
-    plt.figure(figsize=(10, 5))
-    sns.histplot(
-        features["alpha_peak_somato"],
-        bins=20,
-        kde=True,
-        color="red",
-        label="Somatosensory",
-    )
-    plt.title("Alpha peak frequency distribution at global and somatosensory channels")
-    plt.xlabel("Frequency (Hz)")
-    plt.ylabel("Density")
-    plt.legend()
 
 
 ###################################################################

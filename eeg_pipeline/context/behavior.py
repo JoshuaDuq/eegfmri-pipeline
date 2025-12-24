@@ -236,7 +236,6 @@ class BehaviorContext:
 
                 try:
                     if path.suffix == ".parquet":
-                        import pandas as pd
                         df = pd.read_parquet(path)
                     else:
                         df = read_tsv(path)

@@ -37,6 +37,15 @@ type SubjectsResponse struct {
 	Count    int                    `json:"count"`
 }
 
+// ConfigSummaryResponse from eeg-pipeline info config --json
+type ConfigSummaryResponse struct {
+	Task               string `json:"task"`
+	BidsRoot           string `json:"bids_root"`
+	DerivRoot          string `json:"deriv_root"`
+	SourceRoot         string `json:"source_root"`
+	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
+}
+
 // LoadSubjects runs eeg-pipeline info subjects --json and returns subjects
 func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd {
 	return func() tea.Msg {
@@ -87,6 +96,89 @@ func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd
 		}
 
 		return messages.SubjectsLoadedMsg{Subjects: response.Subjects}
+	}
+}
+
+// LoadConfigSummary runs eeg-pipeline info config --json and returns config summary
+func LoadConfigSummary(repoRoot string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "config", "--json"}
+
+		pyCmd := GetPythonCommand(repoRoot)
+		cmd := exec.Command(pyCmd, args...)
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+		output, err := cmd.Output()
+
+		if err != nil {
+			cmd = exec.Command("python3", args...)
+			cmd.Dir = repoRoot
+			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+			output, err = cmd.Output()
+
+			if err != nil {
+				return messages.ConfigLoadedMsg{
+					Error: err,
+				}
+			}
+		}
+
+		var response ConfigSummaryResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.ConfigLoadedMsg{
+				Error: err,
+			}
+		}
+
+		return messages.ConfigLoadedMsg{
+			Summary: messages.ConfigSummary{
+				Task:               response.Task,
+				BidsRoot:           response.BidsRoot,
+				DerivRoot:          response.DerivRoot,
+				SourceRoot:         response.SourceRoot,
+				PreprocessingNJobs: response.PreprocessingNJobs,
+			},
+			Error: nil,
+		}
+	}
+}
+
+// LoadConfigKeys runs eeg-pipeline info config --json --keys ... and returns values
+func LoadConfigKeys(repoRoot string, keys []string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "config", "--json", "--keys"}
+		args = append(args, keys...)
+
+		pyCmd := GetPythonCommand(repoRoot)
+		cmd := exec.Command(pyCmd, args...)
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+		output, err := cmd.Output()
+
+		if err != nil {
+			cmd = exec.Command("python3", args...)
+			cmd.Dir = repoRoot
+			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+			output, err = cmd.Output()
+
+			if err != nil {
+				return messages.ConfigKeysLoadedMsg{
+					Error: err,
+				}
+			}
+		}
+
+		values := make(map[string]interface{})
+		if err := json.Unmarshal(output, &values); err != nil {
+			return messages.ConfigKeysLoadedMsg{
+				Error: err,
+			}
+		}
+
+		return messages.ConfigKeysLoadedMsg{
+			Values: values,
+			Error:  nil,
+		}
 	}
 }
 

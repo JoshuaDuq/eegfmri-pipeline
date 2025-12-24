@@ -60,6 +60,12 @@ def select_p_column_for_fdr(df: pd.DataFrame) -> Optional[str]:
         p = pd.to_numeric(df["p_primary"], errors="coerce")
         if p.notna().any():
             return "p_primary"
+    if "p_psi" in df.columns:
+        return "p_psi"
+    if "sobel_p" in df.columns:
+        return "sobel_p"
+    if "fixed_p" in df.columns:
+        return "fixed_p"
     if "p_raw" in df.columns:
         return "p_raw"
     if "p" in df.columns:
@@ -189,7 +195,7 @@ def apply_global_fdr(
     stats_dir: "Path",
     alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
-    include_glob: str = "*.tsv",
+    include_glob: Union[str, Iterable[str]] = "*.tsv",
     exclude_globs: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Apply global FDR correction across correlation files within families."""
@@ -197,7 +203,15 @@ def apply_global_fdr(
     from eeg_pipeline.infra.tsv import read_tsv, write_tsv
     
     stats_dir = Path(stats_dir)
-    files = list(stats_dir.glob(include_glob))
+    if isinstance(include_glob, str):
+        files = list(stats_dir.glob(include_glob))
+    else:
+        files = []
+        for pat in include_glob:
+            files.extend(list(stats_dir.glob(pat)))
+        # Remove duplicates while preserving order
+        seen = set()
+        files = [f for f in files if not (f in seen or seen.add(f))]
     if exclude_globs:
         excluded = set()
         for pat in exclude_globs:

@@ -86,6 +86,32 @@ type SubjectsLoadedMsg struct {
 	Error    error
 }
 
+// ConfigSummary holds key configuration values for the TUI
+type ConfigSummary struct {
+	Task               string `json:"task"`
+	BidsRoot           string `json:"bids_root"`
+	DerivRoot          string `json:"deriv_root"`
+	SourceRoot         string `json:"source_root"`
+	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
+}
+
+// ConfigLoadedMsg is sent when config discovery completes
+type ConfigLoadedMsg struct {
+	Summary ConfigSummary
+	Error   error
+}
+
+// ConfigKeysLoadedMsg provides specific config values for TUI forms
+type ConfigKeysLoadedMsg struct {
+	Values map[string]interface{}
+	Error  error
+}
+
+// TaskUpdatedMsg notifies the app that the active task has changed
+type TaskUpdatedMsg struct {
+	Task string
+}
+
 // SubjectStartedMsg indicates processing of a subject has started
 type SubjectStartedMsg struct {
 	Subject string

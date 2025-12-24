@@ -162,6 +162,7 @@ class FeatureBundle:
     spectral_df: Optional[pd.DataFrame] = None
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
+    temporal_df: Optional[pd.DataFrame] = None
     all_features_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
 
@@ -205,6 +206,7 @@ def load_feature_bundle(
         spectral_df=_safe_read_table(features_dir / "features_spectral.tsv", logger),
         ratios_df=_safe_read_table(features_dir / "features_ratios.tsv", logger),
         asymmetry_df=_safe_read_table(features_dir / "features_asymmetry.tsv", logger),
+        temporal_df=_safe_read_table(features_dir / "features_temporal.tsv", logger),
         all_features_df=_safe_read_table(features_dir / "features_all.tsv", logger),
     )
 

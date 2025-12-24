@@ -106,15 +106,40 @@ class BehaviorPipelineConfig:
     robust_method: Optional[str] = None
     method_label: str = "spearman"
     
+    # Computation flags
+    run_correlations: bool = True
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
     run_cluster_tests: bool = False
     run_mediation: bool = False
     run_mixed_effects: bool = False
     
+    # General stats
     fdr_alpha: float = 0.05
     n_permutations: int = 1000
     n_jobs: int = -1
+    
+    # Condition-specific
+    condition_effect_threshold: float = 0.5
+    condition_min_trials: int = 10
+    
+    # Temporal-specific
+    temporal_resolution_ms: int = 50
+    temporal_smooth_ms: int = 100
+    
+    # Cluster-specific
+    cluster_threshold: float = 0.05
+    cluster_min_size: int = 2
+    cluster_tail: int = 0
+    
+    # Mediation-specific
+    mediation_n_bootstrap: int = 1000
+    mediation_min_effect: float = 0.05
+    mediation_max_mediators: int = 20
+    
+    # Mixed effects-specific
+    mixed_effects_type: str = "intercept"
+    mixed_effects_max_features: int = 50
     
     @classmethod
     def from_config(cls, config: Any) -> "BehaviorPipelineConfig":
@@ -131,21 +156,40 @@ class BehaviorPipelineConfig:
             min_samples=int(get_config_value(config, "behavior_analysis.min_samples.default", 10)),
             control_temperature=bool(get_config_value(config, "behavior_analysis.control_temperature", True)),
             control_trial_order=bool(get_config_value(config, "behavior_analysis.control_trial_order", True)),
-            compute_change_scores=bool(get_config_value(config, "behavior_analysis.compute_change_scores", True)),
-            compute_pain_sensitivity=bool(get_config_value(config, "behavior_analysis.compute_pain_sensitivity", True)),
+            compute_change_scores=bool(get_config_value(config, "behavior_analysis.correlations.compute_change_scores", True)),
+            compute_pain_sensitivity=bool(get_config_value(config, "behavior_analysis.pain_sensitivity.enabled", True)),
             compute_reliability=bool(get_config_value(config, "behavior_analysis.statistics.compute_reliability", False)),
-            compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.compute_bayes_factors", False)),
-            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.loso_stability", True)),
+            compute_bayes_factors=bool(get_config_value(config, "behavior_analysis.correlations.compute_bayes_factors", False)),
+            compute_loso_stability=bool(get_config_value(config, "behavior_analysis.correlations.loso_stability", True)),
             bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
             robust_method=robust_method,
             method_label=method_label,
-            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
-            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
-            run_temporal_correlations=get_config_value(config, "behavior_analysis.time_frequency_heatmap.enabled", True),
-            run_cluster_tests=get_config_value(config, "behavior_analysis.cluster_correction.enabled", False),
+            run_correlations=get_config_value(config, "behavior_analysis.correlations.enabled", True),
+            run_condition_comparison=get_config_value(config, "behavior_analysis.condition.enabled", True),
+            run_temporal_correlations=get_config_value(config, "behavior_analysis.temporal.enabled", True),
+            run_cluster_tests=get_config_value(config, "behavior_analysis.cluster.enabled", False),
             run_mediation=get_config_value(config, "behavior_analysis.mediation.enabled", False),
             run_mixed_effects=get_config_value(config, "behavior_analysis.mixed_effects.enabled", False),
+            fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
+            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
             n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
+            # Condition-specific
+            condition_effect_threshold=float(get_config_value(config, "behavior_analysis.condition.effect_size_threshold", 0.5)),
+            condition_min_trials=int(get_config_value(config, "behavior_analysis.condition.min_trials_per_condition", 10)),
+            # Temporal-specific
+            temporal_resolution_ms=int(get_config_value(config, "behavior_analysis.temporal.time_resolution_ms", 50)),
+            temporal_smooth_ms=int(get_config_value(config, "behavior_analysis.temporal.smooth_window_ms", 100)),
+            # Cluster-specific
+            cluster_threshold=float(get_config_value(config, "behavior_analysis.cluster.forming_threshold", 0.05)),
+            cluster_min_size=int(get_config_value(config, "behavior_analysis.cluster.min_cluster_size", 2)),
+            cluster_tail=int(get_config_value(config, "behavior_analysis.cluster.tail", 0)),
+            # Mediation-specific
+            mediation_n_bootstrap=int(get_config_value(config, "behavior_analysis.mediation.n_bootstrap", 1000)),
+            mediation_min_effect=float(get_config_value(config, "behavior_analysis.mediation.min_effect_size", 0.05)),
+            mediation_max_mediators=int(get_config_value(config, "behavior_analysis.mediation.max_mediators", 20)),
+            # Mixed effects-specific
+            mixed_effects_type=str(get_config_value(config, "behavior_analysis.mixed_effects.random_effects", "intercept")),
+            mixed_effects_max_features=int(get_config_value(config, "behavior_analysis.mixed_effects.max_features", 50)),
         )
 
 
@@ -158,13 +202,22 @@ class BehaviorPipelineResults:
     mediation: Optional[pd.DataFrame] = None
     mixed_effects: Optional[pd.DataFrame] = None
     cluster: Optional[Dict[str, Any]] = None
+    temporal: Optional[Dict[str, Any]] = None
+    tf: Optional[Dict[str, Any]] = None
     summary: Dict[str, Any] = field(default_factory=dict)
     
     def to_summary(self) -> Dict[str, Any]:
         s = {"subject": self.subject}
-        if self.correlations is not None:
+        n_total = 0
+        n_sig_raw = 0
+        n_sig_controlled = 0
+        n_sig_fdr = 0
+
+        if self.correlations is not None and not self.correlations.empty:
             df = self.correlations
-            s["n_features"] = len(df)
+            n = len(df)
+            n_total += n
+            
             p_raw = (
                 df["p_raw"]
                 if "p_raw" in df.columns
@@ -173,19 +226,108 @@ class BehaviorPipelineResults:
                 else df.get("p")
             )
             p_primary = df["p_primary"] if "p_primary" in df.columns else None
-            if "p_fdr" in df.columns:
-                p_fdr = df["p_fdr"]
-            elif "q_value" in df.columns:
-                p_fdr = df["q_value"]
-            else:
-                p_fdr = None
-            s["n_sig_raw"] = int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
-            s["n_sig_controlled"] = int((p_primary.fillna(1) < 0.05).sum()) if p_primary is not None else 0
+            p_fdr = df["q_global"] if "q_global" in df.columns else df.get("q_value")
+            
+            n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
+            n_sig_controlled += int((p_primary.fillna(1) < 0.05).sum()) if p_primary is not None else 0
+            n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum()) if p_fdr is not None else 0
+        
+        if self.pain_sensitivity is not None and not self.pain_sensitivity.empty:
+            df_psi = self.pain_sensitivity
+            n = len(df_psi)
+            n_total += n
+            s["n_pain_sensitivity_features"] = n
+            
+            p_psi = df_psi["p_psi"] if "p_psi" in df_psi.columns else df_psi.get("p_value")
+            p_fdr = df_psi["q_global"] if "q_global" in df_psi.columns else df_psi.get("q_value")
+            
+            if p_psi is not None:
+                n_sig_psi_raw = int((p_psi.fillna(1) < 0.05).sum())
+                n_sig_raw += n_sig_psi_raw
+                s["n_sig_psi_raw"] = n_sig_psi_raw
+            
             if p_fdr is not None:
-                s["n_sig_fdr"] = int((p_fdr.fillna(1) < 0.05).sum())
-        if self.condition_effects is not None:
-            s["n_condition_effects"] = len(self.condition_effects)
-            s["n_large_effects"] = int((self.condition_effects["hedges_g"].abs() >= 0.8).sum())
+                n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+
+        if self.condition_effects is not None and not self.condition_effects.empty:
+            df = self.condition_effects
+            n = len(df)
+            n_total += n
+            s["n_condition_effects"] = n
+            
+            p_raw = df["p_value"] if "p_value" in df.columns else df.get("p")
+            p_fdr = df["q_global"] if "q_global" in df.columns else df.get("q_value")
+            
+            n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
+            if p_fdr is not None:
+                n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+                
+            s["n_large_effects"] = int((df["hedges_g"].abs() >= 0.8).sum()) if "hedges_g" in df.columns else 0
+
+        if self.mediation is not None and not self.mediation.empty:
+            df = self.mediation
+            n = len(df)
+            n_total += n
+            s["n_mediation_mediators"] = n
+            
+            p_raw = df["sobel_p"] if "sobel_p" in df.columns else df.get("p_value")
+            p_fdr = df["q_global"] if "q_global" in df.columns else None
+            
+            n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
+            if p_fdr is not None:
+                n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+
+        if self.mixed_effects is not None and not self.mixed_effects.empty:
+            df = self.mixed_effects
+            n = len(df)
+            n_total += n
+            s["n_mixed_effects_features"] = n
+            
+            p_raw = df["fixed_p"] if "fixed_p" in df.columns else df.get("p_value")
+            p_fdr = df["q_global"] if "q_global" in df.columns else df.get("fixed_p_fdr")
+            
+            n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
+            if p_fdr is not None:
+                n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+
+        if self.tf is not None:
+             n = self.tf.get("n_tests", 0)
+             n_total += n
+             n_sig_raw += self.tf.get("n_sig_raw", 0)
+             n_sig_fdr += self.tf.get("n_sig_fdr", 0)
+             s["n_tf_tests"] = n
+
+        if self.temporal is not None:
+             n = self.temporal.get("n_tests", 0)
+             n_total += n
+             n_sig_raw += self.temporal.get("n_sig_raw", 0)
+             n_sig_fdr += self.temporal.get("n_sig_fdr", 0)
+             s["n_temporal_tests"] = n
+
+        if self.cluster is not None:
+            n_clusters = 0
+            n_sig_clusters = 0
+            for band, res in self.cluster.items():
+                if isinstance(res, dict):
+                    recs = res.get("cluster_records", [])
+                    n_clusters += len(recs)
+                    # Check q_global first for FDR significance, fallback to p_value
+                    for r in recs:
+                        p_val = r.get("q_global") if "q_global" in r else r.get("p_value", 1.0)
+                        if p_val < 0.05:
+                            n_sig_clusters += 1
+            
+            s["n_clusters"] = n_clusters
+            s["n_sig_clusters"] = n_sig_clusters
+            n_total += n_clusters
+            n_sig_raw += n_sig_clusters
+            n_sig_fdr += n_sig_clusters # Cluster tests are already FWER corrected
+
+        s["n_features"] = n_total
+        s["n_sig_raw"] = n_sig_raw
+        s["n_sig_controlled"] = n_sig_controlled
+        s["n_sig_fdr"] = n_sig_fdr
+        
         return s
 
 
@@ -213,13 +355,11 @@ class BehaviorPipeline(PipelineBase):
         self.feature_files = feature_files
         self.computation_features = computation_features or {}
         
-        self._run_correlations = True
-        self._run_export = True
         self._run_validation = True
         
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
-            self._run_correlations = comp_flags["correlations"]
+            self.pipeline_config.run_correlations = comp_flags["correlations"]
             self.pipeline_config.run_condition_comparison = comp_flags["condition"]
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
             self.pipeline_config.run_cluster_tests = comp_flags["cluster"]
@@ -235,7 +375,7 @@ class BehaviorPipeline(PipelineBase):
         else:
             self._run_validation = any(
                 [
-                    self._run_correlations,
+                    self.pipeline_config.run_correlations,
                     self.pipeline_config.run_condition_comparison,
                     self.pipeline_config.run_temporal_correlations,
                     self.pipeline_config.run_cluster_tests,
@@ -268,9 +408,10 @@ class BehaviorPipeline(PipelineBase):
         
         # Calculate total steps dynamically based on enabled stages
         run_advanced = self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects
+        run_correlate = self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity
         enabled_stages = [
             True,  # Load (always runs)
-            self._run_correlations,
+            run_correlate,
             self.pipeline_config.run_condition_comparison,
             self.pipeline_config.run_temporal_correlations,
             self.pipeline_config.run_cluster_tests,
@@ -376,7 +517,7 @@ class BehaviorPipeline(PipelineBase):
             progress.subject_done(f"sub-{subject}", success=True)
             return results
         
-        if self._run_correlations:
+        if self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
             current_step += 1
@@ -400,7 +541,7 @@ class BehaviorPipeline(PipelineBase):
             current_step += 1
             progress.step("Temporal correlations", current=current_step, total=total_steps)
             logger.info("Running temporal correlations...")
-            _stage_temporal_impl(ctx)
+            results.tf, results.temporal = _stage_temporal_impl(ctx)
             _record_stage("temporal", stage_start, stage_rss)
         
         if self.pipeline_config.run_cluster_tests:
@@ -421,15 +562,6 @@ class BehaviorPipeline(PipelineBase):
             _stage_advanced_impl(ctx, self.pipeline_config, results)
             _record_stage("advanced", stage_start, stage_rss)
         
-        if self._run_validation:
-            stage_start = time.perf_counter()
-            stage_rss = _rss_mb()
-            current_step += 1
-            progress.step("Global FDR correction", current=current_step, total=total_steps)
-            logger.info("Running global FDR correction...")
-            _stage_validate_impl(ctx, self.pipeline_config)
-            _record_stage("fdr", stage_start, stage_rss)
-        
         current_step += 1
         progress.step("Saving results", current=current_step, total=total_steps)
         logger.info("Saving results...")
@@ -438,6 +570,16 @@ class BehaviorPipeline(PipelineBase):
         _stage_export_impl(ctx, self.pipeline_config, results)
         _record_stage("export", stage_start, stage_rss)
 
+        if self._run_validation:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Global FDR correction", current=current_step, total=total_steps)
+            logger.info("Running global FDR correction...")
+            _stage_validate_impl(ctx, self.pipeline_config, results=results)
+            _record_stage("fdr", stage_start, stage_rss)
+
+        # Final metadata and manifest (must be after all stages including validation)
         outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"
         try:
             _write_analysis_metadata_impl(
@@ -447,13 +589,33 @@ class BehaviorPipeline(PipelineBase):
             )
         except Exception as e:
             logger.warning(f"Failed to write analysis metadata: {e}")
+            
+        # Write final outputs manifest and summary.json (re-writing it to include global FDR if needed)
         write_outputs_manifest(ctx, self.pipeline_config, results, stage_metrics)
         
+        # Save summary.json again to ensure it includes Global FDR results
         summary = results.to_summary()
+        from eeg_pipeline.infra.tsv import write_tsv
+        (ctx.stats_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+        
+        # Also re-write normalized results if validation was run to include Global FDR q-values
+        if self.pipeline_config.run_correlations or self.pipeline_config.run_condition_comparison:
+             from eeg_pipeline.analysis.behavior.orchestration import _write_normalized_results
+             _write_normalized_results(ctx, self.pipeline_config, results)
+
+        outputs_log = [
+            f"Complete: {summary.get('n_features', 0)} features",
+            f"  Significant (raw): {summary.get('n_sig_raw', 0)}",
+            f"  Significant (controlled): {summary.get('n_sig_controlled', 0)}",
+            f"  Significant (Global FDR): {summary.get('n_sig_fdr', 0)}",
+        ]
+        if summary.get("n_clusters"):
+            outputs_log.append(f"  Clusters identified: {summary.get('n_clusters')}")
+            outputs_log.append(f"  Significant clusters: {summary.get('n_sig_clusters')}")
+            
         logger.info(f"{'='*60}")
-        logger.info(f"Complete: {summary.get('n_features', 0)} features")
-        logger.info(f"  Significant (raw): {summary.get('n_sig_raw', 0)}")
-        logger.info(f"  Significant (controlled): {summary.get('n_sig_controlled', 0)}")
+        for line in outputs_log:
+            logger.info(line)
         logger.info(f"{'='*60}")
         
         progress.subject_done(f"sub-{subject}", success=True)

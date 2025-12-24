@@ -2,6 +2,8 @@ package wizard
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -42,6 +44,16 @@ func (m Model) SelectedComputations() []string {
 		}
 	}
 	return result
+}
+
+// isComputationSelected checks if a specific computation is currently selected
+func (m Model) isComputationSelected(computation string) bool {
+	for i, sel := range m.computationSelected {
+		if sel && i < len(m.computations) && m.computations[i].Key == computation {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) SelectedSubjectIDs() []string {
@@ -89,7 +101,7 @@ func (m Model) SelectedFeatureFiles() []string {
 func (m Model) SelectedPlotIDs() []string {
 	var result []string
 	for i, plot := range m.plotItems {
-		if m.plotSelected[i] {
+		if m.plotSelected[i] && m.IsPlotCategorySelected(plot.Group) {
 			result = append(result, plot.ID)
 		}
 	}
@@ -145,7 +157,14 @@ func (m Model) getFilteredSubjects() []types.SubjectStatus {
 func (m Model) BuildCommand() string {
 	parts := []string{"eeg-pipeline", strings.ToLower(m.Pipeline.String())}
 
-	if len(m.modeOptions) > 0 {
+	// Positional mode (only for certain pipelines)
+	needsMode := false
+	switch m.Pipeline {
+	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior, types.PipelinePlotting:
+		needsMode = true
+	}
+
+	if needsMode && len(m.modeOptions) > m.modeIndex {
 		parts = append(parts, m.modeOptions[m.modeIndex])
 	}
 
@@ -222,6 +241,31 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
+	// Path overrides for analysis pipelines
+	needsPaths := false
+	switch m.Pipeline {
+	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior,
+		types.PipelineDecoding, types.PipelinePlotting, types.PipelineCombineFeatures:
+		needsPaths = true
+	}
+
+	if needsPaths {
+		if m.bidsRoot != "" {
+			parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
+		}
+		if m.derivRoot != "" {
+			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
+		}
+	}
+	if m.Pipeline == types.PipelineRawToBIDS || m.Pipeline == types.PipelineMergePsychoPyData {
+		if m.sourceRoot != "" {
+			parts = append(parts, "--source-root", expandUserPath(m.sourceRoot))
+		}
+		if m.bidsRoot != "" {
+			parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
+		}
+	}
+
 	// Spatial modes (features pipeline)
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		spatial := m.SelectedSpatialModes()
@@ -253,7 +297,17 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildBehaviorAdvancedArgs()...)
 		case types.PipelineDecoding:
 			parts = append(parts, m.buildDecodingAdvancedArgs()...)
+		case types.PipelinePreprocessing:
+			parts = append(parts, m.buildPreprocessingAdvancedArgs()...)
+		case types.PipelineRawToBIDS:
+			parts = append(parts, m.buildRawToBidsAdvancedArgs()...)
+		case types.PipelineMergePsychoPyData:
+			parts = append(parts, m.buildMergeBehaviorAdvancedArgs()...)
 		}
+	}
+
+	if m.task != "" {
+		parts = append(parts, "--task", m.task)
 	}
 
 	subjs := m.SelectedSubjectIDs()
@@ -274,6 +328,10 @@ func (m Model) BuildCommand() string {
 func (m Model) buildFeaturesAdvancedArgs() []string {
 	var args []string
 
+	if m.useDefaultAdvanced {
+		return args
+	}
+
 	// Connectivity options
 	if m.isCategorySelected("connectivity") {
 		measures := m.selectedConnectivityMeasures()
@@ -281,84 +339,87 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--connectivity-measures")
 			args = append(args, measures...)
 		}
-		if m.connOutputLevel != 0 {
-			val := "full"
-			if m.connOutputLevel == 1 {
-				val = "global_only"
-			}
-			args = append(args, "--conn-output-level", val)
+		if m.connOutputLevel == 1 {
+			args = append(args, "--conn-output-level", "global_only")
+		} else {
+			args = append(args, "--conn-output-level", "full")
 		}
-		if !m.connGraphMetrics {
+
+		if m.connGraphMetrics {
+			args = append(args, "--conn-graph-metrics")
+		} else {
 			args = append(args, "--no-conn-graph-metrics")
 		}
-		if m.connAECMode != 0 {
-			modes := []string{"orth", "none", "sym"}
-			if m.connAECMode < len(modes) {
-				args = append(args, "--conn-aec-mode", modes[m.connAECMode])
-			}
+
+		args = append(args, "--conn-graph-prop", fmt.Sprintf("%.2f", m.connGraphProp))
+		args = append(args, "--conn-window-len", fmt.Sprintf("%.2f", m.connWindowLen))
+		args = append(args, "--conn-window-step", fmt.Sprintf("%.2f", m.connWindowStep))
+
+		aecModes := []string{"orth", "none", "sym"}
+		if m.connAECMode < len(aecModes) {
+			args = append(args, "--conn-aec-mode", aecModes[m.connAECMode])
 		}
 	}
 
 	// PAC options
 	if m.isCategorySelected("pac") {
-		if m.pacPhaseMin != 4.0 || m.pacPhaseMax != 8.0 {
-			args = append(args, "--pac-phase-range",
-				fmt.Sprintf("%.1f", m.pacPhaseMin),
-				fmt.Sprintf("%.1f", m.pacPhaseMax))
+		args = append(args, "--pac-phase-range", fmt.Sprintf("%.1f", m.pacPhaseMin), fmt.Sprintf("%.1f", m.pacPhaseMax))
+		args = append(args, "--pac-amp-range", fmt.Sprintf("%.1f", m.pacAmpMin), fmt.Sprintf("%.1f", m.pacAmpMax))
+		pacMethods := []string{"mvl", "kl", "tort", "ozkurt"}
+		if m.pacMethod < len(pacMethods) {
+			args = append(args, "--pac-method", pacMethods[m.pacMethod])
 		}
-		if m.pacAmpMin != 30.0 || m.pacAmpMax != 80.0 {
-			args = append(args, "--pac-amp-range",
-				fmt.Sprintf("%.1f", m.pacAmpMin),
-				fmt.Sprintf("%.1f", m.pacAmpMax))
-		}
+		args = append(args, "--pac-min-epochs", fmt.Sprintf("%d", m.pacMinEpochs))
 	}
 
 	// Aperiodic options
 	if m.isCategorySelected("aperiodic") {
-		if m.aperiodicFmin != 2.0 || m.aperiodicFmax != 40.0 {
-			args = append(args, "--aperiodic-range",
-				fmt.Sprintf("%.1f", m.aperiodicFmin),
-				fmt.Sprintf("%.1f", m.aperiodicFmax))
-		}
+		args = append(args, "--aperiodic-range", fmt.Sprintf("%.1f", m.aperiodicFmin), fmt.Sprintf("%.1f", m.aperiodicFmax))
+		args = append(args, "--aperiodic-peak-z", fmt.Sprintf("%.2f", m.aperiodicPeakZ))
+		args = append(args, "--aperiodic-min-r2", fmt.Sprintf("%.3f", m.aperiodicMinR2))
+		args = append(args, "--aperiodic-min-points", fmt.Sprintf("%d", m.aperiodicMinPoints))
 	}
 
 	// Complexity options
 	if m.isCategorySelected("complexity") {
-		if m.complexityPEOrder != 3 {
-			args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
-		}
+		args = append(args, "--pe-order", fmt.Sprintf("%d", m.complexityPEOrder))
+		args = append(args, "--pe-delay", fmt.Sprintf("%d", m.complexityPEDelay))
 	}
 
 	// ERP options
 	if m.isCategorySelected("erp") {
-		if !m.erpBaselineCorrection {
+		if m.erpBaselineCorrection {
+			args = append(args, "--erp-baseline")
+		} else {
 			args = append(args, "--no-erp-baseline")
 		}
 	}
 
 	// Burst options
 	if m.isCategorySelected("bursts") {
-		if m.burstThresholdZ != 2.0 {
-			args = append(args, "--burst-threshold", fmt.Sprintf("%.1f", m.burstThresholdZ))
-		}
+		args = append(args, "--burst-threshold", fmt.Sprintf("%.2f", m.burstThresholdZ))
+		args = append(args, "--burst-min-duration", fmt.Sprintf("%d", m.burstMinDuration))
 	}
 
 	// Power options
 	if m.isCategorySelected("power") {
-		if m.powerBaselineMode != 0 {
-			modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
-			if m.powerBaselineMode < len(modes) {
-				args = append(args, "--power-baseline-mode", modes[m.powerBaselineMode])
-			}
+		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
+		if m.powerBaselineMode < len(modes) {
+			args = append(args, "--power-baseline-mode", modes[m.powerBaselineMode])
 		}
 	}
 
 	// Spectral options
 	if m.isCategorySelected("spectral") {
-		if m.spectralEdgePercentile != 0.95 {
-			args = append(args, "--spectral-edge-percentile", fmt.Sprintf("%.2f", m.spectralEdgePercentile))
-		}
+		args = append(args, "--spectral-edge-percentile", fmt.Sprintf("%.2f", m.spectralEdgePercentile))
 	}
+
+	// Generic & Validation
+	if m.exportAllFeatures {
+		args = append(args, "--export-all")
+	}
+
+	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
 
 	return args
 }
@@ -395,6 +456,43 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--fdr-alpha", fmt.Sprintf("%.2f", m.fdrAlpha))
 	}
 
+	// Cluster-specific options
+	if m.isComputationSelected("cluster") {
+		if m.clusterThreshold != 0.05 {
+			args = append(args, "--cluster-threshold", fmt.Sprintf("%.3f", m.clusterThreshold))
+		}
+		if m.clusterMinSize != 2 {
+			args = append(args, "--cluster-min-size", fmt.Sprintf("%d", m.clusterMinSize))
+		}
+		if m.clusterTail != 0 {
+			args = append(args, "--cluster-tail", fmt.Sprintf("%d", m.clusterTail))
+		}
+	}
+
+	// Mediation-specific options
+	if m.isComputationSelected("mediation") {
+		if m.mediationBootstrap != 1000 {
+			args = append(args, "--mediation-bootstrap", fmt.Sprintf("%d", m.mediationBootstrap))
+		}
+		if m.mediationMaxMediators != 20 {
+			args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
+		}
+	}
+
+	// Mixed effects-specific options
+	if m.isComputationSelected("mixed_effects") {
+		if m.mixedMaxFeatures != 50 {
+			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
+		}
+	}
+
+	// Condition-specific options
+	if m.isComputationSelected("condition") {
+		if m.conditionEffectThreshold != 0.5 {
+			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.1f", m.conditionEffectThreshold))
+		}
+	}
+
 	return args
 }
 
@@ -419,4 +517,137 @@ func (m Model) buildDecodingAdvancedArgs() []string {
 	}
 
 	return args
+}
+
+// buildPreprocessingAdvancedArgs returns CLI args for preprocessing advanced options
+func (m Model) buildPreprocessingAdvancedArgs() []string {
+	var args []string
+
+	if !m.prepUsePyprep {
+		args = append(args, "--no-pyprep")
+	}
+	if !m.prepUseIcalabel {
+		args = append(args, "--no-icalabel")
+	}
+	if m.prepNJobs != 1 {
+		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.prepNJobs))
+	}
+
+	// Filtering
+	if m.prepResample != 500 {
+		args = append(args, "--resample", fmt.Sprintf("%d", m.prepResample))
+	}
+	if m.prepLFreq != 0.1 {
+		args = append(args, "--l-freq", fmt.Sprintf("%.1f", m.prepLFreq))
+	}
+	if m.prepHFreq != 100.0 {
+		args = append(args, "--h-freq", fmt.Sprintf("%.1f", m.prepHFreq))
+	}
+	if m.prepNotch != 60 {
+		args = append(args, "--notch", fmt.Sprintf("%d", m.prepNotch))
+	}
+
+	// ICA
+	if m.prepICAMethod != 0 {
+		icaMethodVal := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+		args = append(args, "--ica-method", icaMethodVal)
+	}
+	if m.prepICAComp != 0.99 {
+		args = append(args, "--ica-components", fmt.Sprintf("%.2f", m.prepICAComp))
+	}
+	if m.prepProbThresh != 0.8 {
+		args = append(args, "--prob-threshold", fmt.Sprintf("%.1f", m.prepProbThresh))
+	}
+
+	// Epoching
+	if m.prepEpochsTmin != -5.0 {
+		args = append(args, "--tmin", fmt.Sprintf("%.1f", m.prepEpochsTmin))
+	}
+	if m.prepEpochsTmax != 12.0 {
+		args = append(args, "--tmax", fmt.Sprintf("%.1f", m.prepEpochsTmax))
+	}
+
+	return args
+}
+
+// buildRawToBidsAdvancedArgs returns CLI args for raw-to-bids advanced options
+func (m Model) buildRawToBidsAdvancedArgs() []string {
+	var args []string
+
+	if m.rawMontage != "" && m.rawMontage != "easycap-M1" {
+		args = append(args, "--montage", m.rawMontage)
+	}
+	if m.rawLineFreq != 60 {
+		args = append(args, "--line-freq", fmt.Sprintf("%d", m.rawLineFreq))
+	}
+	if m.rawOverwrite {
+		args = append(args, "--overwrite")
+	}
+	if m.rawZeroBaseOnsets {
+		args = append(args, "--zero-base-onsets")
+	}
+	if m.rawTrimToFirstVolume {
+		args = append(args, "--trim-to-first-volume")
+	}
+	if m.rawEventPrefixes != "" {
+		for _, prefix := range splitListInput(m.rawEventPrefixes) {
+			args = append(args, "--event-prefix", prefix)
+		}
+	}
+	if m.rawKeepAnnotations {
+		args = append(args, "--keep-all-annotations")
+	}
+
+	return args
+}
+
+// buildMergeBehaviorAdvancedArgs returns CLI args for merge-behavior advanced options
+func (m Model) buildMergeBehaviorAdvancedArgs() []string {
+	var args []string
+
+	if m.mergeEventPrefixes != "" {
+		for _, prefix := range splitListInput(m.mergeEventPrefixes) {
+			args = append(args, "--event-prefix", prefix)
+		}
+	}
+	if m.mergeEventTypes != "" {
+		for _, eventType := range splitListInput(m.mergeEventTypes) {
+			args = append(args, "--event-type", eventType)
+		}
+	}
+
+	return args
+}
+
+func expandUserPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	if strings.HasPrefix(value, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			if value == "~" {
+				return filepath.Clean(home)
+			}
+			if strings.HasPrefix(value, "~/") {
+				return filepath.Clean(filepath.Join(home, value[2:]))
+			}
+		}
+	}
+	return filepath.Clean(value)
+}
+
+func splitListInput(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+	var out []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

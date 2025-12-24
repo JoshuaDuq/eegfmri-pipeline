@@ -16,7 +16,7 @@ from eeg_pipeline.pipelines.constants import (
 
 def detect_available_bands(features_dir) -> List[str]:
     """Detect available frequency bands from feature file columns."""
-    bands = {"delta", "theta", "alpha", "beta", "gamma"}
+    bands = set(FREQUENCY_BANDS)
     found_bands = set()
     
     features_dir = Path(features_dir)
@@ -43,7 +43,7 @@ def _empty_feature_availability() -> dict:
         "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
         "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "all"
     ]
-    all_bands = ["delta", "theta", "alpha", "beta", "gamma"]
+    all_bands = FREQUENCY_BANDS
     
     return {
         "features": {cat: {"available": False, "last_modified": None} for cat in all_categories},
@@ -78,7 +78,7 @@ def detect_feature_availability(features_dir) -> dict:
         "all": ["features_all.tsv"],
     }
     
-    bands = {"delta", "theta", "alpha", "beta", "gamma"}
+    bands = set(FREQUENCY_BANDS)
     band_times = {}
     
     for category, patterns in category_patterns.items():
