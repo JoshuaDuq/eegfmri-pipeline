@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from eeg_pipeline.cli.common import (
@@ -29,319 +31,37 @@ class PlotDefinition:
     tfr_plots: Optional[List[str]] = None
     erp_plots: Optional[List[str]] = None
     decoding_mode: Optional[str] = None
+    requires_epochs: bool = False
+    requires_features: bool = False
+    requires_stats: bool = False
 
 
-PLOT_CATALOG: List[PlotDefinition] = [
-    # Features
-    PlotDefinition(
-        "features_power",
-        "features",
-        "Power",
-        "Band power summaries and topomaps",
-        ["features_power.tsv"],
-        feature_categories=["power"],
-    ),
-    PlotDefinition(
-        "features_connectivity",
-        "features",
-        "Connectivity",
-        "Connectivity heatmaps and networks",
-        ["features_connectivity.parquet"],
-        feature_categories=["connectivity"],
-    ),
-    PlotDefinition(
-        "features_aperiodic",
-        "features",
-        "Aperiodic",
-        "1/f spectral slope diagnostics",
-        ["features_aperiodic.tsv"],
-        feature_categories=["aperiodic"],
-    ),
-    PlotDefinition(
-        "features_itpc",
-        "features",
-        "ITPC",
-        "Inter-trial phase coherence plots",
-        ["features_itpc.tsv"],
-        feature_categories=["itpc"],
-    ),
-    PlotDefinition(
-        "features_pac",
-        "features",
-        "PAC",
-        "Phase-amplitude coupling plots",
-        ["features_pac_trials.tsv"],
-        feature_categories=["pac"],
-    ),
-    PlotDefinition(
-        "features_erds",
-        "features",
-        "ERDS",
-        "Event-related desync/sync plots",
-        ["features_erds.tsv"],
-        feature_categories=["erds"],
-    ),
-    PlotDefinition(
-        "features_complexity",
-        "features",
-        "Complexity",
-        "Complexity distributions and condition comparisons",
-        ["features_complexity.tsv"],
-        feature_categories=["complexity"],
-    ),
-    PlotDefinition(
-        "features_quality",
-        "features",
-        "Quality",
-        "Feature quality diagnostics and outlier views",
-        ["features_quality.tsv"],
-        feature_categories=["quality"],
-    ),
-    PlotDefinition(
-        "features_spectral",
-        "features",
-        "Spectral",
-        "Spectral peak and edge features",
-        ["features_spectral.tsv"],
-        feature_categories=["spectral"],
-    ),
-    PlotDefinition(
-        "features_ratios",
-        "features",
-        "Ratios",
-        "Band power ratios",
-        ["features_ratios.tsv"],
-        feature_categories=["ratios"],
-    ),
-    PlotDefinition(
-        "features_asymmetry",
-        "features",
-        "Asymmetry",
-        "Hemispheric asymmetry indices",
-        ["features_asymmetry.tsv"],
-        feature_categories=["asymmetry"],
-    ),
-    PlotDefinition(
-        "features_bursts",
-        "features",
-        "Bursts",
-        "Oscillatory burst dynamics",
-        ["features_bursts.tsv"],
-        feature_categories=["bursts"],
-    ),
-    PlotDefinition(
-        "features_erp",
-        "features",
-        "ERP",
-        "ERP visualizations from epochs",
-        ["epochs/*.fif"],
-        feature_categories=["erp"],
-    ),
-    # Behavior
-    PlotDefinition(
-        "behavior_psychometrics",
-        "behavior",
-        "Psychometrics",
-        "Rating distributions and psychometrics",
-        ["events.tsv", "features_power.tsv"],
-        behavior_plots=["psychometrics"],
-    ),
-    PlotDefinition(
-        "behavior_power_scatter",
-        "behavior",
-        "Power ROI Scatter",
-        "Power vs behavior scatter plots",
-        ["features_power.tsv", "stats/corr_stats_power_*"],
-        behavior_plots=["power_roi_scatter"],
-    ),
-    PlotDefinition(
-        "behavior_complexity_scatter",
-        "behavior",
-        "Complexity Scatter",
-        "Complexity vs behavior scatter plots",
-        ["features_complexity.tsv"],
-        behavior_plots=["complexity_scatter"],
-    ),
-    PlotDefinition(
-        "behavior_aperiodic_scatter",
-        "behavior",
-        "Aperiodic Scatter",
-        "Aperiodic vs behavior scatter plots",
-        ["features_aperiodic.tsv"],
-        behavior_plots=["aperiodic_scatter"],
-    ),
-    PlotDefinition(
-        "behavior_connectivity_scatter",
-        "behavior",
-        "Connectivity Scatter",
-        "Connectivity vs behavior scatter plots",
-        ["features_connectivity.parquet"],
-        behavior_plots=["connectivity_scatter"],
-    ),
-    PlotDefinition(
-        "behavior_itpc_scatter",
-        "behavior",
-        "ITPC Scatter",
-        "ITPC vs behavior scatter plots",
-        ["features_itpc.tsv"],
-        behavior_plots=["itpc_scatter"],
-    ),
-    PlotDefinition(
-        "behavior_temporal_topomaps",
-        "behavior",
-        "Temporal Topomaps",
-        "Temporal correlation topomaps",
-        ["stats/temporal_*"],
-        behavior_plots=["temporal_topomaps"],
-    ),
-    PlotDefinition(
-        "behavior_pain_clusters",
-        "behavior",
-        "Pain Clusters",
-        "Cluster-based temporal contrasts",
-        ["stats/cluster_*"],
-        behavior_plots=["pain_clusters"],
-    ),
-    PlotDefinition(
-        "behavior_dose_response",
-        "behavior",
-        "Dose Response",
-        "Dose-response curves and contrasts",
-        ["events.tsv", "features_power.tsv"],
-        behavior_plots=["dose_response"],
-    ),
-    PlotDefinition(
-        "behavior_mediation",
-        "behavior",
-        "Mediation",
-        "Mediation path diagrams",
-        ["stats/mediation.tsv"],
-        behavior_plots=["mediation"],
-    ),
-    PlotDefinition(
-        "behavior_top_predictors",
-        "behavior",
-        "Top Predictors",
-        "Top predictors summary",
-        ["stats/corr_stats_*"],
-        behavior_plots=["top_predictors"],
-    ),
-    # TFR
-    PlotDefinition(
-        "tfr_scalpmean",
-        "tfr",
-        "Scalp-Mean",
-        "Scalp-mean TFR plots",
-        ["epochs/*.fif"],
-        tfr_plots=["scalpmean"],
-    ),
-    PlotDefinition(
-        "tfr_scalpmean_contrast",
-        "tfr",
-        "Scalp-Mean Contrast",
-        "Pain vs non-pain contrasts",
-        ["epochs/*.fif", "events.tsv"],
-        tfr_plots=["scalpmean_contrast"],
-    ),
-    PlotDefinition(
-        "tfr_channels",
-        "tfr",
-        "Channels",
-        "Channel-level TFR plots",
-        ["epochs/*.fif"],
-        tfr_plots=["channels"],
-    ),
-    PlotDefinition(
-        "tfr_channels_contrast",
-        "tfr",
-        "Channels Contrast",
-        "Channel-level contrast plots",
-        ["epochs/*.fif", "events.tsv"],
-        tfr_plots=["channels_contrast"],
-    ),
-    PlotDefinition(
-        "tfr_rois",
-        "tfr",
-        "ROIs",
-        "ROI-level TFR plots",
-        ["epochs/*.fif"],
-        tfr_plots=["rois"],
-    ),
-    PlotDefinition(
-        "tfr_rois_contrast",
-        "tfr",
-        "ROI Contrast",
-        "ROI-level contrast plots",
-        ["epochs/*.fif", "events.tsv"],
-        tfr_plots=["rois_contrast"],
-    ),
-    PlotDefinition(
-        "tfr_topomaps",
-        "tfr",
-        "Topomaps",
-        "Time-frequency topomaps",
-        ["epochs/*.fif", "events.tsv"],
-        tfr_plots=["topomaps"],
-    ),
-    PlotDefinition(
-        "tfr_band_evolution",
-        "tfr",
-        "Band Evolution",
-        "Band evolution over time",
-        ["epochs/*.fif"],
-        tfr_plots=["band_evolution"],
-    ),
-    # Decoding
-    PlotDefinition(
-        "decoding_regression_plots",
-        "decoding",
-        "Regression Plots",
-        "LOSO regression diagnostics",
-        ["decoding/regression/loso_predictions.tsv"],
-        decoding_mode="regression",
-    ),
-    PlotDefinition(
-        "decoding_timegen_plots",
-        "decoding",
-        "Time-Generalization",
-        "Time-generalization matrices",
-        ["decoding/time_generalization/time_generalization_regression.npz"],
-        decoding_mode="timegen",
-    ),
-    # ERP
-    PlotDefinition(
-        "erp_butterfly",
-        "erp",
-        "Butterfly",
-        "Butterfly ERP plots (all channels)",
-        ["epochs/*.fif"],
-        erp_plots=["butterfly"],
-    ),
-    PlotDefinition(
-        "erp_roi",
-        "erp",
-        "ROI Waveforms",
-        "ROI-based ERP waveforms with error bars",
-        ["epochs/*.fif"],
-        erp_plots=["roi"],
-    ),
-    PlotDefinition(
-        "erp_contrast",
-        "erp",
-        "Contrast",
-        "ERP condition contrasts (Pain vs No-Pain)",
-        ["epochs/*.fif", "events.tsv"],
-        erp_plots=["contrast"],
-    ),
-    PlotDefinition(
-        "erp_topomaps",
-        "erp",
-        "Topomaps",
-        "ERP spatial distributions",
-        ["epochs/*.fif"],
-        erp_plots=["topomaps"],
-    ),
-]
+def _load_plot_catalog() -> List[PlotDefinition]:
+    catalog_path = Path(__file__).resolve().parents[2] / "plotting" / "plot_catalog.json"
+    payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    plots: List[PlotDefinition] = []
+    for entry in payload.get("plots", []):
+        plots.append(
+            PlotDefinition(
+                plot_id=str(entry["id"]),
+                group=str(entry["group"]),
+                label=str(entry.get("label", "")),
+                description=str(entry.get("description", "")),
+                required_files=list(entry.get("required_files", [])),
+                feature_categories=entry.get("feature_categories"),
+                behavior_plots=entry.get("behavior_plots"),
+                tfr_plots=entry.get("tfr_plots"),
+                erp_plots=entry.get("erp_plots"),
+                decoding_mode=entry.get("decoding_mode"),
+                requires_epochs=bool(entry.get("requires_epochs", False)),
+                requires_features=bool(entry.get("requires_features", False)),
+                requires_stats=bool(entry.get("requires_stats", False)),
+            )
+        )
+    return plots
+
+
+PLOT_CATALOG: List[PlotDefinition] = _load_plot_catalog()
 
 PLOT_BY_ID: Dict[str, PlotDefinition] = {plot.plot_id: plot for plot in PLOT_CATALOG}
 PLOT_GROUPS: Dict[str, List[str]] = {}
@@ -376,7 +96,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         choices=sorted(PLOT_GROUPS.keys()),
         default=None,
         metavar="GROUP",
-        help="Plot groups to render (features, behavior, tfr, decoding)",
+        help="Plot groups to render (features, behavior, tfr, erp, decoding)",
     )
     parser.add_argument(
         "--all-plots",

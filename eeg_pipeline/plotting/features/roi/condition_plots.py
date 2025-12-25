@@ -1326,7 +1326,9 @@ def plot_itpc_active_vs_baseline(
     plot_cfg = get_plot_config(config)
     width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
     height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
-    fig, axes = plt.subplots(n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois))
+    fig, axes = plt.subplots(
+        n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois), squeeze=False
+    )
 
     for row_idx, roi_name in enumerate(roi_names):
         for col_idx, band in enumerate(bands):
@@ -1700,17 +1702,14 @@ def plot_band_segment_condition(
     stat_preference: Optional[List[str]] = None,
     scope_preference: Optional[List[str]] = None,
 ) -> None:
-    """Unified Band × Segment × Condition plot.
+    """Unified Band × Segment plot comparing Baseline vs Active.
 
-    Creates grid: rows = frequency bands, columns = segments (baseline, active).
-    Each cell shows mean across ALL channels, comparing pain vs non-pain.
+    Creates a single row of plots, one per frequency band.
+    Each cell shows Baseline vs Active comparison using paired Wilcoxon test.
     """
+    from scipy.stats import wilcoxon
 
-    if features_df is None or features_df.empty or events_df is None:
-        return
-
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    if features_df is None or features_df.empty:
         return
 
     if segments is None:
@@ -1720,9 +1719,18 @@ def plot_band_segment_condition(
         filtered = [seg for seg in segments if seg in available_segments]
         segments = filtered if filtered else available_segments
 
-    bands, band_colors, condition_colors = _get_bands_and_palettes(config)
+    if len(segments) < 2:
+        if logger:
+            logger.warning(
+                f"Need at least 2 segments for {feature_label} baseline vs active comparison"
+            )
+        return
+
+    baseline_seg = "baseline" if "baseline" in segments else segments[0]
+    active_seg = "active" if "active" in segments else segments[-1]
+
+    bands, band_colors, _ = _get_bands_and_palettes(config)
     n_bands = len(bands)
-    n_segments = len(segments)
 
     if stat_preference is None:
         stat_preference = {
@@ -1747,53 +1755,74 @@ def plot_band_segment_condition(
     if scope_preference is None:
         scope_preference = ["global", "roi", "ch", "chpair"]
 
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    baseline_window = get_config_value(
+        config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
+    )
+    active_window = get_config_value(
+        config, "time_frequency_analysis.active_window", [3.0, 10.5]
+    )
+
+    segment_colors = {
+        "baseline": "#5a7d9a",
+        "active": "#c44e52",
+    }
+
     plot_data = {}
     all_pvalues = []
     pvalue_keys = []
 
-    for row_idx, band in enumerate(bands):
-        for col_idx, segment in enumerate(segments):
-            key = (row_idx, col_idx)
+    for band_idx, band in enumerate(bands):
+        baseline_series, _, _ = collect_named_series(
+            features_df,
+            group=feature_prefix,
+            segment=baseline_seg,
+            band=band,
+            stat_preference=stat_preference,
+            scope_preference=scope_preference,
+        )
+        active_series, _, _ = collect_named_series(
+            features_df,
+            group=feature_prefix,
+            segment=active_seg,
+            band=band,
+            stat_preference=stat_preference,
+            scope_preference=scope_preference,
+        )
 
-            vals_nonpain = np.array([])
-            vals_pain = np.array([])
+        vals_baseline = np.array([])
+        vals_active = np.array([])
 
-            series, _, _ = collect_named_series(
-                features_df,
-                group=feature_prefix,
-                segment=segment,
-                band=band,
-                stat_preference=stat_preference,
-                scope_preference=scope_preference,
-            )
-            if not series.empty:
-                vals_nonpain = series[~pain_mask].dropna().values
-                vals_pain = series[pain_mask].dropna().values
+        if not baseline_series.empty and not active_series.empty:
+            valid_mask = baseline_series.notna() & active_series.notna()
+            vals_baseline = baseline_series[valid_mask].values
+            vals_active = active_series[valid_mask].values
 
-            plot_data[key] = (vals_nonpain, vals_pain)
+        plot_data[band_idx] = (vals_baseline, vals_active)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
-                    )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
-                )
-                d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
+        if (
+            len(vals_baseline) > 5
+            and len(vals_active) > 5
+            and len(vals_baseline) == len(vals_active)
+        ):
+            try:
+                _, p = wilcoxon(vals_active, vals_baseline)
+                diff = vals_active - vals_baseline
+                pooled_std = np.std(diff, ddof=1)
+                d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
                 all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+                pvalue_keys.append((band_idx, p, d))
+            except Exception:
+                pass
 
-    has_data = any(len(pdata[0]) > 0 or len(pdata[1]) > 0 for pdata in plot_data.values())
+    has_data = any(
+        len(pdata[0]) > 0 or len(pdata[1]) > 0 for pdata in plot_data.values()
+    )
     if not has_data:
         if logger:
             logger.warning(
-                f"No {feature_label} data found for band × segment × condition plot"
+                f"No {feature_label} data found for band × segment comparison plot"
             )
         return
 
@@ -1804,104 +1833,102 @@ def plot_band_segment_condition(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(n_bands, n_segments, figsize=(5 * n_segments, 3 * n_bands))
+    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
 
-    for row_idx, band in enumerate(bands):
-        for col_idx, segment in enumerate(segments):
-            ax = axes[row_idx, col_idx]
-            key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+    for band_idx, band in enumerate(bands):
+        ax = axes.flatten()[band_idx]
+        vals_baseline, vals_active = plot_data[band_idx]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No data",
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
-                    fontsize=plot_cfg.font.title,
-                    color="gray",
-                )
-                ax.set_xticks([])
-                continue
+        if len(vals_baseline) == 0 or len(vals_active) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                "No data",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+                fontsize=plot_cfg.font.title,
+                color="gray",
+            )
+            ax.set_xticks([])
+            continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
-                bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
-                    positions=[0, 1],
-                    widths=0.5,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
-                bp["boxes"][1].set_alpha(0.6)
+        bp = ax.boxplot(
+            [vals_baseline, vals_active],
+            positions=[0, 1],
+            widths=0.4,
+            patch_artist=True,
+        )
+        bp["boxes"][0].set_facecolor(segment_colors["baseline"])
+        bp["boxes"][0].set_alpha(0.6)
+        bp["boxes"][1].set_facecolor(segment_colors["active"])
+        bp["boxes"][1].set_alpha(0.6)
 
-                ax.scatter(
-                    np.random.uniform(-0.1, 0.1, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
-                    alpha=0.4,
-                    s=10,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.1, 0.1, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
-                    alpha=0.4,
-                    s=10,
-                )
+        ax.scatter(
+            np.random.uniform(-0.08, 0.08, len(vals_baseline)),
+            vals_baseline,
+            c=segment_colors["baseline"],
+            alpha=0.3,
+            s=6,
+        )
+        ax.scatter(
+            1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
+            vals_active,
+            c=segment_colors["active"],
+            alpha=0.3,
+            s=6,
+        )
 
-                all_vals = np.concatenate([vals_nonpain, vals_pain])
-                ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-                yrange = ymax - ymin if ymax > ymin else 1.0
-                ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.25 * yrange)
-
-                if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    sig_color = get_significance_color(sig, config)
-                    ax.annotate(
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        xy=(0.5, ymax + 0.05 * yrange),
-                        ha="center",
-                        fontsize=plot_cfg.font.medium,
-                        color=sig_color,
-                        fontweight="bold" if sig else "normal",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["Non-Pain", "Pain"], fontsize=plot_cfg.font.title)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-
-            if col_idx == 0:
-                ax.set_ylabel(
-                    band.capitalize(),
-                    fontsize=plot_cfg.font.figure_title,
-                    fontweight="bold",
-                    color=band_colors.get(band, None),
+        if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
+            for i in range(len(vals_baseline)):
+                ax.plot(
+                    [0, 1],
+                    [vals_baseline[i], vals_active[i]],
+                    c="gray",
+                    alpha=0.15,
+                    lw=0.5,
                 )
 
-            if row_idx == 0:
-                ax.set_title(
-                    segment.capitalize(),
-                    fontsize=plot_cfg.font.figure_title,
-                    fontweight="bold",
-                )
+        all_vals = np.concatenate([vals_baseline, vals_active])
+        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+        yrange = ymax - ymin if ymax > ymin else 0.1
+        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+        if band_idx in qvalues:
+            _, q, d, sig = qvalues[band_idx]
+            sig_marker = "†" if sig else ""
+            sig_color = get_significance_color(sig, config)
+            ax.annotate(
+                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
+                xy=(0.5, ymax + 0.05 * yrange),
+                ha="center",
+                fontsize=plot_cfg.font.medium,
+                color=sig_color,
+                fontweight="bold" if sig else "normal",
+            )
+
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Baseline", "Active"], fontsize=9)
+        ax.set_title(
+            band.capitalize(),
+            fontweight="bold",
+            color=band_colors.get(band, None),
+        )
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    n_trials = len(features_df)
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        f"{feature_label}: Mean Across Channels by Band × Segment\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
-        f"Mann-Whitney U, FDR-corrected | {n_sig}/{n_tests} significant (†=q<0.05)"
+        f"{feature_label}: Baseline vs Active (Paired Comparison)\n"
+        f"Baseline ({baseline_window[0]:.1f} to {baseline_window[1]:.1f}s) vs "
+        f"Active ({active_window[0]:.1f} to {active_window[1]:.1f}s)\n"
+        f"Subject: {subject} | N: {n_trials} trials | Wilcoxon signed-rank | "
+        f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
-    fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
+    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
 
     plt.tight_layout()
     safe_name = feature_prefix.lower().replace(" ", "_")
@@ -1917,7 +1944,7 @@ def plot_band_segment_condition(
 
     if logger:
         logger.info(
-            f"Saved {feature_label} band × segment × condition plot ({n_sig}/{n_tests} FDR significant)"
+            f"Saved {feature_label} baseline vs active plot ({n_sig}/{n_tests} FDR significant)"
         )
 
 
@@ -1985,10 +2012,10 @@ def plot_power_active_vs_baseline(
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
     plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5))
+    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
 
     for band_idx, band in enumerate(bands):
-        ax = axes[band_idx]
+        ax = axes.flatten()[band_idx]
         vals_baseline, vals_active = plot_data[band_idx]
 
         if len(vals_baseline) == 0 or len(vals_active) == 0:

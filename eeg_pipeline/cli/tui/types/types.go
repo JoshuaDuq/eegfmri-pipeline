@@ -115,6 +115,7 @@ type SubjectStatus struct {
 	ID                  string
 	HasEpochs           bool
 	HasFeatures         bool
+	HasStats            bool
 	AvailableBands      []string
 	FeatureAvailability *FeatureAvailability
 	EpochMetadata       map[string]float64 `json:"epoch_metadata"`

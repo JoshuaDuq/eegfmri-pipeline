@@ -14,6 +14,7 @@ import pandas as pd
 from scipy import stats
 
 from .base import get_statistics_constants
+from .correlation import compute_correlation
 
 
 def compute_band_spatial_correlation(
@@ -256,7 +257,7 @@ def compute_correlation_stats(
         return np.nan, np.nan, n_eff, (np.nan, np.nan)
     
     x_v, y_v = x[mask], y[mask]
-    r, p = stats.spearmanr(x_v, y_v, nan_policy="omit")
+    r, p = compute_correlation(x_v, y_v, method_code)
     
     ci = (np.nan, np.nan)
     if bootstrap_ci > 0:
@@ -291,7 +292,9 @@ def compute_partial_residuals_stats(
         n_partial = int(stats_df.get("n_partial", n_partial))
     
     if not np.isfinite(r_resid):
-        r_resid, p_resid = stats.spearmanr(x_res, y_res, nan_policy="omit")
+        # Always use pearson for residuals (even if method is spearman, 
+        # ranked residuals are Pearson-correlated to get Spearman partial)
+        r_resid, p_resid = compute_correlation(x_res, y_res, method="pearson")
     
     ci = (np.nan, np.nan)
     if bootstrap_ci > 0:

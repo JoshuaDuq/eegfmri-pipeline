@@ -119,6 +119,8 @@ def _plot_histogram_with_kde(
 
 
 def _should_show_percentage_axis(x_label: str) -> bool:
+    if "(ranked)" in x_label.lower():
+        return False
     power_indicators = ["log10(power", "residuals of log10(power"]
     return any(indicator in x_label for indicator in power_indicators)
 
@@ -257,7 +259,7 @@ def generate_correlation_scatter(
             if n_valid >= min_samples:
                 x_vals = x_clean.iloc[mask] if isinstance(x_clean, pd.Series) else x_clean[mask]
                 y_vals = y_clean.iloc[mask] if isinstance(y_clean, pd.Series) else y_clean[mask]
-                use_spearman = method_code.lower() == "spearman"
+                use_spearman = method_code.lower() == "spearman" and not is_partial_residuals
                 if use_spearman:
                     r_disp, p_disp = stats.spearmanr(x_vals, y_vals, nan_policy="omit")
                 else:

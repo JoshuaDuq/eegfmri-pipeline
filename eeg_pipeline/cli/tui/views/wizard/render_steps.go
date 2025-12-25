@@ -155,6 +155,12 @@ func (m Model) renderCategorySelection() string {
 	}
 	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
 
+	if m.CurrentStep == types.StepSelectPlotCategories {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
+			"  Toggle a category to include or exclude all plots in that group.\n\n",
+		))
+	}
+
 	count := 0
 	for _, sel := range m.selected {
 		if sel {
@@ -195,7 +201,17 @@ func (m Model) renderCategorySelection() string {
 			b.WriteString(desc)
 		}
 
-		if m.featureAvailability != nil {
+		if m.Pipeline == types.PipelinePlotting {
+			categories := m.plotCategories
+			if len(categories) == 0 {
+				categories = defaultPlotCategories
+			}
+			if i < len(categories) {
+				total, selected := m.plotCountsForGroup(categories[i].Key)
+				countText := fmt.Sprintf("  [%d/%d plots]", selected, total)
+				b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render(countText))
+			}
+		} else if m.featureAvailability != nil {
 			if m.featureAvailability[cat] {
 				timestamp := m.featureLastModified[cat]
 				relTime := formatRelativeTime(timestamp)
@@ -493,6 +509,47 @@ func (m Model) renderPlotSelection() string {
 	if len(plot.RequiredFiles) > 0 {
 		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 		b.WriteString(reqStyle.Render("Requires: "+strings.Join(plot.RequiredFiles, ", ")) + "\n")
+	}
+
+	reqs := []string{}
+	if plot.RequiresEpochs {
+		reqs = append(reqs, "epochs")
+	}
+	if plot.RequiresFeatures {
+		reqs = append(reqs, "features")
+	}
+	if plot.RequiresStats {
+		reqs = append(reqs, "stats")
+	}
+	if len(reqs) > 0 {
+		reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+		b.WriteString(reqStyle.Render("Needs: "+strings.Join(reqs, ", ")) + "\n")
+	}
+
+	readyCount, totalCount, missing := m.plotAvailabilitySummary(plot)
+	if totalCount > 0 {
+		statusStyle := lipgloss.NewStyle().Foreground(styles.Warning).PaddingLeft(2)
+		if readyCount == totalCount {
+			statusStyle = statusStyle.Foreground(styles.Success)
+		}
+		b.WriteString(statusStyle.Render(fmt.Sprintf("Ready for %d/%d selected subjects", readyCount, totalCount)) + "\n")
+
+		if readyCount < totalCount {
+			missingParts := []string{}
+			if missing["epochs"] > 0 {
+				missingParts = append(missingParts, fmt.Sprintf("epochs=%d", missing["epochs"]))
+			}
+			if missing["features"] > 0 {
+				missingParts = append(missingParts, fmt.Sprintf("features=%d", missing["features"]))
+			}
+			if missing["stats"] > 0 {
+				missingParts = append(missingParts, fmt.Sprintf("stats=%d", missing["stats"]))
+			}
+			if len(missingParts) > 0 {
+				reqStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+				b.WriteString(reqStyle.Render("Missing: "+strings.Join(missingParts, ", ")) + "\n")
+			}
+		}
 	}
 
 	return b.String()

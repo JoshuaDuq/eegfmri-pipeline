@@ -429,7 +429,11 @@ func (m *Model) handleSpace() {
 		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
-		m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
+		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
+			m.togglePlotCategory(m.categoryIndex)
+		} else {
+			m.selected[m.categoryIndex] = !m.selected[m.categoryIndex]
+		}
 	case types.StepSelectSubjects:
 		if m.subjectCursor < len(m.subjects) {
 			subj := m.subjects[m.subjectCursor].ID
@@ -504,6 +508,11 @@ func (m *Model) selectAll() {
 		for i := range m.categories {
 			m.selected[i] = true
 		}
+		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
+			for i := range m.plotItems {
+				m.plotSelected[i] = true
+			}
+		}
 	case types.StepSelectSubjects:
 		for _, s := range m.subjects {
 			m.subjectSelected[s.ID] = true
@@ -537,6 +546,11 @@ func (m *Model) selectNone() {
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline or Plotting categories selection
 		m.selected = make(map[int]bool)
+		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
+			for i := range m.plotItems {
+				m.plotSelected[i] = false
+			}
+		}
 	case types.StepSelectSubjects:
 		m.subjectSelected = make(map[string]bool)
 		m.updateFeatureAvailability()
@@ -786,7 +800,7 @@ func (m *Model) validateTimeRanges() []string {
 	return errors
 }
 
-func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool) {
+func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool, requiresStats bool) {
 	for i, plot := range m.plotItems {
 		if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
 			continue
@@ -797,17 +811,23 @@ func (m Model) plotRequirements() (requiresEpochs bool, requiresFeatures bool) {
 		if plot.RequiresFeatures {
 			requiresFeatures = true
 		}
+		if plot.RequiresStats {
+			requiresStats = true
+		}
 	}
-	return requiresEpochs, requiresFeatures
+	return requiresEpochs, requiresFeatures, requiresStats
 }
 
 func (m Model) validatePlottingSubject(s types.SubjectStatus) (bool, string) {
-	requiresEpochs, requiresFeatures := m.plotRequirements()
+	requiresEpochs, requiresFeatures, requiresStats := m.plotRequirements()
 	if requiresEpochs && !s.HasEpochs {
 		return false, "missing epochs"
 	}
 	if requiresFeatures && !s.HasFeatures {
 		return false, "missing features"
+	}
+	if requiresStats && !s.HasStats {
+		return false, "missing stats"
 	}
 	return true, ""
 }
@@ -1380,6 +1400,27 @@ func (m *Model) startNumberEdit() {
 	m.numberBuffer = ""
 }
 
+func (m *Model) togglePlotCategory(idx int) {
+	if idx < 0 || idx >= len(m.categories) {
+		return
+	}
+	m.selected[idx] = !m.selected[idx]
+
+	categories := m.plotCategories
+	if len(categories) == 0 {
+		categories = defaultPlotCategories
+	}
+	if idx >= len(categories) {
+		return
+	}
+	key := categories[idx].Key
+	for i, plot := range m.plotItems {
+		if strings.EqualFold(plot.Group, key) {
+			m.plotSelected[i] = m.selected[idx]
+		}
+	}
+}
+
 // IsPlotCategorySelected checks if a plot group/category is selected
 func (m Model) IsPlotCategorySelected(group string) bool {
 	// If not in Plotting pipeline or no Categories step, assume all selected
@@ -1395,8 +1436,11 @@ func (m Model) IsPlotCategorySelected(group string) bool {
 		return true
 	}
 
-	// plotCategories are defined in model.go
-	for i, cat := range plotCategories {
+	categories := m.plotCategories
+	if len(categories) == 0 {
+		categories = defaultPlotCategories
+	}
+	for i, cat := range categories {
 		if strings.EqualFold(cat.Key, group) {
 			return m.selected[i]
 		}
@@ -1407,7 +1451,11 @@ func (m Model) IsPlotCategorySelected(group string) bool {
 // SelectedPlotCategoryKeys returns the keys of selected plot categories
 func (m Model) SelectedPlotCategoryKeys() []string {
 	var keys []string
-	for i, cat := range plotCategories {
+	categories := m.plotCategories
+	if len(categories) == 0 {
+		categories = defaultPlotCategories
+	}
+	for i, cat := range categories {
 		if m.selected[i] {
 			keys = append(keys, cat.Key)
 		}

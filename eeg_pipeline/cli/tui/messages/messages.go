@@ -75,6 +75,7 @@ type SubjectInfo struct {
 	ID                  string               `json:"id"`
 	HasEpochs           bool                 `json:"has_epochs"`
 	HasFeatures         bool                 `json:"has_features"`
+	HasStats            bool                 `json:"has_stats"`
 	AvailableBands      []string             `json:"available_bands,omitempty"`
 	FeatureAvailability *FeatureAvailability `json:"feature_availability,omitempty"`
 	EpochMetadata       map[string]float64   `json:"epoch_metadata,omitempty"`

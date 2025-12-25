@@ -1,7 +1,10 @@
 package wizard
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -110,6 +113,7 @@ type PlotItem struct {
 	RequiredFiles    []string
 	RequiresEpochs   bool
 	RequiresFeatures bool
+	RequiresStats    bool
 }
 
 type textField int
@@ -126,58 +130,118 @@ const (
 	textFieldMergeEventTypes
 )
 
-var plotItems = []PlotItem{
+var defaultPlotItems = []PlotItem{
 	// Features
-	{"features_power", "Features", "Power", "Band power summaries and topomaps", []string{"features_power.tsv"}, false, true},
-	{"features_connectivity", "Features", "Connectivity", "Connectivity heatmaps and network views", []string{"features_connectivity.parquet"}, false, true},
-	{"features_aperiodic", "Features", "Aperiodic", "1/f spectral slope diagnostics", []string{"features_aperiodic.tsv"}, false, true},
-	{"features_itpc", "Features", "ITPC", "Inter-trial phase coherence plots", []string{"features_itpc.tsv"}, false, true},
-	{"features_pac", "Features", "PAC", "Phase-amplitude coupling plots", []string{"features_pac_trials.tsv"}, false, true},
-	{"features_erds", "Features", "ERDS", "Event-related desync/sync plots", []string{"features_erds.tsv"}, false, true},
-	{"features_complexity", "Features", "Complexity", "Complexity distributions and condition comparisons", []string{"features_complexity.tsv"}, false, true},
-	{"features_quality", "Features", "Quality", "Feature quality diagnostics and outlier views", []string{"features_quality.tsv"}, false, true},
-	{"features_spectral", "Features", "Spectral", "Spectral peak and edge features", []string{"features_spectral.tsv"}, false, true},
-	{"features_ratios", "Features", "Ratios", "Band power ratios", []string{"features_ratios.tsv"}, false, true},
-	{"features_asymmetry", "Features", "Asymmetry", "Hemispheric asymmetry indices", []string{"features_asymmetry.tsv"}, false, true},
-	{"features_bursts", "Features", "Bursts", "Oscillatory burst dynamics", []string{"features_bursts.tsv"}, false, true},
-	{"features_erp", "Features", "ERP", "ERP visualizations from epochs", []string{"epochs/*.fif"}, true, true},
+	{"features_power", "features", "Power", "Band power summaries and topomaps", []string{"features_power.tsv"}, false, true, false},
+	{"features_connectivity", "features", "Connectivity", "Connectivity heatmaps and networks", []string{"features_connectivity.parquet"}, true, true, false},
+	{"features_aperiodic", "features", "Aperiodic", "1/f spectral slope diagnostics", []string{"features_aperiodic.tsv"}, false, true, false},
+	{"features_itpc", "features", "ITPC", "Inter-trial phase coherence plots", []string{"features_itpc.tsv", "stats/itpc_data.npz"}, false, true, false},
+	{"features_pac", "features", "PAC", "Phase-amplitude coupling plots", []string{"features_pac*.tsv"}, false, true, false},
+	{"features_erds", "features", "ERDS", "Event-related desync/sync plots", []string{"features_erds.tsv"}, false, true, false},
+	{"features_complexity", "features", "Complexity", "Complexity distributions and condition comparisons", []string{"features_complexity.tsv"}, false, true, false},
+	{"features_quality", "features", "Quality", "Feature quality diagnostics and outlier views", []string{"features_quality.tsv"}, false, true, false},
+	{"features_spectral", "features", "Spectral", "Spectral peak and edge features", []string{"features_spectral.tsv"}, false, true, false},
+	{"features_ratios", "features", "Ratios", "Band power ratios", []string{"features_ratios.tsv"}, false, true, false},
+	{"features_asymmetry", "features", "Asymmetry", "Hemispheric asymmetry indices", []string{"features_asymmetry.tsv"}, false, true, false},
+	{"features_bursts", "features", "Bursts", "Oscillatory burst dynamics", []string{"features_bursts.tsv"}, false, true, false},
+	{"features_erp", "features", "ERP", "ERP visualizations from epochs", []string{"epochs/*.fif"}, true, false, false},
 	// Behavior
-	{"behavior_psychometrics", "Behavior", "Psychometrics", "Rating distributions and psychometrics", []string{"events.tsv", "features_power.tsv"}, false, true},
-	{"behavior_power_scatter", "Behavior", "Power ROI Scatter", "Power vs behavior scatter plots", []string{"features_power.tsv", "stats/corr_stats_power_*"}, false, true},
-	{"behavior_complexity_scatter", "Behavior", "Complexity Scatter", "Complexity vs behavior scatter plots", []string{"features_complexity.tsv"}, false, true},
-	{"behavior_aperiodic_scatter", "Behavior", "Aperiodic Scatter", "Aperiodic vs behavior scatter plots", []string{"features_aperiodic.tsv"}, false, true},
-	{"behavior_connectivity_scatter", "Behavior", "Connectivity Scatter", "Connectivity vs behavior scatter plots", []string{"features_connectivity.parquet"}, false, true},
-	{"behavior_itpc_scatter", "Behavior", "ITPC Scatter", "ITPC vs behavior scatter plots", []string{"features_itpc.tsv"}, false, true},
-	{"behavior_temporal_topomaps", "Behavior", "Temporal Topomaps", "Temporal correlation topomaps", []string{"stats/temporal_*"}, false, true},
-	{"behavior_pain_clusters", "Behavior", "Pain Clusters", "Cluster-based temporal contrasts", []string{"stats/cluster_*"}, false, true},
-	{"behavior_dose_response", "Behavior", "Dose-Response", "Induced dose-response curves", []string{"stats/correlations.tsv", "events.tsv"}, false, true},
-	{"behavior_mediation", "Behavior", "Mediation", "Mediation path diagrams", []string{"stats/mediation.tsv"}, false, true},
-	{"behavior_top_predictors", "Behavior", "Top Predictors", "Summary of top behavioral predictors", []string{"stats/correlations.tsv"}, false, true},
+	{"behavior_psychometrics", "behavior", "Psychometrics", "Rating distributions and psychometrics", []string{"events.tsv"}, false, false, false},
+	{"behavior_power_scatter", "behavior", "Power ROI Scatter", "Power vs behavior scatter plots", []string{"features_power.tsv", "epochs/*.fif"}, true, true, false},
+	{"behavior_complexity_scatter", "behavior", "Complexity Scatter", "Complexity vs behavior scatter plots", []string{"features_complexity.tsv", "epochs/*.fif"}, true, true, false},
+	{"behavior_aperiodic_scatter", "behavior", "Aperiodic Scatter", "Aperiodic vs behavior scatter plots", []string{"features_aperiodic.tsv", "epochs/*.fif"}, true, true, false},
+	{"behavior_connectivity_scatter", "behavior", "Connectivity Scatter", "Connectivity vs behavior scatter plots", []string{"features_connectivity.parquet", "epochs/*.fif"}, true, true, false},
+	{"behavior_itpc_scatter", "behavior", "ITPC Scatter", "ITPC vs behavior scatter plots", []string{"features_itpc.tsv", "epochs/*.fif"}, true, true, false},
+	{"behavior_temporal_topomaps", "behavior", "Temporal Topomaps", "Temporal correlation topomaps", []string{"stats/temporal_correlations_by_pain*.npz"}, false, false, true},
+	{"behavior_pain_clusters", "behavior", "Pain Clusters", "Cluster-based temporal contrasts", []string{"stats/pain_nonpain_time_clusters_*.tsv"}, false, false, true},
+	{"behavior_dose_response", "behavior", "Dose Response", "Dose-response curves and contrasts", []string{"features_power.tsv", "epochs/*.fif"}, true, true, false},
+	{"behavior_mediation", "behavior", "Mediation", "Mediation path diagrams", []string{"stats/mediation.tsv"}, false, false, true},
+	{"behavior_top_predictors", "behavior", "Top Predictors", "Top predictors summary", []string{"stats/correlations*.tsv", "stats/corr_stats_all_features_vs_rating*.tsv"}, false, false, true},
 	// TFR
-	{"tfr_scalpmean", "TFR", "Scalp-Mean", "Scalp-mean TFR plots", []string{"epochs/*.fif"}, true, false},
-	{"tfr_scalpmean_contrast", "TFR", "Scalp-Mean Contrast", "Pain vs non-pain contrasts", []string{"epochs/*.fif", "events.tsv"}, true, false},
-	{"tfr_channels", "TFR", "Channels", "Channel-level TFR plots", []string{"epochs/*.fif"}, true, false},
-	{"tfr_channels_contrast", "TFR", "Channels Contrast", "Channel-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false},
-	{"tfr_rois", "TFR", "ROIs", "ROI-level TFR plots", []string{"epochs/*.fif"}, true, false},
-	{"tfr_rois_contrast", "TFR", "ROI Contrast", "ROI-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false},
-	{"tfr_topomaps", "TFR", "Topomaps", "Time-frequency topomaps", []string{"epochs/*.fif", "events.tsv"}, true, false},
-	{"tfr_band_evolution", "TFR", "Band Evolution", "Band evolution over time", []string{"epochs/*.fif"}, true, false},
+	{"tfr_scalpmean", "tfr", "Scalp-Mean", "Scalp-mean TFR plots", []string{"epochs/*.fif"}, true, false, false},
+	{"tfr_scalpmean_contrast", "tfr", "Scalp-Mean Contrast", "Pain vs non-pain contrasts", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{"tfr_channels", "tfr", "Channels", "Channel-level TFR plots", []string{"epochs/*.fif"}, true, false, false},
+	{"tfr_channels_contrast", "tfr", "Channels Contrast", "Channel-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{"tfr_rois", "tfr", "ROIs", "ROI-level TFR plots", []string{"epochs/*.fif"}, true, false, false},
+	{"tfr_rois_contrast", "tfr", "ROI Contrast", "ROI-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{"tfr_topomaps", "tfr", "Topomaps", "Time-frequency topomaps", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{"tfr_band_evolution", "tfr", "Band Evolution", "Band evolution over time", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
 	// ERP
-	{"erp_butterfly", "ERP", "Butterfly", "Butterfly ERP plots (all channels)", []string{"epochs/*.fif"}, true, false},
-	{"erp_roi", "ERP", "ROI Waveforms", "ROI-based ERP waveforms", []string{"epochs/*.fif"}, true, false},
-	{"erp_contrast", "ERP", "Contrast", "ERP condition contrasts (Pain vs No-Pain)", []string{"epochs/*.fif", "events.tsv"}, true, false},
-	{"erp_topomaps", "ERP", "Topomaps", "ERP spatial distributions", []string{"epochs/*.fif"}, true, false},
+	{"erp_butterfly", "erp", "Butterfly", "Butterfly ERP plots (all channels)", []string{"epochs/*.fif"}, true, false, false},
+	{"erp_roi", "erp", "ROI Waveforms", "ROI-based ERP waveforms", []string{"epochs/*.fif"}, true, false, false},
+	{"erp_contrast", "erp", "Contrast", "ERP condition contrasts (Pain vs No-Pain)", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{"erp_topomaps", "erp", "Topomaps", "ERP spatial distributions", []string{"epochs/*.fif"}, true, false, false},
 	// Decoding
-	{"decoding_regression_plots", "Decoding", "Regression Plots", "LOSO regression diagnostics", []string{"decoding/regression/loso_predictions.tsv"}, false, true},
-	{"decoding_timegen_plots", "Decoding", "Time-Generalization", "Time-generalization matrices", []string{"decoding/time_generalization/time_generalization_regression.npz"}, false, true},
+	{"decoding_regression_plots", "decoding", "Regression Plots", "LOSO regression diagnostics", []string{"decoding/regression/loso_predictions.tsv"}, false, false, false},
+	{"decoding_timegen_plots", "decoding", "Time-Generalization", "Time-generalization matrices", []string{"decoding/time_generalization/time_generalization_regression.npz"}, false, false, false},
 }
 
-var plotCategories = []FeatureCategory{
-	{"ERP", "Event-Related Potentials", "Waveforms, butterfly plots, and topo contrasts"},
-	{"TFR", "Time-Frequency", "Time-frequency representations and topomaps"},
-	{"Behavior", "EEG-Behavior", "Correlation scatter plots and psychometrics"},
-	{"Decoding", "Decoding", "Regression diagnostics and time-generalization"},
-	{"Features", "Feature Visualizations", "General feature distribution and QC plots"},
+var defaultPlotCategories = []FeatureCategory{
+	{"features", "Features", "Feature distribution, QC, and descriptive summaries"},
+	{"behavior", "Behavior", "EEG-behavior correlations, temporal stats, and summaries"},
+	{"tfr", "Time-Frequency", "Time-frequency representations, contrasts, and topomaps"},
+	{"erp", "ERP", "Event-related potential waveforms and topographies"},
+	{"decoding", "Decoding", "Decoding regression diagnostics and time-generalization"},
+}
+
+type plotCatalogPayload struct {
+	Groups []plotGroupPayload `json:"groups"`
+	Plots  []plotItemPayload  `json:"plots"`
+}
+
+type plotGroupPayload struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+type plotItemPayload struct {
+	ID               string   `json:"id"`
+	Group            string   `json:"group"`
+	Label            string   `json:"label"`
+	Description      string   `json:"description"`
+	RequiredFiles    []string `json:"required_files"`
+	RequiresEpochs   bool     `json:"requires_epochs"`
+	RequiresFeatures bool     `json:"requires_features"`
+	RequiresStats    bool     `json:"requires_stats"`
+}
+
+func loadPlotCatalog(repoRoot string) ([]PlotItem, []FeatureCategory, error) {
+	catalogPath := filepath.Join(repoRoot, "eeg_pipeline", "plotting", "plot_catalog.json")
+	data, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var payload plotCatalogPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, nil, err
+	}
+
+	items := make([]PlotItem, 0, len(payload.Plots))
+	for _, plot := range payload.Plots {
+		items = append(items, PlotItem{
+			ID:               plot.ID,
+			Group:            plot.Group,
+			Name:             plot.Label,
+			Description:      plot.Description,
+			RequiredFiles:    plot.RequiredFiles,
+			RequiresEpochs:   plot.RequiresEpochs,
+			RequiresFeatures: plot.RequiresFeatures,
+			RequiresStats:    plot.RequiresStats,
+		})
+	}
+
+	categories := make([]FeatureCategory, 0, len(payload.Groups))
+	for _, group := range payload.Groups {
+		categories = append(categories, FeatureCategory{
+			Key:         group.Key,
+			Name:        group.Label,
+			Description: group.Description,
+		})
+	}
+
+	return items, categories, nil
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -237,10 +301,11 @@ type Model struct {
 	featureFileCursor   int
 
 	// Plotting pipeline selection
-	plotItems    []PlotItem
-	plotSelected map[int]bool
-	plotCursor   int
-	plotOffset   int // Scroll offset for plots
+	plotCategories []FeatureCategory
+	plotItems      []PlotItem
+	plotSelected   map[int]bool
+	plotCursor     int
+	plotOffset     int // Scroll offset for plots
 
 	// Plotting output configuration
 	plotFormats         []string
@@ -397,7 +462,7 @@ type Model struct {
 // Constructor
 ///////////////////////////////////////////////////////////////////
 
-func New(pipeline types.Pipeline) Model {
+func New(pipeline types.Pipeline, repoRoot string) Model {
 	help := components.NewHelpOverlay("Wizard Shortcuts", 50)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
@@ -673,19 +738,25 @@ func New(pipeline types.Pipeline) Model {
 	case types.PipelinePlotting:
 		m.modeOptions = []string{styles.ModeVisualize}
 		m.modeDescriptions = []string{"Generate selected visualization suites"}
+		plotItems, plotCategories, err := loadPlotCatalog(repoRoot)
+		if err != nil || len(plotItems) == 0 || len(plotCategories) == 0 {
+			plotItems = defaultPlotItems
+			plotCategories = defaultPlotCategories
+		}
 		m.plotItems = plotItems
+		m.plotCategories = plotCategories
 		for i := range m.plotItems {
-			m.plotSelected[i] = false
+			m.plotSelected[i] = true
 		}
 		m.plotSharedColorbar = true
 
 		// Initialize categories for plotting
-		m.categories = make([]string, len(plotCategories))
-		m.categoryDescs = make([]string, len(plotCategories))
-		for i, cat := range plotCategories {
+		m.categories = make([]string, len(m.plotCategories))
+		m.categoryDescs = make([]string, len(m.plotCategories))
+		for i, cat := range m.plotCategories {
 			m.categories[i] = cat.Name
 			m.categoryDescs[i] = cat.Description
-			m.selected[i] = false // Start unselected
+			m.selected[i] = true // Default to all categories
 		}
 
 		m.steps = []types.WizardStep{
@@ -1004,6 +1075,49 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (m Model) plotCountsForGroup(group string) (total int, selected int) {
+	for i, plot := range m.plotItems {
+		if strings.EqualFold(plot.Group, group) {
+			total++
+			if m.plotSelected[i] {
+				selected++
+			}
+		}
+	}
+	return total, selected
+}
+
+func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int) {
+	missing := make(map[string]int)
+	total := 0
+	available := 0
+
+	for _, s := range m.subjects {
+		if !m.subjectSelected[s.ID] {
+			continue
+		}
+		total++
+		ok := true
+		if plot.RequiresEpochs && !s.HasEpochs {
+			missing["epochs"]++
+			ok = false
+		}
+		if plot.RequiresFeatures && !s.HasFeatures {
+			missing["features"]++
+			ok = false
+		}
+		if plot.RequiresStats && !s.HasStats {
+			missing["stats"]++
+			ok = false
+		}
+		if ok {
+			available++
+		}
+	}
+
+	return available, total, missing
 }
 
 ///////////////////////////////////////////////////////////////////

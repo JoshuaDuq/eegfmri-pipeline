@@ -77,7 +77,6 @@ from eeg_pipeline.plotting.features.power import (
     plot_cross_frequency_power_correlation,
     plot_band_power_topomaps,
     plot_spectral_slope_topomap,
-    plot_power_trial_variability,
     plot_power_topomaps_from_df,
 )
 from eeg_pipeline.plotting.features.roi import (
@@ -1167,25 +1166,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
             ctx.config,
         )
 
-    if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "power_temporal_evolution",
-            "power",
-            None,
-            plot_temporal_evolution,
-            ctx.all_features,
-            ctx.aligned_events,
-            ctx.subject,
-            ctx.subdir("power"),
-            ctx.logger,
-            ctx.config,
-            "power",
-            "Band Power",
-        )
-
-
 @VisualizationRegistry.register("power")
 def plot_power_variability(ctx: FeaturePlotContext, saved_files):
     if ctx.power_df is None:
@@ -1222,22 +1202,6 @@ def plot_power_variability(ctx: FeaturePlotContext, saved_files):
         logger=ctx.logger,
         config=ctx.config,
     )
-
-    safe_plot(
-        ctx,
-        saved_files,
-        "power_trial_variability",
-        "power",
-        None,
-        plot_power_trial_variability,
-        pow_df=ctx.power_df,
-        bands=power_bands,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("power"),
-        logger=ctx.logger,
-        config=ctx.config,
-    )
-
 
 @VisualizationRegistry.register("power")
 def plot_power_summary(ctx: FeaturePlotContext, saved_files):

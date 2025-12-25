@@ -237,6 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ID:                  s.ID,
 				HasEpochs:           s.HasEpochs,
 				HasFeatures:         s.HasFeatures,
+				HasStats:            s.HasStats,
 				AvailableBands:      s.AvailableBands,
 				FeatureAvailability: featAvail,
 				EpochMetadata:       s.EpochMetadata,
@@ -363,7 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.persistentState.LastPipeline = m.mainMenu.SelectedPipeline
 			m.saveState()
 
-			m.wizard = wizard.New(m.selectedPipeline)
+			m.wizard = wizard.New(m.selectedPipeline, m.repoRoot)
 			// Load persistent time ranges
 			m.wizard.SetTimeRanges(m.persistentState.TimeRanges)
 			m.wizard.SetSubjectsLoading()

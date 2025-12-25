@@ -9,7 +9,6 @@ import mne
 import pandas as pd
 
 
-@functools.lru_cache(maxsize=None)
 def _get_io_constants(config: Any) -> Dict[str, Any]:
     if config is None:
         raise ValueError("config is required")

@@ -15,6 +15,9 @@ eeg-pipeline = "eeg_pipeline.cli.main:main"
 [tool.setuptools]
 packages = ["eeg_pipeline"]
 
+[tool.setuptools.package-data]
+eeg_pipeline = ["plotting/plot_catalog.json"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

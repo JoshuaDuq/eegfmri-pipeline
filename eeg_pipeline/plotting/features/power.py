@@ -159,7 +159,8 @@ def plot_power_by_condition(
     fig, axes = plt.subplots(
         len(segments), len(bands), 
         figsize=(width_per_col * len(bands), height_per_row * len(segments)), 
-        sharey="row"
+        sharey="row",
+        squeeze=False,
     )
     
     for row_idx, segment in enumerate(segments):
@@ -244,16 +245,18 @@ def plot_power_by_condition(
 
 
 
-def _setup_subplot_grid(n_items: int, n_cols: int = 2) -> Tuple[plt.Figure, List[plt.Axes]]:
+def _setup_subplot_grid(n_items: int, n_cols: int = 2, config: Any = None) -> Tuple[plt.Figure, List[plt.Axes]]:
     """Create a subplot grid for multiple plots.
     
     Args:
         n_items: Number of subplots needed
         n_cols: Number of columns (default: 2)
+        config: Configuration object
     
     Returns:
         Tuple of (figure, list of axes)
     """
+    plot_cfg = get_plot_config(config)
     n_rows = (n_items + n_cols - 1) // n_cols
     width_per_col = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_col", 6.0))
     height_per_row = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_row", 4.0))
@@ -1015,74 +1018,6 @@ def plot_power_time_course_by_temperature(
     logger.info("Saved band time course by temperature (Induced)")
 
 
-def plot_trial_power_variability(pow_df, bands, subject, save_dir, logger, config):
-    plot_cfg = get_plot_config(config)
-    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
-    n_bands = len(bands)
-    n_trials = len(pow_df)
-    width_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("width_standard", 12.0))
-    height_per_band = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_band", 3.0))
-    fig, axes = plt.subplots(n_bands, 1, figsize=(width_per_band, height_per_band * n_bands))
-    if n_bands == 1:
-        axes = [axes]
-    
-    for i, band in enumerate(bands):
-        band_str = str(band)
-        band_cols = power_cols_by_band.get(band_str, [])
-        if not band_cols:
-            continue
-        
-        n_channels = len(band_cols)
-        band_power_trials = pow_df[band_cols].mean(axis=1)
-        trial_numbers = range(1, len(band_power_trials) + 1)
-        band_color = get_band_color(band_str, config)
-        axes[i].plot(
-            trial_numbers, band_power_trials, 'o-',
-            alpha=0.7, linewidth=1, color=band_color
-        )
-        
-        mean_power = band_power_trials.mean()
-        std_power = band_power_trials.std()
-        coefficient_of_variation = (
-            std_power / abs(mean_power) if abs(mean_power) > 1e-10 else np.nan
-        )
-        
-        axes[i].axhline(
-            mean_power, color='red', linestyle='--', alpha=0.8,
-            label=f'Mean = {mean_power:.3f}'
-        )
-        axes[i].fill_between(
-            trial_numbers, mean_power - std_power, mean_power + std_power,
-            alpha=0.2, color='red', label=f'±1 SD = ±{std_power:.3f}'
-        )
-        axes[i].set_ylabel(f'{band_str.capitalize()}\nlog10(power/baseline)')
-        axes[i].set_title(
-            f'{band_str.capitalize()} Band Power Variability (n={n_trials} trials, {n_channels} channels, CV={coefficient_of_variation:.3f})'
-        )
-        axes[i].grid(True, alpha=0.3)
-        axes[i].legend()
-    
-    plot_cfg = get_plot_config(config)
-    axes[-1].set_xlabel('Trial Number', fontsize=plot_cfg.font.label)
-    
-    footer_text = f"n={n_trials} trials | Units: log10(power/baseline)"
-    fig.text(
-        0.99, 0.01, footer_text,
-        ha='right', va='bottom',
-        fontsize=plot_cfg.font.small,
-        color='gray', alpha=0.8
-    )
-    
-    plt.tight_layout(rect=[0, 0.02, 1, 1])
-    save_fig(
-        fig, save_dir / f'sub-{subject}_trial_power_variability',
-        formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches
-    )
-    plt.close(fig)
-    logger.info("Saved trial power variability")
-
-
 def plot_inter_band_spatial_power_correlation(tfr, subject, save_dir, logger, config):
     features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
     band_names = list(features_freq_bands.keys())
@@ -1141,52 +1076,6 @@ def plot_inter_band_spatial_power_correlation(tfr, subject, save_dir, logger, co
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
     logger.info("Saved inter-band spatial power correlation")
-
-
-def plot_power_trial_variability(
-    pow_df: pd.DataFrame,
-    bands: List[str],
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any
-) -> None:
-    """How variable is power across trials? Plots Coefficient of Variation."""
-    if pow_df is None or pow_df.empty:
-        return
-    
-    plot_cfg = get_plot_config(config)
-    power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
-    
-    fig, ax = plt.subplots(figsize=(8, 5))
-    cv_data = []
-    for band in bands:
-        cols = power_cols_by_band.get(str(band), [])
-        if not cols: continue
-        power = pow_df[cols].mean(axis=1).values
-        power = power[~np.isnan(power)]
-        if len(power) > 0 and abs(np.mean(power)) > 1e-10:
-            cv = np.std(power) / np.abs(np.mean(power))
-            cv_data.append({'band': band, 'cv': cv})
-    
-    if not cv_data:
-        plt.close(fig); return
-    
-    df = pd.DataFrame(cv_data)
-    values = df['cv'].values
-    labels = [b.upper() for b in df['band']]
-    colors = [get_band_color(b, config) for b in df['band']]
-    plot_utils.create_horizontal_bar_plot(
-        ax, values, labels, colors=colors, config=config, add_zero_line=True
-    )
-    ax.set_xlabel('Coefficient of Variation (|std/mean|)')
-    ax.set_title(f"Power Variability across Trials (sub-{subject})", fontweight='bold')
-    
-    save_fig(fig, save_dir / f"sub-{subject}_power_variability", 
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi)
-    plt.close(fig)
-    if logger:
-        logger.info("Saved power variability plot")
 
 
 def plot_power_variability_comprehensive(
@@ -1558,7 +1447,7 @@ def plot_power_topomaps_from_df(
     bands_to_plot = [b for b in bands if power_cols_by_band.get(str(b))]
     if not bands_to_plot: return
     
-    fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=max(1, min(3, len(bands_to_plot))))
+    fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=max(1, min(3, len(bands_to_plot))), config=config)
     # Ensure iterable list for downstream indexing
     if not isinstance(axes, list):
         axes = list(np.ravel(axes))

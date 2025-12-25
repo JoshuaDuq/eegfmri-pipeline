@@ -714,7 +714,13 @@ def plot_connectivity_by_condition(
     
     width_per_col = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("width_per_band", 3.5))
     height_per_row = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("height_per_measure", 4.0))
-    fig, axes = plt.subplots(len(measures), len(bands), figsize=(width_per_col * len(bands), height_per_row * len(measures)), sharey="row")
+    fig, axes = plt.subplots(
+        len(measures),
+        len(bands),
+        figsize=(width_per_col * len(bands), height_per_row * len(measures)),
+        sharey="row",
+        squeeze=False,
+    )
     
     for m_idx, measure in enumerate(measures):
         for b_idx, band in enumerate(bands):

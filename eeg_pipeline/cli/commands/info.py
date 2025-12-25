@@ -66,7 +66,7 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
         get_epoch_metadata,
     )
     from eeg_pipeline.utils.data.feature_io import load_feature_bundle
-    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path
+    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path, deriv_stats_path
     from eeg_pipeline.infra.logging import get_logger
     
     # Suppress logging when JSON output requested to keep output clean for parsing
@@ -136,6 +136,7 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                 for r in results:
                     subj_id = r["subject"].replace("sub-", "")
                     available_bands = []
+                    has_stats = False
                     
                     if r["features"]:
                         features_dir = deriv_features_path(deriv_root, subj_id)
@@ -148,6 +149,13 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                     else:
                         # No features - return explicit unavailable status for all
                         feature_availability = _empty_feature_availability()
+
+                    stats_dir = deriv_stats_path(deriv_root, subj_id)
+                    if stats_dir.exists():
+                        for pattern in ("*.tsv", "*.npz", "*.csv", "*.json"):
+                            if any(stats_dir.glob(pattern)):
+                                has_stats = True
+                                break
                     
                     # Get metadata for this subject if available
                     metadata = {}
@@ -161,6 +169,7 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                         "id": subj_id,
                         "has_epochs": r["epochs"],
                         "has_features": r["features"],
+                        "has_stats": has_stats,
                         "epoch_metadata": metadata,
                         "available_bands": available_bands,
                         "feature_availability": feature_availability,

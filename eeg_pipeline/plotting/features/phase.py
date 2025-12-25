@@ -20,6 +20,7 @@ from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
+from eeg_pipeline.utils.formatting import sanitize_label
 
 
 def plot_itpc_heatmap(
@@ -735,7 +736,16 @@ def plot_pac_time_ribbons(
     cmap = pac_plot_cfg.get("cmap", "magma")
     ensure_dir(save_dir)
 
-    for (roi, phase_f), df_sub in pac_time_df.groupby(["roi", "phase_freq"]):
+    group_cols = ["roi", "phase_freq"]
+    has_segment = "segment" in pac_time_df.columns
+    if has_segment:
+        group_cols = ["segment"] + group_cols
+
+    for key, df_sub in pac_time_df.groupby(group_cols):
+        if has_segment:
+            segment, roi, phase_f = key
+        else:
+            segment, roi, phase_f = None, key[0], key[1]
         times = np.sort(df_sub["time"].unique())
         amp_freqs = np.sort(df_sub["amp_freq"].unique())
         grid = df_sub.pivot(index="amp_freq", columns="time", values="pac").reindex(index=amp_freqs, columns=times)
@@ -748,10 +758,16 @@ def plot_pac_time_ribbons(
         c = ax.pcolormesh(times, amp_freqs, grid.to_numpy(), cmap=cmap, shading="auto", vmin=vmin, vmax=vmax)
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Amplitude frequency (Hz)")
-        ax.set_title(f"PAC over time (ROI: {roi}, phase {phase_f:.1f} Hz)")
+        title = f"PAC over time (ROI: {roi}, phase {phase_f:.1f} Hz)"
+        if segment is not None:
+            title = f"{title} | Segment: {segment}"
+        ax.set_title(title)
         plt.colorbar(c, ax=ax, label="PAC")
 
-        out = save_dir / f"sub-{subject}_pac_time_roi-{roi}_phase-{phase_f:.1f}"
+        out_name = f"sub-{subject}_pac_time_roi-{roi}_phase-{phase_f:.1f}"
+        if segment is not None:
+            out_name = f"{out_name}_segment-{sanitize_label(segment)}"
+        out = save_dir / out_name
         save_fig(
             fig,
             out,
