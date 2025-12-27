@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import mne
 
 from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.plotting.io.figures import save_fig
 from ...utils.analysis.tfr import get_bands_for_tfr
 from ..config import get_plot_config
 
@@ -221,6 +222,7 @@ def plot_band_power_evolution_all_conditions(
         return saved
     
     plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     # Create figure
     n_bands = len(BANDS)
@@ -282,12 +284,18 @@ def plot_band_power_evolution_all_conditions(
     
     plt.tight_layout()
     
-    path = save_dir / "evolution" / "band_power_evolution_all_conditions.png"
-    fig.savefig(path, dpi=plot_cfg.dpi, bbox_inches='tight')
-    plt.close(fig)
+    path = save_dir / "evolution" / f"band_power_evolution_all_conditions.{primary_ext}"
+    save_fig(
+        fig,
+        path,
+        logger=logger,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.savefig_dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
     
     saved["band_power_evolution"] = path
-    logger.info(f"Saved: {path.name}")
     
     return saved
 
@@ -324,6 +332,7 @@ def plot_band_power_by_roi(
     
     masks = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     # Get available ROIs
     available_rois = []
@@ -395,12 +404,18 @@ def plot_band_power_by_roi(
         
         plt.tight_layout()
         
-        path = save_dir / "evolution" / f"band_power_by_roi_{cond}.png"
-        fig.savefig(path, dpi=plot_cfg.dpi, bbox_inches='tight')
-        plt.close(fig)
+        path = save_dir / "evolution" / f"band_power_by_roi_{cond}.{primary_ext}"
+        save_fig(
+            fig,
+            path,
+            logger=logger,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.savefig_dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+        )
         
         saved[f"band_power_roi_{cond}"] = path
-        logger.info(f"Saved: {path.name}")
     
     return saved
 
@@ -437,6 +452,7 @@ def plot_condition_comparison_per_band(
     
     masks = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     # Create figure with 2 rows: pain comparison, temperature comparison
     fig, axes = plt.subplots(2, len(BANDS), figsize=(3*len(BANDS), 6), squeeze=False)
@@ -502,12 +518,18 @@ def plot_condition_comparison_per_band(
     
     plt.tight_layout()
     
-    path = save_dir / "evolution" / "condition_comparison_per_band.png"
-    fig.savefig(path, dpi=plot_cfg.dpi, bbox_inches='tight')
-    plt.close(fig)
+    path = save_dir / "evolution" / f"condition_comparison_per_band.{primary_ext}"
+    save_fig(
+        fig,
+        path,
+        logger=logger,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.savefig_dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
     
     saved["condition_comparison"] = path
-    logger.info(f"Saved: {path.name}")
     
     return saved
 
@@ -543,6 +565,7 @@ def plot_roi_condition_comparison(
     
     masks = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     # Focus on alpha and beta (most relevant for pain)
     focus_bands = ["alpha", "beta"]
@@ -639,12 +662,18 @@ def plot_roi_condition_comparison(
     
     plt.tight_layout()
     
-    path = save_dir / "evolution" / "roi_condition_comparison.png"
-    fig.savefig(path, dpi=plot_cfg.dpi, bbox_inches='tight')
-    plt.close(fig)
+    path = save_dir / "evolution" / f"roi_condition_comparison.{primary_ext}"
+    save_fig(
+        fig,
+        path,
+        logger=logger,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.savefig_dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
     
     saved["roi_condition_comparison"] = path
-    logger.info(f"Saved: {path.name}")
     
     return saved
 
@@ -682,6 +711,7 @@ def plot_band_power_summary(
     
     masks = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     # Compute mean active power for each band and condition
     summary_data = []
@@ -783,12 +813,18 @@ def plot_band_power_summary(
     
     plt.tight_layout()
     
-    path = save_dir / "evolution" / "band_power_summary.png"
-    fig.savefig(path, dpi=plot_cfg.dpi, bbox_inches='tight')
-    plt.close(fig)
+    path = save_dir / "evolution" / f"band_power_summary.{primary_ext}"
+    save_fig(
+        fig,
+        path,
+        logger=logger,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.savefig_dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches,
+    )
     
     saved["band_power_summary"] = path
-    logger.info(f"Saved: {path.name}")
     
     return saved
 

@@ -167,7 +167,9 @@ func (p Pipeline) GetDataSource() string {
 		return "source_data" // Raw source data
 	case PipelineFeatures:
 		return "epochs" // Epoched data
-	case PipelineBehavior, PipelineDecoding, PipelineCombineFeatures:
+	case PipelineBehavior:
+		return "epochs" // Epoched data - subjects discoverable even without features
+	case PipelineDecoding, PipelineCombineFeatures:
 		return "features" // Extracted features
 	case PipelinePlotting:
 		return "all" // Mixed plot types across derivatives

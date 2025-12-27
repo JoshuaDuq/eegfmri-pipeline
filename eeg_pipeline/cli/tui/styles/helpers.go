@@ -3,6 +3,38 @@ package styles
 import "github.com/charmbracelet/lipgloss"
 
 ///////////////////////////////////////////////////////////////////
+// Section Header Helpers
+///////////////////////////////////////////////////////////////////
+
+// RenderSectionHeader creates a professional animated section title with accent indicator.
+// The ticker parameter controls the animation frame (pass model.ticker/3 for standard speed).
+func RenderSectionHeader(title string, ticker int) string {
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(Accent).
+		Bold(true).
+		Render(accentFrames[ticker%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(Primary).
+		MarginLeft(1)
+	return accent + titleStyle.Render(" "+title)
+}
+
+// RenderSectionHeaderWithSubtitle creates a section header with an optional subtitle.
+func RenderSectionHeaderWithSubtitle(title, subtitle string, ticker int) string {
+	header := RenderSectionHeader(title, ticker)
+	if subtitle == "" {
+		return header
+	}
+	subtitleStyle := lipgloss.NewStyle().
+		Foreground(TextDim).
+		Italic(true).
+		PaddingLeft(4)
+	return header + "\n" + subtitleStyle.Render(subtitle)
+}
+
+///////////////////////////////////////////////////////////////////
 // Helper Functions
 ///////////////////////////////////////////////////////////////////
 

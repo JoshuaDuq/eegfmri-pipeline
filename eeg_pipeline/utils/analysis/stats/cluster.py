@@ -42,37 +42,79 @@ from eeg_pipeline.utils.analysis.tfr import (
 
 def get_cluster_test_config(config: Any) -> Dict[str, Any]:
     """Extract and validate cluster test configuration parameters."""
+    def _get_int(*paths: str, default: int) -> int:
+        for path in paths:
+            val = get_config_value(config, path, None)
+            if val is None:
+                continue
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                continue
+        return int(default)
+
+    def _get_float(*paths: str, default: float) -> float:
+        for path in paths:
+            val = get_config_value(config, path, None)
+            if val is None:
+                continue
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+        return float(default)
+
     return {
-        "n_permutations": int(get_config_value(
-            config, "behavior_analysis.statistics.default_n_permutations",
-            get_config_value(config, "behavior_analysis.cluster_correction.default_n_permutations", 1000)
-        )),
-        "alpha": float(get_config_value(
-            config, "statistics.sig_alpha",
-            get_config_value(config, "behavior_analysis.statistics.default_alpha", 0.05)
-        )),
-        "fdr_alpha": float(get_config_value(
-            config, "behavior_analysis.statistics.fdr_alpha",
-            get_config_value(config, "statistics.fdr_alpha", 0.05)
-        )),
-        "cluster_forming_threshold": float(get_config_value(
-            config, "behavior_analysis.cluster_correction.cluster_forming_threshold", 0.05
-        )),
-        "min_timepoints": int(get_config_value(
-            config, "behavior_analysis.cluster_correction.min_timepoints", 2
-        )),
-        "min_channels": int(get_config_value(
-            config, "behavior_analysis.cluster_correction.min_channels", 1
-        )),
-        "min_cluster_size": int(get_config_value(
-            config, "behavior_analysis.cluster_correction.min_cluster_size", 5
-        )),
-        "tail": int(get_config_value(
-            config, "behavior_analysis.cluster_correction.tail", 0
-        )),
-        "random_seed": int(get_config_value(config, "project.random_state", 42)),
+        # Support both legacy `behavior_analysis.cluster_correction.*` and current
+        # `behavior_analysis.cluster.*` config keys (see utils/config/eeg_config.yaml).
+        "n_permutations": _get_int(
+            "behavior_analysis.cluster.n_permutations",
+            "behavior_analysis.cluster_correction.n_permutations",
+            "behavior_analysis.statistics.n_permutations",
+            "statistics.n_permutations",
+            default=1000,
+        ),
+        "alpha": _get_float(
+            "statistics.alpha",
+            "statistics.sig_alpha",
+            "behavior_analysis.statistics.alpha",
+            default=0.05,
+        ),
+        "fdr_alpha": _get_float(
+            "behavior_analysis.statistics.fdr_alpha",
+            "statistics.fdr_alpha",
+            default=0.05,
+        ),
+        "cluster_forming_threshold": _get_float(
+            "behavior_analysis.cluster.forming_threshold",
+            "behavior_analysis.cluster_correction.cluster_forming_threshold",
+            default=0.05,
+        ),
+        "min_timepoints": _get_int(
+            "behavior_analysis.cluster.min_timepoints",
+            "behavior_analysis.cluster_correction.min_timepoints",
+            default=2,
+        ),
+        "min_channels": _get_int(
+            "behavior_analysis.cluster.min_channels",
+            "behavior_analysis.cluster_correction.min_channels",
+            default=1,
+        ),
+        "min_cluster_size": _get_int(
+            "behavior_analysis.cluster.min_cluster_size",
+            "behavior_analysis.cluster_correction.min_cluster_size",
+            default=5,
+        ),
+        "tail": _get_int(
+            "behavior_analysis.cluster.tail",
+            "behavior_analysis.cluster_correction.tail",
+            default=0,
+        ),
+        "random_seed": _get_int("project.random_state", default=42),
         "fwer_method": get_config_value(
-            config, "behavior_analysis.cluster_correction.fwer_method", "cluster"
+            config,
+            "behavior_analysis.cluster.fwer_method",
+            get_config_value(config, "behavior_analysis.cluster_correction.fwer_method", "cluster"),
         ),
     }
 
@@ -146,6 +188,9 @@ def build_distance_adjacency(
     return sparse.csr_matrix(adj), [ch["ch_name"] for ch in info_eeg["chs"]]
 
 
+_EEG_ADJ_CACHE: dict[tuple[str, ...], Any] = {}
+
+
 def get_eeg_adjacency(
     info: "mne.Info",
     restrict_picks: Optional[np.ndarray] = None,
@@ -171,15 +216,23 @@ def get_eeg_adjacency(
         return None, None, None
 
     info_eeg = mne.pick_info(info, sel=eeg_picks.tolist())
+    cache_key = tuple(info_eeg.get("ch_names", []))
+    if cache_key and cache_key in _EEG_ADJ_CACHE:
+        return _EEG_ADJ_CACHE[cache_key], eeg_picks, info_eeg
 
     try:
-        adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg")
+        try:
+            adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg", verbose="ERROR")
+        except TypeError:
+            adjacency, _ = mne.channels.find_ch_adjacency(info_eeg, ch_type="eeg")
     except (RuntimeError, ValueError) as e:
         logger.warning(f"Delaunay adjacency failed ({type(e).__name__}), using distance fallback")
         adjacency, _ = build_distance_adjacency(info_eeg, logger)
         if adjacency is None:
             return None, eeg_picks, info_eeg
 
+    if cache_key:
+        _EEG_ADJ_CACHE[cache_key] = adjacency
     return adjacency, eeg_picks, info_eeg
 
 
@@ -293,7 +346,7 @@ def cluster_test_two_sample(
         )
     else:
         t_stat, clusters, pvals, _ = permutation_cluster_test(
-            [a_eeg, b_eeg], n_permutations=n_permutations, adjacency=adjacency, tail=0, out_type="mask", n_jobs=n_jobs
+            [a_eeg, b_eeg], n_permutations=n_permutations, adjacency=adjacency, tail=1, out_type="mask", n_jobs=n_jobs
         )
 
     sig_eeg = cluster_mask_from_clusters(clusters, pvals, n_features=a_eeg.shape[1], alpha=alpha)
@@ -501,7 +554,7 @@ def compute_pain_nonpain_time_cluster_test(
             T_obs, clusters, cluster_p_values, H0 = permutation_cluster_test(
                 [X_pain, X_nonpain],
                 n_permutations=int(n_permutations),
-                tail=cluster_cfg["tail"],
+                tail=1,
                 n_jobs=n_jobs,
                 adjacency=adjacency,
                 out_type="mask",
@@ -653,7 +706,7 @@ def compute_pain_nonpain_time_cluster_test(
                 T_obs, clusters, cluster_p_values, _ = permutation_cluster_test(
                     [X_pain_ch, X_nonpain_ch],
                     n_permutations=int(n_permutations),
-                    tail=0,
+                    tail=1,
                     n_jobs=n_jobs,
                     adjacency=time_adjacency,
                     out_type="mask",
@@ -813,4 +866,3 @@ def _run_cluster_test_core(
         n_permutations=n_perm,
         alpha=alpha,
     )
-

@@ -88,6 +88,11 @@ CATEGORY_TO_PLOTS = {
     "itpc": ["itpc_scatter"],
     "temporal": ["temporal_topomaps", "pain_clusters"],
     "dose_response": ["dose_response"],
+    "trial_table": ["trial_table_overview"],
+    "confounds": ["confounds_audit"],
+    "regression": ["regression_summary"],
+    "temperature_models": ["temperature_models"],
+    "stability": ["stability_groupwise"],
 }
 
 
@@ -152,6 +157,11 @@ def visualize_subject_behavior(
             "pain_clusters",
             "dose_response",
             "top_predictors",
+            "trial_table_overview",
+            "confounds_audit",
+            "regression_summary",
+            "temperature_models",
+            "stability_groupwise",
         ]
         logger.info("Running behavioral plots via registry...")
         manager.run_selected(plot_names) if plots else manager.run_all()

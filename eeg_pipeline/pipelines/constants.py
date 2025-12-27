@@ -62,6 +62,13 @@ FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
 
 
 BEHAVIOR_COMPUTATIONS: List[str] = [
+    "trial_table",
+    "confounds",
+    "regression",
+    "models",
+    "stability",
+    "consistency",
+    "influence",
     "correlations",
     "pain_sensitivity",
     "condition",
@@ -72,6 +79,13 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
 ]
 
 BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
+    "trial_table": "Export canonical per-trial analysis table",
+    "confounds": "Audit QC confounds vs targets",
+    "regression": "Trialwise regression/moderation models",
+    "models": "Sensitivity model families (robust/quantile/logistic)",
+    "stability": "Run/block stability diagnostics (non-gating)",
+    "consistency": "Effect direction consistency across outcomes",
+    "influence": "Influence diagnostics (Cook's distance/leverage)",
     "correlations": "EEG-rating correlations",
     "pain_sensitivity": "Individual pain sensitivity analysis",
     "condition": "Compare conditions (e.g., ramp vs active)",
@@ -99,6 +113,11 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
 
 BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "psychometrics",
+    "trial_table",
+    "confounds",
+    "regression",
+    "temperature_models",
+    "stability",
     "power",
     "aperiodic",
     "connectivity",

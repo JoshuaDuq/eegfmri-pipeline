@@ -261,6 +261,7 @@ def run_mediation_analysis(
     mediator_cols: List[str],
     y_col: str,
     n_bootstrap: int = 1000,
+    min_effect_size: float = 0.05,
 ) -> pd.DataFrame:
     """Run mediation analysis for multiple potential mediators."""
     X = df[x_col].values
@@ -277,7 +278,7 @@ def run_mediation_analysis(
         feature_df=feature_df,
         Y=Y,
         n_boot=n_bootstrap,
-        min_effect_size=0.05,
+        min_effect_size=min_effect_size,
         x_label=x_col,
         y_label=y_col,
     )

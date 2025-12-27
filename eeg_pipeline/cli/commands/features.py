@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 from typing import Any, List
 
@@ -24,6 +25,69 @@ from eeg_pipeline.cli.commands.base import FEATURE_VISUALIZE_CATEGORIES
 FEATURE_CATEGORY_CHOICES = FEATURE_CATEGORIES + [
     category for category in FEATURE_VISUALIZE_CATEGORIES if category not in FEATURE_CATEGORIES
 ]
+
+_COMPONENT_RANGE_RE = re.compile(
+    r"^\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*-\s*([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s*$"
+)
+
+
+def _split_list_tokens(tokens: List[str]) -> List[str]:
+    parts: List[str] = []
+    for token in tokens:
+        for chunk in re.split(r"[;,]", str(token)):
+            chunk = chunk.strip()
+            if chunk:
+                parts.append(chunk)
+    return parts
+
+
+def _parse_pair_tokens(tokens: List[str], *, label: str) -> List[List[str]]:
+    pairs: List[List[str]] = []
+    for token in _split_list_tokens(tokens):
+        sep = None
+        for candidate in (":", "-", "/", "|"):
+            if candidate in token:
+                sep = candidate
+                break
+        if sep is None:
+            raise ValueError(f"Invalid {label} pair token {token!r}; expected e.g. A:B or A-B")
+        left, right = token.split(sep, 1)
+        left = left.strip()
+        right = right.strip()
+        if not left or not right:
+            raise ValueError(f"Invalid {label} pair token {token!r}; expected e.g. A:B")
+        pairs.append([left, right])
+    return pairs
+
+
+def _parse_erp_components(tokens: List[str]) -> List[dict]:
+    components: List[dict] = []
+    for token in _split_list_tokens(tokens):
+        name = ""
+        rest = ""
+        if "=" in token:
+            name, rest = token.split("=", 1)
+        elif ":" in token:
+            name, rest = token.split(":", 1)
+        else:
+            raise ValueError(
+                f"Invalid ERP component token {token!r}; expected e.g. n2=0.20-0.35"
+            )
+        name = name.strip().lower()
+        rest = rest.strip()
+        if not name:
+            raise ValueError(f"Invalid ERP component token {token!r}; missing name")
+        m = _COMPONENT_RANGE_RE.match(rest)
+        if not m:
+            raise ValueError(
+                f"Invalid ERP component range {rest!r}; expected start-end (seconds), e.g. 0.20-0.35"
+            )
+        start = float(m.group(1))
+        end = float(m.group(2))
+        if not (start < end):
+            raise ValueError(f"Invalid ERP component range {rest!r}; expected start < end")
+        components.append({"name": name, "start": start, "end": end})
+    return components
 
 
 def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -136,15 +200,47 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # ERP options
     parser.add_argument("--erp-baseline", action="store_true", default=None, help="Enable baseline correction for ERP")
     parser.add_argument("--no-erp-baseline", action="store_false", dest="erp_baseline", help="Disable baseline correction for ERP")
+    parser.add_argument("--erp-allow-no-baseline", action="store_true", default=None, help="Allow ERP extraction when baseline window is missing")
+    parser.add_argument("--no-erp-allow-no-baseline", action="store_false", dest="erp_allow_no_baseline", help="Require baseline window when ERP baseline correction is enabled")
+    parser.add_argument(
+        "--erp-components",
+        nargs="+",
+        default=None,
+        metavar="COMP",
+        help="ERP component windows, e.g. n1=0.10-0.20 n2=0.20-0.35 p2=0.35-0.50",
+    )
 
     # Burst options
     parser.add_argument("--burst-threshold", type=float, default=None, help="Z-score threshold for burst detection")
+    parser.add_argument(
+        "--burst-bands",
+        nargs="+",
+        default=None,
+        metavar="BAND",
+        help="Burst bands to compute, e.g. beta gamma",
+    )
 
     # Power options
     parser.add_argument("--power-baseline-mode", choices=["logratio", "mean", "ratio", "zscore", "zlogratio"], default=None, help="Baseline normalization mode for power")
+    parser.add_argument("--power-require-baseline", action="store_true", default=None, help="Require baseline for power normalization")
+    parser.add_argument("--no-power-require-baseline", action="store_false", dest="power_require_baseline", help="Allow raw log power without baseline")
 
     # Spectral options
     parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
+    parser.add_argument(
+        "--ratio-pairs",
+        nargs="+",
+        default=None,
+        metavar="PAIR",
+        help="Band power ratio pairs, e.g. theta:beta theta:alpha alpha:beta",
+    )
+    parser.add_argument(
+        "--asymmetry-channel-pairs",
+        nargs="+",
+        default=None,
+        metavar="PAIR",
+        help="Channel pairs for asymmetry, e.g. F3:F4 C3:C4",
+    )
 
     # Connectivity options (extend)
     parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
@@ -164,6 +260,13 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     
     parser.add_argument("--pac-method", choices=["mvl", "kl", "tort", "ozkurt"], default=None, help="PAC estimation method")
     parser.add_argument("--pac-min-epochs", type=int, default=None, help="Minimum epochs for PAC computation")
+    parser.add_argument(
+        "--pac-pairs",
+        nargs="+",
+        default=None,
+        metavar="PAIR",
+        help="PAC band pairs, e.g. theta:gamma alpha:gamma (uses time_frequency_analysis.bands)",
+    )
     
     parser.add_argument("--pe-delay", type=int, default=None, help="Permutation entropy delay")
     parser.add_argument("--burst-min-duration", type=int, default=None, help="Minimum burst duration (ms)")
@@ -171,6 +274,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
     parser.add_argument("--export-all", action="store_true", default=None, help="Export all features into a single file")
     parser.add_argument("--no-export-all", action="store_false", dest="export_all", help="Don't export all features into a single file")
+    parser.add_argument("--fail-on-missing-windows", action="store_true", default=None, help="Fail if baseline/active windows are missing")
+    parser.add_argument("--no-fail-on-missing-windows", action="store_false", dest="fail_on_missing_windows", help="Do not fail if baseline/active windows are missing")
+    parser.add_argument("--fail-on-missing-named-window", action="store_true", default=None, help="Fail if a named time window is missing")
+    parser.add_argument("--no-fail-on-missing-named-window", action="store_false", dest="fail_on_missing_named_window", help="Do not fail if a named time window is missing")
     
     add_path_args(parser)
     
@@ -211,15 +318,27 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
         if getattr(args, "erp_baseline", None) is not None:
             config["feature_engineering.erp.baseline_correction"] = args.erp_baseline
+        if getattr(args, "erp_allow_no_baseline", None) is not None:
+            config["feature_engineering.erp.allow_no_baseline"] = args.erp_allow_no_baseline
+        if getattr(args, "erp_components", None) is not None:
+            config["feature_engineering.erp.components"] = _parse_erp_components(args.erp_components)
         
         if getattr(args, "burst_threshold", None) is not None:
             config["feature_engineering.bursts.threshold_z"] = args.burst_threshold
+        if getattr(args, "burst_bands", None) is not None:
+            config["feature_engineering.bursts.bands"] = list(_split_list_tokens(args.burst_bands))
 
         if getattr(args, "power_baseline_mode", None) is not None:
             config["time_frequency_analysis.baseline_mode"] = args.power_baseline_mode
+        if getattr(args, "power_require_baseline", None) is not None:
+            config["feature_engineering.power.require_baseline"] = args.power_require_baseline
             
         if getattr(args, "spectral_edge_percentile", None) is not None:
             config["feature_engineering.spectral.edge_percentile"] = args.spectral_edge_percentile
+        if getattr(args, "ratio_pairs", None) is not None:
+            config["feature_engineering.spectral.ratio_pairs"] = _parse_pair_tokens(args.ratio_pairs, label="ratio")
+        if getattr(args, "asymmetry_channel_pairs", None) is not None:
+            config["feature_engineering.asymmetry.channel_pairs"] = _parse_pair_tokens(args.asymmetry_channel_pairs, label="asymmetry")
 
         if getattr(args, "conn_output_level", None) is not None:
             config["feature_engineering.connectivity.output_level"] = args.conn_output_level
@@ -248,6 +367,8 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             config["feature_engineering.pac.method"] = args.pac_method
         if getattr(args, "pac_min_epochs", None) is not None:
             config["feature_engineering.pac.min_epochs"] = args.pac_min_epochs
+        if getattr(args, "pac_pairs", None) is not None:
+            config["feature_engineering.pac.pairs"] = _parse_pair_tokens(args.pac_pairs, label="PAC")
             
         if getattr(args, "pe_delay", None) is not None:
             config["feature_engineering.complexity.pe_delay"] = args.pe_delay
@@ -259,6 +380,10 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             
         if args.export_all is not None:
             config["feature_engineering.create_combined_features"] = args.export_all
+        if getattr(args, "fail_on_missing_windows", None) is not None:
+            config["feature_engineering.validation.fail_on_missing_windows"] = args.fail_on_missing_windows
+        if getattr(args, "fail_on_missing_named_window", None) is not None:
+            config["feature_engineering.validation.fail_on_missing_named_window"] = args.fail_on_missing_named_window
         
         # Prepare time ranges
         time_ranges = []

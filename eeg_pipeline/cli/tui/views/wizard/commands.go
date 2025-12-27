@@ -43,6 +43,7 @@ func (m Model) SelectedComputations() []string {
 			result = append(result, m.computations[i].Key)
 		}
 	}
+	sort.Strings(result)
 	return result
 }
 
@@ -197,7 +198,7 @@ func (m Model) BuildCommand() string {
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		// Computations (analyses to run)
 		comps := m.SelectedComputations()
-		if len(comps) > 0 && len(comps) < len(m.computations) {
+		if len(comps) > 0 {
 			parts = append(parts, "--computations")
 			parts = append(parts, comps...)
 		}
@@ -370,6 +371,10 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--pac-method", pacMethods[m.pacMethod])
 		}
 		args = append(args, "--pac-min-epochs", fmt.Sprintf("%d", m.pacMinEpochs))
+		if strings.TrimSpace(m.pacPairsSpec) != "" {
+			args = append(args, "--pac-pairs")
+			args = append(args, splitCSVList(m.pacPairsSpec)...)
+		}
 	}
 
 	// Aperiodic options
@@ -393,16 +398,34 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		} else {
 			args = append(args, "--no-erp-baseline")
 		}
+		if m.erpAllowNoBaseline {
+			args = append(args, "--erp-allow-no-baseline")
+		} else {
+			args = append(args, "--no-erp-allow-no-baseline")
+		}
+		if strings.TrimSpace(m.erpComponentsSpec) != "" {
+			args = append(args, "--erp-components")
+			args = append(args, splitCSVList(m.erpComponentsSpec)...)
+		}
 	}
 
 	// Burst options
 	if m.isCategorySelected("bursts") {
 		args = append(args, "--burst-threshold", fmt.Sprintf("%.2f", m.burstThresholdZ))
 		args = append(args, "--burst-min-duration", fmt.Sprintf("%d", m.burstMinDuration))
+		if strings.TrimSpace(m.burstBandsSpec) != "" {
+			args = append(args, "--burst-bands")
+			args = append(args, splitCSVList(m.burstBandsSpec)...)
+		}
 	}
 
 	// Power options
 	if m.isCategorySelected("power") {
+		if m.powerRequireBaseline {
+			args = append(args, "--power-require-baseline")
+		} else {
+			args = append(args, "--no-power-require-baseline")
+		}
 		modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
 		if m.powerBaselineMode < len(modes) {
 			args = append(args, "--power-baseline-mode", modes[m.powerBaselineMode])
@@ -414,12 +437,34 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		args = append(args, "--spectral-edge-percentile", fmt.Sprintf("%.2f", m.spectralEdgePercentile))
 	}
 
+	// Ratios options
+	if m.isCategorySelected("ratios") && strings.TrimSpace(m.spectralRatioPairsSpec) != "" {
+		args = append(args, "--ratio-pairs")
+		args = append(args, splitCSVList(m.spectralRatioPairsSpec)...)
+	}
+
+	// Asymmetry options
+	if m.isCategorySelected("asymmetry") && strings.TrimSpace(m.asymmetryChannelPairsSpec) != "" {
+		args = append(args, "--asymmetry-channel-pairs")
+		args = append(args, splitCSVList(m.asymmetryChannelPairsSpec)...)
+	}
+
 	// Generic & Validation
 	if m.exportAllFeatures {
 		args = append(args, "--export-all")
 	}
 
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
+	if m.failOnMissingWindows {
+		args = append(args, "--fail-on-missing-windows")
+	} else {
+		args = append(args, "--no-fail-on-missing-windows")
+	}
+	if m.failOnMissingNamedWindow {
+		args = append(args, "--fail-on-missing-named-window")
+	} else {
+		args = append(args, "--no-fail-on-missing-named-window")
+	}
 
 	return args
 }
@@ -428,8 +473,14 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 func (m Model) buildBehaviorAdvancedArgs() []string {
 	var args []string
 
+	// General / statistics
 	if m.correlationMethod != "spearman" {
 		args = append(args, "--correlation-method", m.correlationMethod)
+	}
+
+	robustMethods := []string{"none", "percentage_bend", "winsorized", "shepherd"}
+	if m.robustCorrelation > 0 && m.robustCorrelation < len(robustMethods) {
+		args = append(args, "--robust-correlation", robustMethods[m.robustCorrelation])
 	}
 
 	if m.bootstrapSamples != 1000 {
@@ -444,6 +495,14 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--rng-seed", fmt.Sprintf("%d", m.rngSeed))
 	}
 
+	if m.behaviorNJobs != -1 {
+		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.behaviorNJobs))
+	}
+
+	if m.behaviorMinSamples != 10 {
+		args = append(args, "--min-samples", fmt.Sprintf("%d", m.behaviorMinSamples))
+	}
+
 	if !m.controlTemperature {
 		args = append(args, "--no-control-temperature")
 	}
@@ -453,7 +512,349 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	if m.fdrAlpha != 0.05 {
-		args = append(args, "--fdr-alpha", fmt.Sprintf("%.2f", m.fdrAlpha))
+		args = append(args, "--fdr-alpha", fmt.Sprintf("%.4f", m.fdrAlpha))
+	}
+
+	if !m.behaviorComputeChangeScores {
+		args = append(args, "--no-compute-change-scores")
+	}
+	if !m.behaviorComputeLosoStability {
+		args = append(args, "--no-loso-stability")
+	}
+	if m.behaviorComputeBayesFactors {
+		args = append(args, "--compute-bayes-factors")
+	}
+
+	// Trial table / pain residual / diagnostics
+	if m.isComputationSelected("trial_table") {
+		formats := []string{"parquet", "tsv"}
+		if m.trialTableFormat >= 0 && m.trialTableFormat < len(formats) && m.trialTableFormat != 0 {
+			args = append(args, "--trial-table-format", formats[m.trialTableFormat])
+		}
+		if !m.trialTableIncludeFeatures {
+			args = append(args, "--no-trial-table-include-features")
+		}
+		if !m.trialTableIncludeCovars {
+			args = append(args, "--no-trial-table-include-covariates")
+		}
+		if !m.trialTableIncludeEvents {
+			args = append(args, "--no-trial-table-include-events")
+		}
+		if !m.trialTableAddLagFeatures {
+			args = append(args, "--no-trial-table-add-lag-features")
+		}
+		if strings.TrimSpace(m.trialTableExtraEventCols) != "" {
+			args = append(args, "--trial-table-extra-event-columns")
+			args = append(args, splitCSVList(m.trialTableExtraEventCols)...)
+		}
+		if !m.trialTableValidateEnabled {
+			args = append(args, "--no-trial-table-validate")
+		}
+		if m.trialTableRatingMin != 0.0 {
+			args = append(args, "--trial-table-rating-min", fmt.Sprintf("%.2f", m.trialTableRatingMin))
+		}
+		if m.trialTableRatingMax != 10.0 {
+			args = append(args, "--trial-table-rating-max", fmt.Sprintf("%.2f", m.trialTableRatingMax))
+		}
+		if m.trialTableTempMin != 25.0 {
+			args = append(args, "--trial-table-temperature-min", fmt.Sprintf("%.2f", m.trialTableTempMin))
+		}
+		if m.trialTableTempMax != 55.0 {
+			args = append(args, "--trial-table-temperature-max", fmt.Sprintf("%.2f", m.trialTableTempMax))
+		}
+		if m.trialTableHighMissingFrac != 0.5 {
+			args = append(args, "--trial-table-high-missing-frac", fmt.Sprintf("%.2f", m.trialTableHighMissingFrac))
+		}
+		if !m.featureSummariesEnabled {
+			args = append(args, "--no-feature-summaries")
+		}
+
+		if !m.painResidualEnabled {
+			args = append(args, "--no-pain-residual")
+		} else {
+			methods := []string{"spline", "poly"}
+			if m.painResidualMethod >= 0 && m.painResidualMethod < len(methods) && m.painResidualMethod != 0 {
+				args = append(args, "--pain-residual-method", methods[m.painResidualMethod])
+			}
+			if m.painResidualMinSamples != 10 {
+				args = append(args, "--pain-residual-min-samples", fmt.Sprintf("%d", m.painResidualMinSamples))
+			}
+			if m.painResidualPolyDegree != 2 {
+				args = append(args, "--pain-residual-poly-degree", fmt.Sprintf("%d", m.painResidualPolyDegree))
+			}
+		}
+
+		if !m.painResidualModelCompareEnabled {
+			args = append(args, "--no-pain-residual-model-compare")
+		}
+		if m.painResidualModelCompareMinSamples != 10 {
+			args = append(args, "--pain-residual-model-compare-min-samples", fmt.Sprintf("%d", m.painResidualModelCompareMinSamples))
+		}
+		if !m.painResidualBreakpointEnabled {
+			args = append(args, "--no-pain-residual-breakpoint-test")
+		}
+		if m.painResidualBreakpointMinSamples != 12 {
+			args = append(args, "--pain-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.painResidualBreakpointMinSamples))
+		}
+		if m.painResidualBreakpointCandidates != 15 {
+			args = append(args, "--pain-residual-breakpoint-candidates", fmt.Sprintf("%d", m.painResidualBreakpointCandidates))
+		}
+		if m.painResidualBreakpointQlow != 0.15 {
+			args = append(args, "--pain-residual-breakpoint-quantile-low", fmt.Sprintf("%.3f", m.painResidualBreakpointQlow))
+		}
+		if m.painResidualBreakpointQhigh != 0.85 {
+			args = append(args, "--pain-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.painResidualBreakpointQhigh))
+		}
+	}
+
+	// Confounds
+	if m.isComputationSelected("confounds") {
+		if m.confoundsAddAsCovariates {
+			args = append(args, "--confounds-add-as-covariates")
+		}
+		if m.confoundsMaxCovariates != 3 {
+			args = append(args, "--confounds-max-covariates", fmt.Sprintf("%d", m.confoundsMaxCovariates))
+		}
+		defaultPatterns := "^quality_.*_global_,^quality_.*_ch_"
+		pat := strings.TrimSpace(m.confoundsQCColumnPatterns)
+		if pat != "" && pat != defaultPatterns {
+			args = append(args, "--confounds-qc-column-patterns")
+			args = append(args, splitCSVList(pat)...)
+		} else if pat == "" && defaultPatterns != "" {
+			// Explicit clear
+			args = append(args, "--confounds-qc-column-patterns", "none")
+		}
+	}
+
+	// Regression
+	if m.isComputationSelected("regression") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.regressionFeatureSet >= 0 && m.regressionFeatureSet < len(featSets) && m.regressionFeatureSet != 0 {
+			args = append(args, "--regression-feature-set", featSets[m.regressionFeatureSet])
+		}
+		outcomes := []string{"rating", "pain_residual"}
+		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
+			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
+		}
+		if !m.regressionIncludeTemperature {
+			args = append(args, "--no-regression-include-temperature")
+		}
+		tempCtrl := []string{"linear", "rating_hat"}
+		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
+			args = append(args, "--regression-temperature-control", tempCtrl[m.regressionTempControl])
+		}
+		if !m.regressionIncludeTrialOrder {
+			args = append(args, "--no-regression-include-trial-order")
+		}
+		if m.regressionIncludePrev {
+			args = append(args, "--regression-include-prev-terms")
+		}
+		if !m.regressionIncludeRunBlock {
+			args = append(args, "--no-regression-include-run-block")
+		}
+		if !m.regressionIncludeInteraction {
+			args = append(args, "--no-regression-include-interaction")
+		}
+		if !m.regressionStandardize {
+			args = append(args, "--no-regression-standardize")
+		}
+		if m.regressionMinSamples != 15 {
+			args = append(args, "--regression-min-samples", fmt.Sprintf("%d", m.regressionMinSamples))
+		}
+		if m.regressionPermutations != 0 {
+			args = append(args, "--regression-permutations", fmt.Sprintf("%d", m.regressionPermutations))
+		}
+		if m.regressionMaxFeatures != 0 {
+			args = append(args, "--regression-max-features", fmt.Sprintf("%d", m.regressionMaxFeatures))
+		}
+	}
+
+	// Models
+	if m.isComputationSelected("models") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.modelsFeatureSet >= 0 && m.modelsFeatureSet < len(featSets) && m.modelsFeatureSet != 0 {
+			args = append(args, "--models-feature-set", featSets[m.modelsFeatureSet])
+		}
+		if !m.modelsIncludeTemperature {
+			args = append(args, "--no-models-include-temperature")
+		}
+		tempCtrl := []string{"linear", "rating_hat"}
+		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
+			args = append(args, "--models-temperature-control", tempCtrl[m.modelsTempControl])
+		}
+		if !m.modelsIncludeTrialOrder {
+			args = append(args, "--no-models-include-trial-order")
+		}
+		if m.modelsIncludePrev {
+			args = append(args, "--models-include-prev-terms")
+		}
+		if !m.modelsIncludeRunBlock {
+			args = append(args, "--no-models-include-run-block")
+		}
+		if !m.modelsIncludeInteraction {
+			args = append(args, "--no-models-include-interaction")
+		}
+		if !m.modelsStandardize {
+			args = append(args, "--no-models-standardize")
+		}
+		if m.modelsMinSamples != 20 {
+			args = append(args, "--models-min-samples", fmt.Sprintf("%d", m.modelsMinSamples))
+		}
+		if m.modelsMaxFeatures != 100 {
+			args = append(args, "--models-max-features", fmt.Sprintf("%d", m.modelsMaxFeatures))
+		}
+		out := []string{}
+		if m.modelsOutcomeRating {
+			out = append(out, "rating")
+		}
+		if m.modelsOutcomePainResidual {
+			out = append(out, "pain_residual")
+		}
+		if m.modelsOutcomePainBinary {
+			out = append(out, "pain_binary")
+		}
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "pain_residual") {
+			args = append(args, "--models-outcomes")
+			args = append(args, out...)
+		}
+		fams := []string{}
+		if m.modelsFamilyOLS {
+			fams = append(fams, "ols_hc3")
+		}
+		if m.modelsFamilyRobust {
+			fams = append(fams, "robust_rlm")
+		}
+		if m.modelsFamilyQuantile {
+			fams = append(fams, "quantile_50")
+		}
+		if m.modelsFamilyLogit {
+			fams = append(fams, "logit")
+		}
+		if len(fams) > 0 && len(fams) < 4 {
+			args = append(args, "--models-families")
+			args = append(args, fams...)
+		}
+		binOut := []string{"pain_binary", "rating_median"}
+		if m.modelsBinaryOutcome >= 0 && m.modelsBinaryOutcome < len(binOut) && m.modelsBinaryOutcome != 0 {
+			args = append(args, "--models-binary-outcome", binOut[m.modelsBinaryOutcome])
+		}
+	}
+
+	// Stability
+	if m.isComputationSelected("stability") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.stabilityFeatureSet >= 0 && m.stabilityFeatureSet < len(featSets) && m.stabilityFeatureSet != 0 {
+			args = append(args, "--stability-feature-set", featSets[m.stabilityFeatureSet])
+		}
+		if m.stabilityMethod == 1 {
+			args = append(args, "--stability-method", "pearson")
+		}
+		outcome := []string{"auto", "rating", "pain_residual"}
+		if m.stabilityOutcome > 0 && m.stabilityOutcome < len(outcome) {
+			args = append(args, "--stability-outcome", outcome[m.stabilityOutcome])
+		}
+		groupCol := []string{"auto", "run", "block"}
+		if m.stabilityGroupColumn > 0 && m.stabilityGroupColumn < len(groupCol) {
+			args = append(args, "--stability-group-column", groupCol[m.stabilityGroupColumn])
+		}
+		if !m.stabilityPartialTemp {
+			args = append(args, "--no-stability-partial-temperature")
+		}
+		if m.stabilityMinGroupTrials != 8 {
+			args = append(args, "--stability-min-group-trials", fmt.Sprintf("%d", m.stabilityMinGroupTrials))
+		}
+		if m.stabilityMaxFeatures != 50 {
+			args = append(args, "--stability-max-features", fmt.Sprintf("%d", m.stabilityMaxFeatures))
+		}
+		if m.stabilityAlpha != 0.05 {
+			args = append(args, "--stability-alpha", fmt.Sprintf("%.4f", m.stabilityAlpha))
+		}
+	}
+
+	// Consistency
+	if m.isComputationSelected("consistency") && !m.consistencyEnabled {
+		args = append(args, "--no-consistency")
+	}
+
+	// Influence
+	if m.isComputationSelected("influence") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.influenceFeatureSet >= 0 && m.influenceFeatureSet < len(featSets) && m.influenceFeatureSet != 0 {
+			args = append(args, "--influence-feature-set", featSets[m.influenceFeatureSet])
+		}
+		out := []string{}
+		if m.influenceOutcomeRating {
+			out = append(out, "rating")
+		}
+		if m.influenceOutcomePainResidual {
+			out = append(out, "pain_residual")
+		}
+		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "pain_residual") {
+			args = append(args, "--influence-outcomes")
+			args = append(args, out...)
+		}
+		if m.influenceMaxFeatures != 20 {
+			args = append(args, "--influence-max-features", fmt.Sprintf("%d", m.influenceMaxFeatures))
+		}
+		if !m.influenceIncludeTemperature {
+			args = append(args, "--no-influence-include-temperature")
+		}
+		tempCtrl := []string{"linear", "rating_hat"}
+		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
+			args = append(args, "--influence-temperature-control", tempCtrl[m.influenceTempControl])
+		}
+		if !m.influenceIncludeTrialOrder {
+			args = append(args, "--no-influence-include-trial-order")
+		}
+		if !m.influenceIncludeRunBlock {
+			args = append(args, "--no-influence-include-run-block")
+		}
+		if m.influenceIncludeInteraction {
+			args = append(args, "--influence-include-interaction")
+		}
+		if !m.influenceStandardize {
+			args = append(args, "--no-influence-standardize")
+		}
+		if m.influenceCooksThreshold > 0 {
+			args = append(args, "--influence-cooks-threshold", fmt.Sprintf("%.6f", m.influenceCooksThreshold))
+		}
+		if m.influenceLeverageThreshold > 0 {
+			args = append(args, "--influence-leverage-threshold", fmt.Sprintf("%.6f", m.influenceLeverageThreshold))
+		}
+	}
+
+	// Pain sensitivity
+	if m.isComputationSelected("pain_sensitivity") && m.painSensitivityMinTrials != 10 {
+		args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
+	}
+
+	// Condition
+	if m.isComputationSelected("condition") {
+		if !m.conditionFailFast {
+			args = append(args, "--no-condition-fail-fast")
+		}
+		if m.conditionEffectThreshold != 0.5 {
+			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.4f", m.conditionEffectThreshold))
+		}
+		if m.conditionMinTrials != 10 {
+			args = append(args, "--condition-min-trials", fmt.Sprintf("%d", m.conditionMinTrials))
+		}
+	}
+
+	// Temporal
+	if m.isComputationSelected("temporal") {
+		if m.temporalResolutionMs != 50 {
+			args = append(args, "--temporal-time-resolution-ms", fmt.Sprintf("%d", m.temporalResolutionMs))
+		}
+		if m.temporalTimeMinMs != -200 {
+			args = append(args, "--temporal-time-min-ms", fmt.Sprintf("%d", m.temporalTimeMinMs))
+		}
+		if m.temporalTimeMaxMs != 1000 {
+			args = append(args, "--temporal-time-max-ms", fmt.Sprintf("%d", m.temporalTimeMaxMs))
+		}
+		if m.temporalSmoothMs != 100 {
+			args = append(args, "--temporal-smooth-window-ms", fmt.Sprintf("%d", m.temporalSmoothMs))
+		}
 	}
 
 	// Cluster-specific options
@@ -474,6 +875,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mediationBootstrap != 1000 {
 			args = append(args, "--mediation-bootstrap", fmt.Sprintf("%d", m.mediationBootstrap))
 		}
+		if m.mediationMinEffect != 0.05 {
+			args = append(args, "--mediation-min-effect-size", fmt.Sprintf("%.4f", m.mediationMinEffect))
+		}
 		if m.mediationMaxMediators != 20 {
 			args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
 		}
@@ -481,19 +885,30 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Mixed effects-specific options
 	if m.isComputationSelected("mixed_effects") {
+		if m.mixedEffectsType == 1 {
+			args = append(args, "--mixed-random-effects", "intercept_slope")
+		}
 		if m.mixedMaxFeatures != 50 {
 			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
 		}
 	}
 
-	// Condition-specific options
-	if m.isComputationSelected("condition") {
-		if m.conditionEffectThreshold != 0.5 {
-			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.1f", m.conditionEffectThreshold))
-		}
-	}
-
 	return args
+}
+
+func splitCSVList(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\t' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // buildDecodingAdvancedArgs returns CLI args for decoding pipeline advanced options

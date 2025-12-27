@@ -15,6 +15,8 @@ import mne
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.style import use_style, get_color
 from eeg_pipeline.utils.analysis.channels import build_roi_map, pick_eeg_channels
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
@@ -47,6 +49,9 @@ def plot_butterfly_erp(
         If None, plots all trials.
     """
     saved_paths = []
+    save_dir.mkdir(parents=True, exist_ok=True)
+    plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     with use_style(context="paper"):
         # 1. Overall butterfly (all trials)
@@ -60,9 +65,16 @@ def plot_butterfly_erp(
         )
         fig.suptitle(f"sub-{subject}: Butterfly ERP (All Trials)", fontsize=14)
         
-        path = save_dir / f"sub-{subject}_erp_butterfly_all.png"
-        fig.savefig(path)
-        plt.close(fig)
+        path = save_dir / f"sub-{subject}_erp_butterfly_all.{primary_ext}"
+        save_fig(
+            fig,
+            path,
+            logger=logger,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.savefig_dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+        )
         saved_paths.append(path)
         
         # 2. Condition-specific butterflies
@@ -83,9 +95,16 @@ def plot_butterfly_erp(
                     )
                     fig.suptitle(f"sub-{subject}: Butterfly ERP ({cond_name})", fontsize=14)
                     
-                    path = save_dir / f"sub-{subject}_erp_butterfly_{cond_name}.png"
-                    fig.savefig(path)
-                    plt.close(fig)
+                    path = save_dir / f"sub-{subject}_erp_butterfly_{cond_name}.{primary_ext}"
+                    save_fig(
+                        fig,
+                        path,
+                        logger=logger,
+                        formats=plot_cfg.formats,
+                        dpi=plot_cfg.savefig_dpi,
+                        bbox_inches=plot_cfg.bbox_inches,
+                        pad_inches=plot_cfg.pad_inches,
+                    )
                     saved_paths.append(path)
                 except Exception as e:
                     logger.warning(f"Failed to plot butterfly for condition {cond_name}: {e}")
@@ -115,6 +134,9 @@ def plot_roi_erp(
         e.g., {"pain": "pain == 1", "nopain": "pain == 0"}
     """
     saved_paths = []
+    save_dir.mkdir(parents=True, exist_ok=True)
+    plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     roi_defs = get_roi_definitions(config)
     if not roi_defs:
         logger.warning("No ROI definitions found in config; skipping ROI ERP plot.")
@@ -187,9 +209,16 @@ def plot_roi_erp(
             baseline = erp_cfg.get("baseline_window", [-0.2, 0.0])
             ax.axvspan(baseline[0]*1000, baseline[1]*1000, color="gray", alpha=0.1, label="Baseline")
             
-            path = save_dir / f"sub-{subject}_erp_roi_{roi_name.lower()}.png"
-            fig.savefig(path)
-            plt.close(fig)
+            path = save_dir / f"sub-{subject}_erp_roi_{roi_name.lower()}.{primary_ext}"
+            save_fig(
+                fig,
+                path,
+                logger=logger,
+                formats=plot_cfg.formats,
+                dpi=plot_cfg.savefig_dpi,
+                bbox_inches=plot_cfg.bbox_inches,
+                pad_inches=plot_cfg.pad_inches,
+            )
             saved_paths.append(path)
             
     return saved_paths
@@ -208,6 +237,9 @@ def plot_erp_contrast(
 ) -> List[Path]:
     """Plot ERP contrast (A - B) for all channels."""
     saved_paths = []
+    save_dir.mkdir(parents=True, exist_ok=True)
+    plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     try:
         evoked_a = epochs[cond_a].average()
@@ -225,9 +257,16 @@ def plot_erp_contrast(
             )
             fig.suptitle(f"sub-{subject}: ERP Contrast ({label_a} - {label_b})", fontsize=14)
             
-            path = save_dir / f"sub-{subject}_erp_contrast_{label_a.lower()}_{label_b.lower()}.png"
-            fig.savefig(path)
-            plt.close(fig)
+            path = save_dir / f"sub-{subject}_erp_contrast_{label_a.lower()}_{label_b.lower()}.{primary_ext}"
+            save_fig(
+                fig,
+                path,
+                logger=logger,
+                formats=plot_cfg.formats,
+                dpi=plot_cfg.savefig_dpi,
+                bbox_inches=plot_cfg.bbox_inches,
+                pad_inches=plot_cfg.pad_inches,
+            )
             saved_paths.append(path)
             
     except Exception as e:

@@ -255,10 +255,16 @@ def _compute_correlations_for_condition(
         compute_cluster_correction_2d, compute_cluster_masses_2d
     )
 
-    cluster_cfg = config.get("behavior_analysis.cluster_correction", {}) if config is not None else {}
+    # Support both legacy `behavior_analysis.cluster_correction.*` and current
+    # `behavior_analysis.cluster.*` keys from utils/config/eeg_config.yaml.
+    cluster_cfg = {}
+    if config is not None:
+        cluster_cfg = config.get("behavior_analysis.cluster_correction", {}) or {}
+        if not cluster_cfg:
+            cluster_cfg = config.get("behavior_analysis.cluster", {}) or {}
     c_alpha = float(cluster_cfg.get("alpha", alpha))
     n_cluster_perm = int(cluster_cfg.get("n_permutations", 0))
-    cluster_forming_threshold = cluster_cfg.get("cluster_forming_threshold")
+    cluster_forming_threshold = cluster_cfg.get("cluster_forming_threshold", cluster_cfg.get("forming_threshold"))
     seed = int(get_config_value(config, "project.random_state", 42)) if config is not None else 42
     cluster_rng = np.random.default_rng(seed)
 
@@ -464,6 +470,8 @@ def _run_tf_correlations_core(
             recs.append({
                 "roi": roi_label, "freq": float(freq), "time_start": float(time_edges[t_i]),
                 "time_end": float(time_edges[t_i+1]), "r": float(corrs[f_i, t_i]),
+                "beta_std": float(corrs[f_i, t_i]),
+                "beta_kind": "standardized",
                 "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
                 "p_cluster": float(p_c) if np.isfinite(p_c) else np.nan,
                 "cluster_id": int(c_labels[f_i, t_i]) if n_perm > 0 else 0,
@@ -544,6 +552,10 @@ def _build_temporal_tsv_records(
                     "time_end": float(win_e[w_i]),
                     "channel": ch_names[c_i] if c_i < len(ch_names) else f"ch_{c_i}",
                     "r": float(r),
+                    # Regression analogue: for standardized residualized variables,
+                    # the slope equals the (partial) correlation.
+                    "beta_std": float(r),
+                    "beta_kind": "standardized",
                     "p": float(p),
                     "n": int(n_valid[b_i, w_i, c_i]),
                     "method": method,
@@ -707,6 +719,4 @@ def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
         ctx.covariates_df,
         ctx.logger,
     )
-
-
 

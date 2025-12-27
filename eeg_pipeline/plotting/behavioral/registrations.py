@@ -12,6 +12,11 @@ from eeg_pipeline.plotting.behavioral.scatter.summary import plot_top_behavioral
 from eeg_pipeline.plotting.behavioral.temporal.clusters import plot_pain_nonpain_clusters
 from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_pain
 from eeg_pipeline.plotting.behavioral.mediation_plots import plot_mediation_path_diagram
+from eeg_pipeline.plotting.behavioral.trial_table_overview import plot_trial_table_overview
+from eeg_pipeline.plotting.behavioral.confounds_audit import plot_confounds_audit
+from eeg_pipeline.plotting.behavioral.regression_summary import plot_regression_summary
+from eeg_pipeline.plotting.behavioral.temperature_models import plot_temperature_models
+from eeg_pipeline.plotting.behavioral.stability_groupwise import plot_stability_groupwise
 from eeg_pipeline.utils.analysis.stats.mediation import MediationResult
 
 
@@ -145,6 +150,71 @@ def run_top_predictors(ctx, saved_plots):
         config=ctx.config,
     )
     saved_plots["top_predictors"] = ctx.plots_dir
+
+
+@BehaviorPlotRegistry.register("summary", name="trial_table_overview")
+def run_trial_table_overview(ctx, saved_plots):
+    res = plot_trial_table_overview(
+        subject=ctx.subject,
+        task=ctx.task,
+        deriv_root=ctx.deriv_root,
+        config=ctx.config,
+        logger=ctx.logger,
+        plots_dir=ctx.plots_dir,
+    )
+    saved_plots.update(res)
+
+
+@BehaviorPlotRegistry.register("summary", name="confounds_audit")
+def run_confounds_audit(ctx, saved_plots):
+    res = plot_confounds_audit(
+        subject=ctx.subject,
+        task=ctx.task,
+        deriv_root=ctx.deriv_root,
+        config=ctx.config,
+        logger=ctx.logger,
+        plots_dir=ctx.plots_dir,
+    )
+    saved_plots.update(res)
+
+
+@BehaviorPlotRegistry.register("summary", name="regression_summary")
+def run_regression_summary(ctx, saved_plots):
+    res = plot_regression_summary(
+        subject=ctx.subject,
+        task=ctx.task,
+        deriv_root=ctx.deriv_root,
+        config=ctx.config,
+        logger=ctx.logger,
+        plots_dir=ctx.plots_dir,
+    )
+    saved_plots.update(res)
+
+
+@BehaviorPlotRegistry.register("summary", name="temperature_models")
+def run_temperature_models(ctx, saved_plots):
+    res = plot_temperature_models(
+        subject=ctx.subject,
+        task=ctx.task,
+        deriv_root=ctx.deriv_root,
+        config=ctx.config,
+        logger=ctx.logger,
+        plots_dir=ctx.plots_dir,
+    )
+    saved_plots.update(res)
+
+
+@BehaviorPlotRegistry.register("summary", name="stability_groupwise")
+def run_stability_groupwise(ctx, saved_plots):
+    res = plot_stability_groupwise(
+        subject=ctx.subject,
+        task=ctx.task,
+        deriv_root=ctx.deriv_root,
+        config=ctx.config,
+        logger=ctx.logger,
+        plots_dir=ctx.plots_dir,
+    )
+    saved_plots.update(res)
 
 
 @BehaviorPlotRegistry.register("advanced", name="mediation")

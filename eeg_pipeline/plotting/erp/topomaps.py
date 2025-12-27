@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 
+from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.style import use_style
 
 
@@ -37,6 +39,9 @@ def plot_erp_topomaps(
     conditions : dict, optional
     """
     saved_paths = []
+    save_dir.mkdir(parents=True, exist_ok=True)
+    plot_cfg = get_plot_config(config)
+    primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
     erp_cfg = config.get("feature_engineering.erp", {})
     components = erp_cfg.get("components", [])
@@ -62,9 +67,16 @@ def plot_erp_topomaps(
         # fig.suptitle is tricky with mne.plot_topomap as it returns a Figure object 
         # but the layout is already tight.
         
-        path = save_dir / f"sub-{subject}_erp_topomaps_all.png"
-        fig.savefig(path)
-        plt.close(fig)
+        path = save_dir / f"sub-{subject}_erp_topomaps_all.{primary_ext}"
+        save_fig(
+            fig,
+            path,
+            logger=logger,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.savefig_dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+        )
         saved_paths.append(path)
         
         # 2. Condition-specific topomaps
@@ -82,9 +94,16 @@ def plot_erp_topomaps(
                         show=False,
                     )
                     
-                    path = save_dir / f"sub-{subject}_erp_topomaps_{cond_name}.png"
-                    fig.savefig(path)
-                    plt.close(fig)
+                    path = save_dir / f"sub-{subject}_erp_topomaps_{cond_name}.{primary_ext}"
+                    save_fig(
+                        fig,
+                        path,
+                        logger=logger,
+                        formats=plot_cfg.formats,
+                        dpi=plot_cfg.savefig_dpi,
+                        bbox_inches=plot_cfg.bbox_inches,
+                        pad_inches=plot_cfg.pad_inches,
+                    )
                     saved_paths.append(path)
                 except Exception as e:
                     logger.warning(f"Failed to plot topomap for condition {cond_name}: {e}")
@@ -104,9 +123,16 @@ def plot_erp_topomaps(
                     show=False,
                 )
                 
-                path = save_dir / f"sub-{subject}_erp_topomaps_contrast.png"
-                fig.savefig(path)
-                plt.close(fig)
+                path = save_dir / f"sub-{subject}_erp_topomaps_contrast.{primary_ext}"
+                save_fig(
+                    fig,
+                    path,
+                    logger=logger,
+                    formats=plot_cfg.formats,
+                    dpi=plot_cfg.savefig_dpi,
+                    bbox_inches=plot_cfg.bbox_inches,
+                    pad_inches=plot_cfg.pad_inches,
+                )
                 saved_paths.append(path)
             except Exception as e:
                 logger.warning(f"Failed to plot contrast topomaps: {e}")

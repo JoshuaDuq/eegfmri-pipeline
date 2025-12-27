@@ -37,6 +37,14 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     add_change_scores as _add_change_scores_impl,
     build_behavior_qc as _build_behavior_qc_impl,
     combine_features as _combine_features_impl,
+    stage_trial_table as _stage_trial_table_impl,
+    stage_trial_table_validate as _stage_trial_table_validate_impl,
+    stage_confounds as _stage_confounds_impl,
+    stage_regression as _stage_regression_impl,
+    stage_models as _stage_models_impl,
+    stage_stability as _stage_stability_impl,
+    stage_consistency as _stage_consistency_impl,
+    stage_influence as _stage_influence_impl,
     stage_advanced as _stage_advanced_impl,
     stage_cluster as _stage_cluster_impl,
     stage_condition as _stage_condition_impl,
@@ -55,6 +63,13 @@ from eeg_pipeline.analysis.behavior.orchestration import (
 ###################################################################
 
 BEHAVIOR_COMPUTATION_FLAGS = [
+    "trial_table",
+    "confounds",
+    "regression",
+    "models",
+    "stability",
+    "consistency",
+    "influence",
     "correlations",
     "pain_sensitivity",
     "condition",
@@ -107,6 +122,13 @@ class BehaviorPipelineConfig:
     method_label: str = "spearman"
     
     # Computation flags
+    run_trial_table: bool = True
+    run_confounds: bool = True
+    run_regression: bool = False
+    run_models: bool = False
+    run_stability: bool = True
+    run_consistency: bool = True
+    run_influence: bool = True
     run_correlations: bool = True
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
@@ -164,6 +186,13 @@ class BehaviorPipelineConfig:
             bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
             robust_method=robust_method,
             method_label=method_label,
+            run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
+            run_confounds=bool(get_config_value(config, "behavior_analysis.confounds.enabled", True)),
+            run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
+            run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
+            run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
+            run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
+            run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
             run_correlations=get_config_value(config, "behavior_analysis.correlations.enabled", True),
             run_condition_comparison=get_config_value(config, "behavior_analysis.condition.enabled", True),
             run_temporal_correlations=get_config_value(config, "behavior_analysis.temporal.enabled", True),
@@ -171,7 +200,13 @@ class BehaviorPipelineConfig:
             run_mediation=get_config_value(config, "behavior_analysis.mediation.enabled", False),
             run_mixed_effects=get_config_value(config, "behavior_analysis.mixed_effects.enabled", False),
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
-            n_permutations=int(get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)),
+            n_permutations=int(
+                get_config_value(
+                    config,
+                    "behavior_analysis.cluster.n_permutations",
+                    get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000),
+                )
+            ),
             n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
             # Condition-specific
             condition_effect_threshold=float(get_config_value(config, "behavior_analysis.condition.effect_size_threshold", 0.5)),
@@ -196,6 +231,14 @@ class BehaviorPipelineConfig:
 @dataclass
 class BehaviorPipelineResults:
     subject: str
+    trial_table_path: Optional[str] = None
+    trial_table_validation: Optional[Dict[str, Any]] = None
+    confounds: Optional[pd.DataFrame] = None
+    regression: Optional[pd.DataFrame] = None
+    models: Optional[pd.DataFrame] = None
+    stability: Optional[pd.DataFrame] = None
+    consistency: Optional[pd.DataFrame] = None
+    influence: Optional[pd.DataFrame] = None
     correlations: Optional[pd.DataFrame] = None
     pain_sensitivity: Optional[pd.DataFrame] = None
     condition_effects: Optional[pd.DataFrame] = None
@@ -208,6 +251,8 @@ class BehaviorPipelineResults:
     
     def to_summary(self) -> Dict[str, Any]:
         s = {"subject": self.subject}
+        if self.trial_table_path:
+            s["trial_table_path"] = self.trial_table_path
         n_total = 0
         n_sig_raw = 0
         n_sig_controlled = 0
@@ -261,6 +306,18 @@ class BehaviorPipelineResults:
             n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
             if p_fdr is not None:
                 n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+
+        if self.regression is not None and not self.regression.empty:
+            df = self.regression
+            n = len(df)
+            n_total += n
+            s["n_regression_features"] = n
+            p_raw = df["p_primary"] if "p_primary" in df.columns else df.get("p_feature")
+            p_fdr = df["q_global"] if "q_global" in df.columns else df.get("p_fdr")
+            if p_raw is not None:
+                n_sig_raw += int((pd.to_numeric(p_raw, errors="coerce").fillna(1) < 0.05).sum())
+            if p_fdr is not None:
+                n_sig_fdr += int((pd.to_numeric(p_fdr, errors="coerce").fillna(1) < 0.05).sum())
                 
             s["n_large_effects"] = int((df["hedges_g"].abs() >= 0.8).sum()) if "hedges_g" in df.columns else 0
 
@@ -359,6 +416,13 @@ class BehaviorPipeline(PipelineBase):
         
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
+            self.pipeline_config.run_trial_table = comp_flags["trial_table"]
+            self.pipeline_config.run_confounds = comp_flags["confounds"]
+            self.pipeline_config.run_regression = comp_flags["regression"]
+            self.pipeline_config.run_models = comp_flags["models"]
+            self.pipeline_config.run_stability = comp_flags["stability"]
+            self.pipeline_config.run_consistency = comp_flags["consistency"]
+            self.pipeline_config.run_influence = comp_flags["influence"]
             self.pipeline_config.run_correlations = comp_flags["correlations"]
             self.pipeline_config.run_condition_comparison = comp_flags["condition"]
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
@@ -375,6 +439,12 @@ class BehaviorPipeline(PipelineBase):
         else:
             self._run_validation = any(
                 [
+                    self.pipeline_config.run_confounds,
+                    self.pipeline_config.run_regression,
+                    self.pipeline_config.run_models,
+                    self.pipeline_config.run_stability,
+                    self.pipeline_config.run_consistency,
+                    self.pipeline_config.run_influence,
                     self.pipeline_config.run_correlations,
                     self.pipeline_config.run_condition_comparison,
                     self.pipeline_config.run_temporal_correlations,
@@ -411,7 +481,14 @@ class BehaviorPipeline(PipelineBase):
         run_correlate = self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity
         enabled_stages = [
             True,  # Load (always runs)
+            self.pipeline_config.run_trial_table,
+            self.pipeline_config.run_confounds,
+            self.pipeline_config.run_regression,
+            self.pipeline_config.run_models,
+            self.pipeline_config.run_stability,
             run_correlate,
+            self.pipeline_config.run_consistency,
+            self.pipeline_config.run_influence,
             self.pipeline_config.run_condition_comparison,
             self.pipeline_config.run_temporal_correlations,
             self.pipeline_config.run_cluster_tests,
@@ -495,6 +572,27 @@ class BehaviorPipeline(PipelineBase):
             return results
         _record_stage("load", stage_start, stage_rss)
 
+        if self.pipeline_config.run_trial_table:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Building trial table", current=current_step, total=total_steps)
+            logger.info("Building trial table...")
+            try:
+                # Default: save inside stats_dir
+                out_path = _stage_trial_table_impl(ctx, self.pipeline_config)
+                if out_path is not None:
+                    results.trial_table_path = str(out_path)
+            except Exception as exc:
+                logger.warning(f"Trial table build failed: {exc}")
+
+            # Always attempt non-gating trial-table validation when enabled.
+            try:
+                results.trial_table_validation = _stage_trial_table_validate_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.debug("Trial table validation failed: %s", exc)
+            _record_stage("trial_table", stage_start, stage_rss)
+
         if validate_only:
             current_step += 1
             progress.step("Exporting validation", current=current_step, total=total_steps)
@@ -516,6 +614,54 @@ class BehaviorPipeline(PipelineBase):
             write_outputs_manifest(ctx, self.pipeline_config, results, stage_metrics)
             progress.subject_done(f"sub-{subject}", success=True)
             return results
+
+        if self.pipeline_config.run_confounds:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Confound audit", current=current_step, total=total_steps)
+            logger.info("Running confound audit...")
+            try:
+                results.confounds = _stage_confounds_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Confound audit failed: {exc}")
+            _record_stage("confounds", stage_start, stage_rss)
+
+        if self.pipeline_config.run_regression:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Trialwise regression", current=current_step, total=total_steps)
+            logger.info("Running trialwise regression...")
+            try:
+                results.regression = _stage_regression_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Regression stage failed: {exc}")
+            _record_stage("regression", stage_start, stage_rss)
+
+        if self.pipeline_config.run_models:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Model families", current=current_step, total=total_steps)
+            logger.info("Running model families...")
+            try:
+                results.models = _stage_models_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Models stage failed: {exc}")
+            _record_stage("models", stage_start, stage_rss)
+
+        if self.pipeline_config.run_stability:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Stability (run/block)", current=current_step, total=total_steps)
+            logger.info("Running stability diagnostics...")
+            try:
+                results.stability = _stage_stability_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Stability stage failed: {exc}")
+            _record_stage("stability", stage_start, stage_rss)
         
         if self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity:
             stage_start = time.perf_counter()
@@ -525,6 +671,30 @@ class BehaviorPipeline(PipelineBase):
             logger.info("Running correlations...")
             results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
             _record_stage("correlations", stage_start, stage_rss)
+
+        if self.pipeline_config.run_consistency:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Consistency summary", current=current_step, total=total_steps)
+            logger.info("Building effect-direction consistency summary...")
+            try:
+                results.consistency = _stage_consistency_impl(ctx, self.pipeline_config, results)
+            except Exception as exc:
+                logger.warning(f"Consistency stage failed: {exc}")
+            _record_stage("consistency", stage_start, stage_rss)
+
+        if self.pipeline_config.run_influence:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Influence diagnostics", current=current_step, total=total_steps)
+            logger.info("Computing influence diagnostics...")
+            try:
+                results.influence = _stage_influence_impl(ctx, self.pipeline_config, results)
+            except Exception as exc:
+                logger.warning(f"Influence stage failed: {exc}")
+            _record_stage("influence", stage_start, stage_rss)
         
         if self.pipeline_config.run_condition_comparison:
             stage_start = time.perf_counter()

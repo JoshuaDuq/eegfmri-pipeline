@@ -34,6 +34,13 @@ type FeatureCategory struct {
 }
 
 var behaviorComputations = []Computation{
+	{"trial_table", "Trial Table", "Export canonical per-trial analysis table"},
+	{"confounds", "Confounds Audit", "Audit QC confounds vs targets"},
+	{"regression", "Trialwise Regression", "Trialwise regression/moderation models"},
+	{"models", "Model Families", "Sensitivity model families (robust/quantile/logistic)"},
+	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics (non-gating)"},
+	{"consistency", "Consistency Summary", "Effect direction consistency across outcomes"},
+	{"influence", "Influence Diagnostics", "Cook's distance and leverage summaries"},
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
@@ -47,6 +54,12 @@ type FrequencyBand struct {
 	Key         string
 	Name        string
 	Description string
+}
+
+type behaviorSection struct {
+	Key     string
+	Label   string
+	Enabled bool
 }
 
 var frequencyBands = []FrequencyBand{
@@ -128,6 +141,15 @@ const (
 	textFieldRawEventPrefixes
 	textFieldMergeEventPrefixes
 	textFieldMergeEventTypes
+	// Behavior advanced config text fields
+	textFieldTrialTableExtraEventColumns
+	textFieldConfoundsQCColumnPatterns
+	// Features advanced config text fields
+	textFieldPACPairs
+	textFieldBurstBands
+	textFieldSpectralRatioPairs
+	textFieldAsymmetryChannelPairs
+	textFieldERPComponents
 )
 
 var defaultPlotItems = []PlotItem{
@@ -347,9 +369,10 @@ type Model struct {
 	// Advanced configuration (shared)
 	useDefaultAdvanced bool // True = skip advanced config customization
 	advancedCursor     int  // Which config option is focused
+	advancedOffset     int  // Scroll offset for advanced config lists
 
 	// Multi-select expansion state for advanced config
-	expandedOption int // -1 = none expanded, 5 = connectivity
+	expandedOption int // -1 = none expanded
 	subCursor      int // Cursor within the expanded list
 
 	// Text input mode for numeric config values
@@ -363,6 +386,20 @@ type Model struct {
 
 	// Features pipeline advanced config
 	connectivityMeasures map[int]bool // Selected connectivity measures
+	// Features advanced config section expansion (collapsed by default for compact UI)
+	featGroupConnectivityExpanded bool
+	featGroupPACExpanded          bool
+	featGroupAperiodicExpanded    bool
+	featGroupComplexityExpanded   bool
+	featGroupBurstsExpanded       bool
+	featGroupPowerExpanded        bool
+	featGroupSpectralExpanded     bool
+	featGroupERPExpanded          bool
+	featGroupRatiosExpanded       bool
+	featGroupAsymmetryExpanded    bool
+	featGroupStorageExpanded      bool
+	featGroupExecutionExpanded    bool
+	featGroupValidationExpanded   bool
 
 	// PAC/CFC configuration
 	pacPhaseMin  float64 // Min phase frequency (Hz)
@@ -371,6 +408,7 @@ type Model struct {
 	pacAmpMax    float64 // Max amplitude frequency (Hz)
 	pacMethod    int     // 0: mvl, 1: kl, 2: tort, 3: ozkurt
 	pacMinEpochs int
+	pacPairsSpec string // e.g. theta:gamma,alpha:gamma
 
 	// Aperiodic configuration
 	aperiodicFmin      float64 // Min frequency for aperiodic fit
@@ -385,19 +423,29 @@ type Model struct {
 
 	// ERP configuration
 	erpBaselineCorrection bool
+	erpAllowNoBaseline    bool
+	erpComponentsSpec     string // e.g. n1=0.10-0.20,n2=0.20-0.35,p2=0.35-0.50
 
 	// Burst configuration
 	burstThresholdZ  float64
-	burstMinDuration int // ms
+	burstMinDuration int    // ms
+	burstBandsSpec   string // e.g. beta,gamma
 
 	// Power configuration
-	powerBaselineMode int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
+	powerBaselineMode    int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
+	powerRequireBaseline bool
 
 	// Spectral configuration
 	spectralEdgePercentile float64
+	spectralRatioPairsSpec string // e.g. theta:beta,alpha:beta
 	// Validation & Generic
-	minEpochsForFeatures int
-	exportAllFeatures    bool
+	minEpochsForFeatures     int
+	exportAllFeatures        bool
+	failOnMissingWindows     bool
+	failOnMissingNamedWindow bool
+
+	// Asymmetry
+	asymmetryChannelPairsSpec string // e.g. F3:F4,C3:C4
 
 	// Connectivity configuration
 	connOutputLevel  int // 0: full, 1: global_only
@@ -408,13 +456,148 @@ type Model struct {
 	connAECMode      int // 0: orth, 1: none, 2: sym
 
 	// Behavior pipeline advanced config
-	correlationMethod  string  // "spearman" or "pearson"
-	bootstrapSamples   int     // 0 = disabled, 1000+ recommended
-	nPermutations      int     // For cluster tests
-	rngSeed            int     // 0 = use project default
-	controlTemperature bool    // Include temperature as covariate
-	controlTrialOrder  bool    // Include trial order as covariate
-	fdrAlpha           float64 // FDR correction threshold
+	correlationMethod     string  // "spearman" or "pearson"
+	robustCorrelation     int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
+	bootstrapSamples      int     // 0 = disabled, 1000+ recommended
+	nPermutations         int     // For cluster tests
+	rngSeed               int     // 0 = use project default
+	controlTemperature    bool    // Include temperature as covariate
+	controlTrialOrder     bool    // Include trial order as covariate
+	fdrAlpha              float64 // FDR correction threshold
+	behaviorConfigSection int     // Behavior config section index (legacy, kept for compatibility)
+	behaviorNJobs         int     // -1 = all
+	behaviorMinSamples    int     // default min samples
+
+	behaviorComputeChangeScores  bool
+	behaviorComputeBayesFactors  bool
+	behaviorComputeLosoStability bool
+
+	// Behavior advanced config section expansion (collapsed by default for compact UI)
+	behaviorGroupGeneralExpanded      bool
+	behaviorGroupTrialTableExpanded   bool
+	behaviorGroupCorrelationsExpanded bool
+	behaviorGroupPainSensExpanded     bool
+	behaviorGroupConfoundsExpanded    bool
+	behaviorGroupRegressionExpanded   bool
+	behaviorGroupModelsExpanded       bool
+	behaviorGroupStabilityExpanded    bool
+	behaviorGroupConsistencyExpanded  bool
+	behaviorGroupInfluenceExpanded    bool
+	behaviorGroupConditionExpanded    bool
+	behaviorGroupTemporalExpanded     bool
+	behaviorGroupClusterExpanded      bool
+	behaviorGroupMediationExpanded    bool
+	behaviorGroupMixedEffectsExpanded bool
+
+	// Trial table / pain residual config (subject-level)
+	trialTableFormat          int // 0=parquet, 1=tsv
+	trialTableIncludeFeatures bool
+	trialTableIncludeCovars   bool
+	trialTableIncludeEvents   bool
+	trialTableAddLagFeatures  bool
+	trialTableExtraEventCols  string
+	trialTableValidateEnabled bool
+	trialTableRatingMin       float64
+	trialTableRatingMax       float64
+	trialTableTempMin         float64
+	trialTableTempMax         float64
+	trialTableHighMissingFrac float64
+	featureSummariesEnabled   bool
+
+	painResidualEnabled                bool
+	painResidualMethod                 int // 0=spline, 1=poly
+	painResidualMinSamples             int
+	painResidualPolyDegree             int
+	painResidualModelCompareEnabled    bool
+	painResidualModelCompareMinSamples int
+	painResidualBreakpointEnabled      bool
+	painResidualBreakpointMinSamples   int
+	painResidualBreakpointCandidates   int
+	painResidualBreakpointQlow         float64
+	painResidualBreakpointQhigh        float64
+
+	// Confounds
+	confoundsAddAsCovariates  bool
+	confoundsMaxCovariates    int
+	confoundsQCColumnPatterns string
+
+	// Regression
+	regressionFeatureSet         int // 0=pain_summaries, 1=all
+	regressionOutcome            int // 0=rating, 1=pain_residual
+	regressionIncludeTemperature bool
+	regressionTempControl        int // 0=linear, 1=rating_hat
+	regressionIncludeTrialOrder  bool
+	regressionIncludePrev        bool
+	regressionIncludeRunBlock    bool
+	regressionIncludeInteraction bool
+	regressionStandardize        bool
+	regressionMinSamples         int
+	regressionPermutations       int
+	regressionMaxFeatures        int // 0 = no limit
+
+	// Models
+	modelsFeatureSet          int // 0=pain_summaries, 1=all
+	modelsIncludeTemperature  bool
+	modelsTempControl         int // 0=linear, 1=rating_hat
+	modelsIncludeTrialOrder   bool
+	modelsIncludePrev         bool
+	modelsIncludeRunBlock     bool
+	modelsIncludeInteraction  bool
+	modelsStandardize         bool
+	modelsMinSamples          int
+	modelsMaxFeatures         int
+	modelsOutcomeRating       bool
+	modelsOutcomePainResidual bool
+	modelsOutcomePainBinary   bool
+	modelsFamilyOLS           bool
+	modelsFamilyRobust        bool
+	modelsFamilyQuantile      bool
+	modelsFamilyLogit         bool
+	modelsBinaryOutcome       int // 0=pain_binary, 1=rating_median
+
+	// Stability
+	stabilityFeatureSet     int // 0=pain_summaries, 1=all
+	stabilityMethod         int // 0=spearman, 1=pearson
+	stabilityOutcome        int // 0=auto, 1=rating, 2=pain_residual
+	stabilityGroupColumn    int // 0=auto, 1=run, 2=block
+	stabilityPartialTemp    bool
+	stabilityMinGroupTrials int
+	stabilityMaxFeatures    int
+	stabilityAlpha          float64
+
+	// Consistency & influence
+	consistencyEnabled           bool
+	influenceFeatureSet          int // 0=pain_summaries, 1=all
+	influenceOutcomeRating       bool
+	influenceOutcomePainResidual bool
+	influenceMaxFeatures         int
+	influenceIncludeTemperature  bool
+	influenceTempControl         int // 0=linear, 1=rating_hat
+	influenceIncludeTrialOrder   bool
+	influenceIncludeRunBlock     bool
+	influenceIncludeInteraction  bool
+	influenceStandardize         bool
+	influenceCooksThreshold      float64 // 0 = default
+	influenceLeverageThreshold   float64 // 0 = default
+
+	// Pain sensitivity
+	painSensitivityMinTrials int
+
+	// Temporal
+	temporalResolutionMs int
+	temporalSmoothMs     int
+	temporalTimeMinMs    int
+	temporalTimeMaxMs    int
+
+	// Mixed effects (group-level; still configurable)
+	mixedEffectsType int // 0=intercept, 1=intercept_slope
+
+	// Mediation
+	mediationMinEffect float64
+
+	// Condition extras
+	conditionMinTrials int
+	conditionFailFast  bool
 	// Cluster-specific
 	clusterThreshold float64 // Forming threshold for clusters
 	clusterMinSize   int     // Minimum cluster size
@@ -466,7 +649,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	help := components.NewHelpOverlay("Wizard Shortcuts", 50)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
-		{Key: "←/→ or h/l", Description: "Switch computation (behavior)"},
+		{Key: "←/→ or h/l", Description: "Switch tab (behavior config)"},
 		{Key: "Tab", Description: "Next computation"},
 	})
 	help.AddSection("Selection", []components.HelpItem{
@@ -493,9 +676,22 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		spatialSelected:     make(map[int]bool),
 		helpOverlay:         help,
 		// Advanced config defaults (shared)
-		useDefaultAdvanced:   true,
-		expandedOption:       -1, // No option expanded initially
-		connectivityMeasures: make(map[int]bool),
+		useDefaultAdvanced:            true,
+		expandedOption:                expandedNone, // No option expanded initially
+		connectivityMeasures:          make(map[int]bool),
+		featGroupConnectivityExpanded: false,
+		featGroupPACExpanded:          false,
+		featGroupAperiodicExpanded:    false,
+		featGroupComplexityExpanded:   false,
+		featGroupBurstsExpanded:       false,
+		featGroupPowerExpanded:        false,
+		featGroupSpectralExpanded:     false,
+		featGroupERPExpanded:          false,
+		featGroupRatiosExpanded:       false,
+		featGroupAsymmetryExpanded:    false,
+		featGroupStorageExpanded:      true,
+		featGroupExecutionExpanded:    true,
+		featGroupValidationExpanded:   true,
 		// PAC/CFC defaults (from config)
 		pacPhaseMin:  4.0,
 		pacPhaseMax:  8.0,
@@ -503,6 +699,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		pacAmpMax:    80.0,
 		pacMethod:    0,
 		pacMinEpochs: 2,
+		pacPairsSpec: "theta:gamma,alpha:gamma",
 		// Aperiodic defaults
 		aperiodicFmin:      2.0,
 		aperiodicFmax:      40.0,
@@ -514,13 +711,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		complexityPEDelay: 1,
 		// ERP defaults
 		erpBaselineCorrection: true,
+		erpAllowNoBaseline:    false,
+		erpComponentsSpec:     "n1=0.10-0.20,n2=0.20-0.35,p2=0.35-0.50",
 		// Burst defaults
 		burstThresholdZ:  2.0,
 		burstMinDuration: 50,
+		burstBandsSpec:   "beta,gamma",
 		// Power defaults
-		powerBaselineMode: 0,
+		powerBaselineMode:    0,
+		powerRequireBaseline: true,
 		// Spectral defaults
 		spectralEdgePercentile: 0.95,
+		spectralRatioPairsSpec: "theta:beta,theta:alpha,alpha:beta,delta:alpha,delta:theta",
 		// Connectivity defaults
 		connOutputLevel:  0,
 		connGraphMetrics: true,
@@ -529,16 +731,119 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWindowStep:   0.5,
 		connAECMode:      0,
 		// Validation & Generic
-		minEpochsForFeatures: 10,
-		exportAllFeatures:    false,
+		minEpochsForFeatures:      10,
+		exportAllFeatures:         false,
+		failOnMissingWindows:      false,
+		failOnMissingNamedWindow:  true,
+		asymmetryChannelPairsSpec: "",
 		// Behavior defaults
-		correlationMethod:  "spearman",
-		bootstrapSamples:   1000,
-		nPermutations:      1000,
-		rngSeed:            0,
-		controlTemperature: true,
-		controlTrialOrder:  false,
-		fdrAlpha:           0.05,
+		correlationMethod:     "spearman",
+		robustCorrelation:     0,
+		bootstrapSamples:      1000,
+		nPermutations:         1000,
+		rngSeed:               0,
+		controlTemperature:    true,
+		controlTrialOrder:     true,
+		fdrAlpha:              0.05,
+		behaviorConfigSection: 0,
+		behaviorNJobs:         -1,
+		behaviorMinSamples:    10,
+
+		behaviorComputeChangeScores:  true,
+		behaviorComputeBayesFactors:  false,
+		behaviorComputeLosoStability: true,
+
+		trialTableFormat:          0,
+		trialTableIncludeFeatures: true,
+		trialTableIncludeCovars:   true,
+		trialTableIncludeEvents:   true,
+		trialTableAddLagFeatures:  true,
+		trialTableExtraEventCols:  "",
+		trialTableValidateEnabled: true,
+		trialTableRatingMin:       0.0,
+		trialTableRatingMax:       10.0,
+		trialTableTempMin:         25.0,
+		trialTableTempMax:         55.0,
+		trialTableHighMissingFrac: 0.5,
+		featureSummariesEnabled:   true,
+
+		painResidualEnabled:                true,
+		painResidualMethod:                 0,
+		painResidualMinSamples:             10,
+		painResidualPolyDegree:             2,
+		painResidualModelCompareEnabled:    true,
+		painResidualModelCompareMinSamples: 10,
+		painResidualBreakpointEnabled:      true,
+		painResidualBreakpointMinSamples:   12,
+		painResidualBreakpointCandidates:   15,
+		painResidualBreakpointQlow:         0.15,
+		painResidualBreakpointQhigh:        0.85,
+
+		confoundsAddAsCovariates:  false,
+		confoundsMaxCovariates:    3,
+		confoundsQCColumnPatterns: "^quality_.*_global_,^quality_.*_ch_",
+
+		regressionFeatureSet:         0,
+		regressionOutcome:            0,
+		regressionIncludeTemperature: true,
+		regressionTempControl:        0,
+		regressionIncludeTrialOrder:  true,
+		regressionIncludePrev:        false,
+		regressionIncludeRunBlock:    true,
+		regressionIncludeInteraction: true,
+		regressionStandardize:        true,
+		regressionMinSamples:         15,
+		regressionPermutations:       0,
+		regressionMaxFeatures:        0,
+
+		modelsFeatureSet:          0,
+		modelsIncludeTemperature:  true,
+		modelsTempControl:         0,
+		modelsIncludeTrialOrder:   true,
+		modelsIncludePrev:         false,
+		modelsIncludeRunBlock:     true,
+		modelsIncludeInteraction:  true,
+		modelsStandardize:         true,
+		modelsMinSamples:          20,
+		modelsMaxFeatures:         100,
+		modelsOutcomeRating:       true,
+		modelsOutcomePainResidual: true,
+		modelsOutcomePainBinary:   false,
+		modelsFamilyOLS:           true,
+		modelsFamilyRobust:        true,
+		modelsFamilyQuantile:      true,
+		modelsFamilyLogit:         true,
+		modelsBinaryOutcome:       0,
+
+		stabilityFeatureSet:     0,
+		stabilityMethod:         0,
+		stabilityOutcome:        0,
+		stabilityGroupColumn:    0,
+		stabilityPartialTemp:    true,
+		stabilityMinGroupTrials: 8,
+		stabilityMaxFeatures:    50,
+		stabilityAlpha:          0.05,
+
+		consistencyEnabled:           true,
+		influenceFeatureSet:          0,
+		influenceOutcomeRating:       true,
+		influenceOutcomePainResidual: true,
+		influenceMaxFeatures:         20,
+		influenceIncludeTemperature:  true,
+		influenceTempControl:         0,
+		influenceIncludeTrialOrder:   true,
+		influenceIncludeRunBlock:     true,
+		influenceIncludeInteraction:  false,
+		influenceStandardize:         true,
+		influenceCooksThreshold:      0.0,
+		influenceLeverageThreshold:   0.0,
+		painSensitivityMinTrials:     10,
+		temporalResolutionMs:         50,
+		temporalSmoothMs:             100,
+		temporalTimeMinMs:            -200,
+		temporalTimeMaxMs:            1000,
+		mixedEffectsType:             0,
+		mediationMinEffect:           0.05,
 		// Cluster defaults
 		clusterThreshold: 0.05,
 		clusterMinSize:   2,
@@ -550,6 +855,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mixedMaxFeatures: 50,
 		// Condition defaults
 		conditionEffectThreshold: 0.5,
+		conditionMinTrials:       10,
+		conditionFailFast:        true,
 		// Decoding defaults
 		decodingNPerm: 0,
 		innerSplits:   3,
@@ -645,8 +952,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"Compute EEG-behavior correlations",
 		}
 		m.computations = behaviorComputations
-		for i := range behaviorComputations {
-			m.computationSelected[i] = true
+		defaultComps := map[string]bool{
+			"trial_table":      true,
+			"confounds":        true,
+			"stability":        true,
+			"consistency":      true,
+			"influence":        true,
+			"correlations":     true,
+			"pain_sensitivity": true,
+			"condition":        true,
+			"temporal":         true,
+		}
+		for i, c := range behaviorComputations {
+			m.computationSelected[i] = defaultComps[c.Key]
 		}
 		// Initialize feature file selection
 		m.featureFiles = featureFileOptions
@@ -1011,14 +1329,106 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.CurrentStep == types.StepSelectPlots {
 			m.UpdatePlotOffset()
 		}
+		if m.CurrentStep == types.StepAdvancedConfig {
+			m.UpdateAdvancedOffset()
+		}
 	}
 
 	// Always update plot offset if in that step to ensure it's in sync
 	if m.CurrentStep == types.StepSelectPlots {
 		m.UpdatePlotOffset()
 	}
+	if m.CurrentStep == types.StepAdvancedConfig {
+		m.UpdateAdvancedOffset()
+	}
 
 	return m, nil
+}
+
+// UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
+func (m *Model) UpdateAdvancedOffset() {
+	if m.height <= 0 {
+		m.advancedOffset = 0
+		return
+	}
+	if m.Pipeline == types.PipelineFeatures && m.useDefaultAdvanced {
+		m.advancedOffset = 0
+		return
+	}
+
+	// Total height minus overhead (approx; reduced for more visible content).
+	// Must match values used in render_steps.go for consistency.
+	maxLines := m.height - 12
+	if m.Pipeline == types.PipelineFeatures {
+		maxLines = m.height - 10
+	} else if m.Pipeline == types.PipelineBehavior {
+		maxLines = m.height - 12
+	}
+	if maxLines < 8 {
+		maxLines = 8
+	}
+
+	totalLines := 0
+	cursorLine := 0
+
+	switch m.Pipeline {
+	case types.PipelineBehavior:
+		options := m.getBehaviorOptions()
+		totalLines = len(options)
+		cursorLine = m.advancedCursor
+
+	case types.PipelineFeatures:
+		options := m.getFeaturesOptions()
+		totalLines = len(options)
+		cursorLine = m.advancedCursor
+
+		if m.expandedOption == expandedConnectivityMeasures {
+			expandedIdx := -1
+			for i, opt := range options {
+				if opt == optConnectivity {
+					expandedIdx = i
+					break
+				}
+			}
+			if expandedIdx >= 0 {
+				totalLines += len(connectivityMeasures)
+				cursorLine = expandedIdx + 1 + m.subCursor
+			}
+		}
+
+	default:
+		totalLines = 0
+		cursorLine = 0
+	}
+
+	if totalLines <= 0 {
+		m.advancedOffset = 0
+		return
+	}
+	if cursorLine < 0 {
+		cursorLine = 0
+	}
+	if cursorLine >= totalLines {
+		cursorLine = totalLines - 1
+	}
+
+	maxOffset := totalLines - maxLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	if cursorLine < m.advancedOffset {
+		m.advancedOffset = cursorLine
+	} else if cursorLine >= m.advancedOffset+maxLines {
+		m.advancedOffset = cursorLine - maxLines + 1
+	}
+
+	if m.advancedOffset < 0 {
+		m.advancedOffset = 0
+	}
+	if m.advancedOffset > maxOffset {
+		m.advancedOffset = maxOffset
+	}
 }
 
 // UpdatePlotOffset calculates and updates the scrolling offset for the plots list
@@ -1220,6 +1630,20 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.mergeEventPrefixes
 	case textFieldMergeEventTypes:
 		return m.mergeEventTypes
+	case textFieldTrialTableExtraEventColumns:
+		return m.trialTableExtraEventCols
+	case textFieldConfoundsQCColumnPatterns:
+		return m.confoundsQCColumnPatterns
+	case textFieldPACPairs:
+		return m.pacPairsSpec
+	case textFieldBurstBands:
+		return m.burstBandsSpec
+	case textFieldSpectralRatioPairs:
+		return m.spectralRatioPairsSpec
+	case textFieldAsymmetryChannelPairs:
+		return m.asymmetryChannelPairsSpec
+	case textFieldERPComponents:
+		return m.erpComponentsSpec
 	default:
 		return ""
 	}
@@ -1281,6 +1705,26 @@ func titleCase(value string) string {
 	return strings.ToUpper(value[:1]) + value[1:]
 }
 
+func (m Model) behaviorSections() []behaviorSection {
+	return []behaviorSection{
+		{Key: "general", Label: "General", Enabled: true},
+		{Key: "trial_table", Label: "Trial Table", Enabled: m.isComputationSelected("trial_table")},
+		{Key: "correlations", Label: "Correlations", Enabled: m.isComputationSelected("correlations")},
+		{Key: "pain_sensitivity", Label: "Pain Sensitivity", Enabled: m.isComputationSelected("pain_sensitivity")},
+		{Key: "confounds", Label: "Confounds", Enabled: m.isComputationSelected("confounds")},
+		{Key: "regression", Label: "Regression", Enabled: m.isComputationSelected("regression")},
+		{Key: "models", Label: "Models", Enabled: m.isComputationSelected("models")},
+		{Key: "stability", Label: "Stability", Enabled: m.isComputationSelected("stability")},
+		{Key: "consistency", Label: "Consistency", Enabled: m.isComputationSelected("consistency")},
+		{Key: "influence", Label: "Influence", Enabled: m.isComputationSelected("influence")},
+		{Key: "condition", Label: "Condition", Enabled: m.isComputationSelected("condition")},
+		{Key: "temporal", Label: "Temporal", Enabled: m.isComputationSelected("temporal")},
+		{Key: "cluster", Label: "Cluster", Enabled: m.isComputationSelected("cluster")},
+		{Key: "mediation", Label: "Mediation", Enabled: m.isComputationSelected("mediation")},
+		{Key: "mixed_effects", Label: "Mixed Effects", Enabled: m.isComputationSelected("mixed_effects")},
+	}
+}
+
 func (m *Model) setTextFieldValue(field textField, value string) {
 	value = strings.TrimSpace(value)
 	switch field {
@@ -1300,6 +1744,20 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.mergeEventPrefixes = value
 	case textFieldMergeEventTypes:
 		m.mergeEventTypes = value
+	case textFieldTrialTableExtraEventColumns:
+		m.trialTableExtraEventCols = value
+	case textFieldConfoundsQCColumnPatterns:
+		m.confoundsQCColumnPatterns = value
+	case textFieldPACPairs:
+		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldBurstBands:
+		m.burstBandsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldSpectralRatioPairs:
+		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldAsymmetryChannelPairs:
+		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldERPComponents:
+		m.erpComponentsSpec = strings.Join(strings.Fields(value), "")
 	}
 }
 
@@ -1312,6 +1770,36 @@ type optionType int
 const (
 	// Feature Pipeline Advanced Options
 	optUseDefaults optionType = iota
+	// Features section headers (expand/collapse)
+	optFeatGroupConnectivity
+	optFeatGroupPAC
+	optFeatGroupAperiodic
+	optFeatGroupComplexity
+	optFeatGroupBursts
+	optFeatGroupPower
+	optFeatGroupSpectral
+	optFeatGroupERP
+	optFeatGroupRatios
+	optFeatGroupAsymmetry
+	optFeatGroupStorage
+	optFeatGroupExecution
+	optFeatGroupValidation
+	// Behavior section headers (expand/collapse)
+	optBehaviorGroupGeneral
+	optBehaviorGroupTrialTable
+	optBehaviorGroupCorrelations
+	optBehaviorGroupPainSens
+	optBehaviorGroupConfounds
+	optBehaviorGroupRegression
+	optBehaviorGroupModels
+	optBehaviorGroupStability
+	optBehaviorGroupConsistency
+	optBehaviorGroupInfluence
+	optBehaviorGroupCondition
+	optBehaviorGroupTemporal
+	optBehaviorGroupCluster
+	optBehaviorGroupMediation
+	optBehaviorGroupMixedEffects
 	optMicrostateStates
 	optGroupTemplates
 	optFixedTemplates
@@ -1320,6 +1808,7 @@ const (
 	optPACAmpRange
 	optPACMethod
 	optPACMinEpochs
+	optPACPairs
 	optAperiodicRange
 	optAperiodicPeakZ
 	optAperiodicMinR2
@@ -1328,10 +1817,16 @@ const (
 	optPEDelay
 	optBurstPercentile
 	optERPBaseline
+	optERPAllowNoBaseline
+	optERPComponents
 	optBurstThreshold
 	optBurstMinDuration
+	optBurstBands
 	optPowerBaselineMode
+	optPowerRequireBaseline
 	optSpectralEdge
+	optSpectralRatioPairs
+	optAsymmetryChannelPairs
 	optConnOutputLevel
 	optConnGraphMetrics
 	optConnGraphProp
@@ -1340,6 +1835,8 @@ const (
 	optConnAECMode
 	optMinEpochs
 	optExportAll
+	optFailOnMissingWindows
+	optFailOnMissingNamedWindow
 	// Behavior options - General
 	optCorrMethod
 	optBootstrap
@@ -1359,6 +1856,108 @@ const (
 	optMixedMaxFeatures
 	// Behavior options - Condition
 	optConditionEffectThreshold
+	optConditionMinTrials
+	optConditionFailFast
+	// Behavior options - Trial table / residual
+	optTrialTableFormat
+	optTrialTableIncludeFeatures
+	optTrialTableIncludeCovars
+	optTrialTableIncludeEvents
+	optTrialTableAddLagFeatures
+	optTrialTableExtraEventCols
+	optTrialTableValidate
+	optTrialTableRatingMin
+	optTrialTableRatingMax
+	optTrialTableTempMin
+	optTrialTableTempMax
+	optTrialTableHighMissingFrac
+	optFeatureSummariesEnabled
+	optPainResidualEnabled
+	optPainResidualMethod
+	optPainResidualMinSamples
+	optPainResidualPolyDegree
+	optPainResidualModelCompare
+	optPainResidualModelCompareMinSamples
+	optPainResidualBreakpoint
+	optPainResidualBreakpointMinSamples
+	optPainResidualBreakpointCandidates
+	optPainResidualBreakpointQlow
+	optPainResidualBreakpointQhigh
+	// Behavior options - General extra
+	optRobustCorrelation
+	optBehaviorNJobs
+	optBehaviorMinSamples
+	optComputeChangeScores
+	optComputeBayesFactors
+	optComputeLosoStability
+	// Behavior options - Confounds
+	optConfoundsAddAsCovariates
+	optConfoundsMaxCovariates
+	optConfoundsQCColumnPatterns
+	// Behavior options - Regression
+	optRegressionFeatureSet
+	optRegressionOutcome
+	optRegressionIncludeTemperature
+	optRegressionTempControl
+	optRegressionIncludeTrialOrder
+	optRegressionIncludePrev
+	optRegressionIncludeRunBlock
+	optRegressionIncludeInteraction
+	optRegressionStandardize
+	optRegressionMinSamples
+	optRegressionPermutations
+	optRegressionMaxFeatures
+	// Behavior options - Models
+	optModelsFeatureSet
+	optModelsIncludeTemperature
+	optModelsTempControl
+	optModelsIncludeTrialOrder
+	optModelsIncludePrev
+	optModelsIncludeRunBlock
+	optModelsIncludeInteraction
+	optModelsStandardize
+	optModelsMinSamples
+	optModelsMaxFeatures
+	optModelsOutcomeRating
+	optModelsOutcomePainResidual
+	optModelsOutcomePainBinary
+	optModelsFamilyOLS
+	optModelsFamilyRobust
+	optModelsFamilyQuantile
+	optModelsFamilyLogit
+	optModelsBinaryOutcome
+	// Behavior options - Stability
+	optStabilityFeatureSet
+	optStabilityMethod
+	optStabilityOutcome
+	optStabilityGroupColumn
+	optStabilityPartialTemp
+	optStabilityMinGroupTrials
+	optStabilityMaxFeatures
+	optStabilityAlpha
+	// Behavior options - Consistency / Influence
+	optConsistencyEnabled
+	optInfluenceFeatureSet
+	optInfluenceOutcomeRating
+	optInfluenceOutcomePainResidual
+	optInfluenceMaxFeatures
+	optInfluenceIncludeTemperature
+	optInfluenceTempControl
+	optInfluenceIncludeTrialOrder
+	optInfluenceIncludeRunBlock
+	optInfluenceIncludeInteraction
+	optInfluenceStandardize
+	optInfluenceCooksThreshold
+	optInfluenceLeverageThreshold
+	// Behavior options - Pain sensitivity / temporal
+	optPainSensitivityMinTrials
+	optTemporalResolutionMs
+	optTemporalTimeMinMs
+	optTemporalTimeMaxMs
+	optTemporalSmoothMs
+	// Behavior options - Mixed effects / mediation
+	optMixedEffectsType
+	optMediationMinEffect
 	// Plotting options
 	optPlotPNG
 	optPlotSVG
@@ -1396,41 +1995,92 @@ const (
 	optMergeEventTypes
 )
 
+const (
+	expandedNone                 = -1
+	expandedConnectivityMeasures = 0
+)
+
 // getFeaturesOptions returns the active advanced options for the features pipeline
 func (m Model) getFeaturesOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
 
 	if m.isCategorySelected("connectivity") {
-		options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnGraphProp, optConnWindowLen, optConnWindowStep, optConnAECMode)
+		options = append(options, optFeatGroupConnectivity)
+		if m.featGroupConnectivityExpanded {
+			options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnGraphProp, optConnWindowLen, optConnWindowStep, optConnAECMode)
+		}
 	}
 
 	if m.isCategorySelected("pac") {
-		options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs)
+		options = append(options, optFeatGroupPAC)
+		if m.featGroupPACExpanded {
+			options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs, optPACPairs)
+		}
 	}
 	if m.isCategorySelected("aperiodic") {
-		options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints)
+		options = append(options, optFeatGroupAperiodic)
+		if m.featGroupAperiodicExpanded {
+			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints)
+		}
 	}
 	if m.isCategorySelected("complexity") {
-		options = append(options, optPEOrder, optPEDelay)
+		options = append(options, optFeatGroupComplexity)
+		if m.featGroupComplexityExpanded {
+			options = append(options, optPEOrder, optPEDelay)
+		}
 	}
 	if m.isCategorySelected("erp") {
-		options = append(options, optERPBaseline)
+		options = append(options, optFeatGroupERP)
+		if m.featGroupERPExpanded {
+			options = append(options, optERPBaseline, optERPAllowNoBaseline, optERPComponents)
+		}
 	}
 	if m.isCategorySelected("bursts") {
-		options = append(options, optBurstThreshold, optBurstMinDuration)
+		options = append(options, optFeatGroupBursts)
+		if m.featGroupBurstsExpanded {
+			options = append(options, optBurstThreshold, optBurstMinDuration, optBurstBands)
+		}
 	}
 	if m.isCategorySelected("power") {
-		options = append(options, optPowerBaselineMode)
+		options = append(options, optFeatGroupPower)
+		if m.featGroupPowerExpanded {
+			options = append(options, optPowerRequireBaseline, optPowerBaselineMode)
+		}
 	}
 	if m.isCategorySelected("spectral") {
-		options = append(options, optSpectralEdge)
+		options = append(options, optFeatGroupSpectral)
+		if m.featGroupSpectralExpanded {
+			options = append(options, optSpectralEdge)
+		}
+	}
+	if m.isCategorySelected("ratios") {
+		options = append(options, optFeatGroupRatios)
+		if m.featGroupRatiosExpanded {
+			options = append(options, optSpectralRatioPairs)
+		}
+	}
+	if m.isCategorySelected("asymmetry") {
+		options = append(options, optFeatGroupAsymmetry)
+		if m.featGroupAsymmetryExpanded {
+			options = append(options, optAsymmetryChannelPairs)
+		}
 	}
 
-	options = append(options,
-		optExportAll,
-		optMinEpochs,
-	)
+	options = append(options, optFeatGroupStorage)
+	if m.featGroupStorageExpanded {
+		options = append(options, optExportAll)
+	}
+
+	options = append(options, optFeatGroupExecution)
+	if m.featGroupExecutionExpanded {
+		options = append(options, optMinEpochs)
+	}
+
+	options = append(options, optFeatGroupValidation)
+	if m.featGroupValidationExpanded {
+		options = append(options, optFailOnMissingWindows, optFailOnMissingNamedWindow)
+	}
 
 	return options
 }
@@ -1479,35 +2129,216 @@ func (m Model) getMergeBehaviorOptions() []optionType {
 }
 
 func (m Model) getBehaviorOptions() []optionType {
-	options := []optionType{
-		optUseDefaults,
-		optCorrMethod,
-		optBootstrap,
-		optNPerm,
-		optRNGSeed,
-		optControlTemp,
-		optControlOrder,
-		optFDRAlpha,
+	var options []optionType
+	options = append(options, optUseDefaults)
+
+	// General section - always visible
+	options = append(options, optBehaviorGroupGeneral)
+	if m.behaviorGroupGeneralExpanded {
+		options = append(options,
+			optCorrMethod,
+			optRobustCorrelation,
+			optBootstrap,
+			optNPerm,
+			optRNGSeed,
+			optBehaviorNJobs,
+			optBehaviorMinSamples,
+			optControlTemp,
+			optControlOrder,
+			optFDRAlpha,
+			optComputeChangeScores,
+			optComputeLosoStability,
+			optComputeBayesFactors,
+		)
 	}
 
-	// Add cluster options if cluster computation is selected
-	if m.isComputationSelected("cluster") {
-		options = append(options, optClusterThreshold, optClusterMinSize, optClusterTail)
+	// Trial table section - only show if trial_table computation is selected
+	if m.isComputationSelected("trial_table") {
+		options = append(options, optBehaviorGroupTrialTable)
+		if m.behaviorGroupTrialTableExpanded {
+			options = append(options,
+				optTrialTableFormat,
+				optTrialTableIncludeFeatures,
+				optTrialTableIncludeCovars,
+				optTrialTableIncludeEvents,
+				optTrialTableAddLagFeatures,
+				optTrialTableExtraEventCols,
+				optTrialTableValidate,
+				optTrialTableRatingMin,
+				optTrialTableRatingMax,
+				optTrialTableTempMin,
+				optTrialTableTempMax,
+				optTrialTableHighMissingFrac,
+				optFeatureSummariesEnabled,
+				optPainResidualEnabled,
+				optPainResidualMethod,
+				optPainResidualMinSamples,
+				optPainResidualPolyDegree,
+				optPainResidualModelCompare,
+				optPainResidualModelCompareMinSamples,
+				optPainResidualBreakpoint,
+				optPainResidualBreakpointMinSamples,
+				optPainResidualBreakpointCandidates,
+				optPainResidualBreakpointQlow,
+				optPainResidualBreakpointQhigh,
+			)
+		}
 	}
 
-	// Add mediation options if mediation computation is selected
-	if m.isComputationSelected("mediation") {
-		options = append(options, optMediationBootstrap, optMediationMaxMediators)
+	// Correlations section
+	if m.isComputationSelected("correlations") {
+		options = append(options, optBehaviorGroupCorrelations)
+		// Correlations currently uses General settings
 	}
 
-	// Add mixed effects options if mixed_effects computation is selected
-	if m.isComputationSelected("mixed_effects") {
-		options = append(options, optMixedMaxFeatures)
+	// Pain sensitivity section
+	if m.isComputationSelected("pain_sensitivity") {
+		options = append(options, optBehaviorGroupPainSens)
+		if m.behaviorGroupPainSensExpanded {
+			options = append(options, optPainSensitivityMinTrials)
+		}
 	}
 
-	// Add condition options if condition computation is selected
+	// Confounds section
+	if m.isComputationSelected("confounds") {
+		options = append(options, optBehaviorGroupConfounds)
+		if m.behaviorGroupConfoundsExpanded {
+			options = append(options, optConfoundsAddAsCovariates, optConfoundsMaxCovariates, optConfoundsQCColumnPatterns)
+		}
+	}
+
+	// Regression section
+	if m.isComputationSelected("regression") {
+		options = append(options, optBehaviorGroupRegression)
+		if m.behaviorGroupRegressionExpanded {
+			options = append(options,
+				optRegressionFeatureSet,
+				optRegressionOutcome,
+				optRegressionIncludeTemperature,
+				optRegressionTempControl,
+				optRegressionIncludeTrialOrder,
+				optRegressionIncludePrev,
+				optRegressionIncludeRunBlock,
+				optRegressionIncludeInteraction,
+				optRegressionStandardize,
+				optRegressionMinSamples,
+				optRegressionPermutations,
+				optRegressionMaxFeatures,
+			)
+		}
+	}
+
+	// Models section
+	if m.isComputationSelected("models") {
+		options = append(options, optBehaviorGroupModels)
+		if m.behaviorGroupModelsExpanded {
+			options = append(options,
+				optModelsFeatureSet,
+				optModelsIncludeTemperature,
+				optModelsTempControl,
+				optModelsIncludeTrialOrder,
+				optModelsIncludePrev,
+				optModelsIncludeRunBlock,
+				optModelsIncludeInteraction,
+				optModelsStandardize,
+				optModelsMinSamples,
+				optModelsMaxFeatures,
+				optModelsOutcomeRating,
+				optModelsOutcomePainResidual,
+				optModelsOutcomePainBinary,
+				optModelsFamilyOLS,
+				optModelsFamilyRobust,
+				optModelsFamilyQuantile,
+				optModelsFamilyLogit,
+				optModelsBinaryOutcome,
+			)
+		}
+	}
+
+	// Stability section
+	if m.isComputationSelected("stability") {
+		options = append(options, optBehaviorGroupStability)
+		if m.behaviorGroupStabilityExpanded {
+			options = append(options,
+				optStabilityFeatureSet,
+				optStabilityMethod,
+				optStabilityOutcome,
+				optStabilityGroupColumn,
+				optStabilityPartialTemp,
+				optStabilityMinGroupTrials,
+				optStabilityMaxFeatures,
+				optStabilityAlpha,
+			)
+		}
+	}
+
+	// Consistency section
+	if m.isComputationSelected("consistency") {
+		options = append(options, optBehaviorGroupConsistency)
+		if m.behaviorGroupConsistencyExpanded {
+			options = append(options, optConsistencyEnabled)
+		}
+	}
+
+	// Influence section
+	if m.isComputationSelected("influence") {
+		options = append(options, optBehaviorGroupInfluence)
+		if m.behaviorGroupInfluenceExpanded {
+			options = append(options,
+				optInfluenceFeatureSet,
+				optInfluenceOutcomeRating,
+				optInfluenceOutcomePainResidual,
+				optInfluenceMaxFeatures,
+				optInfluenceIncludeTemperature,
+				optInfluenceTempControl,
+				optInfluenceIncludeTrialOrder,
+				optInfluenceIncludeRunBlock,
+				optInfluenceIncludeInteraction,
+				optInfluenceStandardize,
+				optInfluenceCooksThreshold,
+				optInfluenceLeverageThreshold,
+			)
+		}
+	}
+
+	// Condition section
 	if m.isComputationSelected("condition") {
-		options = append(options, optConditionEffectThreshold)
+		options = append(options, optBehaviorGroupCondition)
+		if m.behaviorGroupConditionExpanded {
+			options = append(options, optConditionFailFast, optConditionEffectThreshold, optConditionMinTrials)
+		}
+	}
+
+	// Temporal section
+	if m.isComputationSelected("temporal") {
+		options = append(options, optBehaviorGroupTemporal)
+		if m.behaviorGroupTemporalExpanded {
+			options = append(options, optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs)
+		}
+	}
+
+	// Cluster section
+	if m.isComputationSelected("cluster") {
+		options = append(options, optBehaviorGroupCluster)
+		if m.behaviorGroupClusterExpanded {
+			options = append(options, optClusterThreshold, optClusterMinSize, optClusterTail)
+		}
+	}
+
+	// Mediation section
+	if m.isComputationSelected("mediation") {
+		options = append(options, optBehaviorGroupMediation)
+		if m.behaviorGroupMediationExpanded {
+			options = append(options, optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators)
+		}
+	}
+
+	// Mixed effects section
+	if m.isComputationSelected("mixed_effects") {
+		options = append(options, optBehaviorGroupMixedEffects)
+		if m.behaviorGroupMixedEffectsExpanded {
+			options = append(options, optMixedEffectsType, optMixedMaxFeatures)
+		}
 	}
 
 	return options

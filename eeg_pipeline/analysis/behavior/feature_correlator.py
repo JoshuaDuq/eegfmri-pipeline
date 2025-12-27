@@ -1021,7 +1021,8 @@ class FeatureBehaviorCorrelator:
         if corr_config is None:
             corr_config = self.default_corr_config
 
-        all_records = []
+        rating_records: List[Dict[str, Any]] = []
+        temperature_records: List[Dict[str, Any]] = []
         metadata = {"n_feature_types": len(self._feature_dfs)}
         method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
 
@@ -1034,7 +1035,7 @@ class FeatureBehaviorCorrelator:
                 metadata[f"{name}_n_total"] = result.n_total or result.n_features
                 metadata[f"{name}_n_dropped"] = result.n_dropped
                 metadata[f"{name}_n_significant"] = result.n_significant
-                all_records.extend(result.records)
+                rating_records.extend(result.records)
             
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
@@ -1045,30 +1046,63 @@ class FeatureBehaviorCorrelator:
         if temperature_series is not None and len(temperature_series.dropna()) > min_samples_default:
             temp_results = self.correlate_all(temperature_series, "temperature", corr_config)
             self.save_results(temp_results, "temperature", method_label=method_label)
+
+            for name, result in temp_results.items():
+                metadata[f"{name}_n_features_temperature"] = result.n_features
+                metadata[f"{name}_n_total_temperature"] = result.n_total or result.n_features
+                metadata[f"{name}_n_dropped_temperature"] = result.n_dropped
+                metadata[f"{name}_n_significant_temperature"] = result.n_significant
+                temperature_records.extend(result.records)
             
             if "power" in self._feature_dfs:
                 self.compute_roi_correlations(
                     self._feature_dfs["power"], temperature_series, "temp", corr_config
                 )
 
-        combined_df = pd.DataFrame(all_records) if all_records else pd.DataFrame()
-        if not combined_df.empty:
+        method_suffix = f"_{method_label}" if method_label else ""
+        combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
+        if not combined_rating_df.empty:
             if corr_config.apply_fdr:
-                if "p_primary_perm" in combined_df.columns and combined_df["p_primary_perm"].notna().any():
-                    p_for_fdr = pd.to_numeric(combined_df["p_primary_perm"], errors="coerce").to_numpy()
+                if (
+                    "p_primary_perm" in combined_rating_df.columns
+                    and combined_rating_df["p_primary_perm"].notna().any()
+                ):
+                    p_for_fdr = pd.to_numeric(combined_rating_df["p_primary_perm"], errors="coerce").to_numpy()
                 else:
-                    p_for_fdr = pd.to_numeric(combined_df["p_primary"], errors="coerce").to_numpy()
-                combined_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
-            method_suffix = f"_{method_label}" if method_label else ""
+                    p_for_fdr = pd.to_numeric(combined_rating_df["p_primary"], errors="coerce").to_numpy()
+                combined_rating_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
             combined_path = self.stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
-            save_correlation_results(combined_df, combined_path)
+            save_correlation_results(combined_rating_df, combined_path)
+
+        combined_temperature_df = pd.DataFrame(temperature_records) if temperature_records else pd.DataFrame()
+        if not combined_temperature_df.empty:
+            if corr_config.apply_fdr:
+                if (
+                    "p_primary_perm" in combined_temperature_df.columns
+                    and combined_temperature_df["p_primary_perm"].notna().any()
+                ):
+                    p_for_fdr = pd.to_numeric(combined_temperature_df["p_primary_perm"], errors="coerce").to_numpy()
+                else:
+                    p_for_fdr = pd.to_numeric(combined_temperature_df["p_primary"], errors="coerce").to_numpy()
+                combined_temperature_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
+            combined_path = self.stats_dir / f"corr_stats_all_features_vs_temperature{method_suffix}.tsv"
+            save_correlation_results(combined_temperature_df, combined_path)
 
         alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
-        n_sig = sum(1 for r in all_records if r.get("p", 1) < alpha)
+        n_sig = sum(1 for r in rating_records if r.get("p", 1) < alpha)
         self.logger.info(
-            f"Complete: {len(all_records)} correlations, {n_sig} significant "
+            f"Complete (rating): {len(rating_records)} correlations, {n_sig} significant "
             f"(alpha={alpha})"
         )
+
+        if temperature_records:
+            n_sig_temp = sum(1 for r in temperature_records if r.get("p", 1) < alpha)
+            self.logger.info(
+                f"Complete (temperature): {len(temperature_records)} correlations, {n_sig_temp} significant "
+                f"(alpha={alpha})"
+            )
+
+        combined_df = pd.DataFrame([*rating_records, *temperature_records]) if (rating_records or temperature_records) else pd.DataFrame()
 
         return ComputationResult(
             name="feature_correlator",

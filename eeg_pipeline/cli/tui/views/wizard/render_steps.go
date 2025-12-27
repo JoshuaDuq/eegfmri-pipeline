@@ -149,15 +149,26 @@ func (m Model) renderComputationSelection() string {
 
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
-	title := " FEATURE CATEGORIES "
+
+	// Section title with animated accent
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	title := "FEATURE CATEGORIES"
 	if m.CurrentStep == types.StepSelectPlotCategories {
-		title = " PLOT CATEGORIES "
+		title = "PLOT CATEGORIES"
 	}
-	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" "+title) + "\n\n")
 
 	if m.CurrentStep == types.StepSelectPlotCategories {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  Toggle a category to include or exclude all plots in that group.\n\n",
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2).Render(
+			"Toggle a category to include or exclude all plots in that group.\n\n",
 		))
 	}
 
@@ -236,7 +247,18 @@ func (m Model) renderCategorySelection() string {
 
 func (m Model) renderBandSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" FREQUENCY BANDS ") + "\n\n")
+
+	// Section title with animated accent
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" FREQUENCY BANDS") + "\n\n")
 
 	count := 0
 	for _, sel := range m.bandSelected {
@@ -761,7 +783,18 @@ func (m Model) renderTimeRange() string {
 
 func (m Model) renderSubjectSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" SUBJECT SELECTION ") + "\n\n")
+
+	// Section title with animated accent
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" SUBJECT SELECTION") + "\n\n")
 
 	if m.subjectsLoading {
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -1233,53 +1266,59 @@ func (m Model) renderAdvancedConfig() string {
 
 func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
-	// Default mode toggle (Cursor 0)
-	expandIcon := "▶"
-	expandHint := "Press Space to customize"
-	if !m.useDefaultAdvanced {
-		expandIcon = "▼"
-		expandHint = "Press Space to use defaults"
-	}
+	// Section title with animated accent
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" ADVANCED CONFIGURATION") + "\n\n")
 
-	defaultStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(20)
-	toggleStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	cursor := "  "
-	if m.advancedCursor == 0 && m.expandedOption < 0 {
-		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
-		defaultStyle = defaultStyle.Foreground(styles.Primary).Bold(true)
-	}
-
-	b.WriteString(cursor + toggleStyle.Render(expandIcon) + " " + defaultStyle.Render("Configuration"))
-	if m.useDefaultAdvanced {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("Using Defaults"))
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  — " + expandHint))
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("Custom"))
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  — " + expandHint))
-	}
-	b.WriteString("\n\n")
+	// Contextual help text
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
-		summaryStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).MarginLeft(4)
-		b.WriteString(summaryStyle.Render("Default configuration will be used for all parameters.") + "\n")
-		b.WriteString(summaryStyle.Render("Select 'Customize' to modify individual settings.") + "\n")
+		b.WriteString(infoStyle.Render("Default configuration will be used for all feature parameters.") + "\n")
+		b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
+
+		labelWidth := 22
+		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+		isFocused := m.advancedCursor == 0
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		if isFocused {
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+		}
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+
+		tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
+		b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
 		return b.String()
 	}
 
-	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("  Type a number, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
 	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("  Press Space to toggle item, Esc to close.") + "\n\n")
+		b.WriteString(infoStyle.Render("Space to toggle item · Esc to close submenu") + "\n\n")
 	} else {
-		b.WriteString(infoStyle.Render("  Press Space to toggle/expand, Enter to proceed.") + "\n\n")
+		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
 	}
 
-	labelWidth := 20
+	labelWidth := 22
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
 
 	// Prepare values for display
 	peOrderVal := fmt.Sprintf("%d", m.complexityPEOrder)
@@ -1287,8 +1326,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	burstThreshVal := fmt.Sprintf("%.1f z", m.burstThresholdZ)
 	burstMinDurVal := fmt.Sprintf("%d ms", m.burstMinDuration)
 	erpBaselineVal := m.boolToOnOff(m.erpBaselineCorrection)
+	erpAllowNoBaselineVal := m.boolToOnOff(m.erpAllowNoBaseline)
+	erpComponentsVal := m.erpComponentsSpec
+	if strings.TrimSpace(erpComponentsVal) == "" {
+		erpComponentsVal = "(default)"
+	}
 	powerBaselineVal := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}[m.powerBaselineMode]
+	powerRequireBaselineVal := m.boolToOnOff(m.powerRequireBaseline)
 	spectralEdgeVal := fmt.Sprintf("%.0f%%", m.spectralEdgePercentile*100)
+	spectralRatioPairsVal := m.spectralRatioPairsSpec
+	if strings.TrimSpace(spectralRatioPairsVal) == "" {
+		spectralRatioPairsVal = "(default)"
+	}
 	connOutputVal := []string{"full", "global_only"}[m.connOutputLevel]
 	connGraphVal := m.boolToOnOff(m.connGraphMetrics)
 	connGraphPropVal := fmt.Sprintf("%.2f", m.connGraphProp)
@@ -1299,11 +1348,25 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	pacAmpVal := fmt.Sprintf("%.1f-%.1f Hz", m.pacAmpMin, m.pacAmpMax)
 	pacMethodVal := []string{"mvl", "kl", "tort", "ozkurt"}[m.pacMethod]
 	pacMinEpochsVal := fmt.Sprintf("%d", m.pacMinEpochs)
+	pacPairsVal := m.pacPairsSpec
+	if strings.TrimSpace(pacPairsVal) == "" {
+		pacPairsVal = "(default)"
+	}
+	burstBandsVal := m.burstBandsSpec
+	if strings.TrimSpace(burstBandsVal) == "" {
+		burstBandsVal = "(default)"
+	}
+	asymPairsVal := m.asymmetryChannelPairsSpec
+	if strings.TrimSpace(asymPairsVal) == "" {
+		asymPairsVal = "(default)"
+	}
 	aperiodicRangeVal := fmt.Sprintf("%.1f-%.1f Hz", m.aperiodicFmin, m.aperiodicFmax)
 	aperiodicPeakZVal := fmt.Sprintf("%.1f", m.aperiodicPeakZ)
 	aperiodicR2Val := fmt.Sprintf("%.2f", m.aperiodicMinR2)
 	aperiodicPointsVal := fmt.Sprintf("%d", m.aperiodicMinPoints)
 	minEpochsVal := fmt.Sprintf("%d", m.minEpochsForFeatures)
+	failOnMissingWindowsVal := m.boolToOnOff(m.failOnMissingWindows)
+	failOnMissingNamedVal := m.boolToOnOff(m.failOnMissingNamedWindow)
 
 	// Input overrides
 	if m.editingNumber {
@@ -1335,92 +1398,77 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			minEpochsVal = buffer
 		}
 	}
-
-	type featOption struct {
-		label      string
-		value      string
-		hint       string
-		group      string
-		expandable bool
-		expandIdx  int
+	if m.editingText {
+		buffer := m.textBuffer + "█"
+		switch m.editingTextField {
+		case textFieldPACPairs:
+			pacPairsVal = buffer
+		case textFieldBurstBands:
+			burstBandsVal = buffer
+		case textFieldSpectralRatioPairs:
+			spectralRatioPairsVal = buffer
+		case textFieldAsymmetryChannelPairs:
+			asymPairsVal = buffer
+		case textFieldERPComponents:
+			erpComponentsVal = buffer
+		}
 	}
 
-	var options []featOption
+	options := m.getFeaturesOptions()
 
-	if m.isCategorySelected("connectivity") {
-		options = append(options,
-			featOption{"Connectivity", m.selectedConnectivityDisplay(), "Select measures", "Connectivity", true, 4},
-			featOption{"Output Level", connOutputVal, "full / global_only", "", false, -1},
-			featOption{"Graph Metrics", connGraphVal, "Toggles metric computation", "", false, -1},
-			featOption{"Graph Threshold", connGraphPropVal, "Top edges density", "", false, -1},
-			featOption{"Window length", connWindowLenVal, "Seconds per slice", "", false, -1},
-			featOption{"Window step", connWindowStepVal, "Overlap amount", "", false, -1},
-			featOption{"AEC Mode", connAecVal, "orth/none/sym", "", false, -1},
-		)
+	// Calculate total lines including expanded connectivity measures
+	totalLines := len(options)
+	if m.expandedOption == expandedConnectivityMeasures {
+		totalLines += len(connectivityMeasures)
 	}
 
-	if m.isCategorySelected("pac") {
-		options = append(options,
-			featOption{"Phase range", pacPhaseVal, "Frequencies for phase", "PAC / CFC", false, -1},
-			featOption{"Amp range", pacAmpVal, "Frequencies for amplitude", "", false, -1},
-			featOption{"PAC Method", pacMethodVal, "Algorithm type", "", false, -1},
-			featOption{"Min Epochs", pacMinEpochsVal, "Minimum required", "", false, -1},
-		)
+	// Calculate visible area - use sensible defaults if height not yet set
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = 40 // Reasonable default
 	}
 
-	if m.isCategorySelected("aperiodic") {
-		options = append(options,
-			featOption{"Fit range", aperiodicRangeVal, "Frequencies to fit", "Aperiodic Fit", false, -1},
-			featOption{"Peak Z-thresh", aperiodicPeakZVal, "Peak rejection", "", false, -1},
-			featOption{"Min R2", aperiodicR2Val, "Minimum fit quality", "", false, -1},
-			featOption{"Min Points", aperiodicPointsVal, "Minimum bins required", "", false, -1},
-		)
+	// Scrolling for small window sizes (list area only; header stays visible)
+	// Overhead accounts for: title, help text, scroll indicators, footer
+	maxLines := effectiveHeight - 10
+	if maxLines < 8 {
+		maxLines = 8
 	}
 
-	if m.isCategorySelected("complexity") {
-		options = append(options,
-			featOption{"PE Order", peOrderVal, "Symbol length (3-7)", "Complexity", false, -1},
-			featOption{"PE Delay", peDelayVal, "Sample lag", "", false, -1},
-		)
+	// If all content fits, show everything without scrolling
+	startLine := 0
+	endLine := totalLines
+	showScrollIndicators := false
+
+	if totalLines > maxLines {
+		// Need scrolling - use the calculated offset
+		showScrollIndicators = true
+		startLine = m.advancedOffset
+		if startLine < 0 {
+			startLine = 0
+		}
+		// Clamp startLine to avoid showing empty space at bottom
+		if startLine > totalLines-maxLines {
+			startLine = totalLines - maxLines
+		}
+		if startLine < 0 {
+			startLine = 0
+		}
+		endLine = startLine + maxLines
 	}
 
-	if m.isCategorySelected("bursts") {
-		options = append(options,
-			featOption{"Threshold Z", burstThreshVal, "Amplitude trigger", "Burst Detection", false, -1},
-			featOption{"Min Duration", burstMinDurVal, "Minimum length", "", false, -1},
-		)
+	// Show scroll indicator for items above
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startLine)) + "\n")
 	}
 
-	if m.isCategorySelected("power") {
-		options = append(options,
-			featOption{"Baseline mode", powerBaselineVal, "Normalization type", "Power", false, -1},
-		)
-	}
-
-	if m.isCategorySelected("spectral") {
-		options = append(options, featOption{"Spectral Edge", spectralEdgeVal, "Percentile for SEF", "Spectral", false, -1})
-	}
-
-	if m.isCategorySelected("erp") {
-		options = append(options,
-			featOption{"ERP baseline", erpBaselineVal, "Subtract baseline mean", "ERP", false, -1},
-		)
-	}
-
-	options = append(options,
-		featOption{"Export All", m.boolToOnOff(m.exportAllFeatures), "Save combined file", "Validation & Storage", false, -1},
-		featOption{"Min Epochs", minEpochsVal, "Global minimum required", "Execution", false, -1},
-	)
+	lineIdx := 0
 
 	for i, opt := range options {
-		if opt.group != "" {
-			b.WriteString("\n " + groupStyle.Render(opt.group) + "\n")
-		}
-
-		isFocused := (i+1) == m.advancedCursor && m.expandedOption < 0
+		isFocused := i == m.advancedCursor && m.expandedOption < 0
 		cursor := "  "
 		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
 
 		var labelStyle, valueStyle lipgloss.Style
@@ -1432,26 +1480,384 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 
 		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-		// Show expand indicator for expandable options
+		label := ""
+		value := ""
+		hint := ""
 		expandIndicator := ""
-		if opt.expandable {
-			if m.expandedOption != opt.expandIdx {
+
+		switch opt {
+		case optUseDefaults:
+			label = "Configuration"
+			if m.useDefaultAdvanced {
+				value = "Using Defaults"
+				hint = "Press Space to customize"
+				expandIndicator = " ▶"
+			} else {
+				value = "Custom"
+				hint = "Press Space to use defaults"
+				expandIndicator = " ▼"
+			}
+
+		// Section headers - styled as distinct groups with chevron indicators
+		case optFeatGroupConnectivity:
+			label = "▸ Connectivity"
+			hint = "Space to toggle"
+			if m.featGroupConnectivityExpanded {
+				label = "▾ Connectivity"
+				value = ""
+				expandIndicator = ""
+			} else {
+				value = ""
+				expandIndicator = ""
+			}
+			// Use distinct styling for section headers
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupPAC:
+			label = "▸ PAC / CFC"
+			hint = "Space to toggle"
+			if m.featGroupPACExpanded {
+				label = "▾ PAC / CFC"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupAperiodic:
+			label = "▸ Aperiodic"
+			hint = "Space to toggle"
+			if m.featGroupAperiodicExpanded {
+				label = "▾ Aperiodic"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupComplexity:
+			label = "▸ Complexity"
+			hint = "Space to toggle"
+			if m.featGroupComplexityExpanded {
+				label = "▾ Complexity"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupBursts:
+			label = "▸ Bursts"
+			hint = "Space to toggle"
+			if m.featGroupBurstsExpanded {
+				label = "▾ Bursts"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupPower:
+			label = "▸ Power"
+			hint = "Space to toggle"
+			if m.featGroupPowerExpanded {
+				label = "▾ Power"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupSpectral:
+			label = "▸ Spectral"
+			hint = "Space to toggle"
+			if m.featGroupSpectralExpanded {
+				label = "▾ Spectral"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupERP:
+			label = "▸ ERP"
+			hint = "Space to toggle"
+			if m.featGroupERPExpanded {
+				label = "▾ ERP"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupRatios:
+			label = "▸ Ratios"
+			hint = "Space to toggle"
+			if m.featGroupRatiosExpanded {
+				label = "▾ Ratios"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupAsymmetry:
+			label = "▸ Asymmetry"
+			hint = "Space to toggle"
+			if m.featGroupAsymmetryExpanded {
+				label = "▾ Asymmetry"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupStorage:
+			label = "▸ Storage"
+			hint = "Space to toggle"
+			if m.featGroupStorageExpanded {
+				label = "▾ Storage"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupExecution:
+			label = "▸ Execution"
+			hint = "Space to toggle"
+			if m.featGroupExecutionExpanded {
+				label = "▾ Execution"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupValidation:
+			label = "▸ Validation"
+			hint = "Space to toggle"
+			if m.featGroupValidationExpanded {
+				label = "▾ Validation"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		// Connectivity settings
+		case optConnectivity:
+			label = "Measures"
+			value = m.selectedConnectivityDisplay()
+			hint = "Select measures"
+			if m.expandedOption != expandedConnectivityMeasures {
 				expandIndicator = " [+]"
 			} else {
 				expandIndicator = " [-]"
 			}
+		case optConnOutputLevel:
+			label = "Output Level"
+			value = connOutputVal
+			hint = "full / global_only"
+		case optConnGraphMetrics:
+			label = "Graph Metrics"
+			value = connGraphVal
+			hint = "toggles metric computation"
+		case optConnGraphProp:
+			label = "Graph Threshold"
+			value = connGraphPropVal
+			hint = "top edges density"
+		case optConnWindowLen:
+			label = "Window length"
+			value = connWindowLenVal
+			hint = "seconds per slice"
+		case optConnWindowStep:
+			label = "Window step"
+			value = connWindowStepVal
+			hint = "overlap amount"
+		case optConnAECMode:
+			label = "AEC Mode"
+			value = connAecVal
+			hint = "orth/none/sym"
+
+		// PAC
+		case optPACPhaseRange:
+			label = "Phase range"
+			value = pacPhaseVal
+			hint = "frequencies for phase"
+		case optPACAmpRange:
+			label = "Amp range"
+			value = pacAmpVal
+			hint = "frequencies for amplitude"
+		case optPACMethod:
+			label = "PAC Method"
+			value = pacMethodVal
+			hint = "algorithm type"
+		case optPACMinEpochs:
+			label = "Min Epochs"
+			value = pacMinEpochsVal
+			hint = "minimum required"
+		case optPACPairs:
+			label = "Band pairs"
+			value = pacPairsVal
+			hint = "e.g. theta:gamma,alpha:gamma"
+
+		// Aperiodic
+		case optAperiodicRange:
+			label = "Fit range"
+			value = aperiodicRangeVal
+			hint = "frequencies to fit"
+		case optAperiodicPeakZ:
+			label = "Peak Z-thresh"
+			value = aperiodicPeakZVal
+			hint = "peak rejection"
+		case optAperiodicMinR2:
+			label = "Min R2"
+			value = aperiodicR2Val
+			hint = "minimum fit quality"
+		case optAperiodicMinPoints:
+			label = "Min Points"
+			value = aperiodicPointsVal
+			hint = "minimum bins required"
+
+		// Complexity
+		case optPEOrder:
+			label = "PE Order"
+			value = peOrderVal
+			hint = "symbol length (3-7)"
+		case optPEDelay:
+			label = "PE Delay"
+			value = peDelayVal
+			hint = "sample lag"
+
+		// Bursts
+		case optBurstThreshold:
+			label = "Threshold Z"
+			value = burstThreshVal
+			hint = "amplitude trigger"
+		case optBurstMinDuration:
+			label = "Min Duration"
+			value = burstMinDurVal
+			hint = "minimum length"
+		case optBurstBands:
+			label = "Burst bands"
+			value = burstBandsVal
+			hint = "e.g. beta,gamma"
+
+		// Power
+		case optPowerRequireBaseline:
+			label = "Require baseline"
+			value = powerRequireBaselineVal
+			hint = "allow raw log power if OFF"
+		case optPowerBaselineMode:
+			label = "Baseline mode"
+			value = powerBaselineVal
+			hint = "normalization type"
+
+		// Spectral
+		case optSpectralEdge:
+			label = "Spectral Edge"
+			value = spectralEdgeVal
+			hint = "percentile for SEF"
+
+		// ERP
+		case optERPBaseline:
+			label = "ERP baseline"
+			value = erpBaselineVal
+			hint = "subtract baseline mean"
+		case optERPAllowNoBaseline:
+			label = "Allow missing baseline"
+			value = erpAllowNoBaselineVal
+			hint = "only used if baseline ON"
+		case optERPComponents:
+			label = "Components"
+			value = erpComponentsVal
+			hint = "e.g. n1=0.10-0.20,n2=0.20-0.35"
+
+		// Ratios / asymmetry
+		case optSpectralRatioPairs:
+			label = "Ratio pairs"
+			value = spectralRatioPairsVal
+			hint = "e.g. theta:beta,alpha:beta"
+		case optAsymmetryChannelPairs:
+			label = "Channel pairs"
+			value = asymPairsVal
+			hint = "e.g. F3:F4,C3:C4"
+
+		// Generic / validation
+		case optExportAll:
+			label = "Export All"
+			value = m.boolToOnOff(m.exportAllFeatures)
+			hint = "save combined file"
+		case optMinEpochs:
+			label = "Min Epochs"
+			value = minEpochsVal
+			hint = "global minimum required"
+		case optFailOnMissingWindows:
+			label = "Fail missing windows"
+			value = failOnMissingWindowsVal
+			hint = "require baseline+active windows"
+		case optFailOnMissingNamedWindow:
+			label = "Fail missing named"
+			value = failOnMissingNamedVal
+			hint = "require named window per range"
+
+		default:
+			label = "Unknown"
+			value = ""
+			hint = ""
 		}
 
-		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value+expandIndicator))
-		if !opt.expandable {
-			b.WriteString("  " + hintStyle.Render(opt.hint))
+		if lineIdx >= startLine && lineIdx < endLine {
+			b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value+expandIndicator))
+			b.WriteString("  " + hintStyle.Render(hint))
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
+		lineIdx++
 
-		// Render expanded items if this option is expanded
-		if opt.expandable && m.expandedOption == opt.expandIdx {
-			b.WriteString(m.renderExpandedItems(opt.expandIdx))
+		// Expanded items (connectivity measures)
+		if opt == optConnectivity && m.expandedOption == expandedConnectivityMeasures {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, measure := range connectivityMeasures {
+				isSelected := m.connectivityMeasures[j]
+				isSubFocused := j == m.subCursor
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + measure.Description)
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(measure.Name) + desc + "\n")
+				}
+				lineIdx++
+			}
 		}
+	}
+
+	// Show scroll indicator for items below
+	if showScrollIndicators && lineIdx > endLine {
+		remaining := lineIdx - endLine
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
 	}
 
 	return b.String()
@@ -1462,7 +1868,7 @@ func (m Model) renderExpandedItems(optionIdx int) string {
 
 	subIndent := "      " // 6 spaces for sub-items
 
-	if optionIdx == 4 { // Connectivity measures
+	if optionIdx == expandedConnectivityMeasures {
 		for i, measure := range connectivityMeasures {
 			isSelected := m.connectivityMeasures[i]
 			isFocused := i == m.subCursor
@@ -1484,109 +1890,744 @@ func (m Model) renderExpandedItems(optionIdx int) string {
 
 func (m Model) renderBehaviorAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
-	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	b.WriteString(infoStyle.Render("  Configure behavior analysis parameters.") + "\n")
-	if m.editingNumber {
-		b.WriteString(infoStyle.Render("  Type a number, then press Enter to confirm or Esc to cancel.") + "\n\n")
-	} else {
-		b.WriteString(infoStyle.Render("  Press Space to edit values, Enter to proceed.") + "\n\n")
+	// Section title with animated accent
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" ADVANCED CONFIGURATION") + "\n\n")
+
+	// Contextual help text (same as features pipeline)
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+
+	if m.useDefaultAdvanced {
+		b.WriteString(infoStyle.Render("Default configuration will be used for behavior analysis.") + "\n")
+		b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
+
+		labelWidth := 22
+		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+		isFocused := m.advancedCursor == 0
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		if isFocused {
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+		}
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+
+		tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
+		b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+		return b.String()
 	}
 
-	labelWidth := 24
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
+	}
+
+	labelWidth := 30
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
-	// Get the dynamic options based on selected computations
 	options := m.getBehaviorOptions()
 
-	// Prepare values for options
 	getOptionDisplay := func(opt optionType) (string, string, string) {
-		inputDisplay := m.numberBuffer + "█"
+		numberDisplay := m.numberBuffer + "█"
+		textDisplay := m.textBuffer + "█"
 
 		switch opt {
 		case optUseDefaults:
 			return "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"
+		// Behavior section headers
+		case optBehaviorGroupGeneral:
+			label := "▸ General"
+			if m.behaviorGroupGeneralExpanded {
+				label = "▾ General"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupTrialTable:
+			label := "▸ Trial Table"
+			if m.behaviorGroupTrialTableExpanded {
+				label = "▾ Trial Table"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupCorrelations:
+			label := "▸ Correlations"
+			if m.behaviorGroupCorrelationsExpanded {
+				label = "▾ Correlations"
+			}
+			return label, "", "(uses General settings)"
+		case optBehaviorGroupPainSens:
+			label := "▸ Pain Sensitivity"
+			if m.behaviorGroupPainSensExpanded {
+				label = "▾ Pain Sensitivity"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupConfounds:
+			label := "▸ Confounds"
+			if m.behaviorGroupConfoundsExpanded {
+				label = "▾ Confounds"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupRegression:
+			label := "▸ Regression"
+			if m.behaviorGroupRegressionExpanded {
+				label = "▾ Regression"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupModels:
+			label := "▸ Models"
+			if m.behaviorGroupModelsExpanded {
+				label = "▾ Models"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupStability:
+			label := "▸ Stability"
+			if m.behaviorGroupStabilityExpanded {
+				label = "▾ Stability"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupConsistency:
+			label := "▸ Consistency"
+			if m.behaviorGroupConsistencyExpanded {
+				label = "▾ Consistency"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupInfluence:
+			label := "▸ Influence"
+			if m.behaviorGroupInfluenceExpanded {
+				label = "▾ Influence"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupCondition:
+			label := "▸ Condition"
+			if m.behaviorGroupConditionExpanded {
+				label = "▾ Condition"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupTemporal:
+			label := "▸ Temporal"
+			if m.behaviorGroupTemporalExpanded {
+				label = "▾ Temporal"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupCluster:
+			label := "▸ Cluster"
+			if m.behaviorGroupClusterExpanded {
+				label = "▾ Cluster"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupMediation:
+			label := "▸ Mediation"
+			if m.behaviorGroupMediationExpanded {
+				label = "▾ Mediation"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupMixedEffects:
+			label := "▸ Mixed Effects"
+			if m.behaviorGroupMixedEffectsExpanded {
+				label = "▾ Mixed Effects"
+			}
+			return label, "", "Space to toggle"
 		case optCorrMethod:
-			return "Correlation Method", m.correlationMethod, "spearman (robust) / pearson"
+			return "Correlation Method", m.correlationMethod, "spearman / pearson"
+		case optRobustCorrelation:
+			methods := []string{"none", "percentage_bend", "winsorized", "shepherd"}
+			v := "none"
+			if m.robustCorrelation >= 0 && m.robustCorrelation < len(methods) {
+				v = methods[m.robustCorrelation]
+			}
+			return "Robust Correlation", v, "robust alternative for outliers"
 		case optBootstrap:
 			val := fmt.Sprintf("%d", m.bootstrapSamples)
 			if m.editingNumber && m.isCurrentlyEditing(optBootstrap) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Bootstrap Samples", val, "Type a number (0=disabled)"
+			return "Bootstrap Samples", val, "0=disabled"
 		case optNPerm:
 			val := fmt.Sprintf("%d", m.nPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optNPerm) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Permutations", val, "Type a number"
+			return "Permutations", val, "cluster/global permutations"
 		case optRNGSeed:
 			val := m.rngSeedDisplay()
 			if m.editingNumber && m.isCurrentlyEditing(optRNGSeed) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "RNG Seed", val, "Type a number (0=default)"
+			return "RNG Seed", val, "0=project default"
+		case optBehaviorNJobs:
+			val := fmt.Sprintf("%d", m.behaviorNJobs)
+			if m.editingNumber && m.isCurrentlyEditing(optBehaviorNJobs) {
+				val = numberDisplay
+			}
+			return "N Jobs", val, "-1=all cores"
+		case optBehaviorMinSamples:
+			val := fmt.Sprintf("%d", m.behaviorMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optBehaviorMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "default minimum trials"
 		case optControlTemp:
-			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "Partial correlation covariate"
+			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "partial-correlation covariate"
 		case optControlOrder:
-			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "Order effects covariate"
+			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "partial-correlation covariate"
 		case optFDRAlpha:
-			return "FDR Alpha", fmt.Sprintf("%.2f", m.fdrAlpha), "Multiple comparison threshold"
-		// Cluster options
+			val := fmt.Sprintf("%.3f", m.fdrAlpha)
+			if m.editingNumber && m.isCurrentlyEditing(optFDRAlpha) {
+				val = numberDisplay
+			}
+			return "FDR Alpha", val, "multiple comparison threshold"
+		case optComputeChangeScores:
+			return "Change Scores", m.boolToOnOff(m.behaviorComputeChangeScores), "Δ rating / Δ temperature"
+		case optComputeLosoStability:
+			return "LOSO Stability", m.boolToOnOff(m.behaviorComputeLosoStability), "leave-one-out stability"
+		case optComputeBayesFactors:
+			return "Bayes Factors", m.boolToOnOff(m.behaviorComputeBayesFactors), "optional BF reporting"
+
+		// Trial table
+		case optTrialTableFormat:
+			v := "parquet"
+			if m.trialTableFormat == 1 {
+				v = "tsv"
+			}
+			return "Trial Table Format", v, "parquet recommended"
+		case optTrialTableIncludeFeatures:
+			return "Include Features", m.boolToOnOff(m.trialTableIncludeFeatures), "merge feature columns"
+		case optTrialTableIncludeCovars:
+			return "Include Covariates", m.boolToOnOff(m.trialTableIncludeCovars), "merge covariates"
+		case optTrialTableIncludeEvents:
+			return "Include Events", m.boolToOnOff(m.trialTableIncludeEvents), "merge event metadata"
+		case optTrialTableAddLagFeatures:
+			return "Lag/Delta Columns", m.boolToOnOff(m.trialTableAddLagFeatures), "prev_* and delta_*"
+		case optTrialTableExtraEventCols:
+			val := m.trialTableExtraEventCols
+			if val == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldTrialTableExtraEventColumns {
+				val = textDisplay
+			}
+			return "Extra Event Columns", val, "comma-separated"
+		case optTrialTableValidate:
+			return "Validate Table", m.boolToOnOff(m.trialTableValidateEnabled), "non-gating checks"
+		case optTrialTableRatingMin:
+			val := fmt.Sprintf("%.2f", m.trialTableRatingMin)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialTableRatingMin) {
+				val = numberDisplay
+			}
+			return "Rating Min", val, "validation threshold"
+		case optTrialTableRatingMax:
+			val := fmt.Sprintf("%.2f", m.trialTableRatingMax)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialTableRatingMax) {
+				val = numberDisplay
+			}
+			return "Rating Max", val, "validation threshold"
+		case optTrialTableTempMin:
+			val := fmt.Sprintf("%.2f", m.trialTableTempMin)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialTableTempMin) {
+				val = numberDisplay
+			}
+			return "Temp Min", val, "validation threshold"
+		case optTrialTableTempMax:
+			val := fmt.Sprintf("%.2f", m.trialTableTempMax)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialTableTempMax) {
+				val = numberDisplay
+			}
+			return "Temp Max", val, "validation threshold"
+		case optTrialTableHighMissingFrac:
+			val := fmt.Sprintf("%.2f", m.trialTableHighMissingFrac)
+			if m.editingNumber && m.isCurrentlyEditing(optTrialTableHighMissingFrac) {
+				val = numberDisplay
+			}
+			return "High Missing Frac", val, "warn if column missing too much"
+		case optFeatureSummariesEnabled:
+			return "Feature Summaries", m.boolToOnOff(m.featureSummariesEnabled), "build pain_feature_summaries"
+
+		// Pain residual
+		case optPainResidualEnabled:
+			return "Pain Residual", m.boolToOnOff(m.painResidualEnabled), "rating - f(temp)"
+		case optPainResidualMethod:
+			v := "spline"
+			if m.painResidualMethod == 1 {
+				v = "poly"
+			}
+			return "Residual Method", v, "spline preferred"
+		case optPainResidualMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualMinSamples) {
+				val = numberDisplay
+			}
+			return "Residual Min Samples", val, "min trials for curve fit"
+		case optPainResidualPolyDegree:
+			val := fmt.Sprintf("%d", m.painResidualPolyDegree)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualPolyDegree) {
+				val = numberDisplay
+			}
+			return "Poly Degree", val, "poly fallback degree"
+		case optPainResidualModelCompare:
+			return "Temp Model Compare", m.boolToOnOff(m.painResidualModelCompareEnabled), "non-gating diagnostics"
+		case optPainResidualModelCompareMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualModelCompareMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualModelCompareMinSamples) {
+				val = numberDisplay
+			}
+			return "Model Compare Min", val, "min trials to compare"
+		case optPainResidualBreakpoint:
+			return "Breakpoint Test", m.boolToOnOff(m.painResidualBreakpointEnabled), "single-hinge model"
+		case optPainResidualBreakpointMinSamples:
+			val := fmt.Sprintf("%d", m.painResidualBreakpointMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointMinSamples) {
+				val = numberDisplay
+			}
+			return "Breakpoint Min", val, "min trials to test"
+		case optPainResidualBreakpointCandidates:
+			val := fmt.Sprintf("%d", m.painResidualBreakpointCandidates)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointCandidates) {
+				val = numberDisplay
+			}
+			return "Breakpoint Candidates", val, "grid size"
+		case optPainResidualBreakpointQlow:
+			val := fmt.Sprintf("%.2f", m.painResidualBreakpointQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointQlow) {
+				val = numberDisplay
+			}
+			return "Breakpoint Q Low", val, "quantile bound"
+		case optPainResidualBreakpointQhigh:
+			val := fmt.Sprintf("%.2f", m.painResidualBreakpointQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointQhigh) {
+				val = numberDisplay
+			}
+			return "Breakpoint Q High", val, "quantile bound"
+
+		// Confounds
+		case optConfoundsAddAsCovariates:
+			return "Add QC Covariates", m.boolToOnOff(m.confoundsAddAsCovariates), "FDR-selected covariates"
+		case optConfoundsMaxCovariates:
+			val := fmt.Sprintf("%d", m.confoundsMaxCovariates)
+			if m.editingNumber && m.isCurrentlyEditing(optConfoundsMaxCovariates) {
+				val = numberDisplay
+			}
+			return "Max QC Covariates", val, "limit added columns"
+		case optConfoundsQCColumnPatterns:
+			val := m.confoundsQCColumnPatterns
+			if val == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldConfoundsQCColumnPatterns {
+				val = textDisplay
+			}
+			return "QC Column Patterns", val, "comma-separated regexes"
+
+		// Regression
+		case optRegressionFeatureSet:
+			v := "pain_summaries"
+			if m.regressionFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
+		case optRegressionOutcome:
+			v := "rating"
+			if m.regressionOutcome == 1 {
+				v = "pain_residual"
+			}
+			return "Outcome", v, "dependent variable"
+		case optRegressionIncludeTemperature:
+			return "Include Temperature", m.boolToOnOff(m.regressionIncludeTemperature), "add temperature covariate"
+		case optRegressionTempControl:
+			v := "linear"
+			if m.regressionTempControl == 1 {
+				v = "rating_hat"
+			}
+			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+		case optRegressionIncludeTrialOrder:
+			return "Include Trial Order", m.boolToOnOff(m.regressionIncludeTrialOrder), "add trial_index covariate"
+		case optRegressionIncludePrev:
+			return "Prev/Delta Terms", m.boolToOnOff(m.regressionIncludePrev), "use prev_/delta_"
+		case optRegressionIncludeRunBlock:
+			return "Run/Block Dummies", m.boolToOnOff(m.regressionIncludeRunBlock), "categorical controls"
+		case optRegressionIncludeInteraction:
+			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "moderation term"
+		case optRegressionStandardize:
+			return "Standardize", m.boolToOnOff(m.regressionStandardize), "z-score predictors"
+		case optRegressionMinSamples:
+			val := fmt.Sprintf("%d", m.regressionMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "min trials per feature"
+		case optRegressionPermutations:
+			val := fmt.Sprintf("%d", m.regressionPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionPermutations) {
+				val = numberDisplay
+			}
+			return "Permutations", val, "Freedman–Lane (0=off)"
+		case optRegressionMaxFeatures:
+			val := fmt.Sprintf("%d", m.regressionMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionMaxFeatures) {
+				val = numberDisplay
+			}
+			return "Max Features", val, "0=no limit"
+
+		// Models
+		case optModelsFeatureSet:
+			v := "pain_summaries"
+			if m.modelsFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
+		case optModelsIncludeTemperature:
+			return "Include Temperature", m.boolToOnOff(m.modelsIncludeTemperature), "add temperature covariate"
+		case optModelsTempControl:
+			v := "linear"
+			if m.modelsTempControl == 1 {
+				v = "rating_hat"
+			}
+			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+		case optModelsIncludeTrialOrder:
+			return "Include Trial Order", m.boolToOnOff(m.modelsIncludeTrialOrder), "add trial_index covariate"
+		case optModelsIncludePrev:
+			return "Prev/Delta Terms", m.boolToOnOff(m.modelsIncludePrev), "use prev_/delta_"
+		case optModelsIncludeRunBlock:
+			return "Run/Block Dummies", m.boolToOnOff(m.modelsIncludeRunBlock), "categorical controls"
+		case optModelsIncludeInteraction:
+			return "Feature×Temp", m.boolToOnOff(m.modelsIncludeInteraction), "moderation term"
+		case optModelsStandardize:
+			return "Standardize", m.boolToOnOff(m.modelsStandardize), "z-score predictors"
+		case optModelsMinSamples:
+			val := fmt.Sprintf("%d", m.modelsMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "min trials per feature"
+		case optModelsMaxFeatures:
+			val := fmt.Sprintf("%d", m.modelsMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsMaxFeatures) {
+				val = numberDisplay
+			}
+			return "Max Features", val, "0=no limit"
+		case optModelsOutcomeRating:
+			return "Outcome: rating", m.boolToOnOff(m.modelsOutcomeRating), "include rating"
+		case optModelsOutcomePainResidual:
+			return "Outcome: pain_residual", m.boolToOnOff(m.modelsOutcomePainResidual), "include pain residual"
+		case optModelsOutcomePainBinary:
+			return "Outcome: pain_binary", m.boolToOnOff(m.modelsOutcomePainBinary), "include binary outcome"
+		case optModelsFamilyOLS:
+			return "Family: OLS-HC3", m.boolToOnOff(m.modelsFamilyOLS), "ols_hc3"
+		case optModelsFamilyRobust:
+			return "Family: Robust", m.boolToOnOff(m.modelsFamilyRobust), "robust_rlm"
+		case optModelsFamilyQuantile:
+			return "Family: Quantile", m.boolToOnOff(m.modelsFamilyQuantile), "quantile_50"
+		case optModelsFamilyLogit:
+			return "Family: Logistic", m.boolToOnOff(m.modelsFamilyLogit), "logit"
+		case optModelsBinaryOutcome:
+			v := "pain_binary"
+			if m.modelsBinaryOutcome == 1 {
+				v = "rating_median"
+			}
+			return "Binary Outcome", v, "for logit models"
+
+		// Stability
+		case optStabilityFeatureSet:
+			v := "pain_summaries"
+			if m.stabilityFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
+		case optStabilityMethod:
+			v := "spearman"
+			if m.stabilityMethod == 1 {
+				v = "pearson"
+			}
+			return "Method", v, "within-group correlation"
+		case optStabilityOutcome:
+			v := "auto"
+			if m.stabilityOutcome == 1 {
+				v = "rating"
+			} else if m.stabilityOutcome == 2 {
+				v = "pain_residual"
+			}
+			return "Outcome", v, "auto prefers pain_residual"
+		case optStabilityGroupColumn:
+			v := "auto"
+			if m.stabilityGroupColumn == 1 {
+				v = "run"
+			} else if m.stabilityGroupColumn == 2 {
+				v = "block"
+			}
+			return "Group Column", v, "auto selects run/block"
+		case optStabilityPartialTemp:
+			return "Partial Temperature", m.boolToOnOff(m.stabilityPartialTemp), "control temperature"
+		case optStabilityMinGroupTrials:
+			val := fmt.Sprintf("%d", m.stabilityMinGroupTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optStabilityMinGroupTrials) {
+				val = numberDisplay
+			}
+			return "Min Group Trials", val, "per run/block"
+		case optStabilityMaxFeatures:
+			val := fmt.Sprintf("%d", m.stabilityMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optStabilityMaxFeatures) {
+				val = numberDisplay
+			}
+			return "Max Features", val, "0=no limit"
+		case optStabilityAlpha:
+			val := fmt.Sprintf("%.3f", m.stabilityAlpha)
+			if m.editingNumber && m.isCurrentlyEditing(optStabilityAlpha) {
+				val = numberDisplay
+			}
+			return "Alpha", val, "stability cutoff"
+
+		// Consistency
+		case optConsistencyEnabled:
+			return "Consistency Summary", m.boolToOnOff(m.consistencyEnabled), "flag sign flips"
+
+		// Influence
+		case optInfluenceFeatureSet:
+			v := "pain_summaries"
+			if m.influenceFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
+		case optInfluenceOutcomeRating:
+			return "Outcome: rating", m.boolToOnOff(m.influenceOutcomeRating), "include rating"
+		case optInfluenceOutcomePainResidual:
+			return "Outcome: pain_residual", m.boolToOnOff(m.influenceOutcomePainResidual), "include residual"
+		case optInfluenceMaxFeatures:
+			val := fmt.Sprintf("%d", m.influenceMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceMaxFeatures) {
+				val = numberDisplay
+			}
+			return "Max Features", val, "top effects to inspect"
+		case optInfluenceIncludeTemperature:
+			return "Include Temperature", m.boolToOnOff(m.influenceIncludeTemperature), "add covariate"
+		case optInfluenceTempControl:
+			v := "linear"
+			if m.influenceTempControl == 1 {
+				v = "rating_hat"
+			}
+			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+		case optInfluenceIncludeTrialOrder:
+			return "Include Trial Order", m.boolToOnOff(m.influenceIncludeTrialOrder), "add covariate"
+		case optInfluenceIncludeRunBlock:
+			return "Include Run/Block", m.boolToOnOff(m.influenceIncludeRunBlock), "categorical controls"
+		case optInfluenceIncludeInteraction:
+			return "Feature×Temp", m.boolToOnOff(m.influenceIncludeInteraction), "moderation term"
+		case optInfluenceStandardize:
+			return "Standardize", m.boolToOnOff(m.influenceStandardize), "z-score predictors"
+		case optInfluenceCooksThreshold:
+			val := "auto"
+			if m.influenceCooksThreshold > 0 {
+				val = fmt.Sprintf("%.4f", m.influenceCooksThreshold)
+			} else if m.editingNumber && m.isCurrentlyEditing(optInfluenceCooksThreshold) {
+				val = numberDisplay
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceCooksThreshold) {
+				val = numberDisplay
+			}
+			return "Cook's Threshold", val, "0=auto heuristic"
+		case optInfluenceLeverageThreshold:
+			val := "auto"
+			if m.influenceLeverageThreshold > 0 {
+				val = fmt.Sprintf("%.4f", m.influenceLeverageThreshold)
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceLeverageThreshold) {
+				val = numberDisplay
+			}
+			return "Leverage Threshold", val, "0=auto heuristic"
+
+		// Condition
+		case optConditionFailFast:
+			return "Fail Fast", m.boolToOnOff(m.conditionFailFast), "error if split fails"
+		case optConditionEffectThreshold:
+			val := fmt.Sprintf("%.3f", m.conditionEffectThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optConditionEffectThreshold) {
+				val = numberDisplay
+			}
+			return "Effect Threshold", val, "Cohen's d cutoff"
+		case optConditionMinTrials:
+			val := fmt.Sprintf("%d", m.conditionMinTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optConditionMinTrials) {
+				val = numberDisplay
+			}
+			return "Min Trials/Cond", val, "minimum per condition"
+
+		// Temporal
+		case optTemporalResolutionMs:
+			val := fmt.Sprintf("%d", m.temporalResolutionMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalResolutionMs) {
+				val = numberDisplay
+			}
+			return "Time Resolution (ms)", val, "bin size"
+		case optTemporalTimeMinMs:
+			val := fmt.Sprintf("%d", m.temporalTimeMinMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalTimeMinMs) {
+				val = numberDisplay
+			}
+			return "Time Min (ms)", val, "window start"
+		case optTemporalTimeMaxMs:
+			val := fmt.Sprintf("%d", m.temporalTimeMaxMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalTimeMaxMs) {
+				val = numberDisplay
+			}
+			return "Time Max (ms)", val, "window end"
+		case optTemporalSmoothMs:
+			val := fmt.Sprintf("%d", m.temporalSmoothMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalSmoothMs) {
+				val = numberDisplay
+			}
+			return "Smooth Window (ms)", val, "smoothing length"
+
+		// Pain sensitivity
+		case optPainSensitivityMinTrials:
+			val := fmt.Sprintf("%d", m.painSensitivityMinTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {
+				val = numberDisplay
+			}
+			return "Min Trials", val, "minimum trials required"
+
+		// Cluster
 		case optClusterThreshold:
-			return "Cluster Threshold", fmt.Sprintf("%.3f", m.clusterThreshold), "Forming threshold for clusters"
+			val := fmt.Sprintf("%.4f", m.clusterThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optClusterThreshold) {
+				val = numberDisplay
+			}
+			return "Cluster Threshold", val, "forming threshold"
 		case optClusterMinSize:
 			val := fmt.Sprintf("%d", m.clusterMinSize)
 			if m.editingNumber && m.isCurrentlyEditing(optClusterMinSize) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Cluster Min Size", val, "Minimum cluster size"
+			return "Min Cluster Size", val, "minimum cluster size"
 		case optClusterTail:
-			tailStr := "two-tailed"
+			v := "two-tailed"
 			if m.clusterTail == 1 {
-				tailStr = "upper"
+				v = "upper"
 			} else if m.clusterTail == -1 {
-				tailStr = "lower"
+				v = "lower"
 			}
-			return "Cluster Tail", tailStr, "Test direction"
-		// Mediation options
+			return "Cluster Tail", v, "test direction"
+
+		// Mediation
 		case optMediationBootstrap:
 			val := fmt.Sprintf("%d", m.mediationBootstrap)
 			if m.editingNumber && m.isCurrentlyEditing(optMediationBootstrap) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Mediation Bootstrap", val, "Bootstrap iterations"
+			return "Mediation Bootstrap", val, "bootstrap iterations"
+		case optMediationMinEffect:
+			val := fmt.Sprintf("%.3f", m.mediationMinEffect)
+			if m.editingNumber && m.isCurrentlyEditing(optMediationMinEffect) {
+				val = numberDisplay
+			}
+			return "Min Effect Size", val, "minimum indirect effect"
 		case optMediationMaxMediators:
 			val := fmt.Sprintf("%d", m.mediationMaxMediators)
 			if m.editingNumber && m.isCurrentlyEditing(optMediationMaxMediators) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Max Mediators", val, "Maximum mediators to test"
-		// Mixed effects options
+			return "Max Mediators", val, "max mediators tested"
+
+		// Mixed effects
+		case optMixedEffectsType:
+			v := "intercept"
+			if m.mixedEffectsType == 1 {
+				v = "intercept_slope"
+			}
+			return "Random Effects", v, "group-level only"
 		case optMixedMaxFeatures:
 			val := fmt.Sprintf("%d", m.mixedMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optMixedMaxFeatures) {
-				val = inputDisplay
+				val = numberDisplay
 			}
-			return "Mixed Effects Features", val, "Maximum features to include"
-		// Condition options
-		case optConditionEffectThreshold:
-			return "Effect Size Threshold", fmt.Sprintf("%.1f", m.conditionEffectThreshold), "Minimum Cohen's d to report"
+			return "Max Features", val, "max features to include"
+
 		default:
 			return "Unknown", "", ""
 		}
 	}
 
-	for i, opt := range options {
+	// Calculate total lines (options list, no sub-item expansion like features)
+	totalLines := len(options)
+
+	// Calculate visible area - use sensible defaults if height not yet set
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = 40 // Reasonable default
+	}
+
+	// Scrolling for small window sizes (list area only; header stays visible)
+	// Overhead accounts for: title, help text, scroll indicators, footer
+	maxLines := effectiveHeight - 12
+	if maxLines < 8 {
+		maxLines = 8
+	}
+
+	// If all content fits, show everything without scrolling
+	startIdx := 0
+	endIdx := totalLines
+	showScrollIndicators := false
+
+	if totalLines > maxLines {
+		// Need scrolling - use the calculated offset
+		showScrollIndicators = true
+		startIdx = m.advancedOffset
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		// Clamp startIdx to avoid showing empty space at bottom
+		if startIdx > totalLines-maxLines {
+			startIdx = totalLines - maxLines
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx = startIdx + maxLines
+		if endIdx > len(options) {
+			endIdx = len(options)
+		}
+	}
+
+	// Show scroll indicator for items above
+	if showScrollIndicators && startIdx > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startIdx)) + "\n")
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		opt := options[i]
 		isFocused := i == m.advancedCursor
 		label, value, hint := getOptionDisplay(opt)
 
+		// Check if this is a section header option
+		isSectionHeader := opt >= optBehaviorGroupGeneral && opt <= optBehaviorGroupMixedEffects
+
 		var labelStyle, valueStyle lipgloss.Style
-		if isFocused {
+		if isSectionHeader {
+			// Section headers get special styling (like features pipeline)
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+			valueStyle = lipgloss.NewStyle()
+		} else if isFocused {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		} else {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
 
 		if m.useDefaultAdvanced && i > 0 {
@@ -1594,17 +2635,26 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 		} else if m.editingNumber && isFocused {
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		} else {
-			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
 
 		cursor := "  "
 		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
 
-		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
-		b.WriteString("  " + hintStyle.Render(hint) + "\n")
+		if isSectionHeader {
+			// Section headers don't have a colon after the label
+			b.WriteString(cursor + labelStyle.Render(label) + "  " + hintStyle.Render(hint) + "\n")
+		} else {
+			b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+			b.WriteString("  " + hintStyle.Render(hint) + "\n")
+		}
+	}
+
+	// Show scroll indicator for items below
+	if showScrollIndicators && endIdx < len(options) {
+		remaining := len(options) - endIdx
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
 	}
 
 	return b.String()

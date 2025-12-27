@@ -248,6 +248,528 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
     return corr_df, psi_df
 
 
+def _feature_suffix_from_context(ctx: BehaviorContext) -> str:
+    feature_files = ctx.selected_feature_files or ctx.feature_categories or []
+    return "_" + "_".join(sorted(str(x) for x in feature_files)) if feature_files else ""
+
+
+def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
+    """Build and save the canonical per-trial analysis table for this subject."""
+    from eeg_pipeline.utils.data.trial_table import (
+        build_subject_trial_table,
+        save_trial_table,
+        add_lag_and_delta_features,
+        add_pain_residual,
+        build_pain_feature_summaries,
+    )
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    include_features = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.include_features", True))
+    include_covariates = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.include_covariates", True))
+    include_events = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.include_events", True))
+    fmt = str(get_config_value(ctx.config, "behavior_analysis.trial_table.format", "parquet")).strip().lower()
+
+    extra_cols = get_config_value(ctx.config, "behavior_analysis.trial_table.extra_event_columns", None)
+    extra_cols_list = [str(c) for c in extra_cols] if isinstance(extra_cols, (list, tuple)) else None
+
+    result = build_subject_trial_table(
+        ctx,
+        include_features=include_features,
+        include_covariates=include_covariates,
+        include_events=include_events,
+        extra_event_columns=extra_cols_list,
+    )
+
+    # Augment with lag/delta covariates for habituation/dynamics analyses.
+    lag_enabled = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.add_lag_features", True))
+    if lag_enabled:
+        result.df, lag_meta = add_lag_and_delta_features(result.df)
+        result.metadata["lag_features"] = lag_meta
+
+    # Add pain residual = rating - f(temperature) for "pain beyond stimulus intensity".
+    result.df, resid_meta = add_pain_residual(result.df, ctx.config)
+    result.metadata["pain_residual"] = resid_meta
+
+    suffix = _feature_suffix_from_context(ctx)
+    fname = f"trials{suffix}"
+    out_path = ctx.stats_dir / f"{fname}.{ 'parquet' if fmt == 'parquet' else 'tsv' }"
+    save_trial_table(result, out_path, format=fmt)
+
+    meta_path = ctx.stats_dir / f"{fname}.metadata.json"
+    meta_path.write_text(json.dumps(result.metadata, indent=2, default=str))
+    ctx.logger.info("Saved trial table: %s (%s rows, %s cols)", out_path.name, len(result.df), result.df.shape[1])
+
+    # Save temperature→rating nonlinearity diagnostics (subject-level; non-gating).
+    try:
+        mc_enabled = bool(get_config_value(ctx.config, "behavior_analysis.pain_residual.model_comparison.enabled", True))
+        bp_enabled = bool(get_config_value(ctx.config, "behavior_analysis.pain_residual.breakpoint_test.enabled", True))
+        if mc_enabled and "temperature" in result.df.columns and "rating" in result.df.columns:
+            from eeg_pipeline.utils.analysis.stats.temperature_models import compare_temperature_rating_models
+
+            df_cmp, meta_cmp = compare_temperature_rating_models(
+                result.df["temperature"], result.df["rating"], config=ctx.config
+            )
+            if df_cmp is not None and not df_cmp.empty:
+                write_tsv(df_cmp, ctx.stats_dir / f"temperature_model_comparison{suffix}.tsv")
+            (ctx.stats_dir / f"temperature_model_comparison{suffix}.metadata.json").write_text(
+                json.dumps(meta_cmp, indent=2, default=str)
+            )
+            ctx.data_qc["temperature_model_comparison"] = meta_cmp
+
+        if bp_enabled and "temperature" in result.df.columns and "rating" in result.df.columns:
+            from eeg_pipeline.utils.analysis.stats.temperature_models import fit_temperature_breakpoint_test
+
+            df_bp, meta_bp = fit_temperature_breakpoint_test(
+                result.df["temperature"], result.df["rating"], config=ctx.config
+            )
+            if df_bp is not None and not df_bp.empty:
+                write_tsv(df_bp, ctx.stats_dir / f"temperature_breakpoint_candidates{suffix}.tsv")
+            (ctx.stats_dir / f"temperature_breakpoint_test{suffix}.metadata.json").write_text(
+                json.dumps(meta_bp, indent=2, default=str)
+            )
+            ctx.data_qc["temperature_breakpoint_test"] = meta_bp
+    except Exception as exc:
+        ctx.logger.debug("Temperature model diagnostics failed: %s", exc)
+
+    # Also build and save a reduced pain-focused feature set for reporting/regression defaults.
+    summaries_enabled = bool(get_config_value(ctx.config, "behavior_analysis.feature_summaries.enabled", True))
+    if summaries_enabled:
+        try:
+            summaries_df, summaries_meta = build_pain_feature_summaries(result.df, ctx.config)
+            sum_path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+            summaries_df.to_parquet(sum_path, index=False)
+            (ctx.stats_dir / f"pain_feature_summaries{suffix}.metadata.json").write_text(
+                json.dumps(summaries_meta, indent=2, default=str)
+            )
+            ctx.logger.info("Saved pain feature summaries: %s (%s rows, %s cols)", sum_path.name, len(summaries_df), summaries_df.shape[1])
+        except Exception as exc:
+            ctx.logger.warning("Failed to build pain feature summaries: %s", exc)
+
+    return out_path
+
+
+def _load_trial_table_df(ctx: BehaviorContext) -> Optional[pd.DataFrame]:
+    suffix = _feature_suffix_from_context(ctx)
+    for ext in ("parquet", "tsv"):
+        p = ctx.stats_dir / f"trials{suffix}.{ext}"
+        if p.exists():
+            if ext == "parquet":
+                return pd.read_parquet(p)
+            return pd.read_csv(p, sep="\t")
+    # Fallback: any trials parquet in stats_dir
+    candidates = sorted(ctx.stats_dir.glob("trials*.parquet"))
+    if candidates:
+        return pd.read_parquet(candidates[0])
+    return None
+
+
+def stage_trial_table_validate(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
+    """Validate the canonical trial table (non-gating) and write a contract report."""
+    from eeg_pipeline.utils.data.trial_table_validation import validate_trial_table
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    enabled = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.validate.enabled", True))
+    if not enabled:
+        return {"enabled": False, "status": "disabled"}
+
+    df = _load_trial_table_df(ctx)
+    if df is None or df.empty:
+        return {"enabled": True, "status": "missing_trial_table"}
+
+    suffix = _feature_suffix_from_context(ctx)
+    result = validate_trial_table(df, config=ctx.config)
+
+    summary_path = ctx.stats_dir / f"trial_table_validation_summary{suffix}.tsv"
+    report_path = ctx.stats_dir / f"trial_table_validation{suffix}.json"
+    try:
+        if result.summary_df is not None and not result.summary_df.empty:
+            write_tsv(result.summary_df, summary_path)
+        report_path.write_text(json.dumps(result.report, indent=2, default=str))
+    except Exception as exc:
+        ctx.logger.warning("Trial table validation write failed: %s", exc)
+
+    ctx.data_qc["trial_table_validation"] = {
+        "enabled": True,
+        "status": result.report.get("status", "unknown"),
+        "warnings": result.report.get("warnings", []),
+        "summary_tsv": summary_path.name,
+        "report_json": report_path.name,
+    }
+    if result.report.get("warnings"):
+        ctx.logger.info("Trial table validation warnings: %s", "; ".join(result.report["warnings"][:10]))
+    return result.report
+
+
+def stage_confounds(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Audit QC confounds; optionally add selected QC covariates for downstream analyses."""
+    from eeg_pipeline.utils.analysis.stats.confounds import (
+        audit_qc_confounds,
+        select_significant_qc_covariates,
+    )
+    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.utils.formatting import sanitize_label
+
+    df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Confounds: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    # Use the correlation method label for file naming consistency.
+    method = config.method
+    robust_method = config.robust_method
+    method_label = config.method_label
+
+    min_samples = int(get_config_value(ctx.config, "behavior_analysis.min_samples.default", 10))
+    audit_df, audit_meta = audit_qc_confounds(
+        df_trials,
+        config=ctx.config,
+        targets=["rating", "temperature"],
+        method=method,
+        robust_method=robust_method,
+        min_samples=min_samples,
+    )
+
+    suffix = _feature_suffix_from_context(ctx)
+    method_suffix = f"_{method_label}" if method_label else ""
+    out_path = ctx.stats_dir / f"confounds_audit{suffix}{method_suffix}.tsv"
+    if not audit_df.empty:
+        write_tsv(audit_df, out_path)
+        ctx.logger.info("Confounds audit saved: %s (%d rows)", out_path.name, len(audit_df))
+
+    ctx.data_qc["confounds_audit"] = audit_meta
+
+    # Optionally add QC covariates (selected by FDR) to ctx.covariates_df.
+    add_cov = bool(get_config_value(ctx.config, "behavior_analysis.confounds.add_as_covariates_if_significant", False))
+    if not add_cov or audit_df.empty:
+        return audit_df
+
+    alpha = float(get_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05))
+    max_cov = int(get_config_value(ctx.config, "behavior_analysis.confounds.max_qc_covariates", 3))
+    qc_cols = select_significant_qc_covariates(
+        audit_df,
+        config=ctx.config,
+        alpha=alpha,
+        max_covariates=max_cov,
+        prefer_target="rating",
+    )
+    if not qc_cols:
+        return audit_df
+
+    cov_add = pd.DataFrame(index=np.arange(len(df_trials)))
+    for col in qc_cols:
+        safe_name = sanitize_label(f"qc_{col}")
+        if safe_name in cov_add.columns:
+            continue
+        cov_add[safe_name] = pd.to_numeric(df_trials[col], errors="coerce")
+
+    if cov_add.empty:
+        return audit_df
+
+    # Align to ctx indices (0..n-1), then attach to ctx.covariates_df.
+    if ctx.covariates_df is None or ctx.covariates_df.empty:
+        ctx.covariates_df = pd.DataFrame(index=ctx.aligned_events.index if ctx.aligned_events is not None else None)
+
+    cov_add.index = ctx.covariates_df.index
+    for c in cov_add.columns:
+        if c not in ctx.covariates_df.columns:
+            ctx.covariates_df[c] = cov_add[c].to_numpy()
+
+    from eeg_pipeline.utils.data.covariates import build_covariates_without_temp
+
+    ctx.covariates_without_temp_df = build_covariates_without_temp(ctx.covariates_df, ctx.temperature_column)
+    ctx.data_qc["confounds_qc_covariates_added"] = {
+        "columns": list(cov_add.columns),
+        "source_metrics": qc_cols,
+        "alpha": alpha,
+    }
+    ctx.logger.info("Added QC covariates: %s", ", ".join(cov_add.columns))
+
+    return audit_df
+
+
+def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Trialwise regression: rating (or pain_residual) ~ temperature + trial order + feature (+ interaction)."""
+    from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    feature_set = str(get_config_value(ctx.config, "behavior_analysis.regression.feature_set", "pain_summaries")).strip().lower()
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = config.method_label
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    df_trials: Optional[pd.DataFrame] = None
+    if feature_set == "pain_summaries":
+        path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+        if path.exists():
+            df_trials = pd.read_parquet(path)
+    if df_trials is None:
+        df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Regression: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    # Feature columns: use naming schema prefixes for safety.
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+
+    groups = None
+    if getattr(ctx, "group_ids", None) is not None:
+        try:
+            groups = np.asarray(ctx.group_ids)
+        except Exception:
+            groups = None
+
+    reg_df, reg_meta = run_trialwise_feature_regressions(
+        df_trials,
+        feature_cols=feature_cols,
+        config=ctx.config,
+        groups_for_permutation=groups,
+    )
+    ctx.data_qc["trialwise_regression"] = reg_meta
+    if reg_df is not None and not reg_df.empty and "temperature_control" not in reg_df.columns:
+        reg_df = reg_df.copy()
+        reg_df["temperature_control"] = reg_meta.get("temperature_control", None)
+
+    out_path = ctx.stats_dir / f"regression_feature_effects{suffix}{method_suffix}.tsv"
+    if not reg_df.empty:
+        write_tsv(reg_df, out_path)
+        ctx.logger.info("Regression results saved: %s (%d features)", out_path.name, len(reg_df))
+    return reg_df
+
+
+def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Fit multiple model families per feature (OLS-HC3 / robust / quantile / logistic)."""
+    from eeg_pipeline.utils.analysis.stats.feature_models import run_feature_model_families
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    feature_set = str(get_config_value(ctx.config, "behavior_analysis.models.feature_set", "pain_summaries")).strip().lower()
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    df_trials: Optional[pd.DataFrame] = None
+    if feature_set == "pain_summaries":
+        path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+        if path.exists():
+            df_trials = pd.read_parquet(path)
+    if df_trials is None:
+        df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Models: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+
+    model_df, model_meta = run_feature_model_families(
+        df_trials,
+        feature_cols=feature_cols,
+        config=ctx.config,
+    )
+    ctx.data_qc["feature_models"] = model_meta
+    if model_df is not None and not model_df.empty and "temperature_control" not in model_df.columns:
+        model_df = model_df.copy()
+        model_df["temperature_control"] = model_meta.get("temperature_control", None)
+
+    out_path = ctx.stats_dir / f"models_feature_effects{suffix}{method_suffix}.tsv"
+    if model_df is not None and not model_df.empty:
+        write_tsv(model_df, out_path)
+        ctx.logger.info("Model families results saved: %s (%d rows)", out_path.name, len(model_df))
+    return model_df if model_df is not None else pd.DataFrame()
+
+
+def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Assess within-subject run/block stability of feature→outcome associations (non-gating)."""
+    from eeg_pipeline.utils.analysis.stats.stability import compute_groupwise_stability
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    feature_set = str(get_config_value(ctx.config, "behavior_analysis.stability.feature_set", "pain_summaries")).strip().lower()
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    df_trials: Optional[pd.DataFrame] = None
+    if feature_set == "pain_summaries":
+        path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+        if path.exists():
+            df_trials = pd.read_parquet(path)
+    if df_trials is None:
+        df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Stability: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    group_col = str(get_config_value(ctx.config, "behavior_analysis.stability.group_column", "")).strip()
+    if not group_col:
+        group_col = "run" if "run" in df_trials.columns else ("block" if "block" in df_trials.columns else "")
+    if not group_col:
+        ctx.logger.info("Stability: no run/block column available; skipping.")
+        return pd.DataFrame()
+
+    outcome = str(get_config_value(ctx.config, "behavior_analysis.stability.outcome", "")).strip().lower()
+    if not outcome:
+        outcome = "pain_residual" if "pain_residual" in df_trials.columns else "rating"
+
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+
+    stab_df, stab_meta = compute_groupwise_stability(
+        df_trials,
+        feature_cols=feature_cols,
+        outcome=outcome,
+        group_col=group_col,
+        config=ctx.config,
+    )
+    ctx.data_qc["stability_groupwise"] = stab_meta
+
+    out_path = ctx.stats_dir / f"stability_groupwise{suffix}{method_suffix}.tsv"
+    if stab_df is not None and not stab_df.empty:
+        write_tsv(stab_df, out_path)
+        ctx.logger.info("Stability results saved: %s (%d features)", out_path.name, len(stab_df))
+    try:
+        (ctx.stats_dir / f"stability_groupwise{suffix}{method_suffix}.metadata.json").write_text(
+            json.dumps(stab_meta, indent=2, default=str)
+        )
+    except Exception:
+        pass
+    return stab_df if stab_df is not None else pd.DataFrame()
+
+
+def stage_consistency(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
+    """Merge correlations/regression/models and flag effect-direction contradictions (non-gating)."""
+    from eeg_pipeline.utils.analysis.stats.consistency import build_effect_direction_consistency_summary
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    corr_df = getattr(results, "correlations", None)
+    reg_df = getattr(results, "regression", None)
+    models_df = getattr(results, "models", None)
+    out_df, meta = build_effect_direction_consistency_summary(
+        corr_df=corr_df,
+        regression_df=reg_df,
+        models_df=models_df,
+        config=ctx.config,
+    )
+    ctx.data_qc["effect_direction_consistency"] = meta
+    if out_df is None or out_df.empty:
+        return pd.DataFrame()
+
+    out_path = ctx.stats_dir / f"consistency_summary{suffix}{method_suffix}.tsv"
+    write_tsv(out_df, out_path)
+    try:
+        (ctx.stats_dir / f"consistency_summary{suffix}{method_suffix}.metadata.json").write_text(
+            json.dumps(meta, indent=2, default=str)
+        )
+    except Exception:
+        pass
+    ctx.logger.info("Consistency summary saved: %s (%d features)", out_path.name, len(out_df))
+    return out_df
+
+
+def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataFrame:
+    """Compute leverage/Cook's summaries for top effects (non-gating)."""
+    from eeg_pipeline.utils.analysis.stats.influence import compute_influence_diagnostics
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.info("Influence: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+
+    out_df, meta = compute_influence_diagnostics(
+        df_trials,
+        feature_cols=feature_cols,
+        corr_df=getattr(results, "correlations", None),
+        regression_df=getattr(results, "regression", None),
+        models_df=getattr(results, "models", None),
+        config=ctx.config,
+    )
+    ctx.data_qc["influence_diagnostics"] = meta
+    if out_df is None or out_df.empty:
+        return pd.DataFrame()
+
+    out_path = ctx.stats_dir / f"influence_diagnostics{suffix}{method_suffix}.tsv"
+    write_tsv(out_df, out_path)
+    try:
+        (ctx.stats_dir / f"influence_diagnostics{suffix}{method_suffix}.metadata.json").write_text(
+            json.dumps(meta, indent=2, default=str)
+        )
+    except Exception:
+        pass
+    ctx.logger.info("Influence diagnostics saved: %s (%d rows)", out_path.name, len(out_df))
+    return out_df
+
+
 def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
     qc: Dict[str, Any] = {
         "subject": ctx.subject,
@@ -592,6 +1114,12 @@ def write_analysis_metadata(
             "compute_loso_stability": getattr(pipeline_config, "compute_loso_stability", False),
         },
         "outputs": {
+            "has_trial_table": bool(getattr(results, "trial_table_path", None)),
+            "has_trial_table_validation": bool(getattr(results, "trial_table_validation", None)),
+            "has_confounds_audit": bool(getattr(results, "confounds", None) is not None and not results.confounds.empty),
+            "has_regression": bool(getattr(results, "regression", None) is not None and not results.regression.empty),
+            "has_stability": bool(getattr(results, "stability", None) is not None and not getattr(results, "stability").empty) if getattr(results, "stability", None) is not None else False,
+            "has_models": bool(getattr(results, "models", None) is not None and not getattr(results, "models").empty) if getattr(results, "models", None) is not None else False,
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
             "has_pain_sensitivity": bool(getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty),
             "has_condition_effects": bool(getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty),
@@ -794,27 +1322,28 @@ def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
     if config.run_mediation:
         if "temperature" in features.columns and "rating" in features.columns:
             ctx.logger.info("Running mediation analysis...")
-            n_bootstrap = get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000)
+            n_bootstrap = int(get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000))
+            min_effect_size = float(get_config_value(ctx.config, "behavior_analysis.mediation.min_effect_size", 0.05))
+            max_mediators = int(get_config_value(ctx.config, "behavior_analysis.mediation.max_mediators", 20))
+
             variances = features[feature_cols].var()
-            mediators = variances.nlargest(20).index.tolist()
+            mediators = variances.nlargest(max(1, max_mediators)).index.tolist()
             results.mediation = run_mediation_analysis(
                 features,
                 "temperature",
                 mediators,
                 "rating",
                 n_bootstrap=n_bootstrap,
+                min_effect_size=min_effect_size,
             )
         else:
             ctx.logger.warning("Skipping mediation: 'temperature' or 'rating' missing.")
 
-    if config.run_mixed_effects and "subject" in features.columns and "rating" in features.columns:
-        ctx.logger.info("Running mixed-effects analysis...")
-        results.mixed_effects = run_multilevel_correlation_analysis(
-            features,
-            feature_cols[:50],
-            "rating",
-            "subject",
-            config=ctx.config,
+    if config.run_mixed_effects:
+        # Mixed-effects models require multiple subjects with repeated measures.
+        # Subject-level behavior analysis should skip this stage to avoid misleading results.
+        ctx.logger.warning(
+            "Skipping mixed-effects analysis in subject-level mode; run this at group level with multiple subjects."
         )
 
 
@@ -830,6 +1359,14 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
     # 1. Condition effects
     if getattr(config, "run_condition_comparison", False):
         patterns.append("condition_effects*.tsv")
+
+    # 1b. Confounds + regression
+    if getattr(config, "run_confounds", False):
+        patterns.append("confounds_audit*.tsv")
+    if getattr(config, "run_regression", False):
+        patterns.append("regression_feature_effects*.tsv")
+    if getattr(config, "run_models", False):
+        patterns.append("models_feature_effects*.tsv")
         
     # 2. Mediation and Mixed Effects
     if getattr(config, "run_mediation", False):
@@ -902,6 +1439,9 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
         
         # Mapping of result types to files
         mapping = {
+            "confounds": "confounds_audit*.tsv",
+            "regression": "regression_feature_effects*.tsv",
+            "models": "models_feature_effects*.tsv",
             "correlations": "correlations*.tsv",
             "pain_sensitivity": "pain_sensitivity*.tsv",
             "condition_effects": "condition_effects*.tsv",
@@ -1007,6 +1547,18 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
         results.mixed_effects = _ensure_method_columns(
             results.mixed_effects, pipeline_config.method, robust_method, method_label
         )
+    if getattr(results, "confounds", None) is not None:
+        results.confounds = _ensure_method_columns(
+            results.confounds, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "regression", None) is not None:
+        results.regression = _ensure_method_columns(
+            results.regression, pipeline_config.method, robust_method, method_label
+        )
+    if getattr(results, "models", None) is not None:
+        results.models = _ensure_method_columns(
+            results.models, pipeline_config.method, robust_method, method_label
+        )
 
     if getattr(results, "correlations", None) is not None and not results.correlations.empty:
         path = ctx.stats_dir / f"correlations{feature_suffix}{method_suffix}.tsv"
@@ -1031,6 +1583,21 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
     if getattr(results, "mixed_effects", None) is not None and not results.mixed_effects.empty:
         path = ctx.stats_dir / f"mixed_effects{feature_suffix}.tsv"
         write_tsv(results.mixed_effects, path)
+        saved.append(path)
+
+    if getattr(results, "confounds", None) is not None and not results.confounds.empty:
+        path = ctx.stats_dir / f"confounds_audit{feature_suffix}{method_suffix}.tsv"
+        write_tsv(results.confounds, path)
+        saved.append(path)
+
+    if getattr(results, "regression", None) is not None and not results.regression.empty:
+        path = ctx.stats_dir / f"regression_feature_effects{feature_suffix}{method_suffix}.tsv"
+        write_tsv(results.regression, path)
+        saved.append(path)
+
+    if getattr(results, "models", None) is not None and not results.models.empty:
+        path = ctx.stats_dir / f"models_feature_effects{feature_suffix}{method_suffix}.tsv"
+        write_tsv(results.models, path)
         saved.append(path)
 
     normalized_path = _write_normalized_results(ctx, pipeline_config, results)
@@ -1058,6 +1625,28 @@ def _infer_output_kind(name: str) -> str:
         return "mediation"
     if name.startswith("mixed_effects"):
         return "mixed_effects"
+    if name.startswith("confounds_audit"):
+        return "confounds_audit"
+    if name.startswith("regression_feature_effects"):
+        return "trialwise_regression"
+    if name.startswith("models_feature_effects"):
+        return "feature_models"
+    if name.startswith("trials"):
+        return "trial_table"
+    if name.startswith("trial_table_validation"):
+        return "trial_table_validation"
+    if name.startswith("temperature_model_comparison"):
+        return "temperature_model_comparison"
+    if name.startswith("temperature_breakpoint"):
+        return "temperature_breakpoint_test"
+    if name.startswith("stability_groupwise"):
+        return "stability_groupwise"
+    if name.startswith("consistency_summary"):
+        return "consistency_summary"
+    if name.startswith("influence_diagnostics"):
+        return "influence_diagnostics"
+    if name.startswith("pain_feature_summaries"):
+        return "pain_feature_summaries"
     if name.startswith("normalized_results"):
         return "normalized_results"
     if name.startswith("feature_screening"):

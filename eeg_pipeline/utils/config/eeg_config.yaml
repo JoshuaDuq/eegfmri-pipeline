@@ -202,6 +202,124 @@ behavior_analysis:
   bootstrap: 1000
   n_jobs: -1
   targets: ["pain_rating", "temperature", "pain_binary"]
+
+  # Canonical per-trial table export (single source of truth for subject-level stats/plots)
+  trial_table:
+    enabled: true
+    format: "parquet"   # "parquet" (recommended) or "tsv"
+    include_features: true
+    include_covariates: true
+    include_events: true
+    add_lag_features: true
+    extra_event_columns: []
+    validate:
+      enabled: true
+      # Non-gating data contract checks (pain studies defaults; override per project)
+      rating_min: 0.0
+      rating_max: 10.0
+      temperature_min: 25.0
+      temperature_max: 55.0
+      high_missing_frac: 0.5
+
+  # Define pain residual = rating - f(temperature)
+  pain_residual:
+    enabled: true
+    method: "spline"          # "spline" (requires statsmodels) or "poly"
+    min_samples: 10
+    spline_df_candidates: [3, 4, 5]
+    poly_degree: 2
+    model_comparison:
+      enabled: true
+      min_samples: 10
+      poly_degrees: [2, 3]
+    breakpoint_test:
+      enabled: true
+      min_samples: 12
+      quantile_low: 0.15
+      quantile_high: 0.85
+      n_candidates: 15
+
+  # Reduced, pain-focused feature set for reporting/regression defaults
+  feature_summaries:
+    enabled: true
+    lateralization_pairs:
+      - ["Sensorimotor_Contra_R", "Sensorimotor_Ipsi_L"]
+      - ["Temporal_Contra_R", "Temporal_Ipsi_L"]
+      - ["ParOccipital_Contra_R", "ParOccipital_Ipsi_L"]
+
+  # Confound auditing: does QC track rating/temperature?
+  confounds:
+    enabled: true
+    qc_column_patterns:
+      - "^quality_.*_global_"
+      - "^quality_.*_ch_"
+    add_as_covariates_if_significant: false
+    max_qc_covariates: 3
+
+  # Trialwise regression/moderation (complements correlations)
+  regression:
+    enabled: false
+    feature_set: "pain_summaries"  # "pain_summaries" or "all"
+    outcome: "rating"              # "rating" or "pain_residual"
+    include_temperature: true
+    temperature_control: "linear"    # "linear" or "rating_hat" (uses rating_hat_from_temp if present)
+    include_trial_order: true
+    include_prev_terms: false      # uses prev_/delta_ columns from trial table
+    include_run_block: true
+    include_interaction: true      # feature × temperature
+    standardize: true
+    min_samples: 15
+    n_permutations: 0
+    max_features: null
+
+  # Sensitivity model families per feature (robust/quantile/logistic)
+  models:
+    enabled: false
+    feature_set: "pain_summaries"     # "pain_summaries" or "all"
+    outcomes: ["rating", "pain_residual"]
+    families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
+    include_temperature: true
+    temperature_control: "linear"    # "linear" or "rating_hat" (uses rating_hat_from_temp if present)
+    include_trial_order: true
+    include_prev_terms: false
+    include_run_block: true
+    include_interaction: true
+    standardize: true
+    min_samples: 20
+    max_features: 100
+    binary_outcome: "pain_binary"     # or "rating_median"
+
+  # Within-subject stability across runs/blocks (non-gating diagnostics)
+  stability:
+    enabled: true
+    feature_set: "pain_summaries"   # "pain_summaries" or "all"
+    outcome: ""                     # "" -> auto (pain_residual if present, else rating)
+    group_column: ""                # "" -> auto (run if present, else block)
+    method: "spearman"
+    partial_temperature: true
+    min_group_trials: 8
+    max_features: 50
+    alpha: 0.05
+
+  # Effect direction consistency across outcomes/methods (non-gating)
+  consistency:
+    enabled: true
+
+  # Influence diagnostics (non-gating)
+  influence:
+    enabled: true
+    feature_set: "pain_summaries"
+    outcomes: ["rating", "pain_residual"]
+    max_features: 20
+    include_temperature: true
+    temperature_control: "linear"  # "linear" or "rating_hat"
+    include_trial_order: true
+    include_run_block: true
+    include_interaction: false
+    standardize: true
+    # Optional overrides (defaults use common heuristics)
+    cooks_threshold: null
+    leverage_threshold: null
   
   # Statistics
   statistics:

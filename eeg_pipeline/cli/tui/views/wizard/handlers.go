@@ -26,8 +26,9 @@ func (m *Model) resetCursorsForStep() {
 	m.spatialCursor = 0
 	m.featureFileCursor = 0
 	m.advancedCursor = 0
+	m.advancedOffset = 0
 	m.subCursor = 0
-	m.expandedOption = -1
+	m.expandedOption = expandedNone
 	m.plotCursor = 0
 	m.plotOffset = 0
 	if m.CurrentStep == types.StepSelectPlots {
@@ -127,13 +128,14 @@ func (m *Model) handleUp() {
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			// Navigate within the expanded list (connectivity measures)
-			if m.expandedOption == 4 { // Connectivity measures
+			if m.expandedOption == expandedConnectivityMeasures {
 				if m.subCursor > 0 {
 					m.subCursor--
 				} else {
 					m.subCursor = len(connectivityMeasures) - 1
 				}
 			}
+			m.UpdateAdvancedOffset()
 		} else {
 			// Navigate between main options
 			optCount := m.getAdvancedOptionCount()
@@ -142,6 +144,7 @@ func (m *Model) handleUp() {
 			} else {
 				m.advancedCursor = optCount - 1
 			}
+			m.UpdateAdvancedOffset()
 		}
 	}
 }
@@ -222,13 +225,14 @@ func (m *Model) handleDown() {
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			// Navigate within the expanded list (connectivity measures)
-			if m.expandedOption == 4 { // Connectivity measures
+			if m.expandedOption == expandedConnectivityMeasures {
 				if m.subCursor < len(connectivityMeasures)-1 {
 					m.subCursor++
 				} else {
 					m.subCursor = 0
 				}
 			}
+			m.UpdateAdvancedOffset()
 		} else {
 			// Navigate between main options
 			optCount := m.getAdvancedOptionCount()
@@ -237,6 +241,7 @@ func (m *Model) handleDown() {
 			} else {
 				m.advancedCursor = 0
 			}
+			m.UpdateAdvancedOffset()
 		}
 	}
 }
@@ -246,7 +251,7 @@ func (m *Model) handleTab() {
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			// Collapse and move to next primary option
-			m.expandedOption = -1
+			m.expandedOption = expandedNone
 			m.subCursor = 0
 			optCount := m.getAdvancedOptionCount()
 			if m.advancedCursor < optCount-1 {
@@ -254,6 +259,7 @@ func (m *Model) handleTab() {
 			} else {
 				m.advancedCursor = 0
 			}
+			m.UpdateAdvancedOffset()
 		} else {
 			m.handleDown()
 		}
@@ -263,9 +269,13 @@ func (m *Model) handleTab() {
 }
 
 func (m *Model) handleLeft() {
+	// Left/right navigation is no longer used for behavior advanced config
+	// since sections are now collapsible like the features pipeline
 }
 
 func (m *Model) handleRight() {
+	// Left/right navigation is no longer used for behavior advanced config
+	// since sections are now collapsible like the features pipeline
 }
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
@@ -577,8 +587,9 @@ func (m *Model) GoBack() bool {
 
 	// If in advanced config with an expanded option, collapse it first
 	if m.CurrentStep == types.StepAdvancedConfig && m.expandedOption >= 0 {
-		m.expandedOption = -1
+		m.expandedOption = expandedNone
 		m.subCursor = 0
+		m.UpdateAdvancedOffset()
 		return true
 	}
 
@@ -716,6 +727,7 @@ func (m *Model) validate() []string {
 		if featureFileCount == 0 {
 			errors = append(errors, "No feature files selected")
 		}
+
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
@@ -878,7 +890,7 @@ func (m *Model) toggleAdvancedOption() {
 func (m *Model) toggleFeaturesAdvancedOption() {
 	// If an option is expanded, toggle items within it
 	if m.expandedOption >= 0 {
-		if m.expandedOption == 4 { // Connectivity measures
+		if m.expandedOption == expandedConnectivityMeasures {
 			m.connectivityMeasures[m.subCursor] = !m.connectivityMeasures[m.subCursor]
 		}
 		m.useDefaultAdvanced = false
@@ -896,8 +908,51 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	case optFeatGroupConnectivity:
+		m.featGroupConnectivityExpanded = !m.featGroupConnectivityExpanded
+		if !m.featGroupConnectivityExpanded && m.expandedOption == expandedConnectivityMeasures {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
+	case optFeatGroupPAC:
+		m.featGroupPACExpanded = !m.featGroupPACExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupAperiodic:
+		m.featGroupAperiodicExpanded = !m.featGroupAperiodicExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupComplexity:
+		m.featGroupComplexityExpanded = !m.featGroupComplexityExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupBursts:
+		m.featGroupBurstsExpanded = !m.featGroupBurstsExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupPower:
+		m.featGroupPowerExpanded = !m.featGroupPowerExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupSpectral:
+		m.featGroupSpectralExpanded = !m.featGroupSpectralExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupERP:
+		m.featGroupERPExpanded = !m.featGroupERPExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupRatios:
+		m.featGroupRatiosExpanded = !m.featGroupRatiosExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupAsymmetry:
+		m.featGroupAsymmetryExpanded = !m.featGroupAsymmetryExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupStorage:
+		m.featGroupStorageExpanded = !m.featGroupStorageExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupExecution:
+		m.featGroupExecutionExpanded = !m.featGroupExecutionExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupValidation:
+		m.featGroupValidationExpanded = !m.featGroupValidationExpanded
+		m.useDefaultAdvanced = false
 	case optConnectivity:
-		m.expandedOption = 4
+		m.expandedOption = expandedConnectivityMeasures
 		m.subCursor = 0
 		m.useDefaultAdvanced = false
 	case optPACPhaseRange:
@@ -926,6 +981,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPACMinEpochs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optPACPairs:
+		m.startTextEdit(textFieldPACPairs)
+		m.useDefaultAdvanced = false
 	case optAperiodicRange:
 		// Cycle through common aperiodic ranges: standard(2-40) -> narrow(3-30) -> broad(1-50) -> standard
 		if m.aperiodicFmin == 2.0 && m.aperiodicFmax == 40.0 {
@@ -951,6 +1009,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optERPBaseline:
 		m.erpBaselineCorrection = !m.erpBaselineCorrection
 		m.useDefaultAdvanced = false
+	case optERPAllowNoBaseline:
+		m.erpAllowNoBaseline = !m.erpAllowNoBaseline
+		m.useDefaultAdvanced = false
+	case optERPComponents:
+		m.startTextEdit(textFieldERPComponents)
+		m.useDefaultAdvanced = false
 	case optBurstThreshold:
 		switch m.burstThresholdZ {
 		case 1.5:
@@ -966,8 +1030,14 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optBurstMinDuration:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optBurstBands:
+		m.startTextEdit(textFieldBurstBands)
+		m.useDefaultAdvanced = false
 	case optPowerBaselineMode:
 		m.powerBaselineMode = (m.powerBaselineMode + 1) % 5
+		m.useDefaultAdvanced = false
+	case optPowerRequireBaseline:
+		m.powerRequireBaseline = !m.powerRequireBaseline
 		m.useDefaultAdvanced = false
 	case optSpectralEdge:
 		switch m.spectralEdgePercentile {
@@ -997,8 +1067,29 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optMinEpochs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optSpectralRatioPairs:
+		m.startTextEdit(textFieldSpectralRatioPairs)
+		m.useDefaultAdvanced = false
+	case optAsymmetryChannelPairs:
+		m.startTextEdit(textFieldAsymmetryChannelPairs)
+		m.useDefaultAdvanced = false
+	case optFailOnMissingWindows:
+		m.failOnMissingWindows = !m.failOnMissingWindows
+		m.useDefaultAdvanced = false
+	case optFailOnMissingNamedWindow:
+		m.failOnMissingNamedWindow = !m.failOnMissingNamedWindow
+		m.useDefaultAdvanced = false
 	}
 
+	// Clamp cursor after expand/collapse changes.
+	options = m.getFeaturesOptions()
+	if m.advancedCursor >= len(options) {
+		m.advancedCursor = len(options) - 1
+	}
+	if m.advancedCursor < 0 {
+		m.advancedCursor = 0
+	}
+	m.UpdateAdvancedOffset()
 }
 
 func (m *Model) toggleBehaviorAdvancedOption() {
@@ -1007,16 +1098,82 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		return
 	}
 
+	sections := m.behaviorSections()
+	sectionEnabled := true
+	if len(sections) > 0 {
+		idx := m.behaviorConfigSection
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(sections) {
+			idx = len(sections) - 1
+		}
+		sectionEnabled = sections[idx].Enabled
+	}
+
 	opt := options[m.advancedCursor]
+	if opt != optUseDefaults && !sectionEnabled {
+		return
+	}
+
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	// Behavior section header toggles
+	case optBehaviorGroupGeneral:
+		m.behaviorGroupGeneralExpanded = !m.behaviorGroupGeneralExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupTrialTable:
+		m.behaviorGroupTrialTableExpanded = !m.behaviorGroupTrialTableExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupCorrelations:
+		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupPainSens:
+		m.behaviorGroupPainSensExpanded = !m.behaviorGroupPainSensExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupConfounds:
+		m.behaviorGroupConfoundsExpanded = !m.behaviorGroupConfoundsExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupRegression:
+		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupModels:
+		m.behaviorGroupModelsExpanded = !m.behaviorGroupModelsExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupStability:
+		m.behaviorGroupStabilityExpanded = !m.behaviorGroupStabilityExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupConsistency:
+		m.behaviorGroupConsistencyExpanded = !m.behaviorGroupConsistencyExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupInfluence:
+		m.behaviorGroupInfluenceExpanded = !m.behaviorGroupInfluenceExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupCondition:
+		m.behaviorGroupConditionExpanded = !m.behaviorGroupConditionExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupTemporal:
+		m.behaviorGroupTemporalExpanded = !m.behaviorGroupTemporalExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupCluster:
+		m.behaviorGroupClusterExpanded = !m.behaviorGroupClusterExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupMediation:
+		m.behaviorGroupMediationExpanded = !m.behaviorGroupMediationExpanded
+		m.useDefaultAdvanced = false
+	case optBehaviorGroupMixedEffects:
+		m.behaviorGroupMixedEffectsExpanded = !m.behaviorGroupMixedEffectsExpanded
+		m.useDefaultAdvanced = false
 	case optCorrMethod:
 		if m.correlationMethod == "spearman" {
 			m.correlationMethod = "pearson"
 		} else {
 			m.correlationMethod = "spearman"
 		}
+		m.useDefaultAdvanced = false
+	case optRobustCorrelation:
+		m.robustCorrelation = (m.robustCorrelation + 1) % 4
 		m.useDefaultAdvanced = false
 	case optBootstrap:
 		m.startNumberEdit()
@@ -1027,6 +1184,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRNGSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optBehaviorNJobs, optBehaviorMinSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optControlTemp:
 		m.controlTemperature = !m.controlTemperature
 		m.useDefaultAdvanced = false
@@ -1034,29 +1194,265 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.controlTrialOrder = !m.controlTrialOrder
 		m.useDefaultAdvanced = false
 	case optFDRAlpha:
-		switch m.fdrAlpha {
-		case 0.05:
-			m.fdrAlpha = 0.01
-		case 0.01:
-			m.fdrAlpha = 0.10
-		case 0.10:
-			m.fdrAlpha = 0.05
-		default:
-			m.fdrAlpha = 0.05
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	case optComputeChangeScores:
+		m.behaviorComputeChangeScores = !m.behaviorComputeChangeScores
+		m.useDefaultAdvanced = false
+	case optComputeLosoStability:
+		m.behaviorComputeLosoStability = !m.behaviorComputeLosoStability
+		m.useDefaultAdvanced = false
+	case optComputeBayesFactors:
+		m.behaviorComputeBayesFactors = !m.behaviorComputeBayesFactors
+		m.useDefaultAdvanced = false
+
+	// Trial table / residual options
+	case optTrialTableFormat:
+		m.trialTableFormat = (m.trialTableFormat + 1) % 2
+		m.useDefaultAdvanced = false
+	case optTrialTableIncludeFeatures:
+		m.trialTableIncludeFeatures = !m.trialTableIncludeFeatures
+		m.useDefaultAdvanced = false
+	case optTrialTableIncludeCovars:
+		m.trialTableIncludeCovars = !m.trialTableIncludeCovars
+		m.useDefaultAdvanced = false
+	case optTrialTableIncludeEvents:
+		m.trialTableIncludeEvents = !m.trialTableIncludeEvents
+		m.useDefaultAdvanced = false
+	case optTrialTableAddLagFeatures:
+		m.trialTableAddLagFeatures = !m.trialTableAddLagFeatures
+		m.useDefaultAdvanced = false
+	case optTrialTableExtraEventCols:
+		m.startTextEdit(textFieldTrialTableExtraEventColumns)
+		m.useDefaultAdvanced = false
+	case optTrialTableValidate:
+		m.trialTableValidateEnabled = !m.trialTableValidateEnabled
+		m.useDefaultAdvanced = false
+	case optTrialTableRatingMin, optTrialTableRatingMax, optTrialTableTempMin, optTrialTableTempMax, optTrialTableHighMissingFrac:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFeatureSummariesEnabled:
+		m.featureSummariesEnabled = !m.featureSummariesEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualEnabled:
+		m.painResidualEnabled = !m.painResidualEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualMethod:
+		m.painResidualMethod = (m.painResidualMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optPainResidualMinSamples, optPainResidualPolyDegree:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainResidualModelCompare:
+		m.painResidualModelCompareEnabled = !m.painResidualModelCompareEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualModelCompareMinSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainResidualBreakpoint:
+		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualBreakpointMinSamples, optPainResidualBreakpointCandidates, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Confounds
+	case optConfoundsAddAsCovariates:
+		m.confoundsAddAsCovariates = !m.confoundsAddAsCovariates
+		m.useDefaultAdvanced = false
+	case optConfoundsMaxCovariates:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optConfoundsQCColumnPatterns:
+		m.startTextEdit(textFieldConfoundsQCColumnPatterns)
+		m.useDefaultAdvanced = false
+
+	// Regression
+	case optRegressionFeatureSet:
+		m.regressionFeatureSet = (m.regressionFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
+	case optRegressionOutcome:
+		m.regressionOutcome = (m.regressionOutcome + 1) % 2
+		m.useDefaultAdvanced = false
+	case optRegressionIncludeTemperature:
+		m.regressionIncludeTemperature = !m.regressionIncludeTemperature
+		m.useDefaultAdvanced = false
+	case optRegressionTempControl:
+		m.regressionTempControl = (m.regressionTempControl + 1) % 2
+		m.useDefaultAdvanced = false
+	case optRegressionIncludeTrialOrder:
+		m.regressionIncludeTrialOrder = !m.regressionIncludeTrialOrder
+		m.useDefaultAdvanced = false
+	case optRegressionIncludePrev:
+		m.regressionIncludePrev = !m.regressionIncludePrev
+		m.useDefaultAdvanced = false
+	case optRegressionIncludeRunBlock:
+		m.regressionIncludeRunBlock = !m.regressionIncludeRunBlock
+		m.useDefaultAdvanced = false
+	case optRegressionIncludeInteraction:
+		m.regressionIncludeInteraction = !m.regressionIncludeInteraction
+		m.useDefaultAdvanced = false
+	case optRegressionStandardize:
+		m.regressionStandardize = !m.regressionStandardize
+		m.useDefaultAdvanced = false
+	case optRegressionMinSamples, optRegressionPermutations, optRegressionMaxFeatures:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Models
+	case optModelsFeatureSet:
+		m.modelsFeatureSet = (m.modelsFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
+	case optModelsIncludeTemperature:
+		m.modelsIncludeTemperature = !m.modelsIncludeTemperature
+		m.useDefaultAdvanced = false
+	case optModelsTempControl:
+		m.modelsTempControl = (m.modelsTempControl + 1) % 2
+		m.useDefaultAdvanced = false
+	case optModelsIncludeTrialOrder:
+		m.modelsIncludeTrialOrder = !m.modelsIncludeTrialOrder
+		m.useDefaultAdvanced = false
+	case optModelsIncludePrev:
+		m.modelsIncludePrev = !m.modelsIncludePrev
+		m.useDefaultAdvanced = false
+	case optModelsIncludeRunBlock:
+		m.modelsIncludeRunBlock = !m.modelsIncludeRunBlock
+		m.useDefaultAdvanced = false
+	case optModelsIncludeInteraction:
+		m.modelsIncludeInteraction = !m.modelsIncludeInteraction
+		m.useDefaultAdvanced = false
+	case optModelsStandardize:
+		m.modelsStandardize = !m.modelsStandardize
+		m.useDefaultAdvanced = false
+	case optModelsMinSamples, optModelsMaxFeatures:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optModelsOutcomeRating:
+		m.modelsOutcomeRating = !m.modelsOutcomeRating
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+			m.modelsOutcomeRating = true
 		}
 		m.useDefaultAdvanced = false
+	case optModelsOutcomePainResidual:
+		m.modelsOutcomePainResidual = !m.modelsOutcomePainResidual
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+			m.modelsOutcomePainResidual = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsOutcomePainBinary:
+		m.modelsOutcomePainBinary = !m.modelsOutcomePainBinary
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+			m.modelsOutcomePainBinary = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsFamilyOLS:
+		m.modelsFamilyOLS = !m.modelsFamilyOLS
+		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
+			m.modelsFamilyOLS = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsFamilyRobust:
+		m.modelsFamilyRobust = !m.modelsFamilyRobust
+		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
+			m.modelsFamilyRobust = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsFamilyQuantile:
+		m.modelsFamilyQuantile = !m.modelsFamilyQuantile
+		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
+			m.modelsFamilyQuantile = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsFamilyLogit:
+		m.modelsFamilyLogit = !m.modelsFamilyLogit
+		if !m.modelsFamilyOLS && !m.modelsFamilyRobust && !m.modelsFamilyQuantile && !m.modelsFamilyLogit {
+			m.modelsFamilyLogit = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsBinaryOutcome:
+		m.modelsBinaryOutcome = (m.modelsBinaryOutcome + 1) % 2
+		m.useDefaultAdvanced = false
+
+	// Stability
+	case optStabilityFeatureSet:
+		m.stabilityFeatureSet = (m.stabilityFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
+	case optStabilityMethod:
+		m.stabilityMethod = (m.stabilityMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optStabilityOutcome:
+		m.stabilityOutcome = (m.stabilityOutcome + 1) % 3
+		m.useDefaultAdvanced = false
+	case optStabilityGroupColumn:
+		m.stabilityGroupColumn = (m.stabilityGroupColumn + 1) % 3
+		m.useDefaultAdvanced = false
+	case optStabilityPartialTemp:
+		m.stabilityPartialTemp = !m.stabilityPartialTemp
+		m.useDefaultAdvanced = false
+	case optStabilityMinGroupTrials, optStabilityMaxFeatures, optStabilityAlpha:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Consistency
+	case optConsistencyEnabled:
+		m.consistencyEnabled = !m.consistencyEnabled
+		m.useDefaultAdvanced = false
+
+	// Influence
+	case optInfluenceFeatureSet:
+		m.influenceFeatureSet = (m.influenceFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
+	case optInfluenceOutcomeRating:
+		m.influenceOutcomeRating = !m.influenceOutcomeRating
+		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual {
+			m.influenceOutcomeRating = true
+		}
+		m.useDefaultAdvanced = false
+	case optInfluenceOutcomePainResidual:
+		m.influenceOutcomePainResidual = !m.influenceOutcomePainResidual
+		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual {
+			m.influenceOutcomePainResidual = true
+		}
+		m.useDefaultAdvanced = false
+	case optInfluenceMaxFeatures:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optInfluenceIncludeTemperature:
+		m.influenceIncludeTemperature = !m.influenceIncludeTemperature
+		m.useDefaultAdvanced = false
+	case optInfluenceTempControl:
+		m.influenceTempControl = (m.influenceTempControl + 1) % 2
+		m.useDefaultAdvanced = false
+	case optInfluenceIncludeTrialOrder:
+		m.influenceIncludeTrialOrder = !m.influenceIncludeTrialOrder
+		m.useDefaultAdvanced = false
+	case optInfluenceIncludeRunBlock:
+		m.influenceIncludeRunBlock = !m.influenceIncludeRunBlock
+		m.useDefaultAdvanced = false
+	case optInfluenceIncludeInteraction:
+		m.influenceIncludeInteraction = !m.influenceIncludeInteraction
+		m.useDefaultAdvanced = false
+	case optInfluenceStandardize:
+		m.influenceStandardize = !m.influenceStandardize
+		m.useDefaultAdvanced = false
+	case optInfluenceCooksThreshold, optInfluenceLeverageThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Pain sensitivity
+	case optPainSensitivityMinTrials:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Temporal
+	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
 	// Cluster options
 	case optClusterThreshold:
-		switch m.clusterThreshold {
-		case 0.05:
-			m.clusterThreshold = 0.01
-		case 0.01:
-			m.clusterThreshold = 0.001
-		case 0.001:
-			m.clusterThreshold = 0.05
-		default:
-			m.clusterThreshold = 0.05
-		}
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optClusterMinSize:
 		m.startNumberEdit()
@@ -1074,25 +1470,25 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	// Mediation options
-	case optMediationBootstrap, optMediationMaxMediators:
+	case optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// Mixed effects options
 	case optMixedMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optMixedEffectsType:
+		m.mixedEffectsType = (m.mixedEffectsType + 1) % 2
+		m.useDefaultAdvanced = false
 	// Condition options
 	case optConditionEffectThreshold:
-		switch m.conditionEffectThreshold {
-		case 0.5:
-			m.conditionEffectThreshold = 0.8
-		case 0.8:
-			m.conditionEffectThreshold = 0.2
-		case 0.2:
-			m.conditionEffectThreshold = 0.5
-		default:
-			m.conditionEffectThreshold = 0.5
-		}
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optConditionMinTrials:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optConditionFailFast:
+		m.conditionFailFast = !m.conditionFailFast
 		m.useDefaultAdvanced = false
 	}
 }
@@ -1277,13 +1673,152 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.rngSeed = int(val)
 		}
+	case optBehaviorNJobs:
+		m.behaviorNJobs = int(val)
+	case optBehaviorMinSamples:
+		if val >= 0 {
+			m.behaviorMinSamples = int(val)
+		}
+	case optFDRAlpha:
+		if val > 0 && val <= 1 {
+			m.fdrAlpha = val
+		}
+
+	// Trial table thresholds
+	case optTrialTableRatingMin:
+		m.trialTableRatingMin = val
+	case optTrialTableRatingMax:
+		m.trialTableRatingMax = val
+	case optTrialTableTempMin:
+		m.trialTableTempMin = val
+	case optTrialTableTempMax:
+		m.trialTableTempMax = val
+	case optTrialTableHighMissingFrac:
+		if val >= 0 && val <= 1 {
+			m.trialTableHighMissingFrac = val
+		}
+
+	// Pain residual + diagnostics
+	case optPainResidualMinSamples:
+		if val >= 0 {
+			m.painResidualMinSamples = int(val)
+		}
+	case optPainResidualPolyDegree:
+		if val >= 1 {
+			m.painResidualPolyDegree = int(val)
+		}
+	case optPainResidualModelCompareMinSamples:
+		if val >= 0 {
+			m.painResidualModelCompareMinSamples = int(val)
+		}
+	case optPainResidualBreakpointMinSamples:
+		if val >= 0 {
+			m.painResidualBreakpointMinSamples = int(val)
+		}
+	case optPainResidualBreakpointCandidates:
+		if val >= 5 {
+			m.painResidualBreakpointCandidates = int(val)
+		}
+	case optPainResidualBreakpointQlow:
+		if val > 0 && val < 1 {
+			m.painResidualBreakpointQlow = val
+		}
+	case optPainResidualBreakpointQhigh:
+		if val > 0 && val < 1 {
+			m.painResidualBreakpointQhigh = val
+		}
+
+	// Confounds
+	case optConfoundsMaxCovariates:
+		if val >= 0 {
+			m.confoundsMaxCovariates = int(val)
+		}
+
+	// Regression
+	case optRegressionMinSamples:
+		if val >= 0 {
+			m.regressionMinSamples = int(val)
+		}
+	case optRegressionPermutations:
+		if val >= 0 {
+			m.regressionPermutations = int(val)
+		}
+	case optRegressionMaxFeatures:
+		if val >= 0 {
+			m.regressionMaxFeatures = int(val)
+		}
+
+	// Models
+	case optModelsMinSamples:
+		if val >= 0 {
+			m.modelsMinSamples = int(val)
+		}
+	case optModelsMaxFeatures:
+		if val >= 0 {
+			m.modelsMaxFeatures = int(val)
+		}
+
+	// Stability
+	case optStabilityMinGroupTrials:
+		if val >= 0 {
+			m.stabilityMinGroupTrials = int(val)
+		}
+	case optStabilityMaxFeatures:
+		if val >= 0 {
+			m.stabilityMaxFeatures = int(val)
+		}
+	case optStabilityAlpha:
+		if val > 0 && val <= 1 {
+			m.stabilityAlpha = val
+		}
+
+	// Influence
+	case optInfluenceMaxFeatures:
+		if val >= 0 {
+			m.influenceMaxFeatures = int(val)
+		}
+	case optInfluenceCooksThreshold:
+		if val >= 0 {
+			m.influenceCooksThreshold = val
+		}
+	case optInfluenceLeverageThreshold:
+		if val >= 0 {
+			m.influenceLeverageThreshold = val
+		}
+
+	// Pain sensitivity / temporal
+	case optPainSensitivityMinTrials:
+		if val >= 0 {
+			m.painSensitivityMinTrials = int(val)
+		}
+	case optTemporalResolutionMs:
+		if val >= 1 {
+			m.temporalResolutionMs = int(val)
+		}
+	case optTemporalTimeMinMs:
+		m.temporalTimeMinMs = int(val)
+	case optTemporalTimeMaxMs:
+		m.temporalTimeMaxMs = int(val)
+	case optTemporalSmoothMs:
+		if val >= 0 {
+			m.temporalSmoothMs = int(val)
+		}
+
 	case optClusterMinSize:
 		if val >= 1 {
 			m.clusterMinSize = int(val)
 		}
+	case optClusterThreshold:
+		if val > 0 && val <= 1 {
+			m.clusterThreshold = val
+		}
 	case optMediationBootstrap:
 		if val >= 0 {
 			m.mediationBootstrap = int(val)
+		}
+	case optMediationMinEffect:
+		if val >= 0 {
+			m.mediationMinEffect = val
 		}
 	case optMediationMaxMediators:
 		if val >= 1 {
@@ -1292,6 +1827,12 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optMixedMaxFeatures:
 		if val >= 1 {
 			m.mixedMaxFeatures = int(val)
+		}
+	case optConditionEffectThreshold:
+		m.conditionEffectThreshold = val
+	case optConditionMinTrials:
+		if val >= 0 {
+			m.conditionMinTrials = int(val)
 		}
 	}
 }
