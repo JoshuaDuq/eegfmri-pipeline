@@ -138,7 +138,7 @@ def _build_covariate_design(
 class TrialwiseRegressionConfig:
     outcome: str = "rating"
     include_temperature: bool = True
-    temperature_control: str = "linear"  # "linear" or "rating_hat"
+    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -187,20 +187,47 @@ def run_trialwise_feature_regressions(
         return pd.DataFrame(), {"status": "insufficient_samples", "n_valid": int(y_all.notna().sum()), **meta}
 
     covariates: List[str] = []
-    if cfg.include_temperature and out_col != "temperature":
-        temp_ctrl = cfg.temperature_control
-        # Nonlinear control: use predicted rating from temperature (computed in trial table)
+    temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
+    # Do not include temperature control when temperature is the outcome.
+    include_temp_ctrl = bool(cfg.include_temperature and out_col != "temperature")
+    temp_design_df = None
+    if include_temp_ctrl:
+        # Nonlinear control option 1: use predicted rating from temperature (computed in trial table)
         # instead of a linear temperature term. Avoid using this for pain_residual since
         # it is derived from the same curve.
         if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear") and out_col not in ("pain_residual",):
             if "rating_hat_from_temp" in trial_df.columns:
                 covariates.append("rating_hat_from_temp")
+                meta["temperature_control_used"] = "rating_hat"
                 meta["temperature_control_column"] = "rating_hat_from_temp"
             elif "temperature" in trial_df.columns:
                 covariates.append("temperature")
+                meta["temperature_control_used"] = "linear"
                 meta["temperature_control_fallback"] = "temperature"
+        # Nonlinear control option 2: spline terms for physical temperature.
+        elif temp_ctrl in ("spline", "rcs", "restricted_cubic"):
+            if "temperature" in trial_df.columns:
+                from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+
+                temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
+                    trial_df["temperature"],
+                    config=config,
+                    key_prefix="behavior_analysis.regression.temperature_spline",
+                    name_prefix="temperature_rcs",
+                )
+                for c in spline_cols:
+                    if c not in covariates:
+                        covariates.append(c)
+                meta["temperature_control_used"] = "spline" if spline_meta.get("status") in ("ok", "ok_linear_only") else "linear"
+                meta["temperature_spline"] = spline_meta
+                meta["temperature_control_column"] = "temperature"
+            elif "rating_hat_from_temp" in trial_df.columns and out_col not in ("pain_residual",):
+                covariates.append("rating_hat_from_temp")
+                meta["temperature_control_used"] = "rating_hat_fallback"
+                meta["temperature_control_column"] = "rating_hat_from_temp"
         elif "temperature" in trial_df.columns:
             covariates.append("temperature")
+            meta["temperature_control_used"] = "linear"
             meta["temperature_control_column"] = "temperature"
     if cfg.include_trial_order:
         if "trial_index_within_group" in trial_df.columns:
@@ -218,7 +245,18 @@ def run_trialwise_feature_regressions(
 
     # Prepare base table with covariates and outcome.
     base_cols = list(dict.fromkeys([out_col, *covariates]))
-    base = trial_df[base_cols].copy()
+    base_present = [c for c in base_cols if c in trial_df.columns]
+    if out_col not in base_present:
+        base_present = [out_col, *[c for c in base_present if c != out_col]]
+    base = trial_df[base_present].copy()
+
+    # Add any derived spline columns that are not part of the trial table.
+    if temp_design_df is not None:
+        for c in covariates:
+            if c in base.columns:
+                continue
+            if c in temp_design_df.columns:
+                base[c] = temp_design_df[c]
 
     # Reduced model matrix (covariates only).
     Xz, Xz_names, _ = _build_covariate_design(base, covariates, add_intercept=True)

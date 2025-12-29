@@ -127,7 +127,42 @@ func (m Model) renderComputationSelection() string {
 	}
 	b.WriteString("\n\n")
 
-	for i, comp := range m.computations {
+	// Scrolling support for small terminal heights
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = 40
+	}
+	maxLines := effectiveHeight - 16
+	if maxLines < 8 {
+		maxLines = 8
+	}
+	startIdx := 0
+	endIdx := len(m.computations)
+	showScrollIndicators := false
+	if len(m.computations) > maxLines {
+		showScrollIndicators = true
+		startIdx = m.computationOffset
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > len(m.computations)-maxLines {
+			startIdx = len(m.computations) - maxLines
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx = startIdx + maxLines
+		if endIdx > len(m.computations) {
+			endIdx = len(m.computations)
+		}
+	}
+
+	if showScrollIndicators && startIdx > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startIdx)) + "\n")
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		comp := m.computations[i]
 		isSelected := m.computationSelected[i]
 		isFocused := i == m.computationCursor
 
@@ -140,8 +175,29 @@ func (m Model) renderComputationSelection() string {
 
 		b.WriteString(checkbox + nameStyle.Render(comp.Name))
 
+		// Show last computed timestamp if available
+		if m.computationAvailability != nil && m.computationAvailability[comp.Key] {
+			timestamp := m.computationLastModified[comp.Key]
+			relTime := formatRelativeTime(timestamp)
+			if relTime != "" {
+				avail := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  [%s]", relTime))
+				b.WriteString(avail)
+			} else {
+				avail := lipgloss.NewStyle().Foreground(styles.Success).Render("  [DONE]")
+				b.WriteString(avail)
+			}
+		} else {
+			unavail := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  [NO DATA]")
+			b.WriteString(unavail)
+		}
+
 		desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + comp.Description)
 		b.WriteString(desc + "\n")
+	}
+
+	if showScrollIndicators && endIdx < len(m.computations) {
+		remaining := len(m.computations) - endIdx
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
 	}
 
 	return b.String()
@@ -644,7 +700,6 @@ func (m Model) renderTimeRange() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" TIME RANGE ") + "\n\n")
 
-	// Find epoch metadata (from first valid subject)
 	var tmin, tmax float64
 	hasMetadata := false
 	for _, s := range m.subjects {
@@ -661,6 +716,47 @@ func (m Model) renderTimeRange() string {
 		b.WriteString(fmt.Sprintf("  Epoch Length: %s to %s (seconds)\n\n",
 			metaStyle.Render(fmt.Sprintf("%.2f", tmin)),
 			metaStyle.Render(fmt.Sprintf("%.2f", tmax))))
+
+		diagramWidth := 50
+		epochDuration := tmax - tmin
+		if epochDuration > 0 {
+			diagram := strings.Builder{}
+			diagram.WriteString("  ")
+
+			timelineChars := make([]rune, diagramWidth)
+			for i := range timelineChars {
+				timelineChars[i] = '─'
+			}
+
+			for _, tr := range m.TimeRanges {
+				startVal := parseFloat(tr.Tmin, tmin)
+				endVal := parseFloat(tr.Tmax, tmax)
+
+				startPos := int(((startVal - tmin) / epochDuration) * float64(diagramWidth-1))
+				endPos := int(((endVal - tmin) / epochDuration) * float64(diagramWidth-1))
+
+				if startPos < 0 {
+					startPos = 0
+				}
+				if endPos >= diagramWidth {
+					endPos = diagramWidth - 1
+				}
+
+				for i := startPos; i <= endPos; i++ {
+					timelineChars[i] = '█'
+				}
+			}
+
+			timeline := string(timelineChars)
+			diagram.WriteString(lipgloss.NewStyle().Foreground(styles.Primary).Render(timeline))
+			diagram.WriteString("\n")
+
+			diagram.WriteString(fmt.Sprintf("  %-*s%*s\n",
+				diagramWidth/2, lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmin)),
+				diagramWidth/2, lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("%.1fs", tmax))))
+
+			b.WriteString(diagram.String() + "\n")
+		}
 	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
@@ -692,7 +788,6 @@ func (m Model) renderTimeRange() string {
 			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
 
-		// Styles for fields
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 		tminStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 		tmaxStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
@@ -743,7 +838,6 @@ func (m Model) renderTimeRange() string {
 		b.WriteString(row + "\n")
 	}
 
-	// Validation status for required time ranges
 	hasBaseline := false
 	hasActive := false
 	for _, tr := range m.TimeRanges {
@@ -759,7 +853,6 @@ func (m Model) renderTimeRange() string {
 	okStyle := lipgloss.NewStyle().Foreground(styles.Success)
 	warnStyle := lipgloss.NewStyle().Foreground(styles.Warning)
 
-	// Show status indicators
 	b.WriteString("  " + styles.SectionTitleStyle.Render("Requirements") + "\n")
 	if hasBaseline {
 		b.WriteString("  " + okStyle.Render("✓") + " baseline - required for normalization\n")
@@ -772,7 +865,6 @@ func (m Model) renderTimeRange() string {
 		b.WriteString("  " + warnStyle.Render("○") + " active - " + warnStyle.Render("not defined (recommended)") + "\n")
 	}
 
-	// Helpful tip for minimum requirements
 	if !hasBaseline || !hasActive {
 		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 			"  Tip: Define at least 'baseline' and 'active' for most feature extraction.") + "\n")
@@ -781,10 +873,169 @@ func (m Model) renderTimeRange() string {
 	return b.String()
 }
 
+func parseFloat(s string, defaultVal float64) float64 {
+	if s == "" || s == "default" || s == "none" {
+		return defaultVal
+	}
+	var val float64
+	fmt.Sscanf(s, "%f", &val)
+	return val
+}
+
+func (m Model) renderPlotSelectionSplit() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" PLOT SELECTION ") + "\n\n")
+
+	// Left Side: List
+	var left strings.Builder
+	visibleItems := []int{}
+	for i, plot := range m.plotItems {
+		if m.IsPlotCategorySelected(plot.Group) {
+			visibleItems = append(visibleItems, i)
+		}
+	}
+
+	count := 0
+	for _, sel := range m.plotSelected {
+		if sel {
+			count++
+		}
+	}
+
+	statusIndicator := " "
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+	left.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d/%d selected", count, len(visibleItems))) + "\n\n")
+
+	// List of plots
+	maxLines := m.height - 15
+	currentGroup := ""
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	type listLine struct {
+		isHeader bool
+		text     string
+		itemIdx  int
+	}
+	var lines []listLine
+
+	for i, plot := range m.plotItems {
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
+		}
+		if plot.Group != currentGroup {
+			lines = append(lines, listLine{true, groupStyle.Render(" " + strings.ToUpper(plot.Group)), -1})
+			currentGroup = plot.Group
+		}
+		isSelected := m.plotSelected[i]
+		isFocused := i == m.plotCursor
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		if isFocused {
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+		}
+		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
+	}
+
+	offset := m.plotOffset
+	for i := offset; i < len(lines) && i < offset+maxLines; i++ {
+		left.WriteString(lines[i].text + "\n")
+	}
+
+	// Right Side: Details
+	var right strings.Builder
+	plot := m.plotItems[m.plotCursor]
+
+	detailBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Secondary).
+		Padding(1, 2).
+		Width(m.width / 2)
+
+	right.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render("Plot: ") + plot.Name + "\n")
+
+	categoryBadge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(styles.Secondary).
+		Padding(0, 1).
+		Render(plot.Group)
+	right.WriteString(categoryBadge + "\n\n")
+
+	right.WriteString(lipgloss.NewStyle().Foreground(styles.Text).Render(plot.Description) + "\n\n")
+
+	right.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Data Requirements:\n"))
+	if len(plot.RequiredFiles) > 0 {
+		for _, file := range plot.RequiredFiles {
+			icon := "  ○ "
+			fileStyle := lipgloss.NewStyle().Foreground(styles.Text)
+			if strings.Contains(file, "features") {
+				icon = "  [F] "
+			} else if strings.Contains(file, "epochs") {
+				icon = "  [E] "
+			} else if strings.Contains(file, "stats") {
+				icon = "  [S] "
+			}
+			right.WriteString(icon + fileStyle.Render(file) + "\n")
+		}
+	} else {
+		right.WriteString("  " + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("Base epochs only") + "\n")
+	}
+
+	readyCount, totalCount, missing := m.plotAvailabilitySummary(plot)
+	if totalCount > 0 {
+		right.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Availability:\n"))
+
+		readyPct := float64(readyCount) / float64(totalCount) * 100
+		statusColor := styles.Success
+		statusIcon := "✓"
+		if readyPct < 100 {
+			statusColor = styles.Warning
+			statusIcon = "⚠"
+		}
+		if readyPct < 50 {
+			statusColor = styles.Error
+			statusIcon = "⚠"
+		}
+
+		statusLine := fmt.Sprintf("  %s %d/%d subjects ready (%.0f%%)",
+			statusIcon, readyCount, totalCount, readyPct)
+		right.WriteString(lipgloss.NewStyle().Foreground(statusColor).Render(statusLine) + "\n")
+
+		if len(missing) > 0 {
+			var mLines []string
+			for k, v := range missing {
+				if v > 0 {
+					mLines = append(mLines, fmt.Sprintf("%s: %d missing", k, v))
+				}
+			}
+			if len(mLines) > 0 {
+				right.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+					"  "+strings.Join(mLines, ", ")) + "\n")
+			}
+		}
+	}
+
+	if len(plot.Dependencies) > 0 {
+		right.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Bold(true).Render("Dependencies:\n"))
+		for _, dep := range plot.Dependencies {
+			depIcon := "  → "
+			right.WriteString(depIcon + lipgloss.NewStyle().Foreground(styles.Accent).Render(dep) + "\n")
+		}
+	}
+
+	leftView := lipgloss.NewStyle().Width(m.width / 2).Render(left.String())
+	rightView := detailBox.Render(right.String())
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
+}
+
 func (m Model) renderSubjectSelection() string {
 	var b strings.Builder
 
-	// Section title with animated accent
 	accentFrames := []string{"◆", "◇", "◆", "◈"}
 	accent := lipgloss.NewStyle().
 		Foreground(styles.Accent).
@@ -811,7 +1062,7 @@ func (m Model) renderSubjectSelection() string {
 		b.WriteString("  " + filterBox + "\n\n")
 	} else if m.subjectFilter != "" {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Accent).Render(
-			fmt.Sprintf("  🔍 Filtering: \"%s\"", m.subjectFilter)) + "  " +
+			fmt.Sprintf("  Filter: \"%s\"", m.subjectFilter)) + "  " +
 			lipgloss.NewStyle().Foreground(styles.Muted).Render("[Esc to clear]") + "\n\n")
 	}
 
@@ -839,7 +1090,6 @@ func (m Model) renderSubjectSelection() string {
 		}
 	}
 
-	// Inline validation indicator
 	var statusIndicator string
 	if validCount >= 1 {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
@@ -847,14 +1097,19 @@ func (m Model) renderSubjectSelection() string {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
 	}
 
-	summary := fmt.Sprintf("%d selected", selectedCount)
+	countStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+
+	summary := countStyle.Render(fmt.Sprintf("%d", selectedCount)) + dimStyle.Render(" selected")
 	if validCount < selectedCount {
-		summary += fmt.Sprintf(" (%d valid)", validCount)
+		summary += lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf(" (%d valid)", validCount))
 	}
+	summary += dimStyle.Render(fmt.Sprintf(" of %d total", len(m.subjects)))
 	if m.subjectFilter != "" {
-		summary += fmt.Sprintf(" | %d shown", len(filteredSubjects))
+		summary += dimStyle.Render(fmt.Sprintf(" | %d shown", len(filteredSubjects)))
 	}
-	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(summary))
+
+	b.WriteString(statusIndicator + summary)
 	if validCount == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
 	}
@@ -897,11 +1152,31 @@ func (m Model) renderSubjectSelection() string {
 		if m.Pipeline == types.PipelinePlotting {
 			valid, reason = m.validatePlottingSubject(s)
 		}
+
+		var statusBadges []string
+		if s.HasEpochs {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("E"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
+		if s.HasFeatures {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("F"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
+		if s.HasStats {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("S"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
+
+		badgeStr := lipgloss.NewStyle().Foreground(styles.TextDim).Render(" [") +
+			strings.Join(statusBadges, "") +
+			lipgloss.NewStyle().Foreground(styles.TextDim).Render("]")
+		b.WriteString(badgeStr)
+
 		if !valid {
 			indicator := lipgloss.NewStyle().Foreground(styles.Warning).Render(" " + styles.WarningMark + " " + reason)
-			b.WriteString(indicator)
-		} else {
-			indicator := lipgloss.NewStyle().Foreground(styles.Success).Faint(true).Render(" " + styles.CheckMark)
 			b.WriteString(indicator)
 		}
 
@@ -911,8 +1186,11 @@ func (m Model) renderSubjectSelection() string {
 	if len(filteredSubjects) > maxDisplay {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(
-			fmt.Sprintf("  Showing %d-%d of %d", startIdx+1, endIdx, len(filteredSubjects))))
+			fmt.Sprintf("  Showing %d-%d of %d  [↑↓ to scroll]", startIdx+1, endIdx, len(filteredSubjects))))
 	}
+
+	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
+		Render("  Legend: [E]=Epochs [F]=Features [S]=Stats"))
 
 	return b.String()
 }
@@ -1863,31 +2141,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	return b.String()
 }
 
-func (m Model) renderExpandedItems(optionIdx int) string {
-	var b strings.Builder
-
-	subIndent := "      " // 6 spaces for sub-items
-
-	if optionIdx == expandedConnectivityMeasures {
-		for i, measure := range connectivityMeasures {
-			isSelected := m.connectivityMeasures[i]
-			isFocused := i == m.subCursor
-
-			checkbox := styles.RenderCheckbox(isSelected, isFocused)
-
-			nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
-			if isFocused {
-				nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
-			}
-
-			desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + measure.Description)
-			b.WriteString(subIndent + checkbox + nameStyle.Render(measure.Name) + desc + "\n")
-		}
-	}
-
-	return b.String()
-}
-
 func (m Model) renderBehaviorAdvancedConfig() string {
 	var b strings.Builder
 
@@ -1969,7 +2222,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.behaviorGroupCorrelationsExpanded {
 				label = "▾ Correlations"
 			}
-			return label, "", "(uses General settings)"
+			return label, "", "Space to toggle"
 		case optBehaviorGroupPainSens:
 			label := "▸ Pain Sensitivity"
 			if m.behaviorGroupPainSensExpanded {
@@ -2010,6 +2263,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			label := "▸ Influence"
 			if m.behaviorGroupInfluenceExpanded {
 				label = "▾ Influence"
+			}
+			return label, "", "Space to toggle"
+		case optBehaviorGroupReport:
+			label := "▸ Report"
+			if m.behaviorGroupReportExpanded {
+				label = "▾ Report"
 			}
 			return label, "", "Space to toggle"
 		case optBehaviorGroupCondition:
@@ -2085,6 +2344,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "partial-correlation covariate"
 		case optControlOrder:
 			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "partial-correlation covariate"
+		case optTrialTableOnlyMode:
+			return "Trial-Table Only", m.boolToOnOff(m.trialTableOnly), "skip temporal/cluster stages"
 		case optFDRAlpha:
 			val := fmt.Sprintf("%.3f", m.fdrAlpha)
 			if m.editingNumber && m.isCurrentlyEditing(optFDRAlpha) {
@@ -2241,18 +2502,48 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature Set", v, "which features to test"
 		case optRegressionOutcome:
 			v := "rating"
-			if m.regressionOutcome == 1 {
+			switch m.regressionOutcome {
+			case 1:
 				v = "pain_residual"
+			case 2:
+				v = "temperature"
 			}
 			return "Outcome", v, "dependent variable"
 		case optRegressionIncludeTemperature:
 			return "Include Temperature", m.boolToOnOff(m.regressionIncludeTemperature), "add temperature covariate"
 		case optRegressionTempControl:
 			v := "linear"
-			if m.regressionTempControl == 1 {
+			switch m.regressionTempControl {
+			case 1:
 				v = "rating_hat"
+			case 2:
+				v = "spline"
 			}
-			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+			return "Temp Control", v, "linear | rating_hat | spline"
+		case optRegressionTempSplineKnots:
+			val := fmt.Sprintf("%d", m.regressionTempSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineKnots) {
+				val = numberDisplay
+			}
+			return "Temp Spline Knots", val, "restricted cubic (>=4)"
+		case optRegressionTempSplineQlow:
+			val := fmt.Sprintf("%.3f", m.regressionTempSplineQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineQlow) {
+				val = numberDisplay
+			}
+			return "Spline Q Low", val, "knot quantile"
+		case optRegressionTempSplineQhigh:
+			val := fmt.Sprintf("%.3f", m.regressionTempSplineQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineQhigh) {
+				val = numberDisplay
+			}
+			return "Spline Q High", val, "knot quantile"
+		case optRegressionTempSplineMinSamples:
+			val := fmt.Sprintf("%d", m.regressionTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineMinSamples) {
+				val = numberDisplay
+			}
+			return "Spline Min N", val, "fallback to linear"
 		case optRegressionIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.regressionIncludeTrialOrder), "add trial_index covariate"
 		case optRegressionIncludePrev:
@@ -2293,10 +2584,37 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Include Temperature", m.boolToOnOff(m.modelsIncludeTemperature), "add temperature covariate"
 		case optModelsTempControl:
 			v := "linear"
-			if m.modelsTempControl == 1 {
+			switch m.modelsTempControl {
+			case 1:
 				v = "rating_hat"
+			case 2:
+				v = "spline"
 			}
-			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+			return "Temp Control", v, "linear | rating_hat | spline"
+		case optModelsTempSplineKnots:
+			val := fmt.Sprintf("%d", m.modelsTempSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineKnots) {
+				val = numberDisplay
+			}
+			return "Temp Spline Knots", val, "restricted cubic (>=4)"
+		case optModelsTempSplineQlow:
+			val := fmt.Sprintf("%.3f", m.modelsTempSplineQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineQlow) {
+				val = numberDisplay
+			}
+			return "Spline Q Low", val, "knot quantile"
+		case optModelsTempSplineQhigh:
+			val := fmt.Sprintf("%.3f", m.modelsTempSplineQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineQhigh) {
+				val = numberDisplay
+			}
+			return "Spline Q High", val, "knot quantile"
+		case optModelsTempSplineMinSamples:
+			val := fmt.Sprintf("%d", m.modelsTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineMinSamples) {
+				val = numberDisplay
+			}
+			return "Spline Min N", val, "fallback to linear"
 		case optModelsIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.modelsIncludeTrialOrder), "add trial_index covariate"
 		case optModelsIncludePrev:
@@ -2323,6 +2641,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Outcome: rating", m.boolToOnOff(m.modelsOutcomeRating), "include rating"
 		case optModelsOutcomePainResidual:
 			return "Outcome: pain_residual", m.boolToOnOff(m.modelsOutcomePainResidual), "include pain residual"
+		case optModelsOutcomeTemperature:
+			return "Outcome: temperature", m.boolToOnOff(m.modelsOutcomeTemperature), "include temperature"
 		case optModelsOutcomePainBinary:
 			return "Outcome: pain_binary", m.boolToOnOff(m.modelsOutcomePainBinary), "include binary outcome"
 		case optModelsFamilyOLS:
@@ -2355,17 +2675,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Method", v, "within-group correlation"
 		case optStabilityOutcome:
 			v := "auto"
-			if m.stabilityOutcome == 1 {
+			switch m.stabilityOutcome {
+			case 1:
 				v = "rating"
-			} else if m.stabilityOutcome == 2 {
+			case 2:
 				v = "pain_residual"
 			}
 			return "Outcome", v, "auto prefers pain_residual"
 		case optStabilityGroupColumn:
 			v := "auto"
-			if m.stabilityGroupColumn == 1 {
+			switch m.stabilityGroupColumn {
+			case 1:
 				v = "run"
-			} else if m.stabilityGroupColumn == 2 {
+			case 2:
 				v = "block"
 			}
 			return "Group Column", v, "auto selects run/block"
@@ -2405,6 +2727,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Outcome: rating", m.boolToOnOff(m.influenceOutcomeRating), "include rating"
 		case optInfluenceOutcomePainResidual:
 			return "Outcome: pain_residual", m.boolToOnOff(m.influenceOutcomePainResidual), "include residual"
+		case optInfluenceOutcomeTemperature:
+			return "Outcome: temperature", m.boolToOnOff(m.influenceOutcomeTemperature), "include temperature"
 		case optInfluenceMaxFeatures:
 			val := fmt.Sprintf("%d", m.influenceMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optInfluenceMaxFeatures) {
@@ -2415,10 +2739,37 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Include Temperature", m.boolToOnOff(m.influenceIncludeTemperature), "add covariate"
 		case optInfluenceTempControl:
 			v := "linear"
-			if m.influenceTempControl == 1 {
+			switch m.influenceTempControl {
+			case 1:
 				v = "rating_hat"
+			case 2:
+				v = "spline"
 			}
-			return "Temp Control", v, "linear vs nonlinear (rating_hat)"
+			return "Temp Control", v, "linear | rating_hat | spline"
+		case optInfluenceTempSplineKnots:
+			val := fmt.Sprintf("%d", m.influenceTempSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineKnots) {
+				val = numberDisplay
+			}
+			return "Temp Spline Knots", val, "restricted cubic (>=4)"
+		case optInfluenceTempSplineQlow:
+			val := fmt.Sprintf("%.3f", m.influenceTempSplineQlow)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineQlow) {
+				val = numberDisplay
+			}
+			return "Spline Q Low", val, "knot quantile"
+		case optInfluenceTempSplineQhigh:
+			val := fmt.Sprintf("%.3f", m.influenceTempSplineQhigh)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineQhigh) {
+				val = numberDisplay
+			}
+			return "Spline Q High", val, "knot quantile"
+		case optInfluenceTempSplineMinSamples:
+			val := fmt.Sprintf("%d", m.influenceTempSplineMinN)
+			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineMinSamples) {
+				val = numberDisplay
+			}
+			return "Spline Min N", val, "fallback to linear"
 		case optInfluenceIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.influenceIncludeTrialOrder), "add covariate"
 		case optInfluenceIncludeRunBlock:
@@ -2490,7 +2841,35 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Smooth Window (ms)", val, "smoothing length"
 
+		// Report
+		case optReportTopN:
+			val := fmt.Sprintf("%d", m.reportTopN)
+			if m.editingNumber && m.isCurrentlyEditing(optReportTopN) {
+				val = numberDisplay
+			}
+			return "Top N Rows", val, "per TSV in report"
+
+		// Correlations
+		case optCorrelationsFeatureSet:
+			v := "pain_summaries"
+			if m.correlationsFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
+		case optCorrelationsTargetRating:
+			return "Target: rating", m.boolToOnOff(m.correlationsTargetRating), "include rating"
+		case optCorrelationsTargetTemperature:
+			return "Target: temperature", m.boolToOnOff(m.correlationsTargetTemperature), "include temperature"
+		case optCorrelationsTargetPainResidual:
+			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
+
 		// Pain sensitivity
+		case optPainSensitivityFeatureSet:
+			v := "pain_summaries"
+			if m.painSensitivityFeatureSet == 1 {
+				v = "all"
+			}
+			return "Feature Set", v, "which features to test"
 		case optPainSensitivityMinTrials:
 			val := fmt.Sprintf("%d", m.painSensitivityMinTrials)
 			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {
@@ -2513,9 +2892,10 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Min Cluster Size", val, "minimum cluster size"
 		case optClusterTail:
 			v := "two-tailed"
-			if m.clusterTail == 1 {
+			switch m.clusterTail {
+			case 1:
 				v = "upper"
-			} else if m.clusterTail == -1 {
+			case -1:
 				v = "lower"
 			}
 			return "Cluster Tail", v, "test direction"

@@ -69,6 +69,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "stability",
     "consistency",
     "influence",
+    "report",
     "correlations",
     "pain_sensitivity",
     "condition",
@@ -86,6 +87,7 @@ BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
     "stability": "Run/block stability diagnostics (non-gating)",
     "consistency": "Effect direction consistency across outcomes",
     "influence": "Influence diagnostics (Cook's distance/leverage)",
+    "report": "Single-subject report (reproducible summary)",
     "correlations": "EEG-rating correlations",
     "pain_sensitivity": "Individual pain sensitivity analysis",
     "condition": "Compare conditions (e.g., ramp vs active)",
@@ -113,9 +115,6 @@ FEATURE_VISUALIZE_CATEGORIES: List[str] = [
 
 BEHAVIOR_VISUALIZE_CATEGORIES: List[str] = [
     "psychometrics",
-    "trial_table",
-    "confounds",
-    "regression",
     "temperature_models",
     "stability",
     "power",

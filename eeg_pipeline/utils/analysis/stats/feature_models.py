@@ -113,7 +113,7 @@ class FeatureModelsConfig:
     outcomes: List[str] = None  # type: ignore[assignment]
     families: List[str] = None  # type: ignore[assignment]
     include_temperature: bool = True
-    temperature_control: str = "linear"  # "linear" or "rating_hat"
+    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_trial_order: bool = True
     include_prev_terms: bool = False
     include_run_block: bool = True
@@ -186,38 +186,6 @@ def run_feature_model_families(
     if not cfg.enabled:
         return pd.DataFrame(), {**meta, "status": "disabled"}
 
-    # Covariates shared across models.
-    covariates: List[str] = []
-    if cfg.include_temperature:
-        temp_ctrl = cfg.temperature_control
-        if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
-            if "rating_hat_from_temp" in trial_df.columns:
-                covariates.append("rating_hat_from_temp")
-                meta["temperature_control_column"] = "rating_hat_from_temp"
-            elif "temperature" in trial_df.columns:
-                covariates.append("temperature")
-                meta["temperature_control_fallback"] = "temperature"
-        elif "temperature" in trial_df.columns:
-            covariates.append("temperature")
-            meta["temperature_control_column"] = "temperature"
-    if cfg.include_trial_order:
-        if "trial_index_within_group" in trial_df.columns:
-            covariates.append("trial_index_within_group")
-        elif "trial_index" in trial_df.columns:
-            covariates.append("trial_index")
-    if cfg.include_prev_terms:
-        for c in ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]:
-            if c in trial_df.columns:
-                covariates.append(c)
-    if cfg.include_run_block:
-        for c in ["run", "block"]:
-            if c in trial_df.columns:
-                covariates.append(c)
-
-    base_cols = list(dict.fromkeys([*covariates]))
-    base = trial_df[base_cols].copy() if base_cols else pd.DataFrame(index=trial_df.index)
-    X_base, X_base_names = _build_covariate_design(base, covariates, add_intercept=True)
-
     rng_seed = int(_get(config, "project.random_state", 42))
     meta["random_state"] = rng_seed
 
@@ -280,6 +248,67 @@ def run_feature_model_families(
                 continue
             y_all = pd.to_numeric(trial_df[out_name], errors="coerce")
             is_binary = False
+
+        # Outcome-specific covariates (avoid leaking temperature into temperature outcome).
+        covariates: List[str] = []
+        temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
+        temp_design_df = None
+        temp_meta: Dict[str, Any] = {"temperature_control_requested": temp_ctrl}
+        if cfg.include_temperature and out_name != "temperature":
+            if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
+                if "rating_hat_from_temp" in trial_df.columns:
+                    covariates.append("rating_hat_from_temp")
+                    temp_meta.update({"temperature_control_used": "rating_hat", "temperature_control_column": "rating_hat_from_temp"})
+                elif "temperature" in trial_df.columns:
+                    covariates.append("temperature")
+                    temp_meta.update({"temperature_control_used": "linear", "temperature_control_fallback": "temperature"})
+            elif temp_ctrl in ("spline", "rcs", "restricted_cubic"):
+                if "temperature" in trial_df.columns:
+                    from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+
+                    temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
+                        trial_df["temperature"],
+                        config=config,
+                        key_prefix="behavior_analysis.models.temperature_spline",
+                        name_prefix="temperature_rcs",
+                    )
+                    for c in spline_cols:
+                        if c not in covariates:
+                            covariates.append(c)
+                    temp_meta.update({"temperature_control_used": "spline", "temperature_control_column": "temperature", "temperature_spline": spline_meta})
+                elif "rating_hat_from_temp" in trial_df.columns:
+                    covariates.append("rating_hat_from_temp")
+                    temp_meta.update({"temperature_control_used": "rating_hat_fallback", "temperature_control_column": "rating_hat_from_temp"})
+            elif "temperature" in trial_df.columns:
+                covariates.append("temperature")
+                temp_meta.update({"temperature_control_used": "linear", "temperature_control_column": "temperature"})
+
+        if cfg.include_trial_order:
+            if "trial_index_within_group" in trial_df.columns:
+                covariates.append("trial_index_within_group")
+            elif "trial_index" in trial_df.columns:
+                covariates.append("trial_index")
+        if cfg.include_prev_terms:
+            for c in ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]:
+                if c in trial_df.columns:
+                    covariates.append(c)
+        if cfg.include_run_block:
+            for c in ["run", "block"]:
+                if c in trial_df.columns:
+                    covariates.append(c)
+
+        base_present = [c for c in covariates if c in trial_df.columns]
+        base = trial_df[base_present].copy() if base_present else pd.DataFrame(index=trial_df.index)
+        if temp_design_df is not None:
+            for c in covariates:
+                if c in base.columns:
+                    continue
+                if c in temp_design_df.columns:
+                    base[c] = temp_design_df[c]
+
+        X_base, X_base_names = _build_covariate_design(base, covariates, add_intercept=True)
+        meta.setdefault("temperature_control_by_outcome", {})[out_name] = temp_meta
+        meta.setdefault("covariates_by_outcome", {})[out_name] = list(covariates)
 
         for feat in candidates:
             x_raw = pd.to_numeric(trial_df[feat], errors="coerce")
@@ -500,7 +529,6 @@ def run_feature_model_families(
     meta["status"] = "ok"
     meta["n_rows"] = int(len(out))
     meta["n_features"] = int(out["feature"].nunique()) if "feature" in out.columns else 0
-    meta["covariates"] = covariates
     return out, meta
 
 

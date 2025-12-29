@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -78,6 +79,25 @@ type Model struct {
 	OperationCurrent int
 	OperationTotal   int
 
+	// ETA and timing
+	SubjectStartTime   time.Time         // When current subject started
+	SubjectDurations   []time.Duration   // History of completed subject durations
+	EstimatedRemaining time.Duration     // Calculated ETA
+	SubjectStatuses    map[string]string // Per-subject status: "pending", "running", "done", "failed"
+	FailedSubjects     []string          // List of failed subject IDs
+
+	// Resource metrics
+	CPUUsage    float64
+	MemoryUsage float64
+	EpochInfo   string
+
+	// Log filtering
+	ShowDebug     bool
+	ShowInfo      bool
+	ShowWarning   bool
+	ShowError     bool
+	FilterSubject string
+
 	// Error tracking
 	ErrorLines         []string
 	LogTruncated       bool
@@ -123,18 +143,24 @@ func New(command string) Model {
 	vp.MouseWheelDelta = styles.MouseWheelScrollLines
 
 	return Model{
-		Command:        command,
-		Status:         StatusPending,
-		Progress:       0,
-		OutputLines:    []string{},
-		MaxOutputLines: styles.MaxScrollbackLines,
-		CloudStage:     StageSyncing,
-		StartTime:      time.Now(),
-		width:          80,
-		height:         24,
-		logViewport:    vp,
-		logReady:       false,
-		RepoRoot:       "",
+		Command:          command,
+		Status:           StatusPending,
+		Progress:         0,
+		OutputLines:      []string{},
+		MaxOutputLines:   styles.MaxScrollbackLines,
+		CloudStage:       StageSyncing,
+		StartTime:        time.Now(),
+		width:            80,
+		height:           24,
+		logViewport:      vp,
+		logReady:         false,
+		RepoRoot:         "",
+		ShowInfo:         true,
+		ShowWarning:      true,
+		ShowError:        true,
+		SubjectDurations: []time.Duration{},
+		SubjectStatuses:  make(map[string]string),
+		FailedSubjects:   []string{},
 	}
 }
 
@@ -227,7 +253,11 @@ func (m *Model) Start() tea.Cmd {
 		outputChan := make(chan string, styles.LogBufferChannels)
 		doneChan := make(chan error, 1)
 
+		var wg sync.WaitGroup
+		wg.Add(2)
+
 		go func() {
+			defer wg.Done()
 			scanner := bufio.NewScanner(stdout)
 			for scanner.Scan() {
 				outputChan <- scanner.Text()
@@ -235,10 +265,16 @@ func (m *Model) Start() tea.Cmd {
 		}()
 
 		go func() {
+			defer wg.Done()
 			scanner := bufio.NewScanner(stderr)
 			for scanner.Scan() {
 				outputChan <- scanner.Text()
 			}
+		}()
+
+		go func() {
+			wg.Wait()
+			close(outputChan)
 		}()
 
 		go func() {
@@ -262,25 +298,32 @@ func (m Model) listenForOutput() tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		select {
-		case line, ok := <-m.outputChan:
-			if !ok {
-				return nil
-			}
-			return messages.StreamOutputMsg{Line: line}
-		case err := <-m.doneChan:
-			exitCode := 0
-			success := true
-			if err != nil {
-				success = false
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					exitCode = exitErr.ExitCode()
-				} else {
-					exitCode = 1
-				}
-			}
-			return messages.CommandDoneMsg{ExitCode: exitCode, Success: success}
+		line, ok := <-m.outputChan
+		if !ok {
+			return messages.StreamDoneMsg{}
 		}
+		return messages.StreamOutputMsg{Line: line}
+	}
+}
+
+func (m Model) listenForDone() tea.Cmd {
+	if m.doneChan == nil {
+		return nil
+	}
+
+	return func() tea.Msg {
+		err := <-m.doneChan
+		exitCode := 0
+		success := true
+		if err != nil {
+			success = false
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+		return messages.CommandDoneMsg{ExitCode: exitCode, Success: success}
 	}
 }
 
@@ -302,13 +345,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputChan = msg.OutputChan
 		m.doneChan = msg.DoneChan
 		m.Status = StatusRunning
-		return m, m.listenForOutput()
+		return m, tea.Batch(m.listenForOutput(), m.listenForDone())
 
 	case messages.StreamOutputMsg:
 		m.processOutputLine(msg.Line)
-		m.logViewport.SetContent(strings.Join(m.OutputLines, "\n"))
-		m.logViewport.GotoBottom()
 		return m, m.listenForOutput()
+
+	case messages.StreamDoneMsg:
+		// Stream finished, but we might still be waiting for CommandDoneMsg
+		return m, nil
 
 	case messages.LogCopiedMsg:
 		// Show a brief notice that log was copied
@@ -403,6 +448,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "c":
 			return m, m.copyLogToClipboard()
+		case "i":
+			m.ShowInfo = !m.ShowInfo
+			m.updateLogViewport()
+			return m, nil
+		case "d":
+			m.ShowDebug = !m.ShowDebug
+			m.updateLogViewport()
+			return m, nil
+		case "w":
+			m.ShowWarning = !m.ShowWarning
+			m.updateLogViewport()
+			return m, nil
+		case "e":
+			m.ShowError = !m.ShowError
+			m.updateLogViewport()
+			return m, nil
+		case "S": // Capital S for Subject filter
+			m.searchMode = true
+			m.searchQuery = "sub-" // Pre-fill with sub-
+			return m, nil
 		case "j", "down":
 			m.logViewport.LineDown(styles.ScrollStepSize)
 			return m, nil
@@ -470,8 +535,16 @@ func (m *Model) processOutputLine(line string) {
 			TotalSubjects int      `json:"total_subjects"`
 			Subjects      []string `json:"subjects"`
 			Message       string   `json:"message"`
+			CPU           float64  `json:"cpu"`
+			Memory        float64  `json:"memory"`
+			Epoch         string   `json:"epoch"`
 		}
 		if json.Unmarshal([]byte(line), &event) == nil {
+			m.CPUUsage = event.CPU
+			m.MemoryUsage = event.Memory
+			if event.Epoch != "" {
+				m.EpochInfo = event.Epoch
+			}
 			switch event.Event {
 			case "start":
 				m.SubjectTotal = event.TotalSubjects
@@ -480,16 +553,25 @@ func (m *Model) processOutputLine(line string) {
 				}
 				m.addLog(fmt.Sprintf("Starting: %d subjects", m.SubjectTotal))
 			case "subject_start":
+				if m.CurrentSubject != "" && !m.SubjectStartTime.IsZero() {
+					duration := time.Since(m.SubjectStartTime)
+					m.SubjectDurations = append(m.SubjectDurations, duration)
+					m.SubjectStatuses[m.CurrentSubject] = "done"
+				}
+
 				if m.SubjectCurrent < m.SubjectTotal || m.SubjectTotal == 0 {
 					m.SubjectCurrent++
 				}
 				m.CurrentSubject = event.Subject
+				m.SubjectStartTime = time.Now()
+				m.SubjectStatuses[event.Subject] = "running"
 				m.CurrentOperation = ""
 				m.OperationCurrent = 0
 				m.OperationTotal = 0
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent-1) / float64(m.SubjectTotal))
 				}
+				m.calculateETA()
 				m.addLog(fmt.Sprintf("[%d/%d] %s", m.SubjectCurrent, m.SubjectTotal, event.Subject))
 			case "progress":
 				m.CurrentOperation = event.Step
@@ -503,26 +585,33 @@ func (m *Model) processOutputLine(line string) {
 				}
 				useSubjectProgress := m.SubjectTotal > 0 && m.SubjectCurrent > 0
 
-				// For pipelines with per-subject iteration, distribute step progress across subjects
 				if useSubjectProgress && hasStepProgress {
 					subjProgress := float64(m.SubjectCurrent-1) / float64(m.SubjectTotal)
 					stepContrib := stepFraction / float64(m.SubjectTotal)
 					m.Progress = clampProgress(subjProgress + stepContrib)
 				} else if hasStepProgress {
-					// For pipelines without per-subject iteration (e.g., decoding, utilities)
 					m.Progress = clampProgress(stepFraction)
 				} else if event.Pct > 0 {
-					// Fallback to explicit percentage
 					m.Progress = clampProgress(float64(event.Pct) / 100.0)
 				}
 
-				// Log step changes for visibility
 				if event.Step != "" && event.Current > 0 {
 					m.addLog(fmt.Sprintf("  → %s (%d/%d)", event.Step, event.Current, event.Total))
 				}
 			case "subject_done":
+				if m.CurrentSubject != "" && !m.SubjectStartTime.IsZero() {
+					duration := time.Since(m.SubjectStartTime)
+					m.SubjectDurations = append(m.SubjectDurations, duration)
+					m.SubjectStatuses[m.CurrentSubject] = "done"
+					m.calculateETA()
+				}
 				if m.SubjectTotal > 0 {
 					m.Progress = clampProgress(float64(m.SubjectCurrent) / float64(m.SubjectTotal))
+				}
+			case "subject_failed":
+				if m.CurrentSubject != "" {
+					m.SubjectStatuses[m.CurrentSubject] = "failed"
+					m.FailedSubjects = append(m.FailedSubjects, m.CurrentSubject)
 				}
 			case "log":
 				m.addLog(event.Message)
@@ -614,7 +703,7 @@ func (m *Model) addLog(line string) {
 		}
 	}
 
-	if len(m.OutputLines) > m.MaxOutputLines {
+	if m.MaxOutputLines > 0 && len(m.OutputLines) > m.MaxOutputLines {
 		m.OutputLines = m.OutputLines[1:]
 		if !m.LogTruncated {
 			m.LogTruncated = true
@@ -628,37 +717,62 @@ func (m *Model) addLog(line string) {
 }
 
 func (m *Model) updateLogViewport() {
-	if m.searchQuery == "" {
-		// No search - show all lines
-		m.logViewport.SetContent(strings.Join(m.OutputLines, "\n"))
-		m.searchMatches = 0
-	} else {
-		// Filter lines matching search query
-		var filtered []string
-		query := strings.ToLower(m.searchQuery)
-		highlightStyle := lipgloss.NewStyle().Background(styles.Accent).Foreground(lipgloss.Color("#000000"))
+	var filtered []string
+	query := strings.ToLower(m.searchQuery)
+	highlightStyle := lipgloss.NewStyle().Background(styles.Accent).Foreground(lipgloss.Color("#000000"))
 
-		for _, line := range m.OutputLines {
-			if strings.Contains(strings.ToLower(line), query) {
-				// Highlight matches
-				highlighted := line
-				idx := strings.Index(strings.ToLower(line), query)
-				if idx >= 0 {
-					before := line[:idx]
-					match := line[idx : idx+len(m.searchQuery)]
-					after := line[idx+len(m.searchQuery):]
-					highlighted = before + highlightStyle.Render(match) + after
-				}
-				filtered = append(filtered, highlighted)
+	for _, line := range m.OutputLines {
+		upperLine := strings.ToUpper(line)
+
+		// 1. Level Filtering
+		isInfo := strings.Contains(upperLine, "INFO")
+		isDebug := strings.Contains(upperLine, "DEBUG")
+		isWarn := strings.Contains(upperLine, "WARN")
+		isError := strings.Contains(upperLine, "ERROR") || strings.Contains(upperLine, "CRITICAL") || strings.Contains(upperLine, "EXCEPTION") || strings.Contains(line, "Traceback")
+
+		// If it's a known level, check if we should show it
+		if isInfo && !m.ShowInfo {
+			continue
+		}
+		if isDebug && !m.ShowDebug {
+			continue
+		}
+		if isWarn && !m.ShowWarning {
+			continue
+		}
+		if isError && !m.ShowError {
+			continue
+		}
+
+		// 2. Search/Subject Filtering
+		if query != "" {
+			if !strings.Contains(strings.ToLower(line), query) {
+				continue
+			}
+
+			// Highlight matches
+			idx := strings.Index(strings.ToLower(line), query)
+			if idx >= 0 {
+				before := line[:idx]
+				match := line[idx : idx+len(m.searchQuery)]
+				after := line[idx+len(m.searchQuery):]
+				line = before + highlightStyle.Render(match) + after
 			}
 		}
 
-		m.searchMatches = len(filtered)
-		if len(filtered) == 0 {
-			filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No matches found for: "+m.searchQuery))
-		}
-		m.logViewport.SetContent(strings.Join(filtered, "\n"))
+		filtered = append(filtered, line)
 	}
+
+	m.searchMatches = len(filtered)
+	if len(filtered) == 0 {
+		if query != "" {
+			filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("No matches found for: "+m.searchQuery))
+		} else {
+			filtered = append(filtered, lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("All logs hidden by filters"))
+		}
+	}
+
+	m.logViewport.SetContent(strings.Join(filtered, "\n"))
 	m.logViewport.GotoBottom()
 }
 
@@ -901,22 +1015,83 @@ func (m Model) renderHeader() string {
 func (m Model) renderInfoPanel() string {
 	info := strings.Builder{}
 
-	cmdLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(8).Render("Cmd:")
+	cmdLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Command:")
 	cmdValue := lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render(m.Command)
 	info.WriteString(cmdLabel + cmdValue + "\n")
 
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
-		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(8).Render("Time:")
-		timeValue := lipgloss.NewStyle().Foreground(styles.Text).Render(duration.Round(time.Second).String())
+		timeLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Elapsed:")
+		timeValue := lipgloss.NewStyle().Foreground(styles.Text).Render(formatDuration(duration))
 		info.WriteString(timeLabel + timeValue)
+
+		if m.Status == StatusRunning && m.EstimatedRemaining > 0 {
+			etaLabel := lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(2).Render("  ETA:")
+			etaValue := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(formatDuration(m.EstimatedRemaining))
+			info.WriteString(etaLabel + etaValue)
+		}
+		info.WriteString("\n")
+	}
+
+	if m.SubjectTotal > 0 && m.CurrentSubject != "" && m.Status == StatusRunning {
+		subjLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Subject:")
+		subjValue := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(m.CurrentSubject)
+		subjProgress := lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+			fmt.Sprintf(" (%d of %d)", m.SubjectCurrent, m.SubjectTotal))
+		info.WriteString(subjLabel + subjValue + subjProgress)
+
+		if len(m.SubjectDurations) > 0 {
+			avgDuration := m.averageSubjectDuration()
+			avgLabel := lipgloss.NewStyle().Foreground(styles.TextDim).MarginLeft(2).Render("  Avg:")
+			avgValue := lipgloss.NewStyle().Foreground(styles.Text).Render(formatDuration(avgDuration))
+			info.WriteString(avgLabel + avgValue)
+		}
+		info.WriteString("\n")
+	}
+
+	if len(m.FailedSubjects) > 0 {
+		failLabel := lipgloss.NewStyle().Foreground(styles.Error).Width(10).Render("Failed:")
+		failValue := lipgloss.NewStyle().Foreground(styles.Error).Bold(true).Render(
+			fmt.Sprintf("%d subject(s)", len(m.FailedSubjects)))
+		info.WriteString(failLabel + failValue + "\n")
 	}
 
 	return styles.CardStyle.Width(m.width - 10).Render(info.String())
 }
 
+func (m *Model) calculateETA() {
+	if len(m.SubjectDurations) == 0 || m.SubjectTotal == 0 {
+		m.EstimatedRemaining = 0
+		return
+	}
+
+	avgDuration := m.averageSubjectDuration()
+	remainingSubjects := m.SubjectTotal - m.SubjectCurrent
+	if remainingSubjects < 0 {
+		remainingSubjects = 0
+	}
+
+	m.EstimatedRemaining = time.Duration(remainingSubjects) * avgDuration
+}
+
+func (m Model) averageSubjectDuration() time.Duration {
+	if len(m.SubjectDurations) == 0 {
+		return 0
+	}
+
+	var total time.Duration
+	for _, d := range m.SubjectDurations {
+		total += d
+	}
+	return total / time.Duration(len(m.SubjectDurations))
+}
+
 func (m Model) renderProgressSection() string {
 	var b strings.Builder
+
+	// Responsive Layout Decision
+	isNarrow := m.width < 100
+	isShort := m.height < 30
 
 	// Section header with animated icon
 	var progressIcon string
@@ -937,30 +1112,43 @@ func (m Model) renderProgressSection() string {
 
 	// Overall progress with animated gradient bar
 	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Overall")
-	b.WriteString("  " + progressLabel + m.renderAnimatedProgressBar(m.Progress, m.width-22) + "\n")
+	barWidth := m.width - 22
+	if isNarrow {
+		barWidth = m.width - 15
+	}
+	b.WriteString("  " + progressLabel + m.renderAnimatedProgressBar(m.Progress, barWidth) + "\n")
+
+	// Metrics Dashboard (Responsive)
+	if !isShort {
+		b.WriteString("\n" + m.renderMetricsDashboard() + "\n")
+	}
 
 	// Subject counter with visual indicator
 	if m.SubjectTotal > 0 && m.SubjectCurrent > 0 {
 		subjectProgress := float64(m.SubjectCurrent) / float64(m.SubjectTotal)
 
-		// Create a mini visual representation
+		// Create a mini visual representation (hide on narrow screens)
 		var subjectIcons string
-		for i := 0; i < m.SubjectTotal && i < 10; i++ {
-			if i < m.SubjectCurrent {
-				subjectIcons += lipgloss.NewStyle().Foreground(styles.Success).Render("●")
-			} else if i == m.SubjectCurrent {
-				subjectIcons += lipgloss.NewStyle().Foreground(styles.Accent).Render("○")
-			} else {
-				subjectIcons += lipgloss.NewStyle().Foreground(styles.Secondary).Render("○")
+		if !isNarrow {
+			for i := 0; i < m.SubjectTotal && i < 10; i++ {
+				if i < m.SubjectCurrent {
+					subjectIcons += lipgloss.NewStyle().Foreground(styles.Success).Render("●")
+				} else if i == m.SubjectCurrent {
+					subjectIcons += lipgloss.NewStyle().Foreground(styles.Accent).Render("○")
+				} else {
+					subjectIcons += lipgloss.NewStyle().Foreground(styles.Secondary).Render("○")
+				}
 			}
-		}
-		if m.SubjectTotal > 10 {
-			subjectIcons += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" +%d", m.SubjectTotal-10))
+			if m.SubjectTotal > 10 {
+				subjectIcons += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" +%d", m.SubjectTotal-10))
+			}
 		}
 
 		subjectText := fmt.Sprintf("Subject %d/%d  ", m.SubjectCurrent, m.SubjectTotal)
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).PaddingLeft(12).Render(subjectText))
-		b.WriteString(subjectIcons)
+		if !isNarrow {
+			b.WriteString(subjectIcons)
+		}
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("  %.0f%%", subjectProgress*100)) + "\n")
 	}
 
@@ -998,6 +1186,36 @@ func (m Model) renderProgressSection() string {
 	return b.String()
 }
 
+func (m Model) renderMetricsDashboard() string {
+	if m.Status == StatusPending {
+		return ""
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	metricBox := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(styles.Secondary).
+		Padding(0, 1).
+		MarginRight(1)
+
+	// CPU Metric
+	cpu := fmt.Sprintf("%.1f%%", m.CPUUsage)
+	cpuView := metricBox.Render(labelStyle.Render("CPU: ") + valueStyle.Render(cpu))
+
+	// Memory Metric
+	mem := fmt.Sprintf("%.1f GB", m.MemoryUsage)
+	memView := metricBox.Render(labelStyle.Render("MEM: ") + valueStyle.Render(mem))
+
+	// Epoch/Iteration Info
+	epochView := ""
+	if m.EpochInfo != "" {
+		epochView = metricBox.Render(labelStyle.Render("ITEM: ") + valueStyle.Render(m.EpochInfo))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, cpuView, memView, epochView)
+}
+
 func (m Model) renderLogSection() string {
 	var b strings.Builder
 
@@ -1008,13 +1226,13 @@ func (m Model) renderLogSection() string {
 			Foreground(lipgloss.Color("#000000")).
 			Background(styles.Accent).
 			Padding(0, 2).
-			Render("📋 COPY MODE: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
+			Render("COPY MODE: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
 		b.WriteString(copyBanner + "\n\n")
 	}
 
 	// Search mode input
 	if m.searchMode || m.searchQuery != "" {
-		searchIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("🔍 ")
+		searchIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("> ")
 		inputStyle := lipgloss.NewStyle().
 			Foreground(styles.Text).
 			Underline(true).
@@ -1196,14 +1414,17 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Enter", "Return to Menu"),
 			styles.RenderKeyHint("C", "Copy Log"),
 			styles.RenderKeyHint("/", "Search"),
-			styles.RenderKeyHint("M", "Select Mode"),
+			styles.RenderKeyHint("D/I/W/E", "Filter Logs"),
+			styles.RenderKeyHint("S", "Subj Filter"),
 			styles.RenderKeyHint("R", "Retry"),
 		}
 	} else {
 		hints = []string{
 			styles.RenderKeyHint("Ctrl+C", "Cancel"),
 			styles.RenderKeyHint("/", "Search"),
-			styles.RenderKeyHint("M", "Select Mode"),
+			styles.RenderKeyHint("D/I/W/E", "Filter Logs"),
+			styles.RenderKeyHint("S", "Subj Filter"),
+			styles.RenderKeyHint("M", "Copy Mode"),
 			styles.RenderKeyHint("J/K", "Scroll"),
 		}
 	}

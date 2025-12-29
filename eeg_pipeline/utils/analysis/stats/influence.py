@@ -110,7 +110,7 @@ class InfluenceConfig:
     include_trial_order: bool = True
     include_run_block: bool = True
     include_temperature: bool = True
-    temperature_control: str = "linear"  # or "rating_hat"
+    temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_interaction: bool = False
     standardize: bool = True
 
@@ -213,25 +213,6 @@ def compute_influence_diagnostics(
         return pd.DataFrame(), {**meta, "status": "empty"}
     meta["selected_features"] = selected
 
-    # Build covariates for influence model
-    covariates: List[str] = []
-    if cfg.include_temperature:
-        if cfg.temperature_control in ("rating_hat", "rating_hat_from_temp", "nonlinear") and "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta["temperature_control_column"] = "rating_hat_from_temp"
-        elif "temperature" in trial_df.columns:
-            covariates.append("temperature")
-            meta["temperature_control_column"] = "temperature"
-    if cfg.include_trial_order:
-        for c in ["trial_index_within_group", "trial_index"]:
-            if c in trial_df.columns:
-                covariates.append(c)
-                break
-    if cfg.include_run_block:
-        for c in ["run", "block"]:
-            if c in trial_df.columns:
-                covariates.append(c)
-
     records: List[Dict[str, Any]] = []
 
     for outcome in cfg.outcomes:
@@ -239,14 +220,59 @@ def compute_influence_diagnostics(
             continue
         y_all = pd.to_numeric(trial_df[outcome], errors="coerce").to_numpy(dtype=float)
 
+        # Outcome-specific covariates (avoid leaking temperature into temperature outcome).
+        covariates: List[str] = []
+        temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
+        temp_design_df = None
+        temp_meta: Dict[str, Any] = {"temperature_control_requested": temp_ctrl}
+        if cfg.include_temperature and outcome != "temperature":
+            if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear") and "rating_hat_from_temp" in trial_df.columns:
+                covariates.append("rating_hat_from_temp")
+                temp_meta.update({"temperature_control_used": "rating_hat", "temperature_control_column": "rating_hat_from_temp"})
+            elif temp_ctrl in ("spline", "rcs", "restricted_cubic") and "temperature" in trial_df.columns:
+                from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+
+                temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
+                    trial_df["temperature"],
+                    config=config,
+                    key_prefix="behavior_analysis.influence.temperature_spline",
+                    name_prefix="temperature_rcs",
+                )
+                for c in spline_cols:
+                    if c not in covariates:
+                        covariates.append(c)
+                temp_meta.update({"temperature_control_used": "spline", "temperature_control_column": "temperature", "temperature_spline": spline_meta})
+            elif "temperature" in trial_df.columns:
+                covariates.append("temperature")
+                temp_meta.update({"temperature_control_used": "linear", "temperature_control_column": "temperature"})
+
+        if cfg.include_trial_order:
+            for c in ["trial_index_within_group", "trial_index"]:
+                if c in trial_df.columns:
+                    covariates.append(c)
+                    break
+        if cfg.include_run_block:
+            for c in ["run", "block"]:
+                if c in trial_df.columns:
+                    covariates.append(c)
+
+        base_present = [c for c in covariates if c in trial_df.columns]
+        base = trial_df[base_present].copy() if base_present else pd.DataFrame(index=trial_df.index)
+        if temp_design_df is not None:
+            for c in covariates:
+                if c in base.columns:
+                    continue
+                if c in temp_design_df.columns:
+                    base[c] = temp_design_df[c]
+
+        Xb, Xb_names = _build_covariate_design(base, covariates, add_intercept=True)
+        meta.setdefault("temperature_control_by_outcome", {})[str(outcome)] = temp_meta
+
         for feat in selected:
             if feat not in trial_df.columns:
                 continue
             x_raw = pd.to_numeric(trial_df[feat], errors="coerce").to_numpy(dtype=float)
             x = _zscore(x_raw) if cfg.standardize else x_raw
-
-            base = trial_df[covariates].copy() if covariates else pd.DataFrame(index=trial_df.index)
-            Xb, Xb_names = _build_covariate_design(base, covariates, add_intercept=True)
 
             valid = np.isfinite(y_all) & np.isfinite(x) & np.all(np.isfinite(Xb), axis=1)
             if int(valid.sum()) < max(12, Xb.shape[1] + 5):

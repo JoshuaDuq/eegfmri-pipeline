@@ -55,6 +55,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
     compute_group.add_argument("--no-control-trial-order", action="store_false", dest="control_trial_order")
+    compute_group.add_argument("--trial-table-only", action="store_true", default=None, dest="trial_table_only")
+    compute_group.add_argument("--no-trial-table-only", action="store_false", dest="trial_table_only")
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
     compute_group.add_argument("--compute-change-scores", action="store_true", default=None)
     compute_group.add_argument("--no-compute-change-scores", action="store_false", dest="compute_change_scores")
@@ -160,10 +162,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     regression_group = parser.add_argument_group("Trialwise regression options")
     regression_group.add_argument("--regression-feature-set", choices=["pain_summaries", "all"], default=None)
-    regression_group.add_argument("--regression-outcome", choices=["rating", "pain_residual"], default=None)
+    regression_group.add_argument("--regression-outcome", choices=["rating", "pain_residual", "temperature"], default=None)
     regression_group.add_argument("--regression-include-temperature", action="store_true", default=None)
     regression_group.add_argument("--no-regression-include-temperature", action="store_false", dest="regression_include_temperature")
-    regression_group.add_argument("--regression-temperature-control", choices=["linear", "rating_hat"], default=None)
+    regression_group.add_argument("--regression-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
+    regression_group.add_argument("--regression-temperature-spline-knots", type=int, default=None)
+    regression_group.add_argument("--regression-temperature-spline-quantile-low", type=float, default=None)
+    regression_group.add_argument("--regression-temperature-spline-quantile-high", type=float, default=None)
+    regression_group.add_argument("--regression-temperature-spline-min-samples", type=int, default=None)
     regression_group.add_argument("--regression-include-trial-order", action="store_true", default=None)
     regression_group.add_argument("--no-regression-include-trial-order", action="store_false", dest="regression_include_trial_order")
     regression_group.add_argument("--regression-include-prev-terms", action="store_true", default=None)
@@ -180,11 +186,15 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     models_group = parser.add_argument_group("Model families options")
     models_group.add_argument("--models-feature-set", choices=["pain_summaries", "all"], default=None)
-    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "pain_residual", "pain_binary"], default=None)
+    models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature", "pain_binary"], default=None)
     models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
     models_group.add_argument("--models-include-temperature", action="store_true", default=None)
     models_group.add_argument("--no-models-include-temperature", action="store_false", dest="models_include_temperature")
-    models_group.add_argument("--models-temperature-control", choices=["linear", "rating_hat"], default=None)
+    models_group.add_argument("--models-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
+    models_group.add_argument("--models-temperature-spline-knots", type=int, default=None)
+    models_group.add_argument("--models-temperature-spline-quantile-low", type=float, default=None)
+    models_group.add_argument("--models-temperature-spline-quantile-high", type=float, default=None)
+    models_group.add_argument("--models-temperature-spline-min-samples", type=int, default=None)
     models_group.add_argument("--models-include-trial-order", action="store_true", default=None)
     models_group.add_argument("--no-models-include-trial-order", action="store_false", dest="models_include_trial_order")
     models_group.add_argument("--models-include-prev-terms", action="store_true", default=None)
@@ -212,11 +222,15 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     influence_group = parser.add_argument_group("Influence diagnostics options")
     influence_group.add_argument("--influence-feature-set", choices=["pain_summaries", "all"], default=None)
-    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "pain_residual"], default=None)
+    influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature"], default=None)
     influence_group.add_argument("--influence-max-features", type=int, default=None)
     influence_group.add_argument("--influence-include-temperature", action="store_true", default=None)
     influence_group.add_argument("--no-influence-include-temperature", action="store_false", dest="influence_include_temperature")
-    influence_group.add_argument("--influence-temperature-control", choices=["linear", "rating_hat"], default=None)
+    influence_group.add_argument("--influence-temperature-control", choices=["linear", "rating_hat", "spline"], default=None)
+    influence_group.add_argument("--influence-temperature-spline-knots", type=int, default=None)
+    influence_group.add_argument("--influence-temperature-spline-quantile-low", type=float, default=None)
+    influence_group.add_argument("--influence-temperature-spline-quantile-high", type=float, default=None)
+    influence_group.add_argument("--influence-temperature-spline-min-samples", type=int, default=None)
     influence_group.add_argument("--influence-include-trial-order", action="store_true", default=None)
     influence_group.add_argument("--no-influence-include-trial-order", action="store_false", dest="influence_include_trial_order")
     influence_group.add_argument("--influence-include-run-block", action="store_true", default=None)
@@ -230,6 +244,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
     pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
+    pain_sensitivity_group.add_argument("--pain-sensitivity-feature-set", choices=["pain_summaries", "all"], default=None)
+
+    correlations_group = parser.add_argument_group("Correlations (trial-table) options")
+    correlations_group.add_argument("--correlations-feature-set", choices=["pain_summaries", "all"], default=None)
+    correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
+
+    report_group = parser.add_argument_group("Report options")
+    report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
 
     temporal_group = parser.add_argument_group("Temporal options")
     temporal_group.add_argument("--temporal-time-resolution-ms", type=int, default=None)
@@ -320,6 +342,8 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
         if getattr(args, "control_trial_order", None) is not None:
             ba["control_trial_order"] = bool(args.control_trial_order)
+        if getattr(args, "trial_table_only", None) is not None:
+            ba.setdefault("trial_table_only", {})["enabled"] = bool(args.trial_table_only)
 
         if getattr(args, "fdr_alpha", None) is not None:
             stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
@@ -422,6 +446,21 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             reg["include_temperature"] = bool(args.regression_include_temperature)
         if getattr(args, "regression_temperature_control", None) is not None:
             reg["temperature_control"] = str(args.regression_temperature_control).strip().lower()
+        if (
+            getattr(args, "regression_temperature_spline_knots", None) is not None
+            or getattr(args, "regression_temperature_spline_quantile_low", None) is not None
+            or getattr(args, "regression_temperature_spline_quantile_high", None) is not None
+            or getattr(args, "regression_temperature_spline_min_samples", None) is not None
+        ):
+            ts = reg.setdefault("temperature_spline", {})
+            if getattr(args, "regression_temperature_spline_knots", None) is not None:
+                ts["n_knots"] = int(args.regression_temperature_spline_knots)
+            if getattr(args, "regression_temperature_spline_quantile_low", None) is not None:
+                ts["quantile_low"] = float(args.regression_temperature_spline_quantile_low)
+            if getattr(args, "regression_temperature_spline_quantile_high", None) is not None:
+                ts["quantile_high"] = float(args.regression_temperature_spline_quantile_high)
+            if getattr(args, "regression_temperature_spline_min_samples", None) is not None:
+                ts["min_samples"] = int(args.regression_temperature_spline_min_samples)
         if getattr(args, "regression_include_trial_order", None) is not None:
             reg["include_trial_order"] = bool(args.regression_include_trial_order)
         if getattr(args, "regression_include_prev_terms", None) is not None:
@@ -452,6 +491,21 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             mdl["include_temperature"] = bool(args.models_include_temperature)
         if getattr(args, "models_temperature_control", None) is not None:
             mdl["temperature_control"] = str(args.models_temperature_control).strip().lower()
+        if (
+            getattr(args, "models_temperature_spline_knots", None) is not None
+            or getattr(args, "models_temperature_spline_quantile_low", None) is not None
+            or getattr(args, "models_temperature_spline_quantile_high", None) is not None
+            or getattr(args, "models_temperature_spline_min_samples", None) is not None
+        ):
+            ts = mdl.setdefault("temperature_spline", {})
+            if getattr(args, "models_temperature_spline_knots", None) is not None:
+                ts["n_knots"] = int(args.models_temperature_spline_knots)
+            if getattr(args, "models_temperature_spline_quantile_low", None) is not None:
+                ts["quantile_low"] = float(args.models_temperature_spline_quantile_low)
+            if getattr(args, "models_temperature_spline_quantile_high", None) is not None:
+                ts["quantile_high"] = float(args.models_temperature_spline_quantile_high)
+            if getattr(args, "models_temperature_spline_min_samples", None) is not None:
+                ts["min_samples"] = int(args.models_temperature_spline_min_samples)
         if getattr(args, "models_include_trial_order", None) is not None:
             mdl["include_trial_order"] = bool(args.models_include_trial_order)
         if getattr(args, "models_include_prev_terms", None) is not None:
@@ -504,6 +558,21 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             infl["include_temperature"] = bool(args.influence_include_temperature)
         if getattr(args, "influence_temperature_control", None) is not None:
             infl["temperature_control"] = str(args.influence_temperature_control).strip().lower()
+        if (
+            getattr(args, "influence_temperature_spline_knots", None) is not None
+            or getattr(args, "influence_temperature_spline_quantile_low", None) is not None
+            or getattr(args, "influence_temperature_spline_quantile_high", None) is not None
+            or getattr(args, "influence_temperature_spline_min_samples", None) is not None
+        ):
+            ts = infl.setdefault("temperature_spline", {})
+            if getattr(args, "influence_temperature_spline_knots", None) is not None:
+                ts["n_knots"] = int(args.influence_temperature_spline_knots)
+            if getattr(args, "influence_temperature_spline_quantile_low", None) is not None:
+                ts["quantile_low"] = float(args.influence_temperature_spline_quantile_low)
+            if getattr(args, "influence_temperature_spline_quantile_high", None) is not None:
+                ts["quantile_high"] = float(args.influence_temperature_spline_quantile_high)
+            if getattr(args, "influence_temperature_spline_min_samples", None) is not None:
+                ts["min_samples"] = int(args.influence_temperature_spline_min_samples)
         if getattr(args, "influence_include_trial_order", None) is not None:
             infl["include_trial_order"] = bool(args.influence_include_trial_order)
         if getattr(args, "influence_include_run_block", None) is not None:
@@ -520,6 +589,18 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         # Pain sensitivity
         if getattr(args, "pain_sensitivity_min_trials", None) is not None:
             ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
+        if getattr(args, "pain_sensitivity_feature_set", None) is not None:
+            ba.setdefault("pain_sensitivity", {})["feature_set"] = str(args.pain_sensitivity_feature_set).strip().lower()
+
+        # Correlations (trial-table)
+        if getattr(args, "correlations_feature_set", None) is not None:
+            ba.setdefault("correlations", {})["feature_set"] = str(args.correlations_feature_set).strip().lower()
+        if getattr(args, "correlations_targets", None) is not None:
+            ba.setdefault("correlations", {})["targets"] = [str(t).strip().lower() for t in (args.correlations_targets or [])]
+
+        # Report
+        if getattr(args, "report_top_n", None) is not None:
+            ba.setdefault("report", {})["top_n"] = int(args.report_top_n)
 
         # Condition
         if getattr(args, "condition_fail_fast", None) is not None:

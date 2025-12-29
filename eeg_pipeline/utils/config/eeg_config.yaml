@@ -203,6 +203,10 @@ behavior_analysis:
   n_jobs: -1
   targets: ["pain_rating", "temperature", "pain_binary"]
 
+  # Subject-level "tabular" mode: skip analyses that require epochs/time-frequency arrays.
+  trial_table_only:
+    enabled: false
+
   # Canonical per-trial table export (single source of truth for subject-level stats/plots)
   trial_table:
     enabled: true
@@ -260,9 +264,14 @@ behavior_analysis:
   regression:
     enabled: false
     feature_set: "pain_summaries"  # "pain_summaries" or "all"
-    outcome: "rating"              # "rating" or "pain_residual"
+    outcome: "rating"              # "rating" | "pain_residual" | "temperature"
     include_temperature: true
-    temperature_control: "linear"    # "linear" or "rating_hat" (uses rating_hat_from_temp if present)
+    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
+    temperature_spline:
+      n_knots: 4
+      quantile_low: 0.05
+      quantile_high: 0.95
+      min_samples: 12
     include_trial_order: true
     include_prev_terms: false      # uses prev_/delta_ columns from trial table
     include_run_block: true
@@ -276,10 +285,15 @@ behavior_analysis:
   models:
     enabled: false
     feature_set: "pain_summaries"     # "pain_summaries" or "all"
-    outcomes: ["rating", "pain_residual"]
+    outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
     include_temperature: true
-    temperature_control: "linear"    # "linear" or "rating_hat" (uses rating_hat_from_temp if present)
+    temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
+    temperature_spline:
+      n_knots: 4
+      quantile_low: 0.05
+      quantile_high: 0.95
+      min_samples: 12
     include_trial_order: true
     include_prev_terms: false
     include_run_block: true
@@ -309,10 +323,15 @@ behavior_analysis:
   influence:
     enabled: true
     feature_set: "pain_summaries"
-    outcomes: ["rating", "pain_residual"]
+    outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
     max_features: 20
     include_temperature: true
-    temperature_control: "linear"  # "linear" or "rating_hat"
+    temperature_control: "linear"  # "linear" | "rating_hat" | "spline"
+    temperature_spline:
+      n_knots: 4
+      quantile_low: 0.05
+      quantile_high: 0.95
+      min_samples: 12
     include_trial_order: true
     include_run_block: true
     include_interaction: false
@@ -320,6 +339,11 @@ behavior_analysis:
     # Optional overrides (defaults use common heuristics)
     cooks_threshold: null
     leverage_threshold: null
+
+  # Single-subject report (non-gating; summarizes outputs and diagnostics)
+  report:
+    enabled: true
+    top_n: 15
   
   # Statistics
   statistics:
@@ -331,6 +355,8 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
+    feature_set: "pain_summaries"   # "pain_summaries" or "all"
+    targets: ["rating", "temperature", "pain_residual"]
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
@@ -338,6 +364,7 @@ behavior_analysis:
   # Pain sensitivity computation
   pain_sensitivity:
     enabled: true
+    feature_set: "pain_summaries"   # "pain_summaries" or "all"
     min_trials: 10
   
   # Condition comparison computation

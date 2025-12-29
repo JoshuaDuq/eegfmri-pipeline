@@ -28,8 +28,8 @@ const (
 ///////////////////////////////////////////////////////////////////
 
 const (
-	MaxScrollbackLines = 1000
-	LogBufferChannels  = 100
+	MaxScrollbackLines = 0 // 0 for unlimited
+	LogBufferChannels  = 1000
 
 	ScrollStepSize        = 3
 	MouseWheelScrollLines = 1

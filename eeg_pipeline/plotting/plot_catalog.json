@@ -1,0 +1,573 @@
+{
+  "groups": [
+    {
+      "key": "pain",
+      "label": "Pain Response",
+      "description": "Integrated report: behavior, ERP, TFR, and feature effects"
+    },
+    {
+      "key": "features",
+      "label": "Features",
+      "description": "Feature distribution, QC, and descriptive summaries"
+    },
+    {
+      "key": "behavior",
+      "label": "Behavior",
+      "description": "EEG-behavior correlations, temporal stats, and summaries"
+    },
+    {
+      "key": "tfr",
+      "label": "Time-Frequency",
+      "description": "Time-frequency representations, contrasts, and topomaps"
+    },
+    {
+      "key": "erp",
+      "label": "ERP",
+      "description": "Event-related potential waveforms and topographies"
+    },
+    {
+      "key": "decoding",
+      "label": "Decoding",
+      "description": "Decoding regression diagnostics and time-generalization"
+    }
+  ],
+  "plots": [
+    {
+      "id": "pain_report",
+      "group": "pain",
+      "label": "Pain Response Report",
+      "description": "Single-subject pain-focused report (behavior + ERP + TFR + effects)",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv",
+        "stats/correlations*.tsv",
+        "features/features_all.tsv"
+      ],
+      "behavior_plots": [
+        "pain_report"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "features_power",
+      "group": "features",
+      "label": "Power",
+      "description": "Band power summaries and topomaps",
+      "required_files": [
+        "features_power*.tsv"
+      ],
+      "feature_categories": [
+        "power"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_connectivity",
+      "group": "features",
+      "label": "Connectivity",
+      "description": "Connectivity heatmaps and networks",
+      "required_files": [
+        "features_connectivity*.parquet"
+      ],
+      "feature_categories": [
+        "connectivity"
+      ],
+      "requires_features": true,
+      "requires_epochs": true
+    },
+    {
+      "id": "features_aperiodic",
+      "group": "features",
+      "label": "Aperiodic",
+      "description": "1/f spectral slope diagnostics",
+      "required_files": [
+        "features_aperiodic*.tsv"
+      ],
+      "feature_categories": [
+        "aperiodic"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_itpc",
+      "group": "features",
+      "label": "ITPC",
+      "description": "Inter-trial phase coherence plots",
+      "required_files": [
+        "features_itpc*.tsv",
+        "stats/itpc_data.npz"
+      ],
+      "feature_categories": [
+        "itpc"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_pac",
+      "group": "features",
+      "label": "PAC",
+      "description": "Phase-amplitude coupling plots",
+      "required_files": [
+        "features_pac*.tsv"
+      ],
+      "feature_categories": [
+        "pac"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_erds",
+      "group": "features",
+      "label": "ERDS",
+      "description": "Event-related desync/sync plots",
+      "required_files": [
+        "features_erds*.tsv"
+      ],
+      "feature_categories": [
+        "erds"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_complexity",
+      "group": "features",
+      "label": "Complexity",
+      "description": "Complexity distributions and condition comparisons",
+      "required_files": [
+        "features_complexity*.tsv"
+      ],
+      "feature_categories": [
+        "complexity"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_quality",
+      "group": "features",
+      "label": "Quality",
+      "description": "Feature quality diagnostics and outlier views",
+      "required_files": [
+        "features_quality*.tsv"
+      ],
+      "feature_categories": [
+        "quality"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_spectral",
+      "group": "features",
+      "label": "Spectral",
+      "description": "Spectral peak and edge features",
+      "required_files": [
+        "features_spectral*.tsv"
+      ],
+      "feature_categories": [
+        "spectral"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_ratios",
+      "group": "features",
+      "label": "Ratios",
+      "description": "Band power ratios",
+      "required_files": [
+        "features_ratios*.tsv"
+      ],
+      "feature_categories": [
+        "ratios"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_asymmetry",
+      "group": "features",
+      "label": "Asymmetry",
+      "description": "Hemispheric asymmetry indices",
+      "required_files": [
+        "features_asymmetry*.tsv"
+      ],
+      "feature_categories": [
+        "asymmetry"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_bursts",
+      "group": "features",
+      "label": "Bursts",
+      "description": "Oscillatory burst dynamics",
+      "required_files": [
+        "features_bursts*.tsv"
+      ],
+      "feature_categories": [
+        "bursts"
+      ],
+      "requires_features": true
+    },
+    {
+      "id": "features_erp",
+      "group": "features",
+      "label": "ERP",
+      "description": "ERP visualizations from epochs",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "feature_categories": [
+        "erp"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "behavior_psychometrics",
+      "group": "behavior",
+      "label": "Psychometrics",
+      "description": "Rating distributions and psychometrics",
+      "required_files": [
+        "events.tsv"
+      ],
+      "behavior_plots": [
+        "psychometrics"
+      ]
+    },
+    {
+      "id": "behavior_power_scatter",
+      "group": "behavior",
+      "label": "Power ROI Scatter",
+      "description": "Power vs behavior scatter plots",
+      "required_files": [
+        "features_power*.tsv",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "power_roi_scatter"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_complexity_scatter",
+      "group": "behavior",
+      "label": "Complexity Scatter",
+      "description": "Complexity vs behavior scatter plots",
+      "required_files": [
+        "features_complexity*.tsv",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "complexity_scatter"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_aperiodic_scatter",
+      "group": "behavior",
+      "label": "Aperiodic Scatter",
+      "description": "Aperiodic vs behavior scatter plots",
+      "required_files": [
+        "features_aperiodic*.tsv",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "aperiodic_scatter"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_connectivity_scatter",
+      "group": "behavior",
+      "label": "Connectivity Scatter",
+      "description": "Connectivity vs behavior scatter plots",
+      "required_files": [
+        "features_connectivity*.parquet",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "connectivity_scatter"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_itpc_scatter",
+      "group": "behavior",
+      "label": "ITPC Scatter",
+      "description": "ITPC vs behavior scatter plots",
+      "required_files": [
+        "features_itpc*.tsv",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "itpc_scatter"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_temporal_topomaps",
+      "group": "behavior",
+      "label": "Temporal Topomaps",
+      "description": "Temporal correlation topomaps",
+      "required_files": [
+        "stats/temporal_correlations_by_pain*.npz"
+      ],
+      "behavior_plots": [
+        "temporal_topomaps"
+      ],
+      "requires_stats": true
+    },
+    {
+      "id": "behavior_pain_clusters",
+      "group": "behavior",
+      "label": "Pain Clusters",
+      "description": "Cluster-based temporal contrasts",
+      "required_files": [
+        "stats/pain_nonpain_time_clusters_*.tsv"
+      ],
+      "behavior_plots": [
+        "pain_clusters"
+      ],
+      "requires_stats": true
+    },
+    {
+      "id": "behavior_dose_response",
+      "group": "behavior",
+      "label": "Dose Response",
+      "description": "Dose-response curves and contrasts",
+      "required_files": [
+        "features_power*.tsv",
+        "epochs/*.fif"
+      ],
+      "behavior_plots": [
+        "dose_response"
+      ],
+      "requires_epochs": true,
+      "requires_features": true
+    },
+    {
+      "id": "behavior_top_predictors",
+      "group": "behavior",
+      "label": "Top Predictors",
+      "description": "Top predictors summary",
+      "required_files": [
+        "stats/correlations*.tsv"
+      ],
+      "behavior_plots": [
+        "top_predictors"
+      ],
+      "requires_stats": true
+    },
+    {
+      "id": "behavior_temperature_models",
+      "group": "behavior",
+      "label": "Temperature Models",
+      "description": "Subject-level temperature→rating dose-response diagnostics",
+      "required_files": [
+        "stats/trials*.parquet",
+        "stats/temperature_model_comparison*.tsv"
+      ],
+      "behavior_plots": [
+        "temperature_models"
+      ],
+      "requires_stats": true
+    },
+    {
+      "id": "behavior_stability_groupwise",
+      "group": "behavior",
+      "label": "Stability (Run/Block)",
+      "description": "Within-subject stability of feature→outcome associations across runs/blocks",
+      "required_files": [
+        "stats/stability_groupwise*.tsv"
+      ],
+      "behavior_plots": [
+        "stability_groupwise"
+      ],
+      "requires_stats": true
+    },
+    {
+      "id": "tfr_scalpmean",
+      "group": "tfr",
+      "label": "Scalp-Mean",
+      "description": "Scalp-mean TFR plots",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": [
+        "scalpmean"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_scalpmean_contrast",
+      "group": "tfr",
+      "label": "Scalp-Mean Contrast",
+      "description": "Pain vs non-pain contrasts",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": [
+        "scalpmean_contrast"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_channels",
+      "group": "tfr",
+      "label": "Channels",
+      "description": "Channel-level TFR plots",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": [
+        "channels"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_channels_contrast",
+      "group": "tfr",
+      "label": "Channels Contrast",
+      "description": "Channel-level contrast plots",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": [
+        "channels_contrast"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_rois",
+      "group": "tfr",
+      "label": "ROIs",
+      "description": "ROI-level TFR plots",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "tfr_plots": [
+        "rois"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_rois_contrast",
+      "group": "tfr",
+      "label": "ROI Contrast",
+      "description": "ROI-level contrast plots",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": [
+        "rois_contrast"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_topomaps",
+      "group": "tfr",
+      "label": "Topomaps",
+      "description": "Time-frequency topomaps",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": [
+        "topomaps"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "tfr_band_evolution",
+      "group": "tfr",
+      "label": "Band Evolution",
+      "description": "Band evolution over time",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "tfr_plots": [
+        "band_evolution"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "decoding_regression_plots",
+      "group": "decoding",
+      "label": "Regression Plots",
+      "description": "LOSO regression diagnostics",
+      "required_files": [
+        "decoding/regression/loso_predictions.tsv"
+      ],
+      "decoding_mode": "regression"
+    },
+    {
+      "id": "decoding_timegen_plots",
+      "group": "decoding",
+      "label": "Time-Generalization",
+      "description": "Time-generalization matrices",
+      "required_files": [
+        "decoding/time_generalization/time_generalization_regression.npz"
+      ],
+      "decoding_mode": "timegen"
+    },
+    {
+      "id": "erp_butterfly",
+      "group": "erp",
+      "label": "Butterfly",
+      "description": "Butterfly ERP plots (all channels)",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "erp_plots": [
+        "butterfly"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "erp_roi",
+      "group": "erp",
+      "label": "ROI Waveforms",
+      "description": "ROI-based ERP waveforms with error bars",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "erp_plots": [
+        "roi"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "erp_contrast",
+      "group": "erp",
+      "label": "Contrast",
+      "description": "ERP condition contrasts (Pain vs No-Pain)",
+      "required_files": [
+        "epochs/*.fif",
+        "events.tsv"
+      ],
+      "erp_plots": [
+        "contrast"
+      ],
+      "requires_epochs": true
+    },
+    {
+      "id": "erp_topomaps",
+      "group": "erp",
+      "label": "Topomaps",
+      "description": "ERP spatial distributions",
+      "required_files": [
+        "epochs/*.fif"
+      ],
+      "erp_plots": [
+        "topomaps"
+      ],
+      "requires_epochs": true
+    }
+  ]
+}

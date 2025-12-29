@@ -138,16 +138,14 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                     available_bands = []
                     has_stats = False
                     
-                    if r["features"]:
+                    if r["features"] or r["epochs"]:
                         features_dir = deriv_features_path(deriv_root, subj_id)
+                        # Even if features dir doesn't exist, we might have stats
+                        feature_availability = detect_feature_availability(features_dir)
                         if features_dir.exists():
                             available_bands = detect_available_bands(features_dir)
-                            feature_availability = detect_feature_availability(features_dir)
-                        else:
-                            # Features directory doesn't exist - mark all as unavailable
-                            feature_availability = _empty_feature_availability()
                     else:
-                        # No features - return explicit unavailable status for all
+                        # No features or epochs - return explicit unavailable status for all
                         feature_availability = _empty_feature_availability()
 
                     stats_dir = deriv_stats_path(deriv_root, subj_id)

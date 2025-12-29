@@ -215,8 +215,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var featAvail *types.FeatureAvailability
 			if s.FeatureAvailability != nil {
 				featAvail = &types.FeatureAvailability{
-					Features: make(map[string]types.AvailabilityInfo),
-					Bands:    make(map[string]types.AvailabilityInfo),
+					Features:     make(map[string]types.AvailabilityInfo),
+					Bands:        make(map[string]types.AvailabilityInfo),
+					Computations: make(map[string]types.AvailabilityInfo),
 				}
 				for k, v := range s.FeatureAvailability.Features {
 					lm := ""
@@ -231,6 +232,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						lm = *v.LastModified
 					}
 					featAvail.Bands[k] = types.AvailabilityInfo{Available: v.Available, LastModified: lm}
+				}
+				for k, v := range s.FeatureAvailability.Computations {
+					lm := ""
+					if v.LastModified != nil {
+						lm = *v.LastModified
+					}
+					featAvail.Computations[k] = types.AvailabilityInfo{Available: v.Available, LastModified: lm}
 				}
 			}
 			subjects[i] = types.SubjectStatus{

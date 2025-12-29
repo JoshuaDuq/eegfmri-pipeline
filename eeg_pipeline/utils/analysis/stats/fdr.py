@@ -17,7 +17,6 @@ import numpy as np
 import pandas as pd
 
 from .base import get_config_value, get_fdr_alpha
-from .correlation import compute_correlation
 
 if TYPE_CHECKING:
     pass
@@ -527,6 +526,8 @@ def build_correlation_matrices_for_prefix(
     min_samples: int = 3,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """Build correlation matrices for connectivity prefix."""
+    from .correlation import compute_correlation  # Local import to avoid circular dependency
+    
     n = len(node_to_index)
     r_mat = np.full((n, n), np.nan)
     p_mat = np.full((n, n), np.nan)

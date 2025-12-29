@@ -541,6 +541,8 @@ class TestBehaviorComputePipeline:
         assert not result.empty
         assert result.loc[0, "feature"] == "feat"
         assert result.loc[0, "n"] == 5
+        assert "p_primary" in result.columns
+        assert "p_fdr" in result.columns
 
     def test_feature_correlator(self, synthetic_feature_df):
         from eeg_pipeline.analysis.behavior.feature_correlator import (
@@ -617,6 +619,171 @@ class TestBehaviorComputePipeline:
         assert reject_mask.dtype == bool
         assert reject_mask[0] == True
         assert reject_mask[-1] == False
+
+    def test_temperature_rcs_design(self, mock_config):
+        from copy import deepcopy
+
+        from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+
+        cfg = deepcopy(mock_config)
+        cfg["behavior_analysis.regression.temperature_spline.min_samples"] = 10
+        cfg["behavior_analysis.regression.temperature_spline.n_knots"] = 4
+
+        # Varying temperature: should yield nonlinear terms when possible.
+        temp = pd.Series(np.linspace(44.0, 48.0, 30))
+        df_cols, names, meta = build_temperature_rcs_design(temp, config=cfg)
+        assert meta["status"] in ("ok", "ok_linear_only")
+        assert "temperature" in df_cols.columns
+        assert names[0] == "temperature"
+        assert len(names) >= 1
+
+        # Constant temperature: should skip nonlinear terms.
+        temp_const = pd.Series([46.0] * 30)
+        df_cols2, names2, meta2 = build_temperature_rcs_design(temp_const, config=cfg)
+        assert meta2["status"] == "skipped_constant_temperature"
+        assert names2 == ["temperature"]
+
+        # Insufficient samples: should skip nonlinear terms.
+        temp_small = pd.Series(np.linspace(44.0, 48.0, 5))
+        df_cols3, names3, meta3 = build_temperature_rcs_design(temp_small, config=cfg)
+        assert meta3["status"] == "skipped_insufficient_samples"
+        assert names3 == ["temperature"]
+
+    def test_trialwise_regression_temperature_spline_control(self, mock_config):
+        from copy import deepcopy
+
+        from eeg_pipeline.utils.analysis.stats.trialwise_regression import run_trialwise_feature_regressions
+
+        cfg = deepcopy(mock_config)
+        cfg["behavior_analysis.regression.outcome"] = "rating"
+        cfg["behavior_analysis.regression.min_samples"] = 10
+        cfg["behavior_analysis.regression.n_permutations"] = 0
+        cfg["behavior_analysis.regression.include_interaction"] = False
+        cfg["behavior_analysis.regression.temperature_control"] = "spline"
+        cfg["behavior_analysis.regression.temperature_spline.min_samples"] = 10
+        cfg["behavior_analysis.regression.temperature_spline.n_knots"] = 4
+
+        rng = np.random.default_rng(0)
+        n = 40
+        df = pd.DataFrame(
+            {
+                "rating": rng.normal(size=n),
+                "temperature": np.linspace(44.0, 48.0, n),
+                "trial_index": np.arange(n),
+                "power_alpha": rng.normal(size=n),
+            }
+        )
+
+        out, meta = run_trialwise_feature_regressions(df, feature_cols=["power_alpha"], config=cfg)
+        assert meta.get("temperature_control_used") in ("spline", "linear")
+        assert not out.empty
+        assert "p_primary" in out.columns
+        assert "p_fdr" in out.columns
+
+    def test_feature_models_temperature_spline_control(self, mock_config):
+        from copy import deepcopy
+
+        from eeg_pipeline.utils.analysis.stats.feature_models import run_feature_model_families
+
+        cfg = deepcopy(mock_config)
+        cfg["behavior_analysis.models.enabled"] = True
+        cfg["behavior_analysis.models.families"] = ["ols_hc3"]
+        cfg["behavior_analysis.models.outcomes"] = ["rating"]
+        cfg["behavior_analysis.models.min_samples"] = 10
+        cfg["behavior_analysis.models.include_interaction"] = False
+        cfg["behavior_analysis.models.temperature_control"] = "spline"
+        cfg["behavior_analysis.models.temperature_spline.min_samples"] = 10
+        cfg["behavior_analysis.models.temperature_spline.n_knots"] = 4
+
+        rng = np.random.default_rng(1)
+        n = 40
+        df = pd.DataFrame(
+            {
+                "rating": rng.normal(size=n),
+                "temperature": np.linspace(44.0, 48.0, n),
+                "trial_index": np.arange(n),
+                "power_alpha": rng.normal(size=n),
+            }
+        )
+
+        out, meta = run_feature_model_families(df, feature_cols=["power_alpha"], config=cfg)
+        assert not out.empty
+        assert set(["feature", "target", "model_family"]).issubset(out.columns)
+        assert "p_primary" in out.columns
+        assert "p_fdr" in out.columns
+        ctrl_by_out = meta.get("temperature_control_by_outcome") or {}
+        if "rating" in ctrl_by_out:
+            assert (ctrl_by_out["rating"] or {}).get("temperature_control_requested") == "spline"
+
+    def test_influence_diagnostics_basic(self, mock_config):
+        from copy import deepcopy
+
+        from eeg_pipeline.utils.analysis.stats.influence import compute_influence_diagnostics
+
+        cfg = deepcopy(mock_config)
+        cfg["behavior_analysis.influence.enabled"] = True
+        cfg["behavior_analysis.influence.outcomes"] = ["rating"]
+        cfg["behavior_analysis.influence.max_features"] = 3
+        cfg["behavior_analysis.influence.temperature_control"] = "linear"
+
+        rng = np.random.default_rng(2)
+        n = 40
+        df = pd.DataFrame(
+            {
+                "rating": rng.normal(size=n),
+                "temperature": np.linspace(44.0, 48.0, n),
+                "trial_index": np.arange(n),
+                "power_alpha": rng.normal(size=n),
+            }
+        )
+        corr_df = pd.DataFrame(
+            {
+                "feature": ["power_alpha"],
+                "target": ["rating"],
+                "r_primary": [0.2],
+                "p_primary": [0.01],
+            }
+        )
+
+        out, meta = compute_influence_diagnostics(
+            df,
+            feature_cols=["power_alpha"],
+            corr_df=corr_df,
+            regression_df=None,
+            models_df=None,
+            config=cfg,
+        )
+        assert meta.get("status") in ("ok", "empty_after_fit", "empty")
+        if not out.empty:
+            assert set(["feature", "target", "max_cooks", "max_leverage"]).issubset(out.columns)
+
+    def test_effect_direction_consistency_sign_flip(self):
+        from eeg_pipeline.utils.analysis.stats.consistency import build_effect_direction_consistency_summary
+
+        corr_df = pd.DataFrame(
+            {
+                "feature": ["power_alpha"],
+                "target": ["rating"],
+                "r_primary": [0.4],
+                "p_primary": [0.01],
+            }
+        )
+        reg_df = pd.DataFrame(
+            {
+                "feature": ["power_alpha"],
+                "target": ["rating"],
+                "beta_feature": [-0.2],
+                "p_primary": [0.02],
+            }
+        )
+
+        out, meta = build_effect_direction_consistency_summary(
+            corr_df=corr_df, regression_df=reg_df, models_df=None, config=None
+        )
+        assert meta.get("status") == "ok"
+        assert not out.empty
+        assert "flip_corr_vs_reg_rating" in out.columns
+        assert bool(out.loc[0, "flip_corr_vs_reg_rating"]) is True
 
 
 ###################################################################

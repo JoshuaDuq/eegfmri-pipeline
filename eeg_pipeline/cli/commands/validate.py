@@ -20,7 +20,7 @@ def setup_validate(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
     parser.add_argument(
         "mode",
-        choices=["all", "epochs", "features", "bids", "quick"],
+        choices=["all", "epochs", "features", "behavior", "bids", "quick"],
         nargs="?",
         default="quick",
         help="What to validate (default: quick)",
@@ -52,7 +52,7 @@ def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         _collect_subjects_from_derivatives_epochs,
         _collect_subjects_from_features,
     )
-    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path
+    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path, deriv_stats_path
     
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
@@ -152,6 +152,56 @@ def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                         "file": tsv.name,
                         "message": f"Read error: {str(e)[:40]}"
                     })
+
+    if args.mode in ["behavior", "all"]:
+        import pandas as pd
+
+        def _validate_tsv_schema(path: Path, *, required: List[str], any_of: Optional[List[str]] = None) -> Optional[str]:
+            try:
+                df = pd.read_csv(path, sep="\t", nrows=5)
+            except Exception as exc:
+                return f"Read error: {str(exc)[:60]}"
+            cols = set(df.columns.astype(str).tolist())
+            missing = [c for c in required if c not in cols]
+            if missing:
+                return f"Missing columns: {', '.join(missing)}"
+            if any_of:
+                if not any(c in cols for c in any_of):
+                    return f"Missing one of: {', '.join(any_of)}"
+            return None
+
+        behavior_checks = [
+            ("correlations", "correlations*.tsv", ["feature", "target", "p_primary"], ["r_primary", "r"]),
+            ("pain_sensitivity", "pain_sensitivity*.tsv", ["feature", "p_primary"], None),
+            ("regression", "regression_feature_effects*.tsv", ["feature", "target", "beta_feature", "p_primary"], None),
+            ("models", "models_feature_effects*.tsv", ["feature", "target", "model_family", "beta_feature", "p_primary"], None),
+            ("condition_effects", "condition_effects*.tsv", ["feature", "p_primary"], None),
+        ]
+
+        for subj in validate_subjects[:10]:
+            stats_dir = deriv_stats_path(deriv_root, subj)
+            if not stats_dir.exists():
+                warnings.append({"type": "behavior", "subject": subj, "message": "No stats directory (run behavior compute first)"})
+                continue
+
+            trials_files = list(stats_dir.glob("trials*.parquet"))
+            if not trials_files:
+                warnings.append({"type": "behavior", "subject": subj, "message": "Missing trials*.parquet (trial table not found)"})
+            else:
+                passed.append(f"sub-{subj}: trial table present ({trials_files[0].name})")
+
+            for check_name, pattern, required_cols, any_of_cols in behavior_checks:
+                for path in stats_dir.glob(pattern):
+                    err = _validate_tsv_schema(path, required=required_cols, any_of=any_of_cols)
+                    if err:
+                        warnings.append({
+                            "type": "behavior",
+                            "subject": subj,
+                            "file": path.name,
+                            "message": f"{check_name}: {err}",
+                        })
+                    else:
+                        passed.append(f"sub-{subj}: {path.name} schema OK")
     
     if args.mode in ["bids", "all"]:
         bids_root = config.bids_root if hasattr(config, "bids_root") else None

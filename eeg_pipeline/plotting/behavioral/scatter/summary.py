@@ -114,30 +114,52 @@ def _load_correlation_stats(
         method_label = format_correlation_method_label(method, robust_method)
     method_suffix = f"_{method_label}" if method_label else ""
 
-    candidates = [
-        (target_rating, stats_dir / f"correlations{method_suffix}.tsv"),
-        (target_rating, stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"),
-    ]
-    if method_label:
-        candidates.extend([
-            (target_rating, stats_dir / "correlations.tsv"),
-            (target_rating, stats_dir / "corr_stats_all_features_vs_rating.tsv"),
-        ])
-
-    for target_label, path in candidates:
+    def _try_read(path: Path) -> Optional[pd.DataFrame]:
         if not path.exists():
-            continue
+            return None
         df = read_tsv(path)
         if df is None or df.empty:
+            return None
+        return df
+
+    # Prefer the new unified correlations*.tsv outputs. These may include multiple targets.
+    # Choose the most specific match: correlations*_{method_label}.tsv, otherwise correlations*.tsv.
+    glob_candidates: list[Path] = []
+    if method_label:
+        glob_candidates.extend(sorted(stats_dir.glob(f"correlations*{method_suffix}.tsv")))
+    glob_candidates.extend(sorted(stats_dir.glob("correlations*.tsv")))
+    for path in glob_candidates:
+        df = _try_read(path)
+        if df is None:
+            continue
+        if "target" in df.columns:
+            # Default plot behavior focuses on the configured rating target.
+            df_t = df[df["target"].astype(str).str.lower() == str(target_rating).lower()].copy()
+            if not df_t.empty:
+                return df_t
+            # If no rating rows exist, fall back to any targets in the file.
+            return df
+        df = df.copy()
+        df["target"] = target_rating
+        return df
+
+    # Legacy fallback (pre trial-table-first).
+    legacy_candidates = [
+        stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv",
+        stats_dir / "corr_stats_all_features_vs_rating.tsv",
+    ]
+    for path in legacy_candidates:
+        df = _try_read(path)
+        if df is None:
             continue
         if "target" not in df.columns:
             df = df.copy()
-            df["target"] = target_label
+            df["target"] = target_rating
         return df
 
     logger.warning(
         "No correlation stats found. Expected one of: %s",
-        ", ".join(str(p) for _, p in candidates),
+        ", ".join([*(str(p) for p in glob_candidates), *(str(p) for p in legacy_candidates)]),
     )
     return None
 
@@ -147,11 +169,13 @@ def _prepare_predictor_table(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = df.copy()
-    df["r"] = pd.to_numeric(df.get("r"), errors="coerce")
+    # New correlations TSVs may include r_primary; prefer it for plotting.
+    r_col = "r_primary" if "r_primary" in df.columns else "r"
+    df["r"] = pd.to_numeric(df.get(r_col), errors="coerce")
     df["n"] = pd.to_numeric(df.get("n"), errors="coerce")
 
-    # Prefer permutation p-values if present
-    p_cols = ["p_primary_perm", "p_primary", "p"]
+    # Prefer global/within-file corrections when available.
+    p_cols = ["q_global", "p_fdr", "p_primary_perm", "p_primary", "p"]
     p_kind = None
     for col in p_cols:
         if col in df.columns and pd.to_numeric(df[col], errors="coerce").notna().any():

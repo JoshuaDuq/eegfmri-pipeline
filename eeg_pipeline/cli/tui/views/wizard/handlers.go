@@ -1150,6 +1150,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupInfluence:
 		m.behaviorGroupInfluenceExpanded = !m.behaviorGroupInfluenceExpanded
 		m.useDefaultAdvanced = false
+	case optBehaviorGroupReport:
+		m.behaviorGroupReportExpanded = !m.behaviorGroupReportExpanded
+		m.useDefaultAdvanced = false
 	case optBehaviorGroupCondition:
 		m.behaviorGroupConditionExpanded = !m.behaviorGroupConditionExpanded
 		m.useDefaultAdvanced = false
@@ -1192,6 +1195,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optControlOrder:
 		m.controlTrialOrder = !m.controlTrialOrder
+		m.useDefaultAdvanced = false
+	case optTrialTableOnlyMode:
+		m.trialTableOnly = !m.trialTableOnly
 		m.useDefaultAdvanced = false
 	case optFDRAlpha:
 		m.startNumberEdit()
@@ -1273,13 +1279,16 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.regressionFeatureSet = (m.regressionFeatureSet + 1) % 2
 		m.useDefaultAdvanced = false
 	case optRegressionOutcome:
-		m.regressionOutcome = (m.regressionOutcome + 1) % 2
+		m.regressionOutcome = (m.regressionOutcome + 1) % 3
 		m.useDefaultAdvanced = false
 	case optRegressionIncludeTemperature:
 		m.regressionIncludeTemperature = !m.regressionIncludeTemperature
 		m.useDefaultAdvanced = false
 	case optRegressionTempControl:
-		m.regressionTempControl = (m.regressionTempControl + 1) % 2
+		m.regressionTempControl = (m.regressionTempControl + 1) % 3
+		m.useDefaultAdvanced = false
+	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinSamples:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optRegressionIncludeTrialOrder:
 		m.regressionIncludeTrialOrder = !m.regressionIncludeTrialOrder
@@ -1308,7 +1317,10 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.modelsIncludeTemperature = !m.modelsIncludeTemperature
 		m.useDefaultAdvanced = false
 	case optModelsTempControl:
-		m.modelsTempControl = (m.modelsTempControl + 1) % 2
+		m.modelsTempControl = (m.modelsTempControl + 1) % 3
+		m.useDefaultAdvanced = false
+	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinSamples:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsIncludeTrialOrder:
 		m.modelsIncludeTrialOrder = !m.modelsIncludeTrialOrder
@@ -1330,19 +1342,25 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeRating:
 		m.modelsOutcomeRating = !m.modelsOutcomeRating
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
 			m.modelsOutcomeRating = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsOutcomePainResidual:
 		m.modelsOutcomePainResidual = !m.modelsOutcomePainResidual
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
 			m.modelsOutcomePainResidual = true
+		}
+		m.useDefaultAdvanced = false
+	case optModelsOutcomeTemperature:
+		m.modelsOutcomeTemperature = !m.modelsOutcomeTemperature
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
+			m.modelsOutcomeTemperature = true
 		}
 		m.useDefaultAdvanced = false
 	case optModelsOutcomePainBinary:
 		m.modelsOutcomePainBinary = !m.modelsOutcomePainBinary
-		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomePainBinary {
+		if !m.modelsOutcomeRating && !m.modelsOutcomePainResidual && !m.modelsOutcomeTemperature && !m.modelsOutcomePainBinary {
 			m.modelsOutcomePainBinary = true
 		}
 		m.useDefaultAdvanced = false
@@ -1405,14 +1423,20 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optInfluenceOutcomeRating:
 		m.influenceOutcomeRating = !m.influenceOutcomeRating
-		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual {
+		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
 			m.influenceOutcomeRating = true
 		}
 		m.useDefaultAdvanced = false
 	case optInfluenceOutcomePainResidual:
 		m.influenceOutcomePainResidual = !m.influenceOutcomePainResidual
-		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual {
+		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
 			m.influenceOutcomePainResidual = true
+		}
+		m.useDefaultAdvanced = false
+	case optInfluenceOutcomeTemperature:
+		m.influenceOutcomeTemperature = !m.influenceOutcomeTemperature
+		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
+			m.influenceOutcomeTemperature = true
 		}
 		m.useDefaultAdvanced = false
 	case optInfluenceMaxFeatures:
@@ -1422,7 +1446,10 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.influenceIncludeTemperature = !m.influenceIncludeTemperature
 		m.useDefaultAdvanced = false
 	case optInfluenceTempControl:
-		m.influenceTempControl = (m.influenceTempControl + 1) % 2
+		m.influenceTempControl = (m.influenceTempControl + 1) % 3
+		m.useDefaultAdvanced = false
+	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinSamples:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optInfluenceIncludeTrialOrder:
 		m.influenceIncludeTrialOrder = !m.influenceIncludeTrialOrder
@@ -1440,7 +1467,38 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
+	// Report
+	case optReportTopN:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Correlations
+	case optCorrelationsFeatureSet:
+		m.correlationsFeatureSet = (m.correlationsFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
+	case optCorrelationsTargetRating:
+		m.correlationsTargetRating = !m.correlationsTargetRating
+		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
+			m.correlationsTargetRating = true
+		}
+		m.useDefaultAdvanced = false
+	case optCorrelationsTargetTemperature:
+		m.correlationsTargetTemperature = !m.correlationsTargetTemperature
+		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
+			m.correlationsTargetTemperature = true
+		}
+		m.useDefaultAdvanced = false
+	case optCorrelationsTargetPainResidual:
+		m.correlationsTargetPainResidual = !m.correlationsTargetPainResidual
+		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
+			m.correlationsTargetPainResidual = true
+		}
+		m.useDefaultAdvanced = false
+
 	// Pain sensitivity
+	case optPainSensitivityFeatureSet:
+		m.painSensitivityFeatureSet = (m.painSensitivityFeatureSet + 1) % 2
+		m.useDefaultAdvanced = false
 	case optPainSensitivityMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -1735,6 +1793,22 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Regression
+	case optRegressionTempSplineKnots:
+		if val >= 4 {
+			m.regressionTempSplineKnots = int(val)
+		}
+	case optRegressionTempSplineQlow:
+		if val > 0 && val < 1 {
+			m.regressionTempSplineQlow = val
+		}
+	case optRegressionTempSplineQhigh:
+		if val > 0 && val < 1 {
+			m.regressionTempSplineQhigh = val
+		}
+	case optRegressionTempSplineMinSamples:
+		if val >= 0 {
+			m.regressionTempSplineMinN = int(val)
+		}
 	case optRegressionMinSamples:
 		if val >= 0 {
 			m.regressionMinSamples = int(val)
@@ -1749,6 +1823,22 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Models
+	case optModelsTempSplineKnots:
+		if val >= 4 {
+			m.modelsTempSplineKnots = int(val)
+		}
+	case optModelsTempSplineQlow:
+		if val > 0 && val < 1 {
+			m.modelsTempSplineQlow = val
+		}
+	case optModelsTempSplineQhigh:
+		if val > 0 && val < 1 {
+			m.modelsTempSplineQhigh = val
+		}
+	case optModelsTempSplineMinSamples:
+		if val >= 0 {
+			m.modelsTempSplineMinN = int(val)
+		}
 	case optModelsMinSamples:
 		if val >= 0 {
 			m.modelsMinSamples = int(val)
@@ -1773,6 +1863,22 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Influence
+	case optInfluenceTempSplineKnots:
+		if val >= 4 {
+			m.influenceTempSplineKnots = int(val)
+		}
+	case optInfluenceTempSplineQlow:
+		if val > 0 && val < 1 {
+			m.influenceTempSplineQlow = val
+		}
+	case optInfluenceTempSplineQhigh:
+		if val > 0 && val < 1 {
+			m.influenceTempSplineQhigh = val
+		}
+	case optInfluenceTempSplineMinSamples:
+		if val >= 0 {
+			m.influenceTempSplineMinN = int(val)
+		}
 	case optInfluenceMaxFeatures:
 		if val >= 0 {
 			m.influenceMaxFeatures = int(val)
@@ -1787,6 +1893,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Pain sensitivity / temporal
+	case optReportTopN:
+		if val >= 1 {
+			m.reportTopN = int(val)
+		}
 	case optPainSensitivityMinTrials:
 		if val >= 0 {
 			m.painSensitivityMinTrials = int(val)

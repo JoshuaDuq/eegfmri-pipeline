@@ -64,6 +64,9 @@ def plot_erp_topomaps(
             show=False,
             #title=f"sub-{subject} ERP Topomaps (All Trials)"
         )
+        for ax in fig.axes:
+            if ax.get_title():
+                ax.set_title(ax.get_title(), fontsize=8)
         # fig.suptitle is tricky with mne.plot_topomap as it returns a Figure object 
         # but the layout is already tight.
         
@@ -93,6 +96,9 @@ def plot_erp_topomaps(
                         average=0.05,
                         show=False,
                     )
+                    for ax in fig.axes:
+                        if ax.get_title():
+                            ax.set_title(ax.get_title(), fontsize=8)
                     
                     path = save_dir / f"sub-{subject}_erp_topomaps_{cond_name}.{primary_ext}"
                     save_fig(
@@ -122,6 +128,9 @@ def plot_erp_topomaps(
                     average=0.05,
                     show=False,
                 )
+                for ax in fig.axes:
+                    if ax.get_title():
+                        ax.set_title(ax.get_title(), fontsize=8)
                 
                 path = save_dir / f"sub-{subject}_erp_topomaps_contrast.{primary_ext}"
                 save_fig(

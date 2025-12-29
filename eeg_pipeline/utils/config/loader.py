@@ -204,6 +204,10 @@ class ConfigDict(dict):
         if project_value is not None:
             return project_value
         
+        # Alias 'subjects' to 'project.subject_list'
+        if key == "subjects":
+            return get_nested_value(self, "project.subject_list", None)
+        
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
 
 

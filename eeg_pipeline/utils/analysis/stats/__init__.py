@@ -25,6 +25,7 @@ Modules:
     - coupling: Inter-band coupling
     - permutation: Permutation tests
     - partial: Partial correlation
+    - diagnostics: Regression and model diagnostics
     - group: Group correlation statistics
 """
 
@@ -232,6 +233,12 @@ from .partial import (
     prepare_aligned_data,
 )
 
+
+from .diagnostics import (
+    compute_vif,
+    compute_leverage_and_cooks,
+    compute_normality_summary,
+)
 
 from .meta_analysis import (
     MetaAnalysisResult,
@@ -506,6 +513,10 @@ __all__ = [
     "create_provenance_block",
     "format_provenance_text",
     "save_stats_for_plot",
+    # Diagnostics
+    "compute_vif",
+    "compute_leverage_and_cooks",
+    "compute_normality_summary",
     # Reliability and validity
     "compute_icc",
     "compute_split_half_reliability",

@@ -110,7 +110,49 @@ class ProgressReporter:
         self._emit(msg)
 
     def _emit(self, data: Dict[str, Any]) -> None:
+        # Inject resource usage if not already present
+        if "cpu" not in data or "memory" not in data:
+            usage = self._get_resource_usage()
+            data.update(usage)
         print(json.dumps(data), flush=True)
+
+    def _get_resource_usage(self) -> Dict[str, float]:
+        """Get current CPU and Memory usage for the process."""
+        try:
+            import os
+            import resource
+            import time
+            
+            # Memory usage in GB
+            # ru_maxrss is in bytes on macOS, KB on Linux
+            mem_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if sys.platform == 'darwin':
+                mem_gb = mem_bytes / (1024**3)
+            else:
+                mem_gb = mem_bytes / (1024**2) # KB to GB
+            
+            # CPU usage estimate (Total CPU time / Wall time since reporter start)
+            # This is a cumulative average, but better than nothing
+            if not hasattr(self, '_start_time_res'):
+                self._start_time_res = time.time()
+                self._start_cpu_res = sum(os.times()[:2])
+                return {"cpu": 0.0, "memory": mem_gb}
+            
+            elapsed = time.time() - self._start_time_res
+            if elapsed > 0:
+                cpu_delta = sum(os.times()[:2]) - self._start_cpu_res
+                cpu_pct = (cpu_delta / elapsed) * 100
+                # Clamp to reasonable range
+                cpu_pct = min(max(cpu_pct, 0.0), 100.0 * os.cpu_count())
+            else:
+                cpu_pct = 0.0
+                
+            return {
+                "cpu": round(cpu_pct, 1),
+                "memory": round(mem_gb, 2)
+            }
+        except Exception:
+            return {"cpu": 0.0, "memory": 0.0}
 
 
 def create_progress_reporter(args) -> ProgressReporter:

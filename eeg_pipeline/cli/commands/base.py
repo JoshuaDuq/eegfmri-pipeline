@@ -44,21 +44,24 @@ def _empty_feature_availability() -> dict:
         "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "all"
     ]
     all_bands = FREQUENCY_BANDS
+    all_computations = BEHAVIOR_COMPUTATIONS
     
     return {
         "features": {cat: {"available": False, "last_modified": None} for cat in all_categories},
         "bands": {band: {"available": False, "last_modified": None} for band in all_bands},
+        "computations": {comp: {"available": False, "last_modified": None} for comp in all_computations},
     }
 
 
 def detect_feature_availability(features_dir) -> dict:
-    """Detect available feature categories and bands with modification timestamps."""
+    """Detect available feature categories, bands, and computations with modification timestamps."""
     from datetime import datetime
     
     features_dir = Path(features_dir)
     result = {
         "features": {},
         "bands": {},
+        "computations": {},
     }
     
     category_patterns = {
@@ -83,15 +86,14 @@ def detect_feature_availability(features_dir) -> dict:
     
     for category, patterns in category_patterns.items():
         found_file = None
-        for pattern in patterns:
-            files = list(features_dir.glob(pattern))
-            if files:
-                found_file = max(files, key=lambda f: f.stat().st_mtime)
-                break
+        if features_dir.exists():
+            for pattern in patterns:
+                files = list(features_dir.glob(pattern))
+                if files:
+                    found_file = max(files, key=lambda f: f.stat().st_mtime)
+                    break
         
         if found_file and found_file.exists():
-            # Use UTC to avoid timezone issues with TUI
-            mtime = datetime.fromtimestamp(found_file.stat().st_mtime, tz=None)
             mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
             mtime_str = mtime_utc.isoformat() + "Z"
             
@@ -119,6 +121,45 @@ def detect_feature_availability(features_dir) -> dict:
             result["bands"][band] = {"available": True, "last_modified": band_times[band]}
         else:
             result["bands"][band] = {"available": False, "last_modified": None}
+    
+    # Try to find stats adjacent to features
+    stats_dir = features_dir.parent / "stats"
+    computation_patterns = {
+        "trial_table": ["trials.parquet", "trial_table*.tsv"],
+        "confounds": ["confounds_audit*.tsv"],
+        "regression": ["regression_*.tsv", "trialwise_regression*.tsv", "regression_feature_effects*.tsv"],
+        "models": ["model_*.tsv", "sensitivity_*.tsv", "temperature_model_comparison.tsv"],
+        "stability": ["stability_*.tsv", "temperature_breakpoint_test.tsv"],
+        "consistency": ["consistency_*.tsv"],
+        "influence": ["influence_*.tsv", "cooks_*.tsv", "influence_diagnostics*.tsv"],
+        "report": ["subject_report*.html", "subject_report*.pdf", "subject_report*.md"],
+        "correlations": ["correlations*.tsv", "power_topomap_temperature_correlations*.tsv"],
+        "pain_sensitivity": ["pain_sensitivity*.tsv"],
+        "condition": ["condition_*.tsv", "condition_effects.tsv"],
+        "temporal": ["temporal_*.tsv", "temporal_correlations*.npz", "corr_stats_temporal*.tsv"],
+        "cluster": ["cluster_*.tsv", "pain_nonpain_time_clusters*.tsv", "null_distribution_*.json"],
+        "mediation": ["mediation*.tsv"],
+        "mixed_effects": ["mixed_effects*.tsv", "lme_*.tsv"],
+    }
+    
+    for comp, patterns in computation_patterns.items():
+        found_file = None
+        if stats_dir.exists():
+            for pattern in patterns:
+                files = list(stats_dir.glob(pattern))
+                if files:
+                    found_file = max(files, key=lambda f: f.stat().st_mtime)
+                    break
+        
+        if found_file and found_file.exists():
+            mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
+            mtime_str = mtime_utc.isoformat() + "Z"
+            result["computations"][comp] = {
+                "available": True,
+                "last_modified": mtime_str,
+            }
+        else:
+            result["computations"][comp] = {"available": False, "last_modified": None}
     
     return result
 

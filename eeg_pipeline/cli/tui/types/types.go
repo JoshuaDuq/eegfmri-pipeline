@@ -104,10 +104,11 @@ type AvailabilityInfo struct {
 	LastModified string // ISO timestamp
 }
 
-// FeatureAvailability holds per-feature and per-band availability with timestamps
+// FeatureAvailability holds per-feature, per-band, and computation availability with timestamps
 type FeatureAvailability struct {
-	Features map[string]AvailabilityInfo
-	Bands    map[string]AvailabilityInfo
+	Features     map[string]AvailabilityInfo
+	Bands        map[string]AvailabilityInfo
+	Computations map[string]AvailabilityInfo // Behavior computation outputs
 }
 
 // SubjectStatus represents processing status for a subject
@@ -168,7 +169,7 @@ func (p Pipeline) GetDataSource() string {
 	case PipelineFeatures:
 		return "epochs" // Epoched data
 	case PipelineBehavior:
-		return "epochs" // Epoched data - subjects discoverable even without features
+		return "epochs" // Subject discovery needs epochs; feature availability checked separately
 	case PipelineDecoding, PipelineCombineFeatures:
 		return "features" // Extracted features
 	case PipelinePlotting:

@@ -51,6 +51,9 @@ type StreamOutputMsg struct {
 	Line string
 }
 
+// StreamDoneMsg indicates the output stream has closed
+type StreamDoneMsg struct{}
+
 // LogCopiedMsg indicates log was copied to clipboard
 type LogCopiedMsg struct{}
 
@@ -64,10 +67,11 @@ type AvailabilityInfo struct {
 	LastModified *string `json:"last_modified,omitempty"`
 }
 
-// FeatureAvailability holds per-feature and per-band availability with timestamps
+// FeatureAvailability holds per-feature, per-band, and per-computation availability with timestamps
 type FeatureAvailability struct {
-	Features map[string]AvailabilityInfo `json:"features,omitempty"`
-	Bands    map[string]AvailabilityInfo `json:"bands,omitempty"`
+	Features     map[string]AvailabilityInfo `json:"features,omitempty"`
+	Bands        map[string]AvailabilityInfo `json:"bands,omitempty"`
+	Computations map[string]AvailabilityInfo `json:"computations,omitempty"`
 }
 
 // SubjectInfo holds subject processing status

@@ -26,6 +26,10 @@ func (m Model) View() string {
 
 	var b strings.Builder
 
+	// Responsive flags
+	isNarrow := m.width < 100
+	isShort := m.height < 25
+
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n\n")
 
@@ -34,38 +38,46 @@ func (m Model) View() string {
 		return b.String()
 	}
 
+	var mainContent string
 	switch m.CurrentStep {
 	case types.StepSelectMode:
-		b.WriteString(m.renderModeSelection())
+		mainContent = m.renderModeSelection()
 
 	case types.StepSelectComputations:
-		b.WriteString(m.renderComputationSelection())
+		mainContent = m.renderComputationSelection()
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		// Features pipeline or Plotting pipeline categories
-		b.WriteString(m.renderCategorySelection())
+		mainContent = m.renderCategorySelection()
 	case types.StepSelectPlots:
-		b.WriteString(m.renderPlotSelection())
+		if isNarrow {
+			mainContent = m.renderPlotSelection()
+		} else {
+			mainContent = m.renderPlotSelectionSplit()
+		}
 	case types.StepPlotConfig:
-		b.WriteString(m.renderPlotConfig())
+		mainContent = m.renderPlotConfig()
 	case types.StepSelectBands:
-		b.WriteString(m.renderBandSelection())
+		mainContent = m.renderBandSelection()
 	case types.StepSelectFeatureFiles:
-		b.WriteString(m.renderFeatureFileSelection())
+		mainContent = m.renderFeatureFileSelection()
 	case types.StepSelectSpatial:
-		b.WriteString(m.renderSpatialSelection())
+		mainContent = m.renderSpatialSelection()
 	case types.StepTimeRange:
-		b.WriteString(m.renderTimeRange())
+		mainContent = m.renderTimeRange()
 	case types.StepAdvancedConfig:
-		b.WriteString(m.renderAdvancedConfig())
+		mainContent = m.renderAdvancedConfig()
 	case types.StepSelectSubjects:
-		b.WriteString(m.renderSubjectSelection())
+		mainContent = m.renderSubjectSelection()
 	case types.StepReviewExecute:
-		b.WriteString(m.renderReview())
+		mainContent = m.renderReview()
 	}
 
+	b.WriteString(mainContent)
+
 	if len(m.validationErrors) > 0 && m.CurrentStep != types.StepReviewExecute {
-		b.WriteString("\n")
-		b.WriteString(m.renderStepValidationErrors())
+		if !isShort {
+			b.WriteString("\n")
+			b.WriteString(m.renderStepValidationErrors())
+		}
 	}
 
 	b.WriteString("\n")
@@ -178,8 +190,7 @@ func (m Model) renderWithHelpOverlay() string {
 
 func (m Model) renderHeader() string {
 	stepNames := map[types.WizardStep]string{
-		types.StepSelectMode: "Mode",
-
+		types.StepSelectMode:           "Mode",
 		types.StepSelectComputations:   "Analyses",
 		types.StepSelectFeatureFiles:   "Files",
 		types.StepConfigureOptions:     "Features",
@@ -189,72 +200,133 @@ func (m Model) renderHeader() string {
 		types.StepAdvancedConfig:       "Advanced",
 		types.StepSelectPlots:          "Plots",
 		types.StepSelectPlotCategories: "Categories",
-		types.StepPlotConfig:           "Plot Config",
+		types.StepPlotConfig:           "Output",
 		types.StepSelectSubjects:       "Subjects",
 		types.StepReviewExecute:        "Review",
 	}
 
+	var b strings.Builder
+
 	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-	title := accentStyle.Render("◆ ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
+	pipelineTitle := accentStyle.Render("◆ ") + styles.BrandStyle.Render(strings.ToUpper(m.Pipeline.String()))
 
-	// Minimal dot-based step indicator
-	var stepDots []string
-	for i := range m.steps {
-		if i < m.stepIndex {
-			// Completed step
-			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Success).Render("●"))
-		} else if i == m.stepIndex {
-			// Current step - subtle pulse
-			frames := []string{"◉", "●", "◉", "◎"}
-			frame := frames[(m.ticker/3)%len(frames)]
-			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(frame))
-		} else {
-			// Pending step
-			stepDots = append(stepDots, lipgloss.NewStyle().Foreground(styles.Muted).Render("○"))
-		}
-	}
-	stepperLine := strings.Join(stepDots, " ")
-
-	// Current step name and progress
-	currentStepName := stepNames[m.CurrentStep]
-	stepInfo := lipgloss.NewStyle().
-		Foreground(styles.Text).
-		Bold(true).
-		MarginLeft(2).
-		Render(currentStepName)
-
-	stepProgress := lipgloss.NewStyle().
-		Foreground(styles.TextDim).
-		Render(fmt.Sprintf(" (%d/%d)", m.stepIndex+1, len(m.steps)))
-
-	// Subject count badge - show how many subjects are selected
-	subjectBadge := ""
 	selectedCount := 0
 	for _, sel := range m.subjectSelected {
 		if sel {
 			selectedCount++
 		}
 	}
+	var subjectBadge string
 	if selectedCount > 0 {
-		badgeStyle := lipgloss.NewStyle().
+		subjectBadge = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
 			Background(styles.Accent).
 			Bold(true).
 			Padding(0, 1).
-			MarginLeft(2)
-		subjectBadge = badgeStyle.Render(fmt.Sprintf("%d subjects", selectedCount))
+			Render(fmt.Sprintf("%d subjects", selectedCount))
 	} else if len(m.subjects) > 0 {
-		badgeStyle := lipgloss.NewStyle().
+		subjectBadge = lipgloss.NewStyle().
 			Foreground(styles.Warning).
-			MarginLeft(2)
-		subjectBadge = badgeStyle.Render("(no subjects selected)")
+			Render("⚠ no subjects")
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, title, "  ", stepperLine, stepInfo, stepProgress, subjectBadge)
+	presetBadge := ""
+	if m.activePreset != "" {
+		presetBadge = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Success).
+			Bold(true).
+			Padding(0, 1).
+			Render("✓ " + m.activePreset)
+	}
+
+	titleRow := lipgloss.JoinHorizontal(lipgloss.Center,
+		pipelineTitle,
+		"  ",
+		subjectBadge,
+	)
+	if presetBadge != "" {
+		titleRow = lipgloss.JoinHorizontal(lipgloss.Center, titleRow, "  ", presetBadge)
+	}
+	b.WriteString(titleRow + "\n")
+
+	var breadcrumbParts []string
+	isCompact := m.width < 100
+
+	for i, step := range m.steps {
+		stepName := stepNames[step]
+		if stepName == "" {
+			stepName = step.String()
+		}
+
+		var icon, text string
+		if i < m.stepIndex {
+			icon = lipgloss.NewStyle().Foreground(styles.Success).Render("●")
+			text = lipgloss.NewStyle().Foreground(styles.TextDim).Render(stepName)
+		} else if i == m.stepIndex {
+			frames := []string{"◉", "●", "◉", "◎"}
+			frame := frames[(m.ticker/3)%len(frames)]
+			icon = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(frame)
+			text = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(stepName)
+		} else {
+			icon = lipgloss.NewStyle().Foreground(styles.Muted).Render("○")
+			text = lipgloss.NewStyle().Foreground(styles.Muted).Render(stepName)
+		}
+
+		if isCompact {
+			breadcrumbParts = append(breadcrumbParts, icon)
+		} else {
+			breadcrumbParts = append(breadcrumbParts, icon+" "+text)
+		}
+	}
+
+	connector := lipgloss.NewStyle().Foreground(styles.Secondary).Render(" → ")
+	if isCompact {
+		connector = " "
+	}
+
+	breadcrumb := strings.Join(breadcrumbParts, connector)
+
+	stepCounter := lipgloss.NewStyle().Foreground(styles.TextDim).
+		Render(fmt.Sprintf("Step %d of %d", m.stepIndex+1, len(m.steps)))
+
+	var validationIcon string
+	stepErrors := m.validateStep()
+	if len(stepErrors) == 0 {
+		validationIcon = lipgloss.NewStyle().Foreground(styles.Success).Render(" " + styles.CheckMark)
+	} else {
+		validationIcon = lipgloss.NewStyle().Foreground(styles.Warning).Render(" " + styles.WarningMark)
+	}
+
+	breadcrumbRow := lipgloss.JoinHorizontal(lipgloss.Center,
+		breadcrumb,
+		"    ",
+		stepCounter,
+		validationIcon,
+	)
+	b.WriteString(breadcrumbRow)
+
+	return b.String()
 }
 
 func (m Model) renderFooter() string {
 	var hints []string
+
+	// Toast notification takes precedence
+	if m.toastMessage != "" {
+		toastStyle := lipgloss.NewStyle().Bold(true)
+		switch m.toastType {
+		case "success":
+			toastStyle = toastStyle.Foreground(styles.Success)
+		case "error":
+			toastStyle = toastStyle.Foreground(styles.Error)
+		case "warning":
+			toastStyle = toastStyle.Foreground(styles.Warning)
+		default:
+			toastStyle = toastStyle.Foreground(styles.Accent)
+		}
+		return styles.FooterStyle.Width(m.width - 8).Render(toastStyle.Render("✓ " + m.toastMessage))
+	}
 
 	if m.editingText {
 		hints = []string{
@@ -284,7 +356,49 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Esc", "Back"),
 		}
 
-	case types.StepSelectComputations, types.StepConfigureOptions, types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots:
+	case types.StepSelectComputations:
+		if m.Pipeline == types.PipelineBehavior {
+			hints = []string{
+				styles.RenderKeyHint("Space", "Toggle"),
+				styles.RenderKeyHint("A/N", "All/None"),
+				styles.RenderKeyHint("Q", "Quick"),
+				styles.RenderKeyHint("F", "Full"),
+				styles.RenderKeyHint("R", "Regress"),
+				styles.RenderKeyHint("T", "Temporal"),
+				styles.RenderKeyHint("Enter", "Next"),
+			}
+		} else {
+			hints = []string{
+				styles.RenderKeyHint("Space", "Toggle"),
+				styles.RenderKeyHint("A", "All"),
+				styles.RenderKeyHint("N", "None"),
+				styles.RenderKeyHint("Enter", "Next"),
+				styles.RenderKeyHint("Esc", "Back"),
+			}
+		}
+
+	case types.StepConfigureOptions:
+		if m.Pipeline == types.PipelineFeatures {
+			hints = []string{
+				styles.RenderKeyHint("Space", "Toggle"),
+				styles.RenderKeyHint("A/N", "All/None"),
+				styles.RenderKeyHint("Q", "Quick"),
+				styles.RenderKeyHint("F", "Full"),
+				styles.RenderKeyHint("C", "Connect"),
+				styles.RenderKeyHint("S", "Spectral"),
+				styles.RenderKeyHint("Enter", "Next"),
+			}
+		} else {
+			hints = []string{
+				styles.RenderKeyHint("Space", "Toggle"),
+				styles.RenderKeyHint("A", "All"),
+				styles.RenderKeyHint("N", "None"),
+				styles.RenderKeyHint("Enter", "Next"),
+				styles.RenderKeyHint("Esc", "Back"),
+			}
+		}
+
+	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots:
 		hints = []string{
 			styles.RenderKeyHint("Space", "Toggle"),
 			styles.RenderKeyHint("A", "All"),
@@ -292,6 +406,7 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
+
 	case types.StepPlotConfig:
 		hints = []string{
 			styles.RenderKeyHint("Space", "Toggle/Cycle"),
@@ -299,13 +414,16 @@ func (m Model) renderFooter() string {
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
+
 	case types.StepTimeRange:
 		hints = []string{
-			styles.RenderKeyHint("↑/↓", "Select Field"),
-			styles.RenderKeyHint("Type", "Enter Value"),
+			styles.RenderKeyHint("A", "Add"),
+			styles.RenderKeyHint("D", "Delete"),
+			styles.RenderKeyHint("Space", "Edit"),
 			styles.RenderKeyHint("Enter", "Next"),
 			styles.RenderKeyHint("Esc", "Back"),
 		}
+
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			hints = []string{
@@ -321,22 +439,33 @@ func (m Model) renderFooter() string {
 				styles.RenderKeyHint("Esc", "Back"),
 			}
 		}
+
 	case types.StepSelectSubjects:
-		hints = []string{
-			styles.RenderKeyHint("Space", "Toggle"),
-			styles.RenderKeyHint("A", "All"),
-			styles.RenderKeyHint("N", "None"),
-			styles.RenderKeyHint("Enter", "Next"),
-			styles.RenderKeyHint("Esc", "Back"),
+		if m.filteringSubject {
+			hints = []string{
+				styles.RenderKeyHint("Type", "Filter"),
+				styles.RenderKeyHint("Enter", "Apply"),
+				styles.RenderKeyHint("Esc", "Clear"),
+			}
+		} else {
+			hints = []string{
+				styles.RenderKeyHint("Space", "Toggle"),
+				styles.RenderKeyHint("A/N", "All/None"),
+				styles.RenderKeyHint("/", "Filter"),
+				styles.RenderKeyHint("F5", "Refresh"),
+				styles.RenderKeyHint("Enter", "Next"),
+			}
 		}
+
 	case types.StepReviewExecute:
 		if len(m.validationErrors) > 0 {
 			hints = []string{
-				lipgloss.NewStyle().Foreground(styles.Error).Render("Fix errors to continue"),
+				lipgloss.NewStyle().Foreground(styles.Error).Render("⚠ Fix errors to continue"),
 				styles.RenderKeyHint("Esc", "Back"),
 			}
 		} else {
 			hints = []string{
+				styles.RenderKeyHint("P", "Preview"),
 				styles.RenderKeyHint("Enter", "EXECUTE"),
 				styles.RenderKeyHint("Esc", "Back"),
 			}

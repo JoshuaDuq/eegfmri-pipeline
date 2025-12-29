@@ -16,6 +16,7 @@ import pandas as pd
 from scipy import stats
 
 from .base import get_ci_level, get_config_value
+from .fdr import fdr_bh
 from .formatting import _safe_float
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
@@ -469,6 +470,7 @@ def run_pain_sensitivity_correlations(
     robust_method: Optional[str] = None,
     min_samples: int = 10,
     logger: Optional[logging.Logger] = None,
+    config: Optional[Any] = None,
 ) -> pd.DataFrame:
     """Correlate features with pain sensitivity index."""
     method_label = format_correlation_method_label(method, robust_method)
@@ -555,7 +557,21 @@ def run_pain_sensitivity_correlations(
         n_sig = sum(1 for r in records if r["p_psi"] < 0.05)
         logger.info(f"Pain sensitivity: {len(records)} features, {n_sig} significant")
 
-    return pd.DataFrame(records)
+    out = pd.DataFrame(records)
+    if out.empty:
+        return out
+
+    # Standardize to the pipeline-wide schema used by validation/global FDR.
+    out["p_raw"] = pd.to_numeric(out.get("p_psi", np.nan), errors="coerce")
+    out["p_primary"] = out["p_raw"]
+    out["p_kind_primary"] = "p_psi"
+    out["p_primary_source"] = "psi"
+    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)) if config is not None else 0.05
+    try:
+        out["p_fdr"] = fdr_bh(pd.to_numeric(out["p_primary"], errors="coerce").to_numpy(), alpha=alpha, config=config)
+    except Exception:
+        pass
+    return out
 
 
 ###################################################################

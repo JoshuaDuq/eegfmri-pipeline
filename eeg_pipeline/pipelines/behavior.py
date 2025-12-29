@@ -53,6 +53,7 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     stage_load as _stage_load_impl,
     stage_temporal as _stage_temporal_impl,
     stage_validate as _stage_validate_impl,
+    stage_report as _stage_report_impl,
     write_analysis_metadata as _write_analysis_metadata_impl,
     write_outputs_manifest,
 )
@@ -70,6 +71,7 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "stability",
     "consistency",
     "influence",
+    "report",
     "correlations",
     "pain_sensitivity",
     "condition",
@@ -122,6 +124,7 @@ class BehaviorPipelineConfig:
     method_label: str = "spearman"
     
     # Computation flags
+    trial_table_only: bool = True
     run_trial_table: bool = True
     run_confounds: bool = True
     run_regression: bool = False
@@ -129,6 +132,7 @@ class BehaviorPipelineConfig:
     run_stability: bool = True
     run_consistency: bool = True
     run_influence: bool = True
+    run_report: bool = True
     run_correlations: bool = True
     run_condition_comparison: bool = True
     run_temporal_correlations: bool = True
@@ -186,6 +190,7 @@ class BehaviorPipelineConfig:
             bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
             robust_method=robust_method,
             method_label=method_label,
+            trial_table_only=bool(get_config_value(config, "behavior_analysis.trial_table_only.enabled", True)),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_confounds=bool(get_config_value(config, "behavior_analysis.confounds.enabled", True)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
@@ -193,6 +198,7 @@ class BehaviorPipelineConfig:
             run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
             run_consistency=bool(get_config_value(config, "behavior_analysis.consistency.enabled", True)),
             run_influence=bool(get_config_value(config, "behavior_analysis.influence.enabled", True)),
+            run_report=bool(get_config_value(config, "behavior_analysis.report.enabled", True)),
             run_correlations=get_config_value(config, "behavior_analysis.correlations.enabled", True),
             run_condition_comparison=get_config_value(config, "behavior_analysis.condition.enabled", True),
             run_temporal_correlations=get_config_value(config, "behavior_analysis.temporal.enabled", True),
@@ -233,6 +239,7 @@ class BehaviorPipelineResults:
     subject: str
     trial_table_path: Optional[str] = None
     trial_table_validation: Optional[Dict[str, Any]] = None
+    report_path: Optional[str] = None
     confounds: Optional[pd.DataFrame] = None
     regression: Optional[pd.DataFrame] = None
     models: Optional[pd.DataFrame] = None
@@ -253,6 +260,8 @@ class BehaviorPipelineResults:
         s = {"subject": self.subject}
         if self.trial_table_path:
             s["trial_table_path"] = self.trial_table_path
+        if self.report_path:
+            s["report_path"] = self.report_path
         n_total = 0
         n_sig_raw = 0
         n_sig_controlled = 0
@@ -423,6 +432,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_stability = comp_flags["stability"]
             self.pipeline_config.run_consistency = comp_flags["consistency"]
             self.pipeline_config.run_influence = comp_flags["influence"]
+            self.pipeline_config.run_report = comp_flags["report"]
             self.pipeline_config.run_correlations = comp_flags["correlations"]
             self.pipeline_config.run_condition_comparison = comp_flags["condition"]
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
@@ -445,6 +455,7 @@ class BehaviorPipeline(PipelineBase):
                     self.pipeline_config.run_stability,
                     self.pipeline_config.run_consistency,
                     self.pipeline_config.run_influence,
+                    self.pipeline_config.run_report,
                     self.pipeline_config.run_correlations,
                     self.pipeline_config.run_condition_comparison,
                     self.pipeline_config.run_temporal_correlations,
@@ -454,6 +465,15 @@ class BehaviorPipeline(PipelineBase):
                     self.pipeline_config.compute_pain_sensitivity,
                 ]
             )
+
+        # Enforce subject-level "trial-table-only" mode by skipping computations that require epochs/time-frequency arrays.
+        if bool(getattr(self.pipeline_config, "trial_table_only", True)):
+            if self.pipeline_config.run_temporal_correlations:
+                self.logger.info("trial_table_only enabled: skipping `temporal` computation.")
+                self.pipeline_config.run_temporal_correlations = False
+            if self.pipeline_config.run_cluster_tests:
+                self.logger.info("trial_table_only enabled: skipping `cluster` computation.")
+                self.pipeline_config.run_cluster_tests = False
         
         if self.feature_categories:
             self.logger.info("Feature categories filter: %s", ", ".join(self.feature_categories))
@@ -494,6 +514,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_cluster_tests,
             run_advanced,
             self._run_validation,
+            self.pipeline_config.run_report,
             True,  # Export (always runs)
         ]
         total_steps = sum(enabled_stages) if not validate_only else 2
@@ -748,6 +769,20 @@ class BehaviorPipeline(PipelineBase):
             logger.info("Running global FDR correction...")
             _stage_validate_impl(ctx, self.pipeline_config, results=results)
             _record_stage("fdr", stage_start, stage_rss)
+
+        if self.pipeline_config.run_report:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Subject report", current=current_step, total=total_steps)
+            logger.info("Writing subject report...")
+            try:
+                rp = _stage_report_impl(ctx, self.pipeline_config)
+                if rp is not None:
+                    results.report_path = str(rp)
+            except Exception as exc:
+                logger.warning("Report stage failed: %s", exc)
+            _record_stage("report", stage_start, stage_rss)
 
         # Final metadata and manifest (must be after all stages including validation)
         outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"

@@ -137,17 +137,33 @@ func (m Model) selectedConnectivityMeasures() []string {
 ///////////////////////////////////////////////////////////////////
 
 func (m Model) getFilteredSubjects() []types.SubjectStatus {
-	if m.subjectFilter == "" {
+	var filtered []types.SubjectStatus
+	filterLower := strings.ToLower(m.subjectFilter)
+
+	for _, s := range m.subjects {
+		if m.subjectFilter != "" && !strings.Contains(strings.ToLower(s.ID), filterLower) {
+			continue
+		}
+
+		if m.showOnlyValid {
+			valid := false
+			if m.Pipeline == types.PipelinePlotting {
+				valid, _ = m.validatePlottingSubject(s)
+			} else {
+				valid, _ = m.Pipeline.ValidateSubject(s)
+			}
+			if !valid {
+				continue
+			}
+		}
+
+		filtered = append(filtered, s)
+	}
+
+	if len(filtered) == 0 && m.subjectFilter == "" && !m.showOnlyValid {
 		return m.subjects
 	}
 
-	var filtered []types.SubjectStatus
-	filterLower := strings.ToLower(m.subjectFilter)
-	for _, s := range m.subjects {
-		if strings.Contains(strings.ToLower(s.ID), filterLower) {
-			filtered = append(filtered, s)
-		}
-	}
 	return filtered
 }
 
@@ -510,6 +526,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	if !m.controlTrialOrder {
 		args = append(args, "--no-control-trial-order")
 	}
+	if !m.trialTableOnly {
+		args = append(args, "--no-trial-table-only")
+	}
 
 	if m.fdrAlpha != 0.05 {
 		args = append(args, "--fdr-alpha", fmt.Sprintf("%.4f", m.fdrAlpha))
@@ -632,16 +651,22 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.regressionFeatureSet >= 0 && m.regressionFeatureSet < len(featSets) && m.regressionFeatureSet != 0 {
 			args = append(args, "--regression-feature-set", featSets[m.regressionFeatureSet])
 		}
-		outcomes := []string{"rating", "pain_residual"}
+		outcomes := []string{"rating", "pain_residual", "temperature"}
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
 		}
 		if !m.regressionIncludeTemperature {
 			args = append(args, "--no-regression-include-temperature")
 		}
-		tempCtrl := []string{"linear", "rating_hat"}
+		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.regressionTempControl >= 0 && m.regressionTempControl < len(tempCtrl) && m.regressionTempControl != 0 {
 			args = append(args, "--regression-temperature-control", tempCtrl[m.regressionTempControl])
+		}
+		if m.regressionTempControl == 2 {
+			args = append(args, "--regression-temperature-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
+			args = append(args, "--regression-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
+			args = append(args, "--regression-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
+			args = append(args, "--regression-temperature-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
 		}
 		if !m.regressionIncludeTrialOrder {
 			args = append(args, "--no-regression-include-trial-order")
@@ -678,9 +703,15 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.modelsIncludeTemperature {
 			args = append(args, "--no-models-include-temperature")
 		}
-		tempCtrl := []string{"linear", "rating_hat"}
+		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.modelsTempControl >= 0 && m.modelsTempControl < len(tempCtrl) && m.modelsTempControl != 0 {
 			args = append(args, "--models-temperature-control", tempCtrl[m.modelsTempControl])
+		}
+		if m.modelsTempControl == 2 {
+			args = append(args, "--models-temperature-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
+			args = append(args, "--models-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
+			args = append(args, "--models-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
+			args = append(args, "--models-temperature-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
 		}
 		if !m.modelsIncludeTrialOrder {
 			args = append(args, "--no-models-include-trial-order")
@@ -709,6 +740,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.modelsOutcomePainResidual {
 			out = append(out, "pain_residual")
+		}
+		if m.modelsOutcomeTemperature {
+			out = append(out, "temperature")
 		}
 		if m.modelsOutcomePainBinary {
 			out = append(out, "pain_binary")
@@ -789,6 +823,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.influenceOutcomePainResidual {
 			out = append(out, "pain_residual")
 		}
+		if m.influenceOutcomeTemperature {
+			out = append(out, "temperature")
+		}
 		if len(out) > 0 && !(len(out) == 2 && out[0] == "rating" && out[1] == "pain_residual") {
 			args = append(args, "--influence-outcomes")
 			args = append(args, out...)
@@ -799,9 +836,15 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.influenceIncludeTemperature {
 			args = append(args, "--no-influence-include-temperature")
 		}
-		tempCtrl := []string{"linear", "rating_hat"}
+		tempCtrl := []string{"linear", "rating_hat", "spline"}
 		if m.influenceTempControl >= 0 && m.influenceTempControl < len(tempCtrl) && m.influenceTempControl != 0 {
 			args = append(args, "--influence-temperature-control", tempCtrl[m.influenceTempControl])
+		}
+		if m.influenceTempControl == 2 {
+			args = append(args, "--influence-temperature-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
+			args = append(args, "--influence-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
+			args = append(args, "--influence-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
+			args = append(args, "--influence-temperature-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
 		}
 		if !m.influenceIncludeTrialOrder {
 			args = append(args, "--no-influence-include-trial-order")
@@ -823,9 +866,43 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
+	// Correlations (trial-table)
+	if m.isComputationSelected("correlations") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.correlationsFeatureSet >= 0 && m.correlationsFeatureSet < len(featSets) && m.correlationsFeatureSet != 0 {
+			args = append(args, "--correlations-feature-set", featSets[m.correlationsFeatureSet])
+		}
+		targets := []string{}
+		if m.correlationsTargetRating {
+			targets = append(targets, "rating")
+		}
+		if m.correlationsTargetTemperature {
+			targets = append(targets, "temperature")
+		}
+		if m.correlationsTargetPainResidual {
+			targets = append(targets, "pain_residual")
+		}
+		defaultTargets := []string{"rating", "temperature", "pain_residual"}
+		if len(targets) > 0 && !(len(targets) == len(defaultTargets) && strings.Join(targets, ",") == strings.Join(defaultTargets, ",")) {
+			args = append(args, "--correlations-targets")
+			args = append(args, targets...)
+		}
+	}
+
+	// Report
+	if m.isComputationSelected("report") && m.reportTopN != 15 {
+		args = append(args, "--report-top-n", fmt.Sprintf("%d", m.reportTopN))
+	}
+
 	// Pain sensitivity
 	if m.isComputationSelected("pain_sensitivity") && m.painSensitivityMinTrials != 10 {
 		args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
+	}
+	if m.isComputationSelected("pain_sensitivity") {
+		featSets := []string{"pain_summaries", "all"}
+		if m.painSensitivityFeatureSet >= 0 && m.painSensitivityFeatureSet < len(featSets) && m.painSensitivityFeatureSet != 0 {
+			args = append(args, "--pain-sensitivity-feature-set", featSets[m.painSensitivityFeatureSet])
+		}
 	}
 
 	// Condition

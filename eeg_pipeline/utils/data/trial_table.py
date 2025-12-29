@@ -101,7 +101,7 @@ def build_subject_trial_table(
     try:
         from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 
-        pain_col = get_pain_column_from_config(events, ctx.config)
+        pain_col = get_pain_column_from_config(ctx.config, events)
     except Exception:
         pain_col = None
     if pain_col is not None and pain_col in events.columns:

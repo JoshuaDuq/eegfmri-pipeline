@@ -244,7 +244,7 @@ def parse_subject_args(
     elif hasattr(args, "mode"):
         if args.mode == "raw-to-bids":
             sources = ["source_data"]
-        elif args.mode in {"combine-features", "merge-behavior"}:
+        elif args.mode in {"combine", "combine-features", "merge-behavior", "visualize"}:
             sources = ["features", "bids"]
     
     if hasattr(args, "group") and args.group is not None:
@@ -274,8 +274,19 @@ def parse_subject_args(
     elif hasattr(args, "subjects") and args.subjects:
         subjects = list(dict.fromkeys(args.subjects))
 
-    if subjects is None:
-        subjects = config.subjects if hasattr(config, "subjects") and config.subjects else []
+    if not subjects:
+        # Fallback to config if available
+        subjects = getattr(config, "subjects", None) or []
+        
+        # If still no subjects, perform discovery
+        if not subjects:
+            subjects = get_available_subjects(
+                config=config,
+                deriv_root=deriv_root,
+                task=task,
+                discovery_sources=sources,
+                logger=logger,
+            )
 
     return subjects
 

@@ -11,13 +11,8 @@ from eeg_pipeline.plotting.behavioral.scatter.psychometrics import plot_psychome
 from eeg_pipeline.plotting.behavioral.scatter.summary import plot_top_behavioral_predictors
 from eeg_pipeline.plotting.behavioral.temporal.clusters import plot_pain_nonpain_clusters
 from eeg_pipeline.plotting.behavioral.temporal.topomaps import plot_temporal_correlation_topomaps_by_pain
-from eeg_pipeline.plotting.behavioral.mediation_plots import plot_mediation_path_diagram
-from eeg_pipeline.plotting.behavioral.trial_table_overview import plot_trial_table_overview
-from eeg_pipeline.plotting.behavioral.confounds_audit import plot_confounds_audit
-from eeg_pipeline.plotting.behavioral.regression_summary import plot_regression_summary
 from eeg_pipeline.plotting.behavioral.temperature_models import plot_temperature_models
 from eeg_pipeline.plotting.behavioral.stability_groupwise import plot_stability_groupwise
-from eeg_pipeline.utils.analysis.stats.mediation import MediationResult
 
 
 def _record_results(ctx, result) -> None:
@@ -152,43 +147,10 @@ def run_top_predictors(ctx, saved_plots):
     saved_plots["top_predictors"] = ctx.plots_dir
 
 
-@BehaviorPlotRegistry.register("summary", name="trial_table_overview")
-def run_trial_table_overview(ctx, saved_plots):
-    res = plot_trial_table_overview(
-        subject=ctx.subject,
-        task=ctx.task,
-        deriv_root=ctx.deriv_root,
-        config=ctx.config,
-        logger=ctx.logger,
-        plots_dir=ctx.plots_dir,
-    )
-    saved_plots.update(res)
 
 
-@BehaviorPlotRegistry.register("summary", name="confounds_audit")
-def run_confounds_audit(ctx, saved_plots):
-    res = plot_confounds_audit(
-        subject=ctx.subject,
-        task=ctx.task,
-        deriv_root=ctx.deriv_root,
-        config=ctx.config,
-        logger=ctx.logger,
-        plots_dir=ctx.plots_dir,
-    )
-    saved_plots.update(res)
 
 
-@BehaviorPlotRegistry.register("summary", name="regression_summary")
-def run_regression_summary(ctx, saved_plots):
-    res = plot_regression_summary(
-        subject=ctx.subject,
-        task=ctx.task,
-        deriv_root=ctx.deriv_root,
-        config=ctx.config,
-        logger=ctx.logger,
-        plots_dir=ctx.plots_dir,
-    )
-    saved_plots.update(res)
 
 
 @BehaviorPlotRegistry.register("summary", name="temperature_models")
@@ -215,56 +177,3 @@ def run_stability_groupwise(ctx, saved_plots):
         plots_dir=ctx.plots_dir,
     )
     saved_plots.update(res)
-
-
-@BehaviorPlotRegistry.register("advanced", name="mediation")
-def run_mediation_plots(ctx, saved_plots):
-    import pandas as pd
-    med_path = ctx.stats_dir / "mediation.tsv"
-    if not med_path.exists():
-        return
-    
-    try:
-        df = pd.read_csv(med_path, sep="\t")
-        if df.empty:
-            return
-            
-        med_dir = ctx.plots_dir / "mediation"
-        med_dir.mkdir(parents=True, exist_ok=True)
-        
-        results = []
-        for _, row in df.iterrows():
-            # Reconstruct MediationResult from row
-            res = MediationResult(
-                a=row.get("path_a", row.get("a", 0)),
-                b=row.get("path_b", row.get("b", 0)),
-                c=row.get("path_c_total", row.get("c", 0)),
-                c_prime=row.get("path_c_prime_direct", row.get("c_prime", 0)),
-                ab=row.get("indirect_effect_ab", row.get("ab", 0)),
-                p_a=row.get("p_a", 1.0),
-                p_b=row.get("p_b", 1.0),
-                p_c=row.get("p_c", 1.0),
-                p_c_prime=row.get("p_cp", row.get("p_c_prime", 1.0)),
-                p_ab=row.get("sobel_p", row.get("p_ab", 1.0)),
-                ci_ab_low=row.get("ci_ab_low", 0),
-                ci_ab_high=row.get("ci_ab_high", 0),
-                proportion_mediated=row.get("proportion_mediated", 0),
-                n=int(row.get("n", 0)),
-                x_label="Temperature",
-                m_label=str(row.get("mediator", "Mediator")),
-                y_label="Pain Rating"
-            )
-            results.append(res)
-            
-            # Save individual diagram
-            safe_name = str(res.m_label).replace("/", "_").replace(" ", "_")
-            plot_mediation_path_diagram(
-                res, 
-                med_dir / f"sub-{ctx.subject}_mediation_{safe_name}.png",
-                config=ctx.config,
-                logger=ctx.logger
-            )
-            
-        saved_plots["mediation"] = med_dir
-    except Exception as e:
-        ctx.logger.warning(f"Failed to generate mediation plots: {e}")

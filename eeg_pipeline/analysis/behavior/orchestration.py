@@ -213,37 +213,198 @@ def stage_load(ctx: BehaviorContext) -> bool:
 
 
 def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    from eeg_pipeline.analysis.behavior.api import (
-        run_pain_sensitivity_correlations,
-        run_unified_feature_correlations,
+    """Correlations + pain sensitivity from canonical trial table (trial-table-only)."""
+    from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
+    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+    from eeg_pipeline.analysis.behavior.api import run_pain_sensitivity_correlations
+    from eeg_pipeline.utils.analysis.stats import compute_partial_correlations_with_cov_temp
+
+    suffix = _feature_suffix_from_context(ctx)
+
+    # Prefer reduced pain-feature summaries unless user asks for all.
+    feature_set = str(get_config_value(ctx.config, "behavior_analysis.correlations.feature_set", "pain_summaries")).strip().lower()
+    df_trials: Optional[pd.DataFrame] = None
+    if feature_set == "pain_summaries":
+        path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+        if path.exists():
+            df_trials = pd.read_parquet(path)
+    if df_trials is None:
+        df_trials = _load_trial_table_df(ctx)
+
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Correlations: trial table missing; skipping.")
+        return pd.DataFrame(), pd.DataFrame()
+
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
     )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+    if not feature_cols:
+        return pd.DataFrame(), pd.DataFrame()
 
-    add_change_scores(ctx)
+    method = getattr(config, "method", "spearman")
+    robust_method = getattr(config, "robust_method", None)
+    method_label = getattr(config, "method_label", "")
 
-    ctx.logger.info("Running unified feature correlator...")
-    result = run_unified_feature_correlations(ctx)
-    corr_df = result.to_dataframe()
-    if corr_df is None:
-        corr_df = pd.DataFrame()
+    # Targets: configurable; defaults cover pain + stimulus.
+    default_targets = ["rating", "temperature", "pain_residual"]
+    targets_cfg = get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
+    if isinstance(targets_cfg, (list, tuple)) and targets_cfg:
+        targets = [str(t).strip().lower() for t in targets_cfg]
+    else:
+        targets = default_targets
+    targets = [t for t in targets if t in df_trials.columns]
+
+    # Covariates for "trial-order" control: use trial index column only (lightweight + stable).
+    cov_df = None
+    if bool(getattr(config, "control_trial_order", True)):
+        for c in ["trial_index_within_group", "trial_index"]:
+            if c in df_trials.columns:
+                cov_df = pd.DataFrame({c: pd.to_numeric(df_trials[c], errors="coerce")})
+                break
+
+    temperature_series = None
+    if bool(getattr(config, "control_temperature", True)) and "temperature" in df_trials.columns:
+        temperature_series = pd.to_numeric(df_trials["temperature"], errors="coerce")
+
+    records: List[Dict[str, Any]] = []
+    for target in targets:
+        y = pd.to_numeric(df_trials[target], errors="coerce")
+        for feat in feature_cols:
+            x = pd.to_numeric(df_trials[feat], errors="coerce")
+
+            # Raw correlation
+            r_raw, p_raw, n = safe_correlation(
+                x.to_numpy(dtype=float),
+                y.to_numpy(dtype=float),
+                method,
+                int(getattr(config, "min_samples", 10)),
+                robust_method=robust_method,
+            )
+
+            rec: Dict[str, Any] = {
+                "feature": str(feat),
+                "feature_type": _infer_feature_type(str(feat), ctx.config),
+                "target": str(target),
+                "method": method,
+                "robust_method": robust_method,
+                "method_label": method_label,
+                "n": int(n),
+                "r_raw": float(r_raw) if np.isfinite(r_raw) else np.nan,
+                "p_raw": float(p_raw) if np.isfinite(p_raw) else np.nan,
+                "r": float(r_raw) if np.isfinite(r_raw) else np.nan,
+                "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
+                "p_value": float(p_raw) if np.isfinite(p_raw) else np.nan,
+            }
+
+            # Partial correlations (primary selection mirrors control flags).
+            # Skip temperature control when the target itself is temperature.
+            temp_for_partial = temperature_series if (temperature_series is not None and target != "temperature") else None
+            (
+                r_pc,
+                p_pc,
+                n_pc,
+                r_pt,
+                p_pt,
+                n_pt,
+                r_pct,
+                p_pct,
+                n_pct,
+            ) = compute_partial_correlations_with_cov_temp(
+                roi_values=x,
+                target_values=y,
+                covariates_df=cov_df,
+                temperature_series=temp_for_partial,
+                method=method,
+                context="trial_table",
+                logger=ctx.logger,
+                min_samples=int(getattr(config, "min_samples", 10)),
+                config=ctx.config,
+            )
+            rec.update(
+                {
+                    "r_partial_cov": r_pc,
+                    "p_partial_cov": p_pc,
+                    "n_partial_cov": n_pc,
+                    "r_partial_temp": r_pt,
+                    "p_partial_temp": p_pt,
+                    "n_partial_temp": n_pt,
+                    "r_partial_cov_temp": r_pct,
+                    "p_partial_cov_temp": p_pct,
+                    "n_partial_cov_temp": n_pct,
+                }
+            )
+
+            # Primary selection
+            p_kind = "p_raw"
+            p_primary = rec["p_raw"]
+            r_primary = rec["r_raw"]
+            src = "raw"
+            if bool(getattr(config, "control_temperature", True)) and bool(getattr(config, "control_trial_order", True)) and target != "temperature":
+                if pd.notna(rec.get("p_partial_cov_temp", np.nan)):
+                    p_kind = "p_partial_cov_temp"
+                    p_primary = rec.get("p_partial_cov_temp", np.nan)
+                    r_primary = rec.get("r_partial_cov_temp", np.nan)
+                    src = "partial_cov_temp"
+            elif bool(getattr(config, "control_temperature", True)) and target != "temperature":
+                if pd.notna(rec.get("p_partial_temp", np.nan)):
+                    p_kind = "p_partial_temp"
+                    p_primary = rec.get("p_partial_temp", np.nan)
+                    r_primary = rec.get("r_partial_temp", np.nan)
+                    src = "partial_temp"
+            elif bool(getattr(config, "control_trial_order", True)):
+                if pd.notna(rec.get("p_partial_cov", np.nan)):
+                    p_kind = "p_partial_cov"
+                    p_primary = rec.get("p_partial_cov", np.nan)
+                    r_primary = rec.get("r_partial_cov", np.nan)
+                    src = "partial_cov"
+
+            rec["p_kind_primary"] = p_kind
+            rec["p_primary"] = p_primary
+            rec["r_primary"] = r_primary
+            rec["p_primary_source"] = src
+            records.append(rec)
+
+    corr_df = pd.DataFrame(records) if records else pd.DataFrame()
     if not corr_df.empty:
-        ctx.logger.info(f"Obtained {len(corr_df)} correlation results from unified correlator")
+        p_for_fdr = pd.to_numeric(corr_df["p_primary"], errors="coerce").to_numpy()
+        corr_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=float(getattr(config, "fdr_alpha", 0.05)), config=ctx.config)
 
     psi_df = pd.DataFrame()
-    if config.compute_pain_sensitivity and ctx.temperature is not None:
-        features = combine_features(ctx)
-        if not features.empty:
-            robust_method = get_config_value(ctx.config, "behavior_analysis.robust_correlation", None)
-            if robust_method is not None:
-                robust_method = str(robust_method).strip().lower() or None
-            psi_df = run_pain_sensitivity_correlations(
-                features_df=features,
-                ratings=ctx.targets,
-                temperatures=ctx.temperature,
-                method=config.method,
-                robust_method=robust_method,
-                min_samples=config.min_samples,
-                logger=ctx.logger,
-            )
+    if bool(getattr(config, "compute_pain_sensitivity", False)) and "temperature" in df_trials.columns and "rating" in df_trials.columns:
+        robust_method_cfg = get_config_value(ctx.config, "behavior_analysis.robust_correlation", None)
+        if robust_method_cfg is not None:
+            robust_method_cfg = str(robust_method_cfg).strip().lower() or None
+        psi_feature_set = str(get_config_value(ctx.config, "behavior_analysis.pain_sensitivity.feature_set", feature_set)).strip().lower()
+        df_for_psi = df_trials
+        if psi_feature_set == "pain_summaries":
+            path = ctx.stats_dir / f"pain_feature_summaries{suffix}.parquet"
+            if path.exists():
+                df_for_psi = pd.read_parquet(path)
+        psi_features = df_for_psi[[c for c in df_for_psi.columns if str(c).startswith(prefixes)]].copy()
+        psi_df = run_pain_sensitivity_correlations(
+            features_df=psi_features,
+            ratings=pd.to_numeric(df_for_psi["rating"], errors="coerce"),
+            temperatures=pd.to_numeric(df_for_psi["temperature"], errors="coerce"),
+            method=method,
+            robust_method=robust_method_cfg,
+            min_samples=int(getattr(config, "min_samples", 10)),
+            logger=ctx.logger,
+            config=ctx.config,
+        )
 
     return corr_df, psi_df
 
@@ -544,6 +705,13 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     if reg_df is not None and not reg_df.empty and "temperature_control" not in reg_df.columns:
         reg_df = reg_df.copy()
         reg_df["temperature_control"] = reg_meta.get("temperature_control", None)
+        reg_df["temperature_control_used"] = reg_meta.get("temperature_control_used", None)
+        spline_meta = reg_meta.get("temperature_spline", None)
+        if isinstance(spline_meta, dict):
+            reg_df["temperature_spline_status"] = spline_meta.get("status", None)
+            reg_df["temperature_spline_n_knots"] = spline_meta.get("n_knots", None)
+            reg_df["temperature_spline_quantile_low"] = spline_meta.get("quantile_low", None)
+            reg_df["temperature_spline_quantile_high"] = spline_meta.get("quantile_high", None)
 
     out_path = ctx.stats_dir / f"regression_feature_effects{suffix}{method_suffix}.tsv"
     if not reg_df.empty:
@@ -600,6 +768,20 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     if model_df is not None and not model_df.empty and "temperature_control" not in model_df.columns:
         model_df = model_df.copy()
         model_df["temperature_control"] = model_meta.get("temperature_control", None)
+        # Optional per-target (outcome) temperature control diagnostics.
+        ctrl_by_out = model_meta.get("temperature_control_by_outcome", None)
+        if isinstance(ctrl_by_out, dict) and "target" in model_df.columns:
+            used_map = {str(k): (v or {}).get("temperature_control_used", None) for k, v in ctrl_by_out.items()}
+            status_map = {}
+            nknots_map = {}
+            for k, v in ctrl_by_out.items():
+                s = (v or {}).get("temperature_spline", None)
+                if isinstance(s, dict):
+                    status_map[str(k)] = s.get("status", None)
+                    nknots_map[str(k)] = s.get("n_knots", None)
+            model_df["temperature_control_used"] = model_df["target"].astype(str).map(used_map)
+            model_df["temperature_spline_status"] = model_df["target"].astype(str).map(status_map)
+            model_df["temperature_spline_n_knots"] = model_df["target"].astype(str).map(nknots_map)
 
     out_path = ctx.stats_dir / f"models_feature_effects{suffix}{method_suffix}.tsv"
     if model_df is not None and not model_df.empty:
@@ -757,6 +939,17 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
     ctx.data_qc["influence_diagnostics"] = meta
     if out_df is None or out_df.empty:
         return pd.DataFrame()
+    # Attach high-level temperature-control info (useful when spline/rating_hat are enabled).
+    try:
+        if "temperature_control" not in out_df.columns:
+            out_df = out_df.copy()
+            out_df["temperature_control"] = get_config_value(ctx.config, "behavior_analysis.influence.temperature_control", None)
+        ctrl_by_out = meta.get("temperature_control_by_outcome", None) if isinstance(meta, dict) else None
+        if isinstance(ctrl_by_out, dict) and "outcome" in out_df.columns:
+            used_map = {str(k): (v or {}).get("temperature_control_used", None) for k, v in ctrl_by_out.items()}
+            out_df["temperature_control_used"] = out_df["outcome"].astype(str).map(used_map)
+    except Exception:
+        pass
 
     out_path = ctx.stats_dir / f"influence_diagnostics{suffix}{method_suffix}.tsv"
     write_tsv(out_df, out_path)
@@ -1184,13 +1377,16 @@ def write_analysis_metadata(
 def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     from eeg_pipeline.analysis.behavior.api import split_by_condition, compute_condition_effects
 
-    if ctx.aligned_events is None:
+    # Trial-table-only: derive condition split from canonical trial table.
+    df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Condition: trial table missing; skipping.")
         return pd.DataFrame()
 
     fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
 
     try:
-        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(ctx.aligned_events, ctx.config, ctx.logger)
+        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
     except Exception as exc:
         if fail_fast:
             raise
@@ -1211,11 +1407,29 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         )
         return pd.DataFrame()
 
-    features = combine_features(ctx)
-    if features.empty:
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+    if not feature_cols:
+        ctx.logger.info("Condition: no feature columns found in trial table; skipping.")
         return pd.DataFrame()
+    features = df_trials[feature_cols].copy()
 
-    return compute_condition_effects(
+    out = compute_condition_effects(
         features,
         pain_mask,
         nonpain_mask,
@@ -1225,6 +1439,16 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         n_jobs=config.n_jobs,
         config=ctx.config,
     )
+    # Standardize p-value columns for downstream validation/global FDR.
+    if out is not None and not out.empty:
+        out = out.copy()
+        if "p_value" in out.columns and "p_raw" not in out.columns:
+            out["p_raw"] = pd.to_numeric(out["p_value"], errors="coerce")
+        if "p_value" in out.columns and "p_primary" not in out.columns:
+            out["p_primary"] = pd.to_numeric(out["p_value"], errors="coerce")
+        if "q_value" in out.columns and "p_fdr" not in out.columns:
+            out["p_fdr"] = pd.to_numeric(out["q_value"], errors="coerce")
+    return out if out is not None else pd.DataFrame()
 
 
 def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -1301,23 +1525,34 @@ def _get_feature_columns(df: pd.DataFrame) -> List[str]:
 
 
 def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
-    from eeg_pipeline.analysis.behavior.api import run_mediation_analysis, run_multilevel_correlation_analysis
+    from eeg_pipeline.analysis.behavior.api import run_mediation_analysis
 
-    features = combine_features(ctx).copy()
-    if features.empty:
+    # Trial-table-only: mediation uses the canonical trial table.
+    df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.info("Advanced: trial table missing; skipping.")
         return
 
-    # Add targets and temperature to the dataframe for analysis
-    if ctx.targets is not None:
-        features["rating"] = ctx.targets.values
-    if ctx.temperature is not None:
-        features["temperature"] = ctx.temperature.values
-    
-    features["subject"] = ctx.subject
-
-    feature_cols = _get_feature_columns(features)
+    prefixes = (
+        "power_",
+        "conn_",
+        "aperiodic_",
+        "erp_",
+        "itpc_",
+        "pac_",
+        "comp_",
+        "bursts_",
+        "quality_",
+        "erds_",
+        "spectral_",
+        "ratios_",
+        "asymmetry_",
+        "summary_",
+    )
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
     if not feature_cols:
         return
+    features = df_trials.copy()
 
     if config.run_mediation:
         if "temperature" in features.columns and "rating" in features.columns:
@@ -1374,34 +1609,13 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
     if getattr(config, "run_mixed_effects", False):
         patterns.append("mixed_effects*.tsv")
 
-    # 3. Correlations and Pain Sensitivity
-    # We include these if they were requested. 
-    # Note: ctx.selected_feature_files tracks which feature categories were loaded for correlation-style analyses.
-    include_cats = ctx.selected_feature_files or ctx.feature_categories
-    
-    # Check if correlations or pain sensitivity were requested (using heuristic or explicit flags)
-    # The orchestration layer usually has these flags in config.
-    run_corrs = getattr(config, "run_correlations", True) # Default to True if not explicit, but check config
+    # 3. Correlations and Pain Sensitivity (trial-table-only TSVs)
+    run_corrs = getattr(config, "run_correlations", True)
     run_psi = getattr(config, "compute_pain_sensitivity", False)
-
-    if include_cats:
-        for cat in include_cats:
-            if run_corrs:
-                patterns.append(f"corr_stats_{cat}_vs_*.tsv")
-            if run_psi:
-                patterns.append(f"pain_sensitivity_{cat}*.tsv")
-        
-        # Always include 'all_features' and base 'pain_sensitivity' if they might have been written
-        if run_corrs:
-            patterns.append("corr_stats_all_features_vs_*.tsv")
-        if run_psi:
-            patterns.append("pain_sensitivity_*.tsv")
-    elif run_corrs or run_psi:
-        # Fallback if no specific categories selected
-        if run_corrs:
-            patterns.append("corr_stats_*.tsv")
-        if run_psi:
-            patterns.append("pain_sensitivity_*.tsv")
+    if run_corrs:
+        patterns.append("correlations*.tsv")
+    if run_psi:
+        patterns.append("pain_sensitivity*.tsv")
 
     # 4. Temporal and Time-Frequency
     if getattr(config, "run_temporal_correlations", False):
@@ -1422,7 +1636,7 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
     # it means all specific modules were disabled. 
     # We only use the broad fallback if absolutely no patterns were added.
     if not patterns:
-        patterns = ["corr_stats_*.tsv", "condition_effects.tsv", "pain_sensitivity_*.tsv"]
+        patterns = ["correlations*.tsv", "condition_effects*.tsv", "pain_sensitivity*.tsv"]
 
     ctx.logger.info("Applying global FDR correction...")
     summary = apply_global_fdr(
@@ -1512,6 +1726,167 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
     except Exception as exc:
         ctx.logger.warning(f"Hierarchical FDR failed: {exc}")
 
+
+def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
+    """Write a single-subject, self-diagnosing Markdown report (non-gating)."""
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(pipeline_config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    top_n = int(get_config_value(ctx.config, "behavior_analysis.report.top_n", 15))
+    alpha = float(getattr(pipeline_config, "fdr_alpha", 0.05))
+
+    # Trial-table summary
+    df_trials = _load_trial_table_df(ctx)
+    n_trials = int(len(df_trials)) if df_trials is not None else 0
+    n_features = 0
+    if df_trials is not None and not df_trials.empty:
+        prefixes = (
+            "power_",
+            "conn_",
+            "aperiodic_",
+            "erp_",
+            "itpc_",
+            "pac_",
+            "comp_",
+            "bursts_",
+            "quality_",
+            "erds_",
+            "spectral_",
+            "ratios_",
+            "asymmetry_",
+            "summary_",
+        )
+        n_features = int(sum(1 for c in df_trials.columns if str(c).startswith(prefixes)))
+
+    # Trial-table validation (if present)
+    val_status = None
+    val_warnings: List[str] = []
+    try:
+        vpath = ctx.stats_dir / f"trial_table_validation{suffix}.json"
+        if vpath.exists():
+            payload = json.loads(vpath.read_text())
+            val_status = payload.get("status")
+            val_warnings = [str(x) for x in (payload.get("warnings") or [])]
+    except Exception:
+        pass
+
+    def _read_tsv(path: Path) -> Optional[pd.DataFrame]:
+        try:
+            return pd.read_csv(path, sep="\t")
+        except Exception:
+            return None
+
+    def _sig_counts(df: pd.DataFrame) -> Dict[str, Any]:
+        out: Dict[str, Any] = {"n": int(len(df))}
+        for col in ["q_global", "p_fdr", "p_primary"]:
+            if col in df.columns:
+                vals = pd.to_numeric(df[col], errors="coerce")
+                out[f"n_sig_{col}"] = int((vals < alpha).sum()) if vals.notna().any() else 0
+        return out
+
+    def _top_rows(df: pd.DataFrame) -> pd.DataFrame:
+        pcols = [c for c in ["q_global", "p_fdr", "p_primary"] if c in df.columns]
+        if not pcols:
+            return df.head(0)
+        pcol = pcols[0]
+        out = df.copy()
+        out[pcol] = pd.to_numeric(out[pcol], errors="coerce")
+        out = out.sort_values(pcol, ascending=True)
+        keep = [c for c in ["feature", "target", "r_primary", "beta_feature", "hedges_g", "p_primary", "p_fdr", "q_global"] if c in out.columns]
+        return out[keep].head(max(1, int(top_n))) if keep else out.head(0)
+
+    def _to_md_table(df: pd.DataFrame) -> str:
+        if df is None or df.empty:
+            return ""
+        df2 = df.copy()
+        for c in df2.columns:
+            df2[c] = df2[c].apply(lambda x: "" if pd.isna(x) else str(x))
+        cols = [str(c) for c in df2.columns]
+        header = "| " + " | ".join(cols) + " |"
+        sep = "| " + " | ".join(["---"] * len(cols)) + " |"
+        rows = ["| " + " | ".join(row) + " |" for row in df2.to_numpy(dtype=str).tolist()]
+        return "\n".join([header, sep, *rows])
+
+    patterns = [
+        "correlations*.tsv",
+        "pain_sensitivity*.tsv",
+        "regression_feature_effects*.tsv",
+        "models_feature_effects*.tsv",
+        "condition_effects*.tsv",
+        "consistency_summary*.tsv",
+        "influence_diagnostics*.tsv",
+        "trial_table_validation_summary*.tsv",
+        "temperature_model_comparison*.tsv",
+        "temperature_breakpoint_candidates*.tsv",
+        "hierarchical_fdr_summary.tsv",
+        "normalized_results*.tsv",
+        "summary.json",
+        "analysis_metadata.json",
+        "outputs_manifest.json",
+    ]
+
+    files: List[Path] = []
+    for pat in patterns:
+        files.extend(sorted(ctx.stats_dir.glob(pat)))
+    # Include any other TSV outputs not covered above.
+    extra = sorted(p for p in ctx.stats_dir.glob("*.tsv") if p not in files)
+    files.extend(extra)
+    files = sorted({p.resolve() for p in files if p.exists()})
+
+    lines: List[str] = []
+    lines.append(f"# Subject Report: sub-{ctx.subject}")
+    lines.append("")
+    lines.append(f"- Task: `{ctx.task}`")
+    lines.append(f"- Trials: `{n_trials}`")
+    lines.append(f"- Features in trial table: `{n_features}`")
+    lines.append(f"- Method: `{getattr(pipeline_config, 'method', '')}` (`{method_label}`)")
+    lines.append(f"- Controls: temperature=`{bool(getattr(pipeline_config, 'control_temperature', True))}`, trial_order=`{bool(getattr(pipeline_config, 'control_trial_order', True))}`")
+    lines.append(f"- Global FDR alpha: `{alpha}`")
+    if val_status is not None:
+        lines.append(f"- Trial table validation: `{val_status}`")
+    if val_warnings:
+        lines.append("")
+        lines.append("## Validation Warnings")
+        for w in val_warnings[: min(20, len(val_warnings))]:
+            lines.append(f"- {w}")
+        if len(val_warnings) > 20:
+            lines.append(f"- ... {len(val_warnings) - 20} more")
+
+    # Summaries per output file (TSVs)
+    tsvs = [p for p in files if p.suffix == ".tsv"]
+    if tsvs:
+        lines.append("")
+        lines.append("## Outputs")
+        for p in tsvs:
+            df = _read_tsv(p)
+            if df is None or df.empty:
+                lines.append(f"- `{p.name}`: (empty or unreadable)")
+                continue
+            counts = _sig_counts(df)
+            sig_bits = []
+            for k in ["n_sig_q_global", "n_sig_p_fdr", "n_sig_p_primary"]:
+                if k in counts:
+                    sig_bits.append(f"{k}={counts[k]}")
+            sig_str = ", ".join(sig_bits) if sig_bits else "no p-columns"
+            lines.append(f"- `{p.name}`: n={counts['n']}, {sig_str}")
+
+            top = _top_rows(df)
+            if not top.empty and ("feature" in top.columns or "target" in top.columns):
+                lines.append("")
+                lines.append(f"### Top ({min(len(top), top_n)}) — `{p.name}`")
+                lines.append("")
+                lines.append(_to_md_table(top))
+                lines.append("")
+
+    out_path = ctx.stats_dir / f"subject_report{suffix}{method_suffix}.md"
+    try:
+        out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        ctx.logger.info("Subject report saved: %s", out_path.name)
+        return out_path
+    except Exception as exc:
+        ctx.logger.warning("Failed to write subject report: %s", exc)
+        return None
 
 def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> List[Path]:
     from eeg_pipeline.infra.paths import ensure_dir
@@ -1655,6 +2030,8 @@ def _infer_output_kind(name: str) -> str:
         return "summary"
     if name.startswith("analysis_metadata"):
         return "analysis_metadata"
+    if name.startswith("subject_report"):
+        return "subject_report"
     if name.startswith("time_frequency_correlation_data"):
         return "time_frequency"
     if name.startswith("temporal_correlations"):

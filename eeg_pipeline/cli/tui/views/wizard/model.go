@@ -41,6 +41,7 @@ var behaviorComputations = []Computation{
 	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics (non-gating)"},
 	{"consistency", "Consistency Summary", "Effect direction consistency across outcomes"},
 	{"influence", "Influence Diagnostics", "Cook's distance and leverage summaries"},
+	{"report", "Subject Report", "Single-subject report (reproducible summary)"},
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
@@ -127,6 +128,7 @@ type PlotItem struct {
 	RequiresEpochs   bool
 	RequiresFeatures bool
 	RequiresStats    bool
+	Dependencies     []string // Other plots this plot depends on
 }
 
 type textField int
@@ -154,48 +156,47 @@ const (
 
 var defaultPlotItems = []PlotItem{
 	// Features
-	{"features_power", "features", "Power", "Band power summaries and topomaps", []string{"features_power.tsv"}, false, true, false},
-	{"features_connectivity", "features", "Connectivity", "Connectivity heatmaps and networks", []string{"features_connectivity.parquet"}, true, true, false},
-	{"features_aperiodic", "features", "Aperiodic", "1/f spectral slope diagnostics", []string{"features_aperiodic.tsv"}, false, true, false},
-	{"features_itpc", "features", "ITPC", "Inter-trial phase coherence plots", []string{"features_itpc.tsv", "stats/itpc_data.npz"}, false, true, false},
-	{"features_pac", "features", "PAC", "Phase-amplitude coupling plots", []string{"features_pac*.tsv"}, false, true, false},
-	{"features_erds", "features", "ERDS", "Event-related desync/sync plots", []string{"features_erds.tsv"}, false, true, false},
-	{"features_complexity", "features", "Complexity", "Complexity distributions and condition comparisons", []string{"features_complexity.tsv"}, false, true, false},
-	{"features_quality", "features", "Quality", "Feature quality diagnostics and outlier views", []string{"features_quality.tsv"}, false, true, false},
-	{"features_spectral", "features", "Spectral", "Spectral peak and edge features", []string{"features_spectral.tsv"}, false, true, false},
-	{"features_ratios", "features", "Ratios", "Band power ratios", []string{"features_ratios.tsv"}, false, true, false},
-	{"features_asymmetry", "features", "Asymmetry", "Hemispheric asymmetry indices", []string{"features_asymmetry.tsv"}, false, true, false},
-	{"features_bursts", "features", "Bursts", "Oscillatory burst dynamics", []string{"features_bursts.tsv"}, false, true, false},
-	{"features_erp", "features", "ERP", "ERP visualizations from epochs", []string{"epochs/*.fif"}, true, false, false},
+	{ID: "features_power", Group: "features", Name: "Power", Description: "Band power summaries and topomaps", RequiredFiles: []string{"features_power.tsv"}, RequiresFeatures: true},
+	{ID: "features_connectivity", Group: "features", Name: "Connectivity", Description: "Connectivity heatmaps and networks", RequiredFiles: []string{"features_connectivity.parquet"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "features_aperiodic", Group: "features", Name: "Aperiodic", Description: "1/f spectral slope diagnostics", RequiredFiles: []string{"features_aperiodic.tsv"}, RequiresFeatures: true},
+	{ID: "features_itpc", Group: "features", Name: "ITPC", Description: "Inter-trial phase coherence plots", RequiredFiles: []string{"features_itpc.tsv", "stats/itpc_data.npz"}, RequiresFeatures: true},
+	{ID: "features_pac", Group: "features", Name: "PAC", Description: "Phase-amplitude coupling plots", RequiredFiles: []string{"features_pac*.tsv"}, RequiresFeatures: true},
+	{ID: "features_erds", Group: "features", Name: "ERDS", Description: "Event-related desync/sync plots", RequiredFiles: []string{"features_erds.tsv"}, RequiresFeatures: true},
+	{ID: "features_complexity", Group: "features", Name: "Complexity", Description: "Complexity distributions and condition comparisons", RequiredFiles: []string{"features_complexity.tsv"}, RequiresFeatures: true},
+	{ID: "features_quality", Group: "features", Name: "Quality", Description: "Feature quality diagnostics and outlier views", RequiredFiles: []string{"features_quality.tsv"}, RequiresFeatures: true},
+	{ID: "features_spectral", Group: "features", Name: "Spectral", Description: "Spectral peak and edge features", RequiredFiles: []string{"features_spectral.tsv"}, RequiresFeatures: true},
+	{ID: "features_ratios", Group: "features", Name: "Ratios", Description: "Band power ratios", RequiredFiles: []string{"features_ratios.tsv"}, RequiresFeatures: true},
+	{ID: "features_asymmetry", Group: "features", Name: "Asymmetry", Description: "Hemispheric asymmetry indices", RequiredFiles: []string{"features_asymmetry.tsv"}, RequiresFeatures: true},
+	{ID: "features_bursts", Group: "features", Name: "Bursts", Description: "Oscillatory burst dynamics", RequiredFiles: []string{"features_bursts.tsv"}, RequiresFeatures: true},
+	{ID: "features_erp", Group: "features", Name: "ERP", Description: "ERP visualizations from epochs", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// Behavior
-	{"behavior_psychometrics", "behavior", "Psychometrics", "Rating distributions and psychometrics", []string{"events.tsv"}, false, false, false},
-	{"behavior_power_scatter", "behavior", "Power ROI Scatter", "Power vs behavior scatter plots", []string{"features_power.tsv", "epochs/*.fif"}, true, true, false},
-	{"behavior_complexity_scatter", "behavior", "Complexity Scatter", "Complexity vs behavior scatter plots", []string{"features_complexity.tsv", "epochs/*.fif"}, true, true, false},
-	{"behavior_aperiodic_scatter", "behavior", "Aperiodic Scatter", "Aperiodic vs behavior scatter plots", []string{"features_aperiodic.tsv", "epochs/*.fif"}, true, true, false},
-	{"behavior_connectivity_scatter", "behavior", "Connectivity Scatter", "Connectivity vs behavior scatter plots", []string{"features_connectivity.parquet", "epochs/*.fif"}, true, true, false},
-	{"behavior_itpc_scatter", "behavior", "ITPC Scatter", "ITPC vs behavior scatter plots", []string{"features_itpc.tsv", "epochs/*.fif"}, true, true, false},
-	{"behavior_temporal_topomaps", "behavior", "Temporal Topomaps", "Temporal correlation topomaps", []string{"stats/temporal_correlations_by_pain*.npz"}, false, false, true},
-	{"behavior_pain_clusters", "behavior", "Pain Clusters", "Cluster-based temporal contrasts", []string{"stats/pain_nonpain_time_clusters_*.tsv"}, false, false, true},
-	{"behavior_dose_response", "behavior", "Dose Response", "Dose-response curves and contrasts", []string{"features_power.tsv", "epochs/*.fif"}, true, true, false},
-	{"behavior_mediation", "behavior", "Mediation", "Mediation path diagrams", []string{"stats/mediation.tsv"}, false, false, true},
-	{"behavior_top_predictors", "behavior", "Top Predictors", "Top predictors summary", []string{"stats/correlations*.tsv", "stats/corr_stats_all_features_vs_rating*.tsv"}, false, false, true},
+	{ID: "behavior_psychometrics", Group: "behavior", Name: "Psychometrics", Description: "Rating distributions and psychometrics", RequiredFiles: []string{"events.tsv"}},
+	{ID: "behavior_power_scatter", Group: "behavior", Name: "Power ROI Scatter", Description: "Power vs behavior scatter plots", RequiredFiles: []string{"features_power.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_power"}},
+	{ID: "behavior_complexity_scatter", Group: "behavior", Name: "Complexity Scatter", Description: "Complexity vs behavior scatter plots", RequiredFiles: []string{"features_complexity.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_complexity"}},
+	{ID: "behavior_aperiodic_scatter", Group: "behavior", Name: "Aperiodic Scatter", Description: "Aperiodic vs behavior scatter plots", RequiredFiles: []string{"features_aperiodic.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_aperiodic"}},
+	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity.parquet", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_connectivity"}},
+	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_itpc"}},
+	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
+	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Pain Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
+	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
 	// TFR
-	{"tfr_scalpmean", "tfr", "Scalp-Mean", "Scalp-mean TFR plots", []string{"epochs/*.fif"}, true, false, false},
-	{"tfr_scalpmean_contrast", "tfr", "Scalp-Mean Contrast", "Pain vs non-pain contrasts", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
-	{"tfr_channels", "tfr", "Channels", "Channel-level TFR plots", []string{"epochs/*.fif"}, true, false, false},
-	{"tfr_channels_contrast", "tfr", "Channels Contrast", "Channel-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
-	{"tfr_rois", "tfr", "ROIs", "ROI-level TFR plots", []string{"epochs/*.fif"}, true, false, false},
-	{"tfr_rois_contrast", "tfr", "ROI Contrast", "ROI-level contrast plots", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
-	{"tfr_topomaps", "tfr", "Topomaps", "Time-frequency topomaps", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
-	{"tfr_band_evolution", "tfr", "Band Evolution", "Band evolution over time", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
+	{ID: "tfr_scalpmean", Group: "tfr", Name: "Scalp-Mean", Description: "Scalp-mean TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "tfr_scalpmean_contrast", Group: "tfr", Name: "Scalp-Mean Contrast", Description: "Pain vs non-pain contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_channels", Group: "tfr", Name: "Channels", Description: "Channel-level TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "tfr_channels_contrast", Group: "tfr", Name: "Channels Contrast", Description: "Channel-level contrast plots", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_rois", Group: "tfr", Name: "ROIs", Description: "ROI-level TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "tfr_rois_contrast", Group: "tfr", Name: "ROI Contrast", Description: "ROI-level contrast plots", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_topomaps", Group: "tfr", Name: "Topomaps", Description: "Time-frequency topomaps", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "tfr_band_evolution", Group: "tfr", Name: "Band Evolution", Description: "Band evolution over time", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	// ERP
-	{"erp_butterfly", "erp", "Butterfly", "Butterfly ERP plots (all channels)", []string{"epochs/*.fif"}, true, false, false},
-	{"erp_roi", "erp", "ROI Waveforms", "ROI-based ERP waveforms", []string{"epochs/*.fif"}, true, false, false},
-	{"erp_contrast", "erp", "Contrast", "ERP condition contrasts (Pain vs No-Pain)", []string{"epochs/*.fif", "events.tsv"}, true, false, false},
-	{"erp_topomaps", "erp", "Topomaps", "ERP spatial distributions", []string{"epochs/*.fif"}, true, false, false},
+	{ID: "erp_butterfly", Group: "erp", Name: "Butterfly", Description: "Butterfly ERP plots (all channels)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "erp_roi", Group: "erp", Name: "ROI Waveforms", Description: "ROI-based ERP waveforms", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts (Pain vs No-Pain)", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "erp_topomaps", Group: "erp", Name: "Topomaps", Description: "ERP spatial distributions", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// Decoding
-	{"decoding_regression_plots", "decoding", "Regression Plots", "LOSO regression diagnostics", []string{"decoding/regression/loso_predictions.tsv"}, false, false, false},
-	{"decoding_timegen_plots", "decoding", "Time-Generalization", "Time-generalization matrices", []string{"decoding/time_generalization/time_generalization_regression.npz"}, false, false, false},
+	{ID: "decoding_regression_plots", Group: "decoding", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"decoding/regression/loso_predictions.tsv"}},
+	{ID: "decoding_timegen_plots", Group: "decoding", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"decoding/time_generalization/time_generalization_regression.npz"}},
 }
 
 var defaultPlotCategories = []FeatureCategory{
@@ -291,6 +292,7 @@ type Model struct {
 	computations        []Computation
 	computationSelected map[int]bool
 	computationCursor   int
+	computationOffset   int // Scroll offset for computations list
 
 	// Category selection (for features pipeline)
 	categories    []string
@@ -316,6 +318,10 @@ type Model struct {
 	// Feature availability with timestamps
 	featureAvailability map[string]bool
 	featureLastModified map[string]string
+
+	// Computation availability with timestamps (for behavior pipeline)
+	computationAvailability map[string]bool
+	computationLastModified map[string]string
 
 	// Feature file selection (for behavior pipeline)
 	featureFiles        []FeatureFile
@@ -463,6 +469,7 @@ type Model struct {
 	rngSeed               int     // 0 = use project default
 	controlTemperature    bool    // Include temperature as covariate
 	controlTrialOrder     bool    // Include trial order as covariate
+	trialTableOnly        bool    // Skip computations that require epochs/time-frequency arrays
 	fdrAlpha              float64 // FDR correction threshold
 	behaviorConfigSection int     // Behavior config section index (legacy, kept for compatibility)
 	behaviorNJobs         int     // -1 = all
@@ -483,6 +490,7 @@ type Model struct {
 	behaviorGroupStabilityExpanded    bool
 	behaviorGroupConsistencyExpanded  bool
 	behaviorGroupInfluenceExpanded    bool
+	behaviorGroupReportExpanded       bool
 	behaviorGroupConditionExpanded    bool
 	behaviorGroupTemporalExpanded     bool
 	behaviorGroupClusterExpanded      bool
@@ -523,9 +531,13 @@ type Model struct {
 
 	// Regression
 	regressionFeatureSet         int // 0=pain_summaries, 1=all
-	regressionOutcome            int // 0=rating, 1=pain_residual
+	regressionOutcome            int // 0=rating, 1=pain_residual, 2=temperature
 	regressionIncludeTemperature bool
-	regressionTempControl        int // 0=linear, 1=rating_hat
+	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
+	regressionTempSplineKnots    int
+	regressionTempSplineQlow     float64
+	regressionTempSplineQhigh    float64
+	regressionTempSplineMinN     int
 	regressionIncludeTrialOrder  bool
 	regressionIncludePrev        bool
 	regressionIncludeRunBlock    bool
@@ -538,7 +550,11 @@ type Model struct {
 	// Models
 	modelsFeatureSet          int // 0=pain_summaries, 1=all
 	modelsIncludeTemperature  bool
-	modelsTempControl         int // 0=linear, 1=rating_hat
+	modelsTempControl         int // 0=linear, 1=rating_hat, 2=spline
+	modelsTempSplineKnots     int
+	modelsTempSplineQlow      float64
+	modelsTempSplineQhigh     float64
+	modelsTempSplineMinN      int
 	modelsIncludeTrialOrder   bool
 	modelsIncludePrev         bool
 	modelsIncludeRunBlock     bool
@@ -548,6 +564,7 @@ type Model struct {
 	modelsMaxFeatures         int
 	modelsOutcomeRating       bool
 	modelsOutcomePainResidual bool
+	modelsOutcomeTemperature  bool
 	modelsOutcomePainBinary   bool
 	modelsFamilyOLS           bool
 	modelsFamilyRobust        bool
@@ -570,9 +587,14 @@ type Model struct {
 	influenceFeatureSet          int // 0=pain_summaries, 1=all
 	influenceOutcomeRating       bool
 	influenceOutcomePainResidual bool
+	influenceOutcomeTemperature  bool
 	influenceMaxFeatures         int
 	influenceIncludeTemperature  bool
-	influenceTempControl         int // 0=linear, 1=rating_hat
+	influenceTempControl         int // 0=linear, 1=rating_hat, 2=spline
+	influenceTempSplineKnots     int
+	influenceTempSplineQlow      float64
+	influenceTempSplineQhigh     float64
+	influenceTempSplineMinN      int
 	influenceIncludeTrialOrder   bool
 	influenceIncludeRunBlock     bool
 	influenceIncludeInteraction  bool
@@ -580,8 +602,18 @@ type Model struct {
 	influenceCooksThreshold      float64 // 0 = default
 	influenceLeverageThreshold   float64 // 0 = default
 
+	// Correlations (trial-table)
+	correlationsFeatureSet         int // 0=pain_summaries, 1=all
+	correlationsTargetRating       bool
+	correlationsTargetTemperature  bool
+	correlationsTargetPainResidual bool
+
 	// Pain sensitivity
-	painSensitivityMinTrials int
+	painSensitivityMinTrials  int
+	painSensitivityFeatureSet int // 0=pain_summaries, 1=all
+
+	// Report
+	reportTopN int
 
 	// Temporal
 	temporalResolutionMs int
@@ -639,6 +671,22 @@ type Model struct {
 	rawKeepAnnotations   bool
 	mergeEventPrefixes   string
 	mergeEventTypes      string
+
+	// Preset system
+	activePreset   string // Name of currently applied preset (empty if custom)
+	showPresetMenu bool   // Show preset selection overlay
+	presetCursor   int    // Cursor in preset menu
+
+	// Toast notifications
+	toastMessage string // Current toast message
+	toastType    string // "success", "error", "warning", "info"
+	toastTicker  int    // Countdown for toast visibility
+
+	// Subject selection enhancements
+	showOnlyValid    bool // Filter to show only valid subjects
+	subjectViewMode  int  // 0=list, 1=grid
+	subjectSortMode  int  // 0=id, 1=status, 2=date
+	subjectScrollTop int  // Scroll offset for subject list
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -646,7 +694,7 @@ type Model struct {
 ///////////////////////////////////////////////////////////////////
 
 func New(pipeline types.Pipeline, repoRoot string) Model {
-	help := components.NewHelpOverlay("Wizard Shortcuts", 50)
+	help := components.NewHelpOverlay("Wizard Shortcuts", 55)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
 		{Key: "←/→ or h/l", Description: "Switch tab (behavior config)"},
@@ -658,9 +706,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		{Key: "N", Description: "Select none"},
 		{Key: "/", Description: "Filter subjects"},
 	})
+	help.AddSection("Presets", []components.HelpItem{
+		{Key: "Q", Description: "Quick preset"},
+		{Key: "F", Description: "Full preset"},
+		{Key: "C", Description: "Connectivity (features)"},
+		{Key: "S", Description: "Spectral (features)"},
+		{Key: "R", Description: "Regression (behavior)"},
+		{Key: "T", Description: "Temporal (behavior)"},
+	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Proceed to next step"},
+		{Key: "P", Description: "Preview command"},
 		{Key: "?", Description: "Toggle help"},
+		{Key: "F5", Description: "Refresh subjects"},
 	})
 	help.AddSection("General", []components.HelpItem{
 		{Key: "Esc", Description: "Go back / Cancel"},
@@ -744,6 +802,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		rngSeed:               0,
 		controlTemperature:    true,
 		controlTrialOrder:     true,
+		trialTableOnly:        true,
 		fdrAlpha:              0.05,
 		behaviorConfigSection: 0,
 		behaviorNJobs:         -1,
@@ -787,6 +846,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionOutcome:            0,
 		regressionIncludeTemperature: true,
 		regressionTempControl:        0,
+		regressionTempSplineKnots:    4,
+		regressionTempSplineQlow:     0.05,
+		regressionTempSplineQhigh:    0.95,
+		regressionTempSplineMinN:     12,
 		regressionIncludeTrialOrder:  true,
 		regressionIncludePrev:        false,
 		regressionIncludeRunBlock:    true,
@@ -799,6 +862,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsFeatureSet:          0,
 		modelsIncludeTemperature:  true,
 		modelsTempControl:         0,
+		modelsTempSplineKnots:     4,
+		modelsTempSplineQlow:      0.05,
+		modelsTempSplineQhigh:     0.95,
+		modelsTempSplineMinN:      12,
 		modelsIncludeTrialOrder:   true,
 		modelsIncludePrev:         false,
 		modelsIncludeRunBlock:     true,
@@ -808,6 +875,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsMaxFeatures:         100,
 		modelsOutcomeRating:       true,
 		modelsOutcomePainResidual: true,
+		modelsOutcomeTemperature:  false,
 		modelsOutcomePainBinary:   false,
 		modelsFamilyOLS:           true,
 		modelsFamilyRobust:        true,
@@ -828,22 +896,35 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceFeatureSet:          0,
 		influenceOutcomeRating:       true,
 		influenceOutcomePainResidual: true,
+		influenceOutcomeTemperature:  false,
 		influenceMaxFeatures:         20,
 		influenceIncludeTemperature:  true,
 		influenceTempControl:         0,
+		influenceTempSplineKnots:     4,
+		influenceTempSplineQlow:      0.05,
+		influenceTempSplineQhigh:     0.95,
+		influenceTempSplineMinN:      12,
 		influenceIncludeTrialOrder:   true,
 		influenceIncludeRunBlock:     true,
 		influenceIncludeInteraction:  false,
 		influenceStandardize:         true,
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
-		painSensitivityMinTrials:     10,
-		temporalResolutionMs:         50,
-		temporalSmoothMs:             100,
-		temporalTimeMinMs:            -200,
-		temporalTimeMaxMs:            1000,
-		mixedEffectsType:             0,
-		mediationMinEffect:           0.05,
+
+		correlationsFeatureSet:         0,
+		correlationsTargetRating:       true,
+		correlationsTargetTemperature:  true,
+		correlationsTargetPainResidual: true,
+
+		painSensitivityMinTrials:  10,
+		painSensitivityFeatureSet: 0,
+		reportTopN:                15,
+		temporalResolutionMs:      50,
+		temporalSmoothMs:          100,
+		temporalTimeMinMs:         -200,
+		temporalTimeMaxMs:         1000,
+		mixedEffectsType:          0,
+		mediationMinEffect:        0.05,
 		// Cluster defaults
 		clusterThreshold: 0.05,
 		clusterMinSize:   2,
@@ -958,10 +1039,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"stability":        true,
 			"consistency":      true,
 			"influence":        true,
+			"report":           true,
 			"correlations":     true,
 			"pain_sensitivity": true,
 			"condition":        true,
-			"temporal":         true,
+			"temporal":         false,
 		}
 		for i, c := range behaviorComputations {
 			m.computationSelected[i] = defaultComps[c.Key]
@@ -1118,6 +1200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tickMsg:
 		m.ticker++
+		m.TickToast()
 		return m, m.tick()
 
 	case tea.KeyMsg:
@@ -1316,6 +1399,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p", "P":
 			// Toggle command preview overlay
 			m.showCommandPreview = !m.showCommandPreview
+
+		case "Q":
+			// Quick preset
+			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
+				m.ApplyFeaturePreset("quick")
+			} else if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
+				m.ApplyBehaviorPreset("quick")
+			}
+
+		case "F":
+			// Full preset
+			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
+				m.ApplyFeaturePreset("full")
+			} else if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
+				m.ApplyBehaviorPreset("full")
+			}
+
+		case "C":
+			// Connectivity preset (features only)
+			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
+				m.ApplyFeaturePreset("connectivity")
+			}
+
+		case "S":
+			// Spectral preset (features only)
+			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
+				m.ApplyFeaturePreset("spectral")
+			}
+
+		case "R":
+			// Regression preset (behavior only)
+			if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
+				m.ApplyBehaviorPreset("regression")
+			}
+
+		case "T":
+			// Temporal preset (behavior only)
+			if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
+				m.ApplyBehaviorPreset("temporal")
+			}
+
 		case "f5", "ctrl+r":
 			// Signal to parent to refresh subjects
 			m.subjectsLoading = true
@@ -1329,6 +1453,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.CurrentStep == types.StepSelectPlots {
 			m.UpdatePlotOffset()
 		}
+		if m.CurrentStep == types.StepSelectComputations {
+			m.UpdateComputationOffset()
+		}
 		if m.CurrentStep == types.StepAdvancedConfig {
 			m.UpdateAdvancedOffset()
 		}
@@ -1338,11 +1465,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.CurrentStep == types.StepSelectPlots {
 		m.UpdatePlotOffset()
 	}
+	if m.CurrentStep == types.StepSelectComputations {
+		m.UpdateComputationOffset()
+	}
 	if m.CurrentStep == types.StepAdvancedConfig {
 		m.UpdateAdvancedOffset()
 	}
 
 	return m, nil
+}
+
+// UpdateComputationOffset calculates and updates the scrolling offset for the computations list.
+func (m *Model) UpdateComputationOffset() {
+	maxLines := m.height - 16
+	if maxLines < 8 {
+		maxLines = 8
+	}
+
+	total := len(m.computations)
+	if total <= 0 {
+		m.computationOffset = 0
+		return
+	}
+	cursorLine := m.computationCursor
+	if cursorLine < 0 {
+		cursorLine = 0
+	}
+	if cursorLine >= total {
+		cursorLine = total - 1
+	}
+
+	if cursorLine < m.computationOffset {
+		m.computationOffset = cursorLine
+	} else if cursorLine >= m.computationOffset+maxLines {
+		m.computationOffset = cursorLine - maxLines + 1
+	}
+
+	if m.computationOffset < 0 {
+		m.computationOffset = 0
+	}
+	if total > maxLines && m.computationOffset > total-maxLines {
+		m.computationOffset = total - maxLines
+	}
 }
 
 // UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
@@ -1359,9 +1523,10 @@ func (m *Model) UpdateAdvancedOffset() {
 	// Total height minus overhead (approx; reduced for more visible content).
 	// Must match values used in render_steps.go for consistency.
 	maxLines := m.height - 12
-	if m.Pipeline == types.PipelineFeatures {
+	switch m.Pipeline {
+	case types.PipelineFeatures:
 		maxLines = m.height - 10
-	} else if m.Pipeline == types.PipelineBehavior {
+	case types.PipelineBehavior:
 		maxLines = m.height - 12
 	}
 	if maxLines < 8 {
@@ -1541,9 +1706,9 @@ func (m *Model) SetSubjects(subjects []types.SubjectStatus) {
 		m.subjectSelected[s.ID] = true
 	}
 
-	// Calculate feature availability based on all subjects initially
-	// (all are selected by default)
+	// Calculate feature and computation availability based on all subjects
 	m.updateFeatureAvailability()
+	m.updateComputationAvailability()
 }
 
 // updateFeatureAvailability recalculates feature availability based on selected subjects
@@ -1567,6 +1732,33 @@ func (m *Model) updateFeatureAvailability() {
 				if info.LastModified != "" {
 					if existing, ok := m.featureLastModified[cat]; !ok || info.LastModified > existing {
 						m.featureLastModified[cat] = info.LastModified
+					}
+				}
+			}
+		}
+	}
+}
+
+// updateComputationAvailability recalculates computation availability based on selected subjects
+func (m *Model) updateComputationAvailability() {
+	m.computationAvailability = make(map[string]bool)
+	m.computationLastModified = make(map[string]string)
+
+	for _, s := range m.subjects {
+		if !m.subjectSelected[s.ID] {
+			continue
+		}
+
+		if s.FeatureAvailability == nil || s.FeatureAvailability.Computations == nil {
+			continue
+		}
+
+		for comp, info := range s.FeatureAvailability.Computations {
+			if info.Available {
+				m.computationAvailability[comp] = true
+				if info.LastModified != "" {
+					if existing, ok := m.computationLastModified[comp]; !ok || info.LastModified > existing {
+						m.computationLastModified[comp] = info.LastModified
 					}
 				}
 			}
@@ -1795,6 +1987,7 @@ const (
 	optBehaviorGroupStability
 	optBehaviorGroupConsistency
 	optBehaviorGroupInfluence
+	optBehaviorGroupReport
 	optBehaviorGroupCondition
 	optBehaviorGroupTemporal
 	optBehaviorGroupCluster
@@ -1844,6 +2037,7 @@ const (
 	optRNGSeed
 	optControlTemp
 	optControlOrder
+	optTrialTableOnlyMode
 	optFDRAlpha
 	// Behavior options - Cluster
 	optClusterThreshold
@@ -1899,6 +2093,10 @@ const (
 	optRegressionOutcome
 	optRegressionIncludeTemperature
 	optRegressionTempControl
+	optRegressionTempSplineKnots
+	optRegressionTempSplineQlow
+	optRegressionTempSplineQhigh
+	optRegressionTempSplineMinSamples
 	optRegressionIncludeTrialOrder
 	optRegressionIncludePrev
 	optRegressionIncludeRunBlock
@@ -1911,6 +2109,10 @@ const (
 	optModelsFeatureSet
 	optModelsIncludeTemperature
 	optModelsTempControl
+	optModelsTempSplineKnots
+	optModelsTempSplineQlow
+	optModelsTempSplineQhigh
+	optModelsTempSplineMinSamples
 	optModelsIncludeTrialOrder
 	optModelsIncludePrev
 	optModelsIncludeRunBlock
@@ -1920,6 +2122,7 @@ const (
 	optModelsMaxFeatures
 	optModelsOutcomeRating
 	optModelsOutcomePainResidual
+	optModelsOutcomeTemperature
 	optModelsOutcomePainBinary
 	optModelsFamilyOLS
 	optModelsFamilyRobust
@@ -1940,17 +2143,30 @@ const (
 	optInfluenceFeatureSet
 	optInfluenceOutcomeRating
 	optInfluenceOutcomePainResidual
+	optInfluenceOutcomeTemperature
 	optInfluenceMaxFeatures
 	optInfluenceIncludeTemperature
 	optInfluenceTempControl
+	optInfluenceTempSplineKnots
+	optInfluenceTempSplineQlow
+	optInfluenceTempSplineQhigh
+	optInfluenceTempSplineMinSamples
 	optInfluenceIncludeTrialOrder
 	optInfluenceIncludeRunBlock
 	optInfluenceIncludeInteraction
 	optInfluenceStandardize
 	optInfluenceCooksThreshold
 	optInfluenceLeverageThreshold
+	// Behavior options - Report
+	optReportTopN
+	// Behavior options - Correlations / pain sensitivity
+	optCorrelationsFeatureSet
+	optCorrelationsTargetRating
+	optCorrelationsTargetTemperature
+	optCorrelationsTargetPainResidual
 	// Behavior options - Pain sensitivity / temporal
 	optPainSensitivityMinTrials
+	optPainSensitivityFeatureSet
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
 	optTemporalTimeMaxMs
@@ -2145,6 +2361,7 @@ func (m Model) getBehaviorOptions() []optionType {
 			optBehaviorMinSamples,
 			optControlTemp,
 			optControlOrder,
+			optTrialTableOnlyMode,
 			optFDRAlpha,
 			optComputeChangeScores,
 			optComputeLosoStability,
@@ -2188,14 +2405,21 @@ func (m Model) getBehaviorOptions() []optionType {
 	// Correlations section
 	if m.isComputationSelected("correlations") {
 		options = append(options, optBehaviorGroupCorrelations)
-		// Correlations currently uses General settings
+		if m.behaviorGroupCorrelationsExpanded {
+			options = append(options,
+				optCorrelationsFeatureSet,
+				optCorrelationsTargetRating,
+				optCorrelationsTargetTemperature,
+				optCorrelationsTargetPainResidual,
+			)
+		}
 	}
 
 	// Pain sensitivity section
 	if m.isComputationSelected("pain_sensitivity") {
 		options = append(options, optBehaviorGroupPainSens)
 		if m.behaviorGroupPainSensExpanded {
-			options = append(options, optPainSensitivityMinTrials)
+			options = append(options, optPainSensitivityFeatureSet, optPainSensitivityMinTrials)
 		}
 	}
 
@@ -2216,6 +2440,16 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionOutcome,
 				optRegressionIncludeTemperature,
 				optRegressionTempControl,
+			)
+			if m.regressionTempControl == 2 {
+				options = append(options,
+					optRegressionTempSplineKnots,
+					optRegressionTempSplineQlow,
+					optRegressionTempSplineQhigh,
+					optRegressionTempSplineMinSamples,
+				)
+			}
+			options = append(options,
 				optRegressionIncludeTrialOrder,
 				optRegressionIncludePrev,
 				optRegressionIncludeRunBlock,
@@ -2236,6 +2470,16 @@ func (m Model) getBehaviorOptions() []optionType {
 				optModelsFeatureSet,
 				optModelsIncludeTemperature,
 				optModelsTempControl,
+			)
+			if m.modelsTempControl == 2 {
+				options = append(options,
+					optModelsTempSplineKnots,
+					optModelsTempSplineQlow,
+					optModelsTempSplineQhigh,
+					optModelsTempSplineMinSamples,
+				)
+			}
+			options = append(options,
 				optModelsIncludeTrialOrder,
 				optModelsIncludePrev,
 				optModelsIncludeRunBlock,
@@ -2245,6 +2489,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optModelsMaxFeatures,
 				optModelsOutcomeRating,
 				optModelsOutcomePainResidual,
+				optModelsOutcomeTemperature,
 				optModelsOutcomePainBinary,
 				optModelsFamilyOLS,
 				optModelsFamilyRobust,
@@ -2288,9 +2533,20 @@ func (m Model) getBehaviorOptions() []optionType {
 				optInfluenceFeatureSet,
 				optInfluenceOutcomeRating,
 				optInfluenceOutcomePainResidual,
+				optInfluenceOutcomeTemperature,
 				optInfluenceMaxFeatures,
 				optInfluenceIncludeTemperature,
 				optInfluenceTempControl,
+			)
+			if m.influenceTempControl == 2 {
+				options = append(options,
+					optInfluenceTempSplineKnots,
+					optInfluenceTempSplineQlow,
+					optInfluenceTempSplineQhigh,
+					optInfluenceTempSplineMinSamples,
+				)
+			}
+			options = append(options,
 				optInfluenceIncludeTrialOrder,
 				optInfluenceIncludeRunBlock,
 				optInfluenceIncludeInteraction,
@@ -2298,6 +2554,14 @@ func (m Model) getBehaviorOptions() []optionType {
 				optInfluenceCooksThreshold,
 				optInfluenceLeverageThreshold,
 			)
+		}
+	}
+
+	// Report section
+	if m.isComputationSelected("report") {
+		options = append(options, optBehaviorGroupReport)
+		if m.behaviorGroupReportExpanded {
+			options = append(options, optReportTopN)
 		}
 	}
 
