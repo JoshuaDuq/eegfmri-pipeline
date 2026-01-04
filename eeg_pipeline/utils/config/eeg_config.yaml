@@ -212,7 +212,7 @@ behavior_analysis:
   # Canonical per-trial table export (single source of truth for subject-level stats/plots)
   trial_table:
     enabled: true
-    format: "parquet"   # "parquet" (recommended) or "tsv"
+    format: "tsv"   # "parquet" (recommended) or "tsv"
     include_features: true
     include_covariates: true
     include_events: true
