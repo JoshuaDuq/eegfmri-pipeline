@@ -1,16 +1,8 @@
-# Virtual environment
-.venv/
-venv/
-env/
-ENV/
-
-# Python cache
+### Python ###
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -28,22 +20,56 @@ wheels/
 .installed.cfg
 *.egg
 
-# IDE
+### Environment ###
+.venv/
+venv/
+env/
+ENV/
+.venv311/
+.env
+
+### Testing and Cache ###
+.pytest_cache/
+.matplotlib_cache/
+.coverage
+htmlcov/
+.cache/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+### Go (TUI) ###
+eeg_pipeline/cli/tui/tui
+eeg_pipeline/cli/tui/eeg-tui
+eeg_pipeline/cli/tui/eeg-pipeline-tui
+eeg_pipeline/cli/tui/.cache/
+eeg_pipeline/cli/tui/.gocache/
+eeg_pipeline/cli/tui/.gomodcache/
+eeg_pipeline/cli/tui/.gopath/
+bin/
+
+### IDEs & OS ###
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Data folder
+### Local/Temporary Files ###
+*.log
+output.json
+columns_sample.txt
 
+### Data ###
+# Ignore all data by default
 eeg_pipeline/data/**
 !eeg_pipeline/data/**/.gitkeep
 
+# Allow specific metadata files in bids_output
 !eeg_pipeline/data/bids_output/
 eeg_pipeline/data/bids_output/**
 !eeg_pipeline/data/bids_output/README
@@ -51,14 +77,23 @@ eeg_pipeline/data/bids_output/**
 !eeg_pipeline/data/bids_output/participants.tsv
 !eeg_pipeline/data/bids_output/participants.json
 
+# Allow specific metadata files in derivatives
 !eeg_pipeline/data/derivatives/
 eeg_pipeline/data/derivatives/**
 !eeg_pipeline/data/derivatives/dataset_description.json
 
+# Allow external data if it exists
 !eeg_pipeline/data/external/
 !eeg_pipeline/data/external/**
 
-eeg_pipeline/data/.DS_Store
-eeg_pipeline/data/**/.DS_Store
-
-.venv311/
+# Specifically ignore common data formats if they escape the data folders
+*.fif
+*.set
+*.fdt
+*.nii
+*.nii.gz
+*.h5
+*.npy
+*.mat
+*.edf
+*.bdf
