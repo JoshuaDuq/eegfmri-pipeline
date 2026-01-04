@@ -240,6 +240,20 @@ from .diagnostics import (
     compute_normality_summary,
 )
 
+from .paired_comparisons import (
+    PairedComparisonResult,
+    PairedComparisonSummary,
+    safe_wilcoxon,
+    safe_mannwhitneyu,
+    compute_paired_cohens_d,
+    bootstrap_mean_diff_ci,
+    compute_window_comparison,
+    compute_condition_comparison,
+    compute_all_paired_comparisons,
+    save_paired_comparisons,
+    load_paired_comparisons,
+)
+
 from .meta_analysis import (
     MetaAnalysisResult,
     fisher_z as meta_fisher_z,
@@ -528,4 +542,16 @@ __all__ = [
     "compute_required_n_for_correlation",
     "assess_statistical_power",
     "is_underpowered",
+    # Paired Comparisons
+    "PairedComparisonResult",
+    "PairedComparisonSummary",
+    "safe_wilcoxon",
+    "safe_mannwhitneyu",
+    "compute_paired_cohens_d",
+    "bootstrap_mean_diff_ci",
+    "compute_window_comparison",
+    "compute_condition_comparison",
+    "compute_all_paired_comparisons",
+    "save_paired_comparisons",
+    "load_paired_comparisons",
 ]

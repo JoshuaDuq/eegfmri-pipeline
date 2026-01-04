@@ -327,12 +327,15 @@ def plot_itpc_by_condition(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
+    stats_dir: Optional[Path] = None,
 ) -> None:
     """Compare ITPC between conditions per band.
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
     Creates one figure per ROI.
+    
+    If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     if itpc_df is None or itpc_df.empty or events_df is None:
         return
@@ -480,6 +483,7 @@ def plot_itpc_by_condition(
                     label1=seg1.capitalize(),
                     label2=seg2.capitalize(),
                     roi_name=roi_name,
+                    stats_dir=stats_dir,
                 )
         
         log_if_present(logger, "info", f"Saved ITPC paired comparison plots for {len(roi_names)} ROIs")
@@ -838,12 +842,15 @@ def plot_pac_by_condition(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
+    stats_dir: Optional[Path] = None,
 ) -> None:
     """Compare PAC between conditions per phase-amplitude pair.
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
     Creates one figure per ROI.
+    
+    If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     if pac_trials_df is None or pac_trials_df.empty or events_df is None:
         return
@@ -1004,6 +1011,7 @@ def plot_pac_by_condition(
                     label1=seg1.capitalize(),
                     label2=seg2.capitalize(),
                     roi_name=roi_name,
+                    stats_dir=stats_dir,
                 )
         
         log_if_present(logger, "info", f"Saved PAC paired comparison plots for {len(roi_names)} ROIs")

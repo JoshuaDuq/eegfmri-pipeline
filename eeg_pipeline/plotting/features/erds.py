@@ -530,12 +530,15 @@ def plot_erds_by_condition(
     save_dir: Path,
     logger: Any,
     config: Any,
+    stats_dir: Optional[Path] = None,
 ) -> None:
     """Compare ERDS between conditions per band.
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
     Creates one figure per ROI.
+    
+    If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     import logging
     from scipy import stats
@@ -669,6 +672,7 @@ def plot_erds_by_condition(
                     label1=seg1.capitalize(),
                     label2=seg2.capitalize(),
                     roi_name=roi_name,
+                    stats_dir=stats_dir,
                 )
         
         log_if_present(logger, "info", f"Saved ERDS paired comparison plots for {len(roi_names)} ROIs")

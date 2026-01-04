@@ -1727,6 +1727,60 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
         ctx.logger.warning(f"Hierarchical FDR failed: {exc}")
 
 
+def stage_paired_comparisons(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Compute all paired comparisons for time window and condition-based analyses.
+    
+    This stage pre-computes all paired comparisons that the plotting pipeline
+    previously computed on-the-fly, enabling faster plotting and consistent statistics.
+    
+    Comparisons include:
+    - Window comparisons (paired): Baseline vs Active using Wilcoxon signed-rank
+    - Condition comparisons (unpaired): Pain vs Non-Pain using Mann-Whitney U
+    
+    All tests include FDR correction, effect sizes (Cohen's d, Hedges' g),
+    and bootstrap confidence intervals.
+    """
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import (
+        compute_all_paired_comparisons,
+        save_paired_comparisons,
+    )
+    
+    feature_dfs = {}
+    for name, df in ctx.iter_feature_tables():
+        if df is not None and not df.empty:
+            feature_dfs[name] = df
+    
+    if not feature_dfs:
+        ctx.logger.warning("Paired comparisons: no feature tables available; skipping.")
+        return pd.DataFrame()
+    
+    min_samples = int(get_config_value(ctx.config, "behavior_analysis.min_samples.default", 5))
+    n_boot = int(get_config_value(ctx.config, "behavior_analysis.paired_comparisons.n_bootstrap", 1000))
+    fdr_alpha = float(get_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05))
+    
+    summary = compute_all_paired_comparisons(
+        feature_dfs=feature_dfs,
+        events_df=ctx.aligned_events,
+        config=ctx.config,
+        logger=ctx.logger,
+        min_samples=min_samples,
+        n_boot=n_boot,
+        fdr_alpha=fdr_alpha,
+        rng=ctx.rng,
+    )
+    
+    suffix = _feature_suffix_from_context(ctx)
+    out_path = save_paired_comparisons(summary, ctx.stats_dir, suffix=suffix)
+    
+    ctx.logger.info(
+        f"Paired comparisons: {summary.n_tests} tests, "
+        f"{summary.n_significant_raw} raw significant, "
+        f"{summary.n_significant_fdr} FDR significant"
+    )
+    
+    return summary.to_dataframe()
+
+
 def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
     """Write a single-subject, self-diagnosing Markdown report (non-gating)."""
     suffix = _feature_suffix_from_context(ctx)
@@ -2026,6 +2080,8 @@ def _infer_output_kind(name: str) -> str:
         return "normalized_results"
     if name.startswith("feature_screening"):
         return "feature_screening"
+    if name.startswith("paired_comparisons"):
+        return "paired_comparisons"
     if name.startswith("summary"):
         return "summary"
     if name.startswith("analysis_metadata"):

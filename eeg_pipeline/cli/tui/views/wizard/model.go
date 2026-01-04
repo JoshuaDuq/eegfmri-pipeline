@@ -229,6 +229,12 @@ const (
 	textFieldPlotTemporalTimeBins
 	textFieldPlotTemporalTimeLabels
 	textFieldPlotAsymmetryStat
+	// Decoding advanced config text fields
+	textFieldElasticNetAlphaGrid
+	textFieldElasticNetL1RatioGrid
+	textFieldRfMaxDepthGrid
+	// Preprocessing advanced config text fields
+	textFieldIcaLabelsToKeep
 )
 
 var defaultPlotItems = []PlotItem{
@@ -752,6 +758,7 @@ type Model struct {
 	featGroupStorageExpanded      bool
 	featGroupExecutionExpanded    bool
 	featGroupValidationExpanded   bool
+	featGroupTFRExpanded          bool
 
 	// PAC/CFC configuration
 	pacPhaseMin  float64 // Min phase frequency (Hz)
@@ -992,6 +999,29 @@ type Model struct {
 	decodingNPerm int  // Permutations for significance test
 	innerSplits   int  // CV inner splits
 	skipTimeGen   bool // Skip time generalization
+	// Decoding model hyperparameters
+	decodingMinTrialsInner int    // min_trials_inner for CV
+	elasticNetAlphaGrid    string // alpha grid as comma-separated values
+	elasticNetL1RatioGrid  string // l1_ratio grid as comma-separated values
+	rfNEstimators          int    // Random forest n_estimators
+	rfMaxDepthGrid         string // max_depth grid as comma-separated values (use "null" for None)
+
+	// TFR parameters (for features pipeline)
+	tfrFreqMin       float64 // Min frequency for TFR
+	tfrFreqMax       float64 // Max frequency for TFR
+	tfrNFreqs        int     // Number of frequency bins
+	tfrMinCycles     float64 // Minimum cycles for wavelet
+	tfrNCyclesFactor float64 // Cycles factor
+	tfrDecim         int     // Decimation factor
+	tfrWorkers       int     // Workers for parallel TFR (-1 = all)
+
+	// System/global settings
+	systemNJobs      int  // Global n_jobs (-1 = all)
+	systemStrictMode bool // Strict mode for validation
+	loggingLevel     int  // 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+
+	// ICA labels to keep
+	icaLabelsToKeep string // Comma-separated ICA labels (e.g., "brain,other")
 
 	// Preprocessing pipeline advanced config
 	prepUsePyprep   bool
@@ -1289,6 +1319,25 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		decodingNPerm:          0,
 		innerSplits:            3,
 		skipTimeGen:            false,
+		decodingMinTrialsInner: 3,
+		elasticNetAlphaGrid:    "0.001,0.01,0.1,1,10",
+		elasticNetL1RatioGrid:  "0.2,0.5,0.8",
+		rfNEstimators:          500,
+		rfMaxDepthGrid:         "5,10,20,null",
+		// TFR defaults (from config)
+		tfrFreqMin:       1.0,
+		tfrFreqMax:       100.0,
+		tfrNFreqs:        40,
+		tfrMinCycles:     3.0,
+		tfrNCyclesFactor: 2.0,
+		tfrDecim:         4,
+		tfrWorkers:       -1,
+		// System defaults
+		systemNJobs:      -1,
+		systemStrictMode: true,
+		loggingLevel:     1, // INFO
+		// ICA defaults
+		icaLabelsToKeep:        "brain,other",
 		plotSelected:           make(map[int]bool),
 		featurePlotterSelected: make(map[string]bool),
 		plotFormats:            []string{"png", "svg", "pdf"},
@@ -2386,6 +2435,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotTemporalTimeLabelsSpec
 	case textFieldPlotAsymmetryStat:
 		return m.plotAsymmetryStatSpec
+	// Decoding hyperparameter text fields
+	case textFieldElasticNetAlphaGrid:
+		return m.elasticNetAlphaGrid
+	case textFieldElasticNetL1RatioGrid:
+		return m.elasticNetL1RatioGrid
+	case textFieldRfMaxDepthGrid:
+		return m.rfMaxDepthGrid
+	// Preprocessing text fields
+	case textFieldIcaLabelsToKeep:
+		return m.icaLabelsToKeep
 	default:
 		return ""
 	}
@@ -2614,6 +2673,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotTemporalTimeLabelsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotAsymmetryStat:
 		m.plotAsymmetryStatSpec = value
+	// Decoding hyperparameter text fields
+	case textFieldElasticNetAlphaGrid:
+		m.elasticNetAlphaGrid = strings.Join(strings.Fields(value), "")
+	case textFieldElasticNetL1RatioGrid:
+		m.elasticNetL1RatioGrid = strings.Join(strings.Fields(value), "")
+	case textFieldRfMaxDepthGrid:
+		m.rfMaxDepthGrid = strings.Join(strings.Fields(value), "")
+	// Preprocessing text fields
+	case textFieldIcaLabelsToKeep:
+		m.icaLabelsToKeep = strings.Join(strings.Fields(value), "")
 	}
 }
 
@@ -3118,6 +3187,27 @@ const (
 	optPlotAsymmetryStat
 	optPlotTemporalTimeBins
 	optPlotTemporalTimeLabels
+	// TFR parameters (features pipeline)
+	optFeatGroupTFR
+	optTfrFreqMin
+	optTfrFreqMax
+	optTfrNFreqs
+	optTfrMinCycles
+	optTfrNCyclesFactor
+	optTfrDecim
+	optTfrWorkers
+	// Decoding model hyperparameters
+	optDecodingMinTrialsInner
+	optElasticNetAlphaGrid
+	optElasticNetL1RatioGrid
+	optRfNEstimators
+	optRfMaxDepthGrid
+	// ICA labels to keep
+	optIcaLabelsToKeep
+	// System/global settings
+	optSystemNJobs
+	optSystemStrictMode
+	optLoggingLevel
 )
 
 const (
@@ -3192,6 +3282,12 @@ func (m Model) getFeaturesOptions() []optionType {
 		}
 	}
 
+	// TFR settings (always available for features that use time-frequency)
+	options = append(options, optFeatGroupTFR)
+	if m.featGroupTFRExpanded {
+		options = append(options, optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrDecim, optTfrWorkers)
+	}
+
 	options = append(options, optFeatGroupStorage)
 	if m.featGroupStorageExpanded {
 		options = append(options, optExportAll)
@@ -3220,7 +3316,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	}
 
 	if mode == "full" || mode == "ica" {
-		options = append(options, optPrepICAMethod, optPrepICAComp, optPrepUseIcalabel, optPrepProbThresh)
+		options = append(options, optPrepICAMethod, optPrepICAComp, optPrepUseIcalabel, optPrepProbThresh, optIcaLabelsToKeep)
 	}
 
 	if mode == "full" || mode == "epochs" {
@@ -3908,8 +4004,13 @@ func (m Model) getDecodingOptions() []optionType {
 		optUseDefaults,
 		optDecodingNPerm,
 		optDecodingInnerSplits,
+		optDecodingMinTrialsInner,
 		optRNGSeed,
 		optDecodingSkipTimeGen,
+		optElasticNetAlphaGrid,
+		optElasticNetL1RatioGrid,
+		optRfNEstimators,
+		optRfMaxDepthGrid,
 	}
 }
 

@@ -642,12 +642,15 @@ def plot_connectivity_by_condition(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
+    stats_dir: Optional[Path] = None,
 ) -> None:
     """Connectivity comparison by Measure × Band.
     
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
     Creates one figure per connectivity measure per ROI.
+    
+    If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     from eeg_pipeline.utils.config.loader import get_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
@@ -768,6 +771,7 @@ def plot_connectivity_by_condition(
                         label1=seg1.capitalize(),
                         label2=seg2.capitalize(),
                         roi_name=roi_name,
+                        stats_dir=stats_dir,
                     )
         
         log_if_present(logger, "info", f"Saved connectivity paired comparison plots for {len(measures)} measures × {len(roi_names)} ROIs")

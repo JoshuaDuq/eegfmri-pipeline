@@ -1982,6 +1982,46 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
+		case optFeatGroupTFR:
+			label = "▸ Time-Frequency"
+			hint = "Space to toggle"
+			if m.featGroupTFRExpanded {
+				label = "▾ Time-Frequency"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optTfrFreqMin:
+			label = "  Freq Min"
+			value = fmt.Sprintf("%.1f Hz", m.tfrFreqMin)
+			hint = "min TFR frequency"
+		case optTfrFreqMax:
+			label = "  Freq Max"
+			value = fmt.Sprintf("%.1f Hz", m.tfrFreqMax)
+			hint = "max TFR frequency"
+		case optTfrNFreqs:
+			label = "  N Frequencies"
+			value = fmt.Sprintf("%d", m.tfrNFreqs)
+			hint = "number of freq bins"
+		case optTfrMinCycles:
+			label = "  Min Cycles"
+			value = fmt.Sprintf("%.1f", m.tfrMinCycles)
+			hint = "wavelet cycles floor"
+		case optTfrNCyclesFactor:
+			label = "  Cycles Factor"
+			value = fmt.Sprintf("%.1f", m.tfrNCyclesFactor)
+			hint = "cycles per Hz"
+		case optTfrDecim:
+			label = "  Decimation"
+			value = fmt.Sprintf("%d", m.tfrDecim)
+			hint = "temporal downsample"
+		case optTfrWorkers:
+			label = "  Workers"
+			value = fmt.Sprintf("%d", m.tfrWorkers)
+			hint = "-1 = all cores"
 		case optFeatGroupStorage:
 			label = "▸ Storage"
 			hint = "Space to toggle"
@@ -3133,7 +3173,9 @@ func (m Model) renderDecodingAdvancedConfig() string {
 
 	permutationsVal := fmt.Sprintf("%d", m.decodingNPerm)
 	innerSplitsVal := fmt.Sprintf("%d", m.innerSplits)
+	minTrialsInnerVal := fmt.Sprintf("%d", m.decodingMinTrialsInner)
 	rngSeedVal := m.rngSeedDisplay()
+	rfNEstimatorsVal := fmt.Sprintf("%d", m.rfNEstimators)
 
 	// Override with input buffer if editing that field
 	if m.editingNumber {
@@ -3142,8 +3184,32 @@ func (m Model) renderDecodingAdvancedConfig() string {
 			permutationsVal = inputDisplay
 		} else if m.isCurrentlyEditing(optDecodingInnerSplits) {
 			innerSplitsVal = inputDisplay
+		} else if m.isCurrentlyEditing(optDecodingMinTrialsInner) {
+			minTrialsInnerVal = inputDisplay
 		} else if m.isCurrentlyEditing(optRNGSeed) {
 			rngSeedVal = inputDisplay
+		} else if m.isCurrentlyEditing(optRfNEstimators) {
+			rfNEstimatorsVal = inputDisplay
+		}
+	}
+
+	// Text editing for grid values
+	elasticNetAlphaVal := m.elasticNetAlphaGrid
+	elasticNetL1Val := m.elasticNetL1RatioGrid
+	rfMaxDepthVal := m.rfMaxDepthGrid
+	if m.editingText {
+		inputDisplay := m.textBuffer + "█"
+		// The text buffer is shared, check which field is focused
+		options := m.getDecodingOptions()
+		if m.advancedCursor < len(options) {
+			switch options[m.advancedCursor] {
+			case optElasticNetAlphaGrid:
+				elasticNetAlphaVal = inputDisplay
+			case optElasticNetL1RatioGrid:
+				elasticNetL1Val = inputDisplay
+			case optRfMaxDepthGrid:
+				rfMaxDepthVal = inputDisplay
+			}
 		}
 	}
 
@@ -3155,8 +3221,13 @@ func (m Model) renderDecodingAdvancedConfig() string {
 		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
 		{"Permutations", permutationsVal, "0=disabled, 100+ for p-values"},
 		{"Inner CV Splits", innerSplitsVal, "Cross-validation folds"},
+		{"Min Trials Inner", minTrialsInnerVal, "Min trials per inner fold"},
 		{"RNG Seed", rngSeedVal, "0=project default"},
 		{"Skip Time-Gen", m.boolToOnOff(m.skipTimeGen), "Skip time generalization"},
+		{"ElasticNet α Grid", elasticNetAlphaVal, "comma-separated alphas"},
+		{"ElasticNet L1 Grid", elasticNetL1Val, "comma-separated L1 ratios"},
+		{"RF N Estimators", rfNEstimatorsVal, "number of trees"},
+		{"RF Max Depth Grid", rfMaxDepthVal, "depths (use 'null' for None)"},
 	}
 
 	for i, opt := range options {
@@ -3264,6 +3335,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		{"ICA Method", icaMethodVal, "Algorithm (fastica/infomax/picard)", "ICA Fitting"},
 		{"ICA Components", icaCompVal, "Components or variance fraction", ""},
 		{"Prob. Threshold", probThreshVal, "Label classification threshold", ""},
+		{"Labels to Keep", m.icaLabelsToKeep, "comma-sep: brain,other,eye...", ""},
 
 		{"Epochs Tmin", tminVal, "Start of epoch", "Epoching"},
 		{"Epochs Tmax", tmaxVal, "End of epoch", ""},

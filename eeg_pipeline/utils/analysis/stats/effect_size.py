@@ -244,17 +244,6 @@ def split_by_condition(
             pain_series.astype(str)
             .str.strip()
             .str.lower()
-            .replace({
-                "pain": 1,
-                "nonpain": 0,
-                "non-pain": 0,
-                "no_pain": 0,
-                "nopain": 0,
-                "true": 1,
-                "false": 0,
-                "yes": 1,
-                "no": 0,
-            })
         )
         pain_series = mapped
 

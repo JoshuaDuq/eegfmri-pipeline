@@ -26,6 +26,17 @@ def get_roi_definitions(config: Any) -> Dict[str, List[str]]:
     """Get ROI definitions from config."""
     from eeg_pipeline.utils.config.loader import get_config_value
     
+    # Try to get from project-specific section first
+    rois = get_config_value(config, "project.roi_definitions", None)
+    if rois:
+        return rois
+        
+    # Fallback to general spatial section
+    rois = get_config_value(config, "spatial.roi_definitions", {})
+    if rois:
+        return rois
+
+    # Legacy fallbacks
     rois = get_config_value(config, "rois", {})
     if not rois:
         rois = get_config_value(config, "time_frequency_analysis.rois", {})

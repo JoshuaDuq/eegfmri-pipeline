@@ -769,6 +769,95 @@ def compute_variability_metrics(
 # UNIFIED PAIRED COMPARISON PLOTTING
 ###################################################################
 
+
+def load_precomputed_paired_stats(
+    stats_dir: "Path",
+    feature_type: str,
+    comparison_type: str,
+    condition1: str,
+    condition2: str,
+    roi_name: Optional[str] = None,
+    suffix: str = "",
+) -> Optional[pd.DataFrame]:
+    """Load pre-computed paired comparison statistics from behavior pipeline.
+    
+    Args:
+        stats_dir: Path to stats directory
+        feature_type: Feature type (e.g., "power", "aperiodic")
+        comparison_type: "window" or "condition"
+        condition1: First condition label
+        condition2: Second condition label
+        roi_name: Optional ROI name filter
+        suffix: Optional file suffix
+    
+    Returns:
+        Filtered DataFrame with pre-computed statistics or None if not found
+    """
+    from pathlib import Path
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import load_paired_comparisons
+    
+    stats_dir = Path(stats_dir)
+    df = load_paired_comparisons(stats_dir, suffix=suffix)
+    
+    if df is None or df.empty:
+        return None
+    
+    mask = (
+        (df["feature_type"] == feature_type) &
+        (df["comparison_type"] == comparison_type) &
+        (df["condition1"] == condition1) &
+        (df["condition2"] == condition2)
+    )
+    
+    if roi_name:
+        mask &= df["identifier"].str.contains(roi_name, case=False, na=False)
+    
+    filtered = df[mask]
+    return filtered if not filtered.empty else None
+
+
+def get_precomputed_qvalues(
+    precomputed_df: Optional[pd.DataFrame],
+    bands: List[str],
+    roi_name: str,
+) -> Dict[str, Tuple[float, float, float, bool]]:
+    """Extract q-values from pre-computed statistics DataFrame.
+    
+    Args:
+        precomputed_df: Pre-computed statistics DataFrame
+        bands: List of band names
+        roi_name: ROI name
+    
+    Returns:
+        Dict mapping band to (p_value, q_value, effect_size_d, significant)
+    """
+    qvalues = {}
+    
+    if precomputed_df is None or precomputed_df.empty:
+        return qvalues
+    
+    for band in bands:
+        identifier_pattern = f"{band}_{roi_name}"
+        match = precomputed_df[
+            precomputed_df["identifier"].str.lower() == identifier_pattern.lower()
+        ]
+        
+        if match.empty:
+            match = precomputed_df[
+                precomputed_df["identifier"].str.contains(band, case=False, na=False)
+            ]
+        
+        if not match.empty:
+            row = match.iloc[0]
+            p = float(row.get("p_value", 1.0))
+            q = float(row.get("q_value", 1.0)) if "q_value" in row else p
+            d = float(row.get("effect_size_d", 0.0))
+            sig = bool(row.get("significant_fdr", False)) if "significant_fdr" in row else (q < 0.05)
+            qvalues[band] = (p, q, d, sig)
+    
+    return qvalues
+
+
 def plot_paired_comparison(
     data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]],
     subject: str,
@@ -780,12 +869,16 @@ def plot_paired_comparison(
     label1: str = "Condition 1",
     label2: str = "Condition 2",
     roi_name: Optional[str] = None,
+    precomputed_stats: Optional[pd.DataFrame] = None,
+    stats_dir: Optional["Path"] = None,
 ) -> None:
     """Unified paired comparison plot.
     
     Creates a single-row figure with one subplot per frequency band, showing
     paired comparisons with box plots, scatter points, and connecting lines.
-    Uses Wilcoxon signed-rank test with FDR correction.
+    
+    If precomputed_stats or stats_dir is provided, uses pre-computed statistics
+    from the behavior pipeline instead of computing on-the-fly.
     
     Args:
         data_by_band: Dict mapping band names to (values1, values2) tuples.
@@ -798,6 +891,8 @@ def plot_paired_comparison(
         label1: Label for first condition (from user config).
         label2: Label for second condition (from user config).
         roi_name: Optional ROI name for title.
+        precomputed_stats: Optional pre-computed statistics DataFrame.
+        stats_dir: Optional path to stats directory to load pre-computed stats.
     """
     from pathlib import Path
     from scipy.stats import wilcoxon
@@ -809,7 +904,6 @@ def plot_paired_comparison(
             logger.warning(f"No data provided for {feature_label} paired comparison")
         return
     
-    # Get bands in order
     band_order = get_band_names(config)
     bands = [b for b in band_order if b in data_by_band]
     bands += [b for b in data_by_band if b not in bands]
@@ -821,38 +915,68 @@ def plot_paired_comparison(
     plot_cfg = get_plot_config(config)
     band_colors = get_band_colors(config)
     
-    # Consistent colors
     segment_colors = {
-        "v1": "#5a7d9a",  # first condition
-        "v2": "#c44e52",  # second condition
+        "v1": "#5a7d9a",
+        "v2": "#c44e52",
     }
     
-    # Compute statistics for each band
-    all_pvalues = []
-    pvalue_keys = []
+    feature_type_map = {
+        "Band Power": "power",
+        "Aperiodic": "aperiodic",
+        "Connectivity": "connectivity",
+        "Spectral": "spectral",
+        "ERDS": "erds",
+        "Band Ratios": "ratios",
+        "Asymmetry": "asymmetry",
+        "ITPC": "itpc",
+        "PAC": "pac",
+        "Complexity": "complexity",
+    }
+    feature_type = feature_type_map.get(feature_label, feature_label.lower())
     
-    for band in bands:
-        v1, v2 = data_by_band[band]
-        
-        if len(v1) > 5 and len(v2) > 5 and len(v1) == len(v2):
-            try:
-                _, p = wilcoxon(v2, v1)
-                diff = v2 - v1
-                pooled_std = np.std(diff, ddof=1)
-                d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
-                all_pvalues.append(p)
-                pvalue_keys.append((band, p, d))
-            except Exception:
-                pass
+    if precomputed_stats is None and stats_dir is not None:
+        precomputed_stats = load_precomputed_paired_stats(
+            stats_dir=stats_dir,
+            feature_type=feature_type,
+            comparison_type="window",
+            condition1=label1.lower(),
+            condition2=label2.lower(),
+            roi_name=roi_name,
+        )
     
-    # FDR correction
     qvalues = {}
     n_significant = 0
-    if all_pvalues:
-        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-        for i, (band, p, d) in enumerate(pvalue_keys):
-            qvalues[band] = (p, qvals[i], d, rejected[i])
-        n_significant = int(np.sum(rejected))
+    use_precomputed = precomputed_stats is not None and not precomputed_stats.empty
+    
+    if use_precomputed:
+        qvalues = get_precomputed_qvalues(precomputed_stats, bands, roi_name or "all")
+        n_significant = sum(1 for v in qvalues.values() if v[3])
+        if logger:
+            logger.debug(f"Using pre-computed statistics for {feature_label} ({len(qvalues)} bands)")
+    else:
+        all_pvalues = []
+        pvalue_keys = []
+        
+        for band in bands:
+            v1, v2 = data_by_band[band]
+            
+            min_n = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
+            if len(v1) >= min_n and len(v2) >= min_n and len(v1) == len(v2):
+                try:
+                    _, p = wilcoxon(v2, v1)
+                    diff = v2 - v1
+                    pooled_std = np.std(diff, ddof=1)
+                    d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
+                    all_pvalues.append(p)
+                    pvalue_keys.append((band, p, d))
+                except Exception:
+                    pass
+        
+        if all_pvalues:
+            rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
+            for i, (band, p, d) in enumerate(pvalue_keys):
+                qvalues[band] = (p, qvals[i], d, rejected[i])
+            n_significant = int(np.sum(rejected))
     
     # Create figure
     fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)

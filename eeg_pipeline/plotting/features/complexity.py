@@ -136,6 +136,7 @@ def plot_complexity_by_condition(
     save_dir: Path,
     logger: Any = None,
     config: Any = None,
+    stats_dir: Optional[Path] = None,
 ) -> None:
     """Compare complexity metrics between conditions per band.
     
@@ -145,6 +146,8 @@ def plot_complexity_by_condition(
     For window comparisons (paired): Uses the unified plot_paired_comparison helper.
     For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
     Creates one figure per ROI per metric.
+    
+    If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
     from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.infra.paths import ensure_dir
@@ -340,6 +343,7 @@ def plot_complexity_by_condition(
                         label1=seg1.capitalize(),
                         label2=seg2.capitalize(),
                         roi_name=roi_name,
+                        stats_dir=stats_dir,
                     )
             
             if logger:

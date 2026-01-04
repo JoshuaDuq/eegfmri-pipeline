@@ -1160,6 +1160,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optFailOnMissingNamedWindow:
 		m.failOnMissingNamedWindow = !m.failOnMissingNamedWindow
 		m.useDefaultAdvanced = false
+	// TFR section
+	case optFeatGroupTFR:
+		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
+	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrDecim, optTfrWorkers:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	}
 
 	// Clamp cursor after expand/collapse changes.
@@ -2023,11 +2029,20 @@ func (m *Model) toggleDecodingAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optDecodingNPerm, optDecodingInnerSplits, optRNGSeed:
+	case optDecodingNPerm, optDecodingInnerSplits, optDecodingMinTrialsInner, optRNGSeed, optRfNEstimators:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optDecodingSkipTimeGen:
 		m.skipTimeGen = !m.skipTimeGen
+		m.useDefaultAdvanced = false
+	case optElasticNetAlphaGrid:
+		m.startTextEdit(textFieldElasticNetAlphaGrid)
+		m.useDefaultAdvanced = false
+	case optElasticNetL1RatioGrid:
+		m.startTextEdit(textFieldElasticNetL1RatioGrid)
+		m.useDefaultAdvanced = false
+	case optRfMaxDepthGrid:
+		m.startTextEdit(textFieldRfMaxDepthGrid)
 		m.useDefaultAdvanced = false
 	}
 }
@@ -2053,6 +2068,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPrepICAMethod:
 		m.prepICAMethod = (m.prepICAMethod + 1) % 3
+		m.useDefaultAdvanced = false
+	case optIcaLabelsToKeep:
+		m.startTextEdit(textFieldIcaLabelsToKeep)
 		m.useDefaultAdvanced = false
 	}
 }
@@ -2647,6 +2665,33 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+	// TFR options
+	case optTfrFreqMin:
+		if val >= 0 {
+			m.tfrFreqMin = val
+		}
+	case optTfrFreqMax:
+		if val > 0 {
+			m.tfrFreqMax = val
+		}
+	case optTfrNFreqs:
+		if val >= 1 {
+			m.tfrNFreqs = int(val)
+		}
+	case optTfrMinCycles:
+		if val >= 1 {
+			m.tfrMinCycles = val
+		}
+	case optTfrNCyclesFactor:
+		if val >= 0.5 {
+			m.tfrNCyclesFactor = val
+		}
+	case optTfrDecim:
+		if val >= 1 {
+			m.tfrDecim = int(val)
+		}
+	case optTfrWorkers:
+		m.tfrWorkers = int(val)
 	}
 }
 
@@ -2902,9 +2947,17 @@ func (m *Model) commitDecodingNumber(val float64) {
 		if val >= 2 {
 			m.innerSplits = int(val)
 		}
+	case optDecodingMinTrialsInner:
+		if val >= 1 {
+			m.decodingMinTrialsInner = int(val)
+		}
 	case optRNGSeed:
 		if val >= 0 {
 			m.rngSeed = int(val)
+		}
+	case optRfNEstimators:
+		if val >= 1 {
+			m.rfNEstimators = int(val)
 		}
 	}
 }

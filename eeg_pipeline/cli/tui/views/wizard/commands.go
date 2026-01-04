@@ -1106,6 +1106,29 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		args = append(args, splitCSVList(m.asymmetryChannelPairsSpec)...)
 	}
 
+	// TFR parameters
+	if m.tfrFreqMin != 1.0 {
+		args = append(args, "--tfr-freq-min", fmt.Sprintf("%.1f", m.tfrFreqMin))
+	}
+	if m.tfrFreqMax != 100.0 {
+		args = append(args, "--tfr-freq-max", fmt.Sprintf("%.1f", m.tfrFreqMax))
+	}
+	if m.tfrNFreqs != 40 {
+		args = append(args, "--tfr-n-freqs", fmt.Sprintf("%d", m.tfrNFreqs))
+	}
+	if m.tfrMinCycles != 3.0 {
+		args = append(args, "--tfr-min-cycles", fmt.Sprintf("%.1f", m.tfrMinCycles))
+	}
+	if m.tfrNCyclesFactor != 2.0 {
+		args = append(args, "--tfr-n-cycles-factor", fmt.Sprintf("%.1f", m.tfrNCyclesFactor))
+	}
+	if m.tfrDecim != 4 {
+		args = append(args, "--tfr-decim", fmt.Sprintf("%d", m.tfrDecim))
+	}
+	if m.tfrWorkers != -1 {
+		args = append(args, "--tfr-workers", fmt.Sprintf("%d", m.tfrWorkers))
+	}
+
 	// Generic & Validation
 	if m.exportAllFeatures {
 		args = append(args, "--export-all")
@@ -1649,12 +1672,35 @@ func (m Model) buildDecodingAdvancedArgs() []string {
 		args = append(args, "--inner-splits", fmt.Sprintf("%d", m.innerSplits))
 	}
 
+	if m.decodingMinTrialsInner != 3 {
+		args = append(args, "--min-trials-inner", fmt.Sprintf("%d", m.decodingMinTrialsInner))
+	}
+
 	if m.rngSeed > 0 {
 		args = append(args, "--rng-seed", fmt.Sprintf("%d", m.rngSeed))
 	}
 
 	if m.skipTimeGen {
 		args = append(args, "--skip-time-gen")
+	}
+
+	// ElasticNet hyperparameters
+	if strings.TrimSpace(m.elasticNetAlphaGrid) != "" && m.elasticNetAlphaGrid != "0.001,0.01,0.1,1,10" {
+		args = append(args, "--elasticnet-alpha-grid")
+		args = append(args, splitCSVList(m.elasticNetAlphaGrid)...)
+	}
+	if strings.TrimSpace(m.elasticNetL1RatioGrid) != "" && m.elasticNetL1RatioGrid != "0.2,0.5,0.8" {
+		args = append(args, "--elasticnet-l1-ratio-grid")
+		args = append(args, splitCSVList(m.elasticNetL1RatioGrid)...)
+	}
+
+	// Random Forest hyperparameters
+	if m.rfNEstimators != 500 {
+		args = append(args, "--rf-n-estimators", fmt.Sprintf("%d", m.rfNEstimators))
+	}
+	if strings.TrimSpace(m.rfMaxDepthGrid) != "" && m.rfMaxDepthGrid != "5,10,20,null" {
+		args = append(args, "--rf-max-depth-grid")
+		args = append(args, splitCSVList(m.rfMaxDepthGrid)...)
 	}
 
 	return args
@@ -1698,6 +1744,10 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepProbThresh != 0.8 {
 		args = append(args, "--prob-threshold", fmt.Sprintf("%.1f", m.prepProbThresh))
+	}
+	if strings.TrimSpace(m.icaLabelsToKeep) != "" && m.icaLabelsToKeep != "brain,other" {
+		args = append(args, "--ica-labels-to-keep")
+		args = append(args, splitCSVList(m.icaLabelsToKeep)...)
 	}
 
 	// Epoching
