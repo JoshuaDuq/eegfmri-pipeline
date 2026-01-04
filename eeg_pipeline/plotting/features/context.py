@@ -398,8 +398,9 @@ class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
     def __init__(self, ctx: FeaturePlotContext):
         super().__init__(ctx, logger=ctx.logger)
 
-    def run_category(self, category: str) -> None:
-        plotters = VisualizationRegistry.get_plotters(category)
+    def run_category(self, category: str, *, plotters: Optional[List[Tuple[str, PlotterFunc["FeaturePlotContext"]]]] = None) -> None:
+        if plotters is None:
+            plotters = VisualizationRegistry.get_plotters(category)
         from eeg_pipeline.plotting.style import use_style
 
         with use_style():

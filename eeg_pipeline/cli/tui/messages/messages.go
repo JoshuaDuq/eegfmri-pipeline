@@ -87,8 +87,21 @@ type SubjectInfo struct {
 
 // SubjectsLoadedMsg is sent when subject discovery completes
 type SubjectsLoadedMsg struct {
-	Subjects []SubjectInfo
-	Error    error
+	Subjects              []SubjectInfo
+	AvailableWindows      []string
+	AvailableEventColumns []string
+	Error                 error
+}
+
+type PlotterInfo struct {
+	ID       string `json:"id"`
+	Category string `json:"category"`
+	Name     string `json:"name"`
+}
+
+type PlottersLoadedMsg struct {
+	FeaturePlotters map[string][]PlotterInfo
+	Error           error
 }
 
 // ConfigSummary holds key configuration values for the TUI

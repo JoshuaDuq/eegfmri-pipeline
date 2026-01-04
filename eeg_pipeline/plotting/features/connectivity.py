@@ -18,7 +18,6 @@ from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.plotting.io.figures import log_if_present, save_fig, get_band_color
 from eeg_pipeline.utils.data.columns import find_column_in_events, get_column_from_config, find_pain_column_in_events
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from ..config import get_plot_config
 from eeg_pipeline.plotting.features.utils import get_fdr_alpha
 from eeg_pipeline.utils.analysis.connectivity import (
@@ -27,6 +26,12 @@ from eeg_pipeline.utils.analysis.connectivity import (
     compute_significant_edges,
     parse_connectivity_columns,
 )
+from eeg_pipeline.plotting.features.utils import (
+    apply_fdr_correction,
+    get_band_names,
+    get_band_colors,
+)
+
 
 
 @lru_cache(maxsize=256)
@@ -34,8 +39,9 @@ def _parse_connectivity_columns_cached(
     columns: Tuple[str, ...],
     measure: str,
     band: str,
+    segment: Optional[str] = None,
 ) -> Tuple[Tuple[str, ...], Tuple[Tuple[str, str], ...]]:
-    cols, edges, _ = parse_connectivity_columns(list(columns), measure, band)
+    cols, edges, _ = parse_connectivity_columns(list(columns), measure, band, segment=segment)
     return tuple(cols), tuple(edges)
 
 
@@ -62,11 +68,12 @@ def plot_connectivity_circle_for_band(
     }
 
     cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
-    cols = list(cols_tup)
-    edges = list(edges_tup)
+    # Filter for REAL channel pairs (ch1 != ch2) for the circle plot
+    cols = [c for c, e in zip(cols_tup, edges_tup) if e[0] != e[1]]
+    edges = [e for e in edges_tup if e[0] != e[1]]
     
     if not cols:
-        log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
+        log_if_present(logger, "debug", f"No channel-pair connectivity columns found for {measure} {band}")
         return
         
     n_trials = len(features_df)
@@ -188,11 +195,12 @@ def plot_connectivity_circle_by_condition(
     }
 
     cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
-    cols = list(cols_tup)
-    edges = list(edges_tup)
+    # Filter for REAL channel pairs (ch1 != ch2) for the circle plot
+    cols = [c for c, e in zip(cols_tup, edges_tup) if e[0] != e[1]]
+    edges = [e for e in edges_tup if e[0] != e[1]]
     
     if not cols:
-        log_if_present(logger, "warning", f"No connectivity columns found for {measure} {band}")
+        log_if_present(logger, "debug", f"No channel-pair connectivity columns found for {measure} {band}")
         return
     
     node_names = sorted(list(set([ch for edge in edges for ch in edge])))
@@ -635,169 +643,277 @@ def plot_connectivity_by_condition(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    if features_df is None or features_df.empty or events_df is None:
+    """Connectivity comparison by Measure × Band.
+    
+    For window comparisons (paired): Uses the unified plot_paired_comparison helper.
+    For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
+    Creates one figure per connectivity measure per ROI.
+    """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison, get_named_segments
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions
+    from scipy import stats
+
+    if features_df is None or features_df.empty:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
-        return
-
-    from eeg_pipeline.plotting.features.utils import (
-        compute_condition_stats,
-        apply_fdr_correction,
-        format_stats_annotation,
-        format_footer_annotation,
-    )
-
-    measures = get_config_value(config, "plotting.plots.features.connectivity.measures", ["aec", "wpli"])
+    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    
+    # Get segments from config or auto-detect from data
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        measures_default = ["aec", "wpli", "pli", "plv", "coherence"]
+        for m in measures_default:
+            detected = get_named_segments(features_df, group=m)
+            if len(detected) >= 2:
+                segments = detected[:2]
+                if logger:
+                    logger.info(f"Auto-detected segments for connectivity comparison: {segments}")
+                break
+    
+    measures = get_config_value(config, "plotting.plots.features.connectivity.measures", ["aec", "wpli", "pli", "plv", "coherence"])
     bands = list(get_frequency_band_names(config) or ['theta', 'alpha', 'beta', 'gamma'])
     
-    plot_cfg = get_plot_config(config)
-    condition_colors = {"pain": plot_cfg.get_color("pain"), "nonpain": plot_cfg.get_color("nonpain")}
-    band_colors = {band: get_band_color(band, config) for band in bands}
-    
-    all_stats = []
-    all_pvals = []
-    cell_data = {}
-    
-    for m_idx, measure in enumerate(measures):
-        for b_idx, band in enumerate(bands):
-            edge_cols = [
-                c for c in features_df.columns 
-                if measure in c and f'_{band}_' in c and ('__' in c or '_chpair_' in c)
-            ]
-            
-            if not edge_cols:
-                cell_data[(m_idx, b_idx)] = None
-                continue
-            
-            trial_means = features_df[edge_cols].mean(axis=1)
-            vals_pain = trial_means[pain_mask].dropna().values
-            vals_nonpain = trial_means[~pain_mask].dropna().values
-            
-            if len(vals_nonpain) >= 3 and len(vals_pain) >= 3:
-                stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
-                all_stats.append(stats_result)
-                all_pvals.append(stats_result["p_raw"])
-                cell_data[(m_idx, b_idx)] = {
-                    "vals_nonpain": vals_nonpain,
-                    "vals_pain": vals_pain,
-                    "stats": stats_result,
-                    "stats_idx": len(all_stats) - 1,
-                }
-            else:
-                cell_data[(m_idx, b_idx)] = {
-                    "vals_nonpain": vals_nonpain,
-                    "vals_pain": vals_pain,
-                    "stats": None,
-                    "stats_idx": None,
-                }
-    
-    if all_pvals:
-        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
-        if valid_pvals:
-            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
-            q_idx = 0
-            for i, p in enumerate(all_pvals):
-                if np.isfinite(p):
-                    all_stats[i]["q_fdr"] = qvals[q_idx]
-                    all_stats[i]["fdr_significant"] = rejected[q_idx]
-                    q_idx += 1
-                else:
-                    all_stats[i]["q_fdr"] = np.nan
-                    all_stats[i]["fdr_significant"] = False
-            n_significant = int(np.sum(rejected))
-        else:
-            n_significant = 0
+    # Get ROI definitions for within-ROI filtering
+    rois = get_roi_definitions(config)
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
     else:
-        n_significant = 0
+        roi_names = ["all"]
+        if rois:
+            roi_names.extend(list(rois.keys()))
     
-    width_per_col = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("width_per_band", 3.5))
-    height_per_row = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("height_per_measure", 4.0))
-    fig, axes = plt.subplots(
-        len(measures),
-        len(bands),
-        figsize=(width_per_col * len(bands), height_per_row * len(measures)),
-        sharey="row",
-        squeeze=False,
-    )
+    if logger:
+        logger.info(f"Connectivity comparison: segments={segments}, ROIs={roi_names}, measures={measures}, compare_windows={compare_wins}, compare_columns={compare_cols}")
     
-    for m_idx, measure in enumerate(measures):
-        for b_idx, band in enumerate(bands):
-            ax = axes[m_idx, b_idx]
-            
-            data = cell_data.get((m_idx, b_idx))
-            
-            if data is None:
-                ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-                continue
-            
-            vals_nonpain = data["vals_nonpain"]
-            vals_pain = data["vals_pain"]
-            
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
-                bp = ax.boxplot([vals_nonpain, vals_pain], 
-                               positions=[0, 1], widths=0.4, patch_artist=True)
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
-                bp["boxes"][1].set_alpha(0.6)
+    # Helper to filter columns by ROI (for within-ROI connectivity)
+    def filter_columns_by_roi(cols, roi_name):
+        """Filter connectivity columns to within-ROI edges."""
+        if roi_name == "all":
+            return cols
+        if roi_name not in rois:
+            return cols
+        
+        import re
+        from eeg_pipeline.plotting.features.roi import get_roi_channels
+        
+        # Get all channel names that could be in data
+        all_ch_names = set()
+        for col in features_df.columns:
+            match = re.search(r'_chpair_([^_]+)_([^_]+)_', str(col))
+            if match:
+                all_ch_names.add(match.group(1))
+                all_ch_names.add(match.group(2))
+        
+        roi_channels = set(get_roi_channels(rois[roi_name], list(all_ch_names)))
+        
+        filtered = []
+        for col in cols:
+            match = re.search(r'_chpair_([^_]+)_([^_]+)_', str(col))
+            if match:
+                ch1, ch2 = match.group(1), match.group(2)
+                if ch1 in roi_channels and ch2 in roi_channels:
+                    filtered.append(col)
+        return filtered if filtered else cols  # Fallback to all if no matches
+    
+    # Window comparison (paired) - use unified helper
+    if compare_wins and segments and len(segments) >= 2:
+        seg1, seg2 = segments[0], segments[1]
+        
+        for roi_name in roi_names:
+            for measure in measures:
+                data_by_band = {}
+                for band in bands:
+                    cols1, _, _ = parse_connectivity_columns(list(features_df.columns), measure, band, segment=seg1)
+                    cols2, _, _ = parse_connectivity_columns(list(features_df.columns), measure, band, segment=seg2)
+                    
+                    # Filter by ROI
+                    cols1 = filter_columns_by_roi(cols1, roi_name)
+                    cols2 = filter_columns_by_roi(cols2, roi_name)
+                    
+                    if not cols1 or not cols2:
+                        continue
+                    
+                    s1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    s2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    valid_mask = s1.notna() & s2.notna()
+                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                    
+                    if len(v1) > 0:
+                        data_by_band[band] = (v1, v2)
                 
-                ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
-                          vals_nonpain, c=condition_colors["nonpain"], alpha=0.4, s=10)
-                ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
-                          vals_pain, c=condition_colors["pain"], alpha=0.4, s=10)
-                
-                if data["stats"] is not None:
-                    s = data["stats"]
-                    annotation = format_stats_annotation(
-                        p_raw=s["p_raw"],
-                        q_fdr=s.get("q_fdr"),
-                        cohens_d=s["cohens_d"],
-                        ci_low=s["ci_low"],
-                        ci_high=s["ci_high"],
-                        compact=True,
+                if data_by_band:
+                    measure_safe = measure.lower()
+                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    save_path = save_dir / f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_window"
+                    
+                    plot_paired_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Connectivity ({measure.upper()})",
+                        config=config,
+                        logger=logger,
+                        label1=seg1.capitalize(),
+                        label2=seg2.capitalize(),
+                        roi_name=roi_name,
                     )
-                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
-                    ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
-                           ha="center", fontsize=6, va="top", color=text_color,
-                           bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
+        
+        log_if_present(logger, "info", f"Saved connectivity paired comparison plots for {len(measures)} measures × {len(roi_names)} ROIs")
+
+    # Column comparison (unpaired) - use same styling
+    if compare_cols:
+        comp_mask_info = extract_comparison_mask(events_df, config)
+        if not comp_mask_info:
+            if logger:
+                logger.debug("Column comparison requested but config incomplete")
+        else:
+            m1, m2, label1, label2 = comp_mask_info
+            seg = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
             
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.medium)
-            ax.set_title(f"{band.capitalize()}", fontweight="bold", color=band_colors[band])
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+            plot_cfg = get_plot_config(config)
+            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+            band_colors = {band: get_band_color(band, config) for band in bands}
+            n_bands = len(bands)
+            n_trials = len(features_df)
             
-            if b_idx == 0:
-                ax.set_ylabel(f"{measure.upper()}")
+            for roi_name in roi_names:
+                for measure in measures:
+                    all_pvals, pvalue_keys, cell_data = [], [], {}
+                    
+                    for b_idx, band in enumerate(bands):
+                        cols, _, _ = parse_connectivity_columns(list(features_df.columns), measure, band, segment=seg)
+                        cols = filter_columns_by_roi(cols, roi_name)
+                        
+                        if not cols:
+                            cell_data[b_idx] = None
+                            continue
+                        
+                        val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                        v1 = val_series[m1].dropna().values
+                        v2 = val_series[m2].dropna().values
+                        
+                        cell_data[b_idx] = {"v1": v1, "v2": v2}
+                        
+                        if len(v1) >= 3 and len(v2) >= 3:
+                            try:
+                                _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
+                                diff = np.mean(v2) - np.mean(v1)
+                                pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                                d = diff / pooled_std if pooled_std > 0 else 0
+                                all_pvals.append(p)
+                                pvalue_keys.append((b_idx, p, d))
+                            except Exception:
+                                pass
+                    
+                    qvalues = {}
+                    n_significant = 0
+                    if all_pvals:
+                        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                        for i, (key, p, d) in enumerate(pvalue_keys):
+                            qvalues[key] = (p, qvals[i], d, rejected[i])
+                        n_significant = int(np.sum(rejected))
+                    
+                    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+                    
+                    for b_idx, band in enumerate(bands):
+                        ax = axes.flatten()[b_idx]
+                        data = cell_data.get(b_idx)
+                        
+                        if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                            ax.set_xticks([])
+                            continue
+                        
+                        v1, v2 = data["v1"], data["v2"]
+                        
+                        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                        bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                        bp["boxes"][0].set_alpha(0.6)
+                        bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                        bp["boxes"][1].set_alpha(0.6)
+                        
+                        ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+                        ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                        
+                        all_vals = np.concatenate([v1, v2])
+                        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                        yrange = ymax - ymin if ymax > ymin else 0.1
+                        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                        
+                        if b_idx in qvalues:
+                            _, q, d, sig = qvalues[b_idx]
+                            sig_marker = "†" if sig else ""
+                            sig_color = "#d62728" if sig else "#333333"
+                            ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
+                                       ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                                       fontweight="bold" if sig else "normal")
+                        
+                        ax.set_xticks([0, 1])
+                        ax.set_xticklabels([label1, label2], fontsize=9)
+                        ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
+                        ax.spines["top"].set_visible(False)
+                        ax.spines["right"].set_visible(False)
+                    
+                    n_tests = len(all_pvals)
+                    roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Edges"
+                    
+                    title = (f"Connectivity ({measure.upper()}): {label1} vs {label2} (Column Comparison)\n"
+                             f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                             f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                    
+                    plt.tight_layout()
+                    
+                    measure_safe = measure.lower()
+                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    filename = f"sub-{subject}_connectivity_{measure_safe}_by_condition{suffix}_column"
+                    
+                    save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                    plt.close(fig)
+            
+            log_if_present(logger, "info", f"Saved connectivity column comparison plots for {len(measures)} measures × {len(roi_names)} ROIs")
+
+
+def plot_connectivity_band_segment_condition(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> None:
+    """Connectivity comparison by Measure × Band.
+
     
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(f"Connectivity by Condition (sub-{subject})\nN: {n_nonpain} non-pain, {n_pain} pain", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-    
-    n_tests = len([p for p in all_pvals if np.isfinite(p)])
-    footer = format_footer_annotation(
-        n_tests=n_tests,
-        correction_method="FDR-BH",
-        alpha=0.05,
-        n_significant=n_significant,
-        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
+    Delegates to plot_connectivity_by_condition for unified implementation.
+    """
+    plot_connectivity_by_condition(
+        features_df=features_df,
+        events_df=events_df,
+        subject=subject,
+        save_dir=save_dir,
+        logger=logger,
+        config=config,
     )
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_connectivity_by_condition",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", f"Saved connectivity by condition ({n_significant}/{n_tests} FDR significant)")
+
+
+
+
 
 
 def plot_connectivity_heatmap(
@@ -807,27 +923,45 @@ def plot_connectivity_heatmap(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
-    prefix: str,
+    measure: str = "wpli",
+    band: str = "alpha",
     events_df: Optional[pd.DataFrame] = None,
 ) -> None:
-    edge_cols = [c for c in features_df.columns if c.startswith(prefix + "_") and "__" in c]
-    if not edge_cols:
+    """Plot connectivity heatmap for a given measure and band.
+    
+    Supports both old and new column formats.
+    """
+    # Use parse_connectivity_columns which handles both formats
+    cols_all, edges_all, _ = parse_connectivity_columns(list(features_df.columns), measure, band)
+    
+    # Filter for REAL channel pairs (ch1 != ch2) for the heatmap
+    cols = [c for c, e in zip(cols_all, edges_all) if e[0] != e[1]]
+    edges = [e for e in edges_all if e[0] != e[1]]
+    
+    if not cols:
+        log_if_present(logger, "debug", f"No channel-pair connectivity columns for {measure} {band} heatmap")
         return
 
+    # Extract unique nodes from edges
     edge_nodes = set()
-    for col in edge_cols:
-        try:
-            nodes_str = col.split("_")[-1]
-            ch1, ch2 = nodes_str.split("__")
-            edge_nodes.update([ch1, ch2])
-        except ValueError:
-            continue
-    channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
-    adj = build_adjacency_from_edges(features_df, edge_cols, channel_order)
+    for ch1, ch2 in edges:
+        edge_nodes.update([ch1, ch2])
+    
+    # Use info for ordering if available, otherwise just sort names
+    if info is not None:
+        channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
+    else:
+        channel_order = sorted(list(edge_nodes))
+        
+    if not channel_order:
+        log_if_present(logger, "debug", f"No channel names found for {measure} {band}")
+        return
+        
+    adj = build_adjacency_from_edges(features_df, cols, channel_order, edges=edges)
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = compute_significant_edges(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significant_edges(features_df, cols, events_df, config)
     plot_cfg = get_plot_config(config)
     vmax = float(np.nanmax(np.abs(adj))) if np.any(np.isfinite(adj)) else 1.0
 
@@ -837,26 +971,28 @@ def plot_connectivity_heatmap(
     ax.set_yticks(range(len(channel_order)))
     ax.set_xticklabels(channel_order, rotation=90, fontsize=plot_cfg.font.annotation)
     ax.set_yticklabels(channel_order, fontsize=plot_cfg.font.annotation)
-    ax.set_title(f"{prefix} mean connectivity (sub-{subject})")
+    ax.set_title(f"{measure.upper()} {band.capitalize()} mean connectivity (sub-{subject})")
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label("Connectivity")
 
     if sig_edges:
         sig_mask = np.zeros_like(adj, dtype=bool)
+        # Build map from edges to indices for highlighting
+        edge_to_idx = {(ch1, ch2): (channel_order.index(ch1), channel_order.index(ch2)) 
+                       for ch1, ch2 in edges if ch1 in channel_order and ch2 in channel_order}
         for col in sig_edges:
-            try:
-                nodes_str = col.split("_")[-1]
-                ch1, ch2 = nodes_str.split("__")
-            except ValueError:
-                continue
-            if ch1 in channel_order and ch2 in channel_order:
-                i = channel_order.index(ch1)
-                j = channel_order.index(ch2)
-                sig_mask[i, j] = sig_mask[j, i] = True
-        ax.contour(sig_mask, colors="k", levels=[0.5], linewidths=0.5)
+            # Find the edge for this column
+            for (ch1, ch2), (i, j) in edge_to_idx.items():
+                if col in cols:
+                    col_idx = cols.index(col)
+                    if edges[col_idx] == (ch1, ch2):
+                        sig_mask[i, j] = sig_mask[j, i] = True
+                        break
+        if np.any(sig_mask):
+            ax.contour(sig_mask, colors="k", levels=[0.5], linewidths=0.5)
 
     ensure_dir(save_dir)
-    output_name = save_dir / f"sub-{subject}_connectivity_heatmap_{prefix}"
+    output_name = save_dir / f"sub-{subject}_connectivity_heatmap_{measure}_{band}"
     save_fig(
         fig,
         output_name,
@@ -866,7 +1002,7 @@ def plot_connectivity_heatmap(
         pad_inches=plot_cfg.pad_inches,
     )
     plt.close(fig)
-    log_if_present(logger, "info", f"Saved connectivity heatmap for {prefix}")
+    log_if_present(logger, "info", f"Saved connectivity heatmap for {measure} {band}")
 
 
 def plot_connectivity_network(
@@ -876,27 +1012,45 @@ def plot_connectivity_network(
     save_dir: Path,
     logger: logging.Logger,
     config: Any,
-    prefix: str,
+    measure: str = "wpli",
+    band: str = "alpha",
     events_df: Optional[pd.DataFrame] = None,
 ) -> None:
-    edge_cols = [c for c in features_df.columns if c.startswith(prefix + "_") and "__" in c]
-    if not edge_cols:
+    """Plot connectivity network graph for a given measure and band.
+    
+    Supports both old and new column formats.
+    """
+    # Use parse_connectivity_columns which handles both formats
+    cols_all, edge_tuples_all, _ = parse_connectivity_columns(list(features_df.columns), measure, band)
+    
+    # Filter for REAL channel pairs (ch1 != ch2) for the network plot
+    cols = [c for c, e in zip(cols_all, edge_tuples_all) if e[0] != e[1]]
+    edge_tuples = [e for e in edge_tuples_all if e[0] != e[1]]
+    
+    if not cols:
+        log_if_present(logger, "debug", f"No channel-pair connectivity columns for {measure} {band} network")
         return
 
+    # Extract unique nodes from edges
     edge_nodes = set()
-    for col in edge_cols:
-        try:
-            nodes_str = col.split("_")[-1]
-            ch1, ch2 = nodes_str.split("__")
-            edge_nodes.update([ch1, ch2])
-        except ValueError:
-            continue
-    channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
-    adj = build_adjacency_from_edges(features_df, edge_cols, channel_order)
+    for ch1, ch2 in edge_tuples:
+        edge_nodes.update([ch1, ch2])
+    
+    # Use info for ordering if available, otherwise just sort names
+    if info is not None:
+        channel_order = [ch for ch in info.ch_names if ch in edge_nodes]
+    else:
+        channel_order = sorted(list(edge_nodes))
+        
+    if not channel_order:
+        log_if_present(logger, "debug", f"No channel names found for {measure} {band}")
+        return
+        
+    adj = build_adjacency_from_edges(features_df, cols, channel_order, edges=edge_tuples)
     if not np.any(np.isfinite(adj)):
         return
 
-    sig_edges = compute_significant_edges(features_df, edge_cols, events_df, config)
+    sig_edges = compute_significant_edges(features_df, cols, events_df, config)
     sig_set = sig_edges if isinstance(sig_edges, set) else set()
 
     plot_cfg = get_plot_config(config)
@@ -916,14 +1070,14 @@ def plot_connectivity_network(
     vmax = float(np.nanmax(np.abs(weights))) if weights.size else 1.0
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    edges = G.edges()
-    colors = [G[u][v]["weight"] for u, v in edges]
+    graph_edges = G.edges()
+    colors = [G[u][v]["weight"] for u, v in graph_edges]
     node_color = plot_cfg.get_color("network_node")
     nx.draw_networkx_nodes(G, pos, node_size=120, node_color=node_color, alpha=0.8, ax=ax)
     nx.draw_networkx_edges(
         G,
         pos,
-        edgelist=edges,
+        edgelist=graph_edges,
         edge_color=colors,
         edge_cmap=plt.cm.RdBu_r,
         edge_vmin=-vmax,
@@ -935,26 +1089,28 @@ def plot_connectivity_network(
     nx.draw_networkx_labels(G, pos, font_size=7, font_weight="bold", ax=ax)
 
     if sig_set:
+        # Build column-to-edge mapping
+        col_to_edge = {col: edge_tuples[i] for i, col in enumerate(cols)}
         highlight = []
         for col in sig_set:
-            try:
-                nodes_str = col.split("_")[-1]
-                ch1, ch2 = nodes_str.split("__")
-            except ValueError:
-                continue
-            if G.has_edge(ch1, ch2):
-                highlight.append((ch1, ch2))
-        nx.draw_networkx_edges(G, pos, edgelist=highlight, edge_color="lime", width=3.0, alpha=0.9, ax=ax)
+            if col in col_to_edge:
+                ch1, ch2 = col_to_edge[col]
+                if G.has_edge(ch1, ch2):
+                    highlight.append((ch1, ch2))
+                elif G.has_edge(ch2, ch1):
+                    highlight.append((ch2, ch1))
+        if highlight:
+            nx.draw_networkx_edges(G, pos, edgelist=highlight, edge_color="lime", width=3.0, alpha=0.9, ax=ax)
 
     sm = plt.cm.ScalarMappable(cmap="RdBu_r", norm=plt.Normalize(vmin=-vmax, vmax=vmax))
     sm.set_array([])
     cbar = plt.colorbar(sm, ax=ax)
     cbar.set_label("Connectivity")
-    ax.set_title(f"Connectivity network ({prefix}, sub-{subject})")
+    ax.set_title(f"Connectivity network ({measure.upper()} {band.capitalize()}, sub-{subject})")
     ax.axis("off")
 
     ensure_dir(save_dir)
-    output_name = save_dir / f"sub-{subject}_connectivity_network_{prefix}"
+    output_name = save_dir / f"sub-{subject}_connectivity_network_{measure}_{band}"
     save_fig(
         fig,
         output_name,
@@ -964,7 +1120,7 @@ def plot_connectivity_network(
         pad_inches=plot_cfg.pad_inches,
     )
     plt.close(fig)
-    log_if_present(logger, "info", f"Saved connectivity network for {prefix}")
+    log_if_present(logger, "info", f"Saved connectivity network for {measure} {band}")
 
 
 def plot_sliding_state_centroids(

@@ -328,13 +328,11 @@ def plot_itpc_by_condition(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Compare ITPC between Pain and Non-pain conditions using box+strip.
+    """Compare ITPC between conditions per band.
     
-    Statistical improvements:
-    - Shows both raw p-value and FDR-corrected q-value
-    - Includes bootstrap 95% CI for mean difference
-    - Reports Cohen's d effect size
-    - Footer shows total tests and correction method
+    For window comparisons (paired): Uses the unified plot_paired_comparison helper.
+    For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
+    Creates one figure per ROI.
     """
     if itpc_df is None or itpc_df.empty or events_df is None:
         return
@@ -347,207 +345,258 @@ def plot_itpc_by_condition(
         )
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
-        return
-    
     from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
-        compute_condition_stats,
+        plot_paired_comparison,
         apply_fdr_correction,
-        format_stats_annotation,
-        format_footer_annotation,
-        get_band_colors,
-        get_band_names,
-        get_condition_colors,
+        get_named_segments,
+        get_band_color,
     )
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+    from scipy import stats
 
-    condition_colors = get_condition_colors(config)
-    band_colors = get_band_colors(config)
-
-    itpc_entries = []
+    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    
+    # Get segments from config or auto-detect from data
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        detected = get_named_segments(itpc_df, group="itpc")
+        if len(detected) >= 2:
+            segments = detected[:2]
+            if logger:
+                logger.info(f"Auto-detected segments for ITPC comparison: {segments}")
+    
+    # Get available bands from data
     band_set = set()
-    segment_set = set()
     for col in itpc_df.columns:
         parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "itpc":
-            continue
-        segment = parsed.get("segment")
-        band = parsed.get("band")
-        if not segment or not band:
-            continue
-        itpc_entries.append(
-            (
-                str(col),
-                str(band),
-                str(segment),
-                str(parsed.get("scope") or ""),
-            )
-        )
-        band_set.add(str(band))
-        segment_set.add(str(segment))
-
-    if not itpc_entries or not band_set:
-        return
-
-    segment = "active" if "active" in segment_set else sorted(segment_set)[0]
-    itpc_entries = [e for e in itpc_entries if e[2] == segment]
-    band_set = {e[1] for e in itpc_entries}
-
+        if parsed.get("valid") and parsed.get("group") == "itpc":
+            band = parsed.get("band")
+            if band:
+                band_set.add(str(band))
+    
+    from eeg_pipeline.plotting.features.utils import get_band_names
     band_order = get_band_names(config)
     bands = [b for b in band_order if b in band_set]
     bands += [b for b in sorted(band_set) if b not in bands]
     if not bands:
         return
 
-    plot_cfg = get_plot_config(config)
-    n_bands = len(bands)
-
-    # Calculate figure size dynamically
-    width_per_band = float(plot_cfg.plot_type_configs.get("itpc", {}).get("width_per_band_box", 4.0))
-    fig_height = float(plot_cfg.plot_type_configs.get("itpc", {}).get("height_box", 5.0))
-    figsize = (width_per_band * n_bands, fig_height)
+    # Get ROI definitions
+    rois = get_roi_definitions(config)
+    all_channels = set()
+    for col in itpc_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "itpc" and parsed.get("scope") == "ch":
+            ch = parsed.get("identifier")
+            if ch:
+                all_channels.add(str(ch))
+    all_channels = list(all_channels)
     
-    all_stats = []
-    all_pvals = []
-    band_data = {}
-    
-    for band in bands:
-        band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "global"]
-        if not band_cols:
-            band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "roi"]
-        if not band_cols:
-            band_cols = [c for c, b, _, scope in itpc_entries if b == band and scope == "ch"]
-        
-        if not band_cols:
-            band_data[band] = None
-            continue
-        
-        mean_itpc = itpc_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        vals_pain = mean_itpc[pain_mask].dropna().values
-        vals_nonpain = mean_itpc[~pain_mask].dropna().values
-        
-        if len(vals_pain) >= 3 and len(vals_nonpain) >= 3:
-            stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
-            all_stats.append(stats_result)
-            all_pvals.append(stats_result["p_raw"])
-            band_data[band] = {
-                "vals_nonpain": vals_nonpain,
-                "vals_pain": vals_pain,
-                "stats": stats_result,
-                "stats_idx": len(all_stats) - 1,
-            }
-        else:
-            band_data[band] = {
-                "vals_nonpain": vals_nonpain,
-                "vals_pain": vals_pain,
-                "stats": None,
-            }
-    
-    if all_pvals:
-        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
-        if valid_pvals:
-            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
-            q_idx = 0
-            for i, p in enumerate(all_pvals):
-                if np.isfinite(p):
-                    all_stats[i]["q_fdr"] = qvals[q_idx]
-                    all_stats[i]["fdr_significant"] = rejected[q_idx]
-                    q_idx += 1
-                else:
-                    all_stats[i]["q_fdr"] = np.nan
-                    all_stats[i]["fdr_significant"] = False
-            n_significant = int(np.sum(rejected))
-        else:
-            n_significant = 0
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
     else:
-        n_significant = 0
+        roi_names = ["all"]
+        if rois:
+            roi_names.extend(list(rois.keys()))
     
-    fig, axes = plt.subplots(1, n_bands, figsize=figsize, squeeze=False)
-    axes = axes.flatten()
+    if logger:
+        logger.info(f"ITPC comparison: segments={segments}, ROIs={roi_names}, bands={bands}, compare_windows={compare_wins}, compare_columns={compare_cols}")
     
-    for idx, band in enumerate(bands):
-        ax = axes[idx]
-        data = band_data.get(band)
-        
-        if data is None:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-            continue
-        
-        vals_nonpain = data["vals_nonpain"]
-        vals_pain = data["vals_pain"]
-        
-        if len(vals_pain) < 3 or len(vals_nonpain) < 3:
-            ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center", transform=ax.transAxes)
-            continue
-        
-        bp = ax.boxplot([vals_nonpain, vals_pain], positions=[0, 1], widths=0.4, patch_artist=True)
-        bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-        bp["boxes"][0].set_alpha(0.6)
-        bp["boxes"][1].set_facecolor(condition_colors["pain"])
-        bp["boxes"][1].set_alpha(0.6)
-        
-        ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
-                  vals_nonpain, c=condition_colors["nonpain"], alpha=0.4, s=12)
-        ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
-                  vals_pain, c=condition_colors["pain"], alpha=0.4, s=12)
-        
-        if data.get("stats") is not None:
-            s = data["stats"]
-            annotation = format_stats_annotation(
-                p_raw=s["p_raw"],
-                q_fdr=s.get("q_fdr"),
-                cohens_d=s["cohens_d"],
-                ci_low=s["ci_low"],
-                ci_high=s["ci_high"],
-                compact=True,
-            )
-            text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
-            ax.text(0.5, 0.98, annotation, ha="center", va="top", 
-                   transform=ax.transAxes, fontsize=plot_cfg.font.annotation, color=text_color,
-                   bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
-        
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.large)
-        ax.set_ylabel("Mean ITPC")
-        ax.set_title(f"{band.capitalize()}", fontweight="bold", 
-                    color=band_colors.get(band, "#333333"))
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-    
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(
-        f"ITPC by Condition ({segment}, sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=1.02,
-    )
-    
-    n_tests = len([p for p in all_pvals if np.isfinite(p)])
-    footer = format_footer_annotation(
-        n_tests=n_tests,
-        correction_method="FDR-BH",
-        alpha=0.05,
-        n_significant=n_significant,
-        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
-    )
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
+    plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_itpc_by_condition",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", f"Saved ITPC by condition ({n_significant}/{n_tests} FDR significant)")
+    
+    # Helper to get ITPC columns for a segment/band/ROI
+    def get_itpc_columns(segment, band, roi_name):
+        """Get ITPC columns filtered by segment, band, and ROI."""
+        cols = []
+        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois.get(roi_name, []), all_channels)
+        roi_set = set(roi_channels) if roi_channels else set(all_channels)
+        
+        for col in itpc_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "itpc":
+                continue
+            if str(parsed.get("segment") or "") != segment:
+                continue
+            if str(parsed.get("band") or "") != band:
+                continue
+            # Prefer global/roi scope, but accept ch if ROI matches
+            scope = parsed.get("scope") or ""
+            if scope in ("global", "roi"):
+                cols.append(col)
+            elif scope == "ch":
+                ch_id = str(parsed.get("identifier") or "")
+                if ch_id in roi_set:
+                    cols.append(col)
+        return cols
+    
+    # Window comparison (paired) - use unified helper
+    if compare_wins and len(segments) >= 2:
+        seg1, seg2 = segments[0], segments[1]
+        
+        for roi_name in roi_names:
+            data_by_band = {}
+            for band in bands:
+                cols1 = get_itpc_columns(seg1, band, roi_name)
+                cols2 = get_itpc_columns(seg2, band, roi_name)
+                
+                if not cols1 or not cols2:
+                    continue
+                
+                s1 = itpc_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                s2 = itpc_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                valid_mask = s1.notna() & s2.notna()
+                v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                
+                if len(v1) > 0:
+                    data_by_band[band] = (v1, v2)
+            
+            if data_by_band:
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                save_path = save_dir / f"sub-{subject}_itpc_by_condition{suffix}_window"
+                
+                plot_paired_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label="ITPC",
+                    config=config,
+                    logger=logger,
+                    label1=seg1.capitalize(),
+                    label2=seg2.capitalize(),
+                    roi_name=roi_name,
+                )
+        
+        log_if_present(logger, "info", f"Saved ITPC paired comparison plots for {len(roi_names)} ROIs")
+
+    # Column comparison (unpaired)
+    if compare_cols:
+        comp_mask_info = extract_comparison_mask(events_df, config)
+        if not comp_mask_info:
+            if logger:
+                logger.debug("Column comparison requested but config incomplete")
+        else:
+            m1, m2, label1, label2 = comp_mask_info
+            seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+            
+            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+            band_colors = {band: get_band_color(band, config) for band in bands}
+            n_bands = len(bands)
+            n_trials = len(itpc_df)
+            
+            for roi_name in roi_names:
+                all_pvals, pvalue_keys, cell_data = [], [], {}
+                
+                for col_idx, band in enumerate(bands):
+                    cols = get_itpc_columns(seg_name, band, roi_name)
+                    
+                    if not cols:
+                        cell_data[col_idx] = None
+                        continue
+                    
+                    val_series = itpc_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    v1 = val_series[m1].dropna().values
+                    v2 = val_series[m2].dropna().values
+                    
+                    cell_data[col_idx] = {"v1": v1, "v2": v2}
+                    
+                    if len(v1) >= 3 and len(v2) >= 3:
+                        try:
+                            _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
+                            diff = np.mean(v2) - np.mean(v1)
+                            pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                            d = diff / pooled_std if pooled_std > 0 else 0
+                            all_pvals.append(p)
+                            pvalue_keys.append((col_idx, p, d))
+                        except Exception:
+                            pass
+                
+                qvalues = {}
+                n_significant = 0
+                if all_pvals:
+                    rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                    for i, (key, p, d) in enumerate(pvalue_keys):
+                        qvalues[key] = (p, qvals[i], d, rejected[i])
+                    n_significant = int(np.sum(rejected))
+                
+                fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+                
+                for col_idx, band in enumerate(bands):
+                    ax = axes.flatten()[col_idx]
+                    data = cell_data.get(col_idx)
+                    
+                    if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                        ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                               transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                        ax.set_xticks([])
+                        continue
+                    
+                    v1, v2 = data["v1"], data["v2"]
+                    
+                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                    bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                    bp["boxes"][0].set_alpha(0.6)
+                    bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                    bp["boxes"][1].set_alpha(0.6)
+                    
+                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    
+                    all_vals = np.concatenate([v1, v2])
+                    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                    yrange = ymax - ymin if ymax > ymin else 0.1
+                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                    
+                    if col_idx in qvalues:
+                        _, q, d, sig = qvalues[col_idx]
+                        sig_marker = "†" if sig else ""
+                        sig_color = "#d62728" if sig else "#333333"
+                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
+                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                                   fontweight="bold" if sig else "normal")
+                    
+                    ax.set_xticks([0, 1])
+                    ax.set_xticklabels([label1, label2], fontsize=9)
+                    ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                
+                n_tests = len(all_pvals)
+                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                
+                title = (f"ITPC: {label1} vs {label2} (Column Comparison)\n"
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                
+                plt.tight_layout()
+                
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                filename = f"sub-{subject}_itpc_by_condition{suffix}_column"
+                
+                save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                         bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                plt.close(fig)
+            
+            log_if_present(logger, "info", f"Saved ITPC column comparison plots for {len(roi_names)} ROIs")
+
+
 
 
 
@@ -790,7 +839,12 @@ def plot_pac_by_condition(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Compare PAC between Pain and Non-pain using box+strip plots."""
+    """Compare PAC between conditions per phase-amplitude pair.
+    
+    For window comparisons (paired): Uses the unified plot_paired_comparison helper.
+    For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
+    Creates one figure per ROI.
+    """
     if pac_trials_df is None or pac_trials_df.empty or events_df is None:
         return
     if len(pac_trials_df) != len(events_df):
@@ -801,31 +855,41 @@ def plot_pac_by_condition(
         )
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
-        return
-
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
+        plot_paired_comparison,
+        apply_fdr_correction,
         get_named_segments,
         get_named_bands,
         collect_named_series,
-        compute_condition_stats,
-        apply_fdr_correction,
-        format_stats_annotation,
-        format_footer_annotation,
-        get_condition_colors,
     )
-    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+    from scipy import stats
 
-    segments = get_named_segments(pac_trials_df, group="pac")
-    if not segments:
-        return
-    segment = "active" if "active" in segments else segments[0]
-
-    pairs = get_named_bands(pac_trials_df, group="pac", segment=segment)
-    if not pairs:
-        return
-
+    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    
+    # Get segments from config or auto-detect from data
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        detected = get_named_segments(pac_trials_df, group="pac")
+        if len(detected) >= 2:
+            segments = detected[:2]
+            if logger:
+                logger.info(f"Auto-detected segments for PAC comparison: {segments}")
+    
+    # Get available pairs from data
+    all_pairs = set()
+    for col in pac_trials_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "pac":
+            band = parsed.get("band")
+            if band:
+                all_pairs.add(str(band))
+    
+    # Order pairs by config if specified
     cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
     if cfg_pairs is None:
         cfg_pairs = get_config_value(config, "feature_engineering.pac.pairs", None)
@@ -836,146 +900,226 @@ def plot_pac_by_condition(
         elif isinstance(entry, str):
             ordered_pairs.append(entry)
     if ordered_pairs:
-        pairs = [p for p in ordered_pairs if p in pairs] + [p for p in pairs if p not in ordered_pairs]
-
-    plot_cfg = get_plot_config(config)
-    condition_colors = get_condition_colors(config)
-
-    width_per_pair = float(plot_cfg.plot_type_configs.get("pac", {}).get("width_per_roi", 4.0))
-    fig_height = float(plot_cfg.plot_type_configs.get("pac", {}).get("height_box", 5.0))
-    fig, axes = plt.subplots(1, len(pairs), figsize=(width_per_pair * len(pairs), fig_height), squeeze=False)
-    axes = axes.flatten()
-
-    all_stats = []
-    all_pvals = []
-    pair_data = {}
-
-    stat_preference = ["val", "mean", "avg", "value"]
-
-    for pair in pairs:
-        series, _, _ = collect_named_series(
-            pac_trials_df,
-            group="pac",
-            segment=segment,
-            band=pair,
-            stat_preference=stat_preference,
-            scope_preference=["global", "roi", "ch"],
-        )
-        vals_pain = series[pain_mask].dropna().values
-        vals_nonpain = series[~pain_mask].dropna().values
-        if len(vals_pain) >= 3 and len(vals_nonpain) >= 3:
-            stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
-            all_stats.append(stats_result)
-            all_pvals.append(stats_result["p_raw"])
-            pair_data[pair] = (vals_nonpain, vals_pain, stats_result, len(all_stats) - 1)
-        else:
-            pair_data[pair] = (vals_nonpain, vals_pain, None, None)
-
-    if all_pvals:
-        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
-        if valid_pvals:
-            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
-            q_idx = 0
-            for i, p in enumerate(all_pvals):
-                if np.isfinite(p):
-                    all_stats[i]["q_fdr"] = qvals[q_idx]
-                    all_stats[i]["fdr_significant"] = rejected[q_idx]
-                    q_idx += 1
-            n_significant = int(np.sum(rejected))
-        else:
-            n_significant = 0
+        pairs = [p for p in ordered_pairs if p in all_pairs] + [p for p in sorted(all_pairs) if p not in ordered_pairs]
     else:
-        n_significant = 0
+        pairs = sorted(all_pairs)
+    
+    if not pairs:
+        return
+    
+    # Get ROI definitions
+    rois = get_roi_definitions(config)
+    all_channels = set()
+    for col in pac_trials_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "pac" and parsed.get("scope") == "ch":
+            ch = parsed.get("identifier")
+            if ch:
+                all_channels.add(str(ch))
+    all_channels = list(all_channels)
+    
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
+    else:
+        roi_names = ["all"]
+        if rois:
+            roi_names.extend(list(rois.keys()))
+    
+    if logger:
+        logger.info(f"PAC comparison: segments={segments}, ROIs={roi_names}, pairs={pairs}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+    
+    plot_cfg = get_plot_config(config)
+    ensure_dir(save_dir)
+    
+    stat_preference = ["val", "mean", "avg", "value"]
+    
+    # Helper to get PAC columns for a segment/pair/ROI
+    def get_pac_columns(segment, pair, roi_name):
+        """Get PAC columns filtered by segment, pair, and ROI."""
+        cols = []
+        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois.get(roi_name, []), all_channels)
+        roi_set = set(roi_channels) if roi_channels else set(all_channels)
+        
+        for col in pac_trials_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "pac":
+                continue
+            if str(parsed.get("segment") or "") != segment:
+                continue
+            if str(parsed.get("band") or "") != pair:
+                continue
+            # Accept global/roi scope or ch scope in ROI
+            scope = parsed.get("scope") or ""
+            if scope in ("global", "roi"):
+                cols.append(col)
+            elif scope == "ch":
+                ch_id = str(parsed.get("identifier") or "")
+                if ch_id in roi_set:
+                    cols.append(col)
+        return cols
+    
+    # Window comparison (paired) - use unified helper
+    if compare_wins and len(segments) >= 2:
+        seg1, seg2 = segments[0], segments[1]
+        
+        for roi_name in roi_names:
+            data_by_band = {}  # Reusing dict name for compat with helper
+            for pair in pairs:
+                cols1 = get_pac_columns(seg1, pair, roi_name)
+                cols2 = get_pac_columns(seg2, pair, roi_name)
+                
+                if not cols1 or not cols2:
+                    continue
+                
+                s1 = pac_trials_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                s2 = pac_trials_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                
+                valid_mask = s1.notna() & s2.notna()
+                v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                
+                if len(v1) > 0:
+                    data_by_band[pair] = (v1, v2)
+            
+            if data_by_band:
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                save_path = save_dir / f"sub-{subject}_pac_by_condition{suffix}_window"
+                
+                plot_paired_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label="PAC",
+                    config=config,
+                    logger=logger,
+                    label1=seg1.capitalize(),
+                    label2=seg2.capitalize(),
+                    roi_name=roi_name,
+                )
+        
+        log_if_present(logger, "info", f"Saved PAC paired comparison plots for {len(roi_names)} ROIs")
 
-    for idx, pair in enumerate(pairs):
-        ax = axes[idx]
-        vals_nonpain, vals_pain, stats_result, _ = pair_data[pair]
+    # Column comparison (unpaired)
+    if compare_cols:
+        comp_mask_info = extract_comparison_mask(events_df, config)
+        if not comp_mask_info:
+            if logger:
+                logger.debug("Column comparison requested but config incomplete")
+        else:
+            m1, m2, label1, label2 = comp_mask_info
+            seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+            
+            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+            n_pairs = len(pairs)
+            n_trials = len(pac_trials_df)
+            
+            for roi_name in roi_names:
+                all_pvals, pvalue_keys, cell_data = [], [], {}
+                
+                for col_idx, pair in enumerate(pairs):
+                    cols = get_pac_columns(seg_name, pair, roi_name)
+                    
+                    if not cols:
+                        cell_data[col_idx] = None
+                        continue
+                    
+                    val_series = pac_trials_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    v1 = val_series[m1].dropna().values
+                    v2 = val_series[m2].dropna().values
+                    
+                    cell_data[col_idx] = {"v1": v1, "v2": v2}
+                    
+                    if len(v1) >= 3 and len(v2) >= 3:
+                        try:
+                            _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
+                            diff = np.mean(v2) - np.mean(v1)
+                            pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                            d = diff / pooled_std if pooled_std > 0 else 0
+                            all_pvals.append(p)
+                            pvalue_keys.append((col_idx, p, d))
+                        except Exception:
+                            pass
+                
+                qvalues = {}
+                n_significant = 0
+                if all_pvals:
+                    rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                    for i, (key, p, d) in enumerate(pvalue_keys):
+                        qvalues[key] = (p, qvals[i], d, rejected[i])
+                    n_significant = int(np.sum(rejected))
+                
+                fig, axes = plt.subplots(1, n_pairs, figsize=(4 * n_pairs, 5), squeeze=False)
+                
+                for col_idx, pair in enumerate(pairs):
+                    ax = axes.flatten()[col_idx]
+                    data = cell_data.get(col_idx)
+                    
+                    if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                        ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                               transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                        ax.set_xticks([])
+                        continue
+                    
+                    v1, v2 = data["v1"], data["v2"]
+                    
+                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                    bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                    bp["boxes"][0].set_alpha(0.6)
+                    bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                    bp["boxes"][1].set_alpha(0.6)
+                    
+                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    
+                    all_vals = np.concatenate([v1, v2])
+                    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                    yrange = ymax - ymin if ymax > ymin else 0.1
+                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                    
+                    if col_idx in qvalues:
+                        _, q, d, sig = qvalues[col_idx]
+                        sig_marker = "†" if sig else ""
+                        sig_color = "#d62728" if sig else "#333333"
+                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
+                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                                   fontweight="bold" if sig else "normal")
+                    
+                    ax.set_xticks([0, 1])
+                    ax.set_xticklabels([label1, label2], fontsize=9)
+                    ax.set_title(pair.replace("_", "→"), fontweight="bold", color="#8E44AD")  # Purple for PAC
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                
+                n_tests = len(all_pvals)
+                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                
+                title = (f"PAC: {label1} vs {label2} (Column Comparison)\n"
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                
+                plt.tight_layout()
+                
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                filename = f"sub-{subject}_pac_by_condition{suffix}_column"
+                
+                save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                         bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                plt.close(fig)
+            
+            log_if_present(logger, "info", f"Saved PAC column comparison plots for {len(roi_names)} ROIs")
 
-        if len(vals_nonpain) < 3 or len(vals_pain) < 3:
-            ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center", transform=ax.transAxes)
-            ax.set_xticks([])
-            continue
 
-        bp = ax.boxplot([vals_nonpain, vals_pain], positions=[0, 1], widths=0.4, patch_artist=True)
-        bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-        bp["boxes"][0].set_alpha(0.6)
-        bp["boxes"][1].set_facecolor(condition_colors["pain"])
-        bp["boxes"][1].set_alpha(0.6)
-
-        ax.scatter(
-            np.random.uniform(-0.1, 0.1, len(vals_nonpain)),
-            vals_nonpain,
-            c=condition_colors["nonpain"],
-            alpha=0.4,
-            s=12,
-        )
-        ax.scatter(
-            1 + np.random.uniform(-0.1, 0.1, len(vals_pain)),
-            vals_pain,
-            c=condition_colors["pain"],
-            alpha=0.4,
-            s=12,
-        )
-
-        if stats_result is not None:
-            annotation = format_stats_annotation(
-                p_raw=stats_result["p_raw"],
-                q_fdr=stats_result.get("q_fdr"),
-                cohens_d=stats_result["cohens_d"],
-                ci_low=stats_result["ci_low"],
-                ci_high=stats_result["ci_high"],
-                compact=True,
-            )
-            text_color = plot_cfg.style.colors.significant if stats_result.get("fdr_significant", False) else plot_cfg.style.colors.gray
-            ax.text(
-                0.5,
-                0.98,
-                annotation,
-                ha="center",
-                va="top",
-                transform=ax.transAxes,
-                fontsize=plot_cfg.font.annotation,
-                color=text_color,
-                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8),
-            )
-
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.large)
-        ax.set_ylabel("Mean PAC")
-        ax.set_title(pair.replace("_", "→"), fontsize=plot_cfg.font.title, fontweight="bold")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(
-        f"PAC by Condition ({segment.replace('_', ' ').title()}, sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=1.02,
-    )
-
-    n_tests = len([p for p in all_pvals if np.isfinite(p)])
-    footer = format_footer_annotation(
-        n_tests=n_tests,
-        correction_method="FDR-BH",
-        alpha=0.05,
-        n_significant=n_significant,
-        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant",
-    )
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_pac_by_condition",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-    log_if_present(logger, "info", "Saved PAC by condition comparison")
 
 
 def convert_pac_wide_to_long(

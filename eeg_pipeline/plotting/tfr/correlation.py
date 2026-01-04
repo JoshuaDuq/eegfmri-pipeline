@@ -83,8 +83,13 @@ def _annotate_tf_correlation_figure(fig: plt.Figure, config, alpha: float) -> No
         config: Configuration object
         alpha: Significance threshold (FDR alpha)
     """
-    default_baseline = config.get("plotting.tfr.default_baseline_window", [-0.5, -0.01]) if config else [-0.5, -0.01]
-    bwin = config.get("time_frequency_analysis.baseline_window", default_baseline) if config else default_baseline
+    if config:
+        bwin = config.get(
+            "plotting.tfr.default_baseline_window",
+            config.get("time_frequency_analysis.baseline_window", [-0.5, -0.01]),
+        )
+    else:
+        bwin = [-0.5, -0.01]
     corr_txt = f"FDR BH α={alpha}"
     text = (
         f"Group TF correlation | Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s | "
@@ -349,4 +354,3 @@ def group_tf_correlation(
 __all__ = [
     "group_tf_correlation",
 ]
-

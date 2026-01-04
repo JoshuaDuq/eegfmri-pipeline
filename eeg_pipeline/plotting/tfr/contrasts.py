@@ -68,13 +68,14 @@ def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optio
     """
     if baseline is not None:
         return baseline
-    plot_cfg = get_plot_config(config) if config else None
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]) if config else [-5.0, -0.01]
-    default_baseline_start = baseline_window[0]
-    default_baseline_end = baseline_window[1]
-    default_baseline_window = [default_baseline_start, default_baseline_end]
-    return tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window)) if config else tuple(default_baseline_window)
+    if not config:
+        return -5.0, -0.01
+
+    override = config.get("plotting.tfr.default_baseline_window", None)
+    if isinstance(override, (list, tuple)) and len(override) == 2:
+        return tuple(override)
+
+    return tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
 
 
 def _create_pain_masks_from_vector(pain_vec) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -545,13 +546,11 @@ def _save_fig(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if baseline_used is None:
-        plot_cfg = get_plot_config(config)
-        tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
-        default_baseline_start = baseline_window[0]
-        default_baseline_end = baseline_window[1]
-        default_baseline_window = [default_baseline_start, default_baseline_end]
-        baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window))
+        override = config.get("plotting.tfr.default_baseline_window", None)
+        if isinstance(override, (list, tuple)) and len(override) == 2:
+            baseline_used = tuple(override)
+        else:
+            baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
 
     figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
     stem, _ = (name.rsplit(".", 1) + [""])[:2]
@@ -1214,4 +1213,3 @@ def contrast_pain_nonpain(
         fig, axes, row_labels, tmin, tmax, config
     )
     _save_fig(fig, out_dir, "topomap_grid_bands_pain_non_diff_bl.png", config=config, logger=logger, baseline_used=baseline_used)
-

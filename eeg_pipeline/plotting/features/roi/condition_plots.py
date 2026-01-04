@@ -316,7 +316,7 @@ def plot_power_by_roi_band_condition(
                 ax.set_title(
                     band.capitalize(),
                     fontweight="bold",
-                    color=band_colors.get(band, None),
+                    color=band_colors.get(band) or "gray",
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
@@ -549,7 +549,7 @@ def plot_complexity_by_roi_band_condition(
                 ax.set_title(
                     band.capitalize(),
                     fontweight="bold",
-                    color=band_colors.get(band, None),
+                    color=band_colors.get(band) or "gray",
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
@@ -938,7 +938,7 @@ def plot_connectivity_by_roi_band_condition(
                 ax.set_title(
                     band.capitalize(),
                     fontweight="bold",
-                    color=band_colors.get(band, None),
+                    color=band_colors.get(band) or "gray",
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
@@ -1165,7 +1165,7 @@ def plot_itpc_by_roi_band_condition(
                 ax.set_title(
                     band.capitalize(),
                     fontweight="bold",
-                    color=band_colors.get(band, None),
+                    color=band_colors.get(band) or "gray",
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
@@ -1204,251 +1204,6 @@ def plot_itpc_by_roi_band_condition(
         )
 
 
-def plot_itpc_active_vs_baseline(
-    features_df: pd.DataFrame,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """ITPC Active vs Baseline Paired Comparison.
-
-    Shows whether thermal stimulation evokes phase-locked responses.
-    Paired comparison: each y-point is same trial (baseline vs active).
-    """
-
-    if features_df is None or features_df.empty:
-        return
-
-    from eeg_pipeline.utils.config.loader import get_config_value
-    from scipy.stats import wilcoxon
-
-    segments = get_named_segments(features_df, group="itpc")
-    if not segments or "baseline" not in segments or "active" not in segments:
-        if logger:
-            logger.warning("ITPC baseline/active segments not found; skipping plot")
-        return
-    baseline_segment = "baseline"
-    active_segment = "active"
-
-    bands_active = set(get_named_bands(features_df, group="itpc", segment=active_segment))
-    bands_baseline = set(get_named_bands(features_df, group="itpc", segment=baseline_segment))
-    bands = sorted(bands_active & bands_baseline) if bands_active and bands_baseline else []
-    if not bands:
-        return
-    band_order = get_band_names(config)
-    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
-
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-
-    rois = get_roi_definitions(config)
-    data_rois = _get_named_identifiers(features_df, group="itpc", segment=active_segment, scope="roi")
-    if rois:
-        roi_names = list(rois.keys())
-    else:
-        roi_names = data_rois
-    if not roi_names:
-        if logger:
-            logger.warning("No ROI names found for ITPC baseline plot")
-        return
-
-    all_channels = extract_channels_from_columns(list(features_df.columns))
-
-    _, band_colors, _ = _get_bands_and_palettes(config)
-    n_rois = len(roi_names)
-    n_bands = len(bands)
-
-    plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
-    all_pvalues = []
-    pvalue_keys = []
-
-    stat_preference = ["val", "mean", "avg", "value"]
-
-    for row_idx, roi_name in enumerate(roi_names):
-        roi_channels = []
-        if rois and roi_name in rois:
-            roi_channels = get_roi_channels(rois[roi_name], all_channels)
-
-        for col_idx, band in enumerate(bands):
-            key = (row_idx, col_idx)
-
-            baseline_series = _collect_roi_series(
-                features_df,
-                group="itpc",
-                segment=baseline_segment,
-                band=band,
-                roi_name=roi_name,
-                roi_channels=roi_channels,
-                stat_preference=stat_preference,
-            )
-            active_series = _collect_roi_series(
-                features_df,
-                group="itpc",
-                segment=active_segment,
-                band=band,
-                roi_name=roi_name,
-                roi_channels=roi_channels,
-                stat_preference=stat_preference,
-            )
-
-            if baseline_series.empty or active_series.empty:
-                vals_baseline = np.array([])
-                vals_active = np.array([])
-            else:
-                valid_mask = baseline_series.notna() & active_series.notna()
-                vals_baseline = baseline_series[valid_mask].to_numpy(dtype=float)
-                vals_active = active_series[valid_mask].to_numpy(dtype=float)
-
-            plot_data[key] = (vals_baseline, vals_active)
-
-            if (
-                len(vals_baseline) > 5
-                and len(vals_active) > 5
-                and len(vals_baseline) == len(vals_active)
-            ):
-                try:
-                    _, p = wilcoxon(vals_active, vals_baseline)
-                    diff = vals_active - vals_baseline
-                    pooled_std = np.std(diff, ddof=1)
-                    d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
-                    all_pvalues.append(p)
-                    pvalue_keys.append((key, p, d))
-                except Exception:
-                    pass
-
-    qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
-    if all_pvalues:
-        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-        for i, (key, p, d) in enumerate(pvalue_keys):
-            qvalues[key] = (p, qvals[i], d, rejected[i])
-
-    plot_cfg = get_plot_config(config)
-    width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
-    height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
-    fig, axes = plt.subplots(
-        n_rois, n_bands, figsize=(width_per_col * n_bands, height_per_row * n_rois), squeeze=False
-    )
-
-    for row_idx, roi_name in enumerate(roi_names):
-        for col_idx, band in enumerate(bands):
-            ax = axes[row_idx, col_idx]
-            key = (row_idx, col_idx)
-            vals_baseline, vals_active = plot_data[key]
-
-            if len(vals_baseline) == 0 or len(vals_active) == 0:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No data",
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
-                    fontsize=plot_cfg.font.medium,
-                    color="gray",
-                )
-                ax.set_xticks([])
-                continue
-
-            bp = ax.boxplot(
-                [vals_baseline, vals_active],
-                positions=[0, 1],
-                widths=0.4,
-                patch_artist=True,
-            )
-            bp["boxes"][0].set_facecolor("#1f77b4")
-            bp["boxes"][0].set_alpha(0.6)
-            bp["boxes"][1].set_facecolor("#d62728")
-            bp["boxes"][1].set_alpha(0.6)
-
-            ax.scatter(
-                np.random.uniform(-0.08, 0.08, len(vals_baseline)),
-                vals_baseline,
-                c="#1f77b4",
-                alpha=0.3,
-                s=6,
-            )
-            ax.scatter(
-                1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
-                vals_active,
-                c="#d62728",
-                alpha=0.3,
-                s=6,
-            )
-
-            if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
-                for i in range(len(vals_baseline)):
-                    ax.plot(
-                        [0, 1],
-                        [vals_baseline[i], vals_active[i]],
-                        c="gray",
-                        alpha=0.15,
-                        lw=0.5,
-                    )
-
-            all_vals = np.concatenate([vals_baseline, vals_active])
-            ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-            yrange = ymax - ymin if ymax > ymin else 0.1
-            ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.25 * yrange)
-
-            if key in qvalues:
-                _, q, d, sig = qvalues[key]
-                sig_marker = "†" if sig else ""
-                sig_color = "#d62728" if sig else "#333333"
-                ax.annotate(
-                    f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                    xy=(0.5, ymax + 0.05 * yrange),
-                    ha="center",
-                    fontsize=plot_cfg.font.annotation,
-                    color=sig_color,
-                    fontweight="bold" if sig else "normal",
-                )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["BL", "PL"], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-
-            if row_idx == 0:
-                ax.set_title(
-                    band.capitalize(),
-                    fontweight="bold",
-                    color=band_colors.get(band, None),
-                    fontsize=plot_cfg.font.title,
-                )
-            if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
-
-    n_tests = len(all_pvalues)
-    n_sig = sum(1 for k in qvalues if qvalues[k][3])
-
-    title = (
-        "ITPC Active vs Baseline by ROI: Paired Comparison\n"
-        f"Baseline ({baseline_window[0]:.1f}-{baseline_window[1]:.1f}s) vs "
-        f"Active ({active_window[0]:.1f}-{active_window[1]:.1f}s)\n"
-        f"Subject: {subject} | Wilcoxon signed-rank | "
-        f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
-    )
-    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_itpc_active_vs_baseline",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-
-    if logger:
-        logger.info(
-            f"Saved ITPC active vs baseline plot ({n_sig}/{n_tests} FDR significant)"
-        )
 
 
 def plot_pac_by_roi_condition(
@@ -1706,8 +1461,15 @@ def plot_band_segment_condition(
 
     Creates a single row of plots, one per frequency band.
     Each cell shows Baseline vs Active comparison using paired Wilcoxon test.
+    Uses the shared plot_paired_comparison helper for consistent styling.
     """
-    from scipy.stats import wilcoxon
+    from eeg_pipeline.plotting.features.utils import (
+        plot_paired_comparison,
+        get_named_segments,
+        get_band_names,
+        collect_named_series,
+    )
+    from eeg_pipeline.utils.config.loader import get_config_value
 
     if features_df is None or features_df.empty:
         return
@@ -1729,8 +1491,7 @@ def plot_band_segment_condition(
     baseline_seg = "baseline" if "baseline" in segments else segments[0]
     active_seg = "active" if "active" in segments else segments[-1]
 
-    bands, band_colors, _ = _get_bands_and_palettes(config)
-    n_bands = len(bands)
+    bands = get_band_names(config)
 
     if stat_preference is None:
         stat_preference = {
@@ -1755,25 +1516,9 @@ def plot_band_segment_condition(
     if scope_preference is None:
         scope_preference = ["global", "roi", "ch", "chpair"]
 
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    baseline_window = get_config_value(
-        config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
-    )
-    active_window = get_config_value(
-        config, "time_frequency_analysis.active_window", [3.0, 10.5]
-    )
-
-    segment_colors = {
-        "baseline": "#5a7d9a",
-        "active": "#c44e52",
-    }
-
-    plot_data = {}
-    all_pvalues = []
-    pvalue_keys = []
-
-    for band_idx, band in enumerate(bands):
+    # Collect data for each band
+    data_by_band = {}
+    for band in bands:
         baseline_series, _, _ = collect_named_series(
             features_df,
             group=feature_prefix,
@@ -1791,319 +1536,35 @@ def plot_band_segment_condition(
             scope_preference=scope_preference,
         )
 
-        vals_baseline = np.array([])
-        vals_active = np.array([])
-
         if not baseline_series.empty and not active_series.empty:
             valid_mask = baseline_series.notna() & active_series.notna()
             vals_baseline = baseline_series[valid_mask].values
             vals_active = active_series[valid_mask].values
+            if len(vals_baseline) > 0:
+                data_by_band[band] = (vals_baseline, vals_active)
 
-        plot_data[band_idx] = (vals_baseline, vals_active)
-
-        if (
-            len(vals_baseline) > 5
-            and len(vals_active) > 5
-            and len(vals_baseline) == len(vals_active)
-        ):
-            try:
-                _, p = wilcoxon(vals_active, vals_baseline)
-                diff = vals_active - vals_baseline
-                pooled_std = np.std(diff, ddof=1)
-                d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
-                all_pvalues.append(p)
-                pvalue_keys.append((band_idx, p, d))
-            except Exception:
-                pass
-
-    has_data = any(
-        len(pdata[0]) > 0 or len(pdata[1]) > 0 for pdata in plot_data.values()
-    )
-    if not has_data:
+    if not data_by_band:
         if logger:
             logger.warning(
                 f"No {feature_label} data found for band × segment comparison plot"
             )
         return
 
-    qvalues = {}
-    if all_pvalues:
-        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-        for i, (key, p, d) in enumerate(pvalue_keys):
-            qvalues[key] = (p, qvals[i], d, rejected[i])
-
-    plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
-
-    for band_idx, band in enumerate(bands):
-        ax = axes.flatten()[band_idx]
-        vals_baseline, vals_active = plot_data[band_idx]
-
-        if len(vals_baseline) == 0 or len(vals_active) == 0:
-            ax.text(
-                0.5,
-                0.5,
-                "No data",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-                fontsize=plot_cfg.font.title,
-                color="gray",
-            )
-            ax.set_xticks([])
-            continue
-
-        bp = ax.boxplot(
-            [vals_baseline, vals_active],
-            positions=[0, 1],
-            widths=0.4,
-            patch_artist=True,
-        )
-        bp["boxes"][0].set_facecolor(segment_colors["baseline"])
-        bp["boxes"][0].set_alpha(0.6)
-        bp["boxes"][1].set_facecolor(segment_colors["active"])
-        bp["boxes"][1].set_alpha(0.6)
-
-        ax.scatter(
-            np.random.uniform(-0.08, 0.08, len(vals_baseline)),
-            vals_baseline,
-            c=segment_colors["baseline"],
-            alpha=0.3,
-            s=6,
-        )
-        ax.scatter(
-            1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
-            vals_active,
-            c=segment_colors["active"],
-            alpha=0.3,
-            s=6,
-        )
-
-        if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
-            for i in range(len(vals_baseline)):
-                ax.plot(
-                    [0, 1],
-                    [vals_baseline[i], vals_active[i]],
-                    c="gray",
-                    alpha=0.15,
-                    lw=0.5,
-                )
-
-        all_vals = np.concatenate([vals_baseline, vals_active])
-        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-        yrange = ymax - ymin if ymax > ymin else 0.1
-        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-
-        if band_idx in qvalues:
-            _, q, d, sig = qvalues[band_idx]
-            sig_marker = "†" if sig else ""
-            sig_color = get_significance_color(sig, config)
-            ax.annotate(
-                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                xy=(0.5, ymax + 0.05 * yrange),
-                ha="center",
-                fontsize=plot_cfg.font.medium,
-                color=sig_color,
-                fontweight="bold" if sig else "normal",
-            )
-
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Baseline", "Active"], fontsize=9)
-        ax.set_title(
-            band.capitalize(),
-            fontweight="bold",
-            color=band_colors.get(band, None),
-        )
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    n_trials = len(features_df)
-    n_tests = len(all_pvalues)
-    n_sig = sum(1 for k in qvalues if qvalues[k][3])
-
-    title = (
-        f"{feature_label}: Baseline vs Active (Paired Comparison)\n"
-        f"Baseline ({baseline_window[0]:.1f} to {baseline_window[1]:.1f}s) vs "
-        f"Active ({active_window[0]:.1f} to {active_window[1]:.1f}s)\n"
-        f"Subject: {subject} | N: {n_trials} trials | Wilcoxon signed-rank | "
-        f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
-    )
-    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
     safe_name = feature_prefix.lower().replace(" ", "_")
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_{safe_name}_band_segment_condition",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
+    save_path = save_dir / f"sub-{subject}_{safe_name}_band_segment_condition"
+
+    plot_paired_comparison(
+        data_by_band=data_by_band,
+        subject=subject,
+        save_path=save_path,
+        feature_label=feature_label,
+        config=config,
+        logger=logger,
+        label1=baseline_seg.capitalize(),
+        label2=active_seg.capitalize(),
     )
-    plt.close(fig)
-
-    if logger:
-        logger.info(
-            f"Saved {feature_label} baseline vs active plot ({n_sig}/{n_tests} FDR significant)"
-        )
 
 
-def plot_power_active_vs_baseline(
-    features_df: pd.DataFrame,
-    subject: str,
-    save_dir: Path,
-    logger: logging.Logger,
-    config: Any,
-) -> None:
-    """Power Active vs Baseline Paired Comparison.
-
-    Uses paired Wilcoxon signed-rank test for within-trial comparison.
-    Shows whether power changes from baseline to active period.
-    """
-
-    if features_df is None or features_df.empty:
-        return
-
-    from eeg_pipeline.utils.config.loader import get_config_value
-    from scipy.stats import wilcoxon
-
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-
-    bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    n_bands = len(bands)
-
-    plot_data = {}
-    all_pvalues = []
-    pvalue_keys = []
-
-    for band_idx, band in enumerate(bands):
-        baseline_cols = [c for c in features_df.columns if f"power_baseline_{band}_ch_" in c]
-        active_cols = [c for c in features_df.columns if f"power_active_{band}_ch_" in c]
-
-        vals_baseline = np.array([])
-        vals_active = np.array([])
-
-        if baseline_cols and active_cols:
-            vals_baseline = features_df[baseline_cols].mean(axis=1).dropna().values
-            vals_active = features_df[active_cols].mean(axis=1).dropna().values
-
-        plot_data[band_idx] = (vals_baseline, vals_active)
-
-        if (
-            len(vals_baseline) > 5
-            and len(vals_active) > 5
-            and len(vals_baseline) == len(vals_active)
-        ):
-            try:
-                _, p = wilcoxon(vals_active, vals_baseline)
-                diff = vals_active - vals_baseline
-                pooled_std = np.std(diff, ddof=1)
-                d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
-                all_pvalues.append(p)
-                pvalue_keys.append((band_idx, p, d))
-            except Exception:
-                pass
-
-    qvalues = {}
-    if all_pvalues:
-        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-        for i, (key, p, d) in enumerate(pvalue_keys):
-            qvalues[key] = (p, qvals[i], d, rejected[i])
-
-    plot_cfg = get_plot_config(config)
-    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
-
-    for band_idx, band in enumerate(bands):
-        ax = axes.flatten()[band_idx]
-        vals_baseline, vals_active = plot_data[band_idx]
-
-        if len(vals_baseline) == 0 or len(vals_active) == 0:
-            ax.text(
-                0.5,
-                0.5,
-                "No data",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-                fontsize=plot_cfg.font.title,
-                color="gray",
-            )
-            ax.set_xticks([])
-            continue
-
-        bp = ax.boxplot([vals_baseline, vals_active], positions=[0, 1], widths=0.4, patch_artist=True)
-        bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-        bp["boxes"][0].set_alpha(0.6)
-        bp["boxes"][1].set_facecolor(condition_colors["pain"])
-        bp["boxes"][1].set_alpha(0.6)
-
-        ax.scatter(
-            np.random.uniform(-0.08, 0.08, len(vals_baseline)),
-            vals_baseline,
-            c=condition_colors["nonpain"],
-            alpha=0.3,
-            s=6,
-        )
-        ax.scatter(
-            1 + np.random.uniform(-0.08, 0.08, len(vals_active)),
-            vals_active,
-            c=condition_colors["pain"],
-            alpha=0.3,
-            s=6,
-        )
-
-        if len(vals_baseline) == len(vals_active) and len(vals_baseline) <= 100:
-            for i in range(len(vals_baseline)):
-                ax.plot([0, 1], [vals_baseline[i], vals_active[i]], c="gray", alpha=0.15, lw=0.5)
-
-        all_vals = np.concatenate([vals_baseline, vals_active])
-        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-        yrange = ymax - ymin if ymax > ymin else 0.1
-        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-
-        if band_idx in qvalues:
-            _, q, d, sig = qvalues[band_idx]
-            sig_marker = "†" if sig else ""
-            sig_color = get_significance_color(sig, config)
-            ax.annotate(
-                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                xy=(0.5, ymax + 0.05 * yrange),
-                ha="center",
-                fontsize=plot_cfg.font.medium,
-                color=sig_color,
-                fontweight="bold" if sig else "normal",
-            )
-
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Baseline", "Active"], fontsize=9)
-        ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, None))
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    n_tests = len(all_pvalues)
-    n_sig = sum(1 for k in qvalues if qvalues[k][3])
-
-    title = (
-        "Band Power: Baseline vs Active (Paired Comparison)\n"
-        f"Subject: {subject} | Wilcoxon signed-rank | "
-        f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
-    )
-    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    save_fig(
-        fig,
-        save_dir / f"sub-{subject}_power_active_vs_baseline",
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
-    )
-    plt.close(fig)
-
-    if logger:
-        logger.info(f"Saved Power active vs baseline plot ({n_sig}/{n_tests} FDR significant)")
 
 
 def plot_temporal_evolution(
@@ -2220,7 +1681,7 @@ def plot_temporal_evolution(
 
         ax.set_xticks(x)
         ax.set_xticklabels(time_labels)
-        ax.set_ylabel(band.capitalize(), fontweight="bold", color=band_colors.get(band, None))
+        ax.set_ylabel(band.capitalize(), fontweight="bold", color=band_colors.get(band) or "gray")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.legend(loc="upper right", fontsize=plot_cfg.font.medium)
@@ -2252,9 +1713,8 @@ __all__ = [
     "plot_aperiodic_by_roi_condition",
     "plot_connectivity_by_roi_band_condition",
     "plot_itpc_by_roi_band_condition",
-    "plot_itpc_active_vs_baseline",
     "plot_pac_by_roi_condition",
     "plot_band_segment_condition",
-    "plot_power_active_vs_baseline",
     "plot_temporal_evolution",
 ]
+

@@ -24,6 +24,11 @@ from eeg_pipeline.utils.data.columns import (
 )
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.plotting.features.roi import (
+    get_roi_definitions,
+    get_roi_channels,
+    extract_channels_from_columns,
+)
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_and_crop,
     validate_baseline_indices,
@@ -51,197 +56,247 @@ def plot_power_by_condition(
     logger: logging.Logger,
     config: Any,
 ) -> None:
-    """Compare power between conditions per band and timing segment.
+    """Compare power between conditions per band.
     
-    Creates a grid: rows = timing (baseline/active), cols = frequency bands.
-    Each cell shows pain vs non-pain box+strip comparison.
-    
-    Statistical improvements:
-    - Shows both raw p-value and FDR-corrected q-value
-    - Includes bootstrap 95% CI for mean difference
-    - Reports Cohen's d effect size with interpretation
-    - Footer shows total tests and correction method
+    For window comparisons (paired): Uses the unified plot_paired_comparison helper.
+    For column comparisons (unpaired): Uses Mann-Whitney U test.
     """
     if power_df is None or power_df.empty or events_df is None:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
-        return
-    
     from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from .utils import (
-        compute_condition_stats, 
-        apply_fdr_correction, 
-        format_stats_annotation,
-        format_footer_annotation,
+        plot_paired_comparison,
+        apply_fdr_correction,
+        get_named_segments,
     )
+
+    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    # Get segments from config or auto-detect from data
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        detected = get_named_segments(power_df, group="power")
+        if len(detected) >= 2:
+            segments = detected[:2]
+            if logger:
+                logger.info(f"Auto-detected segments for comparison: {segments}")
     
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
     
-    segment_labels = {
-        "baseline": ("BASELINE", f"{baseline_window[0]:.1f} to {baseline_window[1]:.1f}s"),
-        "active": ("ACTIVE", f"{active_window[0]:.1f} to {active_window[1]:.1f}s")
-    }
-    segments = list(segment_labels.keys())
+    rois = get_roi_definitions(config)
+    all_channels = extract_channels_from_columns(list(power_df.columns))
     
-    plot_cfg = get_plot_config(config)
-    band_colors = {band: get_band_color(band, config) for band in bands}
-    condition_colors = {
-        "pain": plot_cfg.get_color("pain"),
-        "nonpain": plot_cfg.get_color("nonpain"),
-    }
+    # Determine which ROIs to plot
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
+    else:
+        roi_names = ["all"]
+        if rois:
+            roi_names.extend(list(rois.keys()))
     
-    all_stats = []
-    all_pvals = []
-    cell_data = {}
-    
-    for row_idx, segment in enumerate(segments):
-        for col_idx, band in enumerate(bands):
-            cols = []
-            for c in power_df.columns:
-                parsed = NamingSchema.parse(str(c))
-                if not (parsed.get("valid") and parsed.get("group") == "power"):
-                    continue
-                if str(parsed.get("segment") or "") != str(segment):
-                    continue
-                if str(parsed.get("band") or "") != str(band):
-                    continue
-                cols.append(c)
-            
-            if not cols:
-                cell_data[(row_idx, col_idx)] = None
-                continue
-                
-            trial_means = power_df[cols].mean(axis=1)
-            vals_pain = trial_means[pain_mask].dropna().values
-            vals_nonpain = trial_means[~pain_mask].dropna().values
-            
-            if len(vals_nonpain) >= 3 and len(vals_pain) >= 3:
-                stats_result = compute_condition_stats(vals_nonpain, vals_pain, n_boot=1000, config=config)
-                all_stats.append(stats_result)
-                all_pvals.append(stats_result["p_raw"])
-                cell_data[(row_idx, col_idx)] = {
-                    "vals_nonpain": vals_nonpain,
-                    "vals_pain": vals_pain,
-                    "stats": stats_result,
-                    "stats_idx": len(all_stats) - 1,
-                }
-            else:
-                cell_data[(row_idx, col_idx)] = {
-                    "vals_nonpain": vals_nonpain,
-                    "vals_pain": vals_pain,
-                    "stats": None,
-                    "stats_idx": None,
-                }
-    
-    if all_pvals:
-        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
-        if valid_pvals:
-            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
-            
-            q_idx = 0
-            for i, p in enumerate(all_pvals):
-                if np.isfinite(p):
-                    all_stats[i]["q_fdr"] = qvals[q_idx]
-                    all_stats[i]["fdr_significant"] = rejected[q_idx]
-                    q_idx += 1
-                else:
-                    all_stats[i]["q_fdr"] = np.nan
-                    all_stats[i]["fdr_significant"] = False
-            n_significant = int(np.sum(rejected)) if all_pvals else 0
-    
-    width_per_col = float(plot_cfg.plot_type_configs.get("power", {}).get("width_per_band", 3.2))
-    height_per_row = float(plot_cfg.plot_type_configs.get("power", {}).get("height_per_segment", 4.0))
-    fig, axes = plt.subplots(
-        len(segments), len(bands), 
-        figsize=(width_per_col * len(bands), height_per_row * len(segments)), 
-        sharey="row",
-        squeeze=False,
-    )
-    
-    for row_idx, segment in enumerate(segments):
-        seg_name, seg_time = segment_labels[segment]
-        for col_idx, band in enumerate(bands):
-            ax = axes[row_idx, col_idx]
-            
-            data = cell_data.get((row_idx, col_idx))
-            
-            if data is None:
-                ax.text(0.5, 0.5, "No data", ha="center", va="center", 
-                       transform=ax.transAxes, fontsize=9, color="gray")
-                ax.set_xticks([])
-                continue
-            
-            vals_nonpain = data["vals_nonpain"]
-            vals_pain = data["vals_pain"]
-            
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
-                bp = ax.boxplot([vals_nonpain, vals_pain], 
-                               positions=[0, 1], widths=0.4, patch_artist=True)
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
-                bp["boxes"][1].set_alpha(0.6)
-                
-                ax.scatter(np.random.uniform(-0.1, 0.1, len(vals_nonpain)), 
-                          vals_nonpain, c=condition_colors["nonpain"], alpha=0.3, s=8)
-                ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(vals_pain)), 
-                          vals_pain, c=condition_colors["pain"], alpha=0.3, s=8)
-                
-                if data["stats"] is not None:
-                    s = data["stats"]
-                    annotation = format_stats_annotation(
-                        p_raw=s["p_raw"],
-                        q_fdr=s.get("q_fdr"),
-                        cohens_d=s["cohens_d"],
-                        ci_low=s["ci_low"],
-                        ci_high=s["ci_high"],
-                        compact=True,
-                    )
-                    
-                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
-                    ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
-                           ha="center", fontsize=6, va="top", color=text_color,
-                           bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
-            
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=8)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            
-            if row_idx == 0:
-                ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
-            if col_idx == 0:
-                ax.set_ylabel(f"{seg_name}\n({seg_time})\nPower (log ratio)", fontsize=9)
-    
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    title = (f"Band Power by Condition: Pain vs Non-Pain Comparison\n"
-             f"Baseline-Normalized Log Ratio (log10 to Pre-Stimulus)\n"
-             f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain trials")
-    fig.suptitle(title, fontsize=11, fontweight="bold", y=1.02)
-    
-    n_tests = len([p for p in all_pvals if np.isfinite(p)])
-    footer = format_footer_annotation(
-        n_tests=n_tests,
-        correction_method="FDR-BH",
-        alpha=0.05,
-        n_significant=n_significant,
-        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
-    )
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(fig, save_dir / f"sub-{subject}_power_by_condition", 
-             formats=plot_cfg.formats, dpi=plot_cfg.dpi, 
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-    plt.close(fig)
     if logger:
-        logger.info(f"Saved power by condition comparison ({n_significant}/{n_tests} FDR significant)")
+        logger.info(f"Power comparison: segments={segments}, ROIs={roi_names}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+    
+    # Window comparison (paired) - use unified helper
+    if compare_wins and len(segments) >= 2:
+
+        seg1, seg2 = segments[0], segments[1]
+        
+        for roi_name in roi_names:
+            if roi_name == "all":
+                roi_channels = all_channels
+            else:
+                roi_channels = get_roi_channels(rois[roi_name], all_channels)
+            
+            if not roi_channels:
+                continue
+            
+            roi_set = set(roi_channels)
+            
+            # Collect data by band
+            data_by_band = {}
+            for band in bands:
+                cols1, cols2 = [], []
+                for c in power_df.columns:
+                    parsed = NamingSchema.parse(str(c))
+                    if not (parsed.get("valid") and parsed.get("group") == "power"):
+                        continue
+                    channel_id = str(parsed.get("identifier") or "")
+                    if channel_id and channel_id not in roi_set:
+                        continue
+                    if str(parsed.get("segment") or "") == seg1 and str(parsed.get("band") or "") == band:
+                        cols1.append(c)
+                    if str(parsed.get("segment") or "") == seg2 and str(parsed.get("band") or "") == band:
+                        cols2.append(c)
+                
+                if cols1 and cols2:
+                    s1 = power_df[cols1].mean(axis=1)
+                    s2 = power_df[cols2].mean(axis=1)
+                    valid_mask = s1.notna() & s2.notna()
+                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                    if len(v1) > 0:
+                        data_by_band[band] = (v1, v2)
+            
+            if data_by_band:
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
+                
+                plot_paired_comparison(
+                    data_by_band=data_by_band,
+                    subject=subject,
+                    save_path=save_path,
+                    feature_label="Band Power",
+                    config=config,
+                    logger=logger,
+                    label1=seg1.capitalize(),
+                    label2=seg2.capitalize(),
+                    roi_name=roi_name,
+                )
+
+    # Column comparison (unpaired)
+    if compare_cols:
+        comp_mask_info = extract_comparison_mask(events_df, config)
+        if not comp_mask_info:
+            if logger:
+                logger.debug("Column comparison requested but config incomplete")
+        else:
+            m1, m2, label1, label2 = comp_mask_info
+            seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+            plot_cfg = get_plot_config(config)
+            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+            band_colors = {band: get_band_color(band, config) for band in bands}
+
+            for roi_name in roi_names:
+                if roi_name == "all":
+                    roi_channels = all_channels
+                else:
+                    roi_channels = get_roi_channels(rois[roi_name], all_channels)
+                
+                if not roi_channels:
+                    continue
+                
+                roi_set = set(roi_channels)
+                all_pvals, pvalue_keys, cell_data = [], [], {}
+                
+                for col_idx, band in enumerate(bands):
+                    cols = []
+                    for c in power_df.columns:
+                        parsed = NamingSchema.parse(str(c))
+                        if not (parsed.get("valid") and parsed.get("group") == "power"):
+                            continue
+                        channel_id = str(parsed.get("identifier") or "")
+                        if channel_id and channel_id not in roi_set:
+                            continue
+                        if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
+                            cols.append(c)
+                    
+                    if not cols:
+                        cell_data[col_idx] = None
+                        continue
+                    
+                    val_series = power_df[cols].mean(axis=1)
+                    v1 = val_series[m1].dropna().values
+                    v2 = val_series[m2].dropna().values
+                    
+                    cell_data[col_idx] = {"v1": v1, "v2": v2}
+                    
+                    if len(v1) >= 3 and len(v2) >= 3:
+                        from scipy.stats import mannwhitneyu
+                        try:
+                            _, p = mannwhitneyu(v1, v2, alternative="two-sided")
+                            diff = np.mean(v2) - np.mean(v1)
+                            pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                            d = diff / pooled_std if pooled_std > 0 else 0
+                            all_pvals.append(p)
+                            pvalue_keys.append((col_idx, p, d))
+                        except Exception:
+                            pass
+                
+                qvalues = {}
+                n_significant = 0
+                if all_pvals:
+                    rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                    for i, (key, p, d) in enumerate(pvalue_keys):
+                        qvalues[key] = (p, qvals[i], d, rejected[i])
+                    n_significant = int(np.sum(rejected))
+                
+                fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 5), squeeze=False)
+                
+                for col_idx, band in enumerate(bands):
+                    ax = axes.flatten()[col_idx]
+                    data = cell_data.get(col_idx)
+                    
+                    if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                        ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                               transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                        ax.set_xticks([])
+                        continue
+                    
+                    v1, v2 = data["v1"], data["v2"]
+                    
+                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                    bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                    bp["boxes"][0].set_alpha(0.6)
+                    bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                    bp["boxes"][1].set_alpha(0.6)
+                    
+                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    
+                    all_vals = np.concatenate([v1, v2])
+                    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                    yrange = ymax - ymin if ymax > ymin else 0.1
+                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                    
+                    if col_idx in qvalues:
+                        _, q, d, sig = qvalues[col_idx]
+                        sig_marker = "†" if sig else ""
+                        sig_color = "#d62728" if sig else "#333333"
+                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
+                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                                   fontweight="bold" if sig else "normal")
+                    
+                    ax.set_xticks([0, 1])
+                    ax.set_xticklabels([label1, label2], fontsize=9)
+                    ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
+                    ax.spines["top"].set_visible(False)
+                    ax.spines["right"].set_visible(False)
+                
+                n_trials = len(power_df)
+                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                n_tests = len(all_pvals)
+                
+                title = (f"Band Power: {label1} vs {label2} (Column Comparison)\n"
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                
+                plt.tight_layout()
+                
+                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                filename = f"sub-{subject}_power_by_condition{suffix}_column"
+                
+                from eeg_pipeline.plotting.io.figures import save_fig
+                save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                         bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                plt.close(fig)
+                
+                if logger:
+                    logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant)")
+
+
 
 
 
@@ -318,6 +373,31 @@ def _get_active_window(config: Any) -> List[float]:
     """Get active window from config."""
     from eeg_pipeline.utils.config.loader import get_config_value
     return get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+
+
+def _get_plotting_tfr_baseline_window(config: Any) -> tuple[float, float]:
+    """Resolve baseline window for plotting.
+
+    Plotting can override the baseline window without changing the analysis
+    baseline via `plotting.tfr.default_baseline_window`.
+    """
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    override = get_config_value(config, "plotting.tfr.default_baseline_window", None)
+    if isinstance(override, (list, tuple)) and len(override) == 2:
+        try:
+            return float(override[0]), float(override[1])
+        except (TypeError, ValueError):
+            pass
+
+    baseline = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
+    if isinstance(baseline, (list, tuple)) and len(baseline) == 2:
+        try:
+            return float(baseline[0]), float(baseline[1])
+        except (TypeError, ValueError):
+            pass
+
+    return -3.0, -0.5
 
 
 def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Logger) -> Optional[Any]:
@@ -549,8 +629,7 @@ def plot_power_time_courses(
     """
     times = tfr_raw.times
     features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
-    from eeg_pipeline.utils.config.loader import get_config_value
-    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
     plot_cfg = get_plot_config(config)
     
     n_epochs = int(tfr_raw.data.shape[0])
@@ -650,8 +729,7 @@ def _plot_psd_by_temperature(
     temp_colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
     
     active_window = _get_active_window(config)
-    from eeg_pipeline.utils.config.loader import get_config_value
-    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
     
     trial_counts = []
     for idx, temp in enumerate(unique_temps):
@@ -792,8 +870,7 @@ def plot_power_spectral_density(
     _validate_epochs_tfr(tfr, "plot_power_spectral_density", logger)
     
     active_window = _get_active_window(config)
-    from eeg_pipeline.utils.config.loader import get_config_value
-    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
     
     if events_df is not None and not events_df.empty:
         temp_col = None
@@ -843,40 +920,45 @@ def plot_power_spectral_density_by_pain(
         logger.warning("No events for PSD by pain")
         return
     
-    pain_col = find_pain_column_in_events(events_df, config)
-    if pain_col is None:
-        logger.warning("No pain binary column found")
-        return
-    
-    active_window = _get_active_window(config)
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.utils.config.loader import get_config_value
-    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+
+    active_window = _get_active_window(config)
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
+
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", True) # Default to True for this plot
+    comp_mask_info = None
+    if compare_cols:
+        comp_mask_info = extract_comparison_mask(events_df, config)
     
-    pain_vals = pd.to_numeric(events_df[pain_col], errors="coerce")
-    
-    if len(tfr) != len(pain_vals):
+    if comp_mask_info:
+        m1, m2, label1, label2 = comp_mask_info
+        v1_mask, v2_mask = m1, m2
+    else:
+        # Fallback for PSD might still want pain if nothing defined, 
+        # but let's be strict if that's what's requested
+        logger.warning("No valid comparison defined for PSD comparison")
+        return
+
+    if len(tfr) != len(events_df):
         raise ValueError(
-            f"TFR window ({len(tfr)} epochs) and events "
-            f"({len(pain_vals)} rows) length mismatch for subject {subject}"
+            f"TFR ({len(tfr)} epochs) and events "
+            f"({len(events_df)} rows) length mismatch for subject {subject}"
         )
     
-    nonpain_mask = (pain_vals == 0).to_numpy()
-    pain_mask = (pain_vals == 1).to_numpy()
-    
-    if nonpain_mask.sum() < 1 or pain_mask.sum() < 1:
-        logger.warning("Insufficient trials for pain comparison")
+    if v1_mask.sum() < 1 or v2_mask.sum() < 1:
+        logger.warning(f"Insufficient trials for {label1} vs {label2} comparison")
         return
     
-    n_nonpain = int(nonpain_mask.sum())
-    n_pain = int(pain_mask.sum())
+    n1, n2 = int(v1_mask.sum()), int(v2_mask.sum())
     
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
     for mask, label, color, n_trials in [
-        (nonpain_mask, 'Non-pain', 'steelblue', n_nonpain),
-        (pain_mask, 'Pain', 'orangered', n_pain)
+        (v1_mask, label1, 'steelblue', n1),
+        (v2_mask, label2, 'orangered', n2)
     ]:
         if mask.sum() < 1:
             continue
@@ -921,12 +1003,14 @@ def plot_power_spectral_density_by_pain(
         color='gray', alpha=0.8
     )
     
-    plt.tight_layout(rect=[0, 0.03, 1, 1])
-    output_path = save_dir / f'sub-{subject}_power_spectral_density_by_pain'
+    comp_type = "Window Comparison" if compare_cols else "Comparison"
+    fig.suptitle(f"PSD Comparison: {label1} vs {label2} ({comp_type})", fontsize=plot_cfg.font.figure_title, fontweight='bold')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    output_path = save_dir / f'sub-{subject}_power_spectral_density_condition'
     save_fig(fig, output_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
-    logger.info("Saved PSD by pain condition (Induced)")
+    logger.info(f"Saved PSD comparison plot ({label1} vs {label2})")
 
 
 def plot_power_time_course_by_temperature(
@@ -962,11 +1046,12 @@ def plot_power_time_course_by_temperature(
     
     unique_temps = sorted(temps.dropna().unique())
     colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
+    plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
     from eeg_pipeline.utils.config.loader import get_config_value
-    tfr_baseline = tuple(get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]))
+    tfr_baseline = _get_plotting_tfr_baseline_window(config)
     freq_bands = get_config_value(config, "time_frequency_analysis.bands", {})
     band_range = freq_bands.get(band, [None, None])
     
@@ -987,7 +1072,6 @@ def plot_power_time_course_by_temperature(
             label=f"{temp:.0f}°C (n={n_trials_temp})"
         )
     
-    plot_cfg = get_plot_config(config)
     ax.axhline(0, color=plot_cfg.style.colors.gray, 
                linewidth=plot_cfg.style.line.width_standard, 
                alpha=plot_cfg.style.line.alpha_dim, linestyle='--')

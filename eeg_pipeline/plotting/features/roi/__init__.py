@@ -6,10 +6,8 @@ from .condition_plots import (
     plot_connectivity_by_roi_band_condition,
     plot_complexity_by_roi_band_condition,
     plot_itpc_by_roi_band_condition,
-    plot_itpc_active_vs_baseline,
     plot_pac_by_roi_condition,
     plot_power_by_roi_band_condition,
-    plot_power_active_vs_baseline,
     plot_temporal_evolution,
 )
 from .core import (
@@ -28,10 +26,8 @@ __all__ = [
     "plot_connectivity_by_roi_band_condition",
     "plot_complexity_by_roi_band_condition",
     "plot_itpc_by_roi_band_condition",
-    "plot_itpc_active_vs_baseline",
     "plot_pac_by_roi_condition",
     "plot_power_by_roi_band_condition",
-    "plot_power_active_vs_baseline",
     "plot_temporal_evolution",
     "aggregate_by_roi",
     "aggregate_connectivity_by_roi",

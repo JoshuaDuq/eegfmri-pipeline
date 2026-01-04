@@ -151,6 +151,18 @@ def plot_roi_erp(
 
     time_vec = epochs.times * 1000  # Convert to ms
     
+    # Filter ROIs based on config
+    from eeg_pipeline.utils.config.loader import get_config_value
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    has_specific = any(r.lower() != "all" for r in comp_rois)
+    if comp_rois and has_specific:
+        filtered_roi_map = {}
+        for r in comp_rois:
+            if r.lower() == "all": continue
+            if r in roi_map:
+                filtered_roi_map[r] = roi_map[r]
+        roi_map = filtered_roi_map
+
     with use_style(context="paper"):
         for roi_name, indices in roi_map.items():
             if not indices:

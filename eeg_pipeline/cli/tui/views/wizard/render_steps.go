@@ -25,13 +25,12 @@ func (m Model) renderConfirmation() string {
 
 	content.WriteString(accent + " " + styles.SectionTitleStyle.Render(" CONFIRM EXECUTION ") + "\n\n")
 
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.Text).Render("You are about to execute:") + "\n\n")
-
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Padding(0, 2)
-	content.WriteString("  " + cmdStyle.Render(m.BuildCommand()) + "\n\n")
+	content.WriteString(
+		lipgloss.NewStyle().Foreground(styles.Text).Render("You are about to execute:") +
+			" " +
+			lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.Pipeline.String()) +
+			"\n\n",
+	)
 
 	if len(m.subjectSelected) > 0 {
 		selectedCount := 0
@@ -127,41 +126,15 @@ func (m Model) renderComputationSelection() string {
 	}
 	b.WriteString("\n\n")
 
-	// Scrolling support for small terminal heights
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = 40
-	}
-	maxLines := effectiveHeight - 16
-	if maxLines < 8 {
-		maxLines = 8
-	}
-	startIdx := 0
-	endIdx := len(m.computations)
-	showScrollIndicators := false
-	if len(m.computations) > maxLines {
-		showScrollIndicators = true
-		startIdx = m.computationOffset
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		if startIdx > len(m.computations)-maxLines {
-			startIdx = len(m.computations) - maxLines
-		}
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		endIdx = startIdx + maxLines
-		if endIdx > len(m.computations) {
-			endIdx = len(m.computations)
-		}
+	// Calculate responsive layout based on terminal height
+	layout := styles.CalculateListLayout(m.height, m.computationCursor, len(m.computations), styles.HeaderFooterRows)
+
+	// Show scroll up indicator
+	if layout.ShowScrollUp {
+		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
 	}
 
-	if showScrollIndicators && startIdx > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", startIdx)) + "\n")
-	}
-
-	for i := startIdx; i < endIdx; i++ {
+	for i := layout.StartIdx; i < layout.EndIdx; i++ {
 		comp := m.computations[i]
 		isSelected := m.computationSelected[i]
 		isFocused := i == m.computationCursor
@@ -195,9 +168,10 @@ func (m Model) renderComputationSelection() string {
 		b.WriteString(desc + "\n")
 	}
 
-	if showScrollIndicators && endIdx < len(m.computations) {
-		remaining := len(m.computations) - endIdx
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", remaining)) + "\n")
+	// Show scroll down indicator
+	if layout.ShowScrollDn {
+		remaining := len(m.computations) - layout.EndIdx
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	}
 
 	return b.String()
@@ -472,25 +446,27 @@ func (m Model) renderFeatureFileSelection() string {
 
 func (m Model) renderPlotSelection() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" PLOT SELECTION ") + "\n\n")
+	title := " PLOT SELECTION "
+	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		"  Select the plots to generate. Details for the focused item are shown below.\n") +
 		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 			"  Use ↑/↓ to navigate, Space to toggle, and A/N to select all/none.\n\n"))
 
-	// Calculate counts
-	count := 0
-	for _, sel := range m.plotSelected {
-		if sel {
-			count++
-		}
-	}
-
 	visibleItems := []int{}
 	for i, plot := range m.plotItems {
-		if m.IsPlotCategorySelected(plot.Group) {
-			visibleItems = append(visibleItems, i)
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
+		}
+		visibleItems = append(visibleItems, i)
+	}
+
+	// Calculate counts
+	count := 0
+	for _, idx := range visibleItems {
+		if m.plotSelected[idx] {
+			count++
 		}
 	}
 
@@ -508,13 +484,6 @@ func (m Model) renderPlotSelection() string {
 	}
 	b.WriteString("\n\n")
 
-	// Determine visible area for scrolling
-	// Total height minus overhead (approx 18-20 lines)
-	maxLines := m.height - 18
-	if maxLines < 10 {
-		maxLines = 10 // Minimum window
-	}
-
 	// Group-aware rendering
 	currentGroup := ""
 	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
@@ -526,6 +495,7 @@ func (m Model) renderPlotSelection() string {
 		itemIdx  int // -1 if header
 	}
 	var lines []listLine
+	cursorLineIdx := 0 // Track which line the cursor is on
 
 	for i, plot := range m.plotItems {
 		if !m.IsPlotCategorySelected(plot.Group) {
@@ -539,6 +509,9 @@ func (m Model) renderPlotSelection() string {
 
 		isSelected := m.plotSelected[i]
 		isFocused := i == m.plotCursor
+		if isFocused {
+			cursorLineIdx = len(lines)
+		}
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
@@ -549,29 +522,22 @@ func (m Model) renderPlotSelection() string {
 		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
 	}
 
-	// Ensure offset is valid (don't mutate here, just use it safely)
-	offset := m.plotOffset
-	if offset > len(lines)-maxLines && len(lines) > maxLines {
-		offset = len(lines) - maxLines
-	}
-	if offset < 0 {
-		offset = 0
+	// Calculate layout using centralized function
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows+8) // Extra for details pane
+
+	// Show scroll up indicator
+	if layout.ShowScrollUp {
+		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
 	}
 
-	// Render the windowed list
-	if offset > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more items above ...", offset)) + "\n")
-	} else {
-		b.WriteString("\n")
-	}
-
-	for i := offset; i < len(lines) && i < offset+maxLines; i++ {
+	for i := layout.StartIdx; i < layout.EndIdx; i++ {
 		b.WriteString(" " + lines[i].text + "\n")
 	}
 
-	// More indicator
-	if offset+maxLines < len(lines) {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more items below ...", len(lines)-(offset+maxLines))) + "\n")
+	// Show scroll down indicator
+	if layout.ShowScrollDn {
+		remaining := len(lines) - layout.EndIdx
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	} else {
 		b.WriteString("\n")
 	}
@@ -884,20 +850,22 @@ func parseFloat(s string, defaultVal float64) float64 {
 
 func (m Model) renderPlotSelectionSplit() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" PLOT SELECTION ") + "\n\n")
+	title := " PLOT SELECTION "
+	b.WriteString(styles.SectionTitleStyle.Render(title) + "\n\n")
 
 	// Left Side: List
 	var left strings.Builder
 	visibleItems := []int{}
 	for i, plot := range m.plotItems {
-		if m.IsPlotCategorySelected(plot.Group) {
-			visibleItems = append(visibleItems, i)
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
 		}
+		visibleItems = append(visibleItems, i)
 	}
 
 	count := 0
-	for _, sel := range m.plotSelected {
-		if sel {
+	for _, idx := range visibleItems {
+		if m.plotSelected[idx] {
 			count++
 		}
 	}
@@ -912,7 +880,6 @@ func (m Model) renderPlotSelectionSplit() string {
 		fmt.Sprintf("%d/%d selected", count, len(visibleItems))) + "\n\n")
 
 	// List of plots
-	maxLines := m.height - 15
 	currentGroup := ""
 	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
@@ -922,6 +889,7 @@ func (m Model) renderPlotSelectionSplit() string {
 		itemIdx  int
 	}
 	var lines []listLine
+	cursorLineIdx := 0 // Track which line the cursor is on
 
 	for i, plot := range m.plotItems {
 		if !m.IsPlotCategorySelected(plot.Group) {
@@ -933,6 +901,9 @@ func (m Model) renderPlotSelectionSplit() string {
 		}
 		isSelected := m.plotSelected[i]
 		isFocused := i == m.plotCursor
+		if isFocused {
+			cursorLineIdx = len(lines)
+		}
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
 		if isFocused {
@@ -941,9 +912,22 @@ func (m Model) renderPlotSelectionSplit() string {
 		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
 	}
 
-	offset := m.plotOffset
-	for i := offset; i < len(lines) && i < offset+maxLines; i++ {
+	// Calculate layout using centralized function (extra rows for right panel)
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows)
+
+	// Show scroll up indicator
+	if layout.ShowScrollUp {
+		left.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
+	}
+
+	for i := layout.StartIdx; i < layout.EndIdx; i++ {
 		left.WriteString(lines[i].text + "\n")
+	}
+
+	// Show scroll down indicator
+	if layout.ShowScrollDn {
+		remaining := len(lines) - layout.EndIdx
+		left.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	}
 
 	// Right Side: Details
@@ -1031,6 +1015,107 @@ func (m Model) renderPlotSelectionSplit() string {
 	rightView := detailBox.Render(right.String())
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
+}
+
+func (m Model) renderFeaturePlotterSelection() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" FEATURE PLOTS ") + "\n\n")
+
+	b.WriteString(
+		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
+			"  Select which plots to execute within selected Feature suites (e.g., Power).\n",
+		) +
+			lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
+				"  Use ↑/↓ to navigate, Space to toggle, and A/N to select all/none.\n\n",
+			),
+	)
+
+	categories := m.selectedFeaturePlotterCategories()
+	if len(categories) == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("  No feature suites selected.\n"))
+		return b.String()
+	}
+	if m.featurePlotters == nil {
+		if strings.TrimSpace(m.featurePlotterError) != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Failed to load feature plots: " + m.featurePlotterError + "\n"))
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  Proceeding will run all plots.\n"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  Loading available feature plots...\n"))
+		}
+		return b.String()
+	}
+
+	items := m.featurePlotterItems()
+	if len(items) == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("  No feature plots available.\n"))
+		return b.String()
+	}
+
+	selectedCount := 0
+	for _, p := range items {
+		if m.featurePlotterSelected[p.ID] {
+			selectedCount++
+		}
+	}
+
+	statusIndicator := lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	if selectedCount > 0 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	}
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", selectedCount, len(items)),
+	))
+	if selectedCount == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
+
+	type listLine struct {
+		isHeader bool
+		text     string
+	}
+	var lines []listLine
+	cursorLineIdx := 0 // Track which line the cursor is on
+
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	currentCategory := ""
+	for i, p := range items {
+		if p.Category != currentCategory {
+			lines = append(lines, listLine{isHeader: true, text: groupStyle.Render(" " + strings.ToUpper(p.Category) + " ")})
+			currentCategory = p.Category
+		}
+		isFocused := i == m.featurePlotterCursor
+		if isFocused {
+			cursorLineIdx = len(lines)
+		}
+		isSelected := m.featurePlotterSelected[p.ID]
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		if isFocused {
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+		}
+		lines = append(lines, listLine{isHeader: false, text: checkbox + nameStyle.Render(p.Name)})
+	}
+
+	// Calculate layout using centralized function
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows)
+
+	// Show scroll up indicator
+	if layout.ShowScrollUp {
+		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
+	}
+
+	for i := layout.StartIdx; i < layout.EndIdx; i++ {
+		b.WriteString(" " + lines[i].text + "\n")
+	}
+
+	// Show scroll down indicator
+	if layout.ShowScrollDn {
+		remaining := len(lines) - layout.EndIdx
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
+	}
+
+	return b.String()
 }
 
 func (m Model) renderSubjectSelection() string {
@@ -1124,14 +1209,14 @@ func (m Model) renderSubjectSelection() string {
 		return b.String()
 	}
 
-	maxDisplay := styles.MaxVisibleSubjects
-	startIdx := 0
-	if m.subjectCursor >= maxDisplay {
-		startIdx = m.subjectCursor - maxDisplay + 1
-	}
-	endIdx := startIdx + maxDisplay
-	if endIdx > len(filteredSubjects) {
-		endIdx = len(filteredSubjects)
+	// Calculate responsive layout based on terminal height
+	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), styles.HeaderFooterRows)
+	startIdx := layout.StartIdx
+	endIdx := layout.EndIdx
+
+	// Show scroll up indicator
+	if layout.ShowScrollUp {
+		b.WriteString(styles.RenderScrollUpIndicator(startIdx) + "\n")
 	}
 
 	for i := startIdx; i < endIdx; i++ {
@@ -1183,7 +1268,14 @@ func (m Model) renderSubjectSelection() string {
 		b.WriteString("\n")
 	}
 
-	if len(filteredSubjects) > maxDisplay {
+	// Show scroll down indicator
+	if layout.ShowScrollDn {
+		remaining := len(filteredSubjects) - endIdx
+		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
+	}
+
+	// Status line with current position
+	if len(filteredSubjects) > layout.MaxItems {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(
 			fmt.Sprintf("  Showing %d-%d of %d  [↑↓ to scroll]", startIdx+1, endIdx, len(filteredSubjects))))
@@ -1339,7 +1431,7 @@ func (m Model) renderReview() string {
 		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Plots:") + "\n")
 		grouped := make(map[string][]string)
 		for i, plot := range m.plotItems {
-			if !m.plotSelected[i] {
+			if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
 				continue
 			}
 			grouped[plot.Group] = append(grouped[plot.Group], plot.Name)
@@ -1476,20 +1568,6 @@ func (m Model) renderReview() string {
 
 	b.WriteString(styles.CardStyle.Width(m.width-10).Render(card.String()) + "\n\n")
 
-	cmdHeader := lipgloss.JoinHorizontal(lipgloss.Left,
-		styles.SectionTitleStyle.Render(" COMMAND "),
-		"  ",
-		lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("(will be executed)"),
-	)
-	b.WriteString(cmdHeader + "\n")
-
-	cmdStyle := lipgloss.NewStyle().
-		Background(styles.BgBase).
-		Foreground(styles.Accent).
-		Padding(0, 2).
-		MarginLeft(2)
-	b.WriteString(cmdStyle.Render(m.BuildCommand()) + "\n\n")
-
 	if len(m.validationErrors) > 0 {
 		errPanel := strings.Builder{}
 		errHeader := lipgloss.NewStyle().
@@ -1529,6 +1607,8 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderFeaturesAdvancedConfig()
 	case types.PipelineBehavior:
 		return m.renderBehaviorAdvancedConfig()
+	case types.PipelinePlotting:
+		return m.renderPlottingAdvancedConfig()
 	case types.PipelineDecoding:
 		return m.renderDecodingAdvancedConfig()
 	case types.PipelinePreprocessing:
@@ -3373,6 +3453,452 @@ func (m Model) renderDefaultAdvancedConfig() string {
 	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("  No advanced options available for this pipeline.") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Press Enter to continue.") + "\n")
+	return b.String()
+}
+
+func (m Model) renderPlottingAdvancedConfig() string {
+	// New exhaustive plotting advanced config renderer (kept behind a runtime
+	// condition so the legacy implementation remains reachable for non-plotting
+	// pipelines, avoiding "unreachable code" compiler errors).
+	if m.Pipeline == types.PipelinePlotting {
+		return m.renderPlottingAdvancedConfigV2()
+	}
+
+	var b strings.Builder
+
+	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	accent := lipgloss.NewStyle().
+		Foreground(styles.Accent).
+		Bold(true).
+		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" ADVANCED PLOT SETTINGS") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	if m.useDefaultAdvanced {
+		b.WriteString(infoStyle.Render("Default plotting settings will be used.") + "\n")
+		b.WriteString(infoStyle.Render("Press Space to customize plot-specific overrides.") + "\n\n")
+
+		labelWidth := 22
+		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+		isFocused := m.advancedCursor == 0
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		if isFocused {
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+		}
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+		return b.String()
+	}
+
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.expandedOption >= 0 {
+		b.WriteString(infoStyle.Render("Space to toggle item · Esc to close submenu") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
+	}
+
+	options := m.getPlottingOptions()
+
+	// Build visible lines, including expanded connectivity measures
+	type line struct {
+		text    string
+		focused bool
+	}
+	lines := make([]line, 0, len(options)+len(connectivityMeasures))
+
+	labelWidth := 26
+	groupStyle := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	triState := func(v *bool) string {
+		if v == nil {
+			return "default"
+		}
+		if *v {
+			return "ON"
+		}
+		return "OFF"
+	}
+	floatOrDefault := func(v float64, fmtStr string) string {
+		if v == 0 {
+			return "default"
+		}
+		return fmt.Sprintf(fmtStr, v)
+	}
+	intOrDefault := func(v int) string {
+		if v == 0 {
+			return "default"
+		}
+		return fmt.Sprintf("%d", v)
+	}
+	spaceListOrDefault := func(v string) string {
+		if strings.TrimSpace(v) == "" {
+			return "(default)"
+		}
+		return v
+	}
+
+	for i, opt := range options {
+		isFocused := m.advancedCursor == i && m.expandedOption < 0
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+
+		labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelWidth)
+		valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		if isFocused {
+			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+			valueStyle = valueStyle.Foreground(styles.Accent).Bold(true)
+		}
+
+		switch opt {
+		case optUseDefaults:
+			lines = append(lines, line{
+				text: cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Custom") + "  " + hintStyle.Render("Space to reset"),
+			})
+
+		case optPlotGroupTopomap:
+			chev := "▸"
+			if m.plotGroupTopomapExpanded {
+				chev = "▾"
+			}
+			lines = append(lines, line{text: cursor + groupStyle.Render(chev+" Topomap")})
+		case optPlotGroupTFR:
+			chev := "▸"
+			if m.plotGroupTFRExpanded {
+				chev = "▾"
+			}
+			lines = append(lines, line{text: cursor + groupStyle.Render(chev+" TFR")})
+		case optPlotGroupSizing:
+			chev := "▸"
+			if m.plotGroupSizingExpanded {
+				chev = "▾"
+			}
+			lines = append(lines, line{text: cursor + groupStyle.Render(chev+" Sizing")})
+		case optPlotGroupSelection:
+			chev := "▸"
+			if m.plotGroupSelectionExpanded {
+				chev = "▾"
+			}
+			lines = append(lines, line{text: cursor + groupStyle.Render(chev+" Selection")})
+
+		case optPlotTopomapContours:
+			val := intOrDefault(m.plotTopomapContours)
+			if m.isCurrentlyEditing(optPlotTopomapContours) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Contours:") + " " + valueStyle.Render(val)})
+		case optPlotTopomapColormap:
+			val := m.plotTopomapColormap
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Colormap:") + " " + valueStyle.Render(val) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotTopomapColorbarFraction:
+			val := floatOrDefault(m.plotTopomapColorbarFraction, "%.4f")
+			if m.isCurrentlyEditing(optPlotTopomapColorbarFraction) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Cbar fraction:") + " " + valueStyle.Render(val)})
+		case optPlotTopomapColorbarPad:
+			val := floatOrDefault(m.plotTopomapColorbarPad, "%.4f")
+			if m.isCurrentlyEditing(optPlotTopomapColorbarPad) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Cbar pad:") + " " + valueStyle.Render(val)})
+		case optPlotTopomapDiffAnnotation:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Diff annotate:") + " " + valueStyle.Render(triState(m.plotTopomapDiffAnnotation))})
+		case optPlotTopomapAnnotateDescriptive:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Annotate desc:") + " " + valueStyle.Render(triState(m.plotTopomapAnnotateDesc))})
+
+		case optPlotTFRLogBase:
+			val := floatOrDefault(m.plotTFRLogBase, "%.4f")
+			if m.isCurrentlyEditing(optPlotTFRLogBase) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Log base:") + " " + valueStyle.Render(val)})
+		case optPlotTFRPercentageMultiplier:
+			val := floatOrDefault(m.plotTFRPercentageMultiplier, "%.4f")
+			if m.isCurrentlyEditing(optPlotTFRPercentageMultiplier) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Pct multiplier:") + " " + valueStyle.Render(val)})
+
+		case optPlotRoiWidthPerBand:
+			val := floatOrDefault(m.plotRoiWidthPerBand, "%.3f")
+			if m.isCurrentlyEditing(optPlotRoiWidthPerBand) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ROI w/band:") + " " + valueStyle.Render(val)})
+		case optPlotRoiWidthPerMetric:
+			val := floatOrDefault(m.plotRoiWidthPerMetric, "%.3f")
+			if m.isCurrentlyEditing(optPlotRoiWidthPerMetric) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ROI w/metric:") + " " + valueStyle.Render(val)})
+		case optPlotRoiHeightPerRoi:
+			val := floatOrDefault(m.plotRoiHeightPerRoi, "%.3f")
+			if m.isCurrentlyEditing(optPlotRoiHeightPerRoi) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ROI h/roi:") + " " + valueStyle.Render(val)})
+
+		case optPlotPowerWidthPerBand:
+			val := floatOrDefault(m.plotPowerWidthPerBand, "%.3f")
+			if m.isCurrentlyEditing(optPlotPowerWidthPerBand) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Power w/band:") + " " + valueStyle.Render(val)})
+		case optPlotPowerHeightPerSegment:
+			val := floatOrDefault(m.plotPowerHeightPerSegment, "%.3f")
+			if m.isCurrentlyEditing(optPlotPowerHeightPerSegment) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Power h/seg:") + " " + valueStyle.Render(val)})
+
+		case optPlotItpcWidthPerBin:
+			val := floatOrDefault(m.plotItpcWidthPerBin, "%.3f")
+			if m.isCurrentlyEditing(optPlotItpcWidthPerBin) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ITPC w/bin:") + " " + valueStyle.Render(val)})
+		case optPlotItpcHeightPerBand:
+			val := floatOrDefault(m.plotItpcHeightPerBand, "%.3f")
+			if m.isCurrentlyEditing(optPlotItpcHeightPerBand) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ITPC h/band:") + " " + valueStyle.Render(val)})
+		case optPlotItpcWidthPerBandBox:
+			val := floatOrDefault(m.plotItpcWidthPerBandBox, "%.3f")
+			if m.isCurrentlyEditing(optPlotItpcWidthPerBandBox) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ITPC box w:") + " " + valueStyle.Render(val)})
+		case optPlotItpcHeightBox:
+			val := floatOrDefault(m.plotItpcHeightBox, "%.3f")
+			if m.isCurrentlyEditing(optPlotItpcHeightBox) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("ITPC box h:") + " " + valueStyle.Render(val)})
+
+		case optPlotPacCmap:
+			val := m.plotPacCmap
+			if strings.TrimSpace(val) == "" {
+				val = "(default)"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("PAC cmap:") + " " + valueStyle.Render(val) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotPacWidthPerRoi:
+			val := floatOrDefault(m.plotPacWidthPerRoi, "%.3f")
+			if m.isCurrentlyEditing(optPlotPacWidthPerRoi) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("PAC w/roi:") + " " + valueStyle.Render(val)})
+		case optPlotPacHeightBox:
+			val := floatOrDefault(m.plotPacHeightBox, "%.3f")
+			if m.isCurrentlyEditing(optPlotPacHeightBox) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("PAC box h:") + " " + valueStyle.Render(val)})
+
+		case optPlotAperiodicWidthPerColumn:
+			val := floatOrDefault(m.plotAperiodicWidthPerColumn, "%.3f")
+			if m.isCurrentlyEditing(optPlotAperiodicWidthPerColumn) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Aper w/col:") + " " + valueStyle.Render(val)})
+		case optPlotAperiodicHeightPerRow:
+			val := floatOrDefault(m.plotAperiodicHeightPerRow, "%.3f")
+			if m.isCurrentlyEditing(optPlotAperiodicHeightPerRow) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Aper h/row:") + " " + valueStyle.Render(val)})
+		case optPlotAperiodicNPerm:
+			val := intOrDefault(m.plotAperiodicNPerm)
+			if m.isCurrentlyEditing(optPlotAperiodicNPerm) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Aper nperm:") + " " + valueStyle.Render(val)})
+
+		case optPlotQualityWidthPerPlot:
+			val := floatOrDefault(m.plotQualityWidthPerPlot, "%.3f")
+			if m.isCurrentlyEditing(optPlotQualityWidthPerPlot) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Quality w:") + " " + valueStyle.Render(val)})
+		case optPlotQualityHeightPerPlot:
+			val := floatOrDefault(m.plotQualityHeightPerPlot, "%.3f")
+			if m.isCurrentlyEditing(optPlotQualityHeightPerPlot) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Quality h:") + " " + valueStyle.Render(val)})
+		case optPlotQualityDistributionNCols:
+			val := intOrDefault(m.plotQualityDistributionNCols)
+			if m.isCurrentlyEditing(optPlotQualityDistributionNCols) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Qual dist cols:") + " " + valueStyle.Render(val)})
+		case optPlotQualityDistributionMaxFeatures:
+			val := intOrDefault(m.plotQualityDistributionMaxFeatures)
+			if m.isCurrentlyEditing(optPlotQualityDistributionMaxFeatures) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Qual dist max:") + " " + valueStyle.Render(val)})
+		case optPlotQualityOutlierZThreshold:
+			val := floatOrDefault(m.plotQualityOutlierZThreshold, "%.3f")
+			if m.isCurrentlyEditing(optPlotQualityOutlierZThreshold) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Outlier z:") + " " + valueStyle.Render(val)})
+		case optPlotQualityOutlierMaxFeatures:
+			val := intOrDefault(m.plotQualityOutlierMaxFeatures)
+			if m.isCurrentlyEditing(optPlotQualityOutlierMaxFeatures) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Outlier max f:") + " " + valueStyle.Render(val)})
+		case optPlotQualityOutlierMaxTrials:
+			val := intOrDefault(m.plotQualityOutlierMaxTrials)
+			if m.isCurrentlyEditing(optPlotQualityOutlierMaxTrials) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Outlier max t:") + " " + valueStyle.Render(val)})
+		case optPlotQualitySnrThresholdDb:
+			val := floatOrDefault(m.plotQualitySnrThresholdDb, "%.3f")
+			if m.isCurrentlyEditing(optPlotQualitySnrThresholdDb) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("SNR thr (dB):") + " " + valueStyle.Render(val)})
+
+		case optPlotComplexityWidthPerMeasure:
+			val := floatOrDefault(m.plotComplexityWidthPerMeasure, "%.3f")
+			if m.isCurrentlyEditing(optPlotComplexityWidthPerMeasure) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Comp w/meas:") + " " + valueStyle.Render(val)})
+		case optPlotComplexityHeightPerSegment:
+			val := floatOrDefault(m.plotComplexityHeightPerSegment, "%.3f")
+			if m.isCurrentlyEditing(optPlotComplexityHeightPerSegment) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Comp h/seg:") + " " + valueStyle.Render(val)})
+
+		case optPlotConnectivityWidthPerCircle:
+			val := floatOrDefault(m.plotConnectivityWidthPerCircle, "%.3f")
+			if m.isCurrentlyEditing(optPlotConnectivityWidthPerCircle) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Conn w/circle:") + " " + valueStyle.Render(val)})
+		case optPlotConnectivityWidthPerBand:
+			val := floatOrDefault(m.plotConnectivityWidthPerBand, "%.3f")
+			if m.isCurrentlyEditing(optPlotConnectivityWidthPerBand) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Conn w/band:") + " " + valueStyle.Render(val)})
+		case optPlotConnectivityHeightPerMeasure:
+			val := floatOrDefault(m.plotConnectivityHeightPerMeasure, "%.3f")
+			if m.isCurrentlyEditing(optPlotConnectivityHeightPerMeasure) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Conn h/meas:") + " " + valueStyle.Render(val)})
+		case optPlotConnectivityCircleTopFraction:
+			val := floatOrDefault(m.plotConnectivityCircleTopFraction, "%.3f")
+			if m.isCurrentlyEditing(optPlotConnectivityCircleTopFraction) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Circle top frac:") + " " + valueStyle.Render(val)})
+		case optPlotConnectivityCircleMinLines:
+			val := intOrDefault(m.plotConnectivityCircleMinLines)
+			if m.isCurrentlyEditing(optPlotConnectivityCircleMinLines) {
+				val = m.numberBuffer + "█"
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Circle min lines:") + " " + valueStyle.Render(val)})
+
+		case optPlotPacPairs:
+			lines = append(lines, line{text: cursor + labelStyle.Render("PAC pairs:") + " " + valueStyle.Render(spaceListOrDefault(m.plotPacPairsSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotConnectivityMeasures:
+			val := "(default)"
+			selected := m.selectedConnectivityMeasures()
+			if len(selected) > 0 {
+				val = strings.Join(selected, " ")
+			}
+			lines = append(lines, line{text: cursor + labelStyle.Render("Conn measures:") + " " + valueStyle.Render(val) + "  " + hintStyle.Render("Space to expand")})
+			if m.expandedOption == expandedConnectivityMeasures && m.advancedCursor == i {
+				for j, measure := range connectivityMeasures {
+					subFocused := m.subCursor == j
+					subCursor := "    "
+					subLabel := "  "
+					if subFocused {
+						subCursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("  ▸ ")
+						subLabel = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("  ")
+					}
+					on := m.connectivityMeasures[j]
+					toggle := "OFF"
+					if on {
+						toggle = "ON"
+					}
+					lines = append(lines, line{
+						text: subCursor + subLabel + measure.Key + ": " + lipgloss.NewStyle().Foreground(styles.Accent).Render(toggle),
+					})
+				}
+			}
+		case optPlotSpectralMetrics:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Spectral metrics:") + " " + valueStyle.Render(spaceListOrDefault(m.plotSpectralMetricsSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotBurstsMetrics:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Bursts metrics:") + " " + valueStyle.Render(spaceListOrDefault(m.plotBurstsMetricsSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotAsymmetryStat:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Asym stat:") + " " + valueStyle.Render(spaceListOrDefault(m.plotAsymmetryStatSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotTemporalTimeBins:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Temporal bins:") + " " + valueStyle.Render(spaceListOrDefault(m.plotTemporalTimeBinsSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		case optPlotTemporalTimeLabels:
+			lines = append(lines, line{text: cursor + labelStyle.Render("Temporal labels:") + " " + valueStyle.Render(spaceListOrDefault(m.plotTemporalTimeLabelsSpec)) + "  " + hintStyle.Render("Enter to edit")})
+		}
+	}
+
+	// Scrolling window
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = 40
+	}
+	maxLines := effectiveHeight - 12
+	if maxLines < 8 {
+		maxLines = 8
+	}
+	start := 0
+	if len(lines) > maxLines {
+		start = m.advancedOffset
+		if start < 0 {
+			start = 0
+		}
+		if start > len(lines)-maxLines {
+			start = len(lines) - maxLines
+		}
+	}
+	end := len(lines)
+	if len(lines) > maxLines {
+		end = start + maxLines
+	}
+
+	if start > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more above ...", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		b.WriteString(lines[i].text + "\n")
+	}
+	if end < len(lines) {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more below ...", len(lines)-end)) + "\n")
+	}
+
 	return b.String()
 }
 

@@ -131,6 +131,42 @@ type PlotItem struct {
 	Dependencies     []string // Other plots this plot depends on
 }
 
+type PlotterInfo struct {
+	ID       string
+	Category string
+	Name     string
+}
+
+// PlotItemConfig stores advanced settings scoped to a specific plot ID.
+// These are passed to the CLI as per-plot overrides.
+type PlotItemConfig struct {
+	// TFR
+	TfrDefaultBaselineWindowSpec string
+
+	// Comparisons
+	CompareWindows        *bool
+	ComparisonWindowsSpec string
+	CompareColumns        *bool
+	ComparisonSegment     string
+	ComparisonColumn      string
+	ComparisonValuesSpec  string
+	ComparisonROIsSpec    string
+}
+
+type plotItemConfigField int
+
+const (
+	plotItemConfigFieldNone plotItemConfigField = iota
+	plotItemConfigFieldTfrDefaultBaselineWindow
+	plotItemConfigFieldCompareWindows
+	plotItemConfigFieldComparisonWindows
+	plotItemConfigFieldCompareColumns
+	plotItemConfigFieldComparisonSegment
+	plotItemConfigFieldComparisonColumn
+	plotItemConfigFieldComparisonValues
+	plotItemConfigFieldComparisonROIs
+)
+
 type textField int
 
 const (
@@ -152,59 +188,156 @@ const (
 	textFieldSpectralRatioPairs
 	textFieldAsymmetryChannelPairs
 	textFieldERPComponents
+	// Plotting advanced config text fields
+	textFieldPlotBboxInches
+	textFieldPlotFontFamily
+	textFieldPlotFontWeight
+	textFieldPlotLayoutTightRect
+	textFieldPlotLayoutTightRectMicrostate
+	textFieldPlotGridSpecWidthRatios
+	textFieldPlotGridSpecHeightRatios
+	textFieldPlotFigureSizeStandard
+	textFieldPlotFigureSizeMedium
+	textFieldPlotFigureSizeSmall
+	textFieldPlotFigureSizeSquare
+	textFieldPlotFigureSizeWide
+	textFieldPlotFigureSizeTFR
+	textFieldPlotFigureSizeTopomap
+	textFieldPlotColorPain
+	textFieldPlotColorNonpain
+	textFieldPlotColorSignificant
+	textFieldPlotColorNonsignificant
+	textFieldPlotColorGray
+	textFieldPlotColorLightGray
+	textFieldPlotColorBlack
+	textFieldPlotColorBlue
+	textFieldPlotColorRed
+	textFieldPlotColorNetworkNode
+	textFieldPlotScatterEdgecolor
+	textFieldPlotHistEdgecolor
+	textFieldPlotKdeColor
+	textFieldPlotTopomapColormap
+	textFieldPlotTopomapSigMaskMarker
+	textFieldPlotTopomapSigMaskMarkerFaceColor
+	textFieldPlotTopomapSigMaskMarkerEdgeColor
+	textFieldPlotTfrDefaultBaselineWindow
+	textFieldPlotPacCmap
+	textFieldPlotPacPairs
+	textFieldPlotConnectivityMeasures
+	textFieldPlotSpectralMetrics
+	textFieldPlotBurstsMetrics
+	textFieldPlotTemporalTimeBins
+	textFieldPlotTemporalTimeLabels
+	textFieldPlotAsymmetryStat
 )
 
 var defaultPlotItems = []PlotItem{
-	// Features
-	{ID: "features_power", Group: "features", Name: "Power", Description: "Band power summaries and topomaps", RequiredFiles: []string{"features_power.tsv"}, RequiresFeatures: true},
-	{ID: "features_connectivity", Group: "features", Name: "Connectivity", Description: "Connectivity heatmaps and networks", RequiredFiles: []string{"features_connectivity.parquet"}, RequiresEpochs: true, RequiresFeatures: true},
-	{ID: "features_aperiodic", Group: "features", Name: "Aperiodic", Description: "1/f spectral slope diagnostics", RequiredFiles: []string{"features_aperiodic.tsv"}, RequiresFeatures: true},
-	{ID: "features_itpc", Group: "features", Name: "ITPC", Description: "Inter-trial phase coherence plots", RequiredFiles: []string{"features_itpc.tsv", "stats/itpc_data.npz"}, RequiresFeatures: true},
-	{ID: "features_pac", Group: "features", Name: "PAC", Description: "Phase-amplitude coupling plots", RequiredFiles: []string{"features_pac*.tsv"}, RequiresFeatures: true},
-	{ID: "features_erds", Group: "features", Name: "ERDS", Description: "Event-related desync/sync plots", RequiredFiles: []string{"features_erds.tsv"}, RequiresFeatures: true},
-	{ID: "features_complexity", Group: "features", Name: "Complexity", Description: "Complexity distributions and condition comparisons", RequiredFiles: []string{"features_complexity.tsv"}, RequiresFeatures: true},
-	{ID: "features_quality", Group: "features", Name: "Quality", Description: "Feature quality diagnostics and outlier views", RequiredFiles: []string{"features_quality.tsv"}, RequiresFeatures: true},
-	{ID: "features_spectral", Group: "features", Name: "Spectral", Description: "Spectral peak and edge features", RequiredFiles: []string{"features_spectral.tsv"}, RequiresFeatures: true},
-	{ID: "features_ratios", Group: "features", Name: "Ratios", Description: "Band power ratios", RequiredFiles: []string{"features_ratios.tsv"}, RequiresFeatures: true},
-	{ID: "features_asymmetry", Group: "features", Name: "Asymmetry", Description: "Hemispheric asymmetry indices", RequiredFiles: []string{"features_asymmetry.tsv"}, RequiresFeatures: true},
-	{ID: "features_bursts", Group: "features", Name: "Bursts", Description: "Oscillatory burst dynamics", RequiredFiles: []string{"features_bursts.tsv"}, RequiresFeatures: true},
-	{ID: "features_erp", Group: "features", Name: "ERP", Description: "ERP visualizations from epochs", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	// Behavior
-	{ID: "behavior_psychometrics", Group: "behavior", Name: "Psychometrics", Description: "Rating distributions and psychometrics", RequiredFiles: []string{"events.tsv"}},
-	{ID: "behavior_power_scatter", Group: "behavior", Name: "Power ROI Scatter", Description: "Power vs behavior scatter plots", RequiredFiles: []string{"features_power.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_power"}},
-	{ID: "behavior_complexity_scatter", Group: "behavior", Name: "Complexity Scatter", Description: "Complexity vs behavior scatter plots", RequiredFiles: []string{"features_complexity.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_complexity"}},
-	{ID: "behavior_aperiodic_scatter", Group: "behavior", Name: "Aperiodic Scatter", Description: "Aperiodic vs behavior scatter plots", RequiredFiles: []string{"features_aperiodic.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_aperiodic"}},
-	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity.parquet", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_connectivity"}},
-	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true, Dependencies: []string{"features_itpc"}},
-	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
-	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Pain Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
-	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
-	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
-	// TFR
-	{ID: "tfr_scalpmean", Group: "tfr", Name: "Scalp-Mean", Description: "Scalp-mean TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_scalpmean_contrast", Group: "tfr", Name: "Scalp-Mean Contrast", Description: "Pain vs non-pain contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
-	{ID: "tfr_channels", Group: "tfr", Name: "Channels", Description: "Channel-level TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_channels_contrast", Group: "tfr", Name: "Channels Contrast", Description: "Channel-level contrast plots", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
-	{ID: "tfr_rois", Group: "tfr", Name: "ROIs", Description: "ROI-level TFR plots", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "tfr_rois_contrast", Group: "tfr", Name: "ROI Contrast", Description: "ROI-level contrast plots", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
-	{ID: "tfr_topomaps", Group: "tfr", Name: "Topomaps", Description: "Time-frequency topomaps", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
-	{ID: "tfr_band_evolution", Group: "tfr", Name: "Band Evolution", Description: "Band evolution over time", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	// Power
+	{ID: "power_by_condition", Group: "power", Name: "Condition Comparison", Description: "Power differences between conditions", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "power_band_segment_condition", Group: "power", Name: "Band × Segment × Condition", Description: "Power across bands and time segments by condition", RequiredFiles: []string{"features_power*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "band_power_topomaps_baseline", Group: "power", Name: "Topomaps (Baseline)", Description: "Band power topographic maps for baseline period", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "band_power_topomaps_active", Group: "power", Name: "Topomaps (Active)", Description: "Band power topographic maps for active period", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "power_variability_comprehensive", Group: "power", Name: "Variability Analysis", Description: "Comprehensive power variability diagnostics", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
+	{ID: "cross_frequency_power_correlation", Group: "power", Name: "Cross-Frequency Correlation", Description: "Correlation matrix between frequency bands", RequiredFiles: []string{"features_power*.tsv"}, RequiresFeatures: true},
+	{ID: "power_spectral_density", Group: "power", Name: "PSD Summary", Description: "Power spectral density curves", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "power_topomaps_from_df", Group: "power", Name: "Topomaps from Features", Description: "Power topomaps generated from feature DataFrame", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "spectral_slope_topomap", Group: "power", Name: "Spectral Slope Topomap", Description: "Topographic map of 1/f spectral slope", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	// Connectivity
+	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.parquet", "events.tsv"}, RequiresFeatures: true},
+	{ID: "connectivity_dynamics", Group: "connectivity", Name: "Sliding Window Dynamics", Description: "Connectivity trajectories over time windows", RequiredFiles: []string{"features_connectivity*.parquet"}, RequiresFeatures: true},
+	// Aperiodic
+	{ID: "aperiodic_topomaps", Group: "aperiodic", Name: "Topomaps", Description: "Topographic maps of slope and offset", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "aperiodic_by_condition", Group: "aperiodic", Name: "Condition Comparison", Description: "Aperiodic differences between conditions", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "aperiodic_band_segment_condition", Group: "aperiodic", Name: "Band × Segment × Condition", Description: "Aperiodic features across segments by condition", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "aperiodic_temporal_evolution", Group: "aperiodic", Name: "Temporal Evolution", Description: "Aperiodic features over time bins", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Phase (ITPC/PAC)
+	{ID: "itpc_heatmap", Group: "phase", Name: "ITPC Heatmap", Description: "Inter-trial phase coherence heatmaps", RequiredFiles: []string{"features_itpc*.tsv"}, RequiresFeatures: true},
+	{ID: "itpc_topomaps", Group: "phase", Name: "ITPC Topomaps", Description: "Topographic maps of phase coherence", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
+	{ID: "itpc_by_condition", Group: "phase", Name: "ITPC Condition Comparison", Description: "Phase coherence differences between conditions", RequiredFiles: []string{"features_itpc*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "itpc_band_segment_condition", Group: "phase", Name: "ITPC Band × Segment × Condition", Description: "ITPC across bands and segments by condition", RequiredFiles: []string{"features_itpc*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "itpc_temporal_evolution", Group: "phase", Name: "ITPC Temporal Evolution", Description: "Phase coherence over time bins", RequiredFiles: []string{"features_itpc*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "pac_summary", Group: "phase", Name: "PAC Summary", Description: "Phase-amplitude coupling overview", RequiredFiles: []string{"features_pac*.tsv"}, RequiresFeatures: true},
+	{ID: "pac_comodulograms", Group: "phase", Name: "PAC Comodulograms", Description: "Phase-amplitude coupling frequency matrices", RequiredFiles: []string{"features_pac*.tsv"}, RequiresFeatures: true},
+	{ID: "pac_by_condition", Group: "phase", Name: "PAC Condition Comparison", Description: "PAC differences between conditions", RequiredFiles: []string{"features_pac*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "pac_time_ribbons", Group: "phase", Name: "PAC Time Ribbons", Description: "PAC temporal dynamics ribbon plots", RequiredFiles: []string{"features_pac*.tsv"}, RequiresFeatures: true},
+	// ERDS
+	{ID: "erds_temporal_evolution", Group: "erds", Name: "Temporal Evolution", Description: "ERD/ERS time course plots", RequiredFiles: []string{"features_erds*.tsv"}, RequiresFeatures: true},
+	{ID: "erds_latency_distribution", Group: "erds", Name: "Latency Distribution", Description: "Distribution of ERD/ERS onset and peak latencies", RequiredFiles: []string{"features_erds*.tsv"}, RequiresFeatures: true},
+	{ID: "erds_erd_ers_separation", Group: "erds", Name: "ERD/ERS Separation", Description: "Separate ERD and ERS magnitude/duration", RequiredFiles: []string{"features_erds*.tsv"}, RequiresFeatures: true},
+	{ID: "erds_global_summary", Group: "erds", Name: "Global Summary", Description: "Summary statistics across channels", RequiredFiles: []string{"features_erds*.tsv"}, RequiresFeatures: true},
+	{ID: "erds_by_condition", Group: "erds", Name: "Condition Comparison", Description: "ERDS differences between conditions", RequiredFiles: []string{"features_erds*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Complexity
+	{ID: "complexity_by_band", Group: "complexity", Name: "By Band", Description: "Complexity metrics per frequency band", RequiredFiles: []string{"features_complexity*.tsv"}, RequiresFeatures: true},
+	{ID: "complexity_by_condition", Group: "complexity", Name: "Condition Comparison", Description: "Complexity differences between conditions", RequiredFiles: []string{"features_complexity*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "complexity_band_segment_condition", Group: "complexity", Name: "Band × Segment × Condition", Description: "Complexity across bands and segments by condition", RequiredFiles: []string{"features_complexity*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "complexity_temporal_evolution", Group: "complexity", Name: "Temporal Evolution", Description: "Complexity over time bins", RequiredFiles: []string{"features_complexity*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Spectral
+	{ID: "spectral_summary", Group: "spectral", Name: "Summary", Description: "Peak frequency and spectral features overview", RequiredFiles: []string{"features_spectral*.tsv"}, RequiresFeatures: true},
+	{ID: "spectral_edge_frequency", Group: "spectral", Name: "Edge Frequency", Description: "Spectral edge frequency (95%) distributions", RequiredFiles: []string{"features_spectral*.tsv"}, RequiresFeatures: true},
+	{ID: "spectral_by_condition", Group: "spectral", Name: "Condition Comparison", Description: "Spectral differences between conditions", RequiredFiles: []string{"features_spectral*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "spectral_band_segment_condition", Group: "spectral", Name: "Band × Segment × Condition", Description: "Spectral features across bands and segments", RequiredFiles: []string{"features_spectral*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "spectral_temporal_evolution", Group: "spectral", Name: "Temporal Evolution", Description: "Spectral features over time bins", RequiredFiles: []string{"features_spectral*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Ratios
+	{ID: "ratios_by_pair", Group: "ratios", Name: "By Pair", Description: "Ratio values for each band pair", RequiredFiles: []string{"features_ratios*.tsv"}, RequiresFeatures: true},
+	{ID: "ratios_by_condition", Group: "ratios", Name: "Condition Comparison", Description: "Ratio differences between conditions", RequiredFiles: []string{"features_ratios*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "ratios_band_segment_condition", Group: "ratios", Name: "Band × Segment × Condition", Description: "Ratios across segments by condition", RequiredFiles: []string{"features_ratios*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "ratios_temporal_evolution", Group: "ratios", Name: "Temporal Evolution", Description: "Ratios over time bins", RequiredFiles: []string{"features_ratios*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Asymmetry
+	{ID: "asymmetry_by_band", Group: "asymmetry", Name: "By Band", Description: "Asymmetry indices per frequency band", RequiredFiles: []string{"features_asymmetry*.tsv"}, RequiresFeatures: true},
+	{ID: "asymmetry_by_condition", Group: "asymmetry", Name: "Condition Comparison", Description: "Asymmetry differences between conditions", RequiredFiles: []string{"features_asymmetry*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "asymmetry_band_segment_condition", Group: "asymmetry", Name: "Band × Segment × Condition", Description: "Asymmetry across bands and segments", RequiredFiles: []string{"features_asymmetry*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "asymmetry_temporal_evolution", Group: "asymmetry", Name: "Temporal Evolution", Description: "Asymmetry over time bins", RequiredFiles: []string{"features_asymmetry*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Bursts
+	{ID: "bursts_by_band", Group: "bursts", Name: "By Band", Description: "Burst metrics per frequency band", RequiredFiles: []string{"features_bursts*.tsv"}, RequiresFeatures: true},
+	{ID: "bursts_by_condition", Group: "bursts", Name: "Condition Comparison", Description: "Burst differences between conditions", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "burst_band_segment_condition", Group: "bursts", Name: "Band × Segment × Condition", Description: "Burst metrics across bands and segments", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "burst_temporal_evolution", Group: "bursts", Name: "Temporal Evolution", Description: "Burst dynamics over time bins", RequiredFiles: []string{"features_bursts*.tsv", "events.tsv"}, RequiresFeatures: true},
+	// Quality
+	{ID: "quality_feature_distributions", Group: "quality", Name: "Feature Distributions", Description: "Distribution of quality metrics across trials", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
+	{ID: "quality_outlier_heatmap", Group: "quality", Name: "Outlier Heatmap", Description: "Heatmap of outlier trials and features", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
+	{ID: "quality_snr_distribution", Group: "quality", Name: "SNR Distribution", Description: "Signal-to-noise ratio distributions", RequiredFiles: []string{"features_quality*.tsv"}, RequiresFeatures: true},
 	// ERP
 	{ID: "erp_butterfly", Group: "erp", Name: "Butterfly", Description: "Butterfly ERP plots (all channels)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "erp_roi", Group: "erp", Name: "ROI Waveforms", Description: "ROI-based ERP waveforms", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	{ID: "erp_roi", Group: "erp", Name: "ROI Waveforms", Description: "ROI-based ERP waveforms with error bars", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts (Pain vs No-Pain)", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	{ID: "erp_topomaps", Group: "erp", Name: "Topomaps", Description: "ERP spatial distributions", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	// TFR
+	{ID: "TFR", Group: "tfr", Name: "Scalp-Mean TFR", Description: "Scalp-mean time-frequency representation", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
+	// Behavior
+	{ID: "temporal_evolution", Group: "behavior", Name: "Temporal Evolution (All Features)", Description: "Feature evolution over time bins", RequiredFiles: []string{"features_*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "behavior_psychometrics", Group: "behavior", Name: "Psychometrics", Description: "Rating distributions and psychometrics", RequiredFiles: []string{"events.tsv"}},
+	{ID: "behavior_power_scatter", Group: "behavior", Name: "Power ROI Scatter", Description: "Power vs behavior scatter plots", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_complexity_scatter", Group: "behavior", Name: "Complexity Scatter", Description: "Complexity vs behavior scatter plots", RequiredFiles: []string{"features_complexity*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_aperiodic_scatter", Group: "behavior", Name: "Aperiodic Scatter", Description: "Aperiodic vs behavior scatter plots", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity*.parquet", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
+	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Pain Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
+	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
+	{ID: "behavior_temperature_models", Group: "behavior", Name: "Temperature Models", Description: "Subject-level temperature→rating diagnostics", RequiredFiles: []string{"stats/trials*.parquet"}, RequiresStats: true},
+	{ID: "behavior_stability_groupwise", Group: "behavior", Name: "Stability (Run/Block)", Description: "Within-subject stability of feature→outcome associations", RequiredFiles: []string{"stats/stability_groupwise*.tsv"}, RequiresStats: true},
 	// Decoding
 	{ID: "decoding_regression_plots", Group: "decoding", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"decoding/regression/loso_predictions.tsv"}},
 	{ID: "decoding_timegen_plots", Group: "decoding", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"decoding/time_generalization/time_generalization_regression.npz"}},
 }
 
 var defaultPlotCategories = []FeatureCategory{
-	{"features", "Features", "Feature distribution, QC, and descriptive summaries"},
-	{"behavior", "Behavior", "EEG-behavior correlations, temporal stats, and summaries"},
-	{"tfr", "Time-Frequency", "Time-frequency representations, contrasts, and topomaps"},
+	{"power", "Power", "Band power features and topomaps"},
+	{"connectivity", "Connectivity", "Functional connectivity measures and networks"},
+	{"aperiodic", "Aperiodic", "1/f spectral slope and offset features"},
+	{"phase", "Phase (ITPC/PAC)", "Phase coherence and phase-amplitude coupling"},
+	{"erds", "ERDS", "Event-related desynchronization/synchronization"},
+	{"complexity", "Complexity", "Lempel-Ziv complexity and permutation entropy"},
+	{"spectral", "Spectral", "Peak frequency, spectral edge, and entropy"},
+	{"ratios", "Ratios", "Band power ratios (theta/beta, alpha/beta, etc.)"},
+	{"asymmetry", "Asymmetry", "Hemispheric asymmetry indices"},
+	{"bursts", "Bursts", "Oscillatory burst dynamics"},
+	{"quality", "Quality", "Data quality diagnostics and outlier detection"},
 	{"erp", "ERP", "Event-related potential waveforms and topographies"},
-	{"decoding", "Decoding", "Decoding regression diagnostics and time-generalization"},
+	{"tfr", "Time-Frequency", "Time-frequency representations and contrasts"},
+	{"behavior", "Behavior", "EEG-behavior correlations and temporal stats"},
+	{"decoding", "Decoding", "Decoding regression and time-generalization"},
 }
 
 type plotCatalogPayload struct {
@@ -329,11 +462,16 @@ type Model struct {
 	featureFileCursor   int
 
 	// Plotting pipeline selection
-	plotCategories []FeatureCategory
-	plotItems      []PlotItem
-	plotSelected   map[int]bool
-	plotCursor     int
-	plotOffset     int // Scroll offset for plots
+	plotCategories         []FeatureCategory
+	plotItems              []PlotItem
+	plotSelected           map[int]bool
+	plotCursor             int
+	plotOffset             int // Scroll offset for plots
+	featurePlotters        map[string][]PlotterInfo
+	featurePlotterSelected map[string]bool
+	featurePlotterCursor   int
+	featurePlotterOffset   int
+	featurePlotterError    string
 
 	// Plotting output configuration
 	plotFormats         []string
@@ -344,6 +482,213 @@ type Model struct {
 	plotSharedColorbar  bool
 	plotConfigCursor    int
 
+	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
+	plotGroupDefaultsExpanded    bool
+	plotGroupFontsExpanded       bool
+	plotGroupLayoutExpanded      bool
+	plotGroupFigureSizesExpanded bool
+	plotGroupColorsExpanded      bool
+	plotGroupAlphaExpanded       bool
+	plotGroupScatterExpanded     bool
+	plotGroupBarExpanded         bool
+	plotGroupLineExpanded        bool
+	plotGroupHistogramExpanded   bool
+	plotGroupKDEExpanded         bool
+	plotGroupErrorbarExpanded    bool
+	plotGroupTextExpanded        bool
+	plotGroupValidationExpanded  bool
+	plotGroupTFRMiscExpanded     bool
+
+	plotGroupTopomapExpanded   bool
+	plotGroupTFRExpanded       bool
+	plotGroupSizingExpanded    bool
+	plotGroupSelectionExpanded bool
+
+	// Per-plot advanced configuration (wizard overrides scoped to plot IDs)
+	plotItemConfigs        map[string]PlotItemConfig
+	plotItemConfigExpanded map[string]bool
+
+	plotBboxInches string
+	plotPadInches  float64
+
+	plotFontFamily          string
+	plotFontWeight          string
+	plotFontSizeSmall       int
+	plotFontSizeMedium      int
+	plotFontSizeLarge       int
+	plotFontSizeTitle       int
+	plotFontSizeAnnotation  int
+	plotFontSizeLabel       int
+	plotFontSizeYLabel      int
+	plotFontSizeSuptitle    int
+	plotFontSizeFigureTitle int
+
+	plotLayoutTightRectSpec           string
+	plotLayoutTightRectMicrostateSpec string
+	plotGridSpecWidthRatiosSpec       string
+	plotGridSpecHeightRatiosSpec      string
+	plotGridSpecHspace                float64
+	plotGridSpecWspace                float64
+	plotGridSpecLeft                  float64
+	plotGridSpecRight                 float64
+	plotGridSpecTop                   float64
+	plotGridSpecBottom                float64
+
+	plotFigureSizeStandardSpec string
+	plotFigureSizeMediumSpec   string
+	plotFigureSizeSmallSpec    string
+	plotFigureSizeSquareSpec   string
+	plotFigureSizeWideSpec     string
+	plotFigureSizeTFRSpec      string
+	plotFigureSizeTopomapSpec  string
+
+	plotColorPain           string
+	plotColorNonpain        string
+	plotColorSignificant    string
+	plotColorNonsignificant string
+	plotColorGray           string
+	plotColorLightGray      string
+	plotColorBlack          string
+	plotColorBlue           string
+	plotColorRed            string
+	plotColorNetworkNode    string
+
+	plotAlphaGrid       float64
+	plotAlphaFill       float64
+	plotAlphaCI         float64
+	plotAlphaCILine     float64
+	plotAlphaTextBox    float64
+	plotAlphaViolinBody float64
+	plotAlphaRidgeFill  float64
+
+	plotScatterMarkerSizeSmall   int
+	plotScatterMarkerSizeLarge   int
+	plotScatterMarkerSizeDefault int
+	plotScatterAlpha             float64
+	plotScatterEdgeColor         string
+	plotScatterEdgeWidth         float64
+
+	plotBarAlpha        float64
+	plotBarWidth        float64
+	plotBarCapsize      int
+	plotBarCapsizeLarge int
+
+	plotLineWidthThin       float64
+	plotLineWidthStandard   float64
+	plotLineWidthThick      float64
+	plotLineWidthBold       float64
+	plotLineAlphaStandard   float64
+	plotLineAlphaDim        float64
+	plotLineAlphaZeroLine   float64
+	plotLineAlphaFitLine    float64
+	plotLineAlphaDiagonal   float64
+	plotLineAlphaReference  float64
+	plotLineRegressionWidth float64
+	plotLineResidualWidth   float64
+	plotLineQQWidth         float64
+
+	plotHistBins           int
+	plotHistBinsBehavioral int
+	plotHistBinsResidual   int
+	plotHistBinsTFR        int
+	plotHistEdgeColor      string
+	plotHistEdgeWidth      float64
+	plotHistAlpha          float64
+	plotHistAlphaResidual  float64
+	plotHistAlphaTFR       float64
+
+	plotKdePoints    int
+	plotKdeColor     string
+	plotKdeLinewidth float64
+	plotKdeAlpha     float64
+
+	plotErrorbarMarkerSize   int
+	plotErrorbarCapsize      int
+	plotErrorbarCapsizeLarge int
+
+	plotTextStatsX             float64
+	plotTextStatsY             float64
+	plotTextPvalueX            float64
+	plotTextPvalueY            float64
+	plotTextBootstrapX         float64
+	plotTextBootstrapY         float64
+	plotTextChannelAnnotationX float64
+	plotTextChannelAnnotationY float64
+	plotTextTitleY             float64
+	plotTextResidualQcTitleY   float64
+
+	plotValidationMinSamplesForPlot        int
+	plotValidationMinSamplesForKDE         int
+	plotValidationMinSamplesForFit         int
+	plotValidationMinSamplesForCalibration int
+	plotValidationMinBinsForCalibration    int
+	plotValidationMaxBinsForCalibration    int
+	plotValidationSamplesPerBin            int
+	plotValidationMinRoisForFDR            int
+	plotValidationMinPvaluesForFDR         int
+
+	plotTfrDefaultBaselineWindowSpec string
+
+	plotTopomapContours               int
+	plotTopomapColormap               string
+	plotTopomapColorbarFraction       float64
+	plotTopomapColorbarPad            float64
+	plotTopomapDiffAnnotation         *bool
+	plotTopomapAnnotateDesc           *bool
+	plotTopomapSigMaskMarker          string
+	plotTopomapSigMaskMarkerFaceColor string
+	plotTopomapSigMaskMarkerEdgeColor string
+	plotTopomapSigMaskLinewidth       float64
+	plotTopomapSigMaskMarkerSize      float64
+
+	plotTFRLogBase              float64
+	plotTFRPercentageMultiplier float64
+
+	plotRoiWidthPerBand   float64
+	plotRoiWidthPerMetric float64
+	plotRoiHeightPerRoi   float64
+
+	plotPowerWidthPerBand     float64
+	plotPowerHeightPerSegment float64
+
+	plotItpcWidthPerBin     float64
+	plotItpcHeightPerBand   float64
+	plotItpcWidthPerBandBox float64
+	plotItpcHeightBox       float64
+
+	plotPacCmap        string
+	plotPacWidthPerRoi float64
+	plotPacHeightBox   float64
+
+	plotAperiodicWidthPerColumn float64
+	plotAperiodicHeightPerRow   float64
+	plotAperiodicNPerm          int
+
+	plotQualityWidthPerPlot            float64
+	plotQualityHeightPerPlot           float64
+	plotQualityDistributionNCols       int
+	plotQualityDistributionMaxFeatures int
+	plotQualityOutlierZThreshold       float64
+	plotQualityOutlierMaxFeatures      int
+	plotQualityOutlierMaxTrials        int
+	plotQualitySnrThresholdDb          float64
+
+	plotComplexityWidthPerMeasure  float64
+	plotComplexityHeightPerSegment float64
+
+	plotConnectivityWidthPerCircle    float64
+	plotConnectivityWidthPerBand      float64
+	plotConnectivityHeightPerMeasure  float64
+	plotConnectivityCircleTopFraction float64
+	plotConnectivityCircleMinLines    int
+
+	plotPacPairsSpec           string
+	plotSpectralMetricsSpec    string
+	plotBurstsMetricsSpec      string
+	plotTemporalTimeBinsSpec   string
+	plotTemporalTimeLabelsSpec string
+	plotAsymmetryStatSpec      string
+
 	// Subject selection
 	subjects         []types.SubjectStatus
 	subjectSelected  map[string]bool
@@ -351,6 +696,8 @@ type Model struct {
 	subjectsLoading  bool
 	subjectFilter    string
 	filteringSubject bool
+	availableWindows []string
+	availableColumns []string
 
 	// Review/Execute
 	ReadyToExecute    bool
@@ -369,9 +716,6 @@ type Model struct {
 	width  int
 	height int
 
-	// Command preview overlay
-	showCommandPreview bool
-
 	// Advanced configuration (shared)
 	useDefaultAdvanced bool // True = skip advanced config customization
 	advancedCursor     int  // Which config option is focused
@@ -389,6 +733,8 @@ type Model struct {
 	editingText      bool
 	textBuffer       string
 	editingTextField textField
+	editingPlotID    string
+	editingPlotField plotItemConfigField
 
 	// Features pipeline advanced config
 	connectivityMeasures map[int]bool // Selected connectivity measures
@@ -716,7 +1062,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Proceed to next step"},
-		{Key: "P", Description: "Preview command"},
 		{Key: "?", Description: "Toggle help"},
 		{Key: "F5", Description: "Refresh subjects"},
 	})
@@ -750,6 +1095,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		featGroupStorageExpanded:      true,
 		featGroupExecutionExpanded:    true,
 		featGroupValidationExpanded:   true,
+		plotItemConfigs:               make(map[string]PlotItemConfig),
+		plotItemConfigExpanded:        make(map[string]bool),
 		// PAC/CFC defaults (from config)
 		pacPhaseMin:  4.0,
 		pacPhaseMax:  8.0,
@@ -939,11 +1286,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionMinTrials:       10,
 		conditionFailFast:        true,
 		// Decoding defaults
-		decodingNPerm: 0,
-		innerSplits:   3,
-		skipTimeGen:   false,
-		plotSelected:  make(map[int]bool),
-		plotFormats:   []string{"png", "svg", "pdf"},
+		decodingNPerm:          0,
+		innerSplits:            3,
+		skipTimeGen:            false,
+		plotSelected:           make(map[int]bool),
+		featurePlotterSelected: make(map[string]bool),
+		plotFormats:            []string{"png", "svg", "pdf"},
 		plotFormatSelected: map[string]bool{
 			"png": true,
 			"svg": true,
@@ -1163,6 +1511,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectSubjects,
 			types.StepSelectPlotCategories,
 			types.StepSelectPlots,
+			types.StepSelectFeaturePlotters,
+			types.StepAdvancedConfig,
 			types.StepPlotConfig,
 			types.StepReviewExecute, // Review & Execute should be the last step
 		}
@@ -1204,14 +1554,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 
 	case tea.KeyMsg:
-		// Handle command preview overlay first
-		if m.showCommandPreview {
-			if msg.String() == "p" || msg.String() == "P" || msg.String() == "esc" {
-				m.showCommandPreview = false
-			}
-			return m, nil
-		}
-
 		if m.showHelp {
 			if msg.String() == "?" || msg.String() == "esc" {
 				m.showHelp = false
@@ -1259,11 +1601,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editingText = false
 				m.textBuffer = ""
 				m.editingTextField = textFieldNone
+				m.editingPlotID = ""
+				m.editingPlotField = plotItemConfigFieldNone
 			case "enter":
 				m.commitTextInput()
 				m.editingText = false
 				m.textBuffer = ""
 				m.editingTextField = textFieldNone
+				m.editingPlotID = ""
+				m.editingPlotField = plotItemConfigFieldNone
 				return m, nil
 			case "backspace":
 				if len(m.textBuffer) > 0 {
@@ -1396,10 +1742,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			m.selectNone()
 
-		case "p", "P":
-			// Toggle command preview overlay
-			m.showCommandPreview = !m.showCommandPreview
-
 		case "Q":
 			// Quick preset
 			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
@@ -1453,6 +1795,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.CurrentStep == types.StepSelectPlots {
 			m.UpdatePlotOffset()
 		}
+		if m.CurrentStep == types.StepSelectFeaturePlotters {
+			m.UpdateFeaturePlotterOffset()
+		}
 		if m.CurrentStep == types.StepSelectComputations {
 			m.UpdateComputationOffset()
 		}
@@ -1464,6 +1809,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Always update plot offset if in that step to ensure it's in sync
 	if m.CurrentStep == types.StepSelectPlots {
 		m.UpdatePlotOffset()
+	}
+	if m.CurrentStep == types.StepSelectFeaturePlotters {
+		m.UpdateFeaturePlotterOffset()
 	}
 	if m.CurrentStep == types.StepSelectComputations {
 		m.UpdateComputationOffset()
@@ -1515,10 +1863,6 @@ func (m *Model) UpdateAdvancedOffset() {
 		m.advancedOffset = 0
 		return
 	}
-	if m.Pipeline == types.PipelineFeatures && m.useDefaultAdvanced {
-		m.advancedOffset = 0
-		return
-	}
 
 	// Total height minus overhead (approx; reduced for more visible content).
 	// Must match values used in render_steps.go for consistency.
@@ -1560,6 +1904,11 @@ func (m *Model) UpdateAdvancedOffset() {
 				cursorLine = expandedIdx + 1 + m.subCursor
 			}
 		}
+
+	case types.PipelinePlotting:
+		rows := m.getPlottingAdvancedRows()
+		totalLines = len(rows)
+		cursorLine = m.advancedCursor
 
 	default:
 		totalLines = 0
@@ -1642,6 +1991,83 @@ func (m *Model) UpdatePlotOffset() {
 	}
 	if lineIdx > maxLines && m.plotOffset > lineIdx-maxLines {
 		m.plotOffset = lineIdx - maxLines
+	}
+}
+
+func (m Model) selectedFeaturePlotterCategories() []string {
+	var ordered []string
+	seen := make(map[string]bool)
+	for i, plot := range m.plotItems {
+		if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
+			continue
+		}
+		if plot.Group != "features" {
+			continue
+		}
+		id := strings.TrimSpace(plot.ID)
+		if !strings.HasPrefix(id, "features_") {
+			continue
+		}
+		cat := strings.TrimPrefix(id, "features_")
+		if cat == "" || seen[cat] {
+			continue
+		}
+		seen[cat] = true
+		ordered = append(ordered, cat)
+	}
+	return ordered
+}
+
+func (m Model) featurePlotterItems() []PlotterInfo {
+	if m.featurePlotters == nil {
+		return nil
+	}
+	var items []PlotterInfo
+	for _, category := range m.selectedFeaturePlotterCategories() {
+		items = append(items, m.featurePlotters[category]...)
+	}
+	return items
+}
+
+func (m *Model) UpdateFeaturePlotterOffset() {
+	maxLines := m.height - 16
+	if maxLines < 10 {
+		maxLines = 10
+	}
+
+	items := m.featurePlotterItems()
+	if len(items) == 0 {
+		m.featurePlotterOffset = 0
+		return
+	}
+
+	currentCategory := ""
+	lineIdx := 0
+	cursorLine := -1
+	for i, p := range items {
+		if p.Category != currentCategory {
+			lineIdx++
+			currentCategory = p.Category
+		}
+		if i == m.featurePlotterCursor {
+			cursorLine = lineIdx
+		}
+		lineIdx++
+	}
+	if cursorLine < 0 {
+		return
+	}
+
+	if cursorLine < m.featurePlotterOffset {
+		m.featurePlotterOffset = cursorLine
+	} else if cursorLine >= m.featurePlotterOffset+maxLines {
+		m.featurePlotterOffset = cursorLine - maxLines + 1
+	}
+	if m.featurePlotterOffset < 0 {
+		m.featurePlotterOffset = 0
+	}
+	if lineIdx > maxLines && m.featurePlotterOffset > lineIdx-maxLines {
+		m.featurePlotterOffset = lineIdx - maxLines
 	}
 }
 
@@ -1776,6 +2202,36 @@ func (m *Model) SetTimeRanges(ranges []types.TimeRange) {
 	}
 }
 
+// SetAvailableMetadata stores runtime-derived metadata (e.g., discovered time
+// windows / event columns) for use in UI hints and lightweight validation.
+func (m *Model) SetAvailableMetadata(windows []string, eventColumns []string) {
+	m.availableWindows = append([]string(nil), windows...)
+	m.availableColumns = append([]string(nil), eventColumns...)
+}
+
+func (m *Model) SetFeaturePlotters(plotters map[string][]PlotterInfo) {
+	m.featurePlotters = plotters
+	m.featurePlotterError = ""
+	if m.featurePlotterSelected == nil {
+		m.featurePlotterSelected = make(map[string]bool)
+	}
+	// Default: select all discovered plotters (the selection step can narrow).
+	for _, entries := range plotters {
+		for _, p := range entries {
+			if p.ID != "" {
+				m.featurePlotterSelected[p.ID] = true
+			}
+		}
+	}
+}
+
+func (m *Model) SetFeaturePlottersError(err error) {
+	if err == nil {
+		return
+	}
+	m.featurePlotterError = err.Error()
+}
+
 func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if m.task == "" && summary.Task != "" {
 		m.task = summary.Task
@@ -1797,11 +2253,25 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 func (m *Model) startTextEdit(field textField) {
 	m.editingTextField = field
 	m.textBuffer = m.getTextFieldValue(field)
+	m.editingPlotID = ""
+	m.editingPlotField = plotItemConfigFieldNone
 	m.editingText = true
 }
 
 func (m *Model) commitTextInput() {
+	if m.editingPlotID != "" && m.editingPlotField != plotItemConfigFieldNone {
+		m.setPlotItemTextFieldValue(m.editingPlotID, m.editingPlotField, m.textBuffer)
+		return
+	}
 	m.setTextFieldValue(m.editingTextField, m.textBuffer)
+}
+
+func (m *Model) startPlotTextEdit(plotID string, field plotItemConfigField) {
+	m.editingTextField = textFieldNone
+	m.editingPlotID = plotID
+	m.editingPlotField = field
+	m.textBuffer = m.getPlotItemTextFieldValue(plotID, field)
+	m.editingText = true
 }
 
 func (m Model) getTextFieldValue(field textField) string {
@@ -1836,6 +2306,109 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.asymmetryChannelPairsSpec
 	case textFieldERPComponents:
 		return m.erpComponentsSpec
+	case textFieldPlotBboxInches:
+		return m.plotBboxInches
+	case textFieldPlotFontFamily:
+		return m.plotFontFamily
+	case textFieldPlotFontWeight:
+		return m.plotFontWeight
+	case textFieldPlotLayoutTightRect:
+		return m.plotLayoutTightRectSpec
+	case textFieldPlotLayoutTightRectMicrostate:
+		return m.plotLayoutTightRectMicrostateSpec
+	case textFieldPlotGridSpecWidthRatios:
+		return m.plotGridSpecWidthRatiosSpec
+	case textFieldPlotGridSpecHeightRatios:
+		return m.plotGridSpecHeightRatiosSpec
+	case textFieldPlotFigureSizeStandard:
+		return m.plotFigureSizeStandardSpec
+	case textFieldPlotFigureSizeMedium:
+		return m.plotFigureSizeMediumSpec
+	case textFieldPlotFigureSizeSmall:
+		return m.plotFigureSizeSmallSpec
+	case textFieldPlotFigureSizeSquare:
+		return m.plotFigureSizeSquareSpec
+	case textFieldPlotFigureSizeWide:
+		return m.plotFigureSizeWideSpec
+	case textFieldPlotFigureSizeTFR:
+		return m.plotFigureSizeTFRSpec
+	case textFieldPlotFigureSizeTopomap:
+		return m.plotFigureSizeTopomapSpec
+	case textFieldPlotColorPain:
+		return m.plotColorPain
+	case textFieldPlotColorNonpain:
+		return m.plotColorNonpain
+	case textFieldPlotColorSignificant:
+		return m.plotColorSignificant
+	case textFieldPlotColorNonsignificant:
+		return m.plotColorNonsignificant
+	case textFieldPlotColorGray:
+		return m.plotColorGray
+	case textFieldPlotColorLightGray:
+		return m.plotColorLightGray
+	case textFieldPlotColorBlack:
+		return m.plotColorBlack
+	case textFieldPlotColorBlue:
+		return m.plotColorBlue
+	case textFieldPlotColorRed:
+		return m.plotColorRed
+	case textFieldPlotColorNetworkNode:
+		return m.plotColorNetworkNode
+	case textFieldPlotScatterEdgecolor:
+		return m.plotScatterEdgeColor
+	case textFieldPlotHistEdgecolor:
+		return m.plotHistEdgeColor
+	case textFieldPlotKdeColor:
+		return m.plotKdeColor
+	case textFieldPlotTopomapColormap:
+		return m.plotTopomapColormap
+	case textFieldPlotTopomapSigMaskMarker:
+		return m.plotTopomapSigMaskMarker
+	case textFieldPlotTopomapSigMaskMarkerFaceColor:
+		return m.plotTopomapSigMaskMarkerFaceColor
+	case textFieldPlotTopomapSigMaskMarkerEdgeColor:
+		return m.plotTopomapSigMaskMarkerEdgeColor
+	case textFieldPlotTfrDefaultBaselineWindow:
+		return m.plotTfrDefaultBaselineWindowSpec
+	case textFieldPlotPacCmap:
+		return m.plotPacCmap
+	case textFieldPlotPacPairs:
+		return m.plotPacPairsSpec
+	case textFieldPlotConnectivityMeasures:
+		return strings.Join(m.selectedConnectivityMeasures(), " ")
+	case textFieldPlotSpectralMetrics:
+		return m.plotSpectralMetricsSpec
+	case textFieldPlotBurstsMetrics:
+		return m.plotBurstsMetricsSpec
+	case textFieldPlotTemporalTimeBins:
+		return m.plotTemporalTimeBinsSpec
+	case textFieldPlotTemporalTimeLabels:
+		return m.plotTemporalTimeLabelsSpec
+	case textFieldPlotAsymmetryStat:
+		return m.plotAsymmetryStatSpec
+	default:
+		return ""
+	}
+}
+
+func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigField) string {
+	cfg, ok := m.plotItemConfigs[plotID]
+	if !ok {
+		return ""
+	}
+	switch field {
+	case plotItemConfigFieldTfrDefaultBaselineWindow:
+		return cfg.TfrDefaultBaselineWindowSpec
+	case plotItemConfigFieldComparisonWindows:
+		return cfg.ComparisonWindowsSpec
+	case plotItemConfigFieldComparisonSegment:
+		return cfg.ComparisonSegment
+	case plotItemConfigFieldComparisonColumn:
+		return cfg.ComparisonColumn
+	case plotItemConfigFieldComparisonValues:
+		return cfg.ComparisonValuesSpec
+	case plotItemConfigFieldComparisonROIs:
+		return cfg.ComparisonROIsSpec
 	default:
 		return ""
 	}
@@ -1950,7 +2523,167 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldERPComponents:
 		m.erpComponentsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldPlotBboxInches:
+		m.plotBboxInches = value
+	case textFieldPlotFontFamily:
+		m.plotFontFamily = value
+	case textFieldPlotFontWeight:
+		m.plotFontWeight = value
+	case textFieldPlotLayoutTightRect:
+		m.plotLayoutTightRectSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotLayoutTightRectMicrostate:
+		m.plotLayoutTightRectMicrostateSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotGridSpecWidthRatios:
+		m.plotGridSpecWidthRatiosSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotGridSpecHeightRatios:
+		m.plotGridSpecHeightRatiosSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeStandard:
+		m.plotFigureSizeStandardSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeMedium:
+		m.plotFigureSizeMediumSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeSmall:
+		m.plotFigureSizeSmallSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeSquare:
+		m.plotFigureSizeSquareSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeWide:
+		m.plotFigureSizeWideSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeTFR:
+		m.plotFigureSizeTFRSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotFigureSizeTopomap:
+		m.plotFigureSizeTopomapSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotColorPain:
+		m.plotColorPain = value
+	case textFieldPlotColorNonpain:
+		m.plotColorNonpain = value
+	case textFieldPlotColorSignificant:
+		m.plotColorSignificant = value
+	case textFieldPlotColorNonsignificant:
+		m.plotColorNonsignificant = value
+	case textFieldPlotColorGray:
+		m.plotColorGray = value
+	case textFieldPlotColorLightGray:
+		m.plotColorLightGray = value
+	case textFieldPlotColorBlack:
+		m.plotColorBlack = value
+	case textFieldPlotColorBlue:
+		m.plotColorBlue = value
+	case textFieldPlotColorRed:
+		m.plotColorRed = value
+	case textFieldPlotColorNetworkNode:
+		m.plotColorNetworkNode = value
+	case textFieldPlotScatterEdgecolor:
+		m.plotScatterEdgeColor = value
+	case textFieldPlotHistEdgecolor:
+		m.plotHistEdgeColor = value
+	case textFieldPlotKdeColor:
+		m.plotKdeColor = value
+	case textFieldPlotTopomapColormap:
+		m.plotTopomapColormap = value
+	case textFieldPlotTopomapSigMaskMarker:
+		m.plotTopomapSigMaskMarker = value
+	case textFieldPlotTopomapSigMaskMarkerFaceColor:
+		m.plotTopomapSigMaskMarkerFaceColor = value
+	case textFieldPlotTopomapSigMaskMarkerEdgeColor:
+		m.plotTopomapSigMaskMarkerEdgeColor = value
+	case textFieldPlotTfrDefaultBaselineWindow:
+		m.plotTfrDefaultBaselineWindowSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotPacCmap:
+		m.plotPacCmap = value
+	case textFieldPlotPacPairs:
+		m.plotPacPairsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotConnectivityMeasures:
+		// Parse space-separated measure keys (e.g. "aec wpli") and map to the
+		// checkbox model used elsewhere in the wizard.
+		for i := range connectivityMeasures {
+			m.connectivityMeasures[i] = false
+		}
+		for _, token := range strings.Fields(value) {
+			for i, measure := range connectivityMeasures {
+				if strings.EqualFold(token, measure.Key) || strings.EqualFold(token, measure.Name) {
+					m.connectivityMeasures[i] = true
+				}
+			}
+		}
+	case textFieldPlotSpectralMetrics:
+		m.plotSpectralMetricsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotBurstsMetrics:
+		m.plotBurstsMetricsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotTemporalTimeBins:
+		m.plotTemporalTimeBinsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotTemporalTimeLabels:
+		m.plotTemporalTimeLabelsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotAsymmetryStat:
+		m.plotAsymmetryStatSpec = value
 	}
+}
+
+func (m *Model) ensurePlotItemConfig(plotID string) PlotItemConfig {
+	if m.plotItemConfigs == nil {
+		m.plotItemConfigs = make(map[string]PlotItemConfig)
+	}
+	cfg, ok := m.plotItemConfigs[plotID]
+	if !ok {
+		cfg = PlotItemConfig{}
+		m.plotItemConfigs[plotID] = cfg
+	}
+	return cfg
+}
+
+func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigField, value string) {
+	cfg := m.ensurePlotItemConfig(plotID)
+	switch field {
+	case plotItemConfigFieldTfrDefaultBaselineWindow:
+		cfg.TfrDefaultBaselineWindowSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldComparisonWindows:
+		cfg.ComparisonWindowsSpec = strings.Join(strings.Fields(value), " ")
+		if len(m.availableWindows) > 0 {
+			unknown := unknownFromList(strings.Fields(cfg.ComparisonWindowsSpec), m.availableWindows)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown window(s): "+strings.Join(unknown, ", "), "warning")
+			}
+		}
+	case plotItemConfigFieldComparisonSegment:
+		cfg.ComparisonSegment = strings.TrimSpace(value)
+		if cfg.ComparisonSegment != "" && len(m.availableWindows) > 0 {
+			unknown := unknownFromList([]string{cfg.ComparisonSegment}, m.availableWindows)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown segment: "+unknown[0], "warning")
+			}
+		}
+	case plotItemConfigFieldComparisonColumn:
+		cfg.ComparisonColumn = strings.TrimSpace(value)
+		if cfg.ComparisonColumn != "" && len(m.availableColumns) > 0 {
+			unknown := unknownFromList([]string{cfg.ComparisonColumn}, m.availableColumns)
+			if len(unknown) > 0 {
+				m.ShowToast("Unknown events.tsv column: "+unknown[0], "warning")
+			}
+		}
+	case plotItemConfigFieldComparisonValues:
+		cfg.ComparisonValuesSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldComparisonROIs:
+		cfg.ComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
+	default:
+		return
+	}
+	m.plotItemConfigs[plotID] = cfg
+}
+
+func unknownFromList(requested []string, available []string) []string {
+	availableSet := make(map[string]struct{}, len(available))
+	for _, item := range available {
+		availableSet[strings.ToLower(strings.TrimSpace(item))] = struct{}{}
+	}
+	var unknown []string
+	for _, item := range requested {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := availableSet[strings.ToLower(item)]; !ok {
+			unknown = append(unknown, item)
+		}
+	}
+	return unknown
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -2209,6 +2942,182 @@ const (
 	// Merge-behavior options
 	optMergeEventPrefixes
 	optMergeEventTypes
+	// Plotting advanced options (wizard-only)
+	optPlotGroupDefaults
+	optPlotGroupFonts
+	optPlotGroupLayout
+	optPlotGroupFigureSizes
+	optPlotGroupColors
+	optPlotGroupAlpha
+	optPlotGroupScatter
+	optPlotGroupBar
+	optPlotGroupLine
+	optPlotGroupHistogram
+	optPlotGroupKDE
+	optPlotGroupErrorbar
+	optPlotGroupText
+	optPlotGroupValidation
+	optPlotGroupTFRMisc
+	optPlotGroupTopomap
+	optPlotGroupTFR
+	optPlotGroupSizing
+	optPlotGroupSelection
+	optPlotBboxInches
+	optPlotPadInches
+	optPlotFontFamily
+	optPlotFontWeight
+	optPlotFontSizeSmall
+	optPlotFontSizeMedium
+	optPlotFontSizeLarge
+	optPlotFontSizeTitle
+	optPlotFontSizeAnnotation
+	optPlotFontSizeLabel
+	optPlotFontSizeYLabel
+	optPlotFontSizeSuptitle
+	optPlotFontSizeFigureTitle
+	optPlotLayoutTightRect
+	optPlotLayoutTightRectMicrostate
+	optPlotGridSpecWidthRatios
+	optPlotGridSpecHeightRatios
+	optPlotGridSpecHspace
+	optPlotGridSpecWspace
+	optPlotGridSpecLeft
+	optPlotGridSpecRight
+	optPlotGridSpecTop
+	optPlotGridSpecBottom
+	optPlotFigureSizeStandard
+	optPlotFigureSizeMedium
+	optPlotFigureSizeSmall
+	optPlotFigureSizeSquare
+	optPlotFigureSizeWide
+	optPlotFigureSizeTFR
+	optPlotFigureSizeTopomap
+	optPlotColorPain
+	optPlotColorNonpain
+	optPlotColorSignificant
+	optPlotColorNonsignificant
+	optPlotColorGray
+	optPlotColorLightGray
+	optPlotColorBlack
+	optPlotColorBlue
+	optPlotColorRed
+	optPlotColorNetworkNode
+	optPlotAlphaGrid
+	optPlotAlphaFill
+	optPlotAlphaCI
+	optPlotAlphaCILine
+	optPlotAlphaTextBox
+	optPlotAlphaViolinBody
+	optPlotAlphaRidgeFill
+	optPlotScatterMarkerSizeSmall
+	optPlotScatterMarkerSizeLarge
+	optPlotScatterMarkerSizeDefault
+	optPlotScatterAlpha
+	optPlotScatterEdgecolor
+	optPlotScatterEdgewidth
+	optPlotBarAlpha
+	optPlotBarWidth
+	optPlotBarCapsize
+	optPlotBarCapsizeLarge
+	optPlotLineWidthThin
+	optPlotLineWidthStandard
+	optPlotLineWidthThick
+	optPlotLineWidthBold
+	optPlotLineAlphaStandard
+	optPlotLineAlphaDim
+	optPlotLineAlphaZeroLine
+	optPlotLineAlphaFitLine
+	optPlotLineAlphaDiagonal
+	optPlotLineAlphaReference
+	optPlotLineRegressionWidth
+	optPlotLineResidualWidth
+	optPlotLineQQWidth
+	optPlotHistBins
+	optPlotHistBinsBehavioral
+	optPlotHistBinsResidual
+	optPlotHistBinsTFR
+	optPlotHistEdgecolor
+	optPlotHistEdgewidth
+	optPlotHistAlpha
+	optPlotHistAlphaResidual
+	optPlotHistAlphaTFR
+	optPlotKdePoints
+	optPlotKdeColor
+	optPlotKdeLinewidth
+	optPlotKdeAlpha
+	optPlotErrorbarMarkersize
+	optPlotErrorbarCapsize
+	optPlotErrorbarCapsizeLarge
+	optPlotTextStatsX
+	optPlotTextStatsY
+	optPlotTextPvalueX
+	optPlotTextPvalueY
+	optPlotTextBootstrapX
+	optPlotTextBootstrapY
+	optPlotTextChannelAnnotationX
+	optPlotTextChannelAnnotationY
+	optPlotTextTitleY
+	optPlotTextResidualQcTitleY
+	optPlotValidationMinSamplesForPlot
+	optPlotValidationMinSamplesForKDE
+	optPlotValidationMinSamplesForFit
+	optPlotValidationMinSamplesForCalibration
+	optPlotValidationMinBinsForCalibration
+	optPlotValidationMaxBinsForCalibration
+	optPlotValidationSamplesPerBin
+	optPlotValidationMinRoisForFDR
+	optPlotValidationMinPvaluesForFDR
+	optPlotTfrDefaultBaselineWindow
+	optPlotTopomapContours
+	optPlotTopomapColormap
+	optPlotTopomapColorbarFraction
+	optPlotTopomapColorbarPad
+	optPlotTopomapDiffAnnotation
+	optPlotTopomapAnnotateDescriptive
+	optPlotTopomapSigMaskMarker
+	optPlotTopomapSigMaskMarkerFaceColor
+	optPlotTopomapSigMaskMarkerEdgeColor
+	optPlotTopomapSigMaskLinewidth
+	optPlotTopomapSigMaskMarkersize
+	optPlotTFRLogBase
+	optPlotTFRPercentageMultiplier
+	optPlotRoiWidthPerBand
+	optPlotRoiWidthPerMetric
+	optPlotRoiHeightPerRoi
+	optPlotPowerWidthPerBand
+	optPlotPowerHeightPerSegment
+	optPlotItpcWidthPerBin
+	optPlotItpcHeightPerBand
+	optPlotItpcWidthPerBandBox
+	optPlotItpcHeightBox
+	optPlotPacCmap
+	optPlotPacWidthPerRoi
+	optPlotPacHeightBox
+	optPlotAperiodicWidthPerColumn
+	optPlotAperiodicHeightPerRow
+	optPlotAperiodicNPerm
+	optPlotQualityWidthPerPlot
+	optPlotQualityHeightPerPlot
+	optPlotQualityDistributionNCols
+	optPlotQualityDistributionMaxFeatures
+	optPlotQualityOutlierZThreshold
+	optPlotQualityOutlierMaxFeatures
+	optPlotQualityOutlierMaxTrials
+	optPlotQualitySnrThresholdDb
+	optPlotComplexityWidthPerMeasure
+	optPlotComplexityHeightPerSegment
+	optPlotConnectivityWidthPerCircle
+	optPlotConnectivityWidthPerBand
+	optPlotConnectivityHeightPerMeasure
+	optPlotConnectivityCircleTopFraction
+	optPlotConnectivityCircleMinLines
+	optPlotPacPairs
+	optPlotConnectivityMeasures
+	optPlotSpectralMetrics
+	optPlotBurstsMetrics
+	optPlotAsymmetryStat
+	optPlotTemporalTimeBins
+	optPlotTemporalTimeLabels
 )
 
 const (
@@ -2342,6 +3251,374 @@ func (m Model) getMergeBehaviorOptions() []optionType {
 		optMergeEventPrefixes,
 		optMergeEventTypes,
 	}
+}
+
+type plottingAdvancedRowKind int
+
+const (
+	plottingRowOption plottingAdvancedRowKind = iota
+	plottingRowSection
+	plottingRowPlotHeader
+	plottingRowPlotField
+	plottingRowPlotInfo
+)
+
+type plottingAdvancedRow struct {
+	kind plottingAdvancedRowKind
+
+	// kind == plottingRowOption
+	opt optionType
+
+	// kind == plottingRowPlotHeader/plottingRowPlotField/plottingRowPlotInfo
+	plotID string
+
+	// kind == plottingRowPlotField
+	plotField plotItemConfigField
+
+	// kind == plottingRowSection/plottingRowPlotInfo
+	label string
+}
+
+func (m Model) selectedPlotItemsForConfig() []PlotItem {
+	items := make([]PlotItem, 0, len(m.plotItems))
+	for i, plot := range m.plotItems {
+		if !m.plotSelected[i] {
+			continue
+		}
+		if !m.IsPlotCategorySelected(plot.Group) {
+			continue
+		}
+		items = append(items, plot)
+	}
+	return items
+}
+
+func (m Model) plotSupportsComparisons(plot PlotItem) bool {
+	switch plot.Group {
+	case "features", "behavior", "tfr", "erp":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
+	fields := make([]plotItemConfigField, 0, 8)
+	if plot.Group == "tfr" {
+		fields = append(fields, plotItemConfigFieldTfrDefaultBaselineWindow)
+	}
+	if m.plotSupportsComparisons(plot) {
+		fields = append(fields,
+			plotItemConfigFieldCompareWindows,
+			plotItemConfigFieldComparisonWindows,
+			plotItemConfigFieldCompareColumns,
+			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonROIs,
+		)
+	}
+	return fields
+}
+
+func (m Model) getPlottingAdvancedRows() []plottingAdvancedRow {
+	// When using defaults, keep the list to a single actionable row so
+	// navigation matches the minimal renderer.
+	if m.useDefaultAdvanced {
+		return []plottingAdvancedRow{{kind: plottingRowOption, opt: optUseDefaults}}
+	}
+
+	rows := make([]plottingAdvancedRow, 0, 256)
+	rows = append(rows, plottingAdvancedRow{kind: plottingRowOption, opt: optUseDefaults})
+
+	rows = append(rows, plottingAdvancedRow{kind: plottingRowSection, label: "Selected Plots"})
+	for _, plot := range m.selectedPlotItemsForConfig() {
+		rows = append(rows, plottingAdvancedRow{kind: plottingRowPlotHeader, plotID: plot.ID})
+
+		fields := m.plotConfigFields(plot)
+		if len(fields) == 0 {
+			if m.plotItemConfigExpanded[plot.ID] {
+				rows = append(rows, plottingAdvancedRow{kind: plottingRowPlotInfo, plotID: plot.ID, label: "No plot-specific settings."})
+			}
+			continue
+		}
+		if !m.plotItemConfigExpanded[plot.ID] {
+			continue
+		}
+		for _, f := range fields {
+			rows = append(rows, plottingAdvancedRow{kind: plottingRowPlotField, plotID: plot.ID, plotField: f})
+		}
+	}
+
+	rows = append(rows, plottingAdvancedRow{kind: plottingRowSection, label: "Global Plot Settings"})
+	for _, opt := range m.getPlottingOptions() {
+		if opt == optUseDefaults {
+			continue
+		}
+		// Deprecated global options moved into per-plot config.
+		if opt == optPlotGroupTFRMisc || opt == optPlotTfrDefaultBaselineWindow {
+			continue
+		}
+		rows = append(rows, plottingAdvancedRow{kind: plottingRowOption, opt: opt})
+	}
+	return rows
+}
+
+func (m Model) getPlottingOptions() []optionType {
+	options := []optionType{optUseDefaults}
+
+	options = append(options, optPlotGroupDefaults)
+	if m.plotGroupDefaultsExpanded {
+		options = append(options, optPlotBboxInches, optPlotPadInches)
+	}
+
+	options = append(options, optPlotGroupFonts)
+	if m.plotGroupFontsExpanded {
+		options = append(options,
+			optPlotFontFamily,
+			optPlotFontWeight,
+			optPlotFontSizeSmall,
+			optPlotFontSizeMedium,
+			optPlotFontSizeLarge,
+			optPlotFontSizeTitle,
+			optPlotFontSizeAnnotation,
+			optPlotFontSizeLabel,
+			optPlotFontSizeYLabel,
+			optPlotFontSizeSuptitle,
+			optPlotFontSizeFigureTitle,
+		)
+	}
+
+	options = append(options, optPlotGroupLayout)
+	if m.plotGroupLayoutExpanded {
+		options = append(options,
+			optPlotLayoutTightRect,
+			optPlotLayoutTightRectMicrostate,
+			optPlotGridSpecWidthRatios,
+			optPlotGridSpecHeightRatios,
+			optPlotGridSpecHspace,
+			optPlotGridSpecWspace,
+			optPlotGridSpecLeft,
+			optPlotGridSpecRight,
+			optPlotGridSpecTop,
+			optPlotGridSpecBottom,
+		)
+	}
+
+	options = append(options, optPlotGroupFigureSizes)
+	if m.plotGroupFigureSizesExpanded {
+		options = append(options,
+			optPlotFigureSizeStandard,
+			optPlotFigureSizeMedium,
+			optPlotFigureSizeSmall,
+			optPlotFigureSizeSquare,
+			optPlotFigureSizeWide,
+			optPlotFigureSizeTFR,
+			optPlotFigureSizeTopomap,
+		)
+	}
+
+	options = append(options, optPlotGroupColors)
+	if m.plotGroupColorsExpanded {
+		options = append(options,
+			optPlotColorPain,
+			optPlotColorNonpain,
+			optPlotColorSignificant,
+			optPlotColorNonsignificant,
+			optPlotColorGray,
+			optPlotColorLightGray,
+			optPlotColorBlack,
+			optPlotColorBlue,
+			optPlotColorRed,
+			optPlotColorNetworkNode,
+		)
+	}
+
+	options = append(options, optPlotGroupAlpha)
+	if m.plotGroupAlphaExpanded {
+		options = append(options,
+			optPlotAlphaGrid,
+			optPlotAlphaFill,
+			optPlotAlphaCI,
+			optPlotAlphaCILine,
+			optPlotAlphaTextBox,
+			optPlotAlphaViolinBody,
+			optPlotAlphaRidgeFill,
+		)
+	}
+
+	options = append(options, optPlotGroupScatter)
+	if m.plotGroupScatterExpanded {
+		options = append(options,
+			optPlotScatterMarkerSizeSmall,
+			optPlotScatterMarkerSizeLarge,
+			optPlotScatterMarkerSizeDefault,
+			optPlotScatterAlpha,
+			optPlotScatterEdgecolor,
+			optPlotScatterEdgewidth,
+		)
+	}
+
+	options = append(options, optPlotGroupBar)
+	if m.plotGroupBarExpanded {
+		options = append(options, optPlotBarAlpha, optPlotBarWidth, optPlotBarCapsize, optPlotBarCapsizeLarge)
+	}
+
+	options = append(options, optPlotGroupLine)
+	if m.plotGroupLineExpanded {
+		options = append(options,
+			optPlotLineWidthThin,
+			optPlotLineWidthStandard,
+			optPlotLineWidthThick,
+			optPlotLineWidthBold,
+			optPlotLineAlphaStandard,
+			optPlotLineAlphaDim,
+			optPlotLineAlphaZeroLine,
+			optPlotLineAlphaFitLine,
+			optPlotLineAlphaDiagonal,
+			optPlotLineAlphaReference,
+			optPlotLineRegressionWidth,
+			optPlotLineResidualWidth,
+			optPlotLineQQWidth,
+		)
+	}
+
+	options = append(options, optPlotGroupHistogram)
+	if m.plotGroupHistogramExpanded {
+		options = append(options,
+			optPlotHistBins,
+			optPlotHistBinsBehavioral,
+			optPlotHistBinsResidual,
+			optPlotHistBinsTFR,
+			optPlotHistEdgecolor,
+			optPlotHistEdgewidth,
+			optPlotHistAlpha,
+			optPlotHistAlphaResidual,
+			optPlotHistAlphaTFR,
+		)
+	}
+
+	options = append(options, optPlotGroupKDE)
+	if m.plotGroupKDEExpanded {
+		options = append(options, optPlotKdePoints, optPlotKdeColor, optPlotKdeLinewidth, optPlotKdeAlpha)
+	}
+
+	options = append(options, optPlotGroupErrorbar)
+	if m.plotGroupErrorbarExpanded {
+		options = append(options, optPlotErrorbarMarkersize, optPlotErrorbarCapsize, optPlotErrorbarCapsizeLarge)
+	}
+
+	options = append(options, optPlotGroupText)
+	if m.plotGroupTextExpanded {
+		options = append(options,
+			optPlotTextStatsX,
+			optPlotTextStatsY,
+			optPlotTextPvalueX,
+			optPlotTextPvalueY,
+			optPlotTextBootstrapX,
+			optPlotTextBootstrapY,
+			optPlotTextChannelAnnotationX,
+			optPlotTextChannelAnnotationY,
+			optPlotTextTitleY,
+			optPlotTextResidualQcTitleY,
+		)
+	}
+
+	options = append(options, optPlotGroupValidation)
+	if m.plotGroupValidationExpanded {
+		options = append(options,
+			optPlotValidationMinSamplesForPlot,
+			optPlotValidationMinSamplesForKDE,
+			optPlotValidationMinSamplesForFit,
+			optPlotValidationMinSamplesForCalibration,
+			optPlotValidationMinBinsForCalibration,
+			optPlotValidationMaxBinsForCalibration,
+			optPlotValidationSamplesPerBin,
+			optPlotValidationMinRoisForFDR,
+			optPlotValidationMinPvaluesForFDR,
+		)
+	}
+
+	options = append(options, optPlotGroupTFRMisc)
+	if m.plotGroupTFRMiscExpanded {
+		options = append(options, optPlotTfrDefaultBaselineWindow)
+	}
+
+	options = append(options, optPlotGroupTopomap)
+	if m.plotGroupTopomapExpanded {
+		options = append(
+			options,
+			optPlotTopomapContours,
+			optPlotTopomapColormap,
+			optPlotTopomapColorbarFraction,
+			optPlotTopomapColorbarPad,
+			optPlotTopomapDiffAnnotation,
+			optPlotTopomapAnnotateDescriptive,
+			optPlotTopomapSigMaskMarker,
+			optPlotTopomapSigMaskMarkerFaceColor,
+			optPlotTopomapSigMaskMarkerEdgeColor,
+			optPlotTopomapSigMaskLinewidth,
+			optPlotTopomapSigMaskMarkersize,
+		)
+	}
+
+	options = append(options, optPlotGroupTFR)
+	if m.plotGroupTFRExpanded {
+		options = append(options, optPlotTFRLogBase, optPlotTFRPercentageMultiplier)
+	}
+
+	options = append(options, optPlotGroupSizing)
+	if m.plotGroupSizingExpanded {
+		options = append(
+			options,
+			optPlotRoiWidthPerBand,
+			optPlotRoiWidthPerMetric,
+			optPlotRoiHeightPerRoi,
+			optPlotPowerWidthPerBand,
+			optPlotPowerHeightPerSegment,
+			optPlotItpcWidthPerBin,
+			optPlotItpcHeightPerBand,
+			optPlotItpcWidthPerBandBox,
+			optPlotItpcHeightBox,
+			optPlotPacCmap,
+			optPlotPacWidthPerRoi,
+			optPlotPacHeightBox,
+			optPlotAperiodicWidthPerColumn,
+			optPlotAperiodicHeightPerRow,
+			optPlotAperiodicNPerm,
+			optPlotQualityWidthPerPlot,
+			optPlotQualityHeightPerPlot,
+			optPlotQualityDistributionNCols,
+			optPlotQualityDistributionMaxFeatures,
+			optPlotQualityOutlierZThreshold,
+			optPlotQualityOutlierMaxFeatures,
+			optPlotQualityOutlierMaxTrials,
+			optPlotQualitySnrThresholdDb,
+			optPlotComplexityWidthPerMeasure,
+			optPlotComplexityHeightPerSegment,
+			optPlotConnectivityWidthPerCircle,
+			optPlotConnectivityWidthPerBand,
+			optPlotConnectivityHeightPerMeasure,
+			optPlotConnectivityCircleTopFraction,
+			optPlotConnectivityCircleMinLines,
+		)
+	}
+
+	options = append(options, optPlotGroupSelection)
+	if m.plotGroupSelectionExpanded {
+		options = append(
+			options,
+			optPlotPacPairs,
+			optPlotConnectivityMeasures,
+			optPlotSpectralMetrics,
+			optPlotBurstsMetrics,
+			optPlotAsymmetryStat,
+			optPlotTemporalTimeBins,
+			optPlotTemporalTimeLabels,
+		)
+	}
+
+	return options
 }
 
 func (m Model) getBehaviorOptions() []optionType {
@@ -2618,7 +3895,7 @@ func (m Model) getPlotConfigOptions() []optionType {
 	}
 
 	// Dynamic options based on selected plots/categories
-	if m.isCategorySelected("TFR") || m.isCategorySelected("Features") {
+	if m.IsPlotCategorySelected("tfr") || m.IsPlotCategorySelected("features") {
 		// ITPC and PAC settings
 		options = append(options, optPlotSharedColorbar)
 	}
@@ -2641,6 +3918,17 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 	if !m.editingNumber {
 		return false
 	}
+
+	// Plotting advanced config uses a mixed row model (per-plot + global options),
+	// so the cursor no longer indexes directly into getPlottingOptions().
+	if m.Pipeline == types.PipelinePlotting {
+		rows := m.getPlottingAdvancedRows()
+		if m.advancedCursor < 0 || m.advancedCursor >= len(rows) {
+			return false
+		}
+		return rows[m.advancedCursor].kind == plottingRowOption && rows[m.advancedCursor].opt == opt
+	}
+
 	var options []optionType
 	switch m.Pipeline {
 	case types.PipelineFeatures:

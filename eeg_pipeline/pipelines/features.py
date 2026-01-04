@@ -269,7 +269,7 @@ class FeaturePipeline(PipelineBase):
                 fixed_template_ch_names=fixed_template_ch_names,
                 feature_categories=feature_categories,
                 bands=kwargs.get("bands"),  # Runtime band override
-                spatial_modes=kwargs.get("spatial_modes") or ["roi", "global"],
+                spatial_modes=kwargs.get("spatial_modes") or self.config.get("feature_engineering.spatial_modes", ["roi", "channels", "global"]),
                 tmin=tmin,
                 tmax=tmax,
                 name=name,

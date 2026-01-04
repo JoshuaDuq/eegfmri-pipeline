@@ -69,6 +69,7 @@ def extract_band_ratios_from_precomputed(
     precomputed: PrecomputedData,
     config: Any,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract band power ratios for ALL user-defined segments."""
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
     if not is_valid:
         logger = getattr(precomputed, "logger", None)
@@ -84,8 +85,11 @@ def extract_band_ratios_from_precomputed(
     if not pairs:
         return pd.DataFrame(), []
 
-    active_mask = getattr(precomputed.windows, "active_mask", None)
-    if active_mask is None or not np.any(active_mask):
+    # Get ALL segment masks from windows
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, config)
+    
+    if not segment_masks:
         return pd.DataFrame(), []
 
     # Spatial info
@@ -99,52 +103,55 @@ def extract_band_ratios_from_precomputed(
             roi_map = build_roi_map(precomputed.ch_names, roi_defs)
 
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
-    records: List[Dict[str, float]] = []
-    for ep_idx in range(precomputed.data.shape[0]):
-        rec: Dict[str, float] = {}
-        # band -> (n_ch,) mean power in active
-        band_power_ch = {}
-        for band, bd in precomputed.band_data.items():
-            p = bd.power[ep_idx]
-            band_power_ch[band] = np.nanmean(p[:, active_mask], axis=1)
+    n_epochs = precomputed.data.shape[0]
+    records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+    
+    # Iterate over ALL segments
+    for seg_label, seg_mask in segment_masks.items():
+        if seg_mask is None or not np.any(seg_mask):
+            continue
+            
+        for ep_idx in range(n_epochs):
+            rec = records[ep_idx]
+            
+            # Compute band power for this segment
+            band_power_ch = {}
+            for band, bd in precomputed.band_data.items():
+                p = bd.power[ep_idx]
+                band_power_ch[band] = np.nanmean(p[:, seg_mask], axis=1)
 
-        for num, den in pairs:
-            if num not in band_power_ch or den not in band_power_ch:
-                continue
+            for num, den in pairs:
+                if num not in band_power_ch or den not in band_power_ch:
+                    continue
+                    
+                p_num = band_power_ch[num]
+                p_den = band_power_ch[den]
                 
-            p_num = band_power_ch[num]
-            p_den = band_power_ch[den]
-            
-            with np.errstate(divide='ignore', invalid='ignore'):
-                r_ch = p_num / p_den
-                r_ch[p_den <= eps] = np.nan
-            
-            pair_label = f"{num}_{den}"
-            
-            # label to use for naming
-            seg_label = getattr(precomputed.windows, "name", "active") or "active"
-            
-            # Channels
-            if 'channels' in spatial_modes:
-                for c, ch in enumerate(precomputed.ch_names):
-                    col = NamingSchema.build("ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch)
-                    rec[col] = float(r_ch[c])
-            
-            # ROI
-            if 'roi' in spatial_modes and roi_map:
-                for roi_name, idxs in roi_map.items():
-                    if idxs:
-                        val = np.nanmean(r_ch[idxs])
-                        col = NamingSchema.build("ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name)
-                        rec[col] = float(val)
-            
-            # Global
-            if 'global' in spatial_modes:
-                val = np.nanmean(r_ch)
-                col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
-                rec[col] = float(val)
-
-        records.append(rec)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    r_ch = p_num / p_den
+                    r_ch[p_den <= eps] = np.nan
+                
+                pair_label = f"{num}_{den}"
+                
+                # Channels
+                if 'channels' in spatial_modes:
+                    for c, ch in enumerate(precomputed.ch_names):
+                        col = NamingSchema.build("ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch)
+                        rec[col] = float(r_ch[c])
+                
+                # ROI
+                if 'roi' in spatial_modes and roi_map:
+                    for roi_name, idxs in roi_map.items():
+                        if idxs:
+                            val = np.nanmean(r_ch[idxs])
+                            col = NamingSchema.build("ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name)
+                            rec[col] = float(val)
+                
+                # Global
+                if 'global' in spatial_modes:
+                    val = np.nanmean(r_ch)
+                    col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
+                    rec[col] = float(val)
 
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []
@@ -202,6 +209,7 @@ def extract_asymmetry_from_precomputed(
     precomputed: Any,
     n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, List[str]]:
+    """Extract hemispheric asymmetry features for ALL user-defined segments."""
     logger = getattr(precomputed, "logger", None)
     if not precomputed.band_data:
         if logger is not None:
@@ -220,34 +228,46 @@ def extract_asymmetry_from_precomputed(
     if not pairs:
         pairs = default_pairs
 
-    segment_label = getattr(precomputed.windows, "name", "active") or "active"
-
     ch_map = {name: i for i, name in enumerate(precomputed.ch_names)}
     valid_pairs = [(l, r, ch_map[l], ch_map[r]) for l, r in pairs if l in ch_map and r in ch_map]
     if not valid_pairs:
         return pd.DataFrame(), []
 
-    mask = get_segment_mask(precomputed.windows, segment_label)
-    if mask is None or not np.any(mask):
-        mask = slice(None)
+    # Get ALL segment masks from windows
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
+    if not segment_masks:
+        return pd.DataFrame(), []
 
     n_epochs = precomputed.data.shape[0]
-    if n_jobs != 1:
-        records = Parallel(n_jobs=n_jobs)(
-            delayed(_process_asymmetry_epoch)(
-                ep_idx,
-                precomputed.band_data,
-                valid_pairs,
-                mask,
-                segment_label,
+    records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+    
+    # Iterate over ALL segments
+    for seg_label, seg_mask in segment_masks.items():
+        if seg_mask is None or not np.any(seg_mask):
+            continue
+        
+        if n_jobs != 1:
+            seg_records = Parallel(n_jobs=n_jobs)(
+                delayed(_process_asymmetry_epoch)(
+                    ep_idx,
+                    precomputed.band_data,
+                    valid_pairs,
+                    seg_mask,
+                    seg_label,
+                )
+                for ep_idx in range(n_epochs)
             )
-            for ep_idx in range(n_epochs)
-        )
-    else:
-        records = [
-            _process_asymmetry_epoch(ep_idx, precomputed.band_data, valid_pairs, mask, segment_label)
-            for ep_idx in range(n_epochs)
-        ]
+        else:
+            seg_records = [
+                _process_asymmetry_epoch(ep_idx, precomputed.band_data, valid_pairs, seg_mask, seg_label)
+                for ep_idx in range(n_epochs)
+            ]
+        
+        # Merge segment records into main records
+        for ep_idx, seg_rec in enumerate(seg_records):
+            records[ep_idx].update(seg_rec)
 
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []

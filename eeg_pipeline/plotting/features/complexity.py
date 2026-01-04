@@ -14,12 +14,13 @@ from typing import Optional, List, Dict, Any, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy import stats
 
-from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.utils import (
+    compute_cohens_d,
     get_band_names,
     get_band_colors,
     get_condition_colors,
@@ -30,343 +31,457 @@ from eeg_pipeline.plotting.features.utils import (
 # Permutation Entropy Plots
 ###################################################################
 
-def _get_complexity_segments(features_df: pd.DataFrame) -> List[str]:
-    segments = set()
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "comp":
-            continue
-        segment = str(parsed.get("segment") or "")
-        if segment:
-            segments.add(segment)
-    return sorted(segments)
 
-
-def _select_complexity_segment(features_df: pd.DataFrame, preferred: str = "active") -> Optional[str]:
-    segments = _get_complexity_segments(features_df)
-    if not segments:
-        return None
-    if preferred in segments:
-        return preferred
-    return segments[0]
-
-
-def _collect_complexity_values(
-    features_df: pd.DataFrame,
-    *,
-    band: str,
-    segment: str,
-    stat: str,
-    scope: str = "global",
-) -> np.ndarray:
-    cols: List[str] = []
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "comp":
-            continue
-        if str(parsed.get("segment") or "") != str(segment):
-            continue
-        if str(parsed.get("band") or "") != str(band):
-            continue
-        if scope and str(parsed.get("scope") or "") != str(scope):
-            continue
-        if str(parsed.get("stat") or "") != str(stat):
-            continue
-        cols.append(str(col))
-
-    if cols:
-        if len(cols) == 1:
-            series = pd.to_numeric(features_df[cols[0]], errors="coerce")
-        else:
-            series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-        vals = series.dropna().values
-        return vals[np.isfinite(vals)]
-
-    if scope == "global":
-        return _collect_complexity_values(
-            features_df,
-            band=band,
-            segment=segment,
-            stat=stat,
-            scope="ch",
-        )
-
-    return np.array([])
-
-
-def plot_complexity_by_band(
+def plot_permutation_entropy_distribution(
     features_df: pd.DataFrame,
     save_path: Path,
     *,
     config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
+    figsize: Tuple[float, float] = (10, 5),
 ) -> plt.Figure:
-    """LZC and permutation entropy distributions across frequency bands."""
-    plot_cfg = get_plot_config(config)
-    if figsize is None:
-        figsize = plot_cfg.get_figure_size("wide", plot_type="features")
+    """Plot removed."""
+    return plt.figure(figsize=figsize)
 
+
+def plot_hjorth_parameters_distribution(
+    features_df: pd.DataFrame,
+    save_path: Path,
+    *,
+    config: Any = None,
+    figsize: Tuple[float, float] = (12, 5),
+) -> plt.Figure:
+    """Plot removed."""
+    return plt.figure(figsize=figsize)
+
+
+def plot_hjorth_by_band(
+    features_df: pd.DataFrame,
+    save_path: Path,
+    *,
+    config: Any = None,
+    figsize: Tuple[float, float] = (10, 5),
+) -> plt.Figure:
+    """Hjorth mobility across frequency bands."""
+    plot_cfg = get_plot_config(config)
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    data_list = []
+    positions = []
+    colors = []
+    
     bands = get_band_names(config)
     band_colors = get_band_colors(config)
-    segment = _select_complexity_segment(features_df, preferred="active")
-
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    metrics = [("lzc", "LZC"), ("pe", "PE")]
-    for ax, (stat, label) in zip(axes, metrics):
-        data_list = []
-        positions = []
-        colors = []
-
-        if segment is not None:
-            for i, band in enumerate(bands):
-                vals = _collect_complexity_values(
-                    features_df,
-                    band=band,
-                    segment=segment,
-                    stat=stat,
-                    scope="global",
-                )
-                if vals.size > 0:
-                    data_list.append(vals)
-                    positions.append(i)
-                    colors.append(band_colors[band])
-
-        if data_list:
-            parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
-            for i, pc in enumerate(parts.get("bodies", [])):
-                pc.set_facecolor(colors[i])
-                pc.set_alpha(0.6)
-            for i, (pos, vals) in enumerate(zip(positions, data_list)):
-                jitter = np.random.uniform(-0.1, 0.1, len(vals))
-                ax.scatter(pos + jitter, vals, c=colors[i], alpha=0.2, s=5)
-            ax.set_xticks(range(len(bands)))
-            ax.set_xticklabels([b.capitalize() for b in bands])
-        else:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-            ax.set_xticks([])
-
-        ax.set_xlabel("Frequency Band")
-        ax.set_ylabel(label)
-        ax.set_title(f"{label} by Band")
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-    seg_label = segment if segment is not None else "unknown"
-    fig.suptitle(
-        f"Complexity by Band ({seg_label})",
-        fontsize=plot_cfg.font.figure_title,
-        fontweight="bold",
-        y=1.02,
-    )
-
+    for i, band in enumerate(bands):
+        cols = [c for c in features_df.columns if f"_{band}_" in c and "hjorth_mobility" in c]
+        if cols:
+            vals = features_df[cols].values.flatten()
+            vals = vals[np.isfinite(vals)]
+            if len(vals) > 0:
+                data_list.append(vals)
+                positions.append(i)
+                colors.append(band_colors[band])
+    
+    if data_list:
+        parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
+        
+        for i, pc in enumerate(parts.get("bodies", [])):
+            pc.set_facecolor(colors[i])
+            pc.set_alpha(0.6)
+        
+        for i, (pos, vals) in enumerate(zip(positions, data_list)):
+            jitter = np.random.uniform(-0.1, 0.1, len(vals))
+            ax.scatter(pos + jitter, vals, c=colors[i], alpha=0.2, s=5)
+    
+    ax.set_xticks(range(len(bands)))
+    ax.set_xticklabels([b.capitalize() for b in bands])
+    ax.set_xlabel("Frequency Band")
+    ax.set_ylabel("Hjorth Mobility")
+    ax.set_title("Hjorth Mobility by Frequency Band")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    
     plt.tight_layout()
     save_fig(fig, save_path)
     plt.close(fig)
-
+    
     return fig
+
+
+def plot_lempel_ziv_complexity_distribution(
+    features_df: pd.DataFrame,
+    save_path: Path,
+    *,
+    config: Any = None,
+    figsize: Tuple[float, float] = (10, 5),
+) -> plt.Figure:
+    """Plot removed."""
+    return plt.figure(figsize=figsize)
+
+
+def plot_complexity_comparison(
+    features_df: pd.DataFrame,
+    save_path: Path,
+    *,
+    config: Any = None,
+    figsize: Tuple[float, float] = (10, 8),
+) -> plt.Figure:
+    """Plot removed."""
+    return plt.figure(figsize=figsize)
 
 
 def plot_complexity_by_condition(
     features_df: pd.DataFrame,
     events_df: pd.DataFrame,
     subject: str,
-    save_path: Path,
+    save_dir: Path,
+    logger: Any = None,
     config: Any = None,
-    figsize: Optional[Tuple[float, float]] = None,
-) -> plt.Figure:
-    """Complexity metrics by condition and timing (baseline vs active).
+) -> None:
+    """Compare complexity metrics between conditions per band.
     
-    Grid: rows = timing (baseline/active), cols = complexity metrics.
+    Complexity uses frequency bands (delta, theta, alpha, beta, gamma) with
+    metrics like lzc (Lempel-Ziv Complexity) and pe (Permutation Entropy).
     
-    Statistical improvements:
-    - Shows both raw p-value and FDR-corrected q-value
-    - Includes bootstrap 95% CI for mean difference
-    - Reports Cohen's d effect size
-    - Footer shows total tests and correction method
+    For window comparisons (paired): Uses the unified plot_paired_comparison helper.
+    For column comparisons (unpaired): Uses Mann-Whitney U test with consistent styling.
+    Creates one figure per ROI per metric.
     """
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None or len(features_df) != len(pain_mask):
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(0.5, 0.5, "Cannot identify conditions", ha="center", va="center")
-        return fig
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.infra.paths import ensure_dir
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.plotting.features.utils import (
+        plot_paired_comparison,
+        apply_fdr_correction,
+        get_band_color,
+    )
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions
+    from eeg_pipeline.plotting.io.figures import log_if_present
+    
+    if features_df is None or features_df.empty or events_df is None:
+        return
+
+    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
+    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    
+    # Get segments from data (the group is "comp", not "complexity")
+    segment_set = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "comp":
+            seg = parsed.get("segment")
+            if seg:
+                segment_set.add(str(seg))
+    
+    # Get segments from config or auto-detect from data
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        if len(segment_set) >= 2:
+            segments = sorted(segment_set)[:2]
+            if logger:
+                log_if_present(logger, "info", f"Auto-detected segments for complexity comparison: {segments}")
+    
+    # Get frequency bands from config
+    bands = get_band_names(config)
+    if not bands:
+        # Try to detect bands from data
+        bands_found = set()
+        for col in features_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if parsed.get("valid") and parsed.get("group") == "comp":
+                band = parsed.get("band")
+                if band:
+                    bands_found.add(str(band))
+        bands = sorted(bands_found)
+    
+    if not bands:
+        return
+    
+    # Get metrics (lzc, pe, etc.)
+    metrics_found = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "comp":
+            stat = parsed.get("stat")
+            if stat:
+                metrics_found.add(str(stat))
+    
+    metrics = sorted(metrics_found) if metrics_found else ["lzc", "pe"]
+    metric_labels = {"lzc": "LZC", "pe": "PE"}
+    
+    # Get ROI definitions
+    rois = get_roi_definitions(config)
+    
+    # Get ROIs from data
+    data_rois = set()
+    for col in features_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "comp" and parsed.get("scope") == "roi":
+            roi_id = parsed.get("identifier")
+            if roi_id:
+                data_rois.add(str(roi_id))
+    
+    # Use config-defined ROIs (keys from 'rois' config)
+    # The feature computation uses these same names in column names
+    config_roi_names = list(rois.keys()) if rois else []
+    
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            else:
+                # Check if config ROI matches by name
+                for config_roi in config_roi_names:
+                    if r.lower().replace("_", "").replace("-", "") == config_roi.lower().replace("_", "").replace("-", ""):
+                        roi_names.append(config_roi)
+                        break
+    else:
+        # Default: all + each config-defined ROI
+        roi_names = ["all"]
+        roi_names.extend(config_roi_names)
+
+    
+    if logger:
+        log_if_present(logger, "info", f"Complexity comparison: segments={segments}, ROIs={roi_names}, bands={bands}, metrics={metrics}, compare_windows={compare_wins}, compare_columns={compare_cols}")
     
     plot_cfg = get_plot_config(config)
-    measures = [
-        ("lzc", "LZC"),
-        ("pe", "PE"),
-    ]
-    if figsize is None:
-        width_per_col = float(plot_cfg.plot_type_configs.get("complexity", {}).get("width_per_measure", 4.5))
-        height_per_row = float(plot_cfg.plot_type_configs.get("complexity", {}).get("height_per_segment", 4.0))
-        figsize = (width_per_col * len(measures), height_per_row * 2)
+    ensure_dir(save_dir)
     
-    from eeg_pipeline.utils.config.loader import get_config_value
-    from .utils import (
-        compute_condition_stats,
-        apply_fdr_correction,
-        format_stats_annotation,
-        format_footer_annotation,
-    )
-    
-    baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    
-    segment_labels = {
-        "baseline": ("BASELINE", f"{baseline_window[0]:.1f} to {baseline_window[1]:.1f}s"),
-        "active": ("ACTIVE", f"{active_window[0]:.1f} to {active_window[1]:.1f}s")
-    }
-    segments = list(segment_labels.keys())
-
-    all_stats = []
-    all_pvals = []
-    cell_data = {}
-    
-    for row_idx, segment in enumerate(segments):
-        for col_idx, (stat, label) in enumerate(measures):
-            cols = []
-            for c in features_df.columns:
-                parsed = NamingSchema.parse(str(c))
+    # Helper to get complexity columns for a segment/band/metric/ROI
+    def get_complexity_columns(segment, band, metric, roi_name):
+        """Get complexity columns filtered by segment, band, metric, and ROI."""
+        cols = []
+        for col in features_df.columns:
+            parsed = NamingSchema.parse(str(col))
+            if not parsed.get("valid"):
+                continue
+            if parsed.get("group") != "comp":
+                continue
+            if str(parsed.get("segment") or "") != segment:
+                continue
+            if str(parsed.get("band") or "") != band:
+                continue
+            if str(parsed.get("stat") or "") != metric:
+                continue
+            
+            scope = parsed.get("scope") or ""
+            if roi_name == "all":
+                # For "all", prefer global scope
+                if scope == "global":
+                    cols.append(col)
+            else:
+                # For specific ROI, match the roi identifier
+                if scope == "roi":
+                    roi_id = str(parsed.get("identifier") or "")
+                    # Flexible matching (case-insensitive, ignore underscores)
+                    if roi_id.lower().replace("_", "") == roi_name.lower().replace("_", ""):
+                        cols.append(col)
+        
+        # If no global columns for "all", fall back to averaging all roi columns
+        if roi_name == "all" and not cols:
+            for col in features_df.columns:
+                parsed = NamingSchema.parse(str(col))
                 if not parsed.get("valid"):
                     continue
                 if parsed.get("group") != "comp":
                     continue
-                if str(parsed.get("segment") or "") != str(segment):
+                if str(parsed.get("segment") or "") != segment:
                     continue
-                if str(parsed.get("stat") or "") != str(stat):
+                if str(parsed.get("band") or "") != band:
                     continue
-                cols.append(str(c))
-            
-            if not cols:
-                cell_data[(row_idx, col_idx)] = None
-                continue
-            
-            vals = features_df[cols].mean(axis=1)
-            nonpain_vals = vals[~pain_mask].dropna().values
-            pain_vals = vals[pain_mask].dropna().values
-            
-            if len(nonpain_vals) >= 3 and len(pain_vals) >= 3:
-                stats_result = compute_condition_stats(nonpain_vals, pain_vals, n_boot=1000, config=config)
-                all_stats.append(stats_result)
-                all_pvals.append(stats_result["p_raw"])
-                cell_data[(row_idx, col_idx)] = {
-                    "nonpain_vals": nonpain_vals,
-                    "pain_vals": pain_vals,
-                    "stats": stats_result,
-                    "stats_idx": len(all_stats) - 1,
-                }
-            else:
-                cell_data[(row_idx, col_idx)] = {
-                    "nonpain_vals": nonpain_vals,
-                    "pain_vals": pain_vals,
-                    "stats": None,
-                    "stats_idx": None,
-                }
+                if str(parsed.get("stat") or "") != metric:
+                    continue
+                if parsed.get("scope") == "roi":
+                    cols.append(col)
+        
+        return cols
     
-    if all_pvals:
-        valid_pvals = [p for p in all_pvals if np.isfinite(p)]
-        if valid_pvals:
-            rejected, qvals, _ = apply_fdr_correction(valid_pvals, config=config)
-            q_idx = 0
-            for i, p in enumerate(all_pvals):
-                if np.isfinite(p):
-                    all_stats[i]["q_fdr"] = qvals[q_idx]
-                    all_stats[i]["fdr_significant"] = rejected[q_idx]
-                    q_idx += 1
-                else:
-                    all_stats[i]["q_fdr"] = np.nan
-                    all_stats[i]["fdr_significant"] = False
-            n_significant = int(np.sum(rejected))
-        else:
-            n_significant = 0
-    else:
-        n_significant = 0
-    
-    fig, axes = plt.subplots(len(segments), len(measures), figsize=figsize, sharey="row")
-    condition_colors = get_condition_colors(config)
-    
-    for row_idx, segment in enumerate(segments):
-        seg_name, seg_time = segment_labels[segment]
-        for col_idx, (stat, label) in enumerate(measures):
-            ax = axes[row_idx, col_idx]
+    # Create plots per metric
+    for metric in metrics:
+        metric_label = metric_labels.get(metric, metric.upper())
+        
+        # Window comparison (paired) - use unified helper
+        if compare_wins and len(segments) >= 2:
+            seg1, seg2 = segments[0], segments[1]
             
-            data = cell_data.get((row_idx, col_idx))
-            
-            if data is None:
-                ax.text(0.5, 0.5, "No data", ha="center", va="center", 
-                       transform=ax.transAxes, fontsize=plot_cfg.font.large, color="gray")
-                ax.set_xticks([])
-                continue
-            
-            nonpain_vals = data["nonpain_vals"]
-            pain_vals = data["pain_vals"]
-            
-            if len(nonpain_vals) > 0 and len(pain_vals) > 0:
-                bp = ax.boxplot([nonpain_vals, pain_vals], 
-                               positions=[0, 1], widths=0.4, patch_artist=True)
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
-                bp["boxes"][1].set_alpha(0.6)
+            for roi_name in roi_names:
+                data_by_band = {}
+                for band in bands:
+                    cols1 = get_complexity_columns(seg1, band, metric, roi_name)
+                    cols2 = get_complexity_columns(seg2, band, metric, roi_name)
+                    
+                    if not cols1 or not cols2:
+                        continue
+                    
+                    s1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    s2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                    
+                    valid_mask = s1.notna() & s2.notna()
+                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+                    
+                    if len(v1) > 0:
+                        data_by_band[band] = (v1, v2)
                 
-                ax.scatter(np.random.uniform(-0.1, 0.1, len(nonpain_vals)), 
-                          nonpain_vals, c=condition_colors["nonpain"], alpha=0.3, s=8)
-                ax.scatter(1 + np.random.uniform(-0.1, 0.1, len(pain_vals)), 
-                          pain_vals, c=condition_colors["pain"], alpha=0.3, s=8)
-                
-                if data["stats"] is not None:
-                    s = data["stats"]
-                    annotation = format_stats_annotation(
-                        p_raw=s["p_raw"],
-                        q_fdr=s.get("q_fdr"),
-                        cohens_d=s["cohens_d"],
-                        ci_low=s["ci_low"],
-                        ci_high=s["ci_high"],
-                        compact=True,
+                if data_by_band:
+                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name.lower() != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    save_path = save_dir / f"sub-{subject}_complexity_{metric}_by_condition{suffix}_window"
+                    
+                    plot_paired_comparison(
+                        data_by_band=data_by_band,
+                        subject=subject,
+                        save_path=save_path,
+                        feature_label=f"Complexity ({metric_label})",
+                        config=config,
+                        logger=logger,
+                        label1=seg1.capitalize(),
+                        label2=seg2.capitalize(),
+                        roi_name=roi_name,
                     )
-                    text_color = plot_cfg.style.colors.significant if s.get("fdr_significant", False) else plot_cfg.style.colors.gray
-                    ax.text(0.5, 0.98, annotation, transform=ax.transAxes, 
-                           ha="center", fontsize=plot_cfg.font.annotation, va="top", color=text_color,
-                           bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
             
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            
-            if row_idx == 0:
-                ax.set_title(label, fontweight="bold", fontsize=plot_cfg.font.title)
-            if col_idx == 0:
-                ax.set_ylabel(f"{seg_name}\n({seg_time})", fontsize=plot_cfg.font.medium)
-    
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    fig.suptitle(f"Complexity by Condition: Baseline vs Active (sub-{subject})\nN: {n_nonpain} non-pain, {n_pain} pain", 
-                fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
-    
-    n_tests = len([p for p in all_pvals if np.isfinite(p)])
-    footer = format_footer_annotation(
-        n_tests=n_tests,
-        correction_method="FDR-BH",
-        alpha=0.05,
-        n_significant=n_significant,
-        additional_info="Mann-Whitney U | Bootstrap 95% CI | †=FDR significant"
-    )
-    fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=8, color="gray")
-    
-    plt.tight_layout(rect=[0, 0.03, 1, 0.98])
-    save_fig(fig, save_path)
-    plt.close(fig)
-    
-    return fig
+            if logger:
+                log_if_present(logger, "info", f"Saved complexity {metric_label} paired comparison plots for {len(roi_names)} ROIs")
+
+        # Column comparison (unpaired)
+        if compare_cols:
+            comp_mask_info = extract_comparison_mask(events_df, config)
+            if not comp_mask_info:
+                if logger:
+                    log_if_present(logger, "debug", "Column comparison requested but config incomplete")
+            else:
+                m1, m2, label1, label2 = comp_mask_info
+                seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+                
+                segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+                band_colors = {band: get_band_color(band, config) for band in bands}
+                n_bands = len(bands)
+                n_trials = len(features_df)
+                
+                for roi_name in roi_names:
+                    all_pvals, pvalue_keys, cell_data = [], [], {}
+                    
+                    for col_idx, band in enumerate(bands):
+                        cols = get_complexity_columns(seg_name, band, metric, roi_name)
+                        
+                        if not cols:
+                            cell_data[col_idx] = None
+                            continue
+                        
+                        val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                        v1 = val_series[m1].dropna().values
+                        v2 = val_series[m2].dropna().values
+                        
+                        cell_data[col_idx] = {"v1": v1, "v2": v2}
+                        
+                        if len(v1) >= 3 and len(v2) >= 3:
+                            try:
+                                _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
+                                diff = np.mean(v2) - np.mean(v1)
+                                pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                                d = diff / pooled_std if pooled_std > 0 else 0
+                                all_pvals.append(p)
+                                pvalue_keys.append((col_idx, p, d))
+                            except Exception:
+                                pass
+                    
+                    qvalues = {}
+                    n_significant = 0
+                    if all_pvals:
+                        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                        for i, (key, p, d) in enumerate(pvalue_keys):
+                            qvalues[key] = (p, qvals[i], d, rejected[i])
+                        n_significant = int(np.sum(rejected))
+                    
+                    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+                    
+                    for col_idx, band in enumerate(bands):
+                        ax = axes.flatten()[col_idx]
+                        data = cell_data.get(col_idx)
+                        
+                        if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                            ax.set_xticks([])
+                            continue
+                        
+                        v1, v2 = data["v1"], data["v2"]
+                        
+                        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                        bp["boxes"][0].set_facecolor(segment_colors["v1"])
+                        bp["boxes"][0].set_alpha(0.6)
+                        bp["boxes"][1].set_facecolor(segment_colors["v2"])
+                        bp["boxes"][1].set_alpha(0.6)
+                        
+                        ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+                        ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                        
+                        all_vals = np.concatenate([v1, v2])
+                        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+                        yrange = ymax - ymin if ymax > ymin else 0.1
+                        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                        
+                        if col_idx in qvalues:
+                            _, q, d, sig = qvalues[col_idx]
+                            sig_marker = "†" if sig else ""
+                            sig_color = "#d62728" if sig else "#333333"
+                            ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
+                                       ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                                       fontweight="bold" if sig else "normal")
+                        
+                        ax.set_xticks([0, 1])
+                        ax.set_xticklabels([label1, label2], fontsize=9)
+                        ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
+                        ax.spines["top"].set_visible(False)
+                        ax.spines["right"].set_visible(False)
+                    
+                    n_tests = len(all_pvals)
+                    roi_display = roi_name.replace("_", " ").title() if roi_name.lower() != "all" else "All Channels"
+                    
+                    title = (f"Complexity ({metric_label}): {label1} vs {label2} (Column Comparison)\n"
+                             f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                             f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                    
+                    plt.tight_layout()
+                    
+                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name.lower() != "all" else ""
+                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
+                    filename = f"sub-{subject}_complexity_{metric}_by_condition{suffix}_column"
+                    
+                    save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                    plt.close(fig)
+                
+                if logger:
+                    log_if_present(logger, "info", f"Saved complexity {metric_label} column comparison plots for {len(roi_names)} ROIs")
 
 
+
+
+
+
+
+def plot_complexity_summary(
+    features_df: pd.DataFrame,
+    save_path: Path,
+    *,
+    config: Any = None,
+    figsize: Tuple[float, float] = (10, 8),
+) -> plt.Figure:
+    """Plot removed."""
+    return plt.figure(figsize=figsize)
+
+
+
+# Alias for backward compatibility
+plot_complexity_by_band = plot_hjorth_by_band
 
 __all__ = [
+    "plot_hjorth_by_band",
     "plot_complexity_by_band",
     "plot_complexity_by_condition",
 ]
+

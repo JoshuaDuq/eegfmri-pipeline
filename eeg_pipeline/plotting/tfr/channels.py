@@ -195,13 +195,13 @@ def _save_fig(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if baseline_used is None:
-        plot_cfg = get_plot_config(config)
-        tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
-        baseline_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
-        default_baseline_start = baseline_window[0]
-        default_baseline_end = baseline_window[1]
-        default_baseline_window = [default_baseline_start, default_baseline_end]
-        baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", default_baseline_window))
+        override = config.get("plotting.tfr.default_baseline_window", None)
+        if isinstance(override, (list, tuple)) and len(override) == 2:
+            baseline_used = tuple(override)
+        else:
+            baseline_used = tuple(
+                config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
+            )
 
     figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
     stem = _build_filename_stem(name, baseline_used, subject, task, band)
@@ -434,4 +434,3 @@ def contrast_channels_pain_nonpain(
         _plot_single_tfr_figure(tfr_pain, ch, None, f"{ch} — Painful (baseline logratio)", f"tfr_{ch}_painful_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
         _plot_single_tfr_figure(tfr_non, ch, None, f"{ch} — Non-pain (baseline logratio)", f"tfr_{ch}_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
         _plot_single_tfr_figure(tfr_diff, ch, None, f"{ch} — Pain minus Non-pain (baseline logratio)", f"tfr_{ch}_pain_minus_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
-

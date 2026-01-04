@@ -1,6 +1,130 @@
 package styles
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+///////////////////////////////////////////////////////////////////
+// List Layout Helpers
+///////////////////////////////////////////////////////////////////
+
+// ListLayout contains calculated layout parameters for a scrollable list
+type ListLayout struct {
+	MaxItems     int // Maximum items visible at once
+	StartIdx     int // First visible item index
+	EndIdx       int // Last visible item index (exclusive)
+	ShowScrollUp bool
+	ShowScrollDn bool
+	TotalItems   int
+	CursorIdx    int
+}
+
+// CalculateListLayout determines the visible range for a scrollable list
+// based on terminal height, cursor position, and total items.
+// headerRows is the number of rows reserved for headers/footers.
+func CalculateListLayout(termHeight, cursorIdx, totalItems, headerRows int) ListLayout {
+	// Calculate available rows for list content
+	availableRows := termHeight - headerRows
+	if availableRows < MinListItems {
+		availableRows = MinListItems
+	}
+
+	// Calculate start and end indices with cursor tracking
+	startIdx := 0
+	endIdx := totalItems
+
+	if totalItems > availableRows {
+		// Keep cursor in view with margin
+		if cursorIdx < ListScrollMargin {
+			startIdx = 0
+		} else if cursorIdx >= totalItems-ListScrollMargin {
+			startIdx = totalItems - availableRows
+		} else {
+			startIdx = cursorIdx - availableRows/2
+		}
+
+		// Clamp start index
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > totalItems-availableRows {
+			startIdx = totalItems - availableRows
+		}
+
+		endIdx = startIdx + availableRows
+		if endIdx > totalItems {
+			endIdx = totalItems
+		}
+	}
+
+	return ListLayout{
+		MaxItems:     availableRows,
+		StartIdx:     startIdx,
+		EndIdx:       endIdx,
+		ShowScrollUp: startIdx > 0,
+		ShowScrollDn: endIdx < totalItems,
+		TotalItems:   totalItems,
+		CursorIdx:    cursorIdx,
+	}
+}
+
+// RenderScrollIndicator returns scroll indicator text for a list
+func RenderScrollIndicator(layout ListLayout, isUp bool) string {
+	if isUp && layout.ShowScrollUp {
+		return RenderScrollUpIndicator(layout.StartIdx)
+	}
+	if !isUp && layout.ShowScrollDn {
+		return RenderScrollDownIndicator(layout.TotalItems - layout.EndIdx)
+	}
+	return ""
+}
+
+// RenderScrollUpIndicator returns a formatted "more above" indicator
+func RenderScrollUpIndicator(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(TextDim).Render(
+		"  ↑ " + formatScrollCount(count) + " more above")
+}
+
+// RenderScrollDownIndicator returns a formatted "more below" indicator
+func RenderScrollDownIndicator(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(TextDim).Render(
+		"  ↓ " + formatScrollCount(count) + " more below")
+}
+
+func formatScrollCount(n int) string {
+	return fmt.Sprintf("%d", n)
+}
+
+// IsTerminalTooSmall returns true if terminal dimensions are too small to render properly
+func IsTerminalTooSmall(width, height int) bool {
+	return width < MinTerminalWidth || height < MinTerminalHeight
+}
+
+// RenderTerminalTooSmall renders a warning message when terminal is too small
+func RenderTerminalTooSmall(width, height int) string {
+	msg := lipgloss.NewStyle().
+		Foreground(Warning).
+		Bold(true).
+		Render("⚠ Terminal too small")
+
+	hint := lipgloss.NewStyle().
+		Foreground(TextDim).
+		Render(fmt.Sprintf("\nResize to at least %dx%d", MinTerminalWidth, MinTerminalHeight))
+
+	current := lipgloss.NewStyle().
+		Foreground(Muted).
+		Render(fmt.Sprintf("\nCurrent: %dx%d", width, height))
+
+	return msg + hint + current
+}
 
 ///////////////////////////////////////////////////////////////////
 // Section Header Helpers

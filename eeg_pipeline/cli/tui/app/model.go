@@ -252,6 +252,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.wizard.SetSubjects(subjects)
+		m.wizard.SetAvailableMetadata(msg.AvailableWindows, msg.AvailableEventColumns)
+		return m, nil
+
+	case messages.PlottersLoadedMsg:
+		if msg.Error != nil {
+			m.wizard.SetFeaturePlottersError(msg.Error)
+			return m, nil
+		}
+		if msg.FeaturePlotters != nil {
+			converted := make(map[string][]wizard.PlotterInfo, len(msg.FeaturePlotters))
+			for category, entries := range msg.FeaturePlotters {
+				list := make([]wizard.PlotterInfo, 0, len(entries))
+				for _, p := range entries {
+					list = append(list, wizard.PlotterInfo{ID: p.ID, Category: p.Category, Name: p.Name})
+				}
+				converted[category] = list
+			}
+			m.wizard.SetFeaturePlotters(converted)
+		}
 		return m, nil
 
 	// Cloud operation messages
@@ -380,6 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mainMenu.SelectedPipeline = -1
 			return m, tea.Batch(
 				executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
+				executor.LoadPlotters(m.repoRoot),
 				executor.LoadConfigSummary(m.repoRoot),
 				executor.LoadConfigKeys(m.repoRoot, []string{"time_frequency_analysis.bands"}),
 			)
@@ -491,6 +511,15 @@ func (m Model) popState() (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Initializing..."
+	}
+
+	// Check if terminal is too small to render properly
+	if styles.IsTerminalTooSmall(m.width, m.height) {
+		return lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			styles.RenderTerminalTooSmall(m.width, m.height),
+		)
 	}
 
 	var content string

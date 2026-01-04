@@ -763,3 +763,180 @@ def compute_variability_metrics(
         "iqr": float(iqr),
         "mad": float(mad),
     }
+
+
+###################################################################
+# UNIFIED PAIRED COMPARISON PLOTTING
+###################################################################
+
+def plot_paired_comparison(
+    data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]],
+    subject: str,
+    save_path: "Path",
+    feature_label: str,
+    config: Any = None,
+    logger: Any = None,
+    *,
+    label1: str = "Condition 1",
+    label2: str = "Condition 2",
+    roi_name: Optional[str] = None,
+) -> None:
+    """Unified paired comparison plot.
+    
+    Creates a single-row figure with one subplot per frequency band, showing
+    paired comparisons with box plots, scatter points, and connecting lines.
+    Uses Wilcoxon signed-rank test with FDR correction.
+    
+    Args:
+        data_by_band: Dict mapping band names to (values1, values2) tuples.
+                      Both arrays must have the same length for paired comparison.
+        subject: Subject identifier for title.
+        save_path: Path to save the figure (without extension).
+        feature_label: Human-readable feature name (e.g., "Band Power").
+        config: Configuration object.
+        logger: Logger instance.
+        label1: Label for first condition (from user config).
+        label2: Label for second condition (from user config).
+        roi_name: Optional ROI name for title.
+    """
+    from pathlib import Path
+    from scipy.stats import wilcoxon
+    import matplotlib.pyplot as plt
+    from eeg_pipeline.plotting.io.figures import save_fig
+    
+    if not data_by_band:
+        if logger:
+            logger.warning(f"No data provided for {feature_label} paired comparison")
+        return
+    
+    # Get bands in order
+    band_order = get_band_names(config)
+    bands = [b for b in band_order if b in data_by_band]
+    bands += [b for b in data_by_band if b not in bands]
+    
+    if not bands:
+        return
+    
+    n_bands = len(bands)
+    plot_cfg = get_plot_config(config)
+    band_colors = get_band_colors(config)
+    
+    # Consistent colors
+    segment_colors = {
+        "v1": "#5a7d9a",  # first condition
+        "v2": "#c44e52",  # second condition
+    }
+    
+    # Compute statistics for each band
+    all_pvalues = []
+    pvalue_keys = []
+    
+    for band in bands:
+        v1, v2 = data_by_band[band]
+        
+        if len(v1) > 5 and len(v2) > 5 and len(v1) == len(v2):
+            try:
+                _, p = wilcoxon(v2, v1)
+                diff = v2 - v1
+                pooled_std = np.std(diff, ddof=1)
+                d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
+                all_pvalues.append(p)
+                pvalue_keys.append((band, p, d))
+            except Exception:
+                pass
+    
+    # FDR correction
+    qvalues = {}
+    n_significant = 0
+    if all_pvalues:
+        rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
+        for i, (band, p, d) in enumerate(pvalue_keys):
+            qvalues[band] = (p, qvals[i], d, rejected[i])
+        n_significant = int(np.sum(rejected))
+    
+    # Create figure
+    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+    
+    for band_idx, band in enumerate(bands):
+        ax = axes.flatten()[band_idx]
+        v1, v2 = data_by_band[band]
+        
+        if len(v1) == 0 or len(v2) == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+            ax.set_xticks([])
+            continue
+        
+        # Box plots
+        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+        bp["boxes"][0].set_facecolor(segment_colors["v1"])
+        bp["boxes"][0].set_alpha(0.6)
+        bp["boxes"][1].set_facecolor(segment_colors["v2"])
+        bp["boxes"][1].set_alpha(0.6)
+        
+        # Scatter points
+        ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)),
+                  v1, c=segment_colors["v1"], alpha=0.3, s=6)
+        ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)),
+                  v2, c=segment_colors["v2"], alpha=0.3, s=6)
+        
+        # Paired connecting lines
+        if len(v1) == len(v2) and len(v1) <= 100:
+            for i in range(len(v1)):
+                ax.plot([0, 1], [v1[i], v2[i]], c="gray", alpha=0.15, lw=0.5)
+        
+        # Y-axis limits with room for annotation
+        all_vals = np.concatenate([v1, v2])
+        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
+        yrange = ymax - ymin if ymax > ymin else 0.1
+        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+        
+        # Statistical annotation
+        if band in qvalues:
+            _, q, d, sig = qvalues[band]
+            sig_marker = "†" if sig else ""
+            sig_color = get_significance_color(sig, config)
+            ax.annotate(
+                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
+                xy=(0.5, ymax + 0.05 * yrange),
+                ha="center",
+                fontsize=plot_cfg.font.medium,
+                color=sig_color,
+                fontweight="bold" if sig else "normal",
+            )
+        
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels([label1, label2], fontsize=9)
+        ax.set_title(band.capitalize(), fontweight="bold", 
+                    color=band_colors.get(band, "gray"))
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+    
+    # Build title - uses user-provided labels only
+    n_trials = len(data_by_band[bands[0]][0]) if bands else 0
+    n_tests = len(all_pvalues)
+    
+    title_parts = [f"{feature_label}: {label1} vs {label2} (Paired Comparison)"]
+    
+    info_parts = [f"Subject: {subject}"]
+    if roi_name:
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        info_parts.append(f"ROI: {roi_display}")
+    info_parts.extend([
+        f"N: {n_trials} trials",
+        "Wilcoxon signed-rank",
+        f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
+    ])
+    title_parts.append(" | ".join(info_parts))
+    
+    fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle, 
+                fontweight="bold", y=1.02)
+    
+    plt.tight_layout()
+    save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+    plt.close(fig)
+    
+    if logger:
+        logger.info(f"Saved {feature_label} paired comparison ({n_significant}/{n_tests} FDR significant)")
+

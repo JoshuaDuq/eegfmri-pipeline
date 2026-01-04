@@ -141,15 +141,17 @@ def plot_connectivity_roi_scatter(
     if data is None:
         return {"significant": [], "all": []}
 
-    conn_path = deriv_features_path(deriv_root, subject) / "features_connectivity.parquet"
-    conn_df = read_table(conn_path) if conn_path.exists() else None
-    if conn_df is None or conn_df.empty:
-        logger.warning("Connectivity features not found at %s", conn_path)
+    if data.conn_df is None or data.conn_df.empty:
+        logger.warning(f"No connectivity data available for scatter plots (sub-{subject})")
         return {"significant": [], "all": []}
-    if len(conn_df) != len(data.y):
+
+    if len(data.conn_df) != len(data.y):
         raise ValueError(
-            f"Length mismatch: connectivity features ({len(conn_df)}) != targets ({len(data.y)})"
+            f"Length mismatch: connectivity features ({len(data.conn_df)} rows) != targets ({len(data.y)} rows)"
         )
+
+    # Use data.conn_df
+    conn_df = data.conn_df
     data.conn_df = conn_df
     data.roi_map = {"Overall": []}
 

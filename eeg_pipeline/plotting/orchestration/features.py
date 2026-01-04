@@ -10,7 +10,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.logging import get_logger
@@ -20,7 +20,7 @@ from eeg_pipeline.plotting.io.figures import setup_matplotlib
 # Import plotters for side-effects: registers plot functions into VisualizationRegistry.
 # This import must not call back into this module at import time.
 from eeg_pipeline.plotting.features import registrations as _feature_plotters  # noqa: F401
-from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationManager
+from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationManager, VisualizationRegistry
 
 
 def visualize_features(
@@ -33,6 +33,7 @@ def visualize_features(
     epochs: Optional[Any] = None,
     tfr: Optional[Any] = None,
     visualize_categories: Optional[List[str]] = None,
+    feature_plotters: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
     """Generate descriptive feature visualizations using registered plotters.
     
@@ -69,14 +70,40 @@ def visualize_features(
             return {}
 
     manager = VisualizationManager(ctx)
-    
+
+    selected_by_category: Dict[str, Set[str]] = {}
+    if feature_plotters:
+        for token in feature_plotters:
+            token = str(token).strip()
+            if not token or "." not in token:
+                continue
+            category, name = token.split(".", 1)
+            category = category.strip()
+            name = name.strip()
+            if not category or not name:
+                continue
+            selected_by_category.setdefault(category, set()).add(name)
+
     if visualize_categories:
         logger.info(f"Visualizing specific categories: {', '.join(visualize_categories)}")
         for category in visualize_categories:
-            manager.run_category(category)
+            if selected_by_category:
+                wanted = selected_by_category.get(category, set())
+                if not wanted:
+                    continue
+                plotters = [(n, f) for (n, f) in VisualizationRegistry.get_plotters(category) if n in wanted]
+                manager.run_category(category, plotters=plotters)
+            else:
+                manager.run_category(category)
         saved_plots = manager.saved_plots
     else:
-        saved_plots = manager.run_all()
+        if selected_by_category:
+            for category, wanted in selected_by_category.items():
+                plotters = [(n, f) for (n, f) in VisualizationRegistry.get_plotters(category) if n in wanted]
+                manager.run_category(category, plotters=plotters)
+            saved_plots = manager.saved_plots
+        else:
+            saved_plots = manager.run_all()
 
     _save_plot_manifest(plots_dir=plots_dir, subject=subject, logger=logger)
 
@@ -146,6 +173,7 @@ def visualize_features_for_subjects(
     config: Any = None,
     logger: Optional[logging.Logger] = None,
     visualize_categories: Optional[List[str]] = None,
+    feature_plotters: Optional[List[str]] = None,
 ) -> None:
     """Visualize features for multiple subjects.
     
@@ -198,6 +226,7 @@ def visualize_features_for_subjects(
             aligned_events=aligned_events,
             epochs=epochs,
             visualize_categories=visualize_categories,
+            feature_plotters=feature_plotters,
         )
 
     logger.info("Feature visualization complete")

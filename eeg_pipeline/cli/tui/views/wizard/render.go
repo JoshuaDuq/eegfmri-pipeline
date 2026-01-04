@@ -19,11 +19,6 @@ func (m Model) View() string {
 		return m.renderWithHelpOverlay()
 	}
 
-	// Command preview overlay
-	if m.showCommandPreview {
-		return m.renderCommandPreviewOverlay()
-	}
-
 	var b strings.Builder
 
 	// Responsive flags
@@ -53,6 +48,8 @@ func (m Model) View() string {
 		} else {
 			mainContent = m.renderPlotSelectionSplit()
 		}
+	case types.StepSelectFeaturePlotters:
+		mainContent = m.renderFeaturePlotterSelection()
 	case types.StepPlotConfig:
 		mainContent = m.renderPlotConfig()
 	case types.StepSelectBands:
@@ -86,92 +83,6 @@ func (m Model) View() string {
 	return b.String()
 }
 
-func (m Model) renderCommandPreviewOverlay() string {
-	var content strings.Builder
-
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Primary).
-		Render("◆ Execution Preview")
-	content.WriteString(title + "\n\n")
-
-	// Structured summary
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(14)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
-	accentStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	// Pipeline
-	content.WriteString(labelStyle.Render("Pipeline:") + " " + accentStyle.Render(m.Pipeline.String()) + "\n")
-
-	// Mode
-	if len(m.modeOptions) > m.modeIndex {
-		content.WriteString(labelStyle.Render("Mode:") + " " + valueStyle.Render(m.modeOptions[m.modeIndex]) + "\n")
-	}
-
-	// Subject count
-	selectedCount := 0
-	for _, sel := range m.subjectSelected {
-		if sel {
-			selectedCount++
-		}
-	}
-	subjColor := styles.Success
-	if selectedCount == 0 {
-		subjColor = styles.Error
-	}
-	subjStyle := lipgloss.NewStyle().Foreground(subjColor).Bold(true)
-	content.WriteString(labelStyle.Render("Subjects:") + " " + subjStyle.Render(fmt.Sprintf("%d", selectedCount)) + "\n")
-
-	// Categories (for features pipeline)
-	if m.Pipeline == types.PipelineFeatures && len(m.selected) > 0 {
-		cats := m.SelectedCategories()
-		if len(cats) > 0 {
-			var chips string
-			for i, cat := range cats {
-				if i > 0 {
-					chips += ", "
-				}
-				chips += cat
-			}
-			content.WriteString(labelStyle.Render("Features:") + " " + valueStyle.Render(chips) + "\n")
-		}
-	}
-	if m.Pipeline == types.PipelinePlotting {
-		plots := m.SelectedPlotIDs()
-		if len(plots) > 0 {
-			content.WriteString(labelStyle.Render("Plots:") + " " + valueStyle.Render(fmt.Sprintf("%d selected", len(plots))) + "\n")
-		}
-	}
-
-	// Divider
-	content.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", 40)) + "\n\n")
-
-	// Command
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("Command:") + "\n")
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Padding(0, 1).
-		MarginLeft(2)
-	content.WriteString(cmdStyle.Render(m.BuildCommand()) + "\n\n")
-
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("Press P or Esc to close"))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Primary).
-		Padding(1, 2).
-		Width(m.width - 20)
-
-	overlayPlaced := lipgloss.Place(
-		m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		box.Render(content.String()),
-	)
-
-	return overlayPlaced
-}
-
 func (m Model) renderWithHelpOverlay() string {
 	overlay := m.helpOverlay.View()
 
@@ -190,19 +101,20 @@ func (m Model) renderWithHelpOverlay() string {
 
 func (m Model) renderHeader() string {
 	stepNames := map[types.WizardStep]string{
-		types.StepSelectMode:           "Mode",
-		types.StepSelectComputations:   "Analyses",
-		types.StepSelectFeatureFiles:   "Files",
-		types.StepConfigureOptions:     "Features",
-		types.StepSelectBands:          "Bands",
-		types.StepSelectSpatial:        "Spatial",
-		types.StepTimeRange:            "Time",
-		types.StepAdvancedConfig:       "Advanced",
-		types.StepSelectPlots:          "Plots",
-		types.StepSelectPlotCategories: "Categories",
-		types.StepPlotConfig:           "Output",
-		types.StepSelectSubjects:       "Subjects",
-		types.StepReviewExecute:        "Review",
+		types.StepSelectMode:            "Mode",
+		types.StepSelectComputations:    "Analyses",
+		types.StepSelectFeatureFiles:    "Files",
+		types.StepConfigureOptions:      "Features",
+		types.StepSelectBands:           "Bands",
+		types.StepSelectSpatial:         "Spatial",
+		types.StepTimeRange:             "Time",
+		types.StepAdvancedConfig:        "Advanced",
+		types.StepSelectPlots:           "Plots",
+		types.StepSelectFeaturePlotters: "Feature Plots",
+		types.StepSelectPlotCategories:  "Categories",
+		types.StepPlotConfig:            "Output",
+		types.StepSelectSubjects:        "Subjects",
+		types.StepReviewExecute:         "Review",
 	}
 
 	var b strings.Builder
@@ -398,7 +310,7 @@ func (m Model) renderFooter() string {
 			}
 		}
 
-	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots:
+	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial, types.StepSelectFeatureFiles, types.StepSelectPlots, types.StepSelectFeaturePlotters:
 		hints = []string{
 			styles.RenderKeyHint("Space", "Toggle"),
 			styles.RenderKeyHint("A", "All"),
@@ -465,7 +377,6 @@ func (m Model) renderFooter() string {
 			}
 		} else {
 			hints = []string{
-				styles.RenderKeyHint("P", "Preview"),
 				styles.RenderKeyHint("Enter", "EXECUTE"),
 				styles.RenderKeyHint("Esc", "Back"),
 			}

@@ -183,7 +183,7 @@ def extract_connectivity_from_precomputed(
     enable_aec = bool(conn_cfg.get("enable_aec", True))
     enable_plv = bool(conn_cfg.get("enable_plv", False))
     enable_pli = bool(conn_cfg.get("enable_pli", False))
-    enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", True))
+    enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
 
     supported_measures = {"wpli", "aec", "plv", "pli"}
     measures_cfg = conn_cfg.get("measures")

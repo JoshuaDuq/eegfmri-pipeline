@@ -122,6 +122,7 @@ time_frequency_analysis:
 # 4.3 Feature Extraction
 feature_engineering:
   feature_categories: ["power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "erp", "bursts"]
+  spatial_modes: ["roi", "channels", "global"]
   create_combined_features: false
 
   validation:
@@ -159,6 +160,7 @@ feature_engineering:
   connectivity:
     measures: ["wpli", "aec"]
     aec_mode: "orth"
+    enable_graph_metrics: false
     graph_top_prop: 0.1
     sliding_window_len: 1.0
     sliding_window_step: 0.5
@@ -607,6 +609,26 @@ plotting:
         bold: 1.5
         thin: 0.5
         thick: 1.0
+
+  comparisons:
+    # Comparison modes for paired plots
+    compare_windows: true            # Window-based comparison (e.g., baseline vs active)
+    compare_columns: true           # Column-based comparison (e.g., pain vs non-pain)
+    
+    # For window comparison: specify exactly 2 segment names to compare
+    comparison_windows: ["baseline", "active"]
+    
+    # For column comparison: specify the segment, column name, and values
+    comparison_segment: "active"     # Segment to use for column comparison (must match a named time window)
+    comparison_column: "pain_binary_coded"  # Column name in events_df
+    comparison_values: [0, 1]        # Values to compare (e.g., [0, 1] for non-pain vs pain)
+    
+    comparison_rois: []              # ROIs to include (empty = all available)
+
+  # Plotting-specific TFR settings (do not affect analysis computation)
+  tfr:
+    # Baseline window used by plotting functions (can be overridden per-plot in the TUI/CLI)
+    default_baseline_window: [-0.5, -0.01]
 
   plots:
     topomap:

@@ -34,6 +34,11 @@ func (m *Model) resetCursorsForStep() {
 	if m.CurrentStep == types.StepSelectPlots {
 		m.plotCursor = m.findNextVisiblePlot(-1, 1) // Start at first visible if possible
 	}
+	m.featurePlotterCursor = 0
+	m.featurePlotterOffset = 0
+	if m.CurrentStep == types.StepSelectFeaturePlotters {
+		m.featurePlotterCursor = m.findNextFeaturePlotter(-1, 1)
+	}
 	m.plotConfigCursor = 0
 
 	// Reset any editing states
@@ -44,6 +49,8 @@ func (m *Model) resetCursorsForStep() {
 	m.editingText = false
 	m.textBuffer = ""
 	m.editingTextField = textFieldNone
+	m.editingPlotID = ""
+	m.editingPlotField = plotItemConfigFieldNone
 	m.editingRangeIdx = -1
 	m.editingField = 0
 }
@@ -94,6 +101,8 @@ func (m *Model) handleUp() {
 		}
 	case types.StepSelectPlots:
 		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, -1)
+	case types.StepSelectFeaturePlotters:
+		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, -1)
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
 		if len(options) == 0 {
@@ -138,11 +147,15 @@ func (m *Model) handleUp() {
 			m.UpdateAdvancedOffset()
 		} else {
 			// Navigate between main options
-			optCount := m.getAdvancedOptionCount()
-			if m.advancedCursor > 0 {
-				m.advancedCursor--
+			if m.Pipeline == types.PipelinePlotting {
+				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, -1)
 			} else {
-				m.advancedCursor = optCount - 1
+				optCount := m.getAdvancedOptionCount()
+				if m.advancedCursor > 0 {
+					m.advancedCursor--
+				} else {
+					m.advancedCursor = optCount - 1
+				}
 			}
 			m.UpdateAdvancedOffset()
 		}
@@ -191,6 +204,8 @@ func (m *Model) handleDown() {
 		}
 	case types.StepSelectPlots:
 		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
+	case types.StepSelectFeaturePlotters:
+		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, 1)
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
 		if len(options) == 0 {
@@ -235,11 +250,15 @@ func (m *Model) handleDown() {
 			m.UpdateAdvancedOffset()
 		} else {
 			// Navigate between main options
-			optCount := m.getAdvancedOptionCount()
-			if m.advancedCursor < optCount-1 {
-				m.advancedCursor++
+			if m.Pipeline == types.PipelinePlotting {
+				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
 			} else {
-				m.advancedCursor = 0
+				optCount := m.getAdvancedOptionCount()
+				if m.advancedCursor < optCount-1 {
+					m.advancedCursor++
+				} else {
+					m.advancedCursor = 0
+				}
 			}
 			m.UpdateAdvancedOffset()
 		}
@@ -325,6 +344,10 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 						skip = true
 					}
 				}
+			case types.PipelinePlotting:
+				if m.CurrentStep == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
+					skip = true
+				}
 			}
 
 			if !skip {
@@ -407,6 +430,28 @@ func (m *Model) validateStep() []string {
 		if count == 0 {
 			errors = append(errors, "Select at least one plot to generate")
 		}
+	case types.StepSelectFeaturePlotters:
+		if len(m.selectedFeaturePlotterCategories()) == 0 {
+			break
+		}
+		if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) == "" {
+			errors = append(errors, "Feature plot list is still loading")
+			break
+		}
+		if m.featurePlotters == nil && strings.TrimSpace(m.featurePlotterError) != "" {
+			// If discovery failed, let the user proceed (defaults to running all plotters).
+			break
+		}
+		items := m.featurePlotterItems()
+		count := 0
+		for _, p := range items {
+			if m.featurePlotterSelected[p.ID] {
+				count++
+			}
+		}
+		if count == 0 {
+			errors = append(errors, "Select at least one feature plot")
+		}
 	case types.StepSelectSpatial:
 		count := 0
 		for _, sel := range m.spatialSelected {
@@ -460,7 +505,30 @@ func (m *Model) handleSpace() {
 	case types.StepSelectPlots:
 		if m.plotCursor < len(m.plotItems) {
 			m.plotSelected[m.plotCursor] = !m.plotSelected[m.plotCursor]
+			plotID := m.plotItems[m.plotCursor].ID
+			if m.plotSelected[m.plotCursor] {
+				_ = m.ensurePlotItemConfig(plotID)
+				if m.plotItemConfigExpanded == nil {
+					m.plotItemConfigExpanded = make(map[string]bool)
+				}
+				if _, ok := m.plotItemConfigExpanded[plotID]; !ok {
+					m.plotItemConfigExpanded[plotID] = false
+				}
+			} else {
+				delete(m.plotItemConfigs, plotID)
+				delete(m.plotItemConfigExpanded, plotID)
+			}
 		}
+	case types.StepSelectFeaturePlotters:
+		items := m.featurePlotterItems()
+		if len(items) == 0 {
+			break
+		}
+		if m.featurePlotterCursor < 0 || m.featurePlotterCursor >= len(items) {
+			break
+		}
+		id := items[m.featurePlotterCursor].ID
+		m.featurePlotterSelected[id] = !m.featurePlotterSelected[id]
 
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
@@ -546,6 +614,10 @@ func (m *Model) selectAll() {
 				m.plotSelected[i] = true
 			}
 		}
+	case types.StepSelectFeaturePlotters:
+		for _, p := range m.featurePlotterItems() {
+			m.featurePlotterSelected[p.ID] = true
+		}
 	}
 }
 
@@ -575,6 +647,10 @@ func (m *Model) selectNone() {
 			if m.IsPlotCategorySelected(plot.Group) {
 				m.plotSelected[i] = false
 			}
+		}
+	case types.StepSelectFeaturePlotters:
+		for _, p := range m.featurePlotterItems() {
+			m.featurePlotterSelected[p.ID] = false
 		}
 	}
 }
@@ -778,24 +854,7 @@ func (m *Model) validateTimeRanges() []string {
 		}
 	}
 
-	// Check for required 'baseline' and 'active'
 	hasBaseline := names["baseline"]
-	hasActive := names["active"]
-
-	if !hasBaseline {
-		errors = append(errors, "Time range 'baseline' is required")
-	}
-	if !hasActive {
-		errors = append(errors, "Time range 'active' is required")
-	}
-
-	// Validate that baseline and active have values
-	for _, tr := range m.TimeRanges {
-		if (tr.Name == "baseline" || tr.Name == "active") && (tr.Tmin == "" || tr.Tmax == "") {
-			errors = append(errors, fmt.Sprintf("Time range '%s' must have both start and end times defined", tr.Name))
-		}
-	}
-
 	needsBaseline := false
 	for i, cat := range m.categories {
 		if m.selected[i] {
@@ -855,6 +914,8 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getFeaturesOptions())
 	case types.PipelineBehavior:
 		return len(m.getBehaviorOptions())
+	case types.PipelinePlotting:
+		return len(m.getPlottingAdvancedRows())
 
 	case types.PipelineDecoding:
 		return len(m.getDecodingOptions())
@@ -869,6 +930,24 @@ func (m *Model) getAdvancedOptionCount() int {
 	}
 }
 
+func (m *Model) findNextPlottingAdvancedRow(current int, delta int) int {
+	rows := m.getPlottingAdvancedRows()
+	if len(rows) == 0 {
+		return 0
+	}
+	next := current
+	for i := 0; i < len(rows); i++ {
+		next = (next + delta + len(rows)) % len(rows)
+		switch rows[next].kind {
+		case plottingRowSection, plottingRowPlotInfo:
+			continue
+		default:
+			return next
+		}
+	}
+	return current
+}
+
 // toggleAdvancedOption handles Space key for advanced config options
 func (m *Model) toggleAdvancedOption() {
 	switch m.Pipeline {
@@ -876,6 +955,8 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleFeaturesAdvancedOption()
 	case types.PipelineBehavior:
 		m.toggleBehaviorAdvancedOption()
+	case types.PipelinePlotting:
+		m.togglePlottingAdvancedOption()
 	case types.PipelineDecoding:
 		m.toggleDecodingAdvancedOption()
 	case types.PipelinePreprocessing:
@@ -1088,6 +1169,387 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	}
 	if m.advancedCursor < 0 {
 		m.advancedCursor = 0
+	}
+	m.UpdateAdvancedOffset()
+}
+
+func (m *Model) togglePlottingAdvancedOption() {
+	rows := m.getPlottingAdvancedRows()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(rows) {
+		return
+	}
+
+	cycleTriState := func(v *bool) *bool {
+		if v == nil {
+			t := true
+			return &t
+		}
+		if *v {
+			f := false
+			return &f
+		}
+		return nil
+	}
+
+	row := rows[m.advancedCursor]
+	switch row.kind {
+	case plottingRowPlotHeader:
+		m.plotItemConfigExpanded[row.plotID] = !m.plotItemConfigExpanded[row.plotID]
+		m.UpdateAdvancedOffset()
+		return
+	case plottingRowPlotField:
+		cfg := m.ensurePlotItemConfig(row.plotID)
+		switch row.plotField {
+		case plotItemConfigFieldCompareWindows:
+			cfg.CompareWindows = cycleTriState(cfg.CompareWindows)
+			m.plotItemConfigs[row.plotID] = cfg
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldCompareColumns:
+			cfg.CompareColumns = cycleTriState(cfg.CompareColumns)
+			m.plotItemConfigs[row.plotID] = cfg
+			m.useDefaultAdvanced = false
+		case plotItemConfigFieldTfrDefaultBaselineWindow,
+			plotItemConfigFieldComparisonWindows,
+			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
+			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonROIs:
+			m.startPlotTextEdit(row.plotID, row.plotField)
+			m.useDefaultAdvanced = false
+		}
+		m.UpdateAdvancedOffset()
+		return
+	case plottingRowSection, plottingRowPlotInfo:
+		return
+	}
+
+	opt := row.opt
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+		if m.useDefaultAdvanced {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+		m.UpdateAdvancedOffset()
+		return
+
+	case optPlotGroupDefaults:
+		m.plotGroupDefaultsExpanded = !m.plotGroupDefaultsExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupFonts:
+		m.plotGroupFontsExpanded = !m.plotGroupFontsExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupLayout:
+		m.plotGroupLayoutExpanded = !m.plotGroupLayoutExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupFigureSizes:
+		m.plotGroupFigureSizesExpanded = !m.plotGroupFigureSizesExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupColors:
+		m.plotGroupColorsExpanded = !m.plotGroupColorsExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupAlpha:
+		m.plotGroupAlphaExpanded = !m.plotGroupAlphaExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupScatter:
+		m.plotGroupScatterExpanded = !m.plotGroupScatterExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupBar:
+		m.plotGroupBarExpanded = !m.plotGroupBarExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupLine:
+		m.plotGroupLineExpanded = !m.plotGroupLineExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupHistogram:
+		m.plotGroupHistogramExpanded = !m.plotGroupHistogramExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupKDE:
+		m.plotGroupKDEExpanded = !m.plotGroupKDEExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupErrorbar:
+		m.plotGroupErrorbarExpanded = !m.plotGroupErrorbarExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupText:
+		m.plotGroupTextExpanded = !m.plotGroupTextExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupValidation:
+		m.plotGroupValidationExpanded = !m.plotGroupValidationExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupTopomap:
+		m.plotGroupTopomapExpanded = !m.plotGroupTopomapExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupTFR:
+		m.plotGroupTFRExpanded = !m.plotGroupTFRExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupSizing:
+		m.plotGroupSizingExpanded = !m.plotGroupSizingExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupSelection:
+		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
+		m.useDefaultAdvanced = false
+
+	case optPlotBboxInches:
+		m.startTextEdit(textFieldPlotBboxInches)
+		m.useDefaultAdvanced = false
+	case optPlotFontFamily:
+		m.startTextEdit(textFieldPlotFontFamily)
+		m.useDefaultAdvanced = false
+	case optPlotFontWeight:
+		m.startTextEdit(textFieldPlotFontWeight)
+		m.useDefaultAdvanced = false
+	case optPlotLayoutTightRect:
+		m.startTextEdit(textFieldPlotLayoutTightRect)
+		m.useDefaultAdvanced = false
+	case optPlotLayoutTightRectMicrostate:
+		m.startTextEdit(textFieldPlotLayoutTightRectMicrostate)
+		m.useDefaultAdvanced = false
+	case optPlotGridSpecWidthRatios:
+		m.startTextEdit(textFieldPlotGridSpecWidthRatios)
+		m.useDefaultAdvanced = false
+	case optPlotGridSpecHeightRatios:
+		m.startTextEdit(textFieldPlotGridSpecHeightRatios)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeStandard:
+		m.startTextEdit(textFieldPlotFigureSizeStandard)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeMedium:
+		m.startTextEdit(textFieldPlotFigureSizeMedium)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeSmall:
+		m.startTextEdit(textFieldPlotFigureSizeSmall)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeSquare:
+		m.startTextEdit(textFieldPlotFigureSizeSquare)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeWide:
+		m.startTextEdit(textFieldPlotFigureSizeWide)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeTFR:
+		m.startTextEdit(textFieldPlotFigureSizeTFR)
+		m.useDefaultAdvanced = false
+	case optPlotFigureSizeTopomap:
+		m.startTextEdit(textFieldPlotFigureSizeTopomap)
+		m.useDefaultAdvanced = false
+
+	case optPlotColorPain:
+		m.startTextEdit(textFieldPlotColorPain)
+		m.useDefaultAdvanced = false
+	case optPlotColorNonpain:
+		m.startTextEdit(textFieldPlotColorNonpain)
+		m.useDefaultAdvanced = false
+	case optPlotColorSignificant:
+		m.startTextEdit(textFieldPlotColorSignificant)
+		m.useDefaultAdvanced = false
+	case optPlotColorNonsignificant:
+		m.startTextEdit(textFieldPlotColorNonsignificant)
+		m.useDefaultAdvanced = false
+	case optPlotColorGray:
+		m.startTextEdit(textFieldPlotColorGray)
+		m.useDefaultAdvanced = false
+	case optPlotColorLightGray:
+		m.startTextEdit(textFieldPlotColorLightGray)
+		m.useDefaultAdvanced = false
+	case optPlotColorBlack:
+		m.startTextEdit(textFieldPlotColorBlack)
+		m.useDefaultAdvanced = false
+	case optPlotColorBlue:
+		m.startTextEdit(textFieldPlotColorBlue)
+		m.useDefaultAdvanced = false
+	case optPlotColorRed:
+		m.startTextEdit(textFieldPlotColorRed)
+		m.useDefaultAdvanced = false
+	case optPlotColorNetworkNode:
+		m.startTextEdit(textFieldPlotColorNetworkNode)
+		m.useDefaultAdvanced = false
+
+	case optPlotScatterEdgecolor:
+		m.startTextEdit(textFieldPlotScatterEdgecolor)
+		m.useDefaultAdvanced = false
+	case optPlotHistEdgecolor:
+		m.startTextEdit(textFieldPlotHistEdgecolor)
+		m.useDefaultAdvanced = false
+	case optPlotKdeColor:
+		m.startTextEdit(textFieldPlotKdeColor)
+		m.useDefaultAdvanced = false
+
+	case optPlotTopomapContours,
+		optPlotPadInches,
+		optPlotFontSizeSmall,
+		optPlotFontSizeMedium,
+		optPlotFontSizeLarge,
+		optPlotFontSizeTitle,
+		optPlotFontSizeAnnotation,
+		optPlotFontSizeLabel,
+		optPlotFontSizeYLabel,
+		optPlotFontSizeSuptitle,
+		optPlotFontSizeFigureTitle,
+		optPlotGridSpecHspace,
+		optPlotGridSpecWspace,
+		optPlotGridSpecLeft,
+		optPlotGridSpecRight,
+		optPlotGridSpecTop,
+		optPlotGridSpecBottom,
+		optPlotAlphaGrid,
+		optPlotAlphaFill,
+		optPlotAlphaCI,
+		optPlotAlphaCILine,
+		optPlotAlphaTextBox,
+		optPlotAlphaViolinBody,
+		optPlotAlphaRidgeFill,
+		optPlotScatterMarkerSizeSmall,
+		optPlotScatterMarkerSizeLarge,
+		optPlotScatterMarkerSizeDefault,
+		optPlotScatterAlpha,
+		optPlotScatterEdgewidth,
+		optPlotBarAlpha,
+		optPlotBarWidth,
+		optPlotBarCapsize,
+		optPlotBarCapsizeLarge,
+		optPlotLineWidthThin,
+		optPlotLineWidthStandard,
+		optPlotLineWidthThick,
+		optPlotLineWidthBold,
+		optPlotLineAlphaStandard,
+		optPlotLineAlphaDim,
+		optPlotLineAlphaZeroLine,
+		optPlotLineAlphaFitLine,
+		optPlotLineAlphaDiagonal,
+		optPlotLineAlphaReference,
+		optPlotLineRegressionWidth,
+		optPlotLineResidualWidth,
+		optPlotLineQQWidth,
+		optPlotHistBins,
+		optPlotHistBinsBehavioral,
+		optPlotHistBinsResidual,
+		optPlotHistBinsTFR,
+		optPlotHistEdgewidth,
+		optPlotHistAlpha,
+		optPlotHistAlphaResidual,
+		optPlotHistAlphaTFR,
+		optPlotKdePoints,
+		optPlotKdeLinewidth,
+		optPlotKdeAlpha,
+		optPlotErrorbarMarkersize,
+		optPlotErrorbarCapsize,
+		optPlotErrorbarCapsizeLarge,
+		optPlotTextStatsX,
+		optPlotTextStatsY,
+		optPlotTextPvalueX,
+		optPlotTextPvalueY,
+		optPlotTextBootstrapX,
+		optPlotTextBootstrapY,
+		optPlotTextChannelAnnotationX,
+		optPlotTextChannelAnnotationY,
+		optPlotTextTitleY,
+		optPlotTextResidualQcTitleY,
+		optPlotValidationMinSamplesForPlot,
+		optPlotValidationMinSamplesForKDE,
+		optPlotValidationMinSamplesForFit,
+		optPlotValidationMinSamplesForCalibration,
+		optPlotValidationMinBinsForCalibration,
+		optPlotValidationMaxBinsForCalibration,
+		optPlotValidationSamplesPerBin,
+		optPlotValidationMinRoisForFDR,
+		optPlotValidationMinPvaluesForFDR,
+		optPlotTopomapColorbarFraction,
+		optPlotTopomapColorbarPad,
+		optPlotTopomapSigMaskLinewidth,
+		optPlotTopomapSigMaskMarkersize,
+		optPlotTFRLogBase,
+		optPlotTFRPercentageMultiplier,
+		optPlotRoiWidthPerBand,
+		optPlotRoiWidthPerMetric,
+		optPlotRoiHeightPerRoi,
+		optPlotPowerWidthPerBand,
+		optPlotPowerHeightPerSegment,
+		optPlotItpcWidthPerBin,
+		optPlotItpcHeightPerBand,
+		optPlotItpcWidthPerBandBox,
+		optPlotItpcHeightBox,
+		optPlotPacWidthPerRoi,
+		optPlotPacHeightBox,
+		optPlotAperiodicWidthPerColumn,
+		optPlotAperiodicHeightPerRow,
+		optPlotAperiodicNPerm,
+		optPlotQualityWidthPerPlot,
+		optPlotQualityHeightPerPlot,
+		optPlotQualityDistributionNCols,
+		optPlotQualityDistributionMaxFeatures,
+		optPlotQualityOutlierZThreshold,
+		optPlotQualityOutlierMaxFeatures,
+		optPlotQualityOutlierMaxTrials,
+		optPlotQualitySnrThresholdDb,
+		optPlotComplexityWidthPerMeasure,
+		optPlotComplexityHeightPerSegment,
+		optPlotConnectivityWidthPerCircle,
+		optPlotConnectivityWidthPerBand,
+		optPlotConnectivityHeightPerMeasure,
+		optPlotConnectivityCircleTopFraction,
+		optPlotConnectivityCircleMinLines:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	case optPlotTopomapColormap:
+		m.startTextEdit(textFieldPlotTopomapColormap)
+		m.useDefaultAdvanced = false
+	case optPlotTopomapSigMaskMarker:
+		m.startTextEdit(textFieldPlotTopomapSigMaskMarker)
+		m.useDefaultAdvanced = false
+	case optPlotTopomapSigMaskMarkerFaceColor:
+		m.startTextEdit(textFieldPlotTopomapSigMaskMarkerFaceColor)
+		m.useDefaultAdvanced = false
+	case optPlotTopomapSigMaskMarkerEdgeColor:
+		m.startTextEdit(textFieldPlotTopomapSigMaskMarkerEdgeColor)
+		m.useDefaultAdvanced = false
+	case optPlotPacCmap:
+		m.startTextEdit(textFieldPlotPacCmap)
+		m.useDefaultAdvanced = false
+
+	case optPlotTopomapDiffAnnotation:
+		m.plotTopomapDiffAnnotation = cycleTriState(m.plotTopomapDiffAnnotation)
+		m.useDefaultAdvanced = false
+	case optPlotTopomapAnnotateDescriptive:
+		m.plotTopomapAnnotateDesc = cycleTriState(m.plotTopomapAnnotateDesc)
+		m.useDefaultAdvanced = false
+
+	case optPlotPacPairs:
+		m.startTextEdit(textFieldPlotPacPairs)
+		m.useDefaultAdvanced = false
+	case optPlotConnectivityMeasures:
+		m.startTextEdit(textFieldPlotConnectivityMeasures)
+		m.useDefaultAdvanced = false
+	case optPlotSpectralMetrics:
+		m.startTextEdit(textFieldPlotSpectralMetrics)
+		m.useDefaultAdvanced = false
+	case optPlotBurstsMetrics:
+		m.startTextEdit(textFieldPlotBurstsMetrics)
+		m.useDefaultAdvanced = false
+	case optPlotAsymmetryStat:
+		m.startTextEdit(textFieldPlotAsymmetryStat)
+		m.useDefaultAdvanced = false
+	case optPlotTemporalTimeBins:
+		m.startTextEdit(textFieldPlotTemporalTimeBins)
+		m.useDefaultAdvanced = false
+	case optPlotTemporalTimeLabels:
+		m.startTextEdit(textFieldPlotTemporalTimeLabels)
+		m.useDefaultAdvanced = false
+	}
+
+	rows = m.getPlottingAdvancedRows()
+	if len(rows) == 0 {
+		m.advancedCursor = 0
+		m.UpdateAdvancedOffset()
+		return
+	}
+	if m.advancedCursor >= len(rows) {
+		m.advancedCursor = len(rows) - 1
+	}
+	if m.advancedCursor < 0 {
+		m.advancedCursor = 0
+	}
+	if rows[m.advancedCursor].kind == plottingRowSection || rows[m.advancedCursor].kind == plottingRowPlotInfo {
+		m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
 	}
 	m.UpdateAdvancedOffset()
 }
@@ -1668,6 +2130,8 @@ func (m *Model) commitNumberInput() {
 		m.commitFeaturesNumber(val)
 	case types.PipelineBehavior:
 		m.commitBehaviorNumber(val)
+	case types.PipelinePlotting:
+		m.commitPlottingNumber(val)
 	case types.PipelineDecoding:
 		m.commitDecodingNumber(val)
 	case types.PipelinePreprocessing:
@@ -1676,6 +2140,481 @@ func (m *Model) commitNumberInput() {
 		m.commitRawToBidsNumber(val)
 	}
 	m.useDefaultAdvanced = false
+}
+
+func (m *Model) commitPlottingNumber(val float64) {
+	rows := m.getPlottingAdvancedRows()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(rows) {
+		return
+	}
+	if rows[m.advancedCursor].kind != plottingRowOption {
+		return
+	}
+
+	opt := rows[m.advancedCursor].opt
+	switch opt {
+	case optPlotPadInches:
+		if val >= 0 {
+			m.plotPadInches = val
+		}
+
+	case optPlotFontSizeSmall:
+		if val >= 0 {
+			m.plotFontSizeSmall = int(val)
+		}
+	case optPlotFontSizeMedium:
+		if val >= 0 {
+			m.plotFontSizeMedium = int(val)
+		}
+	case optPlotFontSizeLarge:
+		if val >= 0 {
+			m.plotFontSizeLarge = int(val)
+		}
+	case optPlotFontSizeTitle:
+		if val >= 0 {
+			m.plotFontSizeTitle = int(val)
+		}
+	case optPlotFontSizeAnnotation:
+		if val >= 0 {
+			m.plotFontSizeAnnotation = int(val)
+		}
+	case optPlotFontSizeLabel:
+		if val >= 0 {
+			m.plotFontSizeLabel = int(val)
+		}
+	case optPlotFontSizeYLabel:
+		if val >= 0 {
+			m.plotFontSizeYLabel = int(val)
+		}
+	case optPlotFontSizeSuptitle:
+		if val >= 0 {
+			m.plotFontSizeSuptitle = int(val)
+		}
+	case optPlotFontSizeFigureTitle:
+		if val >= 0 {
+			m.plotFontSizeFigureTitle = int(val)
+		}
+
+	case optPlotGridSpecHspace:
+		if val >= 0 {
+			m.plotGridSpecHspace = val
+		}
+	case optPlotGridSpecWspace:
+		if val >= 0 {
+			m.plotGridSpecWspace = val
+		}
+	case optPlotGridSpecLeft:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotGridSpecLeft = val
+		}
+	case optPlotGridSpecRight:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotGridSpecRight = val
+		}
+	case optPlotGridSpecTop:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotGridSpecTop = val
+		}
+	case optPlotGridSpecBottom:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotGridSpecBottom = val
+		}
+
+	case optPlotAlphaGrid:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaGrid = val
+		}
+	case optPlotAlphaFill:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaFill = val
+		}
+	case optPlotAlphaCI:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaCI = val
+		}
+	case optPlotAlphaCILine:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaCILine = val
+		}
+	case optPlotAlphaTextBox:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaTextBox = val
+		}
+	case optPlotAlphaViolinBody:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaViolinBody = val
+		}
+	case optPlotAlphaRidgeFill:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotAlphaRidgeFill = val
+		}
+
+	case optPlotScatterMarkerSizeSmall:
+		if val >= 0 {
+			m.plotScatterMarkerSizeSmall = int(val)
+		}
+	case optPlotScatterMarkerSizeLarge:
+		if val >= 0 {
+			m.plotScatterMarkerSizeLarge = int(val)
+		}
+	case optPlotScatterMarkerSizeDefault:
+		if val >= 0 {
+			m.plotScatterMarkerSizeDefault = int(val)
+		}
+	case optPlotScatterAlpha:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotScatterAlpha = val
+		}
+	case optPlotScatterEdgewidth:
+		if val >= 0 {
+			m.plotScatterEdgeWidth = val
+		}
+
+	case optPlotBarAlpha:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotBarAlpha = val
+		}
+	case optPlotBarWidth:
+		if val >= 0 {
+			m.plotBarWidth = val
+		}
+	case optPlotBarCapsize:
+		if val >= 0 {
+			m.plotBarCapsize = int(val)
+		}
+	case optPlotBarCapsizeLarge:
+		if val >= 0 {
+			m.plotBarCapsizeLarge = int(val)
+		}
+
+	case optPlotLineWidthThin:
+		if val >= 0 {
+			m.plotLineWidthThin = val
+		}
+	case optPlotLineWidthStandard:
+		if val >= 0 {
+			m.plotLineWidthStandard = val
+		}
+	case optPlotLineWidthThick:
+		if val >= 0 {
+			m.plotLineWidthThick = val
+		}
+	case optPlotLineWidthBold:
+		if val >= 0 {
+			m.plotLineWidthBold = val
+		}
+	case optPlotLineAlphaStandard:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaStandard = val
+		}
+	case optPlotLineAlphaDim:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaDim = val
+		}
+	case optPlotLineAlphaZeroLine:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaZeroLine = val
+		}
+	case optPlotLineAlphaFitLine:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaFitLine = val
+		}
+	case optPlotLineAlphaDiagonal:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaDiagonal = val
+		}
+	case optPlotLineAlphaReference:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotLineAlphaReference = val
+		}
+	case optPlotLineRegressionWidth:
+		if val >= 0 {
+			m.plotLineRegressionWidth = val
+		}
+	case optPlotLineResidualWidth:
+		if val >= 0 {
+			m.plotLineResidualWidth = val
+		}
+	case optPlotLineQQWidth:
+		if val >= 0 {
+			m.plotLineQQWidth = val
+		}
+
+	case optPlotHistBins:
+		if val >= 0 {
+			m.plotHistBins = int(val)
+		}
+	case optPlotHistBinsBehavioral:
+		if val >= 0 {
+			m.plotHistBinsBehavioral = int(val)
+		}
+	case optPlotHistBinsResidual:
+		if val >= 0 {
+			m.plotHistBinsResidual = int(val)
+		}
+	case optPlotHistBinsTFR:
+		if val >= 0 {
+			m.plotHistBinsTFR = int(val)
+		}
+	case optPlotHistEdgewidth:
+		if val >= 0 {
+			m.plotHistEdgeWidth = val
+		}
+	case optPlotHistAlpha:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotHistAlpha = val
+		}
+	case optPlotHistAlphaResidual:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotHistAlphaResidual = val
+		}
+	case optPlotHistAlphaTFR:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotHistAlphaTFR = val
+		}
+
+	case optPlotKdePoints:
+		if val >= 0 {
+			m.plotKdePoints = int(val)
+		}
+	case optPlotKdeLinewidth:
+		if val >= 0 {
+			m.plotKdeLinewidth = val
+		}
+	case optPlotKdeAlpha:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotKdeAlpha = val
+		}
+
+	case optPlotErrorbarMarkersize:
+		if val >= 0 {
+			m.plotErrorbarMarkerSize = int(val)
+		}
+	case optPlotErrorbarCapsize:
+		if val >= 0 {
+			m.plotErrorbarCapsize = int(val)
+		}
+	case optPlotErrorbarCapsizeLarge:
+		if val >= 0 {
+			m.plotErrorbarCapsizeLarge = int(val)
+		}
+
+	case optPlotTextStatsX:
+		m.plotTextStatsX = val
+	case optPlotTextStatsY:
+		m.plotTextStatsY = val
+	case optPlotTextPvalueX:
+		m.plotTextPvalueX = val
+	case optPlotTextPvalueY:
+		m.plotTextPvalueY = val
+	case optPlotTextBootstrapX:
+		m.plotTextBootstrapX = val
+	case optPlotTextBootstrapY:
+		m.plotTextBootstrapY = val
+	case optPlotTextChannelAnnotationX:
+		m.plotTextChannelAnnotationX = val
+	case optPlotTextChannelAnnotationY:
+		m.plotTextChannelAnnotationY = val
+	case optPlotTextTitleY:
+		m.plotTextTitleY = val
+	case optPlotTextResidualQcTitleY:
+		m.plotTextResidualQcTitleY = val
+
+	case optPlotValidationMinSamplesForPlot:
+		if val >= 0 {
+			m.plotValidationMinSamplesForPlot = int(val)
+		}
+	case optPlotValidationMinSamplesForKDE:
+		if val >= 0 {
+			m.plotValidationMinSamplesForKDE = int(val)
+		}
+	case optPlotValidationMinSamplesForFit:
+		if val >= 0 {
+			m.plotValidationMinSamplesForFit = int(val)
+		}
+	case optPlotValidationMinSamplesForCalibration:
+		if val >= 0 {
+			m.plotValidationMinSamplesForCalibration = int(val)
+		}
+	case optPlotValidationMinBinsForCalibration:
+		if val >= 0 {
+			m.plotValidationMinBinsForCalibration = int(val)
+		}
+	case optPlotValidationMaxBinsForCalibration:
+		if val >= 0 {
+			m.plotValidationMaxBinsForCalibration = int(val)
+		}
+	case optPlotValidationSamplesPerBin:
+		if val >= 0 {
+			m.plotValidationSamplesPerBin = int(val)
+		}
+	case optPlotValidationMinRoisForFDR:
+		if val >= 0 {
+			m.plotValidationMinRoisForFDR = int(val)
+		}
+	case optPlotValidationMinPvaluesForFDR:
+		if val >= 0 {
+			m.plotValidationMinPvaluesForFDR = int(val)
+		}
+
+	case optPlotTopomapSigMaskLinewidth:
+		if val >= 0 {
+			m.plotTopomapSigMaskLinewidth = val
+		}
+	case optPlotTopomapSigMaskMarkersize:
+		if val >= 0 {
+			m.plotTopomapSigMaskMarkerSize = val
+		}
+
+	case optPlotTopomapContours:
+		if val >= 0 {
+			m.plotTopomapContours = int(val)
+		}
+	case optPlotTopomapColorbarFraction:
+		// Allow 0 to reset to default; otherwise constrain to [0,1].
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotTopomapColorbarFraction = val
+		}
+	case optPlotTopomapColorbarPad:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotTopomapColorbarPad = val
+		}
+
+	case optPlotTFRLogBase:
+		if val <= 0 {
+			m.plotTFRLogBase = 0
+		} else {
+			m.plotTFRLogBase = val
+		}
+	case optPlotTFRPercentageMultiplier:
+		if val <= 0 {
+			m.plotTFRPercentageMultiplier = 0
+		} else {
+			m.plotTFRPercentageMultiplier = val
+		}
+
+	case optPlotRoiWidthPerBand:
+		if val >= 0 {
+			m.plotRoiWidthPerBand = val
+		}
+	case optPlotRoiWidthPerMetric:
+		if val >= 0 {
+			m.plotRoiWidthPerMetric = val
+		}
+	case optPlotRoiHeightPerRoi:
+		if val >= 0 {
+			m.plotRoiHeightPerRoi = val
+		}
+
+	case optPlotPowerWidthPerBand:
+		if val >= 0 {
+			m.plotPowerWidthPerBand = val
+		}
+	case optPlotPowerHeightPerSegment:
+		if val >= 0 {
+			m.plotPowerHeightPerSegment = val
+		}
+
+	case optPlotItpcWidthPerBin:
+		if val >= 0 {
+			m.plotItpcWidthPerBin = val
+		}
+	case optPlotItpcHeightPerBand:
+		if val >= 0 {
+			m.plotItpcHeightPerBand = val
+		}
+	case optPlotItpcWidthPerBandBox:
+		if val >= 0 {
+			m.plotItpcWidthPerBandBox = val
+		}
+	case optPlotItpcHeightBox:
+		if val >= 0 {
+			m.plotItpcHeightBox = val
+		}
+
+	case optPlotPacWidthPerRoi:
+		if val >= 0 {
+			m.plotPacWidthPerRoi = val
+		}
+	case optPlotPacHeightBox:
+		if val >= 0 {
+			m.plotPacHeightBox = val
+		}
+
+	case optPlotAperiodicWidthPerColumn:
+		if val >= 0 {
+			m.plotAperiodicWidthPerColumn = val
+		}
+	case optPlotAperiodicHeightPerRow:
+		if val >= 0 {
+			m.plotAperiodicHeightPerRow = val
+		}
+	case optPlotAperiodicNPerm:
+		if val >= 0 {
+			m.plotAperiodicNPerm = int(val)
+		}
+
+	case optPlotQualityWidthPerPlot:
+		if val >= 0 {
+			m.plotQualityWidthPerPlot = val
+		}
+	case optPlotQualityHeightPerPlot:
+		if val >= 0 {
+			m.plotQualityHeightPerPlot = val
+		}
+	case optPlotQualityDistributionNCols:
+		if val >= 0 {
+			m.plotQualityDistributionNCols = int(val)
+		}
+	case optPlotQualityDistributionMaxFeatures:
+		if val >= 0 {
+			m.plotQualityDistributionMaxFeatures = int(val)
+		}
+	case optPlotQualityOutlierZThreshold:
+		if val >= 0 {
+			m.plotQualityOutlierZThreshold = val
+		}
+	case optPlotQualityOutlierMaxFeatures:
+		if val >= 0 {
+			m.plotQualityOutlierMaxFeatures = int(val)
+		}
+	case optPlotQualityOutlierMaxTrials:
+		if val >= 0 {
+			m.plotQualityOutlierMaxTrials = int(val)
+		}
+	case optPlotQualitySnrThresholdDb:
+		m.plotQualitySnrThresholdDb = val
+
+	case optPlotComplexityWidthPerMeasure:
+		if val >= 0 {
+			m.plotComplexityWidthPerMeasure = val
+		}
+	case optPlotComplexityHeightPerSegment:
+		if val >= 0 {
+			m.plotComplexityHeightPerSegment = val
+		}
+
+	case optPlotConnectivityWidthPerCircle:
+		if val >= 0 {
+			m.plotConnectivityWidthPerCircle = val
+		}
+	case optPlotConnectivityWidthPerBand:
+		if val >= 0 {
+			m.plotConnectivityWidthPerBand = val
+		}
+	case optPlotConnectivityHeightPerMeasure:
+		if val >= 0 {
+			m.plotConnectivityHeightPerMeasure = val
+		}
+	case optPlotConnectivityCircleTopFraction:
+		if val == 0 || (val > 0 && val <= 1) {
+			m.plotConnectivityCircleTopFraction = val
+		}
+	case optPlotConnectivityCircleMinLines:
+		if val >= 0 {
+			m.plotConnectivityCircleMinLines = int(val)
+		}
+	}
 }
 
 func (m *Model) commitFeaturesNumber(val float64) {
@@ -2043,6 +2982,18 @@ func (m Model) findNextVisiblePlot(current int, delta int) int {
 		}
 	}
 	return current
+}
+
+func (m Model) findNextFeaturePlotter(current int, delta int) int {
+	items := m.featurePlotterItems()
+	if len(items) == 0 {
+		return 0
+	}
+	next := current
+	if next < 0 {
+		next = len(items) - 1
+	}
+	return (next + delta + len(items)) % len(items)
 }
 
 // startNumberEdit enters editing mode for the current field

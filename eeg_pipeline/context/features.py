@@ -52,7 +52,17 @@ class FeatureContext:
     _windows: Optional[Any] = None # TimeWindowSpec placeholder
 
     def __post_init__(self):
-        """Initialize windows if not provided."""
+        """Initialize windows and spatial modes if not provided."""
+        # Resolve default spatial modes from config if not explicitly passed
+        # We compare against the hardcoded default in the field definition
+        if self.spatial_modes == ["roi", "global"]:
+            config_modes = self.config.get("feature_engineering.spatial_modes")
+            if config_modes and isinstance(config_modes, (list, tuple)):
+                self.spatial_modes = list(config_modes)
+            else:
+                # Default to all three if nothing specified in config either
+                self.spatial_modes = ["roi", "channels", "global"]
+        
         self._ensure_windows()
 
     def _ensure_windows(self) -> None:

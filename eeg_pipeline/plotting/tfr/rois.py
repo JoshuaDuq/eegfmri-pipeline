@@ -18,6 +18,7 @@ import mne
 from eeg_pipeline.plotting.io.figures import unwrap_figure
 from eeg_pipeline.utils.formatting import sanitize_label
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.validation import ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -113,6 +114,17 @@ def plot_rois_all_trials(
         baseline: Baseline window tuple (tmin, tmax)
         logger: Optional logger instance
     """
+    # Filter ROIs based on config
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    has_specific = any(r.lower() != "all" for r in comp_rois)
+    if comp_rois and has_specific:
+        filtered_rois = {}
+        for r in comp_rois:
+            if r.lower() == "all": continue
+            if r in roi_tfrs:
+                filtered_rois[r] = roi_tfrs[r]
+        roi_tfrs = filtered_rois
+
     rois_dir = out_dir / "rois"
     for roi, tfr in roi_tfrs.items():
         tfr_c = tfr.copy()
@@ -154,6 +166,17 @@ def contrast_pain_nonpain_rois(
     if pain_col is None:
         log(f"Events with pain binary column required for ROI contrasts; skipping.", logger, "warning")
         return
+
+    # Filter ROIs based on config
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    has_specific = any(r.lower() != "all" for r in comp_rois)
+    if comp_rois and has_specific:
+        filtered_rois = {}
+        for r in comp_rois:
+            if r.lower() == "all": continue
+            if r in roi_tfrs:
+                filtered_rois[r] = roi_tfrs[r]
+        roi_tfrs = filtered_rois
 
     rois_dir = out_dir / "rois"
     for roi, tfr in roi_tfrs.items():

@@ -6,6 +6,7 @@ package styles
 
 const (
 	MinTerminalWidth   = 60
+	MinTerminalHeight  = 20
 	MaxTerminalWidth   = 300
 	DefaultCardPadding = 2
 	MaxVisibleSubjects = 10
@@ -21,6 +22,17 @@ const (
 
 	SummaryLabelWidth = 16
 	SummaryValueWidth = 30
+
+	// Responsive layout constants
+	NarrowThreshold    = 100 // Width below which to use narrow layout
+	ShortThreshold     = 25  // Height below which to use compact layout
+	VeryShortThreshold = 20  // Height below which to hide optional elements
+
+	// List display constants
+	MinListItems     = 5  // Minimum items to show in a scrollable list
+	DefaultListItems = 10 // Default number of items to show
+	ListScrollMargin = 2  // Lines kept visible above/below cursor when scrolling
+	HeaderFooterRows = 14 // Reserved rows for header and footer
 )
 
 ///////////////////////////////////////////////////////////////////

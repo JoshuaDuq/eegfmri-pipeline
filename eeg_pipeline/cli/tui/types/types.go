@@ -59,18 +59,19 @@ func (p Pipeline) Description() string {
 type WizardStep int
 
 const (
-	StepSelectMode           WizardStep = iota
-	StepProjectSetup                    // Project/task/path setup
-	StepSelectComputations              // For behavior: which analyses to run
-	StepSelectFeatureFiles              // For behavior & combine-features: which feature files to load
-	StepConfigureOptions                // Category selection (features) or per-computation features
-	StepSelectBands                     // Frequency band selection (features)
-	StepSelectSpatial                   // Spatial aggregation mode (roi/channels/global)
-	StepTimeRange                       // Time range input for feature extraction
-	StepAdvancedConfig                  // Advanced pipeline configuration
-	StepSelectPlots                     // Plotting: plot selection
-	StepSelectPlotCategories            // Plotting: category selection (ERP, TFR, etc.)
-	StepPlotConfig                      // Plotting: output config
+	StepSelectMode            WizardStep = iota
+	StepProjectSetup                     // Project/task/path setup
+	StepSelectComputations               // For behavior: which analyses to run
+	StepSelectFeatureFiles               // For behavior & combine-features: which feature files to load
+	StepConfigureOptions                 // Category selection (features) or per-computation features
+	StepSelectBands                      // Frequency band selection (features)
+	StepSelectSpatial                    // Spatial aggregation mode (roi/channels/global)
+	StepTimeRange                        // Time range input for feature extraction
+	StepAdvancedConfig                   // Advanced pipeline configuration
+	StepSelectPlots                      // Plotting: plot selection
+	StepSelectFeaturePlotters            // Plotting: choose which feature plotters to run within selected feature suites
+	StepSelectPlotCategories             // Plotting: category selection (ERP, TFR, etc.)
+	StepPlotConfig                       // Plotting: output config
 	StepSelectSubjects
 	StepReviewExecute
 )
@@ -87,6 +88,7 @@ func (s WizardStep) String() string {
 		"Time Range",
 		"Advanced Config",
 		"Select Plots",
+		"Select Feature Plotters",
 		"Select Plot Categories",
 		"Plot Config",
 		"Select Subjects",

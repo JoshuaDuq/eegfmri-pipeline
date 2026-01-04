@@ -244,17 +244,11 @@ def extract_spectral_features(
     nperseg = min(int(sfreq * 2), data.shape[2])
     
     segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
-    segments: List[str] = []
-    if getattr(ctx, "name", None):
-        if ctx.name in segment_masks:
-            segments = [ctx.name]
-    if not segments and segment_masks:
-        for key in ("active", "active"):
-            if key in segment_masks:
-                segments = [key]
-                break
-        if not segments:
-            segments = [k for k in segment_masks.keys() if k != "baseline"][:1]
+    
+    # Process ALL defined segments (not just one)
+    segments: List[str] = list(segment_masks.keys()) if segment_masks else []
+    
+    # Fallback if no segments defined
     if not segments:
         segments = ["full"]
 

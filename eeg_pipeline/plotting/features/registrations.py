@@ -35,6 +35,7 @@ from eeg_pipeline.plotting.features.erds import (
     plot_erds_latency_distribution,
     plot_erds_erd_ers_separation,
     plot_erds_global_summary,
+    plot_erds_by_condition,
 )
 from eeg_pipeline.plotting.features.quality import (
     plot_feature_distribution_grid,
@@ -48,6 +49,7 @@ from eeg_pipeline.plotting.features.complexity import (
 from eeg_pipeline.plotting.features.spectral import (
     plot_spectral_summary,
     plot_spectral_edge_frequency,
+    plot_spectral_by_condition,
 )
 from eeg_pipeline.plotting.features.ratios import (
     plot_ratios_by_pair,
@@ -80,16 +82,10 @@ from eeg_pipeline.plotting.features.power import (
     plot_power_topomaps_from_df,
 )
 from eeg_pipeline.plotting.features.roi import (
-    plot_aperiodic_by_roi_condition,
     plot_band_segment_condition,
-    plot_connectivity_by_roi_band_condition,
     plot_temporal_evolution,
-    plot_itpc_by_roi_band_condition,
-    plot_itpc_active_vs_baseline,
-    plot_pac_by_roi_condition,
-    plot_power_by_roi_band_condition,
-    plot_power_active_vs_baseline,
 )
+
 from eeg_pipeline.plotting.erp import (
     plot_butterfly_erp,
     plot_roi_erp,
@@ -141,20 +137,7 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
         )
 
         if ctx.all_features is not None:
-            safe_plot(
-                ctx,
-                saved_files,
-                "aperiodic_roi_condition",
-                "aperiodic",
-                None,
-                plot_aperiodic_by_roi_condition,
-                features_df=ctx.all_features,
-                events_df=ctx.aligned_events,
-                subject=ctx.subject,
-                save_dir=aper_dir,
-                logger=ctx.logger,
-                config=ctx.config,
-            )
+
 
             safe_plot(
                 ctx,
@@ -327,25 +310,6 @@ def plot_connectivity_condition(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
-    conn_measures = get_config_value(
-        ctx.config, "plotting.plots.features.connectivity.measures", ["wpli", "aec"]
-    )
-    for measure in conn_measures:
-        safe_plot(
-            ctx,
-            saved_files,
-            f"conn_{measure}_roi_band_condition",
-            "connectivity",
-            None,
-            plot_connectivity_by_roi_band_condition,
-            features_df=ctx.connectivity_df,
-            events_df=ctx.aligned_events,
-            subject=ctx.subject,
-            save_dir=ctx.subdir("connectivity"),
-            logger=ctx.logger,
-            config=ctx.config,
-            measure=measure,
-        )
 
 ###################################################################
 # ERDS
@@ -407,6 +371,22 @@ def plot_erds(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "erds_by_condition",
+            "erds",
+            None,
+            plot_erds_by_condition,
+            features_df=ctx.erds_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_dir=erds_dir,
+            logger=ctx.logger,
+            config=ctx.config,
+        )
+
 
 ###################################################################
 # Complexity
@@ -443,7 +423,8 @@ def plot_complexity(ctx: FeaturePlotContext, saved_files):
             features_df=ctx.complexity_df,
             events_df=ctx.aligned_events,
             subject=ctx.subject,
-            save_path=comp_dir / f"sub-{ctx.subject}_complexity_by_condition",
+            save_dir=comp_dir,
+            logger=ctx.logger,
             config=ctx.config,
         )
 
@@ -520,6 +501,22 @@ def plot_spectral(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
+    if ctx.aligned_events is not None:
+        safe_plot(
+            ctx,
+            saved_files,
+            "spectral_by_condition",
+            "spectral",
+            None,
+            plot_spectral_by_condition,
+            features_df=ctx.spectral_df,
+            events_df=ctx.aligned_events,
+            subject=ctx.subject,
+            save_dir=spectral_dir,
+            logger=ctx.logger,
+            config=ctx.config,
+        )
+
     if ctx.all_features is not None and ctx.aligned_events is not None:
         safe_plot(
             ctx,
@@ -593,7 +590,8 @@ def plot_ratios(ctx: FeaturePlotContext, saved_files):
             features_df=ctx.ratios_df,
             events_df=ctx.aligned_events,
             subject=ctx.subject,
-            save_path=ratios_dir / f"sub-{ctx.subject}_ratios_by_condition",
+            save_dir=ratios_dir,
+            logger=ctx.logger,
             config=ctx.config,
         )
 
@@ -670,7 +668,8 @@ def plot_asymmetry(ctx: FeaturePlotContext, saved_files):
             features_df=ctx.asymmetry_df,
             events_df=ctx.aligned_events,
             subject=ctx.subject,
-            save_path=asym_dir / f"sub-{ctx.subject}_asymmetry_by_condition",
+            save_dir=asym_dir,
+            logger=ctx.logger,
             config=ctx.config,
         )
 
@@ -747,7 +746,8 @@ def plot_bursts(ctx: FeaturePlotContext, saved_files):
             features_df=ctx.bursts_df,
             events_df=ctx.aligned_events,
             subject=ctx.subject,
-            save_path=bursts_dir / f"sub-{ctx.subject}_bursts_by_condition",
+            save_dir=bursts_dir,
+            logger=ctx.logger,
             config=ctx.config,
         )
 
@@ -890,20 +890,6 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
         )
 
-        safe_plot(
-            ctx,
-            saved_files,
-            "itpc_roi_band_condition",
-            "itpc",
-            None,
-            plot_itpc_by_roi_band_condition,
-            ctx.itpc_df,
-            ctx.aligned_events,
-            ctx.subject,
-            itpc_dir,
-            ctx.logger,
-            ctx.config,
-        )
 
         safe_plot(
             ctx,
@@ -939,38 +925,6 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
             "itpc",
             "ITPC",
-        )
-
-    if ctx.itpc_df is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "itpc_active_vs_baseline",
-            "itpc",
-            None,
-            plot_itpc_active_vs_baseline,
-            ctx.itpc_df,
-            ctx.subject,
-            itpc_dir,
-            ctx.logger,
-            ctx.config,
-        )
-
-    if ctx.pac_trials_df is not None and ctx.aligned_events is not None:
-        pac_dir = ctx.subdir("pac")
-        safe_plot(
-            ctx,
-            saved_files,
-            "pac_roi_condition",
-            "pac",
-            None,
-            plot_pac_by_roi_condition,
-            ctx.pac_trials_df,
-            ctx.aligned_events,
-            ctx.subject,
-            pac_dir,
-            ctx.logger,
-            ctx.config,
         )
 
 
@@ -1117,20 +1071,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
-    safe_plot(
-        ctx,
-        saved_files,
-        "power_roi_band_condition",
-        "power",
-        None,
-        plot_power_by_roi_band_condition,
-        features_df=ctx.power_df,
-        events_df=ctx.aligned_events,
-        subject=ctx.subject,
-        save_dir=ctx.subdir("power"),
-        logger=ctx.logger,
-        config=ctx.config,
-    )
 
     if ctx.all_features is not None and ctx.aligned_events is not None:
         safe_plot(
@@ -1151,20 +1091,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
             ["baseline", "active"],
         )
 
-    if ctx.all_features is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "power_active_vs_baseline",
-            "power",
-            None,
-            plot_power_active_vs_baseline,
-            ctx.all_features,
-            ctx.subject,
-            ctx.subdir("power"),
-            ctx.logger,
-            ctx.config,
-        )
 
 @VisualizationRegistry.register("power")
 def plot_power_variability(ctx: FeaturePlotContext, saved_files):

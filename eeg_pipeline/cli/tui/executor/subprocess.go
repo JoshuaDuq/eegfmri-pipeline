@@ -33,8 +33,10 @@ type ProgressEvent struct {
 
 // SubjectsResponse from eeg-pipeline info subjects --json
 type SubjectsResponse struct {
-	Subjects []messages.SubjectInfo `json:"subjects"`
-	Count    int                    `json:"count"`
+	Subjects              []messages.SubjectInfo `json:"subjects"`
+	Count                 int                    `json:"count"`
+	AvailableWindows      []string               `json:"available_windows"`
+	AvailableEventColumns []string               `json:"available_event_columns"`
 }
 
 // ConfigSummaryResponse from eeg-pipeline info config --json
@@ -44,6 +46,10 @@ type ConfigSummaryResponse struct {
 	DerivRoot          string `json:"deriv_root"`
 	SourceRoot         string `json:"source_root"`
 	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
+}
+
+type PlottersResponse struct {
+	FeaturePlotters map[string][]messages.PlotterInfo `json:"feature_plotters"`
 }
 
 // LoadSubjects runs eeg-pipeline info subjects --json and returns subjects
@@ -95,7 +101,39 @@ func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd
 			}
 		}
 
-		return messages.SubjectsLoadedMsg{Subjects: response.Subjects}
+		return messages.SubjectsLoadedMsg{
+			Subjects:              response.Subjects,
+			AvailableWindows:      response.AvailableWindows,
+			AvailableEventColumns: response.AvailableEventColumns,
+		}
+	}
+}
+
+func LoadPlotters(repoRoot string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "plotters", "--json"}
+
+		pyCmd := GetPythonCommand(repoRoot)
+		cmd := exec.Command(pyCmd, args...)
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+		output, err := cmd.Output()
+		if err != nil {
+			cmd = exec.Command("python3", args...)
+			cmd.Dir = repoRoot
+			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+			output, err = cmd.Output()
+			if err != nil {
+				return messages.PlottersLoadedMsg{Error: err}
+			}
+		}
+
+		var response PlottersResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.PlottersLoadedMsg{Error: err}
+		}
+
+		return messages.PlottersLoadedMsg{FeaturePlotters: response.FeaturePlotters}
 	}
 }
 

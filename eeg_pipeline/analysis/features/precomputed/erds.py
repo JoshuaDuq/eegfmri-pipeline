@@ -71,199 +71,212 @@ def extract_erds_from_precomputed(
     clamped_baselines = 0
     windows = precomputed.windows
 
-    records: List[Dict[str, float]] = []
+    # Get ALL segment masks - we compute ERDS for each non-baseline segment
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
+    # Filter out baseline - ERDS uses baseline only as reference
+    active_segments = {k: v for k, v in segment_masks.items() if k != "baseline" and v is not None and np.any(v)}
+    
+    if not active_segments:
+        if precomputed.logger:
+            precomputed.logger.warning("ERDS: No non-baseline segments defined; skipping extraction.")
+        return pd.DataFrame(), [], {}
+
+    records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
     qc_payload: Dict[str, Dict[str, Any]] = {}
     times = precomputed.times
-    active_times = times[windows.active_mask]
 
-    segment_label = getattr(windows, "name", "active") or "active"
-    for ep_idx in range(n_epochs):
-        record: Dict[str, float] = {}
+    # Iterate over ALL active segments
+    for segment_label, active_mask in active_segments.items():
+        active_times = times[active_mask]
+        
+        for ep_idx in range(n_epochs):
+            record = records[ep_idx]
 
-        for band in bands:
-            if band not in precomputed.band_data:
-                continue
+            for band in bands:
+                if band not in precomputed.band_data:
+                    continue
 
-            power = precomputed.band_data[band].power[ep_idx]
-            all_erds_full: List[float] = []
-            all_log_full: List[float] = []
-            clamped_channels_for_band = 0
-            baseline_valid_count = 0
-            n_channels = len(precomputed.ch_names)
+                power = precomputed.band_data[band].power[ep_idx]
+                all_erds_full: List[float] = []
+                all_log_full: List[float] = []
+                clamped_channels_for_band = 0
+                baseline_valid_count = 0
+                n_channels = len(precomputed.ch_names)
 
-            for ch_idx, ch_name in enumerate(precomputed.ch_names):
-                baseline_power, baseline_frac, _, baseline_total = nanmean_with_fraction(
-                    power[ch_idx], windows.baseline_mask
-                )
-                baseline_std = float(np.nanstd(power[ch_idx, windows.baseline_mask]))
-                baseline_ref = (
-                    baseline_power if baseline_power >= min_baseline_power else min_baseline_power
-                )
-                if baseline_power < min_baseline_power:
-                    clamped_baselines += 1
-                    clamped_channels_for_band += 1
+                for ch_idx, ch_name in enumerate(precomputed.ch_names):
+                    baseline_power, baseline_frac, _, baseline_total = nanmean_with_fraction(
+                        power[ch_idx], windows.baseline_mask
+                    )
+                    baseline_std = float(np.nanstd(power[ch_idx, windows.baseline_mask]))
+                    baseline_ref = (
+                        baseline_power if baseline_power >= min_baseline_power else min_baseline_power
+                    )
+                    if baseline_power < min_baseline_power:
+                        clamped_baselines += 1
+                        clamped_channels_for_band += 1
 
-                baseline_valid = (
-                    baseline_ref > epsilon
-                    and baseline_frac >= min_valid_fraction
-                    and baseline_total > 0
-                )
-                if baseline_valid:
-                    baseline_valid_count += 1
+                    baseline_valid = (
+                        baseline_ref > epsilon
+                        and baseline_frac >= min_valid_fraction
+                        and baseline_total > 0
+                    )
+                    if baseline_valid:
+                        baseline_valid_count += 1
 
-                active_power_trace = power[ch_idx, windows.active_mask]
-                active_power_mean, _, _, _ = nanmean_with_fraction(power[ch_idx], windows.active_mask)
-                safe_active_trace = np.maximum(active_power_trace, min_active_power)
-                safe_active_mean = (
-                    float(active_power_mean) if np.isfinite(active_power_mean) else min_active_power
-                )
+                    # Use segment-specific active_mask, not windows.active_mask
+                    active_power_trace = power[ch_idx, active_mask]
+                    active_power_mean, _, _, _ = nanmean_with_fraction(power[ch_idx], active_mask)
+                    safe_active_trace = np.maximum(active_power_trace, min_active_power)
+                    safe_active_mean = (
+                        float(active_power_mean) if np.isfinite(active_power_mean) else min_active_power
+                    )
 
-                if baseline_valid:
-                    erds_full = ((active_power_mean - baseline_ref) / baseline_ref) * 100
-                    erds_trace = ((active_power_trace - baseline_ref) / baseline_ref) * 100
-                    erds_full_db = 10 * np.log10(safe_active_mean / baseline_ref)
-                    erds_trace_db = 10 * np.log10(safe_active_trace / baseline_ref)
-                else:
-                    erds_full = np.nan
-                    erds_trace = np.full_like(active_power_trace, np.nan)
-                    erds_full_db = np.nan
-                    erds_trace_db = np.full_like(active_power_trace, np.nan)
+                    if baseline_valid:
+                        erds_full = ((active_power_mean - baseline_ref) / baseline_ref) * 100
+                        erds_trace = ((active_power_trace - baseline_ref) / baseline_ref) * 100
+                        erds_full_db = 10 * np.log10(safe_active_mean / baseline_ref)
+                        erds_trace_db = 10 * np.log10(safe_active_trace / baseline_ref)
+                    else:
+                        erds_full = np.nan
+                        erds_trace = np.full_like(active_power_trace, np.nan)
+                        erds_full_db = np.nan
+                        erds_trace_db = np.full_like(active_power_trace, np.nan)
 
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "percent", channel=ch_name)
-                ] = float(erds_full)
-                if use_log_ratio:
                     record[
-                        NamingSchema.build("erds", segment_label, band, "ch", "db", channel=ch_name)
-                    ] = float(erds_full_db)
-                all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
-                all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
-
-                record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)
-                ] = np.nan
-
-                if np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
-                    valid_mask = np.isfinite(erds_trace)
-                    if np.sum(valid_mask) > 2:
-                        slope, _ = np.polyfit(active_times[valid_mask], erds_trace[valid_mask], 1)
+                        NamingSchema.build("erds", segment_label, band, "ch", "percent", channel=ch_name)
+                    ] = float(erds_full)
+                    if use_log_ratio:
                         record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)
-                        ] = float(slope)
+                            NamingSchema.build("erds", segment_label, band, "ch", "db", channel=ch_name)
+                        ] = float(erds_full_db)
+                    all_erds_full.append(float(erds_full) if np.isfinite(erds_full) else np.nan)
+                    all_log_full.append(float(erds_full_db) if np.isfinite(erds_full_db) else np.nan)
 
-                    peak_idx = int(np.nanargmax(np.abs(erds_trace)))
+                    record[NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)] = np.nan
                     record[
                         NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)
-                    ] = float(active_times[peak_idx])
-
-                    threshold = (
-                        baseline_std / baseline_ref * 100 if baseline_ref > epsilon else np.inf
-                    )
-                    onset_mask = np.abs(erds_trace) > threshold
-                    if np.any(onset_mask):
-                        onset_idx = int(np.argmax(onset_mask))
-                        record[
-                            NamingSchema.build(
-                                "erds",
-                                segment_label,
-                                band,
-                                "ch",
-                                "onset_latency",
-                                channel=ch_name,
-                            )
-                        ] = float(active_times[onset_idx])
-
-                    erd_vals = erds_trace[erds_trace < 0]
-                    ers_vals = erds_trace[erds_trace > 0]
-                    if baseline_valid:
-                        if len(erd_vals) > 0:
-                            erd_magnitude = float(np.mean(np.abs(erd_vals)))
-                            erd_duration = float(len(erd_vals) / precomputed.sfreq)
-                        else:
-                            erd_magnitude = 0.0
-                            erd_duration = 0.0
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)
-                        ] = erd_magnitude
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)
-                        ] = erd_duration
-
-                        if len(ers_vals) > 0:
-                            ers_magnitude = float(np.mean(ers_vals))
-                            ers_duration = float(len(ers_vals) / precomputed.sfreq)
-                        else:
-                            ers_magnitude = 0.0
-                            ers_duration = 0.0
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)
-                        ] = ers_magnitude
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)
-                        ] = ers_duration
-
-            valid_erds = [e for e in all_erds_full if np.isfinite(e)]
-            valid_log = [e for e in all_log_full if np.isfinite(e)]
-            baseline_valid_fraction = (
-                baseline_valid_count / n_channels if n_channels > 0 else 0.0
-            )
-
-            if band not in qc_payload:
-                qc_payload[band] = {
-                    "clamped_channels": [],
-                    "baseline_min_power": min_baseline_power,
-                    "valid_fractions": [],
-                }
-            qc_payload[band]["clamped_channels"].append(int(clamped_channels_for_band))
-            qc_payload[band]["valid_fractions"].append(float(baseline_valid_fraction))
-
-            if baseline_valid_fraction < min_valid_fraction:
-                record[
-                    NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
-                ] = np.nan
-                record[
-                    NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                ] = np.nan
-                if use_log_ratio:
-                    record[
-                        NamingSchema.build("erds", segment_label, band, "global", "db_mean")
                     ] = np.nan
                     record[
-                        NamingSchema.build("erds", segment_label, band, "global", "db_std")
+                        NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name)
                     ] = np.nan
-            elif valid_erds:
-                record[
-                    NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
-                ] = float(np.mean(valid_erds))
-                record[
-                    NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                ] = float(np.std(valid_erds))
-
-                if use_log_ratio and valid_log:
                     record[
-                        NamingSchema.build("erds", segment_label, band, "global", "db_mean")
-                    ] = float(np.mean(valid_log))
+                        NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)
+                    ] = np.nan
                     record[
-                        NamingSchema.build("erds", segment_label, band, "global", "db_std")
-                    ] = float(np.std(valid_log))
+                        NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)
+                    ] = np.nan
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)
+                    ] = np.nan
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)
+                    ] = np.nan
 
-        records.append(record)
+                    if np.any(np.isfinite(erds_trace)) and len(active_times) > 1:
+                        valid_mask_trace = np.isfinite(erds_trace)
+                        if np.sum(valid_mask_trace) > 2:
+                            slope, _ = np.polyfit(active_times[valid_mask_trace], erds_trace[valid_mask_trace], 1)
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name)
+                            ] = float(slope)
+
+                        peak_idx = int(np.nanargmax(np.abs(erds_trace)))
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name)
+                        ] = float(active_times[peak_idx])
+
+                        threshold = (
+                            baseline_std / baseline_ref * 100 if baseline_ref > epsilon else np.inf
+                        )
+                        onset_mask = np.abs(erds_trace) > threshold
+                        if np.any(onset_mask):
+                            onset_idx = int(np.argmax(onset_mask))
+                            record[
+                                NamingSchema.build(
+                                    "erds",
+                                    segment_label,
+                                    band,
+                                    "ch",
+                                    "onset_latency",
+                                    channel=ch_name,
+                                )
+                            ] = float(active_times[onset_idx])
+
+                        erd_vals = erds_trace[erds_trace < 0]
+                        ers_vals = erds_trace[erds_trace > 0]
+                        if baseline_valid:
+                            if len(erd_vals) > 0:
+                                erd_magnitude = float(np.mean(np.abs(erd_vals)))
+                                erd_duration = float(len(erd_vals) / precomputed.sfreq)
+                            else:
+                                erd_magnitude = 0.0
+                                erd_duration = 0.0
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name)
+                            ] = erd_magnitude
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name)
+                            ] = erd_duration
+
+                            if len(ers_vals) > 0:
+                                ers_magnitude = float(np.mean(ers_vals))
+                                ers_duration = float(len(ers_vals) / precomputed.sfreq)
+                            else:
+                                ers_magnitude = 0.0
+                                ers_duration = 0.0
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name)
+                            ] = ers_magnitude
+                            record[
+                                NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name)
+                            ] = ers_duration
+
+                valid_erds = [e for e in all_erds_full if np.isfinite(e)]
+                valid_log = [e for e in all_log_full if np.isfinite(e)]
+                baseline_valid_fraction = (
+                    baseline_valid_count / n_channels if n_channels > 0 else 0.0
+                )
+
+                if band not in qc_payload:
+                    qc_payload[band] = {
+                        "clamped_channels": [],
+                        "baseline_min_power": min_baseline_power,
+                        "valid_fractions": [],
+                    }
+                qc_payload[band]["clamped_channels"].append(int(clamped_channels_for_band))
+                qc_payload[band]["valid_fractions"].append(float(baseline_valid_fraction))
+
+                if baseline_valid_fraction < min_valid_fraction:
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                    ] = np.nan
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                    ] = np.nan
+                    if use_log_ratio:
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "db_mean")
+                        ] = np.nan
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "db_std")
+                        ] = np.nan
+                elif valid_erds:
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                    ] = float(np.mean(valid_erds))
+                    record[
+                        NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                    ] = float(np.std(valid_erds))
+
+                    if use_log_ratio and valid_log:
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "db_mean")
+                        ] = float(np.mean(valid_log))
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "db_std")
+                        ] = float(np.std(valid_log))
 
     if clamped_baselines > 0 and precomputed.logger:
         precomputed.logger.info(

@@ -20,7 +20,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=["subjects", "features", "config", "version"],
+        choices=["subjects", "features", "config", "version", "plotters"],
         help="What to show: subjects, features for a subject, config summary, or version",
     )
     parser.add_argument(
@@ -82,7 +82,33 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
     
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
-    
+
+    if args.mode == "plotters":
+        from eeg_pipeline.plotting.features import registrations as _feature_plotters  # noqa: F401
+        from eeg_pipeline.plotting.features.context import VisualizationRegistry
+
+        feature_plotters = {}
+        for category in sorted(VisualizationRegistry.get_categories()):
+            plotters = []
+            for name, _func in VisualizationRegistry.get_plotters(category):
+                plotters.append(
+                    {
+                        "id": f"{category}.{name}",
+                        "category": category,
+                        "name": name,
+                    }
+                )
+            feature_plotters[category] = plotters
+
+        if args.output_json:
+            print(json_module.dumps({"feature_plotters": feature_plotters}, indent=2))
+        else:
+            for category, plotters in feature_plotters.items():
+                print(f"{category}:")
+                for p in plotters:
+                    print(f"  - {p['name']}")
+        return
+
     if args.mode == "subjects":
         if args.source == "all":
             sources = ["bids", "derivatives_epochs", "features", "source_data"]
@@ -101,11 +127,14 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
             "features": lambda: _collect_subjects_from_features(deriv_root),
         }
         
+        # Use union policy for "all" source to show subjects with at least epochs
+        policy = "union" if args.source == "all" else "intersection"
         discovered = get_available_subjects(
             config=config,
             deriv_root=deriv_root,
             task=task,
             discovery_sources=sources,
+            subject_discovery_policy=policy,
             logger=logger,
         )
         
@@ -132,6 +161,25 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                         global_epoch_metadata = get_epoch_metadata(subj, task, deriv_root, config=config)
                         if global_epoch_metadata:
                             break
+
+                # Get pipeline-wide metadata for hints
+                available_windows = list(config.get("time_windows", {}).keys())
+                
+                # Get event columns from first subject that has them
+                available_columns = []
+                from eeg_pipeline.infra.paths import bids_events_path
+                for r in results:
+                    subj_id = r["subject"].replace("sub-", "")
+                    evt_path = bids_events_path(config.bids_root, subj_id, task)
+                    if evt_path.exists():
+                        try:
+                            import pandas as pd
+                            df = pd.read_csv(evt_path, sep="\t", nrows=1)
+                            available_columns = sorted(list(df.columns))
+                            if available_columns:
+                                break
+                        except Exception:
+                            continue
 
                 for r in results:
                     subj_id = r["subject"].replace("sub-", "")
@@ -172,7 +220,14 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                         "available_bands": available_bands,
                         "feature_availability": feature_availability,
                     })
-                print(json_module.dumps({"subjects": json_results, "count": len(json_results)}, indent=2))
+                
+                output = {
+                    "subjects": json_results, 
+                    "count": len(json_results),
+                    "available_windows": available_windows,
+                    "available_event_columns": available_columns
+                }
+                print(json_module.dumps(output, indent=2))
             else:
                 for r in results:
                     epoch_mark = "x" if r["epochs"] else " "

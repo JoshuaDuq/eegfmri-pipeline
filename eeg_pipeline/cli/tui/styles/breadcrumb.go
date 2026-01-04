@@ -188,11 +188,12 @@ func RenderSelectionSummary(selected, total int) string {
 	}
 
 	var color lipgloss.Color
-	if selected == 0 {
+	switch {
+	case selected == 0:
 		color = Error
-	} else if selected == total {
+	case selected == total:
 		color = Success
-	} else {
+	default:
 		color = Warning
 	}
 
