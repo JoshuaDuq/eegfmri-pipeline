@@ -183,7 +183,7 @@
       "label": "Condition Comparison",
       "description": "Connectivity differences between conditions",
       "required_files": [
-        "features_connectivity*.parquet",
+        "features_connectivity*.tsv",
         "events.tsv"
       ],
       "requires_features": true
@@ -194,7 +194,7 @@
       "label": "Sliding Window Dynamics",
       "description": "Connectivity trajectories over time windows",
       "required_files": [
-        "features_connectivity*.parquet"
+        "features_connectivity*.tsv"
       ],
       "requires_features": true
     },
@@ -758,7 +758,7 @@
       "label": "Connectivity Scatter",
       "description": "Connectivity vs behavior scatter plots",
       "required_files": [
-        "features_connectivity*.parquet",
+        "features_connectivity*.tsv",
         "epochs/*.fif"
       ],
       "requires_epochs": true,
@@ -824,7 +824,7 @@
       "label": "Temperature Models",
       "description": "Subject-level temperature→rating dose-response diagnostics",
       "required_files": [
-        "stats/trials*.parquet",
+        "stats/trials*.tsv",
         "stats/temperature_model_comparison*.tsv"
       ],
       "requires_stats": true
