@@ -22,6 +22,8 @@ func (m *Model) resetCursorsForStep() {
 	m.categoryIndex = 0
 	m.subjectCursor = 0
 	m.computationCursor = 0
+	m.postComputationCursor = 0
+	m.computationListFocus = 0
 	m.bandCursor = 0
 	m.spatialCursor = 0
 	m.featureFileCursor = 0
@@ -69,10 +71,20 @@ func (m *Model) handleUp() {
 		}
 
 	case types.StepSelectComputations:
-		if m.computationCursor > 0 {
-			m.computationCursor--
+		if m.computationListFocus == 0 {
+			// Primary computations list
+			if m.computationCursor > 0 {
+				m.computationCursor--
+			} else {
+				m.computationCursor = len(m.computations) - 1
+			}
 		} else {
-			m.computationCursor = len(m.computations) - 1
+			// Post computations list
+			if m.postComputationCursor > 0 {
+				m.postComputationCursor--
+			} else {
+				m.postComputationCursor = len(m.postComputations) - 1
+			}
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
@@ -172,10 +184,20 @@ func (m *Model) handleDown() {
 		}
 
 	case types.StepSelectComputations:
-		if m.computationCursor < len(m.computations)-1 {
-			m.computationCursor++
+		if m.computationListFocus == 0 {
+			// Primary computations list
+			if m.computationCursor < len(m.computations)-1 {
+				m.computationCursor++
+			} else {
+				m.computationCursor = 0
+			}
 		} else {
-			m.computationCursor = 0
+			// Post computations list
+			if m.postComputationCursor < len(m.postComputations)-1 {
+				m.postComputationCursor++
+			} else {
+				m.postComputationCursor = 0
+			}
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
@@ -267,6 +289,13 @@ func (m *Model) handleDown() {
 
 func (m *Model) handleTab() {
 	switch m.CurrentStep {
+	case types.StepSelectComputations:
+		// Toggle between primary and post computations lists
+		if m.computationListFocus == 0 {
+			m.computationListFocus = 1
+		} else {
+			m.computationListFocus = 0
+		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			// Collapse and move to next primary option
@@ -387,8 +416,13 @@ func (m *Model) validateStep() []string {
 				count++
 			}
 		}
+		for _, sel := range m.postComputationSelected {
+			if sel {
+				count++
+			}
+		}
 		if count == 0 {
-			errors = append(errors, "Select at least one analysis to run")
+			errors = append(errors, "Select at least one analysis or post-computation to run")
 		}
 	case types.StepSelectFeatureFiles:
 		count := 0
@@ -481,7 +515,11 @@ func (m *Model) validateStep() []string {
 func (m *Model) handleSpace() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
-		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
+		if m.computationListFocus == 0 {
+			m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
+		} else {
+			m.postComputationSelected[m.postComputationCursor] = !m.postComputationSelected[m.postComputationCursor]
+		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
 		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
@@ -578,8 +616,12 @@ func (m *Model) handleSpace() {
 func (m *Model) selectAll() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
+		// Select all in both primary and post computations
 		for i := range m.computations {
 			m.computationSelected[i] = true
+		}
+		for i := range m.postComputations {
+			m.postComputationSelected[i] = true
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline or Plotting categories selection
@@ -624,7 +666,9 @@ func (m *Model) selectAll() {
 func (m *Model) selectNone() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
+		// Clear all in both primary and post computations
 		m.computationSelected = make(map[int]bool)
+		m.postComputationSelected = make(map[int]bool)
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline or Plotting categories selection
 		m.selected = make(map[int]bool)
@@ -782,9 +826,14 @@ func (m *Model) validate() []string {
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		// Validate computations selection
+		// Validate computations selection (both primary and post)
 		computationCount := 0
 		for _, selected := range m.computationSelected {
+			if selected {
+				computationCount++
+			}
+		}
+		for _, selected := range m.postComputationSelected {
 			if selected {
 				computationCount++
 			}
@@ -1142,9 +1191,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optConnAECMode:
 		m.connAECMode = (m.connAECMode + 1) % 3
 		m.useDefaultAdvanced = false
-	case optExportAll:
-		m.exportAllFeatures = !m.exportAllFeatures
-		m.useDefaultAdvanced = false
+
 	case optMinEpochs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -1597,9 +1644,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
 		m.useDefaultAdvanced = false
-	case optBehaviorGroupPainSens:
-		m.behaviorGroupPainSensExpanded = !m.behaviorGroupPainSensExpanded
-		m.useDefaultAdvanced = false
 	case optBehaviorGroupConfounds:
 		m.behaviorGroupConfoundsExpanded = !m.behaviorGroupConfoundsExpanded
 		m.useDefaultAdvanced = false
@@ -1706,9 +1750,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTrialTableRatingMin, optTrialTableRatingMax, optTrialTableTempMin, optTrialTableTempMax, optTrialTableHighMissingFrac:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optFeatureSummariesEnabled:
-		m.featureSummariesEnabled = !m.featureSummariesEnabled
-		m.useDefaultAdvanced = false
 	case optPainResidualEnabled:
 		m.painResidualEnabled = !m.painResidualEnabled
 		m.useDefaultAdvanced = false
@@ -1743,9 +1784,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Regression
-	case optRegressionFeatureSet:
-		m.regressionFeatureSet = (m.regressionFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optRegressionOutcome:
 		m.regressionOutcome = (m.regressionOutcome + 1) % 3
 		m.useDefaultAdvanced = false
@@ -1778,9 +1816,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Models
-	case optModelsFeatureSet:
-		m.modelsFeatureSet = (m.modelsFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optModelsIncludeTemperature:
 		m.modelsIncludeTemperature = !m.modelsIncludeTemperature
 		m.useDefaultAdvanced = false
@@ -1861,9 +1896,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Stability
-	case optStabilityFeatureSet:
-		m.stabilityFeatureSet = (m.stabilityFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optStabilityMethod:
 		m.stabilityMethod = (m.stabilityMethod + 1) % 2
 		m.useDefaultAdvanced = false
@@ -1886,9 +1918,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Influence
-	case optInfluenceFeatureSet:
-		m.influenceFeatureSet = (m.influenceFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optInfluenceOutcomeRating:
 		m.influenceOutcomeRating = !m.influenceOutcomeRating
 		if !m.influenceOutcomeRating && !m.influenceOutcomePainResidual && !m.influenceOutcomeTemperature {
@@ -1941,9 +1970,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Correlations
-	case optCorrelationsFeatureSet:
-		m.correlationsFeatureSet = (m.correlationsFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optCorrelationsTargetRating:
 		m.correlationsTargetRating = !m.correlationsTargetRating
 		if !m.correlationsTargetRating && !m.correlationsTargetTemperature && !m.correlationsTargetPainResidual {
@@ -1964,9 +1990,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 
 	// Pain sensitivity
-	case optPainSensitivityFeatureSet:
-		m.painSensitivityFeatureSet = (m.painSensitivityFeatureSet + 1) % 2
-		m.useDefaultAdvanced = false
 	case optPainSensitivityMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false

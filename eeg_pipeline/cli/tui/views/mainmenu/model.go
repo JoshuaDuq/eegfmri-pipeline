@@ -40,14 +40,12 @@ type utilityItem struct {
 
 const (
 	UtilityGlobalSetup = iota
-	UtilityCombineFeatures
 	UtilityMergePsychopy
 	UtilityRawToBids
 )
 
 var utilities = []utilityItem{
 	{"Global Setup", "Configure global defaults and paths", "G"},
-	{"Combine Features", "Merge all feature files into features_all.tsv", "C"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files", "M"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format", "R"},
 }
@@ -164,11 +162,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pipelineCursor = idx
 				m.SelectedPipeline = idx
 			}
-		case "c", "C":
-			// Quick select Combine Features utility
-			m.inUtilities = true
-			m.utilityCursor = UtilityCombineFeatures
-			m.SelectedUtility = UtilityCombineFeatures
 		case "m", "M":
 			// Quick select Merge PsychoPy Data utility
 			m.inUtilities = true
@@ -245,8 +238,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		case UtilityGlobalSetup:
 			m.SelectedUtility = UtilityGlobalSetup
 			return m, nil
-		case UtilityCombineFeatures:
-			m.SelectedPipeline = int(types.PipelineCombineFeatures)
 		case UtilityMergePsychopy:
 			m.SelectedPipeline = int(types.PipelineMergePsychoPyData)
 		case UtilityRawToBids:
@@ -508,7 +499,6 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("↑↓", "Navigate"),
 		styles.RenderKeyHint("Tab", "Switch"),
 		styles.RenderKeyHint("1-5", "Pipeline"),
-		styles.RenderKeyHint("C", "Combine"),
 		styles.RenderKeyHint("M", "Merge"),
 		styles.RenderKeyHint("R", "Raw2BIDS"),
 		styles.RenderKeyHint("Enter", "Select"),

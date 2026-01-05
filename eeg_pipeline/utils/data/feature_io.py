@@ -163,7 +163,6 @@ class FeatureBundle:
     ratios_df: Optional[pd.DataFrame] = None
     asymmetry_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
-    all_features_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
 
     @property
@@ -207,7 +206,6 @@ def load_feature_bundle(
         ratios_df=_safe_read_table(features_dir / "features_ratios.tsv", logger),
         asymmetry_df=_safe_read_table(features_dir / "features_asymmetry.tsv", logger),
         temporal_df=_safe_read_table(features_dir / "features_temporal.tsv", logger),
-        all_features_df=_safe_read_table(features_dir / "features_all.tsv", logger),
     )
 
     if include_targets:
@@ -324,7 +322,6 @@ def save_all_features(
     quality_df: Optional[pd.DataFrame] = None,
     quality_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
-    export_all: bool = True,
     suffix: Optional[str] = None,
 ) -> pd.DataFrame:
     from eeg_pipeline.domain.features.naming import generate_manifest
@@ -392,11 +389,9 @@ def save_all_features(
 
     direct_blocks = []
     direct_cols: List[str] = []
-    full_blocks = []
 
     if pow_df is not None:
         direct_blocks.append(pow_df)
-        full_blocks.append(pow_df)
         if len(pow_cols) == len(pow_df.columns):
             pow_df.columns = pow_cols
         else:
@@ -409,7 +404,6 @@ def save_all_features(
 
     if baseline_df is not None and not baseline_df.empty:
         direct_blocks.append(baseline_df)
-        full_blocks.append(baseline_df)
         if baseline_cols:
             if len(baseline_cols) == len(baseline_df.columns):
                 baseline_df.columns = baseline_cols
@@ -423,7 +417,6 @@ def save_all_features(
 
 
     if aper_df is not None and not aper_df.empty:
-        full_blocks.append(aper_df)
         if aper_cols:
             if len(aper_cols) == len(aper_df.columns):
                 aper_df.columns = aper_cols
@@ -439,7 +432,6 @@ def save_all_features(
         write_tsv(aper_df, aper_path)
 
     if erp_df is not None and not erp_df.empty:
-        full_blocks.append(erp_df)
         if erp_cols:
             if len(erp_cols) == len(erp_df.columns):
                 erp_df.columns = erp_cols
@@ -449,7 +441,6 @@ def save_all_features(
         write_tsv(erp_df, erp_path)
 
     if itpc_df is not None and not itpc_df.empty:
-        full_blocks.append(itpc_df)
         if itpc_cols and len(itpc_cols) == len(itpc_df.columns):
             itpc_df.columns = itpc_cols
         itpc_name = f"features_itpc_{suffix}.tsv" if suffix else "features_itpc.tsv"
@@ -468,7 +459,6 @@ def save_all_features(
         pac_trials_path = features_dir / pac_trials_name
         logger.info("Saving PAC per-trial values: %s", pac_trials_path)
         write_tsv(pac_trials_df, pac_trials_path)
-        full_blocks.append(pac_trials_df)
 
     if pac_time_df is not None and not pac_time_df.empty:
         pac_time_name = f"features_pac_time_{suffix}.tsv" if suffix else "features_pac_time.tsv"
@@ -476,24 +466,7 @@ def save_all_features(
         logger.info("Saving PAC time-resolved values: %s", pac_time_path)
         write_tsv(pac_time_df, pac_time_path)
 
-        try:
-            n_trials = len(y) if y is not None else None
-            if n_trials is not None and len(pac_time_df) == n_trials:
-                full_blocks.append(pac_time_df)
-            else:
-                logger.info(
-                    "PAC time-resolved output is not trial-aligned (rows=%d, trials=%s); excluding from features_all.tsv",
-                    len(pac_time_df),
-                    str(n_trials) if n_trials is not None else "unknown",
-                )
-        except Exception as exc:
-            logger.warning(
-                "Failed to evaluate PAC time alignment; excluding from features_all.tsv: %s",
-                exc,
-            )
-
     if comp_df is not None and not comp_df.empty:
-        full_blocks.append(comp_df)
         if comp_cols:
             if len(comp_cols) == len(comp_df.columns):
                 comp_df.columns = comp_cols
@@ -503,7 +476,6 @@ def save_all_features(
         write_tsv(comp_df, comp_path)
 
     if bursts_df is not None and not bursts_df.empty:
-        full_blocks.append(bursts_df)
         if bursts_cols:
             if len(bursts_cols) == len(bursts_df.columns):
                 bursts_df.columns = bursts_cols
@@ -513,7 +485,6 @@ def save_all_features(
         write_tsv(bursts_df, bursts_path)
 
     if spectral_df is not None and not spectral_df.empty:
-        full_blocks.append(spectral_df)
         if spectral_cols:
             if len(spectral_cols) == len(spectral_df.columns):
                 spectral_df.columns = spectral_cols
@@ -523,7 +494,6 @@ def save_all_features(
         write_tsv(spectral_df, spec_path)
     
     if erds_df is not None and not erds_df.empty:
-        full_blocks.append(erds_df)
         if erds_cols:
             if len(erds_cols) == len(erds_df.columns):
                 erds_df.columns = erds_cols
@@ -533,7 +503,6 @@ def save_all_features(
         write_tsv(erds_df, erds_path)
 
     if ratios_df is not None and not ratios_df.empty:
-        full_blocks.append(ratios_df)
         if ratios_cols:
             if len(ratios_cols) == len(ratios_df.columns):
                 ratios_df.columns = ratios_cols
@@ -543,7 +512,6 @@ def save_all_features(
         write_tsv(ratios_df, ratios_path)
 
     if asymmetry_df is not None and not asymmetry_df.empty:
-        full_blocks.append(asymmetry_df)
         if asymmetry_cols:
             if len(asymmetry_cols) == len(asymmetry_df.columns):
                 asymmetry_df.columns = asymmetry_cols
@@ -553,7 +521,6 @@ def save_all_features(
         write_tsv(asymmetry_df, asym_path)
 
     if quality_df is not None and not quality_df.empty:
-        full_blocks.append(quality_df)
         if quality_cols:
             if len(quality_cols) == len(quality_df.columns):
                 quality_df.columns = quality_cols
@@ -624,41 +591,16 @@ def save_all_features(
                     len(conn_df.columns),
                 )
 
-        conn_name = f"features_connectivity_{suffix}.parquet" if suffix else "features_connectivity.parquet"
+        conn_name = f"features_connectivity_{suffix}.tsv" if suffix else "features_connectivity.tsv"
         conn_path = features_dir / conn_name
         logger.info("Saving connectivity features: %s", conn_path)
         t0 = time.perf_counter()
-        write_parquet(conn_df, conn_path)
+        write_tsv(conn_df, conn_path)
         logger.info(
-            "Saved connectivity Parquet in %.2fs (rows=%d, cols=%d)",
+            "Saved connectivity TSV in %.2fs (rows=%d, cols=%d)",
             time.perf_counter() - t0,
             len(conn_df),
             len(conn_df.columns),
-        )
-
-    blocks = full_blocks
-    cols_all: List[str] = []
-
-    if blocks:
-        combined_df = pd.concat(blocks, axis=1)
-        combined_df = _dedupe_identical_duplicate_columns(combined_df, df_label="features_all.tsv")
-    else:
-        combined_df = pd.DataFrame()
-        logger.warning("No feature blocks available for combined output")
-
-    if not export_all:
-        logger.debug("Skipping features_all.tsv creation (export_all=False)")
-    else:
-        all_name = f"features_all_{suffix}.tsv" if suffix else "features_all.tsv"
-        combined_path = features_dir / all_name
-        logger.info("Saving combined features: %s", combined_path)
-        t0 = time.perf_counter()
-        write_tsv(combined_df, combined_path)
-        logger.info(
-            "Saved combined TSV in %.2fs (rows=%d, cols=%d)",
-            time.perf_counter() - t0,
-            len(combined_df),
-            len(combined_df.columns),
         )
 
     try:
@@ -666,7 +608,7 @@ def save_all_features(
         json_name = f"features_{suffix}.json" if suffix else "features.json"
         sidecar_path = features_dir / json_name
         manifest = generate_manifest(
-            feature_columns=list(combined_df.columns),
+            feature_columns=list(direct_df.columns),
             config=config,
             subject=subject_str,
             task=config.get("project.task") if config is not None else None,
@@ -684,7 +626,7 @@ def save_all_features(
     logger.info("Saving behavioral target vector: %s (column: %s)", y_path, target_column_name)
     write_tsv(y.to_frame(name=target_column_name), y_path)
 
-    return combined_df
+    return direct_df
 
 
 
@@ -760,51 +702,6 @@ def iterate_feature_columns(
     return list(feature_df.columns), feature_df
 
 
-def combine_all_features(features_dir: Path, config=None) -> Optional[pd.DataFrame]:
-    """
-    Combine all individual feature files into features_all.tsv.
-    
-    This utility loads all feature TSV files from a subject's features directory
-    and merges them into a single combined file.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    features_dir = Path(features_dir)
-    if not features_dir.exists():
-        logger.warning("Features directory does not exist: %s", features_dir)
-        return None
-    
-    blocks = []
-    
-    # Load direct EEG features
-    direct_path = features_dir / "features_power.tsv"
-    if direct_path.exists():
-        df = _safe_read_table(direct_path, logger)
-        if df is not None and not df.empty:
-            blocks.append(df)
-    
-    
-    if not blocks:
-        logger.warning("No feature files found to combine in %s", features_dir)
-        return None
-    
-    # Combine all blocks
-    combined_df = pd.concat(blocks, axis=1)
-    
-    # Remove exact duplicate columns
-    dup_mask = combined_df.columns.duplicated(keep="first")
-    if dup_mask.any():
-        logger.info("Removing %d duplicate columns", dup_mask.sum())
-        combined_df = combined_df.loc[:, ~dup_mask]
-    
-    # Save combined file
-    combined_path = features_dir / "features_all.tsv"
-    write_tsv(combined_df, combined_path)
-    logger.info("Saved combined features: %s (rows=%d, cols=%d)", 
-                combined_path, len(combined_df), len(combined_df.columns))
-    
-    return combined_df
 
 
 __all__ = [
@@ -816,7 +713,6 @@ __all__ = [
     "_load_features_and_targets",
     # Saving
     "build_active_features",
-    "combine_all_features",
     "iterate_feature_columns",
     "save_all_features",
     "save_dropped_trials_log",

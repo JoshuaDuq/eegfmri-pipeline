@@ -560,6 +560,8 @@ class BehaviorPipeline(PipelineBase):
             stats_config=self.pipeline_config,
             feature_categories=self.feature_categories,
             selected_feature_files=self.feature_files,
+            selected_bands=kwargs.get("bands"),
+            computation_features=self.computation_features,
         )
         
         results = BehaviorPipelineResults(subject=subject)
@@ -592,6 +594,10 @@ class BehaviorPipeline(PipelineBase):
             _record_stage("load", stage_start, stage_rss)
             return results
         _record_stage("load", stage_start, stage_rss)
+        
+        # Compute change scores (active-baseline) before building trial table or running stats
+        if self.pipeline_config.compute_change_scores:
+            _add_change_scores_impl(ctx)
 
         if self.pipeline_config.run_trial_table:
             stage_start = time.perf_counter()

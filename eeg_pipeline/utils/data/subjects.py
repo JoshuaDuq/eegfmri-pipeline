@@ -244,7 +244,7 @@ def parse_subject_args(
     elif hasattr(args, "mode"):
         if args.mode == "raw-to-bids":
             sources = ["source_data"]
-        elif args.mode in {"combine", "combine-features", "merge-behavior", "visualize"}:
+        elif args.mode in {"combine", "merge-behavior", "visualize"}:
             sources = ["features", "bids"]
     
     if hasattr(args, "group") and args.group is not None:

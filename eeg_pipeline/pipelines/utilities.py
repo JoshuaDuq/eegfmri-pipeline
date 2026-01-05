@@ -25,9 +25,7 @@ from eeg_pipeline.analysis.preprocessing.orchestration import (
     run_merge_behavior as _run_merge_behavior,
     run_raw_to_bids as _run_raw_to_bids,
 )
-from eeg_pipeline.analysis.behavior.orchestration import (
-    run_combine_features_utility as _run_combine_features,
-)
+
 
 logger = logging.getLogger(__name__)
 
@@ -168,26 +166,7 @@ class UtilityPipeline(PipelineBase):
         
         progress.subject_done(f"sub-{subject}", success=True)
 
-    def run_combine_features(
-        self,
-        subjects: List[str],
-        categories: List[str],
-        **kwargs,
-    ) -> int:
-        """Run feature combination for multiple subjects."""
-        from eeg_pipeline.infra.paths import resolve_deriv_root
-        
-        deriv_root = resolve_deriv_root(config=self.config)
-        progress = kwargs.get("progress")
-        
-        return _run_combine_features(
-            subjects=subjects,
-            categories=categories,
-            deriv_root=deriv_root,
-            config=self.config,
-            logger=self.logger,
-            progress=progress,
-        )
+
 
     def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """Run utilities for multiple subjects."""

@@ -184,9 +184,9 @@ def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                 warnings.append({"type": "behavior", "subject": subj, "message": "No stats directory (run behavior compute first)"})
                 continue
 
-            trials_files = list(stats_dir.glob("trials*.parquet"))
+            trials_files = list(stats_dir.glob("trials*.tsv")) or list(stats_dir.glob("trials*.parquet"))
             if not trials_files:
-                warnings.append({"type": "behavior", "subject": subj, "message": "Missing trials*.parquet (trial table not found)"})
+                warnings.append({"type": "behavior", "subject": subj, "message": "Missing trials*.tsv (trial table not found)"})
             else:
                 passed.append(f"sub-{subj}: trial table present ({trials_files[0].name})")
 

@@ -22,7 +22,7 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
         description="Utilities pipeline: convert raw EEG to BIDS or merge behavioral data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("mode", choices=["raw-to-bids", "merge-behavior", "combine-features"], help="Preprocessing mode")
+    parser.add_argument("mode", choices=["raw-to-bids", "merge-behavior"], help="Preprocessing mode")
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
@@ -41,8 +41,6 @@ def setup_utilities(subparsers: argparse._SubParsersAction) -> argparse.Argument
     merge_group = parser.add_argument_group("merge-behavior options")
     merge_group.add_argument("--event-type", action="append", default=None)
 
-    combine_group = parser.add_argument_group("combine-features options")
-    combine_group.add_argument("--categories", type=str, nargs="*", default=None)
 
     return parser
 
@@ -93,15 +91,3 @@ def run_utilities(args: argparse.Namespace, subjects: List[str], config: Any) ->
         
         progress.step("Finalizing", current=2, total=2)
         progress.complete(success=True)
-    elif args.mode == "combine-features":
-        progress.start("utilities_combine_features", target_subjects)
-        
-        from eeg_pipeline.analysis.features.selection import FEATURE_CATEGORIES
-        categories = args.categories or list(FEATURE_CATEGORIES)
-        
-        pipeline.run_combine_features(
-            subjects=target_subjects,
-            categories=categories,
-            progress=progress,
-        )
-        # Progress completion is handled inside run_combine_features

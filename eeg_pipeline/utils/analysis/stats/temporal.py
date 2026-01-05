@@ -694,6 +694,12 @@ def compute_temporal_correlations_by_condition(
 
 def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Run time-frequency correlations using pre-loaded context data."""
+    if ctx.computation_features and "temporal" in ctx.computation_features:
+        allowed = ctx.computation_features["temporal"]
+        if "power" not in allowed and "spectral" not in allowed:
+            ctx.logger.info("Skipping time-frequency correlations: feature filter %s excludes 'power'/'spectral'", allowed)
+            return None
+
     return _run_tf_correlations_core(
         ctx.subject,
         ctx.epochs,
@@ -709,6 +715,12 @@ def compute_time_frequency_from_context(ctx: "BehaviorContext") -> Optional[Dict
 
 def compute_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Compute temporal correlations by condition using pre-loaded data."""
+    if ctx.computation_features and "temporal" in ctx.computation_features:
+        allowed = ctx.computation_features["temporal"]
+        if "power" not in allowed and "spectral" not in allowed:
+            ctx.logger.info("Skipping temporal correlations: feature filter %s excludes 'power'/'spectral'", allowed)
+            return None
+
     return _run_temporal_by_condition_core(
         ctx.epochs,
         ctx.aligned_events,

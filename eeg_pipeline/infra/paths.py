@@ -83,7 +83,7 @@ def deriv_group_plots_path(deriv_root: Path, subdir: Optional[str] = None) -> Pa
 
 def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     sub = _normalize_subject_label(subject)
-    return Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.parquet"
+    return Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.tsv"
 
 
 def _resolve_deriv_root(

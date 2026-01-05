@@ -105,7 +105,6 @@ def _cooks_distance(
 class InfluenceConfig:
     enabled: bool = True
     outcomes: List[str] = None  # type: ignore[assignment]
-    feature_set: str = "pain_summaries"
     max_features: int = 20
     include_trial_order: bool = True
     include_run_block: bool = True
@@ -122,7 +121,6 @@ class InfluenceConfig:
         return cls(
             enabled=bool(_get(config, "behavior_analysis.influence.enabled", True)),
             outcomes=[str(x) for x in outcomes],
-            feature_set=str(_get(config, "behavior_analysis.influence.feature_set", "pain_summaries")).strip().lower(),
             max_features=int(_get(config, "behavior_analysis.influence.max_features", 20)),
             include_trial_order=bool(_get(config, "behavior_analysis.influence.include_trial_order", True)),
             include_run_block=bool(_get(config, "behavior_analysis.influence.include_run_block", True)),

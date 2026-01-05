@@ -64,31 +64,47 @@ func (m *Model) ApplyFeaturePreset(presetKey string) {
 
 func (m *Model) ApplyBehaviorPreset(presetKey string) {
 	m.computationSelected = make(map[int]bool)
+	m.postComputationSelected = make(map[int]bool)
 
 	var computationsToSelect []string
 
 	switch presetKey {
 	case "quick":
-		computationsToSelect = []string{"trial_table", "correlations", "report"}
+		computationsToSelect = []string{"correlations", "report"}
 	case "full":
+		// Select all in both lists
 		for i := range m.computations {
 			m.computationSelected[i] = true
+		}
+		for i := range m.postComputations {
+			m.postComputationSelected[i] = true
 		}
 		m.activePreset = "Full Analysis"
 		m.ShowToast("Applied: Full Analysis preset", "success")
 		return
 	case "regression":
-		computationsToSelect = []string{"trial_table", "regression", "models", "stability", "influence"}
+		computationsToSelect = []string{"regression", "models", "stability", "influence"}
 	case "temporal":
-		computationsToSelect = []string{"trial_table", "temporal", "cluster", "mediation"}
+		computationsToSelect = []string{"temporal", "cluster", "mediation"}
 	default:
 		return
 	}
 
+	// Match against primary computations
 	for i, comp := range m.computations {
 		for _, target := range computationsToSelect {
 			if comp.Key == target {
 				m.computationSelected[i] = true
+				break
+			}
+		}
+	}
+
+	// Match against post computations
+	for i, comp := range m.postComputations {
+		for _, target := range computationsToSelect {
+			if comp.Key == target {
+				m.postComputationSelected[i] = true
 				break
 			}
 		}

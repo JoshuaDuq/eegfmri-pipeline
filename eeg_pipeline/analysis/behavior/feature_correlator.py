@@ -773,8 +773,11 @@ class FeatureBehaviorCorrelator:
 
         if screening_records and self.stats_dir is not None:
             try:
+                from eeg_pipeline.infra.paths import ensure_dir
+                screen_dir = self.stats_dir / "feature_screening"
+                ensure_dir(screen_dir)
                 screen_df = pd.DataFrame(screening_records)
-                screen_path = self.stats_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
+                screen_path = screen_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
                 write_tsv(screen_df, screen_path)
             except Exception as exc:
                 self.logger.debug(f"Failed to write screening report: {exc}")

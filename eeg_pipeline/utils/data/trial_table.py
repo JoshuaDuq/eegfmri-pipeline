@@ -230,181 +230,22 @@ def add_pain_residual(
     return out, meta
 
 
-def build_pain_feature_summaries(
-    df: pd.DataFrame,
-    config: Any,
-    *,
-    keep_metadata: bool = True,
-) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Build a reduced, pain-focused feature set plus derived lateralization indices."""
-    from eeg_pipeline.domain.features.naming import NamingSchema
-
-    meta: Dict[str, Any] = {}
-    cols_keep: List[str] = []
-
-    # Keep core metadata/targets for convenience.
-    if keep_metadata:
-        base_cols = [
-            "subject",
-            "task",
-            "epoch",
-            "original_event_index",
-            "run",
-            "block",
-            "trial",
-            "condition",
-            "trial_type",
-            "trial_index_within_group",
-            "rating",
-            "temperature",
-            "pain_binary",
-            "pain_residual",
-        ]
-        cols_keep.extend([c for c in base_cols if c in df.columns])
-
-    def _select(pattern_fn) -> List[str]:
-        picked: List[str] = []
-        for col in df.columns:
-            try:
-                parsed = NamingSchema.parse(str(col))
-            except Exception:
-                continue
-            if not parsed.get("valid"):
-                continue
-            if pattern_fn(parsed):
-                picked.append(str(col))
-        return picked
-
-    # Power: active ROI/global means per band
-    cols_keep.extend(
-        _select(
-            lambda p: p.get("group") == "power"
-            and str(p.get("segment") or "").lower() == "active"
-            and str(p.get("scope") or "") in {"roi", "global"}
-            and "mean" in str(p.get("stat") or "").lower()
-        )
-    )
-
-    # ERP: ptp and component peaks/latencies (ROI/global)
-    cols_keep.extend(
-        _select(
-            lambda p: p.get("group") == "erp"
-            and str(p.get("scope") or "") in {"roi", "global"}
-            and any(k in str(p.get("stat") or "").lower() for k in ["ptp", "peak", "latency"])
-        )
-    )
-
-    # Aperiodic: slope/offset and APF/TBR style features (ROI/global)
-    cols_keep.extend(
-        _select(
-            lambda p: p.get("group") == "aperiodic"
-            and str(p.get("scope") or "") in {"roi", "global"}
-        )
-    )
-
-    # Connectivity: global graph metrics only
-    cols_keep.extend(
-        _select(
-            lambda p: p.get("group") == "conn"
-            and str(p.get("scope") or "") == "global"
-            and any(k in str(p.get("stat") or "").lower() for k in ["geff", "clust", "smallworld"])
-        )
-    )
-
-    # Quality: global metrics (snr/muscle/finite/ptp/variance)
-    cols_keep.extend(
-        _select(
-            lambda p: p.get("group") == "quality"
-            and str(p.get("scope") or "") == "global"
-        )
-    )
-
-    cols_keep = list(dict.fromkeys([c for c in cols_keep if c in df.columns]))
-    base = df[cols_keep].copy() if cols_keep else pd.DataFrame(index=df.index)
-
-    # Derived lateralization indices for power ROI where pairs exist.
-    eps = 1e-12
-    lat_pairs_cfg = getattr(config, "get", lambda *_args, **_kwargs: None)(
-        "behavior_analysis.feature_summaries.lateralization_pairs",
-        [
-            ["Sensorimotor_Contra_R", "Sensorimotor_Ipsi_L"],
-            ["Temporal_Contra_R", "Temporal_Ipsi_L"],
-            ["ParOccipital_Contra_R", "ParOccipital_Ipsi_L"],
-        ],
-    )
-    pairs: List[Tuple[str, str]] = []
-    if isinstance(lat_pairs_cfg, (list, tuple)):
-        for entry in lat_pairs_cfg:
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                pairs.append((str(entry[0]), str(entry[1])))
-
-    # band list from config
-    try:
-        bands = list(getattr(config, "get", lambda *_args, **_kwargs: {})("frequency_bands", {}).keys())
-    except Exception:
-        bands = ["delta", "theta", "alpha", "beta", "gamma"]
-
-    # Map (band, roi) -> column
-    roi_cols: Dict[Tuple[str, str], str] = {}
-    for col in base.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid") or parsed.get("group") != "power":
-            continue
-        if str(parsed.get("segment") or "").lower() != "active":
-            continue
-        if parsed.get("scope") != "roi":
-            continue
-        band = str(parsed.get("band") or "")
-        roi = str(parsed.get("identifier") or "")
-        stat = str(parsed.get("stat") or "").lower()
-        if not band or not roi:
-            continue
-        # Prefer baseline-normalized mean if multiple exist.
-        key = (band, roi)
-        prev = roi_cols.get(key)
-        if prev is None:
-            roi_cols[key] = str(col)
-        else:
-            prev_stat = str(NamingSchema.parse(prev).get("stat") or "").lower()
-            if "logratio" in stat and "logratio" not in prev_stat:
-                roi_cols[key] = str(col)
-
-    derived = {}
-    for band in bands:
-        for roi_r, roi_l in pairs:
-            c_r = roi_cols.get((str(band), roi_r))
-            c_l = roi_cols.get((str(band), roi_l))
-            if not c_r or not c_l:
-                continue
-            x_r = pd.to_numeric(base[c_r], errors="coerce")
-            x_l = pd.to_numeric(base[c_l], errors="coerce")
-            diff = x_r - x_l
-            li = diff / (x_r.abs() + x_l.abs() + eps)
-            label = f"{roi_r}_minus_{roi_l}"
-            derived[f"summary_lateral_power_active_{band}_{label}_diff"] = diff
-            derived[f"summary_lateral_power_active_{band}_{label}_li"] = li
-
-    if derived:
-        derived_df = pd.DataFrame(derived)
-        base = pd.concat([base, derived_df], axis=1)
-        meta["n_lateralization_features"] = int(derived_df.shape[1])
-
-    meta["n_columns"] = int(base.shape[1])
-    return base, meta
 
 
 def save_trial_table(
     result: TrialTableBuildResult,
     out_path: Path,
     *,
-    format: str = "parquet",
+    format: str = "tsv",
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fmt = str(format).strip().lower()
-    if fmt == "parquet":
+    if fmt in {"tsv", "txt"}:
+        from eeg_pipeline.infra.tsv import write_tsv
+        write_tsv(result.df, out_path, index=False)
+    elif fmt == "parquet":
+        # Discouraged but kept for legacy fallback if explicitly requested
         result.df.to_parquet(out_path, index=False)
-    elif fmt in {"tsv", "txt"}:
-        result.df.to_csv(out_path, sep="\t", index=False)
     else:
         raise ValueError(f"Unsupported trial table format: {format}")
     return out_path
@@ -415,6 +256,5 @@ __all__ = [
     "build_subject_trial_table",
     "add_lag_and_delta_features",
     "add_pain_residual",
-    "build_pain_feature_summaries",
     "save_trial_table",
 ]

@@ -34,14 +34,6 @@ type FeatureCategory struct {
 }
 
 var behaviorComputations = []Computation{
-	{"trial_table", "Trial Table", "Export canonical per-trial analysis table"},
-	{"confounds", "Confounds Audit", "Audit QC confounds vs targets"},
-	{"regression", "Trialwise Regression", "Trialwise regression/moderation models"},
-	{"models", "Model Families", "Sensitivity model families (robust/quantile/logistic)"},
-	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics (non-gating)"},
-	{"consistency", "Consistency Summary", "Effect direction consistency across outcomes"},
-	{"influence", "Influence Diagnostics", "Cook's distance and leverage summaries"},
-	{"report", "Subject Report", "Single-subject report (reproducible summary)"},
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
@@ -49,6 +41,16 @@ var behaviorComputations = []Computation{
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
 	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
 	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling"},
+}
+
+var behaviorPostComputations = []Computation{
+	{"confounds", "Confounds Audit", "Audit QC confounds vs targets"},
+	{"regression", "Trialwise Regression", "Trialwise regression/moderation models"},
+	{"models", "Model Families", "Sensitivity model families"},
+	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics"},
+	{"consistency", "Consistency Summary", "Effect direction consistency"},
+	{"influence", "Influence Diagnostics", "Cook's distance and leverage"},
+	{"report", "Subject Report", "Single-subject report"},
 }
 
 type FrequencyBand struct {
@@ -116,7 +118,6 @@ var featureFileOptions = []FeatureFile{
 	{"quality", "Quality", "Trial quality metrics"},
 	{"erds", "ERDS", "Event-related desynchronization/sync"},
 	{"spectral", "Spectral", "Peak frequency, spectral edge"},
-	{"all", "All Combined", "All features combined (features_all.tsv)"},
 }
 
 type PlotItem struct {
@@ -249,8 +250,8 @@ var defaultPlotItems = []PlotItem{
 	{ID: "power_topomaps_from_df", Group: "power", Name: "Topomaps from Features", Description: "Power topomaps generated from feature DataFrame", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "spectral_slope_topomap", Group: "power", Name: "Spectral Slope Topomap", Description: "Topographic map of 1/f spectral slope", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	// Connectivity
-	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.parquet", "events.tsv"}, RequiresFeatures: true},
-	{ID: "connectivity_dynamics", Group: "connectivity", Name: "Sliding Window Dynamics", Description: "Connectivity trajectories over time windows", RequiredFiles: []string{"features_connectivity*.parquet"}, RequiresFeatures: true},
+	{ID: "connectivity_by_condition", Group: "connectivity", Name: "Condition Comparison", Description: "Connectivity differences between conditions", RequiredFiles: []string{"features_connectivity*.tsv", "events.tsv"}, RequiresFeatures: true},
+	{ID: "connectivity_dynamics", Group: "connectivity", Name: "Sliding Window Dynamics", Description: "Connectivity trajectories over time windows", RequiredFiles: []string{"features_connectivity*.tsv"}, RequiresFeatures: true},
 	// Aperiodic
 	{ID: "aperiodic_topomaps", Group: "aperiodic", Name: "Topomaps", Description: "Topographic maps of slope and offset", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresFeatures: true, RequiresEpochs: true},
 	{ID: "aperiodic_by_condition", Group: "aperiodic", Name: "Condition Comparison", Description: "Aperiodic differences between conditions", RequiredFiles: []string{"features_aperiodic*.tsv", "events.tsv"}, RequiresFeatures: true},
@@ -315,13 +316,13 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_power_scatter", Group: "behavior", Name: "Power ROI Scatter", Description: "Power vs behavior scatter plots", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_complexity_scatter", Group: "behavior", Name: "Complexity Scatter", Description: "Complexity vs behavior scatter plots", RequiredFiles: []string{"features_complexity*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_aperiodic_scatter", Group: "behavior", Name: "Aperiodic Scatter", Description: "Aperiodic vs behavior scatter plots", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
-	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity*.parquet", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
+	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
 	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Pain Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
 	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
-	{ID: "behavior_temperature_models", Group: "behavior", Name: "Temperature Models", Description: "Subject-level temperature→rating diagnostics", RequiredFiles: []string{"stats/trials*.parquet"}, RequiresStats: true},
+	{ID: "behavior_temperature_models", Group: "behavior", Name: "Temperature Models", Description: "Subject-level temperature→rating diagnostics", RequiredFiles: []string{"stats/trials*.tsv"}, RequiresStats: true},
 	{ID: "behavior_stability_groupwise", Group: "behavior", Name: "Stability (Run/Block)", Description: "Within-subject stability of feature→outcome associations", RequiredFiles: []string{"stats/stability_groupwise*.tsv"}, RequiresStats: true},
 	// Decoding
 	{ID: "decoding_regression_plots", Group: "decoding", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"decoding/regression/loso_predictions.tsv"}},
@@ -432,6 +433,13 @@ type Model struct {
 	computationSelected map[int]bool
 	computationCursor   int
 	computationOffset   int // Scroll offset for computations list
+
+	// Post computation selection (for behavior - computations requiring others)
+	postComputations        []Computation
+	postComputationSelected map[int]bool
+	postComputationCursor   int
+	postComputationOffset   int // Scroll offset for post computations list
+	computationListFocus    int // 0 = primary computations, 1 = post computations
 
 	// Category selection (for features pipeline)
 	categories    []string
@@ -798,8 +806,8 @@ type Model struct {
 	spectralEdgePercentile float64
 	spectralRatioPairsSpec string // e.g. theta:beta,alpha:beta
 	// Validation & Generic
-	minEpochsForFeatures     int
-	exportAllFeatures        bool
+	minEpochsForFeatures int
+
 	failOnMissingWindows     bool
 	failOnMissingNamedWindow bool
 
@@ -863,7 +871,6 @@ type Model struct {
 	trialTableTempMin         float64
 	trialTableTempMax         float64
 	trialTableHighMissingFrac float64
-	featureSummariesEnabled   bool
 
 	painResidualEnabled                bool
 	painResidualMethod                 int // 0=spline, 1=poly
@@ -883,7 +890,6 @@ type Model struct {
 	confoundsQCColumnPatterns string
 
 	// Regression
-	regressionFeatureSet         int // 0=pain_summaries, 1=all
 	regressionOutcome            int // 0=rating, 1=pain_residual, 2=temperature
 	regressionIncludeTemperature bool
 	regressionTempControl        int // 0=linear, 1=rating_hat, 2=spline
@@ -901,7 +907,6 @@ type Model struct {
 	regressionMaxFeatures        int // 0 = no limit
 
 	// Models
-	modelsFeatureSet          int // 0=pain_summaries, 1=all
 	modelsIncludeTemperature  bool
 	modelsTempControl         int // 0=linear, 1=rating_hat, 2=spline
 	modelsTempSplineKnots     int
@@ -926,7 +931,6 @@ type Model struct {
 	modelsBinaryOutcome       int // 0=pain_binary, 1=rating_median
 
 	// Stability
-	stabilityFeatureSet     int // 0=pain_summaries, 1=all
 	stabilityMethod         int // 0=spearman, 1=pearson
 	stabilityOutcome        int // 0=auto, 1=rating, 2=pain_residual
 	stabilityGroupColumn    int // 0=auto, 1=run, 2=block
@@ -937,7 +941,6 @@ type Model struct {
 
 	// Consistency & influence
 	consistencyEnabled           bool
-	influenceFeatureSet          int // 0=pain_summaries, 1=all
 	influenceOutcomeRating       bool
 	influenceOutcomePainResidual bool
 	influenceOutcomeTemperature  bool
@@ -956,14 +959,12 @@ type Model struct {
 	influenceLeverageThreshold   float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsFeatureSet         int // 0=pain_summaries, 1=all
 	correlationsTargetRating       bool
 	correlationsTargetTemperature  bool
 	correlationsTargetPainResidual bool
 
 	// Pain sensitivity
-	painSensitivityMinTrials  int
-	painSensitivityFeatureSet int // 0=pain_summaries, 1=all
+	painSensitivityMinTrials int
 
 	// Report
 	reportTopN int
@@ -1100,14 +1101,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	})
 
 	m := Model{
-		Pipeline:            pipeline,
-		selected:            make(map[int]bool),
-		subjectSelected:     make(map[string]bool),
-		computationSelected: make(map[int]bool),
-		bands:               frequencyBands,
-		bandSelected:        make(map[int]bool),
-		spatialSelected:     make(map[int]bool),
-		helpOverlay:         help,
+		Pipeline:                pipeline,
+		selected:                make(map[int]bool),
+		subjectSelected:         make(map[string]bool),
+		computationSelected:     make(map[int]bool),
+		postComputationSelected: make(map[int]bool),
+		bands:                   frequencyBands,
+		bandSelected:            make(map[int]bool),
+		spatialSelected:         make(map[int]bool),
+		helpOverlay:             help,
 		// Advanced config defaults (shared)
 		useDefaultAdvanced:            true,
 		expandedOption:                expandedNone, // No option expanded initially
@@ -1166,8 +1168,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWindowStep:   0.5,
 		connAECMode:      0,
 		// Validation & Generic
-		minEpochsForFeatures:      10,
-		exportAllFeatures:         false,
+		minEpochsForFeatures: 10,
+
 		failOnMissingWindows:      false,
 		failOnMissingNamedWindow:  true,
 		asymmetryChannelPairsSpec: "",
@@ -1189,7 +1191,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorComputeBayesFactors:  false,
 		behaviorComputeLosoStability: true,
 
-		trialTableFormat:          0,
+		trialTableFormat:          1,
 		trialTableIncludeFeatures: true,
 		trialTableIncludeCovars:   true,
 		trialTableIncludeEvents:   true,
@@ -1201,7 +1203,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		trialTableTempMin:         25.0,
 		trialTableTempMax:         55.0,
 		trialTableHighMissingFrac: 0.5,
-		featureSummariesEnabled:   true,
 
 		painResidualEnabled:                true,
 		painResidualMethod:                 0,
@@ -1219,7 +1220,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		confoundsMaxCovariates:    3,
 		confoundsQCColumnPatterns: "^quality_.*_global_,^quality_.*_ch_",
 
-		regressionFeatureSet:         0,
 		regressionOutcome:            0,
 		regressionIncludeTemperature: true,
 		regressionTempControl:        0,
@@ -1236,7 +1236,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
-		modelsFeatureSet:          0,
 		modelsIncludeTemperature:  true,
 		modelsTempControl:         0,
 		modelsTempSplineKnots:     4,
@@ -1260,7 +1259,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsFamilyLogit:         true,
 		modelsBinaryOutcome:       0,
 
-		stabilityFeatureSet:     0,
 		stabilityMethod:         0,
 		stabilityOutcome:        0,
 		stabilityGroupColumn:    0,
@@ -1270,7 +1268,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		stabilityAlpha:          0.05,
 
 		consistencyEnabled:           true,
-		influenceFeatureSet:          0,
 		influenceOutcomeRating:       true,
 		influenceOutcomePainResidual: true,
 		influenceOutcomeTemperature:  false,
@@ -1288,20 +1285,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
 
-		correlationsFeatureSet:         0,
 		correlationsTargetRating:       true,
 		correlationsTargetTemperature:  true,
 		correlationsTargetPainResidual: true,
 
-		painSensitivityMinTrials:  10,
-		painSensitivityFeatureSet: 0,
-		reportTopN:                15,
-		temporalResolutionMs:      50,
-		temporalSmoothMs:          100,
-		temporalTimeMinMs:         -200,
-		temporalTimeMaxMs:         1000,
-		mixedEffectsType:          0,
-		mediationMinEffect:        0.05,
+		painSensitivityMinTrials: 10,
+		reportTopN:               15,
+		temporalResolutionMs:     50,
+		temporalSmoothMs:         100,
+		temporalTimeMinMs:        -200,
+		temporalTimeMaxMs:        1000,
+		mixedEffectsType:         0,
+		mediationMinEffect:       0.05,
 		// Cluster defaults
 		clusterThreshold: 0.05,
 		clusterMinSize:   2,
@@ -1430,26 +1425,39 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"Compute EEG-behavior correlations",
 		}
 		m.computations = behaviorComputations
-		defaultComps := map[string]bool{
-			"trial_table":      true,
-			"confounds":        true,
-			"stability":        true,
-			"consistency":      true,
-			"influence":        true,
-			"report":           true,
+		m.postComputations = behaviorPostComputations
+
+		// Default selections for primary computations
+		defaultPrimaryComps := map[string]bool{
 			"correlations":     true,
 			"pain_sensitivity": true,
 			"condition":        true,
 			"temporal":         false,
+			"cluster":          false,
+			"mediation":        false,
+			"mixed_effects":    false,
 		}
 		for i, c := range behaviorComputations {
-			m.computationSelected[i] = defaultComps[c.Key]
+			m.computationSelected[i] = defaultPrimaryComps[c.Key]
 		}
+
+		// Default selections for post computations
+		defaultPostComps := map[string]bool{
+			"confounds":   true,
+			"regression":  false,
+			"models":      false,
+			"stability":   true,
+			"consistency": true,
+			"influence":   true,
+			"report":      true,
+		}
+		for i, c := range behaviorPostComputations {
+			m.postComputationSelected[i] = defaultPostComps[c.Key]
+		}
+
 		// Initialize feature file selection
 		m.featureFiles = featureFileOptions
 		m.featureFileSelected = make(map[string]bool)
-		// Default: select "all" combined features
-		m.featureFileSelected["all"] = true
 
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
@@ -1488,29 +1496,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectSubjects,
 			types.StepSelectMode,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
-		}
-
-	case types.PipelineCombineFeatures:
-		m.modeOptions = []string{"combine-features"}
-		m.modeDescriptions = []string{"Merge individual features into features_all.tsv"}
-
-		// Filter out "all" from options
-		m.featureFiles = []FeatureFile{}
-		for _, f := range featureFileOptions {
-			if f.Key != "all" {
-				m.featureFiles = append(m.featureFiles, f)
-			}
-		}
-
-		m.featureFileSelected = make(map[string]bool)
-		// Default: all checked for aggregating
-		for _, f := range m.featureFiles {
-			m.featureFileSelected[f.Key] = true
-		}
-		m.steps = []types.WizardStep{
-			types.StepSelectSubjects,
-			types.StepSelectFeatureFiles,
 			types.StepReviewExecute,
 		}
 
@@ -2829,7 +2814,7 @@ const (
 	optConnWindowStep
 	optConnAECMode
 	optMinEpochs
-	optExportAll
+
 	optFailOnMissingWindows
 	optFailOnMissingNamedWindow
 	// Behavior options - General
@@ -2891,7 +2876,6 @@ const (
 	optConfoundsMaxCovariates
 	optConfoundsQCColumnPatterns
 	// Behavior options - Regression
-	optRegressionFeatureSet
 	optRegressionOutcome
 	optRegressionIncludeTemperature
 	optRegressionTempControl
@@ -2908,7 +2892,6 @@ const (
 	optRegressionPermutations
 	optRegressionMaxFeatures
 	// Behavior options - Models
-	optModelsFeatureSet
 	optModelsIncludeTemperature
 	optModelsTempControl
 	optModelsTempSplineKnots
@@ -2932,7 +2915,6 @@ const (
 	optModelsFamilyLogit
 	optModelsBinaryOutcome
 	// Behavior options - Stability
-	optStabilityFeatureSet
 	optStabilityMethod
 	optStabilityOutcome
 	optStabilityGroupColumn
@@ -2942,7 +2924,6 @@ const (
 	optStabilityAlpha
 	// Behavior options - Consistency / Influence
 	optConsistencyEnabled
-	optInfluenceFeatureSet
 	optInfluenceOutcomeRating
 	optInfluenceOutcomePainResidual
 	optInfluenceOutcomeTemperature
@@ -2962,13 +2943,11 @@ const (
 	// Behavior options - Report
 	optReportTopN
 	// Behavior options - Correlations / pain sensitivity
-	optCorrelationsFeatureSet
 	optCorrelationsTargetRating
 	optCorrelationsTargetTemperature
 	optCorrelationsTargetPainResidual
 	// Behavior options - Pain sensitivity / temporal
 	optPainSensitivityMinTrials
-	optPainSensitivityFeatureSet
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
 	optTemporalTimeMaxMs
@@ -3290,7 +3269,6 @@ func (m Model) getFeaturesOptions() []optionType {
 
 	options = append(options, optFeatGroupStorage)
 	if m.featGroupStorageExpanded {
-		options = append(options, optExportAll)
 	}
 
 	options = append(options, optFeatGroupExecution)
@@ -3780,19 +3758,10 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupCorrelations)
 		if m.behaviorGroupCorrelationsExpanded {
 			options = append(options,
-				optCorrelationsFeatureSet,
 				optCorrelationsTargetRating,
 				optCorrelationsTargetTemperature,
 				optCorrelationsTargetPainResidual,
 			)
-		}
-	}
-
-	// Pain sensitivity section
-	if m.isComputationSelected("pain_sensitivity") {
-		options = append(options, optBehaviorGroupPainSens)
-		if m.behaviorGroupPainSensExpanded {
-			options = append(options, optPainSensitivityFeatureSet, optPainSensitivityMinTrials)
 		}
 	}
 
@@ -3809,7 +3778,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupRegression)
 		if m.behaviorGroupRegressionExpanded {
 			options = append(options,
-				optRegressionFeatureSet,
 				optRegressionOutcome,
 				optRegressionIncludeTemperature,
 				optRegressionTempControl,
@@ -3840,7 +3808,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupModels)
 		if m.behaviorGroupModelsExpanded {
 			options = append(options,
-				optModelsFeatureSet,
 				optModelsIncludeTemperature,
 				optModelsTempControl,
 			)
@@ -3878,7 +3845,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupStability)
 		if m.behaviorGroupStabilityExpanded {
 			options = append(options,
-				optStabilityFeatureSet,
 				optStabilityMethod,
 				optStabilityOutcome,
 				optStabilityGroupColumn,
@@ -3903,7 +3869,6 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupInfluence)
 		if m.behaviorGroupInfluenceExpanded {
 			options = append(options,
-				optInfluenceFeatureSet,
 				optInfluenceOutcomeRating,
 				optInfluenceOutcomePainResidual,
 				optInfluenceOutcomeTemperature,

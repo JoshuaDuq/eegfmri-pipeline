@@ -62,7 +62,6 @@ class FeaturePlotContext:
     pac_time_df: Optional[pd.DataFrame] = None
     itpc_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
-    all_features: Optional[pd.DataFrame] = None
 
     window_ranges: Dict[str, Tuple[float, float]] = field(default_factory=dict)
     time_range_suffixes: List[str] = field(default_factory=list)
@@ -91,10 +90,6 @@ class FeaturePlotContext:
         self._apply_window_overrides()
         self._load_feature_tables()
 
-        if self.all_features is not None:
-            self.logger.info("Loaded features_all.tsv with %d columns", self.all_features.shape[1])
-        else:
-            self.logger.warning("features_all.tsv could not be loaded")
 
         self.n_trials = self._infer_trial_count()
         if self.n_trials > 0:
@@ -200,7 +195,7 @@ class FeaturePlotContext:
     def _load_feature_tables(self) -> None:
         table_specs = [
             ("power_df", "features_power", [".tsv"], "wide"),
-            ("connectivity_df", "features_connectivity", [".parquet", ".tsv"], "wide"),
+            ("connectivity_df", "features_connectivity", [".tsv"], "wide"),
             ("aperiodic_df", "features_aperiodic", [".tsv"], "wide"),
             ("erds_df", "features_erds", [".tsv"], "wide"),
             ("bursts_df", "features_bursts", [".tsv"], "wide"),
@@ -215,7 +210,6 @@ class FeaturePlotContext:
             ("itpc_df", "features_itpc", [".tsv"], "wide"),
             ("temporal_df", "features_temporal", [".tsv"], "wide"),
             ("erp_df", "features_erp", [".tsv"], "wide"),
-            ("all_features", "features_all", [".tsv"], "wide"),
         ]
 
         for attr_name, stem, exts, mode in table_specs:
@@ -359,7 +353,6 @@ class FeaturePlotContext:
             self.pac_trials_df,
             self.temporal_df,
             self.quality_df,
-            self.all_features,
         ]
         for df in candidates:
             if df is not None and not df.empty:

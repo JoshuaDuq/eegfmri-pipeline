@@ -239,6 +239,29 @@ class FeaturePipeline(PipelineBase):
                 windows_spec=user_windows_spec,
             )
 
+        # Accumulators for merging features from all time ranges into default files
+        # This ensures all segment features (baseline, active, ramp, etc.) are available
+        # in the default feature files for behavior analysis
+        accumulated_features: Dict[str, List[pd.DataFrame]] = {
+            "power": [],
+            "baseline": [],
+            "connectivity": [],
+            "aperiodic": [],
+            "erp": [],
+            "itpc": [],
+            "pac": [],
+            "pac_trials": [],
+            "pac_time": [],
+            "complexity": [],
+            "bursts": [],
+            "spectral": [],
+            "erds": [],
+            "ratios": [],
+            "asymmetry": [],
+            "quality": [],
+        }
+        accumulated_y = None
+        
         for tr_spec in ranges_to_process:
             name = tr_spec.get("name")
             tmin = tr_spec.get("tmin")
@@ -382,7 +405,6 @@ class FeaturePipeline(PipelineBase):
             current_step += 1
             progress.step(f"Saving features ({name or 'full'})", current=current_step, total=total_steps)
             
-            should_combine = self.config.get("feature_engineering.create_combined_features", False)
             combined_df = save_all_features(
                 pow_df=pow_df_aligned,
                 pow_cols=pow_cols,
@@ -419,9 +441,45 @@ class FeaturePipeline(PipelineBase):
                 quality_df=features.quality_df,
                 quality_cols=features.quality_cols,
                 feature_qc=feature_qc or None,
-                export_all=should_combine,
                 suffix=suffix,
             )
+            
+            # Accumulate features for merging when processing multiple time ranges
+            if len(ranges_to_process) > 1:
+                if pow_df_aligned is not None and not pow_df_aligned.empty:
+                    accumulated_features["power"].append(pow_df_aligned)
+                if baseline_df_aligned is not None and not baseline_df_aligned.empty:
+                    accumulated_features["baseline"].append(baseline_df_aligned)
+                if conn_df_aligned is not None and not conn_df_aligned.empty:
+                    accumulated_features["connectivity"].append(conn_df_aligned)
+                if aper_df_aligned is not None and not aper_df_aligned.empty:
+                    accumulated_features["aperiodic"].append(aper_df_aligned)
+                if erp_df is not None and not erp_df.empty:
+                    accumulated_features["erp"].append(erp_df)
+                if itpc_df is not None and not itpc_df.empty:
+                    accumulated_features["itpc"].append(itpc_df)
+                if pac_df is not None and not pac_df.empty:
+                    accumulated_features["pac"].append(pac_df)
+                if pac_trials_df is not None and not pac_trials_df.empty:
+                    accumulated_features["pac_trials"].append(pac_trials_df)
+                if pac_time_df is not None and not pac_time_df.empty:
+                    accumulated_features["pac_time"].append(pac_time_df)
+                if comp_df is not None and not comp_df.empty:
+                    accumulated_features["complexity"].append(comp_df)
+                if bursts_df is not None and not bursts_df.empty:
+                    accumulated_features["bursts"].append(bursts_df)
+                if spectral_df is not None and not spectral_df.empty:
+                    accumulated_features["spectral"].append(spectral_df)
+                if erds_df is not None and not erds_df.empty:
+                    accumulated_features["erds"].append(erds_df)
+                if features.ratios_df is not None and not features.ratios_df.empty:
+                    accumulated_features["ratios"].append(features.ratios_df)
+                if features.asymmetry_df is not None and not features.asymmetry_df.empty:
+                    accumulated_features["asymmetry"].append(features.asymmetry_df)
+                if features.quality_df is not None and not features.quality_df.empty:
+                    accumulated_features["quality"].append(features.quality_df)
+                if accumulated_y is None and y_aligned is not None:
+                    accumulated_y = y_aligned
 
 
             n_trials = len(y_aligned)
@@ -455,6 +513,123 @@ class FeaturePipeline(PipelineBase):
                 f"Done {range_info}: sub-{subject}, trials={n_trials}, power={n_pow}, conn={n_conn}, "
                 f"aper={n_aper}, spectral={n_spectral}, total={n_total}"
             )
+
+        # Merge accumulated features from multiple time ranges into default (unsuffixed) files
+        # This ensures all segment features are available for behavior analysis correlations
+        if len(ranges_to_process) > 1:
+            self.logger.info("Merging features from all time ranges into consolidated default files...")
+            
+            from eeg_pipeline.infra.tsv import write_tsv
+            
+            def _merge_dfs(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
+                """Merge DataFrames by concatenating columns, avoiding duplicates."""
+                if not dfs:
+                    return None
+                # Filter out empty DataFrames
+                valid_dfs = [df for df in dfs if df is not None and not df.empty]
+                if not valid_dfs:
+                    return None
+                if len(valid_dfs) == 1:
+                    return valid_dfs[0]
+                # Concatenate column-wise, keeping only unique columns
+                merged = pd.concat(valid_dfs, axis=1)
+                # Drop duplicate columns (keeping first occurrence)
+                merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
+                return merged
+            
+            # Merge and save each feature type
+            merged_power = _merge_dfs(accumulated_features["power"] + accumulated_features["baseline"])
+            if merged_power is not None:
+                write_tsv(merged_power, features_dir / "features_power.tsv")
+                self.logger.info(f"Saved merged power features: {merged_power.shape[1]} columns")
+            
+            merged_conn = _merge_dfs(accumulated_features["connectivity"])
+            if merged_conn is not None:
+                write_tsv(merged_conn, features_dir / "features_connectivity.tsv")
+                self.logger.info(f"Saved merged connectivity features: {merged_conn.shape[1]} columns")
+            
+            merged_aper = _merge_dfs(accumulated_features["aperiodic"])
+            if merged_aper is not None:
+                write_tsv(merged_aper, features_dir / "features_aperiodic.tsv")
+                self.logger.info(f"Saved merged aperiodic features: {merged_aper.shape[1]} columns")
+            
+            merged_erp = _merge_dfs(accumulated_features["erp"])
+            if merged_erp is not None:
+                write_tsv(merged_erp, features_dir / "features_erp.tsv")
+                self.logger.info(f"Saved merged ERP features: {merged_erp.shape[1]} columns")
+            
+            merged_itpc = _merge_dfs(accumulated_features["itpc"])
+            if merged_itpc is not None:
+                write_tsv(merged_itpc, features_dir / "features_itpc.tsv")
+                self.logger.info(f"Saved merged ITPC features: {merged_itpc.shape[1]} columns")
+            
+            merged_pac = _merge_dfs(accumulated_features["pac"])
+            if merged_pac is not None:
+                write_tsv(merged_pac, features_dir / "features_pac.tsv")
+                self.logger.info(f"Saved merged PAC features: {merged_pac.shape[1]} columns")
+            
+            merged_pac_trials = _merge_dfs(accumulated_features["pac_trials"])
+            if merged_pac_trials is not None:
+                write_tsv(merged_pac_trials, features_dir / "features_pac_trials.tsv")
+                self.logger.info(f"Saved merged PAC trials features: {merged_pac_trials.shape[1]} columns")
+            
+            merged_comp = _merge_dfs(accumulated_features["complexity"])
+            if merged_comp is not None:
+                write_tsv(merged_comp, features_dir / "features_complexity.tsv")
+                self.logger.info(f"Saved merged complexity features: {merged_comp.shape[1]} columns")
+            
+            merged_bursts = _merge_dfs(accumulated_features["bursts"])
+            if merged_bursts is not None:
+                write_tsv(merged_bursts, features_dir / "features_bursts.tsv")
+                self.logger.info(f"Saved merged bursts features: {merged_bursts.shape[1]} columns")
+            
+            merged_spectral = _merge_dfs(accumulated_features["spectral"])
+            if merged_spectral is not None:
+                write_tsv(merged_spectral, features_dir / "features_spectral.tsv")
+                self.logger.info(f"Saved merged spectral features: {merged_spectral.shape[1]} columns")
+            
+            merged_erds = _merge_dfs(accumulated_features["erds"])
+            if merged_erds is not None:
+                write_tsv(merged_erds, features_dir / "features_erds.tsv")
+                self.logger.info(f"Saved merged ERDS features: {merged_erds.shape[1]} columns")
+            
+            merged_ratios = _merge_dfs(accumulated_features["ratios"])
+            if merged_ratios is not None:
+                write_tsv(merged_ratios, features_dir / "features_ratios.tsv")
+                self.logger.info(f"Saved merged ratios features: {merged_ratios.shape[1]} columns")
+            
+            merged_asymmetry = _merge_dfs(accumulated_features["asymmetry"])
+            if merged_asymmetry is not None:
+                write_tsv(merged_asymmetry, features_dir / "features_asymmetry.tsv")
+                self.logger.info(f"Saved merged asymmetry features: {merged_asymmetry.shape[1]} columns")
+            
+            merged_quality = _merge_dfs(accumulated_features["quality"])
+            if merged_quality is not None:
+                write_tsv(merged_quality, features_dir / "features_quality.tsv")
+                self.logger.info(f"Saved merged quality features: {merged_quality.shape[1]} columns")
+            
+            # Save targets (use the first valid one since they should all be the same)
+            if accumulated_y is not None:
+                rating_columns = self.config.get("event_columns.rating", ["vas_rating"])
+                target_column_name = rating_columns[0] if rating_columns else "vas_rating"
+                write_tsv(accumulated_y.to_frame(name=target_column_name), features_dir / "target_vas_ratings.tsv")
+                self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
+            
+            # Save merged extraction config summarizing all time ranges
+            merged_extraction_config = {
+                "merged": True,
+                "time_ranges": [tr.get("name") for tr in ranges_to_process],
+                "spatial_modes": kwargs.get("spatial_modes") or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
+                "aggregation_method": kwargs.get("aggregation_method", "mean"),
+                "feature_categories": feature_categories,
+                "n_trials": len(accumulated_y) if accumulated_y is not None else 0,
+                "subject": subject,
+                "task": task,
+            }
+            import json
+            with open(features_dir / "extraction_config.json", "w") as f:
+                json.dump(merged_extraction_config, f, indent=2)
+            self.logger.info("Saved merged extraction config")
 
         progress.subject_done(f"sub-{subject}", success=True)
 

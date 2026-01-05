@@ -41,7 +41,7 @@ def _empty_feature_availability() -> dict:
     """Return feature availability dict with all features marked as unavailable."""
     all_categories = [
         "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
-        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry", "all"
+        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry"
     ]
     all_bands = FREQUENCY_BANDS
     all_computations = BEHAVIOR_COMPUTATIONS
@@ -65,7 +65,7 @@ def detect_feature_availability(features_dir) -> dict:
     }
     
     category_patterns = {
-        "power": ["features_power*.tsv", "features_all.tsv"],
+        "power": ["features_power*.tsv"],
         "connectivity": ["features_connectivity*"],
         "aperiodic": ["features_aperiodic*.tsv"],
         "erp": ["features_erp*.tsv"],
@@ -78,7 +78,6 @@ def detect_feature_availability(features_dir) -> dict:
         "spectral": ["features_spectral*.tsv"],
         "ratios": ["features_ratios*.tsv"],
         "asymmetry": ["features_asymmetry*.tsv"],
-        "all": ["features_all.tsv"],
     }
     
     bands = set(FREQUENCY_BANDS)
@@ -125,7 +124,7 @@ def detect_feature_availability(features_dir) -> dict:
     # Try to find stats adjacent to features
     stats_dir = features_dir.parent / "stats"
     computation_patterns = {
-        "trial_table": ["trials.parquet", "trial_table*.tsv"],
+        "trial_table": ["trials*.tsv", "trials.parquet", "trial_table*.tsv"],
         "confounds": ["confounds_audit*.tsv"],
         "regression": ["regression_*.tsv", "trialwise_regression*.tsv", "regression_feature_effects*.tsv"],
         "models": ["model_*.tsv", "sensitivity_*.tsv", "temperature_model_comparison.tsv"],

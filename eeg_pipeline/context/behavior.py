@@ -75,6 +75,8 @@ class BehaviorContext:
     stats_config: Optional[Any] = None
     feature_categories: Optional[List[str]] = None
     selected_feature_files: Optional[List[str]] = None  # Specific files to load (e.g., ["power", "aperiodic"])
+    selected_bands: Optional[List[str]] = None  # Specific bands to include (e.g., ["alpha", "beta"])
+    computation_features: Optional[Dict[str, List[str]]] = None  # Per-computation feature category filters
     
     epochs: Any = None
     epochs_info: Any = None
@@ -235,10 +237,8 @@ class BehaviorContext:
                     continue
 
                 try:
-                    if path.suffix == ".parquet":
-                        df = pd.read_parquet(path)
-                    else:
-                        df = read_tsv(path)
+                    from eeg_pipeline.infra.tsv import read_table
+                    df = read_table(path)
                     
                     current = getattr(self, attr_name)
                     if current is None:

@@ -109,7 +109,6 @@ def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
 @dataclass
 class FeatureModelsConfig:
     enabled: bool = False
-    feature_set: str = "pain_summaries"  # or "all"
     outcomes: List[str] = None  # type: ignore[assignment]
     families: List[str] = None  # type: ignore[assignment]
     include_temperature: bool = True
@@ -134,7 +133,6 @@ class FeatureModelsConfig:
             families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
         return cls(
             enabled=bool(_get(config, "behavior_analysis.models.enabled", False)),
-            feature_set=str(_get(config, "behavior_analysis.models.feature_set", "pain_summaries")).strip().lower(),
             outcomes=[str(x) for x in outcomes],
             families=[str(x).strip().lower() for x in families],
             include_temperature=bool(_get(config, "behavior_analysis.models.include_temperature", True)),
@@ -180,7 +178,6 @@ def run_feature_model_families(
         "enabled": cfg.enabled,
         "families": cfg.families,
         "outcomes": cfg.outcomes,
-        "feature_set": cfg.feature_set,
         "temperature_control": cfg.temperature_control,
     }
     if not cfg.enabled:

@@ -203,11 +203,11 @@ def apply_global_fdr(
     
     stats_dir = Path(stats_dir)
     if isinstance(include_glob, str):
-        files = list(stats_dir.glob(include_glob))
+        files = list(stats_dir.rglob(include_glob))
     else:
         files = []
         for pat in include_glob:
-            files.extend(list(stats_dir.glob(pat)))
+            files.extend(list(stats_dir.rglob(pat)))
         # Remove duplicates while preserving order
         seen = set()
         files = [f for f in files if not (f in seen or seen.add(f))]

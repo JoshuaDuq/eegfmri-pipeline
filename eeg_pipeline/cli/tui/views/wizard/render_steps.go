@@ -174,6 +174,82 @@ func (m Model) renderComputationSelection() string {
 		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 	}
 
+	// Post Computations section (only for behavior pipeline)
+	if len(m.postComputations) > 0 {
+		b.WriteString("\n")
+		b.WriteString(styles.SectionTitleStyle.Render(" POST COMPUTATIONS ") + "\n\n")
+
+		postCount := 0
+		for _, sel := range m.postComputationSelected {
+			if sel {
+				postCount++
+			}
+		}
+
+		// Inline validation indicator for post computations
+		var postStatusIndicator string
+		if postCount >= 1 {
+			postStatusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+		} else {
+			postStatusIndicator = lipgloss.NewStyle().Foreground(styles.TextDim).Render("○ ")
+		}
+
+		b.WriteString(postStatusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+			fmt.Sprintf("%d of %d selected", postCount, len(m.postComputations))))
+		if postCount == 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render(" — optional"))
+		}
+		b.WriteString("\n\n")
+
+		// Calculate responsive layout for post computations
+		postLayout := styles.CalculateListLayout(m.height/2, m.postComputationCursor, len(m.postComputations), 4)
+
+		// Show scroll up indicator for post computations
+		if postLayout.ShowScrollUp {
+			b.WriteString(styles.RenderScrollUpIndicator(postLayout.StartIdx) + "\n")
+		}
+
+		for i := postLayout.StartIdx; i < postLayout.EndIdx; i++ {
+			comp := m.postComputations[i]
+			isSelected := m.postComputationSelected[i]
+			isFocused := i == m.postComputationCursor
+
+			checkbox := styles.RenderCheckbox(isSelected, isFocused)
+
+			nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+			if isFocused {
+				nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+			}
+
+			b.WriteString(checkbox + nameStyle.Render(comp.Name))
+
+			// Show last computed timestamp if available
+			if m.computationAvailability != nil && m.computationAvailability[comp.Key] {
+				timestamp := m.computationLastModified[comp.Key]
+				relTime := formatRelativeTime(timestamp)
+				if relTime != "" {
+					avail := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  [%s]", relTime))
+					b.WriteString(avail)
+				} else {
+					avail := lipgloss.NewStyle().Foreground(styles.Success).Render("  [DONE]")
+					b.WriteString(avail)
+				}
+			} else {
+				unavail := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  [NO DATA]")
+				b.WriteString(unavail)
+			}
+
+			desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + comp.Description)
+			b.WriteString(desc + "\n")
+		}
+
+		// Show scroll down indicator for post computations
+		if postLayout.ShowScrollDn {
+			remaining := len(m.postComputations) - postLayout.EndIdx
+			b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
+		}
+	}
+
 	return b.String()
 }
 
@@ -375,9 +451,6 @@ func (m Model) renderFeatureFileSelection() string {
 	b.WriteString(styles.SectionTitleStyle.Render(" FEATURE FILES ") + "\n\n")
 
 	instruction := "  Select which feature files to load for analysis.\n"
-	if m.Pipeline == types.PipelineCombineFeatures {
-		instruction = "  Select which features to aggregate into features_all.tsv.\n"
-	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		instruction) +
@@ -2199,10 +2272,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "e.g. F3:F4,C3:C4"
 
 		// Generic / validation
-		case optExportAll:
-			label = "Export All"
-			value = m.boolToOnOff(m.exportAllFeatures)
-			hint = "save combined file"
 		case optMinEpochs:
 			label = "Min Epochs"
 			value = minEpochsVal
@@ -2341,12 +2410,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			label := "▸ Correlations"
 			if m.behaviorGroupCorrelationsExpanded {
 				label = "▾ Correlations"
-			}
-			return label, "", "Space to toggle"
-		case optBehaviorGroupPainSens:
-			label := "▸ Pain Sensitivity"
-			if m.behaviorGroupPainSensExpanded {
-				label = "▾ Pain Sensitivity"
 			}
 			return label, "", "Space to toggle"
 		case optBehaviorGroupConfounds:
@@ -2535,8 +2598,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "High Missing Frac", val, "warn if column missing too much"
-		case optFeatureSummariesEnabled:
-			return "Feature Summaries", m.boolToOnOff(m.featureSummariesEnabled), "build pain_feature_summaries"
 
 		// Pain residual
 		case optPainResidualEnabled:
@@ -2614,12 +2675,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "QC Column Patterns", val, "comma-separated regexes"
 
 		// Regression
-		case optRegressionFeatureSet:
-			v := "pain_summaries"
-			if m.regressionFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optRegressionOutcome:
 			v := "rating"
 			switch m.regressionOutcome {
@@ -2694,12 +2749,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Features", val, "0=no limit"
 
 		// Models
-		case optModelsFeatureSet:
-			v := "pain_summaries"
-			if m.modelsFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optModelsIncludeTemperature:
 			return "Include Temperature", m.boolToOnOff(m.modelsIncludeTemperature), "add temperature covariate"
 		case optModelsTempControl:
@@ -2781,12 +2830,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Binary Outcome", v, "for logit models"
 
 		// Stability
-		case optStabilityFeatureSet:
-			v := "pain_summaries"
-			if m.stabilityFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optStabilityMethod:
 			v := "spearman"
 			if m.stabilityMethod == 1 {
@@ -2837,12 +2880,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Consistency Summary", m.boolToOnOff(m.consistencyEnabled), "flag sign flips"
 
 		// Influence
-		case optInfluenceFeatureSet:
-			v := "pain_summaries"
-			if m.influenceFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optInfluenceOutcomeRating:
 			return "Outcome: rating", m.boolToOnOff(m.influenceOutcomeRating), "include rating"
 		case optInfluenceOutcomePainResidual:
@@ -2970,12 +3007,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Top N Rows", val, "per TSV in report"
 
 		// Correlations
-		case optCorrelationsFeatureSet:
-			v := "pain_summaries"
-			if m.correlationsFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optCorrelationsTargetRating:
 			return "Target: rating", m.boolToOnOff(m.correlationsTargetRating), "include rating"
 		case optCorrelationsTargetTemperature:
@@ -2984,12 +3015,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
 
 		// Pain sensitivity
-		case optPainSensitivityFeatureSet:
-			v := "pain_summaries"
-			if m.painSensitivityFeatureSet == 1 {
-				v = "all"
-			}
-			return "Feature Set", v, "which features to test"
 		case optPainSensitivityMinTrials:
 			val := fmt.Sprintf("%d", m.painSensitivityMinTrials)
 			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {

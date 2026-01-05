@@ -25,7 +25,7 @@ STANDARD_FEATURE_FILES = {
     "ratios": "features_ratios.tsv",
     "asymmetry": "features_asymmetry.tsv",
     # Connectivity & phase
-    "connectivity": "features_connectivity.parquet",
+    "connectivity": "features_connectivity.tsv",
     "itpc": "features_itpc.tsv",
     "pac": "features_pac_trials.tsv",
     # Exploratory & QC
@@ -33,8 +33,6 @@ STANDARD_FEATURE_FILES = {
     "bursts": "features_bursts.tsv",
     "quality": "features_quality.tsv",
     "temporal": "features_temporal.tsv",
-    # Aggregate
-    "all": "features_all.tsv",
 }
 
 FEATURE_FILE_DISPLAY_NAMES = {
@@ -55,8 +53,6 @@ FEATURE_FILE_DISPLAY_NAMES = {
     "bursts": "Burst Dynamics",
     "quality": "Trial Quality Metrics",
     "temporal": "Temporal Binned Features",
-    # Aggregate
-    "all": "All Features Combined",
 }
 
 

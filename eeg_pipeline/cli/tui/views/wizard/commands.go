@@ -39,19 +39,44 @@ func (m Model) isCategorySelected(category string) bool {
 
 func (m Model) SelectedComputations() []string {
 	var result []string
+	hasAnyComputation := false
+
+	// Primary computations
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
 			result = append(result, m.computations[i].Key)
+			hasAnyComputation = true
 		}
 	}
+	// Post computations
+	for i, sel := range m.postComputationSelected {
+		if sel && i < len(m.postComputations) {
+			result = append(result, m.postComputations[i].Key)
+			hasAnyComputation = true
+		}
+	}
+
+	// Auto-include trial_table if ANY computation is selected
+	// (trial_table is the foundational data structure ALL analyses need)
+	if hasAnyComputation {
+		result = append(result, "trial_table")
+	}
+
 	sort.Strings(result)
 	return result
 }
 
 // isComputationSelected checks if a specific computation is currently selected
 func (m Model) isComputationSelected(computation string) bool {
+	// Check primary computations
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) && m.computations[i].Key == computation {
+			return true
+		}
+	}
+	// Check post computations
+	for i, sel := range m.postComputationSelected {
+		if sel && i < len(m.postComputations) && m.postComputations[i].Key == computation {
 			return true
 		}
 	}
@@ -242,14 +267,6 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--feature-files")
 			parts = append(parts, featureFiles...)
 		}
-	} else if m.Pipeline == types.PipelineCombineFeatures {
-		// Special handling for combine-features utility
-		parts = []string{"eeg-pipeline", "utilities", "combine-features"}
-		featureFiles := m.SelectedFeatureFiles()
-		if len(featureFiles) > 0 && len(featureFiles) < len(m.featureFiles) {
-			parts = append(parts, "--categories")
-			parts = append(parts, featureFiles...)
-		}
 	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS {
 		mode := "merge-behavior"
 		if m.Pipeline == types.PipelineRawToBIDS {
@@ -279,7 +296,7 @@ func (m Model) BuildCommand() string {
 	needsPaths := false
 	switch m.Pipeline {
 	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior,
-		types.PipelineDecoding, types.PipelinePlotting, types.PipelineCombineFeatures:
+		types.PipelineDecoding, types.PipelinePlotting:
 		needsPaths = true
 	}
 
@@ -1130,9 +1147,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// Generic & Validation
-	if m.exportAllFeatures {
-		args = append(args, "--export-all")
-	}
 
 	args = append(args, "--min-epochs", fmt.Sprintf("%d", m.minEpochsForFeatures))
 	if m.failOnMissingWindows {
@@ -1248,9 +1262,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.trialTableHighMissingFrac != 0.5 {
 			args = append(args, "--trial-table-high-missing-frac", fmt.Sprintf("%.2f", m.trialTableHighMissingFrac))
 		}
-		if !m.featureSummariesEnabled {
-			args = append(args, "--no-feature-summaries")
-		}
 
 		if !m.painResidualEnabled {
 			args = append(args, "--no-pain-residual")
@@ -1311,10 +1322,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Regression
 	if m.isComputationSelected("regression") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.regressionFeatureSet >= 0 && m.regressionFeatureSet < len(featSets) && m.regressionFeatureSet != 0 {
-			args = append(args, "--regression-feature-set", featSets[m.regressionFeatureSet])
-		}
 		outcomes := []string{"rating", "pain_residual", "temperature"}
 		if m.regressionOutcome >= 0 && m.regressionOutcome < len(outcomes) && m.regressionOutcome != 0 {
 			args = append(args, "--regression-outcome", outcomes[m.regressionOutcome])
@@ -1360,10 +1367,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Models
 	if m.isComputationSelected("models") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.modelsFeatureSet >= 0 && m.modelsFeatureSet < len(featSets) && m.modelsFeatureSet != 0 {
-			args = append(args, "--models-feature-set", featSets[m.modelsFeatureSet])
-		}
 		if !m.modelsIncludeTemperature {
 			args = append(args, "--no-models-include-temperature")
 		}
@@ -1440,10 +1443,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Stability
 	if m.isComputationSelected("stability") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.stabilityFeatureSet >= 0 && m.stabilityFeatureSet < len(featSets) && m.stabilityFeatureSet != 0 {
-			args = append(args, "--stability-feature-set", featSets[m.stabilityFeatureSet])
-		}
 		if m.stabilityMethod == 1 {
 			args = append(args, "--stability-method", "pearson")
 		}
@@ -1476,10 +1475,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Influence
 	if m.isComputationSelected("influence") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.influenceFeatureSet >= 0 && m.influenceFeatureSet < len(featSets) && m.influenceFeatureSet != 0 {
-			args = append(args, "--influence-feature-set", featSets[m.influenceFeatureSet])
-		}
 		out := []string{}
 		if m.influenceOutcomeRating {
 			out = append(out, "rating")
@@ -1532,10 +1527,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Correlations (trial-table)
 	if m.isComputationSelected("correlations") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.correlationsFeatureSet >= 0 && m.correlationsFeatureSet < len(featSets) && m.correlationsFeatureSet != 0 {
-			args = append(args, "--correlations-feature-set", featSets[m.correlationsFeatureSet])
-		}
 		targets := []string{}
 		if m.correlationsTargetRating {
 			targets = append(targets, "rating")
@@ -1561,12 +1552,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	// Pain sensitivity
 	if m.isComputationSelected("pain_sensitivity") && m.painSensitivityMinTrials != 10 {
 		args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
-	}
-	if m.isComputationSelected("pain_sensitivity") {
-		featSets := []string{"pain_summaries", "all"}
-		if m.painSensitivityFeatureSet >= 0 && m.painSensitivityFeatureSet < len(featSets) && m.painSensitivityFeatureSet != 0 {
-			args = append(args, "--pain-sensitivity-feature-set", featSets[m.painSensitivityFeatureSet])
-		}
 	}
 
 	// Condition

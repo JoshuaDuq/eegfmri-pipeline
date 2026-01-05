@@ -64,6 +64,12 @@ if TYPE_CHECKING:
 
 def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
     """Run pain vs non-pain cluster test using pre-loaded context data."""
+    if ctx.computation_features and "cluster" in ctx.computation_features:
+        allowed = ctx.computation_features["cluster"]
+        if "power" not in allowed and "spectral" not in allowed:
+            ctx.logger.info("Skipping cluster test: feature filter %s excludes 'power'/'spectral'", allowed)
+            return None
+
     return _run_cluster_test_core(
         ctx.subject,
         ctx.epochs,

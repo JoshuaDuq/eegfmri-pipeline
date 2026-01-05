@@ -82,7 +82,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Feature categories for correlations analysis"
     )
     compute_group.add_argument(
-        "--pain_sensitivity-features", nargs="+", choices=feature_choices, default=None,
+        "--pain-sensitivity-features", nargs="+", choices=feature_choices, default=None,
         help="Feature categories for pain sensitivity analysis"
     )
     compute_group.add_argument(
@@ -161,7 +161,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     confounds_group.add_argument("--confounds-qc-column-patterns", nargs="+", default=None, metavar="REGEX")
 
     regression_group = parser.add_argument_group("Trialwise regression options")
-    regression_group.add_argument("--regression-feature-set", choices=["pain_summaries", "all"], default=None)
     regression_group.add_argument("--regression-outcome", choices=["rating", "pain_residual", "temperature"], default=None)
     regression_group.add_argument("--regression-include-temperature", action="store_true", default=None)
     regression_group.add_argument("--no-regression-include-temperature", action="store_false", dest="regression_include_temperature")
@@ -185,7 +184,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     regression_group.add_argument("--regression-max-features", type=int, default=None)
 
     models_group = parser.add_argument_group("Model families options")
-    models_group.add_argument("--models-feature-set", choices=["pain_summaries", "all"], default=None)
     models_group.add_argument("--models-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature", "pain_binary"], default=None)
     models_group.add_argument("--models-families", nargs="+", choices=["ols_hc3", "robust_rlm", "quantile_50", "logit"], default=None)
     models_group.add_argument("--models-include-temperature", action="store_true", default=None)
@@ -210,7 +208,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     models_group.add_argument("--models-binary-outcome", choices=["pain_binary", "rating_median"], default=None)
 
     stability_group = parser.add_argument_group("Stability options")
-    stability_group.add_argument("--stability-feature-set", choices=["pain_summaries", "all"], default=None)
     stability_group.add_argument("--stability-method", choices=["spearman", "pearson"], default=None)
     stability_group.add_argument("--stability-outcome", choices=["auto", "rating", "pain_residual"], default=None)
     stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
@@ -221,7 +218,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     stability_group.add_argument("--stability-alpha", type=float, default=None)
 
     influence_group = parser.add_argument_group("Influence diagnostics options")
-    influence_group.add_argument("--influence-feature-set", choices=["pain_summaries", "all"], default=None)
     influence_group.add_argument("--influence-outcomes", nargs="+", choices=["rating", "pain_residual", "temperature"], default=None)
     influence_group.add_argument("--influence-max-features", type=int, default=None)
     influence_group.add_argument("--influence-include-temperature", action="store_true", default=None)
@@ -244,10 +240,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
     pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
-    pain_sensitivity_group.add_argument("--pain-sensitivity-feature-set", choices=["pain_summaries", "all"], default=None)
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
-    correlations_group.add_argument("--correlations-feature-set", choices=["pain_summaries", "all"], default=None)
     correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
 
     report_group = parser.add_argument_group("Report options")

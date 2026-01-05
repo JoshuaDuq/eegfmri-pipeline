@@ -34,14 +34,12 @@ def plot_temperature_models(
     out_dir = plots_dir / "temperature_models"
     ensure_dir(out_dir)
 
-    trials_path = _find_first(stats_dir, "trials*.parquet") or _find_first(stats_dir, "trials*.tsv")
+    trials_path = _find_first(stats_dir, "trials*.tsv") or _find_first(stats_dir, "trials*.parquet")
     if trials_path is None or not trials_path.exists():
         return {}
 
-    if trials_path.suffix == ".parquet":
-        df = pd.read_parquet(trials_path)
-    else:
-        df = pd.read_csv(trials_path, sep="\t")
+    from eeg_pipeline.infra.tsv import read_table
+    df = read_table(trials_path)
 
     if "temperature" not in df.columns or "rating" not in df.columns:
         return {}

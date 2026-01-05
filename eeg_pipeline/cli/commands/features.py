@@ -94,11 +94,11 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     """Configure the features command parser."""
     parser = subparsers.add_parser(
         "features",
-        help="Features analysis: extract, combine, or visualize",
-        description="Features pipeline: extract features, combine into single file, or visualize",
+        help="Features analysis: extract or visualize",
+        description="Features pipeline: extract features or visualize",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("mode", choices=["compute", "combine", "visualize"], help="Pipeline mode (combine: merge feature files into features_all.tsv)")
+    parser.add_argument("mode", choices=["compute", "visualize"], help="Pipeline mode")
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
@@ -247,6 +247,15 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
     parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
     parser.add_argument("--conn-aec-mode", choices=["orth", "sym", "none"], default=None, help="AEC orthogonalization mode")
+
+    # TFR options
+    parser.add_argument("--tfr-freq-min", type=float, default=None, help="Minimum frequency for TFR (Hz)")
+    parser.add_argument("--tfr-freq-max", type=float, default=None, help="Maximum frequency for TFR (Hz)")
+    parser.add_argument("--tfr-n-freqs", type=int, default=None, help="Number of frequencies for TFR")
+    parser.add_argument("--tfr-min-cycles", type=float, default=None, help="Minimum number of cycles for Morlet wavelets")
+    parser.add_argument("--tfr-n-cycles-factor", type=float, default=None, help="Cycles factor (freq/factor) for Morlet wavelets")
+    parser.add_argument("--tfr-decim", type=int, default=None, help="Decimation factor for TFR")
+    parser.add_argument("--tfr-workers", type=int, default=None, help="Number of parallel workers for TFR computation")
     
     # New Advanced Options
     
@@ -272,8 +281,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--burst-min-duration", type=int, default=None, help="Minimum burst duration (ms)")
     
     parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
-    parser.add_argument("--export-all", action="store_true", default=None, help="Export all features into a single file")
-    parser.add_argument("--no-export-all", action="store_false", dest="export_all", help="Don't export all features into a single file")
+
     parser.add_argument("--fail-on-missing-windows", action="store_true", default=None, help="Fail if baseline/active windows are missing")
     parser.add_argument("--no-fail-on-missing-windows", action="store_false", dest="fail_on_missing_windows", help="Do not fail if baseline/active windows are missing")
     parser.add_argument("--fail-on-missing-named-window", action="store_true", default=None, help="Fail if a named time window is missing")
@@ -375,11 +383,27 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         if getattr(args, "burst_min_duration", None) is not None:
             config["feature_engineering.bursts.min_duration_ms"] = args.burst_min_duration
             
+        # TFR Config Overrides
+        tfr_config = config.setdefault("time_frequency_analysis", {}).setdefault("tfr", {})
+        if getattr(args, "tfr_freq_min", None) is not None:
+            tfr_config["freq_min"] = args.tfr_freq_min
+        if getattr(args, "tfr_freq_max", None) is not None:
+            tfr_config["freq_max"] = args.tfr_freq_max
+        if getattr(args, "tfr_n_freqs", None) is not None:
+            tfr_config["n_freqs"] = args.tfr_n_freqs
+        if getattr(args, "tfr_min_cycles", None) is not None:
+            tfr_config["min_cycles"] = args.tfr_min_cycles
+        if getattr(args, "tfr_n_cycles_factor", None) is not None:
+            tfr_config["n_cycles_factor"] = args.tfr_n_cycles_factor
+        if getattr(args, "tfr_decim", None) is not None:
+            tfr_config["decim"] = args.tfr_decim
+        if getattr(args, "tfr_workers", None) is not None:
+            tfr_config["workers"] = args.tfr_workers
+            
         if getattr(args, "min_epochs", None) is not None:
             config["feature_engineering.constants.min_epochs_for_features"] = args.min_epochs
             
-        if args.export_all is not None:
-            config["feature_engineering.create_combined_features"] = args.export_all
+
         if getattr(args, "fail_on_missing_windows", None) is not None:
             config["feature_engineering.validation.fail_on_missing_windows"] = args.fail_on_missing_windows
         if getattr(args, "fail_on_missing_named_window", None) is not None:
@@ -408,30 +432,6 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             aggregation_method=getattr(args, "aggregation_method", "mean"),
             progress=progress,
         )
-    elif args.mode == "combine":
-        from eeg_pipeline.utils.data.feature_io import combine_all_features
-        from eeg_pipeline.infra.paths import deriv_features_path, resolve_deriv_root
-        
-        progress.start("features_combine", subjects)
-        deriv_root = resolve_deriv_root(config=config)
-        
-        for subject in subjects:
-            features_dir = deriv_features_path(deriv_root, subject)
-            if features_dir.exists():
-                progress.subject_start(f"sub-{subject}")
-                try:
-                    combined_df = combine_all_features(features_dir, config)
-                    if combined_df is not None:
-                        progress.log("info", f"Combined {combined_df.shape[1]} columns into features_all.tsv")
-                    else:
-                        progress.log("warning", "No features found to combine")
-                except Exception as e:
-                    progress.log("error", f"Failed to combine: {e}")
-                progress.subject_done(f"sub-{subject}", success=True)
-            else:
-                progress.log("warning", f"No features directory for sub-{subject}")
-        
-        progress.complete(success=True)
     elif args.mode == "visualize":
         visualize_features_for_subjects(
             subjects=subjects,

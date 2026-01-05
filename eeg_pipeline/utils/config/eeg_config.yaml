@@ -245,14 +245,6 @@ behavior_analysis:
       quantile_high: 0.85
       n_candidates: 15
 
-  # Reduced, pain-focused feature set for reporting/regression defaults
-  feature_summaries:
-    enabled: true
-    lateralization_pairs:
-      - ["Sensorimotor_Contra_R", "Sensorimotor_Ipsi_L"]
-      - ["Temporal_Contra_R", "Temporal_Ipsi_L"]
-      - ["ParOccipital_Contra_R", "ParOccipital_Ipsi_L"]
-
   # Confound auditing: does QC track rating/temperature?
   confounds:
     enabled: true
@@ -265,7 +257,6 @@ behavior_analysis:
   # Trialwise regression/moderation (complements correlations)
   regression:
     enabled: false
-    feature_set: "pain_summaries"  # "pain_summaries" or "all"
     outcome: "rating"              # "rating" | "pain_residual" | "temperature"
     include_temperature: true
     temperature_control: "linear"    # "linear" | "rating_hat" (uses rating_hat_from_temp) | "spline" (restricted cubic spline on temperature)
@@ -286,7 +277,6 @@ behavior_analysis:
   # Sensitivity model families per feature (robust/quantile/logistic)
   models:
     enabled: false
-    feature_set: "pain_summaries"     # "pain_summaries" or "all"
     outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
     families: ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
     include_temperature: true
@@ -308,7 +298,6 @@ behavior_analysis:
   # Within-subject stability across runs/blocks (non-gating diagnostics)
   stability:
     enabled: true
-    feature_set: "pain_summaries"   # "pain_summaries" or "all"
     outcome: ""                     # "" -> auto (pain_residual if present, else rating)
     group_column: ""                # "" -> auto (run if present, else block)
     method: "spearman"
@@ -324,7 +313,6 @@ behavior_analysis:
   # Influence diagnostics (non-gating)
   influence:
     enabled: true
-    feature_set: "pain_summaries"
     outcomes: ["rating", "pain_residual"]  # optionally add "temperature"
     max_features: 20
     include_temperature: true
@@ -357,7 +345,6 @@ behavior_analysis:
   # Correlations computation
   correlations:
     enabled: true
-    feature_set: "pain_summaries"   # "pain_summaries" or "all"
     targets: ["rating", "temperature", "pain_residual"]
     compute_change_scores: true
     loso_stability: true
@@ -366,7 +353,6 @@ behavior_analysis:
   # Pain sensitivity computation
   pain_sensitivity:
     enabled: true
-    feature_set: "pain_summaries"   # "pain_summaries" or "all"
     min_trials: 10
   
   # Condition comparison computation
@@ -421,7 +407,7 @@ behavior_analysis:
   feature_registry:
     files:
       power: "features_power.tsv"
-      connectivity: "features_connectivity.parquet"
+      connectivity: "features_connectivity.tsv"
       aperiodic: "features_aperiodic.tsv"
       erp: "features_erp.tsv"
       bursts: "features_bursts.tsv"
