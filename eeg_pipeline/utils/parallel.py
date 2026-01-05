@@ -350,6 +350,83 @@ def parallel_subjects(
     return {subject: result for subject, result in parallel_results}
 
 
+def parallel_regression_features(
+    feature_args: List[Tuple[Any, ...]],
+    process_func: Callable[..., Optional[Dict[str, Any]]],
+    n_jobs: int = -1,
+    min_features_for_parallel: int = 10,
+) -> List[Dict[str, Any]]:
+    """Run regression for multiple features in parallel.
+    
+    Parameters
+    ----------
+    feature_args : List[Tuple]
+        List of argument tuples, one per feature
+    process_func : Callable
+        Function to process a single feature, returns dict or None
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs - 1)
+    min_features_for_parallel : int
+        Minimum features to use parallelization
+        
+    Returns
+    -------
+    List[Dict]
+        Results for each feature (excludes None results)
+    """
+    if n_jobs == -1:
+        n_jobs = max(1, cpu_count() - 1)
+
+    if n_jobs == 1 or len(feature_args) < min_features_for_parallel:
+        results = [process_func(*args) for args in feature_args]
+        return [r for r in results if r is not None]
+
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(process_func)(*args) for args in feature_args
+    )
+    return [r for r in results if r is not None]
+
+
+def parallel_stability_features(
+    feature_args: List[Tuple[Any, ...]],
+    process_func: Callable[..., Optional[Dict[str, Any]]],
+    n_jobs: int = -1,
+    min_features_for_parallel: int = 10,
+) -> List[Dict[str, Any]]:
+    """Compute stability for multiple features in parallel."""
+    if n_jobs == -1:
+        n_jobs = max(1, cpu_count() - 1)
+
+    if n_jobs == 1 or len(feature_args) < min_features_for_parallel:
+        results = [process_func(*args) for args in feature_args]
+        return [r for r in results if r is not None]
+
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(process_func)(*args) for args in feature_args
+    )
+    return [r for r in results if r is not None]
+
+
+def parallel_influence_features(
+    feature_args: List[Tuple[Any, ...]],
+    process_func: Callable[..., Optional[Dict[str, Any]]],
+    n_jobs: int = -1,
+    min_features_for_parallel: int = 5,
+) -> List[Dict[str, Any]]:
+    """Compute influence diagnostics for multiple features in parallel."""
+    if n_jobs == -1:
+        n_jobs = max(1, cpu_count() - 1)
+
+    if n_jobs == 1 or len(feature_args) < min_features_for_parallel:
+        results = [process_func(*args) for args in feature_args]
+        return [r for r in results if r is not None]
+
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(process_func)(*args) for args in feature_args
+    )
+    return [r for r in results if r is not None]
+
+
 __all__ = [
     "get_n_jobs",
     "parallel_map",
@@ -357,7 +434,11 @@ __all__ = [
     "parallel_condition_effects",
     "parallel_feature_types",
     "parallel_subjects",
+    "parallel_regression_features",
+    "parallel_stability_features",
+    "parallel_influence_features",
 ]
+
 
 
 

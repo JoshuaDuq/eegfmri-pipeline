@@ -102,6 +102,10 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Feature categories for mediation analysis"
     )
     compute_group.add_argument(
+        "--moderation-features", nargs="+", choices=feature_choices, default=None,
+        help="Feature categories for moderation analysis"
+    )
+    compute_group.add_argument(
         "--feature-files",
         nargs="+",
         choices=FEATURE_FILE_CHOICES,
@@ -264,6 +268,11 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     mediation_group.add_argument("--mediation-bootstrap", type=int, default=None, help="Bootstrap iterations for mediation")
     mediation_group.add_argument("--mediation-min-effect-size", type=float, default=None, help="Minimum mediation effect size")
     mediation_group.add_argument("--mediation-max-mediators", type=int, default=None, help="Maximum mediators to test")
+    
+    # Moderation-specific options
+    moderation_group = parser.add_argument_group("Moderation analysis options")
+    moderation_group.add_argument("--moderation-max-features", type=int, default=None, help="Maximum features for moderation")
+    moderation_group.add_argument("--moderation-min-samples", type=int, default=None, help="Minimum samples for moderation")
     
     # Mixed effects-specific options
     mixed_group = parser.add_argument_group("Mixed effects options")
@@ -634,6 +643,12 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         if getattr(args, "mediation_max_mediators", None) is not None:
             ba.setdefault("mediation", {})["max_mediators"] = int(args.mediation_max_mediators)
 
+        # Moderation
+        if getattr(args, "moderation_max_features", None) is not None:
+            ba.setdefault("moderation", {})["max_features"] = int(args.moderation_max_features)
+        if getattr(args, "moderation_min_samples", None) is not None:
+            ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
+
         if getattr(args, "mixed_random_effects", None) is not None:
             ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
         if getattr(args, "mixed_max_features", None) is not None:
@@ -652,6 +667,8 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             computation_features["cluster"] = args.cluster_features
         if getattr(args, "mediation_features", None):
             computation_features["mediation"] = args.mediation_features
+        if getattr(args, "moderation_features", None):
+            computation_features["moderation"] = args.moderation_features
         
         pipeline = BehaviorPipeline(
             config=config,

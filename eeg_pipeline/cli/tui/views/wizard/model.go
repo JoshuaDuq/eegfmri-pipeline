@@ -40,6 +40,7 @@ var behaviorComputations = []Computation{
 	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis"},
 	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
 	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
+	{"moderation", "Moderation Analysis", "Test if features moderate temperature→rating"},
 	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling"},
 }
 
@@ -805,6 +806,10 @@ type Model struct {
 	// Spectral configuration
 	spectralEdgePercentile float64
 	spectralRatioPairsSpec string // e.g. theta:beta,alpha:beta
+
+	// Aggregation
+	aggregationMethod int // 0: mean, 1: median
+
 	// Validation & Generic
 	minEpochsForFeatures int
 
@@ -856,6 +861,7 @@ type Model struct {
 	behaviorGroupTemporalExpanded     bool
 	behaviorGroupClusterExpanded      bool
 	behaviorGroupMediationExpanded    bool
+	behaviorGroupModerationExpanded   bool
 	behaviorGroupMixedEffectsExpanded bool
 
 	// Trial table / pain residual config (subject-level)
@@ -871,6 +877,8 @@ type Model struct {
 	trialTableTempMin         float64
 	trialTableTempMax         float64
 	trialTableHighMissingFrac float64
+
+	featureSummariesEnabled bool
 
 	painResidualEnabled                bool
 	painResidualMethod                 int // 0=spline, 1=poly
@@ -991,6 +999,9 @@ type Model struct {
 	// Mediation-specific
 	mediationBootstrap    int // Bootstrap iterations for mediation
 	mediationMaxMediators int // Max mediators to test
+	// Moderation-specific
+	moderationMaxFeatures int // Max features for moderation
+	moderationMinSamples  int // Min samples for moderation
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
@@ -1204,6 +1215,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		trialTableTempMax:         55.0,
 		trialTableHighMissingFrac: 0.5,
 
+		featureSummariesEnabled: true,
+
 		painResidualEnabled:                true,
 		painResidualMethod:                 0,
 		painResidualMinSamples:             10,
@@ -1304,6 +1317,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Mediation defaults
 		mediationBootstrap:    1000,
 		mediationMaxMediators: 20,
+		// Moderation defaults
+		moderationMaxFeatures: 50,
+		moderationMinSamples:  15,
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
 		// Condition defaults
@@ -2530,6 +2546,7 @@ func (m Model) behaviorSections() []behaviorSection {
 		{Key: "temporal", Label: "Temporal", Enabled: m.isComputationSelected("temporal")},
 		{Key: "cluster", Label: "Cluster", Enabled: m.isComputationSelected("cluster")},
 		{Key: "mediation", Label: "Mediation", Enabled: m.isComputationSelected("mediation")},
+		{Key: "moderation", Label: "Moderation", Enabled: m.isComputationSelected("moderation")},
 		{Key: "mixed_effects", Label: "Mixed Effects", Enabled: m.isComputationSelected("mixed_effects")},
 	}
 }
@@ -2779,6 +2796,7 @@ const (
 	optBehaviorGroupTemporal
 	optBehaviorGroupCluster
 	optBehaviorGroupMediation
+	optBehaviorGroupModeration
 	optBehaviorGroupMixedEffects
 	optMicrostateStates
 	optGroupTemplates
@@ -2833,6 +2851,9 @@ const (
 	// Behavior options - Mediation
 	optMediationBootstrap
 	optMediationMaxMediators
+	// Behavior options - Moderation
+	optModerationMaxFeatures
+	optModerationMinSamples
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
 	// Behavior options - Condition
@@ -3932,6 +3953,14 @@ func (m Model) getBehaviorOptions() []optionType {
 		options = append(options, optBehaviorGroupMediation)
 		if m.behaviorGroupMediationExpanded {
 			options = append(options, optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators)
+		}
+	}
+
+	// Moderation section
+	if m.isComputationSelected("moderation") {
+		options = append(options, optBehaviorGroupModeration)
+		if m.behaviorGroupModerationExpanded {
+			options = append(options, optModerationMaxFeatures, optModerationMinSamples)
 		}
 	}
 

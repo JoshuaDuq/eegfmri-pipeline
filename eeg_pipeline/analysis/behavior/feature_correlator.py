@@ -3,14 +3,13 @@ Unified Feature-Behavior Correlator
 ====================================
 
 Single entry point for correlating ALL EEG features with behavioral measures.
-Uses core.correlate_features_loop for all correlations - no duplicate logic.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 import re
 
@@ -19,13 +18,9 @@ import pandas as pd
 
 from eeg_pipeline.context.behavior import BehaviorContext, ComputationResult, ComputationStatus
 from eeg_pipeline.utils.analysis.stats.correlation import (
-    CorrelationRecord,
-    correlate_features_loop,
     save_correlation_results,
     align_groups_to_series as _align_groups_to_series,
     align_features_and_targets,
-    build_temp_record_unified,
-    compute_roi_correlation_stats,
     format_correlation_method_label,
     normalize_correlation_method,
     safe_correlation,
@@ -33,23 +28,15 @@ from eeg_pipeline.utils.analysis.stats.correlation import (
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.context.behavior import AnalysisConfig
-from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value, load_config
+from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value
 from eeg_pipeline.utils.analysis.stats import (
-    prepare_aligned_data,
-    compute_correlation,
-    compute_bootstrap_ci,
     compute_partial_correlations_with_cov_temp,
     compute_permutation_pvalues_with_cov_temp,
-    compute_temp_permutation_pvalues,
-    CorrelationStats,
     fdr_bh,
 )
 from eeg_pipeline.utils.parallel import parallel_feature_types, get_n_jobs
 from joblib import Parallel, delayed, cpu_count
 from eeg_pipeline.domain.features.registry import (
-    FeatureRegistry,
-    classify_feature,
     get_feature_registry,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
@@ -191,20 +178,6 @@ class FeatureCorrelationResult:
 # =============================================================================
 # Parallel Column Processing Helpers
 # =============================================================================
-
-
-@dataclass
-class ColumnProcessorParams:
-    """Parameters for parallel column processing. Bundles config to reduce function args."""
-    method: str
-    min_samples: int
-    n_permutations: int
-    n_bootstrap: int
-    control_temperature: bool
-    control_trial_order: bool
-    compute_bayes_factor: bool
-    compute_loso_stability: bool
-    compute_reliability: bool
 
 
 def _infer_min_samples_for_column(
@@ -1146,157 +1119,3 @@ def run_unified_feature_correlations(ctx: BehaviorContext) -> ComputationResult:
     )
 
 
-def _load_pain_feature_patterns(config: Any) -> List[str]:
-    """Fetch pain-relevant feature regex patterns from config."""
-    patterns = get_config_value(config, "behavior_analysis.pain_relevant_patterns", None)
-    if patterns is None:
-        raise ValueError(
-            "Define behavior_analysis.pain_relevant_patterns in eeg_config.yaml "
-            "as a list of regex strings for pain-relevant features."
-        )
-    if not isinstance(patterns, (list, tuple)):
-        raise ValueError("behavior_analysis.pain_relevant_patterns must be a list.")
-    cleaned = [str(p).strip() for p in patterns if str(p).strip()]
-    if not cleaned:
-        raise ValueError("behavior_analysis.pain_relevant_patterns is empty.")
-    return cleaned
-
-
-def correlate_pain_relevant_features(ctx: BehaviorContext) -> ComputationResult:
-    """Correlate features most relevant to pain processing."""
-    try:
-        pain_patterns = _load_pain_feature_patterns(ctx.config)
-    except ValueError as err:
-        return ComputationResult(
-            name="pain_relevant",
-            status=ComputationStatus.FAILED,
-            error=str(err),
-        )
-
-    correlator = FeatureBehaviorCorrelator(
-        subject=ctx.subject, deriv_root=ctx.deriv_root,
-        config=ctx.config, logger=ctx.logger, stats_dir=ctx.stats_dir,
-    )
-    correlator.load_all_features()
-
-    # Filter to pain-relevant columns
-    pain_features = {}
-    for name, df in correlator._feature_dfs.items():
-        cols = [c for c in df.columns if any(re.search(p, c, re.I) for p in pain_patterns)]
-        if cols:
-            pain_features[name] = df[cols]
-
-    if not pain_features:
-        return ComputationResult(name="pain_relevant", status=ComputationStatus.SKIPPED,
-                                metadata={"reason": "No pain-relevant features"})
-
-    corr_config = CorrelationConfig.from_context(ctx)
-    method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
-    all_records = []
-
-    for name, df in pain_features.items():
-        result = correlator._correlate_df(df, ctx.targets, corr_config, f"{name}_pain")
-        all_records.extend(result.records)
-
-    if all_records:
-        df = pd.DataFrame(all_records)
-        method_suffix = f"_{method_label}" if method_label else ""
-        save_correlation_results(
-            df,
-            ctx.stats_dir / f"corr_stats_pain_relevant_vs_rating{method_suffix}.tsv",
-        )
-
-    alpha = float(get_config_value(ctx.config, "statistics.sig_alpha", 0.05))
-    n_sig = sum(1 for r in all_records if r.get("p", 1) < alpha)
-    return ComputationResult(name="pain_relevant", status=ComputationStatus.SUCCESS,
-                            metadata={"n_features": len(all_records), "n_significant": n_sig})
-
-
-def generate_feature_coverage_report(ctx: BehaviorContext) -> Dict[str, Any]:
-    """Generate feature coverage report."""
-    features_dir = deriv_features_path(ctx.deriv_root, ctx.subject)
-    registry = get_feature_registry(ctx.config)
-    
-    report = {
-        "subject": ctx.subject,
-        "feature_files": {},
-        "feature_types": {},
-        "total_features": 0,
-        "available_files": [],
-        "missing_files": [],
-    }
-
-    for name, filename in registry.files.items():
-        path = features_dir / filename
-        if path.exists():
-            df = read_tsv(path)
-            if df is not None and not df.empty:
-                report["available_files"].append(name)
-                report["feature_files"][name] = {"n_features": len(df.columns), "n_epochs": len(df)}
-                report["total_features"] += len(df.columns)
-                for col in df.columns:
-                    ftype, _, _ = classify_feature(col, include_subtype=True, registry=registry)
-                    report["feature_types"][ftype] = report["feature_types"].get(ftype, 0) + 1
-        else:
-            report["missing_files"].append(name)
-
-    report["coverage_pct"] = len(report["available_files"]) / len(registry.files) * 100
-    ctx.logger.info(f"Coverage: {len(report['available_files'])}/{len(registry.files)} files")
-    return report
-
-
-def compute_feature_importance_summary(ctx: BehaviorContext) -> pd.DataFrame:
-    """Compute feature importance summary."""
-    from eeg_pipeline.utils.analysis.stats import fdr_bh
-
-    correlator = FeatureBehaviorCorrelator(
-        subject=ctx.subject, deriv_root=ctx.deriv_root,
-        config=ctx.config, logger=ctx.logger, stats_dir=ctx.stats_dir,
-    )
-    correlator.load_all_features()
-    corr_config = CorrelationConfig.from_context(ctx)
-
-    rating_results = correlator.correlate_all(ctx.targets, "rating", corr_config)
-    temp_results = None
-    min_samples_default = get_min_samples(ctx.config, "default")
-    if ctx.temperature is not None and len(ctx.temperature.dropna()) > min_samples_default:
-        temp_results = correlator.correlate_all(ctx.temperature, "temperature", corr_config)
-
-    summary = []
-    for name, result in rating_results.items():
-        for rec in result.records:
-            feature = rec.get("feature") or rec.get("identifier", "unknown")
-            r_temp, p_temp = np.nan, np.nan
-            if temp_results and name in temp_results:
-                for tr in temp_results[name].records:
-                    if tr.get("feature") == feature or tr.get("identifier") == feature:
-                        r_temp, p_temp = tr.get("r", np.nan), tr.get("p", np.nan)
-                        break
-
-            abs_r = abs(rec.get("r", 0))
-            effect = "large" if abs_r >= 0.5 else "medium" if abs_r >= 0.3 else "small" if abs_r >= 0.1 else "negligible"
-
-            summary.append({
-                "feature": feature,
-                "feature_type": rec.get("feature_type", name),
-                "band": rec.get("band", "N/A"),
-                "r_rating": rec.get("r"),
-                "p_rating": rec.get("p"),
-                "r_temperature": r_temp,
-                "p_temperature": p_temp,
-                "effect_size": effect,
-                "n": rec.get("n"),
-            })
-
-    if not summary:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(summary)
-    valid_p = df["p_rating"].notna()
-    if valid_p.any():
-        df.loc[valid_p, "q_rating"] = fdr_bh(df.loc[valid_p, "p_rating"].values)
-
-    df = df.assign(abs_r=df["r_rating"].abs()).sort_values("abs_r", ascending=False).drop(columns=["abs_r"])
-    write_tsv(df, ctx.stats_dir / "feature_importance_summary.tsv")
-    ctx.logger.info(f"Saved feature importance: {len(df)} features")
-    return df

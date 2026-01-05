@@ -1677,6 +1677,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optBehaviorGroupMediation:
 		m.behaviorGroupMediationExpanded = !m.behaviorGroupMediationExpanded
 		m.useDefaultAdvanced = false
+	case optBehaviorGroupModeration:
+		m.behaviorGroupModerationExpanded = !m.behaviorGroupModerationExpanded
+		m.useDefaultAdvanced = false
 	case optBehaviorGroupMixedEffects:
 		m.behaviorGroupMixedEffectsExpanded = !m.behaviorGroupMixedEffectsExpanded
 		m.useDefaultAdvanced = false
@@ -1749,6 +1752,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optTrialTableRatingMin, optTrialTableRatingMax, optTrialTableTempMin, optTrialTableTempMax, optTrialTableHighMissingFrac:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFeatureSummariesEnabled:
+		m.featureSummariesEnabled = !m.featureSummariesEnabled
 		m.useDefaultAdvanced = false
 	case optPainResidualEnabled:
 		m.painResidualEnabled = !m.painResidualEnabled
@@ -2020,6 +2026,10 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Mediation options
 	case optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Moderation options
+	case optModerationMaxFeatures, optModerationMinSamples:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// Mixed effects options
@@ -2940,6 +2950,14 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optMediationMaxMediators:
 		if val >= 1 {
 			m.mediationMaxMediators = int(val)
+		}
+	case optModerationMaxFeatures:
+		if val >= 1 {
+			m.moderationMaxFeatures = int(val)
+		}
+	case optModerationMinSamples:
+		if val >= 1 {
+			m.moderationMinSamples = int(val)
 		}
 	case optMixedMaxFeatures:
 		if val >= 1 {

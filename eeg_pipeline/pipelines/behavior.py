@@ -46,6 +46,7 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     stage_consistency as _stage_consistency_impl,
     stage_influence as _stage_influence_impl,
     stage_advanced as _stage_advanced_impl,
+    stage_moderation as _stage_moderation_impl,
     stage_cluster as _stage_cluster_impl,
     stage_condition as _stage_condition_impl,
     stage_correlate as _stage_correlate_impl,
@@ -78,6 +79,7 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "temporal",
     "cluster",
     "mediation",
+    "moderation",
     "mixed_effects",
 ]
 
@@ -138,6 +140,7 @@ class BehaviorPipelineConfig:
     run_temporal_correlations: bool = True
     run_cluster_tests: bool = False
     run_mediation: bool = False
+    run_moderation: bool = False
     run_mixed_effects: bool = False
     
     # General stats
@@ -162,6 +165,10 @@ class BehaviorPipelineConfig:
     mediation_n_bootstrap: int = 1000
     mediation_min_effect: float = 0.05
     mediation_max_mediators: int = 20
+    
+    # Moderation-specific
+    moderation_max_features: int = 50
+    moderation_min_samples: int = 15
     
     # Mixed effects-specific
     mixed_effects_type: str = "intercept"
@@ -204,6 +211,7 @@ class BehaviorPipelineConfig:
             run_temporal_correlations=get_config_value(config, "behavior_analysis.temporal.enabled", True),
             run_cluster_tests=get_config_value(config, "behavior_analysis.cluster.enabled", False),
             run_mediation=get_config_value(config, "behavior_analysis.mediation.enabled", False),
+            run_moderation=get_config_value(config, "behavior_analysis.moderation.enabled", False),
             run_mixed_effects=get_config_value(config, "behavior_analysis.mixed_effects.enabled", False),
             fdr_alpha=float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)),
             n_permutations=int(
@@ -228,6 +236,9 @@ class BehaviorPipelineConfig:
             mediation_n_bootstrap=int(get_config_value(config, "behavior_analysis.mediation.n_bootstrap", 1000)),
             mediation_min_effect=float(get_config_value(config, "behavior_analysis.mediation.min_effect_size", 0.05)),
             mediation_max_mediators=int(get_config_value(config, "behavior_analysis.mediation.max_mediators", 20)),
+            # Moderation-specific
+            moderation_max_features=int(get_config_value(config, "behavior_analysis.moderation.max_features", 50)),
+            moderation_min_samples=int(get_config_value(config, "behavior_analysis.moderation.min_samples", 15)),
             # Mixed effects-specific
             mixed_effects_type=str(get_config_value(config, "behavior_analysis.mixed_effects.random_effects", "intercept")),
             mixed_effects_max_features=int(get_config_value(config, "behavior_analysis.mixed_effects.max_features", 50)),
@@ -250,6 +261,7 @@ class BehaviorPipelineResults:
     pain_sensitivity: Optional[pd.DataFrame] = None
     condition_effects: Optional[pd.DataFrame] = None
     mediation: Optional[pd.DataFrame] = None
+    moderation: Optional[pd.DataFrame] = None
     mixed_effects: Optional[pd.DataFrame] = None
     cluster: Optional[Dict[str, Any]] = None
     temporal: Optional[Dict[str, Any]] = None
@@ -342,6 +354,19 @@ class BehaviorPipelineResults:
             n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
             if p_fdr is not None:
                 n_sig_fdr += int((p_fdr.fillna(1) < 0.05).sum())
+
+        if self.moderation is not None and not self.moderation.empty:
+            df = self.moderation
+            n = len(df)
+            n_total += n
+            s["n_moderation_features"] = n
+            
+            p_raw = df["p_interaction"] if "p_interaction" in df.columns else df.get("p_value")
+            p_fdr = df["q_global"] if "q_global" in df.columns else df.get("p_fdr")
+            
+            n_sig_raw += int((p_raw.fillna(1) < 0.05).sum()) if p_raw is not None else 0
+            if p_fdr is not None:
+                n_sig_fdr += int((pd.to_numeric(p_fdr, errors="coerce").fillna(1) < 0.05).sum())
 
         if self.mixed_effects is not None and not self.mixed_effects.empty:
             df = self.mixed_effects
@@ -438,6 +463,7 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_temporal_correlations = comp_flags["temporal"]
             self.pipeline_config.run_cluster_tests = comp_flags["cluster"]
             self.pipeline_config.run_mediation = comp_flags["mediation"]
+            self.pipeline_config.run_moderation = comp_flags["moderation"]
             self.pipeline_config.run_mixed_effects = comp_flags["mixed_effects"]
             self.pipeline_config.compute_pain_sensitivity = comp_flags["pain_sensitivity"]
             self._run_validation = any(
@@ -461,6 +487,7 @@ class BehaviorPipeline(PipelineBase):
                     self.pipeline_config.run_temporal_correlations,
                     self.pipeline_config.run_cluster_tests,
                     self.pipeline_config.run_mediation,
+                    self.pipeline_config.run_moderation,
                     self.pipeline_config.run_mixed_effects,
                     self.pipeline_config.compute_pain_sensitivity,
                 ]
@@ -497,7 +524,7 @@ class BehaviorPipeline(PipelineBase):
         validate_only = bool(kwargs.get("validate_only", False))
         
         # Calculate total steps dynamically based on enabled stages
-        run_advanced = self.pipeline_config.run_mediation or self.pipeline_config.run_mixed_effects
+        run_advanced = self.pipeline_config.run_mediation or self.pipeline_config.run_moderation or self.pipeline_config.run_mixed_effects
         run_correlate = self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity
         enabled_stages = [
             True,  # Load (always runs)

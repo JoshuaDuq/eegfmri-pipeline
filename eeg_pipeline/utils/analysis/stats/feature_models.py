@@ -18,6 +18,7 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features
 
 
 def _get(config: Any, key: str, default: Any) -> Any:
@@ -164,6 +165,182 @@ def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Ser
     return None, {"binary_outcome_kind": kind, "status": "missing"}
 
 
+def _process_single_feature_models(
+    feat: str,
+    trial_df: pd.DataFrame,
+    y_all: pd.Series,
+    X_base: np.ndarray,
+    X_base_names: List[str],
+    cfg: "FeatureModelsConfig",
+    families: List[str],
+    is_binary: bool,
+    out_name: str,
+    has_statsmodels: bool,
+) -> List[Dict[str, Any]]:
+    """Process all model families for a single feature."""
+    records: List[Dict[str, Any]] = []
+    
+    x_raw = pd.to_numeric(trial_df[feat], errors="coerce")
+    x = x_raw.to_numpy(dtype=float)
+    if cfg.standardize:
+        x = _zscore(x)
+
+    t_use = None
+    if cfg.include_interaction and "temperature" in trial_df.columns:
+        t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
+        t_use = _zscore(t) if cfg.standardize else t
+
+    y = pd.to_numeric(y_all, errors="coerce").to_numpy(dtype=float)
+    valid = np.isfinite(y) & np.isfinite(x) & np.all(np.isfinite(X_base), axis=1)
+    if t_use is not None:
+        valid = valid & np.isfinite(t_use)
+    if int(valid.sum()) < cfg.min_samples:
+        return records
+
+    y_v = y[valid]
+    x_v = x[valid]
+    Xb_v = X_base[valid]
+
+    X_parts = [Xb_v, x_v[:, None]]
+    names = [*X_base_names, "feature"]
+    if t_use is not None:
+        X_parts.append((x_v * t_use[valid])[:, None])
+        names.append("feature_x_temperature")
+    X = np.column_stack(X_parts)
+
+    if has_statsmodels:
+        try:
+            import statsmodels.api as sm
+        except ImportError:
+            sm = None
+    else:
+        sm = None
+
+    for fam in families:
+        fam = str(fam).lower()
+        if fam in ("logit", "logistic", "logistic_regression"):
+            if not is_binary or sm is None:
+                continue
+            y_bin = y_v
+            if int(np.unique(y_bin[np.isfinite(y_bin)]).size) < 2:
+                continue
+            try:
+                model_red = sm.Logit(y_bin, Xb_v).fit(disp=False, maxiter=200)
+                model = sm.Logit(y_bin, X).fit(disp=False, maxiter=200)
+            except Exception:
+                continue
+            idx = names.index("feature")
+            beta = float(model.params[idx])
+            se = float(model.bse[idx]) if np.isfinite(model.bse[idx]) else np.nan
+            z = float(model.tvalues[idx]) if hasattr(model, "tvalues") else (beta / (se + 1e-12))
+            p = float(model.pvalues[idx]) if hasattr(model, "pvalues") else float(2 * stats.norm.sf(abs(z)))
+            or_ = float(np.exp(beta)) if np.isfinite(beta) else np.nan
+            llf = float(model.llf) if hasattr(model, "llf") else np.nan
+            llf0 = float(model_red.llf) if hasattr(model_red, "llf") else np.nan
+            mcfadden = 1.0 - (llf / llf0) if np.isfinite(llf) and np.isfinite(llf0) and llf0 != 0 else np.nan
+
+            auc = np.nan
+            delta_auc = np.nan
+            try:
+                from sklearn.metrics import roc_auc_score
+                yhat = np.asarray(model.predict(X), dtype=float)
+                yhat0 = np.asarray(model_red.predict(Xb_v), dtype=float)
+                auc = float(roc_auc_score(y_bin, yhat)) if np.isfinite(yhat).all() else np.nan
+                auc0 = float(roc_auc_score(y_bin, yhat0)) if np.isfinite(yhat0).all() else np.nan
+                delta_auc = auc - auc0 if np.isfinite(auc) and np.isfinite(auc0) else np.nan
+            except Exception:
+                pass
+
+            records.append({
+                "feature": feat, "target": out_name, "model_family": "logit",
+                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
+                "stat_feature": z, "p_feature": p, "odds_ratio": or_,
+                "auc": auc, "delta_auc": delta_auc, "pseudo_r2_mcfadden": mcfadden,
+                "beta_interaction": float(model.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
+                "p_interaction": float(model.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(model, "pvalues") else np.nan,
+                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "mle",
+            })
+            continue
+
+        if fam in ("quantile_50", "quantile", "median"):
+            if is_binary or sm is None:
+                continue
+            try:
+                mod = sm.QuantReg(y_v, X)
+                res = mod.fit(q=0.5)
+            except Exception:
+                continue
+            idx = names.index("feature")
+            beta = float(res.params[idx])
+            se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
+            t = float(res.tvalues[idx]) if hasattr(res, "tvalues") else (beta / (se + 1e-12))
+            p = float(res.pvalues[idx]) if hasattr(res, "pvalues") else float(2 * stats.norm.sf(abs(t)))
+            records.append({
+                "feature": feat, "target": out_name, "model_family": "quantile_50",
+                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
+                "stat_feature": t, "p_feature": p, "odds_ratio": np.nan,
+                "auc": np.nan, "delta_auc": np.nan, "pseudo_r2_mcfadden": np.nan,
+                "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
+                "p_interaction": float(res.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(res, "pvalues") else np.nan,
+                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "quantreg",
+            })
+            continue
+
+        if fam in ("robust_rlm", "rlm", "huber"):
+            if is_binary or sm is None:
+                continue
+            try:
+                res = sm.RLM(y_v, X, M=sm.robust.norms.HuberT()).fit()
+            except Exception:
+                continue
+            idx = names.index("feature")
+            beta = float(res.params[idx])
+            se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
+            z = beta / (se + 1e-12) if np.isfinite(se) else np.nan
+            p = float(2 * stats.norm.sf(abs(z))) if np.isfinite(z) else np.nan
+            records.append({
+                "feature": feat, "target": out_name, "model_family": "robust_rlm",
+                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
+                "stat_feature": float(z) if np.isfinite(z) else np.nan, "p_feature": p,
+                "odds_ratio": np.nan, "auc": np.nan, "delta_auc": np.nan,
+                "pseudo_r2_mcfadden": np.nan,
+                "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
+                "p_interaction": np.nan,
+                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "rlm",
+            })
+            continue
+
+        if fam in ("ols_hc3", "ols"):
+            if is_binary:
+                continue
+            beta = _ols_fit(X, y_v)
+            if beta is None:
+                continue
+            y_hat = X @ beta
+            r2_full = _r2(y_v, y_hat)
+            se = _hc3_se(X, y_v, beta)
+            dof = max(int(len(y_v) - X.shape[1]), 1)
+            t_stats = beta / (se + 1e-12)
+            p_vals = 2 * stats.t.sf(np.abs(t_stats), df=dof)
+            idx = names.index("feature")
+            beta_f = float(beta[idx])
+            p_f = float(p_vals[idx]) if np.isfinite(p_vals[idx]) else np.nan
+            records.append({
+                "feature": feat, "target": out_name, "model_family": "ols_hc3",
+                "n": int(valid.sum()), "beta_feature": beta_f,
+                "se_feature": float(se[idx]) if np.isfinite(se[idx]) else np.nan,
+                "stat_feature": float(t_stats[idx]) if np.isfinite(t_stats[idx]) else np.nan,
+                "p_feature": p_f, "odds_ratio": np.nan, "auc": np.nan, "delta_auc": np.nan,
+                "pseudo_r2_mcfadden": np.nan,
+                "r2": float(r2_full) if np.isfinite(r2_full) else np.nan,
+                "beta_interaction": float(beta[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
+                "p_interaction": float(p_vals[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
+                "p_primary": p_f, "p_raw": p_f, "p_kind_primary": "p_feature", "p_primary_source": "hc3",
+            })
+
+    return records
+
+
 def run_feature_model_families(
     trial_df: pd.DataFrame,
     *,
@@ -185,8 +362,8 @@ def run_feature_model_families(
 
     rng_seed = int(_get(config, "project.random_state", 42))
     meta["random_state"] = rng_seed
+    n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
 
-    # Feature filtering
     candidates: List[str] = []
     for col in feature_cols:
         if col not in trial_df.columns:
@@ -307,214 +484,22 @@ def run_feature_model_families(
         meta.setdefault("temperature_control_by_outcome", {})[out_name] = temp_meta
         meta.setdefault("covariates_by_outcome", {})[out_name] = list(covariates)
 
-        for feat in candidates:
-            x_raw = pd.to_numeric(trial_df[feat], errors="coerce")
-            x = x_raw.to_numpy(dtype=float)
-            if cfg.standardize:
-                x = _zscore(x)
-
-            t_use = None
-            # Moderation uses physical temperature even if temperature is controlled nonlinearly.
-            if cfg.include_interaction and "temperature" in trial_df.columns:
-                t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
-                t_use = _zscore(t) if cfg.standardize else t
-
-            y = pd.to_numeric(y_all, errors="coerce").to_numpy(dtype=float)
-            valid = np.isfinite(y) & np.isfinite(x) & np.all(np.isfinite(X_base), axis=1)
-            if t_use is not None:
-                valid = valid & np.isfinite(t_use)
-            if int(valid.sum()) < cfg.min_samples:
-                continue
-
-            y_v = y[valid]
-            x_v = x[valid]
-            Xb_v = X_base[valid]
-
-            X_parts = [Xb_v, x_v[:, None]]
-            names = [*X_base_names, "feature"]
-            if t_use is not None:
-                X_parts.append((x_v * t_use[valid])[:, None])
-                names.append("feature_x_temperature")
-            X = np.column_stack(X_parts)
-
-            for fam in cfg.families:
-                fam = str(fam).lower()
-                if fam in ("logit", "logistic", "logistic_regression"):
-                    if not is_binary:
-                        continue
-                    if not _has_statsmodels:
-                        continue
-                    # Require both classes.
-                    y_bin = y_v
-                    if int(np.unique(y_bin[np.isfinite(y_bin)]).size) < 2:
-                        continue
-                    try:
-                        model_red = sm.Logit(y_bin, Xb_v).fit(disp=False, maxiter=200)
-                        model = sm.Logit(y_bin, X).fit(disp=False, maxiter=200)
-                    except Exception:
-                        continue
-                    idx = names.index("feature")
-                    beta = float(model.params[idx])
-                    se = float(model.bse[idx]) if np.isfinite(model.bse[idx]) else np.nan
-                    z = float(model.tvalues[idx]) if hasattr(model, "tvalues") else (beta / (se + 1e-12))
-                    p = float(model.pvalues[idx]) if hasattr(model, "pvalues") else float(2 * stats.norm.sf(abs(z)))
-                    or_ = float(np.exp(beta)) if np.isfinite(beta) else np.nan
-                    llf = float(model.llf) if hasattr(model, "llf") else np.nan
-                    llf0 = float(model_red.llf) if hasattr(model_red, "llf") else np.nan
-                    mcfadden = 1.0 - (llf / llf0) if np.isfinite(llf) and np.isfinite(llf0) and llf0 != 0 else np.nan
-
-                    auc = np.nan
-                    delta_auc = np.nan
-                    try:
-                        from sklearn.metrics import roc_auc_score
-
-                        yhat = np.asarray(model.predict(X), dtype=float)
-                        yhat0 = np.asarray(model_red.predict(Xb_v), dtype=float)
-                        auc = float(roc_auc_score(y_bin, yhat)) if np.isfinite(yhat).all() else np.nan
-                        auc0 = float(roc_auc_score(y_bin, yhat0)) if np.isfinite(yhat0).all() else np.nan
-                        delta_auc = auc - auc0 if np.isfinite(auc) and np.isfinite(auc0) else np.nan
-                    except Exception:
-                        pass
-
-                    records.append(
-                        {
-                            "feature": feat,
-                            "target": out_name,
-                            "model_family": "logit",
-                            "n": int(valid.sum()),
-                            "beta_feature": beta,
-                            "se_feature": se,
-                            "stat_feature": z,
-                            "p_feature": p,
-                            "odds_ratio": or_,
-                            "auc": auc,
-                            "delta_auc": delta_auc,
-                            "pseudo_r2_mcfadden": mcfadden,
-                            "beta_interaction": float(model.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                            "p_interaction": float(model.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(model, "pvalues") else np.nan,
-                            "p_primary": p,
-                            "p_raw": p,
-                            "p_kind_primary": "p_feature",
-                            "p_primary_source": "mle",
-                        }
-                    )
-                    continue
-
-                if fam in ("quantile_50", "quantile", "median"):
-                    if is_binary:
-                        continue
-                    if not _has_statsmodels:
-                        continue
-                    try:
-                        mod = sm.QuantReg(y_v, X)
-                        res = mod.fit(q=0.5)
-                    except Exception:
-                        continue
-                    idx = names.index("feature")
-                    beta = float(res.params[idx])
-                    se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
-                    t = float(res.tvalues[idx]) if hasattr(res, "tvalues") else (beta / (se + 1e-12))
-                    p = float(res.pvalues[idx]) if hasattr(res, "pvalues") else float(2 * stats.norm.sf(abs(t)))
-                    records.append(
-                        {
-                            "feature": feat,
-                            "target": out_name,
-                            "model_family": "quantile_50",
-                            "n": int(valid.sum()),
-                            "beta_feature": beta,
-                            "se_feature": se,
-                            "stat_feature": t,
-                            "p_feature": p,
-                            "odds_ratio": np.nan,
-                            "auc": np.nan,
-                            "delta_auc": np.nan,
-                            "pseudo_r2_mcfadden": np.nan,
-                            "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                            "p_interaction": float(res.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(res, "pvalues") else np.nan,
-                            "p_primary": p,
-                            "p_raw": p,
-                            "p_kind_primary": "p_feature",
-                            "p_primary_source": "quantreg",
-                        }
-                    )
-                    continue
-
-                if fam in ("robust_rlm", "rlm", "huber"):
-                    if is_binary:
-                        continue
-                    if not _has_statsmodels:
-                        continue
-                    try:
-                        res = sm.RLM(y_v, X, M=sm.robust.norms.HuberT()).fit()
-                    except Exception:
-                        continue
-                    idx = names.index("feature")
-                    beta = float(res.params[idx])
-                    se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
-                    z = beta / (se + 1e-12) if np.isfinite(se) else np.nan
-                    p = float(2 * stats.norm.sf(abs(z))) if np.isfinite(z) else np.nan
-                    records.append(
-                        {
-                            "feature": feat,
-                            "target": out_name,
-                            "model_family": "robust_rlm",
-                            "n": int(valid.sum()),
-                            "beta_feature": beta,
-                            "se_feature": se,
-                            "stat_feature": float(z) if np.isfinite(z) else np.nan,
-                            "p_feature": p,
-                            "odds_ratio": np.nan,
-                            "auc": np.nan,
-                            "delta_auc": np.nan,
-                            "pseudo_r2_mcfadden": np.nan,
-                            "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                            "p_interaction": np.nan,
-                            "p_primary": p,
-                            "p_raw": p,
-                            "p_kind_primary": "p_feature",
-                            "p_primary_source": "rlm",
-                        }
-                    )
-                    continue
-
-                if fam in ("ols_hc3", "ols"):
-                    if is_binary:
-                        continue
-                    beta = _ols_fit(X, y_v)
-                    if beta is None:
-                        continue
-                    y_hat = X @ beta
-                    r2_full = _r2(y_v, y_hat)
-                    se = _hc3_se(X, y_v, beta)
-                    dof = max(int(len(y_v) - X.shape[1]), 1)
-                    t_stats = beta / (se + 1e-12)
-                    p_vals = 2 * stats.t.sf(np.abs(t_stats), df=dof)
-                    idx = names.index("feature")
-                    beta_f = float(beta[idx])
-                    p_f = float(p_vals[idx]) if np.isfinite(p_vals[idx]) else np.nan
-                    records.append(
-                        {
-                            "feature": feat,
-                            "target": out_name,
-                            "model_family": "ols_hc3",
-                            "n": int(valid.sum()),
-                            "beta_feature": beta_f,
-                            "se_feature": float(se[idx]) if np.isfinite(se[idx]) else np.nan,
-                            "stat_feature": float(t_stats[idx]) if np.isfinite(t_stats[idx]) else np.nan,
-                            "p_feature": p_f,
-                            "odds_ratio": np.nan,
-                            "auc": np.nan,
-                            "delta_auc": np.nan,
-                            "pseudo_r2_mcfadden": np.nan,
-                            "r2": float(r2_full) if np.isfinite(r2_full) else np.nan,
-                            "beta_interaction": float(beta[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                            "p_interaction": float(p_vals[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                            "p_primary": p_f,
-                            "p_raw": p_f,
-                            "p_kind_primary": "p_feature",
-                            "p_primary_source": "hc3",
-                        }
-                    )
+        feature_args = [
+            (feat, trial_df, y_all, X_base, X_base_names, cfg, cfg.families, is_binary, out_name, _has_statsmodels)
+            for feat in candidates
+        ]
+        
+        outcome_records = parallel_regression_features(
+            feature_args,
+            _process_single_feature_models,
+            n_jobs=n_jobs_actual,
+            min_features_for_parallel=10,
+        )
+        for rec_list in outcome_records:
+            if isinstance(rec_list, list):
+                records.extend(rec_list)
+            elif rec_list is not None:
+                records.append(rec_list)
 
     if not records:
         return pd.DataFrame(), {**meta, "status": "empty"}

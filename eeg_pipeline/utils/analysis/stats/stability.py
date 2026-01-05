@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.analysis.stats.correlation import compute_correlation
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_stability_features
 
 
 def _get(config: Any, key: str, default: Any) -> Any:
@@ -23,6 +24,110 @@ def _get(config: Any, key: str, default: Any) -> Any:
     except Exception:
         pass
     return default
+
+
+def _process_single_stability_feature(
+    feat: str,
+    trial_df: pd.DataFrame,
+    y_all: pd.Series,
+    g_all: pd.Series,
+    groups: List[Any],
+    outcome: str,
+    group_col: str,
+    method: str,
+    min_group_trials: int,
+    alpha: float,
+    use_partial_temp: bool,
+    has_temp: bool,
+) -> Optional[Dict[str, Any]]:
+    """Process stability for a single feature."""
+    x_all = pd.to_numeric(trial_df[feat], errors="coerce")
+    valid_all = x_all.notna() & y_all.notna()
+    r_overall, p_overall = compute_correlation(
+        x_all[valid_all].to_numpy(dtype=float),
+        y_all[valid_all].to_numpy(dtype=float),
+        method=method,
+    )
+
+    rs = []
+    ps = []
+    ns = []
+    rs_partial = []
+    ps_partial = []
+
+    try:
+        from eeg_pipeline.utils.analysis.stats import compute_partial_corr
+        _has_partial = True
+    except Exception:
+        compute_partial_corr = None
+        _has_partial = False
+
+    for g in groups:
+        mask = (g_all == g) & x_all.notna() & y_all.notna()
+        n = int(mask.sum())
+        if n < min_group_trials:
+            continue
+        r, p = compute_correlation(
+            x_all[mask].to_numpy(dtype=float),
+            y_all[mask].to_numpy(dtype=float),
+            method=method,
+        )
+        rs.append(float(r) if np.isfinite(r) else np.nan)
+        ps.append(float(p) if np.isfinite(p) else np.nan)
+        ns.append(n)
+
+        if use_partial_temp and _has_partial and has_temp:
+            t = pd.to_numeric(trial_df.loc[mask, "temperature"], errors="coerce")
+            ok = t.notna()
+            if int(ok.sum()) >= max(min_group_trials, 10):
+                try:
+                    r_p, p_p, _n_p = compute_partial_corr(
+                        pd.Series(x_all[mask][ok].to_numpy(dtype=float)),
+                        pd.Series(y_all[mask][ok].to_numpy(dtype=float)),
+                        pd.DataFrame({"temperature": t[ok].to_numpy(dtype=float)}),
+                        method=method,
+                    )
+                    rs_partial.append(float(r_p) if np.isfinite(r_p) else np.nan)
+                    ps_partial.append(float(p_p) if np.isfinite(p_p) else np.nan)
+                except Exception:
+                    rs_partial.append(np.nan)
+                    ps_partial.append(np.nan)
+
+    rs_arr = np.asarray(rs, dtype=float)
+    ps_arr = np.asarray(ps, dtype=float)
+    ok = np.isfinite(rs_arr)
+    n_groups_valid = int(ok.sum())
+    sign_consistency = float((np.sign(rs_arr[ok]) == np.sign(r_overall)).mean()) if ok.any() and np.isfinite(r_overall) else np.nan
+    frac_sig = float((ps_arr[ok] < alpha).mean()) if ok.any() else np.nan
+
+    rec: Dict[str, Any] = {
+        "feature": feat,
+        "target": outcome,
+        "group_column": group_col,
+        "method": method,
+        "n_groups_total": int(len(groups)),
+        "n_groups_valid": n_groups_valid,
+        "n_trials_total": int(valid_all.sum()),
+        "r_overall": float(r_overall) if np.isfinite(r_overall) else np.nan,
+        "p_overall": float(p_overall) if np.isfinite(p_overall) else np.nan,
+        "r_group_mean": float(np.nanmean(rs_arr)) if ok.any() else np.nan,
+        "r_group_std": float(np.nanstd(rs_arr, ddof=1)) if ok.sum() > 1 else np.nan,
+        "r_group_min": float(np.nanmin(rs_arr)) if ok.any() else np.nan,
+        "r_group_max": float(np.nanmax(rs_arr)) if ok.any() else np.nan,
+        "sign_consistency": sign_consistency,
+        "frac_groups_p_lt_alpha": frac_sig,
+        "mean_group_n": float(np.mean(ns)) if ns else np.nan,
+    }
+
+    if rs_partial:
+        rp = np.asarray(rs_partial, dtype=float)
+        okp = np.isfinite(rp)
+        rec["r_partial_temp_group_mean"] = float(np.nanmean(rp)) if okp.any() else np.nan
+        rec["r_partial_temp_group_std"] = float(np.nanstd(rp, ddof=1)) if okp.sum() > 1 else np.nan
+        pp = np.asarray(ps_partial, dtype=float)
+        rec["frac_groups_partial_p_lt_alpha"] = float((pp[okp] < alpha).mean()) if okp.any() else np.nan
+
+    return rec
 
 
 def compute_groupwise_stability(
@@ -44,6 +149,8 @@ def compute_groupwise_stability(
     max_features = int(_get(config, "behavior_analysis.stability.max_features", 50))
     alpha = float(_get(config, "behavior_analysis.stability.alpha", 0.05))
     use_partial_temp = bool(_get(config, "behavior_analysis.stability.partial_temperature", True))
+    n_jobs = int(_get(config, "behavior_analysis.n_jobs", -1))
+    n_jobs_actual = get_n_jobs(config, n_jobs)
 
     meta: Dict[str, Any] = {
         "method": method,
@@ -92,93 +199,22 @@ def compute_groupwise_stability(
 
     has_temp = "temperature" in trial_df.columns
 
-    records: List[Dict[str, Any]] = []
     groups = list(pd.Series(g_all).dropna().unique())
     meta["n_groups_total"] = int(len(groups))
 
-    for feat in selected:
-        x_all = pd.to_numeric(trial_df[feat], errors="coerce")
-        valid_all = x_all.notna() & y_all.notna()
-        r_overall, p_overall = compute_correlation(
-            x_all[valid_all].to_numpy(dtype=float),
-            y_all[valid_all].to_numpy(dtype=float),
-            method=method,
-        )
+    feature_args = [
+        (feat, trial_df, y_all, g_all, groups, outcome, group_col, method, min_group_trials, alpha, use_partial_temp, has_temp)
+        for feat in selected
+    ]
+    
+    records = parallel_stability_features(
+        feature_args,
+        _process_single_stability_feature,
+        n_jobs=n_jobs_actual,
+        min_features_for_parallel=10,
+    )
 
-        rs = []
-        ps = []
-        ns = []
-        rs_partial = []
-        ps_partial = []
-
-        for g in groups:
-            mask = (g_all == g) & x_all.notna() & y_all.notna()
-            n = int(mask.sum())
-            if n < min_group_trials:
-                continue
-            r, p = compute_correlation(
-                x_all[mask].to_numpy(dtype=float),
-                y_all[mask].to_numpy(dtype=float),
-                method=method,
-            )
-            rs.append(float(r) if np.isfinite(r) else np.nan)
-            ps.append(float(p) if np.isfinite(p) else np.nan)
-            ns.append(n)
-
-            if use_partial_temp and _has_partial and has_temp:
-                t = pd.to_numeric(trial_df.loc[mask, "temperature"], errors="coerce")
-                ok = t.notna()
-                if int(ok.sum()) >= max(min_group_trials, 10):
-                    try:
-                        r_p, p_p, _n_p = compute_partial_corr(
-                            pd.Series(x_all[mask][ok].to_numpy(dtype=float)),
-                            pd.Series(y_all[mask][ok].to_numpy(dtype=float)),
-                            pd.DataFrame({"temperature": t[ok].to_numpy(dtype=float)}),
-                            method=method,
-                        )
-                        rs_partial.append(float(r_p) if np.isfinite(r_p) else np.nan)
-                        ps_partial.append(float(p_p) if np.isfinite(p_p) else np.nan)
-                    except Exception:
-                        rs_partial.append(np.nan)
-                        ps_partial.append(np.nan)
-
-        rs_arr = np.asarray(rs, dtype=float)
-        ps_arr = np.asarray(ps, dtype=float)
-        ok = np.isfinite(rs_arr)
-        n_groups_valid = int(ok.sum())
-        sign_consistency = float((np.sign(rs_arr[ok]) == np.sign(r_overall)).mean()) if ok.any() and np.isfinite(r_overall) else np.nan
-        frac_sig = float((ps_arr[ok] < alpha).mean()) if ok.any() else np.nan
-
-        rec: Dict[str, Any] = {
-            "feature": feat,
-            "target": outcome,
-            "group_column": group_col,
-            "method": method,
-            "n_groups_total": int(len(groups)),
-            "n_groups_valid": n_groups_valid,
-            "n_trials_total": int(valid_all.sum()),
-            "r_overall": float(r_overall) if np.isfinite(r_overall) else np.nan,
-            "p_overall": float(p_overall) if np.isfinite(p_overall) else np.nan,
-            "r_group_mean": float(np.nanmean(rs_arr)) if ok.any() else np.nan,
-            "r_group_std": float(np.nanstd(rs_arr, ddof=1)) if ok.sum() > 1 else np.nan,
-            "r_group_min": float(np.nanmin(rs_arr)) if ok.any() else np.nan,
-            "r_group_max": float(np.nanmax(rs_arr)) if ok.any() else np.nan,
-            "sign_consistency": sign_consistency,
-            "frac_groups_p_lt_alpha": frac_sig,
-            "mean_group_n": float(np.mean(ns)) if ns else np.nan,
-        }
-
-        if rs_partial:
-            rp = np.asarray(rs_partial, dtype=float)
-            okp = np.isfinite(rp)
-            rec["r_partial_temp_group_mean"] = float(np.nanmean(rp)) if okp.any() else np.nan
-            rec["r_partial_temp_group_std"] = float(np.nanstd(rp, ddof=1)) if okp.sum() > 1 else np.nan
-            pp = np.asarray(ps_partial, dtype=float)
-            rec["frac_groups_partial_p_lt_alpha"] = float((pp[okp] < alpha).mean()) if okp.any() else np.nan
-
-        records.append(rec)
-
-    out = pd.DataFrame(records)
+    out = pd.DataFrame(records) if records else pd.DataFrame()
     return out, {**meta, "status": "ok"}
 
 

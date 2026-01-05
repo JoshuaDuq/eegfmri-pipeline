@@ -2478,6 +2478,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				label = "▾ Mediation"
 			}
 			return label, "", "Space to toggle"
+		case optBehaviorGroupModeration:
+			label := "▸ Moderation"
+			if m.behaviorGroupModerationExpanded {
+				label = "▾ Moderation"
+			}
+			return label, "", "Space to toggle"
 		case optBehaviorGroupMixedEffects:
 			label := "▸ Mixed Effects"
 			if m.behaviorGroupMixedEffectsExpanded {
@@ -3064,6 +3070,20 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Mediators", val, "max mediators tested"
+
+		// Moderation
+		case optModerationMaxFeatures:
+			val := fmt.Sprintf("%d", m.moderationMaxFeatures)
+			if m.editingNumber && m.isCurrentlyEditing(optModerationMaxFeatures) {
+				val = numberDisplay
+			}
+			return "Max Features", val, "max features for moderation"
+		case optModerationMinSamples:
+			val := fmt.Sprintf("%d", m.moderationMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optModerationMinSamples) {
+				val = numberDisplay
+			}
+			return "Min Samples", val, "min samples for moderation"
 
 		// Mixed effects
 		case optMixedEffectsType:

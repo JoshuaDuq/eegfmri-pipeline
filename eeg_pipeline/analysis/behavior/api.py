@@ -10,7 +10,6 @@ from eeg_pipeline.analysis.behavior.feature_correlator import (
     CorrelationConfig,
     FeatureBehaviorCorrelator,
     FeatureCorrelationResult,
-    correlate_pain_relevant_features,
     run_unified_feature_correlations,
 )
 from eeg_pipeline.domain.features.registry import (
@@ -131,7 +130,6 @@ __all__ = [
     "FeatureBehaviorCorrelator",
     "CorrelationConfig",
     "FeatureCorrelationResult",
-    "correlate_pain_relevant_features",
     "run_unified_feature_correlations",
     # Feature registry (backward-compatible re-exports)
     "FeatureRegistry",
@@ -157,5 +155,7 @@ __all__ = [
     # Topomaps
     "run_power_topomap_correlations",
 ]
+
+
 
 

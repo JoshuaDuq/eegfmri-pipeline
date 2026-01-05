@@ -23,6 +23,7 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features
 
 
 def _get(config: Any, key: str, default: Any) -> Any:
@@ -165,6 +166,123 @@ class TrialwiseRegressionConfig:
             max_features=_get(config, "behavior_analysis.regression.max_features", None),
             n_jobs=int(_get(config, "behavior_analysis.n_jobs", 1)),
         )
+
+
+def _process_single_regression_feature(
+    col: str,
+    trial_df: pd.DataFrame,
+    valid_mask: np.ndarray,
+    y_v: np.ndarray,
+    Xz_v: np.ndarray,
+    Xz_names: List[str],
+    y_hat_z: np.ndarray,
+    resid_z: np.ndarray,
+    r2_reduced: float,
+    groups_v: Optional[np.ndarray],
+    cfg: "TrialwiseRegressionConfig",
+    rng_seed: int,
+    out_col: str,
+) -> Optional[Dict[str, Any]]:
+    """Process a single feature for regression analysis."""
+    x_raw = pd.to_numeric(trial_df[col], errors="coerce").to_numpy(dtype=float)[valid_mask]
+    if cfg.standardize:
+        x = _zscore(x_raw)
+    else:
+        x = x_raw
+    x_int = None
+    if cfg.include_interaction and "temperature" in trial_df.columns and np.isfinite(x).any():
+        t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)[valid_mask]
+        t_use = _zscore(t) if cfg.standardize else t
+        x_int = x * t_use
+
+    valid_feat = np.isfinite(x)
+    if x_int is not None:
+        valid_feat = valid_feat & np.isfinite(x_int)
+    if int(valid_feat.sum()) < cfg.min_samples:
+        return None
+
+    y_f = y_v[valid_feat]
+    Xz_f = Xz_v[valid_feat]
+    x_f = x[valid_feat]
+    X_parts = [Xz_f, x_f[:, None]]
+    names = [*Xz_names, "feature"]
+    if x_int is not None:
+        X_parts.append(x_int[valid_feat][:, None])
+        names.append("feature_x_temperature")
+    X = np.column_stack(X_parts)
+
+    beta = _ols_fit(X, y_f)
+    if beta is None:
+        return None
+
+    y_hat = X @ beta
+    r2_full = _r2(y_f, y_hat)
+    delta_r2 = r2_full - r2_reduced if np.isfinite(r2_full) and np.isfinite(r2_reduced) else np.nan
+
+    se = _hc3_se_for_beta(X, y_f, beta)
+    p = X.shape[1]
+    dof = max(int(len(y_f) - p), 1)
+    t_stats = beta / (se + 1e-12)
+    p_vals = 2 * stats.t.sf(np.abs(t_stats), df=dof)
+
+    idx_feature = names.index("feature")
+    beta_feature = float(beta[idx_feature])
+    p_feature = float(p_vals[idx_feature]) if np.isfinite(p_vals[idx_feature]) else np.nan
+
+    beta_int = np.nan
+    p_int = np.nan
+    if "feature_x_temperature" in names:
+        idx_int = names.index("feature_x_temperature")
+        beta_int = float(beta[idx_int])
+        p_int = float(p_vals[idx_int]) if np.isfinite(p_vals[idx_int]) else np.nan
+
+    p_perm_feature = np.nan
+    p_perm_int = np.nan
+    if cfg.n_permutations > 0:
+        rng = np.random.default_rng(rng_seed)
+        exceed_feature = 1
+        exceed_int = 1
+        denom = cfg.n_permutations + 1
+        for _ in range(cfg.n_permutations):
+            perm_idx = _permute_within_groups(len(resid_z), rng, groups_v)
+            y_perm = y_hat_z + resid_z[perm_idx]
+            y_perm_f = y_perm[valid_feat]
+            beta_p = _ols_fit(X, y_perm_f)
+            if beta_p is None:
+                continue
+            bf = float(beta_p[idx_feature])
+            if np.abs(bf) >= np.abs(beta_feature):
+                exceed_feature += 1
+            if "feature_x_temperature" in names:
+                bi = float(beta_p[names.index("feature_x_temperature")])
+                if np.abs(bi) >= np.abs(beta_int):
+                    exceed_int += 1
+        p_perm_feature = exceed_feature / denom
+        if "feature_x_temperature" in names:
+            p_perm_int = exceed_int / denom
+
+    return {
+        "feature": col,
+        "target": out_col,
+        "n": int(len(y_f)),
+        "beta_feature": beta_feature,
+        "se_feature_hc3": float(se[idx_feature]) if np.isfinite(se[idx_feature]) else np.nan,
+        "t_feature_hc3": float(t_stats[idx_feature]) if np.isfinite(t_stats[idx_feature]) else np.nan,
+        "p_feature": p_feature,
+        "beta_interaction": beta_int,
+        "p_interaction": p_int,
+        "r2_reduced": float(r2_reduced) if np.isfinite(r2_reduced) else np.nan,
+        "r2_full": float(r2_full) if np.isfinite(r2_full) else np.nan,
+        "delta_r2": float(delta_r2) if np.isfinite(delta_r2) else np.nan,
+        "n_covariates": int(len(Xz_names) - 1),
+        "n_permutations": int(cfg.n_permutations),
+        "p_perm_feature": p_perm_feature,
+        "p_perm_interaction": p_perm_int,
+        "p_primary": p_perm_feature if np.isfinite(p_perm_feature) else p_feature,
+        "p_raw": p_feature,
+        "p_kind_primary": "p_perm_feature" if np.isfinite(p_perm_feature) else "p_feature",
+        "p_primary_source": "permutation" if np.isfinite(p_perm_feature) else "hc3",
+    }
 
 
 def run_trialwise_feature_regressions(
@@ -313,115 +431,33 @@ def run_trialwise_feature_regressions(
             candidates = [c for _v, c in vars_[:max_f]]
             meta["max_features_applied"] = max_f
 
-    records: List[Dict[str, Any]] = []
-    for col in candidates:
-        x_raw = pd.to_numeric(trial_df[col], errors="coerce").to_numpy(dtype=float)[valid_mask]
-        if cfg.standardize:
-            x = _zscore(x_raw)
-        else:
-            x = x_raw
-        x_int = None
-        # Moderation is defined w.r.t. physical temperature, even if temperature is controlled
-        # nonlinearly via rating_hat_from_temp.
-        if cfg.include_interaction and "temperature" in trial_df.columns and np.isfinite(x).any():
-            t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)[valid_mask]
-            t_use = _zscore(t) if cfg.standardize else t
-            x_int = x * t_use
-
-        # Build full X: [Xz, x, (x_int)]
-        valid_feat = np.isfinite(x)
-        if x_int is not None:
-            valid_feat = valid_feat & np.isfinite(x_int)
-        # Also require reduced covariates validity (already in valid_mask)
-        if int(valid_feat.sum()) < cfg.min_samples:
-            continue
-
-        y_f = y_v[valid_feat]
-        Xz_f = Xz_v[valid_feat]
-        x_f = x[valid_feat]
-        X_parts = [Xz_f, x_f[:, None]]
-        names = [*Xz_names, "feature"]
-        if x_int is not None:
-            X_parts.append(x_int[valid_feat][:, None])
-            names.append("feature_x_temperature")
-        X = np.column_stack(X_parts)
-
-        beta = _ols_fit(X, y_f)
-        if beta is None:
-            continue
-
-        y_hat = X @ beta
-        r2_full = _r2(y_f, y_hat)
-        delta_r2 = r2_full - r2_reduced if np.isfinite(r2_full) and np.isfinite(r2_reduced) else np.nan
-
-        se = _hc3_se_for_beta(X, y_f, beta)
-        p = X.shape[1]
-        dof = max(int(len(y_f) - p), 1)
-        t_stats = beta / (se + 1e-12)
-        p_vals = 2 * stats.t.sf(np.abs(t_stats), df=dof)
-
-        idx_feature = names.index("feature")
-        beta_feature = float(beta[idx_feature])
-        p_feature = float(p_vals[idx_feature]) if np.isfinite(p_vals[idx_feature]) else np.nan
-
-        beta_int = np.nan
-        p_int = np.nan
-        if "feature_x_temperature" in names:
-            idx_int = names.index("feature_x_temperature")
-            beta_int = float(beta[idx_int])
-            p_int = float(p_vals[idx_int]) if np.isfinite(p_vals[idx_int]) else np.nan
-
-        p_perm_feature = np.nan
-        p_perm_int = np.nan
-        if cfg.n_permutations > 0:
-            exceed_feature = 1
-            exceed_int = 1
-            denom = cfg.n_permutations + 1
-            # Freedman–Lane: permute reduced residuals and refit full model.
-            for _ in range(cfg.n_permutations):
-                perm_idx = _permute_within_groups(len(resid_z), rng, groups_v)
-                y_perm = y_hat_z + resid_z[perm_idx]
-                # align y_perm to feature-valid subset (valid_feat)
-                y_perm_f = y_perm[valid_feat]
-                beta_p = _ols_fit(X, y_perm_f)
-                if beta_p is None:
-                    continue
-                bf = float(beta_p[idx_feature])
-                if np.abs(bf) >= np.abs(beta_feature):
-                    exceed_feature += 1
-                if "feature_x_temperature" in names:
-                    bi = float(beta_p[names.index("feature_x_temperature")])
-                    if np.abs(bi) >= np.abs(beta_int):
-                        exceed_int += 1
-            p_perm_feature = exceed_feature / denom
-            if "feature_x_temperature" in names:
-                p_perm_int = exceed_int / denom
-
-        records.append(
-            {
-                "feature": col,
-                "target": out_col,
-                "n": int(len(y_f)),
-                "beta_feature": beta_feature,
-                "se_feature_hc3": float(se[idx_feature]) if np.isfinite(se[idx_feature]) else np.nan,
-                "t_feature_hc3": float(t_stats[idx_feature]) if np.isfinite(t_stats[idx_feature]) else np.nan,
-                "p_feature": p_feature,
-                "beta_interaction": beta_int,
-                "p_interaction": p_int,
-                "r2_reduced": float(r2_reduced) if np.isfinite(r2_reduced) else np.nan,
-                "r2_full": float(r2_full) if np.isfinite(r2_full) else np.nan,
-                "delta_r2": float(delta_r2) if np.isfinite(delta_r2) else np.nan,
-                "n_covariates": int(len(Xz_names) - 1),  # exclude intercept
-                "n_permutations": int(cfg.n_permutations),
-                "p_perm_feature": p_perm_feature,
-                "p_perm_interaction": p_perm_int,
-                # Global-FDR compatible aliases
-                "p_primary": p_perm_feature if np.isfinite(p_perm_feature) else p_feature,
-                "p_raw": p_feature,
-                "p_kind_primary": "p_perm_feature" if np.isfinite(p_perm_feature) else "p_feature",
-                "p_primary_source": "permutation" if np.isfinite(p_perm_feature) else "hc3",
-            }
+    n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
+    
+    feature_args = [
+        (
+            col,
+            trial_df,
+            valid_mask,
+            y_v,
+            Xz_v,
+            Xz_names,
+            y_hat_z,
+            resid_z,
+            r2_reduced,
+            groups_v,
+            cfg,
+            rng_seed + i,
+            out_col,
         )
+        for i, col in enumerate(candidates)
+    ]
+    
+    records = parallel_regression_features(
+        feature_args,
+        _process_single_regression_feature,
+        n_jobs=n_jobs_actual,
+        min_features_for_parallel=10,
+    )
 
     if not records:
         return pd.DataFrame(), {"status": "empty", **meta}

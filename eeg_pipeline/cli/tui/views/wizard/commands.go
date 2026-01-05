@@ -1263,6 +1263,10 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--trial-table-high-missing-frac", fmt.Sprintf("%.2f", m.trialTableHighMissingFrac))
 		}
 
+		if !m.featureSummariesEnabled {
+			args = append(args, "--no-feature-summaries")
+		}
+
 		if !m.painResidualEnabled {
 			args = append(args, "--no-pain-residual")
 		} else {
@@ -1606,6 +1610,16 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.mediationMaxMediators != 20 {
 			args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
+		}
+	}
+
+	// Moderation-specific options
+	if m.isComputationSelected("moderation") {
+		if m.moderationMaxFeatures != 50 {
+			args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))
+		}
+		if m.moderationMinSamples != 15 {
+			args = append(args, "--moderation-min-samples", fmt.Sprintf("%d", m.moderationMinSamples))
 		}
 	}
 

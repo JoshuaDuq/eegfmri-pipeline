@@ -23,7 +23,6 @@ from eeg_pipeline.analysis.behavior.api import (
     compute_temporal_from_context,
     compute_time_frequency_correlations,
     compute_time_frequency_from_context,
-    correlate_pain_relevant_features,
     fit_mixed_effects_model,
     get_feature_registry,
     run_cluster_test_from_context,

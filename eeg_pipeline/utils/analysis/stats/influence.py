@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_influence_features
+
 
 def _get(config: Any, key: str, default: Any) -> Any:
     try:
@@ -112,6 +114,7 @@ class InfluenceConfig:
     temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_interaction: bool = False
     standardize: bool = True
+    n_jobs: int = -1
 
     @classmethod
     def from_config(cls, config: Any) -> "InfluenceConfig":
@@ -128,6 +131,7 @@ class InfluenceConfig:
             temperature_control=str(_get(config, "behavior_analysis.influence.temperature_control", "linear")).strip().lower(),
             include_interaction=bool(_get(config, "behavior_analysis.influence.include_interaction", False)),
             standardize=bool(_get(config, "behavior_analysis.influence.standardize", True)),
+            n_jobs=int(_get(config, "behavior_analysis.n_jobs", -1)),
         )
 
 
@@ -190,6 +194,86 @@ def _select_top_features(
     return [feat for feat, _ in ranked[: max(1, int(max_features))]]
 
 
+def _process_single_influence_feature(
+    feat: str,
+    trial_df: pd.DataFrame,
+    y_all: np.ndarray,
+    Xb: np.ndarray,
+    Xb_names: List[str],
+    cfg: "InfluenceConfig",
+    outcome: str,
+    config: Optional[Any],
+) -> Optional[Dict[str, Any]]:
+    """Process influence diagnostics for a single feature."""
+    if feat not in trial_df.columns:
+        return None
+    x_raw = pd.to_numeric(trial_df[feat], errors="coerce").to_numpy(dtype=float)
+    x = _zscore(x_raw) if cfg.standardize else x_raw
+
+    valid = np.isfinite(y_all) & np.isfinite(x) & np.all(np.isfinite(Xb), axis=1)
+    if int(valid.sum()) < max(12, Xb.shape[1] + 5):
+        return None
+
+    y = y_all[valid]
+    x_v = x[valid]
+    X_parts = [Xb[valid], x_v[:, None]]
+    names = [*Xb_names, "feature"]
+
+    if cfg.include_interaction and "temperature" in trial_df.columns:
+        t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
+        t_v = t[valid]
+        t_use = _zscore(t_v) if cfg.standardize else t_v
+        if np.isfinite(t_use).any():
+            X_parts.append((x_v * t_use)[:, None])
+            names.append("feature_x_temperature")
+
+    X = np.column_stack(X_parts)
+    beta = _ols_fit(X, y)
+    if beta is None:
+        return None
+
+    y_hat = X @ beta
+    resid = y - y_hat
+    h = _hat_diag(X)
+    if h is None:
+        return None
+
+    p = int(X.shape[1])
+    cooks = _cooks_distance(resid, h, p=p)
+
+    cooks_cfg = _get(config, "behavior_analysis.influence.cooks_threshold", None)
+    lev_cfg = _get(config, "behavior_analysis.influence.leverage_threshold", None)
+    cooks_thr = float(cooks_cfg) if cooks_cfg is not None else float(4.0 / max(int(len(y)), 1))
+    lev_thr = float(lev_cfg) if lev_cfg is not None else float(2.0 * p / max(int(len(y)), 1))
+
+    worst_cooks_i = int(np.nanargmax(cooks)) if np.isfinite(cooks).any() else -1
+    worst_lev_i = int(np.nanargmax(h)) if np.isfinite(h).any() else -1
+
+    valid_idx = np.where(valid)[0]
+    worst_cooks_trial = int(valid_idx[worst_cooks_i]) if worst_cooks_i >= 0 else -1
+    worst_lev_trial = int(valid_idx[worst_lev_i]) if worst_lev_i >= 0 else -1
+
+    epoch_col = "epoch" if "epoch" in trial_df.columns else None
+    epoch_worst = int(trial_df.iloc[worst_cooks_trial][epoch_col]) if epoch_col and worst_cooks_trial >= 0 else np.nan
+
+    return {
+        "feature": feat,
+        "target": str(outcome),
+        "n": int(len(y)),
+        "p": int(p),
+        "temperature_control": cfg.temperature_control,
+        "cooks_threshold": cooks_thr,
+        "leverage_threshold": lev_thr,
+        "max_cooks": float(np.nanmax(cooks)) if np.isfinite(cooks).any() else np.nan,
+        "n_cooks_gt_threshold": int((cooks > cooks_thr).sum()) if np.isfinite(cooks).any() else 0,
+        "max_leverage": float(np.nanmax(h)) if np.isfinite(h).any() else np.nan,
+        "n_leverage_gt_threshold": int((h > lev_thr).sum()) if np.isfinite(h).any() else 0,
+        "worst_cooks_trial_index": worst_cooks_trial,
+        "worst_cooks_epoch": epoch_worst,
+        "worst_leverage_trial_index": worst_lev_trial,
+    }
+
+
 def compute_influence_diagnostics(
     trial_df: pd.DataFrame,
     *,
@@ -203,6 +287,8 @@ def compute_influence_diagnostics(
     meta: Dict[str, Any] = {"enabled": cfg.enabled}
     if not cfg.enabled:
         return pd.DataFrame(), {**meta, "status": "disabled"}
+
+    n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
 
     selected = _select_top_features(
         corr_df=corr_df, regression_df=regression_df, models_df=models_df, max_features=cfg.max_features
@@ -218,7 +304,6 @@ def compute_influence_diagnostics(
             continue
         y_all = pd.to_numeric(trial_df[outcome], errors="coerce").to_numpy(dtype=float)
 
-        # Outcome-specific covariates (avoid leaking temperature into temperature outcome).
         covariates: List[str] = []
         temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
         temp_design_df = None
@@ -266,78 +351,18 @@ def compute_influence_diagnostics(
         Xb, Xb_names = _build_covariate_design(base, covariates, add_intercept=True)
         meta.setdefault("temperature_control_by_outcome", {})[str(outcome)] = temp_meta
 
-        for feat in selected:
-            if feat not in trial_df.columns:
-                continue
-            x_raw = pd.to_numeric(trial_df[feat], errors="coerce").to_numpy(dtype=float)
-            x = _zscore(x_raw) if cfg.standardize else x_raw
-
-            valid = np.isfinite(y_all) & np.isfinite(x) & np.all(np.isfinite(Xb), axis=1)
-            if int(valid.sum()) < max(12, Xb.shape[1] + 5):
-                continue
-
-            y = y_all[valid]
-            x_v = x[valid]
-            X_parts = [Xb[valid], x_v[:, None]]
-            names = [*Xb_names, "feature"]
-
-            if cfg.include_interaction and "temperature" in trial_df.columns:
-                t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
-                t_v = t[valid]
-                t_use = _zscore(t_v) if cfg.standardize else t_v
-                if np.isfinite(t_use).any():
-                    X_parts.append((x_v * t_use)[:, None])
-                    names.append("feature_x_temperature")
-
-            X = np.column_stack(X_parts)
-            beta = _ols_fit(X, y)
-            if beta is None:
-                continue
-
-            y_hat = X @ beta
-            resid = y - y_hat
-            h = _hat_diag(X)
-            if h is None:
-                continue
-
-            p = int(X.shape[1])
-            cooks = _cooks_distance(resid, h, p=p)
-
-            # Common heuristics
-            cooks_cfg = _get(config, "behavior_analysis.influence.cooks_threshold", None)
-            lev_cfg = _get(config, "behavior_analysis.influence.leverage_threshold", None)
-            cooks_thr = float(cooks_cfg) if cooks_cfg is not None else float(4.0 / max(int(len(y)), 1))
-            lev_thr = float(lev_cfg) if lev_cfg is not None else float(2.0 * p / max(int(len(y)), 1))
-
-            worst_cooks_i = int(np.nanargmax(cooks)) if np.isfinite(cooks).any() else -1
-            worst_lev_i = int(np.nanargmax(h)) if np.isfinite(h).any() else -1
-
-            valid_idx = np.where(valid)[0]
-            worst_cooks_trial = int(valid_idx[worst_cooks_i]) if worst_cooks_i >= 0 else -1
-            worst_lev_trial = int(valid_idx[worst_lev_i]) if worst_lev_i >= 0 else -1
-
-            epoch_col = "epoch" if "epoch" in trial_df.columns else None
-            epoch_worst = int(trial_df.iloc[worst_cooks_trial][epoch_col]) if epoch_col and worst_cooks_trial >= 0 else np.nan
-
-            records.append(
-                {
-                    "feature": feat,
-                    "target": str(outcome),
-                    "n": int(len(y)),
-                    "p": int(p),
-                    "temperature_control": cfg.temperature_control,
-                    "temperature_control_column": meta.get("temperature_control_column", None),
-                    "cooks_threshold": cooks_thr,
-                    "leverage_threshold": lev_thr,
-                    "max_cooks": float(np.nanmax(cooks)) if np.isfinite(cooks).any() else np.nan,
-                    "n_cooks_gt_threshold": int((cooks > cooks_thr).sum()) if np.isfinite(cooks).any() else 0,
-                    "max_leverage": float(np.nanmax(h)) if np.isfinite(h).any() else np.nan,
-                    "n_leverage_gt_threshold": int((h > lev_thr).sum()) if np.isfinite(h).any() else 0,
-                    "worst_cooks_trial_index": worst_cooks_trial,
-                    "worst_cooks_epoch": epoch_worst,
-                    "worst_leverage_trial_index": worst_lev_trial,
-                }
-            )
+        feature_args = [
+            (feat, trial_df, y_all, Xb, Xb_names, cfg, outcome, config)
+            for feat in selected
+        ]
+        
+        outcome_records = parallel_influence_features(
+            feature_args,
+            _process_single_influence_feature,
+            n_jobs=n_jobs_actual,
+            min_features_for_parallel=5,
+        )
+        records.extend(outcome_records)
 
     if not records:
         return pd.DataFrame(), {**meta, "status": "empty_after_fit"}

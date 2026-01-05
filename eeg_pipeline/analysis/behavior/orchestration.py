@@ -339,7 +339,7 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
         if robust_method_cfg is not None:
             robust_method_cfg = str(robust_method_cfg).strip().lower() or None
         
-        psi_feature_cols = [c for c in df_trials.columns if str(c).startswith(prefixes)]
+        psi_feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
         psi_feature_cols = _filter_feature_cols_by_band(psi_feature_cols, ctx)
         psi_feature_cols = _filter_feature_cols_for_computation(psi_feature_cols, "pain_sensitivity", ctx)
         ctx.logger.info("Pain sensitivity: analyzing %d features", len(psi_feature_cols))
@@ -1155,6 +1155,27 @@ def _build_normalized_records(
                 "notes": "indirect_effect",
             })
 
+    mod_df = getattr(results, "moderation", None)
+    if mod_df is not None and not mod_df.empty:
+        for _, row in mod_df.iterrows():
+            feature = row.get("feature")
+            feature_type = row.get("feature_type") or _infer_feature_type(str(feature), ctx.config)
+            records.append({
+                "analysis_type": "moderation",
+                "feature_id": feature,
+                "feature_type": feature_type,
+                "target": "rating",
+                "method": method,
+                "robust_method": robust_method,
+                "method_label": method_label,
+                "n": row.get("n"),
+                "r": row.get("b3_interaction"),
+                "p_raw": row.get("p_interaction"),
+                "p_primary": row.get("p_interaction"),
+                "p_fdr": row.get("p_fdr"),
+                "notes": "interaction_effect",
+            })
+
     mixed_df = getattr(results, "mixed_effects", None)
     if mixed_df is not None and not mixed_df.empty:
         for _, row in mixed_df.iterrows():
@@ -1262,6 +1283,8 @@ def write_analysis_metadata(
             "has_correlations": bool(getattr(results, "correlations", None) is not None and not results.correlations.empty),
             "has_pain_sensitivity": bool(getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty),
             "has_condition_effects": bool(getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty),
+            "has_mediation": bool(getattr(results, "mediation", None) is not None and not getattr(results, "mediation").empty) if getattr(results, "mediation", None) is not None else False,
+            "has_moderation": bool(getattr(results, "moderation", None) is not None and not getattr(results, "moderation").empty) if getattr(results, "moderation", None) is not None else False,
         },
         "qc": build_behavior_qc(ctx),
     }
@@ -1492,12 +1515,129 @@ def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
         else:
             ctx.logger.warning("Skipping mediation: 'temperature' or 'rating' missing.")
 
+    if config.run_moderation:
+        ctx.logger.info("Running moderation analysis...")
+        results.moderation = stage_moderation(ctx, config)
+
     if config.run_mixed_effects:
         # Mixed-effects models require multiple subjects with repeated measures.
         # Subject-level behavior analysis should skip this stage to avoid misleading results.
         ctx.logger.warning(
             "Skipping mixed-effects analysis in subject-level mode; run this at group level with multiple subjects."
         )
+
+
+def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Run moderation analysis: test if neural features moderate the temperature→rating relationship.
+    
+    Model: rating = b0 + b1*temperature + b2*feature + b3*(temperature*feature) + error
+    
+    If b3 is significant, the feature moderates how temperature affects pain rating.
+    """
+    from eeg_pipeline.utils.analysis.stats.moderation import run_moderation_analysis
+    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+    from eeg_pipeline.infra.tsv import write_tsv
+
+    suffix = _feature_suffix_from_context(ctx)
+    method_label = getattr(config, "method_label", "")
+    method_suffix = f"_{method_label}" if method_label else ""
+
+    df_trials = _load_trial_table_df(ctx)
+    if df_trials is None or df_trials.empty:
+        ctx.logger.warning("Moderation: trial table missing; skipping.")
+        return pd.DataFrame()
+
+    if "temperature" not in df_trials.columns or "rating" not in df_trials.columns:
+        ctx.logger.warning("Moderation: requires 'temperature' and 'rating' columns; skipping.")
+        return pd.DataFrame()
+
+    feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
+    feature_cols = _filter_feature_cols_by_band(feature_cols, ctx)
+    feature_cols = _filter_feature_cols_for_computation(feature_cols, "moderation", ctx)
+
+    if not feature_cols:
+        ctx.logger.info("Moderation: no feature columns found; skipping.")
+        return pd.DataFrame()
+
+    max_features = int(getattr(config, "moderation_max_features", 50))
+    min_samples = int(getattr(config, "moderation_min_samples", 15))
+    fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
+
+    if len(feature_cols) > max_features:
+        variances = df_trials[feature_cols].var()
+        feature_cols = variances.nlargest(max_features).index.tolist()
+        ctx.logger.info("Moderation: limited to top %d features by variance", max_features)
+
+    temperature = pd.to_numeric(df_trials["temperature"], errors="coerce").to_numpy()
+    rating = pd.to_numeric(df_trials["rating"], errors="coerce").to_numpy()
+
+    records: List[Dict[str, Any]] = []
+    for feat in feature_cols:
+        feature_values = pd.to_numeric(df_trials[feat], errors="coerce").to_numpy()
+        
+        valid_mask = np.isfinite(temperature) & np.isfinite(rating) & np.isfinite(feature_values)
+        n_valid = int(valid_mask.sum())
+        
+        if n_valid < min_samples:
+            continue
+
+        result = run_moderation_analysis(
+            X=temperature[valid_mask],
+            W=feature_values[valid_mask],
+            Y=rating[valid_mask],
+            x_label="temperature",
+            w_label=str(feat),
+            y_label="rating",
+            center_predictors=True,
+        )
+
+        rec = {
+            "feature": str(feat),
+            "feature_type": _infer_feature_type(str(feat), ctx.config),
+            "n": result.n,
+            "b1_temperature": result.b1,
+            "b2_feature": result.b2,
+            "b3_interaction": result.b3,
+            "se_b3": result.se_b3,
+            "p_interaction": result.p_b3,
+            "slope_low_w": result.slope_low_w,
+            "slope_mean_w": result.slope_mean_w,
+            "slope_high_w": result.slope_high_w,
+            "p_slope_low": result.p_slope_low,
+            "p_slope_mean": result.p_slope_mean,
+            "p_slope_high": result.p_slope_high,
+            "r_squared": result.r_squared,
+            "r_squared_change": result.r_squared_change,
+            "f_interaction": result.f_interaction,
+            "p_f_interaction": result.p_f_interaction,
+            "jn_low": result.jn_low,
+            "jn_high": result.jn_high,
+            "jn_type": result.jn_type,
+            "significant_moderation": result.is_significant_moderation(fdr_alpha),
+        }
+        records.append(rec)
+
+    mod_df = pd.DataFrame(records) if records else pd.DataFrame()
+
+    if not mod_df.empty:
+        p_vals = pd.to_numeric(mod_df["p_interaction"], errors="coerce").to_numpy()
+        mod_df["p_fdr"] = fdr_bh(p_vals, alpha=fdr_alpha, config=ctx.config)
+        mod_df["p_raw"] = mod_df["p_interaction"]
+        mod_df["p_primary"] = mod_df["p_interaction"]
+
+    out_dir = _get_stats_subfolder(ctx, "moderation")
+    out_path = out_dir / f"moderation_results{suffix}{method_suffix}.tsv"
+    if not mod_df.empty:
+        write_tsv(mod_df, out_path)
+        n_sig = int((mod_df["p_fdr"] < fdr_alpha).sum())
+        ctx.logger.info(
+            "Moderation: %d features tested, %d significant (FDR < %.2f)",
+            len(mod_df), n_sig, fdr_alpha
+        )
+    else:
+        ctx.logger.info("Moderation: no valid results.")
+
+    return mod_df
 
 
 def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = None) -> None:
@@ -1521,9 +1661,11 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
     if getattr(config, "run_models", False):
         patterns.append("models_feature_effects*.tsv")
         
-    # 2. Mediation and Mixed Effects
+    # 2. Mediation, Moderation and Mixed Effects
     if getattr(config, "run_mediation", False):
         patterns.append("mediation*.tsv")
+    if getattr(config, "run_moderation", False):
+        patterns.append("moderation_results*.tsv")
     if getattr(config, "run_mixed_effects", False):
         patterns.append("mixed_effects*.tsv")
 
@@ -1581,6 +1723,7 @@ def stage_validate(ctx: BehaviorContext, config: Any, results: Optional[Any] = N
             "temporal": "corr_stats_temporal_*.tsv",
             "cluster": "cluster_results_*.tsv",
             "mediation": "mediation*.tsv",
+            "moderation": "moderation_results*.tsv",
             "mixed_effects": "mixed_effects*.tsv",
         }
         
