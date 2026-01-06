@@ -35,7 +35,6 @@ def _process_single_stability_feature(
     outcome: str,
     group_col: str,
     method: str,
-    min_group_trials: int,
     alpha: float,
     use_partial_temp: bool,
     has_temp: bool,
@@ -65,8 +64,6 @@ def _process_single_stability_feature(
     for g in groups:
         mask = (g_all == g) & x_all.notna() & y_all.notna()
         n = int(mask.sum())
-        if n < min_group_trials:
-            continue
         r, p = compute_correlation(
             x_all[mask].to_numpy(dtype=float),
             y_all[mask].to_numpy(dtype=float),
@@ -79,7 +76,7 @@ def _process_single_stability_feature(
         if use_partial_temp and _has_partial and has_temp:
             t = pd.to_numeric(trial_df.loc[mask, "temperature"], errors="coerce")
             ok = t.notna()
-            if int(ok.sum()) >= max(min_group_trials, 10):
+            if int(ok.sum()) >= 10:
                 try:
                     r_p, p_p, _n_p = compute_partial_corr(
                         pd.Series(x_all[mask][ok].to_numpy(dtype=float)),
@@ -145,7 +142,6 @@ def compute_groupwise_stability(
     sign consistency but does not exclude features.
     """
     method = str(_get(config, "behavior_analysis.stability.method", "spearman")).strip().lower()
-    min_group_trials = int(_get(config, "behavior_analysis.stability.min_group_trials", 8))
     max_features = int(_get(config, "behavior_analysis.stability.max_features", 50))
     alpha = float(_get(config, "behavior_analysis.stability.alpha", 0.05))
     use_partial_temp = bool(_get(config, "behavior_analysis.stability.partial_temperature", True))
@@ -154,7 +150,6 @@ def compute_groupwise_stability(
 
     meta: Dict[str, Any] = {
         "method": method,
-        "min_group_trials": min_group_trials,
         "max_features": max_features,
         "alpha": alpha,
         "partial_temperature": use_partial_temp,
@@ -173,7 +168,7 @@ def compute_groupwise_stability(
         if col not in trial_df.columns:
             continue
         x = pd.to_numeric(trial_df[col], errors="coerce")
-        if int((x.notna() & y_all.notna()).sum()) < max(min_group_trials, 10):
+        if int((x.notna() & y_all.notna()).sum()) < 10:
             continue
         if float(np.nanstd(x.to_numpy(dtype=float), ddof=1)) <= 1e-12:
             continue
@@ -203,7 +198,7 @@ def compute_groupwise_stability(
     meta["n_groups_total"] = int(len(groups))
 
     feature_args = [
-        (feat, trial_df, y_all, g_all, groups, outcome, group_col, method, min_group_trials, alpha, use_partial_temp, has_temp)
+        (feat, trial_df, y_all, g_all, groups, outcome, group_col, method, alpha, use_partial_temp, has_temp)
         for feat in selected
     ]
     

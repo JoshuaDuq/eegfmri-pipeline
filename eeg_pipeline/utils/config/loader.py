@@ -526,13 +526,6 @@ def get_min_samples(config: Any, sample_type: str = "default") -> int:
                                  defaults.get(sample_type, 5)))
 
 
-def get_min_trials(config: Any, trial_type: str = "per_condition") -> int:
-    """Get minimum trials threshold from config."""
-    defaults = {"per_condition": 15, "for_tfr": 20}
-    if config is None:
-        return defaults.get(trial_type, 15)
-    return int(get_config_value(config, f"behavior_analysis.min_trials.{trial_type}",
-                                 defaults.get(trial_type, 15)))
 
 
 ###################################################################

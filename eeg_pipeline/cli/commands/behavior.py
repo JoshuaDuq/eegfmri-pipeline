@@ -217,7 +217,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     stability_group.add_argument("--stability-group-column", choices=["auto", "run", "block"], default=None)
     stability_group.add_argument("--stability-partial-temperature", action="store_true", default=None)
     stability_group.add_argument("--no-stability-partial-temperature", action="store_false", dest="stability_partial_temperature")
-    stability_group.add_argument("--stability-min-group-trials", type=int, default=None)
     stability_group.add_argument("--stability-max-features", type=int, default=None)
     stability_group.add_argument("--stability-alpha", type=float, default=None)
 
@@ -243,7 +242,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     influence_group.add_argument("--influence-leverage-threshold", type=float, default=None)
 
     pain_sensitivity_group = parser.add_argument_group("Pain sensitivity options")
-    pain_sensitivity_group.add_argument("--pain-sensitivity-min-trials", type=int, default=None)
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
     correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
@@ -256,6 +254,28 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)
+    temporal_group.add_argument("--temporal-split-by-condition", action="store_true", default=None, dest="temporal_split_by_condition")
+    temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
+    temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="Column to split by for condition-based analysis")
+    temporal_group.add_argument("--temporal-filter-value", type=str, default=None, help="Compute only for this specific condition value")
+    # Temporal feature selection
+    temporal_group.add_argument("--temporal-feature-power", action="store_true", default=None, dest="temporal_feature_power", help="Enable power temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-power", action="store_false", dest="temporal_feature_power")
+    temporal_group.add_argument("--temporal-feature-itpc", action="store_true", default=None, dest="temporal_feature_itpc", help="Enable ITPC temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-itpc", action="store_false", dest="temporal_feature_itpc")
+    temporal_group.add_argument("--temporal-feature-erds", action="store_true", default=None, dest="temporal_feature_erds", help="Enable ERDS temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-erds", action="store_false", dest="temporal_feature_erds")
+    # ITPC-specific options
+    temporal_group.add_argument("--temporal-itpc-min-trials", type=int, default=None, help="Minimum trials for ITPC computation")
+    temporal_group.add_argument("--temporal-itpc-baseline-correction", action="store_true", default=None, dest="temporal_itpc_baseline_correction", help="Apply baseline correction to ITPC")
+    temporal_group.add_argument("--no-temporal-itpc-baseline-correction", action="store_false", dest="temporal_itpc_baseline_correction")
+    temporal_group.add_argument("--temporal-itpc-baseline-min", type=float, default=None, help="ITPC baseline window start (seconds)")
+    temporal_group.add_argument("--temporal-itpc-baseline-max", type=float, default=None, help="ITPC baseline window end (seconds)")
+    # ERDS-specific options
+    temporal_group.add_argument("--temporal-erds-baseline-min", type=float, default=None, help="ERDS baseline window start (seconds)")
+    temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
+    temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS normalization method")
+    temporal_group.add_argument("--temporal-erds-min-trials", type=int, default=None, help="Minimum trials for ERDS computation")
     
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")
@@ -284,7 +304,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-fail-fast", action="store_true", default=None, dest="condition_fail_fast")
     condition_group.add_argument("--no-condition-fail-fast", action="store_false", dest="condition_fail_fast")
     condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
-    condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
+    condition_group.add_argument("--condition-compare-column", type=str, default=None, help="Column name to use for condition split (default: pain_binary_coded)")
+    condition_group.add_argument("--condition-compare-windows", nargs="+", default=None, metavar="WINDOW", help="Time windows to compare (e.g., baseline active)")
     
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
@@ -541,8 +562,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             stab["group_column"] = "" if val == "auto" else val
         if getattr(args, "stability_partial_temperature", None) is not None:
             stab["partial_temperature"] = bool(args.stability_partial_temperature)
-        if getattr(args, "stability_min_group_trials", None) is not None:
-            stab["min_group_trials"] = int(args.stability_min_group_trials)
         if getattr(args, "stability_max_features", None) is not None:
             max_f = int(args.stability_max_features)
             stab["max_features"] = None if max_f <= 0 else max_f
@@ -590,8 +609,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             infl["leverage_threshold"] = None if float(args.influence_leverage_threshold) <= 0 else float(args.influence_leverage_threshold)
 
         # Pain sensitivity
-        if getattr(args, "pain_sensitivity_min_trials", None) is not None:
-            ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
         if getattr(args, "pain_sensitivity_feature_set", None) is not None:
             ba.setdefault("pain_sensitivity", {})["feature_set"] = str(args.pain_sensitivity_feature_set).strip().lower()
 
@@ -610,8 +627,11 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             ba.setdefault("condition", {})["fail_fast"] = bool(args.condition_fail_fast)
         if getattr(args, "condition_effect_threshold", None) is not None:
             ba.setdefault("condition", {})["effect_size_threshold"] = float(args.condition_effect_threshold)
-        if getattr(args, "condition_min_trials", None) is not None:
-            ba.setdefault("condition", {})["min_trials_per_condition"] = int(args.condition_min_trials)
+        if getattr(args, "condition_compare_column", None) is not None:
+            config.setdefault("event_columns", {})["pain_binary"] = str(args.condition_compare_column).strip()
+        if getattr(args, "condition_compare_windows", None) is not None:
+            windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
+            ba.setdefault("condition", {})["compare_windows"] = windows
 
         # Temporal
         temporal_cfg = ba.setdefault("temporal", {})
@@ -626,6 +646,45 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             lo = int(tmin) if tmin is not None else int(cur[0])
             hi = int(tmax) if tmax is not None else int(cur[1])
             temporal_cfg["time_range_ms"] = [lo, hi]
+        if getattr(args, "temporal_split_by_condition", None) is not None:
+            temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
+        if getattr(args, "temporal_condition_column", None) is not None:
+            temporal_cfg["condition_column"] = str(args.temporal_condition_column).strip()
+        if getattr(args, "temporal_filter_value", None) is not None:
+            temporal_cfg["filter_value"] = str(args.temporal_filter_value).strip()
+        
+        # Temporal feature selection
+        features_cfg = temporal_cfg.setdefault("features", {})
+        if getattr(args, "temporal_feature_power", None) is not None:
+            features_cfg["power"] = bool(args.temporal_feature_power)
+        if getattr(args, "temporal_feature_itpc", None) is not None:
+            features_cfg["itpc"] = bool(args.temporal_feature_itpc)
+        if getattr(args, "temporal_feature_erds", None) is not None:
+            features_cfg["erds"] = bool(args.temporal_feature_erds)
+        
+        # ITPC-specific options
+        itpc_cfg = temporal_cfg.setdefault("itpc", {})
+        if getattr(args, "temporal_itpc_min_trials", None) is not None:
+            itpc_cfg["min_trials"] = int(args.temporal_itpc_min_trials)
+        if getattr(args, "temporal_itpc_baseline_correction", None) is not None:
+            itpc_cfg["baseline_correction"] = bool(args.temporal_itpc_baseline_correction)
+        if getattr(args, "temporal_itpc_baseline_min", None) is not None or getattr(args, "temporal_itpc_baseline_max", None) is not None:
+            cur_bl = itpc_cfg.get("baseline_window", [-0.5, -0.01])
+            bl_min = float(args.temporal_itpc_baseline_min) if getattr(args, "temporal_itpc_baseline_min", None) is not None else cur_bl[0]
+            bl_max = float(args.temporal_itpc_baseline_max) if getattr(args, "temporal_itpc_baseline_max", None) is not None else cur_bl[1]
+            itpc_cfg["baseline_window"] = [bl_min, bl_max]
+
+        # ERDS-specific options
+        erds_cfg = temporal_cfg.setdefault("erds", {})
+        if getattr(args, "temporal_erds_baseline_min", None) is not None or getattr(args, "temporal_erds_baseline_max", None) is not None:
+            cur_bl = erds_cfg.get("baseline_window", [-0.5, -0.1])
+            bl_min = float(args.temporal_erds_baseline_min) if getattr(args, "temporal_erds_baseline_min", None) is not None else cur_bl[0]
+            bl_max = float(args.temporal_erds_baseline_max) if getattr(args, "temporal_erds_baseline_max", None) is not None else cur_bl[1]
+            erds_cfg["baseline_window"] = [bl_min, bl_max]
+        if getattr(args, "temporal_erds_method", None) is not None:
+            erds_cfg["method"] = str(args.temporal_erds_method).strip().lower()
+        if getattr(args, "temporal_erds_min_trials", None) is not None:
+            erds_cfg["min_trials"] = int(args.temporal_erds_min_trials)
 
         # Cluster
         if getattr(args, "cluster_threshold", None) is not None:

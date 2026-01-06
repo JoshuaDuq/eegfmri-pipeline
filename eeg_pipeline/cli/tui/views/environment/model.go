@@ -54,7 +54,7 @@ var environments = []envOption{
 	{
 		EnvGoogleCloud,
 		"Google Cloud VM",
-		"Process on remote GPU-enabled VM",
+		"Process on remote VM",
 		"▸",
 		[]string{"More compute power", "GPU acceleration", "Persistent storage"},
 	},

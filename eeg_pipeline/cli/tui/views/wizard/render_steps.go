@@ -450,7 +450,13 @@ func (m Model) renderFeatureFileSelection() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" FEATURE FILES ") + "\n\n")
 
+	// Get only the features applicable for selected computations
+	applicableFeatures := m.GetApplicableFeatureFiles()
+
 	instruction := "  Select which feature files to load for analysis.\n"
+	if len(applicableFeatures) < len(featureFileOptions) {
+		instruction = "  Showing features applicable for selected computations.\n"
+	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		instruction) +
@@ -459,25 +465,34 @@ func (m Model) renderFeatureFileSelection() string {
 
 	count := 0
 	availableCount := 0
-	for key, sel := range m.featureFileSelected {
-		if sel {
+	for _, file := range applicableFeatures {
+		if m.featureFileSelected[file.Key] {
 			count++
 		}
-		if m.featureAvailability != nil && m.featureAvailability[key] {
+		if m.featureAvailability != nil && m.featureAvailability[file.Key] {
 			availableCount++
 		}
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("  %d of %d selected", count, len(m.featureFiles))))
+		fmt.Sprintf("  %d of %d selected", count, len(applicableFeatures))))
 	if m.featureAvailability != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
 			fmt.Sprintf(" | %d available", availableCount)))
 	}
 	b.WriteString("\n\n")
 
-	for i, file := range m.featureFiles {
+	// Adjust cursor to be within visible range
+	displayCursor := m.featureFileCursor
+	if displayCursor >= len(applicableFeatures) {
+		displayCursor = len(applicableFeatures) - 1
+	}
+	if displayCursor < 0 {
+		displayCursor = 0
+	}
+
+	for i, file := range applicableFeatures {
 		isSelected := m.featureFileSelected[file.Key]
-		isFocused := i == m.featureFileCursor
+		isFocused := i == displayCursor
 
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
@@ -2862,12 +2877,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Group Column", v, "auto selects run/block"
 		case optStabilityPartialTemp:
 			return "Partial Temperature", m.boolToOnOff(m.stabilityPartialTemp), "control temperature"
-		case optStabilityMinGroupTrials:
-			val := fmt.Sprintf("%d", m.stabilityMinGroupTrials)
-			if m.editingNumber && m.isCurrentlyEditing(optStabilityMinGroupTrials) {
-				val = numberDisplay
-			}
-			return "Min Group Trials", val, "per run/block"
 		case optStabilityMaxFeatures:
 			val := fmt.Sprintf("%d", m.stabilityMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optStabilityMaxFeatures) {
@@ -2963,6 +2972,48 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Leverage Threshold", val, "0=auto heuristic"
 
 		// Condition
+		case optConditionCompareColumn:
+			val := m.conditionCompareColumn
+			if val == "" {
+				val = "(default: pain_binary_coded)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionCompareColumn {
+				val = textDisplay
+			}
+			hint := "events.tsv column"
+			if len(m.availableColumns) > 0 {
+				max := 4
+				if len(m.availableColumns) < max {
+					max = len(m.availableColumns)
+				}
+				suffix := ""
+				if len(m.availableColumns) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
+				}
+				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+			}
+			return "Compare Column", val, hint
+		case optConditionCompareWindows:
+			val := m.conditionCompareWindows
+			if val == "" {
+				val = "(optional)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionCompareWindows {
+				val = textDisplay
+			}
+			hint := "space-separated time windows (e.g. baseline active)"
+			if len(m.availableWindows) > 0 {
+				max := 4
+				if len(m.availableWindows) < max {
+					max = len(m.availableWindows)
+				}
+				suffix := ""
+				if len(m.availableWindows) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(m.availableWindows)-max)
+				}
+				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableWindows[:max], " "), suffix)
+			}
+			return "Compare Windows", val, hint
 		case optConditionFailFast:
 			return "Fail Fast", m.boolToOnOff(m.conditionFailFast), "error if split fails"
 		case optConditionEffectThreshold:
@@ -2971,12 +3022,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Effect Threshold", val, "Cohen's d cutoff"
-		case optConditionMinTrials:
-			val := fmt.Sprintf("%d", m.conditionMinTrials)
-			if m.editingNumber && m.isCurrentlyEditing(optConditionMinTrials) {
-				val = numberDisplay
-			}
-			return "Min Trials/Cond", val, "minimum per condition"
 
 		// Temporal
 		case optTemporalResolutionMs:
@@ -3003,6 +3048,97 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Smooth Window (ms)", val, "smoothing length"
+		case optTemporalSplitByCondition:
+			return "Split by Condition", m.boolToOnOff(m.temporalSplitByCondition), "separate files per condition"
+		case optTemporalConditionColumn:
+			val := m.temporalConditionColumn
+			if val == "" {
+				val = "(default: event_columns.pain_binary)"
+			}
+			if m.editingText && m.editingTextField == textFieldTemporalConditionColumn {
+				val = textDisplay
+			}
+			hint := "column to split by"
+			if len(m.availableColumns) > 0 {
+				max := 4
+				if len(m.availableColumns) < max {
+					max = len(m.availableColumns)
+				}
+				suffix := ""
+				if len(m.availableColumns) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
+				}
+				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+			}
+			return "Condition Column", val, hint
+		case optTemporalFilterValue:
+			val := m.temporalFilterValue
+			if val == "" {
+				val = "(all values)"
+			}
+			if m.editingText && m.editingTextField == textFieldTemporalFilterValue {
+				val = textDisplay
+			}
+			return "Filter Value", val, "compute only for this value"
+
+		// Temporal feature selection
+		case optTemporalFeaturePower:
+			return "Feature: Power", m.boolToOnOff(m.temporalFeaturePower), "spectral power in bands"
+		case optTemporalFeatureITPC:
+			return "Feature: ITPC", m.boolToOnOff(m.temporalFeatureITPC), "inter-trial phase coherence"
+		case optTemporalFeatureERDS:
+			return "Feature: ERDS", m.boolToOnOff(m.temporalFeatureERDS), "event-related desync/sync"
+
+		// ITPC-specific options
+		case optTemporalITPCMinTrials:
+			val := fmt.Sprintf("%d", m.temporalITPCMinTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalITPCMinTrials) {
+				val = numberDisplay
+			}
+			return "ITPC Min Trials", val, "minimum trials for ITPC"
+		case optTemporalITPCBaselineCorrection:
+			return "ITPC Baseline Correction", m.boolToOnOff(m.temporalITPCBaselineCorrection), "subtract baseline ITPC"
+		case optTemporalITPCBaselineMin:
+			val := fmt.Sprintf("%.2f", m.temporalITPCBaselineMin)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalITPCBaselineMin) {
+				val = numberDisplay
+			}
+			return "ITPC Baseline Start", val, "seconds"
+		case optTemporalITPCBaselineMax:
+			val := fmt.Sprintf("%.2f", m.temporalITPCBaselineMax)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalITPCBaselineMax) {
+				val = numberDisplay
+			}
+			return "ITPC Baseline End", val, "seconds"
+
+		// ERDS-specific options
+		case optTemporalERDSBaselineMin:
+			val := fmt.Sprintf("%.2f", m.temporalERDSBaselineMin)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalERDSBaselineMin) {
+				val = numberDisplay
+			}
+			return "ERDS Baseline Start", val, "seconds"
+		case optTemporalERDSBaselineMax:
+			val := fmt.Sprintf("%.2f", m.temporalERDSBaselineMax)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalERDSBaselineMax) {
+				val = numberDisplay
+			}
+			return "ERDS Baseline End", val, "seconds"
+		case optTemporalERDSMethod:
+			methods := []string{"percent", "zscore"}
+			var v string
+			if m.temporalERDSMethod >= 0 && m.temporalERDSMethod < len(methods) {
+				v = methods[m.temporalERDSMethod]
+			} else {
+				v = "percent"
+			}
+			return "ERDS Method", v, "ERDS normalization"
+		case optTemporalERDSMinTrials:
+			val := fmt.Sprintf("%d", m.temporalERDSMinTrials)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalERDSMinTrials) {
+				val = numberDisplay
+			}
+			return "ERDS Min Trials", val, "minimum trials"
 
 		// Report
 		case optReportTopN:
@@ -3019,14 +3155,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Target: temperature", m.boolToOnOff(m.correlationsTargetTemperature), "include temperature"
 		case optCorrelationsTargetPainResidual:
 			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
-
-		// Pain sensitivity
-		case optPainSensitivityMinTrials:
-			val := fmt.Sprintf("%d", m.painSensitivityMinTrials)
-			if m.editingNumber && m.isCurrentlyEditing(optPainSensitivityMinTrials) {
-				val = numberDisplay
-			}
-			return "Min Trials", val, "minimum trials required"
 
 		// Cluster
 		case optClusterThreshold:
@@ -3218,7 +3346,6 @@ func (m Model) renderDecodingAdvancedConfig() string {
 
 	permutationsVal := fmt.Sprintf("%d", m.decodingNPerm)
 	innerSplitsVal := fmt.Sprintf("%d", m.innerSplits)
-	minTrialsInnerVal := fmt.Sprintf("%d", m.decodingMinTrialsInner)
 	rngSeedVal := m.rngSeedDisplay()
 	rfNEstimatorsVal := fmt.Sprintf("%d", m.rfNEstimators)
 
@@ -3229,8 +3356,6 @@ func (m Model) renderDecodingAdvancedConfig() string {
 			permutationsVal = inputDisplay
 		} else if m.isCurrentlyEditing(optDecodingInnerSplits) {
 			innerSplitsVal = inputDisplay
-		} else if m.isCurrentlyEditing(optDecodingMinTrialsInner) {
-			minTrialsInnerVal = inputDisplay
 		} else if m.isCurrentlyEditing(optRNGSeed) {
 			rngSeedVal = inputDisplay
 		} else if m.isCurrentlyEditing(optRfNEstimators) {
@@ -3266,7 +3391,6 @@ func (m Model) renderDecodingAdvancedConfig() string {
 		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
 		{"Permutations", permutationsVal, "0=disabled, 100+ for p-values"},
 		{"Inner CV Splits", innerSplitsVal, "Cross-validation folds"},
-		{"Min Trials Inner", minTrialsInnerVal, "Min trials per inner fold"},
 		{"RNG Seed", rngSeedVal, "0=project default"},
 		{"Skip Time-Gen", m.boolToOnOff(m.skipTimeGen), "Skip time generalization"},
 		{"ElasticNet α Grid", elasticNetAlphaVal, "comma-separated alphas"},

@@ -121,6 +121,34 @@ var featureFileOptions = []FeatureFile{
 	{"spectral", "Spectral", "Peak frequency, spectral edge"},
 }
 
+// computationApplicableFeatures maps each computation to the feature files it can use.
+// Features not in this list for a given computation won't be shown in the feature selection.
+var computationApplicableFeatures = map[string][]string{
+	// Correlations can use all standard EEG features
+	"correlations": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Pain sensitivity uses the same features as correlations
+	"pain_sensitivity": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Condition comparison uses trial-level features
+	"condition": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
+	// User selects which to compute in step 3 (feature selection)
+	"temporal": {"power", "itpc", "erds"},
+	// Cluster permutation uses TFR data directly
+	"cluster": {"power"},
+	// Mediation/moderation use correlations features
+	"mediation":     {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"moderation":    {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mixed_effects": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Post computations
+	"confounds":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"regression":  {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"models":      {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"stability":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"consistency": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"influence":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"report":      {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+}
+
 type PlotItem struct {
 	ID               string
 	Group            string
@@ -184,6 +212,10 @@ const (
 	// Behavior advanced config text fields
 	textFieldTrialTableExtraEventColumns
 	textFieldConfoundsQCColumnPatterns
+	textFieldConditionCompareColumn
+	textFieldConditionCompareWindows
+	textFieldTemporalConditionColumn
+	textFieldTemporalFilterValue
 	// Features advanced config text fields
 	textFieldPACPairs
 	textFieldBurstBands
@@ -939,13 +971,12 @@ type Model struct {
 	modelsBinaryOutcome       int // 0=pain_binary, 1=rating_median
 
 	// Stability
-	stabilityMethod         int // 0=spearman, 1=pearson
-	stabilityOutcome        int // 0=auto, 1=rating, 2=pain_residual
-	stabilityGroupColumn    int // 0=auto, 1=run, 2=block
-	stabilityPartialTemp    bool
-	stabilityMinGroupTrials int
-	stabilityMaxFeatures    int
-	stabilityAlpha          float64
+	stabilityMethod      int // 0=spearman, 1=pearson
+	stabilityOutcome     int // 0=auto, 1=rating, 2=pain_residual
+	stabilityGroupColumn int // 0=auto, 1=run, 2=block
+	stabilityPartialTemp bool
+	stabilityMaxFeatures int
+	stabilityAlpha       float64
 
 	// Consistency & influence
 	consistencyEnabled           bool
@@ -972,16 +1003,32 @@ type Model struct {
 	correlationsTargetPainResidual bool
 
 	// Pain sensitivity
-	painSensitivityMinTrials int
 
 	// Report
 	reportTopN int
 
 	// Temporal
-	temporalResolutionMs int
-	temporalSmoothMs     int
-	temporalTimeMinMs    int
-	temporalTimeMaxMs    int
+	temporalResolutionMs     int
+	temporalSmoothMs         int
+	temporalTimeMinMs        int
+	temporalTimeMaxMs        int
+	temporalSplitByCondition bool   // If true, compute separate correlations per condition value
+	temporalConditionColumn  string // Column to split by (empty = use event_columns.pain_binary)
+	temporalFilterValue      string // If set, compute only for this specific value
+	// Temporal feature selection
+	temporalFeaturePower bool // Power (spectral power in bands)
+	temporalFeatureITPC  bool // Inter-trial phase coherence
+	temporalFeatureERDS  bool // Event-related desync/sync
+	// ITPC-specific parameters
+	temporalITPCMinTrials          int     // Minimum trials for reliable ITPC
+	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
+	temporalITPCBaselineMin        float64 // Baseline window start
+	temporalITPCBaselineMax        float64 // Baseline window end
+	// ERDS-specific parameters
+	temporalERDSBaselineMin float64 // ERDS baseline window start (seconds)
+	temporalERDSBaselineMax float64 // ERDS baseline window end (seconds)
+	temporalERDSMethod      int     // 0=percent, 1=zscore
+	temporalERDSMinTrials   int     // Minimum trials for ERDS
 
 	// Mixed effects (group-level; still configurable)
 	mixedEffectsType int // 0=intercept, 1=intercept_slope
@@ -990,8 +1037,7 @@ type Model struct {
 	mediationMinEffect float64
 
 	// Condition extras
-	conditionMinTrials int
-	conditionFailFast  bool
+	conditionFailFast bool
 	// Cluster-specific
 	clusterThreshold float64 // Forming threshold for clusters
 	clusterMinSize   int     // Minimum cluster size
@@ -1006,17 +1052,18 @@ type Model struct {
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
+	conditionCompareColumn   string  // Column to use for condition split (e.g., pain_binary_coded)
+	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 
 	// Decoding pipeline advanced config
 	decodingNPerm int  // Permutations for significance test
 	innerSplits   int  // CV inner splits
 	skipTimeGen   bool // Skip time generalization
 	// Decoding model hyperparameters
-	decodingMinTrialsInner int    // min_trials_inner for CV
-	elasticNetAlphaGrid    string // alpha grid as comma-separated values
-	elasticNetL1RatioGrid  string // l1_ratio grid as comma-separated values
-	rfNEstimators          int    // Random forest n_estimators
-	rfMaxDepthGrid         string // max_depth grid as comma-separated values (use "null" for None)
+	elasticNetAlphaGrid   string // alpha grid as comma-separated values
+	elasticNetL1RatioGrid string // l1_ratio grid as comma-separated values
+	rfNEstimators         int    // Random forest n_estimators
+	rfMaxDepthGrid        string // max_depth grid as comma-separated values (use "null" for None)
 
 	// TFR parameters (for features pipeline)
 	tfrFreqMin       float64 // Min frequency for TFR
@@ -1272,13 +1319,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsFamilyLogit:         true,
 		modelsBinaryOutcome:       0,
 
-		stabilityMethod:         0,
-		stabilityOutcome:        0,
-		stabilityGroupColumn:    0,
-		stabilityPartialTemp:    true,
-		stabilityMinGroupTrials: 8,
-		stabilityMaxFeatures:    50,
-		stabilityAlpha:          0.05,
+		stabilityMethod:      0,
+		stabilityOutcome:     0,
+		stabilityGroupColumn: 0,
+		stabilityPartialTemp: true,
+		stabilityMaxFeatures: 50,
+		stabilityAlpha:       0.05,
 
 		consistencyEnabled:           true,
 		influenceOutcomeRating:       true,
@@ -1302,14 +1348,29 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsTargetTemperature:  true,
 		correlationsTargetPainResidual: true,
 
-		painSensitivityMinTrials: 10,
 		reportTopN:               15,
 		temporalResolutionMs:     50,
 		temporalSmoothMs:         100,
 		temporalTimeMinMs:        -200,
 		temporalTimeMaxMs:        1000,
-		mixedEffectsType:         0,
-		mediationMinEffect:       0.05,
+		temporalSplitByCondition: true,
+		temporalConditionColumn:  "",
+		temporalFilterValue:      "",
+		// Temporal feature selection
+		temporalFeaturePower:           true,  // Power is enabled by default (existing behavior)
+		temporalFeatureITPC:            false, // ITPC off by default
+		temporalFeatureERDS:            false, // ERDS off by default
+		temporalITPCMinTrials:          10,
+		temporalITPCBaselineCorrection: true,
+		temporalITPCBaselineMin:        -0.5,
+		temporalITPCBaselineMax:        -0.01,
+		// ERDS defaults
+		temporalERDSBaselineMin: -0.5,
+		temporalERDSBaselineMax: -0.1,
+		temporalERDSMethod:      0, // 0=percent, 1=zscore
+		temporalERDSMinTrials:   5,
+		mixedEffectsType:        0,
+		mediationMinEffect:      0.05,
 		// Cluster defaults
 		clusterThreshold: 0.05,
 		clusterMinSize:   2,
@@ -1324,17 +1385,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mixedMaxFeatures: 50,
 		// Condition defaults
 		conditionEffectThreshold: 0.5,
-		conditionMinTrials:       10,
 		conditionFailFast:        true,
 		// Decoding defaults
-		decodingNPerm:          0,
-		innerSplits:            3,
-		skipTimeGen:            false,
-		decodingMinTrialsInner: 3,
-		elasticNetAlphaGrid:    "0.001,0.01,0.1,1,10",
-		elasticNetL1RatioGrid:  "0.2,0.5,0.8",
-		rfNEstimators:          500,
-		rfMaxDepthGrid:         "5,10,20,null",
+		decodingNPerm:         0,
+		innerSplits:           3,
+		skipTimeGen:           false,
+		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
+		elasticNetL1RatioGrid: "0.2,0.5,0.8",
+		rfNEstimators:         500,
+		rfMaxDepthGrid:        "5,10,20,null",
 		// TFR defaults (from config)
 		tfrFreqMin:       1.0,
 		tfrFreqMax:       100.0,
@@ -2346,6 +2405,14 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.trialTableExtraEventCols
 	case textFieldConfoundsQCColumnPatterns:
 		return m.confoundsQCColumnPatterns
+	case textFieldConditionCompareColumn:
+		return m.conditionCompareColumn
+	case textFieldConditionCompareWindows:
+		return m.conditionCompareWindows
+	case textFieldTemporalConditionColumn:
+		return m.temporalConditionColumn
+	case textFieldTemporalFilterValue:
+		return m.temporalFilterValue
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -2574,6 +2641,14 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.trialTableExtraEventCols = value
 	case textFieldConfoundsQCColumnPatterns:
 		m.confoundsQCColumnPatterns = value
+	case textFieldConditionCompareColumn:
+		m.conditionCompareColumn = strings.TrimSpace(value)
+	case textFieldConditionCompareWindows:
+		m.conditionCompareWindows = strings.TrimSpace(value)
+	case textFieldTemporalConditionColumn:
+		m.temporalConditionColumn = strings.TrimSpace(value)
+	case textFieldTemporalFilterValue:
+		m.temporalFilterValue = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -2858,8 +2933,9 @@ const (
 	optMixedMaxFeatures
 	// Behavior options - Condition
 	optConditionEffectThreshold
-	optConditionMinTrials
 	optConditionFailFast
+	optConditionCompareColumn
+	optConditionCompareWindows
 	// Behavior options - Trial table / residual
 	optTrialTableFormat
 	optTrialTableIncludeFeatures
@@ -2940,7 +3016,6 @@ const (
 	optStabilityOutcome
 	optStabilityGroupColumn
 	optStabilityPartialTemp
-	optStabilityMinGroupTrials
 	optStabilityMaxFeatures
 	optStabilityAlpha
 	// Behavior options - Consistency / Influence
@@ -2968,11 +3043,27 @@ const (
 	optCorrelationsTargetTemperature
 	optCorrelationsTargetPainResidual
 	// Behavior options - Pain sensitivity / temporal
-	optPainSensitivityMinTrials
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
 	optTemporalTimeMaxMs
 	optTemporalSmoothMs
+	optTemporalSplitByCondition
+	optTemporalConditionColumn
+	optTemporalFilterValue
+	// Temporal feature selection
+	optTemporalFeaturePower
+	optTemporalFeatureITPC
+	optTemporalFeatureERDS
+	// ITPC-specific options
+	optTemporalITPCMinTrials
+	optTemporalITPCBaselineCorrection
+	optTemporalITPCBaselineMin
+	optTemporalITPCBaselineMax
+	// ERDS-specific options
+	optTemporalERDSBaselineMin
+	optTemporalERDSBaselineMax
+	optTemporalERDSMethod
+	optTemporalERDSMinTrials
 	// Behavior options - Mixed effects / mediation
 	optMixedEffectsType
 	optMediationMinEffect
@@ -3197,7 +3288,6 @@ const (
 	optTfrDecim
 	optTfrWorkers
 	// Decoding model hyperparameters
-	optDecodingMinTrialsInner
 	optElasticNetAlphaGrid
 	optElasticNetL1RatioGrid
 	optRfNEstimators
@@ -3408,7 +3498,6 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 			plotItemConfigFieldComparisonWindows,
 			plotItemConfigFieldCompareColumns,
 			plotItemConfigFieldComparisonSegment,
-			plotItemConfigFieldComparisonColumn,
 			plotItemConfigFieldComparisonValues,
 			plotItemConfigFieldComparisonROIs,
 		)
@@ -3870,7 +3959,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optStabilityOutcome,
 				optStabilityGroupColumn,
 				optStabilityPartialTemp,
-				optStabilityMinGroupTrials,
 				optStabilityMaxFeatures,
 				optStabilityAlpha,
 			)
@@ -3928,7 +4016,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("condition") {
 		options = append(options, optBehaviorGroupCondition)
 		if m.behaviorGroupConditionExpanded {
-			options = append(options, optConditionFailFast, optConditionEffectThreshold, optConditionMinTrials)
+			options = append(options, optConditionCompareColumn, optConditionCompareWindows, optConditionFailFast, optConditionEffectThreshold)
 		}
 	}
 
@@ -3936,7 +4024,33 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("temporal") {
 		options = append(options, optBehaviorGroupTemporal)
 		if m.behaviorGroupTemporalExpanded {
-			options = append(options, optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs)
+			options = append(options,
+				optTemporalResolutionMs,
+				optTemporalTimeMinMs,
+				optTemporalTimeMaxMs,
+				optTemporalSmoothMs,
+				optTemporalSplitByCondition,
+				optTemporalConditionColumn,
+				optTemporalFilterValue,
+			)
+			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
+			if m.featureFileSelected["itpc"] {
+				options = append(options,
+					optTemporalITPCMinTrials,
+					optTemporalITPCBaselineCorrection,
+					optTemporalITPCBaselineMin,
+					optTemporalITPCBaselineMax,
+				)
+			}
+			// Show ERDS-specific options when 'erds' is selected in step 3 (feature selection)
+			if m.featureFileSelected["erds"] {
+				options = append(options,
+					optTemporalERDSBaselineMin,
+					optTemporalERDSBaselineMax,
+					optTemporalERDSMethod,
+					optTemporalERDSMinTrials,
+				)
+			}
 		}
 	}
 
@@ -3998,7 +4112,6 @@ func (m Model) getDecodingOptions() []optionType {
 		optUseDefaults,
 		optDecodingNPerm,
 		optDecodingInnerSplits,
-		optDecodingMinTrialsInner,
 		optRNGSeed,
 		optDecodingSkipTimeGen,
 		optElasticNetAlphaGrid,

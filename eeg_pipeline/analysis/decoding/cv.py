@@ -370,13 +370,9 @@ def create_within_subject_folds(
     blocks_all: Optional[np.ndarray],
     inner_cv_splits: int,
     seed: int,
-    min_trials_for_within_subject: Optional[int] = None,
     config: Optional[Any] = None,
 ) -> List[Tuple[int, np.ndarray, np.ndarray, str]]:
     """Create within-subject CV folds."""
-    if min_trials_for_within_subject is None:
-        min_trials_for_within_subject = int(get_config_value(config, "decoding.cv.min_trials_for_within_subject", 2))
-    
     folds: List[Tuple[int, np.ndarray, np.ndarray, str]] = []
     fold_counter = 0
     unique_subs = [str(s) for s in np.unique(groups)]
@@ -384,10 +380,6 @@ def create_within_subject_folds(
     for subject in unique_subs:
         subject_indices = np.where(groups == subject)[0]
         n_samples = len(subject_indices)
-
-        if n_samples < min_trials_for_within_subject:
-            logger.warning(f"Subject {subject}: <{min_trials_for_within_subject} trials, skipping")
-            continue
 
         n_splits = min(inner_cv_splits, n_samples)
 

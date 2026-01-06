@@ -237,9 +237,6 @@ def _compute_single_condition_effect(
     pain_valid = pain_vals[np.isfinite(pain_vals)]
     nonpain_valid = nonpain_vals[np.isfinite(nonpain_vals)]
 
-    if len(pain_valid) < min_samples or len(nonpain_valid) < min_samples:
-        return None
-
     mean_pain = float(np.mean(pain_valid))
     mean_nonpain = float(np.mean(nonpain_valid))
     std_pain = float(np.std(pain_valid, ddof=1))
@@ -438,6 +435,8 @@ __all__ = [
     "parallel_stability_features",
     "parallel_influence_features",
 ]
+
+
 
 
 

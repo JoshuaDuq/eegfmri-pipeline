@@ -28,7 +28,6 @@ from eeg_pipeline.analysis.behavior.api import (
     run_cluster_test_from_context,
     run_mediation_analysis,
     run_multilevel_correlation_analysis,
-    run_pain_nonpain_cluster_test,
     run_pain_sensitivity_correlations,
     run_power_topomap_correlations,
     run_unified_feature_correlations,
@@ -85,7 +84,6 @@ __all__ = [
     # Cluster and topomap helpers
     "compute_pain_nonpain_time_cluster_test",
     "run_cluster_test_from_context",
-    "run_pain_nonpain_cluster_test",
     "run_power_topomap_correlations",
     # Advanced models
     "fit_mixed_effects_model",

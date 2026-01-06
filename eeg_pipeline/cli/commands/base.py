@@ -145,7 +145,8 @@ def detect_feature_availability(features_dir) -> dict:
         found_file = None
         if stats_dir.exists():
             for pattern in patterns:
-                files = list(stats_dir.glob(pattern))
+                # Use rglob to search recursively in subdirectories
+                files = list(stats_dir.rglob(pattern))
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break

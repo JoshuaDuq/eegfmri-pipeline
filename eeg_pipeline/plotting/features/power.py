@@ -181,6 +181,23 @@ def plot_power_by_condition(
             segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
             band_colors = {band: get_band_color(band, config) for band in bands}
 
+            # Try to load pre-computed column comparison stats
+            from .utils import load_precomputed_paired_stats, get_precomputed_qvalues
+            
+            precomputed_column_stats = None
+            if stats_dir is not None:
+                precomputed_column_stats = load_precomputed_paired_stats(
+                    stats_dir=stats_dir,
+                    feature_type="power",
+                    comparison_type="column",
+                    condition1=label1.lower(),
+                    condition2=label2.lower(),
+                    roi_name=None,
+                )
+                if precomputed_column_stats is not None and not precomputed_column_stats.empty:
+                    if logger:
+                        logger.info(f"Using pre-computed column comparison stats ({len(precomputed_column_stats)} entries)")
+
             for roi_name in roi_names:
                 if roi_name == "all":
                     roi_channels = all_channels
@@ -193,47 +210,82 @@ def plot_power_by_condition(
                 roi_set = set(roi_channels)
                 all_pvals, pvalue_keys, cell_data = [], [], {}
                 
-                for col_idx, band in enumerate(bands):
-                    cols = []
-                    for c in power_df.columns:
-                        parsed = NamingSchema.parse(str(c))
-                        if not (parsed.get("valid") and parsed.get("group") == "power"):
-                            continue
-                        channel_id = str(parsed.get("identifier") or "")
-                        if channel_id and channel_id not in roi_set:
-                            continue
-                        if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
-                            cols.append(c)
-                    
-                    if not cols:
-                        cell_data[col_idx] = None
-                        continue
-                    
-                    val_series = power_df[cols].mean(axis=1)
-                    v1 = val_series[m1].dropna().values
-                    v2 = val_series[m2].dropna().values
-                    
-                    cell_data[col_idx] = {"v1": v1, "v2": v2}
-                    
-                    if len(v1) >= 3 and len(v2) >= 3:
-                        from scipy.stats import mannwhitneyu
-                        try:
-                            _, p = mannwhitneyu(v1, v2, alternative="two-sided")
-                            diff = np.mean(v2) - np.mean(v1)
-                            pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
-                            d = diff / pooled_std if pooled_std > 0 else 0
-                            all_pvals.append(p)
-                            pvalue_keys.append((col_idx, p, d))
-                        except Exception:
-                            pass
+                # Use pre-computed stats if available
+                use_precomputed = precomputed_column_stats is not None and not precomputed_column_stats.empty
                 
-                qvalues = {}
-                n_significant = 0
-                if all_pvals:
-                    rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
-                    for i, (key, p, d) in enumerate(pvalue_keys):
-                        qvalues[key] = (p, qvals[i], d, rejected[i])
-                    n_significant = int(np.sum(rejected))
+                if use_precomputed:
+                    qvalues = get_precomputed_qvalues(precomputed_column_stats, bands, roi_name or "all")
+                    n_significant = sum(1 for v in qvalues.values() if v[3])
+                    
+                    # Still need cell_data for plotting the actual values
+                    for col_idx, band in enumerate(bands):
+                        cols = []
+                        for c in power_df.columns:
+                            parsed = NamingSchema.parse(str(c))
+                            if not (parsed.get("valid") and parsed.get("group") == "power"):
+                                continue
+                            channel_id = str(parsed.get("identifier") or "")
+                            if channel_id and channel_id not in roi_set:
+                                continue
+                            if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
+                                cols.append(c)
+                        
+                        if not cols:
+                            cell_data[col_idx] = None
+                            continue
+                        
+                        val_series = power_df[cols].mean(axis=1)
+                        v1 = val_series[m1].dropna().values
+                        v2 = val_series[m2].dropna().values
+                        cell_data[col_idx] = {"v1": v1, "v2": v2}
+                        
+                        # Map band to col_idx for q-value lookup
+                        if band in qvalues:
+                            p, q, d, sig = qvalues[band]
+                            qvalues[col_idx] = (p, q, d, sig)
+                else:
+                    # Compute on-the-fly
+                    for col_idx, band in enumerate(bands):
+                        cols = []
+                        for c in power_df.columns:
+                            parsed = NamingSchema.parse(str(c))
+                            if not (parsed.get("valid") and parsed.get("group") == "power"):
+                                continue
+                            channel_id = str(parsed.get("identifier") or "")
+                            if channel_id and channel_id not in roi_set:
+                                continue
+                            if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
+                                cols.append(c)
+                        
+                        if not cols:
+                            cell_data[col_idx] = None
+                            continue
+                        
+                        val_series = power_df[cols].mean(axis=1)
+                        v1 = val_series[m1].dropna().values
+                        v2 = val_series[m2].dropna().values
+                        
+                        cell_data[col_idx] = {"v1": v1, "v2": v2}
+                        
+                        if len(v1) >= 3 and len(v2) >= 3:
+                            from scipy.stats import mannwhitneyu
+                            try:
+                                _, p = mannwhitneyu(v1, v2, alternative="two-sided")
+                                diff = np.mean(v2) - np.mean(v1)
+                                pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
+                                d = diff / pooled_std if pooled_std > 0 else 0
+                                all_pvals.append(p)
+                                pvalue_keys.append((col_idx, p, d))
+                            except Exception:
+                                pass
+                    
+                    qvalues = {}
+                    n_significant = 0
+                    if all_pvals:
+                        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+                        for i, (key, p, d) in enumerate(pvalue_keys):
+                            qvalues[key] = (p, qvals[i], d, rejected[i])
+                        n_significant = int(np.sum(rejected))
                 
                 fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 5), squeeze=False)
                 
@@ -279,10 +331,11 @@ def plot_power_by_condition(
                 
                 n_trials = len(power_df)
                 roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-                n_tests = len(all_pvals)
+                n_tests = len(qvalues)
                 
+                stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
                 title = (f"Band Power: {label1} vs {label2} (Column Comparison)\n"
-                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
                          f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
                 fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
                 
@@ -298,7 +351,7 @@ def plot_power_by_condition(
                 plt.close(fig)
                 
                 if logger:
-                    logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant)")
+                    logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant, {stats_source})")
 
 
 

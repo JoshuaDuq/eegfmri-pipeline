@@ -693,10 +693,7 @@ class FeatureBehaviorCorrelator:
             variance = float(np.nanvar(col_values[valid_mask])) if n_valid > 1 else np.nan
             status = "kept"
             reason = None
-            if n_valid < min_samples:
-                status = "dropped"
-                reason = "insufficient_samples"
-            elif not np.isfinite(variance) or np.isclose(variance, 0.0):
+            if not np.isfinite(variance) or np.isclose(variance, 0.0):
                 status = "dropped"
                 reason = "zero_variance"
 
@@ -905,14 +902,12 @@ class FeatureBehaviorCorrelator:
                 roi_vals = power_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
                 valid = roi_vals.notna() & targets.notna()
                 
-                if valid.sum() < corr_config.min_samples:
-                    continue
                 
                 r, p, n = safe_correlation(
                     roi_vals[valid].values,
                     targets[valid].values,
                     corr_config.method,
-                    corr_config.min_samples,
+                    0,
                     robust_method=corr_config.robust_method,
                 )
                 if not np.isfinite(r):
@@ -932,12 +927,12 @@ class FeatureBehaviorCorrelator:
             
             overall_vals = power_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
             valid = overall_vals.notna() & targets.notna()
-            if valid.sum() >= corr_config.min_samples:
+            if valid.sum() > 0:
                 r, p, n = safe_correlation(
                     overall_vals[valid].values,
                     targets[valid].values,
                     corr_config.method,
-                    corr_config.min_samples,
+                    0,
                     robust_method=corr_config.robust_method,
                 )
                 if not np.isfinite(r):

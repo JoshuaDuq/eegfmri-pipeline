@@ -106,10 +106,11 @@ func (m *Model) handleUp() {
 			m.bandCursor = len(m.bands) - 1
 		}
 	case types.StepSelectFeatureFiles:
+		applicable := m.GetApplicableFeatureFiles()
 		if m.featureFileCursor > 0 {
 			m.featureFileCursor--
-		} else if len(m.featureFiles) > 0 {
-			m.featureFileCursor = len(m.featureFiles) - 1
+		} else if len(applicable) > 0 {
+			m.featureFileCursor = len(applicable) - 1
 		}
 	case types.StepSelectPlots:
 		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, -1)
@@ -219,7 +220,8 @@ func (m *Model) handleDown() {
 			m.bandCursor = 0
 		}
 	case types.StepSelectFeatureFiles:
-		if m.featureFileCursor < len(m.featureFiles)-1 {
+		applicable := m.GetApplicableFeatureFiles()
+		if m.featureFileCursor < len(applicable)-1 {
 			m.featureFileCursor++
 		} else {
 			m.featureFileCursor = 0
@@ -536,8 +538,9 @@ func (m *Model) handleSpace() {
 	case types.StepSelectBands:
 		m.bandSelected[m.bandCursor] = !m.bandSelected[m.bandCursor]
 	case types.StepSelectFeatureFiles:
-		if m.featureFileCursor < len(m.featureFiles) {
-			key := m.featureFiles[m.featureFileCursor].Key
+		applicable := m.GetApplicableFeatureFiles()
+		if m.featureFileCursor < len(applicable) {
+			key := applicable[m.featureFileCursor].Key
 			m.featureFileSelected[key] = !m.featureFileSelected[key]
 		}
 	case types.StepSelectPlots:
@@ -1914,7 +1917,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optStabilityPartialTemp:
 		m.stabilityPartialTemp = !m.stabilityPartialTemp
 		m.useDefaultAdvanced = false
-	case optStabilityMinGroupTrials, optStabilityMaxFeatures, optStabilityAlpha:
+	case optStabilityMaxFeatures, optStabilityAlpha:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1995,13 +1998,59 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 
-	// Pain sensitivity
-	case optPainSensitivityMinTrials:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optTemporalSplitByCondition:
+		m.temporalSplitByCondition = !m.temporalSplitByCondition
+		m.useDefaultAdvanced = false
+	case optTemporalConditionColumn:
+		m.startTextEdit(textFieldTemporalConditionColumn)
+		m.useDefaultAdvanced = false
+	case optTemporalFilterValue:
+		m.startTextEdit(textFieldTemporalFilterValue)
+		m.useDefaultAdvanced = false
+	// Temporal feature selection
+	case optTemporalFeaturePower:
+		m.temporalFeaturePower = !m.temporalFeaturePower
+		// Ensure at least one feature is enabled
+		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
+			m.temporalFeaturePower = true
+		}
+		m.useDefaultAdvanced = false
+	case optTemporalFeatureITPC:
+		m.temporalFeatureITPC = !m.temporalFeatureITPC
+		// Ensure at least one feature is enabled
+		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
+			m.temporalFeatureITPC = true
+		}
+		m.useDefaultAdvanced = false
+	case optTemporalFeatureERDS:
+		m.temporalFeatureERDS = !m.temporalFeatureERDS
+		// Ensure at least one feature is enabled
+		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
+			m.temporalFeatureERDS = true
+		}
+		m.useDefaultAdvanced = false
+	// ITPC-specific options
+	case optTemporalITPCMinTrials:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optTemporalITPCBaselineCorrection:
+		m.temporalITPCBaselineCorrection = !m.temporalITPCBaselineCorrection
+		m.useDefaultAdvanced = false
+	case optTemporalITPCBaselineMin, optTemporalITPCBaselineMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// ERDS-specific options
+	case optTemporalERDSBaselineMin, optTemporalERDSBaselineMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optTemporalERDSMethod:
+		m.temporalERDSMethod = (m.temporalERDSMethod + 1) % 2 // Toggle between percent and zscore
+		m.useDefaultAdvanced = false
+	case optTemporalERDSMinTrials:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -2040,10 +2089,13 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.mixedEffectsType = (m.mixedEffectsType + 1) % 2
 		m.useDefaultAdvanced = false
 	// Condition options
-	case optConditionEffectThreshold:
-		m.startNumberEdit()
+	case optConditionCompareColumn:
+		m.startTextEdit(textFieldConditionCompareColumn)
 		m.useDefaultAdvanced = false
-	case optConditionMinTrials:
+	case optConditionCompareWindows:
+		m.startTextEdit(textFieldConditionCompareWindows)
+		m.useDefaultAdvanced = false
+	case optConditionEffectThreshold:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optConditionFailFast:
@@ -2062,7 +2114,7 @@ func (m *Model) toggleDecodingAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optDecodingNPerm, optDecodingInnerSplits, optDecodingMinTrialsInner, optRNGSeed, optRfNEstimators:
+	case optDecodingNPerm, optDecodingInnerSplits, optRNGSeed, optRfNEstimators:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optDecodingSkipTimeGen:
@@ -2866,10 +2918,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Stability
-	case optStabilityMinGroupTrials:
-		if val >= 0 {
-			m.stabilityMinGroupTrials = int(val)
-		}
 	case optStabilityMaxFeatures:
 		if val >= 0 {
 			m.stabilityMaxFeatures = int(val)
@@ -2914,10 +2962,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 1 {
 			m.reportTopN = int(val)
 		}
-	case optPainSensitivityMinTrials:
-		if val >= 0 {
-			m.painSensitivityMinTrials = int(val)
-		}
 	case optTemporalResolutionMs:
 		if val >= 1 {
 			m.temporalResolutionMs = int(val)
@@ -2929,6 +2973,24 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optTemporalSmoothMs:
 		if val >= 0 {
 			m.temporalSmoothMs = int(val)
+		}
+	// ITPC temporal options
+	case optTemporalITPCMinTrials:
+		if val >= 1 {
+			m.temporalITPCMinTrials = int(val)
+		}
+	case optTemporalITPCBaselineMin:
+		m.temporalITPCBaselineMin = val
+	case optTemporalITPCBaselineMax:
+		m.temporalITPCBaselineMax = val
+	// ERDS temporal options
+	case optTemporalERDSBaselineMin:
+		m.temporalERDSBaselineMin = val
+	case optTemporalERDSBaselineMax:
+		m.temporalERDSBaselineMax = val
+	case optTemporalERDSMinTrials:
+		if val >= 1 {
+			m.temporalERDSMinTrials = int(val)
 		}
 
 	case optClusterMinSize:
@@ -2965,10 +3027,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 	case optConditionEffectThreshold:
 		m.conditionEffectThreshold = val
-	case optConditionMinTrials:
-		if val >= 0 {
-			m.conditionMinTrials = int(val)
-		}
 	}
 }
 
@@ -2987,10 +3045,6 @@ func (m *Model) commitDecodingNumber(val float64) {
 	case optDecodingInnerSplits:
 		if val >= 2 {
 			m.innerSplits = int(val)
-		}
-	case optDecodingMinTrialsInner:
-		if val >= 1 {
-			m.decodingMinTrialsInner = int(val)
 		}
 	case optRNGSeed:
 		if val >= 0 {

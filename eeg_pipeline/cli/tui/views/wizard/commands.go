@@ -125,6 +125,53 @@ func (m Model) SelectedFeatureFiles() []string {
 	return result
 }
 
+// GetApplicableFeatureFiles returns feature files that are applicable for the currently selected computations.
+// This is used to filter the feature selection UI to only show relevant features.
+func (m Model) GetApplicableFeatureFiles() []FeatureFile {
+	// Build a set of applicable feature keys based on selected computations
+	applicableKeys := make(map[string]bool)
+
+	// Check primary computations
+	for i, sel := range m.computationSelected {
+		if !sel || i >= len(m.computations) {
+			continue
+		}
+		compKey := m.computations[i].Key
+		if features, ok := computationApplicableFeatures[compKey]; ok {
+			for _, f := range features {
+				applicableKeys[f] = true
+			}
+		}
+	}
+
+	// Check post computations
+	for i, sel := range m.postComputationSelected {
+		if !sel || i >= len(m.postComputations) {
+			continue
+		}
+		compKey := m.postComputations[i].Key
+		if features, ok := computationApplicableFeatures[compKey]; ok {
+			for _, f := range features {
+				applicableKeys[f] = true
+			}
+		}
+	}
+
+	// If no computations selected, return all features
+	if len(applicableKeys) == 0 {
+		return featureFileOptions
+	}
+
+	// Filter feature files to only those that are applicable
+	var result []FeatureFile
+	for _, file := range featureFileOptions {
+		if applicableKeys[file.Key] {
+			result = append(result, file)
+		}
+	}
+	return result
+}
+
 func (m Model) SelectedPlotIDs() []string {
 	var result []string
 	for i, plot := range m.plotItems {
@@ -1461,9 +1508,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.stabilityPartialTemp {
 			args = append(args, "--no-stability-partial-temperature")
 		}
-		if m.stabilityMinGroupTrials != 8 {
-			args = append(args, "--stability-min-group-trials", fmt.Sprintf("%d", m.stabilityMinGroupTrials))
-		}
 		if m.stabilityMaxFeatures != 50 {
 			args = append(args, "--stability-max-features", fmt.Sprintf("%d", m.stabilityMaxFeatures))
 		}
@@ -1554,20 +1598,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 	}
 
 	// Pain sensitivity
-	if m.isComputationSelected("pain_sensitivity") && m.painSensitivityMinTrials != 10 {
-		args = append(args, "--pain-sensitivity-min-trials", fmt.Sprintf("%d", m.painSensitivityMinTrials))
-	}
 
 	// Condition
 	if m.isComputationSelected("condition") {
+		if strings.TrimSpace(m.conditionCompareColumn) != "" {
+			args = append(args, "--condition-compare-column", strings.TrimSpace(m.conditionCompareColumn))
+		}
+		if strings.TrimSpace(m.conditionCompareWindows) != "" {
+			args = append(args, "--condition-compare-windows")
+			args = append(args, splitSpaceList(m.conditionCompareWindows)...)
+		}
 		if !m.conditionFailFast {
 			args = append(args, "--no-condition-fail-fast")
 		}
 		if m.conditionEffectThreshold != 0.5 {
 			args = append(args, "--condition-effect-threshold", fmt.Sprintf("%.4f", m.conditionEffectThreshold))
-		}
-		if m.conditionMinTrials != 10 {
-			args = append(args, "--condition-min-trials", fmt.Sprintf("%d", m.conditionMinTrials))
 		}
 	}
 
@@ -1584,6 +1629,50 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.temporalSmoothMs != 100 {
 			args = append(args, "--temporal-smooth-window-ms", fmt.Sprintf("%d", m.temporalSmoothMs))
+		}
+		if !m.temporalSplitByCondition {
+			args = append(args, "--no-temporal-split-by-condition")
+		}
+		if strings.TrimSpace(m.temporalConditionColumn) != "" {
+			args = append(args, "--temporal-condition-column", strings.TrimSpace(m.temporalConditionColumn))
+		}
+		if strings.TrimSpace(m.temporalFilterValue) != "" {
+			args = append(args, "--temporal-filter-value", strings.TrimSpace(m.temporalFilterValue))
+		}
+		// Temporal feature selection
+		if !m.temporalFeaturePower {
+			args = append(args, "--no-temporal-feature-power")
+		}
+		// ITPC-specific options (only if ITPC is selected in step 3)
+		if m.featureFileSelected["itpc"] {
+			if m.temporalITPCMinTrials != 10 {
+				args = append(args, "--temporal-itpc-min-trials", fmt.Sprintf("%d", m.temporalITPCMinTrials))
+			}
+			if !m.temporalITPCBaselineCorrection {
+				args = append(args, "--no-temporal-itpc-baseline-correction")
+			}
+			if m.temporalITPCBaselineMin != -0.5 {
+				args = append(args, "--temporal-itpc-baseline-min", fmt.Sprintf("%.2f", m.temporalITPCBaselineMin))
+			}
+			if m.temporalITPCBaselineMax != -0.01 {
+				args = append(args, "--temporal-itpc-baseline-max", fmt.Sprintf("%.2f", m.temporalITPCBaselineMax))
+			}
+		}
+		// ERDS-specific options (only if ERDS is selected in step 3)
+		if m.featureFileSelected["erds"] {
+			if m.temporalERDSBaselineMin != -0.5 {
+				args = append(args, "--temporal-erds-baseline-min", fmt.Sprintf("%.2f", m.temporalERDSBaselineMin))
+			}
+			if m.temporalERDSBaselineMax != -0.1 {
+				args = append(args, "--temporal-erds-baseline-max", fmt.Sprintf("%.2f", m.temporalERDSBaselineMax))
+			}
+			if m.temporalERDSMethod != 0 {
+				methods := []string{"percent", "zscore"}
+				args = append(args, "--temporal-erds-method", methods[m.temporalERDSMethod])
+			}
+			if m.temporalERDSMinTrials != 5 {
+				args = append(args, "--temporal-erds-min-trials", fmt.Sprintf("%d", m.temporalERDSMinTrials))
+			}
 		}
 	}
 
@@ -1669,10 +1758,6 @@ func (m Model) buildDecodingAdvancedArgs() []string {
 
 	if m.innerSplits != 3 {
 		args = append(args, "--inner-splits", fmt.Sprintf("%d", m.innerSplits))
-	}
-
-	if m.decodingMinTrialsInner != 3 {
-		args = append(args, "--min-trials-inner", fmt.Sprintf("%d", m.decodingMinTrialsInner))
 	}
 
 	if m.rngSeed > 0 {

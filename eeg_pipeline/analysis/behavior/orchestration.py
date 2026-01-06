@@ -1344,66 +1344,213 @@ def write_analysis_metadata(
 
 
 def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
+    """Run condition comparison analysis.
+    
+    Supports two types of comparisons:
+    1. Column comparison: Compare conditions based on a column (e.g., pain vs non-pain)
+    2. Window comparison: Compare time windows (e.g., baseline vs active)
+    
+    Each produces its own output file.
+    """
     from eeg_pipeline.analysis.behavior.api import split_by_condition, compute_condition_effects
+    from eeg_pipeline.infra.tsv import write_tsv
 
-    # Trial-table-only: derive condition split from canonical trial table.
+    # Get configuration
+    fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
+    compare_windows = get_config_value(ctx.config, "behavior_analysis.condition.compare_windows", [])
+    
+    # Load trial table
     df_trials = _load_trial_table_df(ctx)
     if df_trials is None or df_trials.empty:
         ctx.logger.warning("Condition: trial table missing; skipping.")
         return pd.DataFrame()
 
-    fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
-
-    try:
-        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
-    except Exception as exc:
-        if fail_fast:
-            raise
-        ctx.logger.warning(f"Condition split failed; skipping condition effects: {exc}")
-        return pd.DataFrame()
-
-    if n_pain == 0 and n_nonpain == 0:
-        msg = "Condition split produced zero trials; check pain coding and config event_columns.pain_binary"
-        if fail_fast:
-            raise ValueError(msg)
-        ctx.logger.warning(msg)
-        return pd.DataFrame()
-
-    min_samples = max(config.min_samples, ctx.get_min_samples("default"))
-    if n_pain < min_samples or n_nonpain < min_samples:
-        ctx.logger.warning(
-            f"Insufficient trials: {n_pain} pain, {n_nonpain} non-pain (need >= {min_samples})"
-        )
-        return pd.DataFrame()
-
     feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
     feature_cols = _filter_feature_cols_by_band(feature_cols, ctx)
     feature_cols = _filter_feature_cols_for_computation(feature_cols, "condition", ctx)
+    
     if not feature_cols:
         ctx.logger.info("Condition: no feature columns found in trial table; skipping.")
         return pd.DataFrame()
-    features = df_trials[feature_cols].copy()
 
-    out = compute_condition_effects(
-        features,
-        pain_mask,
-        nonpain_mask,
-        min_samples=min_samples,
-        fdr_alpha=config.fdr_alpha,
-        logger=ctx.logger,
-        n_jobs=config.n_jobs,
-        config=ctx.config,
-    )
-    # Standardize p-value columns for downstream validation/global FDR.
-    if out is not None and not out.empty:
-        out = out.copy()
-        if "p_value" in out.columns and "p_raw" not in out.columns:
-            out["p_raw"] = pd.to_numeric(out["p_value"], errors="coerce")
-        if "p_value" in out.columns and "p_primary" not in out.columns:
-            out["p_primary"] = pd.to_numeric(out["p_value"], errors="coerce")
-        if "q_value" in out.columns and "p_fdr" not in out.columns:
-            out["p_fdr"] = pd.to_numeric(out["q_value"], errors="coerce")
-    return out if out is not None else pd.DataFrame()
+    suffix = _feature_suffix_from_context(ctx)
+    out_dir = _get_stats_subfolder(ctx, "condition")
+    column_df = pd.DataFrame()
+    window_df = pd.DataFrame()
+
+    # 1. Column comparison (pain vs non-pain)
+    try:
+        pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
+        
+        if n_pain == 0 and n_nonpain == 0:
+            msg = "Condition split produced zero trials; check pain coding and config event_columns.pain_binary"
+            if fail_fast:
+                raise ValueError(msg)
+            ctx.logger.warning(msg)
+        else:
+            features = df_trials[feature_cols].copy()
+            column_df = compute_condition_effects(
+                features,
+                pain_mask,
+                nonpain_mask,
+                min_samples=0,
+                fdr_alpha=config.fdr_alpha,
+                logger=ctx.logger,
+                n_jobs=config.n_jobs,
+                config=ctx.config,
+            )
+            if column_df is not None and not column_df.empty:
+                column_df = column_df.copy()
+                column_df["comparison_type"] = "column"
+                if "p_value" in column_df.columns and "p_raw" not in column_df.columns:
+                    column_df["p_raw"] = pd.to_numeric(column_df["p_value"], errors="coerce")
+                if "p_value" in column_df.columns and "p_primary" not in column_df.columns:
+                    column_df["p_primary"] = pd.to_numeric(column_df["p_value"], errors="coerce")
+                if "q_value" in column_df.columns and "p_fdr" not in column_df.columns:
+                    column_df["p_fdr"] = pd.to_numeric(column_df["q_value"], errors="coerce")
+                
+                # Save column comparison results
+                col_path = out_dir / f"condition_effects_column{suffix}.tsv"
+                write_tsv(column_df, col_path)
+                ctx.logger.info(f"Condition column comparison: {len(column_df)} features saved to {col_path}")
+    except Exception as exc:
+        if fail_fast:
+            raise
+        ctx.logger.warning(f"Condition column comparison failed: {exc}")
+
+    # 2. Window comparison (e.g., baseline vs active)
+    if compare_windows and len(compare_windows) >= 2:
+        ctx.logger.info(f"Running window comparison: {compare_windows}")
+        window_df = _run_window_comparison(
+            ctx, df_trials, feature_cols, compare_windows, 0, config.fdr_alpha, suffix
+        )
+        if not window_df.empty:
+            win_path = out_dir / f"condition_effects_window{suffix}.tsv"
+            write_tsv(window_df, win_path)
+            ctx.logger.info(f"Condition window comparison: {len(window_df)} features saved to {win_path}")
+    elif compare_windows:
+        ctx.logger.warning(f"Window comparison requires at least 2 windows, got: {compare_windows}")
+
+    # Combine results for return (legacy compatibility)
+    if not column_df.empty and not window_df.empty:
+        return pd.concat([column_df, window_df], ignore_index=True)
+    elif not column_df.empty:
+        return column_df
+    elif not window_df.empty:
+        return window_df
+    else:
+        return pd.DataFrame()
+
+
+def _run_window_comparison(
+    ctx: BehaviorContext,
+    df_trials: pd.DataFrame,
+    feature_cols: List[str],
+    windows: List[str],
+    min_samples: int,
+    fdr_alpha: float,
+    suffix: str,
+) -> pd.DataFrame:
+    """Run paired window comparison on feature columns.
+    
+    Compares features between two time windows (e.g., baseline vs active).
+    """
+    from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+    from scipy import stats as sp_stats
+
+    if len(windows) < 2:
+        ctx.logger.warning("Window comparison requires at least 2 windows")
+        return pd.DataFrame()
+
+    window1, window2 = windows[0], windows[1]
+    records: List[Dict[str, Any]] = []
+
+    # Parse feature columns to find window-specific features
+    # Feature naming pattern: {category}_{window}_{band}_{roi} or similar
+    window1_features = {}
+    window2_features = {}
+    
+    for col in feature_cols:
+        col_lower = str(col).lower()
+        if f"_{window1.lower()}_" in col_lower or col_lower.endswith(f"_{window1.lower()}"):
+            base_name = col_lower.replace(f"_{window1.lower()}", "").replace(f"{window1.lower()}_", "")
+            window1_features[base_name] = col
+        elif f"_{window2.lower()}_" in col_lower or col_lower.endswith(f"_{window2.lower()}"):
+            base_name = col_lower.replace(f"_{window2.lower()}", "").replace(f"{window2.lower()}_", "")
+            window2_features[base_name] = col
+
+    # Find matching pairs
+    common_bases = set(window1_features.keys()) & set(window2_features.keys())
+    
+    if not common_bases:
+        ctx.logger.warning(f"No matching feature pairs found for windows {window1} and {window2}")
+        ctx.logger.info(f"Looking for patterns like '*_{window1}_*' and '*_{window2}_*' in feature columns")
+        return pd.DataFrame()
+
+    ctx.logger.info(f"Window comparison: found {len(common_bases)} feature pairs for {window1} vs {window2}")
+
+    for base_name in common_bases:
+        col1 = window1_features[base_name]
+        col2 = window2_features[base_name]
+        
+        v1 = pd.to_numeric(df_trials[col1], errors="coerce").values
+        v2 = pd.to_numeric(df_trials[col2], errors="coerce").values
+        
+        valid_mask = np.isfinite(v1) & np.isfinite(v2)
+        n_valid = int(valid_mask.sum())
+        
+        v1_valid = v1[valid_mask]
+        v2_valid = v2[valid_mask]
+        
+        # Paired Wilcoxon signed-rank test
+        try:
+            stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
+        except Exception:
+            continue
+        
+        # Effect sizes
+        diff = v2_valid - v1_valid
+        mean_diff = float(np.nanmean(diff))
+        pooled_std = float(np.sqrt((np.nanvar(v1_valid) + np.nanvar(v2_valid)) / 2))
+        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+        
+        # Hedge's g correction
+        n = len(v1_valid)
+        hedges_correction = 1 - (3 / (4 * n - 1)) if n > 1 else 1.0
+        hedges_g = cohens_d * hedges_correction
+        
+        records.append({
+            "feature": base_name,
+            "feature_type": _infer_feature_type(col1, ctx.config),
+            "comparison_type": "window",
+            "window1": window1,
+            "window2": window2,
+            "n_pairs": n_valid,
+            "mean_window1": float(np.nanmean(v1_valid)),
+            "mean_window2": float(np.nanmean(v2_valid)),
+            "std_window1": float(np.nanstd(v1_valid, ddof=1)),
+            "std_window2": float(np.nanstd(v2_valid, ddof=1)),
+            "mean_diff": mean_diff,
+            "statistic": float(stat),
+            "p_value": float(p_val),
+            "cohens_d": cohens_d,
+            "hedges_g": hedges_g,
+        })
+
+    if not records:
+        ctx.logger.info("Window comparison: no valid feature pairs with sufficient samples")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+    
+    # Apply FDR correction
+    p_vals = pd.to_numeric(df["p_value"], errors="coerce").to_numpy()
+    df["p_raw"] = df["p_value"]
+    df["p_primary"] = df["p_value"]
+    df["p_fdr"] = fdr_bh(p_vals, alpha=fdr_alpha, config=ctx.config)
+    df["q_value"] = df["p_fdr"]
+
+    return df
 
 
 def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
@@ -1412,10 +1559,12 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
         compute_temporal_from_context,
         run_power_topomap_correlations,
     )
+    from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
 
-    status = {"time_frequency": "success", "temporal": "success", "topomap": "success"}
+    status = {"time_frequency": "success", "temporal": "success", "itpc_temporal": "success", "topomap": "success"}
     tf_results = None
     temporal_results = None
+    itpc_results = None
 
     ctx.logger.info("Computing time-frequency correlations...")
     try:
@@ -1430,6 +1579,48 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
     except Exception as exc:
         status["temporal"] = f"failed: {exc}"
         ctx.logger.error(f"Temporal correlations failed: {exc}")
+
+    # ITPC/ERDS temporal correlations based on feature selection
+    # If user explicitly selected feature files, use those
+    # If no explicit selection, default to running itpc and erds for temporal computation
+    selected_features = ctx.selected_feature_files or ctx.feature_categories
+    if not selected_features:
+        # No explicit selection - default to all temporal features for temporal computation
+        selected_features = ["power", "itpc", "erds"]
+        ctx.logger.info(f"No feature files specified, defaulting to all temporal features: {selected_features}")
+    
+    if "itpc" in selected_features:
+        ctx.logger.info("Computing ITPC temporal correlations...")
+        try:
+            itpc_results = compute_itpc_temporal_from_context(ctx)
+            if itpc_results:
+                ctx.logger.info(
+                    f"ITPC temporal: {itpc_results.get('n_tests', 0)} tests, "
+                    f"{itpc_results.get('n_sig_raw', 0)} significant"
+                )
+        except Exception as exc:
+            status["itpc_temporal"] = f"failed: {exc}"
+            ctx.logger.error(f"ITPC temporal correlations failed: {exc}")
+    else:
+        status["itpc_temporal"] = "skipped (not selected)"
+
+    # ERDS temporal correlations (if 'erds' was selected in feature selection)
+    erds_results = None
+    if "erds" in selected_features:
+        from eeg_pipeline.utils.analysis.stats.temporal import compute_erds_temporal_from_context
+        ctx.logger.info("Computing ERDS temporal correlations...")
+        try:
+            erds_results = compute_erds_temporal_from_context(ctx)
+            if erds_results:
+                ctx.logger.info(
+                    f"ERDS temporal: {erds_results.get('n_tests', 0)} tests, "
+                    f"{erds_results.get('n_sig_raw', 0)} significant"
+                )
+        except Exception as exc:
+            status["erds_temporal"] = f"failed: {exc}"
+            ctx.logger.error(f"ERDS temporal correlations failed: {exc}")
+    else:
+        status["erds_temporal"] = "skipped (not selected)"
 
     try:
         run_power_topomap_correlations(
@@ -1450,11 +1641,18 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
         status["topomap"] = f"failed: {exc}"
         ctx.logger.error(f"Topomap correlations failed: {exc}")
 
-    failed = {k: v for k, v in status.items() if v != "success"}
+    failed = {k: v for k, v in status.items() if v != "success" and not v.startswith("skipped")}
     if failed:
         ctx.logger.info(f"Temporal stage status: {failed}")
     
-    return tf_results, temporal_results
+    # Combine results
+    combined = {"power": temporal_results}
+    if itpc_results:
+        combined["itpc"] = itpc_results
+    if erds_results:
+        combined["erds"] = erds_results
+    
+    return tf_results, combined
 
 
 def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
@@ -1469,14 +1667,6 @@ def stage_cluster(ctx: BehaviorContext, config: Any) -> Dict[str, Any]:
     except Exception as exc:
         ctx.logger.warning(f"Cluster tests failed: {exc}")
         return {"status": "failed", "error": str(exc)}
-
-
-_METADATA_COLUMNS = frozenset(["subject", "epoch", "trial", "condition", "temperature", "rating"])
-
-
-def _get_feature_columns(df: pd.DataFrame) -> List[str]:
-    """Extract feature columns excluding metadata columns."""
-    return [c for c in df.columns if c not in _METADATA_COLUMNS]
 
 
 def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
@@ -1560,7 +1750,6 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         return pd.DataFrame()
 
     max_features = int(getattr(config, "moderation_max_features", 50))
-    min_samples = int(getattr(config, "moderation_min_samples", 15))
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
 
     if len(feature_cols) > max_features:
@@ -1577,9 +1766,6 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         
         valid_mask = np.isfinite(temperature) & np.isfinite(rating) & np.isfinite(feature_values)
         n_valid = int(valid_mask.sum())
-        
-        if n_valid < min_samples:
-            continue
 
         result = run_moderation_analysis(
             X=temperature[valid_mask],

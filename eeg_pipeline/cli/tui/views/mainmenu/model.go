@@ -346,7 +346,7 @@ func (m Model) renderHeader() string {
 	subtitle := lipgloss.NewStyle().
 		Foreground(styles.TextDim).
 		Italic(true).
-		Render("Thermal Pain Analysis Suite")
+		Render("EEG Pipeline")
 
 	// Environment badge
 	var envBadge string

@@ -4,7 +4,7 @@ Canonical behavior analysis API consolidating stats entry points.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
 from eeg_pipeline.analysis.behavior.feature_correlator import (
     CorrelationConfig,
@@ -51,9 +51,6 @@ from eeg_pipeline.utils.analysis.stats.cluster import (
     _run_cluster_test_core,
 )
 from eeg_pipeline.utils.analysis.stats.topomaps import run_power_topomap_correlations
-from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
-from eeg_pipeline.infra.paths import deriv_stats_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,44 +77,6 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
     )
 
 
-def run_pain_nonpain_cluster_test(
-    subject: str,
-    task: str,
-    deriv_root: "Path",
-    config,
-    logger: "logging.Logger",
-) -> None:
-    """
-    Load epochs/events and run the pain vs non-pain cluster test.
-    """
-    epochs, aligned_events = load_epochs_for_analysis(
-        subject,
-        task,
-        align="strict",
-        preload=True,
-        deriv_root=deriv_root,
-        bids_root=config.bids_root,
-        config=config,
-        logger=logger,
-    )
-    default_n_perm = int(
-        get_config_value(
-            config,
-            "behavior_analysis.cluster_correction.default_n_permutations",
-            get_config_value(config, "behavior_analysis.statistics.default_n_permutations", 100),
-        )
-    )
-    _run_cluster_test_core(
-        subject,
-        epochs,
-        aligned_events,
-        deriv_stats_path(deriv_root, subject),
-        config,
-        logger,
-        n_perm=default_n_perm,
-    )
-
-
 __all__ = [
     # Correlation helpers
     "compute_pain_sensitivity_index",
@@ -137,7 +96,6 @@ __all__ = [
     # Cluster tests
     "compute_pain_nonpain_time_cluster_test",
     "run_cluster_test_from_context",
-    "run_pain_nonpain_cluster_test",
     # Mixed-effects
     "MixedEffectsResult",
     "fit_mixed_effects_model",

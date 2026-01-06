@@ -190,3 +190,9 @@ type LogMsg struct {
 
 // RefreshSubjectsMsg requests a reload of the subject list
 type RefreshSubjectsMsg struct{}
+
+// ResourceUpdateMsg contains real-time CPU and memory usage
+type ResourceUpdateMsg struct {
+	CPUUsage    float64
+	MemoryUsage float64
+}

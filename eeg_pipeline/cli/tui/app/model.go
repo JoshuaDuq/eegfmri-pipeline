@@ -201,7 +201,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.execution = newExec.(execution.Model)
 
 		newGlobal, _ := m.global.Update(msg)
-		m.global = newGlobal.(globalsetup.Model)
+		m.global = *newGlobal.(*globalsetup.Model)
 
 	case messages.SubjectsLoadedMsg:
 		if msg.Error != nil {
@@ -433,7 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StateGlobalSetup:
 		var newGlobal tea.Model
 		newGlobal, cmd = m.global.Update(msg)
-		m.global = newGlobal.(globalsetup.Model)
+		m.global = *newGlobal.(*globalsetup.Model)
 		if m.global.Done {
 			m.state = StateMainMenu
 			return m, executor.LoadConfigSummary(m.repoRoot)

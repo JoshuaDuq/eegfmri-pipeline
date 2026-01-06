@@ -150,7 +150,6 @@ class BehaviorPipelineConfig:
     
     # Condition-specific
     condition_effect_threshold: float = 0.5
-    condition_min_trials: int = 10
     
     # Temporal-specific
     temporal_resolution_ms: int = 50
@@ -224,7 +223,6 @@ class BehaviorPipelineConfig:
             n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
             # Condition-specific
             condition_effect_threshold=float(get_config_value(config, "behavior_analysis.condition.effect_size_threshold", 0.5)),
-            condition_min_trials=int(get_config_value(config, "behavior_analysis.condition.min_trials_per_condition", 10)),
             # Temporal-specific
             temporal_resolution_ms=int(get_config_value(config, "behavior_analysis.temporal.time_resolution_ms", 50)),
             temporal_smooth_ms=int(get_config_value(config, "behavior_analysis.temporal.smooth_window_ms", 100)),

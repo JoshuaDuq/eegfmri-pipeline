@@ -34,6 +34,8 @@ type fieldKey int
 
 const (
 	fieldTask fieldKey = iota
+	fieldRandomState
+	fieldSubjectList
 	fieldBidsRoot
 	fieldDerivRoot
 	fieldSourceRoot
@@ -89,10 +91,12 @@ type Model struct {
 	width  int
 	height int
 
-	task       string
-	bidsRoot   string
-	derivRoot  string
-	sourceRoot string
+	task        string
+	randomState string
+	subjectList string
+	bidsRoot    string
+	derivRoot   string
+	sourceRoot  string
 
 	eventTemp   string
 	eventRating string
@@ -118,6 +122,8 @@ type overridesSavedMsg struct {
 func DefaultConfigKeys() []string {
 	return []string{
 		"project.task",
+		"project.random_state",
+		"project.subject_list",
 		"paths.bids_root",
 		"paths.deriv_root",
 		"paths.source_data",
@@ -135,7 +141,7 @@ func New(repoRoot string) Model {
 		repoRoot:      repoRoot,
 		overridesPath: overridesPath,
 		sections: []sectionDef{
-			{sectionProject, "Project", "Task label"},
+			{sectionProject, "Project", "Task, random seed, and subject filter"},
 			{sectionPaths, "Paths", "BIDS and data roots"},
 			{sectionEvents, "Events", "Behavior columns"},
 			{sectionBands, "Bands", "Frequency bands"},
@@ -155,6 +161,27 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	m.isLoading = false
 	if v, ok := values["project.task"]; ok {
 		m.task = toString(v, m.task)
+	}
+	if v, ok := values["project.random_state"]; ok {
+		m.randomState = toString(v, m.randomState)
+	}
+	if v, ok := values["project.subject_list"]; ok {
+		// subject_list can be null, a list, or a string
+		if v == nil {
+			m.subjectList = ""
+		} else if list, ok := v.([]interface{}); ok {
+			if len(list) > 0 {
+				var strs []string
+				for _, item := range list {
+					strs = append(strs, fmt.Sprintf("%v", item))
+				}
+				m.subjectList = strings.Join(strs, ", ")
+			} else {
+				m.subjectList = ""
+			}
+		} else {
+			m.subjectList = toString(v, m.subjectList)
+		}
 	}
 	if v, ok := values["paths.bids_root"]; ok {
 		m.bidsRoot = toString(v, m.bidsRoot)
@@ -186,7 +213,7 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -461,6 +488,18 @@ func (m Model) renderReview() string {
 	}
 	b.WriteString("Task: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task) + "\n")
 
+	randomState := m.randomState
+	if randomState == "" {
+		randomState = "(default: 42)"
+	}
+	b.WriteString("Random State: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(randomState) + "\n")
+
+	subjectList := m.subjectList
+	if subjectList == "" {
+		subjectList = "(all subjects)"
+	}
+	b.WriteString("Subject List: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(subjectList) + "\n")
+
 	if m.bidsRoot != "" {
 		b.WriteString("BIDS Root: " + m.bidsRoot + "\n")
 	}
@@ -516,7 +555,8 @@ func (m *Model) activateSelection() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		field := fields[m.fieldCursor]
-		return m.startTextEdit(field.key), nil
+		m.startTextEdit(field.key)
+		return m, nil
 	}
 }
 
@@ -612,6 +652,8 @@ func (m Model) sectionFields(section sectionKey) []fieldDef {
 	case sectionProject:
 		return []fieldDef{
 			{fieldTask, "Task", "BIDS task label", false},
+			{fieldRandomState, "Random State", "Random seed for reproducibility", false},
+			{fieldSubjectList, "Subject List", "Comma-separated subject IDs (empty = all)", false},
 		}
 	case sectionPaths:
 		return []fieldDef{
@@ -634,6 +676,10 @@ func (m Model) fieldValue(key fieldKey) string {
 	switch key {
 	case fieldTask:
 		return m.task
+	case fieldRandomState:
+		return m.randomState
+	case fieldSubjectList:
+		return m.subjectList
 	case fieldBidsRoot:
 		return m.bidsRoot
 	case fieldDerivRoot:
@@ -656,6 +702,10 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 	switch key {
 	case fieldTask:
 		m.task = value
+	case fieldRandomState:
+		m.randomState = value
+	case fieldSubjectList:
+		m.subjectList = value
 	case fieldBidsRoot:
 		m.bidsRoot = value
 	case fieldDerivRoot:
@@ -671,7 +721,7 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 	}
 }
 
-func (m Model) handleTextEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleTextEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.editingText = false
@@ -691,11 +741,10 @@ func (m Model) handleTextEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) startTextEdit(key fieldKey) Model {
+func (m *Model) startTextEdit(key fieldKey) {
 	m.editingText = true
 	m.editingField = key
 	m.textBuffer = m.fieldValue(key)
-	return *m
 }
 
 func (m *Model) commitTextEdit() tea.Cmd {
@@ -806,6 +855,24 @@ func (m *Model) buildOverrides() map[string]interface{} {
 	project := map[string]interface{}{}
 	if m.task != "" {
 		project["task"] = m.task
+	}
+	if strings.TrimSpace(m.randomState) != "" {
+		// Try to parse as integer, fallback to string
+		if val, err := strconv.Atoi(strings.TrimSpace(m.randomState)); err == nil {
+			project["random_state"] = val
+		} else {
+			project["random_state"] = m.randomState
+		}
+	}
+	if strings.TrimSpace(m.subjectList) != "" {
+		// Parse comma-separated list
+		subjects := splitList(m.subjectList)
+		if len(subjects) > 0 {
+			project["subject_list"] = subjects
+		}
+	} else {
+		// Empty string means null (process all subjects)
+		project["subject_list"] = nil
 	}
 	if len(project) > 0 {
 		overrides["project"] = project

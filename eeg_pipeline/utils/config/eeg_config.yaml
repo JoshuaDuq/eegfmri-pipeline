@@ -302,7 +302,6 @@ behavior_analysis:
     group_column: ""                # "" -> auto (run if present, else block)
     method: "spearman"
     partial_temperature: true
-    min_group_trials: 8
     max_features: 50
     alpha: 0.05
 
@@ -353,14 +352,12 @@ behavior_analysis:
   # Pain sensitivity computation
   pain_sensitivity:
     enabled: true
-    min_trials: 10
   
   # Condition comparison computation
   condition:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
-    min_trials_per_condition: 10
   
   # Temporal correlations computation  
   temporal:
@@ -368,6 +365,26 @@ behavior_analysis:
     time_resolution_ms: 50
     time_range_ms: [-200, 1000]
     smooth_window_ms: 100
+    # Condition-based splitting (similar to condition comparison)
+    split_by_condition: true           # If true, compute separate correlations per condition value
+    condition_column: ""               # Column to split by (empty = use event_columns.pain_binary)
+    condition_values: []               # Specific values to compute for (empty = all unique values in column)
+    filter_value: ""                   # If set, compute only for this specific value (user types in TUI)
+    # Feature selection for temporal correlations
+    features:
+      power: true                      # Power (spectral power in bands) - default, already implemented
+      itpc: false                      # Inter-trial phase coherence - phase locking strength
+      erds: false                      # Event-related desynchronization/synchronization
+    # ITPC-specific parameters
+    itpc:
+      min_trials: 10                   # Minimum trials for reliable ITPC estimate
+      baseline_correction: true        # Subtract baseline ITPC
+      baseline_window: [-0.5, -0.01]   # Baseline window for ITPC normalization
+    # ERDS-specific parameters
+    erds:
+      baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
+      method: "percent"                # ERDS computation method: "percent" or "zscore"
+      min_trials: 5                    # Minimum trials for ERDS computation
   
   # Time-frequency heatmap computation
   time_frequency_heatmap:
@@ -401,9 +418,6 @@ behavior_analysis:
     roi: 20
     default: 5
     edge: 15
-  min_trials:
-    per_condition: 15
-    for_tfr: 20
   feature_registry:
     files:
       power: "features_power.tsv"
@@ -480,7 +494,6 @@ behavior_analysis:
 decoding:
   cv:
     inner_splits: 5
-    min_trials_inner: 3
   models:
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]

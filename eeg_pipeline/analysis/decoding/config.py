@@ -31,7 +31,6 @@ def get_decoding_config(config: Any = None) -> Dict[str, Any]:
 
     return {
         # CV settings
-        "min_trials_for_within_subject": cv.get("min_trials_for_within_subject", 10),
         "default_n_splits": cv.get("default_n_splits", 5),
         "default_n_bins": cv.get("default_n_bins", 5),
         # Constants
@@ -69,6 +68,8 @@ def get_decoding_config(config: Any = None) -> Dict[str, Any]:
 
 
 __all__ = ["get_decoding_config"]
+
+
 
 
 

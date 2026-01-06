@@ -772,45 +772,180 @@ def compute_variability_metrics(
 
 def load_precomputed_paired_stats(
     stats_dir: "Path",
-    feature_type: str,
-    comparison_type: str,
-    condition1: str,
-    condition2: str,
+    feature_type: Optional[str] = None,
+    comparison_type: Optional[str] = None,
+    condition1: Optional[str] = None,
+    condition2: Optional[str] = None,
     roi_name: Optional[str] = None,
     suffix: str = "",
 ) -> Optional[pd.DataFrame]:
     """Load pre-computed paired comparison statistics from behavior pipeline.
     
+    Checks for statistics files in the following order:
+    1. condition_effects_window*.tsv or condition_effects_column*.tsv (new format from behavior pipeline)
+    2. paired_comparisons*.tsv (legacy format)
+    
     Args:
         stats_dir: Path to stats directory
-        feature_type: Feature type (e.g., "power", "aperiodic")
-        comparison_type: "window" or "condition"
-        condition1: First condition label
-        condition2: Second condition label
+        feature_type: Optional feature type filter (e.g., "power", "aperiodic")
+        comparison_type: Optional "window" or "column" filter
+        condition1: Optional first condition label filter
+        condition2: Optional second condition label filter
         roi_name: Optional ROI name filter
         suffix: Optional file suffix
     
     Returns:
-        Filtered DataFrame with pre-computed statistics or None if not found
+        DataFrame with pre-computed statistics or None if not found
     """
     from pathlib import Path
-    from eeg_pipeline.utils.analysis.stats.paired_comparisons import load_paired_comparisons
+    from eeg_pipeline.infra.tsv import read_tsv
     
     stats_dir = Path(stats_dir)
+    result_dfs = []
+    
+    # Try new behavior pipeline format (condition_effects_*.tsv)
+    condition_subdir = stats_dir / "condition"
+    
+    # Try window comparison files
+    if comparison_type is None or comparison_type == "window":
+        for search_dir in [condition_subdir, stats_dir]:
+            if not search_dir.exists():
+                continue
+            for pattern in [f"condition_effects_window{suffix}.tsv", "condition_effects_window*.tsv"]:
+                for path in search_dir.glob(pattern.replace("*", "**/*") if "**" not in pattern else pattern):
+                    if path.is_file():
+                        df = read_tsv(path)
+                        if df is not None and not df.empty:
+                            df = _normalize_condition_effects_df(df, "window")
+                            if df is not None and not df.empty:
+                                result_dfs.append(df)
+    
+    # Try column comparison files
+    if comparison_type is None or comparison_type == "column":
+        for search_dir in [condition_subdir, stats_dir]:
+            if not search_dir.exists():
+                continue
+            for pattern in [f"condition_effects_column{suffix}.tsv", "condition_effects_column*.tsv"]:
+                for path in search_dir.glob(pattern.replace("*", "**/*") if "**" not in pattern else pattern):
+                    if path.is_file():
+                        df = read_tsv(path)
+                        if df is not None and not df.empty:
+                            df = _normalize_condition_effects_df(df, "column")
+                            if df is not None and not df.empty:
+                                result_dfs.append(df)
+    
+    # Combine results if we found any
+    if result_dfs:
+        combined = pd.concat(result_dfs, ignore_index=True)
+        return _apply_stats_filters(combined, feature_type, comparison_type, condition1, condition2, roi_name)
+    
+    # Fall back to legacy paired_comparisons format
+    from eeg_pipeline.utils.analysis.stats.paired_comparisons import load_paired_comparisons
+    
     df = load_paired_comparisons(stats_dir, suffix=suffix)
     
     if df is None or df.empty:
         return None
     
-    mask = (
-        (df["feature_type"] == feature_type) &
-        (df["comparison_type"] == comparison_type) &
-        (df["condition1"] == condition1) &
-        (df["condition2"] == condition2)
-    )
+    return _apply_stats_filters(df, feature_type, comparison_type, condition1, condition2, roi_name)
+
+
+def _normalize_condition_effects_df(
+    df: pd.DataFrame,
+    comparison_type: str,
+) -> Optional[pd.DataFrame]:
+    """Normalize condition effects DataFrame to expected schema.
     
-    if roi_name:
-        mask &= df["identifier"].str.contains(roi_name, case=False, na=False)
+    Converts from behavior pipeline output format to plotting expected format.
+    Works with any user-defined columns and windows.
+    """
+    if df is None or df.empty:
+        return None
+    
+    # Check for required columns
+    if "feature" not in df.columns:
+        return None
+    
+    result = df.copy()
+    
+    # Map feature to identifier (for lookup)
+    if "identifier" not in result.columns:
+        result["identifier"] = result["feature"].astype(str)
+    
+    # Handle window comparison - map window1/window2 to condition1/condition2
+    if comparison_type == "window":
+        if "window1" in result.columns and "condition1" not in result.columns:
+            result["condition1"] = result["window1"]
+        if "window2" in result.columns and "condition2" not in result.columns:
+            result["condition2"] = result["window2"]
+    
+    # Ensure comparison_type is set
+    if "comparison_type" not in result.columns:
+        result["comparison_type"] = comparison_type
+    
+    # Map effect size columns
+    if "effect_size_d" not in result.columns:
+        if "hedges_g" in result.columns:
+            result["effect_size_d"] = result["hedges_g"]
+        elif "cohens_d" in result.columns:
+            result["effect_size_d"] = result["cohens_d"]
+        else:
+            result["effect_size_d"] = 0.0
+    
+    # Map q_value if not present
+    if "q_value" not in result.columns:
+        if "p_fdr" in result.columns:
+            result["q_value"] = result["p_fdr"]
+        elif "p_value" in result.columns:
+            result["q_value"] = result["p_value"]
+    
+    # Mark significant results
+    if "significant_fdr" not in result.columns:
+        q_vals = pd.to_numeric(result.get("q_value", pd.Series(dtype=float)), errors="coerce")
+        result["significant_fdr"] = q_vals < 0.05
+    
+    return result
+
+
+def _apply_stats_filters(
+    df: pd.DataFrame,
+    feature_type: Optional[str] = None,
+    comparison_type: Optional[str] = None,
+    condition1: Optional[str] = None,
+    condition2: Optional[str] = None,
+    roi_name: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
+    """Apply optional filters to pre-computed stats DataFrame."""
+    if df is None or df.empty:
+        return None
+    
+    mask = pd.Series(True, index=df.index)
+    
+    # Filter by feature_type
+    if feature_type and "feature_type" in df.columns:
+        ft_lower = feature_type.lower()
+        mask &= df["feature_type"].str.lower().str.contains(ft_lower, na=False)
+    
+    # Also check if feature name contains the feature type
+    if feature_type and "identifier" in df.columns:
+        ft_lower = feature_type.lower()
+        mask |= df["identifier"].str.lower().str.contains(ft_lower, na=False)
+    
+    # Filter by comparison_type
+    if comparison_type and "comparison_type" in df.columns:
+        mask &= df["comparison_type"].str.lower() == comparison_type.lower()
+    
+    # Filter by conditions (flexible matching)
+    if condition1 and "condition1" in df.columns:
+        c1_lower = condition1.lower()
+        mask &= df["condition1"].str.lower() == c1_lower
+    if condition2 and "condition2" in df.columns:
+        c2_lower = condition2.lower()
+        mask &= df["condition2"].str.lower() == c2_lower
+    
+    # Filter by ROI
+    if roi_name and roi_name.lower() != "all" and "identifier" in df.columns:
+        mask &= df["identifier"].str.lower().str.contains(roi_name.lower(), na=False)
     
     filtered = df[mask]
     return filtered if not filtered.empty else None
@@ -818,44 +953,155 @@ def load_precomputed_paired_stats(
 
 def get_precomputed_qvalues(
     precomputed_df: Optional[pd.DataFrame],
-    bands: List[str],
-    roi_name: str,
+    feature_keys: List[str],
+    roi_name: str = "all",
 ) -> Dict[str, Tuple[float, float, float, bool]]:
     """Extract q-values from pre-computed statistics DataFrame.
     
+    Flexible matching: looks for feature_keys in the identifier column using
+    substring matching, which works with any user-defined feature names.
+    
     Args:
         precomputed_df: Pre-computed statistics DataFrame
-        bands: List of band names
-        roi_name: ROI name
+        feature_keys: List of feature keys to look for (e.g., band names, metric names)
+        roi_name: ROI name for context
     
     Returns:
-        Dict mapping band to (p_value, q_value, effect_size_d, significant)
+        Dict mapping feature_key to (p_value, q_value, effect_size_d, significant)
     """
     qvalues = {}
     
     if precomputed_df is None or precomputed_df.empty:
         return qvalues
     
-    for band in bands:
-        identifier_pattern = f"{band}_{roi_name}"
-        match = precomputed_df[
-            precomputed_df["identifier"].str.lower() == identifier_pattern.lower()
-        ]
+    if "identifier" not in precomputed_df.columns:
+        return qvalues
+    
+    for key in feature_keys:
+        key_lower = key.lower()
         
+        # Try exact match with roi first
+        if roi_name and roi_name.lower() != "all":
+            pattern = f"{key_lower}_{roi_name.lower()}"
+            match = precomputed_df[
+                precomputed_df["identifier"].str.lower() == pattern
+            ]
+        else:
+            match = pd.DataFrame()
+        
+        # Try partial match on key
         if match.empty:
             match = precomputed_df[
-                precomputed_df["identifier"].str.contains(band, case=False, na=False)
+                precomputed_df["identifier"].str.lower().str.contains(key_lower, na=False)
+            ]
+        
+        # If still no match, try matching just the key anywhere
+        if match.empty:
+            match = precomputed_df[
+                precomputed_df["identifier"].str.lower().str.contains(f"_{key_lower}_", na=False) |
+                precomputed_df["identifier"].str.lower().str.endswith(f"_{key_lower}", na=False) |
+                precomputed_df["identifier"].str.lower().str.startswith(f"{key_lower}_", na=False)
             ]
         
         if not match.empty:
             row = match.iloc[0]
-            p = float(row.get("p_value", 1.0))
-            q = float(row.get("q_value", 1.0)) if "q_value" in row else p
-            d = float(row.get("effect_size_d", 0.0))
-            sig = bool(row.get("significant_fdr", False)) if "significant_fdr" in row else (q < 0.05)
-            qvalues[band] = (p, q, d, sig)
+            p = float(row.get("p_value", row.get("p_raw", 1.0)))
+            q = float(row.get("q_value", row.get("p_fdr", p)))
+            d = float(row.get("effect_size_d", row.get("hedges_g", row.get("cohens_d", 0.0))))
+            sig = bool(row.get("significant_fdr", q < 0.05)) if "significant_fdr" in row else (q < 0.05)
+            qvalues[key] = (p, q, d, sig)
     
     return qvalues
+
+
+def compute_or_load_column_stats(
+    stats_dir: Optional["Path"],
+    feature_type: str,
+    feature_keys: List[str],
+    cell_data: Dict[int, Optional[Dict[str, np.ndarray]]],
+    config: Any = None,
+    logger: Any = None,
+) -> Tuple[Dict[int, Tuple[float, float, float, bool]], int, bool]:
+    """Compute or load column comparison statistics.
+    
+    This is a central helper for all plotting functions that need column
+    comparison statistics. It first tries to load pre-computed stats from
+    the behavior pipeline. If not available, computes on-the-fly.
+    
+    Args:
+        stats_dir: Optional path to stats directory for pre-computed stats
+        feature_type: Feature type (e.g., "power", "spectral", "aperiodic")
+        feature_keys: List of feature keys (e.g., band names) matching cell_data keys by index
+        cell_data: Dict mapping column index to {"v1": array, "v2": array} or None
+        config: Configuration object
+        logger: Logger instance
+    
+    Returns:
+        Tuple of:
+        - qvalues: Dict mapping column_idx to (p_value, q_value, effect_size_d, significant)
+        - n_significant: Number of significant tests
+        - use_precomputed: Whether pre-computed stats were used
+    """
+    qvalues: Dict[int, Tuple[float, float, float, bool]] = {}
+    n_significant = 0
+    use_precomputed = False
+    
+    # Try to load pre-computed stats
+    if stats_dir is not None:
+        precomputed = load_precomputed_paired_stats(
+            stats_dir=stats_dir,
+            feature_type=feature_type,
+            comparison_type="column",
+        )
+        
+        if precomputed is not None and not precomputed.empty:
+            use_precomputed = True
+            if logger:
+                import logging
+                if hasattr(logger, "info"):
+                    logger.info(f"Using pre-computed column stats for {feature_type} ({len(precomputed)} entries)")
+            
+            # Map pre-computed stats to feature_keys
+            precomputed_qvals = get_precomputed_qvalues(precomputed, feature_keys, roi_name="all")
+            
+            for col_idx, key in enumerate(feature_keys):
+                if key in precomputed_qvals:
+                    qvalues[col_idx] = precomputed_qvals[key]
+            
+            n_significant = sum(1 for v in qvalues.values() if v[3])
+            return qvalues, n_significant, use_precomputed
+    
+    # Fall back to computing on-the-fly
+    all_pvals = []
+    pvalue_keys = []
+    
+    for col_idx, key in enumerate(feature_keys):
+        data = cell_data.get(col_idx)
+        if data is None:
+            continue
+        
+        v1 = data.get("v1", np.array([]))
+        v2 = data.get("v2", np.array([]))
+        
+        if len(v1) >= 3 and len(v2) >= 3:
+            try:
+                _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
+                diff = np.mean(v2) - np.mean(v1)
+                n1, n2 = len(v1), len(v2)
+                pooled_std = np.sqrt(((n1-1)*np.var(v1, ddof=1) + (n2-1)*np.var(v2, ddof=1)) / (n1+n2-2))
+                d = diff / pooled_std if pooled_std > 0 else 0
+                all_pvals.append(p)
+                pvalue_keys.append((col_idx, p, d))
+            except Exception:
+                pass
+    
+    if all_pvals:
+        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+        for i, (col_idx, p, d) in enumerate(pvalue_keys):
+            qvalues[col_idx] = (p, qvals[i], d, rejected[i])
+        n_significant = int(np.sum(rejected))
+    
+    return qvalues, n_significant, use_precomputed
 
 
 def plot_paired_comparison(

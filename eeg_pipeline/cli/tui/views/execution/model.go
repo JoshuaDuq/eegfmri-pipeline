@@ -119,10 +119,11 @@ type Model struct {
 	searchMatches int
 
 	// Internal
-	cmd        *exec.Cmd
-	cancel     context.CancelFunc
-	outputChan chan string
-	doneChan   chan error
+	cmd                *exec.Cmd
+	cancel             context.CancelFunc
+	outputChan         chan string
+	doneChan           chan error
+	resourceUpdateChan chan messages.ResourceUpdateMsg // Channel for resource updates
 
 	width  int
 	height int
@@ -327,6 +328,20 @@ func (m Model) listenForDone() tea.Cmd {
 	}
 }
 
+func (m Model) listenForResourceUpdates() tea.Cmd {
+	if m.resourceUpdateChan == nil {
+		return nil
+	}
+
+	return func() tea.Msg {
+		update, ok := <-m.resourceUpdateChan
+		if !ok {
+			return nil
+		}
+		return update
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case messages.TickMsg:
@@ -345,7 +360,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outputChan = msg.OutputChan
 		m.doneChan = msg.DoneChan
 		m.Status = StatusRunning
-		return m, tea.Batch(m.listenForOutput(), m.listenForDone())
+		// Start resource monitoring
+		m.resourceUpdateChan = make(chan messages.ResourceUpdateMsg, 10)
+		return m, tea.Batch(m.listenForOutput(), m.listenForDone(), m.startResourceMonitoring(), m.listenForResourceUpdates())
 
 	case messages.StreamOutputMsg:
 		m.processOutputLine(msg.Line)
@@ -362,6 +379,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case messages.CommandDoneMsg:
+		// Close resource monitoring channel
+		if m.resourceUpdateChan != nil {
+			close(m.resourceUpdateChan)
+			m.resourceUpdateChan = nil
+		}
 		m.EndTime = time.Now()
 		m.ExitCode = msg.ExitCode
 		m.Progress = 1.0
@@ -379,6 +401,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case messages.ResourceUpdateMsg:
+		m.CPUUsage = msg.CPUUsage
+		m.MemoryUsage = msg.MemoryUsage
+		return m, m.listenForResourceUpdates()
 
 	case tea.KeyMsg:
 		// Handle search mode first
@@ -435,6 +462,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			if m.IsDone() {
 				return m, m.copyLogToClipboard()
+			}
+			// Close resource monitoring channel
+			if m.resourceUpdateChan != nil {
+				close(m.resourceUpdateChan)
+				m.resourceUpdateChan = nil
 			}
 			m.Status = StatusCancelled
 			m.EndTime = time.Now()
@@ -1431,6 +1463,77 @@ func (m Model) renderFooter() string {
 
 	separator := "   "
 	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+}
+
+///////////////////////////////////////////////////////////////////
+// Resource Monitoring
+///////////////////////////////////////////////////////////////////
+
+// startResourceMonitoring begins monitoring CPU and memory usage of the process
+func (m *Model) startResourceMonitoring() tea.Cmd {
+	return func() tea.Msg {
+		if m.cmd == nil || m.cmd.Process == nil || m.resourceUpdateChan == nil {
+			return nil
+		}
+
+		// Capture references to avoid repeated access
+		pid := m.cmd.Process.Pid
+		updateChan := m.resourceUpdateChan
+		ticker := time.NewTicker(time.Duration(styles.ResourceMonitorIntervalSec) * time.Second)
+		defer ticker.Stop()
+
+		// Send initial update immediately
+		cpu, mem := m.getProcessResources(pid)
+		select {
+		case updateChan <- messages.ResourceUpdateMsg{CPUUsage: cpu, MemoryUsage: mem}:
+		default:
+		}
+
+		for range ticker.C {
+			if m.cmd == nil || m.cmd.Process == nil {
+				return nil
+			}
+			// Check if process is still running
+			if err := m.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+				// Process is no longer running
+				return nil
+			}
+			cpu, mem := m.getProcessResources(pid)
+			select {
+			case updateChan <- messages.ResourceUpdateMsg{CPUUsage: cpu, MemoryUsage: mem}:
+			default:
+				// Channel is full or closed, skip this update
+			}
+		}
+		return nil
+	}
+}
+
+// getProcessResources queries the system for CPU and memory usage of a process
+func (m *Model) getProcessResources(pid int) (float64, float64) {
+	// Use ps command for cross-platform compatibility (works on macOS and Linux)
+	// Format: %cpu (CPU usage percentage), rss (resident set size in KB)
+	cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "%cpu=,rss=")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0.0, 0.0
+	}
+
+	// Parse output: "CPU% RSSKB" (e.g., "12.5 1234567")
+	fields := strings.Fields(strings.TrimSpace(string(output)))
+	if len(fields) < 2 {
+		return 0.0, 0.0
+	}
+
+	var cpuUsage float64
+	var memKB float64
+	fmt.Sscanf(fields[0], "%f", &cpuUsage)
+	fmt.Sscanf(fields[1], "%f", &memKB)
+
+	// Convert memory from KB to GB
+	memGB := memKB / (1024 * 1024)
+
+	return cpuUsage, memGB
 }
 
 ///////////////////////////////////////////////////////////////////

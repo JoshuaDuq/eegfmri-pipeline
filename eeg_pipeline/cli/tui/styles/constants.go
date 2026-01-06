@@ -59,6 +59,11 @@ const (
 
 	TickIntervalMs         = 100
 	ProgressStaleWarningMs = 30000
+
+	// Resource monitoring interval (in seconds)
+	// Lower values = more frequent updates but slightly more overhead
+	// 1-2 seconds is a good balance for live updates
+	ResourceMonitorIntervalSec = 1
 )
 
 ///////////////////////////////////////////////////////////////////

@@ -359,14 +359,16 @@ def plot_complexity_by_condition(
                 m1, m2, label1, label2 = comp_mask_info
                 seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
                 
+                from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats
+                
                 segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
                 band_colors = {band: get_band_color(band, config) for band in bands}
                 n_bands = len(bands)
                 n_trials = len(features_df)
                 
                 for roi_name in roi_names:
-                    all_pvals, pvalue_keys, cell_data = [], [], {}
-                    
+                    # Collect cell data first
+                    cell_data = {}
                     for col_idx, band in enumerate(bands):
                         cols = get_complexity_columns(seg_name, band, metric, roi_name)
                         
@@ -379,25 +381,16 @@ def plot_complexity_by_condition(
                         v2 = val_series[m2].dropna().values
                         
                         cell_data[col_idx] = {"v1": v1, "v2": v2}
-                        
-                        if len(v1) >= 3 and len(v2) >= 3:
-                            try:
-                                _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
-                                diff = np.mean(v2) - np.mean(v1)
-                                pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
-                                d = diff / pooled_std if pooled_std > 0 else 0
-                                all_pvals.append(p)
-                                pvalue_keys.append((col_idx, p, d))
-                            except Exception:
-                                pass
                     
-                    qvalues = {}
-                    n_significant = 0
-                    if all_pvals:
-                        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
-                        for i, (key, p, d) in enumerate(pvalue_keys):
-                            qvalues[key] = (p, qvals[i], d, rejected[i])
-                        n_significant = int(np.sum(rejected))
+                    # Compute or load column comparison stats
+                    qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
+                        stats_dir=stats_dir,
+                        feature_type="complexity",
+                        feature_keys=bands,
+                        cell_data=cell_data,
+                        config=config,
+                        logger=logger,
+                    )
                     
                     fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
                     
@@ -441,11 +434,12 @@ def plot_complexity_by_condition(
                         ax.spines["top"].set_visible(False)
                         ax.spines["right"].set_visible(False)
                     
-                    n_tests = len(all_pvals)
+                    n_tests = len(qvalues)
                     roi_display = roi_name.replace("_", " ").title() if roi_name.lower() != "all" else "All Channels"
                     
+                    stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
                     title = (f"Complexity ({metric_label}): {label1} vs {label2} (Column Comparison)\n"
-                             f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | Mann-Whitney U | "
+                             f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
                              f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
                     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
                     
