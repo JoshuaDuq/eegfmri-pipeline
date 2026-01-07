@@ -403,6 +403,18 @@ def extract_connectivity_from_precomputed(
     decim = int(conn_cfg.get("decim", 1))
     min_segment_samples = int(conn_cfg.get("min_segment_samples", 50))
     min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
+    min_segment_sec = float(conn_cfg.get("min_segment_sec", 1.0))
+    
+    # Phase estimator mode: "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
+    phase_estimator = str(conn_cfg.get("phase_estimator", "within_epoch")).strip().lower()
+    if phase_estimator not in {"within_epoch", "across_epochs"}:
+        phase_estimator = "within_epoch"
+    
+    if phase_estimator == "across_epochs" and logger is not None:
+        logger.info(
+            "Connectivity: using across_epochs phase estimator (standard wPLI/PLV/PLI definition); "
+            "values will be broadcast to all trials in each group."
+        )
 
     try:
         sfreq = float(getattr(precomputed, "sfreq", None))
@@ -488,7 +500,7 @@ def extract_connectivity_from_precomputed(
         method_use = method
         method_label = method
 
-        def _run(method_to_use: str):
+        def _run(method_to_use: str, use_average: bool = False):
             return spectral_connectivity_time(
                 seg_data,
                 freqs=freqs,
@@ -497,7 +509,7 @@ def extract_connectivity_from_precomputed(
                 sfreq=sfreq,
                 fmin=fmin,
                 fmax=fmax,
-                average=False,
+                average=use_average,
                 faverage=True,
                 mode=conn_mode,
                 n_cycles=use_n_cycles,
@@ -506,8 +518,11 @@ def extract_connectivity_from_precomputed(
                 verbose=False,
             )
 
+        # Determine whether to use across_epochs (average=True) or within_epoch (average=False)
+        use_across_epochs = (phase_estimator == "across_epochs")
+        
         try:
-            con = _run(method_use)
+            con = _run(method_use, use_average=use_across_epochs)
         except Exception as e:
             # Graceful fallback for newer method names on older mne-connectivity installs.
             if method_use == "wpli2_debiased":
@@ -522,7 +537,7 @@ def extract_connectivity_from_precomputed(
                 try:
                     method_use = "wpli"
                     method_label = "wpli"
-                    con = _run(method_use)
+                    con = _run(method_use, use_average=use_across_epochs)
                 except Exception as e2:
                     if logger is not None:
                         logger.warning(
@@ -538,16 +553,28 @@ def extract_connectivity_from_precomputed(
                 return pd.DataFrame()
 
         con_data = np.asarray(con.get_data())
-        if con_data.ndim == 2:
-            con_data = con_data[None, :, :]
-        if con_data.ndim == 3 and con_data.shape[-1] > 1:
-            con_vals = np.nanmean(con_data, axis=-1)
-        elif con_data.ndim == 3:
-            con_vals = con_data[:, :, 0]
+        
+        # Handle across_epochs mode: broadcast single result to all epochs
+        if use_across_epochs:
+            # con_data shape is (n_pairs,) or (n_pairs, n_freqs) when average=True
+            if con_data.ndim == 1:
+                con_vals = np.tile(con_data[None, :], (n_epochs, 1))
+            elif con_data.ndim == 2:
+                con_vals = np.tile(np.nanmean(con_data, axis=-1)[None, :], (n_epochs, 1))
+            else:
+                return pd.DataFrame()
         else:
-            return pd.DataFrame()
-        if con_vals.shape[0] != n_epochs:
-            return pd.DataFrame()
+            # within_epoch mode: per-trial connectivity
+            if con_data.ndim == 2:
+                con_data = con_data[None, :, :]
+            if con_data.ndim == 3 and con_data.shape[-1] > 1:
+                con_vals = np.nanmean(con_data, axis=-1)
+            elif con_data.ndim == 3:
+                con_vals = con_data[:, :, 0]
+            else:
+                return pd.DataFrame()
+            if con_vals.shape[0] != n_epochs:
+                return pd.DataFrame()
 
         parts: List[pd.DataFrame] = []
         if output_level == "full":

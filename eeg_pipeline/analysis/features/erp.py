@@ -208,11 +208,34 @@ def extract_erp_features(
         ctx.logger.warning("ERP: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), []
 
-    data = epochs.get_data(picks=picks)
+    erp_cfg = ctx.config.get("feature_engineering.erp", {}) if hasattr(ctx.config, "get") else {}
+    
+    # Apply low-pass filter for ERP peak detection (standard practice)
+    lowpass_hz = erp_cfg.get("lowpass_hz", 30.0)
+    try:
+        lowpass_hz = float(lowpass_hz) if lowpass_hz is not None else None
+    except Exception:
+        lowpass_hz = 30.0
+    
+    if lowpass_hz is not None and np.isfinite(lowpass_hz) and lowpass_hz > 0:
+        try:
+            epochs_filt = epochs.copy().filter(
+                l_freq=None,
+                h_freq=lowpass_hz,
+                picks=picks,
+                verbose=False,
+            )
+            data = epochs_filt.get_data(picks=picks)
+            ctx.logger.info("ERP: Applied %.1f Hz low-pass filter for peak detection", lowpass_hz)
+        except Exception as exc:
+            ctx.logger.warning("ERP: Low-pass filter failed (%s); using unfiltered data", exc)
+            data = epochs.get_data(picks=picks)
+    else:
+        data = epochs.get_data(picks=picks)
+    
     times = epochs.times
     spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
 
-    erp_cfg = ctx.config.get("feature_engineering.erp", {}) if hasattr(ctx.config, "get") else {}
     baseline_correction = bool(erp_cfg.get("baseline_correction", True))
     allow_no_baseline = bool(erp_cfg.get("allow_no_baseline", False))
     smooth_ms = erp_cfg.get("smooth_ms", 0.0)

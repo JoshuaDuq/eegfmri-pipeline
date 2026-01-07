@@ -167,6 +167,9 @@ feature_engineering:
     line_noise_freqs: [50.0]         # set to [60.0] where appropriate
     line_noise_width_hz: 1.0
     line_noise_harmonics: 3
+    segments: ["baseline"]           # Restrict spectral/IAF to baseline by default; add "active" if needed
+    min_segment_sec: 2.0             # Minimum segment duration for reliable PSD (sec)
+    min_cycles_at_fmin: 3.0          # Require at least this many cycles at lowest freq in band
 
   band_envelope:
     # Padding reduces edge artifacts for bandpass+Hilbert envelopes/phases on epoched data.
@@ -199,6 +202,10 @@ feature_engineering:
     min_r2: 0.6
     min_fit_points: 5
     max_rms: null
+    exclude_line_noise: true       # Exclude line-noise bins before fitting
+    line_noise_freqs: [50.0]       # [60.0] for North America
+    line_noise_width_hz: 1.0
+    line_noise_harmonics: 3
 
   connectivity:
     measures: ["wpli2_debiased", "aec"]
@@ -211,6 +218,8 @@ feature_engineering:
     min_epochs_per_group: 5
     min_cycles_per_band: 3.0         # Minimum oscillatory cycles per band for reliable connectivity
     warn_if_no_spatial_transform: true  # Warn if phase-based measures used without CSD/Laplacian
+    phase_estimator: "within_epoch"  # "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
+    min_segment_sec: 1.0             # Minimum segment duration for connectivity (sec)
 
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
@@ -243,6 +252,7 @@ feature_engineering:
     allow_no_baseline: false
     smooth_ms: 0.0
     peak_prominence_uv: null
+    lowpass_hz: 30.0                 # Low-pass filter before ERP peak detection (standard practice)
     components:
       - name: "n1"
         start: 0.10

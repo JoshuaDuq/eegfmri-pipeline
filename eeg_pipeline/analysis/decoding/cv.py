@@ -30,6 +30,114 @@ logger = get_logger(__name__)
 
 
 ###################################################################
+# CV Hygiene Integration
+###################################################################
+
+
+def apply_fold_specific_hygiene(
+    fold_idx: int,
+    train_indices: np.ndarray,
+    test_indices: np.ndarray,
+    epochs: Optional[Any] = None,
+    config: Optional[Any] = None,
+    log: Optional[logging.Logger] = None,
+) -> Optional["FoldSpecificParams"]:
+    """
+    Apply CV hygiene for a fold: compute fold-specific parameters on training data only.
+    
+    This prevents leakage from test trials into:
+    - IAF (Individual Alpha Frequency) band definitions
+    - Global/broadcast features (e.g., ITPC)
+    - Feature scaling parameters
+    
+    Parameters
+    ----------
+    fold_idx : int
+        Fold index
+    train_indices : np.ndarray
+        Indices of training trials
+    test_indices : np.ndarray
+        Indices of test trials
+    epochs : mne.Epochs, optional
+        Epochs object (required for IAF computation)
+    config : Any, optional
+        Configuration object
+    log : logging.Logger, optional
+        Logger instance
+        
+    Returns
+    -------
+    FoldSpecificParams or None
+        Fold-specific parameters, or None if hygiene is disabled
+    """
+    try:
+        from eeg_pipeline.analysis.features.cv_hygiene import (
+            FoldSpecificParams,
+            create_fold_specific_context,
+        )
+    except ImportError:
+        if log:
+            log.debug("CV hygiene module not available")
+        return None
+    
+    if config is None:
+        return None
+    
+    cv_hygiene_enabled = bool(config.get("decoding.cv.hygiene_enabled", True) if hasattr(config, "get") else True)
+    if not cv_hygiene_enabled:
+        return None
+    
+    if epochs is None:
+        if log:
+            log.debug("CV hygiene: epochs not provided, skipping fold-specific IAF")
+        return FoldSpecificParams(
+            fold_idx=fold_idx,
+            train_indices=train_indices,
+            test_indices=test_indices,
+        )
+    
+    try:
+        params = create_fold_specific_context(
+            epochs=epochs,
+            train_indices=train_indices,
+            test_indices=test_indices,
+            fold_idx=fold_idx,
+            config=config,
+            logger=log,
+            compute_iaf=True,
+        )
+        return params
+    except Exception as exc:
+        if log:
+            log.warning("CV hygiene: failed to create fold context (%s)", exc)
+        return None
+
+
+def get_fold_frequency_bands(
+    fold_params: Optional["FoldSpecificParams"],
+    config: Optional[Any] = None,
+) -> Optional[Dict[str, Tuple[float, float]]]:
+    """
+    Get frequency bands for a fold, using fold-specific IAF if available.
+    
+    Parameters
+    ----------
+    fold_params : FoldSpecificParams or None
+        Fold-specific parameters from apply_fold_specific_hygiene
+    config : Any, optional
+        Configuration object (fallback)
+        
+    Returns
+    -------
+    dict or None
+        Frequency band definitions, or None to use defaults
+    """
+    if fold_params is not None and fold_params.frequency_bands is not None:
+        return fold_params.frequency_bands
+    return None
+
+
+###################################################################
 # Seed Management
 ###################################################################
 
@@ -371,9 +479,16 @@ def create_within_subject_folds(
     inner_cv_splits: int,
     seed: int,
     config: Optional[Any] = None,
-) -> List[Tuple[int, np.ndarray, np.ndarray, str]]:
-    """Create within-subject CV folds."""
-    folds: List[Tuple[int, np.ndarray, np.ndarray, str]] = []
+    epochs: Optional[Any] = None,
+    apply_hygiene: bool = True,
+) -> List[Tuple[int, np.ndarray, np.ndarray, str, Optional[Any]]]:
+    """
+    Create within-subject CV folds with optional CV hygiene.
+    
+    Returns list of (fold_idx, train_idx, test_idx, subject, fold_params)
+    where fold_params contains fold-specific parameters computed on training data only.
+    """
+    folds: List[Tuple[int, np.ndarray, np.ndarray, str, Optional[Any]]] = []
     fold_counter = 0
     unique_subs = [str(s) for s in np.unique(groups)]
 
@@ -398,7 +513,20 @@ def create_within_subject_folds(
             fold_counter += 1
             train_idx = subject_indices[train_local]
             test_idx = subject_indices[test_local]
-            folds.append((fold_counter, train_idx, test_idx, subject))
+            
+            # Apply CV hygiene to compute fold-specific parameters
+            fold_params = None
+            if apply_hygiene:
+                fold_params = apply_fold_specific_hygiene(
+                    fold_idx=fold_counter,
+                    train_indices=train_idx,
+                    test_indices=test_idx,
+                    epochs=epochs,
+                    config=config,
+                    log=logger,
+                )
+            
+            folds.append((fold_counter, train_idx, test_idx, subject, fold_params))
 
     return folds
 

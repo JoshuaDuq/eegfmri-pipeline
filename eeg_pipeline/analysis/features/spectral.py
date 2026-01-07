@@ -137,7 +137,8 @@ def compute_spectral_center(
     """
     Compute spectral center of gravity (centroid) within a frequency range.
     
-    Formula: Σ(f * P) / Σ(P)
+    Uses Δf weighting for non-uniform frequency grids (e.g., log-spaced).
+    Formula: Σ(f * P * Δf) / Σ(P * Δf)
     """
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
@@ -146,11 +147,15 @@ def compute_spectral_center(
     psd_band = psd[mask]
     freqs_band = freqs[mask]
     
-    total_power = np.nansum(psd_band)
-    if total_power <= 0 or np.isnan(total_power):
+    # Compute frequency bin widths for proper weighting
+    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
+    mass = psd_band * df
+    
+    total_mass = np.nansum(mass)
+    if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
     
-    center = float(np.nansum(freqs_band * psd_band) / total_power)
+    center = float(np.nansum(freqs_band * mass) / total_mass)
     return center
 
 
@@ -162,6 +167,8 @@ def compute_spectral_bandwidth(
 ) -> float:
     """
     Compute spectral bandwidth (standard deviation of frequency distribution).
+    
+    Uses Δf weighting for non-uniform frequency grids.
     """
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
@@ -170,12 +177,16 @@ def compute_spectral_bandwidth(
     psd_band = psd[mask]
     freqs_band = freqs[mask]
     
-    total_power = np.nansum(psd_band)
-    if total_power <= 0 or np.isnan(total_power):
+    # Compute frequency bin widths for proper weighting
+    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
+    mass = psd_band * df
+    
+    total_mass = np.nansum(mass)
+    if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
     
-    center = np.nansum(freqs_band * psd_band) / total_power
-    variance = np.nansum(psd_band * (freqs_band - center) ** 2) / total_power
+    center = np.nansum(freqs_band * mass) / total_mass
+    variance = np.nansum(mass * (freqs_band - center) ** 2) / total_mass
     bandwidth = float(np.sqrt(variance))
     
     return bandwidth
@@ -191,6 +202,8 @@ def compute_spectral_edge(
     """
     Compute spectral edge frequency (frequency below which X% of power lies).
     
+    Uses Δf weighting for non-uniform frequency grids.
+    
     Parameters
     ----------
     percentile : float
@@ -203,11 +216,15 @@ def compute_spectral_edge(
     psd_band = psd[mask]
     freqs_band = freqs[mask]
     
-    total_power = np.nansum(psd_band)
-    if total_power <= 0 or np.isnan(total_power):
+    # Compute frequency bin widths for proper weighting
+    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
+    mass = psd_band * df
+    
+    total_mass = np.nansum(mass)
+    if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
     
-    cumsum = np.nancumsum(psd_band) / total_power
+    cumsum = np.nancumsum(mass) / total_mass
     edge_idx = np.searchsorted(cumsum, percentile)
     edge_idx = min(edge_idx, len(freqs_band) - 1)
     
@@ -222,21 +239,29 @@ def compute_spectral_entropy(
 ) -> float:
     """
     Compute normalized spectral entropy within a frequency range.
+    
+    Uses Δf weighting for non-uniform frequency grids.
     """
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
         return np.nan
 
     psd_band = psd[mask]
+    freqs_band = freqs[mask]
     if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
         return np.nan
 
     psd_band = np.maximum(psd_band, 0)
-    total_power = np.nansum(psd_band)
-    if total_power <= 0 or np.isnan(total_power):
+    
+    # Compute frequency bin widths for proper weighting
+    df = np.gradient(freqs_band) if len(freqs_band) > 1 else np.ones_like(freqs_band)
+    mass = psd_band * df
+    
+    total_mass = np.nansum(mass)
+    if total_mass <= 0 or np.isnan(total_mass):
         return np.nan
 
-    probs = psd_band / total_power
+    probs = mass / total_mass
     probs = probs[np.isfinite(probs) & (probs > 0)]
     if probs.size == 0:
         return np.nan
@@ -313,12 +338,21 @@ def extract_spectral_features(
     
     segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
     
-    # Process ALL defined segments (not just one)
-    segments: List[str] = list(segment_masks.keys()) if segment_masks else []
+    # Restrict to configured segments (default: baseline only for spectral/IAF validity)
+    allowed_segments = spec_cfg.get("segments", ["baseline"])
+    if isinstance(allowed_segments, str):
+        allowed_segments = [allowed_segments]
+    
+    # Filter to allowed segments that exist
+    segments: List[str] = [s for s in allowed_segments if s in segment_masks or s == "full"]
     
     # Fallback if no segments defined
     if not segments:
-        segments = ["full"]
+        segments = ["baseline"] if "baseline" in segment_masks else ["full"]
+    
+    # Segment duration validation parameters
+    min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
+    min_cycles_at_fmin = float(spec_cfg.get("min_cycles_at_fmin", 3.0))
 
     records = [dict() for _ in range(n_epochs)]
 
@@ -331,6 +365,16 @@ def extract_spectral_features(
                 continue
 
         seg_data = data[:, :, mask]
+        seg_duration_sec = float(seg_data.shape[2]) / float(sfreq)
+        
+        # Validate minimum segment duration
+        if seg_duration_sec < min_segment_sec:
+            logger.warning(
+                "Spectral: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); skipping.",
+                segment_name, seg_duration_sec, min_segment_sec
+            )
+            continue
+        
         if seg_data.shape[2] < 2:
             continue
 

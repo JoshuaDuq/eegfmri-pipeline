@@ -149,6 +149,31 @@ def _fit_single_epoch_channel_knee(
     except Exception:
         return (epoch_idx, channel_idx, np.nan, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3)
 
+def _build_line_noise_mask(
+    freqs: np.ndarray,
+    line_freqs: List[float],
+    width_hz: float,
+    n_harmonics: int,
+) -> np.ndarray:
+    """
+    Build mask to exclude line-noise frequencies and harmonics.
+    
+    Returns True for frequencies to KEEP (not line noise).
+    """
+    keep = np.ones_like(freqs, dtype=bool)
+    if not line_freqs or width_hz <= 0 or n_harmonics < 1:
+        return keep
+    
+    for base in line_freqs:
+        if not np.isfinite(base) or base <= 0:
+            continue
+        for h in range(1, n_harmonics + 1):
+            f0 = base * h
+            keep &= ~((freqs >= (f0 - width_hz)) & (freqs <= (f0 + width_hz)))
+    
+    return keep
+
+
 def _fit_aperiodic_with_qc(
     log_freqs,
     log_psd,
@@ -158,6 +183,7 @@ def _fit_aperiodic_with_qc(
     *,
     model: str = "fixed",
     n_jobs=1,
+    line_noise_mask: Optional[np.ndarray] = None,
 ):
     # Driver for parallel fitting
     n_epochs, n_channels, _ = log_psd.shape
@@ -170,15 +196,23 @@ def _fit_aperiodic_with_qc(
     
     tasks = [(ep_idx, ch_idx) for ep_idx in range(n_epochs) for ch_idx in range(n_channels)]
     
+    # Apply line-noise mask to exclude those bins from fitting
+    if line_noise_mask is not None and line_noise_mask.shape[0] == log_freqs.shape[0]:
+        log_freqs_fit = log_freqs[line_noise_mask]
+        log_psd_fit = log_psd[:, :, line_noise_mask]
+    else:
+        log_freqs_fit = log_freqs
+        log_psd_fit = log_psd
+    
     if n_jobs != 1:
         if model == "knee":
-            freqs_hz = np.power(10.0, np.asarray(log_freqs, dtype=float))
+            freqs_hz = np.power(10.0, np.asarray(log_freqs_fit, dtype=float))
             results = Parallel(n_jobs=n_jobs)(
                 delayed(_fit_single_epoch_channel_knee)(
                     ep_idx,
                     ch_idx,
                     freqs_hz,
-                    log_psd[ep_idx, ch_idx, :],
+                    log_psd_fit[ep_idx, ch_idx, :],
                     peak_rejection_z,
                     min_fit_points,
                 )
@@ -189,8 +223,8 @@ def _fit_aperiodic_with_qc(
                 delayed(_fit_single_epoch_channel)(
                     ep_idx,
                     ch_idx,
-                    log_freqs,
-                    log_psd[ep_idx, ch_idx, :],
+                    log_freqs_fit,
+                    log_psd_fit[ep_idx, ch_idx, :],
                     peak_rejection_z,
                     min_fit_points,
                 )
@@ -198,13 +232,13 @@ def _fit_aperiodic_with_qc(
             )
     else:
         if model == "knee":
-            freqs_hz = np.power(10.0, np.asarray(log_freqs, dtype=float))
+            freqs_hz = np.power(10.0, np.asarray(log_freqs_fit, dtype=float))
             results = [
                 _fit_single_epoch_channel_knee(
                     ep_idx,
                     ch_idx,
                     freqs_hz,
-                    log_psd[ep_idx, ch_idx, :],
+                    log_psd_fit[ep_idx, ch_idx, :],
                     peak_rejection_z,
                     min_fit_points,
                 )
@@ -215,8 +249,8 @@ def _fit_aperiodic_with_qc(
                 _fit_single_epoch_channel(
                     ep_idx,
                     ch_idx,
-                    log_freqs,
-                    log_psd[ep_idx, ch_idx, :],
+                    log_freqs_fit,
+                    log_psd_fit[ep_idx, ch_idx, :],
                     peak_rejection_z,
                     min_fit_points,
                 )
@@ -396,6 +430,21 @@ def _extract_aperiodic_for_segment(
     min_pts = int(config.get("feature_engineering.aperiodic.min_fit_points", 5))
     n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_aperiodic")
     
+    # Build line-noise exclusion mask for aperiodic fitting
+    exclude_line = bool(aperiodic_cfg.get("exclude_line_noise", True))
+    line_noise_mask = None
+    if exclude_line:
+        line_freqs = aperiodic_cfg.get("line_noise_freqs", [50.0])
+        try:
+            line_freqs = [float(f) for f in line_freqs]
+        except Exception:
+            line_freqs = [50.0]
+        line_width = float(aperiodic_cfg.get("line_noise_width_hz", 1.0))
+        n_harm = int(aperiodic_cfg.get("line_noise_harmonics", 3))
+        line_noise_mask = _build_line_noise_mask(freqs, line_freqs, line_width, n_harm)
+        if logger and np.any(~line_noise_mask):
+            logger.debug("Aperiodic: excluding %d line-noise bins from fitting", int(np.sum(~line_noise_mask)))
+    
     offsets, slopes, valid_bins, kept_bins, peak_rej, fit_masks, fit_qc = _fit_aperiodic_with_qc(
         log_freqs,
         log_psd,
@@ -404,6 +453,7 @@ def _extract_aperiodic_for_segment(
         logger,
         model=model,
         n_jobs=n_jobs,
+        line_noise_mask=line_noise_mask,
     )
     
     if model == "knee":
