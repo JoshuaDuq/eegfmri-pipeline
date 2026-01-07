@@ -790,6 +790,162 @@ def run_regression_decoding(
     return results_dir
 
 
+def run_within_subject_regression_decoding(
+    subjects: List[str],
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    n_perm: int,
+    inner_splits: int,
+    outer_jobs: int,
+    rng_seed: int,
+    results_root: Path,
+    logger: logging.Logger,
+) -> Path:
+    """Run within-subject (block-aware) regression decoding on active features."""
+    X, y, groups, _feature_names, meta = load_active_matrix(subjects, task, deriv_root, config, logger)
+
+    if meta is None or not hasattr(meta, "columns"):
+        raise ValueError("Within-subject decoding requires trial metadata with block/run labels.")
+
+    if "block" not in meta.columns:
+        raise ValueError(
+            "Within-subject decoding requires block/run labels to prevent temporal data leakage. "
+            "Ensure your events.tsv contains one of: block, run_id, run, session."
+        )
+
+    blocks_all = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
+
+    finite_mask = np.isfinite(y)
+    if not np.all(finite_mask):
+        X = X[finite_mask]
+        y = y[finite_mask]
+        groups = groups[finite_mask]
+        meta = meta.loc[finite_mask].reset_index(drop=True)
+        blocks_all = blocks_all[finite_mask]
+
+    finite_blocks = np.isfinite(blocks_all)
+    if not np.all(finite_blocks):
+        dropped = int((~finite_blocks).sum())
+        logger.warning(f"Dropping {dropped} trials with missing block labels for within-subject decoding.")
+        X = X[finite_blocks]
+        y = y[finite_blocks]
+        groups = groups[finite_blocks]
+        meta = meta.loc[finite_blocks].reset_index(drop=True)
+        blocks_all = blocks_all[finite_blocks]
+
+    results_dir = results_root / "within_subject_regression"
+    plots_dir = results_dir / "plots"
+    ensure_dir(results_dir)
+    ensure_dir(plots_dir)
+
+    folds = create_within_subject_folds(
+        groups=groups,
+        blocks_all=blocks_all,
+        inner_cv_splits=inner_splits,
+        seed=rng_seed,
+        config=config,
+        epochs=None,
+        apply_hygiene=False,
+    )
+    if not folds:
+        raise ValueError(
+            "No within-subject folds could be created. "
+            "Ensure each selected subject has at least 2 unique block/run labels."
+        )
+
+    fold_records = []
+    for fold_counter, train_idx, test_idx, subject_id, _fold_params in folds:
+        X_train = X[train_idx]
+        X_test = X[test_idx]
+        y_train = y[train_idx]
+        y_test = y[test_idx]
+
+        blocks_train = blocks_all[train_idx] if blocks_all is not None else None
+
+        pipe = create_elasticnet_pipeline(seed=rng_seed + int(fold_counter), config=config)
+        param_grid = build_elasticnet_param_grid(config)
+        pipe.named_steps["regressor"].param_grid = param_grid
+
+        best_estimator = _fit_within_subject_fold(
+            pipe=pipe,
+            X_train=X_train,
+            y_train=y_train,
+            blocks_train=blocks_train,
+            config_dict=config,
+            fold=int(fold_counter),
+            subject_id=str(subject_id),
+            random_state=rng_seed + int(fold_counter),
+            n_jobs=-1,
+            logger=logger,
+        )
+        y_pred = best_estimator.predict(X_test)
+
+        fold_records.append(
+            {
+                "fold": int(fold_counter),
+                "y_true": y_test,
+                "y_pred": y_pred,
+                "subject_id": [str(subject_id)] * len(y_test),
+                "test_idx": np.asarray(test_idx, dtype=int),
+            }
+        )
+
+    fold_records = sorted(fold_records, key=lambda r: r["fold"])
+    y_true_all = np.concatenate([np.asarray(r["y_true"]) for r in fold_records])
+    y_pred_all = np.concatenate([np.asarray(r["y_pred"]) for r in fold_records])
+    groups_ordered: List[str] = []
+    test_indices: List[int] = []
+    fold_ids: List[int] = []
+    for rec in fold_records:
+        n = len(rec["y_true"])
+        groups_ordered.extend(rec["subject_id"])
+        test_indices.extend(rec["test_idx"].tolist())
+        fold_ids.extend([rec["fold"]] * n)
+
+    pred_path = results_dir / "cv_predictions.tsv"
+    pred_df = export_predictions(
+        y_true_all,
+        y_pred_all,
+        groups_ordered,
+        test_indices,
+        fold_ids,
+        "elasticnet",
+        meta.reset_index(drop=True),
+        pred_path,
+    )
+    export_indices(
+        groups_ordered,
+        test_indices,
+        fold_ids,
+        meta.reset_index(drop=True),
+        results_dir / "cv_indices.tsv",
+    )
+
+    r_subj, _per_subj_r, ci_low, ci_high = compute_subject_level_r(pred_df, config)
+    try:
+        from sklearn.metrics import r2_score
+
+        r2_val = float(r2_score(y_true_all, y_pred_all))
+    except Exception:
+        r2_val = np.nan
+
+    metrics = {
+        "pearson_r": r_subj,
+        "r_subject_ci_low": ci_low,
+        "r_subject_ci_high": ci_high,
+        "r2": r2_val,
+        "p_value": np.nan,
+        "cv_scope": "subject",
+    }
+    metrics_path = results_dir / "pooled_metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics, f, indent=2, default=str)
+
+    logger.info(f"Saved within-subject decoding results to {results_dir}")
+    return results_dir
+
+
 def run_time_generalization(
     subjects: List[str],
     task: str,

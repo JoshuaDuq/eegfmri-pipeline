@@ -100,6 +100,22 @@ var connectivityMeasures = []ConnectivityMeasure{
 	{"pli", "PLI", "Phase lag index"},
 }
 
+type DecodingCVScope int
+
+const (
+	DecodingCVScopeGroup DecodingCVScope = iota
+	DecodingCVScopeSubject
+)
+
+func (s DecodingCVScope) CLIValue() string {
+	switch s {
+	case DecodingCVScopeSubject:
+		return "subject"
+	default:
+		return "group"
+	}
+}
+
 // Feature file selection for behavior pipeline
 type FeatureFile struct {
 	Key         string
@@ -855,6 +871,104 @@ type Model struct {
 	connWindowStep   float64
 	connAECMode      int // 0: orth, 1: none, 2: sym
 
+	// Scientific validity options (new)
+	itpcMethod                   int     // 0: global, 1: fold_global, 2: loo
+	aperiodicMinSegmentSec       float64 // Minimum segment duration for aperiodic fits
+	connAECOutput                int     // 0: r only, 1: z only, 2: both r and z
+	connForceWithinEpochDecoding bool    // Force within_epoch for CV/decoding
+	ratioSource                  int     // 0: raw, 1: powcorr (aperiodic-adjusted)
+
+	// ITPC additional options
+	itpcAllowUnsafeLoo     bool // Allow unsafe LOO ITPC
+	itpcBaselineCorrection int  // 0: none, 1: subtract
+
+	// Spectral advanced options
+	spectralIncludeLogRatios bool    // Include log ratios
+	spectralPsdMethod        int     // 0: multitaper, 1: welch
+	spectralFmin             float64 // Min frequency for spectral
+	spectralFmax             float64 // Max frequency for spectral
+	spectralExcludeLineNoise bool    // Exclude line noise
+	spectralLineNoiseFreq    float64 // Line noise frequency (50 or 60)
+	spectralSegments         int     // 0: baseline only, 1: active only, 2: both
+	spectralMinSegmentSec    float64 // Minimum segment duration
+	spectralMinCyclesAtFmin  float64 // Minimum cycles at lowest frequency
+
+	// Band envelope options
+	bandEnvelopePadSec    float64 // Padding in seconds
+	bandEnvelopePadCycles float64 // Padding in cycles
+
+	// IAF (Individualized Alpha Frequency) options
+	iafEnabled        bool    // Use individualized bands
+	iafAlphaWidthHz   float64 // Alpha band width
+	iafSearchRangeMin float64 // IAF search range min
+	iafSearchRangeMax float64 // IAF search range max
+	iafMinProminence  float64 // IAF peak prominence threshold
+	iafRoisSpec       string  // IAF ROIs (comma-separated)
+
+	// Aperiodic advanced options
+	aperiodicModel            int     // 0: fixed, 1: knee
+	aperiodicPsdMethod        int     // 0: multitaper, 1: welch
+	aperiodicExcludeLineNoise bool    // Exclude line noise
+	aperiodicLineNoiseFreq    float64 // Line noise frequency
+
+	// Connectivity advanced options
+	connGranularity            int     // 0: trial, 1: condition, 2: subject
+	connMinEpochsPerGroup      int     // Minimum epochs per group
+	connMinCyclesPerBand       float64 // Minimum cycles per band
+	connWarnNoSpatialTransform bool    // Warn if no spatial transform
+	connPhaseEstimator         int     // 0: within_epoch, 1: across_epochs
+	connMinSegmentSec          float64 // Minimum segment duration
+
+	// PAC advanced options
+	pacSource              int     // 0: precomputed, 1: tfr
+	pacNormalize           bool    // Normalize PAC values
+	pacNSurrogates         int     // Number of surrogates (0=none)
+	pacAllowHarmonicOvrlap bool    // Allow harmonic overlap
+	pacMaxHarmonic         int     // Maximum harmonic to check
+	pacHarmonicToleranceHz float64 // Harmonic tolerance in Hz
+	pacComputeWaveformQC   bool    // Compute waveform QC
+	pacWaveformOffsetMs    float64 // Waveform offset in ms
+
+	// Complexity advanced options
+	complexityTargetHz       float64 // Target sampling rate
+	complexityTargetNSamples int     // Target number of samples
+	complexityZscore         bool    // Apply z-score normalization
+
+	// Quality feature options
+	qualityPsdMethod        int     // 0: welch, 1: multitaper
+	qualityFmin             float64 // Min frequency
+	qualityFmax             float64 // Max frequency
+	qualityNfft             int     // FFT size
+	qualityExcludeLineNoise bool    // Exclude line noise
+	qualitySnrSignalBandMin float64 // SNR signal band min
+	qualitySnrSignalBandMax float64 // SNR signal band max
+	qualitySnrNoiseBandMin  float64 // SNR noise band min
+	qualitySnrNoiseBandMax  float64 // SNR noise band max
+	qualityMuscleBandMin    float64 // Muscle band min
+	qualityMuscleBandMax    float64 // Muscle band max
+
+	// ERDS advanced options
+	erdsUseLogRatio      bool    // Use dB instead of percent
+	erdsMinBaselinePower float64 // Minimum baseline power
+	erdsMinActivePower   float64 // Minimum active power
+	erdsMinSegmentSec    float64 // Minimum segment duration
+	erdsBandsSpec        string  // Bands for ERDS (comma-separated)
+
+	// Temporal feature selection (behavior pipeline)
+	temporalFeaturePowerEnabled bool // Power temporal enabled
+	temporalFeatureITPCEnabled  bool // ITPC temporal enabled
+	temporalFeatureERDSEnabled  bool // ERDS temporal enabled
+
+	// Time-frequency heatmap options
+	tfHeatmapEnabled   bool   // Enable TF heatmap
+	tfHeatmapFreqsSpec string // Frequencies for heatmap
+	tfHeatmapTimeResMs int    // Time resolution in ms
+
+	// TFR advanced options
+	tfrMaxCycles  float64 // Maximum cycles for wavelets
+	tfrDecimPower int     // Decimation for power TFR
+	tfrDecimPhase int     // Decimation for phase TFR
+
 	// Behavior pipeline advanced config
 	correlationMethod     string  // "spearman" or "pearson"
 	robustCorrelation     int     // 0=none, 1=percentage_bend, 2=winsorized, 3=shepherd
@@ -1003,10 +1117,6 @@ type Model struct {
 	temporalSplitByCondition bool   // If true, compute separate correlations per condition value
 	temporalConditionColumn  string // Column to split by (empty = use event_columns.pain_binary)
 	temporalFilterValue      string // If set, compute only for this specific value
-	// Temporal feature selection
-	temporalFeaturePower bool // Power (spectral power in bands)
-	temporalFeatureITPC  bool // Inter-trial phase coherence
-	temporalFeatureERDS  bool // Event-related desync/sync
 	// ITPC-specific parameters
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
 	temporalITPCBaselineMin        float64 // Baseline window start
@@ -1046,6 +1156,7 @@ type Model struct {
 	decodingNPerm int  // Permutations for significance test
 	innerSplits   int  // CV inner splits
 	skipTimeGen   bool // Skip time generalization
+	decodingScope DecodingCVScope
 	// Decoding model hyperparameters
 	elasticNetAlphaGrid   string // alpha grid as comma-separated values
 	elasticNetL1RatioGrid string // l1_ratio grid as comma-separated values
@@ -1212,6 +1323,104 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWindowLen:    1.0,
 		connWindowStep:   0.5,
 		connAECMode:      0,
+		// Scientific validity defaults (new)
+		itpcMethod:                   0,    // 0: global (default)
+		aperiodicMinSegmentSec:       2.0,  // 2.0s minimum for stable fits
+		connAECOutput:                0,    // 0: r only (raw)
+		connForceWithinEpochDecoding: true, // Force within_epoch for CV-safety
+		ratioSource:                  0,    // 0: raw (default)
+
+		// ITPC additional defaults
+		itpcAllowUnsafeLoo:     false,
+		itpcBaselineCorrection: 0, // 0: none
+
+		// Spectral advanced defaults
+		spectralIncludeLogRatios: true,
+		spectralPsdMethod:        0, // 0: multitaper
+		spectralFmin:             1.0,
+		spectralFmax:             80.0,
+		spectralExcludeLineNoise: true,
+		spectralLineNoiseFreq:    50.0,
+		spectralSegments:         0, // 0: baseline only
+		spectralMinSegmentSec:    2.0,
+		spectralMinCyclesAtFmin:  3.0,
+
+		// Band envelope defaults
+		bandEnvelopePadSec:    0.5,
+		bandEnvelopePadCycles: 3.0,
+
+		// IAF defaults
+		iafEnabled:        false,
+		iafAlphaWidthHz:   2.0,
+		iafSearchRangeMin: 7.0,
+		iafSearchRangeMax: 13.0,
+		iafMinProminence:  0.05,
+		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R",
+
+		// Aperiodic advanced defaults
+		aperiodicModel:            0, // 0: fixed
+		aperiodicPsdMethod:        0, // 0: multitaper
+		aperiodicExcludeLineNoise: true,
+		aperiodicLineNoiseFreq:    50.0,
+
+		// Connectivity advanced defaults
+		connGranularity:            0, // 0: trial
+		connMinEpochsPerGroup:      5,
+		connMinCyclesPerBand:       3.0,
+		connWarnNoSpatialTransform: true,
+		connPhaseEstimator:         0, // 0: within_epoch
+		connMinSegmentSec:          1.0,
+
+		// PAC advanced defaults
+		pacSource:              0, // 0: precomputed
+		pacNormalize:           true,
+		pacNSurrogates:         0,
+		pacAllowHarmonicOvrlap: false,
+		pacMaxHarmonic:         6,
+		pacHarmonicToleranceHz: 1.0,
+		pacComputeWaveformQC:   false,
+		pacWaveformOffsetMs:    5.0,
+
+		// Complexity advanced defaults
+		complexityTargetHz:       100.0,
+		complexityTargetNSamples: 500,
+		complexityZscore:         true,
+
+		// Quality defaults
+		qualityPsdMethod:        0, // 0: welch
+		qualityFmin:             1.0,
+		qualityFmax:             100.0,
+		qualityNfft:             256,
+		qualityExcludeLineNoise: true,
+		qualitySnrSignalBandMin: 1.0,
+		qualitySnrSignalBandMax: 30.0,
+		qualitySnrNoiseBandMin:  40.0,
+		qualitySnrNoiseBandMax:  80.0,
+		qualityMuscleBandMin:    30.0,
+		qualityMuscleBandMax:    80.0,
+
+		// ERDS defaults
+		erdsUseLogRatio:      false,
+		erdsMinBaselinePower: 1.0e-12,
+		erdsMinActivePower:   1.0e-12,
+		erdsMinSegmentSec:    0.5,
+		erdsBandsSpec:        "alpha,beta",
+
+		// Temporal feature selection defaults
+		temporalFeaturePowerEnabled: true,
+		temporalFeatureITPCEnabled:  false,
+		temporalFeatureERDSEnabled:  false,
+
+		// Time-frequency heatmap defaults
+		tfHeatmapEnabled:   true,
+		tfHeatmapFreqsSpec: "4,8,13,30,45",
+		tfHeatmapTimeResMs: 100,
+
+		// TFR advanced defaults
+		tfrMaxCycles:  15.0,
+		tfrDecimPower: 4,
+		tfrDecimPhase: 1,
+
 		// Validation & Generic
 		minEpochsForFeatures: 10,
 
@@ -1334,10 +1543,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalSplitByCondition: true,
 		temporalConditionColumn:  "",
 		temporalFilterValue:      "",
-		// Temporal feature selection
-		temporalFeaturePower:           true,  // Power is enabled by default (existing behavior)
-		temporalFeatureITPC:            false, // ITPC off by default
-		temporalFeatureERDS:            false, // ERDS off by default
+		// Temporal feature selection - duplicate defaults removed (using values from temporalFeature*Enabled fields above)
 		temporalITPCBaselineCorrection: true,
 		temporalITPCBaselineMin:        -0.5,
 		temporalITPCBaselineMax:        -0.01,
@@ -1367,6 +1573,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		decodingNPerm:         0,
 		innerSplits:           3,
 		skipTimeGen:           false,
+		decodingScope:         DecodingCVScopeGroup,
 		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
 		elasticNetL1RatioGrid: "0.2,0.5,0.8",
 		rfNEstimators:         500,

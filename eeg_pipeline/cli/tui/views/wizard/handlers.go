@@ -298,6 +298,15 @@ func (m *Model) handleTab() {
 		} else {
 			m.computationListFocus = 0
 		}
+	case types.StepSelectSubjects:
+		if m.Pipeline == types.PipelineDecoding {
+			if m.decodingScope == DecodingCVScopeGroup {
+				m.decodingScope = DecodingCVScopeSubject
+			} else {
+				m.decodingScope = DecodingCVScopeGroup
+			}
+			return
+		}
 	case types.StepAdvancedConfig:
 		if m.expandedOption >= 0 {
 			// Collapse and move to next primary option
@@ -402,14 +411,36 @@ func (m *Model) validateStep() []string {
 	switch m.CurrentStep {
 
 	case types.StepSelectSubjects:
-		count := 0
-		for _, sel := range m.subjectSelected {
-			if sel {
-				count++
+		selectedCount := 0
+		validCount := 0
+		for subjID, sel := range m.subjectSelected {
+			if !sel {
+				continue
+			}
+			selectedCount++
+			for _, s := range m.subjects {
+				if s.ID != subjID {
+					continue
+				}
+				valid, _ := m.Pipeline.ValidateSubject(s)
+				if m.Pipeline == types.PipelinePlotting {
+					valid, _ = m.validatePlottingSubject(s)
+				}
+				if valid {
+					validCount++
+				}
+				break
 			}
 		}
-		if count == 0 {
-			errors = append(errors, "Select at least one subject")
+		minRequired := 1
+		if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+			minRequired = 2
+		}
+		if selectedCount < minRequired {
+			errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
+		}
+		if validCount < minRequired {
+			errors = append(errors, fmt.Sprintf("Select at least %d valid subject(s)", minRequired))
 		}
 	case types.StepSelectComputations:
 		count := 0
@@ -797,8 +828,13 @@ func (m *Model) validate() []string {
 		}
 	}
 
-	if selectedCount == 0 {
-		errors = append(errors, "No subjects selected")
+	minRequired := 1
+	if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+		minRequired = 2
+	}
+
+	if selectedCount < minRequired {
+		errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
 	} else if validCount == 0 {
 		errors = append(errors, "No valid subjects selected for this pipeline")
 	}
@@ -2006,24 +2042,24 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Temporal feature selection
 	case optTemporalFeaturePower:
-		m.temporalFeaturePower = !m.temporalFeaturePower
+		m.temporalFeaturePowerEnabled = !m.temporalFeaturePowerEnabled
 		// Ensure at least one feature is enabled
-		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
-			m.temporalFeaturePower = true
+		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
+			m.temporalFeaturePowerEnabled = true
 		}
 		m.useDefaultAdvanced = false
 	case optTemporalFeatureITPC:
-		m.temporalFeatureITPC = !m.temporalFeatureITPC
+		m.temporalFeatureITPCEnabled = !m.temporalFeatureITPCEnabled
 		// Ensure at least one feature is enabled
-		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
-			m.temporalFeatureITPC = true
+		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
+			m.temporalFeatureITPCEnabled = true
 		}
 		m.useDefaultAdvanced = false
 	case optTemporalFeatureERDS:
-		m.temporalFeatureERDS = !m.temporalFeatureERDS
+		m.temporalFeatureERDSEnabled = !m.temporalFeatureERDSEnabled
 		// Ensure at least one feature is enabled
-		if !m.temporalFeaturePower && !m.temporalFeatureITPC && !m.temporalFeatureERDS {
-			m.temporalFeatureERDS = true
+		if !m.temporalFeaturePowerEnabled && !m.temporalFeatureITPCEnabled && !m.temporalFeatureERDSEnabled {
+			m.temporalFeatureERDSEnabled = true
 		}
 		m.useDefaultAdvanced = false
 	// ITPC-specific options

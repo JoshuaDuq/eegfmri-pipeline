@@ -685,10 +685,18 @@ def extract_aperiodic_features(
     times = epochs.times
     min_samples = int(sfreq)
     
+    # Scientific validity: aperiodic fits are unstable on short segments
+    # Default to 2.0s minimum for reliable slope/offset estimation
+    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", 2.0))
+    if not np.isfinite(min_segment_sec) or min_segment_sec < 0:
+        min_segment_sec = 2.0
+    
     all_data: Dict[str, Any] = {}
     qc_payload: Dict[str, Any] = {
         "segments": {},
         "channel_names": ch_names,
+        "min_segment_sec": min_segment_sec,
     }
     
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
@@ -698,6 +706,17 @@ def extract_aperiodic_features(
         if mask is None or np.sum(mask) < min_samples:
             continue
         t_seg = times[mask]
+        seg_duration_sec = float(t_seg[-1] - t_seg[0]) if len(t_seg) > 1 else 0.0
+        
+        # Validate segment duration for stable aperiodic fits
+        if seg_duration_sec < min_segment_sec:
+            logger.warning(
+                "Aperiodic: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); "
+                "skipping to avoid unstable slope/offset estimates.",
+                seg_name, seg_duration_sec, min_segment_sec
+            )
+            continue
+        
         spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
         seg_data = _extract_aperiodic_for_segment(
             epochs, picks, ch_names, seg_name,
@@ -708,7 +727,7 @@ def extract_aperiodic_features(
         qc_payload["segments"][seg_name] = seg_data.get("__qc__")
         seg_data.pop("__qc__", None)
         all_data.update(seg_data)
-        logger.info(f"Computed Aperiodic for {seg_name}: [{t_seg[0]:.2f}, {t_seg[-1]:.2f}]")
+        logger.info(f"Computed Aperiodic for {seg_name}: [{t_seg[0]:.2f}, {t_seg[-1]:.2f}] ({seg_duration_sec:.2f}s)")
     
     if not all_data:
         logger.warning("No valid segments for Aperiodic; returning empty result.")

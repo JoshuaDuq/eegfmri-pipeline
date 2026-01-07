@@ -253,6 +253,10 @@ def visualize_regression_from_disk(
     ensure_dir(plots_dir)
     
     pred_path = results_dir / "loso_predictions.tsv"
+    if not pred_path.exists():
+        alt = results_dir / "cv_predictions.tsv"
+        if alt.exists():
+            pred_path = alt
     metrics_path = results_dir / "pooled_metrics.json"
     null_path = results_dir / "loso_null_elasticnet.npz"
     
@@ -269,18 +273,22 @@ def visualize_regression_from_disk(
     
     model_name = "elasticnet"
     
+    prefix = "loso"
+    if pred_path.name != "loso_predictions.tsv":
+        prefix = pred_path.stem.replace("_predictions", "") or "cv"
+
     plot_prediction_scatter(
         pred_df=pred_df,
         model_name=model_name,
         pooled_metrics=pooled_metrics,
-        save_path=plots_dir / "loso_prediction_scatter",
+        save_path=plots_dir / f"{prefix}_prediction_scatter",
         config=config,
     )
     
     plot_residual_diagnostics(
         pred_df=pred_df,
         model_name=model_name,
-        save_path=plots_dir / "loso_residual_diagnostics",
+        save_path=plots_dir / f"{prefix}_residual_diagnostics",
         config=config,
     )
     
@@ -304,7 +312,7 @@ def visualize_regression_from_disk(
             plot_per_subject_performance(
                 per_subj_df=per_subj_df,
                 model_name=model_name,
-                save_path=plots_dir / "loso_per_subject_performance",
+                save_path=plots_dir / f"{prefix}_per_subject_performance",
                 config=config,
             )
     
@@ -316,7 +324,7 @@ def visualize_regression_from_disk(
             plot_decoding_null_hist(
                 null_r=null_rs,
                 empirical_r=empirical_r,
-                save_path=plots_dir / "loso_null_distribution",
+                save_path=plots_dir / f"{prefix}_null_distribution",
                 config=config,
             )
     
@@ -381,4 +389,3 @@ __all__ = [
     "visualize_regression_from_disk",
     "visualize_time_generalization_from_disk",
 ]
-

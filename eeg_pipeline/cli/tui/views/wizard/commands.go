@@ -258,6 +258,10 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, m.modeOptions[m.modeIndex])
 	}
 
+	if m.Pipeline == types.PipelineDecoding {
+		parts = append(parts, "--cv-scope", m.decodingScope.CLIValue())
+	}
+
 	if m.Pipeline == types.PipelinePlotting {
 		selectedPlots := m.SelectedPlotIDs()
 		if len(selectedPlots) > 0 && len(selectedPlots) < len(m.plotItems) {
@@ -1092,6 +1096,39 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		args = append(args, "--aperiodic-peak-z", fmt.Sprintf("%.2f", m.aperiodicPeakZ))
 		args = append(args, "--aperiodic-min-r2", fmt.Sprintf("%.3f", m.aperiodicMinR2))
 		args = append(args, "--aperiodic-min-points", fmt.Sprintf("%d", m.aperiodicMinPoints))
+		// Scientific validity: minimum segment duration for stable fits
+		if m.aperiodicMinSegmentSec != 2.0 {
+			args = append(args, "--aperiodic-min-segment-sec", fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec))
+		}
+	}
+
+	// ITPC options (scientific validity)
+	if m.isCategorySelected("itpc") {
+		itpcMethods := []string{"global", "fold_global", "loo"}
+		if m.itpcMethod >= 0 && m.itpcMethod < len(itpcMethods) && m.itpcMethod != 0 {
+			args = append(args, "--itpc-method", itpcMethods[m.itpcMethod])
+		}
+	}
+
+	// Additional connectivity scientific validity options
+	if m.isCategorySelected("connectivity") {
+		// AEC output format
+		if m.connAECOutput == 1 {
+			args = append(args, "--aec-output", "z")
+		} else if m.connAECOutput == 2 {
+			args = append(args, "--aec-output", "r", "z")
+		}
+		// Force within_epoch for decoding
+		if !m.connForceWithinEpochDecoding {
+			args = append(args, "--no-conn-force-within-epoch-for-decoding")
+		}
+	}
+
+	// Ratios options (scientific validity)
+	if m.isCategorySelected("ratios") {
+		if m.ratioSource == 1 {
+			args = append(args, "--ratio-source", "powcorr")
+		}
 	}
 
 	// Complexity options
@@ -1179,6 +1216,212 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 	if m.tfrWorkers != -1 {
 		args = append(args, "--tfr-workers", fmt.Sprintf("%d", m.tfrWorkers))
+	}
+	// TFR advanced
+	if m.tfrMaxCycles != 15.0 {
+		args = append(args, "--tfr-max-cycles", fmt.Sprintf("%.1f", m.tfrMaxCycles))
+	}
+	if m.tfrDecimPower != 4 {
+		args = append(args, "--tfr-decim-power", fmt.Sprintf("%d", m.tfrDecimPower))
+	}
+	if m.tfrDecimPhase != 1 {
+		args = append(args, "--tfr-decim-phase", fmt.Sprintf("%d", m.tfrDecimPhase))
+	}
+
+	// ITPC additional options
+	if m.itpcAllowUnsafeLoo {
+		args = append(args, "--itpc-allow-unsafe-loo")
+	}
+	if m.itpcBaselineCorrection != 0 {
+		modes := []string{"none", "subtract"}
+		args = append(args, "--itpc-baseline-correction", modes[m.itpcBaselineCorrection])
+	}
+
+	// Spectral advanced options
+	if m.isCategorySelected("spectral") || m.isCategorySelected("ratios") {
+		if !m.spectralIncludeLogRatios {
+			args = append(args, "--no-spectral-include-log-ratios")
+		}
+		if m.spectralPsdMethod != 0 {
+			args = append(args, "--spectral-psd-method", "welch")
+		}
+		if m.spectralFmin != 1.0 {
+			args = append(args, "--spectral-fmin", fmt.Sprintf("%.1f", m.spectralFmin))
+		}
+		if m.spectralFmax != 80.0 {
+			args = append(args, "--spectral-fmax", fmt.Sprintf("%.1f", m.spectralFmax))
+		}
+		if !m.spectralExcludeLineNoise {
+			args = append(args, "--no-spectral-exclude-line-noise")
+		}
+		if m.spectralLineNoiseFreq != 50.0 {
+			args = append(args, "--spectral-line-noise-freq", fmt.Sprintf("%.0f", m.spectralLineNoiseFreq))
+		}
+		segments := []string{"baseline", "active", "baseline active"}
+		if m.spectralSegments != 0 && m.spectralSegments < len(segments) {
+			args = append(args, "--spectral-segments")
+			args = append(args, splitSpaceList(segments[m.spectralSegments])...)
+		}
+		if m.spectralMinSegmentSec != 2.0 {
+			args = append(args, "--spectral-min-segment-sec", fmt.Sprintf("%.1f", m.spectralMinSegmentSec))
+		}
+		if m.spectralMinCyclesAtFmin != 3.0 {
+			args = append(args, "--spectral-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.spectralMinCyclesAtFmin))
+		}
+	}
+
+	// Band envelope options
+	if m.bandEnvelopePadSec != 0.5 {
+		args = append(args, "--band-envelope-pad-sec", fmt.Sprintf("%.2f", m.bandEnvelopePadSec))
+	}
+	if m.bandEnvelopePadCycles != 3.0 {
+		args = append(args, "--band-envelope-pad-cycles", fmt.Sprintf("%.1f", m.bandEnvelopePadCycles))
+	}
+
+	// IAF options
+	if m.iafEnabled {
+		args = append(args, "--iaf-enabled")
+		if m.iafAlphaWidthHz != 2.0 {
+			args = append(args, "--iaf-alpha-width-hz", fmt.Sprintf("%.1f", m.iafAlphaWidthHz))
+		}
+		if m.iafSearchRangeMin != 7.0 || m.iafSearchRangeMax != 13.0 {
+			args = append(args, "--iaf-search-range", fmt.Sprintf("%.1f", m.iafSearchRangeMin), fmt.Sprintf("%.1f", m.iafSearchRangeMax))
+		}
+		if m.iafMinProminence != 0.05 {
+			args = append(args, "--iaf-min-prominence", fmt.Sprintf("%.3f", m.iafMinProminence))
+		}
+		if strings.TrimSpace(m.iafRoisSpec) != "" && m.iafRoisSpec != "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R" {
+			args = append(args, "--iaf-rois")
+			args = append(args, splitCSVList(m.iafRoisSpec)...)
+		}
+	}
+
+	// Aperiodic advanced options
+	if m.isCategorySelected("aperiodic") {
+		if m.aperiodicModel != 0 {
+			args = append(args, "--aperiodic-model", "knee")
+		}
+		if m.aperiodicPsdMethod != 0 {
+			args = append(args, "--aperiodic-psd-method", "welch")
+		}
+		if !m.aperiodicExcludeLineNoise {
+			args = append(args, "--no-aperiodic-exclude-line-noise")
+		}
+		if m.aperiodicLineNoiseFreq != 50.0 {
+			args = append(args, "--aperiodic-line-noise-freq", fmt.Sprintf("%.0f", m.aperiodicLineNoiseFreq))
+		}
+	}
+
+	// Connectivity advanced options
+	if m.isCategorySelected("connectivity") {
+		if m.connGranularity != 0 {
+			granularities := []string{"trial", "condition", "subject"}
+			args = append(args, "--conn-granularity", granularities[m.connGranularity])
+		}
+		if m.connMinEpochsPerGroup != 5 {
+			args = append(args, "--conn-min-epochs-per-group", fmt.Sprintf("%d", m.connMinEpochsPerGroup))
+		}
+		if m.connMinCyclesPerBand != 3.0 {
+			args = append(args, "--conn-min-cycles-per-band", fmt.Sprintf("%.1f", m.connMinCyclesPerBand))
+		}
+		if !m.connWarnNoSpatialTransform {
+			args = append(args, "--no-conn-warn-no-spatial-transform")
+		}
+		if m.connPhaseEstimator != 0 {
+			args = append(args, "--conn-phase-estimator", "across_epochs")
+		}
+		if m.connMinSegmentSec != 1.0 {
+			args = append(args, "--conn-min-segment-sec", fmt.Sprintf("%.1f", m.connMinSegmentSec))
+		}
+	}
+
+	// PAC advanced options
+	if m.isCategorySelected("pac") {
+		if m.pacSource != 0 {
+			args = append(args, "--pac-source", "tfr")
+		}
+		if !m.pacNormalize {
+			args = append(args, "--no-pac-normalize")
+		}
+		if m.pacNSurrogates != 0 {
+			args = append(args, "--pac-n-surrogates", fmt.Sprintf("%d", m.pacNSurrogates))
+		}
+		if m.pacAllowHarmonicOvrlap {
+			args = append(args, "--pac-allow-harmonic-overlap")
+		}
+		if m.pacMaxHarmonic != 6 {
+			args = append(args, "--pac-max-harmonic", fmt.Sprintf("%d", m.pacMaxHarmonic))
+		}
+		if m.pacHarmonicToleranceHz != 1.0 {
+			args = append(args, "--pac-harmonic-tolerance-hz", fmt.Sprintf("%.1f", m.pacHarmonicToleranceHz))
+		}
+		if m.pacComputeWaveformQC {
+			args = append(args, "--pac-compute-waveform-qc")
+		}
+		if m.pacWaveformOffsetMs != 5.0 {
+			args = append(args, "--pac-waveform-offset-ms", fmt.Sprintf("%.1f", m.pacWaveformOffsetMs))
+		}
+	}
+
+	// Complexity advanced options
+	if m.isCategorySelected("complexity") {
+		if m.complexityTargetHz != 100.0 {
+			args = append(args, "--complexity-target-hz", fmt.Sprintf("%.1f", m.complexityTargetHz))
+		}
+		if m.complexityTargetNSamples != 500 {
+			args = append(args, "--complexity-target-n-samples", fmt.Sprintf("%d", m.complexityTargetNSamples))
+		}
+		if !m.complexityZscore {
+			args = append(args, "--no-complexity-zscore")
+		}
+	}
+
+	// Quality options
+	if m.isCategorySelected("quality") {
+		if m.qualityPsdMethod != 0 {
+			args = append(args, "--quality-psd-method", "multitaper")
+		}
+		if m.qualityFmin != 1.0 {
+			args = append(args, "--quality-fmin", fmt.Sprintf("%.1f", m.qualityFmin))
+		}
+		if m.qualityFmax != 100.0 {
+			args = append(args, "--quality-fmax", fmt.Sprintf("%.1f", m.qualityFmax))
+		}
+		if m.qualityNfft != 256 {
+			args = append(args, "--quality-n-fft", fmt.Sprintf("%d", m.qualityNfft))
+		}
+		if !m.qualityExcludeLineNoise {
+			args = append(args, "--no-quality-exclude-line-noise")
+		}
+		if m.qualitySnrSignalBandMin != 1.0 || m.qualitySnrSignalBandMax != 30.0 {
+			args = append(args, "--quality-snr-signal-band", fmt.Sprintf("%.1f", m.qualitySnrSignalBandMin), fmt.Sprintf("%.1f", m.qualitySnrSignalBandMax))
+		}
+		if m.qualitySnrNoiseBandMin != 40.0 || m.qualitySnrNoiseBandMax != 80.0 {
+			args = append(args, "--quality-snr-noise-band", fmt.Sprintf("%.1f", m.qualitySnrNoiseBandMin), fmt.Sprintf("%.1f", m.qualitySnrNoiseBandMax))
+		}
+		if m.qualityMuscleBandMin != 30.0 || m.qualityMuscleBandMax != 80.0 {
+			args = append(args, "--quality-muscle-band", fmt.Sprintf("%.1f", m.qualityMuscleBandMin), fmt.Sprintf("%.1f", m.qualityMuscleBandMax))
+		}
+	}
+
+	// ERDS options
+	if m.isCategorySelected("erds") {
+		if m.erdsUseLogRatio {
+			args = append(args, "--erds-use-log-ratio")
+		}
+		if m.erdsMinBaselinePower != 1.0e-12 {
+			args = append(args, "--erds-min-baseline-power", fmt.Sprintf("%.2e", m.erdsMinBaselinePower))
+		}
+		if m.erdsMinActivePower != 1.0e-12 {
+			args = append(args, "--erds-min-active-power", fmt.Sprintf("%.2e", m.erdsMinActivePower))
+		}
+		if m.erdsMinSegmentSec != 0.5 {
+			args = append(args, "--erds-min-segment-sec", fmt.Sprintf("%.2f", m.erdsMinSegmentSec))
+		}
+		if strings.TrimSpace(m.erdsBandsSpec) != "" && m.erdsBandsSpec != "alpha,beta" {
+			args = append(args, "--erds-bands")
+			args = append(args, splitCSVList(m.erdsBandsSpec)...)
+		}
 	}
 
 	// Generic & Validation
@@ -1606,11 +1849,17 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--temporal-filter-value", strings.TrimSpace(m.temporalFilterValue))
 		}
 		// Temporal feature selection
-		if !m.temporalFeaturePower {
+		if !m.temporalFeaturePowerEnabled {
 			args = append(args, "--no-temporal-feature-power")
 		}
+		if m.temporalFeatureITPCEnabled {
+			args = append(args, "--temporal-feature-itpc")
+		}
+		if m.temporalFeatureERDSEnabled {
+			args = append(args, "--temporal-feature-erds")
+		}
 		// ITPC-specific options (only if ITPC is selected in step 3)
-		if m.featureFileSelected["itpc"] {
+		if m.featureFileSelected["itpc"] || m.temporalFeatureITPCEnabled {
 			if !m.temporalITPCBaselineCorrection {
 				args = append(args, "--no-temporal-itpc-baseline-correction")
 			}
@@ -1622,7 +1871,7 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			}
 		}
 		// ERDS-specific options (only if ERDS is selected in step 3)
-		if m.featureFileSelected["erds"] {
+		if m.featureFileSelected["erds"] || m.temporalFeatureERDSEnabled {
 			if m.temporalERDSBaselineMin != -0.5 {
 				args = append(args, "--temporal-erds-baseline-min", fmt.Sprintf("%.2f", m.temporalERDSBaselineMin))
 			}
@@ -1633,6 +1882,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 				methods := []string{"percent", "zscore"}
 				args = append(args, "--temporal-erds-method", methods[m.temporalERDSMethod])
 			}
+		}
+	}
+
+	// Time-frequency heatmap
+	if !m.tfHeatmapEnabled {
+		args = append(args, "--no-tf-heatmap-enabled")
+	} else {
+		if strings.TrimSpace(m.tfHeatmapFreqsSpec) != "" && m.tfHeatmapFreqsSpec != "4,8,13,30,45" {
+			args = append(args, "--tf-heatmap-freqs")
+			for _, f := range splitCSVList(m.tfHeatmapFreqsSpec) {
+				args = append(args, f)
+			}
+		}
+		if m.tfHeatmapTimeResMs != 100 {
+			args = append(args, "--tf-heatmap-time-resolution-ms", fmt.Sprintf("%d", m.tfHeatmapTimeResMs))
 		}
 	}
 

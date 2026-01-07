@@ -114,7 +114,7 @@ def setup_file_logging(results_dir: Path, run_id: Optional[str] = None, logger_n
 # Best Parameters I/O
 ###################################################################
 
-def prepare_best_params_path(base_path: Path, mode: str, run_id: Optional[str]) -> Path:
+def prepare_best_params_path(base_path: Path, mode: str, run_id: Optional[str] = None) -> Path:
     base_path.parent.mkdir(parents=True, exist_ok=True)
 
     if mode == "run_scoped":

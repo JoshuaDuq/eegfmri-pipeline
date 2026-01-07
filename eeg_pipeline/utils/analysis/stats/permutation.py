@@ -47,13 +47,46 @@ def perm_pval_partial_freedman_lane(
     groups: Optional[np.ndarray] = None,
     config: Optional[Any] = None,
 ) -> float:
-    """Freedman-Lane permutation test for partial correlation."""
+    """Freedman-Lane permutation test for partial correlation.
+    
+    Note: groups can be np.ndarray or pd.Series. If np.ndarray, it must be
+    aligned to the original x/y indices. After dropna, groups will be subset
+    to match the kept rows.
+    """
+    # Convert groups to Series aligned to x's index for proper subsetting after dropna
+    if groups is not None:
+        if isinstance(groups, pd.Series):
+            groups_series = groups
+        else:
+            groups_arr = np.asarray(groups)
+            if len(groups_arr) != len(x):
+                raise ValueError(
+                    f"groups length ({len(groups_arr)}) must match x length ({len(x)}) "
+                    "before dropna subsetting"
+                )
+            groups_series = pd.Series(groups_arr, index=x.index)
+    else:
+        groups_series = None
+    
     df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
     constants = get_statistics_constants(config)
     min_samples = constants.get("min_samples_for_correlation", 5)
     
     if len(df) < min_samples or n_perm is None or n_perm <= 0:
         return np.nan
+    
+    # Subset groups to match the kept (non-NaN) rows
+    groups_arr = None
+    if groups_series is not None:
+        groups_subset = groups_series.reindex(df.index)
+        # Drop any NaN groups (can happen if group info was missing for some rows)
+        valid_groups = groups_subset.dropna()
+        if len(valid_groups) == len(df):
+            groups_arr = valid_groups.to_numpy()
+        elif len(valid_groups) > 0:
+            # Some group values missing - fall back to no grouping with warning
+            groups_arr = None
+        # If all groups are NaN, groups_arr stays None (ungrouped permutation)
     
     intercept = np.ones(len(df))
     
@@ -83,10 +116,6 @@ def perm_pval_partial_freedman_lane(
     
     obs_r, _ = stats.pearsonr(x_res, y_res)
     exceed = 1
-    
-    groups_arr = np.asarray(groups) if groups is not None else None
-    if groups_arr is not None and len(groups_arr) != len(df):
-        raise ValueError("groups length mismatch")
     
     for _ in range(n_perm):
         perm_idx = _permute_within_groups(len(y_res), rng, groups_arr)

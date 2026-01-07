@@ -24,10 +24,19 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands
 # --- Helpers ---
 
 def _get_itpc_method(config: Any) -> str:
+    """Get ITPC computation method from config.
+    
+    Supported methods:
+    - 'global': Compute ITPC across all trials, broadcast to each trial.
+                WARNING: Creates cross-trial dependence; can leak in CV/decoding.
+    - 'fold_global': Compute ITPC from training trials only (requires ctx.train_mask),
+                     broadcast to all trials. This is leakage-safe for CV/decoding.
+    - 'loo': Leave-one-out ITPC (per-trial). Requires train_mask and explicit opt-in.
+    """
     method = str(config.get("feature_engineering.itpc.method", "global")).strip().lower()
-    if method not in {"loo", "global"}:
+    if method not in {"loo", "global", "fold_global"}:
         raise ValueError(
-            "Invalid ITPC method. Supported values are 'loo' and 'global'. "
+            "Invalid ITPC method. Supported values are 'loo', 'global', and 'fold_global'. "
             f"Got: {method!r}"
         )
     if method == "loo" and not bool(config.get("feature_engineering.itpc.allow_unsafe_loo", False)):
@@ -38,6 +47,7 @@ def _get_itpc_method(config: Any) -> str:
             "within CV folds and pass an explicit training mask."
         )
     return method
+
 
 def _sharpness_log_ratio(
     x: np.ndarray,
@@ -124,6 +134,35 @@ def _compute_global_itpc_map(data: np.ndarray) -> np.ndarray:
     return np.abs(np.mean(unit, axis=0))  # (ch, freq, time)
 
 
+def _compute_fold_global_itpc_map(data: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
+    """Compute ITPC map from TRAINING trials only (leakage-safe for CV).
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Complex TFR data (n_epochs, n_ch, n_freqs, n_times)
+    train_mask : np.ndarray
+        Boolean mask indicating training trials (n_epochs,)
+        
+    Returns
+    -------
+    itpc_map : np.ndarray
+        ITPC values (n_ch, n_freqs, n_times) computed on training trials only.
+        This map is constant across all trials (broadcast during feature extraction).
+    """
+    eps = 1e-12
+    unit = data / (np.abs(data) + eps)
+    
+    if train_mask is None or not np.any(train_mask):
+        # Fallback to global if no train_mask (shouldn't happen if fold_global is requested)
+        return np.abs(np.mean(unit, axis=0))
+    
+    # Compute ITPC from training trials only
+    train_unit = unit[train_mask]
+    return np.abs(np.mean(train_unit, axis=0))  # (ch, freq, time)
+
+
+
 def _broadcast_per_trial(values_ch: np.ndarray, n_epochs: int) -> np.ndarray:
     values_ch = np.asarray(values_ch, dtype=float)
     if values_ch.ndim != 1:
@@ -154,16 +193,41 @@ def extract_phase_features(
     ch_names = tfr.info['ch_names']
     n_epochs = int(data.shape[0])
     
-    # ITPC is defined across trials. A per-trial LOO variant can be used in limited
-    # contexts but must be computed within CV folds to avoid leakage.
+    # ITPC is defined across trials. Cross-trial computation can leak test-trial 
+    # information in CV/decoding. We support three modes:
+    # - 'global': Uses ALL trials (default, but leaks in CV)
+    # - 'fold_global': Uses TRAINING trials only, requires ctx.train_mask (leakage-safe)
+    # - 'loo': LOO per-trial, requires ctx.train_mask and explicit opt-in
+    train_mask = getattr(ctx, "train_mask", None)
+    
     if itpc_method == "loo":
-        train_mask = getattr(ctx, "train_mask", None)
         if train_mask is None:
             raise ValueError(
                 "ITPC(method='loo') requires ctx.train_mask to be provided (training set trials only). "
                 "Compute ITPC within each CV fold to avoid leakage."
             )
         itpc_map = _compute_loo_itpc(data, train_mask=train_mask)  # (epochs, ch, freq, time)
+    elif itpc_method == "fold_global":
+        if train_mask is None:
+            ctx.logger.warning(
+                "ITPC(method='fold_global') requested but ctx.train_mask not provided. "
+                "Falling back to global ITPC (which may leak in CV/decoding)."
+            )
+            itpc_map = _compute_global_itpc_map(data)  # (ch, freq, time)
+        else:
+            ctx.logger.info(
+                "ITPC: Using fold_global mode - computing from %d training trials only",
+                int(np.sum(train_mask))
+            )
+            itpc_map = _compute_fold_global_itpc_map(data, train_mask)  # (ch, freq, time)
+    elif itpc_method == "global":
+        # Check if train_mask is provided with 'global' method - recommend fold_global
+        if train_mask is not None:
+            ctx.logger.info(
+                "ITPC: train_mask detected with method='global'. Consider using method='fold_global' "
+                "for leakage-safe CV/decoding. Using global ITPC (all trials) as requested."
+            )
+        itpc_map = _compute_global_itpc_map(data)  # (ch, freq, time)
     else:
         itpc_map = _compute_global_itpc_map(data)  # (ch, freq, time)
     
@@ -691,6 +755,7 @@ def extract_pac_from_precomputed(
     tf_bands = config.get("time_frequency_analysis.bands", {}) if hasattr(config, "get") else {}
     
     ch_names = precomputed.ch_names
+    n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
     windows = precomputed.windows
     segment_name = getattr(windows, "name", "active") or "active"

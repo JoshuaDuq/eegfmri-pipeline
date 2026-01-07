@@ -705,13 +705,34 @@ class BehaviorContext:
             self.covariates_df = self._sanitize_covariates(self.covariates_df)
 
     def _extract_group_ids(self) -> None:
-        """Extract group IDs for permutation testing."""
+        """Extract group IDs for permutation testing.
+        
+        Uses configurable preference order for group columns.
+        Default order is block→run→session (more conservative for within-subject tests),
+        preferring smaller units for permutation to be more conservative about
+        temporal autocorrelation.
+        """
+        from eeg_pipeline.utils.config.loader import get_config_value
+        
         self.group_ids = None
         self.group_column = None
         if self.aligned_events is None:
             return
 
-        for candidate in ["run", "block", "session", "subject"]:
+        # Configurable preference order for group columns
+        # Default: block → run → session (most conservative to least conservative)
+        # This ensures permutation happens within the smallest available unit
+        default_preference = ["block", "run", "session", "subject"]
+        pref_order = get_config_value(
+            self.config, 
+            "behavior_analysis.permutation.group_column_preference",
+            default_preference
+        )
+        if not isinstance(pref_order, (list, tuple)):
+            pref_order = default_preference
+        pref_order = [str(c).strip().lower() for c in pref_order]
+        
+        for candidate in pref_order:
             if candidate not in self.aligned_events.columns:
                 continue
             try:
@@ -724,6 +745,7 @@ class BehaviorContext:
             except Exception:
                 self.group_ids = None
                 self.group_column = None
+
 
     def add_result(self, result: ComputationResult) -> None:
         """Add a computation result."""

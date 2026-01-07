@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.analysis.decoding.orchestration import (
     run_regression_decoding,
+    run_within_subject_regression_decoding,
     run_time_generalization,
 )
 from eeg_pipeline.pipelines.base import PipelineBase
@@ -52,10 +53,15 @@ class DecodingPipeline(PipelineBase):
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
-        
-        min_subjects = self.config.get("analysis.min_subjects_for_group", 2)
-        if len(subjects) < min_subjects:
-            raise ValueError(f"Decoding requires at least {min_subjects} subjects, got {len(subjects)}")
+
+        cv_scope = kwargs.get("cv_scope", "group")
+        if cv_scope not in {"group", "subject"}:
+            raise ValueError(f"Invalid cv_scope: {cv_scope} (expected 'group' or 'subject')")
+
+        if cv_scope == "group":
+            min_subjects = self.config.get("analysis.min_subjects_for_group", 2)
+            if len(subjects) < min_subjects:
+                raise ValueError(f"Decoding requires at least {min_subjects} subjects, got {len(subjects)}")
         
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         n_perm = kwargs.get("n_perm", 0)
@@ -63,29 +69,47 @@ class DecodingPipeline(PipelineBase):
         outer_jobs = kwargs.get("outer_jobs", 1)
         rng_seed = kwargs.get("rng_seed") or self.config.get("project.random_state", 42)
         skip_time_gen = kwargs.get("skip_time_gen", False)
-        
-        total_steps = 4 if not skip_time_gen else 2
+
+        if cv_scope == "subject" and not skip_time_gen:
+            self.logger.info("Within-subject decoding selected; skipping time-generalization.")
+            skip_time_gen = True
+
+        total_steps = 2 if (skip_time_gen or cv_scope == "subject") else 4
         
         self.logger.info(
-            f"Starting decoding: {len(subjects)} subjects, task={task}, n_perm={n_perm}, "
+            f"Starting decoding ({cv_scope} scope): {len(subjects)} subjects, task={task}, n_perm={n_perm}, "
             f"inner_splits={inner_splits}, outer_jobs={outer_jobs}"
         )
         
         progress.start("decoding", subjects)
         progress.step("Regression decoding", current=1, total=total_steps)
-        
-        results_dir = run_regression_decoding(
-            subjects=subjects,
-            task=task,
-            deriv_root=self.deriv_root,
-            config=self.config,
-            n_perm=n_perm,
-            inner_splits=inner_splits,
-            outer_jobs=outer_jobs,
-            rng_seed=rng_seed,
-            results_root=self.results_root,
-            logger=self.logger,
-        )
+
+        if cv_scope == "subject":
+            results_dir = run_within_subject_regression_decoding(
+                subjects=subjects,
+                task=task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+                n_perm=n_perm,
+                inner_splits=inner_splits,
+                outer_jobs=outer_jobs,
+                rng_seed=rng_seed,
+                results_root=self.results_root,
+                logger=self.logger,
+            )
+        else:
+            results_dir = run_regression_decoding(
+                subjects=subjects,
+                task=task,
+                deriv_root=self.deriv_root,
+                config=self.config,
+                n_perm=n_perm,
+                inner_splits=inner_splits,
+                outer_jobs=outer_jobs,
+                rng_seed=rng_seed,
+                results_root=self.results_root,
+                logger=self.logger,
+            )
         
         progress.step("Visualizing regression", current=2, total=total_steps)
         
@@ -95,7 +119,7 @@ class DecodingPipeline(PipelineBase):
             logger=self.logger,
         )
         
-        if not skip_time_gen:
+        if not skip_time_gen and cv_scope == "group":
             progress.step("Time generalization", current=3, total=total_steps)
             
             run_time_generalization(

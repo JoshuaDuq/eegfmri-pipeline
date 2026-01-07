@@ -104,6 +104,13 @@ def extract_band_ratios_from_precomputed(
 
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
     include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
+    
+    # ratio_source: 'raw' uses absolute power, 'powcorr' uses aperiodic-adjusted power
+    # Using powcorr reduces confounding from broadband artifacts and aperiodic slope
+    ratio_source = str(get_config_value(config, "feature_engineering.spectral.ratio_source", "raw")).strip().lower()
+    if ratio_source not in {"raw", "powcorr"}:
+        ratio_source = "raw"
+    
     n_epochs = precomputed.data.shape[0]
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
     
@@ -118,8 +125,14 @@ def extract_band_ratios_from_precomputed(
             # Compute band power for this segment
             band_power_ch = {}
             for band, bd in precomputed.band_data.items():
-                p = bd.power[ep_idx]
+                if ratio_source == "powcorr" and hasattr(bd, 'powcorr') and bd.powcorr is not None:
+                    # Use aperiodic-corrected power (ratio relative to 1/f fit)
+                    p = bd.powcorr[ep_idx]
+                else:
+                    # Use raw absolute power
+                    p = bd.power[ep_idx]
                 band_power_ch[band] = np.nanmean(p[:, seg_mask], axis=1)
+
 
             for num, den in pairs:
                 if num not in band_power_ch or den not in band_power_ch:

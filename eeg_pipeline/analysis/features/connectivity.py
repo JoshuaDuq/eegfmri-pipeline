@@ -410,6 +410,30 @@ def extract_connectivity_features(
         granularity = "trial"
 
     phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
+    
+    # Guardrail: detect CV/decoding mode and warn/force within_epoch for phase estimator
+    # across_epochs is cross-trial by nature and WILL leak test information in CV
+    train_mask = getattr(ctx, "train_mask", None)
+    force_within_for_decoding = bool(conn_cfg.get("force_within_epoch_for_decoding", True))
+    
+    if train_mask is not None and phase_estimator == "across_epochs":
+        if force_within_for_decoding:
+            if ctx.logger is not None:
+                ctx.logger.warning(
+                    "Connectivity: train_mask detected (CV/decoding mode) with phase_estimator='across_epochs'. "
+                    "Across-epochs estimates leak test-trial information. "
+                    "Forcing phase_estimator='within_epoch' for valid CV. "
+                    "Set feature_engineering.connectivity.force_within_epoch_for_decoding=false to override."
+                )
+            phase_estimator = "within_epoch"
+        else:
+            if ctx.logger is not None:
+                ctx.logger.warning(
+                    "Connectivity: train_mask detected (CV/decoding mode) with phase_estimator='across_epochs'. "
+                    "CAUTION: Across-epochs estimates leak test-trial information and will inflate decoding accuracy. "
+                    "Consider using phase_estimator='within_epoch' for valid cross-validation."
+                )
+
     if granularity in {"subject", "condition"} and phase_estimator == "across_epochs":
         n_epochs = int(df.shape[0])
         groups_map: Dict[str, np.ndarray] = {"__all__": np.arange(n_epochs, dtype=int)}
@@ -595,6 +619,17 @@ def extract_connectivity_from_precomputed(
     enable_plv = bool(conn_cfg.get("enable_plv", False))
     enable_pli = bool(conn_cfg.get("enable_pli", False))
     enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
+    
+    # AEC output format: can include "r" (raw correlation) and/or "z" (Fisher-z transform)
+    # Fisher-z is atanh(r) and averages correctly across trials/subjects
+    aec_output_modes = conn_cfg.get("aec_output", ["r"])
+    if isinstance(aec_output_modes, str):
+        aec_output_modes = [aec_output_modes]
+    aec_output_modes = [str(m).strip().lower() for m in aec_output_modes]
+    if not aec_output_modes:
+        aec_output_modes = ["r"]
+    enable_aec_raw = "r" in aec_output_modes
+    enable_aec_z = "z" in aec_output_modes
 
     # Supported by mne-connectivity (version-dependent); extraction will skip unsupported
     # methods if spectral_connectivity_time raises.
@@ -935,16 +970,39 @@ def extract_connectivity_from_precomputed(
             return pd.DataFrame()
 
         aec_vals = dense[:, pair_i, pair_j]
+        
+        # Compute Fisher-z transform: z = atanh(r)
+        # This is scientifically correct for averaging correlations across trials/subjects
+        # Note: clip to avoid infinity at +/-1
+        aec_vals_z = None
+        if enable_aec_z:
+            aec_clipped = np.clip(aec_vals, -0.9999, 0.9999)
+            aec_vals_z = np.arctanh(aec_clipped)
 
         parts: List[pd.DataFrame] = []
         if output_level == "full":
             prefix = f"conn_{seg_name}_{band}_chpair_"
-            suffix = "_aec"
-            cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
-            parts.append(pd.DataFrame(aec_vals, columns=cols))
+            
+            # Raw AEC (r values)
+            if enable_aec_raw:
+                suffix = "_aec"
+                cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
+                parts.append(pd.DataFrame(aec_vals, columns=cols))
+            
+            # Fisher-z AEC (z values)
+            if enable_aec_z and aec_vals_z is not None:
+                suffix_z = "_aec_z"
+                cols_z = [f"{prefix}{pair_name}{suffix_z}" for pair_name in pair_names]
+                parts.append(pd.DataFrame(aec_vals_z, columns=cols_z))
 
-        glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
-        parts.append(pd.DataFrame({glob_col: np.nanmean(aec_vals, axis=1)}))
+        # Global means
+        if enable_aec_raw:
+            glob_col = f"conn_{seg_name}_{band}_global_aec_mean"
+            parts.append(pd.DataFrame({glob_col: np.nanmean(aec_vals, axis=1)}))
+        
+        if enable_aec_z and aec_vals_z is not None:
+            glob_col_z = f"conn_{seg_name}_{band}_global_aec_z_mean"
+            parts.append(pd.DataFrame({glob_col_z: np.nanmean(aec_vals_z, axis=1)}))
 
         if enable_graph_metrics:
             if logger is not None:

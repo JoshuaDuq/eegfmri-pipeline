@@ -160,6 +160,7 @@ feature_engineering:
       - [delta, alpha]     
       - [delta, theta]      
     include_log_ratios: true
+    ratio_source: "raw"              # "raw" (absolute power) or "powcorr" (aperiodic-adjusted, reduces confounding)
     psd_method: "multitaper"         # "multitaper" (recommended) or "welch"
     fmin: 1.0
     fmax: 80.0
@@ -186,9 +187,11 @@ feature_engineering:
     iaf_rois: ["ParOccipital_Midline", "ParOccipital_Ipsi_L", "ParOccipital_Contra_R"]
 
   itpc:
-    # Leakage-safe default: ITPC is computed across trials and broadcast per trial (constant per subject/run).
-    # LOO-ITPC is disabled by default; only enable if computed within CV folds with an explicit training mask.
-    method: "global"   # "global" or "loo" (unsafe unless allow_unsafe_loo=true and computed in-fold)
+    # Leakage-safe modes:
+    # - "global": ITPC computed across ALL trials and broadcast per trial (default, but leaks in CV/decoding)
+    # - "fold_global": ITPC computed from TRAINING trials only when ctx.train_mask present (leakage-safe)
+    # - "loo": Leave-one-out ITPC (unsafe unless allow_unsafe_loo=true and computed in-fold)
+    method: "global"   
     allow_unsafe_loo: false
     baseline_correction: "none"  # "none" or "subtract"
 
@@ -202,6 +205,7 @@ feature_engineering:
     min_r2: 0.6
     min_fit_points: 5
     max_rms: null
+    min_segment_sec: 2.0           # Minimum segment duration for stable slope/offset estimation (sec)
     exclude_line_noise: true       # Exclude line-noise bins before fitting
     line_noise_freqs: [50.0]       # [60.0] for North America
     line_noise_width_hz: 1.0
@@ -210,6 +214,7 @@ feature_engineering:
   connectivity:
     measures: ["wpli2_debiased", "aec"]
     aec_mode: "orth"
+    aec_output: ["r"]                 # ["r"] (raw), ["z"] (Fisher-z), or ["r", "z"] (both); z averages correctly across trials/subjects
     enable_graph_metrics: false
     graph_top_prop: 0.1
     sliding_window_len: 1.0
@@ -219,6 +224,7 @@ feature_engineering:
     min_cycles_per_band: 3.0         # Minimum oscillatory cycles per band for reliable connectivity
     warn_if_no_spatial_transform: true  # Warn if phase-based measures used without CSD/Laplacian
     phase_estimator: "within_epoch"  # "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
+    force_within_epoch_for_decoding: true  # Force within_epoch when train_mask detected (prevents CV leakage)
     min_segment_sec: 1.0             # Minimum segment duration for connectivity (sec)
 
   pac:
@@ -430,6 +436,13 @@ behavior_analysis:
   report:
     enabled: true
     top_n: 15
+  
+  # Permutation testing configuration
+  permutation:
+    # Group column preference for within-group permutation
+    # Order matters: first available column is used
+    # Default: block → run → session (more conservative for within-subject tests)
+    group_column_preference: ["block", "run", "session", "subject"]
   
   # Statistics
   statistics:

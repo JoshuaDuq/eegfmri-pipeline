@@ -256,6 +256,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-time-min-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-time-max-ms", type=int, default=None)
     temporal_group.add_argument("--temporal-smooth-window-ms", type=int, default=None)
+    # Temporal feature selection
+    temporal_group.add_argument("--temporal-feature-power", action="store_true", default=None, help="Enable power temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-power", action="store_false", dest="temporal_feature_power", help="Disable power temporal correlations")
+    temporal_group.add_argument("--temporal-feature-itpc", action="store_true", default=None, help="Enable ITPC temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-itpc", action="store_false", dest="temporal_feature_itpc", help="Disable ITPC temporal correlations")
+    temporal_group.add_argument("--temporal-feature-erds", action="store_true", default=None, help="Enable ERDS temporal correlations")
+    temporal_group.add_argument("--no-temporal-feature-erds", action="store_false", dest="temporal_feature_erds", help="Disable ERDS temporal correlations")
     # ITPC-specific temporal options
     temporal_group.add_argument("--temporal-itpc-baseline-min", type=float, default=None, help="ITPC baseline window start (seconds)")
     temporal_group.add_argument("--temporal-itpc-baseline-max", type=float, default=None, help="ITPC baseline window end (seconds)")
@@ -265,6 +272,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--temporal-erds-baseline-min", type=float, default=None, help="ERDS baseline window start (seconds)")
     temporal_group.add_argument("--temporal-erds-baseline-max", type=float, default=None, help="ERDS baseline window end (seconds)")
     temporal_group.add_argument("--temporal-erds-method", choices=["percent", "zscore"], default=None, help="ERDS computation method")
+    
+    # Time-frequency heatmap options
+    tfheatmap_group = parser.add_argument_group("Time-frequency heatmap options")
+    tfheatmap_group.add_argument("--tf-heatmap-enabled", action="store_true", default=None, help="Enable TF heatmap computation")
+    tfheatmap_group.add_argument("--no-tf-heatmap-enabled", action="store_false", dest="tf_heatmap_enabled", help="Disable TF heatmap computation")
+    tfheatmap_group.add_argument("--tf-heatmap-freqs", nargs="+", type=float, default=None, help="Frequencies for TF heatmap")
+    tfheatmap_group.add_argument("--tf-heatmap-time-resolution-ms", type=int, default=None, help="Time resolution for TF heatmap (ms)")
+    
     
     # Cluster-specific options
     cluster_group = parser.add_argument_group("Cluster permutation options")
@@ -666,6 +681,24 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             erds_cfg["baseline_window"] = baseline_window
         if getattr(args, "temporal_erds_method", None) is not None:
             erds_cfg["method"] = str(args.temporal_erds_method).lower()
+        
+        # Temporal feature selection
+        features_cfg = temporal_cfg.setdefault("features", {})
+        if getattr(args, "temporal_feature_power", None) is not None:
+            features_cfg["power"] = bool(args.temporal_feature_power)
+        if getattr(args, "temporal_feature_itpc", None) is not None:
+            features_cfg["itpc"] = bool(args.temporal_feature_itpc)
+        if getattr(args, "temporal_feature_erds", None) is not None:
+            features_cfg["erds"] = bool(args.temporal_feature_erds)
+        
+        # Time-frequency heatmap
+        tfheatmap_cfg = ba.setdefault("time_frequency_heatmap", {})
+        if getattr(args, "tf_heatmap_enabled", None) is not None:
+            tfheatmap_cfg["enabled"] = bool(args.tf_heatmap_enabled)
+        if getattr(args, "tf_heatmap_freqs", None) is not None:
+            tfheatmap_cfg["freqs"] = list(args.tf_heatmap_freqs)
+        if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
+            tfheatmap_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
 
         # Cluster
         if getattr(args, "cluster_threshold", None) is not None:

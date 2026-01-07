@@ -1221,6 +1221,30 @@ func (m Model) renderSubjectSelection() string {
 		MarginLeft(1)
 	b.WriteString(accent + titleStyle.Render(" SUBJECT SELECTION") + "\n\n")
 
+	if m.Pipeline == types.PipelineDecoding {
+		scopeLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("Scope:")
+		selectedChip := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Accent).
+			Padding(0, 1)
+		unselectedChip := lipgloss.NewStyle().
+			Foreground(styles.TextDim).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.TextDim).
+			Padding(0, 1)
+
+		groupChip := unselectedChip.Render("Group (LOSO)")
+		subjectChip := unselectedChip.Render("Subject (within)")
+		if m.decodingScope == DecodingCVScopeGroup {
+			groupChip = selectedChip.Render("Group (LOSO)")
+		} else {
+			subjectChip = selectedChip.Render("Subject (within)")
+		}
+
+		b.WriteString("  " + scopeLabel + " " + groupChip + " " + subjectChip + " " +
+			lipgloss.NewStyle().Foreground(styles.Muted).Render("[Tab to toggle]") + "\n\n")
+	}
+
 	if m.subjectsLoading {
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		frame := frames[m.ticker%len(frames)]
@@ -1264,8 +1288,13 @@ func (m Model) renderSubjectSelection() string {
 		}
 	}
 
+	minValid := 1
+	if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+		minValid = 2
+	}
+
 	var statusIndicator string
-	if validCount >= 1 {
+	if validCount >= minValid {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
 	} else {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
@@ -1284,8 +1313,9 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	b.WriteString(statusIndicator + summary)
-	if validCount == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	if validCount < minValid {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(
+			fmt.Sprintf(" — select at least %d", minValid)))
 	}
 	b.WriteString("\n\n")
 
@@ -1300,7 +1330,11 @@ func (m Model) renderSubjectSelection() string {
 
 	// Calculate responsive layout based on terminal height
 	// Overhead: header(4) + title(2) + status(2) + footer(2) + legend(2) = 12
-	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), 12)
+	overhead := 12
+	if m.Pipeline == types.PipelineDecoding {
+		overhead += 2 // scope line + spacer
+	}
+	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), overhead)
 	startIdx := layout.StartIdx
 	endIdx := layout.EndIdx
 
@@ -1407,6 +1441,11 @@ func (m Model) renderReview() string {
 	}
 	card.WriteString(iconStyle.Render(modeIcon+" ") + labelStyle.Render("Mode:") +
 		valueStyle.Render(m.modeOptions[m.modeIndex]) + "\n")
+
+	if m.Pipeline == types.PipelineDecoding {
+		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("CV Scope:") +
+			valueStyle.Render(m.decodingScope.CLIValue()) + "\n")
+	}
 
 	subjCount := 0
 	validCount := 0
@@ -3031,11 +3070,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 
 		// Temporal feature selection
 		case optTemporalFeaturePower:
-			return "Feature: Power", m.boolToOnOff(m.temporalFeaturePower), "spectral power in bands"
+			return "Feature: Power", m.boolToOnOff(m.temporalFeaturePowerEnabled), "spectral power in bands"
 		case optTemporalFeatureITPC:
-			return "Feature: ITPC", m.boolToOnOff(m.temporalFeatureITPC), "inter-trial phase coherence"
+			return "Feature: ITPC", m.boolToOnOff(m.temporalFeatureITPCEnabled), "inter-trial phase coherence"
 		case optTemporalFeatureERDS:
-			return "Feature: ERDS", m.boolToOnOff(m.temporalFeatureERDS), "event-related desync/sync"
+			return "Feature: ERDS", m.boolToOnOff(m.temporalFeatureERDSEnabled), "event-related desync/sync"
 
 		// ITPC-specific options
 		case optTemporalITPCBaselineCorrection:

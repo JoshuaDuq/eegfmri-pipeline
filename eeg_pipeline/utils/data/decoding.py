@@ -516,6 +516,10 @@ def load_active_matrix(
         groups_arr = groups_arr[finite_mask]
         meta = meta.loc[finite_mask].reset_index(drop=True)
 
+    # Required by decoding export utilities; keep stable ordering with current X/y.
+    meta = meta.reset_index(drop=True)
+    meta["trial_id"] = np.arange(len(meta), dtype=int)
+
     return X, y_all, groups_arr, feature_cols or [], meta
 
 

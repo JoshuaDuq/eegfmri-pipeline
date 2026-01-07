@@ -79,7 +79,7 @@ def compute_peak_frequency(
     fmin: float,
     fmax: float,
     aperiodic_adjusted: bool = True,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float, float]:
     """
     Compute peak frequency and peak power within a frequency range.
     
@@ -103,29 +103,66 @@ def compute_peak_frequency(
         Frequency of maximum power (on aperiodic-adjusted spectrum if enabled)
     peak_power : float
         Power at peak frequency (from original PSD)
+    peak_ratio : float
+        Ratio of raw power to aperiodic fit at peak frequency (oscillatory 
+        prominence relative to 1/f background). Values > 1 indicate a peak
+        above the aperiodic floor.
+    peak_residual : float
+        Log10(power) - log10(aperiodic_fit) at peak frequency. Positive values
+        indicate oscillatory power above the aperiodic background.
     """
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
     
     psd_band = psd[mask]
     freqs_band = freqs[mask]
     
     if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
     
-    if aperiodic_adjusted:
-        psd_for_peak = remove_aperiodic_component(psd, freqs)[mask]
-        if np.all(np.isnan(psd_for_peak)) or len(psd_for_peak) == 0:
-            psd_for_peak = psd_band
+    # Always compute aperiodic fit for prominence metrics
+    log_f = np.log10(np.maximum(freqs, 1e-6))
+    log_p = np.log10(np.maximum(psd, 1e-20))
+    
+    fit_range = (2.0, 40.0)  # Standard fit range
+    fit_mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1]) & np.isfinite(log_p)
+    
+    aperiodic_fit = None
+    if np.sum(fit_mask) >= 5:
+        try:
+            slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+            aperiodic_fit = 10 ** (intercept + slope * log_f)  # Linear in log-log space
+        except (np.linalg.LinAlgError, ValueError):
+            pass
+    
+    if aperiodic_adjusted and aperiodic_fit is not None:
+        residual = log_p - (np.log10(aperiodic_fit))
+        psd_for_peak = (10 ** residual)[mask]
     else:
+        psd_for_peak = psd_band
+    
+    if np.all(np.isnan(psd_for_peak)):
         psd_for_peak = psd_band
     
     peak_idx = np.nanargmax(psd_for_peak)
     peak_freq = float(freqs_band[peak_idx])
     peak_power = float(psd_band[peak_idx])
     
-    return peak_freq, peak_power
+    # Compute peak prominence metrics
+    peak_ratio = np.nan
+    peak_residual = np.nan
+    
+    if aperiodic_fit is not None:
+        # Find the global index for the peak frequency
+        global_peak_idx = np.where(mask)[0][peak_idx]
+        aperiodic_at_peak = aperiodic_fit[global_peak_idx]
+        
+        if np.isfinite(aperiodic_at_peak) and aperiodic_at_peak > 0:
+            peak_ratio = float(peak_power / aperiodic_at_peak)
+            peak_residual = float(np.log10(peak_power) - np.log10(aperiodic_at_peak))
+    
+    return peak_freq, peak_power, peak_ratio, peak_residual
 
 
 def compute_spectral_center(
@@ -446,7 +483,7 @@ def extract_spectral_features(
                 if "channels" in spatial_modes:
                     for ch_idx, ch_name in enumerate(ch_names):
                         psd = channel_psd[ch_idx]
-                        peak_freq, peak_power = compute_peak_frequency(
+                        peak_freq, peak_power, peak_ratio, peak_residual = compute_peak_frequency(
                             psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
                         )
                         center_freq = compute_spectral_center(psd, freqs_use, fmin, fmax)
@@ -455,13 +492,15 @@ def extract_spectral_features(
 
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_freq"] = peak_freq
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_power"] = peak_power
+                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_ratio"] = peak_ratio
+                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_residual"] = peak_residual
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_center_freq"] = center_freq
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_bandwidth"] = bandwidth
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_entropy"] = entropy
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
-                    g_peak_freq, g_peak_power = compute_peak_frequency(
+                    g_peak_freq, g_peak_power, g_peak_ratio, g_peak_residual = compute_peak_frequency(
                         global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
                     )
                     g_center = compute_spectral_center(global_psd, freqs_use, fmin, fmax)
@@ -470,6 +509,8 @@ def extract_spectral_features(
 
                     record[f"spectral_{segment_name}_{band}_global_peak_freq"] = g_peak_freq
                     record[f"spectral_{segment_name}_{band}_global_peak_power"] = g_peak_power
+                    record[f"spectral_{segment_name}_{band}_global_peak_ratio"] = g_peak_ratio
+                    record[f"spectral_{segment_name}_{band}_global_peak_residual"] = g_peak_residual
                     record[f"spectral_{segment_name}_{band}_global_center_freq"] = g_center
                     record[f"spectral_{segment_name}_{band}_global_bandwidth"] = g_bandwidth
                     record[f"spectral_{segment_name}_{band}_global_entropy"] = g_entropy
@@ -479,7 +520,7 @@ def extract_spectral_features(
                         if not roi_indices:
                             continue
                         roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                        r_peak_freq, r_peak_power = compute_peak_frequency(
+                        r_peak_freq, r_peak_power, r_peak_ratio, r_peak_residual = compute_peak_frequency(
                             roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
                         )
                         r_center = compute_spectral_center(roi_psd, freqs_use, fmin, fmax)
@@ -488,6 +529,8 @@ def extract_spectral_features(
 
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_freq"] = r_peak_freq
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_power"] = r_peak_power
+                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_ratio"] = r_peak_ratio
+                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_residual"] = r_peak_residual
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_center_freq"] = r_center
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_bandwidth"] = r_bandwidth
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_entropy"] = r_entropy
