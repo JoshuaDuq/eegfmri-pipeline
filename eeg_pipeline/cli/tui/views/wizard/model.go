@@ -2153,13 +2153,14 @@ func (m *Model) UpdateComputationOffset() {
 
 // UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
 func (m *Model) UpdateAdvancedOffset() {
-	if m.height <= 0 {
-		m.advancedOffset = 0
-		return
+	// Use a fallback height if terminal size not yet received
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = 40 // Reasonable default for most terminals
 	}
 
 	// Total height minus overhead - must match render functions
-	maxLines := m.height - 10
+	maxLines := effectiveHeight - 10
 	if maxLines < 8 {
 		maxLines = 8
 	}

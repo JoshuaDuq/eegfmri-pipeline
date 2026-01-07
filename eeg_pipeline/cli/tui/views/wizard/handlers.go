@@ -2138,6 +2138,15 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.conditionFailFast = !m.conditionFailFast
 		m.useDefaultAdvanced = false
 	}
+
+	// Clamp cursor to valid range after list might have shrunk (e.g., section collapsed)
+	options = m.getBehaviorOptions()
+	if m.advancedCursor >= len(options) {
+		m.advancedCursor = len(options) - 1
+	}
+	if m.advancedCursor < 0 {
+		m.advancedCursor = 0
+	}
 }
 
 func (m *Model) toggleDecodingAdvancedOption() {
