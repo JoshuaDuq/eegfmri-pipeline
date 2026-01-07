@@ -196,6 +196,7 @@ type PlotItemConfig struct {
 	ComparisonSegment     string
 	ComparisonColumn      string
 	ComparisonValuesSpec  string
+	ComparisonLabelsSpec  string
 	ComparisonROIsSpec    string
 }
 
@@ -210,6 +211,7 @@ const (
 	plotItemConfigFieldComparisonSegment
 	plotItemConfigFieldComparisonColumn
 	plotItemConfigFieldComparisonValues
+	plotItemConfigFieldComparisonLabels
 	plotItemConfigFieldComparisonROIs
 )
 
@@ -277,6 +279,12 @@ const (
 	textFieldPlotTopomapSigMaskMarkerFaceColor
 	textFieldPlotTopomapSigMaskMarkerEdgeColor
 	textFieldPlotTfrDefaultBaselineWindow
+	textFieldPlotComparisonWindows
+	textFieldPlotComparisonSegment
+	textFieldPlotComparisonColumn
+	textFieldPlotComparisonValues
+	textFieldPlotComparisonLabels
+	textFieldPlotComparisonROIs
 	textFieldPlotPacCmap
 	textFieldPlotPacPairs
 	textFieldPlotConnectivityMeasures
@@ -361,7 +369,7 @@ var defaultPlotItems = []PlotItem{
 	// ERP
 	{ID: "erp_butterfly", Group: "erp", Name: "Butterfly", Description: "Butterfly ERP plots (all channels)", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	{ID: "erp_roi", Group: "erp", Name: "ROI Waveforms", Description: "ROI-based ERP waveforms with error bars", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
-	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts (Pain vs No-Pain)", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
+	{ID: "erp_contrast", Group: "erp", Name: "Contrast", Description: "ERP condition contrasts", RequiredFiles: []string{"epochs/*.fif", "events.tsv"}, RequiresEpochs: true},
 	{ID: "erp_topomaps", Group: "erp", Name: "Topomaps", Description: "ERP spatial distributions", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
 	// TFR
 	{ID: "TFR", Group: "tfr", Name: "Scalp-Mean TFR", Description: "Scalp-mean time-frequency representation", RequiredFiles: []string{"epochs/*.fif"}, RequiresEpochs: true},
@@ -374,7 +382,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
-	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Pain Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
+	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Condition Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
 	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
 	{ID: "behavior_temperature_models", Group: "behavior", Name: "Temperature Models", Description: "Subject-level temperature→rating diagnostics", RequiredFiles: []string{"stats/trials*.tsv"}, RequiresStats: true},
@@ -572,6 +580,7 @@ type Model struct {
 	plotGroupTFRExpanded       bool
 	plotGroupSizingExpanded    bool
 	plotGroupSelectionExpanded bool
+	plotGroupComparisonsExpanded bool
 
 	// Per-plot advanced configuration (wizard overrides scoped to plot IDs)
 	plotItemConfigs        map[string]PlotItemConfig
@@ -753,6 +762,16 @@ type Model struct {
 	plotTemporalTimeBinsSpec   string
 	plotTemporalTimeLabelsSpec string
 	plotAsymmetryStatSpec      string
+
+	// Plotting comparisons (global)
+	plotCompareWindows        *bool
+	plotComparisonWindowsSpec string
+	plotCompareColumns        *bool
+	plotComparisonSegment     string
+	plotComparisonColumn      string
+	plotComparisonValuesSpec  string
+	plotComparisonLabelsSpec  string
+	plotComparisonROIsSpec    string
 
 	// Subject selection
 	subjects         []types.SubjectStatus
@@ -2756,6 +2775,18 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotTemporalTimeLabelsSpec
 	case textFieldPlotAsymmetryStat:
 		return m.plotAsymmetryStatSpec
+	case textFieldPlotComparisonWindows:
+		return m.plotComparisonWindowsSpec
+	case textFieldPlotComparisonSegment:
+		return m.plotComparisonSegment
+	case textFieldPlotComparisonColumn:
+		return m.plotComparisonColumn
+	case textFieldPlotComparisonValues:
+		return m.plotComparisonValuesSpec
+	case textFieldPlotComparisonLabels:
+		return m.plotComparisonLabelsSpec
+	case textFieldPlotComparisonROIs:
+		return m.plotComparisonROIsSpec
 	// Decoding hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		return m.elasticNetAlphaGrid
@@ -2787,6 +2818,8 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 		return cfg.ComparisonColumn
 	case plotItemConfigFieldComparisonValues:
 		return cfg.ComparisonValuesSpec
+	case plotItemConfigFieldComparisonLabels:
+		return cfg.ComparisonLabelsSpec
 	case plotItemConfigFieldComparisonROIs:
 		return cfg.ComparisonROIsSpec
 	default:
@@ -3015,6 +3048,18 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotTemporalTimeLabelsSpec = strings.Join(strings.Fields(value), " ")
 	case textFieldPlotAsymmetryStat:
 		m.plotAsymmetryStatSpec = value
+	case textFieldPlotComparisonWindows:
+		m.plotComparisonWindowsSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotComparisonSegment:
+		m.plotComparisonSegment = strings.TrimSpace(value)
+	case textFieldPlotComparisonColumn:
+		m.plotComparisonColumn = strings.TrimSpace(value)
+	case textFieldPlotComparisonValues:
+		m.plotComparisonValuesSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldPlotComparisonLabels:
+		m.plotComparisonLabelsSpec = strings.TrimSpace(value)
+	case textFieldPlotComparisonROIs:
+		m.plotComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
 	// Decoding hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		m.elasticNetAlphaGrid = strings.Join(strings.Fields(value), "")
@@ -3071,6 +3116,8 @@ func (m *Model) setPlotItemTextFieldValue(plotID string, field plotItemConfigFie
 		}
 	case plotItemConfigFieldComparisonValues:
 		cfg.ComparisonValuesSpec = strings.Join(strings.Fields(value), " ")
+	case plotItemConfigFieldComparisonLabels:
+		cfg.ComparisonLabelsSpec = strings.TrimSpace(value)
 	case plotItemConfigFieldComparisonROIs:
 		cfg.ComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
 	default:
@@ -3402,6 +3449,7 @@ const (
 	optPlotGroupTFR
 	optPlotGroupSizing
 	optPlotGroupSelection
+	optPlotGroupComparisons
 	optPlotBboxInches
 	optPlotPadInches
 	optPlotFontFamily
@@ -3554,6 +3602,15 @@ const (
 	optPlotAsymmetryStat
 	optPlotTemporalTimeBins
 	optPlotTemporalTimeLabels
+	// Plotting comparisons (global)
+	optPlotCompareWindows
+	optPlotComparisonWindows
+	optPlotCompareColumns
+	optPlotComparisonSegment
+	optPlotComparisonColumn
+	optPlotComparisonValues
+	optPlotComparisonLabels
+	optPlotComparisonROIs
 	// TFR parameters (features pipeline)
 	optFeatGroupTFR
 	optTfrFreqMin
@@ -3757,10 +3814,10 @@ func (m Model) selectedPlotItemsForConfig() []PlotItem {
 
 func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 	switch plot.Group {
-	case "features", "behavior", "tfr", "erp":
-		return true
-	default:
+	case "decoding":
 		return false
+	default:
+		return true
 	}
 }
 
@@ -3775,7 +3832,9 @@ func (m Model) plotConfigFields(plot PlotItem) []plotItemConfigField {
 			plotItemConfigFieldComparisonWindows,
 			plotItemConfigFieldCompareColumns,
 			plotItemConfigFieldComparisonSegment,
+			plotItemConfigFieldComparisonColumn,
 			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
 			plotItemConfigFieldComparisonROIs,
 		)
 	}
@@ -4072,6 +4131,21 @@ func (m Model) getPlottingOptions() []optionType {
 			optPlotAsymmetryStat,
 			optPlotTemporalTimeBins,
 			optPlotTemporalTimeLabels,
+		)
+	}
+
+	options = append(options, optPlotGroupComparisons)
+	if m.plotGroupComparisonsExpanded {
+		options = append(
+			options,
+			optPlotCompareWindows,
+			optPlotComparisonWindows,
+			optPlotCompareColumns,
+			optPlotComparisonSegment,
+			optPlotComparisonColumn,
+			optPlotComparisonValues,
+			optPlotComparisonLabels,
+			optPlotComparisonROIs,
 		)
 	}
 

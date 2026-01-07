@@ -425,7 +425,7 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, "--all-subjects")
 	}
 
-	return strings.Join(parts, " ")
+	return joinShellCommand(parts)
 }
 
 func (m Model) buildPlottingAdvancedArgs() []string {
@@ -573,10 +573,10 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 
 	// Colors
 	if strings.TrimSpace(m.plotColorPain) != "" {
-		args = append(args, "--color-pain", strings.TrimSpace(m.plotColorPain))
+		args = append(args, "--color-condition-2", strings.TrimSpace(m.plotColorPain))
 	}
 	if strings.TrimSpace(m.plotColorNonpain) != "" {
-		args = append(args, "--color-nonpain", strings.TrimSpace(m.plotColorNonpain))
+		args = append(args, "--color-condition-1", strings.TrimSpace(m.plotColorNonpain))
 	}
 	if strings.TrimSpace(m.plotColorSignificant) != "" {
 		args = append(args, "--color-significant", strings.TrimSpace(m.plotColorSignificant))
@@ -986,6 +986,47 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 		args = append(args, splitSpaceList(m.plotTemporalTimeLabelsSpec)...)
 	}
 
+	// Comparisons
+	if m.plotCompareWindows != nil {
+		if *m.plotCompareWindows {
+			args = append(args, "--compare-windows")
+		} else {
+			args = append(args, "--no-compare-windows")
+		}
+	}
+	if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
+		args = append(args, "--comparison-windows")
+		args = append(args, splitSpaceList(m.plotComparisonWindowsSpec)...)
+	}
+	if m.plotCompareColumns != nil {
+		if *m.plotCompareColumns {
+			args = append(args, "--compare-columns")
+		} else {
+			args = append(args, "--no-compare-columns")
+		}
+	}
+	if strings.TrimSpace(m.plotComparisonSegment) != "" {
+		args = append(args, "--comparison-segment", strings.TrimSpace(m.plotComparisonSegment))
+	}
+	if strings.TrimSpace(m.plotComparisonColumn) != "" {
+		args = append(args, "--comparison-column", strings.TrimSpace(m.plotComparisonColumn))
+	}
+	if strings.TrimSpace(m.plotComparisonValuesSpec) != "" {
+		args = append(args, "--comparison-values")
+		args = append(args, splitSpaceList(m.plotComparisonValuesSpec)...)
+	}
+	if strings.TrimSpace(m.plotComparisonLabelsSpec) != "" {
+		vals := splitSpaceList(m.plotComparisonLabelsSpec)
+		if len(vals) == 2 {
+			args = append(args, "--comparison-labels")
+			args = append(args, vals...)
+		}
+	}
+	if strings.TrimSpace(m.plotComparisonROIsSpec) != "" {
+		args = append(args, "--comparison-rois")
+		args = append(args, splitSpaceList(m.plotComparisonROIsSpec)...)
+	}
+
 	// Per-plot overrides
 	args = append(args, m.buildPlotItemConfigArgs()...)
 
@@ -1029,6 +1070,13 @@ func (m Model) buildPlotItemConfigArgs() []string {
 		if strings.TrimSpace(cfg.ComparisonValuesSpec) != "" {
 			args = append(args, "--plot-item-config", plotID, "comparison_values")
 			args = append(args, splitSpaceList(cfg.ComparisonValuesSpec)...)
+		}
+		if strings.TrimSpace(cfg.ComparisonLabelsSpec) != "" {
+			vals := splitSpaceList(cfg.ComparisonLabelsSpec)
+			if len(vals) == 2 {
+				args = append(args, "--plot-item-config", plotID, "comparison_labels")
+				args = append(args, vals...)
+			}
 		}
 		if strings.TrimSpace(cfg.ComparisonROIsSpec) != "" {
 			args = append(args, "--plot-item-config", plotID, "comparison_rois")
@@ -2041,11 +2089,127 @@ func splitCSVList(raw string) []string {
 }
 
 func splitSpaceList(raw string) []string {
+	parsed, err := splitShellWords(raw)
+	if err == nil && len(parsed) > 0 {
+		return parsed
+	}
 	out := strings.Fields(raw)
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func joinShellCommand(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuote(arg string) string {
+	if arg == "" {
+		return "''"
+	}
+	if isShellSafe(arg) {
+		return arg
+	}
+	// POSIX-safe single-quote escaping:
+	// abc'def -> 'abc'"'"'def'
+	return "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
+}
+
+func isShellSafe(arg string) bool {
+	for _, r := range arg {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			strings.ContainsRune("@%_+=:,./-~", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func splitShellWords(raw string) ([]string, error) {
+	type quoteState int
+	const (
+		stateNone quoteState = iota
+		stateSingle
+		stateDouble
+	)
+
+	var out []string
+	var cur strings.Builder
+	state := stateNone
+	escaped := false
+
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+
+	for _, r := range raw {
+		if escaped {
+			cur.WriteRune(r)
+			escaped = false
+			continue
+		}
+
+		switch state {
+		case stateNone:
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '\'' {
+				state = stateSingle
+				continue
+			}
+			if r == '"' {
+				state = stateDouble
+				continue
+			}
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				flush()
+				continue
+			}
+			cur.WriteRune(r)
+		case stateSingle:
+			if r == '\'' {
+				state = stateNone
+				continue
+			}
+			cur.WriteRune(r)
+		case stateDouble:
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				state = stateNone
+				continue
+			}
+			cur.WriteRune(r)
+		}
+	}
+
+	if escaped {
+		return nil, fmt.Errorf("unfinished escape sequence")
+	}
+	if state != stateNone {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	flush()
+	return out, nil
 }
 
 // buildDecodingAdvancedArgs returns CLI args for decoding pipeline advanced options

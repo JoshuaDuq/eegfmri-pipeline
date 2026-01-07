@@ -3,7 +3,7 @@ TFR Band Power Evolution Plots
 ==============================
 
 Visualizations showing how power in each frequency band evolves across time,
-for different conditions (all trials, pain/non-pain, high/low temperature).
+for different conditions (all trials, condition_1/condition_2, high/low temperature).
 
 Each plot answers a specific scientific question about temporal dynamics.
 """
@@ -49,11 +49,11 @@ BAND_RANGES = {
 
 # ROI definitions are now loaded from config via get_roi_definitions()
 
-# Condition colors
+# Condition colors (for display when per-plot style isn't provided)
 CONDITION_COLORS = {
     "all": "#333333",
-    "pain": "#C42847",
-    "nonpain": "#4C72B0",
+    "condition_1": "#4C72B0",
+    "condition_2": "#C42847",
     "high_temp": "#D62728",
     "low_temp": "#1F77B4",
 }
@@ -140,7 +140,7 @@ def _create_condition_masks(
 ) -> tuple[Dict[str, np.ndarray], str, str]:
     """Create masks for different conditions.
     
-    Returns dict with keys: 'all', 'pain', 'nonpain', 'high_temp', 'low_temp'
+    Returns dict with keys: 'all', 'condition_1', 'condition_2', 'high_temp', 'low_temp'
     """
     n_trials = len(events_df)
     masks = {"all": np.ones(n_trials, dtype=bool)}
@@ -156,8 +156,8 @@ def _create_condition_masks(
 
     if comp is not None:
         mask1, mask2, label1, label2 = comp
-        masks["nonpain"] = np.asarray(mask1, dtype=bool)
-        masks["pain"] = np.asarray(mask2, dtype=bool)
+        masks["condition_1"] = np.asarray(mask1, dtype=bool)
+        masks["condition_2"] = np.asarray(mask2, dtype=bool)
     
     # High/low temperature (median split) using configured temperature column candidates.
     temp_col = get_temperature_column_from_config(config, events_df)
@@ -207,7 +207,7 @@ def plot_band_power_evolution_all_conditions(
     
     Args:
         tfr: EpochsTFR object
-        events_df: Events DataFrame with pain/temperature columns
+        events_df: Events DataFrame with condition/temperature columns
         save_dir: Directory to save plots
         config: Configuration object
         baseline: Baseline window for correction
@@ -224,7 +224,7 @@ def plot_band_power_evolution_all_conditions(
     
     # Get condition masks
     masks, label1, label2 = _create_condition_masks(events_df, config)
-    conditions = ["all", "pain", "nonpain", "high_temp", "low_temp"]
+    conditions = ["all", "condition_2", "condition_1", "high_temp", "low_temp"]
     conditions = [c for c in conditions if c in masks and masks[c].sum() > 0]
     
     if len(conditions) == 0:
@@ -272,8 +272,8 @@ def plot_band_power_evolution_all_conditions(
             if i == 0:
                 cond_labels = {
                     "all": f"All Trials\n(n={mask.sum()})",
-                    "pain": f"{label2}\n(n={mask.sum()})",
-                    "nonpain": f"{label1}\n(n={mask.sum()})",
+                    "condition_2": f"{label2}\n(n={mask.sum()})",
+                    "condition_1": f"{label1}\n(n={mask.sum()})",
                     "high_temp": f"High Temp\n(n={mask.sum()})",
                     "low_temp": f"Low Temp\n(n={mask.sum()})",
                 }
@@ -405,8 +405,8 @@ def plot_band_power_by_roi(
         
         cond_titles = {
             "all": "All Trials",
-            "pain": f"{label2} Trials",
-            "nonpain": f"{label1} Trials",
+            "condition_2": f"{label2} Trials",
+            "condition_1": f"{label1} Trials",
             "high_temp": "High Temperature",
             "low_temp": "Low Temperature",
         }
@@ -442,7 +442,7 @@ def plot_condition_comparison_per_band(
     """Plot condition comparisons overlaid for each band.
     
     Creates one figure per band showing all conditions overlaid.
-    Question: "Do pain and temperature conditions differ in their power dynamics?"
+    Question: "Do conditions differ in their power dynamics?"
     
     Args:
         tfr: EpochsTFR object
@@ -465,7 +465,7 @@ def plot_condition_comparison_per_band(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
-    # Create figure with 2 rows: pain comparison, temperature comparison
+    # Create figure with 2 rows: condition comparison, temperature comparison
     fig, axes = plt.subplots(2, len(BANDS), figsize=(3*len(BANDS), 6), squeeze=False)
     
     for j, band in enumerate(BANDS):
@@ -475,11 +475,11 @@ def plot_condition_comparison_per_band(
         
         power_bl = _apply_baseline(power, times, baseline)
         
-        # Row 1: Pain vs Non-Pain
+        # Row 1: Condition 2 vs Condition 1
         ax = axes[0, j]
         for cond, color, label in [
-            ("pain", CONDITION_COLORS["pain"], label2),
-            ("nonpain", CONDITION_COLORS["nonpain"], label1),
+            ("condition_2", CONDITION_COLORS["condition_2"], label2),
+            ("condition_1", CONDITION_COLORS["condition_1"], label1),
         ]:
             if cond not in masks or masks[cond].sum() < 3:
                 continue
@@ -526,7 +526,7 @@ def plot_condition_comparison_per_band(
             ax.legend(fontsize=8, loc='upper right')
         ax.set_xlim(times[0], times[-1])
     
-    fig.suptitle("Do pain and temperature conditions differ in their power dynamics?",
+    fig.suptitle("Do conditions differ in their power dynamics?",
                 fontsize=12, fontweight='bold', y=1.02)
     
     plt.tight_layout()
@@ -580,7 +580,7 @@ def plot_roi_condition_comparison(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
-    # Focus on alpha and beta (most relevant for pain)
+    # Focus on alpha and beta (common choices for summary figures)
     focus_bands = ["alpha", "beta"]
     
     # Get available ROIs from config
@@ -612,11 +612,11 @@ def plot_roi_condition_comparison(
             
             power_bl = _apply_baseline(power, times, baseline)
             
-            # Pain comparison
+            # Condition comparison
             ax = axes[i, col_idx]
             for cond, color, label in [
-                ("pain", CONDITION_COLORS["pain"], label2),
-                ("nonpain", CONDITION_COLORS["nonpain"], label1),
+                ("condition_2", CONDITION_COLORS["condition_2"], label2),
+                ("condition_1", CONDITION_COLORS["condition_1"], label1),
             ]:
                 if cond not in masks or masks[cond].sum() < 3:
                     continue
@@ -769,21 +769,21 @@ def plot_band_power_summary(
     # Create grouped bar plot
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Panel A: Pain vs Non-Pain
+    # Panel A: Condition 2 vs Condition 1
     ax = axes[0]
-    pain_conds = ['pain', 'nonpain']
-    pain_df = df[df['condition'].isin(pain_conds)]
+    cond_keys = ['condition_2', 'condition_1']
+    cond_df = df[df['condition'].isin(cond_keys)]
     
-    if len(pain_df) > 0:
+    if len(cond_df) > 0:
         x = np.arange(len(BANDS))
         width = 0.35
-        cond_display = {"pain": label2, "nonpain": label1}
+        cond_display = {"condition_2": label2, "condition_1": label1}
         
-        for i, cond in enumerate(pain_conds):
-            cond_df = pain_df[pain_df['condition'] == cond]
-            if len(cond_df) > 0:
-                means = [cond_df[cond_df['band'] == b]['mean'].values[0] if len(cond_df[cond_df['band'] == b]) > 0 else 0 for b in BANDS]
-                sems = [cond_df[cond_df['band'] == b]['sem'].values[0] if len(cond_df[cond_df['band'] == b]) > 0 else 0 for b in BANDS]
+        for i, cond in enumerate(cond_keys):
+            key_df = cond_df[cond_df['condition'] == cond]
+            if len(key_df) > 0:
+                means = [key_df[key_df['band'] == b]['mean'].values[0] if len(key_df[key_df['band'] == b]) > 0 else 0 for b in BANDS]
+                sems = [key_df[key_df['band'] == b]['sem'].values[0] if len(key_df[key_df['band'] == b]) > 0 else 0 for b in BANDS]
                 
                 offset = (i - 0.5) * width
                 bars = ax.bar(x + offset, means, width, yerr=sems, 

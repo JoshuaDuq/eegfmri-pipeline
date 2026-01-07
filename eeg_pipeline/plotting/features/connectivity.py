@@ -203,14 +203,9 @@ def plot_connectivity_circle_by_condition(
     
     plot_cfg = get_plot_config(config)
     condition_colors = {
-        "c1": plot_cfg.get_color("blue"),
-        "c2": plot_cfg.get_color("red"),
+        "c1": plot_cfg.get_color("condition_1"),
+        "c2": plot_cfg.get_color("condition_2"),
     }
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        condition_colors = {
-            "c1": plot_cfg.get_color("nonpain") if label1 == "Non-pain" else plot_cfg.get_color("pain"),
-            "c2": plot_cfg.get_color("pain") if label2 == "Pain" else plot_cfg.get_color("nonpain"),
-        }
 
     cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
     # Filter for REAL channel pairs (ch1 != ch2) for the circle plot

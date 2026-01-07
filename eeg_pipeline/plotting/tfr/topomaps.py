@@ -78,8 +78,8 @@ def _compute_band_diff_data_windows(
     """Compute band difference data for multiple time windows.
     
     Args:
-        tfr_pain: Pain condition TFR
-        tfr_non: Non-pain condition TFR
+        tfr_pain: Condition 2 TFR
+        tfr_non: Condition 1 TFR
         tfr_max: Max temperature TFR (optional)
         tfr_min: Min temperature TFR (optional)
         fmin: Minimum frequency
@@ -222,19 +222,19 @@ def _plot_temporal_topomaps_for_bands(
     config,
     logger: Optional[logging.Logger] = None,
     *,
-    cond_label_2: str = "Pain",
-    cond_label_1: str = "Non-pain",
+    cond_label_2: str = "Condition 2",
+    cond_label_1: str = "Condition 1",
 ) -> None:
     """Plot temporal topomaps for all frequency bands.
     
     Args:
-        tfr_pain: Pain condition TFR
-        tfr_non: Non-pain condition TFR
+        tfr_pain: Condition 2 TFR
+        tfr_non: Condition 1 TFR
         tfr_sub: Trial-level TFR for statistics
         tfr_max: Max temperature TFR (optional)
         tfr_min: Min temperature TFR (optional)
-        pain_mask: Boolean mask for pain condition
-        non_mask: Boolean mask for non-pain condition
+        pain_mask: Boolean mask for condition 2
+        non_mask: Boolean mask for condition 1
         mask_max: Boolean mask for max temperature (optional)
         mask_min: Boolean mask for min temperature (optional)
         window_starts: Array of window start times

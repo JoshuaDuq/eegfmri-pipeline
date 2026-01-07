@@ -81,7 +81,7 @@
       "id": "power_by_condition",
       "group": "power",
       "label": "Condition Comparison",
-      "description": "Power differences between conditions (Pain vs Non-Pain)",
+      "description": "Power differences between conditions",
       "required_files": [
         "features_power*.tsv",
         "events.tsv"
@@ -669,7 +669,7 @@
       "id": "erp_contrast",
       "group": "erp",
       "label": "Contrast",
-      "description": "ERP condition contrasts (Pain vs No-Pain)",
+      "description": "ERP condition contrasts",
       "required_files": [
         "epochs/*.fif",
         "events.tsv"
@@ -789,7 +789,7 @@
     {
       "id": "behavior_pain_clusters",
       "group": "behavior",
-      "label": "Pain Clusters",
+      "label": "Condition Clusters",
       "description": "Cluster-based temporal contrasts",
       "required_files": [
         "stats/pain_nonpain_time_clusters_*.tsv"

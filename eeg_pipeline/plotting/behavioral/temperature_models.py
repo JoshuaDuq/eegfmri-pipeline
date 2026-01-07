@@ -92,7 +92,7 @@ def plot_temperature_models(
         title += f" (best: {best_model})"
     ax.set_title(title)
     ax.set_xlabel("Temperature")
-    ax.set_ylabel("Pain rating")
+    ax.set_ylabel("Rating")
     ax.grid(True, alpha=0.2)
     fig.tight_layout()
 

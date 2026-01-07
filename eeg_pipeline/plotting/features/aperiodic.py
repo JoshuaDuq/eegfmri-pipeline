@@ -614,14 +614,14 @@ def plot_aperiodic_vs_pain(
     sns.scatterplot(x=ratings_agg, y=slopes_agg, ax=ax, alpha=0.6)
     sns.regplot(x=ratings_agg, y=slopes_agg, ax=ax, scatter=False, lowess=True, line_kws={'color': 'red'})
     
-    ax.set_xlabel(f"Pain Rating ({rating_col}, {agg_label})")
+    ax.set_xlabel(f"Rating ({rating_col}, {agg_label})")
     ax.set_ylabel("Mean Aperiodic Slope")
     ax.set_title(
-        f"Aperiodic Slope vs Pain (sub-{subject})\n"
+        f"Aperiodic Slope vs Rating (sub-{subject})\n"
         f"Spearman r={r_val:.2f}, perm q={q_perm:.3f}"
     )
     
-    output_name = f"sub-{subject}_aperiodic_slope_vs_pain"
+    output_name = f"sub-{subject}_aperiodic_slope_vs_rating"
     save_fig(
         fig,
         save_dir / output_name,
@@ -631,7 +631,7 @@ def plot_aperiodic_vs_pain(
         pad_inches=plot_cfg.pad_inches
     )
     plt.close(fig)
-    log_if_present(logger, "info", "Saved aperiodic slope vs pain scatter")
+    log_if_present(logger, "info", "Saved aperiodic slope vs rating scatter")
 
 
 def plot_aperiodic_by_condition(

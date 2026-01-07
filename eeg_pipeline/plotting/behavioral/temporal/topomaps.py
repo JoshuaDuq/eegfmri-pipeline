@@ -204,7 +204,7 @@ def plot_temporal_correlation_topomaps_by_pain(
         logger.warning(f"Temporal correlation data not found: {data_path}")
         return
 
-    logger.info("Plotting temporal correlation topomaps by pain condition...")
+    logger.info("Plotting temporal correlation topomaps by condition...")
 
     global_fdr_map = _load_global_fdr_for_temporal_correlations(stats_dir, use_spearman, logger)
     use_global_fdr = global_fdr_map is not None
@@ -227,7 +227,7 @@ def plot_temporal_correlation_topomaps_by_pain(
         ch_names = ch_names.tolist()
 
     if "pain" not in data or "non_pain" not in data:
-        logger.warning("Pain/non-pain data not found in file")
+        logger.warning("Condition contrast data not found in file")
         return
 
     info_ch_names = info["ch_names"]
@@ -311,7 +311,13 @@ def plot_temporal_correlation_topomaps_by_pain(
             gridspec_kw={"hspace": hspace, "wspace": wspace},
         )
 
-        row_labels = ["Non-Pain", "Pain"]
+        from eeg_pipeline.utils.config.loader import get_config_value
+
+        labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+        if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 2:
+            row_labels = [str(labels_spec[0]), str(labels_spec[1])]
+        else:
+            row_labels = ["Condition 1", "Condition 2"]
         results = [result_non, result_pain]
 
         for row_idx, (row_label, result) in enumerate(zip(row_labels, results)):
@@ -401,7 +407,7 @@ def plot_temporal_correlation_topomaps_by_pain(
         method_name = "Spearman" if use_spearman else "Pearson"
         fig.suptitle(
             (
-                f"Temporal correlation topomaps by pain condition ({band_name}, {window_label})\n"
+                f"Temporal correlation topomaps by condition ({band_name}, {window_label})\n"
                 f"{method_name} correlation, vlim ±{vabs_corr:.2f}{sig_text}\n"
             ),
             fontsize=font_sizes["suptitle"],
@@ -410,7 +416,7 @@ def plot_temporal_correlation_topomaps_by_pain(
 
         topomap_dir = plots_dir / "topomaps"
         ensure_dir(topomap_dir)
-        filename = f"sub-{subject}_temporal_correlations_by_pain_{band_name}.png"
+        filename = f"sub-{subject}_temporal_correlations_by_condition_{band_name}.png"
         save_fig(
             fig,
             topomap_dir / filename,
@@ -579,7 +585,7 @@ def plot_significant_correlations_topomap(
     suptitle_fontsize = topomap_config.get("suptitle_fontsize", 14)
     suptitle_y = topomap_config.get("suptitle_y", 1.02)
     plt.suptitle(
-        f"Significant EEG-Pain Correlations (p < {alpha})\nSubject {subject}",
+        f"Significant EEG-Outcome Correlations (p < {alpha})\nSubject {subject}",
         fontweight="bold",
         fontsize=suptitle_fontsize,
         y=suptitle_y,

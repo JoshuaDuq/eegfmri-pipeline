@@ -49,7 +49,7 @@ def _create_rating_distribution_plot(
     fig, ax = plt.subplots(figsize=(figsize_width, figsize_height))
     ax.hist(y.dropna(), bins=bins, alpha=alpha, edgecolor=edgecolor)
     grid_alpha = rating_config.get("grid_alpha", 0.3)
-    ax.set_xlabel("Pain Rating")
+    ax.set_xlabel("Rating")
     ax.set_ylabel("Frequency")
     ax.set_title("Rating Distribution")
     ax.grid(True, alpha=grid_alpha)

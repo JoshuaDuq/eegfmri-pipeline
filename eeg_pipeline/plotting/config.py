@@ -97,6 +97,7 @@ class ColorPalette:
     blue: str = "#1f77b4"
     significant: str = "#C42847"
     nonsignificant: str = "#666666"
+    # Legacy names retained for backward compatibility; prefer condition_1/condition_2 in config/UI.
     pain: str = "crimson"
     nonpain: str = "navy"
     network_node: str = "#87CEEB"
@@ -284,6 +285,8 @@ class PlotConfig:
         
         kde_dict = styling.get("kde", {})
         colors_dict = styling.get("colors", {})
+        condition_1 = colors_dict.get("condition_1", colors_dict.get("nonpain", "navy"))
+        condition_2 = colors_dict.get("condition_2", colors_dict.get("pain", "crimson"))
         colors = ColorPalette(
             gray=colors_dict.get("gray", "#555555"),
             light_gray=colors_dict.get("light_gray", "#999999"),
@@ -292,8 +295,8 @@ class PlotConfig:
             blue=colors_dict.get("blue", "#1f77b4"),
             significant=colors_dict.get("significant", "#C42847"),
             nonsignificant=colors_dict.get("nonsignificant", "#666666"),
-            pain=colors_dict.get("pain", "crimson"),
-            nonpain=colors_dict.get("nonpain", "navy"),
+            pain=condition_2,
+            nonpain=condition_1,
             network_node=colors_dict.get("network_node", "#87CEEB"),
         )
         
@@ -435,6 +438,10 @@ class PlotConfig:
             "blue": self.style.colors.blue,
             "significant": self.style.colors.significant,
             "nonsignificant": self.style.colors.nonsignificant,
+            # Condition colors (preferred)
+            "condition_1": self.style.colors.nonpain,
+            "condition_2": self.style.colors.pain,
+            # Backward compatible aliases
             "pain": self.style.colors.pain,
             "nonpain": self.style.colors.nonpain,
             "network_node": self.style.colors.network_node,

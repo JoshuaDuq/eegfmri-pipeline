@@ -76,11 +76,11 @@ def get_band_ranges(config: Any = None) -> Dict[str, str]:
 
 
 def get_condition_colors(config: Any = None) -> Dict[str, str]:
-    """Return condition color mapping from config (pain/nonpain)."""
+    """Return condition color mapping from config (condition_1/condition_2)."""
     plot_cfg = get_plot_config(config)
     return {
-        "pain": plot_cfg.get_color("pain"),
-        "nonpain": plot_cfg.get_color("nonpain"),
+        "condition_1": plot_cfg.get_color("condition_1"),
+        "condition_2": plot_cfg.get_color("condition_2"),
     }
 
 
@@ -1309,4 +1309,3 @@ def plot_paired_comparison(
     
     if logger:
         logger.info(f"Saved {feature_label} paired comparison ({n_significant}/{n_tests} FDR significant)")
-

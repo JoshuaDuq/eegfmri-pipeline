@@ -148,7 +148,7 @@ def _create_pain_masks_from_vector(pain_vec) -> Tuple[Optional[np.ndarray], Opti
     """Create pain and non-pain masks from pain vector.
     
     Args:
-        pain_vec: Pain vector (pandas Series or numpy array)
+        pain_vec: Condition indicator vector (pandas Series or numpy array)
         
     Returns:
         Tuple of (pain_mask, non_mask)
@@ -167,7 +167,7 @@ def _create_pain_masks_from_events(events_df: Optional[pd.DataFrame], pain_col: 
     
     Args:
         events_df: Events DataFrame
-        pain_col: Pain column name
+        pain_col: Condition indicator column name
         
     Returns:
         Tuple of (pain_mask, non_mask)
@@ -390,8 +390,8 @@ def _compute_band_diff_data(
     """Compute band difference data for pain and temperature contrasts.
     
     Args:
-        tfr_pain: Pain condition TFR
-        tfr_non: Non-pain condition TFR
+        tfr_pain: Condition 2 TFR
+        tfr_non: Condition 1 TFR
         tfr_max: Max temperature TFR
         tfr_min: Min temperature TFR
         fmin: Minimum frequency

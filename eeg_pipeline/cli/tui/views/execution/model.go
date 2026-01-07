@@ -206,7 +206,10 @@ func (m *Model) Start() tea.Cmd {
 	m.cancel = cancel
 
 	return func() tea.Msg {
-		parts := strings.Fields(m.Command)
+		parts, err := splitShellWords(m.Command)
+		if err != nil {
+			parts = strings.Fields(m.Command)
+		}
 		if len(parts) == 0 {
 			return messages.CommandDoneMsg{ExitCode: 1}
 		}
@@ -288,6 +291,82 @@ func (m *Model) Start() tea.Cmd {
 
 		return CommandStartedMsg{Cmd: cmd, OutputChan: outputChan, DoneChan: doneChan}
 	}
+}
+
+func splitShellWords(raw string) ([]string, error) {
+	type quoteState int
+	const (
+		stateNone quoteState = iota
+		stateSingle
+		stateDouble
+	)
+
+	var out []string
+	var cur strings.Builder
+	state := stateNone
+	escaped := false
+
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+
+	for _, r := range raw {
+		if escaped {
+			cur.WriteRune(r)
+			escaped = false
+			continue
+		}
+
+		switch state {
+		case stateNone:
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '\'' {
+				state = stateSingle
+				continue
+			}
+			if r == '"' {
+				state = stateDouble
+				continue
+			}
+			if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+				flush()
+				continue
+			}
+			cur.WriteRune(r)
+		case stateSingle:
+			if r == '\'' {
+				state = stateNone
+				continue
+			}
+			cur.WriteRune(r)
+		case stateDouble:
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '"' {
+				state = stateNone
+				continue
+			}
+			cur.WriteRune(r)
+		}
+	}
+
+	if escaped {
+		return nil, fmt.Errorf("unfinished escape sequence")
+	}
+	if state != stateNone {
+		return nil, fmt.Errorf("unterminated quote")
+	}
+	flush()
+	return out, nil
 }
 
 // GetContext returns a context that is cancelled when the user cancels the execution

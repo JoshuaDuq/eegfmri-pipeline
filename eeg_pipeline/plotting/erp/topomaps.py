@@ -116,7 +116,7 @@ def plot_erp_topomaps(
 
         # 3. Contrast topomaps
         if conditions and len(conditions) >= 2:
-            # Assume first two are the primary contrast (e.g. Pain vs NoPain)
+            # Assume first two are the primary contrast (e.g. condition A vs condition B)
             keys = list(conditions.keys())
             try:
                 evoked_a = epochs[conditions[keys[0]]].average()

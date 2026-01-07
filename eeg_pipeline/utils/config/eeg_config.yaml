@@ -729,8 +729,8 @@ plotting:
 
   styling:
     colors:
-      pain: "crimson"
-      nonpain: "navy"
+      condition_1: "navy"
+      condition_2: "crimson"
       significant: "#C42847"
       nonsignificant: "#666666"
       gray: "#555555"
@@ -753,15 +753,16 @@ plotting:
   comparisons:
     # Comparison modes for paired plots
     compare_windows: true            # Window-based comparison (e.g., baseline vs active)
-    compare_columns: true           # Column-based comparison (e.g., pain vs non-pain)
+    compare_columns: true           # Column-based comparison (e.g., condition A vs condition B)
     
     # For window comparison: specify exactly 2 segment names to compare
     comparison_windows: ["baseline", "active"]
     
     # For column comparison: specify the segment, column name, and values
     comparison_segment: "active"     # Segment to use for column comparison (must match a named time window)
-    comparison_column: ""                  # Column name in events_df (empty = use event_columns.pain_binary)
-    comparison_values: [0, 1]        # Values to compare (e.g., [0, 1] for non-pain vs pain)
+    comparison_column: ""            # Column name in events.tsv for comparisons (required when compare_columns is enabled)
+    comparison_values: [0, 1]        # Values to compare (exactly 2; may be strings or numbers)
+    comparison_labels: []            # Optional display labels (exactly 2; defaults to stringified values)
     
     comparison_rois: []              # ROIs to include (empty = all available)
 

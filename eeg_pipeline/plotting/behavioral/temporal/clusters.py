@@ -76,7 +76,7 @@ def plot_pain_nonpain_clusters(
         frames.append(df)
 
     if not frames:
-        _log_if_present(logger, "warning", "Pain/non-pain cluster TSVs were found but empty.")
+        _log_if_present(logger, "warning", "Condition contrast cluster TSVs were found but empty.")
         return
 
     all_clusters = pd.concat(frames, ignore_index=True)
@@ -87,7 +87,7 @@ def plot_pain_nonpain_clusters(
 
     topomap_dir = plots_dir / "topomaps"
     ensure_dir(topomap_dir)
-    sig_out = topomap_dir / "pain_nonpain_clusters_significant.tsv"
+    sig_out = topomap_dir / "condition_contrast_clusters_significant.tsv"
     sig_clusters.to_csv(sig_out, sep="\t", index=False)
     _log_if_present(logger, "info", f"Saved significant cluster table to {sig_out}")
 
@@ -154,7 +154,7 @@ def plot_pain_nonpain_clusters(
     ax.set_yticklabels(band_order)
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Band")
-    ax.set_title(f"Pain vs. non-pain cluster summary (sub-{subject})")
+    ax.set_title(f"Condition contrast cluster summary (sub-{subject})")
     legend_patches = [
         mpatches.Patch(color=plot_cfg.get_color("significant"), label="Significant"),
         mpatches.Patch(color=plot_cfg.get_color("nonsignificant"), label="Non-significant"),
@@ -166,7 +166,7 @@ def plot_pain_nonpain_clusters(
     ensure_dir(topomap_dir)
     save_fig(
         fig,
-        topomap_dir / f"sub-{subject}_pain_nonpain_cluster_ribbons",
+        topomap_dir / f"sub-{subject}_condition_cluster_ribbons",
         formats=plot_cfg.formats,
         dpi=plot_cfg.dpi,
         bbox_inches=plot_cfg.bbox_inches,
@@ -246,7 +246,7 @@ def plot_pain_nonpain_clusters(
             vmin=0,
             vmax=1,
         )
-        ax.set_title(f"Pain vs. non-pain clusters (band: {band}, sub-{subject})")
+        ax.set_title(f"Condition contrast clusters (band: {band}, sub-{subject})")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Channel")
         ax.set_yticks(np.arange(len(channels)) + 0.5)
@@ -259,7 +259,7 @@ def plot_pain_nonpain_clusters(
         ensure_dir(topomap_dir)
         save_fig(
             fig,
-            topomap_dir / f"sub-{subject}_pain_nonpain_cluster_mask_{band}",
+            topomap_dir / f"sub-{subject}_condition_cluster_mask_{band}",
             formats=plot_cfg.formats,
             dpi=plot_cfg.dpi,
             bbox_inches=plot_cfg.bbox_inches,

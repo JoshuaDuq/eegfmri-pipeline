@@ -1307,6 +1307,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 			plotItemConfigFieldComparisonSegment,
 			plotItemConfigFieldComparisonColumn,
 			plotItemConfigFieldComparisonValues,
+			plotItemConfigFieldComparisonLabels,
 			plotItemConfigFieldComparisonROIs:
 			m.startPlotTextEdit(row.plotID, row.plotField)
 			m.useDefaultAdvanced = false
@@ -1381,6 +1382,9 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPlotGroupSelection:
 		m.plotGroupSelectionExpanded = !m.plotGroupSelectionExpanded
+		m.useDefaultAdvanced = false
+	case optPlotGroupComparisons:
+		m.plotGroupComparisonsExpanded = !m.plotGroupComparisonsExpanded
 		m.useDefaultAdvanced = false
 
 	case optPlotBboxInches:
@@ -1623,6 +1627,31 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPlotTemporalTimeLabels:
 		m.startTextEdit(textFieldPlotTemporalTimeLabels)
+		m.useDefaultAdvanced = false
+
+	case optPlotCompareWindows:
+		m.plotCompareWindows = cycleTriState(m.plotCompareWindows)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonWindows:
+		m.startTextEdit(textFieldPlotComparisonWindows)
+		m.useDefaultAdvanced = false
+	case optPlotCompareColumns:
+		m.plotCompareColumns = cycleTriState(m.plotCompareColumns)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonSegment:
+		m.startTextEdit(textFieldPlotComparisonSegment)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonColumn:
+		m.startTextEdit(textFieldPlotComparisonColumn)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonValues:
+		m.startTextEdit(textFieldPlotComparisonValues)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonLabels:
+		m.startTextEdit(textFieldPlotComparisonLabels)
+		m.useDefaultAdvanced = false
+	case optPlotComparisonROIs:
+		m.startTextEdit(textFieldPlotComparisonROIs)
 		m.useDefaultAdvanced = false
 	}
 

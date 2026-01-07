@@ -187,8 +187,23 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     defaults_overrides.add_argument("--figure-size-topomap", nargs=2, type=float, default=None, metavar=("W", "H"), help="Topomap figure size (default from config)")
 
     # Styling colors (plotting.styling.colors.*)
-    defaults_overrides.add_argument("--color-pain", type=str, default=None, help="Color for pain condition (default from config)")
-    defaults_overrides.add_argument("--color-nonpain", type=str, default=None, help="Color for non-pain condition (default from config)")
+    defaults_overrides.add_argument(
+        "--color-condition-1",
+        type=str,
+        default=None,
+        dest="color_condition_1",
+        help="Color for comparison condition 1 (value1/label1) (default from config)",
+    )
+    defaults_overrides.add_argument(
+        "--color-condition-2",
+        type=str,
+        default=None,
+        dest="color_condition_2",
+        help="Color for comparison condition 2 (value2/label2) (default from config)",
+    )
+    # Backwards-compatible aliases (suppressed from help).
+    defaults_overrides.add_argument("--color-nonpain", type=str, default=None, dest="color_condition_1", help=argparse.SUPPRESS)
+    defaults_overrides.add_argument("--color-pain", type=str, default=None, dest="color_condition_2", help=argparse.SUPPRESS)
     defaults_overrides.add_argument("--color-significant", type=str, default=None, help="Color for significant items (default from config)")
     defaults_overrides.add_argument("--color-nonsignificant", type=str, default=None, help="Color for non-significant items (default from config)")
     defaults_overrides.add_argument("--color-gray", type=str, default=None, help="Gray color (default from config)")
@@ -370,8 +385,15 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     comparisons.add_argument("--compare-columns", action="store_true", default=None, help="Enable paired comparisons between event columns")
     comparisons.add_argument("--no-compare-columns", action="store_false", dest="compare_columns", help="Disable column comparisons")
     comparisons.add_argument("--comparison-segment", type=str, default=None, help="Segment name for column comparisons (default from config)")
-    comparisons.add_argument("--comparison-column", type=str, default=None, help="Column name from events.tsv for comparisons (e.g. pain)")
+    comparisons.add_argument("--comparison-column", type=str, default=None, help="Column name from events.tsv for comparisons (e.g. condition)")
     comparisons.add_argument("--comparison-values", nargs="+", default=None, metavar="VALUE", help="Values in the comparison column for paired plots (e.g. 0 1)")
+    comparisons.add_argument(
+        "--comparison-labels",
+        nargs=2,
+        default=None,
+        metavar=("LABEL1", "LABEL2"),
+        help="Display labels for the comparison values (e.g. condition_A condition_B)",
+    )
     comparisons.add_argument("--comparison-rois", nargs="+", default=None, metavar="ROI", help="ROIs/Channels to include in paired comparison plots (default: all)")
 
     per_plot = parser.add_argument_group("Per-plot overrides")
@@ -385,7 +407,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
             "Per-plot overrides; can be repeated. "
             "Example: --plot-item-config tfr_scalpmean tfr_default_baseline_window -5.0 -0.01. "
             "Keys: tfr_default_baseline_window, compare_windows, comparison_windows, compare_columns, "
-            "comparison_segment, comparison_column, comparison_values, comparison_rois."
+            "comparison_segment, comparison_column, comparison_values, comparison_labels, comparison_rois."
         ),
     )
 
@@ -479,6 +501,10 @@ def _apply_plot_item_overrides(config: Any, overrides: Dict[str, List[str]]) -> 
             if values:
                 config["plotting.comparisons.comparison_values"] = list(values)
             continue
+        if key == "comparison_labels":
+            if len(values) >= 2:
+                config["plotting.comparisons.comparison_labels"] = [values[0], values[1]]
+            continue
         if key == "comparison_rois":
             if values:
                 config["plotting.comparisons.comparison_rois"] = list(values)
@@ -493,6 +519,7 @@ _PLOT_ITEM_CONFIG_KEYS: Dict[str, str] = {
     "comparison_segment": "plotting.comparisons.comparison_segment",
     "comparison_column": "plotting.comparisons.comparison_column",
     "comparison_values": "plotting.comparisons.comparison_values",
+    "comparison_labels": "plotting.comparisons.comparison_labels",
     "comparison_rois": "plotting.comparisons.comparison_rois",
 }
 
@@ -544,6 +571,10 @@ def _validate_plot_item_configs(configs: Dict[str, Dict[str, List[str]]]) -> Non
             if key in {"comparison_windows", "comparison_values", "comparison_rois"}:
                 if not values:
                     errors.append(f"plot_id '{plot_id}': {key} expects one or more values.")
+
+            if key == "comparison_labels":
+                if len(values) != 2:
+                    errors.append(f"plot_id '{plot_id}': {key} expects exactly 2 values (label1 label2).")
 
     if errors:
         joined = "\n  - ".join(errors)
@@ -646,10 +677,10 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     if getattr(args, "figure_size_topomap", None):
         config["plotting.figure_sizes.topomap"] = list(args.figure_size_topomap)
 
-    if getattr(args, "color_pain", None):
-        config["plotting.styling.colors.pain"] = str(args.color_pain)
-    if getattr(args, "color_nonpain", None):
-        config["plotting.styling.colors.nonpain"] = str(args.color_nonpain)
+    if getattr(args, "color_condition_2", None):
+        config["plotting.styling.colors.condition_2"] = str(args.color_condition_2)
+    if getattr(args, "color_condition_1", None):
+        config["plotting.styling.colors.condition_1"] = str(args.color_condition_1)
     if getattr(args, "color_significant", None):
         config["plotting.styling.colors.significant"] = str(args.color_significant)
     if getattr(args, "color_nonsignificant", None):
@@ -931,6 +962,8 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         config["plotting.comparisons.comparison_column"] = str(args.comparison_column)
     if getattr(args, "comparison_values", None):
         config["plotting.comparisons.comparison_values"] = list(args.comparison_values)
+    if getattr(args, "comparison_labels", None):
+        config["plotting.comparisons.comparison_labels"] = list(args.comparison_labels)
     if getattr(args, "comparison_rois", None):
         config["plotting.comparisons.comparison_rois"] = list(args.comparison_rois)
 

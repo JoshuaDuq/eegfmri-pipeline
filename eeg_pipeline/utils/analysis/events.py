@@ -8,67 +8,12 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-
-
-def extract_pain_mask(events_df: pd.DataFrame, config: Any = None) -> Optional[np.ndarray]:
-    """Extract boolean mask for pain condition (1/True/High = Pain).
-    
-    Args:
-        events_df: Events DataFrame.
-        config: Pipeline configuration object (optional).
-        
-    Returns:
-        Boolean numpy array mask where True indicates Pain condition, 
-        or None if pain column cannot be identified.
-    """
-    if config is None:
-        return None
-
-    try:
-        col = get_pain_column_from_config(config, events_df)
-    except Exception:
-        col = None
-
-    if not col or col not in events_df.columns:
-        return None
-
-    # Prefer the plotting comparison values (value2 is treated as "pain/high") when available.
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    vals_spec = get_config_value(config, "plotting.comparisons.comparison_values", None)
-    pain_value = None
-    if isinstance(vals_spec, (list, tuple)) and len(vals_spec) >= 2:
-        pain_value = vals_spec[1]
-    if pain_value is None:
-        pain_value = 1
-
-    series = events_df[col]
-
-    # Numeric match first
-    try:
-        series_num = pd.to_numeric(series, errors="coerce")
-        pain_value_num = pd.to_numeric(str(pain_value), errors="coerce")
-        if not np.isnan(pain_value_num) and not pd.isna(series_num).all():
-            return (series_num == pain_value_num).to_numpy()
-    except Exception:
-        pass
-
-    return (series.astype(str) == str(pain_value)).to_numpy()
-
-
 def _resolve_comparison_column(events_df: pd.DataFrame, config: Any) -> str:
     from eeg_pipeline.utils.config.loader import get_config_value
 
     col = get_config_value(config, "plotting.comparisons.comparison_column", None)
     col = str(col).strip() if col is not None else ""
-    if col:
-        return col
-
-    try:
-        return str(get_pain_column_from_config(config, events_df) or "").strip()
-    except Exception:
-        return ""
+    return col
 
 
 def _resolve_comparison_values(config: Any) -> tuple[Any, Any]:
@@ -80,22 +25,18 @@ def _resolve_comparison_values(config: Any) -> tuple[Any, Any]:
     return vals_spec[0], vals_spec[1]
 
 
-def _resolve_default_labels(config: Any, *, col: str, v1: Any, v2: Any) -> tuple[str, str]:
-    """Return display labels for a 2-level comparison."""
+def _resolve_comparison_labels(config: Any, *, v1: Any, v2: Any) -> tuple[str, str]:
+    """Return display labels for a 2-level comparison (value1/value2)."""
     from eeg_pipeline.utils.config.loader import get_config_value
 
-    # If this is the configured pain-binary column and values look like 0/1, keep the legacy labels.
-    pain_candidates = get_config_value(config, "event_columns.pain_binary", []) or []
-    is_pain_binary = bool(col) and (col in pain_candidates)
+    labels_spec = get_config_value(config, "plotting.comparisons.comparison_labels", None)
+    if isinstance(labels_spec, (list, tuple)) and len(labels_spec) >= 2:
+        l1 = str(labels_spec[0]).strip()
+        l2 = str(labels_spec[1]).strip()
+        if l1 and l2:
+            return l1, l2
 
-    v1s, v2s = str(v1), str(v2)
-    if is_pain_binary:
-        if (v1s, v2s) == ("0", "1"):
-            return "Non-pain", "Pain"
-        if (v1s, v2s) == ("1", "0"):
-            return "Pain", "Non-pain"
-
-    return v1s, v2s
+    return str(v1), str(v2)
 
 
 def extract_comparison_mask(
@@ -122,7 +63,7 @@ def extract_comparison_mask(
 
     v1, v2 = _resolve_comparison_values(config)
     v1_str, v2_str = str(v1), str(v2)
-    label1, label2 = _resolve_default_labels(config, col=col, v1=v1, v2=v2)
+    label1, label2 = _resolve_comparison_labels(config, v1=v1, v2=v2)
     
     # Try numeric match first
     try:
@@ -167,5 +108,5 @@ def resolve_comparison_spec(
         return None
 
     v1, v2 = _resolve_comparison_values(config)
-    label1, label2 = _resolve_default_labels(config, col=col, v1=v1, v2=v2)
+    label1, label2 = _resolve_comparison_labels(config, v1=v1, v2=v2)
     return col, v1, v2, label1, label2

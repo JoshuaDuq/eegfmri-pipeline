@@ -189,15 +189,10 @@ def plot_power_by_roi_band_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = plot_cfg.get_color("blue")
-    color2 = plot_cfg.get_color("red")
+    color1 = condition_colors.get("condition_1", plot_cfg.get_color("blue"))
+    color2 = condition_colors.get("condition_2", plot_cfg.get_color("red"))
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -421,15 +416,10 @@ def plot_complexity_by_roi_band_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = plot_cfg.get_color("blue")
-    color2 = plot_cfg.get_color("red")
+    color1 = condition_colors.get("condition_1", plot_cfg.get_color("blue"))
+    color2 = condition_colors.get("condition_2", plot_cfg.get_color("red"))
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
     roi_names = list(rois.keys())
     n_rois = len(roi_names)
     n_bands = len(bands)
@@ -671,15 +661,10 @@ def plot_aperiodic_by_roi_condition(
     n_metrics = len(metrics)
 
     condition_colors = get_condition_colors(config)
-    color1 = condition_colors.get("nonpain", "#4C72B0")
-    color2 = condition_colors.get("pain", "#C44E52")
+    color1 = condition_colors.get("condition_1", "#4C72B0")
+    color2 = condition_colors.get("condition_2", "#C44E52")
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
 
     plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
     all_pvalues = []
@@ -881,15 +866,10 @@ def plot_connectivity_by_roi_band_condition(
     all_channels = list(set([p[0] for p in all_pairs] + [p[1] for p in all_pairs]))
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = condition_colors.get("nonpain", "#4C72B0")
-    color2 = condition_colors.get("pain", "#C44E52")
+    color1 = condition_colors.get("condition_1", "#4C72B0")
+    color2 = condition_colors.get("condition_2", "#C44E52")
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
     roi_names = list(rois.keys())
     n_rois = len(roi_names)
     n_bands = len(bands)
@@ -1102,15 +1082,10 @@ def plot_itpc_by_roi_band_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = condition_colors.get("nonpain", "#4C72B0")
-    color2 = condition_colors.get("pain", "#C44E52")
+    color1 = condition_colors.get("condition_1", "#4C72B0")
+    color2 = condition_colors.get("condition_2", "#C44E52")
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -1357,15 +1332,10 @@ def plot_pac_by_roi_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = condition_colors.get("nonpain", "#4C72B0")
-    color2 = condition_colors.get("pain", "#C44E52")
+    color1 = condition_colors.get("condition_1", "#4C72B0")
+    color2 = condition_colors.get("condition_2", "#C44E52")
     tick1 = str(label1)
     tick2 = str(label2)
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
-        tick1 = "NP" if label1 == "Non-pain" else "P"
-        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_pairs = len(pairs)
 
@@ -1703,11 +1673,8 @@ def plot_temporal_evolution(
             time_labels = [seg.replace("_", " ").title() for seg in time_bins]
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
-    color1 = condition_colors.get("nonpain", "#4C72B0")
-    color2 = condition_colors.get("pain", "#C44E52")
-    if {label1, label2} == {"Non-pain", "Pain"}:
-        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
-        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+    color1 = condition_colors.get("condition_1", "#4C72B0")
+    color2 = condition_colors.get("condition_2", "#C44E52")
 
     stat_preference = {
         "power": [
@@ -1795,7 +1762,7 @@ def plot_temporal_evolution(
     axes[0].set_title(f"{feature_label} Temporal Evolution", fontsize=plot_cfg.font.figure_title, fontweight="bold")
     axes[-1].set_xlabel("Trial Phase", fontsize=plot_cfg.font.suptitle)
 
-    title = f"{feature_label} Temporal Evolution: Pain vs Non-Pain\nSubject: {subject}"
+    title = f"{feature_label} Temporal Evolution: {label2} vs {label1}\nSubject: {subject}"
     fig.suptitle(title, fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.01)
 
     plt.tight_layout()

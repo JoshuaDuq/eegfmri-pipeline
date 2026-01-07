@@ -149,6 +149,14 @@ var plotDefaults = struct {
 	tfrPercentageMultiplier  float64
 	tfrDefaultBaselineWindow string
 
+	// Comparisons
+	comparisonWindows string
+	comparisonSegment string
+	comparisonColumn  string
+	comparisonValues  string
+	comparisonLabels  string
+	comparisonROIs    string
+
 	// Plot Sizing (from plots section)
 	roiWidthPerBand              float64
 	roiWidthPerMetric            float64
@@ -309,6 +317,14 @@ var plotDefaults = struct {
 	tfrLogBase:               10.0,
 	tfrPercentageMultiplier:  100.0,
 	tfrDefaultBaselineWindow: "-5.0 -0.01",
+
+	// Comparisons
+	comparisonWindows: "baseline active",
+	comparisonSegment: "active",
+	comparisonColumn:  "(unset)",
+	comparisonValues:  "0 1",
+	comparisonLabels:  "(from values)",
+	comparisonROIs:    "(all)",
 
 	// Plot Sizing
 	roiWidthPerBand:              3.5,
@@ -600,7 +616,7 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 				}
 				lines = append(lines, plotValueLine("segment", val, hint, focused))
 			case plotItemConfigFieldComparisonColumn:
-				val := formatString(cfg.ComparisonColumn, "(auto: event_columns.pain_binary)")
+				val := formatString(cfg.ComparisonColumn, "(unset)")
 				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn {
 					val = m.textBuffer + "█"
 				}
@@ -615,6 +631,12 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 					val = m.textBuffer + "█"
 				}
 				lines = append(lines, plotValueLine("values", val, "e.g. 0 1", focused))
+			case plotItemConfigFieldComparisonLabels:
+				val := formatString(cfg.ComparisonLabelsSpec, "(from values)")
+				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonLabels {
+					val = m.textBuffer + "█"
+				}
+				lines = append(lines, plotValueLine("labels", val, "e.g. condA condB or \"High\" \"Low\"", focused))
 			case plotItemConfigFieldComparisonROIs:
 				val := formatString(cfg.ComparisonROIsSpec, "(all)")
 				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonROIs {
@@ -669,6 +691,8 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 			lines = append(lines, groupLine(opt, "Plot Sizing", m.plotGroupSizingExpanded, "per-plot sizing", focused))
 		case optPlotGroupSelection:
 			lines = append(lines, groupLine(opt, "Selections", m.plotGroupSelectionExpanded, "metric lists & measures", focused))
+		case optPlotGroupComparisons:
+			lines = append(lines, groupLine(opt, "Comparisons", m.plotGroupComparisonsExpanded, "condition/segment comparisons", focused))
 
 		// Defaults / styling (strings)
 		case optPlotBboxInches:
@@ -761,13 +785,13 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 			if m.editingText && m.editingTextField == textFieldPlotColorPain {
 				val = m.textBuffer + "█"
 			}
-			lines = append(lines, valueLine(opt, "color_pain", val, "hex or named color", focused))
+			lines = append(lines, valueLine(opt, "color_condition_2", val, "hex or named color", focused))
 		case optPlotColorNonpain:
 			val := formatString(m.plotColorNonpain, plotDefaults.colorNonpain)
 			if m.editingText && m.editingTextField == textFieldPlotColorNonpain {
 				val = m.textBuffer + "█"
 			}
-			lines = append(lines, valueLine(opt, "color_nonpain", val, "hex or named color", focused))
+			lines = append(lines, valueLine(opt, "color_condition_1", val, "hex or named color", focused))
 		case optPlotColorSignificant:
 			val := formatString(m.plotColorSignificant, plotDefaults.colorSignificant)
 			if m.editingText && m.editingTextField == textFieldPlotColorSignificant {
@@ -1596,6 +1620,59 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 				val = m.textBuffer + "█"
 			}
 			lines = append(lines, valueLine(opt, "temporal_labels", val, "space-separated", focused))
+
+		case optPlotCompareWindows:
+			lines = append(lines, valueLine(opt, "compare_windows", triState(m.plotCompareWindows), "tri-state", focused))
+		case optPlotComparisonWindows:
+			val := formatString(m.plotComparisonWindowsSpec, plotDefaults.comparisonWindows)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonWindows {
+				val = m.textBuffer + "█"
+			}
+			hint := "e.g. baseline active"
+			if avail := availableHint("available", m.availableWindows); avail != "" {
+				hint = hint + " · " + avail
+			}
+			lines = append(lines, valueLine(opt, "comparison_windows", val, hint, focused))
+		case optPlotCompareColumns:
+			lines = append(lines, valueLine(opt, "compare_columns", triState(m.plotCompareColumns), "tri-state", focused))
+		case optPlotComparisonSegment:
+			val := formatString(m.plotComparisonSegment, plotDefaults.comparisonSegment)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonSegment {
+				val = m.textBuffer + "█"
+			}
+			hint := "segment name"
+			if avail := availableHint("available", m.availableWindows); avail != "" {
+				hint = hint + " · " + avail
+			}
+			lines = append(lines, valueLine(opt, "comparison_segment", val, hint, focused))
+		case optPlotComparisonColumn:
+			val := formatString(m.plotComparisonColumn, plotDefaults.comparisonColumn)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonColumn {
+				val = m.textBuffer + "█"
+			}
+			hint := "events.tsv column"
+			if avail := availableHint("available", m.availableColumns); avail != "" {
+				hint = hint + " · " + avail
+			}
+			lines = append(lines, valueLine(opt, "comparison_column", val, hint, focused))
+		case optPlotComparisonValues:
+			val := formatString(m.plotComparisonValuesSpec, plotDefaults.comparisonValues)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonValues {
+				val = m.textBuffer + "█"
+			}
+			lines = append(lines, valueLine(opt, "comparison_values", val, "2 values (e.g. 0 1)", focused))
+		case optPlotComparisonLabels:
+			val := formatString(m.plotComparisonLabelsSpec, plotDefaults.comparisonLabels)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonLabels {
+				val = m.textBuffer + "█"
+			}
+			lines = append(lines, valueLine(opt, "comparison_labels", val, "2 labels; supports quotes", focused))
+		case optPlotComparisonROIs:
+			val := formatString(m.plotComparisonROIsSpec, plotDefaults.comparisonROIs)
+			if m.editingText && m.editingTextField == textFieldPlotComparisonROIs {
+				val = m.textBuffer + "█"
+			}
+			lines = append(lines, valueLine(opt, "comparison_rois", val, "space-separated (empty = all)", focused))
 
 		default:
 			// Fallback: keep UI robust even if new options are added without

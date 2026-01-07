@@ -13,7 +13,7 @@ import pandas as pd
 import re
 from scipy.stats import mannwhitneyu
 
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.config.loader import get_config_value
 
@@ -189,39 +189,40 @@ def compute_significant_edges(
     events_df: Optional[pd.DataFrame],
     config: Any,
 ) -> Optional[Set[str]]:
-    """Return set of edge column names significant (FDR) between pain/non-pain."""
+    """Return set of edge column names significant (FDR) between two configured conditions."""
     if events_df is None or events_df.empty:
         return None
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comparison = extract_comparison_mask(events_df, config, require_enabled=False)
+    if comparison is None:
         return None
+    mask1, mask2, _label1, _label2 = comparison
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
-    if n_pain < 3 or n_nonpain < 3:
+    n1 = int(mask1.sum())
+    n2 = int(mask2.sum())
+    if n1 < 3 or n2 < 3:
         return None
 
     p_values: List[float] = []
     edge_map: List[str] = []
 
-    df_pain = features_df[pain_mask]
-    df_nonpain = features_df[~pain_mask]
+    df1 = features_df[mask1]
+    df2 = features_df[mask2]
 
     for col in edge_cols:
-        vals_pain = pd.to_numeric(df_pain[col], errors="coerce").values
-        vals_nonpain = pd.to_numeric(df_nonpain[col], errors="coerce").values
+        vals_1 = pd.to_numeric(df1[col], errors="coerce").values
+        vals_2 = pd.to_numeric(df2[col], errors="coerce").values
 
-        vals_pain = vals_pain[np.isfinite(vals_pain)]
-        vals_nonpain = vals_nonpain[np.isfinite(vals_nonpain)]
+        vals_1 = vals_1[np.isfinite(vals_1)]
+        vals_2 = vals_2[np.isfinite(vals_2)]
 
-        if len(vals_pain) < 3 or len(vals_nonpain) < 3:
+        if len(vals_1) < 3 or len(vals_2) < 3:
             p_values.append(np.nan)
             edge_map.append(col)
             continue
 
         try:
-            _, p = mannwhitneyu(vals_pain, vals_nonpain, alternative="two-sided")
+            _, p = mannwhitneyu(vals_1, vals_2, alternative="two-sided")
             p_values.append(float(p))
         except ValueError:
             p_values.append(np.nan)
@@ -248,7 +249,6 @@ __all__ = [
     "build_adjacency_from_edges",
     "compute_significant_edges",
 ]
-
 
 
 
