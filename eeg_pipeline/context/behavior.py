@@ -719,10 +719,14 @@ class BehaviorContext:
         if self.aligned_events is None:
             return
 
-        # Configurable preference order for group columns
-        # Default: block → run → session (most conservative to least conservative)
-        # This ensures permutation happens within the smallest available unit
-        default_preference = ["block", "run", "session", "subject"]
+        run_col = str(get_config_value(self.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        if not run_col:
+            run_col = "run_id"
+
+        # Configurable preference order for group columns.
+        # Default: block → run_id (or configured run column) → run → session → subject
+        # This ensures permutation happens within the smallest available unit.
+        default_preference = ["block", run_col, "run", "session", "subject"]
         pref_order = get_config_value(
             self.config, 
             "behavior_analysis.permutation.group_column_preference",
@@ -731,16 +735,28 @@ class BehaviorContext:
         if not isinstance(pref_order, (list, tuple)):
             pref_order = default_preference
         pref_order = [str(c).strip().lower() for c in pref_order]
+        # Ensure configured run column is considered even if user left defaults.
+        if run_col.lower() not in pref_order:
+            pref_order = [*pref_order, run_col.lower()]
+
+        # De-duplicate while preserving order.
+        seen = set()
+        pref_order = [c for c in pref_order if not (c in seen or seen.add(c))]
         
         for candidate in pref_order:
-            if candidate not in self.aligned_events.columns:
-                continue
+            resolved = candidate
+            if resolved not in self.aligned_events.columns:
+                # Support a common alias when paradigms use run_id instead of run.
+                if resolved == "run" and run_col in self.aligned_events.columns:
+                    resolved = run_col
+                else:
+                    continue
             try:
-                values = self.aligned_events[candidate]
+                values = self.aligned_events[resolved]
                 if hasattr(values, "nunique") and int(values.nunique(dropna=False)) <= 1:
                     continue
-                self.group_ids = pd.Series(values, index=self.aligned_events.index, name=candidate)
-                self.group_column = candidate
+                self.group_ids = pd.Series(values, index=self.aligned_events.index, name=resolved)
+                self.group_column = resolved
                 break
             except Exception:
                 self.group_ids = None

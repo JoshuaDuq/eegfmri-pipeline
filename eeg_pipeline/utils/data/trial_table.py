@@ -161,7 +161,7 @@ def add_lag_and_delta_features(
     """Add lagged and delta variables (prev_*, delta_*) within runs/blocks if available."""
     df = df.copy()
 
-    group_columns = [c for c in (group_columns or ["run", "block"]) if c in df.columns]
+    group_columns = [c for c in (group_columns or ["run_id", "run", "block"]) if c in df.columns]
     meta: Dict[str, Any] = {"group_columns": group_columns}
 
     if "epoch" in df.columns:
@@ -227,6 +227,102 @@ def add_pain_residual(
     out = df.copy()
     out[out_pred_col] = pred
     out[out_resid_col] = resid
+    
+    # Optional cross-fit (out-of-run prediction) to avoid optimistic residualization when f(temp) is flexible.
+    # Uses GroupKFold on run_id (or configured group column) when available.
+    crossfit_enabled = bool(
+        getattr(config, "get", lambda *_args, **_kwargs: False)(
+            "behavior_analysis.pain_residual.crossfit.enabled", False
+        )
+    )
+    if crossfit_enabled:
+        from eeg_pipeline.utils.config.loader import get_config_value
+
+        group_col = str(
+            get_config_value(
+                config,
+                "behavior_analysis.pain_residual.crossfit.group_column",
+                get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id"),
+            )
+            or ""
+        ).strip()
+        n_splits_req = int(get_config_value(config, "behavior_analysis.pain_residual.crossfit.n_splits", 5))
+        method = str(get_config_value(config, "behavior_analysis.pain_residual.crossfit.method", "spline")).strip().lower()
+
+        meta["crossfit"] = {"enabled": True, "status": "init", "group_column": group_col or None, "method": method}
+
+        groups = out[group_col] if group_col and group_col in out.columns else None
+        valid = temp.notna() & rating.notna()
+        if groups is not None:
+            valid = valid & pd.Series(groups).notna()
+
+        min_samples = int(get_config_value(config, "behavior_analysis.pain_residual.min_samples", 10))
+        n_valid = int(valid.sum())
+        if n_valid < min_samples:
+            meta["crossfit"]["status"] = "skipped_insufficient_samples"
+        else:
+            try:
+                from sklearn.model_selection import GroupKFold
+                from sklearn.pipeline import Pipeline
+                from sklearn.linear_model import Ridge
+                from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
+            except Exception as exc:
+                meta["crossfit"]["status"] = "skipped_missing_sklearn"
+                meta["crossfit"]["error"] = str(exc)
+            else:
+                idx = out.index[valid]
+                X = temp.loc[idx].to_numpy(dtype=float)[:, None]
+                y = rating.loc[idx].to_numpy(dtype=float)
+
+                if groups is None:
+                    meta["crossfit"]["status"] = "skipped_missing_groups"
+                else:
+                    g = pd.Series(groups, index=out.index).loc[idx].to_numpy()
+                    unique_g = pd.unique(g)
+                    unique_g = unique_g[~pd.isna(unique_g)]
+                    n_groups = int(len(unique_g))
+                    if n_groups < 2:
+                        meta["crossfit"]["status"] = "skipped_missing_groups"
+                    else:
+                        n_splits = max(2, min(n_splits_req, n_groups))
+                        if method == "poly":
+                            deg = int(get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2))
+                            deg = max(1, min(deg, 5))
+                            model = Pipeline(
+                                [
+                                    ("poly", PolynomialFeatures(degree=deg, include_bias=False)),
+                                    ("ridge", Ridge(alpha=1.0)),
+                                ]
+                            )
+                            meta["crossfit"]["poly_degree"] = int(deg)
+                        else:
+                            n_knots = int(get_config_value(config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5))
+                            n_knots = max(3, min(n_knots, 12))
+                            model = Pipeline(
+                                [
+                                    ("spline", SplineTransformer(n_knots=n_knots, degree=3, include_bias=False)),
+                                    ("ridge", Ridge(alpha=1.0)),
+                                ]
+                            )
+                            meta["crossfit"]["spline_n_knots"] = int(n_knots)
+
+                        cv_pred = np.full(len(idx), np.nan, dtype=float)
+                        splitter = GroupKFold(n_splits=n_splits)
+                        for train, test in splitter.split(X, y, groups=g):
+                            model.fit(X[train], y[train])
+                            cv_pred[test] = model.predict(X[test])
+
+                        pred_full = pd.Series(np.nan, index=out.index, dtype=float)
+                        pred_full.loc[idx] = cv_pred
+                        resid_full = pd.Series(np.nan, index=out.index, dtype=float)
+                        resid_full.loc[idx] = y - cv_pred
+
+                        out[f"{out_pred_col}_cv"] = pred_full
+                        out[f"{out_resid_col}_cv"] = resid_full
+                        meta["crossfit"]["status"] = "ok"
+                        meta["crossfit"]["n_valid"] = int(n_valid)
+                        meta["crossfit"]["n_groups"] = int(n_groups)
+                        meta["crossfit"]["n_splits"] = int(n_splits)
     return out, meta
 
 

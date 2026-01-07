@@ -184,6 +184,7 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
     from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
     from eeg_pipeline.analysis.behavior.api import run_pain_sensitivity_correlations
     from eeg_pipeline.utils.analysis.stats import compute_partial_correlations_with_cov_temp
+    from eeg_pipeline.utils.analysis.stats.permutation import compute_permutation_pvalues_with_cov_temp
 
     suffix = _feature_suffix_from_context(ctx)
 
@@ -210,25 +211,66 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
     method_label = getattr(config, "method_label", "")
 
     # Targets: configurable; defaults cover pain + stimulus.
-    default_targets = ["rating", "temperature", "pain_residual"]
+    # Prefer pain_residual for subject-level inference when available (nonlinear temp control).
+    prefer_pain_residual = bool(get_config_value(ctx.config, "behavior_analysis.correlations.prefer_pain_residual", True))
+    default_targets = ["pain_residual", "rating", "temperature"] if prefer_pain_residual else ["rating", "temperature", "pain_residual"]
     targets_cfg = get_config_value(ctx.config, "behavior_analysis.correlations.targets", None)
     if isinstance(targets_cfg, (list, tuple)) and targets_cfg:
         targets = [str(t).strip().lower() for t in targets_cfg]
     else:
         targets = default_targets
+    # Optional: allow using cross-fit pain residual if present in the trial table.
+    use_cv_resid = bool(get_config_value(ctx.config, "behavior_analysis.correlations.use_crossfit_pain_residual", False))
+    if use_cv_resid and "pain_residual_cv" in df_trials.columns:
+        # Insert at front unless user explicitly specified targets.
+        if not (isinstance(targets_cfg, (list, tuple)) and targets_cfg):
+            targets = ["pain_residual_cv", *[t for t in targets if t != "pain_residual_cv"]]
     targets = [t for t in targets if t in df_trials.columns]
 
-    # Covariates for "trial-order" control: use trial index column only (lightweight + stable).
-    cov_df = None
+    # Optional run adjustment for correlation/partial correlation inference.
+    run_adjust_enabled = bool(get_config_value(ctx.config, "behavior_analysis.run_adjustment.enabled", False))
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    if not run_col:
+        run_col = "run_id"
+    run_adjust_in_correlations = bool(
+        get_config_value(ctx.config, "behavior_analysis.run_adjustment.include_in_correlations", run_adjust_enabled)
+    )
+    max_run_dummies = int(get_config_value(ctx.config, "behavior_analysis.run_adjustment.max_dummies", 20))
+
+    # Covariates: trial-order + (optional) run dummies.
+    cov_parts = []
     if bool(getattr(config, "control_trial_order", True)):
         for c in ["trial_index_within_group", "trial_index"]:
             if c in df_trials.columns:
-                cov_df = pd.DataFrame({c: pd.to_numeric(df_trials[c], errors="coerce")})
+                cov_parts.append(pd.DataFrame({c: pd.to_numeric(df_trials[c], errors="coerce")}, index=df_trials.index))
                 break
+    if run_adjust_in_correlations and run_col in df_trials.columns:
+        run_s = df_trials[run_col]
+        n_levels = int(pd.Series(run_s).nunique(dropna=True))
+        if n_levels > 1 and n_levels <= max(1, max_run_dummies + 1):
+            run_dum = pd.get_dummies(run_s.astype("category"), prefix=run_col, drop_first=True)
+            cov_parts.append(run_dum)
+        elif n_levels > max_run_dummies + 1:
+            ctx.logger.warning(
+                "Correlations: run adjustment requested but %s has %d levels (> max %d dummies); skipping run adjustment.",
+                run_col, n_levels, max_run_dummies,
+            )
+    cov_df = pd.concat(cov_parts, axis=1) if cov_parts else None
 
     temperature_series = None
     if bool(getattr(config, "control_temperature", True)) and "temperature" in df_trials.columns:
         temperature_series = pd.to_numeric(df_trials["temperature"], errors="coerce")
+
+    # Permutation inference (subject-level; within-run/block when ctx.group_ids exists).
+    perm_enabled = bool(get_config_value(ctx.config, "behavior_analysis.correlations.permutation.enabled", False))
+    n_perm = int(get_config_value(ctx.config, "behavior_analysis.correlations.permutation.n_permutations", ctx.n_perm or 0))
+    p_primary_mode = str(get_config_value(ctx.config, "behavior_analysis.correlations.p_primary_mode", "perm_if_available")).strip().lower()
+    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial")).strip().lower()
+
+    groups_for_perm = ctx.group_ids if getattr(ctx, "group_ids", None) is not None else None
+    if groups_for_perm is None and run_col in df_trials.columns:
+        # Fallback: if BehaviorContext did not detect group IDs, use run_col directly.
+        groups_for_perm = pd.Series(df_trials[run_col], index=df_trials.index, name=run_col)
 
     records: List[Dict[str, Any]] = []
     for target in targets:
@@ -237,11 +279,22 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
             x = pd.to_numeric(df_trials[feat], errors="coerce")
 
             # Raw correlation
+            x_arr = x.to_numpy(dtype=float)
+            y_arr = y.to_numpy(dtype=float)
+            finite_xy = np.isfinite(x_arr) & np.isfinite(y_arr)
+            skip_reason = None
+            min_samples = int(getattr(config, "min_samples", 10))
+            if int(finite_xy.sum()) >= min_samples:
+                if float(np.nanstd(x_arr[finite_xy], ddof=1)) <= 1e-12:
+                    skip_reason = "feature_constant"
+                elif float(np.nanstd(y_arr[finite_xy], ddof=1)) <= 1e-12:
+                    skip_reason = "target_constant"
+
             r_raw, p_raw, n = safe_correlation(
-                x.to_numpy(dtype=float),
-                y.to_numpy(dtype=float),
+                x_arr,
+                y_arr,
                 method,
-                int(getattr(config, "min_samples", 10)),
+                min_samples,
                 robust_method=robust_method,
             )
 
@@ -258,6 +311,9 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
                 "r": float(r_raw) if np.isfinite(r_raw) else np.nan,
                 "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
                 "p_value": float(p_raw) if np.isfinite(p_raw) else np.nan,
+                "skip_reason": skip_reason,
+                "run_adjustment_enabled": bool(run_adjust_in_correlations and run_col in df_trials.columns),
+                "run_column": run_col if run_col in df_trials.columns else None,
             }
 
             # Partial correlations (primary selection mirrors control flags).
@@ -298,29 +354,118 @@ def stage_correlate(ctx: BehaviorContext, config: Any) -> Tuple[pd.DataFrame, pd
                 }
             )
 
+            # Run-level aggregation (robust unit-of-analysis option).
+            if run_col in df_trials.columns:
+                try:
+                    df_run = pd.DataFrame({run_col: df_trials[run_col], "x": x, "y": y})
+                    run_means = df_run.groupby(run_col, dropna=True)[["x", "y"]].mean(numeric_only=True)
+                    r_run, p_run, n_run = safe_correlation(
+                        run_means["x"].to_numpy(dtype=float),
+                        run_means["y"].to_numpy(dtype=float),
+                        method,
+                        min_samples=3,
+                        robust_method=None,
+                    )
+                    rec.update(
+                        {
+                            "n_runs": int(n_run),
+                            "r_run_mean": float(r_run) if np.isfinite(r_run) else np.nan,
+                            "p_run_mean": float(p_run) if np.isfinite(p_run) else np.nan,
+                        }
+                    )
+                except Exception:
+                    rec.update({"n_runs": np.nan, "r_run_mean": np.nan, "p_run_mean": np.nan})
+
+            # Permutation p-values for raw/partial correlation (block-aware when groups_for_perm is available).
+            perm_ok = (
+                perm_enabled
+                and n_perm > 0
+                and robust_method in (None, "", False)
+                and isinstance(method, str)
+                and method.strip().lower() in {"spearman", "pearson"}
+            )
+            if perm_ok and np.isfinite(r_raw) and int(n) > 0:
+                rng = ctx.rng or np.random.default_rng(42)
+                p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
+                    x_aligned=pd.Series(x.to_numpy(dtype=float), index=df_trials.index),
+                    y_aligned=pd.Series(y.to_numpy(dtype=float), index=df_trials.index),
+                    covariates_df=cov_df,
+                    temp_series=temp_for_partial,
+                    method=method.strip().lower(),
+                    n_perm=n_perm,
+                    n_eff=int(n),
+                    rng=rng,
+                    config=ctx.config,
+                    groups=groups_for_perm,
+                )
+                rec.update(
+                    {
+                        "n_permutations": int(n_perm),
+                        "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
+                        "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
+                        "p_perm_partial_temp": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
+                        "p_perm_partial_cov_temp": float(p_perm_cov_temp) if np.isfinite(p_perm_cov_temp) else np.nan,
+                    }
+                )
+            else:
+                if perm_enabled and robust_method not in (None, "", False):
+                    ctx.logger.debug("Correlations: permutation p-values disabled for robust_method=%s", robust_method)
+                rec.update(
+                    {
+                        "n_permutations": int(n_perm) if perm_enabled else 0,
+                        "p_perm_raw": np.nan,
+                        "p_perm_partial_cov": np.nan,
+                        "p_perm_partial_temp": np.nan,
+                        "p_perm_partial_cov_temp": np.nan,
+                    }
+                )
+
             # Primary selection
+            use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
+
             p_kind = "p_raw"
             p_primary = rec["p_raw"]
             r_primary = rec["r_raw"]
             src = "raw"
-            if bool(getattr(config, "control_temperature", True)) and bool(getattr(config, "control_trial_order", True)) and target != "temperature":
-                if pd.notna(rec.get("p_partial_cov_temp", np.nan)):
+
+            if use_run_unit and pd.notna(rec.get("p_run_mean", np.nan)):
+                p_kind = "p_run_mean"
+                p_primary = rec.get("p_run_mean", np.nan)
+                r_primary = rec.get("r_run_mean", np.nan)
+                src = "run_mean"
+            else:
+                want_partial_cov = cov_df is not None and not cov_df.empty
+                want_partial_temp = bool(getattr(config, "control_temperature", True)) and target != "temperature" and temp_for_partial is not None
+
+                if want_partial_temp and want_partial_cov:
                     p_kind = "p_partial_cov_temp"
                     p_primary = rec.get("p_partial_cov_temp", np.nan)
                     r_primary = rec.get("r_partial_cov_temp", np.nan)
                     src = "partial_cov_temp"
-            elif bool(getattr(config, "control_temperature", True)) and target != "temperature":
-                if pd.notna(rec.get("p_partial_temp", np.nan)):
+                elif want_partial_temp:
                     p_kind = "p_partial_temp"
                     p_primary = rec.get("p_partial_temp", np.nan)
                     r_primary = rec.get("r_partial_temp", np.nan)
                     src = "partial_temp"
-            elif bool(getattr(config, "control_trial_order", True)):
-                if pd.notna(rec.get("p_partial_cov", np.nan)):
+                elif want_partial_cov:
                     p_kind = "p_partial_cov"
                     p_primary = rec.get("p_partial_cov", np.nan)
                     r_primary = rec.get("r_partial_cov", np.nan)
                     src = "partial_cov"
+
+                # Optionally replace primary p-value with a block-aware permutation analogue.
+                if p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}:
+                    perm_map = {
+                        "p_raw": "p_perm_raw",
+                        "p_partial_cov": "p_perm_partial_cov",
+                        "p_partial_temp": "p_perm_partial_temp",
+                        "p_partial_cov_temp": "p_perm_partial_cov_temp",
+                    }
+                    perm_key = perm_map.get(p_kind)
+                    if perm_key and pd.notna(rec.get(perm_key, np.nan)):
+                        p_kind = perm_key
+                        p_primary = rec.get(perm_key, np.nan)
+                        src = f"{src}_perm"
 
             rec["p_kind_primary"] = p_kind
             rec["p_primary"] = p_primary
@@ -475,7 +620,12 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     # Augment with lag/delta covariates for habituation/dynamics analyses.
     lag_enabled = bool(get_config_value(ctx.config, "behavior_analysis.trial_table.add_lag_features", True))
     if lag_enabled:
-        result.df, lag_meta = add_lag_and_delta_features(result.df)
+        run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        group_cols = [c for c in [run_col, "run_id", "run", "block"] if c]
+        # De-duplicate while preserving order.
+        seen = set()
+        group_cols = [c for c in group_cols if not (c in seen or seen.add(c))]
+        result.df, lag_meta = add_lag_and_delta_features(result.df, group_columns=group_cols)
         result.metadata["lag_features"] = lag_meta
 
     # Add pain residual = rating - f(temperature) for "pain beyond stimulus intensity".
@@ -784,9 +934,22 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx.logger.warning("Stability: trial table missing; skipping.")
         return pd.DataFrame()
 
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     group_col = str(get_config_value(ctx.config, "behavior_analysis.stability.group_column", "")).strip()
+    if group_col and group_col not in df_trials.columns:
+        # Support common alias: "run" means configured run column (often run_id).
+        if group_col == "run" and run_col in df_trials.columns:
+            group_col = run_col
+        else:
+            ctx.logger.warning("Stability: configured group_column '%s' not found; falling back to auto.", group_col)
+            group_col = ""
     if not group_col:
-        group_col = "run" if "run" in df_trials.columns else ("block" if "block" in df_trials.columns else "")
+        if run_col in df_trials.columns:
+            group_col = run_col
+        elif "run_id" in df_trials.columns:
+            group_col = "run_id"
+        else:
+            group_col = "run" if "run" in df_trials.columns else ("block" if "block" in df_trials.columns else "")
     if not group_col:
         ctx.logger.info("Stability: no run/block column available; skipping.")
         return pd.DataFrame()
@@ -1389,6 +1552,16 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
             ctx.logger.warning(msg)
         else:
             features = df_trials[feature_cols].copy()
+            groups = None
+            if getattr(ctx, "group_ids", None) is not None:
+                try:
+                    groups = np.asarray(ctx.group_ids)
+                except Exception:
+                    groups = None
+            if groups is None:
+                run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+                if run_col and run_col in df_trials.columns:
+                    groups = pd.to_numeric(df_trials[run_col], errors="ignore").to_numpy()
             column_df = compute_condition_effects(
                 features,
                 pain_mask,
@@ -1398,6 +1571,7 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
                 logger=ctx.logger,
                 n_jobs=config.n_jobs,
                 config=ctx.config,
+                groups=groups,
             )
             if column_df is not None and not column_df.empty:
                 column_df = column_df.copy()
@@ -1465,6 +1639,12 @@ def _run_window_comparison(
     window1, window2 = windows[0], windows[1]
     records: List[Dict[str, Any]] = []
 
+    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    run_adjust_enabled = bool(get_config_value(ctx.config, "behavior_analysis.run_adjustment.enabled", False))
+    use_run_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.condition.window_comparison.primary_unit", "trial")
+    ).strip().lower() in {"run", "run_mean", "runmean", "run_level"}
+
     # Parse feature columns to find window-specific features
     # Feature naming pattern: {category}_{window}_{band}_{roi} or similar
     window1_features = {}
@@ -1507,6 +1687,28 @@ def _run_window_comparison(
             stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
         except Exception:
             continue
+
+        # Optional run-level Wilcoxon on per-run means (more conservative unit-of-analysis).
+        stat_run = np.nan
+        p_val_run = np.nan
+        n_runs = np.nan
+        if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
+            try:
+                df_run = pd.DataFrame(
+                    {
+                        "run": df_trials[run_col],
+                        "v1": pd.to_numeric(df_trials[col1], errors="coerce"),
+                        "v2": pd.to_numeric(df_trials[col2], errors="coerce"),
+                    }
+                ).dropna()
+                run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
+                n_runs = int(len(run_means))
+                if n_runs >= 2:
+                    stat_run, p_val_run = sp_stats.wilcoxon(run_means["v1"].to_numpy(), run_means["v2"].to_numpy())
+            except Exception:
+                stat_run = np.nan
+                p_val_run = np.nan
+                n_runs = np.nan
         
         # Effect sizes
         diff = v2_valid - v1_valid
@@ -1526,6 +1728,7 @@ def _run_window_comparison(
             "window1": window1,
             "window2": window2,
             "n_pairs": n_valid,
+            "n_runs": n_runs,
             "mean_window1": float(np.nanmean(v1_valid)),
             "mean_window2": float(np.nanmean(v2_valid)),
             "std_window1": float(np.nanstd(v1_valid, ddof=1)),
@@ -1533,6 +1736,8 @@ def _run_window_comparison(
             "mean_diff": mean_diff,
             "statistic": float(stat),
             "p_value": float(p_val),
+            "statistic_run": float(stat_run) if np.isfinite(stat_run) else np.nan,
+            "p_value_run": float(p_val_run) if np.isfinite(p_val_run) else np.nan,
             "cohens_d": cohens_d,
             "hedges_g": hedges_g,
         })
@@ -1544,9 +1749,13 @@ def _run_window_comparison(
     df = pd.DataFrame(records)
     
     # Apply FDR correction
-    p_vals = pd.to_numeric(df["p_value"], errors="coerce").to_numpy()
-    df["p_raw"] = df["p_value"]
-    df["p_primary"] = df["p_value"]
+    df["p_raw"] = pd.to_numeric(df["p_value"], errors="coerce")
+    if use_run_unit and "p_value_run" in df.columns:
+        p_primary = pd.to_numeric(df["p_value_run"], errors="coerce")
+        df["p_primary"] = p_primary.where(p_primary.notna(), df["p_raw"])
+    else:
+        df["p_primary"] = df["p_raw"]
+    p_vals = pd.to_numeric(df["p_primary"], errors="coerce").to_numpy()
     df["p_fdr"] = fdr_bh(p_vals, alpha=fdr_alpha, config=ctx.config)
     df["q_value"] = df["p_fdr"]
 

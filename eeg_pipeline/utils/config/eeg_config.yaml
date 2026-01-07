@@ -308,6 +308,14 @@ behavior_analysis:
   n_jobs: -1
   targets: ["pain_rating", "temperature", "pain_binary"]
 
+  # Optional run adjustment (subject-level): enable run-aware covariates / aggregation.
+  # Set enabled=false for paradigms with no runs (trial-only designs).
+  run_adjustment:
+    enabled: false
+    column: "run_id"                 # e.g., "run_id", "run", "block"
+    include_in_correlations: true    # add run dummies to partial correlations
+    max_dummies: 20                  # bounds dummy explosion for categorical run IDs
+
   # Subject-level "tabular" mode: skip analyses that require epochs/time-frequency arrays.
   trial_table_only:
     enabled: false
@@ -337,6 +345,12 @@ behavior_analysis:
     min_samples: 10
     spline_df_candidates: [3, 4, 5]
     poly_degree: 2
+    crossfit:
+      enabled: false
+      group_column: ""        # "" -> use behavior_analysis.run_adjustment.column
+      n_splits: 5
+      method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
+      spline_n_knots: 5
     model_comparison:
       enabled: true
       min_samples: 10
@@ -442,7 +456,7 @@ behavior_analysis:
     # Group column preference for within-group permutation
     # Order matters: first available column is used
     # Default: block → run → session (more conservative for within-subject tests)
-    group_column_preference: ["block", "run", "session", "subject"]
+    group_column_preference: ["block", "run_id", "run", "session", "subject"]
   
   # Statistics
   statistics:
@@ -458,6 +472,13 @@ behavior_analysis:
     compute_change_scores: true
     loso_stability: true
     compute_bayes_factors: false
+    prefer_pain_residual: true
+    use_crossfit_pain_residual: false
+    primary_unit: "trial"            # "trial" | "run_mean"
+    p_primary_mode: "asymptotic"     # "asymptotic" | "perm_if_available"
+    permutation:
+      enabled: false
+      n_permutations: 0
   
   # Pain sensitivity computation
   pain_sensitivity:
@@ -468,6 +489,13 @@ behavior_analysis:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
+    compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
+    p_primary_mode: "asymptotic"   # "asymptotic" | "perm_if_available"
+    permutation:
+      enabled: false
+      n_permutations: 0
+    window_comparison:
+      primary_unit: "trial"        # "trial" | "run_mean"
   
   # Temporal correlations computation  
   temporal:

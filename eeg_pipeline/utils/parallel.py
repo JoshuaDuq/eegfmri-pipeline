@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+import hashlib
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import numpy as np
@@ -198,6 +199,10 @@ def parallel_condition_effects(
     nonpain_mask: np.ndarray,
     min_samples: int,
     n_jobs: int = -1,
+    *,
+    groups: Optional[np.ndarray] = None,
+    n_perm: int = 0,
+    base_seed: int = 42,
 ) -> List[Dict[str, Any]]:
     """Compute condition effects for multiple features in parallel."""
     if n_jobs == -1:
@@ -205,12 +210,30 @@ def parallel_condition_effects(
 
     if n_jobs == 1 or len(feature_columns) < 10:
         return [
-            _compute_single_condition_effect(col, features_df, pain_mask, nonpain_mask, min_samples)
+            _compute_single_condition_effect(
+                col,
+                features_df,
+                pain_mask,
+                nonpain_mask,
+                min_samples,
+                groups=groups,
+                n_perm=n_perm,
+                base_seed=base_seed,
+            )
             for col in feature_columns
         ]
 
     results = Parallel(n_jobs=n_jobs, backend="loky")(
-        delayed(_compute_single_condition_effect)(col, features_df, pain_mask, nonpain_mask, min_samples)
+        delayed(_compute_single_condition_effect)(
+            col,
+            features_df,
+            pain_mask,
+            nonpain_mask,
+            min_samples,
+            groups=groups,
+            n_perm=n_perm,
+            base_seed=base_seed,
+        )
         for col in feature_columns
     )
 
@@ -223,6 +246,10 @@ def _compute_single_condition_effect(
     pain_mask: np.ndarray,
     nonpain_mask: np.ndarray,
     min_samples: int,
+    *,
+    groups: Optional[np.ndarray] = None,
+    n_perm: int = 0,
+    base_seed: int = 42,
 ) -> Optional[Dict[str, Any]]:
     """Compute condition effect for a single feature."""
     from scipy import stats
@@ -263,6 +290,50 @@ def _compute_single_condition_effect(
             t_stat = np.nan
             p_val = np.nan
 
+    p_perm = np.nan
+    if n_perm and int(n_perm) > 0:
+        # Block-aware label shuffling (e.g., within run_id) to reduce temporal/run confounds.
+        finite_mask = np.isfinite(vals) & (pain_mask | nonpain_mask)
+        v = vals[finite_mask].astype(float, copy=False)
+        labels = pain_mask[finite_mask].astype(bool, copy=False)
+        if v.size >= 4 and labels.any() and (~labels).any():
+            obs = float(np.abs(np.nanmean(v[labels]) - np.nanmean(v[~labels])))
+            rng_seed = int(
+                base_seed
+                + (int.from_bytes(hashlib.sha256(str(col).encode("utf-8")).digest()[:8], "little") % 2_000_000_000)
+            )
+            rng = np.random.default_rng(rng_seed)
+
+            groups_v = None
+            if groups is not None:
+                try:
+                    g_all = np.asarray(groups)
+                    if g_all.shape[0] == vals.shape[0]:
+                        g_sub = g_all[finite_mask]
+                        # If group labels are partially missing, fall back to ungrouped permutation.
+                        if not pd.isna(g_sub).any():
+                            groups_v = g_sub
+                except Exception:
+                    groups_v = None
+
+            exceed = 1
+            denom = int(n_perm) + 1
+            for _ in range(int(n_perm)):
+                if groups_v is None:
+                    perm_lab = labels[rng.permutation(len(labels))]
+                else:
+                    perm_lab = labels.copy()
+                    for g in np.unique(groups_v):
+                        idx = np.where(groups_v == g)[0]
+                        if idx.size <= 1:
+                            continue
+                        perm_lab[idx] = labels[idx][rng.permutation(idx.size)]
+
+                stat = float(np.abs(np.nanmean(v[perm_lab]) - np.nanmean(v[~perm_lab])))
+                if stat >= obs - 1e-12:
+                    exceed += 1
+            p_perm = float(exceed / denom)
+
     interp = interpret_effect_size(g) if np.isfinite(g) else "unknown"
 
     return {
@@ -275,6 +346,9 @@ def _compute_single_condition_effect(
         "effect_interpretation": interp,
         "t_statistic": float(t_stat),
         "p_value": float(p_val),
+        "p_raw": float(p_val),
+        "p_perm": float(p_perm) if np.isfinite(p_perm) else np.nan,
+        "n_permutations": int(n_perm) if int(n_perm) > 0 else 0,
         "n_pain": len(pain_valid),
         "n_nonpain": len(nonpain_valid),
     }
@@ -435,7 +509,6 @@ __all__ = [
     "parallel_stability_features",
     "parallel_influence_features",
 ]
-
 
 
 

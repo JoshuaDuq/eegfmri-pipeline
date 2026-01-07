@@ -2163,6 +2163,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
+		case optSaveSubjectLevelFeatures:
+			label = "Save Subject-Level"
+			value = m.boolToOnOff(m.saveSubjectLevelFeatures)
+			hint = "Space to toggle"
 		case optFeatGroupExecution:
 			label = "▸ Execution"
 			hint = "Space to toggle"
@@ -2583,6 +2587,45 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "partial-correlation covariate"
 		case optControlOrder:
 			return "Control Trial Order", m.boolToOnOff(m.controlTrialOrder), "partial-correlation covariate"
+		case optRunAdjustmentEnabled:
+			return "Run Adjustment", m.boolToOnOff(m.runAdjustmentEnabled), "run-aware controls/aggregation"
+		case optRunAdjustmentColumn:
+			val := m.runAdjustmentColumn
+			if strings.TrimSpace(val) == "" {
+				val = "(default: run_id)"
+			}
+			if m.editingText && m.editingTextField == textFieldRunAdjustmentColumn {
+				val = textDisplay
+			}
+			hint := "run identifier column"
+			if !m.runAdjustmentEnabled {
+				hint = hint + " (enable Run Adjustment)"
+			} else if len(m.availableColumns) > 0 {
+				max := 4
+				if len(m.availableColumns) < max {
+					max = len(m.availableColumns)
+				}
+				suffix := ""
+				if len(m.availableColumns) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
+				}
+				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+			}
+			return "Run Column", val, hint
+		case optRunAdjustmentIncludeInCorrelations:
+			if !m.runAdjustmentEnabled {
+				return "Run Dummies in Corr", "N/A", "enable Run Adjustment"
+			}
+			return "Run Dummies in Corr", m.boolToOnOff(m.runAdjustmentIncludeInCorrelations), "add to partial covariates"
+		case optRunAdjustmentMaxDummies:
+			if !m.runAdjustmentEnabled {
+				return "Max Run Dummies", "N/A", "enable Run Adjustment"
+			}
+			val := fmt.Sprintf("%d", m.runAdjustmentMaxDummies)
+			if m.editingNumber && m.isCurrentlyEditing(optRunAdjustmentMaxDummies) {
+				val = numberDisplay
+			}
+			return "Max Run Dummies", val, "skip if > N levels"
 		case optTrialTableOnlyMode:
 			return "Trial-Table Only", m.boolToOnOff(m.trialTableOnly), "skip temporal/cluster stages"
 		case optFDRAlpha:
@@ -2692,6 +2735,53 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Breakpoint Q High", val, "quantile bound"
+		case optPainResidualCrossfitEnabled:
+			if !m.painResidualEnabled {
+				return "Residual Crossfit", "N/A", "enable Pain Residual"
+			}
+			return "Residual Crossfit", m.boolToOnOff(m.painResidualCrossfitEnabled), "out-of-run temperature→rating"
+		case optPainResidualCrossfitGroupColumn:
+			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+				return "Crossfit Group Col", "N/A", "enable Residual Crossfit"
+			}
+			val := m.painResidualCrossfitGroupColumn
+			if strings.TrimSpace(val) == "" {
+				val = "(default: run column)"
+			}
+			if m.editingText && m.editingTextField == textFieldPainResidualCrossfitGroupColumn {
+				val = textDisplay
+			}
+			return "Crossfit Group Col", val, "GroupKFold column (blank=run column)"
+		case optPainResidualCrossfitNSplits:
+			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+				return "Crossfit Splits", "N/A", "enable Residual Crossfit"
+			}
+			val := fmt.Sprintf("%d", m.painResidualCrossfitNSplits)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualCrossfitNSplits) {
+				val = numberDisplay
+			}
+			return "Crossfit Splits", val, "n_splits (>=2)"
+		case optPainResidualCrossfitMethod:
+			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+				return "Crossfit Method", "N/A", "enable Residual Crossfit"
+			}
+			v := "spline"
+			if m.painResidualCrossfitMethod == 1 {
+				v = "poly"
+			}
+			return "Crossfit Method", v, "spline | poly"
+		case optPainResidualCrossfitSplineKnots:
+			if !m.painResidualEnabled || !m.painResidualCrossfitEnabled {
+				return "Crossfit Knots", "N/A", "enable Residual Crossfit"
+			}
+			if m.painResidualCrossfitMethod == 1 {
+				return "Crossfit Knots", "N/A", "poly method"
+			}
+			val := fmt.Sprintf("%d", m.painResidualCrossfitSplineKnots)
+			if m.editingNumber && m.isCurrentlyEditing(optPainResidualCrossfitSplineKnots) {
+				val = numberDisplay
+			}
+			return "Crossfit Knots", val, "spline knots (>=3)"
 
 		// Confounds
 		case optConfoundsAddAsCovariates:
@@ -2962,7 +3052,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optConditionCompareColumn:
 			val := m.conditionCompareColumn
 			if val == "" {
-				val = "(default: pain_binary_coded)"
+				val = "(auto: from event_columns.pain_binary)"
 			}
 			if m.editingText && m.editingTextField == textFieldConditionCompareColumn {
 				val = textDisplay
@@ -3001,6 +3091,23 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableWindows[:max], " "), suffix)
 			}
 			return "Compare Windows", val, hint
+		case optConditionCompareValues:
+			val := m.conditionCompareValues
+			if val == "" {
+				val = "(auto: all unique values)"
+			}
+			if m.editingText && m.editingTextField == textFieldConditionCompareValues {
+				val = textDisplay
+			}
+			return "Compare Values", val, "comma-separated values in column (e.g., 0,1 or pain,nonpain)"
+		case optConditionWindowPrimaryUnit:
+			v := "trial"
+			if m.conditionWindowPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Window Unit", v, "trial | run_mean"
+		case optConditionPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.conditionPermutationPrimary), "within-run/block when available"
 		case optConditionFailFast:
 			return "Fail Fast", m.boolToOnOff(m.conditionFailFast), "error if split fails"
 		case optConditionEffectThreshold:
@@ -3130,6 +3237,18 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Target: temperature", m.boolToOnOff(m.correlationsTargetTemperature), "include temperature"
 		case optCorrelationsTargetPainResidual:
 			return "Target: pain_residual", m.boolToOnOff(m.correlationsTargetPainResidual), "include residual"
+		case optCorrelationsPreferPainResidual:
+			return "Prefer pain_residual", m.boolToOnOff(m.correlationsPreferPainResidual), "auto target selection"
+		case optCorrelationsUseCrossfitPainResidual:
+			return "Use pain_residual_cv", m.boolToOnOff(m.correlationsUseCrossfitResidual), "requires residual crossfit"
+		case optCorrelationsPrimaryUnit:
+			v := "trial"
+			if m.correlationsPrimaryUnit == 1 {
+				v = "run_mean"
+			}
+			return "Primary Unit", v, "trial | run_mean"
+		case optCorrelationsPermutationPrimary:
+			return "Permutation p-primary", m.boolToOnOff(m.correlationsPermutationPrimary), "within-run/block when available"
 
 		// Cluster
 		case optClusterThreshold:
@@ -3432,11 +3551,26 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
 	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
 	notchVal := fmt.Sprintf("%d Hz", m.prepNotch)
+	lineFreqVal := fmt.Sprintf("%d Hz", m.prepLineFreq)
 	icaMethodVal := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
 	icaCompVal := fmt.Sprintf("%.2f", m.prepICAComp)
 	probThreshVal := fmt.Sprintf("%.1f", m.prepProbThresh)
 	tminVal := fmt.Sprintf("%.1f s", m.prepEpochsTmin)
 	tmaxVal := fmt.Sprintf("%.1f s", m.prepEpochsTmax)
+	var baselineVal string
+	if m.prepEpochsNoBaseline {
+		baselineVal = "N/A"
+	} else if m.prepEpochsBaselineStart == 0 && m.prepEpochsBaselineEnd == 0 {
+		baselineVal = "(default)"
+	} else {
+		baselineVal = fmt.Sprintf("%.2f to %.2f s", m.prepEpochsBaselineStart, m.prepEpochsBaselineEnd)
+	}
+	var rejectVal string
+	if m.prepEpochsReject == 0 {
+		rejectVal = "(none)"
+	} else {
+		rejectVal = fmt.Sprintf("%.0f µV", m.prepEpochsReject)
+	}
 
 	// Input overrides
 	if m.editingNumber {
@@ -3452,6 +3586,8 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			hFreqVal = buffer
 		case m.isCurrentlyEditing(optPrepNotch):
 			notchVal = buffer
+		case m.isCurrentlyEditing(optPrepLineFreq):
+			lineFreqVal = buffer
 		case m.isCurrentlyEditing(optPrepICAComp):
 			icaCompVal = buffer
 		case m.isCurrentlyEditing(optPrepProbThresh):
@@ -3460,6 +3596,10 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			tminVal = buffer
 		case m.isCurrentlyEditing(optPrepEpochsTmax):
 			tmaxVal = buffer
+		case m.isCurrentlyEditing(optPrepEpochsBaseline):
+			baselineVal = buffer
+		case m.isCurrentlyEditing(optPrepEpochsReject):
+			rejectVal = buffer
 		}
 	}
 
@@ -3479,6 +3619,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		{"L-Freq", lFreqVal, "High-pass filter", ""},
 		{"H-Freq", hFreqVal, "Low-pass filter", ""},
 		{"Notch", notchVal, "Line noise filter", ""},
+		{"Line Freq", lineFreqVal, "EEG line frequency (50/60)", ""},
 
 		{"ICA Method", icaMethodVal, "Algorithm (fastica/infomax/picard)", "ICA Fitting"},
 		{"ICA Components", icaCompVal, "Components or variance fraction", ""},
@@ -3487,6 +3628,9 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 		{"Epochs Tmin", tminVal, "Start of epoch", "Epoching"},
 		{"Epochs Tmax", tmaxVal, "End of epoch", ""},
+		{"No Baseline", m.boolToOnOff(m.prepEpochsNoBaseline), "Disable baseline correction", ""},
+		{"Baseline Window", baselineVal, "Baseline start to end (s)", ""},
+		{"Reject (µV)", rejectVal, "Peak-to-peak threshold", ""},
 	}
 
 	for i, opt := range options {

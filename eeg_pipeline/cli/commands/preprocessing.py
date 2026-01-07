@@ -99,6 +99,16 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="ICA label probability threshold",
     )
     prep_group.add_argument(
+        "--ica-labels-to-keep",
+        nargs="+",
+        help="ICA component labels to keep (e.g., brain other)",
+    )
+    prep_group.add_argument(
+        "--line-freq",
+        type=int,
+        help="Line frequency for EEG data (Hz), typically 50 or 60",
+    )
+    prep_group.add_argument(
         "--tmin",
         type=float,
         help="Epoch start time (s)",
@@ -107,6 +117,23 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--tmax",
         type=float,
         help="Epoch end time (s)",
+    )
+    prep_group.add_argument(
+        "--baseline",
+        nargs=2,
+        type=float,
+        metavar=("START", "END"),
+        help="Epoch baseline window (start end) in seconds, e.g., -0.2 0",
+    )
+    prep_group.add_argument(
+        "--no-baseline",
+        action="store_true",
+        help="Disable epoch baseline correction",
+    )
+    prep_group.add_argument(
+        "--reject",
+        type=float,
+        help="Peak-to-peak amplitude rejection threshold (µV)",
     )
 
     add_path_args(parser)
@@ -143,12 +170,23 @@ def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any
         config.setdefault("ica", {})["n_components"] = args.ica_components
     if args.prob_threshold:
         config.setdefault("ica", {})["probability_threshold"] = args.prob_threshold
+    if args.ica_labels_to_keep:
+        config.setdefault("ica", {})["labels_to_keep"] = args.ica_labels_to_keep
+    if args.line_freq:
+        config.setdefault("preprocessing", {})["line_freq"] = args.line_freq
         
     # Epoch overrides
     if args.tmin is not None:
         config.setdefault("epochs", {})["tmin"] = args.tmin
     if args.tmax is not None:
         config.setdefault("epochs", {})["tmax"] = args.tmax
+    if args.baseline:
+        config.setdefault("epochs", {})["baseline"] = tuple(args.baseline)
+    if args.no_baseline:
+        config.setdefault("epochs", {})["baseline"] = None
+    if args.reject is not None:
+        # Convert µV to V for MNE (MNE uses V internally)
+        config.setdefault("epochs", {})["reject"] = {"eeg": args.reject * 1e-6}
     
     pipeline = PreprocessingPipeline(config=config)
     

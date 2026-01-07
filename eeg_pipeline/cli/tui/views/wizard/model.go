@@ -230,8 +230,11 @@ const (
 	textFieldConfoundsQCColumnPatterns
 	textFieldConditionCompareColumn
 	textFieldConditionCompareWindows
+	textFieldConditionCompareValues
 	textFieldTemporalConditionColumn
 	textFieldTemporalFilterValue
+	textFieldRunAdjustmentColumn
+	textFieldPainResidualCrossfitGroupColumn
 	// Features advanced config text fields
 	textFieldPACPairs
 	textFieldBurstBands
@@ -860,6 +863,9 @@ type Model struct {
 	failOnMissingWindows     bool
 	failOnMissingNamedWindow bool
 
+	// Storage configuration
+	saveSubjectLevelFeatures bool
+
 	// Asymmetry
 	asymmetryChannelPairsSpec string // e.g. F3:F4,C3:C4
 
@@ -986,6 +992,12 @@ type Model struct {
 	behaviorComputeBayesFactors  bool
 	behaviorComputeLosoStability bool
 
+	// Run adjustment (subject-level; optional)
+	runAdjustmentEnabled               bool
+	runAdjustmentColumn                string
+	runAdjustmentIncludeInCorrelations bool
+	runAdjustmentMaxDummies            int
+
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
 	behaviorGroupGeneralExpanded      bool
 	behaviorGroupTrialTableExpanded   bool
@@ -1029,6 +1041,13 @@ type Model struct {
 	painResidualBreakpointCandidates int
 	painResidualBreakpointQlow       float64
 	painResidualBreakpointQhigh      float64
+
+	// Pain residual cross-fit (out-of-run prediction)
+	painResidualCrossfitEnabled     bool
+	painResidualCrossfitGroupColumn string
+	painResidualCrossfitNSplits     int
+	painResidualCrossfitMethod      int // 0=spline, 1=poly
+	painResidualCrossfitSplineKnots int
 
 	// Confounds
 	confoundsAddAsCovariates  bool
@@ -1103,6 +1122,10 @@ type Model struct {
 	correlationsTargetRating       bool
 	correlationsTargetTemperature  bool
 	correlationsTargetPainResidual bool
+	correlationsPreferPainResidual  bool
+	correlationsUseCrossfitResidual bool
+	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
+	correlationsPermutationPrimary  bool
 
 	// Pain sensitivity
 
@@ -1134,6 +1157,8 @@ type Model struct {
 
 	// Condition extras
 	conditionFailFast bool
+	conditionPermutationPrimary bool
+	conditionWindowPrimaryUnit  int // 0=trial, 1=run_mean
 	// Cluster-specific
 	clusterThreshold float64 // Forming threshold for clusters
 	clusterMinSize   int     // Minimum cluster size
@@ -1151,6 +1176,7 @@ type Model struct {
 	conditionEffectThreshold float64 // Min effect size to report
 	conditionCompareColumn   string  // Column to use for condition split (e.g., pain_binary_coded)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
+	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
 
 	// Decoding pipeline advanced config
 	decodingNPerm int  // Permutations for significance test
@@ -1181,18 +1207,23 @@ type Model struct {
 	icaLabelsToKeep string // Comma-separated ICA labels (e.g., "brain,other")
 
 	// Preprocessing pipeline advanced config
-	prepUsePyprep   bool
-	prepUseIcalabel bool
-	prepNJobs       int
-	prepResample    int
-	prepLFreq       float64
-	prepHFreq       float64
-	prepNotch       int
-	prepICAMethod   int // 0: fastica, 1: infomax, 2: picard
-	prepICAComp     float64
-	prepProbThresh  float64
-	prepEpochsTmin  float64
-	prepEpochsTmax  float64
+	prepUsePyprep           bool
+	prepUseIcalabel         bool
+	prepNJobs               int
+	prepResample            int
+	prepLFreq               float64
+	prepHFreq               float64
+	prepNotch               int
+	prepICAMethod           int // 0: fastica, 1: infomax, 2: picard
+	prepICAComp             float64
+	prepProbThresh          float64
+	prepEpochsTmin          float64
+	prepEpochsTmax          float64
+	prepLineFreq            int     // Line frequency (50 or 60 Hz)
+	prepEpochsBaselineStart float64 // Epoch baseline start (seconds)
+	prepEpochsBaselineEnd   float64 // Epoch baseline end (seconds)
+	prepEpochsNoBaseline    bool    // Disable baseline correction
+	prepEpochsReject        float64 // Peak-to-peak rejection threshold (µV)
 
 	// Utilities (raw-to-bids/merge) advanced config
 	rawMontage           string
@@ -1426,6 +1457,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		failOnMissingWindows:      false,
 		failOnMissingNamedWindow:  true,
+		saveSubjectLevelFeatures:  true,
 		asymmetryChannelPairsSpec: "",
 		// Behavior defaults
 		correlationMethod:     "spearman",
@@ -1443,6 +1475,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorComputeChangeScores:  true,
 		behaviorComputeBayesFactors:  false,
 		behaviorComputeLosoStability: true,
+		runAdjustmentEnabled:               false,
+		runAdjustmentColumn:                "run_id",
+		runAdjustmentIncludeInCorrelations: true,
+		runAdjustmentMaxDummies:            20,
 
 		trialTableFormat:          1,
 		trialTableIncludeFeatures: true,
@@ -1467,6 +1503,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		painResidualBreakpointCandidates: 15,
 		painResidualBreakpointQlow:       0.15,
 		painResidualBreakpointQhigh:      0.85,
+		painResidualCrossfitEnabled:      false,
+		painResidualCrossfitGroupColumn:  "",
+		painResidualCrossfitNSplits:      5,
+		painResidualCrossfitMethod:       0,
+		painResidualCrossfitSplineKnots:  5,
 
 		confoundsAddAsCovariates:  false,
 		confoundsMaxCovariates:    3,
@@ -1534,6 +1575,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsTargetRating:       true,
 		correlationsTargetTemperature:  true,
 		correlationsTargetPainResidual: true,
+		correlationsPreferPainResidual:  true,
+		correlationsUseCrossfitResidual: false,
+		correlationsPrimaryUnit:         0,
+		correlationsPermutationPrimary:  false,
 
 		reportTopN:               15,
 		temporalResolutionMs:     50,
@@ -1569,6 +1614,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Condition defaults
 		conditionEffectThreshold: 0.5,
 		conditionFailFast:        true,
+		conditionPermutationPrimary: false,
+		conditionWindowPrimaryUnit:  0,
 		// Decoding defaults
 		decodingNPerm:         0,
 		innerSplits:           3,
@@ -1604,18 +1651,23 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		plotSavefigDpiIndex: 2,
 
 		// Preprocessing defaults
-		prepUsePyprep:   true,
-		prepUseIcalabel: true,
-		prepNJobs:       1,
-		prepResample:    500,
-		prepLFreq:       0.1,
-		prepHFreq:       100.0,
-		prepNotch:       60,
-		prepICAMethod:   0,
-		prepICAComp:     0.99,
-		prepProbThresh:  0.8,
-		prepEpochsTmin:  -5.0,
-		prepEpochsTmax:  12.0,
+		prepUsePyprep:           true,
+		prepUseIcalabel:         true,
+		prepNJobs:               1,
+		prepResample:            500,
+		prepLFreq:               0.1,
+		prepHFreq:               100.0,
+		prepNotch:               60,
+		prepICAMethod:           0,
+		prepICAComp:             0.99,
+		prepProbThresh:          0.8,
+		prepEpochsTmin:          -5.0,
+		prepEpochsTmax:          12.0,
+		prepLineFreq:            60,
+		prepEpochsBaselineStart: 0,
+		prepEpochsBaselineEnd:   0,
+		prepEpochsNoBaseline:    false,
+		prepEpochsReject:        0,
 
 		// Utilities defaults
 		rawMontage:           "easycap-M1",
@@ -2589,10 +2641,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.conditionCompareColumn
 	case textFieldConditionCompareWindows:
 		return m.conditionCompareWindows
+	case textFieldConditionCompareValues:
+		return m.conditionCompareValues
 	case textFieldTemporalConditionColumn:
 		return m.temporalConditionColumn
 	case textFieldTemporalFilterValue:
 		return m.temporalFilterValue
+	case textFieldRunAdjustmentColumn:
+		return m.runAdjustmentColumn
+	case textFieldPainResidualCrossfitGroupColumn:
+		return m.painResidualCrossfitGroupColumn
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -2825,10 +2883,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.conditionCompareColumn = strings.TrimSpace(value)
 	case textFieldConditionCompareWindows:
 		m.conditionCompareWindows = strings.TrimSpace(value)
+	case textFieldConditionCompareValues:
+		m.conditionCompareValues = strings.TrimSpace(value)
 	case textFieldTemporalConditionColumn:
 		m.temporalConditionColumn = strings.TrimSpace(value)
 	case textFieldTemporalFilterValue:
 		m.temporalFilterValue = strings.TrimSpace(value)
+	case textFieldRunAdjustmentColumn:
+		m.runAdjustmentColumn = strings.TrimSpace(value)
+	case textFieldPainResidualCrossfitGroupColumn:
+		m.painResidualCrossfitGroupColumn = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -3090,6 +3154,8 @@ const (
 
 	optFailOnMissingWindows
 	optFailOnMissingNamedWindow
+	// Storage options
+	optSaveSubjectLevelFeatures
 	// Behavior options - General
 	optCorrMethod
 	optBootstrap
@@ -3097,6 +3163,10 @@ const (
 	optRNGSeed
 	optControlTemp
 	optControlOrder
+	optRunAdjustmentEnabled
+	optRunAdjustmentColumn
+	optRunAdjustmentIncludeInCorrelations
+	optRunAdjustmentMaxDummies
 	optTrialTableOnlyMode
 	optFDRAlpha
 	// Behavior options - Cluster
@@ -3117,6 +3187,9 @@ const (
 	optConditionFailFast
 	optConditionCompareColumn
 	optConditionCompareWindows
+	optConditionCompareValues
+	optConditionWindowPrimaryUnit
+	optConditionPermutationPrimary
 	// Behavior options - Trial table / residual
 	optTrialTableFormat
 	optTrialTableIncludeFeatures
@@ -3139,6 +3212,11 @@ const (
 	optPainResidualBreakpointCandidates
 	optPainResidualBreakpointQlow
 	optPainResidualBreakpointQhigh
+	optPainResidualCrossfitEnabled
+	optPainResidualCrossfitGroupColumn
+	optPainResidualCrossfitNSplits
+	optPainResidualCrossfitMethod
+	optPainResidualCrossfitSplineKnots
 	// Behavior options - General extra
 	optRobustCorrelation
 	optBehaviorNJobs
@@ -3214,6 +3292,10 @@ const (
 	optCorrelationsTargetRating
 	optCorrelationsTargetTemperature
 	optCorrelationsTargetPainResidual
+	optCorrelationsPreferPainResidual
+	optCorrelationsUseCrossfitPainResidual
+	optCorrelationsPrimaryUnit
+	optCorrelationsPermutationPrimary
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
@@ -3261,6 +3343,10 @@ const (
 	optPrepProbThresh
 	optPrepEpochsTmin
 	optPrepEpochsTmax
+	optPrepLineFreq
+	optPrepEpochsBaseline
+	optPrepEpochsNoBaseline
+	optPrepEpochsReject
 	// Raw-to-BIDS options
 	optRawMontage
 	optRawLineFreq
@@ -3546,6 +3632,7 @@ func (m Model) getFeaturesOptions() []optionType {
 
 	options = append(options, optFeatGroupStorage)
 	if m.featGroupStorageExpanded {
+		options = append(options, optSaveSubjectLevelFeatures)
 	}
 
 	options = append(options, optFeatGroupExecution)
@@ -3567,7 +3654,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	options := []optionType{optUseDefaults}
 
 	if mode == "full" || mode == "bad-channels" {
-		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch)
+		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq)
 	}
 
 	if mode == "full" || mode == "ica" {
@@ -3575,7 +3662,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	}
 
 	if mode == "full" || mode == "epochs" {
-		options = append(options, optPrepEpochsTmin, optPrepEpochsTmax)
+		options = append(options, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsNoBaseline, optPrepEpochsBaseline, optPrepEpochsReject)
 	}
 
 	return options
@@ -3983,6 +4070,10 @@ func (m Model) getBehaviorOptions() []optionType {
 			optBehaviorNJobs,
 			optControlTemp,
 			optControlOrder,
+			optRunAdjustmentEnabled,
+			optRunAdjustmentColumn,
+			optRunAdjustmentIncludeInCorrelations,
+			optRunAdjustmentMaxDummies,
 			optTrialTableOnlyMode,
 			optFDRAlpha,
 			optComputeChangeScores,
@@ -4017,6 +4108,11 @@ func (m Model) getBehaviorOptions() []optionType {
 				optPainResidualBreakpointCandidates,
 				optPainResidualBreakpointQlow,
 				optPainResidualBreakpointQhigh,
+				optPainResidualCrossfitEnabled,
+				optPainResidualCrossfitGroupColumn,
+				optPainResidualCrossfitNSplits,
+				optPainResidualCrossfitMethod,
+				optPainResidualCrossfitSplineKnots,
 			)
 		}
 	}
@@ -4029,6 +4125,10 @@ func (m Model) getBehaviorOptions() []optionType {
 				optCorrelationsTargetRating,
 				optCorrelationsTargetTemperature,
 				optCorrelationsTargetPainResidual,
+				optCorrelationsPreferPainResidual,
+				optCorrelationsPrimaryUnit,
+				optCorrelationsPermutationPrimary,
+				optCorrelationsUseCrossfitPainResidual,
 			)
 		}
 	}
@@ -4169,7 +4269,15 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("condition") {
 		options = append(options, optBehaviorGroupCondition)
 		if m.behaviorGroupConditionExpanded {
-			options = append(options, optConditionCompareColumn, optConditionCompareWindows, optConditionFailFast, optConditionEffectThreshold)
+			options = append(options,
+				optConditionCompareColumn,
+				optConditionCompareValues,
+				optConditionCompareWindows,
+				optConditionWindowPrimaryUnit,
+				optConditionPermutationPrimary,
+				optConditionFailFast,
+				optConditionEffectThreshold,
+			)
 		}
 	}
 

@@ -1438,6 +1438,13 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		args = append(args, "--no-fail-on-missing-named-window")
 	}
 
+	// Storage options
+	if m.saveSubjectLevelFeatures {
+		args = append(args, "--save-subject-level-features")
+	} else {
+		args = append(args, "--no-save-subject-level-features")
+	}
+
 	return args
 }
 
@@ -1477,6 +1484,21 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	if !m.controlTrialOrder {
 		args = append(args, "--no-control-trial-order")
+	}
+
+	// Run adjustment (subject-level; optional)
+	if m.runAdjustmentEnabled {
+		args = append(args, "--run-adjustment")
+		col := strings.TrimSpace(m.runAdjustmentColumn)
+		if col != "" && col != "run_id" {
+			args = append(args, "--run-adjustment-column", col)
+		}
+		if !m.runAdjustmentIncludeInCorrelations {
+			args = append(args, "--no-run-adjustment-include-in-correlations")
+		}
+		if m.runAdjustmentMaxDummies != 20 {
+			args = append(args, "--run-adjustment-max-dummies", fmt.Sprintf("%d", m.runAdjustmentMaxDummies))
+		}
 	}
 	if !m.trialTableOnly {
 		args = append(args, "--no-trial-table-only")
@@ -1567,6 +1589,24 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.painResidualBreakpointQhigh != 0.85 {
 			args = append(args, "--pain-residual-breakpoint-quantile-high", fmt.Sprintf("%.3f", m.painResidualBreakpointQhigh))
+		}
+
+		// Optional cross-fit residualization (out-of-run prediction)
+		if m.painResidualEnabled && m.painResidualCrossfitEnabled {
+			args = append(args, "--pain-residual-crossfit")
+			if strings.TrimSpace(m.painResidualCrossfitGroupColumn) != "" {
+				args = append(args, "--pain-residual-crossfit-group-column", strings.TrimSpace(m.painResidualCrossfitGroupColumn))
+			}
+			if m.painResidualCrossfitNSplits != 5 {
+				args = append(args, "--pain-residual-crossfit-n-splits", fmt.Sprintf("%d", m.painResidualCrossfitNSplits))
+			}
+			cfMethods := []string{"spline", "poly"}
+			if m.painResidualCrossfitMethod >= 0 && m.painResidualCrossfitMethod < len(cfMethods) && m.painResidualCrossfitMethod != 0 {
+				args = append(args, "--pain-residual-crossfit-method", cfMethods[m.painResidualCrossfitMethod])
+			}
+			if m.painResidualCrossfitMethod == 0 && m.painResidualCrossfitSplineKnots != 5 {
+				args = append(args, "--pain-residual-crossfit-spline-n-knots", fmt.Sprintf("%d", m.painResidualCrossfitSplineKnots))
+			}
 		}
 	}
 
@@ -1799,6 +1839,18 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--correlations-targets")
 			args = append(args, targets...)
 		}
+		if !m.correlationsPreferPainResidual {
+			args = append(args, "--no-correlations-prefer-pain-residual")
+		}
+		if m.correlationsPrimaryUnit == 1 {
+			args = append(args, "--correlations-primary-unit", "run_mean")
+		}
+		if m.correlationsPermutationPrimary {
+			args = append(args, "--correlations-permutation-primary")
+		}
+		if m.correlationsUseCrossfitResidual {
+			args = append(args, "--correlations-use-crossfit-pain-residual")
+		}
 	}
 
 	// Report
@@ -1813,9 +1865,19 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.conditionCompareColumn) != "" {
 			args = append(args, "--condition-compare-column", strings.TrimSpace(m.conditionCompareColumn))
 		}
+		if strings.TrimSpace(m.conditionCompareValues) != "" {
+			args = append(args, "--condition-compare-values")
+			args = append(args, splitCSVList(m.conditionCompareValues)...)
+		}
 		if strings.TrimSpace(m.conditionCompareWindows) != "" {
 			args = append(args, "--condition-compare-windows")
 			args = append(args, splitSpaceList(m.conditionCompareWindows)...)
+		}
+		if m.conditionWindowPrimaryUnit == 1 {
+			args = append(args, "--condition-window-primary-unit", "run_mean")
+		}
+		if m.conditionPermutationPrimary {
+			args = append(args, "--condition-permutation-primary")
 		}
 		if !m.conditionFailFast {
 			args = append(args, "--no-condition-fail-fast")
@@ -2042,6 +2104,9 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepNotch != 60 {
 		args = append(args, "--notch", fmt.Sprintf("%d", m.prepNotch))
 	}
+	if m.prepLineFreq != 0 && m.prepLineFreq != 60 {
+		args = append(args, "--line-freq", fmt.Sprintf("%d", m.prepLineFreq))
+	}
 
 	// ICA
 	if m.prepICAMethod != 0 {
@@ -2065,6 +2130,14 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepEpochsTmax != 12.0 {
 		args = append(args, "--tmax", fmt.Sprintf("%.1f", m.prepEpochsTmax))
+	}
+	if m.prepEpochsNoBaseline {
+		args = append(args, "--no-baseline")
+	} else if m.prepEpochsBaselineStart != 0 || m.prepEpochsBaselineEnd != 0 {
+		args = append(args, "--baseline", fmt.Sprintf("%.2f", m.prepEpochsBaselineStart), fmt.Sprintf("%.2f", m.prepEpochsBaselineEnd))
+	}
+	if m.prepEpochsReject > 0 {
+		args = append(args, "--reject", fmt.Sprintf("%.0f", m.prepEpochsReject))
 	}
 
 	return args

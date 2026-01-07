@@ -15,6 +15,7 @@ import pandas as pd
 from scipy import stats
 
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+from eeg_pipeline.utils.analysis.stats.base import get_config_value
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.validation import validate_pain_binary_values
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
@@ -230,14 +231,63 @@ def split_by_condition(
     config: Any,
     logger: logging.Logger,
 ) -> Tuple[np.ndarray, np.ndarray, int, int]:
-    """Split trials into pain and non-pain conditions."""
+    """Split trials into two conditions based on a column and values.
+    
+    Supports user-configurable condition column and values via:
+    - config.event_columns.pain_binary: column name (or list of candidates)
+    - config.behavior_analysis.condition.compare_values: values to compare [val1, val2]
+    
+    If compare_values is not specified, defaults to [1, 0] for backward compatibility.
+    Returns (group1_mask, group2_mask, n_group1, n_group2).
+    """
     pain_col = get_pain_column_from_config(config, events_df)
 
     if pain_col is None or pain_col not in events_df.columns:
-        logger.error("Pain column not found in events")
+        logger.error("Condition column not found in events")
         return np.array([]), np.array([]), 0, 0
 
     raw = events_df[pain_col]
+    
+    # Get user-configured compare values
+    compare_values = get_config_value(config, "behavior_analysis.condition.compare_values", None)
+    
+    if compare_values and len(compare_values) >= 2:
+        # User specified explicit values to compare
+        val1, val2 = compare_values[0], compare_values[1]
+        logger.info(f"Using user-specified condition values: {val1} vs {val2} (column: {pain_col})")
+        
+        # Convert to appropriate types for comparison
+        condition_series = raw.copy()
+        if condition_series.dtype == object:
+            condition_series = condition_series.astype(str).str.strip().str.lower()
+            val1_str = str(val1).strip().lower()
+            val2_str = str(val2).strip().lower()
+            
+            group1_mask = condition_series == val1_str
+            group2_mask = condition_series == val2_str
+        else:
+            # Try numeric comparison
+            try:
+                condition_series = pd.to_numeric(condition_series, errors="coerce")
+                val1_num = float(val1) if str(val1).replace('.', '').replace('-', '').isdigit() else val1
+                val2_num = float(val2) if str(val2).replace('.', '').replace('-', '').isdigit() else val2
+                
+                group1_mask = condition_series == val1_num
+                group2_mask = condition_series == val2_num
+            except (ValueError, TypeError):
+                # Fallback to string comparison
+                condition_series = raw.astype(str).str.strip()
+                group1_mask = condition_series == str(val1).strip()
+                group2_mask = condition_series == str(val2).strip()
+        
+        n_group1 = int(group1_mask.sum())
+        n_group2 = int(group2_mask.sum())
+        
+        logger.info(f"Condition split: {n_group1} condition={val1}, {n_group2} condition={val2} trials")
+        
+        return group1_mask.to_numpy(), group2_mask.to_numpy(), n_group1, n_group2
+    
+    # Default behavior: use standard pain binary coding (1=pain, 0=nonpain)
     pain_series = raw.copy()
     if pain_series.dtype == object:
         mapped = (
@@ -273,12 +323,25 @@ def compute_condition_effects(
     logger: Optional[logging.Logger] = None,
     n_jobs: int = -1,
     config: Optional[Any] = None,
+    groups: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Compute effect sizes for pain vs non-pain comparison."""
     n_jobs_actual = get_n_jobs(config, n_jobs)
 
     if logger:
         logger.debug(f"Computing condition effects for {len(features_df.columns)} features (n_jobs={n_jobs_actual})")
+
+    perm_enabled = bool(get_config_value(config, "behavior_analysis.condition.permutation.enabled", False))
+    n_perm = int(
+        get_config_value(
+            config,
+            "behavior_analysis.condition.permutation.n_permutations",
+            get_config_value(config, "behavior_analysis.statistics.n_permutations", 0),
+        )
+        or 0
+    )
+    p_primary_mode = str(get_config_value(config, "behavior_analysis.condition.p_primary_mode", "asymptotic")).strip().lower()
+    base_seed = int(get_config_value(config, "behavior_analysis.statistics.base_seed", 42))
 
     feature_columns = list(features_df.columns)
     records = parallel_condition_effects(
@@ -288,6 +351,9 @@ def compute_condition_effects(
         nonpain_mask=nonpain_mask,
         min_samples=min_samples,
         n_jobs=n_jobs_actual,
+        groups=groups,
+        n_perm=n_perm if perm_enabled else 0,
+        base_seed=base_seed,
     )
 
     if not records:
@@ -295,7 +361,18 @@ def compute_condition_effects(
 
     df = pd.DataFrame(records)
 
-    df["q_value"] = fdr_bh(df["p_value"].values, alpha=fdr_alpha, config=config)
+    if "p_raw" not in df.columns:
+        df["p_raw"] = pd.to_numeric(df.get("p_value", np.nan), errors="coerce")
+    if "p_primary" not in df.columns:
+        use_perm = p_primary_mode in {"perm", "permutation", "perm_if_available", "permutation_if_available"}
+        if use_perm and "p_perm" in df.columns:
+            pprim = pd.to_numeric(df["p_perm"], errors="coerce")
+            fallback = pd.to_numeric(df["p_raw"], errors="coerce")
+            df["p_primary"] = pprim.where(pprim.notna(), fallback)
+        else:
+            df["p_primary"] = pd.to_numeric(df["p_raw"], errors="coerce")
+
+    df["q_value"] = fdr_bh(pd.to_numeric(df["p_primary"], errors="coerce").values, alpha=fdr_alpha, config=config)
     df["significant_fdr"] = df["q_value"] < fdr_alpha
 
     df = df.sort_values("hedges_g", key=abs, ascending=False)
@@ -306,4 +383,3 @@ def compute_condition_effects(
         logger.info(f"Condition effects: {n_sig}/{len(df)} FDR significant, {n_large} large effects")
 
     return df
-

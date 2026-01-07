@@ -55,6 +55,23 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-control-temperature", action="store_false", dest="control_temperature")
     compute_group.add_argument("--control-trial-order", action="store_true", default=None)
     compute_group.add_argument("--no-control-trial-order", action="store_false", dest="control_trial_order")
+    # Run adjustment (subject-level; optional)
+    compute_group.add_argument("--run-adjustment", action="store_true", default=None, dest="run_adjustment")
+    compute_group.add_argument("--no-run-adjustment", action="store_false", dest="run_adjustment")
+    compute_group.add_argument("--run-adjustment-column", type=str, default=None, help="Run identifier column name (e.g., run_id)")
+    compute_group.add_argument(
+        "--run-adjustment-include-in-correlations",
+        action="store_true",
+        default=None,
+        dest="run_adjustment_include_in_correlations",
+        help="Include run dummies in trial-table correlations partial covariates",
+    )
+    compute_group.add_argument(
+        "--no-run-adjustment-include-in-correlations",
+        action="store_false",
+        dest="run_adjustment_include_in_correlations",
+    )
+    compute_group.add_argument("--run-adjustment-max-dummies", type=int, default=None)
     compute_group.add_argument("--trial-table-only", action="store_true", default=None, dest="trial_table_only")
     compute_group.add_argument("--no-trial-table-only", action="store_false", dest="trial_table_only")
     compute_group.add_argument("--fdr-alpha", type=float, default=None)
@@ -157,6 +174,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     residual_group.add_argument("--pain-residual-breakpoint-candidates", type=int, default=None)
     residual_group.add_argument("--pain-residual-breakpoint-quantile-low", type=float, default=None)
     residual_group.add_argument("--pain-residual-breakpoint-quantile-high", type=float, default=None)
+    # Optional cross-fit residualization (out-of-run prediction)
+    residual_group.add_argument("--pain-residual-crossfit", action="store_true", default=None, dest="pain_residual_crossfit_enabled")
+    residual_group.add_argument("--no-pain-residual-crossfit", action="store_false", dest="pain_residual_crossfit_enabled")
+    residual_group.add_argument("--pain-residual-crossfit-group-column", type=str, default=None)
+    residual_group.add_argument("--pain-residual-crossfit-n-splits", type=int, default=None)
+    residual_group.add_argument("--pain-residual-crossfit-method", choices=["spline", "poly"], default=None)
+    residual_group.add_argument("--pain-residual-crossfit-spline-n-knots", type=int, default=None)
 
     confounds_group = parser.add_argument_group("Confounds options")
     confounds_group.add_argument("--confounds-add-as-covariates", action="store_true", default=None, dest="confounds_add_as_covariates")
@@ -247,6 +271,19 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
     correlations_group = parser.add_argument_group("Correlations (trial-table) options")
     correlations_group.add_argument("--correlations-targets", nargs="+", choices=["rating", "temperature", "pain_residual"], default=None)
+    correlations_group.add_argument("--correlations-primary-unit", choices=["trial", "run_mean"], default=None)
+    correlations_group.add_argument("--correlations-prefer-pain-residual", action="store_true", default=None, dest="correlations_prefer_pain_residual")
+    correlations_group.add_argument("--no-correlations-prefer-pain-residual", action="store_false", dest="correlations_prefer_pain_residual")
+    correlations_group.add_argument("--correlations-use-crossfit-pain-residual", action="store_true", default=None, dest="correlations_use_crossfit_pain_residual")
+    correlations_group.add_argument("--no-correlations-use-crossfit-pain-residual", action="store_false", dest="correlations_use_crossfit_pain_residual")
+    correlations_group.add_argument(
+        "--correlations-permutation-primary",
+        action="store_true",
+        default=None,
+        dest="correlations_permutation_primary",
+        help="Use within-run/block permutation p-values for p_primary when available",
+    )
+    correlations_group.add_argument("--no-correlations-permutation-primary", action="store_false", dest="correlations_permutation_primary")
 
     report_group = parser.add_argument_group("Report options")
     report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
@@ -310,8 +347,12 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-effect-threshold", type=float, default=None, help="Minimum effect size (Cohen's d) to report")
     condition_group.add_argument("--condition-min-trials", type=int, default=None, help="Minimum trials per condition")
     condition_group.add_argument("--condition-compare-column", type=str, default=None, help="Column name to use for condition split (default: pain_binary_coded)")
+    condition_group.add_argument("--condition-compare-values", nargs="+", default=None, metavar="VALUE", help="Values in the column to compare (e.g., 0 1 or pain nonpain)")
     condition_group.add_argument("--condition-compare-windows", nargs="+", default=None, metavar="WINDOW", help="Time windows to compare (e.g., baseline active)")
-    
+    condition_group.add_argument("--condition-window-primary-unit", choices=["trial", "run_mean"], default=None)
+    condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
+    condition_group.add_argument("--no-condition-permutation-primary", action="store_false", dest="condition_permutation_primary")
+
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
     plot_group.add_argument("--plots", nargs="+", metavar="PLOT")
@@ -341,6 +382,7 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         ba = config.setdefault("behavior_analysis", {})
         stats_cfg = ba.setdefault("statistics", {})
         corr_cfg = ba.setdefault("correlations", {})
+        run_adj_cfg = ba.setdefault("run_adjustment", {})
 
         rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
         if rng_seed is not None:
@@ -371,6 +413,16 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
 
         if getattr(args, "control_trial_order", None) is not None:
             ba["control_trial_order"] = bool(args.control_trial_order)
+
+        # Run adjustment (optional; paradigms may have run_id or none)
+        if getattr(args, "run_adjustment", None) is not None:
+            run_adj_cfg["enabled"] = bool(args.run_adjustment)
+        if getattr(args, "run_adjustment_column", None) is not None:
+            run_adj_cfg["column"] = str(args.run_adjustment_column).strip()
+        if getattr(args, "run_adjustment_include_in_correlations", None) is not None:
+            run_adj_cfg["include_in_correlations"] = bool(args.run_adjustment_include_in_correlations)
+        if getattr(args, "run_adjustment_max_dummies", None) is not None:
+            run_adj_cfg["max_dummies"] = int(args.run_adjustment_max_dummies)
         if getattr(args, "trial_table_only", None) is not None:
             ba.setdefault("trial_table_only", {})["enabled"] = bool(args.trial_table_only)
 
@@ -383,6 +435,17 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             corr_cfg["loso_stability"] = bool(args.loso_stability)
         if getattr(args, "compute_bayes_factors", None) is not None:
             corr_cfg["compute_bayes_factors"] = bool(args.compute_bayes_factors)
+
+        if getattr(args, "correlations_primary_unit", None) is not None:
+            corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+        if getattr(args, "correlations_prefer_pain_residual", None) is not None:
+            corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+        if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
+            corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
+        if getattr(args, "correlations_permutation_primary", None) is not None:
+            enabled = bool(args.correlations_permutation_primary)
+            corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+            corr_cfg.setdefault("permutation", {})["enabled"] = enabled
 
         if getattr(args, "consistency_enabled", None) is not None:
             ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
@@ -451,6 +514,18 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             bp["quantile_low"] = float(args.pain_residual_breakpoint_quantile_low)
         if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
             bp["quantile_high"] = float(args.pain_residual_breakpoint_quantile_high)
+
+        crossfit = pr.setdefault("crossfit", {})
+        if getattr(args, "pain_residual_crossfit_enabled", None) is not None:
+            crossfit["enabled"] = bool(args.pain_residual_crossfit_enabled)
+        if getattr(args, "pain_residual_crossfit_group_column", None) is not None:
+            crossfit["group_column"] = str(args.pain_residual_crossfit_group_column).strip()
+        if getattr(args, "pain_residual_crossfit_n_splits", None) is not None:
+            crossfit["n_splits"] = int(args.pain_residual_crossfit_n_splits)
+        if getattr(args, "pain_residual_crossfit_method", None) is not None:
+            crossfit["method"] = str(args.pain_residual_crossfit_method).strip().lower()
+        if getattr(args, "pain_residual_crossfit_spline_n_knots", None) is not None:
+            crossfit["spline_n_knots"] = int(args.pain_residual_crossfit_spline_n_knots)
 
         # Confounds
         cf = ba.setdefault("confounds", {})
@@ -626,6 +701,17 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             ba.setdefault("correlations", {})["feature_set"] = str(args.correlations_feature_set).strip().lower()
         if getattr(args, "correlations_targets", None) is not None:
             ba.setdefault("correlations", {})["targets"] = [str(t).strip().lower() for t in (args.correlations_targets or [])]
+        if getattr(args, "correlations_primary_unit", None) is not None:
+            ba.setdefault("correlations", {})["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+        if getattr(args, "correlations_prefer_pain_residual", None) is not None:
+            ba.setdefault("correlations", {})["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+        if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
+            ba.setdefault("correlations", {})["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
+        if getattr(args, "correlations_permutation_primary", None) is not None:
+            enabled = bool(args.correlations_permutation_primary)
+            corr = ba.setdefault("correlations", {})
+            corr["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+            corr.setdefault("permutation", {})["enabled"] = enabled
 
         # Report
         if getattr(args, "report_top_n", None) is not None:
@@ -640,9 +726,19 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             ba.setdefault("condition", {})["min_trials_per_condition"] = int(args.condition_min_trials)
         if getattr(args, "condition_compare_column", None) is not None:
             config.setdefault("event_columns", {})["pain_binary"] = str(args.condition_compare_column).strip()
+        if getattr(args, "condition_compare_values", None) is not None:
+            values = [str(v).strip() for v in (args.condition_compare_values or [])]
+            ba.setdefault("condition", {})["compare_values"] = values
         if getattr(args, "condition_compare_windows", None) is not None:
             windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
             ba.setdefault("condition", {})["compare_windows"] = windows
+        if getattr(args, "condition_window_primary_unit", None) is not None:
+            ba.setdefault("condition", {}).setdefault("window_comparison", {})["primary_unit"] = str(args.condition_window_primary_unit).strip().lower()
+        if getattr(args, "condition_permutation_primary", None) is not None:
+            enabled = bool(args.condition_permutation_primary)
+            cond = ba.setdefault("condition", {})
+            cond["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+            cond.setdefault("permutation", {})["enabled"] = enabled
 
         # Temporal
         temporal_cfg = ba.setdefault("temporal", {})

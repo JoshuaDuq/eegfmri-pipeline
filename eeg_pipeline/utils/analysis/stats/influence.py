@@ -335,7 +335,13 @@ def compute_influence_diagnostics(
                     covariates.append(c)
                     break
         if cfg.include_run_block:
-            for c in ["run", "block"]:
+            run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+            candidates = [run_col, "run_id", "run", "block"]
+            seen = set()
+            for c in candidates:
+                if not c or c in seen:
+                    continue
+                seen.add(c)
                 if c in trial_df.columns:
                     covariates.append(c)
 

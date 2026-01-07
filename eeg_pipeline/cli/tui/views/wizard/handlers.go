@@ -1113,6 +1113,8 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optFeatGroupStorage:
 		m.featGroupStorageExpanded = !m.featGroupStorageExpanded
+	case optSaveSubjectLevelFeatures:
+		m.saveSubjectLevelFeatures = !m.saveSubjectLevelFeatures
 		m.useDefaultAdvanced = false
 	case optFeatGroupExecution:
 		m.featGroupExecutionExpanded = !m.featGroupExecutionExpanded
@@ -1746,6 +1748,18 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optControlOrder:
 		m.controlTrialOrder = !m.controlTrialOrder
 		m.useDefaultAdvanced = false
+	case optRunAdjustmentEnabled:
+		m.runAdjustmentEnabled = !m.runAdjustmentEnabled
+		m.useDefaultAdvanced = false
+	case optRunAdjustmentColumn:
+		m.startTextEdit(textFieldRunAdjustmentColumn)
+		m.useDefaultAdvanced = false
+	case optRunAdjustmentIncludeInCorrelations:
+		m.runAdjustmentIncludeInCorrelations = !m.runAdjustmentIncludeInCorrelations
+		m.useDefaultAdvanced = false
+	case optRunAdjustmentMaxDummies:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optTrialTableOnlyMode:
 		m.trialTableOnly = !m.trialTableOnly
 		m.useDefaultAdvanced = false
@@ -1807,6 +1821,21 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
 		m.useDefaultAdvanced = false
 	case optPainResidualBreakpointCandidates, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainResidualCrossfitEnabled:
+		m.painResidualCrossfitEnabled = !m.painResidualCrossfitEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualCrossfitGroupColumn:
+		m.startTextEdit(textFieldPainResidualCrossfitGroupColumn)
+		m.useDefaultAdvanced = false
+	case optPainResidualCrossfitNSplits:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPainResidualCrossfitMethod:
+		m.painResidualCrossfitMethod = (m.painResidualCrossfitMethod + 1) % 2
+		m.useDefaultAdvanced = false
+	case optPainResidualCrossfitSplineKnots:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -2026,6 +2055,18 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.correlationsTargetPainResidual = true
 		}
 		m.useDefaultAdvanced = false
+	case optCorrelationsPreferPainResidual:
+		m.correlationsPreferPainResidual = !m.correlationsPreferPainResidual
+		m.useDefaultAdvanced = false
+	case optCorrelationsUseCrossfitPainResidual:
+		m.correlationsUseCrossfitResidual = !m.correlationsUseCrossfitResidual
+		m.useDefaultAdvanced = false
+	case optCorrelationsPrimaryUnit:
+		m.correlationsPrimaryUnit = (m.correlationsPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
+	case optCorrelationsPermutationPrimary:
+		m.correlationsPermutationPrimary = !m.correlationsPermutationPrimary
+		m.useDefaultAdvanced = false
 
 	// Temporal
 	case optTemporalResolutionMs, optTemporalTimeMinMs, optTemporalTimeMaxMs, optTemporalSmoothMs:
@@ -2131,6 +2172,15 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionCompareWindows:
 		m.startTextEdit(textFieldConditionCompareWindows)
 		m.useDefaultAdvanced = false
+	case optConditionCompareValues:
+		m.startTextEdit(textFieldConditionCompareValues)
+		m.useDefaultAdvanced = false
+	case optConditionWindowPrimaryUnit:
+		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2
+		m.useDefaultAdvanced = false
+	case optConditionPermutationPrimary:
+		m.conditionPermutationPrimary = !m.conditionPermutationPrimary
+		m.useDefaultAdvanced = false
 	case optConditionEffectThreshold:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -2193,7 +2243,7 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepUseIcalabel:
 		m.prepUseIcalabel = !m.prepUseIcalabel
 		m.useDefaultAdvanced = false
-	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax:
+	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPrepICAMethod:
@@ -2201,6 +2251,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optIcaLabelsToKeep:
 		m.startTextEdit(textFieldIcaLabelsToKeep)
+		m.useDefaultAdvanced = false
+	case optPrepEpochsNoBaseline:
+		m.prepEpochsNoBaseline = !m.prepEpochsNoBaseline
 		m.useDefaultAdvanced = false
 	}
 }
@@ -2835,6 +2888,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val > 0 && val <= 1 {
 			m.fdrAlpha = val
 		}
+	case optRunAdjustmentMaxDummies:
+		if val >= 1 {
+			m.runAdjustmentMaxDummies = int(val)
+		}
 
 	// Trial table thresholds
 	case optTrialTableRatingMin:
@@ -2866,6 +2923,14 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optPainResidualBreakpointQhigh:
 		if val > 0 && val < 1 {
 			m.painResidualBreakpointQhigh = val
+		}
+	case optPainResidualCrossfitNSplits:
+		if val >= 2 {
+			m.painResidualCrossfitNSplits = int(val)
+		}
+	case optPainResidualCrossfitSplineKnots:
+		if val >= 3 {
+			m.painResidualCrossfitSplineKnots = int(val)
 		}
 
 	// Confounds
@@ -3061,6 +3126,10 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 		if val > 0 {
 			m.prepNotch = int(val)
 		}
+	case optPrepLineFreq:
+		if val == 50 || val == 60 {
+			m.prepLineFreq = int(val)
+		}
 	case optPrepICAComp:
 		if val > 0 {
 			m.prepICAComp = val
@@ -3073,6 +3142,15 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 		m.prepEpochsTmin = val
 	case optPrepEpochsTmax:
 		m.prepEpochsTmax = val
+	case optPrepEpochsBaseline:
+		// For baseline, user enters a single number (start), and we assume end = 0
+		// A more sophisticated approach would use text field for "start end" format
+		m.prepEpochsBaselineStart = val
+		m.prepEpochsBaselineEnd = 0
+	case optPrepEpochsReject:
+		if val >= 0 {
+			m.prepEpochsReject = val
+		}
 	}
 }
 

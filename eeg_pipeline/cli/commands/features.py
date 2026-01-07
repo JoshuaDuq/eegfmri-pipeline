@@ -287,6 +287,10 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--fail-on-missing-named-window", action="store_true", default=None, help="Fail if a named time window is missing")
     parser.add_argument("--no-fail-on-missing-named-window", action="store_false", dest="fail_on_missing_named_window", help="Do not fail if a named time window is missing")
     
+    # Storage options
+    parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
+    parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
+    
     # Scientific Validity Options (new)
     parser.add_argument(
         "--itpc-method",
@@ -536,6 +540,10 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             config["feature_engineering.validation.fail_on_missing_windows"] = args.fail_on_missing_windows
         if getattr(args, "fail_on_missing_named_window", None) is not None:
             config["feature_engineering.validation.fail_on_missing_named_window"] = args.fail_on_missing_named_window
+        
+        # Storage options
+        if getattr(args, "save_subject_level_features", None) is not None:
+            config["feature_engineering.output.save_subject_level_features"] = args.save_subject_level_features
         
         # Scientific Validity Overrides (new)
         if getattr(args, "itpc_method", None) is not None:
