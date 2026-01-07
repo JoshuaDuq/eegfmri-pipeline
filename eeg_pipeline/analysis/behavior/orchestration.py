@@ -1560,6 +1560,8 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
         run_power_topomap_correlations,
     )
     from eeg_pipeline.utils.analysis.stats.temporal import compute_itpc_temporal_from_context
+    from eeg_pipeline.infra.tsv import write_tsv
+    from eeg_pipeline.infra.paths import ensure_dir
 
     status = {"time_frequency": "success", "temporal": "success", "itpc_temporal": "success", "topomap": "success"}
     tf_results = None
@@ -1580,12 +1582,8 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
         status["temporal"] = f"failed: {exc}"
         ctx.logger.error(f"Temporal correlations failed: {exc}")
 
-    # ITPC/ERDS temporal correlations based on feature selection
-    # If user explicitly selected feature files, use those
-    # If no explicit selection, default to running itpc and erds for temporal computation
     selected_features = ctx.selected_feature_files or ctx.feature_categories
     if not selected_features:
-        # No explicit selection - default to all temporal features for temporal computation
         selected_features = ["power", "itpc", "erds"]
         ctx.logger.info(f"No feature files specified, defaulting to all temporal features: {selected_features}")
     
@@ -1604,7 +1602,6 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
     else:
         status["itpc_temporal"] = "skipped (not selected)"
 
-    # ERDS temporal correlations (if 'erds' was selected in feature selection)
     erds_results = None
     if "erds" in selected_features:
         from eeg_pipeline.utils.analysis.stats.temporal import compute_erds_temporal_from_context
@@ -1621,6 +1618,21 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
             ctx.logger.error(f"ERDS temporal correlations failed: {exc}")
     else:
         status["erds_temporal"] = "skipped (not selected)"
+
+    all_temporal_records = []
+    for res in [temporal_results, itpc_results, erds_results]:
+        if res and "records" in res:
+            all_temporal_records.extend(res["records"])
+    
+    if all_temporal_records:
+        out_dir = ctx.stats_dir / "temporal_correlations"
+        ensure_dir(out_dir)
+        sfx = "_spearman" if ctx.use_spearman else "_pearson"
+        combined_tsv_path = out_dir / f"corr_stats_temporal_combined{sfx}.tsv"
+        write_tsv(pd.DataFrame(all_temporal_records), combined_tsv_path)
+        ctx.logger.info(
+            f"Saved combined temporal correlations: {len(all_temporal_records)} tests -> {combined_tsv_path.name}"
+        )
 
     try:
         run_power_topomap_correlations(
@@ -1645,7 +1657,6 @@ def stage_temporal(ctx: BehaviorContext) -> Tuple[Optional[Dict[str, Any]], Opti
     if failed:
         ctx.logger.info(f"Temporal stage status: {failed}")
     
-    # Combine results
     combined = {"power": temporal_results}
     if itpc_results:
         combined["itpc"] = itpc_results
@@ -1690,10 +1701,16 @@ def stage_advanced(ctx: BehaviorContext, config: Any, results: Any) -> None:
             ctx.logger.info("Running mediation analysis...")
             n_bootstrap = int(get_config_value(ctx.config, "behavior_analysis.mediation.n_bootstrap", 1000))
             min_effect_size = float(get_config_value(ctx.config, "behavior_analysis.mediation.min_effect_size", 0.05))
-            max_mediators = int(get_config_value(ctx.config, "behavior_analysis.mediation.max_mediators", 20))
+            max_mediators = get_config_value(ctx.config, "behavior_analysis.mediation.max_mediators", None)  # None = unlimited
 
-            variances = features[feature_cols].var()
-            mediators = variances.nlargest(max(1, max_mediators)).index.tolist()
+            if max_mediators is not None:
+                max_mediators = int(max_mediators)
+                variances = features[feature_cols].var()
+                mediators = variances.nlargest(max(1, max_mediators)).index.tolist()
+                ctx.logger.info("Limiting to top %d mediators by variance", max_mediators)
+            else:
+                mediators = feature_cols
+                ctx.logger.info("Testing all %d features as mediators (no limit)", len(mediators))
             results.mediation = run_mediation_analysis(
                 features,
                 "temperature",
@@ -1749,13 +1766,15 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         ctx.logger.info("Moderation: no feature columns found; skipping.")
         return pd.DataFrame()
 
-    max_features = int(getattr(config, "moderation_max_features", 50))
+    max_features = getattr(config, "moderation_max_features", None)  # None = unlimited
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
 
-    if len(feature_cols) > max_features:
+    if max_features is not None and len(feature_cols) > max_features:
         variances = df_trials[feature_cols].var()
         feature_cols = variances.nlargest(max_features).index.tolist()
         ctx.logger.info("Moderation: limited to top %d features by variance", max_features)
+    else:
+        ctx.logger.info("Moderation: testing all %d features (no limit)", len(feature_cols))
 
     temperature = pd.to_numeric(df_trials["temperature"], errors="coerce").to_numpy()
     rating = pd.to_numeric(df_trials["rating"], errors="coerce").to_numpy()

@@ -29,10 +29,10 @@ const (
 	VeryShortThreshold = 20  // Height below which to hide optional elements
 
 	// List display constants
-	MinListItems     = 5  // Minimum items to show in a scrollable list
-	DefaultListItems = 10 // Default number of items to show
-	ListScrollMargin = 2  // Lines kept visible above/below cursor when scrolling
-	HeaderFooterRows = 14 // Reserved rows for header and footer
+	MinListItems     = 5 // Minimum items to show in a scrollable list
+	DefaultListItems = 10
+	ListScrollMargin = 2 // Lines kept visible above/below cursor when scrolling
+	HeaderFooterRows = 6 // Base reserved rows (header ~3 + footer ~3), views add more as needed
 )
 
 ///////////////////////////////////////////////////////////////////

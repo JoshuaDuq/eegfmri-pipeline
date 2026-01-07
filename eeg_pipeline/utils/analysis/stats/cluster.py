@@ -471,6 +471,14 @@ def compute_pain_nonpain_time_cluster_test(
     if alpha is None:
         alpha = cluster_cfg["alpha"]
 
+    # Warn if n_permutations is too low for meaningful results
+    if n_permutations < 100:
+        logger.warning(
+            "Cluster test using only %d permutations - results may not be statistically meaningful. "
+            "For publication-quality results, use at least 1000 permutations.",
+            n_permutations,
+        )
+
     fdr_alpha = cluster_cfg["fdr_alpha"]
     min_timepoints = cluster_cfg["min_timepoints"]
     min_channels = cluster_cfg["min_channels"]
@@ -488,6 +496,7 @@ def compute_pain_nonpain_time_cluster_test(
     n_jobs = resolve_cluster_n_jobs(config=config)
     results: dict = {}
     band_cluster_refs = []
+    band_summaries: List[Dict[str, Any]] = []  # Track all bands for diagnostic summary
 
     for band_name, (fmin, fmax) in bands.items():
         if fmin >= fmax:
@@ -572,7 +581,20 @@ def compute_pain_nonpain_time_cluster_test(
                     np.abs(H0), np.array(observed_masses), null_dist_path, band_name
                 )
 
+            n_clusters_found = len(clusters)
             sig_inds = np.where(cluster_p_values < alpha)[0]
+            n_significant = len(sig_inds)
+            
+            # Log diagnostic info about clusters found
+            if n_clusters_found > 0:
+                min_p = float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan
+                logger.info(
+                    "%s band: found %d clusters, %d significant (p < %.3f), min p-value=%.4f",
+                    band_name, n_clusters_found, n_significant, alpha, min_p,
+                )
+            else:
+                logger.info("%s band: no clusters found", band_name)
+            
             sig_mask = np.zeros((n_channels, n_times), dtype=bool)
             T_obs_grid = T_obs.reshape(n_channels, n_times)
 
@@ -671,6 +693,26 @@ def compute_pain_nonpain_time_cluster_test(
                 cluster_records.append(rec)
                 band_cluster_refs.append(rec)
 
+            # Track diagnostic summary for this band (always, regardless of significance)
+            band_summaries.append({
+                "subject": f"sub-{subject}",
+                "band": band_name,
+                "fmin": float(fmin),
+                "fmax": float(fmax),
+                "n_clusters_found": n_clusters_found,
+                "n_significant": n_significant,
+                "min_p_value": float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan,
+                "n_pain_trials": int(band_power_pain.shape[0]),
+                "n_nonpain_trials": int(band_power_nonpain.shape[0]),
+                "n_permutations": n_permutations,
+                "alpha": alpha,
+                "n_channels": n_channels,
+                "n_timepoints": n_times,
+                "mean_effect_size": float(np.nanmean(np.abs(d_map_grid))),
+                "max_effect_size": float(np.nanmax(np.abs(d_map_grid))),
+                "status": "significant" if n_significant > 0 else ("clusters_found" if n_clusters_found > 0 else "no_clusters"),
+            })
+
             results[band_name] = {
                 "significant": len(cluster_records) > 0,
                 "cluster_records": cluster_records,
@@ -679,6 +721,8 @@ def compute_pain_nonpain_time_cluster_test(
                 "time_mask_channels": sig_mask,
                 "effect_size_map": d_map_grid,
                 "t_stat_map": T_obs_grid,
+                "n_clusters_found": n_clusters_found,
+                "n_significant": n_significant,
                 "config": {
                     "n_permutations": n_permutations,
                     "alpha": alpha,
@@ -769,13 +813,53 @@ def compute_pain_nonpain_time_cluster_test(
                     rec["fdr_reject_local"] = bool(np.isfinite(q_val) and q_val < alpha)
 
                 records = pd.DataFrame(channel_cluster_records)
+                n_sig = sum(1 for rec in channel_cluster_records if rec.get("fdr_reject_local", False))
                 results[band_name] = {
-                    "significant": any(rec.get("fdr_reject_local", False) for rec in channel_cluster_records),
+                    "significant": n_sig > 0,
                     "cluster_records": channel_cluster_records,
                     "times": time_vec,
+                    "n_clusters_found": len(channel_cluster_records),
+                    "n_significant": n_sig,
                 }
+                # Add to band summaries for per-channel fallback
+                band_summaries.append({
+                    "subject": f"sub-{subject}",
+                    "band": band_name,
+                    "fmin": float(fmin),
+                    "fmax": float(fmax),
+                    "n_clusters_found": len(channel_cluster_records),
+                    "n_significant": n_sig,
+                    "min_p_value": float(min(rec.get("p_raw", 1.0) for rec in channel_cluster_records)) if channel_cluster_records else np.nan,
+                    "n_pain_trials": int(band_power_pain.shape[0]),
+                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
+                    "n_permutations": n_permutations,
+                    "alpha": alpha,
+                    "n_channels": n_channels,
+                    "n_timepoints": n_times,
+                    "mean_effect_size": np.nan,  # Not computed for per-channel fallback
+                    "max_effect_size": np.nan,
+                    "status": "significant" if n_sig > 0 else ("clusters_found" if channel_cluster_records else "no_clusters"),
+                })
             else:
-                results[band_name] = {"significant": False, "cluster_records": []}
+                results[band_name] = {"significant": False, "cluster_records": [], "n_clusters_found": 0, "n_significant": 0}
+                band_summaries.append({
+                    "subject": f"sub-{subject}",
+                    "band": band_name,
+                    "fmin": float(fmin),
+                    "fmax": float(fmax),
+                    "n_clusters_found": 0,
+                    "n_significant": 0,
+                    "min_p_value": np.nan,
+                    "n_pain_trials": int(band_power_pain.shape[0]),
+                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
+                    "n_permutations": n_permutations,
+                    "alpha": alpha,
+                    "n_channels": n_channels,
+                    "n_timepoints": n_times,
+                    "mean_effect_size": np.nan,
+                    "max_effect_size": np.nan,
+                    "status": "no_clusters",
+                })
 
     # Global FDR across bands (when adjacency is available)
     if band_cluster_refs:
@@ -793,6 +877,30 @@ def compute_pain_nonpain_time_cluster_test(
         out_path = output_dir / f"cluster_results_{band_name}.tsv"
         write_tsv(pd.DataFrame(records), out_path)
         logger.info("Saved pain vs. non-pain cluster results for %s to %s", band_name, out_path)
+
+    # Always save diagnostic summary (even when no significant clusters)
+    if band_summaries:
+        summary_df = pd.DataFrame(band_summaries)
+        summary_path = output_dir / "cluster_summary.tsv"
+        write_tsv(summary_df, summary_path)
+        
+        # Log final summary
+        total_found = int(summary_df["n_clusters_found"].sum())
+        total_sig = int(summary_df["n_significant"].sum())
+        bands_with_sig = int((summary_df["n_significant"] > 0).sum())
+        
+        logger.info(
+            "Cluster test summary: %d bands tested, %d total clusters found, %d significant across %d bands",
+            len(band_summaries), total_found, total_sig, bands_with_sig,
+        )
+        
+        if total_found > 0 and total_sig == 0:
+            min_p_overall = float(summary_df["min_p_value"].min())
+            logger.info(
+                "No clusters reached significance (alpha=%.3f). Minimum p-value observed: %.4f. "
+                "Consider increasing n_permutations for more stable p-value estimates.",
+                alpha, min_p_overall,
+            )
 
     return results
 

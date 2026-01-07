@@ -259,41 +259,41 @@ func (m Model) View() string {
 		return m.renderWithOverlay(m.helpOverlay.View())
 	}
 
-	var b strings.Builder
+	// Render header (fixed at top)
+	header := m.renderHeader()
+	headerHeight := strings.Count(header, "\n") + 3
 
-	// Header with logo
-	b.WriteString(m.renderHeader())
-	b.WriteString("\n\n")
+	// Render footer (fixed at bottom)
+	footer := m.renderFooter()
+	footerHeight := strings.Count(footer, "\n") + 2
+
+	// Calculate available height for main content
+	mainHeight := m.height - headerHeight - footerHeight
+	if mainHeight < 10 {
+		mainHeight = 10
+	}
 
 	// Main Content - Dual Column Layout
 	pipelinesCol := m.renderPipelinesColumn()
 	utilitiesCol := m.renderUtilitiesColumn()
 
 	leftContent := pipelinesCol + "\n" + utilitiesCol
-	leftWidth := (m.width - 10) * 2 / 3
-	if leftWidth < 52 {
-		leftWidth = 52
-	}
-	rightWidth := m.width - leftWidth - 10
-	if rightWidth < 26 {
-		rightWidth = 26
-	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
 		styles.CardStyle.Width(m.width-10).Render(leftContent),
 	)
 
-	b.WriteString(content + "\n\n")
-
-	// Toast notification (if visible)
+	mainContent := content
 	if m.toast.Visible {
-		b.WriteString(m.toast.View() + "\n\n")
+		mainContent += "\n\n" + m.toast.View()
 	}
 
-	// Footer
-	b.WriteString(m.renderFooter())
+	// Force main content to fill available height
+	mainContentStyled := lipgloss.NewStyle().
+		Height(mainHeight).
+		Render(mainContent)
 
-	return b.String()
+	return header + "\n\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderWithOverlay(overlay string) string {

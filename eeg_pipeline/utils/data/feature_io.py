@@ -603,6 +603,59 @@ def save_all_features(
             len(conn_df.columns),
         )
 
+    # Subject-level export for non-varying (constant) features.
+    # This helps avoid pseudo-replication when constant features are later used in
+    # trial-level statistics/ML. We do not drop them from trial-level tables by default.
+    try:
+        save_subject_level = bool(config.get("feature_engineering.output.save_subject_level_features", True)) if hasattr(config, "get") else True
+    except Exception:
+        save_subject_level = True
+
+    if save_subject_level and features_dir is not None:
+        try:
+            subject_str = features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
+            task_str = config.get("project.task") if config is not None and hasattr(config, "get") else None
+            task_str = str(task_str) if task_str is not None else "unknown"
+
+            def _const_cols(df: Optional[pd.DataFrame]) -> Dict[str, float]:
+                if df is None or df.empty:
+                    return {}
+                numeric = df.apply(pd.to_numeric, errors="coerce")
+                nunique = numeric.nunique(dropna=True)
+                out: Dict[str, float] = {}
+                for col in numeric.columns:
+                    if int(nunique.get(col, 0)) <= 1:
+                        series = numeric[col].dropna()
+                        out[str(col)] = float(series.iloc[0]) if series.size else np.nan
+                return out
+
+            subject_row: Dict[str, Any] = {"subject": str(subject_str), "task": task_str}
+            for block_df in (
+                direct_df,
+                conn_df,
+                aper_df,
+                erp_df,
+                itpc_df,
+                pac_trials_df,
+                comp_df,
+                bursts_df,
+                spectral_df,
+                erds_df,
+                ratios_df,
+                asymmetry_df,
+                quality_df,
+            ):
+                for k, v in _const_cols(block_df).items():
+                    subject_row.setdefault(k, v)
+
+            if len(subject_row) > 2:
+                subj_name = f"features_subject_{suffix}.tsv" if suffix else "features_subject.tsv"
+                subj_path = features_dir / subj_name
+                logger.info("Saving subject-level (constant) features: %s", subj_path)
+                write_tsv(pd.DataFrame([subject_row]), subj_path)
+        except Exception as exc:
+            logger.warning("Subject-level feature export failed: %s", exc)
+
     try:
         subject_str = features_dir.parts[-3].replace("sub-", "") if len(features_dir.parts) > 3 else "unknown"
         json_name = f"features_{suffix}.json" if suffix else "features.json"

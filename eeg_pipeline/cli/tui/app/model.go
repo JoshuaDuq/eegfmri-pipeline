@@ -452,6 +452,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution = execution.NewWithRoot(command, m.repoRoot)
 	m.execution.IsCloud = m.environment == environment.EnvGoogleCloud
+	m.execution.SetSize(m.width, m.height)
 	m.pushState(StateExecution)
 	m.wizard.ReadyToExecute = false
 
@@ -541,7 +542,8 @@ func (m Model) View() string {
 		content = "Unknown state"
 	}
 
-	return styles.BoxStyle.
+	// Fill entire terminal using Height to force full terminal height
+	return lipgloss.NewStyle().
 		Width(m.width).
 		Height(m.height).
 		Render(content)

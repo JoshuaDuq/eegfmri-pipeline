@@ -125,6 +125,13 @@ feature_engineering:
   spatial_modes: ["roi", "channels", "global"]
   create_combined_features: false
 
+  # Optional spatial transform applied before connectivity/band envelope computations.
+  # "csd"/"laplacian" reduces volume conduction in sensor-space connectivity.
+  spatial_transform: "none"   # "none", "csd", "laplacian"
+  spatial_transform_params:
+    lambda2: 1.0e-5
+    stiffness: 4.0
+
   validation:
     fail_on_missing_named_window: true
 
@@ -149,21 +156,56 @@ feature_engineering:
       - [alpha, beta]     
       - [delta, alpha]     
       - [delta, theta]      
+    include_log_ratios: true
+    psd_method: "multitaper"         # "multitaper" (recommended) or "welch"
+    fmin: 1.0
+    fmax: 80.0
+    exclude_line_noise: true
+    line_noise_freqs: [50.0]         # set to [60.0] where appropriate
+    line_noise_width_hz: 1.0
+    line_noise_harmonics: 3
+
+  band_envelope:
+    # Padding reduces edge artifacts for bandpass+Hilbert envelopes/phases on epoched data.
+    # Effective padding is max(pad_sec, pad_cycles / fmin).
+    pad_sec: 0.5
+    pad_cycles: 3.0
+
+  # Optional individualized bands (IAF-based) derived from baseline PSD.
+  bands:
+    use_iaf: false
+    alpha_width_hz: 2.0
+    iaf_search_range_hz: [7.0, 13.0]
+    iaf_min_prominence: 0.05
+    iaf_rois: ["ParOccipital_Midline", "ParOccipital_Ipsi_L", "ParOccipital_Contra_R"]
+
+  itpc:
+    # Leakage-safe default: ITPC is computed across trials and broadcast per trial (constant per subject/run).
+    # LOO-ITPC is disabled by default; only enable if computed within CV folds with an explicit training mask.
+    method: "global"   # "global" or "loo" (unsafe unless allow_unsafe_loo=true and computed in-fold)
+    allow_unsafe_loo: false
+    baseline_correction: "none"  # "none" or "subtract"
 
   aperiodic:
+    model: "fixed"                 # "fixed" or "knee"
+    psd_method: "multitaper"       # "multitaper" (recommended) or "welch"
+    psd_bandwidth: null
     fmin: 2.0
     fmax: 40.0
     peak_rejection_z: 3.5
     min_r2: 0.6
     min_fit_points: 5
+    max_rms: null
 
   connectivity:
-    measures: ["wpli", "aec"]
+    measures: ["wpli2_debiased", "aec"]
     aec_mode: "orth"
     enable_graph_metrics: false
     graph_top_prop: 0.1
     sliding_window_len: 1.0
     sliding_window_step: 0.5
+    granularity: "trial"             # "trial", "condition", "subject"
+    min_epochs_per_group: 5
 
   pac:
     method: "mvl"
@@ -171,14 +213,30 @@ feature_engineering:
     phase_range: [4.0, 8.0]
     amp_range: [30.0, 80.0]
     min_epochs: 2
+    normalize: true
+    n_surrogates: 0
+    random_seed: null
+    allow_harmonic_overlap: false
+    max_harmonic: 6
+    harmonic_tolerance_hz: 1.0
+    compute_waveform_qc: false
+    waveform_offset_ms: 5.0
 
   complexity:
     pe_order: 3
     pe_delay: 1
+    target_hz: 100.0
+    target_n_samples: 500
+    zscore: true
+
+  output:
+    save_subject_level_features: true
 
   erp:
     baseline_correction: true
     allow_no_baseline: false
+    smooth_ms: 0.0
+    peak_prominence_uv: null
     components:
       - name: "n1"
         start: 0.10
@@ -192,8 +250,11 @@ feature_engineering:
 
   bursts:
     bands: ["beta", "gamma"]
-    threshold_z: 2.0
+    threshold_method: "percentile"   # "percentile", "zscore", "mad"
+    threshold_percentile: 95.0
+    threshold_z: 2.0                # used for zscore/mad methods
     min_duration_ms: 50
+    min_cycles: 3.0
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
@@ -377,14 +438,12 @@ behavior_analysis:
       erds: false                      # Event-related desynchronization/synchronization
     # ITPC-specific parameters
     itpc:
-      min_trials: 10                   # Minimum trials for reliable ITPC estimate
       baseline_correction: true        # Subtract baseline ITPC
       baseline_window: [-0.5, -0.01]   # Baseline window for ITPC normalization
     # ERDS-specific parameters
     erds:
       baseline_window: [-0.5, -0.1]    # Baseline window for ERDS (seconds)
       method: "percent"                # ERDS computation method: "percent" or "zscore"
-      min_trials: 5                    # Minimum trials for ERDS computation
   
   # Time-frequency heatmap computation
   time_frequency_heatmap:

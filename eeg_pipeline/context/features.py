@@ -30,12 +30,18 @@ class FeatureContext:
     fixed_template_ch_names: Optional[List[str]] = None
     feature_categories: List[str] = field(default_factory=lambda: list(FEATURE_CATEGORIES))
     bands: Optional[List[str]] = None  # Runtime override for frequency bands
+    frequency_bands: Optional[Dict[str, List[float]]] = None  # Optional per-subject band ranges
     spatial_modes: List[str] = field(default_factory=lambda: ["roi", "global"])  # Spatial aggregation
     tmin: Optional[float] = None  # Custom time window start (seconds)
     tmax: Optional[float] = None  # Custom time window end (seconds)
     name: Optional[str] = None  # Name of the current time range
     aggregation_method: str = "mean"  # Aggregation method: 'mean' or 'median'
     explicit_windows: Optional[List[Dict[str, Any]]] = None  # User-defined time windows (TUI/CLI)
+
+    # Optional: used for leakage-safe computation of cross-trial features inside CV folds.
+    # When provided, it should be a boolean array of shape (n_epochs,) indicating which
+    # trials are part of the training set for the current fold.
+    train_mask: Optional[np.ndarray] = None
     
     # Pre-computed data (computed lazily)
     precomputed: Optional[PrecomputedData] = None
@@ -119,6 +125,8 @@ class FeatureContext:
         self._precomputed_ready = precomputed is not None
         if precomputed is not None:
             precomputed.spatial_modes = list(self.spatial_modes) if self.spatial_modes else None
+            if precomputed.frequency_bands is not None:
+                self.frequency_bands = dict(precomputed.frequency_bands)
     
     @property
     def n_epochs(self) -> int:

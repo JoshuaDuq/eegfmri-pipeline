@@ -103,6 +103,7 @@ def extract_band_ratios_from_precomputed(
             roi_map = build_roi_map(precomputed.ch_names, roi_defs)
 
     eps = float(get_feature_constant(config, "EPSILON_STD", 1e-12))
+    include_log = bool(get_config_value(config, "feature_engineering.spectral.include_log_ratios", True))
     n_epochs = precomputed.data.shape[0]
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
     
@@ -130,6 +131,11 @@ def extract_band_ratios_from_precomputed(
                 with np.errstate(divide='ignore', invalid='ignore'):
                     r_ch = p_num / p_den
                     r_ch[p_den <= eps] = np.nan
+
+                if include_log:
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        log_r_ch = np.log(p_num + eps) - np.log(p_den + eps)
+                        log_r_ch[(p_num <= eps) | (p_den <= eps)] = np.nan
                 
                 pair_label = f"{num}_{den}"
                 
@@ -138,6 +144,9 @@ def extract_band_ratios_from_precomputed(
                     for c, ch in enumerate(precomputed.ch_names):
                         col = NamingSchema.build("ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch)
                         rec[col] = float(r_ch[c])
+                        if include_log:
+                            col_log = NamingSchema.build("ratios", seg_label, pair_label, "ch", "log_ratio", channel=ch)
+                            rec[col_log] = float(log_r_ch[c])
                 
                 # ROI
                 if 'roi' in spatial_modes and roi_map:
@@ -146,12 +155,20 @@ def extract_band_ratios_from_precomputed(
                             val = np.nanmean(r_ch[idxs])
                             col = NamingSchema.build("ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name)
                             rec[col] = float(val)
+                            if include_log:
+                                val_log = np.nanmean(log_r_ch[idxs])
+                                col_log = NamingSchema.build("ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name)
+                                rec[col_log] = float(val_log)
                 
                 # Global
                 if 'global' in spatial_modes:
                     val = np.nanmean(r_ch)
                     col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
                     rec[col] = float(val)
+                    if include_log:
+                        val_log = np.nanmean(log_r_ch)
+                        col_log = NamingSchema.build("ratios", seg_label, pair_label, "global", "log_ratio")
+                        rec[col_log] = float(val_log)
 
     if not records or all(len(r) == 0 for r in records):
         return pd.DataFrame(), []

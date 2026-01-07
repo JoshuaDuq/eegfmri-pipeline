@@ -650,7 +650,7 @@ def _run_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations" / "power"
+    out_dir = stats_dir / "temporal_correlations"
     ensure_dir(out_dir)
 
     all_tsv_records = []
@@ -673,15 +673,10 @@ def _run_temporal_by_condition_core(
         )
         if res:
             cond_records = _build_temporal_tsv_records(res, safe_name, ch_names, method)
+            for rec in cond_records:
+                rec["feature"] = "power"
             all_tsv_records.extend(cond_records)
-            cond_tsv_path = out_dir / f"temporal_power_{safe_name}{sfx}.tsv"
-            write_tsv(pd.DataFrame(cond_records), cond_tsv_path)
-            logger.info(f"Saved power temporal for condition '{safe_name}': {len(cond_records)} tests -> {cond_tsv_path.name}")
-
-    if all_tsv_records:
-        tsv_path = out_dir / f"corr_stats_temporal_power{sfx}.tsv"
-        write_tsv(pd.DataFrame(all_tsv_records), tsv_path)
-        logger.info(f"Saved combined power temporal TSV: {len(all_tsv_records)} tests -> {tsv_path.name}")
+            logger.info(f"Computed power temporal for condition '{safe_name}': {len(cond_records)} tests")
 
     logger.info("Temporal correlations by condition completed")
     
@@ -693,6 +688,8 @@ def _run_temporal_by_condition_core(
     return {
         "n_tests": n_tests,
         "n_sig_raw": n_sig,
+        "feature": "power",
+        "records": all_tsv_records,
     }
 
 
@@ -895,16 +892,8 @@ def _run_itpc_temporal_by_condition_core(
     temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
     itpc_cfg = temporal_cfg.get("itpc", {}) or {}
     
-    min_trials = int(itpc_cfg.get("min_trials", 10))
     baseline_correction = bool(itpc_cfg.get("baseline_correction", True))
     baseline_window = itpc_cfg.get("baseline_window", [-0.5, -0.01])
-    
-    if len(epochs) < min_trials:
-        logger.warning(
-            "ITPC temporal: only %d epochs, need at least %d for reliable ITPC",
-            len(epochs), min_trials,
-        )
-        return None
     
     # Time window configuration from user settings
     time_range_ms = temporal_cfg.get("time_range_ms", [-200, 1000])
@@ -988,7 +977,7 @@ def _run_itpc_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations" / "itpc"
+    out_dir = stats_dir / "temporal_correlations"
     ensure_dir(out_dir)
     
     all_tsv_records = []
@@ -1005,11 +994,6 @@ def _run_itpc_temporal_by_condition_core(
             continue
         
         idx = np.where(mask)[0]
-        if len(idx) < min_trials:
-            logger.info(
-                f"ITPC temporal: skipping condition '{cond_val}' with only {len(idx)} trials (need {min_trials})"
-            )
-            continue
         
         safe_name = str(cond_val).replace(" ", "_").replace("/", "_")
         tfr_c = tfr_data[idx]
@@ -1034,7 +1018,6 @@ def _run_itpc_temporal_by_condition_core(
                 if trial_itpc is None:
                     continue
                 
-                # Optional baseline correction
                 if baseline_correction and baseline_window:
                     bl_itpc = _extract_trial_itpc(
                         tfr_c, fmin, fmax_eff, 
@@ -1077,11 +1060,10 @@ def _run_itpc_temporal_by_condition_core(
         itpc_results[safe_name] = res
         
         np.savez_compressed(
-            out_dir / f"temporal_correlations_itpc_{safe_name}{sfx}.npz",
+            out_dir / f"temporal_itpc_{safe_name}{sfx}.npz",
             **res, times=times, ch_names=ch_names,
         )
         
-        # Build TSV records
         cond_records = []
         for b_i, bn in enumerate(band_names):
             for w_i in range(n_w):
@@ -1107,11 +1089,7 @@ def _run_itpc_temporal_by_condition_core(
                     })
         
         all_tsv_records.extend(cond_records)
-        
-        if cond_records:
-            cond_tsv_path = out_dir / f"temporal_itpc_{safe_name}{sfx}.tsv"
-            write_tsv(pd.DataFrame(cond_records), cond_tsv_path)
-            logger.info(f"Saved ITPC temporal for condition '{safe_name}': {len(cond_records)} tests -> {cond_tsv_path.name}")
+        logger.info(f"Computed ITPC temporal for condition '{safe_name}': {len(cond_records)} tests")
     
     if itpc_results:
         combined_data = dict(itpc_results)
@@ -1119,11 +1097,6 @@ def _run_itpc_temporal_by_condition_core(
         combined_data["ch_names"] = ch_names
         np.savez_compressed(out_dir / f"temporal_itpc_combined{sfx}.npz", **combined_data)
         logger.info(f"Saved ITPC temporal arrays: {len(itpc_results)} conditions")
-    
-    if all_tsv_records:
-        tsv_path = out_dir / f"corr_stats_temporal_itpc{sfx}.tsv"
-        write_tsv(pd.DataFrame(all_tsv_records), tsv_path)
-        logger.info(f"Saved combined ITPC temporal TSV: {len(all_tsv_records)} tests -> {tsv_path.name}")
     
     logger.info("ITPC temporal correlations completed")
     
@@ -1134,6 +1107,7 @@ def _run_itpc_temporal_by_condition_core(
         "n_tests": n_tests,
         "n_sig_raw": n_sig,
         "feature": "itpc",
+        "records": all_tsv_records,
     }
 
 
@@ -1232,11 +1206,6 @@ def _run_erds_temporal_by_condition_core(
     
     baseline_window = erds_cfg.get("baseline_window", [-0.5, -0.1])
     method = str(erds_cfg.get("method", "percent")).lower()
-    min_trials = int(erds_cfg.get("min_trials", 5))
-    
-    if len(epochs) < min_trials:
-        logger.warning("ERDS temporal: only %d epochs, need at least %d", len(epochs), min_trials)
-        return None
     
     time_range_ms = temporal_cfg.get("time_range_ms", [-200, 1000])
     time_resolution_ms = temporal_cfg.get("time_resolution_ms", 50)
@@ -1302,7 +1271,7 @@ def _run_erds_temporal_by_condition_core(
     sfx = "_spearman" if use_spearman else "_pearson"
     corr_method = "spearman" if use_spearman else "pearson"
     
-    out_dir = stats_dir / "temporal_correlations" / "erds"
+    out_dir = stats_dir / "temporal_correlations"
     ensure_dir(out_dir)
     
     all_tsv_records = []
@@ -1314,8 +1283,6 @@ def _run_erds_temporal_by_condition_core(
             continue
         
         idx = np.where(mask)[0]
-        if len(idx) < min_trials:
-            continue
         
         safe_name = str(cond_val).replace(" ", "_").replace("/", "_")
         tfr_c = tfr_data[idx]
@@ -1369,16 +1336,13 @@ def _run_erds_temporal_by_condition_core(
                         continue
                     cond_records.append({"condition": safe_name, "feature": "erds", "band": bn, "time_start": float(win_s[w_i]), "time_end": float(win_e[w_i]), "channel": ch_names[c_i], "r": float(r), "beta_std": float(r), "beta_kind": "standardized", "p": float(p), "n": int(n_valid[b_i, w_i, c_i]), "method": corr_method, "method_label": format_correlation_method_label(corr_method, None)})
         all_tsv_records.extend(cond_records)
-        if cond_records:
-            write_tsv(pd.DataFrame(cond_records), out_dir / f"temporal_erds_{safe_name}{sfx}.tsv")
+        logger.info(f"Computed ERDS temporal for condition '{safe_name}': {len(cond_records)} tests")
     
     if erds_results:
         np.savez_compressed(out_dir / f"temporal_erds_combined{sfx}.npz", **erds_results, times=times, ch_names=ch_names)
-    if all_tsv_records:
-        write_tsv(pd.DataFrame(all_tsv_records), out_dir / f"corr_stats_temporal_erds{sfx}.tsv")
     
     logger.info(f"ERDS temporal correlations: {len(all_tsv_records)} tests")
-    return {"n_tests": len(all_tsv_records), "n_sig_raw": sum(1 for r in all_tsv_records if r.get("p", 1.0) < 0.05), "feature": "erds"}
+    return {"n_tests": len(all_tsv_records), "n_sig_raw": sum(1 for r in all_tsv_records if r.get("p", 1.0) < 0.05), "feature": "erds", "records": all_tsv_records}
 
 
 def compute_erds_temporal_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:

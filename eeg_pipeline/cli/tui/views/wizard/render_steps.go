@@ -127,7 +127,8 @@ func (m Model) renderComputationSelection() string {
 	b.WriteString("\n\n")
 
 	// Calculate responsive layout based on terminal height
-	layout := styles.CalculateListLayout(m.height, m.computationCursor, len(m.computations), styles.HeaderFooterRows)
+	// Overhead: header(4) + section title(2) + status(2) + footer(2) + spacing(2) = 12
+	layout := styles.CalculateListLayout(m.height, m.computationCursor, len(m.computations), 12)
 
 	// Show scroll up indicator
 	if layout.ShowScrollUp {
@@ -611,7 +612,7 @@ func (m Model) renderPlotSelection() string {
 	}
 
 	// Calculate layout using centralized function
-	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows+8) // Extra for details pane
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 14) // header + title + details pane
 
 	// Show scroll up indicator
 	if layout.ShowScrollUp {
@@ -1000,8 +1001,8 @@ func (m Model) renderPlotSelectionSplit() string {
 		lines = append(lines, listLine{false, checkbox + nameStyle.Render(plot.Name), i})
 	}
 
-	// Calculate layout using centralized function (extra rows for right panel)
-	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows)
+	// Calculate layout using centralized function
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 10)
 
 	// Show scroll up indicator
 	if layout.ShowScrollUp {
@@ -1186,7 +1187,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 	}
 
 	// Calculate layout using centralized function
-	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), styles.HeaderFooterRows)
+	layout := styles.CalculateListLayout(m.height, cursorLineIdx, len(lines), 10)
 
 	// Show scroll up indicator
 	if layout.ShowScrollUp {
@@ -1298,7 +1299,8 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	// Calculate responsive layout based on terminal height
-	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), styles.HeaderFooterRows)
+	// Overhead: header(4) + title(2) + status(2) + footer(2) + legend(2) = 12
+	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), 12)
 	startIdx := layout.StartIdx
 	endIdx := layout.EndIdx
 
@@ -1875,7 +1877,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 
 	// Scrolling for small window sizes (list area only; header stays visible)
-	// Overhead accounts for: title, help text, scroll indicators, footer
+	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
 	maxLines := effectiveHeight - 10
 	if maxLines < 8 {
 		maxLines = 8
@@ -2538,12 +2540,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "N Jobs", val, "-1=all cores"
-		case optBehaviorMinSamples:
-			val := fmt.Sprintf("%d", m.behaviorMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optBehaviorMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "default minimum trials"
 		case optControlTemp:
 			return "Control Temperature", m.boolToOnOff(m.controlTemperature), "partial-correlation covariate"
 		case optControlOrder:
@@ -2629,12 +2625,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "poly"
 			}
 			return "Residual Method", v, "spline preferred"
-		case optPainResidualMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualMinSamples) {
-				val = numberDisplay
-			}
-			return "Residual Min Samples", val, "min trials for curve fit"
 		case optPainResidualPolyDegree:
 			val := fmt.Sprintf("%d", m.painResidualPolyDegree)
 			if m.editingNumber && m.isCurrentlyEditing(optPainResidualPolyDegree) {
@@ -2643,20 +2633,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Poly Degree", val, "poly fallback degree"
 		case optPainResidualModelCompare:
 			return "Temp Model Compare", m.boolToOnOff(m.painResidualModelCompareEnabled), "non-gating diagnostics"
-		case optPainResidualModelCompareMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualModelCompareMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualModelCompareMinSamples) {
-				val = numberDisplay
-			}
-			return "Model Compare Min", val, "min trials to compare"
 		case optPainResidualBreakpoint:
 			return "Breakpoint Test", m.boolToOnOff(m.painResidualBreakpointEnabled), "single-hinge model"
-		case optPainResidualBreakpointMinSamples:
-			val := fmt.Sprintf("%d", m.painResidualBreakpointMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointMinSamples) {
-				val = numberDisplay
-			}
-			return "Breakpoint Min", val, "min trials to test"
 		case optPainResidualBreakpointCandidates:
 			val := fmt.Sprintf("%d", m.painResidualBreakpointCandidates)
 			if m.editingNumber && m.isCurrentlyEditing(optPainResidualBreakpointCandidates) {
@@ -2734,12 +2712,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
-		case optRegressionTempSplineMinSamples:
-			val := fmt.Sprintf("%d", m.regressionTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionTempSplineMinSamples) {
-				val = numberDisplay
-			}
-			return "Spline Min N", val, "fallback to linear"
 		case optRegressionIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.regressionIncludeTrialOrder), "add trial_index covariate"
 		case optRegressionIncludePrev:
@@ -2750,12 +2722,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature×Temp", m.boolToOnOff(m.regressionIncludeInteraction), "moderation term"
 		case optRegressionStandardize:
 			return "Standardize", m.boolToOnOff(m.regressionStandardize), "z-score predictors"
-		case optRegressionMinSamples:
-			val := fmt.Sprintf("%d", m.regressionMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optRegressionMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "min trials per feature"
 		case optRegressionPermutations:
 			val := fmt.Sprintf("%d", m.regressionPermutations)
 			if m.editingNumber && m.isCurrentlyEditing(optRegressionPermutations) {
@@ -2799,12 +2765,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
-		case optModelsTempSplineMinSamples:
-			val := fmt.Sprintf("%d", m.modelsTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsTempSplineMinSamples) {
-				val = numberDisplay
-			}
-			return "Spline Min N", val, "fallback to linear"
 		case optModelsIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.modelsIncludeTrialOrder), "add trial_index covariate"
 		case optModelsIncludePrev:
@@ -2815,12 +2775,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature×Temp", m.boolToOnOff(m.modelsIncludeInteraction), "moderation term"
 		case optModelsStandardize:
 			return "Standardize", m.boolToOnOff(m.modelsStandardize), "z-score predictors"
-		case optModelsMinSamples:
-			val := fmt.Sprintf("%d", m.modelsMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optModelsMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "min trials per feature"
 		case optModelsMaxFeatures:
 			val := fmt.Sprintf("%d", m.modelsMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optModelsMaxFeatures) {
@@ -2936,12 +2890,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Spline Q High", val, "knot quantile"
-		case optInfluenceTempSplineMinSamples:
-			val := fmt.Sprintf("%d", m.influenceTempSplineMinN)
-			if m.editingNumber && m.isCurrentlyEditing(optInfluenceTempSplineMinSamples) {
-				val = numberDisplay
-			}
-			return "Spline Min N", val, "fallback to linear"
 		case optInfluenceIncludeTrialOrder:
 			return "Include Trial Order", m.boolToOnOff(m.influenceIncludeTrialOrder), "add covariate"
 		case optInfluenceIncludeRunBlock:
@@ -3090,12 +3038,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Feature: ERDS", m.boolToOnOff(m.temporalFeatureERDS), "event-related desync/sync"
 
 		// ITPC-specific options
-		case optTemporalITPCMinTrials:
-			val := fmt.Sprintf("%d", m.temporalITPCMinTrials)
-			if m.editingNumber && m.isCurrentlyEditing(optTemporalITPCMinTrials) {
-				val = numberDisplay
-			}
-			return "ITPC Min Trials", val, "minimum trials for ITPC"
 		case optTemporalITPCBaselineCorrection:
 			return "ITPC Baseline Correction", m.boolToOnOff(m.temporalITPCBaselineCorrection), "subtract baseline ITPC"
 		case optTemporalITPCBaselineMin:
@@ -3133,12 +3075,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "percent"
 			}
 			return "ERDS Method", v, "ERDS normalization"
-		case optTemporalERDSMinTrials:
-			val := fmt.Sprintf("%d", m.temporalERDSMinTrials)
-			if m.editingNumber && m.isCurrentlyEditing(optTemporalERDSMinTrials) {
-				val = numberDisplay
-			}
-			return "ERDS Min Trials", val, "minimum trials"
 
 		// Report
 		case optReportTopN:
@@ -3192,7 +3128,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Min Effect Size", val, "minimum indirect effect"
+		case optMediationMaxMediatorsEnabled:
+			return "Limit Max Mediators", m.boolToOnOff(m.mediationMaxMediatorsEnabled), "enable mediator limit"
 		case optMediationMaxMediators:
+			if !m.mediationMaxMediatorsEnabled {
+				return "Max Mediators", "N/A", "limit disabled"
+			}
 			val := fmt.Sprintf("%d", m.mediationMaxMediators)
 			if m.editingNumber && m.isCurrentlyEditing(optMediationMaxMediators) {
 				val = numberDisplay
@@ -3200,18 +3141,17 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Mediators", val, "max mediators tested"
 
 		// Moderation
+		case optModerationMaxFeaturesEnabled:
+			return "Limit Max Features", m.boolToOnOff(m.moderationMaxFeaturesEnabled), "enable feature limit"
 		case optModerationMaxFeatures:
+			if !m.moderationMaxFeaturesEnabled {
+				return "Max Features", "N/A", "limit disabled"
+			}
 			val := fmt.Sprintf("%d", m.moderationMaxFeatures)
 			if m.editingNumber && m.isCurrentlyEditing(optModerationMaxFeatures) {
 				val = numberDisplay
 			}
 			return "Max Features", val, "max features for moderation"
-		case optModerationMinSamples:
-			val := fmt.Sprintf("%d", m.moderationMinSamples)
-			if m.editingNumber && m.isCurrentlyEditing(optModerationMinSamples) {
-				val = numberDisplay
-			}
-			return "Min Samples", val, "min samples for moderation"
 
 		// Mixed effects
 		case optMixedEffectsType:
@@ -3242,8 +3182,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	}
 
 	// Scrolling for small window sizes (list area only; header stays visible)
-	// Overhead accounts for: title, help text, scroll indicators, footer
-	maxLines := effectiveHeight - 12
+	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
+	maxLines := effectiveHeight - 10
 	if maxLines < 8 {
 		maxLines = 8
 	}
@@ -4111,7 +4051,8 @@ func (m Model) renderPlottingAdvancedConfig() string {
 	if effectiveHeight <= 0 {
 		effectiveHeight = 40
 	}
-	maxLines := effectiveHeight - 12
+	// Overhead: header(4) + title(2) + footer(2) = 8
+	maxLines := effectiveHeight - 8
 	if maxLines < 8 {
 		maxLines = 8
 	}

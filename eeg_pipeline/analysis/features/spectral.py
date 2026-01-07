@@ -225,7 +225,7 @@ def extract_spectral_features(
         logger.warning("Spectral: No EEG channels available; skipping.")
         return pd.DataFrame(), []
     
-    freq_bands = get_frequency_bands(config)
+    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
     
     roi_map = {}
@@ -238,10 +238,23 @@ def extract_spectral_features(
     data = epochs.get_data(picks=picks)
     n_epochs = data.shape[0]
     n_channels = data.shape[1]
-    
-    from scipy.signal import welch
-    
-    nperseg = min(int(sfreq * 2), data.shape[2])
+
+    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
+    psd_method = str(spec_cfg.get("psd_method", "multitaper")).strip().lower()
+    if psd_method not in {"welch", "multitaper"}:
+        psd_method = "multitaper"
+
+    fmin_psd = float(spec_cfg.get("fmin", 1.0))
+    fmax_psd = float(spec_cfg.get("fmax", min(80.0, float(sfreq) / 2.0 - 0.5)))
+
+    exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
+    line_freqs = spec_cfg.get("line_noise_freqs", [50.0])
+    try:
+        line_freqs = [float(f) for f in line_freqs]
+    except Exception:
+        line_freqs = [50.0]
+    line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
+    n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     
     segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
     
@@ -266,16 +279,54 @@ def extract_spectral_features(
         if seg_data.shape[2] < 2:
             continue
 
-        nperseg = min(int(sfreq * 2), seg_data.shape[2])
+        try:
+            import mne
+            if psd_method == "multitaper":
+                psds, freqs = mne.time_frequency.psd_array_multitaper(
+                    seg_data,
+                    sfreq=float(sfreq),
+                    fmin=fmin_psd,
+                    fmax=fmax_psd,
+                    adaptive=True,
+                    normalization="full",
+                    verbose=False,
+                )
+            else:
+                n_times = int(seg_data.shape[2])
+                n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+                psds, freqs = mne.time_frequency.psd_array_welch(
+                    seg_data,
+                    sfreq=float(sfreq),
+                    fmin=fmin_psd,
+                    fmax=fmax_psd,
+                    n_fft=min(n_times, max(64, n_per_seg)),
+                    n_overlap=0,
+                    verbose=False,
+                )
+        except Exception as exc:
+            logger.warning("Spectral: PSD computation failed for segment '%s' (%s); skipping.", segment_name, exc)
+            continue
+
+        freqs = np.asarray(freqs, dtype=float)
+        psds = np.asarray(psds, dtype=float)
+        if psds.ndim != 3:
+            continue
+
+        keep = np.ones_like(freqs, dtype=bool)
+        if exclude_line and freqs.size > 0 and line_width > 0 and n_harm > 0:
+            for base in line_freqs:
+                if not np.isfinite(base) or base <= 0:
+                    continue
+                for h in range(1, n_harm + 1):
+                    f0 = base * h
+                    keep &= ~((freqs >= (f0 - line_width)) & (freqs <= (f0 + line_width)))
+
+        freqs_use = freqs[keep] if np.any(~keep) else freqs
+        psds_use = psds[:, :, keep] if np.any(~keep) else psds
 
         for ep_idx in range(n_epochs):
             record = records[ep_idx]
-            channel_psd = []
-            for ch_idx in range(n_channels):
-                signal = seg_data[ep_idx, ch_idx, :]
-                freqs, psd = welch(signal, fs=sfreq, nperseg=nperseg)
-                channel_psd.append(psd)
-            channel_psd = np.array(channel_psd)
+            channel_psd = psds_use[ep_idx]
 
             for band in bands:
                 if band not in freq_bands:
@@ -285,10 +336,10 @@ def extract_spectral_features(
                 for ch_idx, ch_name in enumerate(ch_names):
                     psd = channel_psd[ch_idx]
 
-                    peak_freq, peak_power = compute_peak_frequency(psd, freqs, fmin, fmax)
-                    center_freq = compute_spectral_center(psd, freqs, fmin, fmax)
-                    bandwidth = compute_spectral_bandwidth(psd, freqs, fmin, fmax)
-                    entropy = compute_spectral_entropy(psd, freqs, fmin, fmax)
+                    peak_freq, peak_power = compute_peak_frequency(psd, freqs_use, fmin, fmax)
+                    center_freq = compute_spectral_center(psd, freqs_use, fmin, fmax)
+                    bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
+                    entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
 
                     if "channels" in spatial_modes:
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_freq"] = peak_freq
@@ -299,10 +350,10 @@ def extract_spectral_features(
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
-                    g_peak_freq, g_peak_power = compute_peak_frequency(global_psd, freqs, fmin, fmax)
-                    g_center = compute_spectral_center(global_psd, freqs, fmin, fmax)
-                    g_bandwidth = compute_spectral_bandwidth(global_psd, freqs, fmin, fmax)
-                    g_entropy = compute_spectral_entropy(global_psd, freqs, fmin, fmax)
+                    g_peak_freq, g_peak_power = compute_peak_frequency(global_psd, freqs_use, fmin, fmax)
+                    g_center = compute_spectral_center(global_psd, freqs_use, fmin, fmax)
+                    g_bandwidth = compute_spectral_bandwidth(global_psd, freqs_use, fmin, fmax)
+                    g_entropy = compute_spectral_entropy(global_psd, freqs_use, fmin, fmax)
 
                     record[f"spectral_{segment_name}_{band}_global_peak_freq"] = g_peak_freq
                     record[f"spectral_{segment_name}_{band}_global_peak_power"] = g_peak_power
@@ -315,10 +366,10 @@ def extract_spectral_features(
                         if not roi_indices:
                             continue
                         roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                        r_peak_freq, r_peak_power = compute_peak_frequency(roi_psd, freqs, fmin, fmax)
-                        r_center = compute_spectral_center(roi_psd, freqs, fmin, fmax)
-                        r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs, fmin, fmax)
-                        r_entropy = compute_spectral_entropy(roi_psd, freqs, fmin, fmax)
+                        r_peak_freq, r_peak_power = compute_peak_frequency(roi_psd, freqs_use, fmin, fmax)
+                        r_center = compute_spectral_center(roi_psd, freqs_use, fmin, fmax)
+                        r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs_use, fmin, fmax)
+                        r_entropy = compute_spectral_entropy(roi_psd, freqs_use, fmin, fmax)
 
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_freq"] = r_peak_freq
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_power"] = r_peak_power
@@ -327,7 +378,8 @@ def extract_spectral_features(
                         record[f"spectral_{segment_name}_{band}_roi_{roi_name}_entropy"] = r_entropy
 
             global_psd = np.nanmean(channel_psd, axis=0)
-            edge_95 = compute_spectral_edge(global_psd, freqs, 1.0, sfreq / 2 - 1, 0.95)
+            edge_fmax = float(freqs_use[-1]) if freqs_use.size else (float(sfreq) / 2.0 - 0.5)
+            edge_95 = compute_spectral_edge(global_psd, freqs_use, 1.0, edge_fmax, 0.95)
             record[f"spectral_{segment_name}_broadband_global_edge_freq_95"] = edge_95
 
             if "roi" in spatial_modes and roi_map:
@@ -335,7 +387,7 @@ def extract_spectral_features(
                     if not roi_indices:
                         continue
                     roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                    roi_edge = compute_spectral_edge(roi_psd, freqs, 1.0, sfreq / 2 - 1, 0.95)
+                    roi_edge = compute_spectral_edge(roi_psd, freqs_use, 1.0, edge_fmax, 0.95)
                     record[f"spectral_{segment_name}_broadband_roi_{roi_name}_edge_freq_95"] = roi_edge
     
     if not records:

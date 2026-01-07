@@ -110,6 +110,14 @@ def _resolve_behavior_computation_flags(
     return flags
 
 
+def _get_optional_int(config: Any, key: str, default: Optional[int]) -> Optional[int]:
+    """Get optional integer from config, returning None if not set or explicitly None."""
+    value = get_config_value(config, key, default)
+    if value is None:
+        return None
+    return int(value) if value is not None else None
+
+
 @dataclass
 class BehaviorPipelineConfig:
     method: str = "spearman"
@@ -163,10 +171,10 @@ class BehaviorPipelineConfig:
     # Mediation-specific
     mediation_n_bootstrap: int = 1000
     mediation_min_effect: float = 0.05
-    mediation_max_mediators: int = 20
+    mediation_max_mediators: Optional[int] = 20  # None means unlimited
     
     # Moderation-specific
-    moderation_max_features: int = 50
+    moderation_max_features: Optional[int] = 50  # None means unlimited
     moderation_min_samples: int = 15
     
     # Mixed effects-specific
@@ -233,9 +241,9 @@ class BehaviorPipelineConfig:
             # Mediation-specific
             mediation_n_bootstrap=int(get_config_value(config, "behavior_analysis.mediation.n_bootstrap", 1000)),
             mediation_min_effect=float(get_config_value(config, "behavior_analysis.mediation.min_effect_size", 0.05)),
-            mediation_max_mediators=int(get_config_value(config, "behavior_analysis.mediation.max_mediators", 20)),
+            mediation_max_mediators=_get_optional_int(config, "behavior_analysis.mediation.max_mediators", None),
             # Moderation-specific
-            moderation_max_features=int(get_config_value(config, "behavior_analysis.moderation.max_features", 50)),
+            moderation_max_features=_get_optional_int(config, "behavior_analysis.moderation.max_features", None),
             moderation_min_samples=int(get_config_value(config, "behavior_analysis.moderation.min_samples", 15)),
             # Mixed effects-specific
             mixed_effects_type=str(get_config_value(config, "behavior_analysis.mixed_effects.random_effects", "intercept")),

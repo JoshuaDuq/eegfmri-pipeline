@@ -1499,10 +1499,6 @@ func (m *Model) togglePlottingAdvancedOption() {
 		optPlotTextChannelAnnotationY,
 		optPlotTextTitleY,
 		optPlotTextResidualQcTitleY,
-		optPlotValidationMinSamplesForPlot,
-		optPlotValidationMinSamplesForKDE,
-		optPlotValidationMinSamplesForFit,
-		optPlotValidationMinSamplesForCalibration,
 		optPlotValidationMinBinsForCalibration,
 		optPlotValidationMaxBinsForCalibration,
 		optPlotValidationSamplesPerBin,
@@ -1705,7 +1701,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRNGSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optBehaviorNJobs, optBehaviorMinSamples:
+	case optBehaviorNJobs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optControlTemp:
@@ -1765,19 +1761,16 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optPainResidualMethod:
 		m.painResidualMethod = (m.painResidualMethod + 1) % 2
 		m.useDefaultAdvanced = false
-	case optPainResidualMinSamples, optPainResidualPolyDegree:
+	case optPainResidualPolyDegree:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPainResidualModelCompare:
 		m.painResidualModelCompareEnabled = !m.painResidualModelCompareEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualModelCompareMinSamples:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
 	case optPainResidualBreakpoint:
 		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
 		m.useDefaultAdvanced = false
-	case optPainResidualBreakpointMinSamples, optPainResidualBreakpointCandidates, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
+	case optPainResidualBreakpointCandidates, optPainResidualBreakpointQlow, optPainResidualBreakpointQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1802,7 +1795,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionTempControl:
 		m.regressionTempControl = (m.regressionTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh, optRegressionTempSplineMinSamples:
+	case optRegressionTempSplineKnots, optRegressionTempSplineQlow, optRegressionTempSplineQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optRegressionIncludeTrialOrder:
@@ -1820,7 +1813,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optRegressionStandardize:
 		m.regressionStandardize = !m.regressionStandardize
 		m.useDefaultAdvanced = false
-	case optRegressionMinSamples, optRegressionPermutations, optRegressionMaxFeatures:
+	case optRegressionPermutations, optRegressionMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
@@ -1831,7 +1824,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModelsTempControl:
 		m.modelsTempControl = (m.modelsTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh, optModelsTempSplineMinSamples:
+	case optModelsTempSplineKnots, optModelsTempSplineQlow, optModelsTempSplineQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsIncludeTrialOrder:
@@ -1849,7 +1842,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optModelsStandardize:
 		m.modelsStandardize = !m.modelsStandardize
 		m.useDefaultAdvanced = false
-	case optModelsMinSamples, optModelsMaxFeatures:
+	case optModelsMaxFeatures:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optModelsOutcomeRating:
@@ -1954,7 +1947,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optInfluenceTempControl:
 		m.influenceTempControl = (m.influenceTempControl + 1) % 3
 		m.useDefaultAdvanced = false
-	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh, optInfluenceTempSplineMinSamples:
+	case optInfluenceTempSplineKnots, optInfluenceTempSplineQlow, optInfluenceTempSplineQhigh:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optInfluenceIncludeTrialOrder:
@@ -2034,9 +2027,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	// ITPC-specific options
-	case optTemporalITPCMinTrials:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
 	case optTemporalITPCBaselineCorrection:
 		m.temporalITPCBaselineCorrection = !m.temporalITPCBaselineCorrection
 		m.useDefaultAdvanced = false
@@ -2049,9 +2039,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optTemporalERDSMethod:
 		m.temporalERDSMethod = (m.temporalERDSMethod + 1) % 2 // Toggle between percent and zscore
-		m.useDefaultAdvanced = false
-	case optTemporalERDSMinTrials:
-		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
 	// Cluster options
@@ -2074,13 +2061,26 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	// Mediation options
-	case optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators:
+	case optMediationBootstrap, optMediationMinEffect:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optMediationMaxMediatorsEnabled:
+		m.mediationMaxMediatorsEnabled = !m.mediationMaxMediatorsEnabled
+		m.useDefaultAdvanced = false
+	case optMediationMaxMediators:
+		if m.mediationMaxMediatorsEnabled {
+			m.startNumberEdit()
+			m.useDefaultAdvanced = false
+		}
 	// Moderation options
-	case optModerationMaxFeatures, optModerationMinSamples:
-		m.startNumberEdit()
+	case optModerationMaxFeaturesEnabled:
+		m.moderationMaxFeaturesEnabled = !m.moderationMaxFeaturesEnabled
 		m.useDefaultAdvanced = false
+	case optModerationMaxFeatures:
+		if m.moderationMaxFeaturesEnabled {
+			m.startNumberEdit()
+			m.useDefaultAdvanced = false
+		}
 	// Mixed effects options
 	case optMixedMaxFeatures:
 		m.startNumberEdit()
@@ -2523,22 +2523,6 @@ func (m *Model) commitPlottingNumber(val float64) {
 	case optPlotTextResidualQcTitleY:
 		m.plotTextResidualQcTitleY = val
 
-	case optPlotValidationMinSamplesForPlot:
-		if val >= 0 {
-			m.plotValidationMinSamplesForPlot = int(val)
-		}
-	case optPlotValidationMinSamplesForKDE:
-		if val >= 0 {
-			m.plotValidationMinSamplesForKDE = int(val)
-		}
-	case optPlotValidationMinSamplesForFit:
-		if val >= 0 {
-			m.plotValidationMinSamplesForFit = int(val)
-		}
-	case optPlotValidationMinSamplesForCalibration:
-		if val >= 0 {
-			m.plotValidationMinSamplesForCalibration = int(val)
-		}
 	case optPlotValidationMinBinsForCalibration:
 		if val >= 0 {
 			m.plotValidationMinBinsForCalibration = int(val)
@@ -2802,10 +2786,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 	case optBehaviorNJobs:
 		m.behaviorNJobs = int(val)
-	case optBehaviorMinSamples:
-		if val >= 0 {
-			m.behaviorMinSamples = int(val)
-		}
 	case optFDRAlpha:
 		if val > 0 && val <= 1 {
 			m.fdrAlpha = val
@@ -2826,21 +2806,9 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		}
 
 	// Pain residual + diagnostics
-	case optPainResidualMinSamples:
-		if val >= 0 {
-			m.painResidualMinSamples = int(val)
-		}
 	case optPainResidualPolyDegree:
 		if val >= 1 {
 			m.painResidualPolyDegree = int(val)
-		}
-	case optPainResidualModelCompareMinSamples:
-		if val >= 0 {
-			m.painResidualModelCompareMinSamples = int(val)
-		}
-	case optPainResidualBreakpointMinSamples:
-		if val >= 0 {
-			m.painResidualBreakpointMinSamples = int(val)
 		}
 	case optPainResidualBreakpointCandidates:
 		if val >= 5 {
@@ -2874,14 +2842,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val > 0 && val < 1 {
 			m.regressionTempSplineQhigh = val
 		}
-	case optRegressionTempSplineMinSamples:
-		if val >= 0 {
-			m.regressionTempSplineMinN = int(val)
-		}
-	case optRegressionMinSamples:
-		if val >= 0 {
-			m.regressionMinSamples = int(val)
-		}
 	case optRegressionPermutations:
 		if val >= 0 {
 			m.regressionPermutations = int(val)
@@ -2903,14 +2863,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optModelsTempSplineQhigh:
 		if val > 0 && val < 1 {
 			m.modelsTempSplineQhigh = val
-		}
-	case optModelsTempSplineMinSamples:
-		if val >= 0 {
-			m.modelsTempSplineMinN = int(val)
-		}
-	case optModelsMinSamples:
-		if val >= 0 {
-			m.modelsMinSamples = int(val)
 		}
 	case optModelsMaxFeatures:
 		if val >= 0 {
@@ -2939,10 +2891,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optInfluenceTempSplineQhigh:
 		if val > 0 && val < 1 {
 			m.influenceTempSplineQhigh = val
-		}
-	case optInfluenceTempSplineMinSamples:
-		if val >= 0 {
-			m.influenceTempSplineMinN = int(val)
 		}
 	case optInfluenceMaxFeatures:
 		if val >= 0 {
@@ -2975,10 +2923,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.temporalSmoothMs = int(val)
 		}
 	// ITPC temporal options
-	case optTemporalITPCMinTrials:
-		if val >= 1 {
-			m.temporalITPCMinTrials = int(val)
-		}
 	case optTemporalITPCBaselineMin:
 		m.temporalITPCBaselineMin = val
 	case optTemporalITPCBaselineMax:
@@ -2988,11 +2932,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		m.temporalERDSBaselineMin = val
 	case optTemporalERDSBaselineMax:
 		m.temporalERDSBaselineMax = val
-	case optTemporalERDSMinTrials:
-		if val >= 1 {
-			m.temporalERDSMinTrials = int(val)
-		}
-
 	case optClusterMinSize:
 		if val >= 1 {
 			m.clusterMinSize = int(val)
@@ -3016,10 +2955,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optModerationMaxFeatures:
 		if val >= 1 {
 			m.moderationMaxFeatures = int(val)
-		}
-	case optModerationMinSamples:
-		if val >= 1 {
-			m.moderationMinSamples = int(val)
 		}
 	case optMixedMaxFeatures:
 		if val >= 1 {

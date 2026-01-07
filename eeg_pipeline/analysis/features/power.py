@@ -76,7 +76,7 @@ def extract_power_features(
     tfr_already_baselined = isinstance(tfr_comment, str) and ("BASELINED:" in tfr_comment)
 
     from eeg_pipeline.utils.config.loader import get_frequency_bands
-    freq_bands = get_frequency_bands(ctx.config)
+    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(ctx.config)
     
     # Get spatial modes from context
     spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
@@ -137,7 +137,22 @@ def extract_power_features(
         for band, fmask in band_indices.items():
             try:
                 d = tfr_data[:, :, fmask, :][:, :, :, mask]
-                segment_power = np.nanmean(np.nanmean(d, axis=3), axis=2)  # (n_epochs, n_channels)
+                # Average over time, then compute a frequency-weighted mean.
+                # TFR frequencies are often log-spaced; weighting by Δf avoids biasing
+                # bands based on bin density.
+                p_ft = np.nanmean(d, axis=3)  # (n_epochs, n_channels, n_freqs_in_band)
+                band_freqs = np.asarray(freqs[fmask], dtype=float)
+                if band_freqs.size >= 2 and np.all(np.isfinite(band_freqs)):
+                    w = np.gradient(band_freqs).astype(float)
+                    w = np.where(np.isfinite(w) & (w > 0), w, np.nan)
+                else:
+                    w = np.ones((band_freqs.size,), dtype=float)
+
+                w3 = w[None, None, :]
+                finite = np.isfinite(p_ft) & np.isfinite(w3)
+                num = np.nansum(np.where(finite, p_ft * w3, 0.0), axis=2)
+                den = np.nansum(np.where(finite, w3, 0.0), axis=2)
+                segment_power = np.where(den > 0, num / den, np.nan)  # (n_epochs, n_channels)
 
                 if tfr_already_baselined:
                     # Baselined at TFR level; preserve sign and scale.

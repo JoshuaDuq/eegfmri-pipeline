@@ -39,6 +39,10 @@ def compute_band_data(
     fmax: float,
     logger: Optional[logging.Logger] = None,
     n_jobs: int = 1,
+    *,
+    pad_sec: Optional[float] = None,
+    pad_cycles: Optional[float] = None,
+    config: Any = None,
 ) -> Optional[BandData]:
     """
     Compute all band-related quantities once.
@@ -48,8 +52,51 @@ def compute_band_data(
     try:
         # Reshape for filtering: (epochs * channels, times)
         flat_data = data.reshape(-1, n_times)
-        
-        filter_length = _safe_filter_length(n_times, sfreq, fmin)
+
+        default_pad_sec = 0.5
+        default_pad_cycles = 3.0
+
+        eff_pad_sec = default_pad_sec
+        eff_pad_cycles = default_pad_cycles
+
+        if config is not None and hasattr(config, "get"):
+            try:
+                eff_pad_sec = float(config.get("feature_engineering.band_envelope.pad_sec", eff_pad_sec))
+            except Exception:
+                eff_pad_sec = default_pad_sec
+            try:
+                eff_pad_cycles = float(config.get("feature_engineering.band_envelope.pad_cycles", eff_pad_cycles))
+            except Exception:
+                eff_pad_cycles = default_pad_cycles
+
+        if pad_sec is not None:
+            try:
+                eff_pad_sec = float(pad_sec)
+            except Exception:
+                eff_pad_sec = default_pad_sec
+        if pad_cycles is not None:
+            try:
+                eff_pad_cycles = float(pad_cycles)
+            except Exception:
+                eff_pad_cycles = default_pad_cycles
+
+        cycle_pad_sec = (eff_pad_cycles / float(fmin)) if np.isfinite(fmin) and fmin > 0 and eff_pad_cycles > 0 else 0.0
+        eff_pad_sec = max(float(eff_pad_sec), float(cycle_pad_sec))
+        pad_samples = int(round(eff_pad_sec * float(sfreq))) if np.isfinite(eff_pad_sec) and eff_pad_sec > 0 else 0
+
+        pad_samples = int(max(0, min(pad_samples, n_times - 1))) if n_times > 1 else 0
+
+        if pad_samples > 0:
+            flat_data = np.pad(
+                flat_data,
+                pad_width=((0, 0), (pad_samples, pad_samples)),
+                mode="reflect",
+            )
+            n_times_padded = flat_data.shape[-1]
+        else:
+            n_times_padded = n_times
+
+        filter_length = _safe_filter_length(n_times_padded, sfreq, fmin)
         filtered = mne.filter.filter_data(
             flat_data,
             sfreq,
@@ -61,6 +108,10 @@ def compute_band_data(
         )
         
         analytic = hilbert(filtered, axis=-1)
+
+        if pad_samples > 0 and n_times_padded > (2 * pad_samples):
+            filtered = filtered[:, pad_samples:-pad_samples]
+            analytic = analytic[:, pad_samples:-pad_samples]
         
         # Reshape back
         filtered = filtered.reshape(n_epochs, n_channels, n_times)

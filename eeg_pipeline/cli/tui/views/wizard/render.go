@@ -19,68 +19,77 @@ func (m Model) View() string {
 		return m.renderWithHelpOverlay()
 	}
 
-	var b strings.Builder
-
 	// Responsive flags
 	isNarrow := m.width < 100
 	isShort := m.height < 25
 
-	b.WriteString(m.renderHeader())
-	b.WriteString("\n\n")
+	// Render header (fixed at top)
+	header := m.renderHeader()
+	headerHeight := strings.Count(header, "\n") + 3 // +3 for spacing
 
-	if m.ConfirmingExecute {
-		b.WriteString(m.renderConfirmation())
-		return b.String()
+	// Render footer (fixed at bottom)
+	footer := m.renderFooter()
+	footerHeight := strings.Count(footer, "\n") + 2 // +2 for spacing
+
+	// Calculate available height for main content
+	mainHeight := m.height - headerHeight - footerHeight
+	if mainHeight < 10 {
+		mainHeight = 10
 	}
 
+	// Render main content
 	var mainContent string
-	switch m.CurrentStep {
-	case types.StepSelectMode:
-		mainContent = m.renderModeSelection()
-
-	case types.StepSelectComputations:
-		mainContent = m.renderComputationSelection()
-	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		mainContent = m.renderCategorySelection()
-	case types.StepSelectPlots:
-		if isNarrow {
-			mainContent = m.renderPlotSelection()
-		} else {
-			mainContent = m.renderPlotSelectionSplit()
+	if m.ConfirmingExecute {
+		mainContent = m.renderConfirmation()
+	} else {
+		switch m.CurrentStep {
+		case types.StepSelectMode:
+			mainContent = m.renderModeSelection()
+		case types.StepSelectComputations:
+			mainContent = m.renderComputationSelection()
+		case types.StepConfigureOptions, types.StepSelectPlotCategories:
+			mainContent = m.renderCategorySelection()
+		case types.StepSelectPlots:
+			if isNarrow {
+				mainContent = m.renderPlotSelection()
+			} else {
+				mainContent = m.renderPlotSelectionSplit()
+			}
+		case types.StepSelectFeaturePlotters:
+			mainContent = m.renderFeaturePlotterSelection()
+		case types.StepPlotConfig:
+			mainContent = m.renderPlotConfig()
+		case types.StepSelectBands:
+			mainContent = m.renderBandSelection()
+		case types.StepSelectFeatureFiles:
+			mainContent = m.renderFeatureFileSelection()
+		case types.StepSelectSpatial:
+			mainContent = m.renderSpatialSelection()
+		case types.StepTimeRange:
+			mainContent = m.renderTimeRange()
+		case types.StepAdvancedConfig:
+			mainContent = m.renderAdvancedConfig()
+		case types.StepSelectSubjects:
+			mainContent = m.renderSubjectSelection()
+		case types.StepReviewExecute:
+			mainContent = m.renderReview()
 		}
-	case types.StepSelectFeaturePlotters:
-		mainContent = m.renderFeaturePlotterSelection()
-	case types.StepPlotConfig:
-		mainContent = m.renderPlotConfig()
-	case types.StepSelectBands:
-		mainContent = m.renderBandSelection()
-	case types.StepSelectFeatureFiles:
-		mainContent = m.renderFeatureFileSelection()
-	case types.StepSelectSpatial:
-		mainContent = m.renderSpatialSelection()
-	case types.StepTimeRange:
-		mainContent = m.renderTimeRange()
-	case types.StepAdvancedConfig:
-		mainContent = m.renderAdvancedConfig()
-	case types.StepSelectSubjects:
-		mainContent = m.renderSubjectSelection()
-	case types.StepReviewExecute:
-		mainContent = m.renderReview()
+
+		// Add validation errors if present
+		if len(m.validationErrors) > 0 && m.CurrentStep != types.StepReviewExecute {
+			if !isShort {
+				mainContent += "\n" + m.renderStepValidationErrors()
+			}
+		}
 	}
 
-	b.WriteString(mainContent)
+	// Force main content to fill available height
+	mainContentStyled := lipgloss.NewStyle().
+		Height(mainHeight).
+		Render(mainContent)
 
-	if len(m.validationErrors) > 0 && m.CurrentStep != types.StepReviewExecute {
-		if !isShort {
-			b.WriteString("\n")
-			b.WriteString(m.renderStepValidationErrors())
-		}
-	}
-
-	b.WriteString("\n")
-	b.WriteString(m.renderFooter())
-
-	return b.String()
+	// Combine: header + main + footer
+	return header + "\n\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderWithHelpOverlay() string {

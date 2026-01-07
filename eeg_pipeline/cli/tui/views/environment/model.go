@@ -230,8 +230,6 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
-	var b strings.Builder
-
 	// Calculate responsive width
 	contentWidth := m.width - 6
 	if contentWidth < styles.MinContentWidth {
@@ -246,34 +244,38 @@ func (m Model) View() string {
 		separatorWidth = 55
 	}
 
-	// Welcome Banner
-	b.WriteString(m.renderWelcomeBanner())
-	b.WriteString("\n\n")
+	// Render header (welcome banner + system info)
+	header := m.renderWelcomeBanner() + "\n\n" + m.renderSystemInfo()
+	headerHeight := strings.Count(header, "\n") + 3
 
-	// System Info
-	b.WriteString(m.renderSystemInfo())
-	b.WriteString("\n\n")
+	// Render footer
+	footer := m.renderFooter()
+	footerHeight := strings.Count(footer, "\n") + 2
 
-	// Title
-	b.WriteString(m.renderTitle(separatorWidth))
-	b.WriteString("\n\n")
-
-	// Environment Options
-	b.WriteString(m.renderOptions())
-	b.WriteString("\n")
-
-	// Cloud details panel when cloud is highlighted
-	if m.cursor == 1 {
-		b.WriteString(m.renderCloudPanel())
-		b.WriteString("\n")
+	// Calculate available height for main content
+	mainHeight := m.height - headerHeight - footerHeight
+	if mainHeight < 10 {
+		mainHeight = 10
 	}
 
-	b.WriteString("\n")
+	// Build main content
+	var mainContent strings.Builder
+	mainContent.WriteString(m.renderTitle(separatorWidth))
+	mainContent.WriteString("\n\n")
+	mainContent.WriteString(m.renderOptions())
+	mainContent.WriteString("\n")
 
-	// Footer
-	b.WriteString(m.renderFooter())
+	if m.cursor == 1 {
+		mainContent.WriteString(m.renderCloudPanel())
+		mainContent.WriteString("\n")
+	}
 
-	return b.String()
+	// Force main content to fill available height
+	mainContentStyled := lipgloss.NewStyle().
+		Height(mainHeight).
+		Render(mainContent.String())
+
+	return header + "\n\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderWelcomeBanner() string {

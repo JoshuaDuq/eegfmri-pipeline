@@ -98,11 +98,16 @@ def extract_burst_features(
     cfg = ctx.config if hasattr(ctx, "config") else precomputed.config
     burst_cfg = cfg.get("feature_engineering.bursts", {}) if hasattr(cfg, "get") else {}
     burst_bands = burst_cfg.get("bands") or bands
+    threshold_method = str(burst_cfg.get("threshold_method", "percentile")).strip().lower()
+    if threshold_method not in {"percentile", "zscore", "mad"}:
+        threshold_method = "percentile"
     threshold_z = float(burst_cfg.get("threshold_z", 2.0))
+    threshold_percentile = float(burst_cfg.get("threshold_percentile", 95.0))
     min_duration_ms = float(burst_cfg.get("min_duration_ms", 50.0))
+    min_cycles = float(burst_cfg.get("min_cycles", 3.0))
 
     sfreq = float(getattr(precomputed, "sfreq", np.nan))
-    min_samples = max(1, int(round(min_duration_ms * sfreq / 1000.0))) if sfreq > 0 else 1
+    min_samples_ms = max(1, int(round(min_duration_ms * sfreq / 1000.0))) if sfreq > 0 else 1
 
     baseline_mask = precomputed.windows.get_mask("baseline")
     if baseline_mask is None or not np.any(baseline_mask):
@@ -132,9 +137,28 @@ def extract_burst_features(
         env = precomputed.band_data[band].envelope
 
         baseline_env = env[:, :, baseline_mask]
-        base_mean = np.nanmean(baseline_env, axis=2)
-        base_std = np.nanstd(baseline_env, axis=2)
-        thresholds = base_mean + (threshold_z * base_std)
+        if threshold_method == "zscore":
+            base_mean = np.nanmean(baseline_env, axis=2)
+            base_std = np.nanstd(baseline_env, axis=2)
+            thresholds = base_mean + (threshold_z * base_std)
+        elif threshold_method == "mad":
+            base_med = np.nanmedian(baseline_env, axis=2)
+            mad = np.nanmedian(np.abs(baseline_env - base_med[:, :, None]), axis=2)
+            thresholds = base_med + (threshold_z * 1.4826 * mad)
+        else:
+            q = float(np.clip(threshold_percentile, 50.0, 99.9))
+            thresholds = np.nanpercentile(baseline_env, q=q, axis=2)
+
+        # Duration threshold: max(config ms threshold, config cycles threshold)
+        min_samples = int(min_samples_ms)
+        try:
+            bd = precomputed.band_data[band]
+            center_hz = float(np.sqrt(float(bd.fmin) * float(bd.fmax))) if float(bd.fmin) > 0 else np.nan
+            if np.isfinite(center_hz) and center_hz > 0 and np.isfinite(min_cycles) and min_cycles > 0:
+                min_samples_cycles = int(round((min_cycles / center_hz) * sfreq))
+                min_samples = max(min_samples, max(1, min_samples_cycles))
+        except Exception:
+            min_samples = int(min_samples_ms)
 
         for seg_name in segments:
             seg_mask = masks.get(seg_name)

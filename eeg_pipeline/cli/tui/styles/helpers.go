@@ -31,32 +31,42 @@ func CalculateListLayout(termHeight, cursorIdx, totalItems, headerRows int) List
 		availableRows = MinListItems
 	}
 
+	// If all items fit, show everything without scrolling
+	if totalItems <= availableRows {
+		return ListLayout{
+			MaxItems:     availableRows,
+			StartIdx:     0,
+			EndIdx:       totalItems,
+			ShowScrollUp: false,
+			ShowScrollDn: false,
+			TotalItems:   totalItems,
+			CursorIdx:    cursorIdx,
+		}
+	}
+
 	// Calculate start and end indices with cursor tracking
 	startIdx := 0
-	endIdx := totalItems
 
-	if totalItems > availableRows {
-		// Keep cursor in view with margin
-		if cursorIdx < ListScrollMargin {
-			startIdx = 0
-		} else if cursorIdx >= totalItems-ListScrollMargin {
-			startIdx = totalItems - availableRows
-		} else {
-			startIdx = cursorIdx - availableRows/2
-		}
+	// Keep cursor in view with margin
+	if cursorIdx < ListScrollMargin {
+		startIdx = 0
+	} else if cursorIdx >= totalItems-ListScrollMargin {
+		startIdx = totalItems - availableRows
+	} else {
+		startIdx = cursorIdx - availableRows/2
+	}
 
-		// Clamp start index
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		if startIdx > totalItems-availableRows {
-			startIdx = totalItems - availableRows
-		}
+	// Clamp start index
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx > totalItems-availableRows {
+		startIdx = totalItems - availableRows
+	}
 
-		endIdx = startIdx + availableRows
-		if endIdx > totalItems {
-			endIdx = totalItems
-		}
+	endIdx := startIdx + availableRows
+	if endIdx > totalItems {
+		endIdx = totalItems
 	}
 
 	return ListLayout{

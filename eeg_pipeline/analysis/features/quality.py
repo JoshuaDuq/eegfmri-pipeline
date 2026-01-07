@@ -25,7 +25,7 @@ from eeg_pipeline.domain.features.constants import EPSILON_STD
 from eeg_pipeline.utils.config.loader import get_feature_constant
 
 
-def _compute_signal_metrics(data, sfreq):
+def _compute_signal_metrics(data, sfreq, config: Any = None):
     # data: (n_ch, n_times)
     res = {}
     
@@ -57,15 +57,71 @@ def _compute_signal_metrics(data, sfreq):
         return res
         
     try:
-        # Use simple periodogram or welch
-        psds, freqs = mne.time_frequency.psd_array_welch(
-            data, sfreq, fmin=1, fmax=100, n_fft=min(n_times, 256), verbose=False
-        )
+        qcfg = config.get("feature_engineering.quality", {}) if config is not None and hasattr(config, "get") else {}
+        psd_method = str(qcfg.get("psd_method", "welch")).strip().lower()
+        if psd_method not in {"welch", "multitaper"}:
+            psd_method = "welch"
+
+        fmin = float(qcfg.get("fmin", 1.0))
+        fmax = float(qcfg.get("fmax", min(100.0, float(sfreq) / 2.0 - 0.5)))
+
+        if psd_method == "multitaper":
+            psds, freqs = mne.time_frequency.psd_array_multitaper(
+                data,
+                sfreq=float(sfreq),
+                fmin=fmin,
+                fmax=fmax,
+                adaptive=True,
+                normalization="full",
+                verbose=False,
+            )
+        else:
+            psds, freqs = mne.time_frequency.psd_array_welch(
+                data,
+                sfreq=float(sfreq),
+                fmin=fmin,
+                fmax=fmax,
+                n_fft=min(n_times, int(qcfg.get("n_fft", 256))),
+                verbose=False,
+            )
         # psds: (n_ch, n_freqs)
+
+        freqs = np.asarray(freqs, dtype=float)
+        psds = np.asarray(psds, dtype=float)
+
+        # Exclude line-noise neighborhoods
+        exclude_line = bool(qcfg.get("exclude_line_noise", True))
+        line_freqs = qcfg.get("line_noise_freqs", [50.0])
+        try:
+            line_freqs = [float(f) for f in line_freqs]
+        except Exception:
+            line_freqs = [50.0]
+        width = float(qcfg.get("line_noise_width_hz", 1.0))
+        n_harm = int(qcfg.get("line_noise_harmonics", 3))
+
+        keep = np.ones_like(freqs, dtype=bool)
+        if exclude_line and freqs.size and width > 0 and n_harm > 0:
+            for base in line_freqs:
+                if not np.isfinite(base) or base <= 0:
+                    continue
+                for h in range(1, n_harm + 1):
+                    f0 = base * h
+                    keep &= ~((freqs >= (f0 - width)) & (freqs <= (f0 + width)))
+        if np.any(~keep):
+            freqs = freqs[keep]
+            psds = psds[:, keep]
         
-        # SNR: Power(1-30) / Power(50+)
-        mask_sig = (freqs >= 1) & (freqs <= 30)
-        mask_noise = (freqs >= 50)
+        snr_sig = qcfg.get("snr_signal_band", [1.0, 30.0])
+        snr_noise = qcfg.get("snr_noise_band", [40.0, 80.0])
+        try:
+            s0, s1 = float(snr_sig[0]), float(snr_sig[1])
+            n0, n1 = float(snr_noise[0]), float(snr_noise[1])
+        except Exception:
+            s0, s1, n0, n1 = 1.0, 30.0, 40.0, 80.0
+
+        # SNR-like: Power(sig)/Power(noise)
+        mask_sig = (freqs >= s0) & (freqs <= s1)
+        mask_noise = (freqs >= n0) & (freqs <= n1)
         
         pow_sig = np.sum(psds[:, mask_sig], axis=1)
         pow_noise = np.sum(psds[:, mask_noise], axis=1)
@@ -73,8 +129,13 @@ def _compute_signal_metrics(data, sfreq):
         snr_db = 10 * np.log10(pow_sig / (pow_noise + EPSILON_STD))
         res["snr"] = snr_db
         
-        # Muscle: Power(30-100) / Total
-        mask_mus = (freqs >= 30) & (freqs <= 100)
+        # Muscle proxy: high-frequency fraction
+        mus_band = qcfg.get("muscle_band", [30.0, 80.0])
+        try:
+            m0, m1 = float(mus_band[0]), float(mus_band[1])
+        except Exception:
+            m0, m1 = 30.0, 80.0
+        mask_mus = (freqs >= m0) & (freqs <= m1)
         pow_mus = np.sum(psds[:, mask_mus], axis=1)
         total = np.sum(psds, axis=1)
         
@@ -117,7 +178,7 @@ def extract_quality_features(
         # Iterate epochs
         for e in range(n_epochs):
             ep_data = data_seg[e]
-            metrics = _compute_signal_metrics(ep_data, sfreq)
+            metrics = _compute_signal_metrics(ep_data, sfreq, config=getattr(ctx, "config", None))
             
             # metrics keys: variance, ptp, finite, snr, muscle (arrays of shape n_ch)
             

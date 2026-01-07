@@ -664,15 +664,11 @@ type Model struct {
 	plotTextTitleY             float64
 	plotTextResidualQcTitleY   float64
 
-	plotValidationMinSamplesForPlot        int
-	plotValidationMinSamplesForKDE         int
-	plotValidationMinSamplesForFit         int
-	plotValidationMinSamplesForCalibration int
-	plotValidationMinBinsForCalibration    int
-	plotValidationMaxBinsForCalibration    int
-	plotValidationSamplesPerBin            int
-	plotValidationMinRoisForFDR            int
-	plotValidationMinPvaluesForFDR         int
+	plotValidationMinBinsForCalibration int
+	plotValidationMaxBinsForCalibration int
+	plotValidationSamplesPerBin         int
+	plotValidationMinRoisForFDR         int
+	plotValidationMinPvaluesForFDR      int
 
 	plotTfrDefaultBaselineWindowSpec string
 
@@ -871,7 +867,6 @@ type Model struct {
 	fdrAlpha              float64 // FDR correction threshold
 	behaviorConfigSection int     // Behavior config section index (legacy, kept for compatibility)
 	behaviorNJobs         int     // -1 = all
-	behaviorMinSamples    int     // default min samples
 
 	behaviorComputeChangeScores  bool
 	behaviorComputeBayesFactors  bool
@@ -912,17 +907,14 @@ type Model struct {
 
 	featureSummariesEnabled bool
 
-	painResidualEnabled                bool
-	painResidualMethod                 int // 0=spline, 1=poly
-	painResidualMinSamples             int
-	painResidualPolyDegree             int
-	painResidualModelCompareEnabled    bool
-	painResidualModelCompareMinSamples int
-	painResidualBreakpointEnabled      bool
-	painResidualBreakpointMinSamples   int
-	painResidualBreakpointCandidates   int
-	painResidualBreakpointQlow         float64
-	painResidualBreakpointQhigh        float64
+	painResidualEnabled              bool
+	painResidualMethod               int // 0=spline, 1=poly
+	painResidualPolyDegree           int
+	painResidualModelCompareEnabled  bool
+	painResidualBreakpointEnabled    bool
+	painResidualBreakpointCandidates int
+	painResidualBreakpointQlow       float64
+	painResidualBreakpointQhigh      float64
 
 	// Confounds
 	confoundsAddAsCovariates  bool
@@ -936,13 +928,11 @@ type Model struct {
 	regressionTempSplineKnots    int
 	regressionTempSplineQlow     float64
 	regressionTempSplineQhigh    float64
-	regressionTempSplineMinN     int
 	regressionIncludeTrialOrder  bool
 	regressionIncludePrev        bool
 	regressionIncludeRunBlock    bool
 	regressionIncludeInteraction bool
 	regressionStandardize        bool
-	regressionMinSamples         int
 	regressionPermutations       int
 	regressionMaxFeatures        int // 0 = no limit
 
@@ -952,13 +942,11 @@ type Model struct {
 	modelsTempSplineKnots     int
 	modelsTempSplineQlow      float64
 	modelsTempSplineQhigh     float64
-	modelsTempSplineMinN      int
 	modelsIncludeTrialOrder   bool
 	modelsIncludePrev         bool
 	modelsIncludeRunBlock     bool
 	modelsIncludeInteraction  bool
 	modelsStandardize         bool
-	modelsMinSamples          int
 	modelsMaxFeatures         int
 	modelsOutcomeRating       bool
 	modelsOutcomePainResidual bool
@@ -1020,7 +1008,6 @@ type Model struct {
 	temporalFeatureITPC  bool // Inter-trial phase coherence
 	temporalFeatureERDS  bool // Event-related desync/sync
 	// ITPC-specific parameters
-	temporalITPCMinTrials          int     // Minimum trials for reliable ITPC
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
 	temporalITPCBaselineMin        float64 // Baseline window start
 	temporalITPCBaselineMax        float64 // Baseline window end
@@ -1028,7 +1015,6 @@ type Model struct {
 	temporalERDSBaselineMin float64 // ERDS baseline window start (seconds)
 	temporalERDSBaselineMax float64 // ERDS baseline window end (seconds)
 	temporalERDSMethod      int     // 0=percent, 1=zscore
-	temporalERDSMinTrials   int     // Minimum trials for ERDS
 
 	// Mixed effects (group-level; still configurable)
 	mixedEffectsType int // 0=intercept, 1=intercept_slope
@@ -1043,11 +1029,12 @@ type Model struct {
 	clusterMinSize   int     // Minimum cluster size
 	clusterTail      int     // 0=two-tailed, 1=upper, -1=lower
 	// Mediation-specific
-	mediationBootstrap    int // Bootstrap iterations for mediation
-	mediationMaxMediators int // Max mediators to test
+	mediationBootstrap           int  // Bootstrap iterations for mediation
+	mediationMaxMediatorsEnabled bool // Enable max mediators limit
+	mediationMaxMediators        int  // Max mediators to test
 	// Moderation-specific
-	moderationMaxFeatures int // Max features for moderation
-	moderationMinSamples  int // Min samples for moderation
+	moderationMaxFeaturesEnabled bool // Enable max features limit
+	moderationMaxFeatures        int  // Max features for moderation
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
@@ -1243,7 +1230,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		fdrAlpha:              0.05,
 		behaviorConfigSection: 0,
 		behaviorNJobs:         -1,
-		behaviorMinSamples:    10,
 
 		behaviorComputeChangeScores:  true,
 		behaviorComputeBayesFactors:  false,
@@ -1264,17 +1250,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		featureSummariesEnabled: true,
 
-		painResidualEnabled:                true,
-		painResidualMethod:                 0,
-		painResidualMinSamples:             10,
-		painResidualPolyDegree:             2,
-		painResidualModelCompareEnabled:    true,
-		painResidualModelCompareMinSamples: 10,
-		painResidualBreakpointEnabled:      true,
-		painResidualBreakpointMinSamples:   12,
-		painResidualBreakpointCandidates:   15,
-		painResidualBreakpointQlow:         0.15,
-		painResidualBreakpointQhigh:        0.85,
+		painResidualEnabled:              true,
+		painResidualMethod:               0,
+		painResidualPolyDegree:           2,
+		painResidualModelCompareEnabled:  true,
+		painResidualBreakpointEnabled:    true,
+		painResidualBreakpointCandidates: 15,
+		painResidualBreakpointQlow:       0.15,
+		painResidualBreakpointQhigh:      0.85,
 
 		confoundsAddAsCovariates:  false,
 		confoundsMaxCovariates:    3,
@@ -1286,13 +1269,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		regressionTempSplineKnots:    4,
 		regressionTempSplineQlow:     0.05,
 		regressionTempSplineQhigh:    0.95,
-		regressionTempSplineMinN:     12,
 		regressionIncludeTrialOrder:  true,
 		regressionIncludePrev:        false,
 		regressionIncludeRunBlock:    true,
 		regressionIncludeInteraction: true,
 		regressionStandardize:        true,
-		regressionMinSamples:         15,
 		regressionPermutations:       0,
 		regressionMaxFeatures:        0,
 
@@ -1301,13 +1282,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		modelsTempSplineKnots:     4,
 		modelsTempSplineQlow:      0.05,
 		modelsTempSplineQhigh:     0.95,
-		modelsTempSplineMinN:      12,
 		modelsIncludeTrialOrder:   true,
 		modelsIncludePrev:         false,
 		modelsIncludeRunBlock:     true,
 		modelsIncludeInteraction:  true,
 		modelsStandardize:         true,
-		modelsMinSamples:          20,
 		modelsMaxFeatures:         100,
 		modelsOutcomeRating:       true,
 		modelsOutcomePainResidual: true,
@@ -1336,7 +1315,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceTempSplineKnots:     4,
 		influenceTempSplineQlow:      0.05,
 		influenceTempSplineQhigh:     0.95,
-		influenceTempSplineMinN:      12,
 		influenceIncludeTrialOrder:   true,
 		influenceIncludeRunBlock:     true,
 		influenceIncludeInteraction:  false,
@@ -1360,7 +1338,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalFeaturePower:           true,  // Power is enabled by default (existing behavior)
 		temporalFeatureITPC:            false, // ITPC off by default
 		temporalFeatureERDS:            false, // ERDS off by default
-		temporalITPCMinTrials:          10,
 		temporalITPCBaselineCorrection: true,
 		temporalITPCBaselineMin:        -0.5,
 		temporalITPCBaselineMax:        -0.01,
@@ -1368,7 +1345,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalERDSBaselineMin: -0.5,
 		temporalERDSBaselineMax: -0.1,
 		temporalERDSMethod:      0, // 0=percent, 1=zscore
-		temporalERDSMinTrials:   5,
 		mixedEffectsType:        0,
 		mediationMinEffect:      0.05,
 		// Cluster defaults
@@ -1376,11 +1352,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		clusterMinSize:   2,
 		clusterTail:      0,
 		// Mediation defaults
-		mediationBootstrap:    1000,
-		mediationMaxMediators: 20,
+		mediationBootstrap:           1000,
+		mediationMaxMediatorsEnabled: true,
+		mediationMaxMediators:        20,
 		// Moderation defaults
-		moderationMaxFeatures: 50,
-		moderationMinSamples:  15,
+		moderationMaxFeaturesEnabled: true,
+		moderationMaxFeatures:        50,
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
 		// Condition defaults
@@ -1934,7 +1911,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // UpdateComputationOffset calculates and updates the scrolling offset for the computations list.
 func (m *Model) UpdateComputationOffset() {
-	maxLines := m.height - 16
+	// Match overhead with renderComputationSelection (12 lines)
+	maxLines := m.height - 12
 	if maxLines < 8 {
 		maxLines = 8
 	}
@@ -1973,15 +1951,8 @@ func (m *Model) UpdateAdvancedOffset() {
 		return
 	}
 
-	// Total height minus overhead (approx; reduced for more visible content).
-	// Must match values used in render_steps.go for consistency.
-	maxLines := m.height - 12
-	switch m.Pipeline {
-	case types.PipelineFeatures:
-		maxLines = m.height - 10
-	case types.PipelineBehavior:
-		maxLines = m.height - 12
-	}
+	// Total height minus overhead - must match render functions
+	maxLines := m.height - 10
 	if maxLines < 8 {
 		maxLines = 8
 	}
@@ -2056,10 +2027,10 @@ func (m *Model) UpdateAdvancedOffset() {
 
 // UpdatePlotOffset calculates and updates the scrolling offset for the plots list
 func (m *Model) UpdatePlotOffset() {
-	// Total height minus overhead (approx 18-20 lines)
-	maxLines := m.height - 18
-	if maxLines < 10 {
-		maxLines = 10 // Minimum window
+	// Match overhead with renderPlotSelection (10-14 lines)
+	maxLines := m.height - 10
+	if maxLines < 8 {
+		maxLines = 8
 	}
 
 	// Reconstruct the list logic to find cursor position
@@ -2139,9 +2110,10 @@ func (m Model) featurePlotterItems() []PlotterInfo {
 }
 
 func (m *Model) UpdateFeaturePlotterOffset() {
-	maxLines := m.height - 16
-	if maxLines < 10 {
-		maxLines = 10
+	// Match overhead with renderFeaturePlotterSelection (10 lines)
+	maxLines := m.height - 10
+	if maxLines < 8 {
+		maxLines = 8
 	}
 
 	items := m.featurePlotterItems()
@@ -2925,10 +2897,11 @@ const (
 	optClusterTail
 	// Behavior options - Mediation
 	optMediationBootstrap
+	optMediationMaxMediatorsEnabled
 	optMediationMaxMediators
 	// Behavior options - Moderation
+	optModerationMaxFeaturesEnabled
 	optModerationMaxFeatures
-	optModerationMinSamples
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
 	// Behavior options - Condition
@@ -2952,19 +2925,15 @@ const (
 	optFeatureSummariesEnabled
 	optPainResidualEnabled
 	optPainResidualMethod
-	optPainResidualMinSamples
 	optPainResidualPolyDegree
 	optPainResidualModelCompare
-	optPainResidualModelCompareMinSamples
 	optPainResidualBreakpoint
-	optPainResidualBreakpointMinSamples
 	optPainResidualBreakpointCandidates
 	optPainResidualBreakpointQlow
 	optPainResidualBreakpointQhigh
 	// Behavior options - General extra
 	optRobustCorrelation
 	optBehaviorNJobs
-	optBehaviorMinSamples
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability
@@ -2979,13 +2948,11 @@ const (
 	optRegressionTempSplineKnots
 	optRegressionTempSplineQlow
 	optRegressionTempSplineQhigh
-	optRegressionTempSplineMinSamples
 	optRegressionIncludeTrialOrder
 	optRegressionIncludePrev
 	optRegressionIncludeRunBlock
 	optRegressionIncludeInteraction
 	optRegressionStandardize
-	optRegressionMinSamples
 	optRegressionPermutations
 	optRegressionMaxFeatures
 	// Behavior options - Models
@@ -2994,13 +2961,11 @@ const (
 	optModelsTempSplineKnots
 	optModelsTempSplineQlow
 	optModelsTempSplineQhigh
-	optModelsTempSplineMinSamples
 	optModelsIncludeTrialOrder
 	optModelsIncludePrev
 	optModelsIncludeRunBlock
 	optModelsIncludeInteraction
 	optModelsStandardize
-	optModelsMinSamples
 	optModelsMaxFeatures
 	optModelsOutcomeRating
 	optModelsOutcomePainResidual
@@ -3029,7 +2994,6 @@ const (
 	optInfluenceTempSplineKnots
 	optInfluenceTempSplineQlow
 	optInfluenceTempSplineQhigh
-	optInfluenceTempSplineMinSamples
 	optInfluenceIncludeTrialOrder
 	optInfluenceIncludeRunBlock
 	optInfluenceIncludeInteraction
@@ -3055,7 +3019,6 @@ const (
 	optTemporalFeatureITPC
 	optTemporalFeatureERDS
 	// ITPC-specific options
-	optTemporalITPCMinTrials
 	optTemporalITPCBaselineCorrection
 	optTemporalITPCBaselineMin
 	optTemporalITPCBaselineMax
@@ -3063,7 +3026,6 @@ const (
 	optTemporalERDSBaselineMin
 	optTemporalERDSBaselineMax
 	optTemporalERDSMethod
-	optTemporalERDSMinTrials
 	// Behavior options - Mixed effects / mediation
 	optMixedEffectsType
 	optMediationMinEffect
@@ -3218,10 +3180,6 @@ const (
 	optPlotTextChannelAnnotationY
 	optPlotTextTitleY
 	optPlotTextResidualQcTitleY
-	optPlotValidationMinSamplesForPlot
-	optPlotValidationMinSamplesForKDE
-	optPlotValidationMinSamplesForFit
-	optPlotValidationMinSamplesForCalibration
 	optPlotValidationMinBinsForCalibration
 	optPlotValidationMaxBinsForCalibration
 	optPlotValidationSamplesPerBin
@@ -3711,10 +3669,6 @@ func (m Model) getPlottingOptions() []optionType {
 	options = append(options, optPlotGroupValidation)
 	if m.plotGroupValidationExpanded {
 		options = append(options,
-			optPlotValidationMinSamplesForPlot,
-			optPlotValidationMinSamplesForKDE,
-			optPlotValidationMinSamplesForFit,
-			optPlotValidationMinSamplesForCalibration,
 			optPlotValidationMinBinsForCalibration,
 			optPlotValidationMaxBinsForCalibration,
 			optPlotValidationSamplesPerBin,
@@ -3819,7 +3773,6 @@ func (m Model) getBehaviorOptions() []optionType {
 			optNPerm,
 			optRNGSeed,
 			optBehaviorNJobs,
-			optBehaviorMinSamples,
 			optControlTemp,
 			optControlOrder,
 			optTrialTableOnlyMode,
@@ -3850,12 +3803,9 @@ func (m Model) getBehaviorOptions() []optionType {
 				optFeatureSummariesEnabled,
 				optPainResidualEnabled,
 				optPainResidualMethod,
-				optPainResidualMinSamples,
 				optPainResidualPolyDegree,
 				optPainResidualModelCompare,
-				optPainResidualModelCompareMinSamples,
 				optPainResidualBreakpoint,
-				optPainResidualBreakpointMinSamples,
 				optPainResidualBreakpointCandidates,
 				optPainResidualBreakpointQlow,
 				optPainResidualBreakpointQhigh,
@@ -3897,7 +3847,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optRegressionTempSplineKnots,
 					optRegressionTempSplineQlow,
 					optRegressionTempSplineQhigh,
-					optRegressionTempSplineMinSamples,
 				)
 			}
 			options = append(options,
@@ -3906,7 +3855,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionIncludeRunBlock,
 				optRegressionIncludeInteraction,
 				optRegressionStandardize,
-				optRegressionMinSamples,
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
 			)
@@ -3926,7 +3874,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optModelsTempSplineKnots,
 					optModelsTempSplineQlow,
 					optModelsTempSplineQhigh,
-					optModelsTempSplineMinSamples,
 				)
 			}
 			options = append(options,
@@ -3935,7 +3882,6 @@ func (m Model) getBehaviorOptions() []optionType {
 				optModelsIncludeRunBlock,
 				optModelsIncludeInteraction,
 				optModelsStandardize,
-				optModelsMinSamples,
 				optModelsMaxFeatures,
 				optModelsOutcomeRating,
 				optModelsOutcomePainResidual,
@@ -3990,7 +3936,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optInfluenceTempSplineKnots,
 					optInfluenceTempSplineQlow,
 					optInfluenceTempSplineQhigh,
-					optInfluenceTempSplineMinSamples,
 				)
 			}
 			options = append(options,
@@ -4036,7 +3981,6 @@ func (m Model) getBehaviorOptions() []optionType {
 			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
 			if m.featureFileSelected["itpc"] {
 				options = append(options,
-					optTemporalITPCMinTrials,
 					optTemporalITPCBaselineCorrection,
 					optTemporalITPCBaselineMin,
 					optTemporalITPCBaselineMax,
@@ -4048,7 +3992,6 @@ func (m Model) getBehaviorOptions() []optionType {
 					optTemporalERDSBaselineMin,
 					optTemporalERDSBaselineMax,
 					optTemporalERDSMethod,
-					optTemporalERDSMinTrials,
 				)
 			}
 		}
@@ -4066,7 +4009,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("mediation") {
 		options = append(options, optBehaviorGroupMediation)
 		if m.behaviorGroupMediationExpanded {
-			options = append(options, optMediationBootstrap, optMediationMinEffect, optMediationMaxMediators)
+			options = append(options, optMediationBootstrap, optMediationMinEffect, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
 		}
 	}
 
@@ -4074,7 +4017,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("moderation") {
 		options = append(options, optBehaviorGroupModeration)
 		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeatures, optModerationMinSamples)
+			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures)
 		}
 	}
 

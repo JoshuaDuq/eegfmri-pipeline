@@ -76,6 +76,7 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
     "temporal",
     "cluster",
     "mediation",
+    "moderation",
     "mixed_effects",
 ]
 
@@ -94,6 +95,7 @@ BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
     "temporal": "Time-resolved correlation analysis",
     "cluster": "Cluster-based permutation tests",
     "mediation": "Path analysis and mediation models",
+    "moderation": "Moderation analysis (interaction effects)",
     "mixed_effects": "Mixed-effects modeling",
 }
 

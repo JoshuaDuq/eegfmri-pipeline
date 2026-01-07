@@ -405,6 +405,7 @@ class PrecomputedData:
     logger: Any = None
     qc: PrecomputedQC = field(default_factory=PrecomputedQC)
     spatial_modes: Optional[List[str]] = None
+    frequency_bands: Optional[Dict[str, List[float]]] = None
 
     def crop(self, tmin: float, tmax: float) -> PrecomputedData:
         """Create a new PrecomputedData object cropped to the time range."""
@@ -430,6 +431,7 @@ class PrecomputedData:
             config=self.config,
             logger=self.logger,
             spatial_modes=self.spatial_modes,
+            frequency_bands=self.frequency_bands,
         )
         
         # Crop band data
@@ -490,4 +492,5 @@ class PrecomputedData:
             logger=self.logger,
             qc=self.qc,
             spatial_modes=self.spatial_modes,
+            frequency_bands=self.frequency_bands,
         )

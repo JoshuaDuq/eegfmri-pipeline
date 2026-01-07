@@ -784,18 +784,6 @@ func (m Model) buildPlottingAdvancedArgs() []string {
 	}
 
 	// Validation
-	if m.plotValidationMinSamplesForPlot != 0 {
-		args = append(args, "--validation-min-samples-for-plot", fmt.Sprintf("%d", m.plotValidationMinSamplesForPlot))
-	}
-	if m.plotValidationMinSamplesForKDE != 0 {
-		args = append(args, "--validation-min-samples-for-kde", fmt.Sprintf("%d", m.plotValidationMinSamplesForKDE))
-	}
-	if m.plotValidationMinSamplesForFit != 0 {
-		args = append(args, "--validation-min-samples-for-fit", fmt.Sprintf("%d", m.plotValidationMinSamplesForFit))
-	}
-	if m.plotValidationMinSamplesForCalibration != 0 {
-		args = append(args, "--validation-min-samples-for-calibration", fmt.Sprintf("%d", m.plotValidationMinSamplesForCalibration))
-	}
 	if m.plotValidationMinBinsForCalibration != 0 {
 		args = append(args, "--validation-min-bins-for-calibration", fmt.Sprintf("%d", m.plotValidationMinBinsForCalibration))
 	}
@@ -1240,10 +1228,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.behaviorNJobs))
 	}
 
-	if m.behaviorMinSamples != 10 {
-		args = append(args, "--min-samples", fmt.Sprintf("%d", m.behaviorMinSamples))
-	}
-
 	if !m.controlTemperature {
 		args = append(args, "--no-control-temperature")
 	}
@@ -1321,9 +1305,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.painResidualMethod >= 0 && m.painResidualMethod < len(methods) && m.painResidualMethod != 0 {
 				args = append(args, "--pain-residual-method", methods[m.painResidualMethod])
 			}
-			if m.painResidualMinSamples != 10 {
-				args = append(args, "--pain-residual-min-samples", fmt.Sprintf("%d", m.painResidualMinSamples))
-			}
 			if m.painResidualPolyDegree != 2 {
 				args = append(args, "--pain-residual-poly-degree", fmt.Sprintf("%d", m.painResidualPolyDegree))
 			}
@@ -1332,14 +1313,8 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if !m.painResidualModelCompareEnabled {
 			args = append(args, "--no-pain-residual-model-compare")
 		}
-		if m.painResidualModelCompareMinSamples != 10 {
-			args = append(args, "--pain-residual-model-compare-min-samples", fmt.Sprintf("%d", m.painResidualModelCompareMinSamples))
-		}
 		if !m.painResidualBreakpointEnabled {
 			args = append(args, "--no-pain-residual-breakpoint-test")
-		}
-		if m.painResidualBreakpointMinSamples != 12 {
-			args = append(args, "--pain-residual-breakpoint-min-samples", fmt.Sprintf("%d", m.painResidualBreakpointMinSamples))
 		}
 		if m.painResidualBreakpointCandidates != 15 {
 			args = append(args, "--pain-residual-breakpoint-candidates", fmt.Sprintf("%d", m.painResidualBreakpointCandidates))
@@ -1388,7 +1363,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--regression-temperature-spline-knots", fmt.Sprintf("%d", m.regressionTempSplineKnots))
 			args = append(args, "--regression-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.regressionTempSplineQlow))
 			args = append(args, "--regression-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.regressionTempSplineQhigh))
-			args = append(args, "--regression-temperature-spline-min-samples", fmt.Sprintf("%d", m.regressionTempSplineMinN))
 		}
 		if !m.regressionIncludeTrialOrder {
 			args = append(args, "--no-regression-include-trial-order")
@@ -1404,9 +1378,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if !m.regressionStandardize {
 			args = append(args, "--no-regression-standardize")
-		}
-		if m.regressionMinSamples != 15 {
-			args = append(args, "--regression-min-samples", fmt.Sprintf("%d", m.regressionMinSamples))
 		}
 		if m.regressionPermutations != 0 {
 			args = append(args, "--regression-permutations", fmt.Sprintf("%d", m.regressionPermutations))
@@ -1429,7 +1400,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--models-temperature-spline-knots", fmt.Sprintf("%d", m.modelsTempSplineKnots))
 			args = append(args, "--models-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.modelsTempSplineQlow))
 			args = append(args, "--models-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.modelsTempSplineQhigh))
-			args = append(args, "--models-temperature-spline-min-samples", fmt.Sprintf("%d", m.modelsTempSplineMinN))
 		}
 		if !m.modelsIncludeTrialOrder {
 			args = append(args, "--no-models-include-trial-order")
@@ -1445,9 +1415,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if !m.modelsStandardize {
 			args = append(args, "--no-models-standardize")
-		}
-		if m.modelsMinSamples != 20 {
-			args = append(args, "--models-min-samples", fmt.Sprintf("%d", m.modelsMinSamples))
 		}
 		if m.modelsMaxFeatures != 100 {
 			args = append(args, "--models-max-features", fmt.Sprintf("%d", m.modelsMaxFeatures))
@@ -1551,7 +1518,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--influence-temperature-spline-knots", fmt.Sprintf("%d", m.influenceTempSplineKnots))
 			args = append(args, "--influence-temperature-spline-quantile-low", fmt.Sprintf("%.3f", m.influenceTempSplineQlow))
 			args = append(args, "--influence-temperature-spline-quantile-high", fmt.Sprintf("%.3f", m.influenceTempSplineQhigh))
-			args = append(args, "--influence-temperature-spline-min-samples", fmt.Sprintf("%d", m.influenceTempSplineMinN))
 		}
 		if !m.influenceIncludeTrialOrder {
 			args = append(args, "--no-influence-include-trial-order")
@@ -1645,9 +1611,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		// ITPC-specific options (only if ITPC is selected in step 3)
 		if m.featureFileSelected["itpc"] {
-			if m.temporalITPCMinTrials != 10 {
-				args = append(args, "--temporal-itpc-min-trials", fmt.Sprintf("%d", m.temporalITPCMinTrials))
-			}
 			if !m.temporalITPCBaselineCorrection {
 				args = append(args, "--no-temporal-itpc-baseline-correction")
 			}
@@ -1669,9 +1632,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.temporalERDSMethod != 0 {
 				methods := []string{"percent", "zscore"}
 				args = append(args, "--temporal-erds-method", methods[m.temporalERDSMethod])
-			}
-			if m.temporalERDSMinTrials != 5 {
-				args = append(args, "--temporal-erds-min-trials", fmt.Sprintf("%d", m.temporalERDSMinTrials))
 			}
 		}
 	}
@@ -1697,18 +1657,19 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mediationMinEffect != 0.05 {
 			args = append(args, "--mediation-min-effect-size", fmt.Sprintf("%.4f", m.mediationMinEffect))
 		}
-		if m.mediationMaxMediators != 20 {
-			args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
+		if m.mediationMaxMediatorsEnabled {
+			if m.mediationMaxMediators != 20 {
+				args = append(args, "--mediation-max-mediators", fmt.Sprintf("%d", m.mediationMaxMediators))
+			}
 		}
 	}
 
 	// Moderation-specific options
 	if m.isComputationSelected("moderation") {
-		if m.moderationMaxFeatures != 50 {
-			args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))
-		}
-		if m.moderationMinSamples != 15 {
-			args = append(args, "--moderation-min-samples", fmt.Sprintf("%d", m.moderationMinSamples))
+		if m.moderationMaxFeaturesEnabled {
+			if m.moderationMaxFeatures != 50 {
+				args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))
+			}
 		}
 	}
 

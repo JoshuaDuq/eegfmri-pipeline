@@ -21,7 +21,8 @@ import mne
 
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig
-from ...utils.analysis.tfr import get_bands_for_tfr
+from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+from ...utils.analysis.tfr import get_bands_for_tfr, build_rois_from_info
 from ..config import get_plot_config
 
 
@@ -45,14 +46,7 @@ BAND_RANGES = {
     "gamma": "30-100 Hz",
 }
 
-# ROI definitions (simplified for visualization)
-ROI_CHANNELS = {
-    "Frontal": ["Fp1", "Fp2", "Fpz", "AF3", "AF4", "F3", "F4", "Fz", "F7", "F8"],
-    "Central": ["C3", "C4", "Cz", "FC3", "FC4", "CP3", "CP4"],
-    "Parietal": ["P3", "P4", "Pz", "P7", "P8", "POz"],
-    "Occipital": ["O1", "O2", "Oz", "PO3", "PO4", "PO7", "PO8"],
-    "Temporal": ["T7", "T8", "TP7", "TP8", "FT7", "FT8"],
-}
+# ROI definitions are now loaded from config via get_roi_definitions()
 
 # Condition colors
 CONDITION_COLORS = {
@@ -112,10 +106,29 @@ def _get_band_power_timecourse(
     return tfr.times, band_data
 
 
-def _get_roi_channel_indices(tfr: mne.time_frequency.EpochsTFR, roi_name: str) -> List[int]:
-    """Get channel indices for a ROI."""
+def _get_roi_channel_indices(tfr: mne.time_frequency.EpochsTFR, roi_name: str, config: Any) -> List[int]:
+    """Get channel indices for a ROI from config-defined ROIs.
+    
+    Args:
+        tfr: EpochsTFR object with channel info
+        roi_name: Name of the ROI to get channels for
+        config: Configuration object containing ROI definitions
+        
+    Returns:
+        List of channel indices matching the ROI
+    """
     ch_names = tfr.ch_names
-    roi_channels = ROI_CHANNELS.get(roi_name, [])
+    
+    # Get ROI definitions from config (user-defined in global setup)
+    rois = get_roi_definitions(config)
+    if not rois or roi_name not in rois:
+        return []
+    
+    # Get channel names for this ROI using the regex patterns
+    roi_patterns = rois[roi_name]
+    roi_channels = get_roi_channels(roi_patterns, ch_names)
+    
+    # Convert channel names to indices
     indices = [i for i, ch in enumerate(ch_names) if ch in roi_channels]
     return indices
 
@@ -334,10 +347,11 @@ def plot_band_power_by_roi(
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
-    # Get available ROIs
+    # Get available ROIs from config
+    rois = get_roi_definitions(config)
     available_rois = []
-    for roi_name in ROI_CHANNELS.keys():
-        indices = _get_roi_channel_indices(tfr, roi_name)
+    for roi_name in rois.keys():
+        indices = _get_roi_channel_indices(tfr, roi_name, config)
         if len(indices) > 0:
             available_rois.append(roi_name)
     
@@ -356,7 +370,7 @@ def plot_band_power_by_roi(
         fig, axes = plt.subplots(n_rois, n_bands, figsize=(3*n_bands, 2.5*n_rois), squeeze=False)
         
         for i, roi_name in enumerate(available_rois):
-            roi_indices = _get_roi_channel_indices(tfr, roi_name)
+            roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
             
             for j, band in enumerate(BANDS):
                 ax = axes[i, j]
@@ -570,9 +584,11 @@ def plot_roi_condition_comparison(
     # Focus on alpha and beta (most relevant for pain)
     focus_bands = ["alpha", "beta"]
     
+    # Get available ROIs from config
+    rois = get_roi_definitions(config)
     available_rois = []
-    for roi_name in ROI_CHANNELS.keys():
-        indices = _get_roi_channel_indices(tfr, roi_name)
+    for roi_name in rois.keys():
+        indices = _get_roi_channel_indices(tfr, roi_name, config)
         if len(indices) > 0:
             available_rois.append(roi_name)
     
@@ -586,7 +602,7 @@ def plot_roi_condition_comparison(
     fig, axes = plt.subplots(n_rois, n_bands * 2, figsize=(4*n_bands*2, 2.5*n_rois), squeeze=False)
     
     for i, roi_name in enumerate(available_rois):
-        roi_indices = _get_roi_channel_indices(tfr, roi_name)
+        roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
         
         col_idx = 0
         for band in focus_bands:

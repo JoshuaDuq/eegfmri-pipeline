@@ -7,12 +7,12 @@ import scipy.signal
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from mne_bids import BIDSPath, get_entities_from_fname
-from mne_bids_pipeline._logging import gen_log_kwargs, logger
+from mne_bids_pipeline._logging import gen_log_kwargs, logger  # type: ignore
 from mne.beamformer import make_lcmv, apply_lcmv_epochs
 from mne_connectivity import spectral_connectivity_epochs, envelope_correlation
 from mne.datasets import fetch_fsaverage
-from specparam import SpectralModel
-import bct
+from specparam import SpectralModel  # type: ignore
+import bct  # type: ignore
 
 from . import utils
 from . import io
@@ -493,30 +493,33 @@ def compute_source_space_features(
 # Single Subject Feature Computation
 ###################################################################
 
-def _get_default_roi_channels():
-    return {
-        "somato": [
-            "C3", "C4", "CP3", "CP4", "C1", "C2", "C5", "C6",
-            "CP1", "CP2", "CP5", "CP6", "Cz", "CPz",
-        ],
-        "prefrontal": ["Fp1", "Fp2", "AF3", "AF4", "AF7", "AF8", "AFz"],
-        "frontal": [
-            "Fz", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
-            "FC1", "FC2", "FC3", "FC4", "FC5", "FC6",
-        ],
-        "parietal": [
-            "Pz", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
-            "CP1", "CP2", "CP3", "CP4", "CPz",
-        ],
-        "temporal": [
-            "T7", "T8", "TP7", "TP8", "TP9", "TP10",
-            "FT7", "FT8", "FT9", "FT10",
-        ],
-        "occipital": ["O1", "O2", "Oz", "PO3", "PO4", "PO7", "PO8", "POz"],
-        "midline": [
-            "Fpz", "AFz", "Fz", "FCz", "Cz", "CPz", "Pz", "POz", "Oz",
-        ],
-    }
+def _get_roi_channels_from_config(config, ch_names):
+    """Get ROI channel mappings from config using user-defined ROI definitions.
+    
+    Args:
+        config: Configuration object containing ROI definitions
+        ch_names: List of available channel names
+        
+    Returns:
+        Dictionary mapping ROI names to lists of channel names that match the ROI patterns
+    """
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+    
+    # Get ROI definitions from config (user-defined in global setup)
+    roi_defs = get_roi_definitions(config)
+    
+    if not roi_defs:
+        # If no ROIs defined in config, return empty dict
+        return {}
+    
+    # Convert ROI patterns to channel lists
+    roi_channels = {}
+    for roi_name, patterns in roi_defs.items():
+        matched_channels = get_roi_channels(patterns, ch_names)
+        if matched_channels:  # Only include ROIs that have matching channels
+            roi_channels[roi_name] = matched_channels
+    
+    return roi_channels
 
 
 def _compute_trial_features(
@@ -641,6 +644,7 @@ def compute_features_single_subject(
     compute_sourcespace_features,
     task_is_rest=True,
     roi_channels=None,
+    config=None,
     compute_connectivity=True,
     connectivity_methods=["aec", "wpli"],
     graph_metrics=["density", "clustering", "path_length", "efficiency"],
@@ -763,7 +767,11 @@ def compute_features_single_subject(
         )
         
         if roi_channels is None:
-            roi_channels = _get_default_roi_channels()
+            # Get ROIs from config (user-defined in global setup)
+            if config is not None:
+                roi_channels = _get_roi_channels_from_config(config, psd.ch_names)
+            else:
+                roi_channels = {}  # No ROIs if config not provided
         
         freqRange = (psd.freqs >= freq_bands["alpha"][0]) & (psd.freqs <= freq_bands["alpha"][1])
         
@@ -851,7 +859,11 @@ def compute_features_single_subject(
         logger.info(**gen_log_kwargs(message=msg, subject=subject, session=session))
         
         if roi_channels is None:
-            roi_channels = _get_default_roi_channels()
+            # Get ROIs from config (user-defined in global setup)
+            if config is not None:
+                roi_channels = _get_roi_channels_from_config(config, psd.ch_names)
+            else:
+                roi_channels = {}  # No ROIs if config not provided
         
         for condition in conditions_to_process:
             epochs_for_condition = clean_epo[condition].copy()
@@ -1310,6 +1322,7 @@ def compute_features(
     compute_sourcespace_features=True,
     task_is_rest=True,
     roi_channels=None,
+    config=None,
     compute_connectivity=True,
     connectivity_methods=["aec", "wpli"],
     graph_metrics=["density", "clustering", "path_length", "efficiency"],
@@ -1370,6 +1383,7 @@ def compute_features(
                 compute_sourcespace_features,
                 task_is_rest,
                 roi_channels,
+                config,
                 compute_connectivity,
                 connectivity_methods,
                 graph_metrics,
@@ -1393,6 +1407,7 @@ def compute_features(
                 compute_sourcespace_features,
                 task_is_rest,
                 roi_channels,
+                config,
                 compute_connectivity,
                 connectivity_methods,
                 graph_metrics,

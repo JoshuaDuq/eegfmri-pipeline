@@ -298,25 +298,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	var b strings.Builder
-
+	// Render header
 	title := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("◆ GLOBAL SETUP")
 	section := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.sections[m.sectionIndex].label)
-	b.WriteString(title + "  " + section + "\n\n")
+	header := title + "  " + section
+	headerHeight := 3
 
+	// Render footer
+	footer := m.renderFooter()
+	footerHeight := strings.Count(footer, "\n") + 2
+
+	// Calculate available height for main content
+	mainHeight := m.height - headerHeight - footerHeight
+	if mainHeight < 10 {
+		mainHeight = 10
+	}
+
+	// Build main content
+	var mainContent strings.Builder
 	switch m.sections[m.sectionIndex].key {
 	case sectionBands:
-		b.WriteString(m.renderBands())
+		mainContent.WriteString(m.renderBands())
 	case sectionROIs:
-		b.WriteString(m.renderRois())
+		mainContent.WriteString(m.renderRois())
 	case sectionReview:
-		b.WriteString(m.renderReview())
+		mainContent.WriteString(m.renderReview())
 	default:
-		b.WriteString(m.renderFields())
+		mainContent.WriteString(m.renderFields())
 	}
 
 	if m.isLoading {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  Searching for paths and configuration..."))
+		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  Searching for paths and configuration..."))
 	}
 
 	if m.statusMessage != "" {
@@ -324,16 +336,19 @@ func (m Model) View() string {
 		if m.statusIsError {
 			color = styles.Error
 		}
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(color).Render(m.statusMessage))
+		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(color).Render(m.statusMessage))
 	}
 
 	if m.isSaving {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Saving changes..."))
+		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Saving changes..."))
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString(m.renderFooter())
-	return b.String()
+	// Force main content to fill available height
+	mainContentStyled := lipgloss.NewStyle().
+		Height(mainHeight).
+		Render(mainContent.String())
+
+	return header + "\n\n" + mainContentStyled + "\n" + footer
 }
 
 func (m Model) renderFooter() string {
@@ -443,14 +458,29 @@ func (m Model) renderBands() string {
 func (m Model) renderRois() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" ROIS ") + "\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"ROI name with regex list. Use A to add, D to delete.") + "\n\n")
 
-	if len(m.rois) == 0 {
+	helpText := "ROI name with regex list. Use A to add, D to delete."
+	if m.editingText && m.editingField == fieldRoiEdit {
+		helpText = "Editing ROI: name=pattern1 ; pattern2. Press Enter to save, Esc to cancel."
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(helpText) + "\n\n")
+
+	if len(m.rois) == 0 && !m.editingText {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("No ROIs defined. Press A to add.") + "\n")
 		return b.String()
 	}
 
+	// Show editing input if currently editing
+	if m.editingText && m.editingField == fieldRoiEdit {
+		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		editPrompt := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Editing: ")
+		editText := m.textBuffer + "█"
+		b.WriteString(cursor + editPrompt + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(editText) + "\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  Format: ROI_name=pattern1 ; pattern2 ; pattern3") + "\n")
+		return b.String()
+	}
+
+	// Show ROI list
 	for i, roi := range m.rois {
 		isFocused := i == m.roiCursor
 		cursor := "  "
@@ -733,8 +763,23 @@ func (m *Model) handleTextEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.textBuffer) > 0 {
 			m.textBuffer = m.textBuffer[:len(m.textBuffer)-1]
 		}
+	case "ctrl+u":
+		// Clear entire buffer
+		m.textBuffer = ""
+	case "ctrl+w":
+		// Delete word backwards
+		if len(m.textBuffer) > 0 {
+			// Find last space or start of string
+			lastSpace := strings.LastIndex(m.textBuffer[:len(m.textBuffer)-1], " ")
+			if lastSpace == -1 {
+				m.textBuffer = ""
+			} else {
+				m.textBuffer = m.textBuffer[:lastSpace+1]
+			}
+		}
 	default:
-		if len(msg.String()) == 1 {
+		// Handle all printable characters and spaces
+		if len(msg.String()) == 1 || msg.String() == " " {
 			m.textBuffer += msg.String()
 		}
 	}
@@ -781,9 +826,6 @@ func (m *Model) editRoi() (tea.Model, tea.Cmd) {
 	patterns := strings.Join(roi.Patterns, " ; ")
 	m.editingText = true
 	m.editingField = fieldRoiEdit
-	if patterns == "" {
-		patterns = "(regex)"
-	}
 	m.textBuffer = fmt.Sprintf("%s=%s", roi.Name, patterns)
 	return m, nil
 }

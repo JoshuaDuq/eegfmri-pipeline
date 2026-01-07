@@ -30,7 +30,49 @@ def _extract_params(config: Any) -> Dict[str, Any]:
     return {
         "pe_order": int(config.get("feature_engineering.complexity.pe_order", 3)),
         "pe_delay": int(config.get("feature_engineering.complexity.pe_delay", 1)),
+        "target_hz": float(config.get("feature_engineering.complexity.target_hz", 100.0)),
+        "target_n_samples": int(config.get("feature_engineering.complexity.target_n_samples", 500)),
+        "zscore": bool(config.get("feature_engineering.complexity.zscore", True)),
     }
+
+
+def _resample_1d(x: np.ndarray, *, target_n: int) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    if target_n <= 1 or x.size <= 1:
+        return x
+    if x.size == target_n:
+        return x
+    try:
+        # Prefer polyphase resampling (anti-aliasing) when available.
+        from math import gcd
+        from scipy.signal import resample_poly
+
+        g = gcd(int(x.size), int(target_n))
+        up = int(target_n // g)
+        down = int(x.size // g)
+        y = resample_poly(x, up=up, down=down, window=("kaiser", 5.0), padtype="line")
+        if y.size == target_n:
+            return y.astype(float, copy=False)
+    except Exception:
+        pass
+
+    xp = np.linspace(0.0, 1.0, x.size)
+    xq = np.linspace(0.0, 1.0, target_n)
+    return np.interp(xq, xp, x)
+
+
+def _standardize_trace(x: np.ndarray, *, zscore: bool) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    if not zscore:
+        return x
+    finite = x[np.isfinite(x)]
+    if finite.size < 2:
+        return x
+    mu = float(np.mean(finite))
+    sd = float(np.std(finite, ddof=1))
+    if not np.isfinite(sd) or sd <= 0:
+        return x - mu
+    return (x - mu) / sd
 
 # =============================================================================
 # Precomputed Data Extractors (Moved from pipeline.py)
@@ -45,6 +87,7 @@ def _process_complexity_epoch(
     params: Dict[str, Any],
     spatial_modes: List[str],
     roi_map: Dict[str, List[int]],
+    sfreq: float,
 ) -> Dict[str, float]:
     """Process complexity for a single epoch (parallel worker)."""
     record: Dict[str, float] = {}
@@ -52,7 +95,7 @@ def _process_complexity_epoch(
         env = bd.envelope[ep_idx]
         env_seg = env[:, segment_mask] if not isinstance(segment_mask, slice) else env
         
-        if env_seg.shape[1] < 10: 
+        if env_seg.shape[1] < 10:
             continue
 
         n_ch = len(ch_names)
@@ -61,14 +104,30 @@ def _process_complexity_epoch(
         
         for ch_idx, ch_name in enumerate(ch_names):
             trace = env_seg[ch_idx]
+
+            # Complexity metrics are sensitive to sampling rate and window length.
+            # Standardize by resampling to a fixed target length and (optionally) z-scoring.
+            target_hz = float(params.get("target_hz", 100.0))
+            target_n = int(params.get("target_n_samples", 500))
+            if np.isfinite(sfreq) and sfreq > 0 and np.isfinite(target_hz) and target_hz > 0:
+                duration_sec = float(trace.size) / float(sfreq)
+                target_n = max(10, int(round(duration_sec * target_hz)))
+            target_n = max(10, int(target_n))
+
+            trace_rs = _resample_1d(trace, target_n=target_n)
+            trace_rs = _standardize_trace(trace_rs, zscore=bool(params.get("zscore", True)))
             
             try:
-                lzc = _lempel_ziv_complexity(trace)
+                lzc = _lempel_ziv_complexity(trace_rs)
             except (ValueError, RuntimeError):
                 lzc = np.nan
             
             try:
-                pe = _permutation_entropy(trace, order=params.get("pe_order", 3), delay=params.get("pe_delay", 1))
+                pe = _permutation_entropy(
+                    trace_rs,
+                    order=params.get("pe_order", 3),
+                    delay=params.get("pe_delay", 1),
+                )
             except (ValueError, RuntimeError):
                 pe = np.nan
 
@@ -120,6 +179,7 @@ def _compute_complexity_for_segment(
                 params,
                 spatial_modes,
                 roi_map,
+                float(getattr(precomputed, "sfreq", np.nan)),
             )
             for ep_idx in range(n_epochs)
         )
@@ -134,6 +194,7 @@ def _compute_complexity_for_segment(
                 params,
                 spatial_modes,
                 roi_map,
+                float(getattr(precomputed, "sfreq", np.nan)),
             )
             for ep_idx in range(n_epochs)
         ]

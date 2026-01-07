@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter, find_peaks
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.domain.features.constants import MIN_SAMPLES_DEFAULT, validate_extractor_inputs
@@ -47,20 +48,52 @@ def _compute_peaks(
     data: np.ndarray,
     times: np.ndarray,
     mode: str,
+    *,
+    smooth_samples: int = 0,
+    prominence: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     has_finite = np.isfinite(data).any(axis=2)
-    if mode == "neg":
-        data_for_idx = np.where(np.isfinite(data), data, np.inf)
-        idx = np.argmin(data_for_idx, axis=2)
-    elif mode == "pos":
-        data_for_idx = np.where(np.isfinite(data), data, -np.inf)
-        idx = np.argmax(data_for_idx, axis=2)
-    else:
-        data_for_idx = np.where(np.isfinite(data), np.abs(data), -np.inf)
-        idx = np.argmax(data_for_idx, axis=2)
+    n_epochs, n_series, n_times = data.shape
+    peak_vals = np.full((n_epochs, n_series), np.nan)
+    peak_times = np.full((n_epochs, n_series), np.nan)
 
-    peak_vals = np.take_along_axis(data, idx[..., None], axis=2).squeeze(axis=2)
-    peak_times = times[idx]
+    use_smooth = int(smooth_samples) if smooth_samples is not None else 0
+    if use_smooth and use_smooth >= 5 and use_smooth < n_times:
+        if use_smooth % 2 == 0:
+            use_smooth += 1
+        try:
+            data_s = savgol_filter(data, window_length=use_smooth, polyorder=2, axis=2, mode="interp")
+        except Exception:
+            data_s = data
+    else:
+        data_s = data
+
+    for e in range(n_epochs):
+        for s in range(n_series):
+            y = data_s[e, s]
+            if not np.isfinite(y).any():
+                continue
+            y0 = np.nan_to_num(y, nan=np.nanmedian(y))
+            if mode == "neg":
+                y_search = -y0
+            elif mode == "pos":
+                y_search = y0
+            else:
+                y_search = np.abs(y0)
+
+            if prominence is not None and np.isfinite(prominence) and prominence > 0:
+                peaks, props = find_peaks(y_search, prominence=float(prominence))
+                if peaks.size:
+                    best = int(peaks[np.argmax(props.get("prominences", np.ones_like(peaks)))])
+                    peak_vals[e, s] = float(y0[best])
+                    peak_times[e, s] = float(times[best])
+                    continue
+
+            # Fallback: argmax on requested mode
+            best = int(np.nanargmax(y_search))
+            peak_vals[e, s] = float(y0[best])
+            peak_times[e, s] = float(times[best])
+
     peak_vals[~has_finite] = np.nan
     peak_times[~has_finite] = np.nan
     return peak_vals, peak_times
@@ -74,9 +107,18 @@ def _append_series_features(
     segment: str,
     scope: str,
     peak_mode: str,
+    *,
+    smooth_samples: int = 0,
+    prominence: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     mean_vals = np.nanmean(data, axis=2)
-    peak_vals, peak_times = _compute_peaks(data, times, peak_mode)
+    peak_vals, peak_times = _compute_peaks(
+        data,
+        times,
+        peak_mode,
+        smooth_samples=int(smooth_samples),
+        prominence=prominence,
+    )
     has_finite = np.isfinite(data).any(axis=2)
     auc_vals = np.trapz(np.nan_to_num(data, nan=0.0), times, axis=2)
     auc_vals[~has_finite] = np.nan
@@ -173,6 +215,19 @@ def extract_erp_features(
     erp_cfg = ctx.config.get("feature_engineering.erp", {}) if hasattr(ctx.config, "get") else {}
     baseline_correction = bool(erp_cfg.get("baseline_correction", True))
     allow_no_baseline = bool(erp_cfg.get("allow_no_baseline", False))
+    smooth_ms = erp_cfg.get("smooth_ms", 0.0)
+    try:
+        smooth_ms = float(smooth_ms)
+    except Exception:
+        smooth_ms = 0.0
+    smooth_samples = int(round(float(epochs.info["sfreq"]) * smooth_ms / 1000.0)) if smooth_ms > 0 else 0
+    peak_prom_uv = erp_cfg.get("peak_prominence_uv", None)
+    peak_prominence = None
+    if peak_prom_uv is not None:
+        try:
+            peak_prominence = float(peak_prom_uv) * 1e-6
+        except Exception:
+            peak_prominence = None
 
     if baseline_correction:
         baseline_mask = ctx.windows.get_mask("baseline") if ctx.windows is not None else None
@@ -221,7 +276,15 @@ def extract_erp_features(
 
         if "channels" in spatial_modes:
             peak_vals, peak_times = _append_series_features(
-                output, seg_data, ch_names, seg_times, seg_name, "ch", peak_mode
+                output,
+                seg_data,
+                ch_names,
+                seg_times,
+                seg_name,
+                "ch",
+                peak_mode,
+                smooth_samples=smooth_samples,
+                prominence=peak_prominence,
             )
             peak_cache["ch"][seg_name] = (peak_vals, peak_times, ch_names)
 
@@ -235,14 +298,30 @@ def extract_erp_features(
             if roi_series:
                 roi_stack = np.stack(roi_series, axis=1)
                 peak_vals, peak_times = _append_series_features(
-                    output, roi_stack, roi_names, seg_times, seg_name, "roi", peak_mode
+                    output,
+                    roi_stack,
+                    roi_names,
+                    seg_times,
+                    seg_name,
+                    "roi",
+                    peak_mode,
+                    smooth_samples=smooth_samples,
+                    prominence=peak_prominence,
                 )
                 peak_cache["roi"][seg_name] = (peak_vals, peak_times, roi_names)
 
         if "global" in spatial_modes:
             global_series = np.nanmean(seg_data, axis=1, keepdims=True)
             peak_vals, peak_times = _append_series_features(
-                output, global_series, ["global"], seg_times, seg_name, "global", peak_mode
+                output,
+                global_series,
+                ["global"],
+                seg_times,
+                seg_name,
+                "global",
+                peak_mode,
+                smooth_samples=smooth_samples,
+                prominence=peak_prominence,
             )
             peak_cache["global"][seg_name] = (peak_vals, peak_times, ["global"])
 

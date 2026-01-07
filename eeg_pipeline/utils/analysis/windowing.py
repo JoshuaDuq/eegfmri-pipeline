@@ -249,24 +249,34 @@ class TimeWindowSpec:
         
     def _build_all_windows(self):
         """Construct windows based on explicit user input or configuration."""
-        # If explicit windows are provided (from CLI/TUI), use ONLY those
-        if self.explicit_windows:
-            for win in self.explicit_windows:
-                win_name = win.get("name")
+        # Explicit windows are treated as additional analysis windows, not a full override.
+        # Baseline/active windows remain available for baseline-dependent features unless
+        # the user explicitly overrides them by providing windows named "baseline"/"active".
+        explicit = self.explicit_windows or []
+        explicit_by_name: Dict[str, Tuple[float, float]] = {}
+        for win in explicit:
+            try:
+                win_name = str(win.get("name") or "").strip()
                 win_tmin = win.get("tmin")
                 win_tmax = win.get("tmax")
-                if win_name and win_tmin is not None and win_tmax is not None:
-                    self._add_window(win_name, float(win_tmin), float(win_tmax))
-            return
-        
+                if not win_name or win_tmin is None or win_tmax is None:
+                    continue
+                explicit_by_name[win_name] = (float(win_tmin), float(win_tmax))
+            except Exception:
+                continue
+
         # Fall back to config-based windows only if no explicit windows
         feat_cfg = self.config.get("feature_engineering.windows", {})
         tf_cfg = self.config.get("time_frequency_analysis", {})
         
-        # 1. Build baseline ONLY if explicitly defined (usually for normalization)
-        baseline_def = feat_cfg.get("baseline_window", tf_cfg.get("baseline_window"))
-        if baseline_def and isinstance(baseline_def, (list, tuple)) and len(baseline_def) >= 2:
-            self._add_window("baseline", float(baseline_def[0]), float(baseline_def[1]))
+        # 1. Baseline window (used for normalization) - allow explicit override
+        if "baseline" in explicit_by_name:
+            b0, b1 = explicit_by_name["baseline"]
+            self._add_window("baseline", float(b0), float(b1))
+        else:
+            baseline_def = feat_cfg.get("baseline_window", tf_cfg.get("baseline_window"))
+            if baseline_def and isinstance(baseline_def, (list, tuple)) and len(baseline_def) >= 2:
+                self._add_window("baseline", float(baseline_def[0]), float(baseline_def[1]))
 
         # 2. Targeted window (context/user-defined iteration)
         if self.name:
@@ -296,15 +306,24 @@ class TimeWindowSpec:
                     self._add_window(self.name, self.times[0], self.times[-1])
                 else:
                     self._add_empty_window(self.name, reason="missing_named_window")
+            # Add any explicit windows (including potentially baseline/active), since this
+            # spec may be used downstream for cross-feature alignment and metadata.
+            for win_name, (t0, t1) in explicit_by_name.items():
+                if win_name == self.name:
+                    continue
+                if win_name in self.masks:
+                    continue
+                self._add_window(win_name, float(t0), float(t1))
             return
 
-        # 1b. Build active window if explicitly defined
-        active_def = (
-            feat_cfg.get("active_window")
-            or tf_cfg.get("active_window")
-        )
-        if active_def and isinstance(active_def, (list, tuple)) and len(active_def) >= 2:
-            self._add_window("active", float(active_def[0]), float(active_def[1]))
+        # 1b. Active window - allow explicit override
+        if "active" in explicit_by_name:
+            a0, a1 = explicit_by_name["active"]
+            self._add_window("active", float(a0), float(a1))
+        else:
+            active_def = feat_cfg.get("active_window") or tf_cfg.get("active_window")
+            if active_def and isinstance(active_def, (list, tuple)) and len(active_def) >= 2:
+                self._add_window("active", float(active_def[0]), float(active_def[1]))
 
         # 3. Batch windows: process 'custom_windows' if defined
         custom = feat_cfg.get("custom_windows", [])
@@ -312,6 +331,12 @@ class TimeWindowSpec:
             for win in custom:
                 if isinstance(win, dict) and "name" in win and "start" in win and "end" in win:
                     self._add_window(win["name"], float(win["start"]), float(win["end"]))
+
+        # 4. Add any remaining explicit analysis windows (e.g., UI-defined segments)
+        for win_name, (t0, t1) in explicit_by_name.items():
+            if win_name in self.masks:
+                continue
+            self._add_window(win_name, float(t0), float(t1))
 
     def _add_window(self, name: str, start: float, end: float, prefix: str = ""):
         """Add a window with clamping and validation."""

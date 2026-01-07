@@ -135,7 +135,7 @@ def detect_feature_availability(features_dir) -> dict:
         "correlations": ["correlations*.tsv", "power_topomap_temperature_correlations*.tsv"],
         "pain_sensitivity": ["pain_sensitivity*.tsv"],
         "condition": ["condition_*.tsv", "condition_effects.tsv"],
-        "temporal": ["temporal_*.tsv", "temporal_correlations*.npz", "corr_stats_temporal*.tsv"],
+        "temporal": ["temporal_*.tsv", "corr_stats_temporal*.tsv"],
         "cluster": ["cluster_*.tsv", "pain_nonpain_time_clusters*.tsv", "null_distribution_*.json"],
         "mediation": ["mediation*.tsv"],
         "mixed_effects": ["mixed_effects*.tsv", "lme_*.tsv"],
@@ -147,6 +147,9 @@ def detect_feature_availability(features_dir) -> dict:
             for pattern in patterns:
                 # Use rglob to search recursively in subdirectories
                 files = list(stats_dir.rglob(pattern))
+                # Filter out temporal correlation files from regular correlations check
+                if comp == "correlations":
+                    files = [f for f in files if "temporal" not in f.name.lower() and not f.name.startswith("corr_stats_temporal")]
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break

@@ -82,13 +82,75 @@ def extract_connectivity_features(
     if not segments:
         segments = ["full"]
 
-    return extract_connectivity_from_precomputed(
+    df, cols = extract_connectivity_from_precomputed(
         precomputed,
         bands=bands,
         segments=segments,
         config=ctx.config,
         logger=ctx.logger,
     )
+    if df is None or df.empty:
+        return pd.DataFrame(), []
+
+    conn_cfg = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
+    granularity = str(conn_cfg.get("granularity", "trial")).strip().lower()
+    if granularity not in {"trial", "condition", "subject"}:
+        granularity = "trial"
+
+    if granularity == "trial":
+        return df, cols
+
+    n_epochs = int(df.shape[0])
+
+    if granularity == "subject":
+        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
+        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        return out, list(out.columns)
+
+    # condition-level: broadcast within each condition label
+    events = getattr(ctx, "aligned_events", None)
+    if events is None or getattr(events, "empty", True) or len(events) != n_epochs:
+        ctx.logger.warning("Connectivity granularity=condition requested but aligned_events missing/mismatched; falling back to subject-level.")
+        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
+        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        return out, list(out.columns)
+
+    cond_col = None
+    for candidate in ("condition", "trial_type"):
+        if candidate in events.columns:
+            cond_col = candidate
+            break
+    if cond_col is None:
+        candidates = ctx.config.get("event_columns.pain_binary", []) if hasattr(ctx.config, "get") else []
+        if isinstance(candidates, (list, tuple)):
+            for c in candidates:
+                if c in events.columns:
+                    cond_col = c
+                    break
+
+    if cond_col is None:
+        ctx.logger.warning("Connectivity granularity=condition requested but no condition column found; falling back to subject-level.")
+        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
+        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        return out, list(out.columns)
+
+    labels = events[cond_col].astype(str)
+    numeric = df.apply(pd.to_numeric, errors="coerce")
+    out = numeric.copy()
+
+    min_n = int(conn_cfg.get("min_epochs_per_group", 5))
+    for lab in sorted(labels.unique()):
+        mask = (labels == lab).to_numpy()
+        n = int(np.sum(mask))
+        if n < min_n:
+            ctx.logger.warning("Connectivity condition group '%s' has only %d epochs (<%d); using subject mean for this group.", lab, n, min_n)
+            grp_mean = numeric.mean(axis=0)
+        else:
+            grp_mean = numeric.loc[mask].mean(axis=0)
+        out.loc[mask] = np.tile(grp_mean.to_numpy(dtype=float), (n, 1))
+
+    out.columns = df.columns
+    return out, list(out.columns)
 
 # =============================================================================
 # Precomputed Data Extractors (Moved from pipeline.py)
@@ -185,7 +247,9 @@ def extract_connectivity_from_precomputed(
     enable_pli = bool(conn_cfg.get("enable_pli", False))
     enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
 
-    supported_measures = {"wpli", "aec", "plv", "pli"}
+    # Supported by mne-connectivity (version-dependent); extraction will skip unsupported
+    # methods if spectral_connectivity_time raises.
+    supported_measures = {"wpli", "wpli2_debiased", "imcoh", "aec", "plv", "pli"}
     measures_cfg = conn_cfg.get("measures")
     if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
         measures = {str(m).strip().lower() for m in measures_cfg}
@@ -197,11 +261,25 @@ def extract_connectivity_from_precomputed(
             )
         measures = measures & supported_measures
         enable_wpli = "wpli" in measures
+        enable_wpli2 = "wpli2_debiased" in measures
+        enable_imcoh = "imcoh" in measures
         enable_aec = "aec" in measures
         enable_plv = "plv" in measures
         enable_pli = "pli" in measures
-
-    phase_measures = [m for m, enabled in (("wpli", enable_wpli), ("plv", enable_plv), ("pli", enable_pli)) if enabled]
+    else:
+        enable_wpli2 = bool(conn_cfg.get("enable_wpli2_debiased", False))
+        enable_imcoh = bool(conn_cfg.get("enable_imcoh", False))
+    phase_measures = [
+        m
+        for m, enabled in (
+            ("wpli2_debiased", enable_wpli2),
+            ("wpli", enable_wpli),
+            ("imcoh", enable_imcoh),
+            ("plv", enable_plv),
+            ("pli", enable_pli),
+        )
+        if enabled
+    ]
 
     if not phase_measures and not enable_aec:
         if logger is not None:
@@ -298,7 +376,7 @@ def extract_connectivity_from_precomputed(
             "Install it with: pip install mne-connectivity"
         )
 
-    freq_bands = get_frequency_bands(config)
+    freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
 
     use_task_parallel = bool(n_jobs > 1)
     inner_n_jobs = 1 if use_task_parallel else n_jobs
@@ -318,13 +396,25 @@ def extract_connectivity_from_precomputed(
             str(bool(enable_graph_metrics)),
         )
 
-    def _phase_task(seg_name: str, band: str, method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any) -> pd.DataFrame:
+    def _phase_task(
+        seg_name: str,
+        band: str,
+        method: str,
+        seg_data: np.ndarray,
+        freqs: np.ndarray,
+        fmin: float,
+        fmax: float,
+        use_n_cycles: Any,
+    ) -> pd.DataFrame:
         t0 = time.perf_counter()
-        try:
-            con = spectral_connectivity_time(
+        method_use = method
+        method_label = method
+
+        def _run(method_to_use: str):
+            return spectral_connectivity_time(
                 seg_data,
                 freqs=freqs,
-                method=method,
+                method=method_to_use,
                 indices=indices,
                 sfreq=sfreq,
                 fmin=fmin,
@@ -337,10 +427,37 @@ def extract_connectivity_from_precomputed(
                 n_jobs=inner_n_jobs,
                 verbose=False,
             )
+
+        try:
+            con = _run(method_use)
         except Exception as e:
-            if logger is not None:
-                logger.warning(f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}")
-            return pd.DataFrame()
+            # Graceful fallback for newer method names on older mne-connectivity installs.
+            if method_use == "wpli2_debiased":
+                if logger is not None:
+                    logger.warning(
+                        "Connectivity: method '%s' failed for segment '%s' band '%s' (%s); falling back to 'wpli'.",
+                        method_use,
+                        seg_name,
+                        band,
+                        e,
+                    )
+                try:
+                    method_use = "wpli"
+                    method_label = "wpli"
+                    con = _run(method_use)
+                except Exception as e2:
+                    if logger is not None:
+                        logger.warning(
+                            "Connectivity: fallback 'wpli' also failed for segment '%s' band '%s': %s",
+                            seg_name,
+                            band,
+                            e2,
+                        )
+                    return pd.DataFrame()
+            else:
+                if logger is not None:
+                    logger.warning(f"Connectivity: {method} failed for segment '{seg_name}' band '{band}': {e}")
+                return pd.DataFrame()
 
         con_data = np.asarray(con.get_data())
         if con_data.ndim == 2:
@@ -357,11 +474,11 @@ def extract_connectivity_from_precomputed(
         parts: List[pd.DataFrame] = []
         if output_level == "full":
             prefix = f"conn_{seg_name}_{band}_chpair_"
-            suffix = f"_{method}"
+            suffix = f"_{method_label}"
             cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
             parts.append(pd.DataFrame(con_vals, columns=cols))
 
-        glob_col = f"conn_{seg_name}_{band}_global_{method}_mean"
+        glob_col = f"conn_{seg_name}_{band}_global_{method_label}_mean"
         parts.append(pd.DataFrame({glob_col: np.nanmean(con_vals, axis=1)}))
 
         if enable_graph_metrics:
@@ -379,7 +496,7 @@ def extract_connectivity_from_precomputed(
                 adj = np.zeros((n_channels, n_channels), dtype=float)
                 adj[pair_i, pair_j] = con_vals[ep_idx]
                 adj[pair_j, pair_i] = con_vals[ep_idx]
-                return _graph_metrics(adj, method, band, seg_name, conn_cfg)
+                return _graph_metrics(adj, method_label, band, seg_name, conn_cfg)
 
             if graph_n_jobs == 1:
                 graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
@@ -495,7 +612,11 @@ def extract_connectivity_from_precomputed(
         for band in bands_use:
             if band not in freq_bands:
                 continue
-            fmin, fmax = freq_bands[band]
+            if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
+                fmin = float(precomputed.band_data[band].fmin)
+                fmax = float(precomputed.band_data[band].fmax)
+            else:
+                fmin, fmax = freq_bands[band]
             try:
                 fmin = float(fmin)
                 fmax = float(fmax)

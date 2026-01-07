@@ -18,6 +18,7 @@ import pandas as pd
 import mne
 import warnings
 from scipy import stats
+from scipy.optimize import curve_fit
 from joblib import Parallel, delayed
 
 from eeg_pipeline.utils.analysis.channels import pick_eeg_channels
@@ -77,9 +78,87 @@ def _fit_single_epoch_channel(
             0,
         )
     except Exception:
-        return (epoch_idx, channel_idx, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3)
+        return (
+            epoch_idx,
+            channel_idx,
+            np.nan,
+            np.nan,
+            valid_bins,
+            kept_bins,
+            peak_rejected,
+            np.array([], dtype=int),
+            3,
+        )
 
-def _fit_aperiodic_with_qc(log_freqs, log_psd, peak_rejection_z, min_fit_points, logger, n_jobs=1):
+def _fit_single_epoch_channel_knee(
+    epoch_idx: int,
+    channel_idx: int,
+    freqs_hz: np.ndarray,
+    log_psd_vals: np.ndarray,
+    peak_rejection_z: float,
+    min_fit_points: int,
+) -> Tuple[int, int, float, float, float, int, int, bool, np.ndarray, int]:
+    """Knee model fit: log10(P) = offset - log10(knee + f^exponent)."""
+    finite_mask = np.isfinite(freqs_hz) & np.isfinite(log_psd_vals)
+    finite_indices = np.flatnonzero(finite_mask)
+    valid_bins = int(finite_indices.size)
+    if valid_bins < min_fit_points:
+        return (epoch_idx, channel_idx, np.nan, np.nan, np.nan, valid_bins, 0, False, np.array([], dtype=int), 1)
+
+    y = log_psd_vals[finite_indices]
+    keep_mask = np.ones(valid_bins, dtype=bool)
+    mad = stats.median_abs_deviation(y, scale="normal", nan_policy="omit")
+    median = np.median(y) if np.isfinite(y).any() else np.nan
+    peak_rejected = False
+    if np.isfinite(mad) and mad > 1e-12 and np.isfinite(median):
+        candidate_keep = y <= median + peak_rejection_z * mad
+        if int(np.sum(candidate_keep)) >= min_fit_points:
+            keep_mask = candidate_keep
+            peak_rejected = bool(np.any(~candidate_keep))
+
+    kept_indices = finite_indices[keep_mask]
+    kept_bins = int(kept_indices.size)
+    if kept_bins < min_fit_points:
+        return (epoch_idx, channel_idx, np.nan, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 2)
+
+    f = np.asarray(freqs_hz[kept_indices], dtype=float)
+    yfit = np.asarray(log_psd_vals[kept_indices], dtype=float)
+
+    def _knee_model(f_hz: np.ndarray, offset: float, knee: float, exponent: float) -> np.ndarray:
+        knee = np.maximum(knee, 0.0)
+        exponent = np.maximum(exponent, 0.01)
+        return offset - np.log10(knee + np.power(f_hz, exponent))
+
+    try:
+        p0 = (float(np.nanmedian(yfit)), 1.0, 1.0)
+        bounds = ([-np.inf, 0.0, 0.01], [np.inf, np.inf, 5.0])
+        popt, _ = curve_fit(_knee_model, f, yfit, p0=p0, bounds=bounds, maxfev=8000)
+        offset, knee, exponent = float(popt[0]), float(popt[1]), float(popt[2])
+        return (
+            epoch_idx,
+            channel_idx,
+            offset,
+            exponent,
+            knee,
+            valid_bins,
+            kept_bins,
+            peak_rejected,
+            kept_indices.astype(int),
+            0,
+        )
+    except Exception:
+        return (epoch_idx, channel_idx, np.nan, np.nan, np.nan, valid_bins, kept_bins, peak_rejected, np.array([], dtype=int), 3)
+
+def _fit_aperiodic_with_qc(
+    log_freqs,
+    log_psd,
+    peak_rejection_z,
+    min_fit_points,
+    logger,
+    *,
+    model: str = "fixed",
+    n_jobs=1,
+):
     # Driver for parallel fitting
     n_epochs, n_channels, _ = log_psd.shape
     offsets = np.full((n_epochs, n_channels), np.nan)
@@ -89,27 +168,88 @@ def _fit_aperiodic_with_qc(log_freqs, log_psd, peak_rejection_z, min_fit_points,
     peak_rejected = np.zeros((n_epochs, n_channels), dtype=bool)
     fit_masks = np.zeros((n_epochs, n_channels, log_freqs.shape[0]), dtype=bool)
     
-    tasks = [
-        (ep_idx, ch_idx, log_freqs, log_psd[ep_idx, ch_idx, :], peak_rejection_z, min_fit_points)
-        for ep_idx in range(n_epochs) for ch_idx in range(n_channels)
-    ]
+    tasks = [(ep_idx, ch_idx) for ep_idx in range(n_epochs) for ch_idx in range(n_channels)]
     
     if n_jobs != 1:
-        results = Parallel(n_jobs=n_jobs)(
-            delayed(_fit_single_epoch_channel)(*task) for task in tasks
-        )
+        if model == "knee":
+            freqs_hz = np.power(10.0, np.asarray(log_freqs, dtype=float))
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_fit_single_epoch_channel_knee)(
+                    ep_idx,
+                    ch_idx,
+                    freqs_hz,
+                    log_psd[ep_idx, ch_idx, :],
+                    peak_rejection_z,
+                    min_fit_points,
+                )
+                for ep_idx, ch_idx in tasks
+            )
+        else:
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_fit_single_epoch_channel)(
+                    ep_idx,
+                    ch_idx,
+                    log_freqs,
+                    log_psd[ep_idx, ch_idx, :],
+                    peak_rejection_z,
+                    min_fit_points,
+                )
+                for ep_idx, ch_idx in tasks
+            )
     else:
-        results = [_fit_single_epoch_channel(*task) for task in tasks]
+        if model == "knee":
+            freqs_hz = np.power(10.0, np.asarray(log_freqs, dtype=float))
+            results = [
+                _fit_single_epoch_channel_knee(
+                    ep_idx,
+                    ch_idx,
+                    freqs_hz,
+                    log_psd[ep_idx, ch_idx, :],
+                    peak_rejection_z,
+                    min_fit_points,
+                )
+                for ep_idx, ch_idx in tasks
+            ]
+        else:
+            results = [
+                _fit_single_epoch_channel(
+                    ep_idx,
+                    ch_idx,
+                    log_freqs,
+                    log_psd[ep_idx, ch_idx, :],
+                    peak_rejection_z,
+                    min_fit_points,
+                )
+                for ep_idx, ch_idx in tasks
+            ]
     
-    for ep_idx, ch_idx, offset, slope, v_bins, k_bins, p_rej, fit_idx, status in results:
-        offsets[ep_idx, ch_idx] = offset
-        slopes[ep_idx, ch_idx] = slope
-        valid_bins[ep_idx, ch_idx] = v_bins
-        kept_bins[ep_idx, ch_idx] = k_bins
-        peak_rejected[ep_idx, ch_idx] = p_rej
-        if fit_idx.size > 0: fit_masks[ep_idx, ch_idx, fit_idx] = True
-        
-    return offsets, slopes, valid_bins, kept_bins, peak_rejected, fit_masks, {}
+    knees = np.full((n_epochs, n_channels), np.nan)
+    statuses = np.zeros((n_epochs, n_channels), dtype=int)
+
+    for res in results:
+        if model == "knee":
+            ep_idx, ch_idx, offset, exponent, knee, v_bins, k_bins, p_rej, fit_idx, status = res
+            offsets[ep_idx, ch_idx] = offset
+            slopes[ep_idx, ch_idx] = -float(exponent) if np.isfinite(exponent) else np.nan
+            knees[ep_idx, ch_idx] = knee
+            valid_bins[ep_idx, ch_idx] = v_bins
+            kept_bins[ep_idx, ch_idx] = k_bins
+            peak_rejected[ep_idx, ch_idx] = p_rej
+            statuses[ep_idx, ch_idx] = int(status)
+            if fit_idx.size > 0:
+                fit_masks[ep_idx, ch_idx, fit_idx] = True
+        else:
+            ep_idx, ch_idx, offset, slope, v_bins, k_bins, p_rej, fit_idx, status = res
+            offsets[ep_idx, ch_idx] = offset
+            slopes[ep_idx, ch_idx] = slope
+            valid_bins[ep_idx, ch_idx] = v_bins
+            kept_bins[ep_idx, ch_idx] = k_bins
+            peak_rejected[ep_idx, ch_idx] = p_rej
+            statuses[ep_idx, ch_idx] = int(status)
+            if fit_idx.size > 0:
+                fit_masks[ep_idx, ch_idx, fit_idx] = True
+
+    return offsets, slopes, valid_bins, kept_bins, peak_rejected, fit_masks, {"model": model, "knees": knees, "status": statuses}
 
 def _compute_fit_r2_and_rms(log_freqs, log_psd, offsets, slopes, fit_masks):
     n_epochs, n_channels, _ = log_psd.shape
@@ -166,6 +306,7 @@ def _extract_aperiodic_for_segment(
     config: Any,
     logger: Any,
     spatial_modes: Optional[List[str]] = None,
+    frequency_bands_override: Optional[Dict[str, List[float]]] = None,
 ) -> Dict[str, np.ndarray]:
     """Extract aperiodic and spectral features for a single segment.
     
@@ -191,15 +332,52 @@ def _extract_aperiodic_for_segment(
     aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
     fmin = float(aperiodic_cfg.get("fmin", config.get("feature_engineering.constants.aperiodic_fmin", 2.0)))
     fmax = float(aperiodic_cfg.get("fmax", config.get("feature_engineering.constants.aperiodic_fmax", 40.0)))
+
+    psd_method = str(aperiodic_cfg.get("psd_method", "multitaper")).strip().lower()
+    if psd_method not in {"multitaper", "welch"}:
+        psd_method = "multitaper"
     
     try:
+        psd_kwargs: Dict[str, Any] = {}
+        if psd_method == "multitaper":
+            bw = aperiodic_cfg.get("psd_bandwidth", None)
+            if bw is not None:
+                try:
+                    bw = float(bw)
+                except Exception:
+                    bw = None
+            if bw is not None and np.isfinite(bw) and bw > 0:
+                psd_kwargs["bandwidth"] = float(bw)
+            psd_kwargs.setdefault("adaptive", True)
+            psd_kwargs.setdefault("normalization", "full")
+
         spectrum = epochs.compute_psd(
-            method="welch", fmin=fmin, fmax=fmax, tmin=start_t, tmax=end_t,
-            picks=picks, average=False, verbose=False
+            method=psd_method,
+            fmin=fmin,
+            fmax=fmax,
+            tmin=start_t,
+            tmax=end_t,
+            picks=picks,
+            average=False,
+            verbose=False,
+            **psd_kwargs,
         )
     except Exception as e:
-        logger.warning(f"PSD computation failed for {segment_name}: {e}")
-        return {}
+        # Fallback to Welch for broader compatibility across MNE versions.
+        try:
+            spectrum = epochs.compute_psd(
+                method="welch",
+                fmin=fmin,
+                fmax=fmax,
+                tmin=start_t,
+                tmax=end_t,
+                picks=picks,
+                average=False,
+                verbose=False,
+            )
+        except Exception as e2:
+            logger.warning(f"PSD computation failed for {segment_name}: {e2}")
+            return {}
         
     psds, freqs = spectrum.get_data(return_freqs=True)
     
@@ -210,15 +388,39 @@ def _extract_aperiodic_for_segment(
     log_freqs = np.log10(freqs)
     log_psd = np.log10(np.maximum(psds, 1e-20))
     
+    model = str(config.get("feature_engineering.aperiodic.model", "fixed")).strip().lower()
+    if model not in {"fixed", "knee"}:
+        model = "fixed"
+
     peak_z = float(config.get("feature_engineering.aperiodic.peak_rejection_z", 3.5))
     min_pts = int(config.get("feature_engineering.aperiodic.min_fit_points", 5))
     n_jobs = get_n_jobs(config, default=-1, config_path="feature_engineering.parallel.n_jobs_aperiodic")
     
     offsets, slopes, valid_bins, kept_bins, peak_rej, fit_masks, fit_qc = _fit_aperiodic_with_qc(
-        log_freqs, log_psd, peak_z, min_pts, logger, n_jobs=n_jobs
+        log_freqs,
+        log_psd,
+        peak_z,
+        min_pts,
+        logger,
+        model=model,
+        n_jobs=n_jobs,
     )
     
-    residuals = compute_residuals(log_freqs, log_psd, offsets, slopes)
+    if model == "knee":
+        knees = fit_qc.get("knees") if isinstance(fit_qc, dict) else None
+        f_lin = freqs.astype(float)
+        residuals = np.full_like(log_psd, np.nan, dtype=float)
+        for e in range(log_psd.shape[0]):
+            for c in range(log_psd.shape[1]):
+                if not np.isfinite(offsets[e, c]) or not np.isfinite(slopes[e, c]):
+                    continue
+                knee = float(knees[e, c]) if knees is not None and np.isfinite(knees[e, c]) else 0.0
+                exponent = float(-slopes[e, c])
+                exponent = max(exponent, 0.01)
+                bg = float(offsets[e, c]) - np.log10(np.maximum(knee, 0.0) + np.power(f_lin, exponent))
+                residuals[e, c, :] = log_psd[e, c, :] - bg
+    else:
+        residuals = compute_residuals(log_freqs, log_psd, offsets, slopes)
     r2, rms = _compute_fit_r2_and_rms(log_freqs, log_psd, offsets, slopes, fit_masks)
 
     min_r2 = float(config.get("feature_engineering.aperiodic.min_r2", 0.0))
@@ -246,7 +448,16 @@ def _extract_aperiodic_for_segment(
     n_channels = len(ch_names)
     
     metrics: Dict[str, Tuple[str, str, np.ndarray]] = {} # name -> (band, stat, matrix)
-    metrics["slope"] = ("broadband", "slope", slopes.copy())
+    if model == "knee":
+        exponent = (-slopes).copy()
+        metrics["exponent"] = ("broadband", "exponent", exponent)
+        knees = fit_qc.get("knees") if isinstance(fit_qc, dict) else None
+        if isinstance(knees, np.ndarray) and knees.shape == exponent.shape:
+            metrics["knee"] = ("broadband", "knee", knees.copy())
+        # Keep legacy "slope" column but mark as NaN to avoid misinterpretation.
+        metrics["slope"] = ("broadband", "slope", np.full_like(exponent, np.nan))
+    else:
+        metrics["slope"] = ("broadband", "slope", slopes.copy())
     metrics["offset"] = ("broadband", "offset", offsets.copy())
     metrics["r2"] = ("broadband", "r2", r2.copy())
     metrics["rms"] = ("broadband", "rms", rms.copy())
@@ -261,7 +472,7 @@ def _extract_aperiodic_for_segment(
     tbr_matrix = np.full((n_epochs, n_channels), np.nan)
     
     # Get frequency bands for metrics
-    freq_bands = get_frequency_bands_for_aperiodic(config)
+    freq_bands = frequency_bands_override or get_frequency_bands_for_aperiodic(config)
     theta_range = freq_bands.get("theta", (4.0, 8.0))
     beta_range = freq_bands.get("beta", (13.0, 30.0))
     alpha_range = freq_bands.get("alpha", (8.0, 13.0))
@@ -270,21 +481,41 @@ def _extract_aperiodic_for_segment(
     theta_mask = (freqs >= theta_range[0]) & (freqs <= theta_range[1])
     beta_mask = (freqs >= beta_range[0]) & (freqs <= beta_range[1])
     
+    # Prefer aperiodic-adjusted metrics (less confounded by slope/offset):
+    # residuals are log10(power/background), so 10**residuals is a relative oscillatory power ratio.
     for i in range(n_channels):
-        # APF
+        if not np.any(fit_ok[:, i]):
+            continue
+
+        rel = None
+        try:
+            rel = np.power(10.0, residuals[:, i, :])
+        except Exception:
+            rel = None
+
+        if rel is None or rel.ndim != 2:
+            continue
+
+        # APF (aperiodic-adjusted center-of-gravity in alpha)
         if np.any(alpha_mask):
-            alpha_psd = psds[:, i, alpha_mask]
-            alpha_psd_pos = np.maximum(alpha_psd, 0)
-            total_power = np.sum(alpha_psd_pos, axis=1)
-            with np.errstate(invalid='ignore', divide='ignore'):
-                apf_matrix[:, i] = np.where(total_power > 0, np.sum(freqs[alpha_mask] * alpha_psd_pos, axis=1) / total_power, np.nan)
-        
-        # TBR
+            alpha_rel = np.maximum(rel[:, alpha_mask], 0.0)
+            total = np.sum(alpha_rel, axis=1)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                apf_matrix[:, i] = np.where(
+                    total > 0,
+                    np.sum(freqs[alpha_mask] * alpha_rel, axis=1) / total,
+                    np.nan,
+                )
+
+        # TBR (aperiodic-adjusted theta/beta)
         if np.any(theta_mask) and np.any(beta_mask):
-            theta_pow = np.mean(psds[:, i, theta_mask], axis=1)
-            beta_pow = np.mean(psds[:, i, beta_mask], axis=1)
-            with np.errstate(invalid='ignore', divide='ignore'):
-                tbr_matrix[:, i] = np.where(beta_pow > 0, theta_pow / beta_pow, np.nan)
+            theta_rel = np.nanmean(rel[:, theta_mask], axis=1)
+            beta_rel = np.nanmean(rel[:, beta_mask], axis=1)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                tbr_matrix[:, i] = np.where(beta_rel > 0, theta_rel / beta_rel, np.nan)
+
+        apf_matrix[~fit_ok[:, i], i] = np.nan
+        tbr_matrix[~fit_ok[:, i], i] = np.nan
                 
     metrics["peakfreq"] = ("alpha", "peakfreq", apf_matrix)
     metrics["tbr"] = ("broadband", "tbr", tbr_matrix)
@@ -371,6 +602,7 @@ def extract_aperiodic_features(
     
     config = ctx.config
     logger = ctx.logger
+    freq_bands_override = getattr(ctx, "frequency_bands", None)
     sfreq = epochs.info["sfreq"]
     times = epochs.times
     min_samples = int(sfreq)
@@ -392,7 +624,8 @@ def extract_aperiodic_features(
         seg_data = _extract_aperiodic_for_segment(
             epochs, picks, ch_names, seg_name,
             t_seg[0], t_seg[-1], bands, config, logger,
-            spatial_modes=spatial_modes
+            spatial_modes=spatial_modes,
+            frequency_bands_override=freq_bands_override,
         )
         qc_payload["segments"][seg_name] = seg_data.get("__qc__")
         seg_data.pop("__qc__", None)
@@ -429,6 +662,7 @@ def extract_aperiodic_features_from_epochs(
     logger: Any,
     *,
     events_df: Optional[pd.DataFrame] = None,
+    frequency_bands_override: Optional[Dict[str, List[float]]] = None,
 ) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
@@ -473,6 +707,7 @@ def extract_aperiodic_features_from_epochs(
         bands,
         config,
         logger,
+        frequency_bands_override=frequency_bands_override,
     )
     if baseline_data:
         all_data.update(baseline_data)
@@ -491,6 +726,7 @@ def extract_aperiodic_features_from_epochs(
                 bands,
                 config,
                 logger,
+                frequency_bands_override=frequency_bands_override,
             )
             if ramp_data:
                 all_data.update(ramp_data)
@@ -509,6 +745,7 @@ def extract_aperiodic_features_from_epochs(
                 bands,
                 config,
                 logger,
+                frequency_bands_override=frequency_bands_override,
             )
             if active_data:
                 all_data.update(active_data)

@@ -271,10 +271,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     defaults_overrides.add_argument("--text-residual-qc-title-y", type=float, default=None, help="Residual QC title y position (default from config)")
 
     # Validation thresholds (plotting.validation.*)
-    defaults_overrides.add_argument("--validation-min-samples-for-plot", type=int, default=None, help="Min samples required to plot (default from config)")
-    defaults_overrides.add_argument("--validation-min-samples-for-kde", type=int, default=None, help="Min samples required for KDE (default from config)")
-    defaults_overrides.add_argument("--validation-min-samples-for-fit", type=int, default=None, help="Min samples required for fit (default from config)")
-    defaults_overrides.add_argument("--validation-min-samples-for-calibration", type=int, default=None, help="Min samples required for calibration (default from config)")
     defaults_overrides.add_argument("--validation-min-bins-for-calibration", type=int, default=None, help="Min bins for calibration (default from config)")
     defaults_overrides.add_argument("--validation-max-bins-for-calibration", type=int, default=None, help="Max bins for calibration (default from config)")
     defaults_overrides.add_argument("--validation-samples-per-bin", type=int, default=None, help="Samples per bin for calibration (default from config)")
@@ -791,14 +787,6 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     if getattr(args, "text_residual_qc_title_y", None) is not None:
         config["plotting.styling.text_position.residual_qc_title_y"] = float(args.text_residual_qc_title_y)
 
-    if getattr(args, "validation_min_samples_for_plot", None) is not None:
-        config["plotting.validation.min_samples_for_plot"] = int(args.validation_min_samples_for_plot)
-    if getattr(args, "validation_min_samples_for_kde", None) is not None:
-        config["plotting.validation.min_samples_for_kde"] = int(args.validation_min_samples_for_kde)
-    if getattr(args, "validation_min_samples_for_fit", None) is not None:
-        config["plotting.validation.min_samples_for_fit"] = int(args.validation_min_samples_for_fit)
-    if getattr(args, "validation_min_samples_for_calibration", None) is not None:
-        config["plotting.validation.min_samples_for_calibration"] = int(args.validation_min_samples_for_calibration)
     if getattr(args, "validation_min_bins_for_calibration", None) is not None:
         config["plotting.validation.min_bins_for_calibration"] = int(args.validation_min_bins_for_calibration)
     if getattr(args, "validation_max_bins_for_calibration", None) is not None:

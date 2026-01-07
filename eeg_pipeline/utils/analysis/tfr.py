@@ -211,8 +211,20 @@ def _extract_baseline_power_features(
         freq_mask = (freqs >= fmin) & (freqs <= fmax)
         if not np.any(freq_mask): continue
         
-        # Avg over freqs
-        band_power = np.mean(data_mean_time[..., freq_mask], axis=-1) # (n_epochs, n_ch)
+        # Frequency-weighted mean across band bins (TFR frequencies are often log-spaced).
+        band_freqs = np.asarray(freqs[freq_mask], dtype=float)
+        if band_freqs.size >= 2 and np.all(np.isfinite(band_freqs)):
+            w = np.gradient(band_freqs).astype(float)
+            w = np.where(np.isfinite(w) & (w > 0), w, np.nan)
+        else:
+            w = np.ones((band_freqs.size,), dtype=float)
+
+        p = data_mean_time[..., freq_mask]  # (n_epochs, n_ch, n_freqs_in_band)
+        w3 = w[None, None, :]
+        finite = np.isfinite(p) & np.isfinite(w3)
+        num = np.nansum(np.where(finite, p * w3, 0.0), axis=-1)
+        den = np.nansum(np.where(finite, w3, 0.0), axis=-1)
+        band_power = np.where(den > 0, num / den, np.nan)  # (n_epochs, n_ch)
         
         for i, ch in enumerate(ch_names):
             col = NamingSchema.build("power", "baseline", band, "ch", "mean", channel=ch)

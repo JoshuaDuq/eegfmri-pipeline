@@ -171,6 +171,7 @@ def extract_all_features(
                 ctx.logger,
                 windows_spec=ctx.windows,
                 compute_psd_data=compute_psd_data,
+                frequency_bands_override=getattr(ctx, "frequency_bands", None),
             )
             ctx.set_precomputed(precomputed_data)
 
@@ -600,6 +601,7 @@ def extract_precomputed_features(
             config,
             logger,
             events_df=events_df,
+            frequency_bands_override=getattr(precomputed, "frequency_bands", None),
         )
         if not df.empty:
             result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")

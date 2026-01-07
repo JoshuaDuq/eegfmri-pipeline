@@ -193,6 +193,8 @@ type RefreshSubjectsMsg struct{}
 
 // ResourceUpdateMsg contains real-time CPU and memory usage
 type ResourceUpdateMsg struct {
-	CPUUsage    float64
-	MemoryUsage float64
+	CPUUsage      float64
+	MemoryUsage   float64
+	CPUCoreUsages []float64 // Per-core CPU usage percentages
+	NumCPUCores   int       // Total number of CPU cores
 }

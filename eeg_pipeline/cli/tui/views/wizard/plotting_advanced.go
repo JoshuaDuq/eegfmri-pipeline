@@ -1298,30 +1298,6 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 			}
 			lines = append(lines, valueLine(opt, "text_residqc_y", val, "float", focused))
 
-		case optPlotValidationMinSamplesForPlot:
-			val := formatInt(m.plotValidationMinSamplesForPlot, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinSamplesForPlot) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_n_plot", val, "int", focused))
-		case optPlotValidationMinSamplesForKDE:
-			val := formatInt(m.plotValidationMinSamplesForKDE, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinSamplesForKDE) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_n_kde", val, "int", focused))
-		case optPlotValidationMinSamplesForFit:
-			val := formatInt(m.plotValidationMinSamplesForFit, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinSamplesForFit) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_n_fit", val, "int", focused))
-		case optPlotValidationMinSamplesForCalibration:
-			val := formatInt(m.plotValidationMinSamplesForCalibration, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinSamplesForCalibration) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_n_cal", val, "int", focused))
 		case optPlotValidationMinBinsForCalibration:
 			val := formatInt(m.plotValidationMinBinsForCalibration, 0)
 			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinBinsForCalibration) {
@@ -1632,7 +1608,8 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 	if effectiveHeight <= 0 {
 		effectiveHeight = 40
 	}
-	maxLines := effectiveHeight - 12
+	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
+	maxLines := effectiveHeight - 10
 	if maxLines < 8 {
 		maxLines = 8
 	}
