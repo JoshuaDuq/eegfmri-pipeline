@@ -589,6 +589,8 @@ behavior_analysis:
 decoding:
   cv:
     inner_splits: 5
+    hygiene_enabled: true
+    permutation_scheme: "within_subject"  # "within_subject" | "within_subject_within_block"
   models:
     elasticnet:
       alpha_grid: [0.001, 0.01, 0.1, 1, 10]

@@ -11,6 +11,7 @@ import mne
 from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.infra.tsv import read_tsv
 from ..config.loader import ConfigDict
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 
@@ -167,10 +168,17 @@ def load_decoding_data(
 
     groups = np.array([sub] * len(X))
 
+    trial_index = None
+    if "trial_index" in manifest.columns:
+        trial_index = pd.to_numeric(manifest["trial_index"], errors="coerce")
+    if trial_index is None or len(trial_index) != len(mask_valid):
+        trial_index = pd.Series(list(range(len(mask_valid))))
+
     meta = pd.DataFrame(
         {
             "subject_id": [sub] * len(X),
             "trial_id": list(range(len(X))),
+            "trial_index": trial_index.loc[mask_valid].to_numpy(dtype=float),
         }
     )
 
@@ -219,6 +227,7 @@ def load_multiple_subjects_decoding_data(
     subj_ids: List[str] = []
 
     col_template = None
+    col_sets: List[set] = []
     n_found = 0
 
     for s in subjects:
@@ -237,14 +246,7 @@ def load_multiple_subjects_decoding_data(
 
         if col_template is None:
             col_template = list(X.columns)
-        elif list(X.columns) != col_template:
-            common = [c for c in col_template if c in X.columns]
-            if not common:
-                raise RuntimeError(f"No overlapping features for {s}")
-            if len(common) < len(col_template):
-                logger.warning(f"Using {len(common)} common features for {s}")
-            X = X.loc[:, common]
-            col_template = common
+        col_sets.append(set(X.columns))
 
         n = len(X)
         X_list.append(X)
@@ -263,6 +265,11 @@ def load_multiple_subjects_decoding_data(
     if col_template is None:
         raise RuntimeError("No feature columns detected.")
 
+    # Stable feature harmonization: intersect across all subjects, keep first-subject order.
+    common_cols = set.intersection(*col_sets) if col_sets else set(col_template)
+    col_template = [c for c in col_template if c in common_cols]
+    if not col_template:
+        raise RuntimeError("No overlapping features across subjects after harmonization.")
     X_all = pd.concat([Xi.loc[:, col_template].copy() for Xi in X_list], axis=0, ignore_index=True)
     y_all = pd.concat(y_list, axis=0, ignore_index=True)
     groups = np.array(g_list)
@@ -438,10 +445,44 @@ def load_active_matrix(
             continue
 
         y_sub = pd.to_numeric(aligned_events[target_col], errors="coerce").to_numpy()
-        df = pd.DataFrame(epochs.get_data().mean(axis=2))
+
+        picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
+        if picks is None or len(picks) == 0:
+            log.warning(f"No EEG channels for sub-{sub}; skipping")
+            continue
+
+        data = epochs.get_data(picks=picks)
+        times = np.asarray(epochs.times, dtype=float)
+        sfreq = float(epochs.info["sfreq"])
+
+        baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
+        active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+        try:
+            b0, b1 = float(baseline_window[0]), float(baseline_window[1])
+            a0, a1 = float(active_window[0]), float(active_window[1])
+        except Exception:
+            b0, b1 = -3.0, -0.5
+            a0, a1 = 3.0, 10.5
+
+        bmask = (times >= b0) & (times < b1)
+        amask = (times >= a0) & (times < a1)
+        if not np.any(amask):
+            log.warning(f"Active window empty for sub-{sub}; using full epoch mean.")
+            amask = np.ones_like(times, dtype=bool)
+        if not np.any(bmask):
+            log.warning(f"Baseline window empty for sub-{sub}; using zero baseline.")
+
+        active_mean = np.nanmean(data[..., amask], axis=2)
+        if np.any(bmask):
+            baseline_mean = np.nanmean(data[..., bmask], axis=2)
+        else:
+            baseline_mean = np.zeros_like(active_mean)
+
+        # Baseline-corrected mean amplitude in the active window (scientifically interpretable).
+        X_sub = (active_mean - baseline_mean).astype(float)
+
         if feature_cols is None:
-            feature_cols = [f"ch{i}" for i in range(df.shape[1])]
-        X_sub = df.to_numpy(dtype=float)
+            feature_cols = list(np.asarray(epochs.ch_names)[picks])
         if X_sub.shape[0] != len(y_sub):
             log.warning(f"Mismatch X/y for sub-{sub}; skipping")
             continue
@@ -449,7 +490,16 @@ def load_active_matrix(
         X_blocks.append(X_sub)
         y_blocks.append(y_sub)
         groups.extend([sub] * len(y_sub))
-        meta_blocks.append(pd.DataFrame({"subject_id": [sub] * len(y_sub)}))
+        meta_rec = {"subject_id": [sub] * len(y_sub)}
+        # Preserve block/run identifiers for block-aware nulls and diagnostics.
+        block_series = None
+        for cand in ("block", "run_id", "run", "session"):
+            if cand in aligned_events.columns:
+                block_series = aligned_events[cand]
+                break
+        if block_series is not None:
+            meta_rec["block"] = pd.to_numeric(block_series, errors="coerce").to_numpy()
+        meta_blocks.append(pd.DataFrame(meta_rec))
 
     if not X_blocks:
         raise RuntimeError("No subjects with usable epoch data")

@@ -736,6 +736,7 @@ def nested_loso_predictions_matrix(
     pipe: Pipeline,
     param_grid: dict,
     inner_cv_splits: int,
+    blocks: Optional[np.ndarray] = None,
     n_jobs: int = -1,
     seed: int = 42,
     best_params_log_path: Optional[Path] = None,
@@ -767,9 +768,13 @@ def nested_loso_predictions_matrix(
     X = np.asarray(X)
     y = np.asarray(y)
     groups = np.asarray(groups)
+    if blocks is not None:
+        blocks = np.asarray(blocks)
 
     if len(X) != len(y) or len(X) != len(groups):
         raise ValueError(f"Length mismatch: X={len(X)}, y={len(y)}, groups={len(groups)}")
+    if blocks is not None and len(blocks) != len(y):
+        raise ValueError(f"Length mismatch: blocks={len(blocks)} vs y={len(y)}")
 
     folds = create_loso_folds(X, groups)
     inner_n_jobs = determine_inner_n_jobs(outer_n_jobs, n_jobs)
@@ -848,7 +853,7 @@ def nested_loso_predictions_matrix(
 
     if null_n_perm > 0 and null_output_path:
         run_permutation_test(
-            X, y, groups, pipe, param_grid, inner_cv_splits, inner_n_jobs,
+            X, y, groups, blocks, pipe, param_grid, inner_cv_splits, inner_n_jobs,
             seed, model_name, null_n_perm, null_output_path, config
         )
 
@@ -859,6 +864,7 @@ def run_permutation_test(
     X: np.ndarray,
     y: np.ndarray,
     groups: np.ndarray,
+    blocks: Optional[np.ndarray],
     pipe: Pipeline,
     param_grid: dict,
     inner_cv_splits: int,
@@ -876,14 +882,45 @@ def run_permutation_test(
     null_r2 = []
     n_completed = 0
 
+    perm_scheme = "within_subject"
+    if config is not None:
+        try:
+            perm_scheme = str(get_config_value(config, "decoding.cv.permutation_scheme", perm_scheme)).strip().lower()
+        except Exception:
+            perm_scheme = "within_subject"
+    if perm_scheme not in {"within_subject", "within_subject_within_block"}:
+        perm_scheme = "within_subject"
+
+    blocks_arr = None
+    if perm_scheme == "within_subject_within_block":
+        if blocks is None:
+            logger.warning("Permutation scheme 'within_subject_within_block' requested but blocks are missing; falling back to within_subject.")
+            perm_scheme = "within_subject"
+        else:
+            blocks_arr = np.asarray(blocks)
+            if len(blocks_arr) != len(y):
+                logger.warning("Permutation blocks length mismatch; falling back to within_subject.")
+                perm_scheme = "within_subject"
+                blocks_arr = None
+
     for perm in range(null_n_perm):
         y_perm = y.copy()
         for subj in np.unique(groups):
-            mask = groups == subj
-            y_perm[mask] = rng.permutation(y_perm[mask])
+            subj_mask = groups == subj
+            if perm_scheme == "within_subject_within_block" and blocks_arr is not None:
+                subj_blocks = blocks_arr[subj_mask]
+                for b in np.unique(subj_blocks):
+                    if np.isfinite(b):
+                        bm = subj_mask & (blocks_arr == b)
+                    else:
+                        bm = subj_mask & (~np.isfinite(blocks_arr))
+                    if np.sum(bm) >= 2:
+                        y_perm[bm] = rng.permutation(y_perm[bm])
+            else:
+                y_perm[subj_mask] = rng.permutation(y_perm[subj_mask])
 
         y_true_p, y_pred_p, groups_p, _, _ = nested_loso_predictions_matrix(
-            X=X, y=y_perm, groups=groups, pipe=pipe, param_grid=param_grid,
+            X=X, y=y_perm, groups=groups, blocks=blocks_arr, pipe=pipe, param_grid=param_grid,
             inner_cv_splits=inner_cv_splits, n_jobs=inner_n_jobs, seed=seed + perm,
             model_name=model_name, outer_n_jobs=1, null_n_perm=0, config=config,
         )

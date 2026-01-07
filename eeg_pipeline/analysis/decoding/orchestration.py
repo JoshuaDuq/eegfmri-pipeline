@@ -473,9 +473,19 @@ def within_subject_kfold_predictions(
             raise ValueError(f"Block/run labels required for within-subject CV (subject {subject_id})")
 
         groups_subj = groups_arr[subject_indices]
-        folds = create_within_subject_folds(groups_subj, blocks_subj, n_splits, seed, config=config_local)
+        # NOTE: These folds are used for epoch-based decoding; feature-extraction CV hygiene
+        # (e.g., IAF re-estimation) is not applied here because we do not recompute features in-fold.
+        folds = create_within_subject_folds(
+            groups_subj,
+            blocks_subj,
+            n_splits,
+            seed,
+            config=config_local,
+            epochs=None,
+            apply_hygiene=False,
+        )
 
-        for fold_counter, train_idx_rel, test_idx_rel, subject_name in folds:
+        for fold_counter, train_idx_rel, test_idx_rel, subject_name, _fold_params in folds:
             X_train = X_subj[train_idx_rel]
             X_test = X_subj[test_idx_rel]
             
@@ -628,6 +638,7 @@ def nested_loso_predictions_from_matrix(
     pipe: Pipeline,
     param_grid: dict,
     inner_cv_splits: int,
+    blocks: Optional[np.ndarray] = None,
     n_jobs: int = -1,
     seed: int = 42,
     best_params_log_path: Optional[Path] = None,
@@ -659,6 +670,7 @@ def nested_loso_predictions_from_matrix(
         X=X,
         y=y,
         groups=groups,
+        blocks=blocks,
         pipe=pipe,
         param_grid=param_grid,
         inner_cv_splits=inner_cv_splits,
@@ -692,6 +704,9 @@ def run_regression_decoding(
 ) -> Path:
     """Run LOSO regression decoding on active features."""
     X, y, groups, _feature_names, meta = load_active_matrix(subjects, task, deriv_root, config, logger)
+    blocks = None
+    if meta is not None and hasattr(meta, "columns") and "block" in meta.columns:
+        blocks = pd.to_numeric(meta["block"], errors="coerce").to_numpy()
 
     results_dir = results_root / "regression"
     plots_dir = results_dir / "plots"
@@ -707,6 +722,7 @@ def run_regression_decoding(
         X=X,
         y=y,
         groups=groups,
+        blocks=blocks,
         pipe=pipe,
         param_grid=param_grid,
         inner_cv_splits=inner_splits,
@@ -803,5 +819,3 @@ def run_time_generalization(
         return
 
     logger.info(f"Saved time-generalization outputs to {results_dir}")
-
-

@@ -418,6 +418,32 @@ def _extract_aperiodic_for_segment(
     if psds.ndim != 3:
         if psds.ndim == 4: 
             psds = np.mean(psds, axis=-1)
+
+    # Exclude line-noise bins/harmonics to avoid biasing aperiodic fits.
+    exclude_line = bool(aperiodic_cfg.get("exclude_line_noise", False))
+    line_freqs = aperiodic_cfg.get("line_noise_freqs", [50.0])
+    try:
+        line_freqs = [float(f) for f in (line_freqs or [])]
+    except Exception:
+        line_freqs = [50.0]
+    line_width = float(aperiodic_cfg.get("line_noise_width_hz", 1.0))
+    n_harm = int(aperiodic_cfg.get("line_noise_harmonics", 3))
+    n_removed = 0
+    if exclude_line and np.asarray(freqs).size > 0 and line_width > 0 and n_harm > 0 and line_freqs:
+        freqs_arr = np.asarray(freqs, dtype=float)
+        keep = np.ones_like(freqs_arr, dtype=bool)
+        for base in line_freqs:
+            if not np.isfinite(base) or base <= 0:
+                continue
+            for h in range(1, n_harm + 1):
+                f0 = base * h
+                keep &= ~((freqs_arr >= (f0 - line_width)) & (freqs_arr <= (f0 + line_width)))
+        n_removed = int(np.sum(~keep))
+        if n_removed > 0 and np.any(keep):
+            freqs = freqs_arr[keep]
+            psds = np.asarray(psds, dtype=float)[..., keep]
+        else:
+            freqs = freqs_arr
     
     log_freqs = np.log10(freqs)
     log_psd = np.log10(np.maximum(psds, 1e-20))
@@ -617,6 +643,8 @@ def _extract_aperiodic_for_segment(
         "segment": segment_name,
         "freqs": freqs,
         "log_freqs": log_freqs,
+        "line_noise_excluded": bool(exclude_line),
+        "line_noise_bins_removed": int(n_removed),
         "slopes": slopes,
         "offsets": offsets,
         "r2": r2,

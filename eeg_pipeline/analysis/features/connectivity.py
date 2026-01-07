@@ -106,6 +106,241 @@ def _validate_segment_duration_for_connectivity(
     return True
 
 
+def _normalize_phase_estimator(value: Any) -> str:
+    v = str(value).strip().lower()
+    if v in {"across", "across_epochs", "acrossepochs", "across-epochs"}:
+        return "across_epochs"
+    if v in {"trial", "trialwise", "within_epoch", "within-epoch", "withinepoch"}:
+        return "within_epoch"
+    return "within_epoch"
+
+
+def _resolve_phase_measures(conn_cfg: Dict[str, Any]) -> List[str]:
+    supported_measures = {"wpli", "wpli2_debiased", "imcoh", "plv", "pli"}
+    measures_cfg = conn_cfg.get("measures")
+    if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
+        measures = {str(m).strip().lower() for m in measures_cfg}
+        measures = measures & supported_measures
+        return [m for m in ("wpli2_debiased", "wpli", "imcoh", "plv", "pli") if m in measures]
+    out: List[str] = []
+    if bool(conn_cfg.get("enable_wpli2_debiased", False)):
+        out.append("wpli2_debiased")
+    if bool(conn_cfg.get("enable_wpli", True)):
+        out.append("wpli")
+    if bool(conn_cfg.get("enable_imcoh", False)):
+        out.append("imcoh")
+    if bool(conn_cfg.get("enable_plv", False)):
+        out.append("plv")
+    if bool(conn_cfg.get("enable_pli", False)):
+        out.append("pli")
+    return out
+
+
+def _apply_across_epochs_phase_estimates_inplace(
+    df: pd.DataFrame,
+    *,
+    precomputed: Any,
+    segments: List[str],
+    bands: List[str],
+    epoch_groups: Dict[str, np.ndarray],
+    config: Any,
+    logger: Any,
+) -> None:
+    """
+    Replace phase-based connectivity columns with across-epochs estimates (broadcast to row groups).
+    This is used to avoid the scientifically-invalid "compute per-epoch then average" shortcut for
+    wPLI/PLV/PLI/imCoh in group-level (subject/condition) summaries.
+    """
+    if df is None or df.empty:
+        return
+    if spectral_connectivity_time is None:
+        if logger is not None:
+            logger.warning("Connectivity: mne-connectivity unavailable; cannot compute across-epochs phase estimates.")
+        return
+
+    conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
+    phase_measures = _resolve_phase_measures(conn_cfg)
+    if not phase_measures:
+        return
+
+    output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
+    if output_level not in {"full", "global_only"}:
+        output_level = "full"
+    enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
+
+    n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
+    conn_mode = str(conn_cfg.get("mode", "cwt_morlet"))
+    n_cycles = conn_cfg.get("n_cycles", None)
+    try:
+        n_cycles = float(n_cycles) if n_cycles is not None else None
+    except Exception:
+        n_cycles = None
+    decim = int(conn_cfg.get("decim", 1))
+
+    min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
+    min_segment_sec = float(conn_cfg.get("min_segment_sec", 0.0))
+
+    try:
+        sfreq = float(getattr(precomputed, "sfreq", None))
+    except Exception:
+        sfreq = np.nan
+    if not np.isfinite(sfreq) or sfreq <= 0:
+        return
+
+    ch_names = list(getattr(precomputed, "ch_names", []))
+    n_channels = len(ch_names)
+    if n_channels < 2:
+        return
+    pair_i, pair_j = np.triu_indices(n_channels, k=1)
+    pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
+    indices = (pair_i.astype(int), pair_j.astype(int))
+
+    freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
+    masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+
+    def _run(method: str, seg_data: np.ndarray, freqs: np.ndarray, fmin: float, fmax: float, use_n_cycles: Any):
+        # Prefer across-epochs averaging if supported by installed mne-connectivity.
+        try:
+            return spectral_connectivity_time(
+                seg_data,
+                freqs=freqs,
+                method=method,
+                indices=indices,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                average=True,
+                faverage=True,
+                mode=conn_mode,
+                n_cycles=use_n_cycles,
+                decim=decim,
+                n_jobs=1,
+                verbose=False,
+            )
+        except TypeError:
+            return spectral_connectivity_time(
+                seg_data,
+                freqs=freqs,
+                method=method,
+                indices=indices,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                average=False,
+                faverage=True,
+                mode=conn_mode,
+                n_cycles=use_n_cycles,
+                decim=decim,
+                n_jobs=1,
+                verbose=False,
+            )
+
+    for _label, epoch_idx in epoch_groups.items():
+        epoch_idx = np.asarray(epoch_idx, dtype=int)
+        if epoch_idx.size == 0:
+            continue
+
+        for seg_name in segments:
+            if seg_name == "full":
+                seg_mask = np.ones_like(precomputed.times, dtype=bool)
+            else:
+                seg_mask = masks.get(seg_name)
+            if seg_mask is None or not np.any(seg_mask):
+                continue
+
+            seg_len = int(np.sum(seg_mask))
+            seg_sec = float(seg_len) / sfreq if sfreq > 0 else 0.0
+            if min_segment_sec > 0 and seg_sec < min_segment_sec:
+                continue
+
+            req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+            min_viable_freq = (req_cycles / seg_sec) if seg_sec > 0 else np.inf
+
+            seg_data = precomputed.data[epoch_idx][:, :, seg_mask]
+            if seg_data.ndim != 3 or seg_data.shape[-1] < 2:
+                continue
+
+            for band in bands:
+                if band not in freq_bands:
+                    continue
+                if band in precomputed.band_data and getattr(precomputed.band_data[band], "fmin", None) is not None:
+                    fmin = float(precomputed.band_data[band].fmin)
+                    fmax = float(precomputed.band_data[band].fmax)
+                else:
+                    fmin, fmax = freq_bands[band]
+                try:
+                    fmin = float(fmin)
+                    fmax = float(fmax)
+                except Exception:
+                    continue
+                if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
+                    continue
+                if fmax < min_viable_freq:
+                    continue
+
+                freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
+                freqs = freqs[np.asarray(freqs) >= min_viable_freq]
+                if freqs.size < 2:
+                    continue
+
+                use_n_cycles = n_cycles
+                if conn_mode == "cwt_morlet":
+                    # Ensure n_cycles / f < duration (MNE constraint), with a safety factor.
+                    base = float(use_n_cycles) if use_n_cycles is not None else 7.0
+                    max_cycles = 0.9 * seg_sec * freqs
+                    use_n_cycles = np.minimum(base, np.maximum(max_cycles, 0.5))
+
+                for method in phase_measures:
+                    method_use = method
+                    method_label = method
+                    try:
+                        con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
+                    except Exception:
+                        if method_use == "wpli2_debiased":
+                            try:
+                                method_use = "wpli"
+                                method_label = "wpli"
+                                con = _run(method_use, seg_data, freqs, fmin, fmax, use_n_cycles)
+                            except Exception:
+                                continue
+                        else:
+                            continue
+
+                    con_data = np.asarray(con.get_data())
+                    if con_data.ndim == 3:
+                        con_mean = np.nanmean(con_data, axis=0)
+                        con_pairs = np.nanmean(con_mean, axis=-1) if con_mean.shape[-1] > 1 else con_mean[:, 0]
+                    elif con_data.ndim == 2:
+                        con_pairs = np.nanmean(con_data, axis=-1) if con_data.shape[-1] > 1 else con_data[:, 0]
+                    elif con_data.ndim == 1:
+                        con_pairs = con_data
+                    else:
+                        continue
+                    con_pairs = np.asarray(con_pairs, dtype=float).reshape(-1)
+                    if con_pairs.size != len(pair_names):
+                        continue
+
+                    if output_level == "full":
+                        prefix = f"conn_{seg_name}_{band}_chpair_"
+                        suffix = f"_{method_label}"
+                        cols = [f"{prefix}{pair_name}{suffix}" for pair_name in pair_names]
+                        for c, v in zip(cols, con_pairs):
+                            if c in df.columns:
+                                df.loc[epoch_idx, c] = float(v)
+                    glob_col = f"conn_{seg_name}_{band}_global_{method_label}_mean"
+                    if glob_col in df.columns:
+                        df.loc[epoch_idx, glob_col] = float(np.nanmean(con_pairs))
+
+                    if enable_graph_metrics:
+                        adj = np.zeros((n_channels, n_channels), dtype=float)
+                        adj[pair_i, pair_j] = con_pairs
+                        adj[pair_j, pair_i] = con_pairs
+                        g = _graph_metrics(adj, method_label, band, seg_name, conn_cfg)
+                        for k, v in g.items():
+                            if k in df.columns:
+                                df.loc[epoch_idx, k] = float(v)
+
+
 def extract_connectivity_features(
     ctx: Any,
     bands: List[str],
@@ -173,6 +408,43 @@ def extract_connectivity_features(
     granularity = str(conn_cfg.get("granularity", "trial")).strip().lower()
     if granularity not in {"trial", "condition", "subject"}:
         granularity = "trial"
+
+    phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
+    if granularity in {"subject", "condition"} and phase_estimator == "across_epochs":
+        n_epochs = int(df.shape[0])
+        groups_map: Dict[str, np.ndarray] = {"__all__": np.arange(n_epochs, dtype=int)}
+        if granularity == "condition":
+            events = getattr(ctx, "aligned_events", None)
+            if events is not None and not getattr(events, "empty", True) and len(events) == n_epochs:
+                cond_col = None
+                for candidate in ("condition", "trial_type"):
+                    if candidate in events.columns:
+                        cond_col = candidate
+                        break
+                if cond_col is None:
+                    candidates = ctx.config.get("event_columns.pain_binary", []) if hasattr(ctx.config, "get") else []
+                    if isinstance(candidates, (list, tuple)):
+                        for c in candidates:
+                            if c in events.columns:
+                                cond_col = c
+                                break
+                if cond_col is not None:
+                    labels = events[cond_col].astype(str)
+                    min_n = int(conn_cfg.get("min_epochs_per_group", 5))
+                    for lab in sorted(labels.unique()):
+                        idx = np.where((labels == lab).to_numpy())[0]
+                        if idx.size >= min_n:
+                            groups_map[f"cond:{lab}"] = idx
+
+        _apply_across_epochs_phase_estimates_inplace(
+            df,
+            precomputed=precomputed,
+            segments=segments,
+            bands=bands,
+            epoch_groups=groups_map,
+            config=ctx.config,
+            logger=ctx.logger,
+        )
 
     if granularity == "trial":
         return df, cols
@@ -406,9 +678,7 @@ def extract_connectivity_from_precomputed(
     min_segment_sec = float(conn_cfg.get("min_segment_sec", 1.0))
     
     # Phase estimator mode: "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
-    phase_estimator = str(conn_cfg.get("phase_estimator", "within_epoch")).strip().lower()
-    if phase_estimator not in {"within_epoch", "across_epochs"}:
-        phase_estimator = "within_epoch"
+    phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
     
     if phase_estimator == "across_epochs" and logger is not None:
         logger.info(
@@ -711,8 +981,15 @@ def extract_connectivity_from_precomputed(
             seg_data = _slice_epochs(precomputed.data, seg_mask)
         if seg_data is None:
             continue
-        if seg_data.shape[-1] < min_segment_samples:
+
+        seg_n_times = int(seg_data.shape[-1])
+        if seg_n_times < min_segment_samples:
             continue
+        seg_duration = float(seg_n_times) / sfreq
+        if min_segment_sec > 0 and seg_duration < min_segment_sec:
+            continue
+        req_cycles = max(float(min_cycles_per_band), 1.0) if np.isfinite(min_cycles_per_band) else 1.0
+        min_viable_freq = (req_cycles / seg_duration) if seg_duration > 0 else np.inf
 
         for band in bands_use:
             if band not in freq_bands:
@@ -730,30 +1007,25 @@ def extract_connectivity_from_precomputed(
             if not np.isfinite(fmin) or not np.isfinite(fmax) or fmax <= fmin:
                 continue
 
-            # Skip band if segment is too short for these frequencies
-            seg_duration = float(seg_data.shape[-1]) / sfreq
-            # Min frequency required for n_cycles=1 to fit in duration
-            min_viable_freq = 1.0 / seg_duration
+            # Skip band if segment is too short for required cycles in this band
             if fmax < min_viable_freq:
                 if logger is not None:
                     logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (fmax {fmax} < min_viable {min_viable_freq:.2f}Hz)")
                 continue
             
-            _validate_segment_duration_for_connectivity(
-                seg_duration, fmin, min_cycles_per_band, band, logger
-            )
+            if not _validate_segment_duration_for_connectivity(seg_duration, fmin, min_cycles_per_band, band, logger):
+                continue
 
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
             
             # Filter freqs to those that actually fit
-            viable_mask = freqs >= min_viable_freq
-            if not np.any(viable_mask):
+            freqs = freqs[np.asarray(freqs) >= min_viable_freq]
+            if freqs.size < 2:
                 continue
-            freqs = freqs[viable_mask]
 
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet":
-                use_n_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, int(seg_data.shape[-1]))
+                use_n_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, seg_n_times)
             
             for method in phase_measures:
                 tasks.append(("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles)))

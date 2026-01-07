@@ -432,15 +432,27 @@ def extract_spectral_features(
                     continue
                 fmin, fmax = freq_bands[band]
 
-                for ch_idx, ch_name in enumerate(ch_names):
-                    psd = channel_psd[ch_idx]
+                # Require enough cycles at the lowest frequency in the band.
+                if min_cycles_at_fmin > 0:
+                    try:
+                        fmin_hz = float(fmin)
+                    except Exception:
+                        fmin_hz = np.nan
+                    if np.isfinite(fmin_hz) and fmin_hz > 0:
+                        min_req_sec = float(min_cycles_at_fmin) / fmin_hz
+                        if seg_duration_sec < min_req_sec:
+                            continue
 
-                    peak_freq, peak_power = compute_peak_frequency(psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
-                    center_freq = compute_spectral_center(psd, freqs_use, fmin, fmax)
-                    bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
-                    entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
+                if "channels" in spatial_modes:
+                    for ch_idx, ch_name in enumerate(ch_names):
+                        psd = channel_psd[ch_idx]
+                        peak_freq, peak_power = compute_peak_frequency(
+                            psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                        )
+                        center_freq = compute_spectral_center(psd, freqs_use, fmin, fmax)
+                        bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
+                        entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
 
-                    if "channels" in spatial_modes:
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_freq"] = peak_freq
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_power"] = peak_power
                         record[f"spectral_{segment_name}_{band}_ch_{ch_name}_center_freq"] = center_freq
@@ -449,7 +461,9 @@ def extract_spectral_features(
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
-                    g_peak_freq, g_peak_power = compute_peak_frequency(global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
+                    g_peak_freq, g_peak_power = compute_peak_frequency(
+                        global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                    )
                     g_center = compute_spectral_center(global_psd, freqs_use, fmin, fmax)
                     g_bandwidth = compute_spectral_bandwidth(global_psd, freqs_use, fmin, fmax)
                     g_entropy = compute_spectral_entropy(global_psd, freqs_use, fmin, fmax)
@@ -465,7 +479,9 @@ def extract_spectral_features(
                         if not roi_indices:
                             continue
                         roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                        r_peak_freq, r_peak_power = compute_peak_frequency(roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
+                        r_peak_freq, r_peak_power = compute_peak_frequency(
+                            roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True
+                        )
                         r_center = compute_spectral_center(roi_psd, freqs_use, fmin, fmax)
                         r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs_use, fmin, fmax)
                         r_entropy = compute_spectral_entropy(roi_psd, freqs_use, fmin, fmax)
