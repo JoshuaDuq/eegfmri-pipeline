@@ -858,10 +858,74 @@ func (m *Model) addLog(line string) {
 	m.updateLogViewport()
 }
 
+// wrapText wraps text to fit within the specified width, breaking at word boundaries
+// If a word is too long, it will be broken at the width limit
+func wrapText(text string, width int) []string {
+	if width < 1 {
+		return []string{text}
+	}
+
+	// Strip ANSI codes to get actual text length
+	stripped := stripANSI(text)
+	if len(stripped) <= width {
+		return []string{text}
+	}
+
+	var lines []string
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		// Handle case where text has no words but exceeds width (e.g., long URL)
+		for len(stripped) > width {
+			lines = append(lines, text[:width])
+			text = text[width:]
+			stripped = stripANSI(text)
+		}
+		if len(text) > 0 {
+			lines = append(lines, text)
+		}
+		return lines
+	}
+
+	currentLine := words[0]
+	for i := 1; i < len(words); i++ {
+		testLine := currentLine + " " + words[i]
+		if len(stripANSI(testLine)) <= width {
+			currentLine = testLine
+		} else {
+			// Current line is full, add it and start new line
+			lines = append(lines, currentLine)
+			// Check if the word itself is too long
+			wordStripped := stripANSI(words[i])
+			if len(wordStripped) > width {
+				// Break the long word
+				remainingWord := words[i]
+				for len(stripANSI(remainingWord)) > width {
+					lines = append(lines, remainingWord[:width])
+					remainingWord = remainingWord[width:]
+				}
+				currentLine = remainingWord
+			} else {
+				currentLine = words[i]
+			}
+		}
+	}
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+
+	return lines
+}
+
 func (m *Model) updateLogViewport() {
 	var filtered []string
 	query := strings.ToLower(m.searchQuery)
 	highlightStyle := lipgloss.NewStyle().Background(styles.Accent).Foreground(lipgloss.Color("#000000"))
+
+	// Calculate available width: viewport width minus border (2) and padding (2)
+	contentWidth := m.logViewport.Width - 4
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
 
 	for _, line := range m.OutputLines {
 		upperLine := strings.ToUpper(line)
@@ -902,7 +966,9 @@ func (m *Model) updateLogViewport() {
 			}
 		}
 
-		filtered = append(filtered, line)
+		// Wrap line to fit viewport width
+		wrappedLines := wrapText(line, contentWidth)
+		filtered = append(filtered, wrappedLines...)
 	}
 
 	m.searchMatches = len(filtered)

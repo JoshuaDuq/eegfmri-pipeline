@@ -38,6 +38,7 @@ from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
 from eeg_pipeline.cli.commands.clean import setup_clean, run_clean
+from eeg_pipeline.cli.commands.discover import setup_discover, run_discover
 
 from eeg_pipeline.cli.commands.base import (
     detect_available_bands,
@@ -130,6 +131,14 @@ COMMANDS: List[Command] = [
         description="Remove generated files to free disk space",
         setup=setup_clean,
         run=run_clean,
+        requires_subjects=False,
+    ),
+    Command(
+        name="discover",
+        help="Discover available columns and values from data files",
+        description="Scan events files or trial tables to find available columns",
+        setup=setup_discover,
+        run=run_discover,
         requires_subjects=False,
     ),
 ]

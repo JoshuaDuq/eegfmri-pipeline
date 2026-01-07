@@ -2111,6 +2111,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
+		case optFeatGroupSpatialTransform:
+			label = "▸ Spatial Transform"
+			hint = "Space to toggle"
+			if m.featGroupSpatialTransformExpanded {
+				label = "▾ Spatial Transform"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optSpatialTransform:
+			label = "  Transform"
+			transforms := []string{"none", "CSD", "Laplacian"}
+			value = transforms[m.spatialTransform]
+			hint = "volume conduction reduction"
+		case optSpatialTransformLambda2:
+			label = "  Lambda2"
+			value = fmt.Sprintf("%.2e", m.spatialTransformLambda2)
+			hint = "regularization parameter"
+		case optSpatialTransformStiffness:
+			label = "  Stiffness"
+			value = fmt.Sprintf("%.1f", m.spatialTransformStiffness)
+			hint = "spline stiffness"
 		case optFeatGroupTFR:
 			label = "▸ Time-Frequency"
 			hint = "Space to toggle"
@@ -3058,7 +3083,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "events.tsv column"
-			if len(m.availableColumns) > 0 {
+			// Use discovered columns with values if available
+			if len(m.discoveredColumns) > 0 {
+				max := 4
+				cols := m.discoveredColumns
+				if len(cols) < max {
+					max = len(cols)
+				}
+				suffix := ""
+				if len(cols) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
+				}
+				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
+			} else if len(m.availableColumns) > 0 {
 				max := 4
 				if len(m.availableColumns) < max {
 					max = len(m.availableColumns)
@@ -3099,7 +3136,24 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldConditionCompareValues {
 				val = textDisplay
 			}
-			return "Compare Values", val, "comma-separated values in column (e.g., 0,1 or pain,nonpain)"
+			hint := "comma-separated values in column (e.g., 0,1 or pain,nonpain)"
+			// Show available values for the selected column
+			selectedCol := m.conditionCompareColumn
+			if selectedCol == "" {
+				selectedCol = "pain_binary_coded" // Default column
+			}
+			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
+				max := 5
+				if len(vals) < max {
+					max = len(vals)
+				}
+				suffix := ""
+				if len(vals) > max {
+					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
+				}
+				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			}
+			return "Compare Values", val, hint
 		case optConditionWindowPrimaryUnit:
 			v := "trial"
 			if m.conditionWindowPrimaryUnit == 1 {
@@ -3153,7 +3207,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "column to split by"
-			if len(m.availableColumns) > 0 {
+			// Use discovered columns with values if available
+			if len(m.discoveredColumns) > 0 {
+				max := 4
+				cols := m.discoveredColumns
+				if len(cols) < max {
+					max = len(cols)
+				}
+				suffix := ""
+				if len(cols) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
+				}
+				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
+			} else if len(m.availableColumns) > 0 {
 				max := 4
 				if len(m.availableColumns) < max {
 					max = len(m.availableColumns)
@@ -3176,7 +3242,24 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldTemporalConditionValues {
 				val = textDisplay
 			}
-			return "Condition Values", val, "optional subset (e.g., 0,1 or pain,nonpain)"
+			hint := "optional subset (e.g., 0,1 or pain,nonpain)"
+			// Show available values for the selected column
+			selectedCol := m.temporalConditionColumn
+			if selectedCol == "" {
+				selectedCol = "pain_binary_coded"
+			}
+			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
+				max := 5
+				if len(vals) < max {
+					max = len(vals)
+				}
+				suffix := ""
+				if len(vals) > max {
+					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
+				}
+				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			}
+			return "Condition Values", val, hint
 		case optTemporalFilterValue:
 			val := m.temporalFilterValue
 			if val == "" {
@@ -3293,7 +3376,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "events.tsv column"
-			if len(m.availableColumns) > 0 {
+			// Use discovered columns with values if available
+			if len(m.discoveredColumns) > 0 {
+				max := 4
+				cols := m.discoveredColumns
+				if len(cols) < max {
+					max = len(cols)
+				}
+				suffix := ""
+				if len(cols) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
+				}
+				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
+			} else if len(m.availableColumns) > 0 {
 				max := 4
 				if len(m.availableColumns) < max {
 					max = len(m.availableColumns)
@@ -3313,7 +3408,24 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldClusterConditionValues {
 				val = textDisplay
 			}
-			return "Cluster Values", val, "two values (e.g. 0 1 or pain nonpain)"
+			hint := "two values (e.g. 0 1 or pain nonpain)"
+			// Show available values for the selected column
+			selectedCol := m.clusterConditionColumn
+			if selectedCol == "" {
+				selectedCol = "pain_binary_coded"
+			}
+			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
+				max := 5
+				if len(vals) < max {
+					max = len(vals)
+				}
+				suffix := ""
+				if len(vals) > max {
+					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
+				}
+				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			}
+			return "Cluster Values", val, hint
 
 		// Mediation
 		case optMediationBootstrap:

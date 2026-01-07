@@ -167,10 +167,145 @@ def detect_feature_availability(features_dir) -> dict:
     return result
 
 
+def discover_event_columns(bids_root, task: str = None, subject: str = None) -> dict:
+    """Discover available columns and their unique values from events files.
+    
+    Returns
+    -------
+    dict
+        {
+            "columns": ["onset", "duration", "trial_type", "condition", ...],
+            "values": {
+                "condition": ["pain", "nonpain"],
+                "trial_type": ["stim", "rating"],
+                ...
+            },
+            "source": "events" | "metadata",
+            "file": "path/to/file"
+        }
+    """
+    from pathlib import Path
+    import pandas as pd
+    
+    bids_root = Path(bids_root)
+    result = {"columns": [], "values": {}, "source": None, "file": None}
+    
+    events_file = None
+    
+    if subject:
+        subj_id = subject.replace("sub-", "")
+        subj_dir = bids_root / f"sub-{subj_id}"
+        if subj_dir.exists():
+            eeg_dir = subj_dir / "eeg"
+            if eeg_dir.exists():
+                patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
+                for pattern in patterns:
+                    files = list(eeg_dir.glob(pattern))
+                    if files:
+                        events_file = files[0]
+                        break
+    
+    if not events_file:
+        for subj_dir in sorted(bids_root.glob("sub-*"))[:5]:
+            eeg_dir = subj_dir / "eeg"
+            if not eeg_dir.exists():
+                continue
+            patterns = [f"*task-{task}*_events.tsv", "*_events.tsv"] if task else ["*_events.tsv"]
+            for pattern in patterns:
+                files = list(eeg_dir.glob(pattern))
+                if files:
+                    events_file = files[0]
+                    break
+            if events_file:
+                break
+    
+    if not events_file or not events_file.exists():
+        return result
+    
+    try:
+        df = pd.read_csv(events_file, sep="\t")
+        result["columns"] = df.columns.tolist()
+        result["source"] = "events"
+        result["file"] = str(events_file)
+        
+        skip_columns = {"onset", "duration", "sample", "value", "stim_file"}
+        for col in df.columns:
+            if col.lower() in skip_columns:
+                continue
+            unique_vals = df[col].dropna().unique()
+            if len(unique_vals) <= 50:
+                vals = [str(v) for v in unique_vals if pd.notna(v)]
+                result["values"][col] = sorted(set(vals))
+    except Exception:
+        pass
+    
+    return result
+
+
+def discover_trial_table_columns(deriv_root, subject: str = None) -> dict:
+    """Discover columns from an existing trial table.
+    
+    This provides more detailed columns after behavior compute has run.
+    """
+    from pathlib import Path
+    import pandas as pd
+    
+    deriv_root = Path(deriv_root)
+    result = {"columns": [], "values": {}, "source": None, "file": None}
+    
+    trial_file = None
+    
+    if subject:
+        subj_id = subject.replace("sub-", "")
+        stats_dir = deriv_root / "stats" / f"sub-{subj_id}"
+        if stats_dir.exists():
+            for pattern in ["trials*.tsv", "trial_table*.tsv"]:
+                files = list(stats_dir.glob(pattern))
+                if files:
+                    trial_file = files[0]
+                    break
+    
+    if not trial_file:
+        for stats_dir in sorted(deriv_root.glob("stats/sub-*"))[:5]:
+            for pattern in ["trials*.tsv", "trial_table*.tsv"]:
+                files = list(stats_dir.glob(pattern))
+                if files:
+                    trial_file = files[0]
+                    break
+            if trial_file:
+                break
+    
+    if not trial_file or not trial_file.exists():
+        return result
+    
+    try:
+        df = pd.read_csv(trial_file, sep="\t", nrows=500)
+        result["columns"] = df.columns.tolist()
+        result["source"] = "trial_table"
+        result["file"] = str(trial_file)
+        
+        skip_columns = {"onset", "duration", "sample", "value", "epoch", "trial"}
+        for col in df.columns:
+            if col.lower() in skip_columns:
+                continue
+            if df[col].dtype in ["float64", "float32"] and df[col].nunique() > 20:
+                continue
+            unique_vals = df[col].dropna().unique()
+            if len(unique_vals) <= 50:
+                vals = [str(v) for v in unique_vals if pd.notna(v)]
+                result["values"][col] = sorted(set(vals))
+    except Exception:
+        pass
+    
+    return result
+
+
 __all__ = [
     "detect_available_bands",
     "detect_feature_availability",
     "_empty_feature_availability",
+    "discover_event_columns",
+    "discover_trial_table_columns",
     "BEHAVIOR_COMPUTATIONS",
     "FEATURE_VISUALIZE_CATEGORIES",
     "BEHAVIOR_VISUALIZE_CATEGORIES",

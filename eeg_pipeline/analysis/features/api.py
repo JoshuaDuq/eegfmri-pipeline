@@ -346,169 +346,233 @@ def extract_all_features(
 
     if "power" in ctx.feature_categories:
         progress.step(message="Extracting power features...")
-        pow_df, pow_cols = extract_power_features(ctx, power_bands)
-        if pow_df is not None and not pow_df.empty and len(pow_df) != expected_n_trials:
-            raise ValueError(f"Power length mismatch: {len(pow_df)} vs {expected_n_trials}")
-        results.pow_df = pow_df
-        results.pow_cols = pow_cols
+        try:
+            pow_df, pow_cols = extract_power_features(ctx, power_bands)
+            if pow_df is not None and not pow_df.empty and len(pow_df) != expected_n_trials:
+                raise ValueError(f"Power length mismatch: {len(pow_df)} vs {expected_n_trials}")
+            results.pow_df = pow_df
+            results.pow_cols = pow_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract power features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "connectivity" in ctx.feature_categories:
         progress.step(message="Extracting connectivity features...")
-        conn_df, conn_cols = extract_connectivity_features(ctx, power_bands)
-        if conn_df is not None and not conn_df.empty and len(conn_df) != expected_n_trials:
-            raise ValueError(f"Connectivity length mismatch: {len(conn_df)} vs {expected_n_trials}")
-        results.conn_df = conn_df
-        results.conn_cols = conn_cols
+        try:
+            conn_df, conn_cols = extract_connectivity_features(ctx, power_bands)
+            if conn_df is not None and not conn_df.empty and len(conn_df) != expected_n_trials:
+                raise ValueError(f"Connectivity length mismatch: {len(conn_df)} vs {expected_n_trials}")
+            results.conn_df = conn_df
+            results.conn_cols = conn_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract connectivity features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "aperiodic" in ctx.feature_categories:
         progress.step(message="Extracting aperiodic features...")
-        aper_df, aper_cols, qc_payload = extract_aperiodic_features(ctx, power_bands)
-        _check_length("Aperiodic", aper_df)
-        results.aper_df = aper_df
-        results.aper_cols = aper_cols
-        results.aper_qc = qc_payload
+        try:
+            aper_df, aper_cols, qc_payload = extract_aperiodic_features(ctx, power_bands)
+            _check_length("Aperiodic", aper_df)
+            results.aper_df = aper_df
+            results.aper_cols = aper_cols
+            results.aper_qc = qc_payload
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract aperiodic features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "erp" in ctx.feature_categories:
         progress.step(message="Extracting ERP/LEP features...")
-        erp_df, erp_cols = extract_erp_features(ctx)
-        _check_length("ERP", erp_df)
-        results.erp_df = erp_df
-        results.erp_cols = erp_cols
+        try:
+            erp_df, erp_cols = extract_erp_features(ctx)
+            _check_length("ERP", erp_df)
+            results.erp_df = erp_df
+            results.erp_cols = erp_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract ERP features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "complexity" in ctx.feature_categories:
         progress.step(message="Extracting complexity features...")
-        if precomputed_data is not None:
-            comp_df, comp_cols = extract_complexity_from_precomputed(precomputed_data)
-            _check_length("Complexity", comp_df)
-            results.comp_df = comp_df
-            results.comp_cols = comp_cols
+        try:
+            if precomputed_data is not None:
+                comp_df, comp_cols = extract_complexity_from_precomputed(precomputed_data)
+                _check_length("Complexity", comp_df)
+                results.comp_df = comp_df
+                results.comp_cols = comp_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract complexity features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "bursts" in ctx.feature_categories:
         progress.step(message="Extracting burst features...")
-        bursts_df, bursts_cols = extract_burst_features(ctx, power_bands)
-        _check_length("Bursts", bursts_df)
-        results.bursts_df = bursts_df
-        results.bursts_cols = bursts_cols
+        try:
+            bursts_df, bursts_cols = extract_burst_features(ctx, power_bands)
+            _check_length("Bursts", bursts_df)
+            results.bursts_df = bursts_df
+            results.bursts_cols = bursts_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract burst features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "itpc" in ctx.feature_categories or "phase" in ctx.feature_categories:
         progress.step(message="Extracting phase features...")
-        phase_df, phase_cols = extract_phase_features(ctx, power_bands)
-        _check_length("Phase", phase_df)
-        results.phase_df = phase_df
-        results.phase_cols = phase_cols
+        try:
+            phase_df, phase_cols = extract_phase_features(ctx, power_bands)
+            _check_length("Phase", phase_df)
+            results.phase_df = phase_df
+            results.phase_cols = phase_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract phase features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     if "pac" in ctx.feature_categories:
         progress.step(message="Computing PAC features...")
-        
-        pac_cfg = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
-        pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
-        
-        if pac_source == "precomputed" and precomputed_data is not None:
-            ctx.logger.info("Using Hilbert PAC from precomputed analytic signals (recommended for scientific validity)")
-            pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_data, ctx.config)
-            _check_length("PAC trials (precomputed)", pac_trials_df)
-            if pac_trials_df is not None and not pac_trials_df.empty:
-                results.pac_trials_df = pac_trials_df
-                results.pac_df = None
-                results.pac_phase_freqs = None
-                results.pac_amp_freqs = None
-                results.pac_time_df = None
-        else:
-            if pac_source == "precomputed" and precomputed_data is None:
-                ctx.logger.warning(
-                    "PAC source='precomputed' requested but no precomputed data available; "
-                    "falling back to TFR-based PAC (less robust to spurious coupling)"
-                )
+        try:
+            pac_cfg = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
+            pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
             
-            if tfr_complex is None:
-                tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+            if pac_source == "precomputed" and precomputed_data is not None:
+                ctx.logger.info("Using Hilbert PAC from precomputed analytic signals (recommended for scientific validity)")
+                pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_data, ctx.config)
+                _check_length("PAC trials (precomputed)", pac_trials_df)
+                if pac_trials_df is not None and not pac_trials_df.empty:
+                    results.pac_trials_df = pac_trials_df
+                    results.pac_df = None
+                    results.pac_phase_freqs = None
+                    results.pac_amp_freqs = None
+                    results.pac_time_df = None
+            else:
+                if pac_source == "precomputed" and precomputed_data is None:
+                    ctx.logger.warning(
+                        "PAC source='precomputed' requested but no precomputed data available; "
+                        "falling back to TFR-based PAC (less robust to spurious coupling)"
+                    )
+                
+                if tfr_complex is None:
+                    tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+                    if tfr_complex is not None:
+                        ctx.tfr_complex = tfr_complex
+
                 if tfr_complex is not None:
-                    ctx.tfr_complex = tfr_complex
+                    freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
+                    freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
 
-            if tfr_complex is not None:
-                freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
-                freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
+                    segment_window = None
+                    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
+                    if ctx.windows is not None:
+                        if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
+                            seg_range = ctx.windows.ranges.get(ctx.name)
+                        else:
+                            seg_range = ctx.windows.ranges.get("active") or ctx.windows.ranges.get("active")
+                            if seg_range is None and ctx.windows.active_range is not None:
+                                ar = ctx.windows.active_range
+                                if np.isfinite(ar[0]) and np.isfinite(ar[1]):
+                                    seg_range = ar
+                        if seg_range is not None:
+                            segment_window = (float(seg_range[0]), float(seg_range[1]))
 
-                segment_window = None
-                segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
-                if ctx.windows is not None:
-                    if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
-                        seg_range = ctx.windows.ranges.get(ctx.name)
-                    else:
-                        seg_range = ctx.windows.ranges.get("active") or ctx.windows.ranges.get("active")
-                        if seg_range is None and ctx.windows.active_range is not None:
-                            ar = ctx.windows.active_range
-                            if np.isfinite(ar[0]) and np.isfinite(ar[1]):
-                                seg_range = ar
-                    if seg_range is not None:
-                        segment_window = (float(seg_range[0]), float(seg_range[1]))
-
-                pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
-                    tfr_complex,
-                    freqs,
-                    tfr_complex.times,
-                    ctx.epochs.info,
-                    ctx.config,
-                    ctx.logger,
-                    segment_name=segment_label,
-                    segment_window=segment_window,
-                    spatial_modes=ctx.spatial_modes,
-                )
-                _check_length("PAC trials", pac_trials_df)
-                _check_length("PAC time-resolved", pac_time_df)
-                results.pac_df = pac_df
-                results.pac_phase_freqs = pac_phase_freqs
-                results.pac_amp_freqs = pac_amp_freqs
-                results.pac_trials_df = pac_trials_df
-                results.pac_time_df = pac_time_df
+                    pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
+                        tfr_complex,
+                        freqs,
+                        tfr_complex.times,
+                        ctx.epochs.info,
+                        ctx.config,
+                        ctx.logger,
+                        segment_name=segment_label,
+                        segment_window=segment_window,
+                        spatial_modes=ctx.spatial_modes,
+                    )
+                    _check_length("PAC trials", pac_trials_df)
+                    _check_length("PAC time-resolved", pac_time_df)
+                    results.pac_df = pac_df
+                    results.pac_phase_freqs = pac_phase_freqs
+                    results.pac_amp_freqs = pac_amp_freqs
+                    results.pac_trials_df = pac_trials_df
+                    results.pac_time_df = pac_time_df
+        except Exception as exc:
+            ctx.logger.error(f"Failed to compute PAC features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     # ERDS - Event-related (de)synchronization
     if "erds" in ctx.feature_categories:
         progress.step(message="Extracting ERDS features...")
-        if precomputed_data is not None:
-            erds_df, erds_cols, erds_qc = extract_erds_from_precomputed(precomputed_data, power_bands)
-            _check_length("ERDS", erds_df)
-            if not erds_df.empty:
-                results.erds_df = erds_df
-                results.erds_cols = erds_cols
+        try:
+            if precomputed_data is not None:
+                erds_df, erds_cols, erds_qc = extract_erds_from_precomputed(precomputed_data, power_bands)
+                _check_length("ERDS", erds_df)
+                if not erds_df.empty:
+                    results.erds_df = erds_df
+                    results.erds_cols = erds_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract ERDS features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     # Spectral - Peak frequency, IAF, spectral edge
     if "spectral" in ctx.feature_categories:
         progress.step(message="Extracting spectral features (IAF)...")
-        spectral_df, spectral_cols = extract_spectral_features(ctx, power_bands)
-        _check_length("Spectral", spectral_df)
-        if not spectral_df.empty:
-            results.spectral_df = spectral_df
-            results.spectral_cols = spectral_cols
+        try:
+            spectral_df, spectral_cols = extract_spectral_features(ctx, power_bands)
+            _check_length("Spectral", spectral_df)
+            if not spectral_df.empty:
+                results.spectral_df = spectral_df
+                results.spectral_cols = spectral_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract spectral features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     # Ratios - band power ratios
     if "ratios" in ctx.feature_categories:
         progress.step(message="Extracting band ratio features...")
-        if precomputed_data is not None:
-            ratio_df, ratio_cols = extract_band_ratios_from_precomputed(precomputed_data, ctx.config)
-            _check_length("Ratios", ratio_df)
-            if not ratio_df.empty:
-                results.ratios_df = ratio_df
-                results.ratios_cols = ratio_cols
+        try:
+            if precomputed_data is not None:
+                ratio_df, ratio_cols = extract_band_ratios_from_precomputed(precomputed_data, ctx.config)
+                _check_length("Ratios", ratio_df)
+                if not ratio_df.empty:
+                    results.ratios_df = ratio_df
+                    results.ratios_cols = ratio_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract band ratio features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     # Asymmetry - hemispheric asymmetry
     if "asymmetry" in ctx.feature_categories:
         progress.step(message="Extracting asymmetry features...")
-        if precomputed_data is not None:
-            n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_bands", -1))
-            asym_df, asym_cols = extract_asymmetry_from_precomputed(precomputed_data, n_jobs=n_jobs)
-            _check_length("Asymmetry", asym_df)
-            if not asym_df.empty:
-                results.asymmetry_df = asym_df
-                results.asymmetry_cols = asym_cols
+        try:
+            if precomputed_data is not None:
+                n_jobs = int(ctx.config.get("feature_engineering.parallel.n_jobs_bands", -1))
+                asym_df, asym_cols = extract_asymmetry_from_precomputed(precomputed_data, n_jobs=n_jobs)
+                _check_length("Asymmetry", asym_df)
+                if not asym_df.empty:
+                    results.asymmetry_df = asym_df
+                    results.asymmetry_cols = asym_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract asymmetry features: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
     # Quality metrics
     if "quality" in ctx.feature_categories:
         progress.step(message="Computing trial quality metrics...")
-        qual_df, qual_cols = extract_quality_features(ctx)
-        _check_length("Quality metrics", qual_df)
-        results.quality_df = qual_df
-        results.quality_cols = qual_cols
+        try:
+            qual_df, qual_cols = extract_quality_features(ctx)
+            _check_length("Quality metrics", qual_df)
+            results.quality_df = qual_df
+            results.quality_cols = qual_cols
+        except Exception as exc:
+            ctx.logger.error(f"Failed to extract quality metrics: {exc}")
+            if ctx.config.get("feature_engineering.validation.fail_on_error", False):
+                raise
 
 
 

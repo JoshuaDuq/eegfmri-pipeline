@@ -1158,6 +1158,18 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
+	// Spatial transform options (for volume conduction reduction)
+	if m.spatialTransform != 0 {
+		transforms := []string{"none", "csd", "laplacian"}
+		args = append(args, "--spatial-transform", transforms[m.spatialTransform])
+		if m.spatialTransformLambda2 != 1e-5 {
+			args = append(args, "--spatial-transform-lambda2", fmt.Sprintf("%.2e", m.spatialTransformLambda2))
+		}
+		if m.spatialTransformStiffness != 4.0 {
+			args = append(args, "--spatial-transform-stiffness", fmt.Sprintf("%.1f", m.spatialTransformStiffness))
+		}
+	}
+
 	// Additional connectivity scientific validity options
 	if m.isCategorySelected("connectivity") {
 		// AEC output format

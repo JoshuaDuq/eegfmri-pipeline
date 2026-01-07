@@ -419,6 +419,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--tfr-decim-power", type=int, default=None, help="Decimation factor for power TFR")
     parser.add_argument("--tfr-decim-phase", type=int, default=None, help="Decimation factor for phase TFR")
     
+    # Spatial transform options (for volume conduction reduction)
+    parser.add_argument(
+        "--spatial-transform",
+        choices=["none", "csd", "laplacian"],
+        default=None,
+        help="Spatial transform for volume conduction reduction: none, csd (current source density), or laplacian",
+    )
+    parser.add_argument("--spatial-transform-lambda2", type=float, default=None, help="Lambda2 regularization for CSD/Laplacian (default: 1e-5)")
+    parser.add_argument("--spatial-transform-stiffness", type=float, default=None, help="Stiffness for CSD/Laplacian (default: 4.0)")
+    
     add_path_args(parser)
     
     return parser
@@ -697,6 +707,14 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             tfr_config["decim_power"] = args.tfr_decim_power
         if getattr(args, "tfr_decim_phase", None) is not None:
             tfr_config["decim_phase"] = args.tfr_decim_phase
+        
+        # Spatial transform options
+        if getattr(args, "spatial_transform", None) is not None:
+            config["feature_engineering.spatial_transform"] = args.spatial_transform
+        if getattr(args, "spatial_transform_lambda2", None) is not None:
+            config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["lambda2"] = args.spatial_transform_lambda2
+        if getattr(args, "spatial_transform_stiffness", None) is not None:
+            config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["stiffness"] = args.spatial_transform_stiffness
         
         # Prepare time ranges
         time_ranges = []

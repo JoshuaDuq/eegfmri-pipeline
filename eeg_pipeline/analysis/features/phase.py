@@ -94,72 +94,80 @@ def _sharpness_log_ratio(
         return float(np.log(sp / st))
     return np.nan
 
-def _compute_loo_itpc(data, train_mask=None):
+def _compute_loo_itpc(data: np.ndarray, train_mask: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Compute Leave-One-Out ITPC.
     data: (n_epochs, n_ch, n_freqs, n_times) complex TFR
     Returns: (n_epochs, n_ch, n_freqs, n_times) ITPC values
     """
     n_epochs = data.shape[0]
-    if n_epochs < 2: return np.zeros_like(np.abs(data))
+    if n_epochs < 2:
+        return np.zeros_like(np.abs(data), dtype=np.float32)
     
-    # Normalize to unit circle
     eps = 1e-12
-    unit = data / (np.abs(data) + eps)
-    
     if train_mask is None:
         train_mask = np.ones(n_epochs, dtype=bool)
-    n_train = np.sum(train_mask)
+    n_train = int(np.sum(train_mask))
     
-    if n_train < 1: return np.zeros_like(np.abs(data))
+    if n_train < 1:
+        return np.zeros_like(np.abs(data), dtype=np.float32)
     
-    sum_train = np.sum(unit[train_mask], axis=0)  # (ch, freq, time)
-
-    mean_test = sum_train / max(1, n_train)
-    loo_itpc = np.broadcast_to(np.abs(mean_test), (n_epochs,) + mean_test.shape).copy()
-
-    if n_train > 1:
-        train_indices = np.flatnonzero(train_mask)
-        if train_indices.size:
-            loo_train = (sum_train[None, ...] - unit[train_indices]) / (n_train - 1)
-            loo_itpc[train_indices] = np.abs(loo_train)
-
+    # Process channel-by-channel to save memory
+    loo_itpc = np.zeros(data.shape, dtype=np.float32)
+    train_indices = np.flatnonzero(train_mask)
+    
+    for ch in range(data.shape[1]):
+        ch_data = data[:, ch]  # (nep, nfr, nt)
+        unit_ch = ch_data / (np.abs(ch_data) + eps)
+        
+        sum_train = np.sum(unit_ch[train_mask], axis=0)  # (n_fr, nt)
+        
+        # Broadcast training set mean to all trials
+        mean_test = sum_train / max(1, n_train)
+        loo_itpc[:, ch] = np.abs(mean_test)
+        
+        # Update training trials with LOO values
+        if n_train > 1 and train_indices.size:
+            loo_train = (sum_train[None, ...] - unit_ch[train_indices]) / (n_train - 1)
+            loo_itpc[train_indices, ch] = np.abs(loo_train)
+            
     return loo_itpc
 
 
 def _compute_global_itpc_map(data: np.ndarray) -> np.ndarray:
     """Compute ITPC map across epochs: |mean_e exp(i*phi_e)|."""
+    # Memory-efficient: process channel-by-channel to avoid creating a massive temporary 'unit' array
+    n_epochs = data.shape[0]
+    n_ch = data.shape[1]
     eps = 1e-12
-    unit = data / (np.abs(data) + eps)
-    return np.abs(np.mean(unit, axis=0))  # (ch, freq, time)
+    
+    itpc_map = np.zeros(data.shape[1:], dtype=np.float32)
+    
+    for ch in range(n_ch):
+        ch_data = data[:, ch]
+        unit_ch = ch_data / (np.abs(ch_data) + eps)
+        itpc_map[ch] = np.abs(np.mean(unit_ch, axis=0))
+        
+    return itpc_map
 
 
 def _compute_fold_global_itpc_map(data: np.ndarray, train_mask: np.ndarray) -> np.ndarray:
-    """Compute ITPC map from TRAINING trials only (leakage-safe for CV).
-    
-    Parameters
-    ----------
-    data : np.ndarray
-        Complex TFR data (n_epochs, n_ch, n_freqs, n_times)
-    train_mask : np.ndarray
-        Boolean mask indicating training trials (n_epochs,)
-        
-    Returns
-    -------
-    itpc_map : np.ndarray
-        ITPC values (n_ch, n_freqs, n_times) computed on training trials only.
-        This map is constant across all trials (broadcast during feature extraction).
-    """
+    """Compute ITPC map from TRAINING trials only (leakage-safe for CV)."""
+    n_ch = data.shape[1]
     eps = 1e-12
-    unit = data / (np.abs(data) + eps)
     
     if train_mask is None or not np.any(train_mask):
-        # Fallback to global if no train_mask (shouldn't happen if fold_global is requested)
-        return np.abs(np.mean(unit, axis=0))
+        return _compute_global_itpc_map(data)
     
-    # Compute ITPC from training trials only
-    train_unit = unit[train_mask]
-    return np.abs(np.mean(train_unit, axis=0))  # (ch, freq, time)
+    itpc_map = np.zeros(data.shape[1:], dtype=np.float32)
+    
+    for ch in range(n_ch):
+        ch_data = data[:, ch]
+        unit_ch = ch_data / (np.abs(ch_data) + eps)
+        train_unit_ch = unit_ch[train_mask]
+        itpc_map[ch] = np.abs(np.mean(train_unit_ch, axis=0))
+        
+    return itpc_map
 
 
 

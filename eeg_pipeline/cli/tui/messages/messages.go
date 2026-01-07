@@ -93,6 +93,14 @@ type SubjectsLoadedMsg struct {
 	Error                 error
 }
 
+// ColumnsDiscoveredMsg is sent when column discovery from events/trial tables completes
+type ColumnsDiscoveredMsg struct {
+	Columns []string            // Available column names
+	Values  map[string][]string // Unique values for each column
+	Source  string              // "events" or "trial_table"
+	Error   error               // Error if discovery failed
+}
+
 type PlotterInfo struct {
 	ID       string `json:"id"`
 	Category string `json:"category"`

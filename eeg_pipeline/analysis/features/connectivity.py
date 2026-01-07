@@ -733,9 +733,16 @@ def extract_connectivity_from_precomputed(
         freqs_hz: np.ndarray,
         sfreq_hz: float,
         n_times: int,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute safe n_cycles and filter out frequencies that would crash MNE.
+        
+        Returns:
+            Tuple of (valid_freqs, n_cycles_for_valid_freqs)
+        """
+        freqs_hz = np.asarray(freqs_hz, dtype=float)
+        
         if n_times <= 0:
-            return np.ones_like(freqs_hz, dtype=float)
+            return np.array([]), np.array([])
 
         duration = float(n_times) / sfreq_hz
         default_cycles = 7.0
@@ -744,15 +751,25 @@ def extract_connectivity_from_precomputed(
         except Exception:
             base = default_cycles
 
-        freqs_hz = np.asarray(freqs_hz, dtype=float)
-        # MNE requirement: n_cycles / freqs < duration
-        # We use a safety factor of 0.9 to be sure
-        max_cycles = 0.9 * duration * freqs_hz
+        # MNE requirement: n_cycles / freqs < duration (or equivalently: wavelet_length < n_times)
+        # Wavelet length = n_cycles / freq * sfreq
+        # We use a CONSERVATIVE safety factor of 0.7 to avoid edge cases
+        # This is stricter than the 0.9 factor that was causing crashes
+        safety_factor = 0.7
+        max_cycles = safety_factor * duration * freqs_hz
         
-        # We cap at base, but ensure it's at least 1.0 if possible
-        # If 1.0 is still too large, we'll return a value that MNE might still reject,
-        # so we should also filter the frequencies themselves later.
-        return np.minimum(base, np.maximum(max_cycles, 0.5))
+        # For each frequency, compute the safe n_cycles (capped at base)
+        safe_cycles = np.minimum(base, max_cycles)
+        
+        # Filter out frequencies where even 1 cycle doesn't fit
+        # (need at least 1 cycle for meaningful phase estimation)
+        min_required_cycles = 1.0
+        valid_mask = safe_cycles >= min_required_cycles
+        
+        valid_freqs = freqs_hz[valid_mask]
+        valid_cycles = safe_cycles[valid_mask]
+        
+        return valid_freqs, valid_cycles
 
     def _slice_epochs(arr_3d: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
         if mask is None:
@@ -828,6 +845,19 @@ def extract_connectivity_from_precomputed(
         
         try:
             con = _run(method_use, use_average=use_across_epochs)
+        except ValueError as e:
+            # Handle MNE's "wavelet longer than signal" and similar validation errors gracefully
+            error_msg = str(e).lower()
+            if "wavelet" in error_msg or "n_cycles" in error_msg or "longer than" in error_msg:
+                if logger is not None:
+                    logger.warning(
+                        f"Connectivity: {method_use} skipped for segment '{seg_name}' band '{band}' - "
+                        f"segment too short for wavelet-based connectivity. "
+                        f"Consider using longer epochs or excluding low-frequency bands for short segments."
+                    )
+                return pd.DataFrame()
+            # Re-raise other ValueErrors
+            raise
         except Exception as e:
             # Graceful fallback for newer method names on older mne-connectivity installs.
             if method_use == "wpli2_debiased":
@@ -843,6 +873,16 @@ def extract_connectivity_from_precomputed(
                     method_use = "wpli"
                     method_label = "wpli"
                     con = _run(method_use, use_average=use_across_epochs)
+                except ValueError as e2:
+                    error_msg = str(e2).lower()
+                    if "wavelet" in error_msg or "n_cycles" in error_msg or "longer than" in error_msg:
+                        if logger is not None:
+                            logger.warning(
+                                f"Connectivity: wpli fallback also skipped for segment '{seg_name}' band '{band}' - "
+                                f"segment too short for wavelet-based connectivity."
+                            )
+                        return pd.DataFrame()
+                    raise
                 except Exception as e2:
                     if logger is not None:
                         logger.warning(
@@ -1079,11 +1119,24 @@ def extract_connectivity_from_precomputed(
             # Filter freqs to those that actually fit
             freqs = freqs[np.asarray(freqs) >= min_viable_freq]
             if freqs.size < 2:
+                if logger is not None:
+                    logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (not enough valid frequencies after filtering)")
                 continue
 
             use_n_cycles = n_cycles
             if conn_mode == "cwt_morlet":
-                use_n_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, seg_n_times)
+                # Apply strict pre-flight check to filter frequencies that would crash MNE
+                valid_freqs, valid_cycles = _safe_n_cycles_for_segment(n_cycles, freqs, sfreq, seg_n_times)
+                if valid_freqs.size < 2:
+                    if logger is not None:
+                        logger.warning(
+                            f"Connectivity: skipping band '{band}' for segment '{seg_name}' - "
+                            f"segment too short ({seg_n_times} samples = {seg_n_times/sfreq:.2f}s) for reliable "
+                            f"phase connectivity at these frequencies (need longer epochs or higher fmin)."
+                        )
+                    continue
+                freqs = valid_freqs
+                use_n_cycles = valid_cycles
             
             for method in phase_measures:
                 tasks.append(("phase", (seg_name, band, method, seg_data, freqs, fmin, fmax, use_n_cycles)))

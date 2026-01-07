@@ -280,27 +280,36 @@ class TimeWindowSpec:
 
         # 2. Targeted window (context/user-defined iteration)
         if self.name:
-            # Look for this specific name in all possible config sections
-            all_cfgs = [
-                self.config.get("feature_engineering.windows", {}),
-                self.config.get("feature_engineering.features", {}),
-                self.config.get("time_frequency_analysis", {}),
-            ]
             found = False
-            for cfg in all_cfgs:
-                # Check for exact name or common suffix "window"
-                for key in [self.name, f"{self.name}_window"]:
-                    val = cfg.get(key)
-                    if isinstance(val, (list, tuple)) and len(val) >= 2:
-                        try:
-                            self._add_window(self.name, float(val[0]), float(val[1]))
-                            found = True
-                            break
-                        except (ValueError, TypeError):
-                            continue
-                if found:
-                    break
             
+            # FIRST: Check explicit windows (CLI/TUI-provided time ranges) - these take precedence
+            if self.name in explicit_by_name:
+                t0, t1 = explicit_by_name[self.name]
+                self._add_window(self.name, float(t0), float(t1))
+                found = True
+            
+            # SECOND: Fall back to config sections if not found in explicit windows
+            if not found:
+                all_cfgs = [
+                    self.config.get("feature_engineering.windows", {}),
+                    self.config.get("feature_engineering.features", {}),
+                    self.config.get("time_frequency_analysis", {}),
+                ]
+                for cfg in all_cfgs:
+                    # Check for exact name or common suffix "window"
+                    for key in [self.name, f"{self.name}_window"]:
+                        val = cfg.get(key)
+                        if isinstance(val, (list, tuple)) and len(val) >= 2:
+                            try:
+                                self._add_window(self.name, float(val[0]), float(val[1]))
+                                found = True
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    if found:
+                        break
+            
+            # Handle special cases and mark missing windows
             if not found:
                 if str(self.name).strip().lower() in {"full", "all"}:
                     self._add_window(self.name, self.times[0], self.times[-1])

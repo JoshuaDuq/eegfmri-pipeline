@@ -576,10 +576,10 @@ type Model struct {
 	plotGroupValidationExpanded  bool
 	plotGroupTFRMiscExpanded     bool
 
-	plotGroupTopomapExpanded   bool
-	plotGroupTFRExpanded       bool
-	plotGroupSizingExpanded    bool
-	plotGroupSelectionExpanded bool
+	plotGroupTopomapExpanded     bool
+	plotGroupTFRExpanded         bool
+	plotGroupSizingExpanded      bool
+	plotGroupSelectionExpanded   bool
 	plotGroupComparisonsExpanded bool
 
 	// Per-plot advanced configuration (wizard overrides scoped to plot IDs)
@@ -823,20 +823,21 @@ type Model struct {
 	// Features pipeline advanced config
 	connectivityMeasures map[int]bool // Selected connectivity measures
 	// Features advanced config section expansion (collapsed by default for compact UI)
-	featGroupConnectivityExpanded bool
-	featGroupPACExpanded          bool
-	featGroupAperiodicExpanded    bool
-	featGroupComplexityExpanded   bool
-	featGroupBurstsExpanded       bool
-	featGroupPowerExpanded        bool
-	featGroupSpectralExpanded     bool
-	featGroupERPExpanded          bool
-	featGroupRatiosExpanded       bool
-	featGroupAsymmetryExpanded    bool
-	featGroupStorageExpanded      bool
-	featGroupExecutionExpanded    bool
-	featGroupValidationExpanded   bool
-	featGroupTFRExpanded          bool
+	featGroupConnectivityExpanded     bool
+	featGroupPACExpanded              bool
+	featGroupAperiodicExpanded        bool
+	featGroupComplexityExpanded       bool
+	featGroupBurstsExpanded           bool
+	featGroupPowerExpanded            bool
+	featGroupSpectralExpanded         bool
+	featGroupERPExpanded              bool
+	featGroupRatiosExpanded           bool
+	featGroupAsymmetryExpanded        bool
+	featGroupSpatialTransformExpanded bool
+	featGroupStorageExpanded          bool
+	featGroupExecutionExpanded        bool
+	featGroupValidationExpanded       bool
+	featGroupTFRExpanded              bool
 
 	// PAC/CFC configuration
 	pacPhaseMin  float64 // Min phase frequency (Hz)
@@ -938,6 +939,11 @@ type Model struct {
 	aperiodicPsdMethod        int     // 0: multitaper, 1: welch
 	aperiodicExcludeLineNoise bool    // Exclude line noise
 	aperiodicLineNoiseFreq    float64 // Line noise frequency
+
+	// Spatial transform options (for volume conduction reduction)
+	spatialTransform          int     // 0: none, 1: csd, 2: laplacian
+	spatialTransformLambda2   float64 // Lambda2 regularization
+	spatialTransformStiffness float64 // Stiffness parameter
 
 	// Connectivity advanced options
 	connGranularity            int     // 0: trial, 1: condition, 2: subject
@@ -1203,6 +1209,16 @@ type Model struct {
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
 
+	// Column discovery (populated from events files)
+	discoveredColumns       []string            // Available columns from events/trial table
+	discoveredColumnValues  map[string][]string // Values for each column
+	columnDiscoveryDone     bool                // Whether discovery has been completed
+	columnDiscoveryError    string              // Error message if discovery failed
+	columnDiscoverySource   string              // "events" or "trial_table"
+	selectedColumnCursor    int                 // Cursor for column selection
+	selectedValueCursors    map[string]int      // Cursor for value selection per column
+	expandedColumnSelection string              // Currently expanded column for value selection
+
 	// Decoding pipeline advanced config
 	decodingNPerm int  // Permutations for significance test
 	innerSplits   int  // CV inner splits
@@ -1323,24 +1339,25 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		spatialSelected:         make(map[int]bool),
 		helpOverlay:             help,
 		// Advanced config defaults (shared)
-		useDefaultAdvanced:            true,
-		expandedOption:                expandedNone, // No option expanded initially
-		connectivityMeasures:          make(map[int]bool),
-		featGroupConnectivityExpanded: false,
-		featGroupPACExpanded:          false,
-		featGroupAperiodicExpanded:    false,
-		featGroupComplexityExpanded:   false,
-		featGroupBurstsExpanded:       false,
-		featGroupPowerExpanded:        false,
-		featGroupSpectralExpanded:     false,
-		featGroupERPExpanded:          false,
-		featGroupRatiosExpanded:       false,
-		featGroupAsymmetryExpanded:    false,
-		featGroupStorageExpanded:      true,
-		featGroupExecutionExpanded:    true,
-		featGroupValidationExpanded:   true,
-		plotItemConfigs:               make(map[string]PlotItemConfig),
-		plotItemConfigExpanded:        make(map[string]bool),
+		useDefaultAdvanced:                true,
+		expandedOption:                    expandedNone, // No option expanded initially
+		connectivityMeasures:              make(map[int]bool),
+		featGroupConnectivityExpanded:     false,
+		featGroupPACExpanded:              false,
+		featGroupAperiodicExpanded:        false,
+		featGroupComplexityExpanded:       false,
+		featGroupBurstsExpanded:           false,
+		featGroupPowerExpanded:            false,
+		featGroupSpectralExpanded:         false,
+		featGroupERPExpanded:              false,
+		featGroupRatiosExpanded:           false,
+		featGroupAsymmetryExpanded:        false,
+		featGroupSpatialTransformExpanded: false,
+		featGroupStorageExpanded:          true,
+		featGroupExecutionExpanded:        true,
+		featGroupValidationExpanded:       true,
+		plotItemConfigs:                   make(map[string]PlotItemConfig),
+		plotItemConfigExpanded:            make(map[string]bool),
 		// PAC/CFC defaults (from config)
 		pacPhaseMin:  4.0,
 		pacPhaseMax:  8.0,
@@ -1418,6 +1435,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		aperiodicPsdMethod:        0, // 0: multitaper
 		aperiodicExcludeLineNoise: true,
 		aperiodicLineNoiseFreq:    50.0,
+
+		// Spatial transform defaults
+		spatialTransform:          0,    // 0: none
+		spatialTransformLambda2:   1e-5, // Default lambda2
+		spatialTransformStiffness: 4.0,  // Default stiffness
 
 		// Connectivity advanced defaults
 		connGranularity:            0, // 0: trial
@@ -1644,6 +1666,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
+		// Column discovery defaults
+		discoveredColumns:      []string{},
+		discoveredColumnValues: make(map[string][]string),
+		selectedValueCursors:   make(map[string]int),
 		// Decoding defaults
 		decodingNPerm:         0,
 		innerSplits:           3,
@@ -2601,6 +2627,32 @@ func (m *Model) SetFeaturePlottersError(err error) {
 	m.featurePlotterError = err.Error()
 }
 
+// SetDiscoveredColumns sets the columns and values discovered from events/trial tables
+func (m *Model) SetDiscoveredColumns(columns []string, values map[string][]string, source string) {
+	m.discoveredColumns = columns
+	m.discoveredColumnValues = values
+	m.columnDiscoverySource = source
+	m.columnDiscoveryDone = true
+	m.columnDiscoveryError = ""
+}
+
+// SetColumnsDiscoveryError sets the error from column discovery
+func (m *Model) SetColumnsDiscoveryError(err error) {
+	if err == nil {
+		return
+	}
+	m.columnDiscoveryError = err.Error()
+	m.columnDiscoveryDone = true
+}
+
+// GetDiscoveredColumnValues returns the unique values for a column
+func (m Model) GetDiscoveredColumnValues(column string) []string {
+	if m.discoveredColumnValues == nil {
+		return nil
+	}
+	return m.discoveredColumnValues[column]
+}
+
 func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if m.task == "" && summary.Task != "" {
 		m.task = summary.Task
@@ -3164,6 +3216,7 @@ const (
 	optFeatGroupERP
 	optFeatGroupRatios
 	optFeatGroupAsymmetry
+	optFeatGroupSpatialTransform
 	optFeatGroupStorage
 	optFeatGroupExecution
 	optFeatGroupValidation
@@ -3218,6 +3271,10 @@ const (
 	optConnWindowLen
 	optConnWindowStep
 	optConnAECMode
+	// Spatial transform options
+	optSpatialTransform
+	optSpatialTransformLambda2
+	optSpatialTransformStiffness
 	optMinEpochs
 
 	optFailOnMissingWindows
@@ -3702,6 +3759,14 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupAsymmetry)
 		if m.featGroupAsymmetryExpanded {
 			options = append(options, optAsymmetryChannelPairs)
+		}
+	}
+
+	// Spatial transform (for volume conduction reduction) - useful when connectivity is selected
+	if m.isCategorySelected("connectivity") {
+		options = append(options, optFeatGroupSpatialTransform)
+		if m.featGroupSpatialTransformExpanded {
+			options = append(options, optSpatialTransform, optSpatialTransformLambda2, optSpatialTransformStiffness)
 		}
 	}
 

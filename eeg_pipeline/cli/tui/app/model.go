@@ -273,6 +273,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case messages.ColumnsDiscoveredMsg:
+		if msg.Error != nil {
+			m.wizard.SetColumnsDiscoveryError(msg.Error)
+			return m, nil
+		}
+		m.wizard.SetDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
+		return m, nil
+
 	// Cloud operation messages
 	case cloud.SyncCompleteMsg:
 		if msg.Error != nil {
@@ -402,6 +410,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				executor.LoadPlotters(m.repoRoot),
 				executor.LoadConfigSummary(m.repoRoot),
 				executor.LoadConfigKeys(m.repoRoot, []string{"time_frequency_analysis.bands"}),
+				executor.DiscoverColumns(m.repoRoot, m.task),
 			)
 		}
 		if m.mainMenu.SelectedUtility == mainmenu.UtilityGlobalSetup {

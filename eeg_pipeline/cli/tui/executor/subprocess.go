@@ -53,6 +53,61 @@ type PlottersResponse struct {
 	FeaturePlotters map[string][]messages.PlotterInfo `json:"feature_plotters"`
 }
 
+// DiscoverColumnsResponse from eeg-pipeline discover --json
+type DiscoverColumnsResponse struct {
+	Columns []string            `json:"columns"`
+	Values  map[string][]string `json:"values"`
+	Source  string              `json:"source"`
+	File    string              `json:"file,omitempty"`
+}
+
+// DiscoverColumns runs eeg-pipeline discover --json to find available columns and their values
+func DiscoverColumns(repoRoot string, task string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "discover", "all", "--json"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+
+		pyCmd := GetPythonCommand(repoRoot)
+		cmd := exec.Command(pyCmd, args...)
+		cmd.Dir = repoRoot
+		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+		output, err := cmd.Output()
+
+		if err != nil {
+			cmd = exec.Command("python3", args...)
+			cmd.Dir = repoRoot
+			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+			output, err = cmd.Output()
+
+			if err != nil {
+				return messages.ColumnsDiscoveredMsg{
+					Columns: nil,
+					Values:  nil,
+					Error:   err,
+				}
+			}
+		}
+
+		var response DiscoverColumnsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
+			}
+		}
+
+		return messages.ColumnsDiscoveredMsg{
+			Columns: response.Columns,
+			Values:  response.Values,
+			Source:  response.Source,
+			Error:   nil,
+		}
+	}
+}
+
 // LoadSubjects runs eeg-pipeline info subjects --json and returns subjects
 func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd {
 	return func() tea.Msg {

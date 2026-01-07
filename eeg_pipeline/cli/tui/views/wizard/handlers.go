@@ -1248,6 +1248,16 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optFailOnMissingNamedWindow:
 		m.failOnMissingNamedWindow = !m.failOnMissingNamedWindow
 		m.useDefaultAdvanced = false
+	// Spatial transform section
+	case optFeatGroupSpatialTransform:
+		m.featGroupSpatialTransformExpanded = !m.featGroupSpatialTransformExpanded
+		m.useDefaultAdvanced = false
+	case optSpatialTransform:
+		m.spatialTransform = (m.spatialTransform + 1) % 3 // 0=none, 1=csd, 2=laplacian
+		m.useDefaultAdvanced = false
+	case optSpatialTransformLambda2, optSpatialTransformStiffness:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	// TFR section
 	case optFeatGroupTFR:
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
@@ -2870,6 +2880,15 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+	// Spatial transform options
+	case optSpatialTransformLambda2:
+		if val > 0 {
+			m.spatialTransformLambda2 = val
+		}
+	case optSpatialTransformStiffness:
+		if val >= 0 {
+			m.spatialTransformStiffness = val
+		}
 	// TFR options
 	case optTfrFreqMin:
 		if val >= 0 {
