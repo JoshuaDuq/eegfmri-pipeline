@@ -29,11 +29,56 @@ from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 ###################################################################
 
 
+def remove_aperiodic_component(
+    psd: np.ndarray,
+    freqs: np.ndarray,
+    fit_range: Tuple[float, float] = (2.0, 40.0),
+) -> np.ndarray:
+    """
+    Remove 1/f aperiodic component from PSD using robust linear fit in log-log space.
+    
+    This addresses the scientific validity concern that raw PSD peak detection
+    is biased by 1/f changes (common in pain/arousal/alertness states).
+    
+    Parameters
+    ----------
+    psd : np.ndarray
+        Power spectral density (1D array)
+    freqs : np.ndarray
+        Frequency values
+    fit_range : tuple
+        Frequency range for fitting 1/f model (Hz)
+        
+    Returns
+    -------
+    residual : np.ndarray
+        Aperiodic-adjusted PSD (residual in log space)
+    """
+    if psd.size == 0 or freqs.size == 0:
+        return psd.copy()
+    
+    log_f = np.log10(np.maximum(freqs, 1e-6))
+    log_p = np.log10(np.maximum(psd, 1e-20))
+    
+    fit_mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1]) & np.isfinite(log_p)
+    if np.sum(fit_mask) < 5:
+        return psd.copy()
+    
+    try:
+        slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+        aperiodic_fit = intercept + slope * log_f
+        residual = log_p - aperiodic_fit
+        return 10 ** residual
+    except (np.linalg.LinAlgError, ValueError):
+        return psd.copy()
+
+
 def compute_peak_frequency(
     psd: np.ndarray,
     freqs: np.ndarray,
     fmin: float,
     fmax: float,
+    aperiodic_adjusted: bool = True,
 ) -> Tuple[float, float]:
     """
     Compute peak frequency and peak power within a frequency range.
@@ -48,13 +93,16 @@ def compute_peak_frequency(
         Minimum frequency
     fmax : float
         Maximum frequency
+    aperiodic_adjusted : bool
+        If True, remove 1/f component before peak detection to avoid
+        bias from aperiodic power changes (default: True)
     
     Returns
     -------
     peak_freq : float
-        Frequency of maximum power
+        Frequency of maximum power (on aperiodic-adjusted spectrum if enabled)
     peak_power : float
-        Power at peak frequency
+        Power at peak frequency (from original PSD)
     """
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
@@ -66,7 +114,14 @@ def compute_peak_frequency(
     if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
         return np.nan, np.nan
     
-    peak_idx = np.nanargmax(psd_band)
+    if aperiodic_adjusted:
+        psd_for_peak = remove_aperiodic_component(psd, freqs)[mask]
+        if np.all(np.isnan(psd_for_peak)) or len(psd_for_peak) == 0:
+            psd_for_peak = psd_band
+    else:
+        psd_for_peak = psd_band
+    
+    peak_idx = np.nanargmax(psd_for_peak)
     peak_freq = float(freqs_band[peak_idx])
     peak_power = float(psd_band[peak_idx])
     
@@ -336,7 +391,7 @@ def extract_spectral_features(
                 for ch_idx, ch_name in enumerate(ch_names):
                     psd = channel_psd[ch_idx]
 
-                    peak_freq, peak_power = compute_peak_frequency(psd, freqs_use, fmin, fmax)
+                    peak_freq, peak_power = compute_peak_frequency(psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
                     center_freq = compute_spectral_center(psd, freqs_use, fmin, fmax)
                     bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
                     entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
@@ -350,7 +405,7 @@ def extract_spectral_features(
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
-                    g_peak_freq, g_peak_power = compute_peak_frequency(global_psd, freqs_use, fmin, fmax)
+                    g_peak_freq, g_peak_power = compute_peak_frequency(global_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
                     g_center = compute_spectral_center(global_psd, freqs_use, fmin, fmax)
                     g_bandwidth = compute_spectral_bandwidth(global_psd, freqs_use, fmin, fmax)
                     g_entropy = compute_spectral_entropy(global_psd, freqs_use, fmin, fmax)
@@ -366,7 +421,7 @@ def extract_spectral_features(
                         if not roi_indices:
                             continue
                         roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
-                        r_peak_freq, r_peak_power = compute_peak_frequency(roi_psd, freqs_use, fmin, fmax)
+                        r_peak_freq, r_peak_power = compute_peak_frequency(roi_psd, freqs_use, fmin, fmax, aperiodic_adjusted=True)
                         r_center = compute_spectral_center(roi_psd, freqs_use, fmin, fmax)
                         r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs_use, fmin, fmax)
                         r_entropy = compute_spectral_entropy(roi_psd, freqs_use, fmin, fmax)
@@ -408,4 +463,5 @@ __all__ = [
     "compute_spectral_bandwidth",
     "compute_spectral_edge",
     "compute_spectral_entropy",
+    "remove_aperiodic_component",
 ]

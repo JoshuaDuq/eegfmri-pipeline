@@ -399,47 +399,68 @@ def extract_all_features(
 
     if "pac" in ctx.feature_categories:
         progress.step(message="Computing PAC features...")
-        if tfr_complex is None:
-            tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+        
+        pac_cfg = ctx.config.get("feature_engineering.pac", {}) if hasattr(ctx.config, "get") else {}
+        pac_source = str(pac_cfg.get("source", "precomputed")).strip().lower()
+        
+        if pac_source == "precomputed" and precomputed_data is not None:
+            ctx.logger.info("Using Hilbert PAC from precomputed analytic signals (recommended for scientific validity)")
+            pac_trials_df, pac_cols = extract_pac_from_precomputed(precomputed_data, ctx.config)
+            _check_length("PAC trials (precomputed)", pac_trials_df)
+            if pac_trials_df is not None and not pac_trials_df.empty:
+                results.pac_trials_df = pac_trials_df
+                results.pac_df = None
+                results.pac_phase_freqs = None
+                results.pac_amp_freqs = None
+                results.pac_time_df = None
+        else:
+            if pac_source == "precomputed" and precomputed_data is None:
+                ctx.logger.warning(
+                    "PAC source='precomputed' requested but no precomputed data available; "
+                    "falling back to TFR-based PAC (less robust to spurious coupling)"
+                )
+            
+            if tfr_complex is None:
+                tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+                if tfr_complex is not None:
+                    ctx.tfr_complex = tfr_complex
+
             if tfr_complex is not None:
-                ctx.tfr_complex = tfr_complex
+                freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
+                freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
 
-        if tfr_complex is not None:
-            freq_min, freq_max, n_freqs, *_ = get_tfr_config(ctx.config)
-            freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
+                segment_window = None
+                segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
+                if ctx.windows is not None:
+                    if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
+                        seg_range = ctx.windows.ranges.get(ctx.name)
+                    else:
+                        seg_range = ctx.windows.ranges.get("active") or ctx.windows.ranges.get("active")
+                        if seg_range is None and ctx.windows.active_range is not None:
+                            ar = ctx.windows.active_range
+                            if np.isfinite(ar[0]) and np.isfinite(ar[1]):
+                                seg_range = ar
+                    if seg_range is not None:
+                        segment_window = (float(seg_range[0]), float(seg_range[1]))
 
-            segment_window = None
-            segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
-            if ctx.windows is not None:
-                if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
-                    seg_range = ctx.windows.ranges.get(ctx.name)
-                else:
-                    seg_range = ctx.windows.ranges.get("active") or ctx.windows.ranges.get("active")
-                    if seg_range is None and ctx.windows.active_range is not None:
-                        ar = ctx.windows.active_range
-                        if np.isfinite(ar[0]) and np.isfinite(ar[1]):
-                            seg_range = ar
-                if seg_range is not None:
-                    segment_window = (float(seg_range[0]), float(seg_range[1]))
-
-            pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
-                tfr_complex,
-                freqs,
-                tfr_complex.times,
-                ctx.epochs.info,
-                ctx.config,
-                ctx.logger,
-                segment_name=segment_label,
-                segment_window=segment_window,
-                spatial_modes=ctx.spatial_modes,
-            )
-            _check_length("PAC trials", pac_trials_df)
-            _check_length("PAC time-resolved", pac_time_df)
-            results.pac_df = pac_df
-            results.pac_phase_freqs = pac_phase_freqs
-            results.pac_amp_freqs = pac_amp_freqs
-            results.pac_trials_df = pac_trials_df
-            results.pac_time_df = pac_time_df
+                pac_df, pac_phase_freqs, pac_amp_freqs, pac_trials_df, pac_time_df = compute_pac_comodulograms(
+                    tfr_complex,
+                    freqs,
+                    tfr_complex.times,
+                    ctx.epochs.info,
+                    ctx.config,
+                    ctx.logger,
+                    segment_name=segment_label,
+                    segment_window=segment_window,
+                    spatial_modes=ctx.spatial_modes,
+                )
+                _check_length("PAC trials", pac_trials_df)
+                _check_length("PAC time-resolved", pac_time_df)
+                results.pac_df = pac_df
+                results.pac_phase_freqs = pac_phase_freqs
+                results.pac_amp_freqs = pac_amp_freqs
+                results.pac_trials_df = pac_trials_df
+                results.pac_time_df = pac_time_df
 
     # ERDS - Event-related (de)synchronization
     if "erds" in ctx.feature_categories:

@@ -54,6 +54,30 @@ def get_tfr_config(config) -> Tuple[float, float, int, float, int, Union[str, li
     return freq_min, freq_max, n_freqs, n_cycles_factor, decim, picks
 
 
+def get_tfr_decim(config, mode: str = "power") -> int:
+    """
+    Get decimation factor for TFR based on mode.
+    
+    Parameters
+    ----------
+    config : Any
+        Configuration object
+    mode : str
+        "power" for power TFR (can be aggressive) or "phase" for complex TFR (preserve time structure)
+        
+    Returns
+    -------
+    int
+        Decimation factor
+    """
+    tfr_config = config.get("time_frequency_analysis.tfr", {})
+    
+    if mode == "phase":
+        return int(tfr_config.get("decim_phase", tfr_config.get("decim", 1)))
+    else:
+        return int(tfr_config.get("decim_power", tfr_config.get("decim", 4)))
+
+
 ###################################################################
 # TFR Computation Helpers
 ###################################################################
@@ -83,7 +107,7 @@ def compute_tfr_morlet(
     picks : Optional[Union[str, List[int]]]
         Channel picks. If None, uses config defaults.
     decim : Optional[int]
-        Decimation factor. If None, uses config defaults.
+        Decimation factor. If None, uses config decim_power for power TFR.
         
     Returns
     -------
@@ -93,18 +117,17 @@ def compute_tfr_morlet(
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
+    freq_min, freq_max, n_freqs, n_cycles_factor, _, tfr_picks = get_tfr_config(config)
     
     if freqs is None:
         freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     if picks is None:
         picks = tfr_picks
     if decim is None:
-        decim = tfr_decim
+        decim = get_tfr_decim(config, mode="power")
     
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
     
-    # Get number of workers from config or environment
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
     power = epochs.compute_tfr(
@@ -139,6 +162,8 @@ def compute_complex_tfr(
     """
     Compute complex-valued TFR for phase-based metrics (ITPC, PAC).
     
+    Uses decim_phase (default=1) to preserve time structure for phase metrics.
+    
     Parameters
     ----------
     epochs : mne.Epochs
@@ -158,20 +183,21 @@ def compute_complex_tfr(
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
+    freq_min, freq_max, n_freqs, n_cycles_factor, _, tfr_picks = get_tfr_config(config)
     
     if freqs is None:
         freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
     
+    decim_phase = get_tfr_decim(config, mode="phase")
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
-    logger.info("Computing complex TFR for phase-based metrics...")
+    logger.info("Computing complex TFR for phase-based metrics (decim=%d)...", decim_phase)
     return epochs.compute_tfr(
         method="morlet",
         freqs=freqs,
         n_cycles=n_cycles,
-        decim=tfr_decim,
+        decim=decim_phase,
         picks=tfr_picks,
         use_fft=True,
         return_itc=False,
@@ -683,16 +709,32 @@ def compute_adaptive_n_cycles(
     max_cycles: Optional[float] = None,
     config: Optional[Any] = None
 ) -> np.ndarray:
+    """
+    Compute adaptive n_cycles for Morlet wavelets.
+    
+    Formula: n_cycles = freq / cycles_factor, clamped to [min_cycles, max_cycles].
+    
+    With n_cycles_factor=2.0 (default), this gives:
+    - 4 Hz -> 2 cycles (clamped to min_cycles=3)
+    - 10 Hz -> 5 cycles
+    - 40 Hz -> 20 cycles (clamped to max_cycles=15 if set)
+    - 80 Hz -> 40 cycles (clamped to max_cycles=15 if set)
+    
+    The max_cycles cap prevents extreme temporal smoothing at high frequencies
+    (gamma band), which can degrade PAC/ITPC time structure.
+    """
     if cycles_factor is None:
         cycles_factor = _get_config_float(config, "time_frequency_analysis.tfr.n_cycles_factor", 2.0)
     if min_cycles is None:
         min_cycles = _get_config_float(config, "time_frequency_analysis.tfr.min_cycles", 3.0)
+    if max_cycles is None:
+        max_cycles = _get_config_float(config, "time_frequency_analysis.tfr.max_cycles", None)
     
     freqs = np.asarray(freqs, dtype=float)
     base_cycles = freqs / cycles_factor
     n_cycles = np.maximum(base_cycles, min_cycles)
     
-    if max_cycles is not None:
+    if max_cycles is not None and np.isfinite(max_cycles) and max_cycles > 0:
         n_cycles = np.minimum(n_cycles, max_cycles)
     
     return n_cycles

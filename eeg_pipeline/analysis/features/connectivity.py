@@ -38,12 +38,89 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
 from eeg_pipeline.analysis.features.preparation import precompute_data
 
 
+def _warn_if_phase_connectivity_without_spatial_transform(
+    config: Any,
+    measures: List[str],
+    logger: Any,
+) -> None:
+    """
+    Warn if phase-based connectivity measures are used without CSD/Laplacian transform.
+    
+    Phase-based measures (wPLI, PLI, ImCoh, PLV) are sensitive to volume conduction.
+    Using CSD or Laplacian transform reduces spurious connectivity from field spread.
+    """
+    phase_measures = {"wpli", "wpli2_debiased", "imcoh", "plv", "pli"}
+    uses_phase = bool(set(m.lower() for m in measures) & phase_measures)
+    
+    if not uses_phase:
+        return
+    
+    conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
+    warn_enabled = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
+    if not warn_enabled:
+        return
+    
+    spatial_transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+    if spatial_transform in {"csd", "laplacian"}:
+        return
+    
+    if logger is not None:
+        logger.warning(
+            "Phase-based connectivity measures (%s) are used without CSD/Laplacian transform. "
+            "This can lead to spurious connectivity from volume conduction. "
+            "Consider setting feature_engineering.spatial_transform='csd' for more valid results. "
+            "Set feature_engineering.connectivity.warn_if_no_spatial_transform=false to suppress this warning.",
+            ", ".join(sorted(set(m.lower() for m in measures) & phase_measures)),
+        )
+
+
+def _validate_segment_duration_for_connectivity(
+    segment_duration_sec: float,
+    fmin: float,
+    min_cycles: float,
+    band: str,
+    logger: Any,
+) -> bool:
+    """
+    Validate that segment duration is sufficient for reliable connectivity estimation.
+    
+    For phase-based connectivity, we need enough oscillatory cycles to estimate
+    phase relationships reliably. Rule of thumb: min_cycles / fmin seconds.
+    """
+    min_duration_sec = min_cycles / fmin if fmin > 0 else np.inf
+    
+    if segment_duration_sec < min_duration_sec:
+        if logger is not None:
+            logger.warning(
+                "Connectivity: segment duration (%.2fs) is shorter than recommended "
+                "for band '%s' (need %.2fs for %d cycles at %.1f Hz). "
+                "Results may be unreliable. Consider longer segments or setting "
+                "feature_engineering.connectivity.min_cycles_per_band lower.",
+                segment_duration_sec,
+                band,
+                min_duration_sec,
+                int(min_cycles),
+                fmin,
+            )
+        return False
+    return True
+
+
 def extract_connectivity_features(
     ctx: Any,
     bands: List[str],
 ) -> Tuple[pd.DataFrame, List[str]]:
     if not bands:
         return pd.DataFrame(), []
+
+    conn_cfg = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
+    measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
+    if isinstance(measures_cfg, (list, tuple)):
+        measures = [str(m).strip().lower() for m in measures_cfg]
+    else:
+        measures = ["wpli2_debiased", "aec"]
+    
+    _warn_if_phase_connectivity_without_spatial_transform(ctx.config, measures, ctx.logger)
 
     precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
@@ -325,6 +402,7 @@ def extract_connectivity_from_precomputed(
         n_cycles = None
     decim = int(conn_cfg.get("decim", 1))
     min_segment_samples = int(conn_cfg.get("min_segment_samples", 50))
+    min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
 
     try:
         sfreq = float(getattr(precomputed, "sfreq", None))
@@ -633,6 +711,10 @@ def extract_connectivity_from_precomputed(
                 if logger is not None:
                     logger.debug(f"Connectivity: skipping band {band} for segment {seg_name} (fmax {fmax} < min_viable {min_viable_freq:.2f}Hz)")
                 continue
+            
+            _validate_segment_duration_for_connectivity(
+                seg_duration, fmin, min_cycles_per_band, band, logger
+            )
 
             freqs = np.linspace(fmin, fmax, max(n_freqs_per_band, 2))
             

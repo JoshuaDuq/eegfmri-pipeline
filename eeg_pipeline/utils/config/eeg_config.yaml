@@ -97,8 +97,11 @@ time_frequency_analysis:
     freq_max: 100.0
     n_freqs: 40
     min_cycles: 3.0
-    n_cycles_factor: 2.0
-    decim: 4
+    max_cycles: 15.0            # Cap to avoid extreme smoothing at high frequencies (gamma)
+    n_cycles_factor: 2.0         # n_cycles = freq / n_cycles_factor
+    decim_power: 4               # Decimation for power TFR (can be aggressive)
+    decim_phase: 1               # Decimation for phase/complex TFR (preserve time structure)
+    decim: 4                     # Legacy fallback (deprecated, use decim_power/decim_phase)
     workers: -1
   rois: *roi_definitions
   
@@ -206,8 +209,11 @@ feature_engineering:
     sliding_window_step: 0.5
     granularity: "trial"             # "trial", "condition", "subject"
     min_epochs_per_group: 5
+    min_cycles_per_band: 3.0         # Minimum oscillatory cycles per band for reliable connectivity
+    warn_if_no_spatial_transform: true  # Warn if phase-based measures used without CSD/Laplacian
 
   pac:
+    source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
     method: "mvl"
     pairs: [["theta", "gamma"], ["alpha", "gamma"]]
     phase_range: [4.0, 8.0]
@@ -255,6 +261,26 @@ feature_engineering:
     threshold_z: 2.0                # used for zscore/mad methods
     min_duration_ms: 50
     min_cycles: 3.0
+
+  erds:
+    use_log_ratio: false             # true = dB (10*log10), false = percent change
+    min_baseline_power: 1.0e-12      # Clamp baseline power to avoid division instability
+    min_active_power: 1.0e-12        # Clamp active power for log computation
+    min_segment_sec: 0.5             # Minimum segment duration in seconds
+    bands: ["alpha", "beta"]         # Bands for ERDS computation (subset of frequency_bands)
+
+  quality:
+    psd_method: "welch"              # "welch" or "multitaper"
+    fmin: 1.0
+    fmax: 100.0
+    n_fft: 256
+    exclude_line_noise: true
+    line_noise_freqs: [50.0]         # [60.0] for North America
+    line_noise_width_hz: 1.0
+    line_noise_harmonics: 3
+    snr_signal_band: [1.0, 30.0]     # "Signal" band for SNR computation
+    snr_noise_band: [40.0, 80.0]     # "Noise" band for SNR computation
+    muscle_band: [30.0, 80.0]        # High-frequency band for muscle artifact detection
 
 # 4.4 Behavioral Correlation
 behavior_analysis:
