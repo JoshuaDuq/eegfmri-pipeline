@@ -20,6 +20,7 @@ from eeg_pipeline.utils.data.columns import find_column_in_events, get_column_fr
 from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
 from ..config import get_plot_config
 from eeg_pipeline.plotting.features.utils import get_fdr_alpha
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.utils.analysis.connectivity import (
     build_adjacency_from_edges,
     build_matrix_from_edges,
@@ -184,15 +185,32 @@ def plot_connectivity_circle_by_condition(
         log_if_present(logger, "warning", "mne-connectivity not installed")
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = extract_comparison_mask(events_df, config, require_enabled=False)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+
+    n = min(len(features_df), len(mask1))
+    if n <= 0:
+        return
+    if n != len(features_df):
+        features_df = features_df.iloc[:n].copy()
+    mask1 = np.asarray(mask1[:n], dtype=bool)
+    mask2 = np.asarray(mask2[:n], dtype=bool)
+
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
     
     plot_cfg = get_plot_config(config)
     condition_colors = {
-        "nonpain": plot_cfg.get_color("nonpain"),
-        "pain": plot_cfg.get_color("pain"),
+        "c1": plot_cfg.get_color("blue"),
+        "c2": plot_cfg.get_color("red"),
     }
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        condition_colors = {
+            "c1": plot_cfg.get_color("nonpain") if label1 == "Non-pain" else plot_cfg.get_color("pain"),
+            "c2": plot_cfg.get_color("pain") if label2 == "Pain" else plot_cfg.get_color("nonpain"),
+        }
 
     cols_tup, edges_tup = _parse_connectivity_columns_cached(tuple(features_df.columns), measure, band)
     # Filter for REAL channel pairs (ch1 != ch2) for the circle plot
@@ -226,11 +244,11 @@ def plot_connectivity_circle_by_condition(
                 n_sig += 1
         return mat, n_sig
     
-    matrix_nonpain, n_sig_nonpain = build_matrix_thresholded(~pain_mask)
-    matrix_pain, n_sig_pain = build_matrix_thresholded(pain_mask)
+    matrix_c1, n_sig_c1 = build_matrix_thresholded(mask1)
+    matrix_c2, n_sig_c2 = build_matrix_thresholded(mask2)
     
-    n_nonpain = int((~pain_mask).sum())
-    n_pain = int(pain_mask.sum())
+    n_c1 = int(mask1.sum())
+    n_c2 = int(mask2.sum())
     
     vmin, vmax = 0.0, 1.0
     colormap = "viridis"
@@ -238,27 +256,35 @@ def plot_connectivity_circle_by_condition(
     # Auto-calculate n_lines if not specified
     min_lines = int(get_config_value(config, "plotting.plots.features.connectivity.circle_min_lines", 20))
     if n_lines is None:
-        n_lines = max(min_lines, max(n_sig_nonpain, n_sig_pain))
+        n_lines = max(min_lines, max(n_sig_c1, n_sig_c2))
     
     width_per_col = float(plot_cfg.plot_type_configs.get("connectivity", {}).get("width_per_circle", 9.0))
     fig, axes = plt.subplots(1, 2, figsize=(width_per_col * 2, width_per_col), subplot_kw=dict(polar=True))
     
     try:
         plot_connectivity_circle(
-            matrix_nonpain, node_names, n_lines=n_lines, ax=axes[0],
+            matrix_c1, node_names, n_lines=n_lines, ax=axes[0],
             title="", show=False,
             vmin=vmin, vmax=vmax, colorbar=False, colormap=colormap
         )
-        axes[0].set_title(f"Non-Pain\n(n={n_nonpain} trials, {n_sig_nonpain} edges)", 
-                         fontsize=plot_cfg.font.suptitle, fontweight="bold", color=condition_colors["nonpain"])
+        axes[0].set_title(
+            f"{label1}\n(n={n_c1} trials, {n_sig_c1} edges)",
+            fontsize=plot_cfg.font.suptitle,
+            fontweight="bold",
+            color=condition_colors["c1"],
+        )
         
         plot_connectivity_circle(
-            matrix_pain, node_names, n_lines=n_lines, ax=axes[1],
+            matrix_c2, node_names, n_lines=n_lines, ax=axes[1],
             title="", show=False,
             vmin=vmin, vmax=vmax, colorbar=True, colormap=colormap
         )
-        axes[1].set_title(f"Pain\n(n={n_pain} trials, {n_sig_pain} edges)", 
-                         fontsize=plot_cfg.font.suptitle, fontweight="bold", color=condition_colors["pain"])
+        axes[1].set_title(
+            f"{label2}\n(n={n_c2} trials, {n_sig_c2} edges)",
+            fontsize=plot_cfg.font.suptitle,
+            fontweight="bold",
+            color=condition_colors["c2"],
+        )
     except Exception as e:
         log_if_present(logger, "error", f"Failed to plot: {e}")
         plt.close(fig)
@@ -326,23 +352,35 @@ def plot_sliding_connectivity_trajectories(
     n_trials = mat.shape[1]
     n_windows = len(window_indices)
     
-    pain_mask = extract_pain_mask(aligned_events, config)
-    if pain_mask is not None and len(pain_mask) == mat.shape[1]:
-        for mask_val, label, color in [(False, "Non-pain", plot_cfg.get_color("nonpain")), (True, "Pain", plot_cfg.get_color("pain"))]:
-            m = mat[:, pain_mask.to_numpy() == mask_val]
-            n_cond = m.shape[1]
-            if m.size == 0:
-                continue
-            mean_cond = np.nanmean(m, axis=1)
-            sem_cond = np.nanstd(m, axis=1) / np.sqrt(np.maximum(1, np.sum(np.isfinite(m), axis=1)))
-            ax.plot(window_centers[:len(mean_cond)], mean_cond, label=f"{label} (n={n_cond})", color=color)
-            ax.fill_between(
-                window_centers[:len(mean_cond)],
-                mean_cond - sem_cond,
-                mean_cond + sem_cond,
-                color=color,
-                alpha=0.2,
-            )
+    if aligned_events is not None:
+        comp = extract_comparison_mask(aligned_events, config, require_enabled=False)
+        if comp is not None:
+            m1, m2, label1, label2 = comp
+            n = min(mat.shape[1], len(m1))
+            if n > 0:
+                mat_aligned = mat[:, :n]
+                m1 = np.asarray(m1[:n], dtype=bool)
+                m2 = np.asarray(m2[:n], dtype=bool)
+                for msk, label, color in [
+                    (m1, label1, plot_cfg.get_color("blue")),
+                    (m2, label2, plot_cfg.get_color("red")),
+                ]:
+                    if int(msk.sum()) == 0:
+                        continue
+                    m = mat_aligned[:, msk]
+                    n_cond = m.shape[1]
+                    if m.size == 0:
+                        continue
+                    mean_cond = np.nanmean(m, axis=1)
+                    sem_cond = np.nanstd(m, axis=1) / np.sqrt(np.maximum(1, np.sum(np.isfinite(m), axis=1)))
+                    ax.plot(window_centers[:len(mean_cond)], mean_cond, label=f"{label} (n={n_cond})", color=color)
+                    ax.fill_between(
+                        window_centers[:len(mean_cond)],
+                        mean_cond - sem_cond,
+                        mean_cond + sem_cond,
+                        color=color,
+                        alpha=0.2,
+                    )
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Mean sliding connectivity")

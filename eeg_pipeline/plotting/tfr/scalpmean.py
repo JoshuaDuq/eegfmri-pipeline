@@ -24,15 +24,11 @@ from eeg_pipeline.plotting.io.figures import (
     save_fig as central_save_fig,
 )
 from eeg_pipeline.utils.formatting import format_baseline_window_string
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
     apply_baseline_and_crop,
-    create_tfr_subset,
 )
-from ...utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode
@@ -230,66 +226,6 @@ def _plot_scalpmean_tfr(
     _save_fig(fig, out_dir, filename, config=config, logger=logger, baseline_used=baseline_used, subject=subject, task=task)
 
 
-def _prepare_pain_contrast_data(
-    tfr,
-    events_df: Optional[pd.DataFrame],
-    pain_col: Optional[str],
-    config,
-    logger: Optional[logging.Logger] = None,
-):
-    """Prepare TFR data and masks for pain contrast analysis.
-    
-    Args:
-        tfr: MNE TFR object (EpochsTFR or AverageTFR)
-        events_df: Optional events DataFrame
-        pain_col: Optional pain column name
-        config: Configuration object
-        logger: Optional logger instance
-        
-    Returns:
-        Tuple of (tfr_subset, pain_mask, non_mask, n) or (None, None, None, None) on failure
-    """
-    if not require_epochs_tfr(tfr, "Contrast", logger):
-        return None, None, None, None
-    
-    if pain_col is None:
-        log("Events with pain binary column required for contrast; skipping.", logger, "warning")
-        return None, None, None, None
-    
-    n = compute_aligned_data_length(tfr, events_df)
-    
-    pain_vec = extract_pain_vector(tfr, events_df, pain_col, n)
-    if pain_vec is None:
-        return None, None, None, None
-    
-    pain_mask = pain_vec == 1
-    non_mask = pain_vec == 0
-    
-    log(f"Pain/non-pain counts (n={n}): pain={int(pain_mask.sum())}, non-pain={int(non_mask.sum())}.", logger)
-    
-    if pain_mask.sum() == 0 or non_mask.sum() == 0:
-        log("One of the groups has zero trials; skipping contrasts.", logger, "warning")
-        return None, None, None, None
-    
-    tfr_sub = create_tfr_subset(tfr, n)
-    try:
-        ensure_aligned_lengths(
-            tfr_sub, pain_mask, non_mask,
-            context="Pain contrast",
-            strict=get_strict_mode(config),
-            logger=logger
-        )
-    except ValueError as e:
-        log(f"{e}. Skipping contrast.", logger, "error")
-        return None, None, None, None
-    
-    if len(pain_mask) != len(tfr_sub):
-        pain_mask = pain_mask[:len(tfr_sub)]
-        non_mask = non_mask[:len(tfr_sub)]
-    
-    return tfr_sub, pain_mask, non_mask, n
-
-
 ###################################################################
 # Scalp-Mean Plotting Functions
 ###################################################################
@@ -366,51 +302,54 @@ def contrast_scalpmean_pain_nonpain(
         subject: Optional subject identifier
         task: Optional task identifier
     """
-    pain_col = get_pain_column_from_config(config, events_df)
-    tfr_sub, pain_mask, non_mask, n = _prepare_pain_contrast_data(tfr, events_df, pain_col, config, logger)
+    from .contrasts import _prepare_comparison_contrast_data
+
+    tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Scalpmean contrast"
+    )
     if tfr_sub is None:
         return
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_1 = tfr_sub[mask1].average()
+    tfr_2 = tfr_sub[mask2].average()
 
-    baseline_used = apply_baseline_and_crop(tfr_pain, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline, mode="logratio", logger=logger)
+    baseline_used = apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
 
-    eeg_picks_p = extract_eeg_picks(tfr_pain, exclude_bads=False)
-    eeg_picks_n = extract_eeg_picks(tfr_non, exclude_bads=False)
+    eeg_picks_1 = extract_eeg_picks(tfr_1, exclude_bads=False)
+    eeg_picks_2 = extract_eeg_picks(tfr_2, exclude_bads=False)
     
-    if len(eeg_picks_p) == 0 or len(eeg_picks_n) == 0:
+    if len(eeg_picks_1) == 0 or len(eeg_picks_2) == 0:
         log("No EEG channels found for scalp-averaged contrast", logger, "warning")
         return
     
-    tfr_pain_sm = create_scalpmean_tfr_from_existing(tfr_pain, eeg_picks_p)
-    tfr_non_sm = create_scalpmean_tfr_from_existing(tfr_non, eeg_picks_n)
-    tfr_diff_sm = tfr_pain_sm.copy()
-    tfr_diff_sm.data = tfr_pain_sm.data - tfr_non_sm.data
-    tfr_diff_sm.comment = "Pain-minus-Non"
+    tfr_1_sm = create_scalpmean_tfr_from_existing(tfr_1, eeg_picks_1)
+    tfr_2_sm = create_scalpmean_tfr_from_existing(tfr_2, eeg_picks_2)
+    tfr_diff_sm = tfr_2_sm.copy()
+    tfr_diff_sm.data = tfr_2_sm.data - tfr_1_sm.data
+    tfr_diff_sm.comment = "cond2-minus-cond1"
     
-    arr_pain = np.asarray(tfr_pain_sm.data[0])
-    arr_non = np.asarray(tfr_non_sm.data[0])
+    arr_1 = np.asarray(tfr_1_sm.data[0])
+    arr_2 = np.asarray(tfr_2_sm.data[0])
     arr_diff = np.asarray(tfr_diff_sm.data[0])
     
-    vabs_pn = robust_sym_vlim([arr_pain, arr_non])
+    vabs_pn = robust_sym_vlim([arr_1, arr_2])
     vabs_diff = robust_sym_vlim(arr_diff)
 
-    times = np.asarray(tfr_pain.times)
-    _, pct_pain, tmask = _compute_active_statistics(arr_pain, times, active_window, config, logger)
-    _, pct_non, _ = _compute_active_statistics(arr_non, times, active_window, config, logger)
+    times = np.asarray(tfr_1.times)
+    _, pct_1, _ = _compute_active_statistics(arr_1, times, active_window, config, logger)
+    _, pct_2, _ = _compute_active_statistics(arr_2, times, active_window, config, logger)
     _, pct_diff, _ = _compute_active_statistics(arr_diff, times, active_window, config, logger)
 
     _plot_scalpmean_tfr(
-        tfr_pain_sm, f"Scalp-averaged TFR — Pain (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_pain:+.0f}%",
+        tfr_2_sm, f"Scalp-averaged TFR — {label2} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_2:+.0f}%",
         "tfr_scalpmean_pain_bl.png", (-vabs_pn, +vabs_pn), out_dir, config, logger, baseline_used, subject, task
     )
     _plot_scalpmean_tfr(
-        tfr_non_sm, f"Scalp-averaged TFR — Non-pain (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_non:+.0f}%",
+        tfr_1_sm, f"Scalp-averaged TFR — {label1} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_1:+.0f}%",
         "tfr_scalpmean_nonpain_bl.png", (-vabs_pn, +vabs_pn), out_dir, config, logger, baseline_used, subject, task
     )
     _plot_scalpmean_tfr(
-        tfr_diff_sm, f"Scalp-averaged TFR — Pain minus Non-pain (baseline logratio)\nvlim ±{vabs_diff:.2f}; mean %Δ vs BL={pct_diff:+.0f}%",
+        tfr_diff_sm, f"Scalp-averaged TFR — {label2} minus {label1} (baseline logratio)\nvlim ±{vabs_diff:.2f}; mean %Δ vs BL={pct_diff:+.0f}%",
         "tfr_scalpmean_pain_minus_non_bl.png", (-vabs_diff, +vabs_diff), out_dir, config, logger, baseline_used, subject, task
     )

@@ -19,7 +19,6 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.utils.formatting import sanitize_label
 
 

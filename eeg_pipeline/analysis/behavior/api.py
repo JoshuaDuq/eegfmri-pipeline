@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
 
 def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, Any]]:
-    """Run pain vs non-pain cluster test using pre-loaded context data."""
+    """Run a two-condition cluster test (configurable) using pre-loaded context data."""
     if ctx.computation_features and "cluster" in ctx.computation_features:
         allowed = ctx.computation_features["cluster"]
         if "power" not in allowed and "spectral" not in allowed:
@@ -113,7 +113,6 @@ __all__ = [
     # Topomaps
     "run_power_topomap_correlations",
 ]
-
 
 
 

@@ -131,7 +131,7 @@ def plot_roi_erp(
     config : Any
     logger : logging.Logger
     conditions : dict, optional
-        e.g., {"pain": "pain == 1", "nopain": "pain == 0"}
+        Mapping of display name -> metadata query string (pandas/MNE syntax).
     """
     saved_paths = []
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -242,16 +242,45 @@ def plot_erp_contrast(
     save_dir: Path,
     config: Any,
     logger: logging.Logger,
-    cond_a: str = "pain == 1",
-    cond_b: str = "pain == 0",
-    label_a: str = "Pain",
-    label_b: str = "No Pain",
+    cond_a: Optional[str] = None,
+    cond_b: Optional[str] = None,
+    label_a: Optional[str] = None,
+    label_b: Optional[str] = None,
 ) -> List[Path]:
     """Plot ERP contrast (A - B) for all channels."""
     saved_paths = []
     save_dir.mkdir(parents=True, exist_ok=True)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
+
+    if cond_a is None or cond_b is None or label_a is None or label_b is None:
+        from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
+
+        def _query_for_value(col: str, value: Any) -> str:
+            import numpy as np
+            import pandas as pd
+
+            col_expr = f"`{col}`"
+            try:
+                v_num = pd.to_numeric(str(value), errors="coerce")
+                if not np.isnan(v_num):
+                    if float(v_num).is_integer():
+                        return f"{col_expr} == {int(v_num)}"
+                    return f"{col_expr} == {float(v_num)}"
+            except Exception:
+                pass
+            return f"{col_expr} == {repr(str(value))}"
+
+        meta = getattr(epochs, "metadata", None)
+        spec = resolve_comparison_spec(meta, config, require_enabled=False) if meta is not None else None
+        if spec is None:
+            logger.warning("No configured comparison found in metadata; skipping ERP contrast.")
+            return saved_paths
+        col, v1, v2, auto_label1, auto_label2 = spec
+        cond_a = _query_for_value(col, v2)
+        cond_b = _query_for_value(col, v1)
+        label_a = auto_label2
+        label_b = auto_label1
     
     try:
         evoked_a = epochs[cond_a].average()

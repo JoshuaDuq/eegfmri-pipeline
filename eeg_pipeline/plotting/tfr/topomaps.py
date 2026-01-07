@@ -22,7 +22,7 @@ from eeg_pipeline.plotting.io.figures import (
     get_viz_params,
     plot_topomap_on_ax,
 )
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths, detect_data_format
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
@@ -37,8 +37,6 @@ from ...utils.analysis.windowing import (
     build_time_windows_fixed_size_clamped,
 )
 from ...utils.data.tfr_alignment import (
-    compute_aligned_data_length,
-    extract_pain_vector_array,
     extract_temperature_series,
     create_temperature_masks,
 )
@@ -56,7 +54,6 @@ from ..core.annotations import (
 from ..core.annotations import get_sig_marker_text
 from .contrasts import (
     _get_baseline_window,
-    _create_pain_masks_from_vector,
     _align_and_trim_masks,
 )
 from .channels import _save_fig as _channels_save_fig
@@ -224,6 +221,9 @@ def _plot_temporal_topomaps_for_bands(
     out_dir: Path,
     config,
     logger: Optional[logging.Logger] = None,
+    *,
+    cond_label_2: str = "Pain",
+    cond_label_1: str = "Non-pain",
 ) -> None:
     """Plot temporal topomaps for all frequency bands.
     
@@ -318,7 +318,7 @@ def _plot_temporal_topomaps_for_bands(
         row_pain = 0
         row_temp = 1 if n_rows == 2 else None
         
-        axes[row_pain, 0].set_ylabel(f"Pain - Non\n{freq_label}", fontsize=font_sizes["ylabel"], labelpad=10)
+        axes[row_pain, 0].set_ylabel(f"{cond_label_2} - {cond_label_1}\n{freq_label}", fontsize=font_sizes["ylabel"], labelpad=10)
 
         for col, (tmin_win, tmax_win) in enumerate(zip(window_starts, window_ends)):
             time_label = f"{tmin_win:.2f}s"
@@ -351,7 +351,7 @@ def _plot_temporal_topomaps_for_bands(
         n_trials_pain = int(pain_mask.sum()) if pain_mask is not None else None
         n_trials_non = int(non_mask.sum()) if non_mask is not None else None
         
-        title_parts = [f"Temporal topomaps: Pain - Non-pain difference ({band_name}, {window_label})"]
+        title_parts = [f"Temporal topomaps: {cond_label_2} - {cond_label_1} difference ({band_name}, {window_label})"]
         if n_rows == 2:
             title_parts.append(f"Max - Min temp ({t_min:.1f}-{t_max:.1f}°C)")
         title_parts.append(f"log10(power/baseline) difference, vlim ±{vabs_diff:.2f}")
@@ -549,51 +549,35 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
         return
 
     baseline = _get_baseline_window(config, baseline)
+    from .contrasts import _prepare_comparison_contrast_data, _get_aligned_events_df_for_tfr
 
-    pain_col = get_pain_column_from_config(config, events_df)
-    temp_col = get_temperature_column_from_config(config, events_df)
-    
-    if pain_col is None:
-        log("Events with pain binary column required for temporal topomaps; skipping.", logger, "warning")
+    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Temporal topomaps"
+    )
+    if tfr_sub is None:
         return
 
-    n = compute_aligned_data_length(tfr, events_df)
+    log(f"Temporal topomaps (diff, all bands): {label2}={int(mask2.sum())}, {label1}={int(mask1.sum())} trials.", logger)
 
-    pain_vec = extract_pain_vector_array(tfr, events_df, pain_col, n)
-    if pain_vec is None:
-        log("Events with pain binary column required for temporal topomaps; skipping.", logger, "warning")
-        return
-    
-    pain_mask, non_mask = _create_pain_masks_from_vector(pain_vec)
-    if pain_mask is None:
-        log("Could not create pain masks; skipping.", logger, "warning")
-        return
-
-    if pain_mask.sum() == 0 or non_mask.sum() == 0:
-        log("One of the groups has zero trials; skipping temporal topomaps.", logger, "warning")
-        return
-
-    log(f"Temporal topomaps (diff, all bands): pain={int(pain_mask.sum())}, non-pain={int(non_mask.sum())} trials.", logger)
-
-    tfr_sub = create_tfr_subset(tfr, n)
     aligned = _align_and_trim_masks(
         tfr_sub,
-        {"Pain contrast": (pain_mask, non_mask)},
-        config, logger
+        {"Condition contrast": (mask2, mask1)},
+        config,
+        logger,
     )
     if aligned is None:
         return
-    
-    pain_mask, non_mask = aligned["Pain contrast"]
+
+    mask2, mask1 = aligned["Condition contrast"]
 
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_2 = tfr_sub[mask2].average()
+    tfr_1 = tfr_sub[mask1].average()
     
-    apply_baseline_and_crop(tfr_pain, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_2, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_1, baseline=baseline_used, mode="logratio", logger=logger)
 
     has_temp = False
     tfr_max = None
@@ -603,7 +587,9 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     t_min = None
     t_max = None
     
-    temp_series = extract_temperature_series(tfr, events_df, temp_col, n)
+    aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, int(n))
+    temp_col = get_temperature_column_from_config(config, aligned_events) if aligned_events is not None else None
+    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, int(n)) if temp_col else None
     if temp_series is not None:
         temp_result = create_temperature_masks(temp_series)
         if temp_result[0] is not None:
@@ -631,7 +617,7 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
                 except ValueError as e:
                     log(f"{e}. Skipping temperature contrast.", logger, "warning")
 
-    times = np.asarray(tfr_pain.times)
+    times = np.asarray(tfr_2.times)
     tmin_req, tmax_req = active_window
     clipped = clip_time_range(times, tmin_req, tmax_req)
     if clipped is None:
@@ -659,11 +645,17 @@ def plot_pain_nonpain_temporal_topomaps_diff_allbands(
     filename_base = "temporal_topomaps_pain_minus_nonpain_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
-        tfr_pain, tfr_non, tfr_sub_stats, tfr_max, tfr_min,
-        pain_mask, non_mask, mask_max, mask_min,
+        tfr_2, tfr_1, tfr_sub_stats, tfr_max, tfr_min,
+        mask2, mask1, mask_max, mask_min,
         window_starts, window_ends, has_temp, t_min, t_max,
         tmin_clip, tmax_clip, n_windows, baseline_used,
-        window_label, filename_base, out_dir, config, logger
+        window_label,
+        filename_base,
+        out_dir,
+        config,
+        logger,
+        cond_label_2=str(label2),
+        cond_label_1=str(label1),
     )
 
 
@@ -696,51 +688,35 @@ def plot_temporal_topomaps_allbands_active(
         return
 
     baseline = _get_baseline_window(config, baseline)
+    from .contrasts import _prepare_comparison_contrast_data, _get_aligned_events_df_for_tfr
 
-    pain_col = get_pain_column_from_config(config, events_df)
-    temp_col = get_temperature_column_from_config(config, events_df)
-    
-    if pain_col is None:
-        log("Events with pain binary column required for temporal topomaps; skipping.", logger, "warning")
+    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Temporal topomaps"
+    )
+    if tfr_sub is None:
         return
 
-    n = compute_aligned_data_length(tfr, events_df)
+    log(f"Temporal topomaps (active, all bands): {label2}={int(mask2.sum())}, {label1}={int(mask1.sum())} trials.", logger)
 
-    pain_vec = extract_pain_vector_array(tfr, events_df, pain_col, n)
-    if pain_vec is None:
-        log("Events with pain binary column required for temporal topomaps; skipping.", logger, "warning")
-        return
-    
-    pain_mask, non_mask = _create_pain_masks_from_vector(pain_vec)
-    if pain_mask is None:
-        log("Could not create pain masks; skipping.", logger, "warning")
-        return
-
-    if pain_mask.sum() == 0 or non_mask.sum() == 0:
-        log("One of the groups has zero trials; skipping temporal topomaps.", logger, "warning")
-        return
-
-    log(f"Temporal topomaps (active, all bands): pain={int(pain_mask.sum())}, non-pain={int(non_mask.sum())} trials.", logger)
-
-    tfr_sub = create_tfr_subset(tfr, n)
     aligned = _align_and_trim_masks(
         tfr_sub,
-        {"Pain contrast": (pain_mask, non_mask)},
-        config, logger
+        {"Condition contrast": (mask2, mask1)},
+        config,
+        logger,
     )
     if aligned is None:
         return
-    
-    pain_mask, non_mask = aligned["Pain contrast"]
+
+    mask2, mask1 = aligned["Condition contrast"]
 
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_2 = tfr_sub[mask2].average()
+    tfr_1 = tfr_sub[mask1].average()
     
-    apply_baseline_and_crop(tfr_pain, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_2, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_1, baseline=baseline_used, mode="logratio", logger=logger)
 
     has_temp = False
     tfr_max = None
@@ -750,7 +726,9 @@ def plot_temporal_topomaps_allbands_active(
     t_min = None
     t_max = None
     
-    temp_series = extract_temperature_series(tfr, events_df, temp_col, n)
+    aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, int(n))
+    temp_col = get_temperature_column_from_config(config, aligned_events) if aligned_events is not None else None
+    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, int(n)) if temp_col else None
     if temp_series is not None:
         temp_result = create_temperature_masks(temp_series)
         if temp_result[0] is not None:
@@ -778,7 +756,7 @@ def plot_temporal_topomaps_allbands_active(
                 except ValueError as e:
                     log(f"{e}. Skipping temperature contrast.", logger, "warning")
 
-    times = np.asarray(tfr_pain.times)
+    times = np.asarray(tfr_2.times)
     tmin_req, tmax_req = active_window
     clipped = clip_time_range(times, tmin_req, tmax_req)
     if clipped is None:
@@ -803,10 +781,15 @@ def plot_temporal_topomaps_allbands_active(
     filename_base = "temporal_topomaps_active_{band_name}_{tmin:.0f}-{tmax:.0f}s_{n_windows}windows_{baseline_str}.png"
     
     _plot_temporal_topomaps_for_bands(
-        tfr_pain, tfr_non, tfr_sub_stats, tfr_max, tfr_min,
-        pain_mask, non_mask, mask_max, mask_min,
+        tfr_2, tfr_1, tfr_sub_stats, tfr_max, tfr_min,
+        mask2, mask1, mask_max, mask_min,
         window_starts, window_ends, has_temp, t_min, t_max,
         tmin_clip, tmax_clip, n_windows, baseline_used,
-        window_label, filename_base, out_dir, config, logger
+        window_label,
+        filename_base,
+        out_dir,
+        config,
+        logger,
+        cond_label_2=str(label2),
+        cond_label_1=str(label1),
     )
-

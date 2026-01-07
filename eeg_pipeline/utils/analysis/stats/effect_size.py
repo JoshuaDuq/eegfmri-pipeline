@@ -235,12 +235,14 @@ def split_by_condition(
     
     Supports user-configurable condition column and values via:
     - config.event_columns.pain_binary: column name (or list of candidates)
+    - config.behavior_analysis.condition.compare_column: explicit events column override (optional)
     - config.behavior_analysis.condition.compare_values: values to compare [val1, val2]
     
     If compare_values is not specified, defaults to [1, 0] for backward compatibility.
     Returns (group1_mask, group2_mask, n_group1, n_group2).
     """
-    pain_col = get_pain_column_from_config(config, events_df)
+    compare_col = str(get_config_value(config, "behavior_analysis.condition.compare_column", "") or "").strip()
+    pain_col = compare_col if compare_col and compare_col in events_df.columns else get_pain_column_from_config(config, events_df)
 
     if pain_col is None or pain_col not in events_df.columns:
         logger.error("Condition column not found in events")

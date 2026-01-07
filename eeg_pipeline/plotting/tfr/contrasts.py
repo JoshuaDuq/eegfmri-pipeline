@@ -23,7 +23,8 @@ from eeg_pipeline.plotting.io.figures import (
     get_viz_params,
     plot_topomap_on_ax,
 )
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config, get_temperature_column_from_config
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
@@ -38,7 +39,6 @@ from ...utils.analysis.stats import (
 )
 from ...utils.data.tfr_alignment import (
     compute_aligned_data_length,
-    extract_pain_vector,
     extract_temperature_series,
     get_temperature_range,
     create_temperature_masks_from_range,
@@ -54,6 +54,72 @@ from ..core.annotations import add_roi_annotations, get_sig_marker_text
 ###################################################################
 # Helper Functions
 ###################################################################
+
+
+def _get_aligned_events_df_for_tfr(tfr, events_df: Optional[pd.DataFrame], n: int) -> Optional[pd.DataFrame]:
+    meta = getattr(tfr, "metadata", None)
+    if isinstance(meta, pd.DataFrame) and not meta.empty:
+        return meta.iloc[:n]
+    if events_df is not None and not events_df.empty:
+        return events_df.iloc[:n]
+    return None
+
+
+def _prepare_comparison_contrast_data(
+    tfr,
+    events_df: Optional[pd.DataFrame],
+    config,
+    logger: Optional[logging.Logger] = None,
+    *,
+    context: str = "Condition contrast",
+) -> tuple[
+    Optional[mne.time_frequency.EpochsTFR],
+    Optional[np.ndarray],
+    Optional[np.ndarray],
+    Optional[str],
+    Optional[str],
+    Optional[int],
+]:
+    if not require_epochs_tfr(tfr, context, logger):
+        return None, None, None, None, None, None
+
+    n = compute_aligned_data_length(tfr, events_df)
+    aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, n)
+    if aligned_events is None:
+        log("Events metadata required for contrast; skipping.", logger, "warning")
+        return None, None, None, None, None, None
+
+    comp = extract_comparison_mask(aligned_events, config, require_enabled=False)
+    if comp is None:
+        log("No comparison column/values available for contrast; skipping.", logger, "warning")
+        return None, None, None, None, None, None
+
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1[:n], dtype=bool)
+    mask2 = np.asarray(mask2[:n], dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+        log("One of the groups has zero trials; skipping contrasts.", logger, "warning")
+        return None, None, None, None, None, None
+
+    tfr_sub = create_tfr_subset(tfr, n)
+    try:
+        ensure_aligned_lengths(
+            tfr_sub,
+            mask1,
+            mask2,
+            context=context,
+            strict=get_strict_mode(config),
+            logger=logger,
+        )
+    except ValueError as e:
+        log(f"{e}. Skipping contrast.", logger, "error")
+        return None, None, None, None, None, None
+
+    if len(mask1) != len(tfr_sub):
+        mask1 = mask1[: len(tfr_sub)]
+        mask2 = mask2[: len(tfr_sub)]
+
+    return tfr_sub, mask1, mask2, label1, label2, n
 
 
 def _get_baseline_window(config, baseline: Optional[Tuple[Optional[float], Optional[float]]] = None) -> Tuple[Optional[float], Optional[float]]:
@@ -793,33 +859,23 @@ def plot_bands_pain_temp_contrasts(
     baseline = _get_baseline_window(config, baseline)
     if not require_epochs_tfr(tfr, "Combined contrast", logger):
         return
-    if events_df is None:
-        log("Combined contrast requires events_df; skipping.", logger, "warning")
+    tfr_sub, mask1, mask2, label1, label2, n = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Combined contrast"
+    )
+    if tfr_sub is None:
         return
-    
-    pain_col = get_pain_column_from_config(config, events_df)
-    temp_col = get_temperature_column_from_config(config, events_df)
-    
-    if pain_col is None:
-        log("Combined contrast: no pain column found; skipping.", logger, "warning")
+
+    aligned_events = _get_aligned_events_df_for_tfr(tfr, events_df, int(n))
+    if aligned_events is None:
+        log("Combined contrast: no events metadata found; skipping.", logger, "warning")
         return
+
+    temp_col = get_temperature_column_from_config(config, aligned_events)
     if temp_col is None:
         log("Combined contrast: no temperature column found; skipping.", logger, "warning")
         return
 
-    n = compute_aligned_data_length(tfr, events_df)
-
-    pain_vec = extract_pain_vector(tfr, events_df, pain_col, n)
-    if pain_vec is None:
-        log("Combined contrast: could not extract pain vector; skipping.", logger, "warning")
-        return
-    
-    pain_mask, non_mask = _create_pain_masks_from_vector(pain_vec)
-    if pain_mask.sum() == 0 or non_mask.sum() == 0:
-        log("Combined contrast: one pain group has zero trials; skipping.", logger, "warning")
-        return
-    
-    temp_series = extract_temperature_series(tfr, events_df, temp_col, n)
+    temp_series = extract_temperature_series(tfr, aligned_events, temp_col, int(n))
     if temp_series is None:
         log("Combined contrast: no temperature column found; skipping.", logger, "warning")
         return
@@ -835,11 +891,10 @@ def plot_bands_pain_temp_contrasts(
         log(f"Combined contrast: zero trials in one temp group (min n={int(mask_min.sum())}, max n={int(mask_max.sum())}); skipping.", logger, "warning")
         return
 
-    tfr_sub = create_tfr_subset(tfr, n)
     aligned = _align_and_trim_masks(
         tfr_sub,
         {
-            "Pain contrast": (pain_mask, non_mask),
+            "Condition contrast": (mask2, mask1),
             "Temperature contrast": (mask_min, mask_max)
         },
         config, logger
@@ -847,26 +902,26 @@ def plot_bands_pain_temp_contrasts(
     if aligned is None:
         return
     
-    pain_mask, non_mask = aligned["Pain contrast"]
+    mask2, mask1 = aligned["Condition contrast"]
     mask_min, mask_max = aligned["Temperature contrast"]
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_2 = tfr_sub[mask2].average()
+    tfr_1 = tfr_sub[mask1].average()
     tfr_min = tfr_sub[mask_min].average()
     tfr_max = tfr_sub[mask_max].average()
 
-    baseline_used = apply_baseline_and_crop(tfr_pain, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline, mode="logratio", logger=logger)
+    baseline_used = apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
     apply_baseline_and_crop(tfr_min, baseline=baseline, mode="logratio", logger=logger)
     apply_baseline_and_crop(tfr_max, baseline=baseline, mode="logratio", logger=logger)
 
-    times = np.asarray(tfr_pain.times)
+    times = np.asarray(tfr_2.times)
     tmin_req, tmax_req = active_window
     tmin_eff = float(max(times.min(), tmin_req))
     tmax_eff = float(min(times.max(), tmax_req))
     tmin, tmax = tmin_eff, tmax_eff
 
-    fmax_available = float(np.max(tfr_pain.freqs))
+    fmax_available = float(np.max(tfr_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
 
     n_rows = 2
@@ -883,12 +938,12 @@ def plot_bands_pain_temp_contrasts(
     )
 
     viz_params = get_viz_params(config)
-    n_pain = int(pain_mask.sum())
-    n_non = int(non_mask.sum())
+    n_2 = int(mask2.sum())
+    n_1 = int(mask1.sum())
     n_max = int(mask_max.sum())
     n_min = int(mask_min.sum())
 
-    all_pain_diff = []
+    all_cond_diff = []
     all_temp_diff = []
     band_significance_data = {}
     
@@ -899,22 +954,22 @@ def plot_bands_pain_temp_contrasts(
                 axes[r, c].axis('off')
             continue
 
-        pain_diff_data, temp_diff_data = _compute_band_diff_data(tfr_pain, tfr_non, tfr_max, tfr_min, fmin, fmax_eff, tmin, tmax)
+        cond_diff_data, temp_diff_data = _compute_band_diff_data(tfr_2, tfr_1, tfr_max, tfr_min, fmin, fmax_eff, tmin, tmax)
         
-        if pain_diff_data is None or temp_diff_data is None:
+        if cond_diff_data is None or temp_diff_data is None:
             for r in range(n_rows):
                 axes[r, c].axis('off')
             continue
         
-        all_pain_diff.append(pain_diff_data)
+        all_cond_diff.append(cond_diff_data)
         all_temp_diff.append(temp_diff_data)
 
-        pain_sig_mask = None
-        pain_cluster_p_min = pain_cluster_k = pain_cluster_mass = None
+        cond_sig_mask = None
+        cond_cluster_p_min = cond_cluster_k = cond_cluster_mass = None
         if viz_params["diff_annotation_enabled"]:
-            pain_diff_data_len = len(pain_diff_data) if pain_diff_data is not None else None
-            pain_sig_mask, pain_cluster_p_min, pain_cluster_k, pain_cluster_mass = compute_cluster_significance(
-                tfr_sub, pain_mask, non_mask, fmin, fmax_eff, tmin, tmax, config, diff_data_len=pain_diff_data_len, logger=logger
+            cond_diff_data_len = len(cond_diff_data) if cond_diff_data is not None else None
+            cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass = compute_cluster_significance(
+                tfr_sub, mask2, mask1, fmin, fmax_eff, tmin, tmax, config, diff_data_len=cond_diff_data_len, logger=logger
             )
 
         temp_sig_mask = None
@@ -926,13 +981,13 @@ def plot_bands_pain_temp_contrasts(
             )
         
         band_significance_data[band] = {
-            "pain": (pain_sig_mask, pain_cluster_p_min, pain_cluster_k, pain_cluster_mass),
+            "cond": (cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass),
             "temp": (temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass),
-            "pain_diff": pain_diff_data,
+            "cond_diff": cond_diff_data,
             "temp_diff": temp_diff_data,
         }
 
-    pain_diff_abs = robust_sym_vlim(all_pain_diff) if len(all_pain_diff) > 0 else 0.0
+    cond_diff_abs = robust_sym_vlim(all_cond_diff) if len(all_cond_diff) > 0 else 0.0
     temp_diff_abs = robust_sym_vlim(all_temp_diff) if len(all_temp_diff) > 0 else 0.0
     
     for c, (band, (fmin, fmax)) in enumerate(bands.items()):
@@ -944,21 +999,21 @@ def plot_bands_pain_temp_contrasts(
             continue
 
         band_data = band_significance_data[band]
-        pain_diff_data = band_data["pain_diff"]
+        cond_diff_data = band_data["cond_diff"]
         temp_diff_data = band_data["temp_diff"]
-        pain_sig_mask, pain_cluster_p_min, pain_cluster_k, pain_cluster_mass = band_data["pain"]
+        cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass = band_data["cond"]
         temp_sig_mask, temp_cluster_p_min, temp_cluster_k, temp_cluster_mass = band_data["temp"]
 
-        pain_data_group_a = extract_trial_band_power(tfr_sub[pain_mask], fmin, fmax_eff, tmin, tmax)
-        pain_data_group_b = extract_trial_band_power(tfr_sub[non_mask], fmin, fmax_eff, tmin, tmax)
+        cond_data_group_a = extract_trial_band_power(tfr_sub[mask2], fmin, fmax_eff, tmin, tmax)
+        cond_data_group_b = extract_trial_band_power(tfr_sub[mask1], fmin, fmax_eff, tmin, tmax)
         temp_data_group_a = extract_trial_band_power(tfr_sub[mask_max], fmin, fmax_eff, tmin, tmax)
         temp_data_group_b = extract_trial_band_power(tfr_sub[mask_min], fmin, fmax_eff, tmin, tmax)
 
         _plot_diff_topomap_with_label(
-            axes[0, c], pain_diff_data, tfr_pain.info, pain_diff_abs,
-            pain_sig_mask, pain_cluster_p_min, pain_cluster_k, pain_cluster_mass, config, viz_params,
-            data_group_a=pain_data_group_a,
-            data_group_b=pain_data_group_b,
+            axes[0, c], cond_diff_data, tfr_2.info, cond_diff_abs,
+            cond_sig_mask, cond_cluster_p_min, cond_cluster_k, cond_cluster_mass, config, viz_params,
+            data_group_a=cond_data_group_a,
+            data_group_b=cond_data_group_b,
             paired=False
         )
 
@@ -972,11 +1027,11 @@ def plot_bands_pain_temp_contrasts(
 
         axes[0, c].set_title(f"{band} ({fmin:.0f}-{fmax_eff:.0f} Hz)", fontsize=9, pad=4, y=1.04)
 
-    add_diff_colorbar(fig, axes[0, :].ravel().tolist(), pain_diff_abs, viz_params["topo_cmap"], config)
+    add_diff_colorbar(fig, axes[0, :].ravel().tolist(), cond_diff_abs, viz_params["topo_cmap"], config)
     add_diff_colorbar(fig, axes[1, :].ravel().tolist(), temp_diff_abs, viz_params["topo_cmap"], config)
 
     font_sizes = get_font_sizes()
-    axes[0, 0].set_ylabel(f"Pain - Non (n={n_pain}-{n_non})", fontsize=font_sizes["ylabel"])
+    axes[0, 0].set_ylabel(f"{label2} - {label1} (n={n_2}-{n_1})", fontsize=font_sizes["ylabel"])
     axes[1, 0].set_ylabel(f"Max - Min temp ({t_max:.1f}-{t_min:.1f}°C, n={n_max}-{n_min})", fontsize=font_sizes["ylabel"])
     sig_text = get_sig_marker_text(config)
     fig.suptitle(f"Topomaps (baseline: logratio; t=[{tmin:.1f}, {tmax:.1f}] s){sig_text}", fontsize=font_sizes["figure_title"])
@@ -1010,71 +1065,71 @@ def contrast_pain_nonpain(
         logger: Optional logger instance
         subject: Optional subject identifier
     """
-    from .scalpmean import _prepare_pain_contrast_data
     from .channels import _pick_central_channel, _plot_single_tfr_figure, _compute_active_statistics
     from .topomaps import _add_roi_annotations
-    
-    pain_col = get_pain_column_from_config(config, events_df)
-    tfr_sub, pain_mask, non_mask, n = _prepare_pain_contrast_data(tfr, events_df, pain_col, config, logger)
+
+    tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Condition contrast"
+    )
     if tfr_sub is None:
         return
 
     tfr_sub_stats = tfr_sub.copy()
     baseline_used = apply_baseline_and_crop(tfr_sub_stats, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_1 = tfr_sub[mask1].average()
+    tfr_2 = tfr_sub[mask2].average()
 
-    apply_baseline_and_crop(tfr_pain, baseline=baseline_used, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_2, baseline=baseline_used, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_1, baseline=baseline_used, mode="logratio", logger=logger)
 
-    central_ch = _pick_central_channel(tfr_pain.info, preferred="Cz", logger=logger)
+    central_ch = _pick_central_channel(tfr_2.info, preferred="Cz", logger=logger)
     
-    ch_idx = tfr_pain.info["ch_names"].index(central_ch)
-    arr_pain = np.asarray(tfr_pain.data[ch_idx])
-    arr_non = np.asarray(tfr_non.data[ch_idx])
-    vabs_pn = robust_sym_vlim([arr_pain, arr_non])
+    ch_idx = tfr_2.info["ch_names"].index(central_ch)
+    arr_2 = np.asarray(tfr_2.data[ch_idx])
+    arr_1 = np.asarray(tfr_1.data[ch_idx])
+    vabs_pn = robust_sym_vlim([arr_2, arr_1])
     
-    times = np.asarray(tfr_pain.times)
-    _, pct_pain, _ = _compute_active_statistics(arr_pain, times, active_window, config, logger)
-    _, pct_non, _ = _compute_active_statistics(arr_non, times, active_window, config, logger)
+    times = np.asarray(tfr_2.times)
+    _, pct_2, _ = _compute_active_statistics(arr_2, times, active_window, config, logger)
+    _, pct_1, _ = _compute_active_statistics(arr_1, times, active_window, config, logger)
     
     _plot_single_tfr_figure(
-        tfr_pain, central_ch, (-vabs_pn, +vabs_pn),
-        f"{central_ch} — Pain (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_pain:+.0f}%",
+        tfr_2, central_ch, (-vabs_pn, +vabs_pn),
+        f"{central_ch} — {label2} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_2:+.0f}%",
         f"tfr_{central_ch}_pain_bl.png", out_dir, config, logger, baseline_used
     )
     
     _plot_single_tfr_figure(
-        tfr_non, central_ch, (-vabs_pn, +vabs_pn),
-        f"{central_ch} — Non-pain (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_non:+.0f}%",
+        tfr_1, central_ch, (-vabs_pn, +vabs_pn),
+        f"{central_ch} — {label1} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_1:+.0f}%",
         f"tfr_{central_ch}_nonpain_bl.png", out_dir, config, logger, baseline_used
     )
     
-    tfr_diff = tfr_pain.copy()
-    tfr_diff.data = tfr_pain.data - tfr_non.data
-    tfr_diff.comment = "pain-minus-nonpain"
+    tfr_diff = tfr_2.copy()
+    tfr_diff.data = tfr_2.data - tfr_1.data
+    tfr_diff.comment = "cond2-minus-cond1"
     
-    arr_diff = np.asarray(arr_pain) - np.asarray(arr_non)
+    arr_diff = np.asarray(arr_2) - np.asarray(arr_1)
     vabs_diff = robust_sym_vlim(arr_diff)
     _, pct_diff, _ = _compute_active_statistics(arr_diff, times, active_window, config, logger)
     
     _plot_single_tfr_figure(
         tfr_diff, central_ch, (-vabs_diff, +vabs_diff),
-        f"{central_ch} — Pain minus Non (baseline logratio)\nvlim ±{vabs_diff:.2f}; Δ% vs BL={pct_diff:+.0f}%",
+        f"{central_ch} — {label2} minus {label1} (baseline logratio)\nvlim ±{vabs_diff:.2f}; Δ% vs BL={pct_diff:+.0f}%",
         f"tfr_{central_ch}_pain_minus_non_bl.png", out_dir, config, logger, baseline_used
     )
 
-    times = np.asarray(tfr_pain.times)
+    times = np.asarray(tfr_2.times)
     tmin_eff = float(max(np.min(times), active_window[0]))
     tmax_eff = float(min(np.max(times), active_window[1]))
-    fmax_available = float(np.max(tfr_pain.freqs))
+    fmax_available = float(np.max(tfr_2.freqs))
     bands = get_bands_for_tfr(max_freq_available=fmax_available, config=config)
     tmin, tmax = tmin_eff, tmax_eff
 
-    n_pain = int(pain_mask.sum())
-    n_non = int(non_mask.sum())
-    row_labels = [f"Pain (n={n_pain})", f"Non-pain (n={n_non})", "Pain - Non"]
+    n_2 = int(mask2.sum())
+    n_1 = int(mask1.sum())
+    row_labels = [f"{label2} (n={n_2})", f"{label1} (n={n_1})", f"{label2} - {label1}"]
     n_cols = len(bands)
     topo_n_rows = 3
     plot_cfg_contrast = get_plot_config(config)
@@ -1169,19 +1224,19 @@ def contrast_pain_nonpain(
             _turn_off_column_axes(axes, c, topo_n_rows)
             continue
 
-        pain_data = average_tfr_band(tfr_pain, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax)
-        non_data = average_tfr_band(tfr_non, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax)
-        if pain_data is None or non_data is None:
+        data_2 = average_tfr_band(tfr_2, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax)
+        data_1 = average_tfr_band(tfr_1, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax)
+        if data_2 is None or data_1 is None:
             _turn_off_column_axes(axes, c, topo_n_rows)
             continue
 
-        diff_data = pain_data - non_data
-        vabs_pn = robust_sym_vlim([pain_data, non_data])
+        diff_data = data_2 - data_1
+        vabs_pn = robust_sym_vlim([data_2, data_1])
         topo_default_diff_abs = topomap_config_contrast.get("default_diff_abs", 0.0)
         diff_abs = robust_sym_vlim(diff_data) if np.isfinite(diff_data).any() else topo_default_diff_abs
 
         sig_mask, cluster_p_min, cluster_k, cluster_mass = compute_cluster_significance(
-            tfr_sub_stats, pain_mask, non_mask, fmin, fmax_eff, tmin, tmax, config, diff_data_len=len(diff_data), logger=logger
+            tfr_sub_stats, mask2, mask1, fmin, fmax_eff, tmin, tmax, config, diff_data_len=len(diff_data), logger=logger
         )
         cluster_info_dict = {
             "cluster_p_min": cluster_p_min,
@@ -1189,11 +1244,11 @@ def contrast_pain_nonpain(
             "cluster_mass": cluster_mass
         }
 
-        data_group_a = extract_trial_band_power(tfr_sub_stats[pain_mask], fmin, fmax_eff, tmin, tmax)
-        data_group_b = extract_trial_band_power(tfr_sub_stats[non_mask], fmin, fmax_eff, tmin, tmax)
+        data_group_a = extract_trial_band_power(tfr_sub_stats[mask2], fmin, fmax_eff, tmin, tmax)
+        data_group_b = extract_trial_band_power(tfr_sub_stats[mask1], fmin, fmax_eff, tmin, tmax)
 
         _plot_pain_nonpain_topomaps(
-            axes, c, pain_data, non_data, diff_data, tfr_pain.info,
+            axes, c, data_2, data_1, diff_data, tfr_2.info,
             vabs_pn, diff_abs, sig_mask, cluster_info_dict, config,
             data_group_a, data_group_b
         )

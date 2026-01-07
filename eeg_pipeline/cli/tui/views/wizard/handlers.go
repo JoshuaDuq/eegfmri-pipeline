@@ -2078,6 +2078,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTemporalConditionColumn:
 		m.startTextEdit(textFieldTemporalConditionColumn)
 		m.useDefaultAdvanced = false
+	case optTemporalConditionValues:
+		m.startTextEdit(textFieldTemporalConditionValues)
+		m.useDefaultAdvanced = false
 	case optTemporalFilterValue:
 		m.startTextEdit(textFieldTemporalFilterValue)
 		m.useDefaultAdvanced = false
@@ -2136,6 +2139,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		default:
 			m.clusterTail = 0
 		}
+		m.useDefaultAdvanced = false
+	case optClusterConditionColumn:
+		m.startTextEdit(textFieldClusterConditionColumn)
+		m.useDefaultAdvanced = false
+	case optClusterConditionValues:
+		m.startTextEdit(textFieldClusterConditionValues)
 		m.useDefaultAdvanced = false
 	// Mediation options
 	case optMediationBootstrap, optMediationMinEffect:

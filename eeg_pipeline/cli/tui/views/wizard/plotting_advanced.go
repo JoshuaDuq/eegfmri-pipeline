@@ -600,7 +600,7 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 				}
 				lines = append(lines, plotValueLine("segment", val, hint, focused))
 			case plotItemConfigFieldComparisonColumn:
-				val := formatString(cfg.ComparisonColumn, "pain_binary_coded")
+				val := formatString(cfg.ComparisonColumn, "(auto: event_columns.pain_binary)")
 				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn {
 					val = m.textBuffer + "█"
 				}

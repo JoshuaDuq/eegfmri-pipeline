@@ -1214,16 +1214,45 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
     erp_dir = ctx.subdir("erp")
     
     # Conditions for contrast
-    conditions = {"pain": "pain == 1", "nopain": "pain == 0"}
-    available_conditions = {}
+    conditions = None
     if ctx.aligned_events is not None:
-        for name, query in conditions.items():
+        from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
+        import numpy as np
+        import pandas as pd
+
+        def _condition_key(label: str) -> str:
+            key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
+            if key in {"non_pain", "nopain", "no_pain"}:
+                return "nonpain"
+            return key or "condition"
+
+        def _query_for_value(col: str, value: Any) -> str:
+            col_expr = f"`{col}`"
             try:
-                if len(ctx.epochs[query]) > 0:
-                    available_conditions[name] = query
+                v_num = pd.to_numeric(str(value), errors="coerce")
+                if not np.isnan(v_num):
+                    if float(v_num).is_integer():
+                        return f"{col_expr} == {int(v_num)}"
+                    return f"{col_expr} == {float(v_num)}"
             except Exception:
-                continue
-    conditions = available_conditions if available_conditions else None
+                pass
+            return f"{col_expr} == {repr(str(value))}"
+
+        spec = resolve_comparison_spec(ctx.aligned_events, ctx.config, require_enabled=False)
+        if spec is not None:
+            col, v1, v2, label1, label2 = spec
+            candidates = {
+                _condition_key(label1): _query_for_value(col, v1),
+                _condition_key(label2): _query_for_value(col, v2),
+            }
+            available_conditions = {}
+            for name, query in candidates.items():
+                try:
+                    if len(ctx.epochs[query]) > 0:
+                        available_conditions[name] = query
+                except Exception:
+                    continue
+            conditions = available_conditions if available_conditions else None
 
     safe_plot(
         ctx,

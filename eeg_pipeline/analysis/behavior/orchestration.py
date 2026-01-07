@@ -1546,7 +1546,11 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
         
         if n_pain == 0 and n_nonpain == 0:
-            msg = "Condition split produced zero trials; check pain coding and config event_columns.pain_binary"
+            msg = (
+                "Condition split produced zero trials; check "
+                "behavior_analysis.condition.compare_column / behavior_analysis.condition.compare_values "
+                "and/or config event_columns.pain_binary"
+            )
             if fail_fast:
                 raise ValueError(msg)
             ctx.logger.warning(msg)

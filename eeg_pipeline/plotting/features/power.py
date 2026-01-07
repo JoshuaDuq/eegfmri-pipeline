@@ -22,7 +22,6 @@ from eeg_pipeline.utils.data.columns import (
     find_pain_column_in_events,
     find_temperature_column_in_events,
 )
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.features.roi import (
     get_roi_definitions,
@@ -482,7 +481,12 @@ def _crop_tfr_to_active(tfr: Any, active_window: List[float], logger: logging.Lo
 
 
 def _validate_temperature_data(
-    tfr: Any, events_df: Optional[pd.DataFrame], subject: str, logger: logging.Logger
+    tfr: Any,
+    events_df: Optional[pd.DataFrame],
+    *,
+    config: Any,
+    subject: str,
+    logger: logging.Logger,
 ) -> Optional[pd.Series]:
     """Validate and extract temperature data from events DataFrame.
     
@@ -495,11 +499,15 @@ def _validate_temperature_data(
     Returns:
         Series of temperature values or None if validation fails
     """
+    if config is None:
+        logger.warning("Config is required for temperature plotting; skipping.")
+        return None
+
     if events_df is None or events_df.empty:
         logger.warning("No events DataFrame provided for temperature analysis")
         return None
         
-    temp_col = find_temperature_column_in_events(events_df, config=None)
+    temp_col = find_temperature_column_in_events(events_df, config)
     if temp_col is None:
         logger.warning("No temperature column found in events")
         return None
@@ -1093,7 +1101,7 @@ def plot_power_time_course_by_temperature(
     _validate_epochs_tfr(tfr, "plot_power_time_course_by_temperature", logger)
     
     band = str(band)
-    temps = _validate_temperature_data(tfr, events_df, subject, logger)
+    temps = _validate_temperature_data(tfr, events_df, config=config, subject=subject, logger=logger)
     if temps is None:
         return
     

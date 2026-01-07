@@ -17,20 +17,16 @@ import mne
 
 from eeg_pipeline.plotting.io.figures import unwrap_figure
 from eeg_pipeline.utils.formatting import sanitize_label
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.config.loader import get_config_value
-from eeg_pipeline.utils.validation import ensure_aligned_lengths
 from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
-    create_tfr_subset,
     resolve_tfr_workers,
 )
-from ...utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode
 from .channels import _save_fig
-from .contrasts import _create_pain_masks_from_vector, _align_and_trim_masks
+from .contrasts import _prepare_comparison_contrast_data
 
 
 ###################################################################
@@ -162,11 +158,6 @@ def contrast_pain_nonpain_rois(
         baseline: Baseline window tuple (tmin, tmax)
         logger: Optional logger instance
     """
-    pain_col = get_pain_column_from_config(config, events_df)
-    if pain_col is None:
-        log(f"Events with pain binary column required for ROI contrasts; skipping.", logger, "warning")
-        return
-
     # Filter ROIs based on config
     comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
     has_specific = any(r.lower() != "all" for r in comp_rois)
@@ -181,59 +172,36 @@ def contrast_pain_nonpain_rois(
     rois_dir = out_dir / "rois"
     for roi, tfr in roi_tfrs.items():
         try:
-            n_epochs = tfr.data.shape[0]
-            n_meta = len(events_df) if events_df is not None else n_epochs
-            n = compute_aligned_data_length(tfr, events_df)
-            if n_epochs != n_meta:
-                log(f"ROI {roi}: trimming to {n} epochs to match events.", logger)
-
-            pain_vec = extract_pain_vector_array(tfr, events_df, pain_col, n)
-            if pain_vec is None:
-                continue
-            
-            pain_mask, non_mask = _create_pain_masks_from_vector(pain_vec)
-            if pain_mask is None:
-                continue
-            
-            if pain_mask.sum() == 0 or non_mask.sum() == 0:
-                log(f"ROI {roi}: one group has zero trials; skipping.", logger, "warning")
-                continue
-
-            tfr_sub = create_tfr_subset(tfr, n)
-            aligned = _align_and_trim_masks(
-                tfr_sub,
-                {f"ROI {roi}": (pain_mask, non_mask)},
-                config, logger
+            tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
+                tfr, events_df, config, logger, context=f"ROI {roi} contrast"
             )
-            if aligned is None:
+            if tfr_sub is None:
                 continue
-            
-            pain_mask, non_mask = aligned[f"ROI {roi}"]
-            baseline_used = apply_baseline_and_crop(tfr_sub, baseline=baseline, mode="logratio", logger=logger)
-            tfr_pain = tfr_sub[pain_mask].average()
-            tfr_non = tfr_sub[non_mask].average()
 
-            ch = tfr_pain.info['ch_names'][0]
+            baseline_used = apply_baseline_and_crop(tfr_sub, baseline=baseline, mode="logratio", logger=logger)
+            tfr_2 = tfr_sub[mask2].average()
+            tfr_1 = tfr_sub[mask1].average()
+
+            ch = tfr_2.info['ch_names'][0]
             roi_tag = sanitize_label(roi)
             roi_dir = rois_dir / roi_tag
 
-            fig = unwrap_figure(tfr_pain.plot(picks=ch, show=False))
+            fig = unwrap_figure(tfr_2.plot(picks=ch, show=False))
             font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — Painful (baseline logratio)", fontsize=font_sizes["figure_title"])
+            fig.suptitle(f"ROI: {roi} — {label2} (baseline logratio)", fontsize=font_sizes["figure_title"])
             _save_fig(fig, roi_dir, "tfr_painful_bl.png", config=config, logger=logger, baseline_used=baseline_used)
 
-            fig = unwrap_figure(tfr_non.plot(picks=ch, show=False))
+            fig = unwrap_figure(tfr_1.plot(picks=ch, show=False))
             font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — Non-pain (baseline logratio)", fontsize=font_sizes["figure_title"])
+            fig.suptitle(f"ROI: {roi} — {label1} (baseline logratio)", fontsize=font_sizes["figure_title"])
             _save_fig(fig, roi_dir, "tfr_nonpain_bl.png", config=config, logger=logger, baseline_used=baseline_used)
 
-            tfr_diff = tfr_pain.copy()
-            tfr_diff.data = tfr_pain.data - tfr_non.data
+            tfr_diff = tfr_2.copy()
+            tfr_diff.data = tfr_2.data - tfr_1.data
             fig = unwrap_figure(tfr_diff.plot(picks=ch, show=False))
             font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — Pain minus Non-pain (baseline logratio)", fontsize=font_sizes["figure_title"])
+            fig.suptitle(f"ROI: {roi} — {label2} minus {label1} (baseline logratio)", fontsize=font_sizes["figure_title"])
             _save_fig(fig, roi_dir, "tfr_pain_minus_nonpain_bl.png", config=config, logger=logger, baseline_used=baseline_used)
         except (FileNotFoundError, ValueError, RuntimeError, KeyError, IndexError) as exc:
             log(f"ROI {roi}: error while computing ROI contrasts ({exc})", logger, "error")
             continue
-

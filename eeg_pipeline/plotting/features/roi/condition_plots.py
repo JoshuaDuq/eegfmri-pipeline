@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
+from eeg_pipeline.utils.analysis.events import extract_comparison_mask
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import (
@@ -33,6 +33,12 @@ from .core import (
     get_roi_channels,
     get_roi_definitions,
 )
+
+
+def _get_comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[tuple[np.ndarray, np.ndarray, str, str]]:
+    if events_df is None or events_df.empty:
+        return None
+    return extract_comparison_mask(events_df, config, require_enabled=False)
 
 
 def _get_named_identifiers(
@@ -128,7 +134,7 @@ def plot_power_by_roi_band_condition(
     """Power by ROI, Band, and Condition (active timing).
 
     Creates a grid: rows = ROIs (9), cols = frequency bands (5).
-    Each cell shows pain vs non-pain box+strip comparison.
+    Each cell shows a 2-condition box+strip comparison.
     FDR-corrected significance markers applied across all tests.
     """
 
@@ -137,23 +143,33 @@ def plot_power_by_roi_band_condition(
     if len(features_df) != len(events_df):
         if logger:
             logger.warning(
-                "ITPC ROI plot skipped: %d feature rows vs %d events",
+                "Power ROI plot skipped: %d feature rows vs %d events",
                 len(features_df),
                 len(events_df),
             )
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
-    segments = get_named_segments(features_df, group="itpc")
+    plot_cfg = get_plot_config(config)
+
+    from eeg_pipeline.utils.config.loader import get_config_value
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+
+    segments = get_named_segments(features_df, group="power")
     if not segments:
         return
-    if segment not in segments:
-        segment = "active" if "active" in segments else segments[0]
+    segment = "active" if "active" in segments else segments[0]
 
-    bands = get_named_bands(features_df, group="itpc", segment=segment)
+    bands = get_named_bands(features_df, group="power", segment=segment)
     if not bands:
         return
     band_order = get_band_names(config)
@@ -167,12 +183,21 @@ def plot_power_by_roi_band_condition(
         roi_names = data_rois
     if not roi_names:
         if logger:
-            logger.warning("No ROI names found for ITPC plot")
+            logger.warning("No ROI names found for power ROI plot")
         return
 
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = plot_cfg.get_color("blue")
+    color2 = plot_cfg.get_color("red")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -195,7 +220,7 @@ def plot_power_by_roi_band_condition(
                     continue
                 if parsed.get("group") != "power":
                     continue
-                if parsed.get("segment") != "active":
+                if parsed.get("segment") != segment:
                     continue
                 if parsed.get("band") != band:
                     continue
@@ -210,22 +235,22 @@ def plot_power_by_roi_band_condition(
                 else pd.Series([np.nan] * len(features_df), index=features_df.index)
             )
 
-            vals_nonpain = roi_vals[~pain_mask].dropna().values
-            vals_pain = roi_vals[pain_mask].dropna().values
+            vals_1 = roi_vals[mask1].dropna().values
+            vals_2 = roi_vals[mask2].dropna().values
 
-            plot_data[key] = (vals_nonpain, vals_pain)
+            plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+            if len(vals_1) > 3 and len(vals_2) > 3:
+                _, p = stats.mannwhitneyu(vals_1, vals_2)
                 pooled_std = np.sqrt(
                     (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                     )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
+                    / (len(vals_1) + len(vals_2) - 2)
                 )
                 d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                     if pooled_std > 0
                     else 0
                 )
@@ -251,9 +276,9 @@ def plot_power_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+            vals_1, vals_2 = plot_data[key]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
+            if len(vals_1) == 0 and len(vals_2) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -267,29 +292,29 @@ def plot_power_by_roi_band_condition(
                 ax.set_xticks([])
                 continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
@@ -308,7 +333,7 @@ def plot_power_by_roi_band_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -325,15 +350,15 @@ def plot_power_by_roi_band_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "Band Power by ROI: Pain vs Non-Pain Condition Comparison\n"
+        "Band Power by ROI: Condition Comparison\n"
         f"Active Phase ({active_label}), Baseline-Normalized dB\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
+        f"Subject: {subject} | N: {n_1} {label1}, {n_2} {label2} | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -373,9 +398,16 @@ def plot_complexity_by_roi_band_condition(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
         return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+        return
+
+    plot_cfg = get_plot_config(config)
 
     from eeg_pipeline.utils.config.loader import get_config_value
 
@@ -389,6 +421,15 @@ def plot_complexity_by_roi_band_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = plot_cfg.get_color("blue")
+    color2 = plot_cfg.get_color("red")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
     roi_names = list(rois.keys())
     n_rois = len(roi_names)
     n_bands = len(bands)
@@ -443,21 +484,21 @@ def plot_complexity_by_roi_band_condition(
             if cols:
                 roi_vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
-            vals_nonpain = roi_vals[~pain_mask].dropna().values
-            vals_pain = roi_vals[pain_mask].dropna().values
-            plot_data[key] = (vals_nonpain, vals_pain)
+            vals_1 = roi_vals[mask1].dropna().values
+            vals_2 = roi_vals[mask2].dropna().values
+            plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+            if len(vals_1) > 3 and len(vals_2) > 3:
+                _, p = stats.mannwhitneyu(vals_1, vals_2)
                 pooled_std = np.sqrt(
                     (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                     )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
+                    / (len(vals_1) + len(vals_2) - 2)
                 )
                 d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                     if pooled_std > 0
                     else 0
                 )
@@ -470,7 +511,6 @@ def plot_complexity_by_roi_band_condition(
         for i, (key, p, d) in enumerate(pvalue_keys):
             qvalues[key] = (p, qvals[i], d, rejected[i])
 
-    plot_cfg = get_plot_config(config)
     width_per_col = float(plot_cfg.plot_type_configs.get("roi", {}).get("width_per_band", 3.2))
     height_per_row = float(plot_cfg.plot_type_configs.get("roi", {}).get("height_per_roi", 2.5))
     fig, axes = plt.subplots(
@@ -484,9 +524,9 @@ def plot_complexity_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+            vals_1, vals_2 = plot_data[key]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
+            if len(vals_1) == 0 and len(vals_2) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -500,29 +540,29 @@ def plot_complexity_by_roi_band_condition(
                 ax.set_xticks([])
                 continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
@@ -541,7 +581,7 @@ def plot_complexity_by_roi_band_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -558,15 +598,15 @@ def plot_complexity_by_roi_band_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        f"{metric_label} by ROI: Pain vs Non-Pain Condition Comparison\n"
+        f"{metric_label} by ROI: Condition Comparison\n"
         f"Active Phase ({active_label})\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
+        f"Subject: {subject} | N: {n_1} {label1}, {n_2} {label2} | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -605,8 +645,13 @@ def plot_aperiodic_by_roi_condition(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -626,6 +671,15 @@ def plot_aperiodic_by_roi_condition(
     n_metrics = len(metrics)
 
     condition_colors = get_condition_colors(config)
+    color1 = condition_colors.get("nonpain", "#4C72B0")
+    color2 = condition_colors.get("pain", "#C44E52")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
 
     plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
     all_pvalues = []
@@ -648,25 +702,25 @@ def plot_aperiodic_by_roi_condition(
 
             if cols:
                 roi_vals = features_df[cols].mean(axis=1)
-                vals_nonpain = roi_vals[~pain_mask].dropna().values
-                vals_pain = roi_vals[pain_mask].dropna().values
+                vals_1 = roi_vals[mask1].dropna().values
+                vals_2 = roi_vals[mask2].dropna().values
             else:
-                vals_nonpain = np.array([])
-                vals_pain = np.array([])
+                vals_1 = np.array([])
+                vals_2 = np.array([])
 
-            plot_data[key] = (vals_nonpain, vals_pain)
+            plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+            if len(vals_1) > 3 and len(vals_2) > 3:
+                _, p = stats.mannwhitneyu(vals_1, vals_2)
                 pooled_std = np.sqrt(
                     (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                     )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
+                    / (len(vals_1) + len(vals_2) - 2)
                 )
                 d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                     if pooled_std > 0
                     else 0
                 )
@@ -688,9 +742,9 @@ def plot_aperiodic_by_roi_condition(
         for col_idx, metric in enumerate(metrics):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+            vals_1, vals_2 = plot_data[key]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
+            if len(vals_1) == 0 and len(vals_2) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -704,29 +758,29 @@ def plot_aperiodic_by_roi_condition(
                 ax.set_xticks([])
                 continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
@@ -745,7 +799,7 @@ def plot_aperiodic_by_roi_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -757,15 +811,15 @@ def plot_aperiodic_by_roi_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "Aperiodic 1/f Parameters by ROI: Pain vs Non-Pain Comparison\n"
+        "Aperiodic 1/f Parameters by ROI: Condition Comparison\n"
         f"Active Phase ({active_label})\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
+        f"Subject: {subject} | N: {n_1} {label1}, {n_2} {label2} | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -805,8 +859,13 @@ def plot_connectivity_by_roi_band_condition(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -822,6 +881,15 @@ def plot_connectivity_by_roi_band_condition(
     all_channels = list(set([p[0] for p in all_pairs] + [p[1] for p in all_pairs]))
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = condition_colors.get("nonpain", "#4C72B0")
+    color2 = condition_colors.get("pain", "#C44E52")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
     roi_names = list(rois.keys())
     n_rois = len(roi_names)
     n_bands = len(bands)
@@ -874,47 +942,47 @@ def plot_connectivity_by_roi_band_condition(
                 ax.set_xticks([])
                 continue
 
-            vals_nonpain = roi_vals[~pain_mask].dropna().values
-            vals_pain = roi_vals[pain_mask].dropna().values
+            vals_1 = roi_vals[mask1].dropna().values
+            vals_2 = roi_vals[mask2].dropna().values
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
 
-                if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                    _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+                if len(vals_1) > 3 and len(vals_2) > 3:
+                    _, p = stats.mannwhitneyu(vals_1, vals_2)
                     pooled_std = np.sqrt(
                         (
-                            (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                            + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                            (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                            + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                         )
-                        / (len(vals_nonpain) + len(vals_pain) - 2)
+                        / (len(vals_1) + len(vals_2) - 2)
                     )
                     d = (
-                        (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                        (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                         if pooled_std > 0
                         else 0
                     )
@@ -930,7 +998,7 @@ def plot_connectivity_by_roi_band_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -947,10 +1015,10 @@ def plot_connectivity_by_roi_band_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     fig.suptitle(
-        f"Within-ROI {measure_label} by Band: Active ({active_label}) (sub-{subject})\nN: {n_nonpain} NP, {n_pain} P",
+        f"Within-ROI {measure_label} by Band: Active ({active_label}) (sub-{subject})\nN: {n_1} {label1}, {n_2} {label2}",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
         y=1.01,
@@ -998,8 +1066,13 @@ def plot_itpc_by_roi_band_condition(
             )
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
     segments = get_named_segments(features_df, group="itpc")
@@ -1029,6 +1102,15 @@ def plot_itpc_by_roi_band_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = condition_colors.get("nonpain", "#4C72B0")
+    color2 = condition_colors.get("pain", "#C44E52")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_bands = len(bands)
 
@@ -1058,22 +1140,22 @@ def plot_itpc_by_roi_band_condition(
             if roi_vals.empty:
                 roi_vals = pd.Series([np.nan] * len(features_df), index=features_df.index)
 
-            vals_nonpain = roi_vals[~pain_mask].dropna().values
-            vals_pain = roi_vals[pain_mask].dropna().values
+            vals_1 = roi_vals[mask1].dropna().values
+            vals_2 = roi_vals[mask2].dropna().values
 
-            plot_data[key] = (vals_nonpain, vals_pain)
+            plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+            if len(vals_1) > 3 and len(vals_2) > 3:
+                _, p = stats.mannwhitneyu(vals_1, vals_2)
                 pooled_std = np.sqrt(
                     (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                     )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
+                    / (len(vals_1) + len(vals_2) - 2)
                 )
                 d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                     if pooled_std > 0
                     else 0
                 )
@@ -1095,9 +1177,9 @@ def plot_itpc_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+            vals_1, vals_2 = plot_data[key]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
+            if len(vals_1) == 0 and len(vals_2) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -1111,34 +1193,34 @@ def plot_itpc_by_roi_band_condition(
                 ax.set_xticks([])
                 continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
 
-                all_vals = np.concatenate([vals_nonpain, vals_pain])
+                all_vals = np.concatenate([vals_1, vals_2])
                 ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
                 yrange = ymax - ymin if ymax > ymin else 0.1
                 ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.25 * yrange)
@@ -1157,7 +1239,7 @@ def plot_itpc_by_roi_band_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -1174,15 +1256,15 @@ def plot_itpc_by_roi_band_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "Inter-Trial Phase Coherence by ROI: Pain vs Non-Pain Comparison\n"
+        "Inter-Trial Phase Coherence by ROI: Condition Comparison\n"
         f"Segment ({segment_label}), LOO-ITPC\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
+        f"Subject: {subject} | N: {n_1} {label1}, {n_2} {label2} | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -1231,8 +1313,13 @@ def plot_pac_by_roi_condition(
             )
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
     segments = get_named_segments(features_df, group="pac")
@@ -1270,6 +1357,15 @@ def plot_pac_by_roi_condition(
     all_channels = extract_channels_from_columns(list(features_df.columns))
 
     _, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = condition_colors.get("nonpain", "#4C72B0")
+    color2 = condition_colors.get("pain", "#C44E52")
+    tick1 = str(label1)
+    tick2 = str(label2)
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
+        tick1 = "NP" if label1 == "Non-pain" else "P"
+        tick2 = "P" if label2 == "Pain" else "NP"
     n_rois = len(roi_names)
     n_pairs = len(pairs)
 
@@ -1298,25 +1394,25 @@ def plot_pac_by_roi_condition(
             )
 
             if roi_vals.empty:
-                vals_nonpain = np.array([])
-                vals_pain = np.array([])
+                vals_1 = np.array([])
+                vals_2 = np.array([])
             else:
-                vals_nonpain = roi_vals[~pain_mask].dropna().values
-                vals_pain = roi_vals[pain_mask].dropna().values
+                vals_1 = roi_vals[mask1].dropna().values
+                vals_2 = roi_vals[mask2].dropna().values
 
-            plot_data[key] = (vals_nonpain, vals_pain)
+            plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_nonpain) > 3 and len(vals_pain) > 3:
-                _, p = stats.mannwhitneyu(vals_nonpain, vals_pain)
+            if len(vals_1) > 3 and len(vals_2) > 3:
+                _, p = stats.mannwhitneyu(vals_1, vals_2)
                 pooled_std = np.sqrt(
                     (
-                        (len(vals_nonpain) - 1) * np.var(vals_nonpain, ddof=1)
-                        + (len(vals_pain) - 1) * np.var(vals_pain, ddof=1)
+                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
+                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
                     )
-                    / (len(vals_nonpain) + len(vals_pain) - 2)
+                    / (len(vals_1) + len(vals_2) - 2)
                 )
                 d = (
-                    (np.mean(vals_pain) - np.mean(vals_nonpain)) / pooled_std
+                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
                     if pooled_std > 0
                     else 0
                 )
@@ -1341,9 +1437,9 @@ def plot_pac_by_roi_condition(
         for col_idx, pair in enumerate(pairs):
             ax = axes[row_idx, col_idx]
             key = (row_idx, col_idx)
-            vals_nonpain, vals_pain = plot_data[key]
+            vals_1, vals_2 = plot_data[key]
 
-            if len(vals_nonpain) == 0 and len(vals_pain) == 0:
+            if len(vals_1) == 0 and len(vals_2) == 0:
                 ax.text(
                     0.5,
                     0.5,
@@ -1357,29 +1453,29 @@ def plot_pac_by_roi_condition(
                 ax.set_xticks([])
                 continue
 
-            if len(vals_nonpain) > 0 and len(vals_pain) > 0:
+            if len(vals_1) > 0 and len(vals_2) > 0:
                 bp = ax.boxplot(
-                    [vals_nonpain, vals_pain],
+                    [vals_1, vals_2],
                     positions=[0, 1],
                     widths=0.4,
                     patch_artist=True,
                 )
-                bp["boxes"][0].set_facecolor(condition_colors["nonpain"])
+                bp["boxes"][0].set_facecolor(color1)
                 bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(condition_colors["pain"])
+                bp["boxes"][1].set_facecolor(color2)
                 bp["boxes"][1].set_alpha(0.6)
 
                 ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_nonpain)),
-                    vals_nonpain,
-                    c=condition_colors["nonpain"],
+                    np.random.uniform(-0.08, 0.08, len(vals_1)),
+                    vals_1,
+                    c=color1,
                     alpha=0.3,
                     s=6,
                 )
                 ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_pain)),
-                    vals_pain,
-                    c=condition_colors["pain"],
+                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
+                    vals_2,
+                    c=color2,
                     alpha=0.3,
                     s=6,
                 )
@@ -1398,7 +1494,7 @@ def plot_pac_by_roi_condition(
                     )
 
             ax.set_xticks([0, 1])
-            ax.set_xticklabels(["NP", "P"], fontsize=plot_cfg.font.small)
+            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
 
@@ -1416,15 +1512,15 @@ def plot_pac_by_roi_condition(
                 )
                 ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
 
-    n_pain = int(pain_mask.sum())
-    n_nonpain = int((~pain_mask).sum())
+    n_1 = int(mask1.sum())
+    n_2 = int(mask2.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
     title = (
-        "Phase-Amplitude Coupling by ROI: Pain vs Non-Pain Comparison\n"
+        "Phase-Amplitude Coupling by ROI: Condition Comparison\n"
         f"Segment ({segment.replace('_', ' ').title()}), MVL Method\n"
-        f"Subject: {subject} | N: {n_nonpain} non-pain, {n_pain} pain | "
+        f"Subject: {subject} | N: {n_1} {label1}, {n_2} {label2} | "
         f"FDR: {n_sig}/{n_tests} significant (†=q<0.05)"
     )
     fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
@@ -1582,8 +1678,13 @@ def plot_temporal_evolution(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is None:
+    comp = _get_comparison_masks(events_df, config)
+    if comp is None:
+        return
+    mask1, mask2, label1, label2 = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
         return
 
     from eeg_pipeline.utils.config.loader import get_config_value
@@ -1602,6 +1703,11 @@ def plot_temporal_evolution(
             time_labels = [seg.replace("_", " ").title() for seg in time_bins]
 
     bands, band_colors, condition_colors = _get_bands_and_palettes(config)
+    color1 = condition_colors.get("nonpain", "#4C72B0")
+    color2 = condition_colors.get("pain", "#C44E52")
+    if {label1, label2} == {"Non-pain", "Pain"}:
+        color1 = condition_colors["nonpain"] if label1 == "Non-pain" else condition_colors["pain"]
+        color2 = condition_colors["pain"] if label2 == "Pain" else condition_colors["nonpain"]
 
     stat_preference = {
         "power": [
@@ -1630,8 +1736,8 @@ def plot_temporal_evolution(
     for band_idx, band in enumerate(bands):
         ax = axes[band_idx]
 
-        pain_means, nonpain_means = [], []
-        pain_sems, nonpain_sems = [], []
+        means1, means2 = [], []
+        sems1, sems2 = [], []
 
         for time_bin in time_bins:
             series, _, _ = collect_named_series(
@@ -1643,38 +1749,38 @@ def plot_temporal_evolution(
                 scope_preference=scope_preference,
             )
             if not series.empty:
-                pain_vals = series[pain_mask].dropna().values
-                nonpain_vals = series[~pain_mask].dropna().values
+                vals1 = series[mask1].dropna().values
+                vals2 = series[mask2].dropna().values
 
-                pain_means.append(np.mean(pain_vals) if len(pain_vals) > 0 else np.nan)
-                nonpain_means.append(np.mean(nonpain_vals) if len(nonpain_vals) > 0 else np.nan)
-                pain_sems.append(stats.sem(pain_vals) if len(pain_vals) > 1 else 0)
-                nonpain_sems.append(stats.sem(nonpain_vals) if len(nonpain_vals) > 1 else 0)
+                means1.append(np.mean(vals1) if len(vals1) > 0 else np.nan)
+                means2.append(np.mean(vals2) if len(vals2) > 0 else np.nan)
+                sems1.append(stats.sem(vals1) if len(vals1) > 1 else 0)
+                sems2.append(stats.sem(vals2) if len(vals2) > 1 else 0)
             else:
-                pain_means.append(np.nan)
-                nonpain_means.append(np.nan)
-                pain_sems.append(0)
-                nonpain_sems.append(0)
+                means1.append(np.nan)
+                means2.append(np.nan)
+                sems1.append(0)
+                sems2.append(0)
 
         x = np.arange(len(time_bins))
 
         ax.errorbar(
             x - 0.1,
-            nonpain_means,
-            yerr=nonpain_sems,
+            means1,
+            yerr=sems1,
             fmt="o-",
-            color=condition_colors["nonpain"],
-            label="Non-Pain",
+            color=color1,
+            label=str(label1),
             capsize=3,
             markersize=8,
         )
         ax.errorbar(
             x + 0.1,
-            pain_means,
-            yerr=pain_sems,
+            means2,
+            yerr=sems2,
             fmt="o-",
-            color=condition_colors["pain"],
-            label="Pain",
+            color=color2,
+            label=str(label2),
             capsize=3,
             markersize=8,
         )
@@ -1717,4 +1823,3 @@ __all__ = [
     "plot_band_segment_condition",
     "plot_temporal_evolution",
 ]
-

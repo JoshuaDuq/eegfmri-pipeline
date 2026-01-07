@@ -606,6 +606,8 @@ def _run_temporal_by_condition_core(
     split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
     condition_column = temporal_cfg.get("condition_column", "") or ""
     filter_value = temporal_cfg.get("filter_value", "") or ""
+    requested_values = temporal_cfg.get("condition_values", []) or []
+    requested_values = temporal_cfg.get("condition_values", []) or []
 
     if not condition_column:
         condition_column = get_pain_column_from_config(config, events)
@@ -621,6 +623,28 @@ def _run_temporal_by_condition_core(
                 fv = filter_value
             condition_values = [fv]
             logger.info(f"Temporal correlations: filtering to condition '{condition_column}' == '{fv}'")
+        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
+            exemplar = pd.Series(condition_vec).dropna()
+            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
+
+            def _cast(v: Any) -> Any:
+                if exemplar_val is None:
+                    return v
+                try:
+                    if isinstance(exemplar_val, (np.integer, int)):
+                        return int(float(v))
+                    if isinstance(exemplar_val, (np.floating, float)):
+                        return float(v)
+                    return type(exemplar_val)(v)
+                except Exception:
+                    return v
+
+            condition_values = [_cast(v) for v in requested_values]
+            logger.info(
+                "Temporal correlations: using configured values for '%s': %s",
+                condition_column,
+                condition_values,
+            )
         else:
             condition_values = list(pd.Series(condition_vec).dropna().unique())
             logger.info(f"Temporal correlations: splitting by '{condition_column}' with values {condition_values}")
@@ -929,6 +953,7 @@ def _run_itpc_temporal_by_condition_core(
     split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
     condition_column = temporal_cfg.get("condition_column", "") or ""
     filter_value = temporal_cfg.get("filter_value", "") or ""
+    requested_values = temporal_cfg.get("condition_values", []) or []
     
     # Fall back to pain column if no condition column specified
     if not condition_column:
@@ -946,6 +971,28 @@ def _run_itpc_temporal_by_condition_core(
                 fv = filter_value
             condition_values = [fv]
             logger.info(f"ITPC temporal: filtering to condition '{condition_column}' == '{fv}'")
+        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
+            exemplar = pd.Series(condition_vec).dropna()
+            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
+
+            def _cast(v: Any) -> Any:
+                if exemplar_val is None:
+                    return v
+                try:
+                    if isinstance(exemplar_val, (np.integer, int)):
+                        return int(float(v))
+                    if isinstance(exemplar_val, (np.floating, float)):
+                        return float(v)
+                    return type(exemplar_val)(v)
+                except Exception:
+                    return v
+
+            condition_values = [_cast(v) for v in requested_values]
+            logger.info(
+                "ITPC temporal: using configured values for '%s': %s",
+                condition_column,
+                condition_values,
+            )
         else:
             # Compute for all unique values in the column
             condition_values = list(pd.Series(condition_vec).dropna().unique())
@@ -1253,6 +1300,28 @@ def _run_erds_temporal_by_condition_core(
                 fv = filter_value
             condition_values = [fv]
             logger.info(f"ERDS temporal: filtering to '{condition_column}' == '{fv}'")
+        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
+            exemplar = pd.Series(condition_vec).dropna()
+            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
+
+            def _cast(v: Any) -> Any:
+                if exemplar_val is None:
+                    return v
+                try:
+                    if isinstance(exemplar_val, (np.integer, int)):
+                        return int(float(v))
+                    if isinstance(exemplar_val, (np.floating, float)):
+                        return float(v)
+                    return type(exemplar_val)(v)
+                except Exception:
+                    return v
+
+            condition_values = [_cast(v) for v in requested_values]
+            logger.info(
+                "ERDS temporal: using configured values for '%s': %s",
+                condition_column,
+                condition_values,
+            )
         else:
             condition_values = list(pd.Series(condition_vec).dropna().unique())
             logger.info(f"ERDS temporal: splitting by '{condition_column}' with values {condition_values}")

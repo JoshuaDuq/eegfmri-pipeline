@@ -238,18 +238,22 @@ def plot_aperiodic_topomaps(
 
     plot_cfg = get_plot_config(config)
 
-    pain_col = get_pain_column_from_config(config, events_df) if events_df is not None else None
     pain_mask = None
     nonpain_mask = None
-    if pain_col and len(features_df) == len(events_df):
-        pain_series = pd.to_numeric(events_df[pain_col], errors="coerce")
-        nonpain_mask = pain_series == 0
-        pain_mask = pain_series == 1
-        if nonpain_mask.sum() == 0 or pain_mask.sum() == 0:
-            log_if_present(logger, "warning", "Pain/non-pain topomaps skipped (missing one condition)")
-            pain_mask = nonpain_mask = None
-    elif pain_col:
-        log_if_present(logger, "warning", "Pain column found but events/features length mismatch; using overall mean.")
+    label1 = label2 = None
+    if events_df is not None and len(features_df) == len(events_df):
+        from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+
+        comp = extract_comparison_mask(events_df, config, require_enabled=False)
+        if comp is not None:
+            nonpain_mask, pain_mask, label1, label2 = comp
+            nonpain_mask = np.asarray(nonpain_mask, dtype=bool)
+            pain_mask = np.asarray(pain_mask, dtype=bool)
+            if nonpain_mask.sum() == 0 or pain_mask.sum() == 0:
+                log_if_present(logger, "warning", "Condition topomaps skipped (missing one condition)")
+                pain_mask = nonpain_mask = None
+    elif events_df is not None:
+        log_if_present(logger, "warning", "Events/features length mismatch; using overall mean.")
 
     all_pvals: List[float] = []
     per_metric_pvals: Dict[str, List[float]] = {}
@@ -281,11 +285,13 @@ def plot_aperiodic_topomaps(
             data_pain, ch_pain = _extract_aperiodic_data(features_df, metric, info, mask=pain_mask)
             common_chs = [ch for ch in found_chs_overall if ch in ch_nonpain and ch in ch_pain]
             if common_chs:
-                run_col = None
-                for cand in ["run_id", "run", "block"]:
-                    if cand in events_df.columns:
-                        run_col = cand
-                        break
+                run_col = config.get("behavior_analysis.run_adjustment.column", None) if config is not None else None
+                run_col = str(run_col).strip() if run_col is not None else ""
+                if not run_col or run_col not in events_df.columns:
+                    for cand in ["run_id", "run", "block"]:
+                        if cand in events_df.columns:
+                            run_col = cand
+                            break
                 if run_col is None:
                     log_if_present(logger, "warning", "No run/block column found; skipping pain vs non-pain channel tests to avoid non-independent trials.")
                     continue
@@ -393,13 +399,15 @@ def plot_aperiodic_topomaps(
             mne.viz.plot_topomap(
                 data_nonpain, info_common, axes=ax, show=False, cmap=cmap, contours=6
             )
-            ax.set_title(f"{metric.capitalize()} - Non-pain")
+            cond1_label = str(label1) if label1 is not None else "Condition 1"
+            cond2_label = str(label2) if label2 is not None else "Condition 2"
+            ax.set_title(f"{metric.capitalize()} - {cond1_label}")
             
             ax = axes[row_idx, 2]
             mne.viz.plot_topomap(
                 data_pain, info_common, axes=ax, show=False, cmap=cmap, contours=6
             )
-            ax.set_title(f"{metric.capitalize()} - Pain")
+            ax.set_title(f"{metric.capitalize()} - {cond2_label}")
             
             ax = axes[row_idx, 3]
             mne.viz.plot_topomap(
@@ -418,7 +426,7 @@ def plot_aperiodic_topomaps(
                     markersize=8,
                 ) if np.any(sig_mask) else None,
             )
-            title = f"{metric.capitalize()} - Contrast"
+            title = f"{metric.capitalize()} - {cond2_label} minus {cond1_label}"
             if np.any(sig_mask):
                 q_min = np.nanmin(q_vals[sig_mask])
                 title += f"\\n(FDR<{alpha:.2f}, min q={q_min:.3f})"
@@ -489,18 +497,20 @@ def plot_aperiodic_vs_pain(
         return
     
     if "aper_slope_" in slope_cols[0]:
-        if events_df is not None and rating_col in events_df.columns:
-            pain_col = get_pain_column_from_config(config, events_df)
-        else:
-            pain_col = None
-        if pain_col and len(features_df) == len(events_df):
-            pain_series = pd.to_numeric(events_df[pain_col], errors="coerce")
-            nonpain_mask = pain_series == 0
-            pain_mask = pain_series == 1
+        comp = None
+        if events_df is not None and len(features_df) == len(events_df):
+            from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+
+            comp = extract_comparison_mask(events_df, config, require_enabled=False)
+
+        if comp is not None:
+            mask1, mask2, _, _ = comp
+            mask1 = np.asarray(mask1, dtype=bool)
+            mask2 = np.asarray(mask2, dtype=bool)
             common_chs = []
             for col in slope_cols:
                 vals = pd.to_numeric(features_df[col], errors="coerce")
-                if vals[nonpain_mask].notna().all() and vals[pain_mask].notna().all():
+                if vals[mask1].notna().all() and vals[mask2].notna().all():
                     common_chs.append(col)
         else:
             common_chs = [
@@ -874,5 +884,3 @@ def plot_aperiodic_by_condition(
                 plt.close(fig)
             
             log_if_present(logger, "info", f"Saved aperiodic column comparison plots for {len(roi_names)} ROIs")
-
-

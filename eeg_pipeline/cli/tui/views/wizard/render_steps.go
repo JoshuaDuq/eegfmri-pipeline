@@ -3165,6 +3165,18 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
 			}
 			return "Condition Column", val, hint
+		case optTemporalConditionValues:
+			if !m.temporalSplitByCondition {
+				return "Condition Values", "N/A", "enable Split by Condition"
+			}
+			val := m.temporalConditionValues
+			if val == "" {
+				val = "(all unique values)"
+			}
+			if m.editingText && m.editingTextField == textFieldTemporalConditionValues {
+				val = textDisplay
+			}
+			return "Condition Values", val, "optional subset (e.g., 0,1 or pain,nonpain)"
 		case optTemporalFilterValue:
 			val := m.temporalFilterValue
 			if val == "" {
@@ -3272,6 +3284,36 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				v = "lower"
 			}
 			return "Cluster Tail", v, "test direction"
+		case optClusterConditionColumn:
+			val := m.clusterConditionColumn
+			if val == "" {
+				val = "(auto: event_columns.pain_binary)"
+			}
+			if m.editingText && m.editingTextField == textFieldClusterConditionColumn {
+				val = textDisplay
+			}
+			hint := "events.tsv column"
+			if len(m.availableColumns) > 0 {
+				max := 4
+				if len(m.availableColumns) < max {
+					max = len(m.availableColumns)
+				}
+				suffix := ""
+				if len(m.availableColumns) > max {
+					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
+				}
+				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+			}
+			return "Cluster Column", val, hint
+		case optClusterConditionValues:
+			val := m.clusterConditionValues
+			if val == "" {
+				val = "(default: 0 1)"
+			}
+			if m.editingText && m.editingTextField == textFieldClusterConditionValues {
+				val = textDisplay
+			}
+			return "Cluster Values", val, "two values (e.g. 0 1 or pain nonpain)"
 
 		// Mediation
 		case optMediationBootstrap:

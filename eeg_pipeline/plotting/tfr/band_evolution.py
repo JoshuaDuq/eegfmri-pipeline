@@ -22,6 +22,7 @@ import mne
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
+from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
 from ...utils.analysis.tfr import get_bands_for_tfr, build_rois_from_info
 from ..config import get_plot_config
 
@@ -133,37 +134,33 @@ def _get_roi_channel_indices(tfr: mne.time_frequency.EpochsTFR, roi_name: str, c
     return indices
 
 
-def _find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-    """Find first matching column from candidates."""
-    for col in candidates:
-        if col in df.columns:
-            return col
-    return None
-
-
 def _create_condition_masks(
     events_df: pd.DataFrame,
     config: Any,
-) -> Dict[str, np.ndarray]:
+) -> tuple[Dict[str, np.ndarray], str, str]:
     """Create masks for different conditions.
     
     Returns dict with keys: 'all', 'pain', 'nonpain', 'high_temp', 'low_temp'
     """
     n_trials = len(events_df)
     masks = {"all": np.ones(n_trials, dtype=bool)}
+
+    label1 = "Condition 1"
+    label2 = "Condition 2"
+    try:
+        from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+
+        comp = extract_comparison_mask(events_df, config, require_enabled=False)
+    except Exception:
+        comp = None
+
+    if comp is not None:
+        mask1, mask2, label1, label2 = comp
+        masks["nonpain"] = np.asarray(mask1, dtype=bool)
+        masks["pain"] = np.asarray(mask2, dtype=bool)
     
-    # Pain/non-pain - try multiple column names
-    pain_candidates = ["pain_binary_coded", "pain_binary", "pain", "painful"]
-    pain_col = _find_column(events_df, pain_candidates)
-    
-    if pain_col:
-        pain_vec = pd.to_numeric(events_df[pain_col], errors="coerce").fillna(0).astype(int)
-        masks["pain"] = (pain_vec == 1).values
-        masks["nonpain"] = (pain_vec == 0).values
-    
-    # High/low temperature - try multiple column names
-    temp_candidates = ["stimulus_temp", "temperature", "temp", "stim_temp"]
-    temp_col = _find_column(events_df, temp_candidates)
+    # High/low temperature (median split) using configured temperature column candidates.
+    temp_col = get_temperature_column_from_config(config, events_df)
     
     if temp_col:
         temps = pd.to_numeric(events_df[temp_col], errors="coerce")
@@ -173,7 +170,7 @@ def _create_condition_masks(
             masks["high_temp"] = (temps >= median_temp).fillna(False).values
             masks["low_temp"] = (temps < median_temp).fillna(False).values
     
-    return masks
+    return masks, str(label1), str(label2)
 
 
 def _apply_baseline(
@@ -226,7 +223,7 @@ def plot_band_power_evolution_all_conditions(
     saved = {}
     
     # Get condition masks
-    masks = _create_condition_masks(events_df, config)
+    masks, label1, label2 = _create_condition_masks(events_df, config)
     conditions = ["all", "pain", "nonpain", "high_temp", "low_temp"]
     conditions = [c for c in conditions if c in masks and masks[c].sum() > 0]
     
@@ -275,8 +272,8 @@ def plot_band_power_evolution_all_conditions(
             if i == 0:
                 cond_labels = {
                     "all": f"All Trials\n(n={mask.sum()})",
-                    "pain": f"Pain\n(n={mask.sum()})",
-                    "nonpain": f"Non-Pain\n(n={mask.sum()})",
+                    "pain": f"{label2}\n(n={mask.sum()})",
+                    "nonpain": f"{label1}\n(n={mask.sum()})",
                     "high_temp": f"High Temp\n(n={mask.sum()})",
                     "low_temp": f"Low Temp\n(n={mask.sum()})",
                 }
@@ -343,7 +340,7 @@ def plot_band_power_by_roi(
     ensure_dir(save_dir / "evolution")
     saved = {}
     
-    masks = _create_condition_masks(events_df, config)
+    masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
@@ -408,8 +405,8 @@ def plot_band_power_by_roi(
         
         cond_titles = {
             "all": "All Trials",
-            "pain": "Pain Trials",
-            "nonpain": "Non-Pain Trials",
+            "pain": f"{label2} Trials",
+            "nonpain": f"{label1} Trials",
             "high_temp": "High Temperature",
             "low_temp": "Low Temperature",
         }
@@ -464,7 +461,7 @@ def plot_condition_comparison_per_band(
     ensure_dir(save_dir / "evolution")
     saved = {}
     
-    masks = _create_condition_masks(events_df, config)
+    masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
@@ -480,8 +477,10 @@ def plot_condition_comparison_per_band(
         
         # Row 1: Pain vs Non-Pain
         ax = axes[0, j]
-        for cond, color, label in [("pain", CONDITION_COLORS["pain"], "Pain"),
-                                    ("nonpain", CONDITION_COLORS["nonpain"], "Non-Pain")]:
+        for cond, color, label in [
+            ("pain", CONDITION_COLORS["pain"], label2),
+            ("nonpain", CONDITION_COLORS["nonpain"], label1),
+        ]:
             if cond not in masks or masks[cond].sum() < 3:
                 continue
             
@@ -499,7 +498,7 @@ def plot_condition_comparison_per_band(
         ax.set_title(f"{band.upper()}\n({BAND_RANGES[band]})", fontsize=10, 
                     fontweight='bold', color=BAND_COLORS[band])
         if j == 0:
-            ax.set_ylabel("Pain vs Non-Pain\n% change", fontsize=10)
+            ax.set_ylabel(f"{label2} vs {label1}\n% change", fontsize=10)
             ax.legend(fontsize=8, loc='upper right')
         ax.set_xlim(times[0], times[-1])
         
@@ -577,7 +576,7 @@ def plot_roi_condition_comparison(
     ensure_dir(save_dir / "evolution")
     saved = {}
     
-    masks = _create_condition_masks(events_df, config)
+    masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
@@ -615,8 +614,10 @@ def plot_roi_condition_comparison(
             
             # Pain comparison
             ax = axes[i, col_idx]
-            for cond, color, label in [("pain", CONDITION_COLORS["pain"], "Pain"),
-                                        ("nonpain", CONDITION_COLORS["nonpain"], "Non-Pain")]:
+            for cond, color, label in [
+                ("pain", CONDITION_COLORS["pain"], label2),
+                ("nonpain", CONDITION_COLORS["nonpain"], label1),
+            ]:
                 if cond not in masks or masks[cond].sum() < 3:
                     continue
                 
@@ -632,7 +633,7 @@ def plot_roi_condition_comparison(
             ax.axvline(0, color='black', linestyle='-', linewidth=0.5)
             
             if i == 0:
-                ax.set_title(f"{band.upper()} - Pain", fontsize=10, fontweight='bold',
+                ax.set_title(f"{band.upper()} - {label2} vs {label1}", fontsize=10, fontweight='bold',
                             color=BAND_COLORS[band])
             if col_idx == 0:
                 ax.set_ylabel(f"{roi_name}\n% change", fontsize=9)
@@ -725,7 +726,7 @@ def plot_band_power_summary(
     ensure_dir(save_dir / "evolution")
     saved = {}
     
-    masks = _create_condition_masks(events_df, config)
+    masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
     
@@ -776,6 +777,7 @@ def plot_band_power_summary(
     if len(pain_df) > 0:
         x = np.arange(len(BANDS))
         width = 0.35
+        cond_display = {"pain": label2, "nonpain": label1}
         
         for i, cond in enumerate(pain_conds):
             cond_df = pain_df[pain_df['condition'] == cond]
@@ -785,7 +787,7 @@ def plot_band_power_summary(
                 
                 offset = (i - 0.5) * width
                 bars = ax.bar(x + offset, means, width, yerr=sems, 
-                             label=cond.replace('_', ' ').title(),
+                             label=str(cond_display.get(cond, cond)).replace('_', ' ').title(),
                              color=CONDITION_COLORS.get(cond, 'gray'),
                              capsize=3, alpha=0.8)
         
@@ -793,7 +795,7 @@ def plot_band_power_summary(
         ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
         ax.set_ylabel('Mean Active Power (% change)', fontsize=10)
-        ax.set_title('A. Pain vs Non-Pain', fontweight='bold', loc='left', fontsize=11)
+        ax.set_title(f'A. {label2} vs {label1}', fontweight='bold', loc='left', fontsize=11)
         ax.legend(fontsize=9)
     
     # Panel B: High vs Low Temperature

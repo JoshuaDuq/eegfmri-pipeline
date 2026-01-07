@@ -41,11 +41,15 @@ def plot_temperature_models(
     from eeg_pipeline.infra.tsv import read_table
     df = read_table(trials_path)
 
-    if "temperature" not in df.columns or "rating" not in df.columns:
+    temp_candidates = list(config.get("event_columns.temperature", []) or []) + ["temperature"]
+    rating_candidates = list(config.get("event_columns.rating", []) or []) + ["rating"]
+    temp_col = next((c for c in temp_candidates if c in df.columns), None)
+    rating_col = next((c for c in rating_candidates if c in df.columns), None)
+    if temp_col is None or rating_col is None:
         return {}
 
-    t = pd.to_numeric(df["temperature"], errors="coerce")
-    y = pd.to_numeric(df["rating"], errors="coerce")
+    t = pd.to_numeric(df[temp_col], errors="coerce")
+    y = pd.to_numeric(df[rating_col], errors="coerce")
     ok = t.notna() & y.notna()
     if int(ok.sum()) < 5:
         return {}
@@ -83,7 +87,7 @@ def plot_temperature_models(
     if best_break is not None and np.isfinite(best_break):
         ax.axvline(float(best_break), linestyle="--", linewidth=1.5)
 
-    title = f"sub-{subject} {task}: rating vs temperature"
+    title = f"sub-{subject} {task}: {rating_col} vs {temp_col}"
     if best_model:
         title += f" (best: {best_model})"
     ax.set_title(title)

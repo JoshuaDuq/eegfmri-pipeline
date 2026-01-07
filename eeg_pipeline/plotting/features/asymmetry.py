@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
 from eeg_pipeline.plotting.features.utils import (
     get_named_segments,
     get_named_bands,

@@ -232,9 +232,12 @@ const (
 	textFieldConditionCompareWindows
 	textFieldConditionCompareValues
 	textFieldTemporalConditionColumn
+	textFieldTemporalConditionValues
 	textFieldTemporalFilterValue
 	textFieldRunAdjustmentColumn
 	textFieldPainResidualCrossfitGroupColumn
+	textFieldClusterConditionColumn
+	textFieldClusterConditionValues
 	// Features advanced config text fields
 	textFieldPACPairs
 	textFieldBurstBands
@@ -1119,9 +1122,9 @@ type Model struct {
 	influenceLeverageThreshold   float64 // 0 = default
 
 	// Correlations (trial-table)
-	correlationsTargetRating       bool
-	correlationsTargetTemperature  bool
-	correlationsTargetPainResidual bool
+	correlationsTargetRating        bool
+	correlationsTargetTemperature   bool
+	correlationsTargetPainResidual  bool
 	correlationsPreferPainResidual  bool
 	correlationsUseCrossfitResidual bool
 	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
@@ -1139,6 +1142,7 @@ type Model struct {
 	temporalTimeMaxMs        int
 	temporalSplitByCondition bool   // If true, compute separate correlations per condition value
 	temporalConditionColumn  string // Column to split by (empty = use event_columns.pain_binary)
+	temporalConditionValues  string // Values to compute (empty = all unique values)
 	temporalFilterValue      string // If set, compute only for this specific value
 	// ITPC-specific parameters
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
@@ -1156,13 +1160,15 @@ type Model struct {
 	mediationMinEffect float64
 
 	// Condition extras
-	conditionFailFast bool
+	conditionFailFast           bool
 	conditionPermutationPrimary bool
 	conditionWindowPrimaryUnit  int // 0=trial, 1=run_mean
 	// Cluster-specific
-	clusterThreshold float64 // Forming threshold for clusters
-	clusterMinSize   int     // Minimum cluster size
-	clusterTail      int     // 0=two-tailed, 1=upper, -1=lower
+	clusterThreshold       float64 // Forming threshold for clusters
+	clusterMinSize         int     // Minimum cluster size
+	clusterTail            int     // 0=two-tailed, 1=upper, -1=lower
+	clusterConditionColumn string  // events.tsv column to split by (empty=event_columns.pain_binary)
+	clusterConditionValues string  // Exactly 2 values (space/comma-separated) to compare
 	// Mediation-specific
 	mediationBootstrap           int  // Bootstrap iterations for mediation
 	mediationMaxMediatorsEnabled bool // Enable max mediators limit
@@ -1174,7 +1180,7 @@ type Model struct {
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
 	conditionEffectThreshold float64 // Min effect size to report
-	conditionCompareColumn   string  // Column to use for condition split (e.g., pain_binary_coded)
+	conditionCompareColumn   string  // Column to use for condition split (empty=event_columns.pain_binary)
 	conditionCompareWindows  string  // Time windows to compare (e.g., "baseline active")
 	conditionCompareValues   string  // Values in the column to compare (e.g., "0,1" or "pain,nonpain")
 
@@ -1472,9 +1478,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		behaviorConfigSection: 0,
 		behaviorNJobs:         -1,
 
-		behaviorComputeChangeScores:  true,
-		behaviorComputeBayesFactors:  false,
-		behaviorComputeLosoStability: true,
+		behaviorComputeChangeScores:        true,
+		behaviorComputeBayesFactors:        false,
+		behaviorComputeLosoStability:       true,
 		runAdjustmentEnabled:               false,
 		runAdjustmentColumn:                "run_id",
 		runAdjustmentIncludeInCorrelations: true,
@@ -1572,9 +1578,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		influenceCooksThreshold:      0.0,
 		influenceLeverageThreshold:   0.0,
 
-		correlationsTargetRating:       true,
-		correlationsTargetTemperature:  true,
-		correlationsTargetPainResidual: true,
+		correlationsTargetRating:        true,
+		correlationsTargetTemperature:   true,
+		correlationsTargetPainResidual:  true,
 		correlationsPreferPainResidual:  true,
 		correlationsUseCrossfitResidual: false,
 		correlationsPrimaryUnit:         0,
@@ -1587,6 +1593,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		temporalTimeMaxMs:        1000,
 		temporalSplitByCondition: true,
 		temporalConditionColumn:  "",
+		temporalConditionValues:  "",
 		temporalFilterValue:      "",
 		// Temporal feature selection - duplicate defaults removed (using values from temporalFeature*Enabled fields above)
 		temporalITPCBaselineCorrection: true,
@@ -1599,9 +1606,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mixedEffectsType:        0,
 		mediationMinEffect:      0.05,
 		// Cluster defaults
-		clusterThreshold: 0.05,
-		clusterMinSize:   2,
-		clusterTail:      0,
+		clusterThreshold:       0.05,
+		clusterMinSize:         2,
+		clusterTail:            0,
+		clusterConditionColumn: "",
+		clusterConditionValues: "",
 		// Mediation defaults
 		mediationBootstrap:           1000,
 		mediationMaxMediatorsEnabled: true,
@@ -1612,8 +1621,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
 		// Condition defaults
-		conditionEffectThreshold: 0.5,
-		conditionFailFast:        true,
+		conditionEffectThreshold:    0.5,
+		conditionFailFast:           true,
 		conditionPermutationPrimary: false,
 		conditionWindowPrimaryUnit:  0,
 		// Decoding defaults
@@ -2645,12 +2654,18 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.conditionCompareValues
 	case textFieldTemporalConditionColumn:
 		return m.temporalConditionColumn
+	case textFieldTemporalConditionValues:
+		return m.temporalConditionValues
 	case textFieldTemporalFilterValue:
 		return m.temporalFilterValue
 	case textFieldRunAdjustmentColumn:
 		return m.runAdjustmentColumn
 	case textFieldPainResidualCrossfitGroupColumn:
 		return m.painResidualCrossfitGroupColumn
+	case textFieldClusterConditionColumn:
+		return m.clusterConditionColumn
+	case textFieldClusterConditionValues:
+		return m.clusterConditionValues
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -2887,12 +2902,18 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.conditionCompareValues = strings.TrimSpace(value)
 	case textFieldTemporalConditionColumn:
 		m.temporalConditionColumn = strings.TrimSpace(value)
+	case textFieldTemporalConditionValues:
+		m.temporalConditionValues = strings.TrimSpace(value)
 	case textFieldTemporalFilterValue:
 		m.temporalFilterValue = strings.TrimSpace(value)
 	case textFieldRunAdjustmentColumn:
 		m.runAdjustmentColumn = strings.TrimSpace(value)
 	case textFieldPainResidualCrossfitGroupColumn:
 		m.painResidualCrossfitGroupColumn = strings.TrimSpace(value)
+	case textFieldClusterConditionColumn:
+		m.clusterConditionColumn = strings.TrimSpace(value)
+	case textFieldClusterConditionValues:
+		m.clusterConditionValues = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -3173,6 +3194,8 @@ const (
 	optClusterThreshold
 	optClusterMinSize
 	optClusterTail
+	optClusterConditionColumn
+	optClusterConditionValues
 	// Behavior options - Mediation
 	optMediationBootstrap
 	optMediationMaxMediatorsEnabled
@@ -3303,6 +3326,7 @@ const (
 	optTemporalSmoothMs
 	optTemporalSplitByCondition
 	optTemporalConditionColumn
+	optTemporalConditionValues
 	optTemporalFilterValue
 	// Temporal feature selection
 	optTemporalFeaturePower
@@ -4292,6 +4316,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalSmoothMs,
 				optTemporalSplitByCondition,
 				optTemporalConditionColumn,
+				optTemporalConditionValues,
 				optTemporalFilterValue,
 			)
 			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
@@ -4317,7 +4342,14 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("cluster") {
 		options = append(options, optBehaviorGroupCluster)
 		if m.behaviorGroupClusterExpanded {
-			options = append(options, optClusterThreshold, optClusterMinSize, optClusterTail)
+			options = append(
+				options,
+				optClusterThreshold,
+				optClusterMinSize,
+				optClusterTail,
+				optClusterConditionColumn,
+				optClusterConditionValues,
+			)
 		}
 	}
 

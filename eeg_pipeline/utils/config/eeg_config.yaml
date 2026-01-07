@@ -489,6 +489,7 @@ behavior_analysis:
     enabled: true
     fail_fast: true
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
+    compare_column: ""          # Column to split by (empty = use event_columns.pain_binary)
     compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
     p_primary_mode: "asymptotic"   # "asymptotic" | "perm_if_available"
     permutation:
@@ -535,6 +536,8 @@ behavior_analysis:
     forming_threshold: 0.05
     min_cluster_size: 2
     tail: 0  # 0=two-tailed, 1=upper, -1=lower
+    condition_column: ""         # Column to split by (empty = use event_columns.pain_binary)
+    condition_values: []         # Exactly 2 values to compare (default [0, 1] if empty)
   
   # Mediation analysis
   mediation:
@@ -757,7 +760,7 @@ plotting:
     
     # For column comparison: specify the segment, column name, and values
     comparison_segment: "active"     # Segment to use for column comparison (must match a named time window)
-    comparison_column: "pain_binary_coded"  # Column name in events_df
+    comparison_column: ""                  # Column name in events_df (empty = use event_columns.pain_binary)
     comparison_values: [0, 1]        # Values to compare (e.g., [0, 1] for non-pain vs pain)
     
     comparison_rois: []              # ROIs to include (empty = all available)

@@ -26,7 +26,6 @@ from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh_values, fdr_bh
-from eeg_pipeline.utils.analysis.stats.validation import validate_pain_binary_values
 from eeg_pipeline.utils.analysis.tfr import (
     apply_baseline_to_tfr,
     compute_tfr_morlet,
@@ -445,7 +444,7 @@ def cluster_test_epochs(
 
 
 ###################################################################
-# Pain vs Non-Pain Cluster Tests
+# Two-Condition Cluster Tests
 ###################################################################
 
 
@@ -459,8 +458,15 @@ def compute_pain_nonpain_time_cluster_test(
     n_permutations: Optional[int] = None,
     alpha: Optional[float] = None,
     save_null_distributions: bool = True,
+    *,
+    condition_column: Optional[str] = None,
+    condition_values: Optional[Tuple[Any, Any]] = None,
+    condition_labels: Optional[Tuple[str, str]] = None,
 ) -> dict:
-    """Time-domain cluster permutation test for pain vs. non-pain trials."""
+    """Time-domain cluster permutation test for two trial groups.
+
+    Backward-compatible entry point (historically "pain vs non-pain").
+    """
     logger = logging.getLogger(__name__)
     ensure_dir(output_dir)
 
@@ -498,6 +504,12 @@ def compute_pain_nonpain_time_cluster_test(
     band_cluster_refs = []
     band_summaries: List[Dict[str, Any]] = []  # Track all bands for diagnostic summary
 
+    if condition_labels is None:
+        if condition_values is not None and len(condition_values) == 2:
+            condition_labels = (str(condition_values[0]), str(condition_values[1]))
+        else:
+            condition_labels = ("group_a", "group_b")
+
     for band_name, (fmin, fmax) in bands.items():
         if fmin >= fmax:
             logger.warning("Band %s has invalid range [%s, %s]; skipping.", band_name, fmin, fmax)
@@ -509,8 +521,13 @@ def compute_pain_nonpain_time_cluster_test(
             continue
 
         logger.info(
-            "Computing pain vs. non-pain time-cluster test for %s band [%s, %s] (sub-%s)",
-            band_name, fmin, fmax, subject,
+            "Computing %s vs %s time-cluster test for %s band [%s, %s] (sub-%s)",
+            condition_labels[0],
+            condition_labels[1],
+            band_name,
+            fmin,
+            fmax,
+            subject,
         )
 
         tfr_pain = compute_tfr_morlet(
@@ -539,8 +556,12 @@ def compute_pain_nonpain_time_cluster_test(
 
         if band_power_pain.shape[0] < 2 or band_power_nonpain.shape[0] < 2:
             logger.warning(
-                "Insufficient epochs for band %s (pain=%d, nonpain=%d); skipping cluster test.",
-                band_name, band_power_pain.shape[0], band_power_nonpain.shape[0],
+                "Insufficient epochs for band %s (%s=%d, %s=%d); skipping cluster test.",
+                band_name,
+                condition_labels[0],
+                band_power_pain.shape[0],
+                condition_labels[1],
+                band_power_nonpain.shape[0],
             )
             results[band_name] = {"error": "insufficient_epochs"}
             continue
@@ -667,6 +688,11 @@ def compute_pain_nonpain_time_cluster_test(
                 rec = {
                     "subject": f"sub-{subject}",
                     "band": band_name,
+                    "condition_column": str(condition_column) if condition_column else "",
+                    "condition_a_label": str(condition_labels[0]),
+                    "condition_b_label": str(condition_labels[1]),
+                    "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
+                    "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
                     "cluster_index": int(idx),
                     "p_value": float(cluster_p_values[idx]),
                     "t_start": t_start,
@@ -697,11 +723,19 @@ def compute_pain_nonpain_time_cluster_test(
             band_summaries.append({
                 "subject": f"sub-{subject}",
                 "band": band_name,
+                "condition_column": str(condition_column) if condition_column else "",
+                "condition_a_label": str(condition_labels[0]),
+                "condition_b_label": str(condition_labels[1]),
+                "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
+                "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
                 "fmin": float(fmin),
                 "fmax": float(fmax),
                 "n_clusters_found": n_clusters_found,
                 "n_significant": n_significant,
                 "min_p_value": float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan,
+                "n_condition_a_trials": int(band_power_pain.shape[0]),
+                "n_condition_b_trials": int(band_power_nonpain.shape[0]),
+                # Backward-compatible aliases
                 "n_pain_trials": int(band_power_pain.shape[0]),
                 "n_nonpain_trials": int(band_power_nonpain.shape[0]),
                 "n_permutations": n_permutations,
@@ -730,8 +764,16 @@ def compute_pain_nonpain_time_cluster_test(
                     "min_channels": min_channels,
                     "min_cluster_size": min_cluster_size,
                     "random_seed": rng_seed,
-                    "n_pain_trials": band_power_pain.shape[0],
-                    "n_nonpain_trials": band_power_nonpain.shape[0],
+                    "condition_column": str(condition_column) if condition_column else "",
+                    "condition_a_label": str(condition_labels[0]),
+                    "condition_b_label": str(condition_labels[1]),
+                    "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
+                    "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
+                    "n_condition_a_trials": int(band_power_pain.shape[0]),
+                    "n_condition_b_trials": int(band_power_nonpain.shape[0]),
+                    # Backward-compatible aliases
+                    "n_pain_trials": int(band_power_pain.shape[0]),
+                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
                 },
             }
         else:
@@ -876,7 +918,7 @@ def compute_pain_nonpain_time_cluster_test(
             continue
         out_path = output_dir / f"cluster_results_{band_name}.tsv"
         write_tsv(pd.DataFrame(records), out_path)
-        logger.info("Saved pain vs. non-pain cluster results for %s to %s", band_name, out_path)
+        logger.info("Saved cluster results for %s to %s", band_name, out_path)
 
     # Always save diagnostic summary (even when no significant clusters)
     if band_summaries:
@@ -914,11 +956,11 @@ def _run_cluster_test_core(
     logger: logging.Logger,
     n_perm: int,
 ) -> Optional[Dict[str, Any]]:
-    """Core implementation for pain vs. non-pain cluster test."""
+    """Core implementation for two-condition cluster test."""
     from eeg_pipeline.utils.analysis.tfr import restrict_epochs_to_roi
 
     if epochs is None or aligned_events is None:
-        logger.warning("Cannot run pain vs. non-pain cluster test: epochs or events unavailable.")
+        logger.warning("Cannot run cluster test: epochs or events unavailable.")
         return None
 
     if not epochs.preload:
@@ -928,35 +970,61 @@ def _run_cluster_test_core(
     roi_selection = heatmap_config.get("roi_selection")
     epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
 
-    pain_col = get_pain_column_from_config(config, aligned_events)
-    if pain_col is None or pain_col not in aligned_events.columns:
-        logger.warning("Pain column not found; skipping pain vs. non-pain cluster test.")
+    # Resolve condition split (column + two values)
+    cond_col_cfg = str(get_config_value(config, "behavior_analysis.cluster.condition_column", "") or "").strip()
+    cond_col = cond_col_cfg if cond_col_cfg and cond_col_cfg in aligned_events.columns else get_pain_column_from_config(config, aligned_events)
+    if cond_col is None or cond_col not in aligned_events.columns:
+        logger.warning("Cluster condition column not found; skipping cluster test.")
         return None
 
-    pain_series = pd.to_numeric(aligned_events[pain_col], errors="coerce")
-    valid_pain_mask = pain_series.isin([0, 1])
-    invalid_trials = int((~valid_pain_mask).sum())
-    if invalid_trials > 0:
-        logger.warning(f"Pain column {pain_col} contains {invalid_trials} invalid/NaN entries; dropping.")
-        pain_series = pain_series[valid_pain_mask]
-        epochs_roi = epochs_roi[valid_pain_mask.to_numpy()]
-        aligned_events = aligned_events.loc[valid_pain_mask].reset_index(drop=True)
+    cond_vals_cfg = get_config_value(config, "behavior_analysis.cluster.condition_values", []) or []
+    cond_vals: List[Any] = list(cond_vals_cfg) if isinstance(cond_vals_cfg, (list, tuple)) else [cond_vals_cfg]
+    if len(cond_vals) >= 2:
+        v_a, v_b = cond_vals[0], cond_vals[1]
+    else:
+        v_a, v_b = 0, 1
 
-    if len(pain_series) == 0:
-        logger.warning("No valid pain trials remain; skipping cluster test.")
+    raw = aligned_events[cond_col]
+
+    def _match_two_values(series: pd.Series, a: Any, b: Any) -> Tuple[pd.Series, pd.Series]:
+        s = series
+        # Prefer string match if object dtype or values look non-numeric.
+        if s.dtype == object:
+            s_norm = s.astype(str).str.strip().str.lower()
+            a_norm = str(a).strip().lower()
+            b_norm = str(b).strip().lower()
+            return (s_norm == a_norm), (s_norm == b_norm)
+        # Numeric match attempt
+        s_num = pd.to_numeric(s, errors="coerce")
+        try:
+            a_num = float(a)
+            b_num = float(b)
+            return (s_num == a_num), (s_num == b_num)
+        except Exception:
+            s_str = s.astype(str).str.strip()
+            return (s_str == str(a).strip()), (s_str == str(b).strip())
+
+    mask_a, mask_b = _match_two_values(raw, v_a, v_b)
+    keep = (mask_a | mask_b) & raw.notna()
+    n_keep = int(keep.sum())
+    if n_keep == 0:
+        logger.warning("Cluster condition split produced zero trials; column=%s values=%s/%s", cond_col, v_a, v_b)
         return None
 
-    try:
-        pain_values, _ = validate_pain_binary_values(pain_series, pain_col, logger=logger)
-    except ValueError as exc:
-        logger.error(f"Pain column validation failed: {exc}")
-        return None
+    # Restrict to the two compared values only (drop other conditions / NaNs)
+    epochs_roi = epochs_roi[keep.to_numpy()]
+    aligned_events = aligned_events.loc[keep].reset_index(drop=True)
+    mask_a = mask_a.loc[keep].reset_index(drop=True)
+    mask_b = mask_b.loc[keep].reset_index(drop=True)
 
-    pain_mask = np.asarray(pain_values == 1, dtype=bool)
-    nonpain_mask = np.asarray(pain_values == 0, dtype=bool)
-
-    if pain_mask.sum() < 2 or nonpain_mask.sum() < 2:
-        logger.warning(f"Insufficient trials (pain={int(pain_mask.sum())}, non-pain={int(nonpain_mask.sum())}); skipping.")
+    if int(mask_a.sum()) < 2 or int(mask_b.sum()) < 2:
+        logger.warning(
+            "Insufficient trials (%s=%d, %s=%d); skipping cluster test.",
+            str(v_a),
+            int(mask_a.sum()),
+            str(v_b),
+            int(mask_b.sum()),
+        )
         return None
 
     stats_cfg = config.get("behavior_analysis.statistics", {})
@@ -966,11 +1034,14 @@ def _run_cluster_test_core(
 
     return compute_pain_nonpain_time_cluster_test(
         subject=subject,
-        pain_epochs=epochs_roi[pain_mask],
-        nonpain_epochs=epochs_roi[nonpain_mask],
+        pain_epochs=epochs_roi[mask_a.to_numpy()],
+        nonpain_epochs=epochs_roi[mask_b.to_numpy()],
         output_dir=output_dir,
         config=config,
         bands=bands,
         n_permutations=n_perm,
         alpha=alpha,
+        condition_column=str(cond_col),
+        condition_values=(v_a, v_b),
+        condition_labels=(str(v_a), str(v_b)),
     )

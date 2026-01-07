@@ -15,7 +15,7 @@ from joblib import Parallel, delayed
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.infra.paths import deriv_plots_path, ensure_dir, resolve_deriv_root
 from eeg_pipeline.utils.parallel import get_n_jobs
-from eeg_pipeline.utils.analysis.events import extract_pain_mask
+from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 
 from eeg_pipeline.plotting.erp.waveform import (
     plot_butterfly_erp,
@@ -57,22 +57,43 @@ def visualize_subject_erp(
         return
 
     # 2. Define Conditions for Contrast
-    pain_mask = extract_pain_mask(events_df, config)
-    if pain_mask is not None:
-        conditions = {
-            "pain": "pain == 1",
-            "nopain": "pain == 0"
+    def _condition_key(label: str) -> str:
+        key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
+        if key in {"non_pain", "nopain", "no_pain"}:
+            return "nonpain"
+        return key or "condition"
+
+    def _query_for_value(col: str, value: Any) -> str:
+        import numpy as np
+        import pandas as pd
+
+        col_expr = f"`{col}`"
+        try:
+            v_num = pd.to_numeric(str(value), errors="coerce")
+            if not np.isnan(v_num):
+                if float(v_num).is_integer():
+                    return f"{col_expr} == {int(v_num)}"
+                return f"{col_expr} == {float(v_num)}"
+        except Exception:
+            pass
+        return f"{col_expr} == {repr(str(value))}"
+
+    conditions = None
+    contrast_spec = resolve_comparison_spec(events_df, config, require_enabled=False) if events_df is not None else None
+    if contrast_spec is not None:
+        col, v1, v2, label1, label2 = contrast_spec
+        candidates = {
+            _condition_key(label1): _query_for_value(col, v1),
+            _condition_key(label2): _query_for_value(col, v2),
         }
         available_conditions = {}
-        for name, query in conditions.items():
+        for name, query in candidates.items():
             try:
                 if len(epochs[query]) > 0:
                     available_conditions[name] = query
             except Exception:
                 continue
         conditions = available_conditions if available_conditions else None
-    else:
-        conditions = None
 
     # 3. Execute Selected Plots
     plots_to_run = plots if plots is not None else [
@@ -90,9 +111,20 @@ def visualize_subject_erp(
         logger.info("Plotting ROI ERPs...")
         plot_roi_erp(epochs, subject, plots_dir, config, logger, conditions=conditions)
 
-    if "contrast" in plots_to_run and conditions and len(conditions) >= 2:
+    if "contrast" in plots_to_run and contrast_spec is not None:
         logger.info("Plotting ERP contrasts...")
-        plot_erp_contrast(epochs, subject, plots_dir, config, logger)
+        col, v1, v2, label1, label2 = contrast_spec
+        plot_erp_contrast(
+            epochs,
+            subject,
+            plots_dir,
+            config,
+            logger,
+            cond_a=_query_for_value(col, v2),
+            cond_b=_query_for_value(col, v1),
+            label_a=label2,
+            label_b=label1,
+        )
 
     if "topomaps" in plots_to_run:
         logger.info("Plotting ERP topomaps...")

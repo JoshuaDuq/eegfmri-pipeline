@@ -1907,6 +1907,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if strings.TrimSpace(m.temporalConditionColumn) != "" {
 			args = append(args, "--temporal-condition-column", strings.TrimSpace(m.temporalConditionColumn))
 		}
+		if strings.TrimSpace(m.temporalConditionValues) != "" {
+			args = append(args, "--temporal-condition-values")
+			spec := strings.ReplaceAll(m.temporalConditionValues, ",", " ")
+			args = append(args, splitSpaceList(spec)...)
+		}
 		if strings.TrimSpace(m.temporalFilterValue) != "" {
 			args = append(args, "--temporal-filter-value", strings.TrimSpace(m.temporalFilterValue))
 		}
@@ -1972,6 +1977,14 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.clusterTail != 0 {
 			args = append(args, "--cluster-tail", fmt.Sprintf("%d", m.clusterTail))
+		}
+		if strings.TrimSpace(m.clusterConditionColumn) != "" {
+			args = append(args, "--cluster-condition-column", strings.TrimSpace(m.clusterConditionColumn))
+		}
+		if strings.TrimSpace(m.clusterConditionValues) != "" {
+			args = append(args, "--cluster-condition-values")
+			spec := strings.ReplaceAll(m.clusterConditionValues, ",", " ")
+			args = append(args, splitSpaceList(spec)...)
 		}
 	}
 

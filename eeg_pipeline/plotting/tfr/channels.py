@@ -24,15 +24,11 @@ from eeg_pipeline.plotting.io.figures import (
     save_fig as central_save_fig,
 )
 from eeg_pipeline.utils.formatting import format_baseline_window_string
-from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-from eeg_pipeline.utils.validation import require_epochs_tfr, ensure_aligned_lengths
 from ...utils.analysis.windowing import time_mask_loose, time_mask_strict
 from ...utils.analysis.tfr import (
     apply_baseline_and_average,
     apply_baseline_and_crop,
-    create_tfr_subset,
 )
-from ...utils.data.tfr_alignment import compute_aligned_data_length, extract_pain_vector
 from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
 from ..core.statistics import get_strict_mode
@@ -402,23 +398,24 @@ def contrast_channels_pain_nonpain(
         subject: Optional subject identifier
         channels: Optional list of channel names to plot (case-insensitive)
     """
-    from .scalpmean import _prepare_pain_contrast_data
-    
-    pain_col = get_pain_column_from_config(config, events_df)
-    tfr_sub, pain_mask, non_mask, n = _prepare_pain_contrast_data(tfr, events_df, pain_col, config, logger)
+    from .contrasts import _prepare_comparison_contrast_data
+
+    tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
+        tfr, events_df, config, logger, context="Channel contrast"
+    )
     if tfr_sub is None:
         return
 
-    tfr_pain = tfr_sub[pain_mask].average()
-    tfr_non = tfr_sub[non_mask].average()
+    tfr_1 = tfr_sub[mask1].average()
+    tfr_2 = tfr_sub[mask2].average()
 
-    baseline_used = apply_baseline_and_crop(tfr_pain, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_non, baseline=baseline, mode="logratio", logger=logger)
+    baseline_used = apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
+    apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
 
-    tfr_diff = tfr_pain.copy()
-    tfr_diff.data = tfr_pain.data - tfr_non.data
+    tfr_diff = tfr_2.copy()
+    tfr_diff.data = tfr_2.data - tfr_1.data
 
-    ch_names = tfr_pain.info["ch_names"]
+    ch_names = tfr_2.info["ch_names"]
     if channels is not None:
         channels_set = {ch.upper() for ch in channels}
         ch_names = [ch for ch in ch_names if ch.upper() in channels_set]
@@ -431,6 +428,39 @@ def contrast_channels_pain_nonpain(
     ch_dir.mkdir(parents=True, exist_ok=True)
 
     for ch in ch_names:
-        _plot_single_tfr_figure(tfr_pain, ch, None, f"{ch} — Painful (baseline logratio)", f"tfr_{ch}_painful_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
-        _plot_single_tfr_figure(tfr_non, ch, None, f"{ch} — Non-pain (baseline logratio)", f"tfr_{ch}_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
-        _plot_single_tfr_figure(tfr_diff, ch, None, f"{ch} — Pain minus Non-pain (baseline logratio)", f"tfr_{ch}_pain_minus_nonpain_bl.png", ch_dir, config, logger, baseline_used, subject=subject)
+        _plot_single_tfr_figure(
+            tfr_2,
+            ch,
+            None,
+            f"{ch} — {label2} (baseline logratio)",
+            f"tfr_{ch}_painful_bl.png",
+            ch_dir,
+            config,
+            logger,
+            baseline_used,
+            subject=subject,
+        )
+        _plot_single_tfr_figure(
+            tfr_1,
+            ch,
+            None,
+            f"{ch} — {label1} (baseline logratio)",
+            f"tfr_{ch}_nonpain_bl.png",
+            ch_dir,
+            config,
+            logger,
+            baseline_used,
+            subject=subject,
+        )
+        _plot_single_tfr_figure(
+            tfr_diff,
+            ch,
+            None,
+            f"{ch} — {label2} minus {label1} (baseline logratio)",
+            f"tfr_{ch}_pain_minus_nonpain_bl.png",
+            ch_dir,
+            config,
+            logger,
+            baseline_used,
+            subject=subject,
+        )
