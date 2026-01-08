@@ -23,37 +23,64 @@ func (m Model) renderConfirmation() string {
 		Bold(true).
 		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
 
-	content.WriteString(accent + " " + styles.SectionTitleStyle.Render(" CONFIRM EXECUTION ") + "\n\n")
+	content.WriteString(accent + " " + styles.SectionTitleStyle.Render(" REVIEW & EXECUTE ") + "\n\n")
 
 	content.WriteString(
-		lipgloss.NewStyle().Foreground(styles.Text).Render("You are about to execute:") +
+		lipgloss.NewStyle().Foreground(styles.Text).Render("Pipeline:") +
 			" " +
 			lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(m.Pipeline.String()) +
-			"\n\n",
+			"\n",
 	)
 
+	// Show subject count and estimated time
+	selectedCount := 0
 	if len(m.subjectSelected) > 0 {
-		selectedCount := 0
 		for _, sel := range m.subjectSelected {
 			if sel {
 				selectedCount++
 			}
 		}
-		if selectedCount > 0 {
-			timeInfo := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-				Render(fmt.Sprintf("Processing %d subjects", selectedCount))
-			content.WriteString("  " + timeInfo + "\n\n")
-		}
+	}
+	if selectedCount > 0 {
+		subjectInfo := lipgloss.NewStyle().Foreground(styles.Text).Render("Subjects:") +
+			" " +
+			lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(fmt.Sprintf("%d", selectedCount))
+		content.WriteString(subjectInfo + "\n")
+
+		// Estimated time (rough heuristic)
+		estMins := m.estimateExecutionTime(selectedCount)
+		timeInfo := lipgloss.NewStyle().Foreground(styles.Text).Render("Est. time:") +
+			" " +
+			lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(fmt.Sprintf("~%d min", estMins))
+		content.WriteString(timeInfo + "\n")
 	}
 
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render("Proceed with execution?") + "\n\n")
+	// Show output paths
+	content.WriteString("\n")
+	content.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Underline(true).Render("Output locations:") + "\n")
+	outputPaths := m.getExpectedOutputPaths()
+	for _, p := range outputPaths {
+		pathLine := lipgloss.NewStyle().Foreground(styles.Muted).Render("  → ") +
+			lipgloss.NewStyle().Foreground(styles.Text).Render(p)
+		content.WriteString(pathLine + "\n")
+	}
 
+	content.WriteString("\n")
+
+	// Action buttons
 	yesBtn := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#000000")).
 		Background(styles.Success).
 		Bold(true).
 		Padding(0, 2).
 		Render("▶ [Y] Execute")
+
+	dryRunBtn := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(styles.Warning).
+		Bold(true).
+		Padding(0, 2).
+		Render("◇ [D] Dry-run")
 
 	noBtn := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
@@ -62,7 +89,7 @@ func (m Model) renderConfirmation() string {
 		Padding(0, 2).
 		Render("✗ [N] Cancel")
 
-	actions := lipgloss.JoinHorizontal(lipgloss.Left, yesBtn, "   ", noBtn)
+	actions := lipgloss.JoinHorizontal(lipgloss.Left, yesBtn, "  ", dryRunBtn, "  ", noBtn)
 	content.WriteString("  " + actions)
 
 	boxStyle := lipgloss.NewStyle().
@@ -71,6 +98,44 @@ func (m Model) renderConfirmation() string {
 		Padding(1, 2)
 
 	return boxStyle.Render(content.String())
+}
+
+// estimateExecutionTime returns rough estimate in minutes based on pipeline and subject count
+func (m Model) estimateExecutionTime(subjectCount int) int {
+	// Rough estimates per subject (in minutes)
+	perSubject := 1
+	switch m.Pipeline {
+	case types.PipelinePreprocessing:
+		perSubject = 5
+	case types.PipelineFeatures:
+		perSubject = 3
+	case types.PipelineBehavior:
+		perSubject = 1
+	case types.PipelineML:
+		perSubject = 2
+	case types.PipelinePlotting:
+		perSubject = 1
+	}
+	return perSubject * subjectCount
+}
+
+// getExpectedOutputPaths returns the expected output directories for the current pipeline
+func (m Model) getExpectedOutputPaths() []string {
+	base := "derivatives/"
+	switch m.Pipeline {
+	case types.PipelinePreprocessing:
+		return []string{base + "preprocessed/", base + "epochs/"}
+	case types.PipelineFeatures:
+		return []string{base + "features/"}
+	case types.PipelineBehavior:
+		return []string{base + "behavior/", base + "stats/"}
+	case types.PipelineML:
+		return []string{base + "machine_learning/"}
+	case types.PipelinePlotting:
+		return []string{base + "plots/"}
+	default:
+		return []string{base}
+	}
 }
 
 func (m Model) renderModeSelection() string {
@@ -96,6 +161,65 @@ func (m Model) renderModeSelection() string {
 
 		b.WriteString("\n")
 	}
+
+	return b.String()
+}
+
+func (m Model) renderProjectSetup() string {
+	var b strings.Builder
+	b.WriteString(styles.SectionTitleStyle.Render(" PROJECT SETUP ") + "\n\n")
+
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(16)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	selectedStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+	fields := []struct {
+		label  string
+		value  string
+		hint   string
+		isPath bool
+	}{
+		{"Task", m.task, "BIDS task label (e.g., pain)", false},
+		{"BIDS Root", m.projectBidsRoot, "Input BIDS dataset path", true},
+		{"Deriv Root", m.projectDerivRoot, "Derivatives output path", true},
+		{"Source Root", m.projectSourceRoot, "Raw source data path (utilities)", true},
+	}
+
+	for i, f := range fields {
+		cursor := "  "
+		if i == m.projectSetupCursor {
+			cursor = selectedStyle.Render("▸ ")
+		}
+
+		value := f.value
+		if value == "" {
+			value = dimStyle.Render("(use global default)")
+		} else {
+			value = valueStyle.Render(value)
+		}
+
+		b.WriteString(cursor + labelStyle.Render(f.label+":") + value + "\n")
+		if i == m.projectSetupCursor {
+			b.WriteString("    " + dimStyle.Render(f.hint) + "\n")
+		}
+	}
+
+	// Use global defaults toggle
+	b.WriteString("\n")
+	toggleCursor := "  "
+	if m.projectSetupCursor == 4 {
+		toggleCursor = selectedStyle.Render("▸ ")
+	}
+	checkbox := "[ ]"
+	if m.useGlobalDefaults {
+		checkbox = lipgloss.NewStyle().Foreground(styles.Success).Render("[✓]")
+	}
+	b.WriteString(toggleCursor + checkbox + " Use global defaults for this run\n")
+
+	// Help hints
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render("↑/↓ navigate  •  Enter edit  •  Space toggle  •  Esc clear") + "\n")
 
 	return b.String()
 }
@@ -1221,7 +1345,7 @@ func (m Model) renderSubjectSelection() string {
 		MarginLeft(1)
 	b.WriteString(accent + titleStyle.Render(" SUBJECT SELECTION") + "\n\n")
 
-	if m.Pipeline == types.PipelineDecoding {
+	if m.Pipeline == types.PipelineML {
 		scopeLabel := lipgloss.NewStyle().Foreground(styles.Muted).Render("Scope:")
 		selectedChip := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
@@ -1235,7 +1359,7 @@ func (m Model) renderSubjectSelection() string {
 
 		groupChip := unselectedChip.Render("Group (LOSO)")
 		subjectChip := unselectedChip.Render("Subject (within)")
-		if m.decodingScope == DecodingCVScopeGroup {
+		if m.mlScope == MLCVScopeGroup {
 			groupChip = selectedChip.Render("Group (LOSO)")
 		} else {
 			subjectChip = selectedChip.Render("Subject (within)")
@@ -1289,7 +1413,7 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	minValid := 1
-	if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
 		minValid = 2
 	}
 
@@ -1331,7 +1455,7 @@ func (m Model) renderSubjectSelection() string {
 	// Calculate responsive layout based on terminal height
 	// Overhead: header(4) + title(2) + status(2) + footer(2) + legend(2) = 12
 	overhead := 12
-	if m.Pipeline == types.PipelineDecoding {
+	if m.Pipeline == types.PipelineML {
 		overhead += 2 // scope line + spacer
 	}
 	layout := styles.CalculateListLayout(m.height, m.subjectCursor, len(filteredSubjects), overhead)
@@ -1442,9 +1566,9 @@ func (m Model) renderReview() string {
 	card.WriteString(iconStyle.Render(modeIcon+" ") + labelStyle.Render("Mode:") +
 		valueStyle.Render(m.modeOptions[m.modeIndex]) + "\n")
 
-	if m.Pipeline == types.PipelineDecoding {
+	if m.Pipeline == types.PipelineML {
 		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("CV Scope:") +
-			valueStyle.Render(m.decodingScope.CLIValue()) + "\n")
+			valueStyle.Render(m.mlScope.CLIValue()) + "\n")
 	}
 
 	subjCount := 0
@@ -1738,8 +1862,8 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderBehaviorAdvancedConfig()
 	case types.PipelinePlotting:
 		return m.renderPlottingAdvancedConfig()
-	case types.PipelineDecoding:
-		return m.renderDecodingAdvancedConfig()
+	case types.PipelineML:
+		return m.renderMLAdvancedConfig()
 	case types.PipelinePreprocessing:
 		return m.renderPreprocessingAdvancedConfig()
 	case types.PipelineRawToBIDS:
@@ -2273,6 +2397,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Band pairs"
 			value = pacPairsVal
 			hint = "e.g. theta:gamma,alpha:gamma"
+		case optPACSource:
+			label = "Source"
+			sources := []string{"precomputed", "tfr"}
+			value = sources[m.pacSource]
+			hint = "Hilbert vs wavelet"
+		case optPACNormalize:
+			label = "Normalize"
+			value = m.boolToOnOff(m.pacNormalize)
+			hint = "normalize PAC values"
+		case optPACNSurrogates:
+			label = "N Surrogates"
+			value = fmt.Sprintf("%d", m.pacNSurrogates)
+			hint = "0=none, >0 for z-scores"
+		case optPACAllowHarmonicOverlap:
+			label = "Allow Harmonics"
+			value = m.boolToOnOff(m.pacAllowHarmonicOvrlap)
+			hint = "allow harmonic overlap"
+		case optPACMaxHarmonic:
+			label = "Max Harmonic"
+			value = fmt.Sprintf("%d", m.pacMaxHarmonic)
+			hint = "upper harmonic to check"
+		case optPACHarmonicToleranceHz:
+			label = "Harmonic Tol Hz"
+			value = fmt.Sprintf("%.1f", m.pacHarmonicToleranceHz)
+			hint = "tolerance for overlap check"
 
 		// Aperiodic
 		case optAperiodicRange:
@@ -2291,6 +2440,28 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Min Points"
 			value = aperiodicPointsVal
 			hint = "minimum bins required"
+		case optAperiodicPsdBandwidth:
+			aperiodicBandwidthVal := fmt.Sprintf("%.1f", m.aperiodicPsdBandwidth)
+			if m.aperiodicPsdBandwidth == 0 {
+				aperiodicBandwidthVal = "(default)"
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicPsdBandwidth) {
+				aperiodicBandwidthVal = m.numberBuffer + "█"
+			}
+			label = "PSD Bandwidth"
+			value = aperiodicBandwidthVal
+			hint = "Hz (0=default)"
+		case optAperiodicMaxRms:
+			aperiodicMaxRmsVal := fmt.Sprintf("%.3f", m.aperiodicMaxRms)
+			if m.aperiodicMaxRms == 0 {
+				aperiodicMaxRmsVal = "(no limit)"
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicMaxRms) {
+				aperiodicMaxRmsVal = m.numberBuffer + "█"
+			}
+			label = "Max RMS"
+			value = aperiodicMaxRmsVal
+			hint = "fit quality limit (0=no limit)"
 
 		// Complexity
 		case optPEOrder:
@@ -2303,6 +2474,23 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "sample lag"
 
 		// Bursts
+		case optBurstThresholdMethod:
+			methods := []string{"percentile", "zscore", "mad"}
+			methodVal := "percentile"
+			if m.burstThresholdMethod >= 0 && m.burstThresholdMethod < len(methods) {
+				methodVal = methods[m.burstThresholdMethod]
+			}
+			label = "Threshold Method"
+			value = methodVal
+			hint = "percentile / zscore / mad"
+		case optBurstThresholdPercentile:
+			burstPercentileVal := fmt.Sprintf("%.1f", m.burstThresholdPercentile)
+			if m.editingNumber && m.isCurrentlyEditing(optBurstThresholdPercentile) {
+				burstPercentileVal = m.numberBuffer + "█"
+			}
+			label = "Threshold Percentile"
+			value = burstPercentileVal
+			hint = "percentile threshold"
 		case optBurstThreshold:
 			label = "Threshold Z"
 			value = burstThreshVal
@@ -2345,6 +2533,36 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Components"
 			value = erpComponentsVal
 			hint = "e.g. n1=0.10-0.20,n2=0.20-0.35"
+		case optERPSmoothMs:
+			erpSmoothVal := fmt.Sprintf("%.1f ms", m.erpSmoothMs)
+			if m.erpSmoothMs == 0 {
+				erpSmoothVal = "(no smoothing)"
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optERPSmoothMs) {
+				erpSmoothVal = m.numberBuffer + "█"
+			}
+			label = "Smooth Window"
+			value = erpSmoothVal
+			hint = "ms (0=no smoothing)"
+		case optERPPeakProminenceUv:
+			erpProminenceVal := fmt.Sprintf("%.1f µV", m.erpPeakProminenceUv)
+			if m.erpPeakProminenceUv == 0 {
+				erpProminenceVal = "(default)"
+			}
+			if m.editingNumber && m.isCurrentlyEditing(optERPPeakProminenceUv) {
+				erpProminenceVal = m.numberBuffer + "█"
+			}
+			label = "Peak Prominence"
+			value = erpProminenceVal
+			hint = "µV (0=use default)"
+		case optERPLowpassHz:
+			erpLowpassVal := fmt.Sprintf("%.1f Hz", m.erpLowpassHz)
+			if m.editingNumber && m.isCurrentlyEditing(optERPLowpassHz) {
+				erpLowpassVal = m.numberBuffer + "█"
+			}
+			label = "Low-Pass Filter"
+			value = erpLowpassVal
+			hint = "Hz before peak detection"
 
 		// Ratios / asymmetry
 		case optSpectralRatioPairs:
@@ -2462,6 +2680,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
 	} else if m.editingText {
 		b.WriteString(infoStyle.Render("Type text, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.expandedOption >= 0 {
+		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
 	} else {
 		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
 	}
@@ -2690,32 +2910,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			return "Extra Event Columns", val, "comma-separated"
-		case optTrialTableValidate:
-			return "Validate Table", m.boolToOnOff(m.trialTableValidateEnabled), "non-gating checks"
-		case optTrialTableRatingMin:
-			val := fmt.Sprintf("%.2f", m.trialTableRatingMin)
-			if m.editingNumber && m.isCurrentlyEditing(optTrialTableRatingMin) {
-				val = numberDisplay
-			}
-			return "Rating Min", val, "validation threshold"
-		case optTrialTableRatingMax:
-			val := fmt.Sprintf("%.2f", m.trialTableRatingMax)
-			if m.editingNumber && m.isCurrentlyEditing(optTrialTableRatingMax) {
-				val = numberDisplay
-			}
-			return "Rating Max", val, "validation threshold"
-		case optTrialTableTempMin:
-			val := fmt.Sprintf("%.2f", m.trialTableTempMin)
-			if m.editingNumber && m.isCurrentlyEditing(optTrialTableTempMin) {
-				val = numberDisplay
-			}
-			return "Temp Min", val, "validation threshold"
-		case optTrialTableTempMax:
-			val := fmt.Sprintf("%.2f", m.trialTableTempMax)
-			if m.editingNumber && m.isCurrentlyEditing(optTrialTableTempMax) {
-				val = numberDisplay
-			}
-			return "Temp Max", val, "validation threshold"
 		case optTrialTableHighMissingFrac:
 			val := fmt.Sprintf("%.2f", m.trialTableHighMissingFrac)
 			if m.editingNumber && m.isCurrentlyEditing(optTrialTableHighMissingFrac) {
@@ -2738,8 +2932,26 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Poly Degree", val, "poly fallback degree"
+		case optPainResidualSplineDfCandidates:
+			val := m.painResidualSplineDfCandidates
+			if val == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldPainResidualSplineDfCandidates {
+				val = textDisplay
+			}
+			return "Spline DF Candidates", val, "comma-separated (e.g., 3,4,5)"
 		case optPainResidualModelCompare:
 			return "Temp Model Compare", m.boolToOnOff(m.painResidualModelCompareEnabled), "non-gating diagnostics"
+		case optPainResidualModelComparePolyDegrees:
+			val := m.painResidualModelComparePolyDegrees
+			if val == "" {
+				val = "(none)"
+			}
+			if m.editingText && m.editingTextField == textFieldPainResidualModelComparePolyDegrees {
+				val = textDisplay
+			}
+			return "Model Compare Poly Deg", val, "comma-separated (e.g., 2,3)"
 		case optPainResidualBreakpoint:
 			return "Breakpoint Test", m.boolToOnOff(m.painResidualBreakpointEnabled), "single-hinge model"
 		case optPainResidualBreakpointCandidates:
@@ -3077,81 +3289,43 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optConditionCompareColumn:
 			val := m.conditionCompareColumn
 			if val == "" {
-				val = "(auto: from event_columns.pain_binary)"
+				val = "(select column)"
 			}
 			if m.editingText && m.editingTextField == textFieldConditionCompareColumn {
 				val = textDisplay
 			}
-			hint := "events.tsv column"
-			// Use discovered columns with values if available
+			hint := "Space to select"
 			if len(m.discoveredColumns) > 0 {
-				max := 4
-				cols := m.discoveredColumns
-				if len(cols) < max {
-					max = len(cols)
-				}
-				suffix := ""
-				if len(cols) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
-				}
-				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
-			} else if len(m.availableColumns) > 0 {
-				max := 4
-				if len(m.availableColumns) < max {
-					max = len(m.availableColumns)
-				}
-				suffix := ""
-				if len(m.availableColumns) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
-				}
-				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
 			}
 			return "Compare Column", val, hint
 		case optConditionCompareWindows:
 			val := m.conditionCompareWindows
 			if val == "" {
-				val = "(optional)"
+				val = "(select windows)"
 			}
 			if m.editingText && m.editingTextField == textFieldConditionCompareWindows {
 				val = textDisplay
 			}
-			hint := "space-separated time windows (e.g. baseline active)"
+			hint := "Space to select"
 			if len(m.availableWindows) > 0 {
-				max := 4
-				if len(m.availableWindows) < max {
-					max = len(m.availableWindows)
-				}
-				suffix := ""
-				if len(m.availableWindows) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(m.availableWindows)-max)
-				}
-				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableWindows[:max], " "), suffix)
+				hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
 			}
 			return "Compare Windows", val, hint
 		case optConditionCompareValues:
+			if m.conditionCompareColumn == "" {
+				return "Compare Values", "(select column first)", "requires column selection"
+			}
 			val := m.conditionCompareValues
 			if val == "" {
-				val = "(auto: all unique values)"
+				val = "(select values)"
 			}
 			if m.editingText && m.editingTextField == textFieldConditionCompareValues {
 				val = textDisplay
 			}
-			hint := "comma-separated values in column (e.g., 0,1 or pain,nonpain)"
-			// Show available values for the selected column
-			selectedCol := m.conditionCompareColumn
-			if selectedCol == "" {
-				selectedCol = "pain_binary_coded" // Default column
-			}
-			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
-				max := 5
-				if len(vals) < max {
-					max = len(vals)
-				}
-				suffix := ""
-				if len(vals) > max {
-					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
-				}
-				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			hint := "Space to select"
+			if vals := m.GetDiscoveredColumnValues(m.conditionCompareColumn); len(vals) > 0 {
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.conditionCompareColumn)
 			}
 			return "Compare Values", val, hint
 		case optConditionWindowPrimaryUnit:
@@ -3201,63 +3375,33 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optTemporalConditionColumn:
 			val := m.temporalConditionColumn
 			if val == "" {
-				val = "(default: event_columns.pain_binary)"
+				val = "(select column)"
 			}
 			if m.editingText && m.editingTextField == textFieldTemporalConditionColumn {
 				val = textDisplay
 			}
-			hint := "column to split by"
-			// Use discovered columns with values if available
+			hint := "Space to select"
 			if len(m.discoveredColumns) > 0 {
-				max := 4
-				cols := m.discoveredColumns
-				if len(cols) < max {
-					max = len(cols)
-				}
-				suffix := ""
-				if len(cols) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
-				}
-				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
-			} else if len(m.availableColumns) > 0 {
-				max := 4
-				if len(m.availableColumns) < max {
-					max = len(m.availableColumns)
-				}
-				suffix := ""
-				if len(m.availableColumns) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
-				}
-				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
 			}
 			return "Condition Column", val, hint
 		case optTemporalConditionValues:
 			if !m.temporalSplitByCondition {
 				return "Condition Values", "N/A", "enable Split by Condition"
 			}
+			if m.temporalConditionColumn == "" {
+				return "Condition Values", "(select column first)", "requires column selection"
+			}
 			val := m.temporalConditionValues
 			if val == "" {
-				val = "(all unique values)"
+				val = "(select values)"
 			}
 			if m.editingText && m.editingTextField == textFieldTemporalConditionValues {
 				val = textDisplay
 			}
-			hint := "optional subset (e.g., 0,1 or pain,nonpain)"
-			// Show available values for the selected column
-			selectedCol := m.temporalConditionColumn
-			if selectedCol == "" {
-				selectedCol = "pain_binary_coded"
-			}
-			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
-				max := 5
-				if len(vals) < max {
-					max = len(vals)
-				}
-				suffix := ""
-				if len(vals) > max {
-					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
-				}
-				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			hint := "Space to select"
+			if vals := m.GetDiscoveredColumnValues(m.temporalConditionColumn); len(vals) > 0 {
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.temporalConditionColumn)
 			}
 			return "Condition Values", val, hint
 		case optTemporalFilterValue:
@@ -3317,6 +3461,25 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "ERDS Method", v, "ERDS normalization"
 
+		// TF Heatmap options
+		case optTemporalTfHeatmapEnabled:
+			return "TF Heatmap", m.boolToOnOff(m.tfHeatmapEnabled), "time-frequency correlation heatmap"
+		case optTemporalTfHeatmapFreqs:
+			val := m.tfHeatmapFreqsSpec
+			if val == "" {
+				val = "(default)"
+			}
+			if m.editingText && m.editingTextField == textFieldTfHeatmapFreqs {
+				val = textDisplay
+			}
+			return "TF Freqs", val, "frequencies for heatmap"
+		case optTemporalTfHeatmapTimeResMs:
+			val := fmt.Sprintf("%d ms", m.tfHeatmapTimeResMs)
+			if m.editingNumber && m.isCurrentlyEditing(optTemporalTfHeatmapTimeResMs) {
+				val = numberDisplay
+			}
+			return "TF Time Res", val, "temporal resolution"
+
 		// Report
 		case optReportTopN:
 			val := fmt.Sprintf("%d", m.reportTopN)
@@ -3370,60 +3533,30 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		case optClusterConditionColumn:
 			val := m.clusterConditionColumn
 			if val == "" {
-				val = "(auto: event_columns.pain_binary)"
+				val = "(select column)"
 			}
 			if m.editingText && m.editingTextField == textFieldClusterConditionColumn {
 				val = textDisplay
 			}
-			hint := "events.tsv column"
-			// Use discovered columns with values if available
+			hint := "Space to select"
 			if len(m.discoveredColumns) > 0 {
-				max := 4
-				cols := m.discoveredColumns
-				if len(cols) < max {
-					max = len(cols)
-				}
-				suffix := ""
-				if len(cols) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(cols)-max)
-				}
-				hint = fmt.Sprintf("Space to expand · columns: %s%s", strings.Join(cols[:max], " "), suffix)
-			} else if len(m.availableColumns) > 0 {
-				max := 4
-				if len(m.availableColumns) < max {
-					max = len(m.availableColumns)
-				}
-				suffix := ""
-				if len(m.availableColumns) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
-				}
-				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
 			}
 			return "Cluster Column", val, hint
 		case optClusterConditionValues:
+			if m.clusterConditionColumn == "" {
+				return "Cluster Values", "(select column first)", "requires column selection"
+			}
 			val := m.clusterConditionValues
 			if val == "" {
-				val = "(default: 0 1)"
+				val = "(select values)"
 			}
 			if m.editingText && m.editingTextField == textFieldClusterConditionValues {
 				val = textDisplay
 			}
-			hint := "two values (e.g. 0 1 or pain nonpain)"
-			// Show available values for the selected column
-			selectedCol := m.clusterConditionColumn
-			if selectedCol == "" {
-				selectedCol = "pain_binary_coded"
-			}
-			if vals := m.GetDiscoveredColumnValues(selectedCol); len(vals) > 0 {
-				max := 5
-				if len(vals) < max {
-					max = len(vals)
-				}
-				suffix := ""
-				if len(vals) > max {
-					suffix = fmt.Sprintf(" +%d more", len(vals)-max)
-				}
-				hint = fmt.Sprintf("available: %s%s", strings.Join(vals[:max], ", "), suffix)
+			hint := "Space to select"
+			if vals := m.GetDiscoveredColumnValues(m.clusterConditionColumn); len(vals) > 0 {
+				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.clusterConditionColumn)
 			}
 			return "Cluster Values", val, hint
 
@@ -3480,12 +3613,9 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Max Features", val, "max features to include"
 
 		default:
-			return "Unknown", "", ""
+			return "", "", ""
 		}
 	}
-
-	// Calculate total lines (options list, no sub-item expansion like features)
-	totalLines := len(options)
 
 	// Calculate visible area - use sensible defaults if height not yet set
 	effectiveHeight := m.height
@@ -3499,6 +3629,10 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	if maxLines < 8 {
 		maxLines = 8
 	}
+
+	// Note: expanded list items are rendered inline after their parent option,
+	// so we only scroll based on the options array length
+	totalLines := len(options)
 
 	// If all content fits, show everything without scrolling
 	startIdx := 0
@@ -3520,8 +3654,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			startIdx = 0
 		}
 		endIdx = startIdx + maxLines
-		if endIdx > len(options) {
-			endIdx = len(options)
+		if endIdx > totalLines {
+			endIdx = totalLines
 		}
 	}
 
@@ -3574,6 +3708,25 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
 			b.WriteString("  " + hintStyle.Render(hint) + "\n")
 		}
+
+		// Render expanded column/value list after the relevant option
+		if m.shouldRenderExpandedListAfterOption(opt) {
+			items := m.getExpandedListItems()
+			subIndent := "      " // 6 spaces for sub-items
+			for j, item := range items {
+				isSubFocused := j == m.subCursor
+				isSelected := m.isExpandedItemSelected(j, item)
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+				if isSubFocused {
+					itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+				}
+
+				b.WriteString(subIndent + checkbox + " " + itemStyle.Render(item) + "\n")
+			}
+		}
 	}
 
 	// Show scroll indicator for items below
@@ -3585,29 +3738,32 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	return b.String()
 }
 
-func (m Model) renderDecodingAdvancedConfig() string {
+func (m Model) renderMLAdvancedConfig() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	b.WriteString(infoStyle.Render("  Configure decoding analysis parameters.") + "\n")
+	b.WriteString(infoStyle.Render("  Configure machine learning analysis parameters.") + "\n")
 	b.WriteString(infoStyle.Render("  Press Space to toggle/cycle values, Enter to proceed.") + "\n\n")
 
 	labelWidth := 22
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
-	permutationsVal := fmt.Sprintf("%d", m.decodingNPerm)
+	permutationsVal := fmt.Sprintf("%d", m.mlNPerm)
 	innerSplitsVal := fmt.Sprintf("%d", m.innerSplits)
+	outerJobsVal := fmt.Sprintf("%d", m.outerJobs)
 	rngSeedVal := m.rngSeedDisplay()
 	rfNEstimatorsVal := fmt.Sprintf("%d", m.rfNEstimators)
 
 	// Override with input buffer if editing that field
 	if m.editingNumber {
 		inputDisplay := m.numberBuffer + "█"
-		if m.isCurrentlyEditing(optDecodingNPerm) {
+		if m.isCurrentlyEditing(optMLNPerm) {
 			permutationsVal = inputDisplay
-		} else if m.isCurrentlyEditing(optDecodingInnerSplits) {
+		} else if m.isCurrentlyEditing(optMLInnerSplits) {
 			innerSplitsVal = inputDisplay
+		} else if m.isCurrentlyEditing(optMLOuterJobs) {
+			outerJobsVal = inputDisplay
 		} else if m.isCurrentlyEditing(optRNGSeed) {
 			rngSeedVal = inputDisplay
 		} else if m.isCurrentlyEditing(optRfNEstimators) {
@@ -3622,7 +3778,7 @@ func (m Model) renderDecodingAdvancedConfig() string {
 	if m.editingText {
 		inputDisplay := m.textBuffer + "█"
 		// The text buffer is shared, check which field is focused
-		options := m.getDecodingOptions()
+		options := m.getMLOptions()
 		if m.advancedCursor < len(options) {
 			switch options[m.advancedCursor] {
 			case optElasticNetAlphaGrid:
@@ -3643,6 +3799,7 @@ func (m Model) renderDecodingAdvancedConfig() string {
 		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization"},
 		{"Permutations", permutationsVal, "0=disabled, 100+ for p-values"},
 		{"Inner CV Splits", innerSplitsVal, "Cross-validation folds"},
+		{"Outer Jobs", outerJobsVal, "Parallel jobs for outer CV"},
 		{"RNG Seed", rngSeedVal, "0=project default"},
 		{"Skip Time-Gen", m.boolToOnOff(m.skipTimeGen), "Skip time generalization"},
 		{"ElasticNet α Grid", elasticNetAlphaVal, "comma-separated alphas"},
@@ -3701,6 +3858,10 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 	// Build values for display
 	nJobsVal := fmt.Sprintf("%d", m.prepNJobs)
+	montageVal := m.prepMontage
+	if m.editingText && m.editingTextField == textFieldPrepMontage {
+		montageVal = m.textBuffer + "█"
+	}
 	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
 	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
 	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
@@ -3768,6 +3929,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		{"Use PyPREP", m.boolToOnOff(m.prepUsePyprep), "Bad channel detection", "Preprocessing Controls"},
 		{"Use ICA Label", m.boolToOnOff(m.prepUseIcalabel), "mne-icalabel classification", ""},
 		{"N Jobs", nJobsVal, "Parallel jobs for bad channels", ""},
+		{"Montage", montageVal, "EEG montage (e.g., easycap-M1)", ""},
 
 		{"Resample", resampleVal, "Resampling frequency", "Filtering"},
 		{"L-Freq", lFreqVal, "High-pass filter", ""},

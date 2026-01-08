@@ -1,9 +1,9 @@
 """
-Decoding Plotting Helpers (Canonical)
+Machine Learning Plotting Helpers (Canonical)
 =====================================
 
-Shared helper functions for decoding visualization modules.
-All decoding plotting modules should import these helpers from here.
+Shared helper functions for machine learning visualization modules.
+All machine learning plotting modules should import these helpers from here.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def calculate_axis_limits(
 ) -> tuple[float, float]:
     """Calculate axis limits with margin."""
     if margin_factor is None:
-        margin_factor = plot_cfg.plot_type_configs.get("decoding", {}).get("axis_margin_factor", 0.05)
+        margin_factor = plot_cfg.plot_type_configs.get("machine_learning", {}).get("axis_margin_factor", 0.05)
     value_min = np.nanmin(values)
     value_max = np.nanmax(values)
     margin = (value_max - value_min) * margin_factor
@@ -123,8 +123,8 @@ def plot_residual_diagnostics(
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="decoding")
-    marker_size = plot_cfg.get_scatter_marker_size(plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
+    marker_size = plot_cfg.get_scatter_marker_size(plot_type="machine_learning")
     
     fig, axes = plt.subplots(1, 2, figsize=fig_size)
     
@@ -143,9 +143,9 @@ def plot_residual_diagnostics(
     despine(axes[0])
     
     residuals_sorted = np.sort(residuals)
-    decoding_config = plot_cfg.plot_type_configs.get("decoding", {})
-    quantile_min = decoding_config.get("quantile_min", 0.01)
-    quantile_max = decoding_config.get("quantile_max", 0.99)
+    ml_config = plot_cfg.plot_type_configs.get("machine_learning", {})
+    quantile_min = ml_config.get("quantile_min", 0.01)
+    quantile_max = ml_config.get("quantile_max", 0.99)
     quantile_range = np.linspace(quantile_min, quantile_max, len(residuals_sorted))
     theoretical_quantiles = stats.norm.ppf(quantile_range)
     axes[1].scatter(theoretical_quantiles, residuals_sorted, s=marker_size, 

@@ -2,7 +2,7 @@
 Feature Registry and Classification
 ===================================
 
-Shared feature registry utilities used by behavioral correlations and decoding.
+Shared feature registry utilities used by behavioral correlations and machine learning.
 """
 
 from __future__ import annotations

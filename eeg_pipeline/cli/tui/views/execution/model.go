@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -578,6 +579,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "c":
 			return m, m.copyLogToClipboard()
+		case "o", "O":
+			// Open results folder (only when done successfully)
+			if m.IsDone() && m.Status == StatusSuccess {
+				return m, m.OpenResultsFolder()
+			}
+			return m, nil
 		case "i":
 			m.ShowInfo = !m.ShowInfo
 			m.updateLogViewport()
@@ -628,6 +635,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// GetOutputPaths returns the expected output paths based on the command being run
+func (m Model) GetOutputPaths() []string {
+	if m.RepoRoot == "" {
+		return nil
+	}
+
+	base := filepath.Join(m.RepoRoot, "eeg_pipeline", "data", "derivatives")
+
+	// Parse pipeline from command
+	cmd := strings.ToLower(m.Command)
+	var paths []string
+
+	switch {
+	case strings.Contains(cmd, "preprocess"):
+		paths = []string{
+			filepath.Join(base, "preprocessed"),
+			filepath.Join(base, "epochs"),
+		}
+	case strings.Contains(cmd, "features"):
+		paths = []string{filepath.Join(base, "features")}
+	case strings.Contains(cmd, "behavior"):
+		paths = []string{
+			filepath.Join(base, "behavior"),
+			filepath.Join(base, "stats"),
+		}
+	case strings.Contains(cmd, " ml "):
+		paths = []string{filepath.Join(base, "machine_learning")}
+	case strings.Contains(cmd, "plot"):
+		paths = []string{filepath.Join(base, "plots")}
+	default:
+		paths = []string{base}
+	}
+
+	// Filter to paths that exist
+	var existingPaths []string
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			existingPaths = append(existingPaths, p)
+		}
+	}
+
+	if len(existingPaths) == 0 {
+		return paths // Return expected paths even if they don't exist yet
+	}
+	return existingPaths
+}
+
+// OpenResultsFolder opens the first output path in the system file browser
+func (m Model) OpenResultsFolder() tea.Cmd {
+	paths := m.GetOutputPaths()
+	if len(paths) == 0 {
+		return nil
+	}
+	return executor.OpenInFileBrowserCmd(paths[0])
 }
 
 // updateViewportSize recalculates log viewport dimensions based on current state
@@ -1118,23 +1181,43 @@ func (m Model) renderCompletionSummary() string {
 	}
 	b.WriteString(labelStyle.Render("Log:") + valueStyle.Render(logCount) + "\n")
 
+	// Show output paths for successful runs
+	if m.Status == StatusSuccess && m.RepoRoot != "" {
+		b.WriteString("\n")
+		outputHeader := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Output Locations:")
+		b.WriteString(outputHeader + "\n")
+
+		outputPaths := m.GetOutputPaths()
+		for i, p := range outputPaths {
+			pathStyle := lipgloss.NewStyle().Foreground(styles.Text)
+			numStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+			b.WriteString(numStyle.Render(fmt.Sprintf("[%d]", i+1)) + " " + pathStyle.Render(p) + "\n")
+		}
+	}
+
 	// Add quick action buttons
 	b.WriteString("\n")
 	switch m.Status {
 	case StatusSuccess:
-		// Styled action buttons for success
+		// Styled action buttons for success with results browsing
 		enterBtn := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
 			Background(styles.Success).
 			Bold(true).
 			Padding(0, 1).
 			Render("[Enter] Menu")
+		openBtn := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(styles.Accent).
+			Bold(true).
+			Padding(0, 1).
+			Render("[O] Open Results")
 		copyBtn := lipgloss.NewStyle().
 			Foreground(styles.Text).
 			Background(styles.Secondary).
 			Padding(0, 1).
 			Render("[C] Copy Log")
-		b.WriteString(enterBtn + "  " + copyBtn)
+		b.WriteString(enterBtn + "  " + openBtn + "  " + copyBtn)
 	case StatusFailed:
 		// Prominent action buttons for failure - recovery options highlighted
 		retryBtn := lipgloss.NewStyle().
@@ -2108,9 +2191,8 @@ func (m Model) copyLogToClipboard() tea.Cmd {
 		logContent += "\n--- Log ---\n"
 		logContent += strings.Join(m.OutputLines, "\n")
 
-		cmd := exec.Command("pbcopy")
-		cmd.Stdin = strings.NewReader(logContent)
-		cmd.Run()
+		// Cross-platform clipboard support
+		executor.CopyToClipboard(logContent)
 
 		return messages.LogCopiedMsg{}
 	}

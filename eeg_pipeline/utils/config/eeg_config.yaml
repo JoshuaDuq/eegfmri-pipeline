@@ -188,7 +188,7 @@ feature_engineering:
 
   itpc:
     # Leakage-safe modes:
-    # - "global": ITPC computed across ALL trials and broadcast per trial (default, but leaks in CV/decoding)
+    # - "global": ITPC computed across ALL trials and broadcast per trial (default, but leaks in CV/machine learning)
     # - "fold_global": ITPC computed from TRAINING trials only when ctx.train_mask present (leakage-safe)
     # - "loo": Leave-one-out ITPC (unsafe unless allow_unsafe_loo=true and computed in-fold)
     method: "global"   
@@ -224,7 +224,7 @@ feature_engineering:
     min_cycles_per_band: 3.0         # Minimum oscillatory cycles per band for reliable connectivity
     warn_if_no_spatial_transform: true  # Warn if phase-based measures used without CSD/Laplacian
     phase_estimator: "within_epoch"  # "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
-    force_within_epoch_for_decoding: true  # Force within_epoch when train_mask detected (prevents CV leakage)
+    force_within_epoch_for_ml: true  # Force within_epoch when train_mask detected (prevents CV leakage)
     min_segment_sec: 1.0             # Minimum segment duration for connectivity (sec)
 
   pac:
@@ -327,18 +327,18 @@ behavior_analysis:
     include_features: true
     include_covariates: true
     include_events: true
-    add_lag_features: true
     extra_event_columns: []
     validate:
       enabled: true
       # Non-gating data contract checks (pain studies defaults; override per project)
-      rating_min: 0.0
-      rating_max: 10.0
-      temperature_min: 25.0
-      temperature_max: 55.0
       high_missing_frac: 0.5
 
-  # Define pain residual = rating - f(temperature)
+  # Lag features: temporal dynamics (prev_*, delta_*) for habituation analyses
+  lag_features:
+    enabled: true
+    group_columns: []  # Empty = auto-detect from run_adjustment.column, run_id, run, block
+
+  # Pain residual = rating - f(temperature) for "pain beyond stimulus intensity"
   pain_residual:
     enabled: true
     method: "spline"          # "spline" (requires statsmodels) or "poly"
@@ -351,6 +351,10 @@ behavior_analysis:
       n_splits: 5
       method: "spline"        # "spline" | "poly" (crossfit uses sklearn splines/poly + ridge)
       spline_n_knots: 5
+
+  # Temperature→rating model diagnostics (model comparison + breakpoint detection)
+  temperature_models:
+    enabled: true
     model_comparison:
       enabled: true
       min_samples: 10
@@ -629,8 +633,8 @@ behavior_analysis:
       itpc_segmented: "^itpc_([^_]+)_ch_([^_]+)_([^_]+)_.+$"
       dynamics_burst_segmented: "^bursts_([^_]+)_([^_]+)_([^_]+)_.+$"
 
-# 4.5 Decoding (ML)
-decoding:
+# 4.5 Machine Learning
+machine_learning:
   cv:
     inner_splits: 5
     hygiene_enabled: true

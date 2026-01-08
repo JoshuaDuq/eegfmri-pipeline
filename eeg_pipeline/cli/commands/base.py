@@ -123,21 +123,34 @@ def detect_feature_availability(features_dir) -> dict:
     
     # Try to find stats adjacent to features
     stats_dir = features_dir.parent / "stats"
+    # Patterns are searched via rglob within stats_dir, so they can match nested subfolders.
+    # Keep these aligned with outputs produced by eeg_pipeline.analysis.behavior.orchestration.
     computation_patterns = {
-        "trial_table": ["trials*.tsv", "trials.parquet", "trial_table*.tsv"],
-        "confounds": ["confounds_audit*.tsv"],
-        "regression": ["regression_*.tsv", "trialwise_regression*.tsv", "regression_feature_effects*.tsv"],
-        "models": ["model_*.tsv", "sensitivity_*.tsv", "temperature_model_comparison.tsv"],
-        "stability": ["stability_*.tsv", "temperature_breakpoint_test.tsv"],
-        "consistency": ["consistency_*.tsv"],
-        "influence": ["influence_*.tsv", "cooks_*.tsv", "influence_diagnostics*.tsv"],
-        "report": ["subject_report*.html", "subject_report*.pdf", "subject_report*.md"],
-        "correlations": ["correlations*.tsv", "power_topomap_temperature_correlations*.tsv"],
+        "trial_table": ["trials*.tsv", "trials*.parquet"],
+        "lag_features": ["trials_with_lags*.tsv", "lag_features*.metadata.json"],
+        "pain_residual": ["trials_with_residual*.tsv", "pain_residual*.metadata.json"],
+        "temperature_models": [
+            "model_comparison*.tsv",
+            "breakpoint_candidates*.tsv",
+            "temperature_models*.metadata.json",
+        ],
+        "confounds": ["confounds_audit*.tsv", "confounds_audit*.metadata.json"],
+        "regression": ["regression_feature_effects*.tsv", "regression_feature_effects*.metadata.json"],
+        "models": ["models_feature_effects*.tsv", "models_feature_effects*.metadata.json"],
+        "stability": ["stability_groupwise*.tsv", "stability_groupwise*.metadata.json"],
+        "consistency": ["consistency_summary*.tsv", "consistency_summary*.metadata.json"],
+        "influence": ["influence_diagnostics*.tsv", "influence_diagnostics*.metadata.json"],
+        "report": ["subject_report*.md", "subject_report*.html", "subject_report*.pdf"],
+        "correlations": [
+            "correlations*.tsv",
+            "*_topomap_*_correlations_*.tsv",
+        ],
         "pain_sensitivity": ["pain_sensitivity*.tsv"],
-        "condition": ["condition_*.tsv", "condition_effects.tsv"],
-        "temporal": ["temporal_*.tsv", "corr_stats_temporal*.tsv"],
-        "cluster": ["cluster_*.tsv", "pain_nonpain_time_clusters*.tsv", "null_distribution_*.json"],
+        "condition": ["condition_effects*.tsv"],
+        "temporal": ["corr_stats_temporal_*.tsv", "corr_stats_temporal_combined*.tsv", "corr_stats_tf_*.tsv"],
+        "cluster": ["cluster_results_*.tsv", "cluster_*.tsv", "null_distribution_*.json"],
         "mediation": ["mediation*.tsv"],
+        "moderation": ["moderation_results*.tsv"],
         "mixed_effects": ["mixed_effects*.tsv", "lme_*.tsv"],
     }
     

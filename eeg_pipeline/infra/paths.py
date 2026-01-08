@@ -327,7 +327,7 @@ def ensure_derivatives_dataset_description(
             {
                 "Name": "Thermal_Pain_EEG_Pipeline",
                 "Version": "unknown",
-                "Description": "Custom EEG analysis (ERP, TFR, features, decoding)",
+                "Description": "Custom EEG analysis (ERP, TFR, features, machine learning)",
             }
         ],
     }

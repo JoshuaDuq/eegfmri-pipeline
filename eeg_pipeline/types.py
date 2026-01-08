@@ -128,13 +128,13 @@ class CorrelationResult:
 
 
 ###################################################################
-# Decoding Types
+# Machine Learning Types
 ###################################################################
 
 
 @dataclass
-class DecodingResult:
-    """Result of a decoding analysis."""
+class MLResult:
+    """Result of a machine learning analysis."""
 
     y_true: np.ndarray
     y_pred: np.ndarray

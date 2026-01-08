@@ -20,16 +20,15 @@ import (
 type pipelineItem struct {
 	name        string
 	description string
-	icon        string
 	shortcut    string
 }
 
 var pipelines = []pipelineItem{
-	{"Preprocessing", "Bad channels, ICA, epochs", "▸", "1"},
-	{"Features", "Extract EEG feature sets", "▸", "2"},
-	{"Behavior", "EEG-behavior analysis", "▸", "3"},
-	{"Decoding", "LOSO regression & classification", "▸", "4"},
-	{"Plotting", "Curate and export visualization suites", "▸", "5"},
+	{"Preprocessing", "Bad channels, ICA, epochs", "1"},
+	{"Features", "Extract EEG feature sets", "2"},
+	{"Behavior", "EEG-behavior analysis", "3"},
+	{"Machine Learning", "LOSO regression & classification", "4"},
+	{"Plotting", "Curate and export visualization suites", "5"},
 }
 
 type utilityItem struct {
@@ -45,7 +44,6 @@ const (
 )
 
 var utilities = []utilityItem{
-	{"Global Setup", "Configure global defaults and paths", "G"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files", "M"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format", "R"},
 }
@@ -497,10 +495,9 @@ func (m Model) renderPipelineItem(_ int, p pipelineItem, selected bool) string {
 func (m Model) renderFooter() string {
 	hints := []string{
 		styles.RenderKeyHint("↑↓", "Navigate"),
-		styles.RenderKeyHint("Tab", "Switch"),
 		styles.RenderKeyHint("1-5", "Pipeline"),
-		styles.RenderKeyHint("M", "Merge"),
-		styles.RenderKeyHint("R", "Raw2BIDS"),
+		styles.RenderKeyHint("D", "Dashboard"),
+		styles.RenderKeyHint("H", "History"),
 		styles.RenderKeyHint("Enter", "Select"),
 		styles.RenderKeyHint("Q", "Quit"),
 	}

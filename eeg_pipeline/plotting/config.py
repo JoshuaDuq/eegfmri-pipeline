@@ -531,7 +531,7 @@ def get_plot_config(config: Optional[Any] = None) -> PlotConfig:
         >>> from eeg_pipeline.utils.config.loader import load_config
         >>> config = load_config()
         >>> plot_cfg = get_plot_config(config)
-        >>> fig_size = plot_cfg.get_figure_size("square", plot_type="decoding")
+        >>> fig_size = plot_cfg.get_figure_size("square", plot_type="machine_learning")
     """
     global _plot_config_cache
     

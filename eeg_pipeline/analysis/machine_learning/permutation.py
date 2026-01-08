@@ -9,13 +9,13 @@ from sklearn.model_selection import LeaveOneGroupOut, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
 
-from eeg_pipeline.analysis.decoding.cv import (
+from eeg_pipeline.analysis.machine_learning.cv import (
     create_inner_cv,
     create_block_aware_inner_cv,
     create_scoring_dict,
     safe_pearsonr,
 )
-from eeg_pipeline.utils.data.decoding import load_kept_indices
+from eeg_pipeline.utils.data.machine_learning import load_kept_indices
 from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, load_config, get_config_value
@@ -101,7 +101,7 @@ def _is_feature_constant_within_blocks(
     if threshold is None:
         from eeg_pipeline.utils.config.loader import ensure_config
         config = ensure_config(config)
-        threshold = float(get_config_value(config, "decoding.constants.min_variance_threshold", 1e-10))
+        threshold = float(get_config_value(config, "machine_learning.constants.min_variance_threshold", 1e-10))
     
     if blocks is None or len(np.unique(blocks)) < 2:
         return np.zeros(X.shape[1], dtype=bool)
@@ -166,7 +166,7 @@ def _compute_permutation_importance_for_feature(
     if config is None:
         config = load_config()
     
-    inner_splits_config = get_config_value(config, "decoding.cv.inner_splits", 5)
+    inner_splits_config = get_config_value(config, "machine_learning.cv.inner_splits", 5)
     
     rng = np.random.default_rng(seed)
     # Skip features with no variation to avoid undefined correlations

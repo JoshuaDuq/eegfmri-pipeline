@@ -12,7 +12,7 @@ Available commands:
 - features: Feature extraction
 - erp: Event-related potential analysis
 - tfr: Time-frequency visualization
-- decoding: ML-based prediction
+- ml: Machine learning-based prediction
 - preprocessing: Raw-to-BIDS and behavior merge
 - plotting: Curated visualization suites
 """

@@ -1,10 +1,10 @@
 """Pipeline-level visualization entrypoints.
 
-Grouped orchestration functions for behavior, decoding, and TFR.
+Grouped orchestration functions for behavior, machine learning, and TFR.
 """
 
 from .behavior import visualize_subject_behavior, visualize_behavior_for_subjects
-from .decoding import (
+from .machine_learning import (
     visualize_regression_results,
     visualize_time_generalization,
     visualize_model_comparisons,

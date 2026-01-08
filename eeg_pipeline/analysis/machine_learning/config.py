@@ -1,5 +1,5 @@
 """
-Shared decoding configuration loader to keep defaults consistent.
+Shared ML configuration loader to keep defaults consistent.
 """
 
 from __future__ import annotations
@@ -13,16 +13,16 @@ def _ensure_config(config: Any) -> Any:
     return config if config is not None else load_config()
 
 
-def get_decoding_config(config: Any = None) -> Dict[str, Any]:
+def get_ml_config(config: Any = None) -> Dict[str, Any]:
     """
-    Extract decoding configuration with unified defaults for regression and classification.
+    Extract ML configuration with unified defaults for regression and classification.
     """
     cfg = _ensure_config(config)
 
-    cv = cfg.get("decoding.cv", {})
-    constants = cfg.get("decoding.constants", {})
-    preprocessing = cfg.get("decoding.preprocessing", {})
-    models = cfg.get("decoding.models", {})
+    cv = cfg.get("machine_learning.cv", {})
+    constants = cfg.get("machine_learning.constants", {})
+    preprocessing = cfg.get("machine_learning.preprocessing", {})
+    models = cfg.get("machine_learning.models", {})
 
     elasticnet = models.get("elasticnet", {})
     rf = models.get("random_forest", {})
@@ -67,7 +67,7 @@ def get_decoding_config(config: Any = None) -> Dict[str, Any]:
     }
 
 
-__all__ = ["get_decoding_config"]
+__all__ = ["get_ml_config"]
 
 
 

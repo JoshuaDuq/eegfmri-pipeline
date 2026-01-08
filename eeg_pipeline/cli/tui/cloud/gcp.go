@@ -174,7 +174,11 @@ func RunRemoteCommand(ctx context.Context, cfg Config, pipelineCmd string) tea.C
 		}
 		prefix += fmt.Sprintf(" && export EEG_PIPELINE_N_JOBS=%d && export MNE_N_JOBS=%d", cfg.NJobs, cfg.NJobs)
 
-		fullCmd := fmt.Sprintf("%s && python3 -m eeg_pipeline %s", prefix, pipelineCmd)
+		// Strip "eeg-pipeline " prefix - BuildCommand() returns full command
+		// but python3 -m eeg_pipeline already provides the entry point
+		args := strings.TrimPrefix(pipelineCmd, "eeg-pipeline ")
+
+		fullCmd := fmt.Sprintf("%s && python3 -m eeg_pipeline %s", prefix, args)
 
 		cmd := exec.CommandContext(ctx, "ssh", cfg.getRemoteTarget(), fullCmd)
 

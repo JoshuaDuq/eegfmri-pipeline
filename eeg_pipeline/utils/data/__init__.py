@@ -13,7 +13,7 @@ from .feature_io import (
     iterate_feature_columns,
 )
 from .behavior import load_behavior_plot_features, load_behavior_stats_files, load_stats_file_with_fallbacks
-from .decoding import load_active_matrix, load_epoch_windows, load_epochs_with_targets
+from .machine_learning import load_active_matrix, load_epoch_windows, load_epochs_with_targets
 from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
 from .stats import (
     load_precomputed_correlations,

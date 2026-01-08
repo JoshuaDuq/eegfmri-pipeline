@@ -63,6 +63,9 @@ FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
 
 BEHAVIOR_COMPUTATIONS: List[str] = [
     "trial_table",
+    "lag_features",
+    "pain_residual",
+    "temperature_models",
     "confounds",
     "regression",
     "models",
@@ -82,6 +85,9 @@ BEHAVIOR_COMPUTATIONS: List[str] = [
 
 BEHAVIOR_COMPUTATION_DESCRIPTIONS: Dict[str, str] = {
     "trial_table": "Export canonical per-trial analysis table",
+    "lag_features": "Add lag/delta dynamics to trial table",
+    "pain_residual": "Compute pain_residual = rating - f(temperature)",
+    "temperature_models": "Model comparison and breakpoint detection on temp→rating",
     "confounds": "Audit QC confounds vs targets",
     "regression": "Trialwise regression/moderation models",
     "models": "Sensitivity model families (robust/quantile/logistic)",
@@ -143,13 +149,13 @@ PREPROCESSING_MODE_DESCRIPTIONS: Dict[str, str] = {
 }
 
 
-DECODING_MODES: List[str] = [
+ML_MODES: List[str] = [
     "regression",
     "timegen",
     "classify",
 ]
 
-DECODING_MODE_DESCRIPTIONS: Dict[str, str] = {
+ML_MODE_DESCRIPTIONS: Dict[str, str] = {
     "regression": "LOSO regression",
     "timegen": "Time generalization",
     "classify": "Binary classification",
@@ -175,8 +181,8 @@ def get_definitions_dict() -> Dict:
             {"key": mode, "name": mode.replace("-", " ").title(), "description": PREPROCESSING_MODE_DESCRIPTIONS.get(mode, "")}
             for mode in PREPROCESSING_MODES
         ],
-        "decoding_modes": [
-            {"key": mode, "name": mode.title(), "description": DECODING_MODE_DESCRIPTIONS.get(mode, "")}
-            for mode in DECODING_MODES
+        "ml_modes": [
+            {"key": mode, "name": mode.title(), "description": ML_MODE_DESCRIPTIONS.get(mode, "")}
+            for mode in ML_MODES
         ],
     }

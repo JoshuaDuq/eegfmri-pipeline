@@ -1,8 +1,8 @@
 """
-Decoding plotting module.
+Machine learning plotting module.
 
 Low-level plotting primitives live here. High-level orchestration/IO is defined in
-`pipelines.viz.decoding` to keep responsibilities separated.
+`plotting.orchestration.machine_learning` to keep responsibilities separated.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ __all__ = [
     # Performance metric plotting
     "plot_prediction_scatter",
     "plot_per_subject_performance",
-    "plot_decoding_null_hist",
+    "plot_ml_null_hist",
     "plot_calibration_curve",
     "plot_bootstrap_distributions",
     "plot_permutation_null",
@@ -41,7 +41,7 @@ def __getattr__(name: str):
         # Performance metric plotting
         "plot_prediction_scatter": "performance",
         "plot_per_subject_performance": "performance",
-        "plot_decoding_null_hist": "performance",
+        "plot_ml_null_hist": "performance",
         "plot_calibration_curve": "performance",
         "plot_bootstrap_distributions": "performance",
         "plot_permutation_null": "performance",

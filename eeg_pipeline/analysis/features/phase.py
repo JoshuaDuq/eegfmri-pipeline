@@ -28,9 +28,9 @@ def _get_itpc_method(config: Any) -> str:
     
     Supported methods:
     - 'global': Compute ITPC across all trials, broadcast to each trial.
-                WARNING: Creates cross-trial dependence; can leak in CV/decoding.
+                WARNING: Creates cross-trial dependence; can leak in CV/machine learning.
     - 'fold_global': Compute ITPC from training trials only (requires ctx.train_mask),
-                     broadcast to all trials. This is leakage-safe for CV/decoding.
+                     broadcast to all trials. This is leakage-safe for CV/machine learning.
     - 'loo': Leave-one-out ITPC (per-trial). Requires train_mask and explicit opt-in.
     """
     method = str(config.get("feature_engineering.itpc.method", "global")).strip().lower()
@@ -202,7 +202,7 @@ def extract_phase_features(
     n_epochs = int(data.shape[0])
     
     # ITPC is defined across trials. Cross-trial computation can leak test-trial 
-    # information in CV/decoding. We support three modes:
+    # information in CV/machine learning. We support three modes:
     # - 'global': Uses ALL trials (default, but leaks in CV)
     # - 'fold_global': Uses TRAINING trials only, requires ctx.train_mask (leakage-safe)
     # - 'loo': LOO per-trial, requires ctx.train_mask and explicit opt-in
@@ -219,7 +219,7 @@ def extract_phase_features(
         if train_mask is None:
             ctx.logger.warning(
                 "ITPC(method='fold_global') requested but ctx.train_mask not provided. "
-                "Falling back to global ITPC (which may leak in CV/decoding)."
+                "Falling back to global ITPC (which may leak in CV/machine learning)."
             )
             itpc_map = _compute_global_itpc_map(data)  # (ch, freq, time)
         else:
@@ -233,7 +233,7 @@ def extract_phase_features(
         if train_mask is not None:
             ctx.logger.info(
                 "ITPC: train_mask detected with method='global'. Consider using method='fold_global' "
-                "for leakage-safe CV/decoding. Using global ITPC (all trials) as requested."
+                "for leakage-safe CV/machine learning. Using global ITPC (all trials) as requested."
             )
         itpc_map = _compute_global_itpc_map(data)  # (ch, freq, time)
     else:

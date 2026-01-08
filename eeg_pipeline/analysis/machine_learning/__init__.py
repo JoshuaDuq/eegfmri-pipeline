@@ -1,5 +1,5 @@
 """
-Machine learning decoding analysis.
+Machine learning pipeline.
 
 Submodules:
 - cv: Cross-validation utilities and fold management
@@ -8,12 +8,12 @@ Submodules:
 - time_generalization: Temporal generalization analysis
 - permutation: Permutation importance
 
-Data loading utilities live in `eeg_pipeline.utils.data.decoding` (decoding matrices)
+Data loading utilities live in `eeg_pipeline.utils.data.machine_learning` (ML matrices)
 and `eeg_pipeline.utils.data.epochs_loading` / `eeg_pipeline.utils.data.features_io`.
 """
 
 # CV utilities
-from eeg_pipeline.analysis.decoding.cv import (
+from eeg_pipeline.analysis.machine_learning.cv import (
     create_loso_folds,
     create_inner_cv,
     create_stratified_cv_by_binned_targets,
@@ -41,19 +41,19 @@ from eeg_pipeline.analysis.decoding.cv import (
 )
 
 # Pipeline factories
-from eeg_pipeline.analysis.decoding.pipelines import (
+from eeg_pipeline.analysis.machine_learning.pipelines import (
     create_elasticnet_pipeline,
     create_rf_pipeline,
     build_elasticnet_param_grid,
     build_rf_param_grid,
 )
 
-# Data loading (canonical location: eeg_pipeline.utils.data.decoding)
-from eeg_pipeline.utils.data.decoding import load_epoch_windows, load_active_matrix
+# Data loading (canonical location: eeg_pipeline.utils.data.machine_learning)
+from eeg_pipeline.utils.data.machine_learning import load_epoch_windows, load_active_matrix
 
 # Cross-validation orchestration (high-level CV strategies)
-# Canonical pipeline class is in eeg_pipeline.pipelines.decoding
-from eeg_pipeline.analysis.decoding.orchestration import (
+# Canonical pipeline class is in eeg_pipeline.pipelines.machine_learning
+from eeg_pipeline.analysis.machine_learning.orchestration import (
     nested_loso_predictions,
     within_subject_kfold_predictions,
     loso_baseline_predictions,
@@ -61,12 +61,12 @@ from eeg_pipeline.analysis.decoding.orchestration import (
 )
 
 # Time generalization
-from eeg_pipeline.analysis.decoding.time_generalization import (
+from eeg_pipeline.analysis.machine_learning.time_generalization import (
     time_generalization_regression,
 )
 
 # Classification
-from eeg_pipeline.analysis.decoding.classification import (
+from eeg_pipeline.analysis.machine_learning.classification import (
     create_svm_pipeline,
     create_logistic_pipeline,
     create_rf_classification_pipeline,
@@ -78,7 +78,7 @@ from eeg_pipeline.analysis.decoding.classification import (
 )
 
 # SHAP feature importance
-from eeg_pipeline.analysis.decoding.shap_importance import (
+from eeg_pipeline.analysis.machine_learning.shap_importance import (
     compute_shap_values,
     compute_shap_importance,
     compute_shap_for_cv_folds,
@@ -90,7 +90,7 @@ from eeg_pipeline.analysis.decoding.shap_importance import (
 )
 
 # Uncertainty quantification
-from eeg_pipeline.analysis.decoding.uncertainty import (
+from eeg_pipeline.analysis.machine_learning.uncertainty import (
     compute_prediction_intervals,
     calibrate_classifier,
     PredictionIntervalResult,

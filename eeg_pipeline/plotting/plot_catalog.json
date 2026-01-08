@@ -71,9 +71,9 @@
       "description": "EEG-behavior correlations and temporal stats"
     },
     {
-      "key": "decoding",
-      "label": "Decoding",
-      "description": "Decoding regression and time-generalization"
+      "key": "machine_learning",
+      "label": "Machine Learning",
+      "description": "Machine learning regression and time-generalization"
     }
   ],
   "plots": [
@@ -840,21 +840,21 @@
       "requires_stats": true
     },
     {
-      "id": "decoding_regression_plots",
-      "group": "decoding",
+      "id": "ml_regression_plots",
+      "group": "machine_learning",
       "label": "Regression Plots",
       "description": "LOSO regression diagnostics",
       "required_files": [
-        "decoding/regression/loso_predictions.tsv"
+        "machine_learning/regression/loso_predictions.tsv"
       ]
     },
     {
-      "id": "decoding_timegen_plots",
-      "group": "decoding",
+      "id": "ml_timegen_plots",
+      "group": "machine_learning",
       "label": "Time-Generalization",
       "description": "Time-generalization matrices",
       "required_files": [
-        "decoding/time_generalization/time_generalization_regression.npz"
+        "machine_learning/time_generalization/time_generalization_regression.npz"
       ]
     }
   ]

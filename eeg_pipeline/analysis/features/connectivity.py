@@ -411,26 +411,26 @@ def extract_connectivity_features(
 
     phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
     
-    # Guardrail: detect CV/decoding mode and warn/force within_epoch for phase estimator
+    # Guardrail: detect CV/machine learning mode and warn/force within_epoch for phase estimator
     # across_epochs is cross-trial by nature and WILL leak test information in CV
     train_mask = getattr(ctx, "train_mask", None)
-    force_within_for_decoding = bool(conn_cfg.get("force_within_epoch_for_decoding", True))
+    force_within_for_ml = bool(conn_cfg.get("force_within_epoch_for_ml", True))
     
     if train_mask is not None and phase_estimator == "across_epochs":
-        if force_within_for_decoding:
+        if force_within_for_ml:
             if ctx.logger is not None:
                 ctx.logger.warning(
-                    "Connectivity: train_mask detected (CV/decoding mode) with phase_estimator='across_epochs'. "
+                    "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
                     "Across-epochs estimates leak test-trial information. "
                     "Forcing phase_estimator='within_epoch' for valid CV. "
-                    "Set feature_engineering.connectivity.force_within_epoch_for_decoding=false to override."
+                    "Set feature_engineering.connectivity.force_within_epoch_for_ml=false to override."
                 )
             phase_estimator = "within_epoch"
         else:
             if ctx.logger is not None:
                 ctx.logger.warning(
-                    "Connectivity: train_mask detected (CV/decoding mode) with phase_estimator='across_epochs'. "
-                    "CAUTION: Across-epochs estimates leak test-trial information and will inflate decoding accuracy. "
+                    "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
+                    "CAUTION: Across-epochs estimates leak test-trial information and will inflate machine learning accuracy. "
                     "Consider using phase_estimator='within_epoch' for valid cross-validation."
                 )
 

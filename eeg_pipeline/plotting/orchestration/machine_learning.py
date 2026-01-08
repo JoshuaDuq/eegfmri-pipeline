@@ -1,6 +1,6 @@
-"""Decoding visualization orchestration (pipeline-level).
+"""Machine learning visualization orchestration (pipeline-level).
 
-Plot primitives live in `eeg_pipeline.plotting.decoding.*`.
+Plot primitives live in `eeg_pipeline.plotting.machine_learning.*`.
 """
 
 from __future__ import annotations
@@ -11,20 +11,20 @@ from typing import Any, Dict, Optional
 
 from eeg_pipeline.infra.paths import ensure_dir
 
-from eeg_pipeline.plotting.decoding.time_generalization import (
+from eeg_pipeline.plotting.machine_learning.time_generalization import (
     plot_time_generalization_matrix,
     plot_time_generalization_with_null,
 )
-from eeg_pipeline.plotting.decoding.performance import (
+from eeg_pipeline.plotting.machine_learning.performance import (
     plot_prediction_scatter,
     plot_per_subject_performance,
-    plot_decoding_null_hist,
+    plot_ml_null_hist,
     plot_calibration_curve,
     plot_bootstrap_distributions,
     plot_permutation_null,
 )
-from eeg_pipeline.plotting.decoding.helpers import plot_residual_diagnostics
-from eeg_pipeline.plotting.decoding.comparisons import (
+from eeg_pipeline.plotting.machine_learning.helpers import plot_residual_diagnostics
+from eeg_pipeline.plotting.machine_learning.comparisons import (
     plot_model_comparison,
     plot_riemann_band_comparison,
     plot_riemann_sliding_window,
@@ -33,7 +33,7 @@ from eeg_pipeline.plotting.decoding.comparisons import (
 
 
 ###################################################################
-# Regression Decoding Visualization
+# Regression ML Visualization
 ###################################################################
 
 
@@ -55,7 +55,7 @@ def visualize_regression_results(
 
     ensure_dir(plots_dir)
 
-    logger.info(f"Creating regression decoding visualizations for {model_name}...")
+    logger.info(f"Creating regression ML visualizations for {model_name}...")
 
     plot_prediction_scatter(
         pred_df=pred_df,
@@ -80,7 +80,7 @@ def visualize_regression_results(
     )
 
     if null_r is not None and empirical_r is not None:
-        plot_decoding_null_hist(
+        plot_ml_null_hist(
             null_r=null_r,
             empirical_r=empirical_r,
             save_path=plots_dir / f"{model_name}_null_histogram",
@@ -103,7 +103,7 @@ def visualize_regression_results(
             config=config,
         )
 
-    logger.info(f"Regression decoding visualizations saved to {plots_dir}")
+    logger.info(f"Regression machine learning visualizations saved to {plots_dir}")
 
 
 ###################################################################
@@ -236,7 +236,7 @@ def visualize_regression_from_disk(
     config: Optional[Any] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
-    """Generate regression decoding plots from saved results on disk.
+    """Generate regression machine learning plots from saved results on disk.
     
     This is the pipeline-layer entrypoint that reads predictions, metrics,
     and null distributions from disk and generates all standard plots.
@@ -321,14 +321,14 @@ def visualize_regression_from_disk(
         null_rs = data.get("null_r")
         empirical_r = pooled_metrics.get("pearson_r", np.nan)
         if null_rs is not None and null_rs.size > 0 and np.isfinite(empirical_r):
-            plot_decoding_null_hist(
+            plot_ml_null_hist(
                 null_r=null_rs,
                 empirical_r=empirical_r,
                 save_path=plots_dir / f"{prefix}_null_distribution",
                 config=config,
             )
     
-    logger.info(f"Regression decoding visualizations saved to {plots_dir}")
+    logger.info(f"Regression machine learning visualizations saved to {plots_dir}")
 
 
 def visualize_time_generalization_from_disk(
@@ -380,6 +380,122 @@ def visualize_time_generalization_from_disk(
     logger.info(f"Time-generalization visualizations saved to {results_dir}")
 
 
+###################################################################
+# Classification ML Visualization
+###################################################################
+
+
+def visualize_classification_from_disk(
+    results_dir: Path,
+    config: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Visualize classification ML results from disk.
+    
+    Single responsibility: Read classification results contract and create plots.
+    """
+    import json
+    import pandas as pd
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    results_dir = Path(results_dir)
+    plots_dir = results_dir / "plots"
+    ensure_dir(plots_dir)
+    
+    # Load predictions
+    pred_path = results_dir / "loso_predictions.tsv"
+    if not pred_path.exists():
+        logger.warning(f"Classification predictions not found: {pred_path}")
+        return
+    
+    pred_df = pd.read_csv(pred_path, sep="\t")
+    
+    # Load metrics
+    metrics_path = results_dir / "pooled_metrics.json"
+    if metrics_path.exists():
+        with open(metrics_path) as f:
+            pooled_metrics = json.load(f)
+    else:
+        pooled_metrics = {}
+    
+    model_name = pooled_metrics.get("model", "classification")
+    
+    # ROC curve
+    if "y_true" in pred_df.columns and "y_prob" in pred_df.columns:
+        try:
+            from sklearn.metrics import roc_curve, auc
+            import matplotlib.pyplot as plt
+            
+            fpr, tpr, _ = roc_curve(pred_df["y_true"], pred_df["y_prob"])
+            roc_auc = auc(fpr, tpr)
+            
+            fig, ax = plt.subplots(figsize=(6, 6))
+            ax.plot(fpr, tpr, lw=2, label=f"ROC (AUC = {roc_auc:.3f})")
+            ax.plot([0, 1], [0, 1], "k--", lw=1, label="Chance")
+            ax.set_xlabel("False Positive Rate")
+            ax.set_ylabel("True Positive Rate")
+            ax.set_title(f"ROC Curve - {model_name}")
+            ax.legend(loc="lower right")
+            ax.set_xlim([0, 1])
+            ax.set_ylim([0, 1.05])
+            fig.tight_layout()
+            fig.savefig(plots_dir / f"roc_curve_{model_name}.png", dpi=150)
+            plt.close(fig)
+            logger.info(f"Saved ROC curve to {plots_dir}")
+        except Exception as exc:
+            logger.warning(f"ROC curve plot failed: {exc}")
+    
+    # Confusion matrix
+    if "y_true" in pred_df.columns and "y_pred" in pred_df.columns:
+        try:
+            from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+            import matplotlib.pyplot as plt
+            
+            cm = confusion_matrix(pred_df["y_true"], pred_df["y_pred"])
+            fig, ax = plt.subplots(figsize=(6, 5))
+            disp = ConfusionMatrixDisplay(cm, display_labels=["No Pain", "Pain"])
+            disp.plot(ax=ax, cmap="Blues")
+            ax.set_title(f"Confusion Matrix - {model_name}")
+            fig.tight_layout()
+            fig.savefig(plots_dir / f"confusion_matrix_{model_name}.png", dpi=150)
+            plt.close(fig)
+        except Exception as exc:
+            logger.warning(f"Confusion matrix plot failed: {exc}")
+    
+    # Calibration curve
+    if "y_true" in pred_df.columns and "y_prob" in pred_df.columns:
+        try:
+            plot_calibration_curve(
+                pred_df["y_true"].to_numpy(),
+                pred_df["y_prob"].to_numpy(),
+                model_name,
+                plots_dir / f"calibration_{model_name}.png",
+            )
+        except Exception as exc:
+            logger.warning(f"Calibration curve failed: {exc}")
+    
+    # Null distribution if available
+    null_path = list(results_dir.glob("loso_null_*.npz"))
+    if null_path:
+        try:
+            import numpy as np
+            data = np.load(null_path[0])
+            null_auc = data.get("null_auc")
+            if null_auc is not None and len(null_auc) > 0:
+                plot_permutation_null(
+                    null_auc,
+                    pooled_metrics.get("auc", 0),
+                    "AUC",
+                    plots_dir / f"null_distribution_{model_name}.png",
+                )
+        except Exception as exc:
+            logger.warning(f"Null distribution plot failed: {exc}")
+    
+    logger.info(f"Classification visualizations saved to {plots_dir}")
+
+
 __all__ = [
     "visualize_regression_results",
     "visualize_time_generalization",
@@ -388,4 +504,5 @@ __all__ = [
     "visualize_incremental_validity",
     "visualize_regression_from_disk",
     "visualize_time_generalization_from_disk",
+    "visualize_classification_from_disk",
 ]

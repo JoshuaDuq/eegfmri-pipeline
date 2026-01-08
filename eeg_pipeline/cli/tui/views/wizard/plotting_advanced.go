@@ -394,6 +394,8 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 
 	if m.editingNumber || m.editingText {
 		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.expandedOption >= 0 {
+		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
 	} else {
 		b.WriteString(infoStyle.Render("Space to expand/edit · ↑↓ to navigate · Enter to proceed") + "\n\n")
 	}
@@ -1624,15 +1626,31 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 		case optPlotCompareWindows:
 			lines = append(lines, valueLine(opt, "compare_windows", triState(m.plotCompareWindows), "tri-state", focused))
 		case optPlotComparisonWindows:
-			val := formatString(m.plotComparisonWindowsSpec, plotDefaults.comparisonWindows)
+			val := m.plotComparisonWindowsSpec
+			if val == "" {
+				val = "(select windows)"
+			}
 			if m.editingText && m.editingTextField == textFieldPlotComparisonWindows {
 				val = m.textBuffer + "█"
 			}
-			hint := "e.g. baseline active"
-			if avail := availableHint("available", m.availableWindows); avail != "" {
-				hint = hint + " · " + avail
+			hint := "Space to select"
+			if len(m.availableWindows) > 0 {
+				hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
 			}
 			lines = append(lines, valueLine(opt, "comparison_windows", val, hint, focused))
+			// Render expanded windows list
+			if m.expandedOption == expandedPlotComparisonWindows && focused && len(m.availableWindows) > 0 {
+				for j, win := range m.availableWindows {
+					isSubFocused := j == m.subCursor
+					isSelected := m.isColumnValueSelected(win)
+					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+					if isSubFocused {
+						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+					}
+					lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(win)})
+				}
+			}
 		case optPlotCompareColumns:
 			lines = append(lines, valueLine(opt, "compare_columns", triState(m.plotCompareColumns), "tri-state", focused))
 		case optPlotComparisonSegment:
@@ -1646,21 +1664,64 @@ func (m Model) renderPlottingAdvancedConfigV2() string {
 			}
 			lines = append(lines, valueLine(opt, "comparison_segment", val, hint, focused))
 		case optPlotComparisonColumn:
-			val := formatString(m.plotComparisonColumn, plotDefaults.comparisonColumn)
+			val := m.plotComparisonColumn
+			if val == "" {
+				val = "(select column)"
+			}
 			if m.editingText && m.editingTextField == textFieldPlotComparisonColumn {
 				val = m.textBuffer + "█"
 			}
-			hint := "events.tsv column"
-			if avail := availableHint("available", m.availableColumns); avail != "" {
-				hint = hint + " · " + avail
+			hint := "Space to select"
+			if len(m.discoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
 			}
 			lines = append(lines, valueLine(opt, "comparison_column", val, hint, focused))
-		case optPlotComparisonValues:
-			val := formatString(m.plotComparisonValuesSpec, plotDefaults.comparisonValues)
-			if m.editingText && m.editingTextField == textFieldPlotComparisonValues {
-				val = m.textBuffer + "█"
+			// Render expanded column list
+			if m.expandedOption == expandedPlotComparisonColumn && focused && len(m.discoveredColumns) > 0 {
+				for j, col := range m.discoveredColumns {
+					isSubFocused := j == m.subCursor
+					isSelected := m.plotComparisonColumn == col
+					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+					if isSubFocused {
+						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+					}
+					lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(col)})
+				}
 			}
-			lines = append(lines, valueLine(opt, "comparison_values", val, "2 values (e.g. 0 1)", focused))
+		case optPlotComparisonValues:
+			if m.plotComparisonColumn == "" {
+				lines = append(lines, valueLine(opt, "comparison_values", "(select column first)", "requires column selection", focused))
+			} else {
+				val := m.plotComparisonValuesSpec
+				if val == "" {
+					val = "(select values)"
+				}
+				if m.editingText && m.editingTextField == textFieldPlotComparisonValues {
+					val = m.textBuffer + "█"
+				}
+				hint := "Space to select"
+				if vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn); len(vals) > 0 {
+					hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.plotComparisonColumn)
+				}
+				lines = append(lines, valueLine(opt, "comparison_values", val, hint, focused))
+				// Render expanded values list
+				if m.expandedOption == expandedPlotComparisonValues && focused {
+					vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn)
+					if len(vals) > 0 {
+						for j, v := range vals {
+							isSubFocused := j == m.subCursor
+							isSelected := m.isColumnValueSelected(v)
+							checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+							itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+							if isSubFocused {
+								itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+							}
+							lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(v)})
+						}
+					}
+				}
+			}
 		case optPlotComparisonLabels:
 			val := formatString(m.plotComparisonLabelsSpec, plotDefaults.comparisonLabels)
 			if m.editingText && m.editingTextField == textFieldPlotComparisonLabels {

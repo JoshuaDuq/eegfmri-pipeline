@@ -2,11 +2,11 @@
 EEG Analysis Pipeline
 
 A comprehensive pipeline for EEG data processing, feature extraction,
-behavioral correlation analysis, and machine learning decoding.
+behavioral correlation analysis, and machine learning.
 
 Package Structure
 -----------------
-- analysis/: Core analysis modules (features, behavior, decoding, group)
+- analysis/: Core analysis modules (features, behavior, machine_learning, group)
 - pipelines/: High-level pipeline orchestration
 - plotting/: Visualization utilities
 - preprocessing/: BIDS conversion and event processing
@@ -30,7 +30,7 @@ __all__ = [
     "EEGConfig",
     "ConfigLike",
     "CorrelationResult",
-    "DecodingResult",
+    "MLResult",
     "ValidationResult",
     "BandData",
     "PSDData",
@@ -45,7 +45,7 @@ def __getattr__(name: str):
         "EEGConfig",
         "ConfigLike",
         "CorrelationResult",
-        "DecodingResult",
+        "MLResult",
         "ValidationResult",
         "BandData",
         "PSDData",

@@ -1,5 +1,5 @@
 """
-Cross-validation utilities for decoding.
+Cross-validation utilities for machine learning.
 
 This module provides CV helpers, fold creation, and result aggregation.
 """
@@ -83,7 +83,7 @@ def apply_fold_specific_hygiene(
     if config is None:
         return None
     
-    cv_hygiene_enabled = bool(config.get("decoding.cv.hygiene_enabled", True) if hasattr(config, "get") else True)
+    cv_hygiene_enabled = bool(config.get("machine_learning.cv.hygiene_enabled", True) if hasattr(config, "get") else True)
     if not cv_hygiene_enabled:
         return None
     
@@ -178,9 +178,9 @@ def create_stratified_cv_by_binned_targets(
 ) -> Tuple[StratifiedKFold, np.ndarray]:
     """Create stratified CV by binning continuous targets."""
     if n_splits is None:
-        n_splits = int(get_config_value(config, "decoding.cv.default_n_splits", 5))
+        n_splits = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
     if n_bins is None:
-        n_bins = int(get_config_value(config, "decoding.cv.default_n_bins", 5))
+        n_bins = int(get_config_value(config, "machine_learning.cv.default_n_bins", 5))
     y_binned = pd.qcut(y, q=n_bins, labels=False, duplicates="drop")
     if pd.isna(y_binned).all():
         y_binned = np.zeros_like(y, dtype=int)
@@ -194,7 +194,7 @@ def create_block_aware_cv(
 ) -> Tuple[Optional[GroupKFold], int]:
     """Create block-aware GroupKFold CV."""
     if n_splits is None:
-        n_splits = int(get_config_value(config, "decoding.cv.default_n_splits", 5))
+        n_splits = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
     unique_blocks = np.unique(blocks[~pd.isna(blocks)])
     n_unique = len(unique_blocks)
 
@@ -375,8 +375,29 @@ def aggregate_fold_results(
 def compute_subject_level_r(
     pred_df: pd.DataFrame,
     config: Optional[Any] = None,
+    ci_method: str = "fixed_effects",
 ) -> Tuple[float, List[Tuple[str, float]], float, float]:
-    """Compute subject-level Pearson r with Fisher z aggregation."""
+    """Compute subject-level Pearson r with Fisher z aggregation.
+    
+    Parameters
+    ----------
+    pred_df : pd.DataFrame
+        Predictions with columns: subject_id, y_true, y_pred
+    config : Any, optional
+        Configuration object
+    ci_method : str
+        CI method: 'fixed_effects' (variance = 1/sum(n_i-3)) or 
+        'bootstrap' (subject-level bootstrap, often preferable for EEG)
+    
+    Returns
+    -------
+    agg_r : float
+        Aggregated correlation (Fisher z weighted average back-transformed)
+    per_subject : list
+        List of (subject_id, r) tuples
+    ci_low, ci_high : float
+        95% confidence interval bounds
+    """
     per_subject: List[Tuple[str, float, int]] = []
 
     for subj, df_sub in pred_df.groupby("subject_id"):
@@ -408,15 +429,33 @@ def compute_subject_level_r(
     # Fisher z transform and weighted average
     z_vals = np.arctanh(r_vals)
     weights = np.maximum(n_trials_vals - 3, 1.0)
-    weights = weights / weights.sum()
-    mean_z = float(np.average(z_vals, weights=weights))
+    sum_weights = weights.sum()
+    norm_weights = weights / sum_weights
+    mean_z = float(np.average(z_vals, weights=norm_weights))
     agg_r = float(np.tanh(mean_z))
 
     # Confidence interval
     ci_low, ci_high = np.nan, np.nan
-    if len(z_vals) > 1:
-        weighted_var = np.average((z_vals - mean_z) ** 2, weights=weights)
-        se = float(np.sqrt(weighted_var / len(z_vals)))
+    
+    if ci_method == "bootstrap" and len(z_vals) >= 3:
+        # Subject-level bootstrap CI (often preferable for EEG)
+        rng = np.random.default_rng(42)
+        n_boot = 1000
+        boot_means = []
+        n_subjects = len(z_vals)
+        for _ in range(n_boot):
+            boot_idx = rng.choice(n_subjects, size=n_subjects, replace=True)
+            boot_z = z_vals[boot_idx]
+            boot_w = weights[boot_idx]
+            boot_w = boot_w / boot_w.sum()
+            boot_means.append(np.average(boot_z, weights=boot_w))
+        boot_means = np.array(boot_means)
+        ci_low = float(np.tanh(np.percentile(boot_means, 2.5)))
+        ci_high = float(np.tanh(np.percentile(boot_means, 97.5)))
+    elif len(z_vals) > 1:
+        # Fixed-effects CI: variance = 1 / sum(n_i - 3)
+        # This is the standard meta-analytic fixed-effects variance
+        se = float(np.sqrt(1.0 / sum_weights))
         if np.isfinite(se) and se > 0:
             delta = 1.96 * se
             ci_low = float(np.tanh(mean_z - delta))
@@ -552,7 +591,7 @@ def create_block_aware_inner_cv(
 def get_inner_cv_splits(n_unique_groups: int, default: Optional[int] = None, config: Optional[Any] = None) -> int:
     """Get number of inner CV splits, capped by available groups."""
     if default is None:
-        default = int(get_config_value(config, "decoding.cv.default_n_splits", 5))
+        default = int(get_config_value(config, "machine_learning.cv.default_n_splits", 5))
     return int(np.clip(default, 2, n_unique_groups))
 
 
@@ -561,7 +600,7 @@ def get_min_channels_required(config: Any = None, min_absolute: int = 4) -> int:
     if config is None:
         return min_absolute
 
-    riemann_min = config.get("decoding.analysis.riemann.min_channels_for_fold", min_absolute)
+    riemann_min = config.get("machine_learning.analysis.riemann.min_channels_for_fold", min_absolute)
     return max(min_absolute, int(riemann_min))
 
 
@@ -588,7 +627,7 @@ def _fit_with_inner_cv(
         Tuple of (best_estimator, cv_results_df, grid_search_cv)
         If n_splits < 2, returns (fitted_pipe, None, None)
     """
-    from eeg_pipeline.analysis.decoding.pipelines import build_elasticnet_param_grid
+    from eeg_pipeline.analysis.machine_learning.pipelines import build_elasticnet_param_grid
 
     n_unique = len(np.unique(train_groups))
     n_splits = get_inner_cv_splits(n_unique, inner_splits)
@@ -885,7 +924,7 @@ def run_permutation_test(
     perm_scheme = "within_subject"
     if config is not None:
         try:
-            perm_scheme = str(get_config_value(config, "decoding.cv.permutation_scheme", perm_scheme)).strip().lower()
+            perm_scheme = str(get_config_value(config, "machine_learning.cv.permutation_scheme", perm_scheme)).strip().lower()
         except Exception:
             perm_scheme = "within_subject"
     if perm_scheme not in {"within_subject", "within_subject_within_block"}:

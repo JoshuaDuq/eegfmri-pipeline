@@ -2,7 +2,7 @@
 Pain Classification Pipelines
 =============================
 
-Classification models for pain vs no-pain decoding from EEG features.
+Classification models for pain vs no-pain prediction from EEG features.
 Complements the regression pipelines for predicting pain intensity.
 
 Models:
@@ -11,7 +11,7 @@ Models:
 - Random Forest Classifier (non-linear, feature importance)
 
 Usage:
-    from eeg_pipeline.analysis.decoding.classification import (
+    from eeg_pipeline.analysis.machine_learning.classification import (
         create_svm_pipeline,
         decode_pain_binary,
         nested_loso_classification,
@@ -48,15 +48,22 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import (
     GridSearchCV,
+    GroupKFold,
     LeaveOneGroupOut,
     StratifiedKFold,
     cross_val_predict,
 )
+
+try:
+    from sklearn.model_selection import StratifiedGroupKFold
+    _HAS_STRATIFIED_GROUP_KFOLD = True
+except ImportError:
+    _HAS_STRATIFIED_GROUP_KFOLD = False
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from eeg_pipeline.analysis.decoding.config import get_decoding_config
+from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 
 
 ###################################################################
@@ -89,7 +96,7 @@ def create_svm_pipeline(
     Pipeline
         sklearn Pipeline with imputation, scaling, and SVM
     """
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     return Pipeline([
         ("impute", SimpleImputer(strategy="median")),
@@ -128,7 +135,7 @@ def create_logistic_pipeline(
     Pipeline
         sklearn Pipeline with imputation, scaling, and LogisticRegression
     """
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     solver = "saga" if penalty in ("l1", "elasticnet") else "lbfgs"
 
@@ -167,7 +174,7 @@ def create_rf_classification_pipeline(
     Pipeline
         sklearn Pipeline with imputation and RandomForestClassifier
     """
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     return Pipeline([
         ("impute", SimpleImputer(strategy="median")),
@@ -213,7 +220,7 @@ def create_ensemble_pipeline(
 
 def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for SVM hyperparameter tuning."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
     return {
         "svm__C": cfg["svm_C_grid"],
         "svm__gamma": cfg["svm_gamma_grid"],
@@ -222,7 +229,7 @@ def build_svm_param_grid(config: Any = None) -> Dict[str, List]:
 
 def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for Logistic Regression."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
     return {
         "lr__C": cfg["lr_C_grid"],
     }
@@ -230,7 +237,7 @@ def build_logistic_param_grid(config: Any = None) -> Dict[str, List]:
 
 def build_rf_classification_param_grid(config: Any = None) -> Dict[str, List]:
     """Build parameter grid for Random Forest classifier."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],
         "rf__min_samples_leaf": [1, 3, 5],
@@ -526,10 +533,28 @@ def nested_loso_classification(
             y_pred[test_idx] = int(np.median(y_train))
             continue
         
-        # Inner CV: stratified within training set
-        inner_cv = StratifiedKFold(n_splits=inner_splits, shuffle=True, random_state=seed + fold)
+        # Inner CV: group-aware stratified CV to prevent within-subject mixing
+        # This ensures hyperparameter tuning generalizes across subjects
+        n_unique_train_groups = len(np.unique(train_groups))
+        effective_splits = min(inner_splits, n_unique_train_groups)
         
-        # GridSearch
+        if effective_splits < 2:
+            log.warning(f"Fold {fold}: <2 groups in training, fitting without inner CV")
+            pipe_clone = clone(pipe)
+            pipe_clone.fit(X_train, y_train)
+            y_pred[test_idx] = pipe_clone.predict(X_test)
+            if hasattr(pipe_clone, "predict_proba"):
+                y_prob[test_idx] = pipe_clone.predict_proba(X_test)[:, 1]
+            continue
+        
+        if _HAS_STRATIFIED_GROUP_KFOLD:
+            inner_cv = StratifiedGroupKFold(n_splits=effective_splits, shuffle=True, random_state=seed + fold)
+        else:
+            # Fallback: GroupKFold (not stratified, but respects subject boundaries)
+            inner_cv = GroupKFold(n_splits=effective_splits)
+            log.debug(f"Fold {fold}: Using GroupKFold (StratifiedGroupKFold not available)")
+        
+        # GridSearch with group-aware inner CV
         gs = GridSearchCV(
             estimator=pipe,
             param_grid=param_grid,
@@ -540,7 +565,7 @@ def nested_loso_classification(
         )
         
         try:
-            gs.fit(X_train, y_train)
+            gs.fit(X_train, y_train, groups=train_groups)
             best_params_records.append({
                 "fold": fold,
                 "test_subject": test_subject,

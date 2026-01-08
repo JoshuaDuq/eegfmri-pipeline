@@ -7,7 +7,7 @@ const (
 	PipelinePreprocessing Pipeline = iota
 	PipelineFeatures
 	PipelineBehavior
-	PipelineDecoding
+	PipelineML
 	PipelinePlotting
 	PipelineMergePsychoPyData
 	PipelineRawToBIDS
@@ -25,7 +25,7 @@ func (p Pipeline) String() string {
 		"Preprocessing",
 		"Features",
 		"Behavior",
-		"Decoding",
+		"Machine Learning",
 		"Plotting",
 		"Merge PsychoPy Data",
 		"Raw to BIDS",
@@ -36,12 +36,30 @@ func (p Pipeline) String() string {
 	return "Unknown"
 }
 
+// CLICommand returns the canonical CLI subcommand name for this pipeline.
+// This is the actual command accepted by the Python CLI (eeg-pipeline <cmd>).
+func (p Pipeline) CLICommand() string {
+	commands := []string{
+		"preprocessing", // PipelinePreprocessing
+		"features",      // PipelineFeatures
+		"behavior",      // PipelineBehavior
+		"ml",            // PipelineML (NOT "machine learning")
+		"plotting",      // PipelinePlotting
+		"utilities",     // PipelineMergePsychoPyData (handled specially)
+		"utilities",     // PipelineRawToBIDS (handled specially)
+	}
+	if int(p) < len(commands) {
+		return commands[p]
+	}
+	return "unknown"
+}
+
 func (p Pipeline) Description() string {
 	descriptions := []string{
 		"Bad channels, ICA, epochs",
 		"Extract EEG features (power, connectivity...)",
 		"EEG-behavior analysis",
-		"LOSO regression & time generalization",
+		"Machine learning: LOSO regression & time generalization",
 		"Generate curated visualization suites",
 		"Merge PsychoPy data into BIDS events files",
 		"Convert raw BrainVision data to BIDS",
@@ -130,7 +148,7 @@ func (p Pipeline) RequiresEpochs() bool {
 		return false // Works with raw BIDS data or source data
 	case PipelineFeatures:
 		return true // Need epochs
-	case PipelineBehavior, PipelineDecoding, PipelinePlotting, PipelineMergePsychoPyData:
+	case PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData:
 		return false // Need features or other raw data
 	default:
 		return false
@@ -140,7 +158,7 @@ func (p Pipeline) RequiresEpochs() bool {
 // RequiresFeatures returns true if the pipeline needs extracted features
 func (p Pipeline) RequiresFeatures() bool {
 	switch p {
-	case PipelineBehavior, PipelineDecoding:
+	case PipelineBehavior, PipelineML:
 		return true // Need pre-computed features
 	default:
 		return false
@@ -169,7 +187,7 @@ func (p Pipeline) GetDataSource() string {
 		return "epochs" // Epoched data
 	case PipelineBehavior:
 		return "epochs" // Subject discovery needs epochs; feature availability checked separately
-	case PipelineDecoding:
+	case PipelineML:
 		return "features" // Extracted features
 	case PipelinePlotting:
 		return "all" // Mixed plot types across derivatives

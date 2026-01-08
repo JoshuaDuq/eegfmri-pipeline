@@ -484,6 +484,102 @@ def compute_fdr_rejections_for_heatmap(
     return rej_map, crit_val
 
 
+def hierarchical_fdr(
+    df: pd.DataFrame,
+    p_col: str = "p_value",
+    family_col: str = "family_id",
+    alpha: Optional[float] = None,
+    config: Optional[Any] = None,
+) -> pd.DataFrame:
+    """Apply hierarchical FDR correction with explicit family structure.
+    
+    Corrects p-values within families first, then globally. Adds columns
+    documenting the family structure for auditability.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Results dataframe with p-values and family assignments
+    p_col : str
+        Column containing p-values
+    family_col : str
+        Column containing family assignments
+    alpha : float, optional
+        FDR alpha level
+    config : Any, optional
+        Configuration object
+    
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with added columns:
+        - family_id: Family identifier (copied if not present)
+        - family_kind: Type of family grouping
+        - q_within_family: FDR q-values within family
+        - q_global: Global FDR q-values
+        - reject_within_family: Boolean rejection within family
+        - reject_global: Boolean rejection globally
+        - family_n_tests: Number of tests in family
+        - family_n_reject: Number of rejections in family
+    """
+    if alpha is None:
+        alpha = get_fdr_alpha(config)
+    
+    df = df.copy()
+    
+    # Ensure family_id column exists
+    if family_col not in df.columns:
+        df["family_id"] = "default"
+        family_col = "family_id"
+    else:
+        df["family_id"] = df[family_col]
+    
+    # Infer family_kind if not present
+    if "family_kind" not in df.columns:
+        if "feature_type" in df.columns:
+            df["family_kind"] = "feature_type"
+        elif "analysis_type" in df.columns:
+            df["family_kind"] = "analysis_type"
+        else:
+            df["family_kind"] = "inferred"
+    
+    # Initialize output columns
+    df["q_within_family"] = np.nan
+    df["reject_within_family"] = False
+    df["family_n_tests"] = 0
+    df["family_n_reject"] = 0
+    
+    # Apply FDR within each family
+    for family in df["family_id"].unique():
+        mask = df["family_id"] == family
+        family_df = df.loc[mask]
+        
+        if p_col not in family_df.columns:
+            continue
+        
+        p_vals = pd.to_numeric(family_df[p_col], errors="coerce").to_numpy()
+        valid = np.isfinite(p_vals)
+        
+        if not np.any(valid):
+            continue
+        
+        q_vals = fdr_bh(p_vals, alpha=alpha, config=config)
+        reject = q_vals < alpha
+        
+        df.loc[mask, "q_within_family"] = q_vals
+        df.loc[mask, "reject_within_family"] = reject
+        df.loc[mask, "family_n_tests"] = int(valid.sum())
+        df.loc[mask, "family_n_reject"] = int(reject.sum()) if np.any(valid) else 0
+    
+    # Apply global FDR
+    if p_col in df.columns:
+        all_p = pd.to_numeric(df[p_col], errors="coerce").to_numpy()
+        df["q_global"] = fdr_bh(all_p, alpha=alpha, config=config)
+        df["reject_global"] = df["q_global"] < alpha
+    
+    return df
+
+
 def compute_effective_n(n_tests: int, correlation_matrix: Optional[np.ndarray] = None) -> int:
     """Compute effective number of independent tests.
     

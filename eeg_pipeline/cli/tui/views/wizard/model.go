@@ -34,6 +34,7 @@ type FeatureCategory struct {
 }
 
 var behaviorComputations = []Computation{
+	{"trial_table", "Trial Table", "Build canonical per-trial analysis table"},
 	{"correlations", "Correlations", "EEG-rating correlations"},
 	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
 	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
@@ -45,6 +46,9 @@ var behaviorComputations = []Computation{
 }
 
 var behaviorPostComputations = []Computation{
+	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation analyses"},
+	{"pain_residual", "Pain Residual", "Compute pain_residual = rating - f(temperature)"},
+	{"temperature_models", "Temperature Models", "Model comparison and breakpoint detection on temp→rating"},
 	{"confounds", "Confounds Audit", "Audit QC confounds vs targets"},
 	{"regression", "Trialwise Regression", "Trialwise regression/moderation models"},
 	{"models", "Model Families", "Sensitivity model families"},
@@ -100,16 +104,16 @@ var connectivityMeasures = []ConnectivityMeasure{
 	{"pli", "PLI", "Phase lag index"},
 }
 
-type DecodingCVScope int
+type MLCVScope int
 
 const (
-	DecodingCVScopeGroup DecodingCVScope = iota
-	DecodingCVScopeSubject
+	MLCVScopeGroup MLCVScope = iota
+	MLCVScopeSubject
 )
 
-func (s DecodingCVScope) CLIValue() string {
+func (s MLCVScope) CLIValue() string {
 	switch s {
-	case DecodingCVScopeSubject:
+	case MLCVScopeSubject:
 		return "subject"
 	default:
 		return "group"
@@ -224,6 +228,7 @@ const (
 	textFieldDerivRoot
 	textFieldSourceRoot
 	textFieldRawMontage
+	textFieldPrepMontage
 	textFieldRawEventPrefixes
 	textFieldMergeEventPrefixes
 	textFieldMergeEventTypes
@@ -236,6 +241,7 @@ const (
 	textFieldTemporalConditionColumn
 	textFieldTemporalConditionValues
 	textFieldTemporalFilterValue
+	textFieldTfHeatmapFreqs
 	textFieldRunAdjustmentColumn
 	textFieldPainResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
@@ -246,6 +252,8 @@ const (
 	textFieldSpectralRatioPairs
 	textFieldAsymmetryChannelPairs
 	textFieldERPComponents
+	textFieldPainResidualSplineDfCandidates
+	textFieldPainResidualModelComparePolyDegrees
 	// Plotting advanced config text fields
 	textFieldPlotBboxInches
 	textFieldPlotFontFamily
@@ -293,7 +301,7 @@ const (
 	textFieldPlotTemporalTimeBins
 	textFieldPlotTemporalTimeLabels
 	textFieldPlotAsymmetryStat
-	// Decoding advanced config text fields
+	// Machine Learning advanced config text fields
 	textFieldElasticNetAlphaGrid
 	textFieldElasticNetL1RatioGrid
 	textFieldRfMaxDepthGrid
@@ -387,9 +395,9 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
 	{ID: "behavior_temperature_models", Group: "behavior", Name: "Temperature Models", Description: "Subject-level temperature→rating diagnostics", RequiredFiles: []string{"stats/trials*.tsv"}, RequiresStats: true},
 	{ID: "behavior_stability_groupwise", Group: "behavior", Name: "Stability (Run/Block)", Description: "Within-subject stability of feature→outcome associations", RequiredFiles: []string{"stats/stability_groupwise*.tsv"}, RequiresStats: true},
-	// Decoding
-	{ID: "decoding_regression_plots", Group: "decoding", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"decoding/regression/loso_predictions.tsv"}},
-	{ID: "decoding_timegen_plots", Group: "decoding", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"decoding/time_generalization/time_generalization_regression.npz"}},
+	// Machine Learning
+	{ID: "ml_regression_plots", Group: "machine_learning", Name: "Regression Plots", Description: "LOSO regression diagnostics", RequiredFiles: []string{"machine_learning/regression/loso_predictions.tsv"}},
+	{ID: "ml_timegen_plots", Group: "machine_learning", Name: "Time-Generalization", Description: "Time-generalization matrices", RequiredFiles: []string{"machine_learning/time_generalization/time_generalization_regression.npz"}},
 }
 
 var defaultPlotCategories = []FeatureCategory{
@@ -407,7 +415,7 @@ var defaultPlotCategories = []FeatureCategory{
 	{"erp", "ERP", "Event-related potential waveforms and topographies"},
 	{"tfr", "Time-Frequency", "Time-frequency representations and contrasts"},
 	{"behavior", "Behavior", "EEG-behavior correlations and temporal stats"},
-	{"decoding", "Decoding", "Decoding regression and time-generalization"},
+	{"machine_learning", "Machine Learning", "Machine learning regression and time-generalization"},
 }
 
 type plotCatalogPayload struct {
@@ -485,6 +493,13 @@ type Model struct {
 	bidsRoot   string
 	derivRoot  string
 	sourceRoot string
+
+	// Project setup step (per-run overrides)
+	projectBidsRoot    string // Override for this run
+	projectDerivRoot   string // Override for this run
+	projectSourceRoot  string // Override for this run
+	projectSetupCursor int    // Which field is selected
+	useGlobalDefaults  bool   // If true, use global config values
 
 	// Mode selection
 	modeOptions      []string
@@ -786,6 +801,7 @@ type Model struct {
 	// Review/Execute
 	ReadyToExecute    bool
 	ConfirmingExecute bool
+	DryRunMode        bool // If true, append --dry-run to command
 
 	// Validation
 	validationErrors []string
@@ -862,12 +878,17 @@ type Model struct {
 	// ERP configuration
 	erpBaselineCorrection bool
 	erpAllowNoBaseline    bool
-	erpComponentsSpec     string // e.g. n1=0.10-0.20,n2=0.20-0.35,p2=0.35-0.50
+	erpComponentsSpec     string  // e.g. n1=0.10-0.20,n2=0.20-0.35,p2=0.35-0.50
+	erpSmoothMs           float64 // Smoothing window in ms (0.0 = no smoothing)
+	erpPeakProminenceUv   float64 // Peak prominence threshold in µV (0 = use default)
+	erpLowpassHz          float64 // Low-pass filter before ERP peak detection (Hz)
 
 	// Burst configuration
-	burstThresholdZ  float64
-	burstMinDuration int    // ms
-	burstBandsSpec   string // e.g. beta,gamma
+	burstThresholdZ          float64
+	burstThresholdMethod     int     // 0: percentile, 1: zscore, 2: mad
+	burstThresholdPercentile float64 // Percentile threshold (for percentile method)
+	burstMinDuration         int     // ms
+	burstBandsSpec           string  // e.g. beta,gamma
 
 	// Power configuration
 	powerBaselineMode    int // 0: logratio, 1: mean, 2: ratio, 3: zscore, 4: zlogratio
@@ -901,11 +922,11 @@ type Model struct {
 	connAECMode      int // 0: orth, 1: none, 2: sym
 
 	// Scientific validity options (new)
-	itpcMethod                   int     // 0: global, 1: fold_global, 2: loo
-	aperiodicMinSegmentSec       float64 // Minimum segment duration for aperiodic fits
-	connAECOutput                int     // 0: r only, 1: z only, 2: both r and z
-	connForceWithinEpochDecoding bool    // Force within_epoch for CV/decoding
-	ratioSource                  int     // 0: raw, 1: powcorr (aperiodic-adjusted)
+	itpcMethod             int     // 0: global, 1: fold_global, 2: loo
+	aperiodicMinSegmentSec float64 // Minimum segment duration for aperiodic fits
+	connAECOutput          int     // 0: r only, 1: z only, 2: both r and z
+	connForceWithinEpochML bool    // Force within_epoch for CV/machine learning
+	ratioSource            int     // 0: raw, 1: powcorr (aperiodic-adjusted)
 
 	// ITPC additional options
 	itpcAllowUnsafeLoo     bool // Allow unsafe LOO ITPC
@@ -937,6 +958,8 @@ type Model struct {
 	// Aperiodic advanced options
 	aperiodicModel            int     // 0: fixed, 1: knee
 	aperiodicPsdMethod        int     // 0: multitaper, 1: welch
+	aperiodicPsdBandwidth     float64 // PSD bandwidth (0 = use default)
+	aperiodicMaxRms           float64 // Max RMS for aperiodic fit (0 = no limit)
 	aperiodicExcludeLineNoise bool    // Exclude line noise
 	aperiodicLineNoiseFreq    float64 // Line noise frequency
 
@@ -1052,23 +1075,20 @@ type Model struct {
 	trialTableIncludeEvents   bool
 	trialTableAddLagFeatures  bool
 	trialTableExtraEventCols  string
-	trialTableValidateEnabled bool
-	trialTableRatingMin       float64
-	trialTableRatingMax       float64
-	trialTableTempMin         float64
-	trialTableTempMax         float64
 	trialTableHighMissingFrac float64
 
 	featureSummariesEnabled bool
 
-	painResidualEnabled              bool
-	painResidualMethod               int // 0=spline, 1=poly
-	painResidualPolyDegree           int
-	painResidualModelCompareEnabled  bool
-	painResidualBreakpointEnabled    bool
-	painResidualBreakpointCandidates int
-	painResidualBreakpointQlow       float64
-	painResidualBreakpointQhigh      float64
+	painResidualEnabled                 bool
+	painResidualMethod                  int // 0=spline, 1=poly
+	painResidualPolyDegree              int
+	painResidualSplineDfCandidates      string // Comma-separated list (e.g., "3,4,5")
+	painResidualModelCompareEnabled     bool
+	painResidualModelComparePolyDegrees string // Comma-separated list (e.g., "2,3")
+	painResidualBreakpointEnabled       bool
+	painResidualBreakpointCandidates    int
+	painResidualBreakpointQlow          float64
+	painResidualBreakpointQhigh         float64
 
 	// Pain residual cross-fit (out-of-run prediction)
 	painResidualCrossfitEnabled     bool
@@ -1219,12 +1239,13 @@ type Model struct {
 	selectedValueCursors    map[string]int      // Cursor for value selection per column
 	expandedColumnSelection string              // Currently expanded column for value selection
 
-	// Decoding pipeline advanced config
-	decodingNPerm int  // Permutations for significance test
-	innerSplits   int  // CV inner splits
-	skipTimeGen   bool // Skip time generalization
-	decodingScope DecodingCVScope
-	// Decoding model hyperparameters
+	// Machine Learning pipeline advanced config
+	mlNPerm     int  // Permutations for significance test
+	innerSplits int  // CV inner splits
+	outerJobs   int  // Number of parallel jobs for outer CV
+	skipTimeGen bool // Skip time generalization
+	mlScope     MLCVScope
+	// Machine Learning model hyperparameters
 	elasticNetAlphaGrid   string // alpha grid as comma-separated values
 	elasticNetL1RatioGrid string // l1_ratio grid as comma-separated values
 	rfNEstimators         int    // Random forest n_estimators
@@ -1251,6 +1272,7 @@ type Model struct {
 	prepUsePyprep           bool
 	prepUseIcalabel         bool
 	prepNJobs               int
+	prepMontage             string // EEG montage (e.g., easycap-M1)
 	prepResample            int
 	prepLFreq               float64
 	prepHFreq               float64
@@ -1379,10 +1401,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		erpBaselineCorrection: true,
 		erpAllowNoBaseline:    false,
 		erpComponentsSpec:     "n1=0.10-0.20,n2=0.20-0.35,p2=0.35-0.50",
+		erpSmoothMs:           0.0,
+		erpPeakProminenceUv:   0.0, // 0 = use default from config
+		erpLowpassHz:          30.0,
 		// Burst defaults
-		burstThresholdZ:  2.0,
-		burstMinDuration: 50,
-		burstBandsSpec:   "beta,gamma",
+		burstThresholdZ:          2.0,
+		burstThresholdMethod:     0, // 0: percentile
+		burstThresholdPercentile: 95.0,
+		burstMinDuration:         50,
+		burstBandsSpec:           "beta,gamma",
 		// Power defaults
 		powerBaselineMode:    0,
 		powerRequireBaseline: true,
@@ -1397,11 +1424,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWindowStep:   0.5,
 		connAECMode:      0,
 		// Scientific validity defaults (new)
-		itpcMethod:                   0,    // 0: global (default)
-		aperiodicMinSegmentSec:       2.0,  // 2.0s minimum for stable fits
-		connAECOutput:                0,    // 0: r only (raw)
-		connForceWithinEpochDecoding: true, // Force within_epoch for CV-safety
-		ratioSource:                  0,    // 0: raw (default)
+		itpcMethod:             0,    // 0: global (default)
+		aperiodicMinSegmentSec: 2.0,  // 2.0s minimum for stable fits
+		connAECOutput:          0,    // 0: r only (raw)
+		connForceWithinEpochML: true, // Force within_epoch for CV-safety
+		ratioSource:            0,    // 0: raw (default)
 
 		// ITPC additional defaults
 		itpcAllowUnsafeLoo:     false,
@@ -1431,8 +1458,10 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R",
 
 		// Aperiodic advanced defaults
-		aperiodicModel:            0, // 0: fixed
-		aperiodicPsdMethod:        0, // 0: multitaper
+		aperiodicModel:            0,   // 0: fixed
+		aperiodicPsdMethod:        0,   // 0: multitaper
+		aperiodicPsdBandwidth:     0.0, // 0 = use default
+		aperiodicMaxRms:           0.0, // 0 = no limit
 		aperiodicExcludeLineNoise: true,
 		aperiodicLineNoiseFreq:    50.0,
 
@@ -1533,28 +1562,25 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		trialTableIncludeEvents:   true,
 		trialTableAddLagFeatures:  true,
 		trialTableExtraEventCols:  "",
-		trialTableValidateEnabled: true,
-		trialTableRatingMin:       0.0,
-		trialTableRatingMax:       10.0,
-		trialTableTempMin:         25.0,
-		trialTableTempMax:         55.0,
 		trialTableHighMissingFrac: 0.5,
 
 		featureSummariesEnabled: true,
 
-		painResidualEnabled:              true,
-		painResidualMethod:               0,
-		painResidualPolyDegree:           2,
-		painResidualModelCompareEnabled:  true,
-		painResidualBreakpointEnabled:    true,
-		painResidualBreakpointCandidates: 15,
-		painResidualBreakpointQlow:       0.15,
-		painResidualBreakpointQhigh:      0.85,
-		painResidualCrossfitEnabled:      false,
-		painResidualCrossfitGroupColumn:  "",
-		painResidualCrossfitNSplits:      5,
-		painResidualCrossfitMethod:       0,
-		painResidualCrossfitSplineKnots:  5,
+		painResidualEnabled:                 true,
+		painResidualMethod:                  0,
+		painResidualPolyDegree:              2,
+		painResidualSplineDfCandidates:      "3,4,5",
+		painResidualModelCompareEnabled:     true,
+		painResidualModelComparePolyDegrees: "2,3",
+		painResidualBreakpointEnabled:       true,
+		painResidualBreakpointCandidates:    15,
+		painResidualBreakpointQlow:          0.15,
+		painResidualBreakpointQhigh:         0.85,
+		painResidualCrossfitEnabled:         false,
+		painResidualCrossfitGroupColumn:     "",
+		painResidualCrossfitNSplits:         5,
+		painResidualCrossfitMethod:          0,
+		painResidualCrossfitSplineKnots:     5,
 
 		confoundsAddAsCovariates:  false,
 		confoundsMaxCovariates:    3,
@@ -1670,11 +1696,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		discoveredColumns:      []string{},
 		discoveredColumnValues: make(map[string][]string),
 		selectedValueCursors:   make(map[string]int),
-		// Decoding defaults
-		decodingNPerm:         0,
+		// Machine Learning defaults
+		mlNPerm:               0,
 		innerSplits:           3,
+		outerJobs:             1,
 		skipTimeGen:           false,
-		decodingScope:         DecodingCVScopeGroup,
+		mlScope:               MLCVScopeGroup,
 		elasticNetAlphaGrid:   "0.001,0.01,0.1,1,10",
 		elasticNetL1RatioGrid: "0.2,0.5,0.8",
 		rfNEstimators:         500,
@@ -1708,6 +1735,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepUsePyprep:           true,
 		prepUseIcalabel:         true,
 		prepNJobs:               1,
+		prepMontage:             "easycap-M1",
 		prepResample:            500,
 		prepLFreq:               0.1,
 		prepHFreq:               100.0,
@@ -1808,13 +1836,16 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 
 		// Default selections for post computations
 		defaultPostComps := map[string]bool{
-			"confounds":   true,
-			"regression":  false,
-			"models":      false,
-			"stability":   true,
-			"consistency": true,
-			"influence":   true,
-			"report":      true,
+			"lag_features":       true,
+			"pain_residual":      true,
+			"temperature_models": true,
+			"confounds":          true,
+			"regression":         false,
+			"models":             false,
+			"stability":          true,
+			"consistency":        true,
+			"influence":          true,
+			"report":             true,
 		}
 		for i, c := range behaviorPostComputations {
 			m.postComputationSelected[i] = defaultPostComps[c.Key]
@@ -1836,7 +1867,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			m.bandSelected[i] = true
 		}
 
-	case types.PipelineDecoding:
+	case types.PipelineML:
 		m.modeOptions = []string{"regression", "timegen", "classify"}
 		m.modeDescriptions = []string{
 			"LOSO regression",
@@ -1984,6 +2015,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y", "enter":
 				m.ConfirmingExecute = false
+				m.DryRunMode = false
+				m.ReadyToExecute = true
+				return m, nil
+			case "d", "D":
+				// Dry-run mode - execute with --dry-run flag
+				m.ConfirmingExecute = false
+				m.DryRunMode = true
 				m.ReadyToExecute = true
 				return m, nil
 			case "n", "N", "esc":
@@ -2278,6 +2316,7 @@ func (m *Model) UpdateAdvancedOffset() {
 	case types.PipelineBehavior:
 		options := m.getBehaviorOptions()
 		totalLines = len(options)
+		// Note: expanded list items are rendered inline, so cursorLine stays as advancedCursor
 		cursorLine = m.advancedCursor
 
 	case types.PipelineFeatures:
@@ -2653,6 +2692,274 @@ func (m Model) GetDiscoveredColumnValues(column string) []string {
 	return m.discoveredColumnValues[column]
 }
 
+// getExpandedListLength returns the length of the currently expanded list
+func (m Model) getExpandedListLength() int {
+	switch m.expandedOption {
+	case expandedConnectivityMeasures:
+		return len(connectivityMeasures)
+	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
+		return len(m.discoveredColumns)
+	case expandedConditionCompareValues:
+		if m.conditionCompareColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.conditionCompareColumn))
+	case expandedTemporalConditionValues:
+		if m.temporalConditionColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.temporalConditionColumn))
+	case expandedClusterConditionValues:
+		if m.clusterConditionColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.clusterConditionColumn))
+	case expandedPlotComparisonColumn:
+		return len(m.discoveredColumns)
+	case expandedPlotComparisonValues:
+		if m.plotComparisonColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.plotComparisonColumn))
+	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		return len(m.availableWindows)
+	}
+	return 0
+}
+
+// getExpandedListItems returns the items in the currently expanded list
+func (m Model) getExpandedListItems() []string {
+	switch m.expandedOption {
+	case expandedConnectivityMeasures:
+		items := make([]string, len(connectivityMeasures))
+		for i, measure := range connectivityMeasures {
+			items[i] = measure.Key
+		}
+		return items
+	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
+		return m.discoveredColumns
+	case expandedConditionCompareValues:
+		if m.conditionCompareColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.conditionCompareColumn)
+	case expandedTemporalConditionValues:
+		if m.temporalConditionColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.temporalConditionColumn)
+	case expandedClusterConditionValues:
+		if m.clusterConditionColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.clusterConditionColumn)
+	case expandedPlotComparisonColumn:
+		return m.discoveredColumns
+	case expandedPlotComparisonValues:
+		if m.plotComparisonColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.plotComparisonColumn)
+	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		return m.availableWindows
+	}
+	return nil
+}
+
+// isColumnValueSelected checks if a value is selected for the current column context
+func (m Model) isColumnValueSelected(value string) bool {
+	var selectedValues string
+	switch m.expandedOption {
+	case expandedConditionCompareValues:
+		selectedValues = m.conditionCompareValues
+	case expandedTemporalConditionValues:
+		selectedValues = m.temporalConditionValues
+	case expandedClusterConditionValues:
+		selectedValues = m.clusterConditionValues
+	case expandedPlotComparisonValues:
+		selectedValues = m.plotComparisonValuesSpec
+	case expandedConditionCompareWindows:
+		selectedValues = m.conditionCompareWindows
+	case expandedPlotComparisonWindows:
+		selectedValues = m.plotComparisonWindowsSpec
+	default:
+		return false
+	}
+	if selectedValues == "" {
+		return false
+	}
+	// Check if value is in space or comma-separated list
+	for _, v := range strings.Fields(selectedValues) {
+		if v == value {
+			return true
+		}
+	}
+	for _, v := range strings.Split(selectedValues, ",") {
+		if strings.TrimSpace(v) == value {
+			return true
+		}
+	}
+	return false
+}
+
+// handleExpandedListToggle handles toggling items in expanded column/value lists
+func (m *Model) handleExpandedListToggle() {
+	items := m.getExpandedListItems()
+	if m.subCursor < 0 || m.subCursor >= len(items) {
+		return
+	}
+
+	selectedItem := items[m.subCursor]
+
+	switch m.expandedOption {
+	case expandedConnectivityMeasures:
+		m.connectivityMeasures[m.subCursor] = !m.connectivityMeasures[m.subCursor]
+
+	case expandedConditionCompareColumn:
+		m.conditionCompareColumn = selectedItem
+		m.conditionCompareValues = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedTemporalConditionColumn:
+		m.temporalConditionColumn = selectedItem
+		m.temporalConditionValues = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedClusterConditionColumn:
+		m.clusterConditionColumn = selectedItem
+		m.clusterConditionValues = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedConditionCompareValues:
+		m.toggleColumnValue(selectedItem, &m.conditionCompareValues)
+
+	case expandedTemporalConditionValues:
+		m.toggleColumnValue(selectedItem, &m.temporalConditionValues)
+
+	case expandedClusterConditionValues:
+		m.toggleColumnValue(selectedItem, &m.clusterConditionValues)
+
+	case expandedPlotComparisonColumn:
+		m.plotComparisonColumn = selectedItem
+		m.plotComparisonValuesSpec = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedPlotComparisonValues:
+		m.toggleSpaceValue(selectedItem, &m.plotComparisonValuesSpec)
+
+	case expandedConditionCompareWindows:
+		m.toggleSpaceValue(selectedItem, &m.conditionCompareWindows)
+
+	case expandedPlotComparisonWindows:
+		m.toggleSpaceValue(selectedItem, &m.plotComparisonWindowsSpec)
+	}
+
+	m.useDefaultAdvanced = false
+}
+
+// shouldRenderExpandedListAfterOption checks if we should render an expanded list after the given option
+func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
+	switch m.expandedOption {
+	case expandedConditionCompareColumn:
+		return opt == optConditionCompareColumn
+	case expandedConditionCompareValues:
+		return opt == optConditionCompareValues
+	case expandedConditionCompareWindows:
+		return opt == optConditionCompareWindows
+	case expandedTemporalConditionColumn:
+		return opt == optTemporalConditionColumn
+	case expandedTemporalConditionValues:
+		return opt == optTemporalConditionValues
+	case expandedClusterConditionColumn:
+		return opt == optClusterConditionColumn
+	case expandedClusterConditionValues:
+		return opt == optClusterConditionValues
+	case expandedPlotComparisonColumn:
+		return opt == optPlotComparisonColumn
+	case expandedPlotComparisonValues:
+		return opt == optPlotComparisonValues
+	case expandedPlotComparisonWindows:
+		return opt == optPlotComparisonWindows
+	}
+	return false
+}
+
+// isExpandedItemSelected checks if an item at the given index is selected in the expanded list
+func (m Model) isExpandedItemSelected(_ int, item string) bool {
+	switch m.expandedOption {
+	case expandedConditionCompareColumn:
+		return m.conditionCompareColumn == item
+	case expandedTemporalConditionColumn:
+		return m.temporalConditionColumn == item
+	case expandedClusterConditionColumn:
+		return m.clusterConditionColumn == item
+	case expandedPlotComparisonColumn:
+		return m.plotComparisonColumn == item
+	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
+		expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		return m.isColumnValueSelected(item)
+	}
+	return false
+}
+
+// toggleColumnValue toggles a value in a comma-separated list
+func (m *Model) toggleColumnValue(value string, target *string) {
+	if *target == "" {
+		*target = value
+		return
+	}
+
+	// Parse existing values
+	existing := strings.Split(*target, ",")
+	var newValues []string
+	found := false
+
+	for _, v := range existing {
+		v = strings.TrimSpace(v)
+		if v == value {
+			found = true
+		} else if v != "" {
+			newValues = append(newValues, v)
+		}
+	}
+
+	if !found {
+		newValues = append(newValues, value)
+	}
+
+	*target = strings.Join(newValues, ",")
+}
+
+// toggleSpaceValue toggles a value in a space-separated list
+func (m *Model) toggleSpaceValue(value string, target *string) {
+	if *target == "" {
+		*target = value
+		return
+	}
+
+	existing := strings.Fields(*target)
+	var newValues []string
+	found := false
+
+	for _, v := range existing {
+		if v == value {
+			found = true
+		} else if v != "" {
+			newValues = append(newValues, v)
+		}
+	}
+
+	if !found {
+		newValues = append(newValues, value)
+	}
+
+	*target = strings.Join(newValues, " ")
+}
+
 func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if m.task == "" && summary.Task != "" {
 		m.task = summary.Task
@@ -2707,6 +3014,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.sourceRoot
 	case textFieldRawMontage:
 		return m.rawMontage
+	case textFieldPrepMontage:
+		return m.prepMontage
 	case textFieldRawEventPrefixes:
 		return m.rawEventPrefixes
 	case textFieldMergeEventPrefixes:
@@ -2729,10 +3038,16 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.temporalConditionValues
 	case textFieldTemporalFilterValue:
 		return m.temporalFilterValue
+	case textFieldTfHeatmapFreqs:
+		return m.tfHeatmapFreqsSpec
 	case textFieldRunAdjustmentColumn:
 		return m.runAdjustmentColumn
 	case textFieldPainResidualCrossfitGroupColumn:
 		return m.painResidualCrossfitGroupColumn
+	case textFieldPainResidualSplineDfCandidates:
+		return m.painResidualSplineDfCandidates
+	case textFieldPainResidualModelComparePolyDegrees:
+		return m.painResidualModelComparePolyDegrees
 	case textFieldClusterConditionColumn:
 		return m.clusterConditionColumn
 	case textFieldClusterConditionValues:
@@ -2839,7 +3154,7 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.plotComparisonLabelsSpec
 	case textFieldPlotComparisonROIs:
 		return m.plotComparisonROIsSpec
-	// Decoding hyperparameter text fields
+	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		return m.elasticNetAlphaGrid
 	case textFieldElasticNetL1RatioGrid:
@@ -2969,6 +3284,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.sourceRoot = value
 	case textFieldRawMontage:
 		m.rawMontage = value
+	case textFieldPrepMontage:
+		m.prepMontage = value
 	case textFieldRawEventPrefixes:
 		m.rawEventPrefixes = value
 	case textFieldMergeEventPrefixes:
@@ -2991,10 +3308,16 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.temporalConditionValues = strings.TrimSpace(value)
 	case textFieldTemporalFilterValue:
 		m.temporalFilterValue = strings.TrimSpace(value)
+	case textFieldTfHeatmapFreqs:
+		m.tfHeatmapFreqsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldRunAdjustmentColumn:
 		m.runAdjustmentColumn = strings.TrimSpace(value)
 	case textFieldPainResidualCrossfitGroupColumn:
 		m.painResidualCrossfitGroupColumn = strings.TrimSpace(value)
+	case textFieldPainResidualSplineDfCandidates:
+		m.painResidualSplineDfCandidates = strings.Join(strings.Fields(value), "")
+	case textFieldPainResidualModelComparePolyDegrees:
+		m.painResidualModelComparePolyDegrees = strings.Join(strings.Fields(value), "")
 	case textFieldClusterConditionColumn:
 		m.clusterConditionColumn = strings.TrimSpace(value)
 	case textFieldClusterConditionValues:
@@ -3112,7 +3435,7 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.plotComparisonLabelsSpec = strings.TrimSpace(value)
 	case textFieldPlotComparisonROIs:
 		m.plotComparisonROIsSpec = strings.Join(strings.Fields(value), " ")
-	// Decoding hyperparameter text fields
+	// Machine Learning hyperparameter text fields
 	case textFieldElasticNetAlphaGrid:
 		m.elasticNetAlphaGrid = strings.Join(strings.Fields(value), "")
 	case textFieldElasticNetL1RatioGrid:
@@ -3238,28 +3561,37 @@ const (
 	optBehaviorGroupMediation
 	optBehaviorGroupModeration
 	optBehaviorGroupMixedEffects
-	optMicrostateStates
-	optGroupTemplates
-	optFixedTemplates
 	optConnectivity
 	optPACPhaseRange
 	optPACAmpRange
 	optPACMethod
 	optPACMinEpochs
 	optPACPairs
+	optPACSource
+	optPACNormalize
+	optPACNSurrogates
+	optPACAllowHarmonicOverlap
+	optPACMaxHarmonic
+	optPACHarmonicToleranceHz
 	optAperiodicRange
 	optAperiodicPeakZ
 	optAperiodicMinR2
 	optAperiodicMinPoints
+	optAperiodicPsdBandwidth
+	optAperiodicMaxRms
 	optPEOrder
 	optPEDelay
-	optBurstPercentile
-	optERPBaseline
-	optERPAllowNoBaseline
-	optERPComponents
+	optBurstThresholdMethod
+	optBurstThresholdPercentile
 	optBurstThreshold
 	optBurstMinDuration
 	optBurstBands
+	optERPBaseline
+	optERPAllowNoBaseline
+	optERPComponents
+	optERPSmoothMs
+	optERPPeakProminenceUv
+	optERPLowpassHz
 	optPowerBaselineMode
 	optPowerRequireBaseline
 	optSpectralEdge
@@ -3324,17 +3656,14 @@ const (
 	optTrialTableIncludeEvents
 	optTrialTableAddLagFeatures
 	optTrialTableExtraEventCols
-	optTrialTableValidate
-	optTrialTableRatingMin
-	optTrialTableRatingMax
-	optTrialTableTempMin
-	optTrialTableTempMax
 	optTrialTableHighMissingFrac
 	optFeatureSummariesEnabled
 	optPainResidualEnabled
 	optPainResidualMethod
 	optPainResidualPolyDegree
+	optPainResidualSplineDfCandidates
 	optPainResidualModelCompare
+	optPainResidualModelComparePolyDegrees
 	optPainResidualBreakpoint
 	optPainResidualBreakpointCandidates
 	optPainResidualBreakpointQlow
@@ -3444,6 +3773,10 @@ const (
 	optTemporalERDSBaselineMin
 	optTemporalERDSBaselineMax
 	optTemporalERDSMethod
+	// TF Heatmap options
+	optTemporalTfHeatmapEnabled
+	optTemporalTfHeatmapFreqs
+	optTemporalTfHeatmapTimeResMs
 	// Behavior options - Mixed effects / mediation
 	optMixedEffectsType
 	optMediationMinEffect
@@ -3454,14 +3787,16 @@ const (
 	optPlotDPI
 	optPlotSaveDPI
 	optPlotSharedColorbar
-	// Decoding options
-	optDecodingNPerm
-	optDecodingInnerSplits
-	optDecodingSkipTimeGen
+	// Machine Learning options
+	optMLNPerm
+	optMLInnerSplits
+	optMLOuterJobs
+	optMLSkipTimeGen
 	// Preprocessing options
 	optPrepUsePyprep
 	optPrepUseIcalabel
 	optPrepNJobs
+	optPrepMontage
 	optPrepResample
 	optPrepLFreq
 	optPrepHFreq
@@ -3677,7 +4012,7 @@ const (
 	optTfrNCyclesFactor
 	optTfrDecim
 	optTfrWorkers
-	// Decoding model hyperparameters
+	// Machine Learning model hyperparameters
 	optElasticNetAlphaGrid
 	optElasticNetL1RatioGrid
 	optRfNEstimators
@@ -3691,8 +4026,18 @@ const (
 )
 
 const (
-	expandedNone                 = -1
-	expandedConnectivityMeasures = 0
+	expandedNone                    = -1
+	expandedConnectivityMeasures    = 0
+	expandedConditionCompareColumn  = 1
+	expandedConditionCompareValues  = 2
+	expandedConditionCompareWindows = 3
+	expandedTemporalConditionColumn = 4
+	expandedTemporalConditionValues = 5
+	expandedClusterConditionColumn  = 6
+	expandedClusterConditionValues  = 7
+	expandedPlotComparisonColumn    = 8
+	expandedPlotComparisonValues    = 9
+	expandedPlotComparisonWindows   = 10
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -3710,13 +4055,14 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("pac") {
 		options = append(options, optFeatGroupPAC)
 		if m.featGroupPACExpanded {
-			options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs, optPACPairs)
+			options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs, optPACPairs,
+				optPACSource, optPACNormalize, optPACNSurrogates, optPACAllowHarmonicOverlap, optPACMaxHarmonic, optPACHarmonicToleranceHz)
 		}
 	}
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, optFeatGroupAperiodic)
 		if m.featGroupAperiodicExpanded {
-			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints)
+			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms)
 		}
 	}
 	if m.isCategorySelected("complexity") {
@@ -3728,13 +4074,13 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("erp") {
 		options = append(options, optFeatGroupERP)
 		if m.featGroupERPExpanded {
-			options = append(options, optERPBaseline, optERPAllowNoBaseline, optERPComponents)
+			options = append(options, optERPBaseline, optERPAllowNoBaseline, optERPComponents, optERPSmoothMs, optERPPeakProminenceUv, optERPLowpassHz)
 		}
 	}
 	if m.isCategorySelected("bursts") {
 		options = append(options, optFeatGroupBursts)
 		if m.featGroupBurstsExpanded {
-			options = append(options, optBurstThreshold, optBurstMinDuration, optBurstBands)
+			options = append(options, optBurstThresholdMethod, optBurstThresholdPercentile, optBurstThreshold, optBurstMinDuration, optBurstBands)
 		}
 	}
 	if m.isCategorySelected("power") {
@@ -3800,7 +4146,7 @@ func (m Model) getPreprocessingOptions() []optionType {
 	options := []optionType{optUseDefaults}
 
 	if mode == "full" || mode == "bad-channels" {
-		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq)
+		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepMontage, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq)
 	}
 
 	if mode == "full" || mode == "ica" {
@@ -3879,7 +4225,7 @@ func (m Model) selectedPlotItemsForConfig() []PlotItem {
 
 func (m Model) plotSupportsComparisons(plot PlotItem) bool {
 	switch plot.Group {
-	case "decoding":
+	case "machine_learning":
 		return false
 	default:
 		return true
@@ -4256,17 +4602,14 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTrialTableIncludeEvents,
 				optTrialTableAddLagFeatures,
 				optTrialTableExtraEventCols,
-				optTrialTableValidate,
-				optTrialTableRatingMin,
-				optTrialTableRatingMax,
-				optTrialTableTempMin,
-				optTrialTableTempMax,
 				optTrialTableHighMissingFrac,
 				optFeatureSummariesEnabled,
 				optPainResidualEnabled,
 				optPainResidualMethod,
 				optPainResidualPolyDegree,
+				optPainResidualSplineDfCandidates,
 				optPainResidualModelCompare,
+				optPainResidualModelComparePolyDegrees,
 				optPainResidualBreakpoint,
 				optPainResidualBreakpointCandidates,
 				optPainResidualBreakpointQlow,
@@ -4474,6 +4817,16 @@ func (m Model) getBehaviorOptions() []optionType {
 					optTemporalERDSMethod,
 				)
 			}
+			// TF Heatmap options (always visible when temporal is expanded)
+			options = append(options,
+				optTemporalTfHeatmapEnabled,
+			)
+			if m.tfHeatmapEnabled {
+				options = append(options,
+					optTemporalTfHeatmapFreqs,
+					optTemporalTfHeatmapTimeResMs,
+				)
+			}
 		}
 	}
 
@@ -4537,13 +4890,14 @@ func (m Model) getPlotConfigOptions() []optionType {
 	return options
 }
 
-func (m Model) getDecodingOptions() []optionType {
+func (m Model) getMLOptions() []optionType {
 	return []optionType{
 		optUseDefaults,
-		optDecodingNPerm,
-		optDecodingInnerSplits,
+		optMLNPerm,
+		optMLInnerSplits,
+		optMLOuterJobs,
 		optRNGSeed,
-		optDecodingSkipTimeGen,
+		optMLSkipTimeGen,
 		optElasticNetAlphaGrid,
 		optElasticNetL1RatioGrid,
 		optRfNEstimators,
@@ -4573,8 +4927,8 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 		options = m.getFeaturesOptions()
 	case types.PipelineBehavior:
 		options = m.getBehaviorOptions()
-	case types.PipelineDecoding:
-		options = m.getDecodingOptions()
+	case types.PipelineML:
+		options = m.getMLOptions()
 	case types.PipelinePreprocessing:
 		options = m.getPreprocessingOptions()
 	case types.PipelineRawToBIDS:

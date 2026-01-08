@@ -48,7 +48,7 @@ func (m Model) SelectedComputations() []string {
 			hasAnyComputation = true
 		}
 	}
-	// Post computations
+	// Post computations (includes lag_features, pain_residual, temperature_models)
 	for i, sel := range m.postComputationSelected {
 		if sel && i < len(m.postComputations) {
 			result = append(result, m.postComputations[i].Key)
@@ -245,12 +245,12 @@ func (m Model) getFilteredSubjects() []types.SubjectStatus {
 ///////////////////////////////////////////////////////////////////
 
 func (m Model) BuildCommand() string {
-	parts := []string{"eeg-pipeline", strings.ToLower(m.Pipeline.String())}
+	parts := []string{"eeg-pipeline", m.Pipeline.CLICommand()}
 
 	// Positional mode (only for certain pipelines)
 	needsMode := false
 	switch m.Pipeline {
-	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior, types.PipelinePlotting:
+	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior, types.PipelinePlotting, types.PipelineML:
 		needsMode = true
 	}
 
@@ -258,8 +258,20 @@ func (m Model) BuildCommand() string {
 		parts = append(parts, m.modeOptions[m.modeIndex])
 	}
 
-	if m.Pipeline == types.PipelineDecoding {
-		parts = append(parts, "--cv-scope", m.decodingScope.CLIValue())
+	if m.Pipeline == types.PipelineML {
+		parts = append(parts, "--cv-scope", m.mlScope.CLIValue())
+		if m.skipTimeGen {
+			parts = append(parts, "--skip-timegen")
+		}
+		if m.mlNPerm > 0 {
+			parts = append(parts, "--n-perm", fmt.Sprintf("%d", m.mlNPerm))
+		}
+		if m.innerSplits > 0 && m.innerSplits != 3 {
+			parts = append(parts, "--inner-splits", fmt.Sprintf("%d", m.innerSplits))
+		}
+		if m.outerJobs > 1 {
+			parts = append(parts, "--outer-jobs", fmt.Sprintf("%d", m.outerJobs))
+		}
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
@@ -347,7 +359,7 @@ func (m Model) BuildCommand() string {
 	needsPaths := false
 	switch m.Pipeline {
 	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior,
-		types.PipelineDecoding, types.PipelinePlotting:
+		types.PipelineML, types.PipelinePlotting:
 		needsPaths = true
 	}
 
@@ -399,8 +411,8 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildBehaviorAdvancedArgs()...)
 		case types.PipelinePlotting:
 			parts = append(parts, m.buildPlottingAdvancedArgs()...)
-		case types.PipelineDecoding:
-			parts = append(parts, m.buildDecodingAdvancedArgs()...)
+		case types.PipelineML:
+			parts = append(parts, m.buildMLAdvancedArgs()...)
 		case types.PipelinePreprocessing:
 			parts = append(parts, m.buildPreprocessingAdvancedArgs()...)
 		case types.PipelineRawToBIDS:
@@ -422,7 +434,14 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--subject", s)
 		}
 	} else {
-		parts = append(parts, "--all-subjects")
+		// Use comma-separated list for >10 subjects instead of --all-subjects
+		// This preserves the user's exact selection
+		parts = append(parts, "--subjects", strings.Join(subjs, ","))
+	}
+
+	// Add --dry-run flag if dry-run mode is enabled
+	if m.DryRunMode {
+		parts = append(parts, "--dry-run")
 	}
 
 	return joinShellCommand(parts)
@@ -1144,6 +1163,12 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		args = append(args, "--aperiodic-peak-z", fmt.Sprintf("%.2f", m.aperiodicPeakZ))
 		args = append(args, "--aperiodic-min-r2", fmt.Sprintf("%.3f", m.aperiodicMinR2))
 		args = append(args, "--aperiodic-min-points", fmt.Sprintf("%d", m.aperiodicMinPoints))
+		if m.aperiodicPsdBandwidth > 0 {
+			args = append(args, "--aperiodic-psd-bandwidth", fmt.Sprintf("%.1f", m.aperiodicPsdBandwidth))
+		}
+		if m.aperiodicMaxRms > 0 {
+			args = append(args, "--aperiodic-max-rms", fmt.Sprintf("%.3f", m.aperiodicMaxRms))
+		}
 		// Scientific validity: minimum segment duration for stable fits
 		if m.aperiodicMinSegmentSec != 2.0 {
 			args = append(args, "--aperiodic-min-segment-sec", fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec))
@@ -1173,14 +1198,15 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	// Additional connectivity scientific validity options
 	if m.isCategorySelected("connectivity") {
 		// AEC output format
-		if m.connAECOutput == 1 {
+		switch m.connAECOutput {
+		case 1:
 			args = append(args, "--aec-output", "z")
-		} else if m.connAECOutput == 2 {
+		case 2:
 			args = append(args, "--aec-output", "r", "z")
 		}
-		// Force within_epoch for decoding
-		if !m.connForceWithinEpochDecoding {
-			args = append(args, "--no-conn-force-within-epoch-for-decoding")
+		// Force within_epoch for machine learning
+		if !m.connForceWithinEpochML {
+			args = append(args, "--no-conn-force-within-epoch-for-ml")
 		}
 	}
 
@@ -1213,11 +1239,29 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 			args = append(args, "--erp-components")
 			args = append(args, splitCSVList(m.erpComponentsSpec)...)
 		}
+		if m.erpSmoothMs > 0 {
+			args = append(args, "--erp-smooth-ms", fmt.Sprintf("%.1f", m.erpSmoothMs))
+		}
+		if m.erpPeakProminenceUv > 0 {
+			args = append(args, "--erp-peak-prominence-uv", fmt.Sprintf("%.1f", m.erpPeakProminenceUv))
+		}
+		if m.erpLowpassHz > 0 {
+			args = append(args, "--erp-lowpass-hz", fmt.Sprintf("%.1f", m.erpLowpassHz))
+		}
 	}
 
 	// Burst options
 	if m.isCategorySelected("bursts") {
-		args = append(args, "--burst-threshold", fmt.Sprintf("%.2f", m.burstThresholdZ))
+		methods := []string{"percentile", "zscore", "mad"}
+		if m.burstThresholdMethod >= 0 && m.burstThresholdMethod < len(methods) {
+			args = append(args, "--burst-threshold-method", methods[m.burstThresholdMethod])
+		}
+		if m.burstThresholdMethod == 0 && m.burstThresholdPercentile > 0 {
+			args = append(args, "--burst-threshold-percentile", fmt.Sprintf("%.1f", m.burstThresholdPercentile))
+		}
+		if m.burstThresholdMethod != 0 {
+			args = append(args, "--burst-threshold", fmt.Sprintf("%.2f", m.burstThresholdZ))
+		}
 		args = append(args, "--burst-min-duration", fmt.Sprintf("%d", m.burstMinDuration))
 		if strings.TrimSpace(m.burstBandsSpec) != "" {
 			args = append(args, "--burst-bands")
@@ -1600,21 +1644,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			args = append(args, "--trial-table-extra-event-columns")
 			args = append(args, splitCSVList(m.trialTableExtraEventCols)...)
 		}
-		if !m.trialTableValidateEnabled {
-			args = append(args, "--no-trial-table-validate")
-		}
-		if m.trialTableRatingMin != 0.0 {
-			args = append(args, "--trial-table-rating-min", fmt.Sprintf("%.2f", m.trialTableRatingMin))
-		}
-		if m.trialTableRatingMax != 10.0 {
-			args = append(args, "--trial-table-rating-max", fmt.Sprintf("%.2f", m.trialTableRatingMax))
-		}
-		if m.trialTableTempMin != 25.0 {
-			args = append(args, "--trial-table-temperature-min", fmt.Sprintf("%.2f", m.trialTableTempMin))
-		}
-		if m.trialTableTempMax != 55.0 {
-			args = append(args, "--trial-table-temperature-max", fmt.Sprintf("%.2f", m.trialTableTempMax))
-		}
 		if m.trialTableHighMissingFrac != 0.5 {
 			args = append(args, "--trial-table-high-missing-frac", fmt.Sprintf("%.2f", m.trialTableHighMissingFrac))
 		}
@@ -1633,10 +1662,18 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			if m.painResidualPolyDegree != 2 {
 				args = append(args, "--pain-residual-poly-degree", fmt.Sprintf("%d", m.painResidualPolyDegree))
 			}
+			if strings.TrimSpace(m.painResidualSplineDfCandidates) != "" && m.painResidualSplineDfCandidates != "3,4,5" {
+				args = append(args, "--pain-residual-spline-df-candidates")
+				args = append(args, splitCSVList(m.painResidualSplineDfCandidates)...)
+			}
 		}
 
 		if !m.painResidualModelCompareEnabled {
 			args = append(args, "--no-pain-residual-model-compare")
+		}
+		if strings.TrimSpace(m.painResidualModelComparePolyDegrees) != "" && m.painResidualModelComparePolyDegrees != "2,3" {
+			args = append(args, "--pain-residual-model-compare-poly-degrees")
+			args = append(args, splitCSVList(m.painResidualModelComparePolyDegrees)...)
 		}
 		if !m.painResidualBreakpointEnabled {
 			args = append(args, "--no-pain-residual-breakpoint-test")
@@ -2224,25 +2261,28 @@ func splitShellWords(raw string) ([]string, error) {
 	return out, nil
 }
 
-// buildDecodingAdvancedArgs returns CLI args for decoding pipeline advanced options
-func (m Model) buildDecodingAdvancedArgs() []string {
+// buildMLAdvancedArgs returns CLI args for machine learning pipeline advanced options
+func (m Model) buildMLAdvancedArgs() []string {
 	var args []string
 
-	if m.decodingNPerm > 0 {
-		args = append(args, "--n-perm", fmt.Sprintf("%d", m.decodingNPerm))
+	if m.mlNPerm > 0 {
+		args = append(args, "--n-perm", fmt.Sprintf("%d", m.mlNPerm))
 	}
 
 	if m.innerSplits != 3 {
 		args = append(args, "--inner-splits", fmt.Sprintf("%d", m.innerSplits))
 	}
 
+	if m.outerJobs != 1 {
+		args = append(args, "--outer-jobs", fmt.Sprintf("%d", m.outerJobs))
+	}
+
 	if m.rngSeed > 0 {
 		args = append(args, "--rng-seed", fmt.Sprintf("%d", m.rngSeed))
 	}
 
-	if m.skipTimeGen {
-		args = append(args, "--skip-time-gen")
-	}
+	// NOTE: --skip-time-gen removed - not a valid CLI flag
+	// Time generalization is now a separate mode: eeg ml timegen
 
 	// ElasticNet hyperparameters
 	if strings.TrimSpace(m.elasticNetAlphaGrid) != "" && m.elasticNetAlphaGrid != "0.001,0.01,0.1,1,10" {
@@ -2278,6 +2318,9 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepNJobs != 1 {
 		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.prepNJobs))
+	}
+	if strings.TrimSpace(m.prepMontage) != "" && m.prepMontage != "easycap-M1" {
+		args = append(args, "--montage", m.prepMontage)
 	}
 
 	// Filtering

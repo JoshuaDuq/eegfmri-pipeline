@@ -1,0 +1,12 @@
+{
+  "Name": "EEG Pipeline Derivatives",
+  "BIDSVersion": "1.8.0",
+  "DatasetType": "derivative",
+  "GeneratedBy": [
+    {
+      "Name": "Thermal_Pain_EEG_Pipeline",
+      "Version": "unknown",
+      "Description": "Custom EEG analysis (ERP, TFR, features, decoding)"
+    }
+  ]
+}

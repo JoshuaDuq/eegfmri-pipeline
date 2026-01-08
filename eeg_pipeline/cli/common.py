@@ -18,7 +18,7 @@ from eeg_pipeline.infra.paths import resolve_deriv_root
 
 DEFAULT_TASK_KEY = "project.task"
 MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
-MIN_SUBJECTS_FOR_DECODING = 2
+MIN_SUBJECTS_FOR_ML = 2
 
 
 ###################################################################

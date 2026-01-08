@@ -7,7 +7,7 @@ Submodules:
 - features: Feature distribution plots
 - tfr: Time-frequency representation plots
 - behavioral: Brain-behavior correlation plots
-- decoding: ML decoding performance plots
+- machine_learning: ML performance plots
 
 Usage:
     # Import specific functions from submodules
@@ -123,22 +123,22 @@ def __getattr__(name: str):
 
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
-        # Decoding
-        "plot_time_generalization_matrix": "decoding",
-        "plot_time_generalization_with_null": "decoding",
-        "plot_prediction_scatter": "decoding",
-        "plot_per_subject_performance": "decoding",
-        "plot_decoding_null_hist": "decoding",
-        "plot_calibration_curve": "decoding",
-        "plot_bootstrap_distributions": "decoding",
-        "plot_permutation_null": "decoding",
-        "plot_residual_diagnostics": "decoding",
-        "plot_model_comparison": "decoding",
-        "plot_riemann_band_comparison": "decoding",
-        "plot_riemann_sliding_window": "decoding",
-        "plot_incremental_validity": "decoding",
-        "plot_feature_importance_top_n": "decoding",
-        "plot_feature_importance_stability": "decoding",
+        # Machine Learning
+        "plot_time_generalization_matrix": "machine_learning",
+        "plot_time_generalization_with_null": "machine_learning",
+        "plot_prediction_scatter": "machine_learning",
+        "plot_per_subject_performance": "machine_learning",
+        "plot_ml_null_hist": "machine_learning",
+        "plot_calibration_curve": "machine_learning",
+        "plot_bootstrap_distributions": "machine_learning",
+        "plot_permutation_null": "machine_learning",
+        "plot_residual_diagnostics": "machine_learning",
+        "plot_model_comparison": "machine_learning",
+        "plot_riemann_band_comparison": "machine_learning",
+        "plot_riemann_sliding_window": "machine_learning",
+        "plot_incremental_validity": "machine_learning",
+        "plot_feature_importance_top_n": "machine_learning",
+        "plot_feature_importance_stability": "machine_learning",
         "visualize_features_for_subjects": "features",
         "visualize_tfr_for_subjects": "tfr",
         "visualize_behavior_for_subjects": "behavioral",

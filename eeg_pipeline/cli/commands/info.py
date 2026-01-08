@@ -162,8 +162,53 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
                         if global_epoch_metadata:
                             break
 
-                # Get pipeline-wide metadata for hints
-                available_windows = list(config.get("time_windows", {}).keys())
+                # Get available time windows from computed features (extraction_config.json)
+                # This reflects what the user actually specified during feature extraction,
+                # not the default config time_windows section
+                available_windows = []
+                for r in results:
+                    subj_id = r["subject"].replace("sub-", "")
+                    features_dir = deriv_features_path(deriv_root, subj_id)
+                    if not features_dir.exists():
+                        continue
+                    
+                    # First try the merged extraction_config.json
+                    extraction_config_path = features_dir / "extraction_config.json"
+                    if extraction_config_path.exists():
+                        try:
+                            extraction_meta = json_module.loads(extraction_config_path.read_text())
+                            # Check for merged config with time_ranges list
+                            if extraction_meta.get("merged") and extraction_meta.get("time_ranges"):
+                                available_windows = [
+                                    w for w in extraction_meta["time_ranges"] 
+                                    if w is not None
+                                ]
+                                if available_windows:
+                                    break
+                        except Exception:
+                            pass
+                    
+                    # If no merged config, look for suffixed extraction_config_{name}.json files
+                    if not available_windows:
+                        try:
+                            suffixed_configs = list(features_dir.glob("extraction_config_*.json"))
+                            for cfg_path in suffixed_configs:
+                                # Extract window name from filename: extraction_config_{name}.json
+                                stem = cfg_path.stem  # extraction_config_{name}
+                                if stem.startswith("extraction_config_"):
+                                    window_name = stem.replace("extraction_config_", "")
+                                    if window_name and window_name not in available_windows:
+                                        available_windows.append(window_name)
+                            if available_windows:
+                                # Sort for consistency
+                                available_windows = sorted(available_windows)
+                                break
+                        except Exception:
+                            continue
+                
+                # Fallback to static config if no extraction_config.json found
+                if not available_windows:
+                    available_windows = list(config.get("time_windows", {}).keys())
                 
                 # Get event columns from first subject that has them
                 available_columns = []

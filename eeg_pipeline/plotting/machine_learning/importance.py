@@ -12,7 +12,7 @@ from scipy.stats import gaussian_kde
 
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.config import get_plot_config
-from eeg_pipeline.utils.data.decoding import extract_channel_importance_from_coefficients, extract_importance_column
+from eeg_pipeline.utils.data.machine_learning import extract_channel_importance_from_coefficients, extract_importance_column
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions (imported from helpers module)
 ###################################################################
 
-from eeg_pipeline.plotting.decoding.helpers import (
+from eeg_pipeline.plotting.machine_learning.helpers import (
     despine,
     add_zero_reference_line,
 )
@@ -56,12 +56,12 @@ def plot_feature_importance_top_n(importance_df: pd.DataFrame, model_name: str, 
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size_tall = plot_cfg.get_figure_size("tall", plot_type="decoding")
+    fig_size_tall = plot_cfg.get_figure_size("tall", plot_type="machine_learning")
     features = importance_df_sorted['feature_name'].values
     
-    decoding_config = plot_cfg.plot_type_configs.get("decoding", {})
-    feature_max_height = decoding_config.get("feature_plot_max_height", 6)
-    feature_height_per_feature = decoding_config.get("feature_plot_height_per_feature", 0.3)
+    ml_config = plot_cfg.plot_type_configs.get("machine_learning", {})
+    feature_max_height = ml_config.get("feature_plot_max_height", 6)
+    feature_height_per_feature = ml_config.get("feature_plot_height_per_feature", 0.3)
     fig_height = min(feature_max_height, feature_height_per_feature * len(features))
     fig, ax = plt.subplots(figsize=(fig_size_tall[0], fig_height))
     
@@ -82,11 +82,11 @@ def _plot_violin_stability(df: pd.DataFrame, channels_ordered: list, model_name:
     """
     Helper function to create violin plot for feature importance stability.
     """
-    decoding_config = plot_cfg.plot_type_configs.get("decoding", {})
-    violin_min_width = decoding_config.get("violin_plot_min_width", 8)
-    violin_width_per_channel = decoding_config.get("violin_plot_width_per_channel", 0.3)
-    violin_height = decoding_config.get("violin_plot_height", 5)
-    violin_width = decoding_config.get("violin_width", 0.7)
+    ml_config = plot_cfg.plot_type_configs.get("machine_learning", {})
+    violin_min_width = ml_config.get("violin_plot_min_width", 8)
+    violin_width_per_channel = ml_config.get("violin_plot_width_per_channel", 0.3)
+    violin_height = ml_config.get("violin_plot_height", 5)
+    violin_width = ml_config.get("violin_width", 0.7)
     
     fig_width = max(violin_min_width, len(channels_ordered) * violin_width_per_channel)
     fig, ax = plt.subplots(figsize=(fig_width, violin_height))
@@ -121,12 +121,12 @@ def _plot_ridge_stability(df: pd.DataFrame, channels_ordered: list, model_name: 
     """
     Helper function to create ridge plot for feature importance stability.
     """
-    decoding_config = plot_cfg.plot_type_configs.get("decoding", {})
-    ridge_max_channels = decoding_config.get("ridge_plot_max_channels", 30)
-    ridge_min_height = decoding_config.get("ridge_plot_min_height", 4)
-    ridge_height_per_channel = decoding_config.get("ridge_plot_height_per_channel", 0.4)
-    ridge_y_offset = decoding_config.get("ridge_plot_y_offset", 0.2)
-    ridge_kde_points = decoding_config.get("ridge_kde_points", 200)
+    ml_config = plot_cfg.plot_type_configs.get("machine_learning", {})
+    ridge_max_channels = ml_config.get("ridge_plot_max_channels", 30)
+    ridge_min_height = ml_config.get("ridge_plot_min_height", 4)
+    ridge_height_per_channel = ml_config.get("ridge_plot_height_per_channel", 0.4)
+    ridge_y_offset = ml_config.get("ridge_plot_y_offset", 0.2)
+    ridge_kde_points = ml_config.get("ridge_kde_points", 200)
     
     n_channels = len(channels_ordered)
     if n_channels > ridge_max_channels:
@@ -135,7 +135,7 @@ def _plot_ridge_stability(df: pd.DataFrame, channels_ordered: list, model_name: 
         df = df[df['channel'].isin(channels_ordered)]
     
     fig_height = max(ridge_min_height, len(channels_ordered) * ridge_height_per_channel)
-    tall_size = plot_cfg.get_figure_size("tall", plot_type="decoding")
+    tall_size = plot_cfg.get_figure_size("tall", plot_type="machine_learning")
     fig, axes = plt.subplots(len(channels_ordered), 1, figsize=(tall_size[0], fig_height), 
                             sharex=True, sharey=True)
     if len(channels_ordered) == 1:
@@ -149,8 +149,8 @@ def _plot_ridge_stability(df: pd.DataFrame, channels_ordered: list, model_name: 
         ch_data = ch_data[np.isfinite(ch_data)]
         
         if len(ch_data) < min_samples_for_fit:
-            ridge_text_x = decoding_config.get("ridge_text_x", 0.5)
-            ridge_text_y = decoding_config.get("ridge_text_y", 0.5)
+            ridge_text_x = ml_config.get("ridge_text_x", 0.5)
+            ridge_text_y = ml_config.get("ridge_text_y", 0.5)
             axes[idx].text(ridge_text_x, ridge_text_y, 'Insufficient data', 
                          transform=axes[idx].transAxes, ha='center', va='center', 
                          fontsize=plot_cfg.font.small)

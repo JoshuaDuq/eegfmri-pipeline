@@ -31,7 +31,7 @@ class PlotDefinition:
     behavior_plots: Optional[List[str]] = None
     tfr_plots: Optional[List[str]] = None
     erp_plots: Optional[List[str]] = None
-    decoding_mode: Optional[str] = None
+    ml_mode: Optional[str] = None
     requires_epochs: bool = False
     requires_features: bool = False
     requires_stats: bool = False
@@ -53,7 +53,7 @@ def _load_plot_catalog() -> List[PlotDefinition]:
                 behavior_plots=entry.get("behavior_plots"),
                 tfr_plots=entry.get("tfr_plots"),
                 erp_plots=entry.get("erp_plots"),
-                decoding_mode=entry.get("decoding_mode"),
+                ml_mode=entry.get("ml_mode"),
                 requires_epochs=bool(entry.get("requires_epochs", False)),
                 requires_features=bool(entry.get("requires_features", False)),
                 requires_stats=bool(entry.get("requires_stats", False)),
@@ -97,7 +97,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         choices=sorted(PLOT_GROUPS.keys()),
         default=None,
         metavar="GROUP",
-        help="Plot groups to render (features, behavior, tfr, erp, decoding)",
+        help="Plot groups to render (features, behavior, tfr, erp, machine_learning)",
     )
     parser.add_argument(
         "--all-plots",
@@ -587,9 +587,10 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
     from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
     from eeg_pipeline.plotting.orchestration.erp import visualize_erp_for_subjects
-    from eeg_pipeline.plotting.orchestration.decoding import (
+    from eeg_pipeline.plotting.orchestration.machine_learning import (
         visualize_regression_from_disk,
         visualize_time_generalization_from_disk,
+        visualize_classification_from_disk,
     )
 
     if getattr(args, "bids_root", None):
@@ -1017,14 +1018,17 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                     config=plot_config,
                     plots=_unique_in_order(list(plots_list)),
                 )
-            if definition.decoding_mode:
+            if definition.ml_mode:
                 deriv_root = get_deriv_root(plot_config)
-                if definition.decoding_mode == "regression":
-                    results_dir = deriv_root / "decoding" / "regression"
+                if definition.ml_mode == "regression":
+                    results_dir = deriv_root / "machine_learning" / "regression"
                     visualize_regression_from_disk(results_dir=results_dir, config=plot_config)
-                if definition.decoding_mode == "timegen":
-                    results_dir = deriv_root / "decoding" / "time_generalization"
+                if definition.ml_mode == "timegen":
+                    results_dir = deriv_root / "machine_learning" / "time_generalization"
                     visualize_time_generalization_from_disk(results_dir=results_dir, config=plot_config)
+                if definition.ml_mode == "classify":
+                    results_dir = deriv_root / "machine_learning" / "classification"
+                    visualize_classification_from_disk(results_dir=results_dir, config=plot_config)
 
         progress.complete(success=True)
         return
@@ -1034,7 +1038,7 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
     behavior_plots: List[str] = []
     tfr_plots: List[str] = []
     erp_plots: List[Any] = []
-    decoding_modes: Set[str] = set()
+    ml_modes: Set[str] = set()
 
     for plot_id in plot_ids:
         definition = PLOT_BY_ID.get(plot_id)
@@ -1048,8 +1052,8 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             tfr_plots.extend(definition.tfr_plots)
         if definition.erp_plots:
             erp_plots.append(definition.erp_plots) # erp_plots is just used as a list of strings
-        if definition.decoding_mode:
-            decoding_modes.add(definition.decoding_mode)
+        if definition.ml_mode:
+            ml_modes.add(definition.ml_mode)
 
     # Flatten and unique erp_plots
     flat_erp_plots = []
@@ -1072,7 +1076,7 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         steps += 1
     if erp_plots:
         steps += 1
-    if decoding_modes:
+    if ml_modes:
         steps += 1
 
     if steps == 0:
@@ -1122,16 +1126,19 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             plots=erp_plots,
         )
 
-    if decoding_modes:
+    if ml_modes:
         step_idx += 1
-        progress.step("Rendering decoding plots", current=step_idx, total=steps)
+        progress.step("Rendering machine learning plots", current=step_idx, total=steps)
         deriv_root = get_deriv_root(config)
-        if "regression" in decoding_modes:
-            results_dir = deriv_root / "decoding" / "regression"
+        if "regression" in ml_modes:
+            results_dir = deriv_root / "machine_learning" / "regression"
             visualize_regression_from_disk(results_dir=results_dir, config=config)
-        if "timegen" in decoding_modes:
-            results_dir = deriv_root / "decoding" / "time_generalization"
+        if "timegen" in ml_modes:
+            results_dir = deriv_root / "machine_learning" / "time_generalization"
             visualize_time_generalization_from_disk(results_dir=results_dir, config=config)
+        if "classify" in ml_modes:
+            results_dir = deriv_root / "machine_learning" / "classification"
+            visualize_classification_from_disk(results_dir=results_dir, config=config)
 
     progress.complete(success=True)
 

@@ -5,16 +5,21 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/eeg-pipeline/tui/cloud"
 	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
+	"github.com/eeg-pipeline/tui/views/dashboard"
 	"github.com/eeg-pipeline/tui/views/environment"
 	"github.com/eeg-pipeline/tui/views/execution"
 	"github.com/eeg-pipeline/tui/views/globalsetup"
+	"github.com/eeg-pipeline/tui/views/history"
 	"github.com/eeg-pipeline/tui/views/mainmenu"
+	"github.com/eeg-pipeline/tui/views/quickactions"
 	"github.com/eeg-pipeline/tui/views/wizard"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,6 +36,8 @@ const (
 	StateExecution
 	StateResults
 	StateGlobalSetup
+	StateDashboard
+	StateHistory
 )
 
 // TUIState represents the persistent state of the TUI across sessions
@@ -45,11 +52,18 @@ type Model struct {
 	navStack []AppState
 
 	// Sub-models
-	envSelect environment.Model
-	mainMenu  mainmenu.Model
-	wizard    wizard.Model
-	execution execution.Model
-	global    globalsetup.Model
+	envSelect    environment.Model
+	mainMenu     mainmenu.Model
+	wizard       wizard.Model
+	execution    execution.Model
+	global       globalsetup.Model
+	dashboard    dashboard.Model
+	historyMdl   history.Model
+	quickActions quickactions.Model
+
+	// Execution tracking for history
+	execStartTime time.Time
+	execCommand   string
 
 	// Shared state
 	width       int
@@ -181,6 +195,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
 				return m, cloud.PullDerivatives(context.Background(), m.cloudConfig, dataDir)
 			}
+		case "d", "D":
+			// Open Dashboard from main menu
+			if m.state == StateMainMenu {
+				m.dashboard = dashboard.New(m.repoRoot)
+				m.pushState(StateDashboard)
+				return m, tea.Batch(
+					m.dashboard.Init(),
+					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+				)
+			}
+		case "h", "H":
+			// Open History from main menu
+			if m.state == StateMainMenu {
+				m.historyMdl = history.New(m.repoRoot)
+				m.pushState(StateHistory)
+				return m, tea.Batch(
+					m.historyMdl.Init(),
+					func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+				)
+			}
+		case "ctrl+k":
+			// Quick Actions overlay (available from most states)
+			if m.state == StateMainMenu || m.state == StatePipelineWizard {
+				m.quickActions.Show()
+				return m, m.quickActions.Init()
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -285,9 +325,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cloud.SyncCompleteMsg:
 		if msg.Error != nil {
 			m.execution.AddOutput("Sync failed: " + msg.Error.Error())
+			m.execution.SetStatus(execution.StatusFailed)
 			return m, nil
 		}
 		m.execution.AddOutput("Sync complete. Running pipeline...")
+		m.execution.CloudStage = execution.StageRunning
 		// Now run the actual command
 		cmd := m.wizard.BuildCommand()
 		return m, cloud.RunRemoteCommand(m.execution.GetContext(), m.cloudConfig, cmd)
@@ -295,21 +337,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cloud.RunCompleteMsg:
 		if msg.Error != nil {
 			m.execution.SetStatus(execution.StatusFailed)
+			m.execution.CloudStage = execution.StageDone
 		} else if msg.ExitCode == 0 {
-			m.execution.SetStatus(execution.StatusSuccess)
 			m.execution.AddOutput("Pipeline run complete. Pulling results...")
+			m.execution.CloudStage = execution.StagePulling
 			localDataDir := filepath.Join(m.repoRoot, "eeg_pipeline", "data")
 			return m, cloud.PullDerivatives(m.execution.GetContext(), m.cloudConfig, localDataDir)
 		} else {
 			m.execution.SetStatus(execution.StatusFailed)
+			m.execution.CloudStage = execution.StageDone
 		}
 		return m, nil
 
 	case cloud.PullCompleteMsg:
+		m.execution.CloudStage = execution.StageDone
 		if msg.Error != nil {
 			m.execution.AddOutput("Pull failed: " + msg.Error.Error())
 		} else {
 			m.execution.AddOutput("Results pulled successfully.")
+			m.execution.SetStatus(execution.StatusSuccess)
 		}
 		return m, nil
 
@@ -452,9 +498,91 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var newExec tea.Model
 		newExec, cmd = m.execution.Update(msg)
 		m.execution = newExec.(execution.Model)
+
+	case StateDashboard:
+		var newDash tea.Model
+		newDash, cmd = m.dashboard.Update(msg)
+		m.dashboard = newDash.(dashboard.Model)
+
+	case StateHistory:
+		var newHist tea.Model
+		newHist, cmd = m.historyMdl.Update(msg)
+		m.historyMdl = newHist.(history.Model)
+
+		// Handle re-run from history
+		if m.historyMdl.Done && m.historyMdl.SelectedCommand != "" {
+			command := m.historyMdl.SelectedCommand
+			m.historyMdl.Done = false
+			m.historyMdl.SelectedCommand = ""
+			return m.startExecution(command)
+		}
+	}
+
+	// Handle Quick Actions overlay (can be shown on top of other views)
+	if m.quickActions.Visible {
+		var newQA tea.Model
+		newQA, cmd = m.quickActions.Update(msg)
+		m.quickActions = newQA.(quickactions.Model)
+
+		if m.quickActions.Done {
+			action := m.quickActions.SelectedAction
+			m.quickActions.Reset()
+			m.quickActions.Hide()
+			return m.handleQuickAction(action)
+		}
+		return m, cmd
 	}
 
 	return m, cmd
+}
+
+// handleQuickAction processes the selected quick action
+func (m Model) handleQuickAction(action quickactions.ActionType) (tea.Model, tea.Cmd) {
+	switch action {
+	case quickactions.ActionStats:
+		// Open Dashboard
+		m.dashboard = dashboard.New(m.repoRoot)
+		m.pushState(StateDashboard)
+		return m, tea.Batch(
+			m.dashboard.Init(),
+			func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+		)
+	case quickactions.ActionHistory:
+		// Open History
+		m.historyMdl = history.New(m.repoRoot)
+		m.pushState(StateHistory)
+		return m, tea.Batch(
+			m.historyMdl.Init(),
+			func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
+		)
+	case quickactions.ActionConfig:
+		// Open Global Setup
+		m.global = globalsetup.New(m.repoRoot)
+		m.global.SetSize(m.width, m.height)
+		m.pushState(StateGlobalSetup)
+		return m, executor.LoadConfigKeys(m.repoRoot, globalsetup.DefaultConfigKeys())
+	case quickactions.ActionRefresh:
+		// Refresh subjects
+		if m.state == StatePipelineWizard {
+			m.wizard.SetSubjectsLoading()
+			return m, executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline)
+		}
+	case quickactions.ActionValidate:
+		// Run validation command
+		cmd := "eeg-pipeline utilities validate --all-subjects"
+		if m.task != "" {
+			cmd += " --task " + m.task
+		}
+		return m.startExecution(cmd)
+	case quickactions.ActionExport:
+		// Run export command
+		cmd := "eeg-pipeline utilities export --all-subjects --format csv"
+		if m.task != "" {
+			cmd += " --task " + m.task
+		}
+		return m.startExecution(cmd)
+	}
+	return m, nil
 }
 
 // startExecution starts pipeline execution (local or cloud)
@@ -464,6 +592,10 @@ func (m Model) startExecution(command string) (tea.Model, tea.Cmd) {
 	m.execution.SetSize(m.width, m.height)
 	m.pushState(StateExecution)
 	m.wizard.ReadyToExecute = false
+
+	// Track execution for history
+	m.execStartTime = time.Now()
+	m.execCommand = command
 
 	if m.environment == environment.EnvGoogleCloud {
 		// Cloud mode: sync first, then run
@@ -494,12 +626,54 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 		return m, nil
 	case StateExecution:
 		if m.execution.IsDone() {
+			// Record execution to history before returning
+			m.recordExecutionToHistory()
 			return m.popState()
 		}
 		return m, nil
+	case StateDashboard, StateHistory:
+		return m.popState()
 	default:
 		return m.popState()
 	}
+}
+
+// recordExecutionToHistory saves the completed execution to history
+func (m *Model) recordExecutionToHistory() {
+	if m.execCommand == "" {
+		return
+	}
+
+	// Extract pipeline name from command
+	parts := strings.Fields(m.execCommand)
+	pipeline := "unknown"
+	mode := ""
+	if len(parts) >= 2 {
+		pipeline = parts[1]
+	}
+	if len(parts) >= 3 {
+		mode = parts[2]
+	}
+
+	// Determine success from execution status
+	success := m.execution.Status == execution.StatusSuccess
+
+	record := history.ExecutionRecord{
+		ID:        time.Now().Format("20060102150405"),
+		Command:   m.execCommand,
+		Pipeline:  pipeline,
+		Mode:      mode,
+		StartTime: m.execStartTime,
+		EndTime:   time.Now(),
+		Duration:  time.Since(m.execStartTime).Seconds(),
+		ExitCode:  0,
+		Success:   success,
+	}
+	if !success {
+		record.ExitCode = 1
+	}
+
+	_ = history.AddRecord(m.repoRoot, record)
 }
 
 // pushState pushes current state to nav stack
@@ -547,8 +721,24 @@ func (m Model) View() string {
 		content = m.execution.View()
 	case StateResults:
 		content = m.renderResults()
+	case StateDashboard:
+		content = m.dashboard.View()
+	case StateHistory:
+		content = m.historyMdl.View()
 	default:
 		content = "Unknown state"
+	}
+
+	// Render Quick Actions overlay if visible
+	if m.quickActions.Visible {
+		overlay := m.quickActions.View()
+		content = lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			overlay,
+			lipgloss.WithWhitespaceChars(" "),
+			lipgloss.WithWhitespaceForeground(lipgloss.Color("#333333")),
+		)
 	}
 
 	// Fill entire terminal using Height to force full terminal height

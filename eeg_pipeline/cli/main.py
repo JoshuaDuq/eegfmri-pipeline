@@ -15,13 +15,13 @@ Commands:
     behavior       Brain-behavior correlation analysis
     features       Feature extraction from epochs
     tfr            Time-frequency visualization
-    decoding       ML-based prediction
+    ml             Machine learning-based prediction
 
 Examples:
     python -m eeg_pipeline.cli.main utilities raw-to-bids --source-root data/source_data
     python -m eeg_pipeline.cli.main features compute --subject 0001
     python -m eeg_pipeline.cli.main behavior compute --all-subjects
-    python -m eeg_pipeline.cli.main decoding --subject 0001 --subject 0002
+    python -m eeg_pipeline.cli.main ml --subject 0001 --subject 0002
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ Examples:
   # TFR: visualize
   python -m eeg_pipeline.cli.main tfr visualize --subject 0001
 
-  # Decoding: run analysis
-  python -m eeg_pipeline.cli.main decoding --subject 0001 --subject 0002
+  # Machine Learning: run analysis
+  python -m eeg_pipeline.cli.main ml --subject 0001 --subject 0002
 
 For detailed help on each subcommand:
   python -m eeg_pipeline.cli.main <subcommand> --help

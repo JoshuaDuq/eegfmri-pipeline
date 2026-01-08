@@ -10,7 +10,7 @@ SHAP provides:
 - Consistent, theoretically-grounded importance measures
 
 Usage:
-    from eeg_pipeline.analysis.decoding.shap_importance import (
+    from eeg_pipeline.analysis.machine_learning.shap_importance import (
         compute_shap_importance,
         compute_shap_values,
         plot_shap_summary,

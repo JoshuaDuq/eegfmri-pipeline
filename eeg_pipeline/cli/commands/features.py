@@ -318,16 +318,16 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Power source for band ratios: raw (absolute) or powcorr (aperiodic-adjusted)",
     )
     parser.add_argument(
-        "--conn-force-within-epoch-for-decoding",
+        "--conn-force-within-epoch-for-ml",
         action="store_true",
         default=None,
         help="Force within_epoch phase estimator when train_mask detected (CV-safe)",
     )
     parser.add_argument(
-        "--no-conn-force-within-epoch-for-decoding",
+        "--no-conn-force-within-epoch-for-ml",
         action="store_false",
-        dest="conn_force_within_epoch_for_decoding",
-        help="Allow across_epochs phase estimator even in CV/decoding mode",
+        dest="conn_force_within_epoch_for_ml",
+        help="Allow across_epochs phase estimator even in CV/machine learning mode",
     )
     
     # ITPC additional options
@@ -564,8 +564,8 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             config["feature_engineering.connectivity.aec_output"] = args.aec_output
         if getattr(args, "ratio_source", None) is not None:
             config["feature_engineering.spectral.ratio_source"] = args.ratio_source
-        if getattr(args, "conn_force_within_epoch_for_decoding", None) is not None:
-            config["feature_engineering.connectivity.force_within_epoch_for_decoding"] = args.conn_force_within_epoch_for_decoding
+        if getattr(args, "conn_force_within_epoch_for_ml", None) is not None:
+            config["feature_engineering.connectivity.force_within_epoch_for_ml"] = args.conn_force_within_epoch_for_ml
         
         # ITPC additional options
         if getattr(args, "itpc_allow_unsafe_loo", None) is not None:

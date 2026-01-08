@@ -90,7 +90,7 @@ def _resolve_columns(
     return pain_col, temp_col, rating_col
 
 
-def load_decoding_data(
+def load_ml_data(
     subject: str,
     deriv_root: Path,
     config: EEGConfig,
@@ -187,7 +187,7 @@ def load_decoding_data(
     return X, y, groups, meta
 
 
-def load_multiple_subjects_decoding_data(
+def load_multiple_subjects_ml_data(
     deriv_root: Path,
     config: EEGConfig,
     subjects: Optional[List[str]] = None,
@@ -232,7 +232,7 @@ def load_multiple_subjects_decoding_data(
 
     for s in subjects:
         try:
-            X, y, groups, meta = load_decoding_data(
+            X, y, groups, meta = load_ml_data(
                 subject=s,
                 deriv_root=deriv_root,
                 config=config,
@@ -285,13 +285,17 @@ def load_multiple_subjects_decoding_data(
 
 def load_epochs_with_targets(
     deriv_root: Path,
-    config: EEGConfig,
+    config: Optional[EEGConfig] = None,
     subjects: Optional[List[str]] = None,
     subject_discovery_policy: Literal["intersection", "union", "config_only"] = "intersection",
     task: str = "",
     bids_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[List[Tuple[str, mne.Epochs, pd.Series]], List[str]]:
+    from eeg_pipeline.utils.config.loader import load_config
+    
+    if config is None:
+        config = load_config()
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -516,7 +520,7 @@ def load_active_matrix(
         groups_arr = groups_arr[finite_mask]
         meta = meta.loc[finite_mask].reset_index(drop=True)
 
-    # Required by decoding export utilities; keep stable ordering with current X/y.
+    # Required by machine learning export utilities; keep stable ordering with current X/y.
     meta = meta.reset_index(drop=True)
     meta["trial_id"] = np.arange(len(meta), dtype=int)
 
@@ -764,3 +768,157 @@ def extract_importance_column(
         return df_sorted["importance"].values, "Importance (ΔR²)"
 
     return None, None
+
+
+###################################################################
+# Unified Feature Matrix Builder
+###################################################################
+
+
+def ml_build_feature_matrix(
+    subjects: List[str],
+    task: str,
+    deriv_root: Path,
+    config: Any,
+    feature_set: Literal["channels_mean", "power", "connectivity", "itpc", "aperiodic", "combined"] = "channels_mean",
+    log: Optional[logging.Logger] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str], pd.DataFrame]:
+    """
+    Unified feature matrix builder for ML pipelines.
+    
+    Provides a single entry point for building feature matrices with different
+    feature-set options, reusing the same feature registry conventions as behavior.
+    
+    Parameters
+    ----------
+    subjects : List[str]
+        List of subject IDs
+    task : str
+        Task name
+    deriv_root : Path
+        Derivatives root directory
+    config : Any
+        Configuration object
+    feature_set : str
+        Feature set to use:
+        - 'channels_mean': Baseline-corrected mean amplitude by channel (default, fast)
+        - 'power': Band power features from feature extraction
+        - 'connectivity': Connectivity features (wPLI, AEC)
+        - 'itpc': Inter-trial phase coherence features
+        - 'aperiodic': Aperiodic (1/f) features
+        - 'combined': All available feature types concatenated
+    log : Logger, optional
+        Logger instance
+    
+    Returns
+    -------
+    X : np.ndarray
+        Feature matrix (n_samples, n_features)
+    y : np.ndarray
+        Target values
+    groups : np.ndarray
+        Subject group labels
+    feature_names : List[str]
+        Feature column names
+    meta : pd.DataFrame
+        Trial metadata with subject_id, block, trial_id
+    """
+    if log is None:
+        log = logging.getLogger(__name__)
+    
+    if feature_set == "channels_mean":
+        return load_active_matrix(subjects, task, deriv_root, config, log)
+    
+    from eeg_pipeline.utils.data.feature_io import load_feature_bundle
+    from eeg_pipeline.infra.paths import deriv_features_path
+    
+    X_blocks: List[np.ndarray] = []
+    y_blocks: List[np.ndarray] = []
+    groups: List[str] = []
+    meta_blocks: List[pd.DataFrame] = []
+    feature_cols: Optional[List[str]] = None
+    
+    for sub in subjects:
+        bundle = load_feature_bundle(sub, deriv_root, log, include_targets=True, config=config)
+        
+        if bundle.empty or bundle.targets is None:
+            log.warning(f"No features or targets for sub-{sub}; skipping")
+            continue
+        
+        y_sub = bundle.targets.to_numpy()
+        
+        feature_dfs = []
+        
+        if feature_set == "power" or feature_set == "combined":
+            if bundle.power_df is not None and not bundle.power_df.empty:
+                numeric_cols = bundle.power_df.select_dtypes(include=[np.number]).columns
+                feature_dfs.append(bundle.power_df[numeric_cols])
+        
+        if feature_set == "connectivity" or feature_set == "combined":
+            if bundle.connectivity_df is not None and not bundle.connectivity_df.empty:
+                numeric_cols = bundle.connectivity_df.select_dtypes(include=[np.number]).columns
+                feature_dfs.append(bundle.connectivity_df[numeric_cols])
+        
+        if feature_set == "itpc" or feature_set == "combined":
+            if bundle.itpc_df is not None and not bundle.itpc_df.empty:
+                numeric_cols = bundle.itpc_df.select_dtypes(include=[np.number]).columns
+                feature_dfs.append(bundle.itpc_df[numeric_cols])
+        
+        if feature_set == "aperiodic" or feature_set == "combined":
+            if bundle.aperiodic_df is not None and not bundle.aperiodic_df.empty:
+                numeric_cols = bundle.aperiodic_df.select_dtypes(include=[np.number]).columns
+                feature_dfs.append(bundle.aperiodic_df[numeric_cols])
+        
+        if not feature_dfs:
+            log.warning(f"No {feature_set} features found for sub-{sub}; skipping")
+            continue
+        
+        if len(feature_dfs) == 1:
+            features_df = feature_dfs[0]
+        else:
+            features_df = pd.concat(feature_dfs, axis=1)
+        
+        if len(features_df) != len(y_sub):
+            log.warning(f"Feature/target length mismatch for sub-{sub}: {len(features_df)} != {len(y_sub)}; skipping")
+            continue
+        
+        X_sub = features_df.to_numpy().astype(float)
+        
+        if feature_cols is None:
+            feature_cols = list(features_df.columns)
+        elif list(features_df.columns) != feature_cols:
+            common_cols = [c for c in feature_cols if c in features_df.columns]
+            if not common_cols:
+                log.warning(f"No common features for sub-{sub}; skipping")
+                continue
+            X_sub = features_df[common_cols].to_numpy().astype(float)
+            feature_cols = common_cols
+        
+        X_blocks.append(X_sub)
+        y_blocks.append(y_sub)
+        groups.extend([sub] * len(y_sub))
+        
+        meta_rec = {"subject_id": [sub] * len(y_sub)}
+        meta_blocks.append(pd.DataFrame(meta_rec))
+    
+    if not X_blocks:
+        raise RuntimeError(f"No subjects with usable {feature_set} features")
+    
+    X = np.vstack(X_blocks)
+    y_all = np.concatenate(y_blocks)
+    groups_arr = np.asarray(groups)
+    meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
+    
+    finite_mask = np.isfinite(y_all)
+    if not np.all(finite_mask):
+        X = X[finite_mask]
+        y_all = y_all[finite_mask]
+        groups_arr = groups_arr[finite_mask]
+        meta = meta.loc[finite_mask].reset_index(drop=True)
+    
+    meta = meta.reset_index(drop=True)
+    meta["trial_id"] = np.arange(len(meta), dtype=int)
+    
+    log.info(f"Built ML feature matrix: {feature_set}, shape={X.shape}, n_subjects={len(np.unique(groups_arr))}")
+    
+    return X, y_all, groups_arr, feature_cols or [], meta

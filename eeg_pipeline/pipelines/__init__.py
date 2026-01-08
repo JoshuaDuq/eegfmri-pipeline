@@ -6,7 +6,7 @@ complete analysis workflows on EEG data.
 Pipeline Classes:
 - FeaturePipeline: Feature extraction (TFR-based and precomputed)
 - BehaviorPipeline: EEG-behavior correlation analysis
-- DecodingPipeline: ML-based prediction (LOSO, time-generalization)
+- MLPipeline: Machine learning pipeline (LOSO, time-generalization)
 - PreprocessingPipeline: Bad channels, ICA, epochs
 
 Preprocessing Functions:
@@ -29,7 +29,7 @@ from eeg_pipeline.pipelines.behavior import (
     BehaviorPipelineConfig,
     BehaviorPipelineResults,
 )
-from eeg_pipeline.pipelines.decoding import DecodingPipeline
+from eeg_pipeline.pipelines.machine_learning import MLPipeline
 from eeg_pipeline.pipelines.utilities import UtilityPipeline
 from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
 
@@ -48,8 +48,8 @@ __all__ = [
     "BehaviorPipeline",
     "BehaviorPipelineConfig",
     "BehaviorPipelineResults",
-    # Decoding
-    "DecodingPipeline",
+    # Machine Learning
+    "MLPipeline",
     # Preprocessing
     "PreprocessingPipeline",
 ]

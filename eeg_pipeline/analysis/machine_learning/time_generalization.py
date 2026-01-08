@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import numpy as np
 from sklearn.model_selection import LeaveOneGroupOut
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -16,13 +16,13 @@ from eeg_pipeline.utils.analysis.tfr import (
     find_common_channels_train_test,
 )
 from eeg_pipeline.utils.analysis.windowing import build_time_windows
-from eeg_pipeline.utils.data.decoding import (
+from eeg_pipeline.utils.data.machine_learning import (
     filter_finite_targets,
     extract_epoch_data_block,
     prepare_trial_records_from_epochs,
 )
-from eeg_pipeline.utils.data.decoding import load_epochs_with_targets
-from eeg_pipeline.analysis.decoding.cv import (
+from eeg_pipeline.utils.data.machine_learning import load_epochs_with_targets
+from eeg_pipeline.analysis.machine_learning.cv import (
     get_min_channels_required,
     safe_pearsonr,
 )
@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 
 ###################################################################
-# Time Generalization Decoding
+# Time Generalization Analysis
 ###################################################################
 
 
@@ -86,9 +86,9 @@ def time_generalization_regression(
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
 
-    active_window = tuple(config_local.get("decoding.analysis.time_generalization.active_window", [3.0, 10.5]))
-    window_len = config_local.get("decoding.analysis.time_generalization.window_len", 0.75)
-    step = config_local.get("decoding.analysis.time_generalization.step", 0.25)
+    active_window = tuple(config_local.get("machine_learning.analysis.time_generalization.active_window", [3.0, 10.5]))
+    window_len = config_local.get("machine_learning.analysis.time_generalization.window_len", 0.75)
+    step = config_local.get("machine_learning.analysis.time_generalization.step", 0.25)
 
     tmin_pl, tmax_pl = active_window
     windows = build_time_windows(window_len, step, tmin_pl, tmax_pl)
@@ -153,7 +153,7 @@ def time_generalization_regression(
             
             # Minimum samples per window for reliable regression and correlation
             min_samples_per_window = cfg.get(
-                "decoding.analysis.time_generalization.min_samples_per_window", 15
+                "machine_learning.analysis.time_generalization.min_samples_per_window", 15
             )
             
             for i in range(n_windows):
@@ -171,7 +171,16 @@ def time_generalization_regression(
                 imputer = SimpleImputer(strategy='mean')
                 train_feat_i_clean = imputer.fit_transform(train_feat_i_clean)
                 
-                model = Pipeline([("scale", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+                use_ridgecv = cfg.get("machine_learning.analysis.time_generalization.use_ridgecv", False)
+                alpha_grid = cfg.get("machine_learning.analysis.time_generalization.alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
+                
+                if use_ridgecv and len(y_train[finite_mask_train]) >= 5:
+                    ridge_model = RidgeCV(alphas=alpha_grid, cv=min(5, len(y_train[finite_mask_train])))
+                else:
+                    default_alpha = cfg.get("machine_learning.analysis.time_generalization.default_alpha", 1.0)
+                    ridge_model = Ridge(alpha=default_alpha)
+                
+                model = Pipeline([("scale", StandardScaler()), ("ridge", ridge_model)])
                 try:
                     model.fit(train_feat_i_clean, y_train[finite_mask_train])
                 except Exception:
@@ -198,7 +207,7 @@ def time_generalization_regression(
                         
                         # Configurable minimum samples for reliable correlation estimation
                         min_samples_for_corr = cfg.get(
-                            "decoding.analysis.time_generalization.min_samples_for_corr", 10
+                            "machine_learning.analysis.time_generalization.min_samples_for_corr", 10
                         )
                         if n_valid >= min_samples_for_corr:
                             r_val, _ = safe_pearsonr(y_test_finite, y_pred_finite)
@@ -247,7 +256,7 @@ def time_generalization_regression(
         
         # Minimum total samples across folds for reliable Fisher z-averaging
         min_count_per_cell = cfg.get(
-            "decoding.analysis.time_generalization.min_count_per_cell", 15
+            "machine_learning.analysis.time_generalization.min_count_per_cell", 15
         )
         
         for i in range(n_windows):
@@ -326,6 +335,86 @@ def time_generalization_regression(
             null_r = np.stack(null_r, axis=0)
             null_r2 = np.stack(null_r2, axis=0)
 
+    # Compute cell-wise p-values and apply multiple comparison corrections
+    p_matrix = np.ones_like(tg_r)
+    sig_fdr = np.zeros_like(tg_r, dtype=bool)
+    sig_maxstat = np.zeros_like(tg_r, dtype=bool)
+    sig_cluster = np.zeros_like(tg_r, dtype=bool)
+    
+    if isinstance(null_r, np.ndarray) and null_r.size > 0 and tg_r.size > 0:
+        n_perm_valid = null_r.shape[0]
+        
+        for i in range(tg_r.shape[0]):
+            for j in range(tg_r.shape[1]):
+                if np.isfinite(tg_r[i, j]):
+                    null_vals = null_r[:, i, j]
+                    finite_null = null_vals[np.isfinite(null_vals)]
+                    if len(finite_null) > 0:
+                        p_matrix[i, j] = (np.sum(np.abs(finite_null) >= np.abs(tg_r[i, j])) + 1) / (len(finite_null) + 1)
+        
+        # FDR correction
+        from statsmodels.stats.multitest import multipletests
+        p_flat = p_matrix.flatten()
+        valid_mask = np.isfinite(p_flat) & (p_flat < 1.0)
+        if valid_mask.sum() > 0:
+            reject_flat = np.zeros(len(p_flat), dtype=bool)
+            _, p_fdr_valid, _, _ = multipletests(p_flat[valid_mask], alpha=0.05, method="fdr_bh")
+            reject_flat[valid_mask] = p_fdr_valid < 0.05
+            sig_fdr = reject_flat.reshape(tg_r.shape)
+            
+            n_sig = sig_fdr.sum()
+            n_tests = valid_mask.sum()
+            logger.info(f"Time-generalization FDR: {n_sig}/{n_tests} significant cells")
+        
+        # Max-statistic correction (FWER control)
+        null_max_abs = np.nanmax(np.abs(null_r), axis=(1, 2))
+        empirical_max_abs = np.abs(tg_r)
+        max_stat_threshold = np.percentile(null_max_abs[np.isfinite(null_max_abs)], 95) if np.any(np.isfinite(null_max_abs)) else np.inf
+        sig_maxstat = (empirical_max_abs >= max_stat_threshold) & np.isfinite(tg_r)
+        n_sig_maxstat = sig_maxstat.sum()
+        logger.info(f"Time-generalization max-stat (FWER): {n_sig_maxstat}/{valid_mask.sum()} significant cells (threshold={max_stat_threshold:.3f})")
+        
+        # Cluster-based correction
+        cluster_threshold = config_local.get("machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
+        from scipy import ndimage
+        
+        uncorrected_sig = p_matrix < cluster_threshold
+        labeled_clusters, n_clusters = ndimage.label(uncorrected_sig)
+        
+        if n_clusters > 0:
+            observed_cluster_sizes = ndimage.sum(uncorrected_sig, labeled_clusters, range(1, n_clusters + 1))
+            max_observed_cluster = np.max(observed_cluster_sizes) if len(observed_cluster_sizes) > 0 else 0
+            
+            null_max_clusters = []
+            for perm_idx in range(n_perm_valid):
+                null_p_perm = np.ones_like(tg_r)
+                for i in range(tg_r.shape[0]):
+                    for j in range(tg_r.shape[1]):
+                        if np.isfinite(null_r[perm_idx, i, j]):
+                            other_perms = np.delete(null_r[:, i, j], perm_idx)
+                            finite_other = other_perms[np.isfinite(other_perms)]
+                            if len(finite_other) > 0:
+                                null_p_perm[i, j] = (np.sum(np.abs(finite_other) >= np.abs(null_r[perm_idx, i, j])) + 1) / (len(finite_other) + 1)
+                
+                null_sig = null_p_perm < cluster_threshold
+                _, n_null_clusters = ndimage.label(null_sig)
+                if n_null_clusters > 0:
+                    null_cluster_sizes = ndimage.sum(null_sig, ndimage.label(null_sig)[0], range(1, n_null_clusters + 1))
+                    null_max_clusters.append(np.max(null_cluster_sizes) if len(null_cluster_sizes) > 0 else 0)
+                else:
+                    null_max_clusters.append(0)
+            
+            null_max_clusters = np.array(null_max_clusters)
+            cluster_size_threshold = np.percentile(null_max_clusters, 95) if len(null_max_clusters) > 0 else np.inf
+            
+            for cluster_id in range(1, n_clusters + 1):
+                cluster_size = observed_cluster_sizes[cluster_id - 1]
+                if cluster_size >= cluster_size_threshold:
+                    sig_cluster |= (labeled_clusters == cluster_id)
+            
+            n_sig_cluster = sig_cluster.sum()
+            logger.info(f"Time-generalization cluster (FWER): {n_sig_cluster}/{valid_mask.sum()} significant cells (min cluster size={cluster_size_threshold:.0f})")
+
     if results_dir is not None:
         try:
             results_dir.mkdir(parents=True, exist_ok=True)
@@ -337,6 +426,10 @@ def time_generalization_regression(
                 coverage_map=coverage_map,
                 null_r=null_r,
                 null_r2=null_r2,
+                p_matrix=p_matrix,
+                sig_fdr=sig_fdr,
+                sig_maxstat=sig_maxstat,
+                sig_cluster=sig_cluster,
             )
         except (OSError, PermissionError, ValueError) as exc:
             logger.warning("Failed to save time-generalization outputs: %s", exc)

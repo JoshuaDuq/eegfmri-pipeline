@@ -31,6 +31,14 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("mode", choices=["compute", "visualize"], help="Pipeline mode")
+    
+    # Discoverability options
+    parser.add_argument(
+        "--list-stages",
+        action="store_true",
+        help="List all available pipeline stages with descriptions",
+    )
+    
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
@@ -149,12 +157,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     trial_table_group.add_argument("--trial-table-add-lag-features", action="store_true", default=None)
     trial_table_group.add_argument("--no-trial-table-add-lag-features", action="store_false", dest="trial_table_add_lag_features")
     trial_table_group.add_argument("--trial-table-extra-event-columns", nargs="+", default=None, metavar="COL")
-    trial_table_group.add_argument("--trial-table-validate", action="store_true", default=None)
-    trial_table_group.add_argument("--no-trial-table-validate", action="store_false", dest="trial_table_validate")
-    trial_table_group.add_argument("--trial-table-rating-min", type=float, default=None)
-    trial_table_group.add_argument("--trial-table-rating-max", type=float, default=None)
-    trial_table_group.add_argument("--trial-table-temperature-min", type=float, default=None)
-    trial_table_group.add_argument("--trial-table-temperature-max", type=float, default=None)
     trial_table_group.add_argument("--trial-table-high-missing-frac", type=float, default=None)
     trial_table_group.add_argument("--feature-summaries", action="store_true", default=None, dest="feature_summaries_enabled")
     trial_table_group.add_argument("--no-feature-summaries", action="store_false", dest="feature_summaries_enabled")
@@ -373,8 +375,45 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
 def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the behavior command."""
+    import json
     from eeg_pipeline.pipelines.behavior import BehaviorPipeline
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
+    from eeg_pipeline.analysis.behavior.orchestration import StageRegistry, config_to_stage_names
+    
+    # Handle discoverability options first
+    if getattr(args, "list_stages", False):
+        stages = StageRegistry.list_stages()
+        print("\n=== Available Behavior Pipeline Stages ===\n")
+        for stage in stages:
+            print(f"  {stage['name']}")
+            print(f"    Description: {stage['description']}")
+            print(f"    Group: {stage['group']}")
+            if stage['requires']:
+                print(f"    Requires: {', '.join(stage['requires'])}")
+            if stage['produces']:
+                print(f"    Produces: {', '.join(stage['produces'])}")
+            print()
+        return
+    
+    if getattr(args, "dry_run", False):
+        # Build a mock pipeline config to resolve stages
+        from eeg_pipeline.pipelines.behavior import BehaviorPipelineConfig
+        pipeline_config = BehaviorPipelineConfig()
+        # Apply CLI args to config
+        if hasattr(args, "computations") and args.computations:
+            for comp in args.computations:
+                setattr(pipeline_config, f"run_{comp}", True)
+        
+        stages = config_to_stage_names(pipeline_config)
+        dry_run_result = StageRegistry.dry_run(stages)
+        
+        print("\n=== Dry Run: Behavior Pipeline ===\n")
+        print(f"Requested stages: {', '.join(dry_run_result['requested'])}")
+        print(f"Resolved stages ({dry_run_result['n_stages']} total):")
+        for i, stage in enumerate(dry_run_result['execution_order'], 1):
+            print(f"  {i}. {stage}")
+        print(f"\nExpected outputs: {', '.join(dry_run_result['expected_outputs'])}")
+        return
     
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
@@ -477,16 +516,6 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                 tt["extra_event_columns"] = cols
 
         tt_val = tt.setdefault("validate", {})
-        if getattr(args, "trial_table_validate", None) is not None:
-            tt_val["enabled"] = bool(args.trial_table_validate)
-        if getattr(args, "trial_table_rating_min", None) is not None:
-            tt_val["rating_min"] = float(args.trial_table_rating_min)
-        if getattr(args, "trial_table_rating_max", None) is not None:
-            tt_val["rating_max"] = float(args.trial_table_rating_max)
-        if getattr(args, "trial_table_temperature_min", None) is not None:
-            tt_val["temperature_min"] = float(args.trial_table_temperature_min)
-        if getattr(args, "trial_table_temperature_max", None) is not None:
-            tt_val["temperature_max"] = float(args.trial_table_temperature_max)
         if getattr(args, "trial_table_high_missing_frac", None) is not None:
             tt_val["high_missing_frac"] = float(args.trial_table_high_missing_frac)
 

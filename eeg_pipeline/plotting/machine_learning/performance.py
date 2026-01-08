@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions (imported from helpers module)
 ###################################################################
 
-from eeg_pipeline.plotting.decoding.helpers import (
+from eeg_pipeline.plotting.machine_learning.helpers import (
     despine,
     calculate_axis_limits,
     calculate_shared_axis_limits,
@@ -68,8 +68,8 @@ def plot_prediction_scatter(pred_df: pd.DataFrame, model_name: str, pooled_metri
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("square", plot_type="decoding")
-    marker_size = plot_cfg.get_scatter_marker_size(plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("square", plot_type="machine_learning")
+    marker_size = plot_cfg.get_scatter_marker_size(plot_type="machine_learning")
     
     fig, ax = plt.subplots(figsize=fig_size)
     
@@ -89,7 +89,7 @@ def plot_prediction_scatter(pred_df: pd.DataFrame, model_name: str, pooled_metri
     min_samples = plot_cfg.validation.get("min_samples_for_fit", 2)
     y_true_finite, y_pred_finite, mask = extract_finite_mask(y_true, y_pred)
     if mask.sum() >= min_samples:
-        fit_points = plot_cfg.plot_type_configs.get("decoding", {}).get("fit_points", 100)
+        fit_points = plot_cfg.plot_type_configs.get("machine_learning", {}).get("fit_points", 100)
         x_fit = np.linspace(axis_limits[0], axis_limits[1], fit_points)
         y_fit = fit_linear_regression(y_true_finite, y_pred_finite, x_fit, min_samples=min_samples)
         if np.any(np.isfinite(y_fit)):
@@ -131,7 +131,7 @@ def plot_per_subject_performance(per_subj_df: pd.DataFrame, model_name: str, sav
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
     
     fig, axes = plt.subplots(1, 2, figsize=fig_size)
     
@@ -149,7 +149,7 @@ def plot_per_subject_performance(per_subj_df: pd.DataFrame, model_name: str, sav
     logger.info(f"Saved {model_name} per-subject performance: {save_path}")
 
 
-def plot_decoding_null_hist(
+def plot_ml_null_hist(
     null_r: np.ndarray,
     empirical_r: float,
     save_path: Path,
@@ -163,7 +163,7 @@ def plot_decoding_null_hist(
         logger.warning("Null distribution empty; skipping null histogram")
         return
     plot_cfg = get_plot_config(config)
-    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("standard", plot_type="decoding"))
+    fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("standard", plot_type="machine_learning"))
     ax.hist(null_r, bins=30, color=plot_cfg.style.colors.gray, alpha=0.7, label="Null (shuffled)")
     ax.axvline(empirical_r, color="crimson", linestyle="--", linewidth=plot_cfg.style.line.width_standard, label=f"Empirical r={empirical_r:.2f}")
     ax.set_xlabel("Pearson r")
@@ -173,7 +173,7 @@ def plot_decoding_null_hist(
     despine(ax)
     plt.tight_layout()
     save_fig(fig, save_path, formats=plot_cfg.formats)
-    logger.info("Saved decoding null histogram to %s", save_path)
+    logger.info("Saved machine learning null histogram to %s", save_path)
 
 
 def plot_calibration_curve(pred_df: pd.DataFrame, model_name: str, cal_metrics: dict, save_path: Path, config: Optional[Any] = None) -> None:
@@ -190,7 +190,7 @@ def plot_calibration_curve(pred_df: pd.DataFrame, model_name: str, cal_metrics: 
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("square", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("square", plot_type="machine_learning")
     
     y_true = pred_df['y_true'].values
     y_pred = pred_df['y_pred'].values
@@ -265,7 +265,7 @@ def plot_bootstrap_distributions(bootstrap_results: dict, save_path: Path, confi
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size_wide = plot_cfg.get_figure_size("wide", plot_type="decoding")
+    fig_size_wide = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
     
     n_models = len(valid_models)
     fig, axes = plt.subplots(n_models, 2, figsize=(fig_size_wide[0], fig_size_wide[1] * n_models))
@@ -300,8 +300,8 @@ def plot_permutation_null(null_rs: np.ndarray, observed_r: float, p_value: float
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("tall", plot_type="decoding")
-    bins = plot_cfg.get_histogram_bins(plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("tall", plot_type="machine_learning")
+    bins = plot_cfg.get_histogram_bins(plot_type="machine_learning")
     
     fig, ax = plt.subplots(figsize=fig_size)
     

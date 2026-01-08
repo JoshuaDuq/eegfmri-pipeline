@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions (imported from helpers module)
 ###################################################################
 
-from eeg_pipeline.plotting.decoding.helpers import despine
+from eeg_pipeline.plotting.machine_learning.helpers import despine
 
 
 ###################################################################
@@ -33,7 +33,7 @@ def plot_time_generalization_matrix(
     config: Optional[Any] = None,
 ) -> None:
     """
-    Plot train×test time-generalization matrix for regression decoding.
+    Plot train×test time-generalization matrix for regression machine learning.
     tg_matrix should be shape (n_train_windows, n_test_windows); window_centers in seconds.
     """
     if tg_matrix is None or tg_matrix.size == 0:
@@ -44,7 +44,7 @@ def plot_time_generalization_matrix(
         return
 
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("square", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("square", plot_type="machine_learning")
 
     train_times = np.asarray(window_centers, dtype=float)
     test_times = train_times
@@ -117,7 +117,7 @@ def plot_time_generalization_with_null(
                 sig_mask = np.abs(tg_matrix) > np.nanpercentile(np.abs(null_matrix), 95, axis=0)
 
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("square", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("square", plot_type="machine_learning")
 
     train_times = np.asarray(window_centers, dtype=float)
     test_times = train_times

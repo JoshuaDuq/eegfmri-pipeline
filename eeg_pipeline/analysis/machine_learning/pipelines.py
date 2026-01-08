@@ -1,7 +1,7 @@
 """
-ML pipeline factories for decoding.
+ML pipeline factories.
 
-Provides pre-configured sklearn pipelines for regression decoding.
+Provides pre-configured sklearn pipelines for regression.
 """
 
 from __future__ import annotations
@@ -10,14 +10,14 @@ from typing import Any, Dict, Optional
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import ElasticNet
+from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, PowerTransformer
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.feature_selection import VarianceThreshold
 
 
-from eeg_pipeline.analysis.decoding.config import get_decoding_config
+from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 
 
 ###################################################################
@@ -30,7 +30,7 @@ def create_base_preprocessing_pipeline(
     config: Any = None,
 ) -> Pipeline:
     """Create base preprocessing pipeline (impute, variance filter, scale)."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     steps = [
         ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
@@ -48,7 +48,7 @@ def create_elasticnet_pipeline(
     config: Any = None,
 ) -> Pipeline:
     """Create ElasticNet regression pipeline with target transformation."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     base_steps = create_base_preprocessing_pipeline(include_scaling=True, config=config).steps
 
@@ -69,6 +69,27 @@ def create_elasticnet_pipeline(
     return Pipeline(base_steps)
 
 
+def create_ridge_pipeline(
+    seed: int = 42,
+    config: Any = None,
+) -> Pipeline:
+    """Create Ridge regression pipeline with target transformation."""
+    cfg = get_ml_config(config)
+
+    base_steps = create_base_preprocessing_pipeline(include_scaling=True, config=config).steps
+
+    regressor = TransformedTargetRegressor(
+        regressor=Ridge(random_state=seed),
+        transformer=PowerTransformer(
+            method=cfg["power_transformer_method"],
+            standardize=cfg["power_transformer_standardize"],
+        ),
+    )
+
+    base_steps.append(("regressor", regressor))
+    return Pipeline(base_steps)
+
+
 def create_rf_pipeline(
     n_estimators: Optional[int] = None,
     n_jobs: int = 1,
@@ -76,7 +97,7 @@ def create_rf_pipeline(
     config: Any = None,
 ) -> Pipeline:
     """Create Random Forest regression pipeline."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     if n_estimators is None:
         n_estimators = cfg["rf_n_estimators"]
@@ -105,7 +126,7 @@ def create_rf_pipeline(
 
 def build_elasticnet_param_grid(config: Any = None) -> dict:
     """Build hyperparameter grid for ElasticNet including variance threshold."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
 
     param_grid = {
         "regressor__regressor__alpha": cfg["elasticnet_alpha_grid"],
@@ -119,9 +140,20 @@ def build_elasticnet_param_grid(config: Any = None) -> dict:
     return param_grid
 
 
+def build_ridge_param_grid(config: Any = None) -> dict:
+    """Build hyperparameter grid for Ridge regression."""
+    cfg = get_ml_config(config)
+    
+    alpha_grid = cfg.get("ridge_alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
+    
+    return {
+        "regressor__regressor__alpha": alpha_grid,
+    }
+
+
 def build_rf_param_grid(config: Any = None) -> dict:
     """Build hyperparameter grid for Random Forest."""
-    cfg = get_decoding_config(config)
+    cfg = get_ml_config(config)
     
     return {
         "rf__max_depth": cfg["rf_max_depth_grid"],

@@ -45,6 +45,8 @@ func (m Model) View() string {
 		switch m.CurrentStep {
 		case types.StepSelectMode:
 			mainContent = m.renderModeSelection()
+		case types.StepProjectSetup:
+			mainContent = m.renderProjectSetup()
 		case types.StepSelectComputations:
 			mainContent = m.renderComputationSelection()
 		case types.StepConfigureOptions, types.StepSelectPlotCategories:

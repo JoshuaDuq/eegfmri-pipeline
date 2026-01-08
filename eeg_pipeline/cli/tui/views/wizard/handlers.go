@@ -70,6 +70,13 @@ func (m *Model) handleUp() {
 			m.modeIndex = len(m.modeOptions) - 1
 		}
 
+	case types.StepProjectSetup:
+		if m.projectSetupCursor > 0 {
+			m.projectSetupCursor--
+		} else {
+			m.projectSetupCursor = 4 // 4 fields + 1 toggle
+		}
+
 	case types.StepSelectComputations:
 		if m.computationListFocus == 0 {
 			// Primary computations list
@@ -149,12 +156,12 @@ func (m *Model) handleUp() {
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
-			// Navigate within the expanded list (connectivity measures)
-			if m.expandedOption == expandedConnectivityMeasures {
+			listLen := m.getExpandedListLength()
+			if listLen > 0 {
 				if m.subCursor > 0 {
 					m.subCursor--
 				} else {
-					m.subCursor = len(connectivityMeasures) - 1
+					m.subCursor = listLen - 1
 				}
 			}
 			m.UpdateAdvancedOffset()
@@ -182,6 +189,13 @@ func (m *Model) handleDown() {
 			m.modeIndex++
 		} else {
 			m.modeIndex = 0
+		}
+
+	case types.StepProjectSetup:
+		if m.projectSetupCursor < 4 {
+			m.projectSetupCursor++
+		} else {
+			m.projectSetupCursor = 0
 		}
 
 	case types.StepSelectComputations:
@@ -263,9 +277,9 @@ func (m *Model) handleDown() {
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
-			// Navigate within the expanded list (connectivity measures)
-			if m.expandedOption == expandedConnectivityMeasures {
-				if m.subCursor < len(connectivityMeasures)-1 {
+			listLen := m.getExpandedListLength()
+			if listLen > 0 {
+				if m.subCursor < listLen-1 {
 					m.subCursor++
 				} else {
 					m.subCursor = 0
@@ -299,11 +313,11 @@ func (m *Model) handleTab() {
 			m.computationListFocus = 0
 		}
 	case types.StepSelectSubjects:
-		if m.Pipeline == types.PipelineDecoding {
-			if m.decodingScope == DecodingCVScopeGroup {
-				m.decodingScope = DecodingCVScopeSubject
+		if m.Pipeline == types.PipelineML {
+			if m.mlScope == MLCVScopeGroup {
+				m.mlScope = MLCVScopeSubject
 			} else {
-				m.decodingScope = DecodingCVScopeGroup
+				m.mlScope = MLCVScopeGroup
 			}
 			return
 		}
@@ -433,7 +447,7 @@ func (m *Model) validateStep() []string {
 			}
 		}
 		minRequired := 1
-		if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+		if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
 			minRequired = 2
 		}
 		if selectedCount < minRequired {
@@ -829,7 +843,7 @@ func (m *Model) validate() []string {
 	}
 
 	minRequired := 1
-	if m.Pipeline == types.PipelineDecoding && m.decodingScope == DecodingCVScopeGroup {
+	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
 		minRequired = 2
 	}
 
@@ -1005,8 +1019,8 @@ func (m *Model) getAdvancedOptionCount() int {
 	case types.PipelinePlotting:
 		return len(m.getPlottingAdvancedRows())
 
-	case types.PipelineDecoding:
-		return len(m.getDecodingOptions())
+	case types.PipelineML:
+		return len(m.getMLOptions())
 	case types.PipelinePreprocessing:
 		return len(m.getPreprocessingOptions())
 	case types.PipelineRawToBIDS:
@@ -1045,8 +1059,8 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleBehaviorAdvancedOption()
 	case types.PipelinePlotting:
 		m.togglePlottingAdvancedOption()
-	case types.PipelineDecoding:
-		m.toggleDecodingAdvancedOption()
+	case types.PipelineML:
+		m.toggleMLAdvancedOption()
 	case types.PipelinePreprocessing:
 		m.togglePreprocessingAdvancedOption()
 	case types.PipelineRawToBIDS:
@@ -1057,12 +1071,9 @@ func (m *Model) toggleAdvancedOption() {
 }
 
 func (m *Model) toggleFeaturesAdvancedOption() {
-	// If an option is expanded, toggle items within it
+	// Handle expanded list toggles first
 	if m.expandedOption >= 0 {
-		if m.expandedOption == expandedConnectivityMeasures {
-			m.connectivityMeasures[m.subCursor] = !m.connectivityMeasures[m.subCursor]
-		}
-		m.useDefaultAdvanced = false
+		m.handleExpandedListToggle()
 		return
 	}
 
@@ -1155,6 +1166,24 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPACPairs:
 		m.startTextEdit(textFieldPACPairs)
 		m.useDefaultAdvanced = false
+	case optPACSource:
+		m.pacSource = (m.pacSource + 1) % 2 // 0: precomputed, 1: tfr
+		m.useDefaultAdvanced = false
+	case optPACNormalize:
+		m.pacNormalize = !m.pacNormalize
+		m.useDefaultAdvanced = false
+	case optPACNSurrogates:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPACAllowHarmonicOverlap:
+		m.pacAllowHarmonicOvrlap = !m.pacAllowHarmonicOvrlap
+		m.useDefaultAdvanced = false
+	case optPACMaxHarmonic:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPACHarmonicToleranceHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	case optAperiodicRange:
 		// Cycle through common aperiodic ranges: standard(2-40) -> narrow(3-30) -> broad(1-50) -> standard
 		if m.aperiodicFmin == 2.0 && m.aperiodicFmax == 40.0 {
@@ -1165,7 +1194,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.aperiodicFmin, m.aperiodicFmax = 2.0, 40.0 // standard
 		}
 		m.useDefaultAdvanced = false
-	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints:
+	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPEOrder:
@@ -1185,6 +1214,18 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optERPComponents:
 		m.startTextEdit(textFieldERPComponents)
+		m.useDefaultAdvanced = false
+	case optERPSmoothMs, optERPPeakProminenceUv, optERPLowpassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optBurstThresholdMethod:
+		m.burstThresholdMethod++
+		if m.burstThresholdMethod > 2 {
+			m.burstThresholdMethod = 0
+		}
+		m.useDefaultAdvanced = false
+	case optBurstThresholdPercentile:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optBurstThreshold:
 		switch m.burstThresholdZ {
@@ -1278,6 +1319,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 }
 
 func (m *Model) togglePlottingAdvancedOption() {
+	// Handle expanded list toggles first
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
 	rows := m.getPlottingAdvancedRows()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(rows) {
 		return
@@ -1643,7 +1690,12 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.plotCompareWindows = cycleTriState(m.plotCompareWindows)
 		m.useDefaultAdvanced = false
 	case optPlotComparisonWindows:
-		m.startTextEdit(textFieldPlotComparisonWindows)
+		if len(m.availableWindows) > 0 {
+			m.expandedOption = expandedPlotComparisonWindows
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldPlotComparisonWindows)
+		}
 		m.useDefaultAdvanced = false
 	case optPlotCompareColumns:
 		m.plotCompareColumns = cycleTriState(m.plotCompareColumns)
@@ -1652,10 +1704,24 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.startTextEdit(textFieldPlotComparisonSegment)
 		m.useDefaultAdvanced = false
 	case optPlotComparisonColumn:
-		m.startTextEdit(textFieldPlotComparisonColumn)
+		if len(m.discoveredColumns) > 0 {
+			m.expandedOption = expandedPlotComparisonColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldPlotComparisonColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optPlotComparisonValues:
-		m.startTextEdit(textFieldPlotComparisonValues)
+		if m.plotComparisonColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn); len(vals) > 0 {
+			m.expandedOption = expandedPlotComparisonValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldPlotComparisonValues)
+		}
 		m.useDefaultAdvanced = false
 	case optPlotComparisonLabels:
 		m.startTextEdit(textFieldPlotComparisonLabels)
@@ -1684,6 +1750,12 @@ func (m *Model) togglePlottingAdvancedOption() {
 }
 
 func (m *Model) toggleBehaviorAdvancedOption() {
+	// Handle expanded list toggles first
+	if m.expandedOption >= 0 {
+		m.handleExpandedListToggle()
+		return
+	}
+
 	options := m.getBehaviorOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
@@ -1835,10 +1907,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTrialTableExtraEventCols:
 		m.startTextEdit(textFieldTrialTableExtraEventColumns)
 		m.useDefaultAdvanced = false
-	case optTrialTableValidate:
-		m.trialTableValidateEnabled = !m.trialTableValidateEnabled
-		m.useDefaultAdvanced = false
-	case optTrialTableRatingMin, optTrialTableRatingMax, optTrialTableTempMin, optTrialTableTempMax, optTrialTableHighMissingFrac:
+	case optTrialTableHighMissingFrac:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optFeatureSummariesEnabled:
@@ -1853,8 +1922,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optPainResidualPolyDegree:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optPainResidualSplineDfCandidates:
+		m.startTextEdit(textFieldPainResidualSplineDfCandidates)
+		m.useDefaultAdvanced = false
 	case optPainResidualModelCompare:
 		m.painResidualModelCompareEnabled = !m.painResidualModelCompareEnabled
+		m.useDefaultAdvanced = false
+	case optPainResidualModelComparePolyDegrees:
+		m.startTextEdit(textFieldPainResidualModelComparePolyDegrees)
 		m.useDefaultAdvanced = false
 	case optPainResidualBreakpoint:
 		m.painResidualBreakpointEnabled = !m.painResidualBreakpointEnabled
@@ -2115,10 +2190,24 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.temporalSplitByCondition = !m.temporalSplitByCondition
 		m.useDefaultAdvanced = false
 	case optTemporalConditionColumn:
-		m.startTextEdit(textFieldTemporalConditionColumn)
+		if len(m.discoveredColumns) > 0 {
+			m.expandedOption = expandedTemporalConditionColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldTemporalConditionColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optTemporalConditionValues:
-		m.startTextEdit(textFieldTemporalConditionValues)
+		if m.temporalConditionColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.temporalConditionColumn); len(vals) > 0 {
+			m.expandedOption = expandedTemporalConditionValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldTemporalConditionValues)
+		}
 		m.useDefaultAdvanced = false
 	case optTemporalFilterValue:
 		m.startTextEdit(textFieldTemporalFilterValue)
@@ -2159,8 +2248,17 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optTemporalERDSMethod:
 		m.temporalERDSMethod = (m.temporalERDSMethod + 1) % 2 // Toggle between percent and zscore
 		m.useDefaultAdvanced = false
+	// TF Heatmap options
+	case optTemporalTfHeatmapEnabled:
+		m.tfHeatmapEnabled = !m.tfHeatmapEnabled
+		m.useDefaultAdvanced = false
+	case optTemporalTfHeatmapFreqs:
+		m.startTextEdit(textFieldTfHeatmapFreqs)
+		m.useDefaultAdvanced = false
+	case optTemporalTfHeatmapTimeResMs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 
-	// Cluster options
 	case optClusterThreshold:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -2180,10 +2278,24 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optClusterConditionColumn:
-		m.startTextEdit(textFieldClusterConditionColumn)
+		if len(m.discoveredColumns) > 0 {
+			m.expandedOption = expandedClusterConditionColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldClusterConditionColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optClusterConditionValues:
-		m.startTextEdit(textFieldClusterConditionValues)
+		if m.clusterConditionColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.clusterConditionColumn); len(vals) > 0 {
+			m.expandedOption = expandedClusterConditionValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldClusterConditionValues)
+		}
 		m.useDefaultAdvanced = false
 	// Mediation options
 	case optMediationBootstrap, optMediationMinEffect:
@@ -2215,13 +2327,32 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Condition options
 	case optConditionCompareColumn:
-		m.startTextEdit(textFieldConditionCompareColumn)
+		if len(m.discoveredColumns) > 0 {
+			m.expandedOption = expandedConditionCompareColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldConditionCompareColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optConditionCompareWindows:
-		m.startTextEdit(textFieldConditionCompareWindows)
+		if len(m.availableWindows) > 0 {
+			m.expandedOption = expandedConditionCompareWindows
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldConditionCompareWindows)
+		}
 		m.useDefaultAdvanced = false
 	case optConditionCompareValues:
-		m.startTextEdit(textFieldConditionCompareValues)
+		if m.conditionCompareColumn == "" {
+			m.ShowToast("Select a column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.conditionCompareColumn); len(vals) > 0 {
+			m.expandedOption = expandedConditionCompareValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldConditionCompareValues)
+		}
 		m.useDefaultAdvanced = false
 	case optConditionWindowPrimaryUnit:
 		m.conditionWindowPrimaryUnit = (m.conditionWindowPrimaryUnit + 1) % 2
@@ -2247,8 +2378,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	}
 }
 
-func (m *Model) toggleDecodingAdvancedOption() {
-	options := m.getDecodingOptions()
+func (m *Model) toggleMLAdvancedOption() {
+	options := m.getMLOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
 	}
@@ -2257,10 +2388,10 @@ func (m *Model) toggleDecodingAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
-	case optDecodingNPerm, optDecodingInnerSplits, optRNGSeed, optRfNEstimators:
+	case optMLNPerm, optMLInnerSplits, optRNGSeed, optRfNEstimators:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optDecodingSkipTimeGen:
+	case optMLSkipTimeGen:
 		m.skipTimeGen = !m.skipTimeGen
 		m.useDefaultAdvanced = false
 	case optElasticNetAlphaGrid:
@@ -2290,6 +2421,9 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPrepUseIcalabel:
 		m.prepUseIcalabel = !m.prepUseIcalabel
+		m.useDefaultAdvanced = false
+	case optPrepMontage:
+		m.startTextEdit(textFieldPrepMontage)
 		m.useDefaultAdvanced = false
 	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
 		m.startNumberEdit()
@@ -2381,8 +2515,8 @@ func (m *Model) commitNumberInput() {
 		m.commitBehaviorNumber(val)
 	case types.PipelinePlotting:
 		m.commitPlottingNumber(val)
-	case types.PipelineDecoding:
-		m.commitDecodingNumber(val)
+	case types.PipelineML:
+		m.commitMLNumber(val)
 	case types.PipelinePreprocessing:
 		m.commitPreprocessingNumber(val)
 	case types.PipelineRawToBIDS:
@@ -2866,12 +3000,42 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.aperiodicMinR2 = val
 	case optAperiodicMinPoints:
 		m.aperiodicMinPoints = int(val)
+	case optAperiodicPsdBandwidth:
+		if val >= 0 {
+			m.aperiodicPsdBandwidth = val
+		}
+	case optAperiodicMaxRms:
+		if val >= 0 {
+			m.aperiodicMaxRms = val
+		}
 	case optPACMinEpochs:
 		m.pacMinEpochs = int(val)
+	case optPACNSurrogates:
+		m.pacNSurrogates = int(val)
+	case optPACMaxHarmonic:
+		m.pacMaxHarmonic = int(val)
+	case optPACHarmonicToleranceHz:
+		m.pacHarmonicToleranceHz = val
 	case optPEDelay:
 		m.complexityPEDelay = int(val)
+	case optBurstThresholdPercentile:
+		if val >= 0 && val <= 100 {
+			m.burstThresholdPercentile = val
+		}
 	case optBurstMinDuration:
 		m.burstMinDuration = int(val)
+	case optERPSmoothMs:
+		if val >= 0 {
+			m.erpSmoothMs = val
+		}
+	case optERPPeakProminenceUv:
+		if val >= 0 {
+			m.erpPeakProminenceUv = val
+		}
+	case optERPLowpassHz:
+		if val > 0 {
+			m.erpLowpassHz = val
+		}
 	case optMinEpochs:
 		m.minEpochsForFeatures = int(val)
 	case optConnGraphProp:
@@ -2950,15 +3114,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.runAdjustmentMaxDummies = int(val)
 		}
 
-	// Trial table thresholds
-	case optTrialTableRatingMin:
-		m.trialTableRatingMin = val
-	case optTrialTableRatingMax:
-		m.trialTableRatingMax = val
-	case optTrialTableTempMin:
-		m.trialTableTempMin = val
-	case optTrialTableTempMax:
-		m.trialTableTempMax = val
 	case optTrialTableHighMissingFrac:
 		if val >= 0 && val <= 1 {
 			m.trialTableHighMissingFrac = val
@@ -3099,6 +3254,11 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		m.temporalERDSBaselineMin = val
 	case optTemporalERDSBaselineMax:
 		m.temporalERDSBaselineMax = val
+	// TF Heatmap options
+	case optTemporalTfHeatmapTimeResMs:
+		if val >= 1 {
+			m.tfHeatmapTimeResMs = int(val)
+		}
 	case optClusterMinSize:
 		if val >= 1 {
 			m.clusterMinSize = int(val)
@@ -3132,21 +3292,25 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	}
 }
 
-func (m *Model) commitDecodingNumber(val float64) {
-	options := m.getDecodingOptions()
+func (m *Model) commitMLNumber(val float64) {
+	options := m.getMLOptions()
 	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
 		return
 	}
 
 	opt := options[m.advancedCursor]
 	switch opt {
-	case optDecodingNPerm:
+	case optMLNPerm:
 		if val >= 0 {
-			m.decodingNPerm = int(val)
+			m.mlNPerm = int(val)
 		}
-	case optDecodingInnerSplits:
+	case optMLInnerSplits:
 		if val >= 2 {
 			m.innerSplits = int(val)
+		}
+	case optMLOuterJobs:
+		if val >= 1 {
+			m.outerJobs = int(val)
 		}
 	case optRNGSeed:
 		if val >= 0 {

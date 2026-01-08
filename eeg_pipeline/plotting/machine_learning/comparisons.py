@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions (imported from helpers module)
 ###################################################################
 
-from eeg_pipeline.plotting.decoding.helpers import (
+from eeg_pipeline.plotting.machine_learning.helpers import (
     despine,
     add_zero_reference_line,
     create_bar_plot,
@@ -54,14 +54,14 @@ def plot_model_comparison(models_dict: dict, save_path: Path, config: Optional[A
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
     
     fig, axes = plt.subplots(1, 2, figsize=fig_size)
     
     x_positions = np.arange(len(model_names))
     
     create_bar_plot(axes[0], x_positions, np.array(r_values), model_names, "Pearson's r", plot_cfg)
-    y_lim_padding = plot_cfg.plot_type_configs.get("decoding", {}).get("y_lim_padding_factor", 1.1)
+    y_lim_padding = plot_cfg.plot_type_configs.get("machine_learning", {}).get("y_lim_padding_factor", 1.1)
     r_min = min(0, min(r_values) * y_lim_padding)
     r_max = max(r_values) * y_lim_padding
     axes[0].set_ylim([r_min, r_max])
@@ -85,7 +85,7 @@ def plot_riemann_band_comparison(band_results: dict, save_path: Path, config: Op
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("wide", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("wide", plot_type="machine_learning")
     
     bands = list(band_results.keys())
     r_vals = [band_results[band].get('pearson_r', np.nan) for band in bands]
@@ -117,8 +117,8 @@ def plot_riemann_sliding_window(sliding_df: pd.DataFrame, save_path: Path, confi
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("sliding", plot_type="decoding")
-    marker_size = plot_cfg.get_scatter_marker_size(plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("sliding", plot_type="machine_learning")
+    marker_size = plot_cfg.get_scatter_marker_size(plot_type="machine_learning")
     
     fig, axes = plt.subplots(2, 1, figsize=fig_size, sharex=True)
     
@@ -153,7 +153,7 @@ def plot_incremental_validity(inc_summary: dict, save_path: Path, config: Option
         return
     
     plot_cfg = get_plot_config(config)
-    fig_size = plot_cfg.get_figure_size("tall", plot_type="decoding")
+    fig_size = plot_cfg.get_figure_size("tall", plot_type="machine_learning")
     
     rf_r = inc_summary.get('RandomForest', {}).get('pearson_r', np.nan)
     temp_r = inc_summary.get('TemperatureOnly', {}).get('pearson_r', np.nan)

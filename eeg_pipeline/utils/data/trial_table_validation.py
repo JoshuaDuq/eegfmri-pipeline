@@ -92,41 +92,25 @@ def validate_trial_table(
         if epoch.notna().any() and not report["checks"]["epoch"]["is_monotonic_increasing"]:
             warnings.append("Epoch column is not monotonic increasing (table may be unsorted)")
 
-    # Rating range checks (pain studies: VAS 0-10 is common; allow config override)
-    rating_min = float(_get(config, "behavior_analysis.trial_table.validate.rating_min", 0.0))
-    rating_max = float(_get(config, "behavior_analysis.trial_table.validate.rating_max", 10.0))
+    # Rating statistics (no range validation)
     if "rating" in df.columns:
         r = pd.to_numeric(df["rating"], errors="coerce")
         ok = r.notna()
-        out_of_range = int(((r < rating_min) | (r > rating_max)) & ok).sum()
         report["checks"]["rating"] = {
             "n_non_nan": int(ok.sum()),
             "min": float(r.min()) if ok.any() else np.nan,
             "max": float(r.max()) if ok.any() else np.nan,
-            "out_of_range": out_of_range,
-            "expected_min": rating_min,
-            "expected_max": rating_max,
         }
-        if out_of_range > 0:
-            warnings.append(f"Rating has {out_of_range} values outside [{rating_min}, {rating_max}]")
 
-    # Temperature range checks (typical thermode pain: ~30-50C, allow override)
+    # Temperature statistics (no range validation)
     if "temperature" in df.columns:
-        tmin = float(_get(config, "behavior_analysis.trial_table.validate.temperature_min", 25.0))
-        tmax = float(_get(config, "behavior_analysis.trial_table.validate.temperature_max", 55.0))
         t = pd.to_numeric(df["temperature"], errors="coerce")
         ok = t.notna()
-        out_of_range = int(((t < tmin) | (t > tmax)) & ok).sum()
         report["checks"]["temperature"] = {
             "n_non_nan": int(ok.sum()),
             "min": float(t.min()) if ok.any() else np.nan,
             "max": float(t.max()) if ok.any() else np.nan,
-            "out_of_range": out_of_range,
-            "expected_min": tmin,
-            "expected_max": tmax,
         }
-        if out_of_range > 0:
-            warnings.append(f"Temperature has {out_of_range} values outside [{tmin}, {tmax}]")
 
     # pain_binary sanity
     if "pain_binary" in df.columns:

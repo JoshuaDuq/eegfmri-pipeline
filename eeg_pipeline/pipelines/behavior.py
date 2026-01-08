@@ -39,20 +39,27 @@ from eeg_pipeline.analysis.behavior.orchestration import (
     combine_features as _combine_features_impl,
     stage_trial_table as _stage_trial_table_impl,
     stage_trial_table_validate as _stage_trial_table_validate_impl,
+    stage_lag_features as _stage_lag_features_impl,
+    stage_pain_residual as _stage_pain_residual_impl,
+    stage_temperature_models as _stage_temperature_models_impl,
     stage_confounds as _stage_confounds_impl,
     stage_regression as _stage_regression_impl,
     stage_models as _stage_models_impl,
     stage_stability as _stage_stability_impl,
     stage_consistency as _stage_consistency_impl,
     stage_influence as _stage_influence_impl,
-    stage_advanced as _stage_advanced_impl,
+    stage_mediation as _stage_mediation_impl,
+    stage_mixed_effects as _stage_mixed_effects_impl,
     stage_moderation as _stage_moderation_impl,
     stage_cluster as _stage_cluster_impl,
     stage_condition as _stage_condition_impl,
     stage_correlate as _stage_correlate_impl,
+    stage_pain_sensitivity as _stage_pain_sensitivity_impl,
     stage_export as _stage_export_impl,
     stage_load as _stage_load_impl,
-    stage_temporal as _stage_temporal_impl,
+    stage_temporal_tfr as _stage_temporal_tfr_impl,
+    stage_temporal_stats as _stage_temporal_stats_impl,
+    stage_temporal_topomaps as _stage_temporal_topomaps_impl,
     stage_validate as _stage_validate_impl,
     stage_report as _stage_report_impl,
     write_analysis_metadata as _write_analysis_metadata_impl,
@@ -66,6 +73,9 @@ from eeg_pipeline.analysis.behavior.orchestration import (
 
 BEHAVIOR_COMPUTATION_FLAGS = [
     "trial_table",
+    "lag_features",
+    "pain_residual",
+    "temperature_models",
     "confounds",
     "regression",
     "models",
@@ -136,6 +146,9 @@ class BehaviorPipelineConfig:
     # Computation flags
     trial_table_only: bool = True
     run_trial_table: bool = True
+    run_lag_features: bool = True
+    run_pain_residual: bool = True
+    run_temperature_models: bool = True
     run_confounds: bool = True
     run_regression: bool = False
     run_models: bool = False
@@ -206,6 +219,9 @@ class BehaviorPipelineConfig:
             method_label=method_label,
             trial_table_only=bool(get_config_value(config, "behavior_analysis.trial_table_only.enabled", True)),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
+            run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
+            run_pain_residual=bool(get_config_value(config, "behavior_analysis.pain_residual.enabled", True)),
+            run_temperature_models=bool(get_config_value(config, "behavior_analysis.temperature_models.enabled", True)),
             run_confounds=bool(get_config_value(config, "behavior_analysis.confounds.enabled", True)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
@@ -456,7 +472,26 @@ class BehaviorPipeline(PipelineBase):
         
         comp_flags = _resolve_behavior_computation_flags(computations, logger=self.logger)
         if comp_flags is not None:
+            # Dependencies / intent-preserving defaults:
+            # - Any analysis requires the canonical trial table.
+            # - Temporal/cluster analyses require epochs/time-frequency support (trial_table_only must be False).
+            any_requested = any(comp_flags.values())
+            needs_trial_table = any_requested and any(
+                comp_flags[k] for k in comp_flags.keys() if k != "trial_table"
+            )
+            if needs_trial_table and not comp_flags.get("trial_table", False):
+                self.logger.info("Auto-enabling `trial_table` (required by selected computations).")
+                comp_flags["trial_table"] = True
+
+            if comp_flags.get("temporal", False) or comp_flags.get("cluster", False):
+                if bool(getattr(self.pipeline_config, "trial_table_only", True)):
+                    self.logger.info("Auto-disabling `trial_table_only` to honor requested temporal/cluster computations.")
+                    self.pipeline_config.trial_table_only = False
+
             self.pipeline_config.run_trial_table = comp_flags["trial_table"]
+            self.pipeline_config.run_lag_features = comp_flags["lag_features"]
+            self.pipeline_config.run_pain_residual = comp_flags["pain_residual"]
+            self.pipeline_config.run_temperature_models = comp_flags["temperature_models"]
             self.pipeline_config.run_confounds = comp_flags["confounds"]
             self.pipeline_config.run_regression = comp_flags["regression"]
             self.pipeline_config.run_models = comp_flags["models"]
@@ -481,6 +516,9 @@ class BehaviorPipeline(PipelineBase):
         else:
             self._run_validation = any(
                 [
+                    self.pipeline_config.run_lag_features,
+                    self.pipeline_config.run_pain_residual,
+                    self.pipeline_config.run_temperature_models,
                     self.pipeline_config.run_confounds,
                     self.pipeline_config.run_regression,
                     self.pipeline_config.run_models,
@@ -516,6 +554,210 @@ class BehaviorPipeline(PipelineBase):
                 self.logger.info("  %s features: %s", comp, ", ".join(feats))
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
+        """Process a single subject using the DAG-based stage executor.
+        
+        This is the canonical entry point. All stage execution is delegated to
+        run_behavior_stages() which resolves dependencies and runs stages in order.
+        """
+        from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
+        from eeg_pipeline.infra.logging import get_subject_logger
+        from eeg_pipeline.cli.common import ProgressReporter
+        from eeg_pipeline.analysis.behavior.orchestration import run_behavior_stages
+        import time
+        
+        task = task or self.config.get("project.task", "thermalactive")
+        progress = kwargs.get("progress") or ProgressReporter(enabled=False)
+        validate_only = bool(kwargs.get("validate_only", False))
+        
+        stats_dir = deriv_stats_path(self.deriv_root, subject)
+        ensure_dir(stats_dir)
+        
+        logger = get_subject_logger(
+            "behavior_analysis", subject,
+            self.config.get("logging.log_file_name", "behavior_analysis.log"),
+            config=self.config
+        )
+        
+        logger.info(f"{'='*60}")
+        logger.info(f"Behavior Pipeline: sub-{subject}")
+        logger.info(f"{'='*60}")
+        
+        progress.subject_start(f"sub-{subject}")
+
+        base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
+        rng = np.random.default_rng(get_subject_seed(base_seed, subject))
+
+        stats_cfg = self.config.get("behavior_analysis.statistics", {})
+        partial_covars = stats_cfg.get("partial_covariates", None)
+
+        # Build context (step 1)
+        ctx = BehaviorContext(
+            subject=subject,
+            task=task,
+            config=self.config,
+            logger=logger,
+            deriv_root=self.deriv_root,
+            stats_dir=stats_dir,
+            use_spearman=(self.pipeline_config.method == "spearman"),
+            bootstrap=int(self.pipeline_config.bootstrap),
+            n_perm=int(self.pipeline_config.n_permutations),
+            rng=rng,
+            partial_covars=partial_covars,
+            control_temperature=self.pipeline_config.control_temperature,
+            control_trial_order=self.pipeline_config.control_trial_order,
+            compute_change_scores=self.pipeline_config.compute_change_scores,
+            compute_reliability=self.pipeline_config.compute_reliability,
+            stats_config=self.pipeline_config,
+            feature_categories=self.feature_categories,
+            selected_feature_files=self.feature_files,
+            selected_bands=kwargs.get("bands"),
+            computation_features=self.computation_features,
+        )
+        
+        results = BehaviorPipelineResults(subject=subject)
+        
+        # Handle validate_only mode
+        if validate_only:
+            logger.info("Validation-only mode: running minimal stages.")
+            ctx.data_qc["validate_only"] = True
+            # Override config to only run load + trial_table + export
+            self.pipeline_config.run_correlations = False
+            self.pipeline_config.run_condition_comparison = False
+            self.pipeline_config.run_temporal_correlations = False
+            self.pipeline_config.run_cluster_tests = False
+            self.pipeline_config.run_mediation = False
+            self.pipeline_config.run_moderation = False
+            self.pipeline_config.run_mixed_effects = False
+        
+        # Run all stages via DAG executor (step 2)
+        start_time = time.perf_counter()
+        try:
+            stage_outputs = run_behavior_stages(
+                ctx=ctx,
+                pipeline_config=self.pipeline_config,
+                results=results,
+                progress=progress,
+            )
+        except Exception as exc:
+            logger.error(f"Pipeline failed: {exc}")
+            progress.error("pipeline_failed", str(exc))
+            progress.subject_done(f"sub-{subject}", success=False)
+            return results
+        
+        elapsed = time.perf_counter() - start_time
+        logger.info(f"DAG execution completed in {elapsed:.1f}s")
+        
+        # Persist metadata (step 3)
+        outputs_manifest_path = ctx.stats_dir / "outputs_manifest.json"
+        try:
+            _write_analysis_metadata_impl(
+                ctx, self.pipeline_config, results,
+                stage_metrics={},
+                outputs_manifest=outputs_manifest_path,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to write analysis metadata: {e}")
+        
+        write_outputs_manifest(ctx, self.pipeline_config, results, {})
+        
+        # Write summary
+        summary = results.to_summary()
+        (ctx.stats_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+        
+        # Re-write normalized results if validation was run
+        if self.pipeline_config.run_correlations or self.pipeline_config.run_condition_comparison:
+            from eeg_pipeline.analysis.behavior.orchestration import _write_normalized_results
+            _write_normalized_results(ctx, self.pipeline_config, results)
+
+        outputs_log = [
+            f"Complete: {summary.get('n_features', 0)} features",
+            f"  Significant (raw): {summary.get('n_sig_raw', 0)}",
+            f"  Significant (controlled): {summary.get('n_sig_controlled', 0)}",
+            f"  Significant (Global FDR): {summary.get('n_sig_fdr', 0)}",
+        ]
+        if summary.get("n_clusters"):
+            outputs_log.append(f"  Clusters identified: {summary.get('n_clusters')}")
+            outputs_log.append(f"  Significant clusters: {summary.get('n_sig_clusters')}")
+            
+        logger.info(f"{'='*60}")
+        for line in outputs_log:
+            logger.info(line)
+        logger.info(f"{'='*60}")
+        
+        progress.subject_done(f"sub-{subject}", success=True)
+        
+        return results
+    
+    def run_group_level(self, subjects: List[str], **kwargs) -> Any:
+        """Run group-level behavior analysis across multiple subjects.
+        
+        Implements multi-subject analyses including:
+        - Mixed-effects models with subject random effects
+        - Multilevel correlations with block-restricted permutations
+        - Hierarchical FDR correction by feature family
+        
+        Parameters
+        ----------
+        subjects : List[str]
+            List of subject IDs to include
+        **kwargs : dict
+            run_mixed_effects : bool, default True
+                Run mixed-effects models
+            run_multilevel_correlations : bool, default True
+                Run multilevel correlations with block-restricted permutations
+            output_dir : Path, optional
+                Custom output directory (default: deriv_root/group/stats)
+        
+        Returns
+        -------
+        GroupLevelResult
+            Aggregated group-level results with mixed-effects and multilevel correlations
+        """
+        from eeg_pipeline.analysis.behavior.orchestration import (
+            run_group_level_analysis,
+            GroupLevelResult,
+        )
+        from eeg_pipeline.infra.paths import ensure_dir
+        
+        output_dir = kwargs.get("output_dir")
+        if output_dir is None:
+            output_dir = self.deriv_root / "group" / "stats" / "behavior"
+        
+        ensure_dir(output_dir)
+        
+        self.logger.info("="*60)
+        self.logger.info("Group-Level Behavior Analysis")
+        self.logger.info("="*60)
+        self.logger.info("Subjects (%d): %s", len(subjects), ", ".join(subjects))
+        
+        result = run_group_level_analysis(
+            subjects=subjects,
+            deriv_root=self.deriv_root,
+            config=self.config,
+            logger=self.logger,
+            run_mixed_effects=kwargs.get("run_mixed_effects", True),
+            run_multilevel_correlations=kwargs.get("run_multilevel_correlations", True),
+            output_dir=output_dir,
+        )
+        
+        if result.mixed_effects and result.mixed_effects.df is not None:
+            n_sig = result.mixed_effects.n_significant
+            self.logger.info("Mixed-effects: %d significant features", n_sig)
+        
+        if result.multilevel_correlations is not None and not result.multilevel_correlations.empty:
+            n_sig = (result.multilevel_correlations.get("q_within_family", pd.Series([1.0])) < 0.05).sum()
+            self.logger.info("Multilevel correlations: %d significant", n_sig)
+        
+        self.logger.info("Group-level results saved to: %s", output_dir)
+        
+        return result
+    
+    def process_subject_legacy(self, subject: str, task: Optional[str] = None, **kwargs) -> BehaviorPipelineResults:
+        """Legacy hard-coded stage execution (deprecated).
+        
+        Use process_subject() instead, which uses the DAG-based executor.
+        This method is kept for backwards compatibility and debugging.
+        """
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
         from eeg_pipeline.cli.common import ProgressReporter
@@ -525,16 +767,17 @@ class BehaviorPipeline(PipelineBase):
         
         task = task or self.config.get("project.task", "thermalactive")
         
-        # Initialize progress reporter
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         validate_only = bool(kwargs.get("validate_only", False))
         
-        # Calculate total steps dynamically based on enabled stages
         run_advanced = self.pipeline_config.run_mediation or self.pipeline_config.run_moderation or self.pipeline_config.run_mixed_effects
         run_correlate = self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity
         enabled_stages = [
-            True,  # Load (always runs)
+            True,
             self.pipeline_config.run_trial_table,
+            self.pipeline_config.run_lag_features,
+            self.pipeline_config.run_pain_residual,
+            self.pipeline_config.run_temperature_models,
             self.pipeline_config.run_confounds,
             self.pipeline_config.run_regression,
             self.pipeline_config.run_models,
@@ -548,7 +791,7 @@ class BehaviorPipeline(PipelineBase):
             run_advanced,
             self._run_validation,
             self.pipeline_config.run_report,
-            True,  # Export (always runs)
+            True,
         ]
         total_steps = sum(enabled_stages) if not validate_only else 2
         current_step = 0
@@ -563,7 +806,7 @@ class BehaviorPipeline(PipelineBase):
         )
         
         logger.info(f"{'='*60}")
-        logger.info(f"Behavior Pipeline: sub-{subject}")
+        logger.info(f"Behavior Pipeline (legacy): sub-{subject}")
         logger.info(f"{'='*60}")
         
         progress.subject_start(f"sub-{subject}")
@@ -628,7 +871,6 @@ class BehaviorPipeline(PipelineBase):
             return results
         _record_stage("load", stage_start, stage_rss)
         
-        # Compute change scores (active-baseline) before building trial table or running stats
         if self.pipeline_config.compute_change_scores:
             _add_change_scores_impl(ctx)
 
@@ -639,19 +881,53 @@ class BehaviorPipeline(PipelineBase):
             progress.step("Building trial table", current=current_step, total=total_steps)
             logger.info("Building trial table...")
             try:
-                # Default: save inside stats_dir
                 out_path = _stage_trial_table_impl(ctx, self.pipeline_config)
                 if out_path is not None:
                     results.trial_table_path = str(out_path)
             except Exception as exc:
                 logger.warning(f"Trial table build failed: {exc}")
 
-            # Always attempt non-gating trial-table validation when enabled.
             try:
                 results.trial_table_validation = _stage_trial_table_validate_impl(ctx, self.pipeline_config)
             except Exception as exc:
                 logger.debug("Trial table validation failed: %s", exc)
             _record_stage("trial_table", stage_start, stage_rss)
+
+        if self.pipeline_config.run_lag_features:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Computing lag features", current=current_step, total=total_steps)
+            logger.info("Computing lag features...")
+            try:
+                _stage_lag_features_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Lag features failed: {exc}")
+            _record_stage("lag_features", stage_start, stage_rss)
+
+        if self.pipeline_config.run_pain_residual:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Computing pain residual", current=current_step, total=total_steps)
+            logger.info("Computing pain residual...")
+            try:
+                _stage_pain_residual_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Pain residual failed: {exc}")
+            _record_stage("pain_residual", stage_start, stage_rss)
+
+        if self.pipeline_config.run_temperature_models:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Fitting temperature models", current=current_step, total=total_steps)
+            logger.info("Fitting temperature models...")
+            try:
+                _stage_temperature_models_impl(ctx, self.pipeline_config)
+            except Exception as exc:
+                logger.warning(f"Temperature models failed: {exc}")
+            _record_stage("temperature_models", stage_start, stage_rss)
 
         if validate_only:
             current_step += 1
@@ -723,14 +999,24 @@ class BehaviorPipeline(PipelineBase):
                 logger.warning(f"Stability stage failed: {exc}")
             _record_stage("stability", stage_start, stage_rss)
         
-        if self.pipeline_config.run_correlations or self.pipeline_config.compute_pain_sensitivity:
+        if self.pipeline_config.run_correlations:
             stage_start = time.perf_counter()
             stage_rss = _rss_mb()
             current_step += 1
             progress.step("Running correlations", current=current_step, total=total_steps)
             logger.info("Running correlations...")
-            results.correlations, results.pain_sensitivity = _stage_correlate_impl(ctx, self.pipeline_config)
+            results.correlations = _stage_correlate_impl(ctx, self.pipeline_config)
             _record_stage("correlations", stage_start, stage_rss)
+        
+        if self.pipeline_config.compute_pain_sensitivity:
+            stage_start = time.perf_counter()
+            stage_rss = _rss_mb()
+            current_step += 1
+            progress.step("Running pain sensitivity", current=current_step, total=total_steps)
+            logger.info("Running pain sensitivity analysis...")
+            results.pain_sensitivity = _stage_pain_sensitivity_impl(ctx, self.pipeline_config)
+            _record_stage("pain_sensitivity", stage_start, stage_rss)
+
 
         if self.pipeline_config.run_consistency:
             stage_start = time.perf_counter()
@@ -771,7 +1057,9 @@ class BehaviorPipeline(PipelineBase):
             current_step += 1
             progress.step("Temporal correlations", current=current_step, total=total_steps)
             logger.info("Running temporal correlations...")
-            results.tf, results.temporal = _stage_temporal_impl(ctx)
+            results.tf = _stage_temporal_tfr_impl(ctx)
+            results.temporal = _stage_temporal_stats_impl(ctx)
+            _stage_temporal_topomaps_impl(ctx)
             _record_stage("temporal", stage_start, stage_rss)
         
         if self.pipeline_config.run_cluster_tests:
@@ -789,7 +1077,9 @@ class BehaviorPipeline(PipelineBase):
             current_step += 1
             progress.step("Advanced analyses", current=current_step, total=total_steps)
             logger.info("Running advanced analyses...")
-            _stage_advanced_impl(ctx, self.pipeline_config, results)
+            results.mediation = _stage_mediation_impl(ctx, self.pipeline_config)
+            results.moderation = _stage_moderation_impl(ctx, self.pipeline_config)
+            results.mixed_effects = _stage_mixed_effects_impl(ctx, self.pipeline_config)
             _record_stage("advanced", stage_start, stage_rss)
         
         current_step += 1

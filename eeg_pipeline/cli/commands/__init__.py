@@ -30,7 +30,7 @@ class Command:
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.tfr import setup_tfr, run_tfr
-from eeg_pipeline.cli.commands.decoding import setup_decoding, run_decoding
+from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
 from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
 from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
@@ -73,11 +73,11 @@ COMMANDS: List[Command] = [
         run=run_tfr,
     ),
     Command(
-        name="decoding",
-        help="Decoding analysis: run LOSO regression and time-generalization",
-        description="Run EEG decoding (LOSO regression + time-generalization)",
-        setup=setup_decoding,
-        run=run_decoding,
+        name="ml",
+        help="Machine learning: run LOSO regression and time-generalization",
+        description="Run machine learning pipeline (LOSO regression + time-generalization)",
+        setup=setup_ml,
+        run=run_ml,
     ),
     Command(
         name="plotting",

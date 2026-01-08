@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -666,14 +665,12 @@ func (m Model) browseForPath(field fieldKey) tea.Cmd {
 			prompt = "Select source data folder"
 		}
 
-		cmd := exec.Command("osascript", "-e", fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, prompt))
-		output, err := cmd.Output()
-		if err != nil {
-			return pathPickedMsg{field: field, err: err}
+		// Cross-platform folder picker
+		result := executor.PickFolder(prompt, fmt.Sprintf("%d", field))()
+		if msg, ok := result.(executor.PickFolderMsg); ok {
+			return pathPickedMsg{field: field, path: msg.Path, err: msg.Error}
 		}
-
-		path := strings.TrimSpace(string(output))
-		return pathPickedMsg{field: field, path: path, err: nil}
+		return pathPickedMsg{field: field, err: fmt.Errorf("unexpected result type")}
 	}
 }
 

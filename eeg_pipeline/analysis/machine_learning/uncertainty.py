@@ -9,7 +9,7 @@ Key methods:
 - Calibration: Ensure predicted probabilities match true frequencies
 
 Usage:
-    from eeg_pipeline.analysis.decoding.uncertainty import (
+    from eeg_pipeline.analysis.machine_learning.uncertainty import (
         compute_prediction_intervals,
         calibrate_classifier,
         PredictionIntervalResult,
@@ -99,6 +99,7 @@ def compute_prediction_intervals(
     method: str = "cv_plus",
     cv_splits: int = 5,
     seed: int = 42,
+    groups: Optional[np.ndarray] = None,
 ) -> PredictionIntervalResult:
     """
     Compute conformal prediction intervals.
@@ -142,9 +143,9 @@ def compute_prediction_intervals(
     if method == "split":
         return _conformal_split(model, X_train, y_train, X_test, alpha, rng)
     elif method == "cv_plus":
-        return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed)
+        return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     elif method == "cqr":
-        return _conformalized_quantile_regression(model, X_train, y_train, X_test, alpha, cv_splits, seed)
+        return _conformalized_quantile_regression(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     else:
         raise ValueError(f"Unknown method: {method}")
 
@@ -207,23 +208,36 @@ def _conformal_cv_plus(
     alpha: float,
     cv_splits: int,
     seed: int,
+    groups: Optional[np.ndarray] = None,
 ) -> PredictionIntervalResult:
     """
     CV+ conformal prediction (Jackknife+).
     
     Uses cross-validation residuals for more efficient calibration.
+    Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
     """
-    from sklearn.model_selection import KFold
+    from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
     
     n = len(X_train)
     
-    # Get out-of-fold predictions via cross-validation
-    kf = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
+    # Select CV strategy based on groups
+    if groups is not None:
+        unique_groups = np.unique(groups)
+        n_groups = len(unique_groups)
+        if n_groups >= cv_splits:
+            cv = GroupKFold(n_splits=cv_splits)
+            split_iter = cv.split(X_train, y_train, groups)
+        else:
+            cv = LeaveOneGroupOut()
+            split_iter = cv.split(X_train, y_train, groups)
+    else:
+        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
+        split_iter = cv.split(X_train)
     
     # Store residuals and which model was used for each point
     loo_residuals = np.zeros(n)
     
-    for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X_train)):
+    for fold_idx, (train_idx, val_idx) in enumerate(split_iter):
         model_fold = clone(model)
         model_fold.fit(X_train[train_idx], y_train[train_idx])
         
@@ -257,32 +271,44 @@ def _conformalized_quantile_regression(
     alpha: float,
     cv_splits: int,
     seed: int,
+    groups: Optional[np.ndarray] = None,
 ) -> PredictionIntervalResult:
     """
     Conformalized Quantile Regression (CQR).
     
     Better for heteroscedastic data where prediction uncertainty
     varies across the feature space.
+    Supports group-aware CV via GroupKFold or LeaveOneGroupOut.
     """
     try:
         from sklearn.ensemble import GradientBoostingRegressor
     except ImportError:
-        # Fall back to CV+ if no quantile regressor available
-        return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed)
+        return _conformal_cv_plus(model, X_train, y_train, X_test, alpha, cv_splits, seed, groups)
     
-    from sklearn.model_selection import KFold
+    from sklearn.model_selection import KFold, GroupKFold, LeaveOneGroupOut
     
     n = len(X_train)
     alpha_lo = alpha / 2
     alpha_hi = 1 - alpha / 2
     
-    kf = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
+    if groups is not None:
+        unique_groups = np.unique(groups)
+        n_groups = len(unique_groups)
+        if n_groups >= cv_splits:
+            cv = GroupKFold(n_splits=cv_splits)
+            split_iter = cv.split(X_train, y_train, groups)
+        else:
+            cv = LeaveOneGroupOut()
+            split_iter = cv.split(X_train, y_train, groups)
+    else:
+        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seed)
+        split_iter = cv.split(X_train)
     
     # Get out-of-fold quantile predictions
     loo_lower = np.zeros(n)
     loo_upper = np.zeros(n)
     
-    for train_idx, val_idx in kf.split(X_train):
+    for train_idx, val_idx in split_iter:
         # Fit lower quantile model
         qr_low = GradientBoostingRegressor(
             loss="quantile", alpha=alpha_lo, random_state=seed
