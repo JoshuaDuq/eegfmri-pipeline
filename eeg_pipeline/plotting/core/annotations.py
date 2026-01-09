@@ -6,10 +6,13 @@ Significance markers, ROI annotation helpers, and p-value formatting functions.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+if TYPE_CHECKING:
+    import mne
 
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh_values as _fdr_bh_values
@@ -47,8 +50,9 @@ def format_cluster_significance_info(
     sig_parts.append(cluster_info)
     sig_parts.append(f"Channels: {', '.join(roi_sig_chs)}")
     if p_ch is not None:
-        roi_p_vals = [p_ch[i] for i in roi_sig_indices]
-        p_str = ', '.join([f"{p:.3f}" for p in roi_p_vals])
+        roi_p_vals = [p_ch[idx] for idx in roi_sig_indices]
+        p_value_strings = [f"{p_val:.3f}" for p_val in roi_p_vals]
+        p_str = ', '.join(p_value_strings)
         sig_parts.append(f"p-values: {p_str}")
     return " | ".join(sig_parts)
 
@@ -69,9 +73,9 @@ def format_ttest_significance_info(
         Formatted significance information string
     """
     sig_parts = ["T-Test:"]
-    roi_p_vals = [p_ch[i] for i in roi_sig_indices]
-    for ch, p_val in zip(roi_sig_chs, roi_p_vals):
-        sig_parts.append(f"{ch}: {p_val:.3f}")
+    roi_p_vals = [p_ch[idx] for idx in roi_sig_indices]
+    for channel_name, p_val in zip(roi_sig_chs, roi_p_vals):
+        sig_parts.append(f"{channel_name}: {p_val:.3f}")
     return " | ".join(sig_parts)
 
 
@@ -186,6 +190,26 @@ def apply_fdr_correction_to_roi_pvalues(
 ###################################################################
 
 
+def _validate_group_data_shapes(
+    data_group_a: np.ndarray,
+    data_group_b: np.ndarray,
+    num_channels: int
+) -> bool:
+    """Validate that group data arrays have correct channel dimension.
+    
+    Args:
+        data_group_a: Group A data array
+        data_group_b: Group B data array
+        num_channels: Expected number of channels
+    
+    Returns:
+        True if both groups have valid shapes, False otherwise
+    """
+    group_a_valid = data_group_a.shape[1] == num_channels
+    group_b_valid = data_group_b.shape[1] == num_channels
+    return group_a_valid and group_b_valid
+
+
 def find_annotation_x_position(ax: plt.Axes, plot_cfg=None) -> float:
     """Find x position for annotations, avoiding overlap with adjacent axes.
     
@@ -207,27 +231,27 @@ def find_annotation_x_position(ax: plt.Axes, plot_cfg=None) -> float:
     
     fig = ax.figure
     ax_bbox = ax.get_position()
-    ax_x1 = ax_bbox.x1
-    ax_y_center = (ax_bbox.y0 + ax_bbox.y1) / 2.0
+    current_ax_right_edge = ax_bbox.x1
+    current_ax_y_center = (ax_bbox.y0 + ax_bbox.y1) / 2.0
     
-    right_neighbor_x0 = None
+    right_neighbor_left_edge = None
     for other_ax in fig.get_axes():
         if other_ax == ax:
             continue
         other_bbox = other_ax.get_position()
-        other_y_center = (other_bbox.y0 + other_bbox.y1) / 2.0
-        is_same_row = abs(other_y_center - ax_y_center) < y_center_tolerance
-        is_right_of_current = other_bbox.x0 > ax_x1 + x_min_distance
-        if is_same_row and is_right_of_current:
-            if right_neighbor_x0 is None or other_bbox.x0 < right_neighbor_x0:
-                right_neighbor_x0 = other_bbox.x0
+        other_ax_y_center = (other_bbox.y0 + other_bbox.y1) / 2.0
+        y_centers_are_close = abs(other_ax_y_center - current_ax_y_center) < y_center_tolerance
+        is_to_the_right = other_bbox.x0 > current_ax_right_edge + x_min_distance
+        if y_centers_are_close and is_to_the_right:
+            if right_neighbor_left_edge is None or other_bbox.x0 < right_neighbor_left_edge:
+                right_neighbor_left_edge = other_bbox.x0
     
-    if right_neighbor_x0 is None:
+    if right_neighbor_left_edge is None:
         return default_x_position
     
     ax_width = ax_bbox.x1 - ax_bbox.x0
-    max_x_fig = (right_neighbor_x0 - ax_bbox.x0) / ax_width
-    return min(max_x_position, max_x_fig - x_offset)
+    max_x_in_axes_coords = (right_neighbor_left_edge - ax_bbox.x0) / ax_width
+    return min(max_x_position, max_x_in_axes_coords - x_offset)
 
 
 ###################################################################
@@ -304,7 +328,7 @@ def render_roi_annotations(
         if pval is not None and np.isfinite(pval)
     )
     min_rois_for_fdr = plot_cfg.validation.get("min_rois_for_fdr", 1)
-    use_fdr = apply_fdr_correction and num_rois_with_pvals > min_rois_for_fdr
+    should_use_fdr = apply_fdr_correction and num_rois_with_pvals > min_rois_for_fdr
     
     annotation_line_height = tfr_config.get("annotation_line_height", 0.045)
     annotation_min_spacing = tfr_config.get("annotation_min_spacing", 0.03)
@@ -312,7 +336,7 @@ def render_roi_annotations(
     
     for i, annotation in enumerate(annotations):
         roi, pct, sig_info, roi_pvalue = annotation
-        label = build_roi_annotation_label(roi, pct, roi_pvalue, sig_info, use_fdr, paired)
+        label = build_roi_annotation_label(roi, pct, roi_pvalue, sig_info, should_use_fdr, paired)
         
         ax.text(
             x_pos_ax, y_pos_ax, label,
@@ -322,8 +346,10 @@ def render_roi_annotations(
         )
         
         if i < len(annotations) - 1:
-            spacing_ax = annotation_min_spacing + (annotation_line_height * annotation_spacing_multiplier)
-            y_pos_ax -= (annotation_line_height + spacing_ax)
+            extra_spacing = annotation_line_height * annotation_spacing_multiplier
+            spacing_ax = annotation_min_spacing + extra_spacing
+            total_line_spacing = annotation_line_height + spacing_ax
+            y_pos_ax -= total_line_spacing
 
 
 ###################################################################
@@ -341,17 +367,29 @@ def get_sig_marker_text(config=None) -> str:
         Significance marker text string, or empty string if diff_annotation_enabled is False
     """
     from eeg_pipeline.plotting.io.figures import get_viz_params
+    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
     
     viz_params = get_viz_params(config)
     if not viz_params["diff_annotation_enabled"]:
         return ""
     
-    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
     config = ensure_config(config)
     plot_cfg = get_plot_config(config)
-    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-    default_sig_alpha = tfr_config.get("default_significance_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)) if plot_cfg else get_config_value(config, "statistics.sig_alpha", 0.05)
-    default_cluster_n_perm = tfr_config.get("default_cluster_n_perm", get_config_value(config, "statistics.cluster_n_perm", 100)) if plot_cfg else get_config_value(config, "statistics.cluster_n_perm", 100)
+    
+    if plot_cfg:
+        tfr_config = plot_cfg.plot_type_configs.get("tfr", {})
+        default_sig_alpha = tfr_config.get(
+            "default_significance_alpha",
+            get_config_value(config, "statistics.sig_alpha", 0.05)
+        )
+        default_cluster_n_perm = tfr_config.get(
+            "default_cluster_n_perm",
+            get_config_value(config, "statistics.cluster_n_perm", 100)
+        )
+    else:
+        default_sig_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+        default_cluster_n_perm = get_config_value(config, "statistics.cluster_n_perm", 100)
+    
     alpha = get_config_value(config, "statistics.sig_alpha", default_sig_alpha)
     n_perm = get_config_value(config, "statistics.cluster_n_perm", default_cluster_n_perm)
     method = f"cluster permutation (n={n_perm})"
@@ -366,7 +404,7 @@ def get_sig_marker_text(config=None) -> str:
 def add_roi_annotations(
     ax: "plt.Axes",
     data: np.ndarray,
-    info: "mne.Info",
+    info: mne.Info,
     config=None,
     roi_map=None,
     sig_mask: Optional[np.ndarray] = None,
@@ -427,9 +465,10 @@ def add_roi_annotations(
     
     has_valid_groups = data_group_a is not None and data_group_b is not None
     if has_valid_groups:
-        group_a_valid = data_group_a.shape[1] == len(ch_names)
-        group_b_valid = data_group_b.shape[1] == len(ch_names)
-        if not group_a_valid or not group_b_valid:
+        groups_have_valid_shapes = _validate_group_data_shapes(
+            data_group_a, data_group_b, len(ch_names)
+        )
+        if not groups_have_valid_shapes:
             data_group_a = None
             data_group_b = None
     
@@ -438,10 +477,19 @@ def add_roi_annotations(
     plot_cfg = get_plot_config(config)
     tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
     if fdr_alpha is None:
-        fdr_alpha = get_config_value(config, "behavior_analysis.statistics.fdr_alpha", get_config_value(config, "statistics.fdr_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)))
+        default_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+        fdr_alpha_fallback = get_config_value(config, "statistics.fdr_alpha", default_alpha)
+        fdr_alpha = get_config_value(
+            config, "behavior_analysis.statistics.fdr_alpha", fdr_alpha_fallback
+        )
     
-    percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0) if plot_cfg else 5.0
-    is_percent_format = _detect_data_format(data, data_format, percent_threshold=percent_detection_threshold)
+    if plot_cfg:
+        percent_detection_threshold = tfr_config.get("percent_detection_threshold", 5.0)
+    else:
+        percent_detection_threshold = 5.0
+    is_percent_format = _detect_data_format(
+        data, data_format, percent_threshold=percent_detection_threshold
+    )
     
     from ...utils.analysis.tfr import (
         build_roi_channel_mask,
@@ -452,7 +500,7 @@ def add_roi_annotations(
         compute_roi_pvalue,
     )
     
-    has_sig_info = sig_mask is not None and sig_mask.any()
+    has_significant_channels = sig_mask is not None and sig_mask.any()
     
     roi_pvalues_raw = {}
     roi_data_dict = {}
@@ -492,10 +540,12 @@ def add_roi_annotations(
         roi_pvalue = roi_pvalues_corrected.get(roi)
         
         sig_info = None
-        if has_sig_info:
-            roi_sig_indices, roi_sig_chs = extract_significant_roi_channels(ch_names, mask_vec, sig_mask)
+        if has_significant_channels:
+            roi_sig_indices, roi_sig_chs = extract_significant_roi_channels(
+                ch_names, mask_vec, sig_mask
+            )
             sig_info = build_significance_info(
-                roi_sig_chs, roi_sig_indices, p_ch, is_cluster, 
+                roi_sig_chs, roi_sig_indices, p_ch, is_cluster,
                 cluster_p_min, cluster_k
             )
         

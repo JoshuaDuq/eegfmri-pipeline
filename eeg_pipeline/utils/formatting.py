@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any, Union
 
@@ -9,6 +10,9 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.utils.analysis.stats import _safe_float
+
+DEFAULT_MAX_CHANNELS_DISPLAY = 10
 
 def sanitize_label(label: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(label))
@@ -24,12 +28,16 @@ def format_baseline_string(baseline_window: Tuple[float, float]) -> str:
 
 
 def parse_analysis_type_from_filename(filename: str) -> str:
-    if filename.startswith("corr_stats_pow_roi") or filename.startswith("corr_stats_power_roi"):
-        return "pow_roi"
-    if filename.startswith("corr_stats_conn_roi_summary"):
-        return "conn_roi_summary"
-    if filename.startswith("corr_stats_edges"):
-        return "conn_edges"
+    analysis_type_prefixes = {
+        "pow_roi": ("corr_stats_pow_roi", "corr_stats_power_roi"),
+        "conn_roi_summary": ("corr_stats_conn_roi_summary",),
+        "conn_edges": ("corr_stats_edges",),
+    }
+
+    for analysis_type, prefixes in analysis_type_prefixes.items():
+        if any(filename.startswith(prefix) for prefix in prefixes):
+            return analysis_type
+
     return "other"
 
 
@@ -54,12 +62,11 @@ def format_band_range(band: str, freq_bands: Dict[str, List[float]]) -> str:
     if not band or not freq_bands:
         return ""
 
-    band_rng = freq_bands.get(band)
-    if not band_rng or len(band_rng) < 2:
+    band_range = freq_bands.get(band)
+    if not band_range or len(band_range) < 2:
         return ""
 
-    band_range_tuple = tuple(band_rng)
-    return f"{band_range_tuple[0]:g}–{band_range_tuple[1]:g} Hz"
+    return f"{band_range[0]:g}–{band_range[1]:g} Hz"
 
 
 def build_partial_covars_string(covariates_df: Optional[pd.DataFrame]) -> str:
@@ -68,14 +75,13 @@ def build_partial_covars_string(covariates_df: Optional[pd.DataFrame]) -> str:
     return ",".join(covariates_df.columns.tolist())
 
 
-def format_band_label(band: str, config) -> str:
+def format_band_label(band: str, config: Dict[str, Any]) -> str:
     if not band:
         return ""
 
     freq_bands = config.get("time_frequency_analysis.bands", {})
     band_range = freq_bands.get(band)
-    if band_range:
-        band_range = tuple(band_range)
+    if band_range and len(band_range) >= 2:
         return f"{band} ({band_range[0]:g}–{band_range[1]:g} Hz)"
     return band
 
@@ -100,7 +106,7 @@ def write_group_trial_counts(
     output_dir: Path,
     counts_file_name: str,
     pain_counts: Optional[List[Tuple[int, int]]] = None,
-    logger: Optional[Any] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> None:
     if pain_counts is None:
         pain_counts = [(0, 0)] * len(subjects)
@@ -137,9 +143,11 @@ def write_group_trial_counts(
         logger.info(f"Saved counts: {output_path}")
 
 
-def format_channel_list_for_display(channels: List[str], max_channels: Optional[int] = None, config: Optional[Dict[str, Any]] = None) -> str:
+def format_channel_list_for_display(
+    channels: List[str], max_channels: Optional[int] = None
+) -> str:
     if max_channels is None:
-        max_channels = 10
+        max_channels = DEFAULT_MAX_CHANNELS_DISPLAY
 
     displayed = channels[:max_channels]
     return "Channels: " + ", ".join(displayed)
@@ -187,16 +195,12 @@ def get_temporal_xlabel(time_label: str) -> str:
     return f"log10(power/baseline) — {time_label}"
 
 
-
-
 def build_file_updates_dict(
     file_references: List[Tuple[Path, int]],
     q_array: np.ndarray,
     rejections_array: np.ndarray,
     p_array: np.ndarray,
 ) -> Dict[Path, List[Tuple[int, float, bool, float]]]:
-    from eeg_pipeline.utils.analysis.stats import _safe_float
-
     file_updates: Dict[Path, List[Tuple[int, float, bool, float]]] = {}
 
     for index, (file_path, row_index) in enumerate(file_references):
@@ -227,10 +231,20 @@ def build_predictor_column_mapping(predictor_type: str) -> Dict[str, str]:
 
 
 def build_predictor_name(df: pd.DataFrame, predictor_type: str) -> pd.Series:
-    region_col = "roi" if "roi" in str(predictor_type).lower() else "channel"
+    predictor_type_lower = str(predictor_type).lower()
+    region_col = "roi" if "roi" in predictor_type_lower else "channel"
+
     if region_col not in df.columns:
-        region_col = "roi" if "roi" in df.columns else "channel" if "channel" in df.columns else df.columns[0]
-    return df[region_col].astype(str) + " (" + df["band"].astype(str) + ")"
+        if "roi" in df.columns:
+            region_col = "roi"
+        elif "channel" in df.columns:
+            region_col = "channel"
+        else:
+            region_col = df.columns[0]
+
+    region_str = df[region_col].astype(str)
+    band_str = df["band"].astype(str)
+    return region_str + " (" + band_str + ")"
 
 
 def build_connectivity_heatmap_records(
@@ -262,6 +276,54 @@ def _get_df_value(df: pd.DataFrame, col: str, row_idx: int, default: str = "") -
     return df.get(col, pd.Series([default] * len(df))).iloc[row_idx]
 
 
+def _build_power_roi_meta(
+    df: pd.DataFrame, row_idx: int, target: str
+) -> Dict[str, Any]:
+    roi = _get_df_value(df, "roi", row_idx)
+    band = _get_df_value(df, "band", row_idx)
+    return {
+        "roi": roi,
+        "band": band,
+        "test_label": f"pow_{band}_ROI {roi} vs {target}",
+    }
+
+
+def _build_conn_roi_summary_meta(
+    df: pd.DataFrame, row_idx: int, measure_band: str, target: str
+) -> Dict[str, Any]:
+    roi_i = _get_df_value(df, "roi_i", row_idx)
+    roi_j = _get_df_value(df, "roi_j", row_idx)
+    return {
+        "roi_i": roi_i,
+        "roi_j": roi_j,
+        "test_label": f"conn_{measure_band}_ROI {roi_i}-{roi_j} vs {target}",
+    }
+
+
+def _build_power_channel_meta(
+    df: pd.DataFrame, row_idx: int, target: str
+) -> Dict[str, Any]:
+    channel = _get_df_value(df, "channel", row_idx)
+    band = _get_df_value(df, "band", row_idx)
+    return {
+        "channel": channel,
+        "band": band,
+        "test_label": f"pow_{band}_Channel {channel} vs {target}",
+    }
+
+
+def _build_conn_edges_meta(
+    df: pd.DataFrame, row_idx: int, measure_band: str, target: str
+) -> Dict[str, Any]:
+    node_i = _get_df_value(df, "node_i", row_idx)
+    node_j = _get_df_value(df, "node_j", row_idx)
+    return {
+        "node_i": node_i,
+        "node_j": node_j,
+        "test_label": f"conn_{measure_band}_Edge {node_i}-{node_j} vs {target}",
+    }
+
+
 def build_meta_for_row(
     df: pd.DataFrame,
     row_idx: int,
@@ -281,29 +343,21 @@ def build_meta_for_row(
     if p_source:
         meta["p_used_source"] = p_source
 
-    try:
-        if analysis_type == "pow_roi":
-            roi = _get_df_value(df, "roi", row_idx)
-            band = _get_df_value(df, "band", row_idx)
-            meta.update({"roi": roi, "band": band})
-            meta["test_label"] = f"pow_{band}_ROI {roi} vs {target}"
-        elif analysis_type == "conn_roi_summary":
-            roi_i = _get_df_value(df, "roi_i", row_idx)
-            roi_j = _get_df_value(df, "roi_j", row_idx)
-            meta.update({"roi_i": roi_i, "roi_j": roi_j})
-            meta["test_label"] = f"conn_{measure_band}_ROI {roi_i}-{roi_j} vs {target}"
-        elif analysis_type == "pow_channel":
-            channel = _get_df_value(df, "channel", row_idx)
-            band = _get_df_value(df, "band", row_idx)
-            meta.update({"channel": channel, "band": band})
-            meta["test_label"] = f"pow_{band}_Channel {channel} vs {target}"
-        elif analysis_type == "conn_edges":
-            node_i = _get_df_value(df, "node_i", row_idx)
-            node_j = _get_df_value(df, "node_j", row_idx)
-            meta.update({"node_i": node_i, "node_j": node_j})
-            meta["test_label"] = f"conn_{measure_band}_Edge {node_i}-{node_j} vs {target}"
-    except (KeyError, IndexError):
-        pass
+    analysis_handlers = {
+        "pow_roi": lambda: _build_power_roi_meta(df, row_idx, target),
+        "conn_roi_summary": lambda: _build_conn_roi_summary_meta(
+            df, row_idx, measure_band, target
+        ),
+        "pow_channel": lambda: _build_power_channel_meta(df, row_idx, target),
+        "conn_edges": lambda: _build_conn_edges_meta(df, row_idx, measure_band, target),
+    }
+
+    handler = analysis_handlers.get(analysis_type)
+    if handler:
+        try:
+            meta.update(handler())
+        except (KeyError, IndexError):
+            pass
 
     return meta
 

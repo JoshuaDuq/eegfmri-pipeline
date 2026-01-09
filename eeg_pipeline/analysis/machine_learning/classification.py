@@ -36,6 +36,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     balanced_accuracy_score,
     confusion_matrix,
     f1_score,
@@ -43,15 +44,12 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
     roc_curve,
-    precision_recall_curve,
-    average_precision_score,
 )
 from sklearn.model_selection import (
     GridSearchCV,
     GroupKFold,
     LeaveOneGroupOut,
     StratifiedKFold,
-    cross_val_predict,
 )
 
 try:

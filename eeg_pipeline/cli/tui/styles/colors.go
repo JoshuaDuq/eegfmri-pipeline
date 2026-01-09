@@ -2,9 +2,7 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
-///////////////////////////////////////////////////////////////////
-// Theme Colors - Modern Premium Palette
-///////////////////////////////////////////////////////////////////
+// Theme colors for the TUI (lipgloss palette).
 
 var (
 	Primary   = lipgloss.Color("#2563EB") // Blue-600

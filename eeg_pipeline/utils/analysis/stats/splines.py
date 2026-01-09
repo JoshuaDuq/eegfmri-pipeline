@@ -16,19 +16,130 @@ import numpy as np
 import pandas as pd
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
-    try:
-        if hasattr(config, "get"):
+# Constants
+MIN_KNOTS_FOR_NONLINEAR = 4
+MIN_SAMPLES_DEFAULT = 12
+N_KNOTS_DEFAULT = 4
+QUANTILE_LOW_DEFAULT = 0.05
+QUANTILE_HIGH_DEFAULT = 0.95
+QUANTILE_LOW_BOUND = 0.49
+QUANTILE_HIGH_BOUND = 0.51
+NUMERICAL_TOLERANCE = 1e-12
+
+
+def _get_config_value(config: Any, key: str, default: Any) -> Any:
+    """Extract value from config object, returning default if unavailable."""
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        try:
             return config.get(key, default)
-    except Exception:
-        pass
+        except (AttributeError, KeyError, TypeError):
+            return default
     return default
 
 
-def _tp3(x: np.ndarray) -> np.ndarray:
-    """Truncated power function (cube)."""
+def truncated_power_cube(x: np.ndarray) -> np.ndarray:
+    """Compute truncated power function of degree 3: max(x, 0)^3."""
     x = np.asarray(x, dtype=float)
     return np.maximum(x, 0.0) ** 3
+
+
+def _validate_temperature_data(
+    temperature_values: np.ndarray,
+    finite_mask: np.ndarray,
+    min_samples: int,
+) -> Optional[str]:
+    """Validate temperature data for spline construction."""
+    n_valid = int(finite_mask.sum())
+    if n_valid < min_samples:
+        return "skipped_insufficient_samples"
+
+    valid_temperature_values = temperature_values[finite_mask]
+    if np.nanstd(valid_temperature_values, ddof=1) <= NUMERICAL_TOLERANCE:
+        return "skipped_constant_temperature"
+
+    return None
+
+
+def _compute_knot_quantiles(
+    quantile_low: float,
+    quantile_high: float,
+    n_knots: int,
+) -> Tuple[float, float]:
+    """Compute and validate quantile bounds for knot placement."""
+    quantile_low = min(max(quantile_low, 0.0), QUANTILE_LOW_BOUND)
+    quantile_high = max(min(quantile_high, 1.0), QUANTILE_HIGH_BOUND)
+
+    if quantile_high <= quantile_low:
+        quantile_low = QUANTILE_LOW_DEFAULT
+        quantile_high = QUANTILE_HIGH_DEFAULT
+
+    return quantile_low, quantile_high
+
+
+def _compute_knots(
+    valid_temperature_values: np.ndarray,
+    quantile_low: float,
+    quantile_high: float,
+    n_knots: int,
+) -> np.ndarray:
+    """Compute unique, sorted knots from temperature quantiles."""
+    quantile_low, quantile_high = _compute_knot_quantiles(
+        quantile_low, quantile_high, n_knots
+    )
+
+    quantile_values = np.linspace(
+        quantile_low, quantile_high, num=max(n_knots, MIN_KNOTS_FOR_NONLINEAR)
+    )
+    knots = np.quantile(valid_temperature_values, quantile_values)
+    knots = np.unique(np.asarray(knots, dtype=float))
+
+    return np.sort(knots)
+
+
+def _validate_knots(knots: np.ndarray) -> Optional[str]:
+    """Validate knots for spline construction."""
+    if knots.size < MIN_KNOTS_FOR_NONLINEAR:
+        return "skipped_insufficient_unique_knots"
+
+    second_to_last_knot = float(knots[-2])
+    last_knot = float(knots[-1])
+    boundary_knot_difference = last_knot - second_to_last_knot
+
+    if not np.isfinite(boundary_knot_difference):
+        return "skipped_degenerate_boundary_knots"
+
+    if abs(boundary_knot_difference) <= NUMERICAL_TOLERANCE:
+        return "skipped_degenerate_boundary_knots"
+
+    return None
+
+
+def _compute_spline_basis_term(
+    temperature_all: np.ndarray,
+    interior_knot: float,
+    second_to_last_knot: float,
+    last_knot: float,
+    boundary_knot_difference: float,
+) -> np.ndarray:
+    """Compute a single restricted cubic spline basis term."""
+    term_at_knot = truncated_power_cube(temperature_all - interior_knot)
+    term_at_second_to_last = truncated_power_cube(
+        temperature_all - second_to_last_knot
+    )
+    term_at_last = truncated_power_cube(temperature_all - last_knot)
+
+    coefficient_second_to_last = (last_knot - interior_knot) / boundary_knot_difference
+    coefficient_last = (second_to_last_knot - interior_knot) / boundary_knot_difference
+
+    spline_term = (
+        term_at_knot
+        - term_at_second_to_last * coefficient_second_to_last
+        + term_at_last * coefficient_last
+    )
+
+    return spline_term
 
 
 def build_temperature_rcs_design(
@@ -51,93 +162,92 @@ def build_temperature_rcs_design(
     meta : dict
         Diagnostics about knots and fallbacks.
     """
-    temp = pd.to_numeric(temperature, errors="coerce")
-    x = temp.to_numpy(dtype=float)
-    finite = np.isfinite(x)
+    temperature_numeric = pd.to_numeric(temperature, errors="coerce")
+    temperature_values = temperature_numeric.to_numpy(dtype=float)
+    finite_mask = np.isfinite(temperature_values)
 
-    n_valid = int(finite.sum())
-    min_samples = int(_get(config, f"{key_prefix}.min_samples", 12))
-    n_knots = int(_get(config, f"{key_prefix}.n_knots", 4))
-    q_low = float(_get(config, f"{key_prefix}.quantile_low", 0.05))
-    q_high = float(_get(config, f"{key_prefix}.quantile_high", 0.95))
+    min_samples = int(
+        _get_config_value(config, f"{key_prefix}.min_samples", MIN_SAMPLES_DEFAULT)
+    )
+    n_knots = int(
+        _get_config_value(config, f"{key_prefix}.n_knots", N_KNOTS_DEFAULT)
+    )
+    quantile_low = float(
+        _get_config_value(config, f"{key_prefix}.quantile_low", QUANTILE_LOW_DEFAULT)
+    )
+    quantile_high = float(
+        _get_config_value(
+            config, f"{key_prefix}.quantile_high", QUANTILE_HIGH_DEFAULT
+        )
+    )
 
+    n_valid = int(finite_mask.sum())
     meta: Dict[str, Any] = {
         "n_valid": n_valid,
         "min_samples": min_samples,
         "n_knots": n_knots,
-        "quantile_low": q_low,
-        "quantile_high": q_high,
+        "quantile_low": quantile_low,
+        "quantile_high": quantile_high,
     }
 
-    out = pd.DataFrame(index=temp.index)
-    out["temperature"] = temp
+    output_dataframe = pd.DataFrame(index=temperature_numeric.index)
+    output_dataframe["temperature"] = temperature_numeric
 
-    if n_valid < min_samples:
-        meta["status"] = "skipped_insufficient_samples"
-        return out, ["temperature"], meta
+    validation_error = _validate_temperature_data(
+        temperature_values, finite_mask, min_samples
+    )
+    if validation_error:
+        meta["status"] = validation_error
+        return output_dataframe, ["temperature"], meta
 
-    if n_knots < 4:
-        # RCS requires >=4 knots for at least one nonlinear term.
+    if n_knots < MIN_KNOTS_FOR_NONLINEAR:
         meta["status"] = "skipped_n_knots_lt_4"
-        return out, ["temperature"], meta
+        return output_dataframe, ["temperature"], meta
 
-    x_v = x[finite]
-    if np.nanstd(x_v, ddof=1) <= 1e-12:
-        meta["status"] = "skipped_constant_temperature"
-        return out, ["temperature"], meta
+    valid_temperature_values = temperature_values[finite_mask]
+    knots = _compute_knots(valid_temperature_values, quantile_low, quantile_high, n_knots)
 
-    # Choose knots using quantiles, bounded away from extremes.
-    q_low = min(max(q_low, 0.0), 0.49)
-    q_high = max(min(q_high, 1.0), 0.51)
-    if q_high <= q_low:
-        q_low, q_high = 0.05, 0.95
+    knot_validation_error = _validate_knots(knots)
+    if knot_validation_error:
+        meta["status"] = knot_validation_error
+        if knot_validation_error == "skipped_insufficient_unique_knots":
+            meta["knots_unique"] = int(knots.size)
+        return output_dataframe, ["temperature"], meta
 
-    # Evenly space internal quantiles between q_low and q_high.
-    qs = np.linspace(q_low, q_high, num=max(n_knots, 4))
-    knots = np.quantile(x_v, qs)
-    knots = np.unique(np.asarray(knots, dtype=float))
+    second_to_last_knot = float(knots[-2])
+    last_knot = float(knots[-1])
+    boundary_knot_difference = last_knot - second_to_last_knot
 
-    if knots.size < 4:
-        meta["status"] = "skipped_insufficient_unique_knots"
-        meta["knots_unique"] = int(knots.size)
-        return out, ["temperature"], meta
+    interior_knots = knots[1:-1]
+    n_spline_terms = int(max(len(interior_knots) - 1, 0))
 
-    knots = np.sort(knots)
-    k0, k1, k_lastm1, k_last = float(knots[0]), float(knots[1]), float(knots[-2]), float(knots[-1])
-    denom = (k_last - k_lastm1)
-    if not np.isfinite(denom) or abs(denom) <= 1e-12:
-        meta["status"] = "skipped_degenerate_boundary_knots"
-        return out, ["temperature"], meta
-
-    # Nonlinear terms: for each interior knot excluding the first and last.
-    # Harrell restricted cubic spline basis:
-    # h_j(x) = tp(x-k_j) - tp(x-k_{K-1})*(k_K-k_j)/(k_K-k_{K-1}) + tp(x-k_K)*(k_{K-1}-k_j)/(k_K-k_{K-1})
-    interior = knots[1:-1]
-    n_terms = int(max(len(interior) - 1, 0))  # exclude the last interior knot (k_{K-1})
-    if n_terms <= 0:
+    if n_spline_terms <= 0:
         meta["status"] = "ok_linear_only"
         meta["knots"] = [float(k) for k in knots.tolist()]
-        return out, ["temperature"], meta
+        return output_dataframe, ["temperature"], meta
 
-    # Prepare arrays for all rows; missing -> NaN
-    x_all = x.astype(float)
-    tp_lastm1 = _tp3(x_all - k_lastm1)
-    tp_last = _tp3(x_all - k_last)
+    temperature_all = temperature_values.astype(float)
+    covariate_names: List[str] = ["temperature"]
 
-    cov_names: List[str] = ["temperature"]
-    for j, k_j in enumerate(interior[:-1]):
-        k_jf = float(k_j)
-        term = _tp3(x_all - k_jf)
-        term = term - tp_lastm1 * (k_last - k_jf) / denom + tp_last * (k_lastm1 - k_jf) / denom
-        term[~finite] = np.nan
-        col_name = f"{name_prefix}_{j+1}"
-        out[col_name] = term
-        cov_names.append(col_name)
+    for term_index, interior_knot in enumerate(interior_knots[:-1]):
+        interior_knot_value = float(interior_knot)
+        spline_term = _compute_spline_basis_term(
+            temperature_all,
+            interior_knot_value,
+            second_to_last_knot,
+            last_knot,
+            boundary_knot_difference,
+        )
+        spline_term[~finite_mask] = np.nan
+
+        column_name = f"{name_prefix}_{term_index + 1}"
+        output_dataframe[column_name] = spline_term
+        covariate_names.append(column_name)
 
     meta["status"] = "ok"
     meta["knots"] = [float(k) for k in knots.tolist()]
-    meta["n_spline_terms"] = int(len(cov_names) - 1)
-    return out, cov_names, meta
+    meta["n_spline_terms"] = int(len(covariate_names) - 1)
+    return output_dataframe, covariate_names, meta
 
 
 __all__ = ["build_temperature_rcs_design"]

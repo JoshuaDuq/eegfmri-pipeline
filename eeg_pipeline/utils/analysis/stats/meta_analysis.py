@@ -12,12 +12,16 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from scipy import stats
+from scipy.special import betaln
 
 
-###################################################################
-# Data Structures
-###################################################################
+_MIN_SAMPLE_SIZE = 4
+_MIN_CORRELATION = -0.9999
+_MAX_CORRELATION = 0.9999
+_DEFAULT_PRIOR_SCALE = 0.707
+_DEFAULT_Z_CRITICAL = 1.96
 
 
 @dataclass
@@ -30,24 +34,19 @@ class MetaAnalysisResult:
     ci_high: float
     z_score: float
     p_value: float
-    
-    # Heterogeneity
     q_statistic: float
     q_pvalue: float
     i_squared: float
     tau_squared: float
-    
-    # Sample info
     n_studies: int
     n_total: int
-    
-    # Per-study data for forest plots
     study_rs: np.ndarray
     study_ses: np.ndarray
     study_weights: np.ndarray
     study_ns: np.ndarray
     
     def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary."""
         return {
             "r_pooled": self.r_pooled,
             "se_pooled": self.se_pooled,
@@ -64,15 +63,11 @@ class MetaAnalysisResult:
         }
 
 
-###################################################################
-# Core Meta-Analysis Functions
-###################################################################
-
-
 def fisher_z(r: np.ndarray) -> np.ndarray:
     """Fisher z-transform correlation coefficients."""
-    r = np.clip(np.asarray(r), -0.9999, 0.9999)
-    return np.arctanh(r)
+    r_array = np.asarray(r)
+    r_clipped = np.clip(r_array, _MIN_CORRELATION, _MAX_CORRELATION)
+    return np.arctanh(r_clipped)
 
 
 def inverse_fisher_z(z: np.ndarray) -> np.ndarray:
@@ -82,8 +77,9 @@ def inverse_fisher_z(z: np.ndarray) -> np.ndarray:
 
 def correlation_se(n: np.ndarray) -> np.ndarray:
     """Standard error for Fisher z-transformed correlation."""
-    n = np.asarray(n)
-    return 1.0 / np.sqrt(np.maximum(n - 3, 1))
+    n_array = np.asarray(n)
+    degrees_of_freedom = np.maximum(n_array - 3, 1)
+    return 1.0 / np.sqrt(degrees_of_freedom)
 
 
 def compute_heterogeneity(
@@ -105,22 +101,104 @@ def compute_heterogeneity(
     tau_squared : float
         Between-study variance estimate
     """
-    k = len(z_values)
-    if k < 2:
+    n_studies = len(z_values)
+    if n_studies < 2:
         return 0.0, 1.0, 0.0, 0.0
     
-    q_stat = float(np.sum(weights * (z_values - z_pooled) ** 2))
-    df = k - 1
-    q_pvalue = float(1.0 - stats.chi2.cdf(q_stat, df))
+    squared_deviations = (z_values - z_pooled) ** 2
+    q_stat = float(np.sum(weights * squared_deviations))
+    degrees_of_freedom = n_studies - 1
+    q_pvalue = float(1.0 - stats.chi2.cdf(q_stat, degrees_of_freedom))
     
-    # I² = (Q - df) / Q * 100
-    i_squared = max(0.0, (q_stat - df) / q_stat * 100) if q_stat > 0 else 0.0
+    i_squared = 0.0
+    if q_stat > 0:
+        i_squared = max(0.0, (q_stat - degrees_of_freedom) / q_stat * 100)
     
-    # τ² estimation (DerSimonian-Laird)
-    c = np.sum(weights) - np.sum(weights ** 2) / np.sum(weights)
-    tau_squared = max(0.0, (q_stat - df) / c) if c > 0 else 0.0
+    sum_weights = np.sum(weights)
+    sum_squared_weights = np.sum(weights ** 2)
+    denominator = sum_weights - sum_squared_weights / sum_weights
+    tau_squared = 0.0
+    if denominator > 0:
+        tau_squared = max(0.0, (q_stat - degrees_of_freedom) / denominator)
     
     return q_stat, q_pvalue, i_squared, tau_squared
+
+
+def _compute_confidence_interval(
+    z_pooled: float,
+    se_pooled: float,
+    ci_level: float,
+) -> Tuple[float, float]:
+    """Compute confidence interval for pooled z-value."""
+    alpha = 1 - ci_level
+    z_critical = stats.norm.ppf(1 - alpha / 2)
+    z_lower = z_pooled - z_critical * se_pooled
+    z_upper = z_pooled + z_critical * se_pooled
+    ci_low = inverse_fisher_z(z_lower)
+    ci_high = inverse_fisher_z(z_upper)
+    return float(ci_low), float(ci_high)
+
+
+def _compute_p_value(z_score: float) -> float:
+    """Compute two-tailed p-value from z-score."""
+    return float(2 * (1 - stats.norm.cdf(abs(z_score))))
+
+
+def _validate_inputs(
+    r_values: np.ndarray,
+    n_values: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Validate and filter inputs for meta-analysis."""
+    r_array = np.asarray(r_values)
+    n_array = np.asarray(n_values)
+    
+    is_finite_r = np.isfinite(r_array)
+    is_finite_n = np.isfinite(n_array)
+    has_sufficient_n = n_array >= _MIN_SAMPLE_SIZE
+    valid_mask = is_finite_r & is_finite_n & has_sufficient_n
+    
+    return r_array, n_array, valid_mask
+
+
+def _build_meta_result(
+    z_pooled: float,
+    se_pooled: float,
+    ci_level: float,
+    z_values: np.ndarray,
+    weights: np.ndarray,
+    r_valid: np.ndarray,
+    se_values: np.ndarray,
+    n_valid: np.ndarray,
+    n_studies: int,
+) -> MetaAnalysisResult:
+    """Build MetaAnalysisResult from computed values."""
+    r_pooled = inverse_fisher_z(z_pooled)
+    ci_low, ci_high = _compute_confidence_interval(z_pooled, se_pooled, ci_level)
+    z_score = z_pooled / se_pooled
+    p_value = _compute_p_value(z_score)
+    q_stat, q_pvalue, i_squared, tau_squared = compute_heterogeneity(
+        z_values, weights, z_pooled
+    )
+    normalized_weights = weights / weights.sum()
+    
+    return MetaAnalysisResult(
+        r_pooled=float(r_pooled),
+        se_pooled=float(se_pooled),
+        ci_low=ci_low,
+        ci_high=ci_high,
+        z_score=float(z_score),
+        p_value=p_value,
+        q_statistic=q_stat,
+        q_pvalue=q_pvalue,
+        i_squared=i_squared,
+        tau_squared=tau_squared,
+        n_studies=n_studies,
+        n_total=int(n_valid.sum()),
+        study_rs=r_valid,
+        study_ses=se_values,
+        study_weights=normalized_weights,
+        study_ns=n_valid,
+    )
 
 
 def fixed_effects_meta(
@@ -140,52 +218,33 @@ def fixed_effects_meta(
     ci_level : float
         Confidence interval level
     """
-    r_values = np.asarray(r_values)
-    n_values = np.asarray(n_values)
+    r_array, n_array, valid_mask = _validate_inputs(r_values, n_values)
     
-    valid = np.isfinite(r_values) & np.isfinite(n_values) & (n_values >= 4)
-    if valid.sum() < 1:
+    n_valid_studies = valid_mask.sum()
+    if n_valid_studies < 1:
         return _empty_meta_result()
     
-    r_valid = r_values[valid]
-    n_valid = n_values[valid]
+    r_valid = r_array[valid_mask]
+    n_valid = n_array[valid_mask]
     
     z_values = fisher_z(r_valid)
     se_values = correlation_se(n_valid)
     weights = 1.0 / (se_values ** 2)
     
-    z_pooled = np.sum(weights * z_values) / np.sum(weights)
-    se_pooled = 1.0 / np.sqrt(np.sum(weights))
+    sum_weights = np.sum(weights)
+    z_pooled = np.sum(weights * z_values) / sum_weights
+    se_pooled = 1.0 / np.sqrt(sum_weights)
     
-    r_pooled = inverse_fisher_z(z_pooled)
-    
-    alpha = 1 - ci_level
-    z_crit = stats.norm.ppf(1 - alpha / 2)
-    ci_low = inverse_fisher_z(z_pooled - z_crit * se_pooled)
-    ci_high = inverse_fisher_z(z_pooled + z_crit * se_pooled)
-    
-    z_score = z_pooled / se_pooled
-    p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
-    
-    q_stat, q_pvalue, i_sq, tau_sq = compute_heterogeneity(z_values, weights, z_pooled)
-    
-    return MetaAnalysisResult(
-        r_pooled=float(r_pooled),
-        se_pooled=float(se_pooled),
-        ci_low=float(ci_low),
-        ci_high=float(ci_high),
-        z_score=float(z_score),
-        p_value=float(p_value),
-        q_statistic=q_stat,
-        q_pvalue=q_pvalue,
-        i_squared=i_sq,
-        tau_squared=tau_sq,
-        n_studies=int(valid.sum()),
-        n_total=int(n_valid.sum()),
-        study_rs=r_valid,
-        study_ses=se_values,
-        study_weights=weights / weights.sum(),
-        study_ns=n_valid,
+    return _build_meta_result(
+        z_pooled=z_pooled,
+        se_pooled=se_pooled,
+        ci_level=ci_level,
+        z_values=z_values,
+        weights=weights,
+        r_valid=r_valid,
+        se_values=se_values,
+        n_valid=n_valid,
+        n_studies=n_valid_studies,
     )
 
 
@@ -199,61 +258,91 @@ def random_effects_meta(
     
     Accounts for between-study heterogeneity in the pooled estimate.
     """
-    r_values = np.asarray(r_values)
-    n_values = np.asarray(n_values)
+    r_array, n_array, valid_mask = _validate_inputs(r_values, n_values)
     
-    valid = np.isfinite(r_values) & np.isfinite(n_values) & (n_values >= 4)
-    if valid.sum() < 2:
+    n_valid_studies = valid_mask.sum()
+    if n_valid_studies < 2:
         return fixed_effects_meta(r_values, n_values, ci_level)
     
-    r_valid = r_values[valid]
-    n_valid = n_values[valid]
+    r_valid = r_array[valid_mask]
+    n_valid = n_array[valid_mask]
     
     z_values = fisher_z(r_valid)
     se_values = correlation_se(n_valid)
-    within_var = se_values ** 2
+    within_study_variance = se_values ** 2
     
-    # Fixed-effects estimate for Q calculation
-    w_fe = 1.0 / within_var
-    z_fe = np.sum(w_fe * z_values) / np.sum(w_fe)
+    fixed_effects_weights = 1.0 / within_study_variance
+    sum_fe_weights = np.sum(fixed_effects_weights)
+    z_fixed_effects = np.sum(fixed_effects_weights * z_values) / sum_fe_weights
     
-    q_stat, q_pvalue, i_sq, tau_sq = compute_heterogeneity(z_values, w_fe, z_fe)
-    
-    # Random-effects weights
-    total_var = within_var + tau_sq
-    w_re = 1.0 / total_var
-    
-    z_pooled = np.sum(w_re * z_values) / np.sum(w_re)
-    se_pooled = 1.0 / np.sqrt(np.sum(w_re))
-    
-    r_pooled = inverse_fisher_z(z_pooled)
-    
-    alpha = 1 - ci_level
-    z_crit = stats.norm.ppf(1 - alpha / 2)
-    ci_low = inverse_fisher_z(z_pooled - z_crit * se_pooled)
-    ci_high = inverse_fisher_z(z_pooled + z_crit * se_pooled)
-    
-    z_score = z_pooled / se_pooled
-    p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
-    
-    return MetaAnalysisResult(
-        r_pooled=float(r_pooled),
-        se_pooled=float(se_pooled),
-        ci_low=float(ci_low),
-        ci_high=float(ci_high),
-        z_score=float(z_score),
-        p_value=float(p_value),
-        q_statistic=q_stat,
-        q_pvalue=q_pvalue,
-        i_squared=i_sq,
-        tau_squared=tau_sq,
-        n_studies=int(valid.sum()),
-        n_total=int(n_valid.sum()),
-        study_rs=r_valid,
-        study_ses=se_values,
-        study_weights=w_re / w_re.sum(),
-        study_ns=n_valid,
+    q_stat, q_pvalue, i_squared, tau_squared = compute_heterogeneity(
+        z_values, fixed_effects_weights, z_fixed_effects
     )
+    
+    total_variance = within_study_variance + tau_squared
+    random_effects_weights = 1.0 / total_variance
+    
+    sum_re_weights = np.sum(random_effects_weights)
+    z_pooled = np.sum(random_effects_weights * z_values) / sum_re_weights
+    se_pooled = 1.0 / np.sqrt(sum_re_weights)
+    
+    return _build_meta_result(
+        z_pooled=z_pooled,
+        se_pooled=se_pooled,
+        ci_level=ci_level,
+        z_values=z_values,
+        weights=random_effects_weights,
+        r_valid=r_valid,
+        se_values=se_values,
+        n_valid=n_valid,
+        n_studies=n_valid_studies,
+    )
+
+
+def _leave_one_out_analysis(
+    r_values: np.ndarray,
+    n_values: np.ndarray,
+    meta_function,
+) -> List[Tuple[int, MetaAnalysisResult]]:
+    """Perform leave-one-out analysis with specified meta-analysis function."""
+    n_studies = len(r_values)
+    results = []
+    
+    for excluded_index in range(n_studies):
+        mask = np.ones(n_studies, dtype=bool)
+        mask[excluded_index] = False
+        result = meta_function(r_values[mask], n_values[mask])
+        results.append((excluded_index, result))
+    
+    return results
+
+
+def leave_one_out_meta_fixed(
+    r_values: np.ndarray,
+    n_values: np.ndarray,
+) -> List[Tuple[int, MetaAnalysisResult]]:
+    """
+    Leave-one-out sensitivity analysis using fixed-effects model.
+    
+    Returns list of (excluded_index, meta_result) tuples.
+    """
+    r_array = np.asarray(r_values)
+    n_array = np.asarray(n_values)
+    return _leave_one_out_analysis(r_array, n_array, fixed_effects_meta)
+
+
+def leave_one_out_meta_random(
+    r_values: np.ndarray,
+    n_values: np.ndarray,
+) -> List[Tuple[int, MetaAnalysisResult]]:
+    """
+    Leave-one-out sensitivity analysis using random-effects model.
+    
+    Returns list of (excluded_index, meta_result) tuples.
+    """
+    r_array = np.asarray(r_values)
+    n_array = np.asarray(n_values)
+    return _leave_one_out_analysis(r_array, n_array, random_effects_meta)
 
 
 def leave_one_out_meta(
@@ -264,48 +353,50 @@ def leave_one_out_meta(
     """
     Leave-one-out sensitivity analysis.
     
+    Deprecated: Use leave_one_out_meta_fixed or leave_one_out_meta_random instead.
+    
     Returns list of (excluded_index, meta_result) tuples.
     """
-    r_values = np.asarray(r_values)
-    n_values = np.asarray(n_values)
-    
-    meta_func = random_effects_meta if use_random_effects else fixed_effects_meta
-    results = []
-    
-    for i in range(len(r_values)):
-        mask = np.ones(len(r_values), dtype=bool)
-        mask[i] = False
-        result = meta_func(r_values[mask], n_values[mask])
-        results.append((i, result))
-    
-    return results
+    if use_random_effects:
+        return leave_one_out_meta_random(r_values, n_values)
+    return leave_one_out_meta_fixed(r_values, n_values)
 
 
 def _empty_meta_result() -> MetaAnalysisResult:
     """Return empty meta-analysis result."""
+    empty_array = np.array([])
+    nan_value = np.nan
     return MetaAnalysisResult(
-        r_pooled=np.nan,
-        se_pooled=np.nan,
-        ci_low=np.nan,
-        ci_high=np.nan,
-        z_score=np.nan,
-        p_value=np.nan,
-        q_statistic=np.nan,
-        q_pvalue=np.nan,
-        i_squared=np.nan,
-        tau_squared=np.nan,
+        r_pooled=nan_value,
+        se_pooled=nan_value,
+        ci_low=nan_value,
+        ci_high=nan_value,
+        z_score=nan_value,
+        p_value=nan_value,
+        q_statistic=nan_value,
+        q_pvalue=nan_value,
+        i_squared=nan_value,
+        tau_squared=nan_value,
         n_studies=0,
         n_total=0,
-        study_rs=np.array([]),
-        study_ses=np.array([]),
-        study_weights=np.array([]),
-        study_ns=np.array([]),
+        study_rs=empty_array,
+        study_ses=empty_array,
+        study_weights=empty_array,
+        study_ns=empty_array,
     )
 
 
-###################################################################
-# Null Distribution and Permutation
-###################################################################
+def _compute_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    method: str,
+) -> float:
+    """Compute correlation using specified method."""
+    if method == "pearson":
+        correlation, _ = stats.pearsonr(x, y)
+    else:
+        correlation, _ = stats.spearmanr(x, y)
+    return correlation
 
 
 def permutation_null_distribution(
@@ -330,37 +421,35 @@ def permutation_null_distribution(
     if rng is None:
         rng = np.random.default_rng()
     
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
+    x_array = np.asarray(x).ravel()
+    y_array = np.asarray(y).ravel()
     
-    valid = np.isfinite(x) & np.isfinite(y)
-    if valid.sum() < 4:
+    is_finite_x = np.isfinite(x_array)
+    is_finite_y = np.isfinite(y_array)
+    valid_mask = is_finite_x & is_finite_y
+    n_valid = valid_mask.sum()
+    
+    if n_valid < _MIN_SAMPLE_SIZE:
         return np.array([]), np.nan, np.nan
     
-    x_v, y_v = x[valid], y[valid]
+    x_valid = x_array[valid_mask]
+    y_valid = y_array[valid_mask]
     
-    if method == "pearson":
-        observed_r, _ = stats.pearsonr(x_v, y_v)
-    else:
-        observed_r, _ = stats.spearmanr(x_v, y_v)
+    observed_r = _compute_correlation(x_valid, y_valid, method)
     
-    null_rs = np.zeros(n_perm)
-    for i in range(n_perm):
-        y_perm = rng.permutation(y_v)
-        if method == "pearson":
-            null_rs[i], _ = stats.pearsonr(x_v, y_perm)
-        else:
-            null_rs[i], _ = stats.spearmanr(x_v, y_perm)
+    null_correlations = np.zeros(n_perm)
+    for perm_idx in range(n_perm):
+        y_permuted = rng.permutation(y_valid)
+        null_correlations[perm_idx] = _compute_correlation(
+            x_valid, y_permuted, method
+        )
     
-    n_extreme = np.sum(np.abs(null_rs) >= np.abs(observed_r))
+    abs_observed = np.abs(observed_r)
+    abs_null = np.abs(null_correlations)
+    n_extreme = np.sum(abs_null >= abs_observed)
     p_perm = (n_extreme + 1) / (n_perm + 1)
     
-    return null_rs, float(observed_r), float(p_perm)
-
-
-###################################################################
-# Bootstrap CI Computation
-###################################################################
+    return null_correlations, float(observed_r), float(p_perm)
 
 
 def bootstrap_correlation_ci(
@@ -388,100 +477,109 @@ def bootstrap_correlation_ci(
     if rng is None:
         rng = np.random.default_rng()
     
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
+    x_array = np.asarray(x).ravel()
+    y_array = np.asarray(y).ravel()
     
-    valid = np.isfinite(x) & np.isfinite(y)
-    n_valid = valid.sum()
-    if n_valid < 4:
+    is_finite_x = np.isfinite(x_array)
+    is_finite_y = np.isfinite(y_array)
+    valid_mask = is_finite_x & is_finite_y
+    n_valid = valid_mask.sum()
+    
+    if n_valid < _MIN_SAMPLE_SIZE:
         return np.nan, np.nan, np.nan, np.array([])
     
-    x_v, y_v = x[valid], y[valid]
+    x_valid = x_array[valid_mask]
+    y_valid = y_array[valid_mask]
     
-    if method == "pearson":
-        r_obs, _ = stats.pearsonr(x_v, y_v)
-    else:
-        r_obs, _ = stats.spearmanr(x_v, y_v)
+    r_observed = _compute_correlation(x_valid, y_valid, method)
     
-    boot_rs = np.zeros(n_boot)
-    for i in range(n_boot):
-        idx = rng.integers(0, n_valid, size=n_valid)
-        if method == "pearson":
-            boot_rs[i], _ = stats.pearsonr(x_v[idx], y_v[idx])
-        else:
-            boot_rs[i], _ = stats.spearmanr(x_v[idx], y_v[idx])
+    bootstrap_correlations = np.zeros(n_boot)
+    for boot_idx in range(n_boot):
+        bootstrap_indices = rng.integers(0, n_valid, size=n_valid)
+        bootstrap_correlations[boot_idx] = _compute_correlation(
+            x_valid[bootstrap_indices], y_valid[bootstrap_indices], method
+        )
     
-    boot_rs = boot_rs[np.isfinite(boot_rs)]
-    if len(boot_rs) < 10:
-        return float(r_obs), np.nan, np.nan, boot_rs
+    finite_bootstrap = bootstrap_correlations[np.isfinite(bootstrap_correlations)]
+    min_bootstrap_samples = 10
+    if len(finite_bootstrap) < min_bootstrap_samples:
+        return float(r_observed), np.nan, np.nan, finite_bootstrap
     
     alpha = 1 - ci_level
-    ci_low = np.percentile(boot_rs, 100 * alpha / 2)
-    ci_high = np.percentile(boot_rs, 100 * (1 - alpha / 2))
+    lower_percentile = 100 * alpha / 2
+    upper_percentile = 100 * (1 - alpha / 2)
+    ci_low = np.percentile(finite_bootstrap, lower_percentile)
+    ci_high = np.percentile(finite_bootstrap, upper_percentile)
     
-    return float(r_obs), float(ci_low), float(ci_high), boot_rs
+    return float(r_observed), float(ci_low), float(ci_high), finite_bootstrap
+
+
+def _compute_fisher_confidence_interval(
+    r: float,
+    n: int,
+) -> Tuple[float, float]:
+    """Compute Fisher z-based confidence interval for correlation."""
+    if pd.isna(r) or pd.isna(n) or n < _MIN_SAMPLE_SIZE:
+        return np.nan, np.nan
+    
+    r_clipped = np.clip(r, _MIN_CORRELATION, _MAX_CORRELATION)
+    z = np.arctanh(r_clipped)
+    se = 1.0 / np.sqrt(n - 3)
+    z_critical = _DEFAULT_Z_CRITICAL
+    z_lower = z - z_critical * se
+    z_upper = z + z_critical * se
+    ci_low = np.tanh(z_lower)
+    ci_high = np.tanh(z_upper)
+    return ci_low, ci_high
 
 
 def ensure_bootstrap_ci(
-    stats_df,
+    stats_df: pd.DataFrame,
     x_data: Optional[np.ndarray] = None,
     y_data: Optional[np.ndarray] = None,
     n_boot: int = 2000,
     method: str = "spearman",
     config: Optional[Any] = None,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """
     Ensure bootstrap CIs exist in stats dataframe, computing if missing.
     
     If ci_low/ci_high columns are missing or contain NaN, computes bootstrap CIs.
     """
-    import pandas as pd
-    
     if stats_df is None or stats_df.empty:
         return stats_df
     
     df = stats_df.copy()
     
-    has_ci = "ci_low" in df.columns and "ci_high" in df.columns
-    if has_ci:
-        missing_ci = df["ci_low"].isna() | df["ci_high"].isna()
-        if not missing_ci.any():
+    has_ci_columns = "ci_low" in df.columns and "ci_high" in df.columns
+    if has_ci_columns:
+        missing_ci_mask = df["ci_low"].isna() | df["ci_high"].isna()
+        if not missing_ci_mask.any():
             return df
     
-    # Compute Fisher z-based CIs as fallback when raw data unavailable
     if "r" in df.columns and "n" in df.columns:
-        def _fisher_ci(row):
-            r, n = row.get("r"), row.get("n")
-            if pd.isna(r) or pd.isna(n) or n < 4:
-                return np.nan, np.nan
-            z = np.arctanh(np.clip(r, -0.9999, 0.9999))
-            se = 1.0 / np.sqrt(n - 3)
-            z_crit = 1.96
-            return np.tanh(z - z_crit * se), np.tanh(z + z_crit * se)
-        
         if "ci_low" not in df.columns:
             df["ci_low"] = np.nan
         if "ci_high" not in df.columns:
             df["ci_high"] = np.nan
         
         for idx in df.index:
-            if pd.isna(df.loc[idx, "ci_low"]) or pd.isna(df.loc[idx, "ci_high"]):
-                ci_lo, ci_hi = _fisher_ci(df.loc[idx])
-                df.loc[idx, "ci_low"] = ci_lo
-                df.loc[idx, "ci_high"] = ci_hi
+            row = df.loc[idx]
+            has_missing_ci = pd.isna(row["ci_low"]) or pd.isna(row["ci_high"])
+            if has_missing_ci:
+                ci_low, ci_high = _compute_fisher_confidence_interval(
+                    row.get("r"), row.get("n")
+                )
+                df.loc[idx, "ci_low"] = ci_low
+                df.loc[idx, "ci_high"] = ci_high
     
     return df
-
-
-###################################################################
-# Bayes Factor for Equivalence Testing
-###################################################################
 
 
 def bayes_factor_correlation(
     r: float,
     n: int,
-    prior_scale: float = 0.707,
+    prior_scale: float = _DEFAULT_PRIOR_SCALE,
 ) -> float:
     """
     Compute Bayes Factor for correlation (BF10).
@@ -499,33 +597,17 @@ def bayes_factor_correlation(
     prior_scale : float
         Scale of prior (default 0.707 = medium effect)
     """
-    if np.isnan(r) or n < 4:
+    if np.isnan(r) or n < _MIN_SAMPLE_SIZE:
         return np.nan
     
-    r = np.clip(r, -0.9999, 0.9999)
+    r_clipped = np.clip(r, _MIN_CORRELATION, _MAX_CORRELATION)
+    r_squared = r_clipped ** 2
     
-    # Approximate BF using Wetzels & Wagenmakers (2012) formula
-    # This is a simplified version; full computation requires numerical integration
-    t = r * np.sqrt((n - 2) / (1 - r**2))
-    df = n - 2
-    
-    # Savage-Dickey approximation
-    # BF10 ≈ (1 + t²/df)^(-(df+1)/2) * sqrt(df) / (prior_scale * sqrt(2*pi))
-    # Simplified JZS approximation
-    rscale = prior_scale
-    bf10 = np.exp(
-        0.5 * np.log(1 + (t**2) / df) * (-(df + 1) / 2)
-        + 0.5 * np.log(df)
-        - np.log(rscale)
-        - 0.5 * np.log(2 * np.pi)
-    )
-    
-    # More accurate approximation using beta function
-    from scipy.special import betaln
+    degrees_of_freedom = n - 2
     log_bf = (
-        betaln(0.5, (n - 2) / 2)
+        betaln(0.5, degrees_of_freedom / 2)
         - betaln(0.5, 0.5)
-        + ((n - 1) / 2) * np.log(1 - r**2)
+        + ((n - 1) / 2) * np.log(1 - r_squared)
     )
     bf10 = np.exp(-log_bf)
     
@@ -552,24 +634,23 @@ def equivalence_test_correlation(
     equivalent : bool
         True if correlation is equivalent to zero
     """
-    if np.isnan(r) or n < 4:
+    if np.isnan(r) or n < _MIN_SAMPLE_SIZE:
         return np.nan, np.nan, False
     
-    z = np.arctanh(np.clip(r, -0.9999, 0.9999))
+    r_clipped = np.clip(r, _MIN_CORRELATION, _MAX_CORRELATION)
+    z = np.arctanh(r_clipped)
     se = 1.0 / np.sqrt(n - 3)
     
-    z_lower = np.arctanh(-equiv_bound)
-    z_upper = np.arctanh(equiv_bound)
+    z_lower_bound = np.arctanh(-equiv_bound)
+    z_upper_bound = np.arctanh(equiv_bound)
     
-    # Test H0: z <= z_lower (effect is too negative)
-    t_lower = (z - z_lower) / se
-    p_lower = 1 - stats.norm.cdf(t_lower)
+    t_statistic_lower = (z - z_lower_bound) / se
+    p_lower = 1 - stats.norm.cdf(t_statistic_lower)
     
-    # Test H0: z >= z_upper (effect is too positive)
-    t_upper = (z - z_upper) / se
-    p_upper = stats.norm.cdf(t_upper)
+    t_statistic_upper = (z - z_upper_bound) / se
+    p_upper = stats.norm.cdf(t_statistic_upper)
     
-    # Both must be significant for equivalence
-    equivalent = max(p_lower, p_upper) < alpha
+    max_p_value = max(p_lower, p_upper)
+    equivalent = max_p_value < alpha
     
     return float(p_lower), float(p_upper), equivalent

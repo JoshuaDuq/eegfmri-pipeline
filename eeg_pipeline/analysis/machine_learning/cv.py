@@ -10,12 +10,12 @@ import json
 import logging
 import random as pyrandom
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr, ConstantInputWarning, norm
+from scipy.stats import pearsonr, ConstantInputWarning
 import scipy.stats
 from sklearn.model_selection import GroupKFold, StratifiedKFold, LeaveOneGroupOut, GridSearchCV
 from sklearn.metrics import r2_score
@@ -25,6 +25,9 @@ from sklearn.pipeline import Pipeline
 
 from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values, get_config_value
+
+if TYPE_CHECKING:
+    from eeg_pipeline.analysis.features.cv_hygiene import FoldSpecificParams
 
 logger = get_logger(__name__)
 
@@ -41,7 +44,7 @@ def apply_fold_specific_hygiene(
     epochs: Optional[Any] = None,
     config: Optional[Any] = None,
     log: Optional[logging.Logger] = None,
-) -> Optional["FoldSpecificParams"]:
+) -> Optional[FoldSpecificParams]:
     """
     Apply CV hygiene for a fold: compute fold-specific parameters on training data only.
     
@@ -104,7 +107,6 @@ def apply_fold_specific_hygiene(
             fold_idx=fold_idx,
             config=config,
             logger=log,
-            compute_iaf=True,
         )
         return params
     except Exception as exc:
@@ -114,7 +116,7 @@ def apply_fold_specific_hygiene(
 
 
 def get_fold_frequency_bands(
-    fold_params: Optional["FoldSpecificParams"],
+    fold_params: Optional[FoldSpecificParams],
     config: Optional[Any] = None,
 ) -> Optional[Dict[str, Tuple[float, float]]]:
     """
@@ -542,7 +544,7 @@ def create_within_subject_folds(
             continue
 
         subject_blocks = blocks_all[subject_indices]
-        block_cv, effective_splits = create_block_aware_cv(subject_blocks, n_splits)
+        block_cv, _ = create_block_aware_cv(subject_blocks, n_splits)
 
         if block_cv is None:
             logger.warning(f"Subject {subject}: insufficient blocks, skipping")
@@ -663,7 +665,6 @@ def _fit_default_pipeline(
     random_state: Optional[int] = None,
 ) -> Any:
     """Fit pipeline without hyperparameter tuning."""
-    from sklearn.base import clone
     pipe_clone = clone(pipe)
     if random_state is not None:
         if hasattr(pipe_clone, "set_params"):

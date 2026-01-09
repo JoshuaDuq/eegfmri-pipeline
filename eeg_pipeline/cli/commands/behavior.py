@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, List, Optional
+from typing import Any, List
 
 from eeg_pipeline.cli.common import (
     add_common_subject_args,
@@ -373,9 +373,507 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     return parser
 
 
+def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> None:
+    """
+    Populate behavior-analysis configuration from CLI arguments.
+
+    This mutates ``config`` in place but does not have other side effects.
+    """
+    ba = config.setdefault("behavior_analysis", {})
+    stats_cfg = ba.setdefault("statistics", {})
+    corr_cfg = ba.setdefault("correlations", {})
+    run_adj_cfg = ba.setdefault("run_adjustment", {})
+
+    rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
+    if rng_seed is not None:
+        config.setdefault("project", {})["random_state"] = rng_seed
+
+    if args.correlation_method:
+        stats_cfg["correlation_method"] = args.correlation_method
+
+    if getattr(args, "robust_correlation", None) is not None:
+        rc = str(args.robust_correlation).strip().lower()
+        ba["robust_correlation"] = None if rc in ("", "none") else rc
+
+    if args.bootstrap is not None:
+        ba["bootstrap"] = int(args.bootstrap)
+
+    if args.n_perm is not None:
+        stats_cfg["n_permutations"] = int(args.n_perm)
+        ba.setdefault("cluster", {})["n_permutations"] = int(args.n_perm)
+
+    if getattr(args, "n_jobs", None) is not None:
+        ba["n_jobs"] = int(args.n_jobs)
+
+    if getattr(args, "min_samples", None) is not None:
+        ba.setdefault("min_samples", {})["default"] = int(args.min_samples)
+
+    if getattr(args, "control_temperature", None) is not None:
+        ba["control_temperature"] = bool(args.control_temperature)
+
+    if getattr(args, "control_trial_order", None) is not None:
+        ba["control_trial_order"] = bool(args.control_trial_order)
+
+    # Run adjustment (optional; paradigms may have run_id or none)
+    if getattr(args, "run_adjustment", None) is not None:
+        run_adj_cfg["enabled"] = bool(args.run_adjustment)
+    if getattr(args, "run_adjustment_column", None) is not None:
+        run_adj_cfg["column"] = str(args.run_adjustment_column).strip()
+    if getattr(args, "run_adjustment_include_in_correlations", None) is not None:
+        run_adj_cfg["include_in_correlations"] = bool(args.run_adjustment_include_in_correlations)
+    if getattr(args, "run_adjustment_max_dummies", None) is not None:
+        run_adj_cfg["max_dummies"] = int(args.run_adjustment_max_dummies)
+    if getattr(args, "trial_table_only", None) is not None:
+        ba.setdefault("trial_table_only", {})["enabled"] = bool(args.trial_table_only)
+
+    if getattr(args, "fdr_alpha", None) is not None:
+        stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
+
+    if getattr(args, "compute_change_scores", None) is not None:
+        corr_cfg["compute_change_scores"] = bool(args.compute_change_scores)
+    if getattr(args, "loso_stability", None) is not None:
+        corr_cfg["loso_stability"] = bool(args.loso_stability)
+    if getattr(args, "compute_bayes_factors", None) is not None:
+        corr_cfg["compute_bayes_factors"] = bool(args.compute_bayes_factors)
+
+    if getattr(args, "correlations_primary_unit", None) is not None:
+        corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
+        corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+    if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
+        corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
+    if getattr(args, "correlations_permutation_primary", None) is not None:
+        enabled = bool(args.correlations_permutation_primary)
+        corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+        corr_cfg.setdefault("permutation", {})["enabled"] = enabled
+
+    if getattr(args, "consistency_enabled", None) is not None:
+        ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
+
+    # Trial table
+    tt = ba.setdefault("trial_table", {})
+    if getattr(args, "trial_table_format", None) is not None:
+        tt["format"] = str(args.trial_table_format).strip().lower()
+    if getattr(args, "trial_table_include_features", None) is not None:
+        tt["include_features"] = bool(args.trial_table_include_features)
+    if getattr(args, "trial_table_include_covariates", None) is not None:
+        tt["include_covariates"] = bool(args.trial_table_include_covariates)
+    if getattr(args, "trial_table_include_events", None) is not None:
+        tt["include_events"] = bool(args.trial_table_include_events)
+    if getattr(args, "trial_table_add_lag_features", None) is not None:
+        tt["add_lag_features"] = bool(args.trial_table_add_lag_features)
+    if getattr(args, "trial_table_extra_event_columns", None) is not None:
+        cols = [str(c) for c in (args.trial_table_extra_event_columns or [])]
+        if len(cols) == 1 and cols[0].strip().lower() == "none":
+            tt["extra_event_columns"] = []
+        else:
+            tt["extra_event_columns"] = cols
+
+    tt_val = tt.setdefault("validate", {})
+    if getattr(args, "trial_table_high_missing_frac", None) is not None:
+        tt_val["high_missing_frac"] = float(args.trial_table_high_missing_frac)
+
+    if getattr(args, "feature_summaries_enabled", None) is not None:
+        ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
+
+    # Pain residual / temperature-model diagnostics
+    pr = ba.setdefault("pain_residual", {})
+    if getattr(args, "pain_residual_enabled", None) is not None:
+        pr["enabled"] = bool(args.pain_residual_enabled)
+    if getattr(args, "pain_residual_method", None) is not None:
+        pr["method"] = str(args.pain_residual_method).strip().lower()
+    if getattr(args, "pain_residual_min_samples", None) is not None:
+        pr["min_samples"] = int(args.pain_residual_min_samples)
+    if getattr(args, "pain_residual_poly_degree", None) is not None:
+        pr["poly_degree"] = int(args.pain_residual_poly_degree)
+
+    mc = pr.setdefault("model_comparison", {})
+    if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
+        mc["enabled"] = bool(args.pain_residual_model_compare_enabled)
+    if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
+        mc["min_samples"] = int(args.pain_residual_model_compare_min_samples)
+
+    bp = pr.setdefault("breakpoint_test", {})
+    if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
+        bp["enabled"] = bool(args.pain_residual_breakpoint_enabled)
+    if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
+        bp["min_samples"] = int(args.pain_residual_breakpoint_min_samples)
+    if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
+        bp["n_candidates"] = int(args.pain_residual_breakpoint_candidates)
+    if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
+        bp["quantile_low"] = float(args.pain_residual_breakpoint_quantile_low)
+    if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
+        bp["quantile_high"] = float(args.pain_residual_breakpoint_quantile_high)
+
+    crossfit = pr.setdefault("crossfit", {})
+    if getattr(args, "pain_residual_crossfit_enabled", None) is not None:
+        crossfit["enabled"] = bool(args.pain_residual_crossfit_enabled)
+    if getattr(args, "pain_residual_crossfit_group_column", None) is not None:
+        crossfit["group_column"] = str(args.pain_residual_crossfit_group_column).strip()
+    if getattr(args, "pain_residual_crossfit_n_splits", None) is not None:
+        crossfit["n_splits"] = int(args.pain_residual_crossfit_n_splits)
+    if getattr(args, "pain_residual_crossfit_method", None) is not None:
+        crossfit["method"] = str(args.pain_residual_crossfit_method).strip().lower()
+    if getattr(args, "pain_residual_crossfit_spline_n_knots", None) is not None:
+        crossfit["spline_n_knots"] = int(args.pain_residual_crossfit_spline_n_knots)
+
+    # Confounds
+    cf = ba.setdefault("confounds", {})
+    if getattr(args, "confounds_add_as_covariates", None) is not None:
+        cf["add_as_covariates_if_significant"] = bool(args.confounds_add_as_covariates)
+    if getattr(args, "confounds_max_covariates", None) is not None:
+        cf["max_qc_covariates"] = int(args.confounds_max_covariates)
+    if getattr(args, "confounds_qc_column_patterns", None) is not None:
+        pats = [str(p) for p in (args.confounds_qc_column_patterns or [])]
+        if len(pats) == 1 and pats[0].strip().lower() == "none":
+            cf["qc_column_patterns"] = []
+        else:
+            cf["qc_column_patterns"] = pats
+
+    # Regression
+    reg = ba.setdefault("regression", {})
+    if getattr(args, "regression_feature_set", None) is not None:
+        reg["feature_set"] = str(args.regression_feature_set).strip().lower()
+    if getattr(args, "regression_outcome", None) is not None:
+        reg["outcome"] = str(args.regression_outcome).strip().lower()
+    if getattr(args, "regression_include_temperature", None) is not None:
+        reg["include_temperature"] = bool(args.regression_include_temperature)
+    if getattr(args, "regression_temperature_control", None) is not None:
+        reg["temperature_control"] = str(args.regression_temperature_control).strip().lower()
+    if (
+        getattr(args, "regression_temperature_spline_knots", None) is not None
+        or getattr(args, "regression_temperature_spline_quantile_low", None) is not None
+        or getattr(args, "regression_temperature_spline_quantile_high", None) is not None
+        or getattr(args, "regression_temperature_spline_min_samples", None) is not None
+    ):
+        ts = reg.setdefault("temperature_spline", {})
+        if getattr(args, "regression_temperature_spline_knots", None) is not None:
+            ts["n_knots"] = int(args.regression_temperature_spline_knots)
+        if getattr(args, "regression_temperature_spline_quantile_low", None) is not None:
+            ts["quantile_low"] = float(args.regression_temperature_spline_quantile_low)
+        if getattr(args, "regression_temperature_spline_quantile_high", None) is not None:
+            ts["quantile_high"] = float(args.regression_temperature_spline_quantile_high)
+        if getattr(args, "regression_temperature_spline_min_samples", None) is not None:
+            ts["min_samples"] = int(args.regression_temperature_spline_min_samples)
+    if getattr(args, "regression_include_trial_order", None) is not None:
+        reg["include_trial_order"] = bool(args.regression_include_trial_order)
+    if getattr(args, "regression_include_prev_terms", None) is not None:
+        reg["include_prev_terms"] = bool(args.regression_include_prev_terms)
+    if getattr(args, "regression_include_run_block", None) is not None:
+        reg["include_run_block"] = bool(args.regression_include_run_block)
+    if getattr(args, "regression_include_interaction", None) is not None:
+        reg["include_interaction"] = bool(args.regression_include_interaction)
+    if getattr(args, "regression_standardize", None) is not None:
+        reg["standardize"] = bool(args.regression_standardize)
+    if getattr(args, "regression_min_samples", None) is not None:
+        reg["min_samples"] = int(args.regression_min_samples)
+    if getattr(args, "regression_permutations", None) is not None:
+        reg["n_permutations"] = int(args.regression_permutations)
+    if getattr(args, "regression_max_features", None) is not None:
+        max_f = int(args.regression_max_features)
+        reg["max_features"] = None if max_f <= 0 else max_f
+
+    # Models
+    mdl = ba.setdefault("models", {})
+    if getattr(args, "models_feature_set", None) is not None:
+        mdl["feature_set"] = str(args.models_feature_set).strip().lower()
+    if getattr(args, "models_outcomes", None) is not None:
+        mdl["outcomes"] = [str(o).strip().lower() for o in (args.models_outcomes or [])]
+    if getattr(args, "models_families", None) is not None:
+        mdl["families"] = [str(f).strip().lower() for f in (args.models_families or [])]
+    if getattr(args, "models_include_temperature", None) is not None:
+        mdl["include_temperature"] = bool(args.models_include_temperature)
+    if getattr(args, "models_temperature_control", None) is not None:
+        mdl["temperature_control"] = str(args.models_temperature_control).strip().lower()
+    if (
+        getattr(args, "models_temperature_spline_knots", None) is not None
+        or getattr(args, "models_temperature_spline_quantile_low", None) is not None
+        or getattr(args, "models_temperature_spline_quantile_high", None) is not None
+        or getattr(args, "models_temperature_spline_min_samples", None) is not None
+    ):
+        ts = mdl.setdefault("temperature_spline", {})
+        if getattr(args, "models_temperature_spline_knots", None) is not None:
+            ts["n_knots"] = int(args.models_temperature_spline_knots)
+        if getattr(args, "models_temperature_spline_quantile_low", None) is not None:
+            ts["quantile_low"] = float(args.models_temperature_spline_quantile_low)
+        if getattr(args, "models_temperature_spline_quantile_high", None) is not None:
+            ts["quantile_high"] = float(args.models_temperature_spline_quantile_high)
+        if getattr(args, "models_temperature_spline_min_samples", None) is not None:
+            ts["min_samples"] = int(args.models_temperature_spline_min_samples)
+    if getattr(args, "models_include_trial_order", None) is not None:
+        mdl["include_trial_order"] = bool(args.models_include_trial_order)
+    if getattr(args, "models_include_prev_terms", None) is not None:
+        mdl["include_prev_terms"] = bool(args.models_include_prev_terms)
+    if getattr(args, "models_include_run_block", None) is not None:
+        mdl["include_run_block"] = bool(args.models_include_run_block)
+    if getattr(args, "models_include_interaction", None) is not None:
+        mdl["include_interaction"] = bool(args.models_include_interaction)
+    if getattr(args, "models_standardize", None) is not None:
+        mdl["standardize"] = bool(args.models_standardize)
+    if getattr(args, "models_min_samples", None) is not None:
+        mdl["min_samples"] = int(args.models_min_samples)
+    if getattr(args, "models_max_features", None) is not None:
+        max_f = int(args.models_max_features)
+        mdl["max_features"] = None if max_f <= 0 else max_f
+    if getattr(args, "models_binary_outcome", None) is not None:
+        mdl["binary_outcome"] = str(args.models_binary_outcome).strip().lower()
+
+    # Stability
+    stab = ba.setdefault("stability", {})
+    if getattr(args, "stability_feature_set", None) is not None:
+        stab["feature_set"] = str(args.stability_feature_set).strip().lower()
+    if getattr(args, "stability_method", None) is not None:
+        stab["method"] = str(args.stability_method).strip().lower()
+    if getattr(args, "stability_outcome", None) is not None:
+        val = str(args.stability_outcome).strip().lower()
+        stab["outcome"] = "" if val == "auto" else val
+    if getattr(args, "stability_group_column", None) is not None:
+        val = str(args.stability_group_column).strip().lower()
+        stab["group_column"] = "" if val == "auto" else val
+    if getattr(args, "stability_partial_temperature", None) is not None:
+        stab["partial_temperature"] = bool(args.stability_partial_temperature)
+    if getattr(args, "stability_min_group_trials", None) is not None:
+        stab["min_group_trials"] = int(args.stability_min_group_trials)
+    if getattr(args, "stability_max_features", None) is not None:
+        max_f = int(args.stability_max_features)
+        stab["max_features"] = None if max_f <= 0 else max_f
+    if getattr(args, "stability_alpha", None) is not None:
+        stab["alpha"] = float(args.stability_alpha)
+
+    # Influence
+    infl = ba.setdefault("influence", {})
+    if getattr(args, "influence_feature_set", None) is not None:
+        infl["feature_set"] = str(args.influence_feature_set).strip().lower()
+    if getattr(args, "influence_outcomes", None) is not None:
+        infl["outcomes"] = [str(o).strip().lower() for o in (args.influence_outcomes or [])]
+    if getattr(args, "influence_max_features", None) is not None:
+        infl["max_features"] = int(args.influence_max_features)
+    if getattr(args, "influence_include_temperature", None) is not None:
+        infl["include_temperature"] = bool(args.influence_include_temperature)
+    if getattr(args, "influence_temperature_control", None) is not None:
+        infl["temperature_control"] = str(args.influence_temperature_control).strip().lower()
+    if (
+        getattr(args, "influence_temperature_spline_knots", None) is not None
+        or getattr(args, "influence_temperature_spline_quantile_low", None) is not None
+        or getattr(args, "influence_temperature_spline_quantile_high", None) is not None
+        or getattr(args, "influence_temperature_spline_min_samples", None) is not None
+    ):
+        ts = infl.setdefault("temperature_spline", {})
+        if getattr(args, "influence_temperature_spline_knots", None) is not None:
+            ts["n_knots"] = int(args.influence_temperature_spline_knots)
+        if getattr(args, "influence_temperature_spline_quantile_low", None) is not None:
+            ts["quantile_low"] = float(args.influence_temperature_spline_quantile_low)
+        if getattr(args, "influence_temperature_spline_quantile_high", None) is not None:
+            ts["quantile_high"] = float(args.influence_temperature_spline_quantile_high)
+        if getattr(args, "influence_temperature_spline_min_samples", None) is not None:
+            ts["min_samples"] = int(args.influence_temperature_spline_min_samples)
+    if getattr(args, "influence_include_trial_order", None) is not None:
+        infl["include_trial_order"] = bool(args.influence_include_trial_order)
+    if getattr(args, "influence_include_run_block", None) is not None:
+        infl["include_run_block"] = bool(args.influence_include_run_block)
+    if getattr(args, "influence_include_interaction", None) is not None:
+        infl["include_interaction"] = bool(args.influence_include_interaction)
+    if getattr(args, "influence_standardize", None) is not None:
+        infl["standardize"] = bool(args.influence_standardize)
+    if getattr(args, "influence_cooks_threshold", None) is not None:
+        infl["cooks_threshold"] = (
+            None if float(args.influence_cooks_threshold) <= 0 else float(args.influence_cooks_threshold)
+        )
+    if getattr(args, "influence_leverage_threshold", None) is not None:
+        infl["leverage_threshold"] = (
+            None if float(args.influence_leverage_threshold) <= 0 else float(args.influence_leverage_threshold)
+        )
+
+    # Pain sensitivity
+    if getattr(args, "pain_sensitivity_min_trials", None) is not None:
+        ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
+    if getattr(args, "pain_sensitivity_feature_set", None) is not None:
+        ba.setdefault("pain_sensitivity", {})["feature_set"] = str(args.pain_sensitivity_feature_set).strip().lower()
+
+    # Correlations (trial-table)
+    if getattr(args, "correlations_feature_set", None) is not None:
+        ba.setdefault("correlations", {})["feature_set"] = str(args.correlations_feature_set).strip().lower()
+    if getattr(args, "correlations_targets", None) is not None:
+        ba.setdefault("correlations", {})["targets"] = [
+            str(t).strip().lower() for t in (args.correlations_targets or [])
+        ]
+    if getattr(args, "correlations_primary_unit", None) is not None:
+        ba.setdefault("correlations", {})["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
+    if getattr(args, "correlations_prefer_pain_residual", None) is not None:
+        ba.setdefault("correlations", {})["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
+    if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
+        ba.setdefault("correlations", {})["use_crossfit_pain_residual"] = bool(
+            args.correlations_use_crossfit_pain_residual
+        )
+    if getattr(args, "correlations_permutation_primary", None) is not None:
+        enabled = bool(args.correlations_permutation_primary)
+        corr = ba.setdefault("correlations", {})
+        corr["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+        corr.setdefault("permutation", {})["enabled"] = enabled
+
+    # Report
+    if getattr(args, "report_top_n", None) is not None:
+        ba.setdefault("report", {})["top_n"] = int(args.report_top_n)
+
+    # Condition
+    if getattr(args, "condition_fail_fast", None) is not None:
+        ba.setdefault("condition", {})["fail_fast"] = bool(args.condition_fail_fast)
+    if getattr(args, "condition_effect_threshold", None) is not None:
+        ba.setdefault("condition", {})["effect_size_threshold"] = float(args.condition_effect_threshold)
+    if getattr(args, "condition_min_trials", None) is not None:
+        ba.setdefault("condition", {})["min_trials_per_condition"] = int(args.condition_min_trials)
+    if getattr(args, "condition_compare_column", None) is not None:
+        ba.setdefault("condition", {})["compare_column"] = str(args.condition_compare_column).strip()
+    if getattr(args, "condition_compare_values", None) is not None:
+        values = [str(v).strip() for v in (args.condition_compare_values or [])]
+        ba.setdefault("condition", {})["compare_values"] = values
+    if getattr(args, "condition_compare_windows", None) is not None:
+        windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
+        ba.setdefault("condition", {})["compare_windows"] = windows
+    if getattr(args, "condition_window_primary_unit", None) is not None:
+        ba.setdefault("condition", {}).setdefault("window_comparison", {})["primary_unit"] = (
+            str(args.condition_window_primary_unit).strip().lower()
+        )
+    if getattr(args, "condition_permutation_primary", None) is not None:
+        enabled = bool(args.condition_permutation_primary)
+        cond = ba.setdefault("condition", {})
+        cond["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
+        cond.setdefault("permutation", {})["enabled"] = enabled
+
+    # Temporal
+    temporal_cfg = ba.setdefault("temporal", {})
+    if getattr(args, "temporal_split_by_condition", None) is not None:
+        temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
+    if getattr(args, "temporal_condition_column", None) is not None:
+        temporal_cfg["condition_column"] = str(args.temporal_condition_column).strip()
+    if getattr(args, "temporal_condition_values", None) is not None:
+        temporal_cfg["condition_values"] = [str(v).strip() for v in (args.temporal_condition_values or [])]
+    if getattr(args, "temporal_filter_value", None) is not None:
+        temporal_cfg["filter_value"] = str(args.temporal_filter_value).strip()
+    if getattr(args, "temporal_time_resolution_ms", None) is not None:
+        temporal_cfg["time_resolution_ms"] = int(args.temporal_time_resolution_ms)
+    if getattr(args, "temporal_smooth_window_ms", None) is not None:
+        temporal_cfg["smooth_window_ms"] = int(args.temporal_smooth_window_ms)
+    tmin = getattr(args, "temporal_time_min_ms", None)
+    tmax = getattr(args, "temporal_time_max_ms", None)
+    if tmin is not None or tmax is not None:
+        cur = temporal_cfg.get("time_range_ms", [-200, 1000])
+        lo = int(tmin) if tmin is not None else int(cur[0])
+        hi = int(tmax) if tmax is not None else int(cur[1])
+        temporal_cfg["time_range_ms"] = [lo, hi]
+
+    # ITPC-specific temporal options
+    itpc_cfg = temporal_cfg.setdefault("itpc", {})
+    if getattr(args, "temporal_itpc_baseline_min", None) is not None or getattr(
+        args,
+        "temporal_itpc_baseline_max",
+        None,
+    ) is not None:
+        baseline_window = list(itpc_cfg.get("baseline_window", [-0.5, -0.01]))
+        if getattr(args, "temporal_itpc_baseline_min", None) is not None:
+            baseline_window[0] = float(args.temporal_itpc_baseline_min)
+        if getattr(args, "temporal_itpc_baseline_max", None) is not None:
+            baseline_window[1] = float(args.temporal_itpc_baseline_max)
+        itpc_cfg["baseline_window"] = baseline_window
+    if getattr(args, "temporal_itpc_baseline_correction", None) is not None:
+        itpc_cfg["baseline_correction"] = bool(args.temporal_itpc_baseline_correction)
+
+    # ERDS-specific temporal options
+    erds_cfg = temporal_cfg.setdefault("erds", {})
+    if getattr(args, "temporal_erds_baseline_min", None) is not None or getattr(
+        args,
+        "temporal_erds_baseline_max",
+        None,
+    ) is not None:
+        baseline_window = list(erds_cfg.get("baseline_window", [-0.5, -0.1]))
+        if getattr(args, "temporal_erds_baseline_min", None) is not None:
+            baseline_window[0] = float(args.temporal_erds_baseline_min)
+        if getattr(args, "temporal_erds_baseline_max", None) is not None:
+            baseline_window[1] = float(args.temporal_erds_baseline_max)
+        erds_cfg["baseline_window"] = baseline_window
+    if getattr(args, "temporal_erds_method", None) is not None:
+        erds_cfg["method"] = str(args.temporal_erds_method).lower()
+
+    # Temporal feature selection
+    features_cfg = temporal_cfg.setdefault("features", {})
+    if getattr(args, "temporal_feature_power", None) is not None:
+        features_cfg["power"] = bool(args.temporal_feature_power)
+    if getattr(args, "temporal_feature_itpc", None) is not None:
+        features_cfg["itpc"] = bool(args.temporal_feature_itpc)
+    if getattr(args, "temporal_feature_erds", None) is not None:
+        features_cfg["erds"] = bool(args.temporal_feature_erds)
+
+    # Time-frequency heatmap
+    tfheatmap_cfg = ba.setdefault("time_frequency_heatmap", {})
+    if getattr(args, "tf_heatmap_enabled", None) is not None:
+        tfheatmap_cfg["enabled"] = bool(args.tf_heatmap_enabled)
+    if getattr(args, "tf_heatmap_freqs", None) is not None:
+        tfheatmap_cfg["freqs"] = list(args.tf_heatmap_freqs)
+    if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
+        tfheatmap_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
+
+    # Cluster
+    if getattr(args, "cluster_threshold", None) is not None:
+        ba.setdefault("cluster", {})["forming_threshold"] = float(args.cluster_threshold)
+    if getattr(args, "cluster_min_size", None) is not None:
+        ba.setdefault("cluster", {})["min_cluster_size"] = int(args.cluster_min_size)
+    if getattr(args, "cluster_tail", None) is not None:
+        ba.setdefault("cluster", {})["tail"] = int(args.cluster_tail)
+    if getattr(args, "cluster_condition_column", None) is not None:
+        ba.setdefault("cluster", {})["condition_column"] = str(args.cluster_condition_column).strip()
+    if getattr(args, "cluster_condition_values", None) is not None:
+        ba.setdefault("cluster", {})["condition_values"] = [
+            str(v).strip() for v in (args.cluster_condition_values or [])
+        ]
+
+    # Mediation / mixed effects
+    if getattr(args, "mediation_bootstrap", None) is not None:
+        ba.setdefault("mediation", {})["n_bootstrap"] = int(args.mediation_bootstrap)
+    if getattr(args, "mediation_min_effect_size", None) is not None:
+        ba.setdefault("mediation", {})["min_effect_size"] = float(args.mediation_min_effect_size)
+    if getattr(args, "mediation_max_mediators", None) is not None:
+        ba.setdefault("mediation", {})["max_mediators"] = int(args.mediation_max_mediators)
+
+    # Moderation
+    if getattr(args, "moderation_max_features", None) is not None:
+        ba.setdefault("moderation", {})["max_features"] = int(args.moderation_max_features)
+    if getattr(args, "moderation_min_samples", None) is not None:
+        ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
+
+    if getattr(args, "mixed_random_effects", None) is not None:
+        ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
+    if getattr(args, "mixed_max_features", None) is not None:
+        ba.setdefault("mixed_effects", {})["max_features"] = int(args.mixed_max_features)
+
+
+def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]] | None:
+    """
+    Collect feature-category selections per computation type from CLI args.
+
+    Returns ``None`` when no computation-specific feature overrides are given.
+    """
+    computation_features: dict[str, list[str]] = {}
+
+    if getattr(args, "correlations_features", None):
+        computation_features["correlations"] = args.correlations_features
+    if getattr(args, "pain_sensitivity_features", None):
+        computation_features["pain_sensitivity"] = args.pain_sensitivity_features
+    if getattr(args, "condition_features", None):
+        computation_features["condition"] = args.condition_features
+    if getattr(args, "temporal_features", None):
+        computation_features["temporal"] = args.temporal_features
+    if getattr(args, "cluster_features", None):
+        computation_features["cluster"] = args.cluster_features
+    if getattr(args, "mediation_features", None):
+        computation_features["mediation"] = args.mediation_features
+    if getattr(args, "moderation_features", None):
+        computation_features["moderation"] = args.moderation_features
+
+    return computation_features or None
+
+
 def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the behavior command."""
-    import json
     from eeg_pipeline.pipelines.behavior import BehaviorPipeline
     from eeg_pipeline.plotting.orchestration.behavior import visualize_behavior_for_subjects
     from eeg_pipeline.analysis.behavior.orchestration import StageRegistry, config_to_stage_names
@@ -425,474 +923,16 @@ def run_behavior(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
     
     if args.mode == "compute":
-        ba = config.setdefault("behavior_analysis", {})
-        stats_cfg = ba.setdefault("statistics", {})
-        corr_cfg = ba.setdefault("correlations", {})
-        run_adj_cfg = ba.setdefault("run_adjustment", {})
+        _configure_behavior_compute_mode(args, config)
 
-        rng_seed = args.rng_seed if args.rng_seed is not None else config.get("project.random_state")
-        if rng_seed is not None:
-            config.setdefault("project", {})["random_state"] = rng_seed
-
-        if args.correlation_method:
-            stats_cfg["correlation_method"] = args.correlation_method
-
-        if getattr(args, "robust_correlation", None) is not None:
-            rc = str(args.robust_correlation).strip().lower()
-            ba["robust_correlation"] = None if rc in ("", "none") else rc
-
-        if args.bootstrap is not None:
-            ba["bootstrap"] = int(args.bootstrap)
-
-        if args.n_perm is not None:
-            stats_cfg["n_permutations"] = int(args.n_perm)
-            ba.setdefault("cluster", {})["n_permutations"] = int(args.n_perm)
-
-        if getattr(args, "n_jobs", None) is not None:
-            ba["n_jobs"] = int(args.n_jobs)
-
-        if getattr(args, "min_samples", None) is not None:
-            ba.setdefault("min_samples", {})["default"] = int(args.min_samples)
-
-        if getattr(args, "control_temperature", None) is not None:
-            ba["control_temperature"] = bool(args.control_temperature)
-
-        if getattr(args, "control_trial_order", None) is not None:
-            ba["control_trial_order"] = bool(args.control_trial_order)
-
-        # Run adjustment (optional; paradigms may have run_id or none)
-        if getattr(args, "run_adjustment", None) is not None:
-            run_adj_cfg["enabled"] = bool(args.run_adjustment)
-        if getattr(args, "run_adjustment_column", None) is not None:
-            run_adj_cfg["column"] = str(args.run_adjustment_column).strip()
-        if getattr(args, "run_adjustment_include_in_correlations", None) is not None:
-            run_adj_cfg["include_in_correlations"] = bool(args.run_adjustment_include_in_correlations)
-        if getattr(args, "run_adjustment_max_dummies", None) is not None:
-            run_adj_cfg["max_dummies"] = int(args.run_adjustment_max_dummies)
-        if getattr(args, "trial_table_only", None) is not None:
-            ba.setdefault("trial_table_only", {})["enabled"] = bool(args.trial_table_only)
-
-        if getattr(args, "fdr_alpha", None) is not None:
-            stats_cfg["fdr_alpha"] = float(args.fdr_alpha)
-
-        if getattr(args, "compute_change_scores", None) is not None:
-            corr_cfg["compute_change_scores"] = bool(args.compute_change_scores)
-        if getattr(args, "loso_stability", None) is not None:
-            corr_cfg["loso_stability"] = bool(args.loso_stability)
-        if getattr(args, "compute_bayes_factors", None) is not None:
-            corr_cfg["compute_bayes_factors"] = bool(args.compute_bayes_factors)
-
-        if getattr(args, "correlations_primary_unit", None) is not None:
-            corr_cfg["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
-        if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-            corr_cfg["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
-        if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
-            corr_cfg["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
-        if getattr(args, "correlations_permutation_primary", None) is not None:
-            enabled = bool(args.correlations_permutation_primary)
-            corr_cfg["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-            corr_cfg.setdefault("permutation", {})["enabled"] = enabled
-
-        if getattr(args, "consistency_enabled", None) is not None:
-            ba.setdefault("consistency", {})["enabled"] = bool(args.consistency_enabled)
-
-        # Trial table
-        tt = ba.setdefault("trial_table", {})
-        if getattr(args, "trial_table_format", None) is not None:
-            tt["format"] = str(args.trial_table_format).strip().lower()
-        if getattr(args, "trial_table_include_features", None) is not None:
-            tt["include_features"] = bool(args.trial_table_include_features)
-        if getattr(args, "trial_table_include_covariates", None) is not None:
-            tt["include_covariates"] = bool(args.trial_table_include_covariates)
-        if getattr(args, "trial_table_include_events", None) is not None:
-            tt["include_events"] = bool(args.trial_table_include_events)
-        if getattr(args, "trial_table_add_lag_features", None) is not None:
-            tt["add_lag_features"] = bool(args.trial_table_add_lag_features)
-        if getattr(args, "trial_table_extra_event_columns", None) is not None:
-            cols = [str(c) for c in (args.trial_table_extra_event_columns or [])]
-            if len(cols) == 1 and cols[0].strip().lower() == "none":
-                tt["extra_event_columns"] = []
-            else:
-                tt["extra_event_columns"] = cols
-
-        tt_val = tt.setdefault("validate", {})
-        if getattr(args, "trial_table_high_missing_frac", None) is not None:
-            tt_val["high_missing_frac"] = float(args.trial_table_high_missing_frac)
-
-        if getattr(args, "feature_summaries_enabled", None) is not None:
-            ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
-
-        # Pain residual / temperature-model diagnostics
-        pr = ba.setdefault("pain_residual", {})
-        if getattr(args, "pain_residual_enabled", None) is not None:
-            pr["enabled"] = bool(args.pain_residual_enabled)
-        if getattr(args, "pain_residual_method", None) is not None:
-            pr["method"] = str(args.pain_residual_method).strip().lower()
-        if getattr(args, "pain_residual_min_samples", None) is not None:
-            pr["min_samples"] = int(args.pain_residual_min_samples)
-        if getattr(args, "pain_residual_poly_degree", None) is not None:
-            pr["poly_degree"] = int(args.pain_residual_poly_degree)
-
-        mc = pr.setdefault("model_comparison", {})
-        if getattr(args, "pain_residual_model_compare_enabled", None) is not None:
-            mc["enabled"] = bool(args.pain_residual_model_compare_enabled)
-        if getattr(args, "pain_residual_model_compare_min_samples", None) is not None:
-            mc["min_samples"] = int(args.pain_residual_model_compare_min_samples)
-
-        bp = pr.setdefault("breakpoint_test", {})
-        if getattr(args, "pain_residual_breakpoint_enabled", None) is not None:
-            bp["enabled"] = bool(args.pain_residual_breakpoint_enabled)
-        if getattr(args, "pain_residual_breakpoint_min_samples", None) is not None:
-            bp["min_samples"] = int(args.pain_residual_breakpoint_min_samples)
-        if getattr(args, "pain_residual_breakpoint_candidates", None) is not None:
-            bp["n_candidates"] = int(args.pain_residual_breakpoint_candidates)
-        if getattr(args, "pain_residual_breakpoint_quantile_low", None) is not None:
-            bp["quantile_low"] = float(args.pain_residual_breakpoint_quantile_low)
-        if getattr(args, "pain_residual_breakpoint_quantile_high", None) is not None:
-            bp["quantile_high"] = float(args.pain_residual_breakpoint_quantile_high)
-
-        crossfit = pr.setdefault("crossfit", {})
-        if getattr(args, "pain_residual_crossfit_enabled", None) is not None:
-            crossfit["enabled"] = bool(args.pain_residual_crossfit_enabled)
-        if getattr(args, "pain_residual_crossfit_group_column", None) is not None:
-            crossfit["group_column"] = str(args.pain_residual_crossfit_group_column).strip()
-        if getattr(args, "pain_residual_crossfit_n_splits", None) is not None:
-            crossfit["n_splits"] = int(args.pain_residual_crossfit_n_splits)
-        if getattr(args, "pain_residual_crossfit_method", None) is not None:
-            crossfit["method"] = str(args.pain_residual_crossfit_method).strip().lower()
-        if getattr(args, "pain_residual_crossfit_spline_n_knots", None) is not None:
-            crossfit["spline_n_knots"] = int(args.pain_residual_crossfit_spline_n_knots)
-
-        # Confounds
-        cf = ba.setdefault("confounds", {})
-        if getattr(args, "confounds_add_as_covariates", None) is not None:
-            cf["add_as_covariates_if_significant"] = bool(args.confounds_add_as_covariates)
-        if getattr(args, "confounds_max_covariates", None) is not None:
-            cf["max_qc_covariates"] = int(args.confounds_max_covariates)
-        if getattr(args, "confounds_qc_column_patterns", None) is not None:
-            pats = [str(p) for p in (args.confounds_qc_column_patterns or [])]
-            if len(pats) == 1 and pats[0].strip().lower() == "none":
-                cf["qc_column_patterns"] = []
-            else:
-                cf["qc_column_patterns"] = pats
-
-        # Regression
-        reg = ba.setdefault("regression", {})
-        if getattr(args, "regression_feature_set", None) is not None:
-            reg["feature_set"] = str(args.regression_feature_set).strip().lower()
-        if getattr(args, "regression_outcome", None) is not None:
-            reg["outcome"] = str(args.regression_outcome).strip().lower()
-        if getattr(args, "regression_include_temperature", None) is not None:
-            reg["include_temperature"] = bool(args.regression_include_temperature)
-        if getattr(args, "regression_temperature_control", None) is not None:
-            reg["temperature_control"] = str(args.regression_temperature_control).strip().lower()
-        if (
-            getattr(args, "regression_temperature_spline_knots", None) is not None
-            or getattr(args, "regression_temperature_spline_quantile_low", None) is not None
-            or getattr(args, "regression_temperature_spline_quantile_high", None) is not None
-            or getattr(args, "regression_temperature_spline_min_samples", None) is not None
-        ):
-            ts = reg.setdefault("temperature_spline", {})
-            if getattr(args, "regression_temperature_spline_knots", None) is not None:
-                ts["n_knots"] = int(args.regression_temperature_spline_knots)
-            if getattr(args, "regression_temperature_spline_quantile_low", None) is not None:
-                ts["quantile_low"] = float(args.regression_temperature_spline_quantile_low)
-            if getattr(args, "regression_temperature_spline_quantile_high", None) is not None:
-                ts["quantile_high"] = float(args.regression_temperature_spline_quantile_high)
-            if getattr(args, "regression_temperature_spline_min_samples", None) is not None:
-                ts["min_samples"] = int(args.regression_temperature_spline_min_samples)
-        if getattr(args, "regression_include_trial_order", None) is not None:
-            reg["include_trial_order"] = bool(args.regression_include_trial_order)
-        if getattr(args, "regression_include_prev_terms", None) is not None:
-            reg["include_prev_terms"] = bool(args.regression_include_prev_terms)
-        if getattr(args, "regression_include_run_block", None) is not None:
-            reg["include_run_block"] = bool(args.regression_include_run_block)
-        if getattr(args, "regression_include_interaction", None) is not None:
-            reg["include_interaction"] = bool(args.regression_include_interaction)
-        if getattr(args, "regression_standardize", None) is not None:
-            reg["standardize"] = bool(args.regression_standardize)
-        if getattr(args, "regression_min_samples", None) is not None:
-            reg["min_samples"] = int(args.regression_min_samples)
-        if getattr(args, "regression_permutations", None) is not None:
-            reg["n_permutations"] = int(args.regression_permutations)
-        if getattr(args, "regression_max_features", None) is not None:
-            max_f = int(args.regression_max_features)
-            reg["max_features"] = None if max_f <= 0 else max_f
-
-        # Models
-        mdl = ba.setdefault("models", {})
-        if getattr(args, "models_feature_set", None) is not None:
-            mdl["feature_set"] = str(args.models_feature_set).strip().lower()
-        if getattr(args, "models_outcomes", None) is not None:
-            mdl["outcomes"] = [str(o).strip().lower() for o in (args.models_outcomes or [])]
-        if getattr(args, "models_families", None) is not None:
-            mdl["families"] = [str(f).strip().lower() for f in (args.models_families or [])]
-        if getattr(args, "models_include_temperature", None) is not None:
-            mdl["include_temperature"] = bool(args.models_include_temperature)
-        if getattr(args, "models_temperature_control", None) is not None:
-            mdl["temperature_control"] = str(args.models_temperature_control).strip().lower()
-        if (
-            getattr(args, "models_temperature_spline_knots", None) is not None
-            or getattr(args, "models_temperature_spline_quantile_low", None) is not None
-            or getattr(args, "models_temperature_spline_quantile_high", None) is not None
-            or getattr(args, "models_temperature_spline_min_samples", None) is not None
-        ):
-            ts = mdl.setdefault("temperature_spline", {})
-            if getattr(args, "models_temperature_spline_knots", None) is not None:
-                ts["n_knots"] = int(args.models_temperature_spline_knots)
-            if getattr(args, "models_temperature_spline_quantile_low", None) is not None:
-                ts["quantile_low"] = float(args.models_temperature_spline_quantile_low)
-            if getattr(args, "models_temperature_spline_quantile_high", None) is not None:
-                ts["quantile_high"] = float(args.models_temperature_spline_quantile_high)
-            if getattr(args, "models_temperature_spline_min_samples", None) is not None:
-                ts["min_samples"] = int(args.models_temperature_spline_min_samples)
-        if getattr(args, "models_include_trial_order", None) is not None:
-            mdl["include_trial_order"] = bool(args.models_include_trial_order)
-        if getattr(args, "models_include_prev_terms", None) is not None:
-            mdl["include_prev_terms"] = bool(args.models_include_prev_terms)
-        if getattr(args, "models_include_run_block", None) is not None:
-            mdl["include_run_block"] = bool(args.models_include_run_block)
-        if getattr(args, "models_include_interaction", None) is not None:
-            mdl["include_interaction"] = bool(args.models_include_interaction)
-        if getattr(args, "models_standardize", None) is not None:
-            mdl["standardize"] = bool(args.models_standardize)
-        if getattr(args, "models_min_samples", None) is not None:
-            mdl["min_samples"] = int(args.models_min_samples)
-        if getattr(args, "models_max_features", None) is not None:
-            max_f = int(args.models_max_features)
-            mdl["max_features"] = None if max_f <= 0 else max_f
-        if getattr(args, "models_binary_outcome", None) is not None:
-            mdl["binary_outcome"] = str(args.models_binary_outcome).strip().lower()
-
-        # Stability
-        stab = ba.setdefault("stability", {})
-        if getattr(args, "stability_feature_set", None) is not None:
-            stab["feature_set"] = str(args.stability_feature_set).strip().lower()
-        if getattr(args, "stability_method", None) is not None:
-            stab["method"] = str(args.stability_method).strip().lower()
-        if getattr(args, "stability_outcome", None) is not None:
-            val = str(args.stability_outcome).strip().lower()
-            stab["outcome"] = "" if val == "auto" else val
-        if getattr(args, "stability_group_column", None) is not None:
-            val = str(args.stability_group_column).strip().lower()
-            stab["group_column"] = "" if val == "auto" else val
-        if getattr(args, "stability_partial_temperature", None) is not None:
-            stab["partial_temperature"] = bool(args.stability_partial_temperature)
-        if getattr(args, "stability_min_group_trials", None) is not None:
-            stab["min_group_trials"] = int(args.stability_min_group_trials)
-        if getattr(args, "stability_max_features", None) is not None:
-            max_f = int(args.stability_max_features)
-            stab["max_features"] = None if max_f <= 0 else max_f
-        if getattr(args, "stability_alpha", None) is not None:
-            stab["alpha"] = float(args.stability_alpha)
-
-        # Influence
-        infl = ba.setdefault("influence", {})
-        if getattr(args, "influence_feature_set", None) is not None:
-            infl["feature_set"] = str(args.influence_feature_set).strip().lower()
-        if getattr(args, "influence_outcomes", None) is not None:
-            infl["outcomes"] = [str(o).strip().lower() for o in (args.influence_outcomes or [])]
-        if getattr(args, "influence_max_features", None) is not None:
-            infl["max_features"] = int(args.influence_max_features)
-        if getattr(args, "influence_include_temperature", None) is not None:
-            infl["include_temperature"] = bool(args.influence_include_temperature)
-        if getattr(args, "influence_temperature_control", None) is not None:
-            infl["temperature_control"] = str(args.influence_temperature_control).strip().lower()
-        if (
-            getattr(args, "influence_temperature_spline_knots", None) is not None
-            or getattr(args, "influence_temperature_spline_quantile_low", None) is not None
-            or getattr(args, "influence_temperature_spline_quantile_high", None) is not None
-            or getattr(args, "influence_temperature_spline_min_samples", None) is not None
-        ):
-            ts = infl.setdefault("temperature_spline", {})
-            if getattr(args, "influence_temperature_spline_knots", None) is not None:
-                ts["n_knots"] = int(args.influence_temperature_spline_knots)
-            if getattr(args, "influence_temperature_spline_quantile_low", None) is not None:
-                ts["quantile_low"] = float(args.influence_temperature_spline_quantile_low)
-            if getattr(args, "influence_temperature_spline_quantile_high", None) is not None:
-                ts["quantile_high"] = float(args.influence_temperature_spline_quantile_high)
-            if getattr(args, "influence_temperature_spline_min_samples", None) is not None:
-                ts["min_samples"] = int(args.influence_temperature_spline_min_samples)
-        if getattr(args, "influence_include_trial_order", None) is not None:
-            infl["include_trial_order"] = bool(args.influence_include_trial_order)
-        if getattr(args, "influence_include_run_block", None) is not None:
-            infl["include_run_block"] = bool(args.influence_include_run_block)
-        if getattr(args, "influence_include_interaction", None) is not None:
-            infl["include_interaction"] = bool(args.influence_include_interaction)
-        if getattr(args, "influence_standardize", None) is not None:
-            infl["standardize"] = bool(args.influence_standardize)
-        if getattr(args, "influence_cooks_threshold", None) is not None:
-            infl["cooks_threshold"] = None if float(args.influence_cooks_threshold) <= 0 else float(args.influence_cooks_threshold)
-        if getattr(args, "influence_leverage_threshold", None) is not None:
-            infl["leverage_threshold"] = None if float(args.influence_leverage_threshold) <= 0 else float(args.influence_leverage_threshold)
-
-        # Pain sensitivity
-        if getattr(args, "pain_sensitivity_min_trials", None) is not None:
-            ba.setdefault("pain_sensitivity", {})["min_trials"] = int(args.pain_sensitivity_min_trials)
-        if getattr(args, "pain_sensitivity_feature_set", None) is not None:
-            ba.setdefault("pain_sensitivity", {})["feature_set"] = str(args.pain_sensitivity_feature_set).strip().lower()
-
-        # Correlations (trial-table)
-        if getattr(args, "correlations_feature_set", None) is not None:
-            ba.setdefault("correlations", {})["feature_set"] = str(args.correlations_feature_set).strip().lower()
-        if getattr(args, "correlations_targets", None) is not None:
-            ba.setdefault("correlations", {})["targets"] = [str(t).strip().lower() for t in (args.correlations_targets or [])]
-        if getattr(args, "correlations_primary_unit", None) is not None:
-            ba.setdefault("correlations", {})["primary_unit"] = str(args.correlations_primary_unit).strip().lower()
-        if getattr(args, "correlations_prefer_pain_residual", None) is not None:
-            ba.setdefault("correlations", {})["prefer_pain_residual"] = bool(args.correlations_prefer_pain_residual)
-        if getattr(args, "correlations_use_crossfit_pain_residual", None) is not None:
-            ba.setdefault("correlations", {})["use_crossfit_pain_residual"] = bool(args.correlations_use_crossfit_pain_residual)
-        if getattr(args, "correlations_permutation_primary", None) is not None:
-            enabled = bool(args.correlations_permutation_primary)
-            corr = ba.setdefault("correlations", {})
-            corr["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-            corr.setdefault("permutation", {})["enabled"] = enabled
-
-        # Report
-        if getattr(args, "report_top_n", None) is not None:
-            ba.setdefault("report", {})["top_n"] = int(args.report_top_n)
-
-        # Condition
-        if getattr(args, "condition_fail_fast", None) is not None:
-            ba.setdefault("condition", {})["fail_fast"] = bool(args.condition_fail_fast)
-        if getattr(args, "condition_effect_threshold", None) is not None:
-            ba.setdefault("condition", {})["effect_size_threshold"] = float(args.condition_effect_threshold)
-        if getattr(args, "condition_min_trials", None) is not None:
-            ba.setdefault("condition", {})["min_trials_per_condition"] = int(args.condition_min_trials)
-        if getattr(args, "condition_compare_column", None) is not None:
-            ba.setdefault("condition", {})["compare_column"] = str(args.condition_compare_column).strip()
-        if getattr(args, "condition_compare_values", None) is not None:
-            values = [str(v).strip() for v in (args.condition_compare_values or [])]
-            ba.setdefault("condition", {})["compare_values"] = values
-        if getattr(args, "condition_compare_windows", None) is not None:
-            windows = [str(w).strip() for w in (args.condition_compare_windows or [])]
-            ba.setdefault("condition", {})["compare_windows"] = windows
-        if getattr(args, "condition_window_primary_unit", None) is not None:
-            ba.setdefault("condition", {}).setdefault("window_comparison", {})["primary_unit"] = str(args.condition_window_primary_unit).strip().lower()
-        if getattr(args, "condition_permutation_primary", None) is not None:
-            enabled = bool(args.condition_permutation_primary)
-            cond = ba.setdefault("condition", {})
-            cond["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
-            cond.setdefault("permutation", {})["enabled"] = enabled
-
-        # Temporal
-        temporal_cfg = ba.setdefault("temporal", {})
-        if getattr(args, "temporal_split_by_condition", None) is not None:
-            temporal_cfg["split_by_condition"] = bool(args.temporal_split_by_condition)
-        if getattr(args, "temporal_condition_column", None) is not None:
-            temporal_cfg["condition_column"] = str(args.temporal_condition_column).strip()
-        if getattr(args, "temporal_condition_values", None) is not None:
-            temporal_cfg["condition_values"] = [str(v).strip() for v in (args.temporal_condition_values or [])]
-        if getattr(args, "temporal_filter_value", None) is not None:
-            temporal_cfg["filter_value"] = str(args.temporal_filter_value).strip()
-        if getattr(args, "temporal_time_resolution_ms", None) is not None:
-            temporal_cfg["time_resolution_ms"] = int(args.temporal_time_resolution_ms)
-        if getattr(args, "temporal_smooth_window_ms", None) is not None:
-            temporal_cfg["smooth_window_ms"] = int(args.temporal_smooth_window_ms)
-        tmin = getattr(args, "temporal_time_min_ms", None)
-        tmax = getattr(args, "temporal_time_max_ms", None)
-        if tmin is not None or tmax is not None:
-            cur = temporal_cfg.get("time_range_ms", [-200, 1000])
-            lo = int(tmin) if tmin is not None else int(cur[0])
-            hi = int(tmax) if tmax is not None else int(cur[1])
-            temporal_cfg["time_range_ms"] = [lo, hi]
-        
-        # ITPC-specific temporal options
-        itpc_cfg = temporal_cfg.setdefault("itpc", {})
-        if getattr(args, "temporal_itpc_baseline_min", None) is not None or getattr(args, "temporal_itpc_baseline_max", None) is not None:
-            baseline_window = list(itpc_cfg.get("baseline_window", [-0.5, -0.01]))
-            if getattr(args, "temporal_itpc_baseline_min", None) is not None:
-                baseline_window[0] = float(args.temporal_itpc_baseline_min)
-            if getattr(args, "temporal_itpc_baseline_max", None) is not None:
-                baseline_window[1] = float(args.temporal_itpc_baseline_max)
-            itpc_cfg["baseline_window"] = baseline_window
-        if getattr(args, "temporal_itpc_baseline_correction", None) is not None:
-            itpc_cfg["baseline_correction"] = bool(args.temporal_itpc_baseline_correction)
-        
-        # ERDS-specific temporal options
-        erds_cfg = temporal_cfg.setdefault("erds", {})
-        if getattr(args, "temporal_erds_baseline_min", None) is not None or getattr(args, "temporal_erds_baseline_max", None) is not None:
-            baseline_window = list(erds_cfg.get("baseline_window", [-0.5, -0.1]))
-            if getattr(args, "temporal_erds_baseline_min", None) is not None:
-                baseline_window[0] = float(args.temporal_erds_baseline_min)
-            if getattr(args, "temporal_erds_baseline_max", None) is not None:
-                baseline_window[1] = float(args.temporal_erds_baseline_max)
-            erds_cfg["baseline_window"] = baseline_window
-        if getattr(args, "temporal_erds_method", None) is not None:
-            erds_cfg["method"] = str(args.temporal_erds_method).lower()
-        
-        # Temporal feature selection
-        features_cfg = temporal_cfg.setdefault("features", {})
-        if getattr(args, "temporal_feature_power", None) is not None:
-            features_cfg["power"] = bool(args.temporal_feature_power)
-        if getattr(args, "temporal_feature_itpc", None) is not None:
-            features_cfg["itpc"] = bool(args.temporal_feature_itpc)
-        if getattr(args, "temporal_feature_erds", None) is not None:
-            features_cfg["erds"] = bool(args.temporal_feature_erds)
-        
-        # Time-frequency heatmap
-        tfheatmap_cfg = ba.setdefault("time_frequency_heatmap", {})
-        if getattr(args, "tf_heatmap_enabled", None) is not None:
-            tfheatmap_cfg["enabled"] = bool(args.tf_heatmap_enabled)
-        if getattr(args, "tf_heatmap_freqs", None) is not None:
-            tfheatmap_cfg["freqs"] = list(args.tf_heatmap_freqs)
-        if getattr(args, "tf_heatmap_time_resolution_ms", None) is not None:
-            tfheatmap_cfg["time_resolution_ms"] = int(args.tf_heatmap_time_resolution_ms)
-
-        # Cluster
-        if getattr(args, "cluster_threshold", None) is not None:
-            ba.setdefault("cluster", {})["forming_threshold"] = float(args.cluster_threshold)
-        if getattr(args, "cluster_min_size", None) is not None:
-            ba.setdefault("cluster", {})["min_cluster_size"] = int(args.cluster_min_size)
-        if getattr(args, "cluster_tail", None) is not None:
-            ba.setdefault("cluster", {})["tail"] = int(args.cluster_tail)
-        if getattr(args, "cluster_condition_column", None) is not None:
-            ba.setdefault("cluster", {})["condition_column"] = str(args.cluster_condition_column).strip()
-        if getattr(args, "cluster_condition_values", None) is not None:
-            ba.setdefault("cluster", {})["condition_values"] = [str(v).strip() for v in (args.cluster_condition_values or [])]
-
-        # Mediation / mixed effects
-        if getattr(args, "mediation_bootstrap", None) is not None:
-            ba.setdefault("mediation", {})["n_bootstrap"] = int(args.mediation_bootstrap)
-        if getattr(args, "mediation_min_effect_size", None) is not None:
-            ba.setdefault("mediation", {})["min_effect_size"] = float(args.mediation_min_effect_size)
-        if getattr(args, "mediation_max_mediators", None) is not None:
-            ba.setdefault("mediation", {})["max_mediators"] = int(args.mediation_max_mediators)
-
-        # Moderation
-        if getattr(args, "moderation_max_features", None) is not None:
-            ba.setdefault("moderation", {})["max_features"] = int(args.moderation_max_features)
-        if getattr(args, "moderation_min_samples", None) is not None:
-            ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
-
-        if getattr(args, "mixed_random_effects", None) is not None:
-            ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
-        if getattr(args, "mixed_max_features", None) is not None:
-            ba.setdefault("mixed_effects", {})["max_features"] = int(args.mixed_max_features)
-        
-        computation_features = {}
-        if getattr(args, "correlations_features", None):
-            computation_features["correlations"] = args.correlations_features
-        if getattr(args, "pain_sensitivity_features", None):
-            computation_features["pain_sensitivity"] = args.pain_sensitivity_features
-        if getattr(args, "condition_features", None):
-            computation_features["condition"] = args.condition_features
-        if getattr(args, "temporal_features", None):
-            computation_features["temporal"] = args.temporal_features
-        if getattr(args, "cluster_features", None):
-            computation_features["cluster"] = args.cluster_features
-        if getattr(args, "mediation_features", None):
-            computation_features["mediation"] = args.mediation_features
-        if getattr(args, "moderation_features", None):
-            computation_features["moderation"] = args.moderation_features
+        computation_features = _build_computation_features(args)
         
         pipeline = BehaviorPipeline(
             config=config,
             computations=args.computations,
             feature_categories=categories,
             feature_files=getattr(args, "feature_files", None),
-            computation_features=computation_features if computation_features else None,
+            computation_features=computation_features,
         )
         
         pipeline.run_batch(

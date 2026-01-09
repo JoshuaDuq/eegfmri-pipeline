@@ -14,6 +14,13 @@ EEGConfig = ConfigDict
 
 _configured_loggers: set[str] = set()
 
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_FILE_EXTENSION = ".log"
+LOGS_DIRECTORY_NAME = "logs"
+DEFAULT_LOGGER_NAME = "eeg_pipeline"
+DEFAULT_LOG_LEVEL = logging.INFO
+
 
 def _resolve_log_dir(config: Optional[EEGConfig] = None) -> Optional[Path]:
     if config is None:
@@ -25,38 +32,72 @@ def _resolve_log_dir(config: Optional[EEGConfig] = None) -> Optional[Path]:
 
     deriv_root = config.get("paths.deriv_root")
     if deriv_root:
-        return Path(deriv_root) / "logs"
+        return Path(deriv_root) / LOGS_DIRECTORY_NAME
 
     return None
 
 
+def _get_log_file_path(logger_name: str, log_file_name: Optional[str], config: Optional[EEGConfig]) -> Optional[Path]:
+    has_file_name = log_file_name is not None
+    has_config = config is not None
+    
+    if not has_file_name and not has_config:
+        return None
+    
+    log_dir = _resolve_log_dir(config)
+    if log_dir is None:
+        return None
+    
+    filename = log_file_name if has_file_name else f"{logger_name}{LOG_FILE_EXTENSION}"
+    return log_dir / filename
+
+
+def _create_log_formatter() -> logging.Formatter:
+    return logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
+
+
+def _add_console_handler(logger: logging.Logger, formatter: logging.Formatter) -> None:
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+
+def _add_file_handler(logger: logging.Logger, log_file_path: Path, formatter: logging.Formatter) -> None:
+    ensure_dir(log_file_path.parent)
+    file_handler = logging.FileHandler(log_file_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+
+def _is_logger_configured(logger_name: str) -> bool:
+    return logger_name in _configured_loggers
+
+
+def _mark_logger_configured(logger_name: str) -> None:
+    _configured_loggers.add(logger_name)
+
+
 def _configure_logger_handlers(logger: logging.Logger, log_file_path: Optional[Path] = None) -> None:
-    if logger.name in _configured_loggers:
+    if _is_logger_configured(logger.name):
         return
 
     logger.handlers.clear()
     logger.propagate = False
 
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    formatter = _create_log_formatter()
+    _add_console_handler(logger, formatter)
 
     if log_file_path is not None:
-        ensure_dir(log_file_path.parent)
-        file_handler = logging.FileHandler(log_file_path, mode="a", encoding="utf-8")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        _add_file_handler(logger, log_file_path, formatter)
 
-    logger.setLevel(logging.INFO)
-    _configured_loggers.add(logger.name)
+    logger.setLevel(DEFAULT_LOG_LEVEL)
+    _mark_logger_configured(logger.name)
 
 
 def get_logger(name: str, log_file_path: Optional[Path] = None) -> logging.Logger:
+    if not name or not isinstance(name, str):
+        raise ValueError("Logger name must be a non-empty string")
+    
     logger = logging.getLogger(name)
     _configure_logger_handlers(logger, log_file_path)
     return logger
@@ -82,37 +123,40 @@ def reset_logging() -> None:
     _configured_loggers.clear()
 
 
-def _get_log_file_path(logger_name: str, log_file_name: Optional[str], config: Optional[EEGConfig]) -> Optional[Path]:
-    if not log_file_name and not config:
-        return None
-    log_dir = _resolve_log_dir(config)
-    if not log_dir:
-        return None
-    filename = log_file_name or f"{logger_name}.log"
-    return log_dir / filename
-
-
 def get_subject_logger(
     module_name: str,
     subject: str,
     log_file_name: Optional[str] = None,
     config: Optional[EEGConfig] = None,
 ) -> logging.Logger:
+    if not module_name or not isinstance(module_name, str):
+        raise ValueError("Module name must be a non-empty string")
+    if not subject or not isinstance(subject, str):
+        raise ValueError("Subject must be a non-empty string")
+    
     logger_name = f"{module_name}.sub-{subject}"
     log_file_path = _get_log_file_path(logger_name, log_file_name, config)
     return get_logger(logger_name, log_file_path)
 
 
 def get_pipeline_logger(module_name: Optional[str] = None, config: Optional[EEGConfig] = None) -> logging.Logger:
-    logger_name = module_name or "eeg_pipeline"
+    logger_name = module_name or DEFAULT_LOGGER_NAME
     log_file_path = _get_log_file_path(logger_name, None, config) if config else None
     return get_logger(logger_name, log_file_path)
 
 
+def setup_pipeline_logger(config: Optional[EEGConfig] = None) -> logging.Logger:
+    return get_pipeline_logger(config=config)
+
+
+def setup_subject_logger(subject: str, config: Optional[EEGConfig] = None) -> logging.Logger:
+    return get_subject_logger("pipeline", subject, config=config)
+
+
 def setup_logger(config: Optional[EEGConfig] = None, subject: Optional[str] = None) -> logging.Logger:
     if subject:
-        return get_subject_logger("pipeline", subject, config=config)
-    return get_pipeline_logger(config=config)
+        return setup_subject_logger(subject, config=config)
+    return setup_pipeline_logger(config=config)
 
 
 def get_default_logger() -> logging.Logger:
@@ -124,6 +168,9 @@ def get_group_logger(
     log_file_name: Optional[str] = None,
     config: Optional[EEGConfig] = None,
 ) -> logging.Logger:
+    if not module_name or not isinstance(module_name, str):
+        raise ValueError("Module name must be a non-empty string")
+    
     logger_name = f"{module_name}.group"
     log_file_path = _get_log_file_path(logger_name, log_file_name, config)
     return get_logger(logger_name, log_file_path)
@@ -140,5 +187,7 @@ __all__ = [
     "get_group_logger",
     "get_pipeline_logger",
     "setup_logger",
+    "setup_pipeline_logger",
+    "setup_subject_logger",
     "get_default_logger",
 ]

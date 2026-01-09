@@ -2,6 +2,8 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
+// Common component styles for the TUI, built on the shared color palette.
+
 ///////////////////////////////////////////////////////////////////
 // Common Styles
 ///////////////////////////////////////////////////////////////////
@@ -69,35 +71,28 @@ var (
 ///////////////////////////////////////////////////////////////////
 
 var (
-	BadgeSuccessStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(Success).
-				Bold(true).
-				Padding(0, 1)
+	badgeDarkForeground  = lipgloss.Color("#000000")
+	badgeLightForeground = lipgloss.Color("#FFFFFF")
+)
 
-	BadgeErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(Error).
-			Bold(true).
-			Padding(0, 1)
+func newBadgeStyle(foreground, background lipgloss.Color) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(foreground).
+		Background(background).
+		Bold(true).
+		Padding(0, 1)
+}
 
-	BadgeWarningStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(Warning).
-				Bold(true).
-				Padding(0, 1)
+var (
+	BadgeSuccessStyle = newBadgeStyle(badgeDarkForeground, Success)
 
-	BadgeAccentStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(Accent).
-				Bold(true).
-				Padding(0, 1)
+	BadgeErrorStyle = newBadgeStyle(badgeLightForeground, Error)
 
-	BadgeMutedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(Muted).
-			Bold(true).
-			Padding(0, 1)
+	BadgeWarningStyle = newBadgeStyle(badgeDarkForeground, Warning)
+
+	BadgeAccentStyle = newBadgeStyle(badgeDarkForeground, Accent)
+
+	BadgeMutedStyle = newBadgeStyle(badgeLightForeground, Muted)
 )
 
 ///////////////////////////////////////////////////////////////////

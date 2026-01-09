@@ -1,6 +1,7 @@
 package environment
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -14,15 +15,37 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-///////////////////////////////////////////////////////////////////
-// Types
-///////////////////////////////////////////////////////////////////
-
 type Environment int
 
 const (
 	EnvLocal Environment = iota
 	EnvGoogleCloud
+)
+
+const (
+	tickInterval = 150 * time.Millisecond
+
+	contentWidthPadding     = 6
+	separatorWidthPadding   = 4
+	maxSeparatorWidth       = 55
+	minMainContentHeight    = 10
+	headerHeightPadding     = 3
+	footerHeightPadding     = 2
+	optionNameWidth         = 20
+	cloudPanelWidthPadding  = 10
+	footerWidthPadding      = 8
+	maxErrorMsgLength       = 40
+	helpOverlayWidth        = 45
+	labelStyleWidth         = 15
+)
+
+const (
+	vmStatusUnknown  = "unknown"
+	vmStatusChecking = "checking"
+	vmStatusStarting = "starting"
+	vmStatusRunning  = "running"
+	vmStatusStopped  = "stopped"
+	vmStatusError    = "error"
 )
 
 func (e Environment) String() string {
@@ -60,10 +83,6 @@ var environments = []envOption{
 	},
 }
 
-///////////////////////////////////////////////////////////////////
-// Model
-///////////////////////////////////////////////////////////////////
-
 type Model struct {
 	cursor   int
 	Selected Environment
@@ -76,7 +95,6 @@ type Model struct {
 	VMHostname  string
 	VMError     error
 
-	// Help overlay
 	helpOverlay components.HelpOverlay
 	showHelp    bool
 
@@ -85,12 +103,8 @@ type Model struct {
 
 type TickMsg struct{}
 
-///////////////////////////////////////////////////////////////////
-// Constructor
-///////////////////////////////////////////////////////////////////
-
 func New() Model {
-	help := components.NewHelpOverlay("Environment Shortcuts", 45)
+	help := components.NewHelpOverlay("Environment Shortcuts", helpOverlayWidth)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓", Description: "Select environment"},
 		{Key: "L", Description: "Choose Local"},
@@ -112,23 +126,123 @@ func New() Model {
 		cursor:      0,
 		Selected:    EnvLocal,
 		CloudConfig: cloud.DefaultConfig(),
-		VMStatus:    "unknown",
+		VMStatus:    vmStatusUnknown,
 		helpOverlay: help,
 	}
 }
-
-///////////////////////////////////////////////////////////////////
-// Tea Model Implementation
-///////////////////////////////////////////////////////////////////
 
 func (m Model) Init() tea.Cmd {
 	return m.tick()
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*150, func(t time.Time) tea.Msg {
+	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
 		return TickMsg{}
 	})
+}
+
+func (m Model) isCloudSelected() bool {
+	return m.cursor < len(environments) && environments[m.cursor].env == EnvGoogleCloud
+}
+
+func (m Model) moveCursorUp() Model {
+	if m.cursor > 0 {
+		m.cursor--
+	} else {
+		m.cursor = len(environments) - 1
+	}
+	return m
+}
+
+func (m Model) moveCursorDown() Model {
+	if m.cursor < len(environments)-1 {
+		m.cursor++
+	} else {
+		m.cursor = 0
+	}
+	return m
+}
+
+func (m Model) handleHelpToggle(key string) (Model, tea.Cmd) {
+	if key == "?" || key == "esc" {
+		m.showHelp = false
+		m.helpOverlay.Visible = false
+	}
+	return m, nil
+}
+
+func (m Model) handleNavigation(key string) (Model, tea.Cmd, bool) {
+	switch key {
+	case "up", "k":
+		m = m.moveCursorUp()
+	case "down", "j":
+		m = m.moveCursorDown()
+	default:
+		return m, nil, false
+	}
+
+	if m.isCloudSelected() && m.VMStatus == vmStatusUnknown {
+		m.VMStatus = vmStatusChecking
+		return m, cloud.CheckVMStatus(m.CloudConfig), true
+	}
+
+	return m, nil, true
+}
+
+func (m Model) handleSelection(key string) (Model, tea.Cmd, bool) {
+	switch key {
+	case "enter", " ":
+		if m.isCloudSelected() && m.VMStatus != vmStatusRunning {
+			return m, nil, true
+		}
+		m.Selected = environments[m.cursor].env
+		m.Done = true
+		return m, nil, true
+
+	case "l", "L":
+		m.Selected = EnvLocal
+		m.Done = true
+		return m, nil, true
+
+	case "g", "G":
+		if m.VMStatus == vmStatusRunning {
+			m.Selected = EnvGoogleCloud
+			m.Done = true
+		}
+		return m, nil, true
+	}
+
+	return m, nil, false
+}
+
+func (m Model) handleCloudActions(key string) (Model, tea.Cmd, bool) {
+	switch key {
+	case "s":
+		if m.VMStatus == vmStatusStopped || m.VMStatus == vmStatusError {
+			m.VMStatus = vmStatusStarting
+			return m, cloud.StartVM(m.CloudConfig), true
+		}
+		return m, nil, true
+
+	case "c":
+		m.VMStatus = vmStatusChecking
+		return m, cloud.CheckVMStatus(m.CloudConfig), true
+	}
+
+	return m, nil, false
+}
+
+func (m Model) handleVMStatus(msg cloud.VMStatusMsg) Model {
+	if msg.Error != nil {
+		m.VMStatus = vmStatusStopped
+		m.VMError = msg.Error
+	} else if msg.Running {
+		m.VMStatus = vmStatusRunning
+		m.VMHostname = msg.IP
+	} else {
+		m.VMStatus = vmStatusStopped
+	}
+	return m
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -138,77 +252,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 
 	case tea.KeyMsg:
-		// Handle help overlay first
 		if m.showHelp {
-			if msg.String() == "?" || msg.String() == "esc" {
-				m.showHelp = false
-				m.helpOverlay.Visible = false
-			}
-			return m, nil
+			return m.handleHelpToggle(msg.String())
 		}
 
-		switch msg.String() {
-		case "?":
+		key := msg.String()
+		if key == "?" {
 			m.showHelp = true
 			m.helpOverlay.Visible = true
 			return m, nil
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			} else {
-				m.cursor = len(environments) - 1
-			}
-			if m.cursor == 1 && m.VMStatus == "unknown" {
-				m.VMStatus = "checking"
-				return m, cloud.CheckVMStatus(m.CloudConfig)
-			}
-		case "down", "j":
-			if m.cursor < len(environments)-1 {
-				m.cursor++
-			} else {
-				m.cursor = 0
-			}
-			if m.cursor == 1 && m.VMStatus == "unknown" {
-				m.VMStatus = "checking"
-				return m, cloud.CheckVMStatus(m.CloudConfig)
-			}
-		case "enter", " ":
-			if m.cursor == 1 && m.VMStatus != "running" {
-				return m, nil
-			}
-			m.Selected = environments[m.cursor].env
-			m.Done = true
-			return m, nil
-		case "l", "L":
-			m.Selected = EnvLocal
-			m.Done = true
-			return m, nil
-		case "g", "G":
-			if m.VMStatus == "running" {
-				m.Selected = EnvGoogleCloud
-				m.Done = true
-			}
-			return m, nil
-		case "s":
-			if m.VMStatus == "stopped" || m.VMStatus == "error" {
-				m.VMStatus = "starting"
-				return m, cloud.StartVM(m.CloudConfig)
-			}
-		case "c":
-			m.VMStatus = "checking"
-			return m, cloud.CheckVMStatus(m.CloudConfig)
+		}
+
+		if updated, cmd, handled := m.handleNavigation(key); handled {
+			return updated, cmd
+		}
+
+		if updated, cmd, handled := m.handleSelection(key); handled {
+			return updated, cmd
+		}
+
+		if updated, cmd, handled := m.handleCloudActions(key); handled {
+			return updated, cmd
 		}
 
 	case cloud.VMStatusMsg:
-		if msg.Error != nil {
-			m.VMStatus = "stopped"
-			m.VMError = msg.Error
-		} else if msg.Running {
-			m.VMStatus = "running"
-			m.VMHostname = msg.IP
-		} else {
-			m.VMStatus = "stopped"
-		}
+		m = m.handleVMStatus(msg)
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -219,63 +287,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-///////////////////////////////////////////////////////////////////
-// View
-///////////////////////////////////////////////////////////////////
-
 func (m Model) View() string {
-	// Help overlay takes precedence
 	if m.showHelp {
 		overlay := m.helpOverlay.View()
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
-	// Calculate responsive width
-	contentWidth := m.width - 6
-	if contentWidth < styles.MinContentWidth {
-		contentWidth = styles.MinContentWidth
-	}
-	if contentWidth > styles.MaxContentWidth {
-		contentWidth = styles.MaxContentWidth
-	}
+	contentWidth := m.calculateContentWidth()
+	separatorWidth := m.calculateSeparatorWidth(contentWidth)
 
-	separatorWidth := contentWidth - 4
-	if separatorWidth > 55 {
-		separatorWidth = 55
-	}
-
-	// Render header (welcome banner + system info)
 	header := m.renderWelcomeBanner() + "\n\n" + m.renderSystemInfo()
-	headerHeight := strings.Count(header, "\n") + 3
+	headerHeight := strings.Count(header, "\n") + headerHeightPadding
 
-	// Render footer
 	footer := m.renderFooter()
-	footerHeight := strings.Count(footer, "\n") + 2
+	footerHeight := strings.Count(footer, "\n") + footerHeightPadding
 
-	// Calculate available height for main content
 	mainHeight := m.height - headerHeight - footerHeight
-	if mainHeight < 10 {
-		mainHeight = 10
+	if mainHeight < minMainContentHeight {
+		mainHeight = minMainContentHeight
 	}
 
-	// Build main content
 	var mainContent strings.Builder
 	mainContent.WriteString(m.renderTitle(separatorWidth))
 	mainContent.WriteString("\n\n")
 	mainContent.WriteString(m.renderOptions())
 	mainContent.WriteString("\n")
 
-	if m.cursor == 1 {
+	if m.isCloudSelected() {
 		mainContent.WriteString(m.renderCloudPanel())
 		mainContent.WriteString("\n")
 	}
 
-	// Force main content to fill available height
 	mainContentStyled := lipgloss.NewStyle().
 		Height(mainHeight).
 		Render(mainContent.String())
 
 	return header + "\n\n" + mainContentStyled + "\n" + footer
+}
+
+func (m Model) calculateContentWidth() int {
+	contentWidth := m.width - contentWidthPadding
+	if contentWidth < styles.MinContentWidth {
+		contentWidth = styles.MinContentWidth
+	}
+	if contentWidth > styles.MaxContentWidth {
+		contentWidth = styles.MaxContentWidth
+	}
+	return contentWidth
+}
+
+func (m Model) calculateSeparatorWidth(contentWidth int) int {
+	separatorWidth := contentWidth - separatorWidthPadding
+	if separatorWidth > maxSeparatorWidth {
+		separatorWidth = maxSeparatorWidth
+	}
+	return separatorWidth
 }
 
 func (m Model) renderWelcomeBanner() string {
@@ -295,23 +361,21 @@ func (m Model) renderSystemInfo() string {
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
 
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
 	cpuCount := runtime.NumCPU()
+	osArch := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
 
 	var info []string
 	info = append(info, infoStyle.Render("Host: ")+valueStyle.Render(hostname))
-	info = append(info, infoStyle.Render("OS: ")+valueStyle.Render(runtime.GOOS+"/"+runtime.GOARCH))
-	info = append(info, infoStyle.Render("CPUs: ")+valueStyle.Render(formatInt(cpuCount)))
+	info = append(info, infoStyle.Render("OS: ")+valueStyle.Render(osArch))
+	info = append(info, infoStyle.Render("CPUs: ")+valueStyle.Render(fmt.Sprintf("%d", cpuCount)))
 
 	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render("  │  ")
 	return strings.Join(info, separator)
-}
-
-func formatInt(n int) string {
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return string(rune('0'+n/10)) + string(rune('0'+n%10))
 }
 
 func (m Model) renderTitle(separatorWidth int) string {
@@ -326,8 +390,7 @@ func (m Model) renderTitle(separatorWidth int) string {
 }
 
 func (m Model) renderOptions() string {
-	var b strings.Builder
-	nameWidth := 20
+	var builder strings.Builder
 
 	for i, opt := range environments {
 		isFocused := i == m.cursor
@@ -342,37 +405,37 @@ func (m Model) renderOptions() string {
 			nameStyle = nameStyle.Bold(true).Foreground(styles.Primary)
 		}
 
-		// Pad name to fixed width for alignment
-		paddedName := opt.name + strings.Repeat(" ", nameWidth-len(opt.name))
+		paddingNeeded := optionNameWidth - len(opt.name)
+		paddedName := opt.name + strings.Repeat(" ", paddingNeeded)
 
 		line := cursor + marker + " " + nameStyle.Render(paddedName) + descStyle.Render(opt.description)
 
-		// Add VM status for cloud option
 		if opt.env == EnvGoogleCloud {
 			line += "  " + m.renderVMStatusBadge()
 		}
 
-		b.WriteString(line + "\n")
+		builder.WriteString(line + "\n")
 	}
 
-	return b.String()
+	return builder.String()
 }
 
 func (m Model) renderVMStatusBadge() string {
 	switch m.VMStatus {
-	case "checking", "starting":
-		frames := []string{"◐", "◓", "◑", "◒"}
-		frame := frames[m.ticker%len(frames)]
-		label := "checking"
-		if m.VMStatus == "starting" {
-			label = "starting"
+	case vmStatusChecking, vmStatusStarting:
+		animationFrames := []string{"◐", "◓", "◑", "◒"}
+		frameIndex := m.ticker % len(animationFrames)
+		currentFrame := animationFrames[frameIndex]
+		label := vmStatusChecking
+		if m.VMStatus == vmStatusStarting {
+			label = vmStatusStarting
 		}
-		return lipgloss.NewStyle().Foreground(styles.Accent).Render("[" + frame + " " + label + "]")
-	case "running":
+		return lipgloss.NewStyle().Foreground(styles.Accent).Render("[" + currentFrame + " " + label + "]")
+	case vmStatusRunning:
 		return lipgloss.NewStyle().Foreground(styles.Success).Render("[" + styles.ActiveMark + " running]")
-	case "stopped":
+	case vmStatusStopped:
 		return lipgloss.NewStyle().Foreground(styles.Warning).Render("[" + styles.PendingMark + " stopped]")
-	case "error":
+	case vmStatusError:
 		return lipgloss.NewStyle().Foreground(styles.Error).Render("[" + styles.CrossMark + " error]")
 	default:
 		return lipgloss.NewStyle().Foreground(styles.Muted).Render("[? unknown]")
@@ -384,47 +447,62 @@ func (m Model) renderCloudPanel() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Secondary).
 		Padding(0, 1).
-		Width(m.width - 10)
+		Width(m.width - cloudPanelWidthPadding)
 
 	var content strings.Builder
 
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(15)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(labelStyleWidth)
 	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
 
 	content.WriteString(labelStyle.Render("SSH Host:") + valueStyle.Render(m.CloudConfig.RemoteHost) + "\n")
 	content.WriteString(labelStyle.Render("Remote Path:") + valueStyle.Render(m.CloudConfig.RemoteBase) + "\n")
 	content.WriteString(labelStyle.Render("GCP Instance:") + valueStyle.Render(m.CloudConfig.GCPInstance) + "\n")
 
-	// Status line
 	statusLabel := labelStyle.Render("Status:")
-	switch m.VMStatus {
-	case "running":
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.ActiveMark+" Connected"))
-		if m.VMHostname != "" {
-			content.WriteString(" (" + valueStyle.Render(m.VMHostname) + ")")
-		}
-		content.WriteString("\n")
-	case "stopped":
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.PendingMark+" Stopped"))
-		content.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(" - press [s] to start") + "\n")
-	case "checking":
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Accent).Render("Checking connection...") + "\n")
-	case "starting":
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Accent).Render("Starting VM...") + "\n")
-	case "error":
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark+" Connection failed") + "\n")
-		if m.VMError != nil {
-			errMsg := m.VMError.Error()
-			if len(errMsg) > 40 {
-				errMsg = errMsg[:40] + "..."
-			}
-			content.WriteString(labelStyle.Render("") + lipgloss.NewStyle().Foreground(styles.TextDim).Render(errMsg) + "\n")
-		}
-	default:
-		content.WriteString(statusLabel + lipgloss.NewStyle().Foreground(styles.Muted).Render("Press [c] to check") + "\n")
-	}
+	statusLine := m.renderCloudStatusLine(statusLabel, valueStyle, labelStyle)
+	content.WriteString(statusLine)
 
 	return boxStyle.Render(content.String())
+}
+
+func (m Model) renderCloudStatusLine(statusLabel string, valueStyle, labelStyle lipgloss.Style) string {
+	switch m.VMStatus {
+	case vmStatusRunning:
+		statusText := lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(styles.ActiveMark + " Connected")
+		if m.VMHostname != "" {
+			statusText += " (" + valueStyle.Render(m.VMHostname) + ")"
+		}
+		return statusLabel + statusText + "\n"
+
+	case vmStatusStopped:
+		statusText := lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.PendingMark + " Stopped")
+		hintText := lipgloss.NewStyle().Foreground(styles.TextDim).Render(" - press [s] to start")
+		return statusLabel + statusText + hintText + "\n"
+
+	case vmStatusChecking:
+		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("Checking connection...")
+		return statusLabel + statusText + "\n"
+
+	case vmStatusStarting:
+		statusText := lipgloss.NewStyle().Foreground(styles.Accent).Render("Starting VM...")
+		return statusLabel + statusText + "\n"
+
+	case vmStatusError:
+		statusText := lipgloss.NewStyle().Foreground(styles.Error).Render(styles.CrossMark + " Connection failed")
+		result := statusLabel + statusText + "\n"
+		if m.VMError != nil {
+			errMsg := m.VMError.Error()
+			if len(errMsg) > maxErrorMsgLength {
+				errMsg = errMsg[:maxErrorMsgLength] + "..."
+			}
+			result += labelStyle.Render("") + lipgloss.NewStyle().Foreground(styles.TextDim).Render(errMsg) + "\n"
+		}
+		return result
+
+	default:
+		statusText := lipgloss.NewStyle().Foreground(styles.Muted).Render("Press [c] to check")
+		return statusLabel + statusText + "\n"
+	}
 }
 
 func (m Model) renderFooter() string {
@@ -439,5 +517,5 @@ func (m Model) renderFooter() string {
 	}
 
 	separator := "  "
-	return styles.FooterStyle.Width(m.width - 8).Render(strings.Join(hints, separator))
+	return styles.FooterStyle.Width(m.width - footerWidthPadding).Render(strings.Join(hints, separator))
 }

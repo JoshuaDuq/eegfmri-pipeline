@@ -41,20 +41,13 @@ class CorrelationStats:
 
 def get_statistics_constants(config=None):
     """Load statistics constants from config."""
-    if get_constants is not None:
-        try:
-            constants = get_constants("statistics", config)
-            if "cluster_structure_2d" in constants:
-                constants["cluster_structure_2d"] = np.array(
-                    constants["cluster_structure_2d"], dtype=int
-                )
-            # Ensure critical keys have defaults if missing from the returned constants
-            if "min_samples_for_correlation" not in constants:
-                constants["min_samples_for_correlation"] = 5
-            return constants
-        except ValueError:
-            # Fallback to secondary mechanism if section is missing
-            pass
+    try:
+        constants = get_constants("statistics", config)
+        _normalize_cluster_structure(constants)
+        _ensure_min_samples_default(constants)
+        return constants
+    except ValueError:
+        pass
 
     config = ensure_config(config)
     if config is None:
@@ -69,18 +62,30 @@ def get_statistics_constants(config=None):
         }
 
     result = dict(constants)
-    if "cluster_structure_2d" in result:
-        result["cluster_structure_2d"] = np.array(result["cluster_structure_2d"], dtype=int)
-    
-    if "min_samples_for_correlation" not in result:
-        result["min_samples_for_correlation"] = 5
-        
+    _normalize_cluster_structure(result)
+    _ensure_min_samples_default(result)
     return result
+
+
+def _normalize_cluster_structure(constants: dict) -> None:
+    """Convert cluster_structure_2d to numpy array if present."""
+    if "cluster_structure_2d" in constants:
+        constants["cluster_structure_2d"] = np.array(
+            constants["cluster_structure_2d"], dtype=int
+        )
+
+
+def _ensure_min_samples_default(constants: dict) -> None:
+    """Ensure min_samples_for_correlation has a default value."""
+    if "min_samples_for_correlation" not in constants:
+        constants["min_samples_for_correlation"] = 5
 
 
 def get_fdr_alpha(config: Optional[Any] = None) -> float:
     """Get FDR alpha from config."""
-    return float(get_config_value(config, "statistics.fdr_alpha", get_config_value(config, "statistics.sig_alpha", 0.05)))
+    default_alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
+    fdr_alpha = get_config_value(config, "statistics.fdr_alpha", default_alpha)
+    return float(fdr_alpha)
 
 
 def get_ci_level(config: Optional[Any] = None) -> float:
@@ -141,6 +146,7 @@ def get_subject_seed(subject: str, base_seed: Optional[int] = None, config: Opti
     if base_seed is None:
         base_seed = int(get_config_value(config, "project.random_state", 42))
     
-    subject_hash = hash(subject) % (2**31)
-    return (subject_hash + base_seed) % (2**31)
+    max_int31 = 2**31
+    subject_hash = hash(subject) % max_int31
+    return (subject_hash + base_seed) % max_int31
 

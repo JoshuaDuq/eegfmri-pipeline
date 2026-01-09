@@ -40,17 +40,35 @@ if TYPE_CHECKING:
     from eeg_pipeline.context.behavior import BehaviorContext
 
 
+# Numerical stability constants
+MIN_VARIANCE_THRESHOLD = 1e-12
+MIN_DENOMINATOR_THRESHOLD = 1e-15
+MIN_OBSERVATIONS_FOR_CORRELATION = 10
+PARALLELIZATION_TASK_THRESHOLD = 50
+
+
 def _compute_single_bin_correlation(
-    f_i: int, t_i: int, power: np.ndarray, y: np.ndarray, times: np.ndarray,
-    time_edges: np.ndarray, min_pts: int, use_spearman: bool,
-    cov_mat: Optional[np.ndarray], cov_df: Optional[pd.DataFrame], n_cov: int,
-    config: Any, min_samples_per_cov: int = 5, partial_corr_base: int = 5, min_dof: int = 2
+    freq_idx: int,
+    time_idx: int,
+    power: np.ndarray,
+    y: np.ndarray,
+    times: np.ndarray,
+    time_edges: np.ndarray,
+    min_pts: int,
+    use_spearman: bool,
+    cov_mat: Optional[np.ndarray],
+    cov_df: Optional[pd.DataFrame],
+    n_cov: int,
+    config: Any,
+    min_samples_per_cov: int = 5,
+    partial_corr_base: int = 5,
+    min_dof: int = 2,
 ) -> Tuple[int, int, np.ndarray, float, float, int, bool]:
     """Compute correlation for a single frequency-time bin."""
-    t_mask = (times >= time_edges[t_i]) & (times < time_edges[t_i + 1])
+    t_mask = (times >= time_edges[time_idx]) & (times < time_edges[time_idx + 1])
     bin_vals = np.full(len(y), np.nan)
     if t_mask.any():
-        bin_vals = power[:, f_i, t_mask].mean(axis=1)
+        bin_vals = power[:, freq_idx, t_mask].mean(axis=1)
 
     valid = np.isfinite(bin_vals) & np.isfinite(y)
     n_obs = int(valid.sum())
@@ -58,27 +76,35 @@ def _compute_single_bin_correlation(
 
     if cov_mat is not None:
         cov_valid = valid & np.all(np.isfinite(cov_mat), axis=1)
-        req = max(min_pts, n_cov * min_samples_per_cov + partial_corr_base)
+        min_required = max(min_pts, n_cov * min_samples_per_cov + partial_corr_base)
         n_obs = int(cov_valid.sum())
-        if n_obs >= req:
+        if n_obs >= min_required:
             try:
                 r, p, n_obs = compute_partial_corr(
-                    pd.Series(bin_vals[cov_valid]), pd.Series(y[cov_valid]),
+                    pd.Series(bin_vals[cov_valid]),
+                    pd.Series(y[cov_valid]),
                     pd.DataFrame(cov_mat[cov_valid], columns=list(cov_df.columns)),
-                    method="spearman" if use_spearman else "pearson"
+                    method="spearman" if use_spearman else "pearson",
                 )
             except (ValueError, RuntimeWarning) as err:
                 logging.getLogger(__name__).debug(
-                    "Partial correlation failed for bin (f=%s, t=%s): %s", f_i, t_i, err
+                    "Partial correlation failed for bin (f=%s, t=%s): %s",
+                    freq_idx,
+                    time_idx,
+                    err,
                 )
                 r, p = np.nan, np.nan
     elif n_obs >= min_pts:
-        r, p = compute_correlation(bin_vals[valid], y[valid], "spearman" if use_spearman else "pearson")
+        r, p = compute_correlation(
+            bin_vals[valid], y[valid], "spearman" if use_spearman else "pearson"
+        )
 
     dof = n_obs - n_cov - 2
-    is_valid = np.isfinite(r) and np.isfinite(p) and dof >= min_dof and abs(r) < 1
+    is_valid = (
+        np.isfinite(r) and np.isfinite(p) and dof >= min_dof and abs(r) < 1
+    )
 
-    return f_i, t_i, bin_vals, r, p, n_obs, is_valid
+    return freq_idx, time_idx, bin_vals, r, p, n_obs, is_valid
 
 
 def _compute_tf_correlations_for_bins(
@@ -103,72 +129,119 @@ def _compute_tf_correlations_for_bins(
     partial_corr_base = int(get_config_value(config, "behavior_analysis.statistics.partial_corr_base_samples", 5))
     min_dof = int(get_config_value(config, "behavior_analysis.statistics.min_dof_for_correlation", 2))
 
-    tasks = [(f_i, t_i) for f_i in range(len(freqs)) for t_i in range(n_bins)]
+    tasks = [
+        (freq_idx, time_idx)
+        for freq_idx in range(len(freqs))
+        for time_idx in range(n_bins)
+    ]
 
-    if n_jobs == 1:
-        results = [
-            _compute_single_bin_correlation(
-                f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
-                cov_mat, cov_df, n_cov, config, min_samples_per_cov, partial_corr_base, min_dof
-            )
-            for f_i, t_i in tasks
-        ]
-    else:
+    should_parallelize = n_jobs != 1 and len(tasks) >= PARALLELIZATION_TASK_THRESHOLD
+    if should_parallelize:
         results = Parallel(n_jobs=n_jobs, backend="loky")(
             delayed(_compute_single_bin_correlation)(
-                f_i, t_i, power, y, times, time_edges, min_pts, use_spearman,
-                cov_mat, cov_df, n_cov, config, min_samples_per_cov, partial_corr_base, min_dof
+                freq_idx,
+                time_idx,
+                power,
+                y,
+                times,
+                time_edges,
+                min_pts,
+                use_spearman,
+                cov_mat,
+                cov_df,
+                n_cov,
+                config,
+                min_samples_per_cov,
+                partial_corr_base,
+                min_dof,
             )
-            for f_i, t_i in tasks
+            for freq_idx, time_idx in tasks
         )
+    else:
+        results = [
+            _compute_single_bin_correlation(
+                freq_idx,
+                time_idx,
+                power,
+                y,
+                times,
+                time_edges,
+                min_pts,
+                use_spearman,
+                cov_mat,
+                cov_df,
+                n_cov,
+                config,
+                min_samples_per_cov,
+                partial_corr_base,
+                min_dof,
+            )
+            for freq_idx, time_idx in tasks
+        ]
 
-    for f_i, t_i, bin_vals, r, p, n_obs, is_valid in results:
-        bin_data[f_i, t_i, :] = bin_vals
-        n_valid[f_i, t_i] = n_obs
+    for freq_idx, time_idx, bin_vals, r, p, n_obs, is_valid in results:
+        bin_data[freq_idx, time_idx, :] = bin_vals
+        n_valid[freq_idx, time_idx] = n_obs
         if is_valid:
-            corrs[f_i, t_i] = r
-            pvals[f_i, t_i] = p
-            info_bins.append((f_i, t_i))
+            corrs[freq_idx, time_idx] = r
+            pvals[freq_idx, time_idx] = p
+            info_bins.append((freq_idx, time_idx))
 
     return corrs, pvals, n_valid, bin_data, info_bins
 
 
 def _compute_single_condition_channel(
-    b_i: int, w_i: int, c_i: int, bp: np.ndarray, y_c: np.ndarray,
-    cov_vals: Optional[np.ndarray], cov_valid_mask: Optional[np.ndarray],
-    req_samples: int, method: str, use_spearman: bool,
+    band_idx: int,
+    window_idx: int,
+    channel_idx: int,
+    band_power: np.ndarray,
+    y_condition: np.ndarray,
+    cov_vals: Optional[np.ndarray],
+    cov_valid_mask: Optional[np.ndarray],
+    req_samples: int,
+    method: str,
+    use_spearman: bool,
 ) -> Tuple[int, int, int, float, float, int]:
     """Compute correlation for a single band/window/channel combination."""
-    ch_p = bp[:, c_i]
-    valid = np.isfinite(ch_p) & np.isfinite(y_c)
+    channel_power = band_power[:, channel_idx]
+    valid = np.isfinite(channel_power) & np.isfinite(y_condition)
     if cov_valid_mask is not None:
         valid &= cov_valid_mask
 
     if valid.sum() < req_samples:
-        return b_i, w_i, c_i, np.nan, np.nan, 0
+        return band_idx, window_idx, channel_idx, np.nan, np.nan, 0
 
-    ch_valid = ch_p[valid]
-    if np.std(ch_valid) < 1e-12:
-        return b_i, w_i, c_i, np.nan, np.nan, 0
+    channel_valid = channel_power[valid]
+    if np.std(channel_valid) < MIN_VARIANCE_THRESHOLD:
+        return band_idx, window_idx, channel_idx, np.nan, np.nan, 0
 
     try:
         if cov_vals is not None and cov_vals.shape[1] > 0:
-            r, p, n = compute_partial_corr(
-                pd.Series(ch_valid), pd.Series(y_c[valid]),
-                pd.DataFrame(cov_vals[valid]), method=method
+            r, p, n_obs = compute_partial_corr(
+                pd.Series(channel_valid),
+                pd.Series(y_condition[valid]),
+                pd.DataFrame(cov_vals[valid]),
+                method=method,
             )
-            if n < req_samples:
-                return b_i, w_i, c_i, np.nan, np.nan, 0
+            if n_obs < req_samples:
+                return band_idx, window_idx, channel_idx, np.nan, np.nan, 0
         else:
             corr_fn = spearmanr if use_spearman else pearsonr
-            r, p = corr_fn(ch_valid, y_c[valid])
+            r, p = corr_fn(channel_valid, y_condition[valid])
 
         if np.isfinite(r) and np.isfinite(p):
-            return b_i, w_i, c_i, float(r), float(p), int(valid.sum())
+            return (
+                band_idx,
+                window_idx,
+                channel_idx,
+                float(r),
+                float(p),
+                int(valid.sum()),
+            )
     except (ValueError, RuntimeWarning):
         pass
 
-    return b_i, w_i, c_i, np.nan, np.nan, 0
+    return band_idx, window_idx, channel_idx, np.nan, np.nan, 0
 
 
 def _compute_correlations_for_condition(
@@ -204,48 +277,63 @@ def _compute_correlations_for_condition(
 
     tasks = []
 
-    for b_i, (bn, (fmin, fmax_b)) in enumerate(bands.items()):
-        fmax_eff = min(fmax_b, fmax)
-        if fmin >= fmax_eff:
+    for band_idx, (band_name, (fmin, fmax_band)) in enumerate(bands.items()):
+        fmax_effective = min(fmax_band, fmax)
+        if fmin >= fmax_effective:
             continue
-        for w_i, (t0, t1) in enumerate(zip(win_s, win_e)):
-            bp = extract_trial_band_power(tfr_c, fmin, fmax_eff, t0, t1)
-            if bp is None:
+        for window_idx, (t0, t1) in enumerate(zip(win_s, win_e)):
+            band_power = extract_trial_band_power(tfr_c, fmin, fmax_effective, t0, t1)
+            if band_power is None:
                 continue
-            cov_valid_mask = np.all(np.isfinite(cov_vals), axis=1) if cov_vals is not None else None
+            cov_valid_mask = (
+                np.all(np.isfinite(cov_vals), axis=1) if cov_vals is not None else None
+            )
 
             # Cache bin-level data for permutation-based cluster correction
-            if bp.shape[0] == n_trials and bp.shape[1] == n_ch:
-                bin_data[b_i, w_i] = bp.T
+            if band_power.shape[0] == n_trials and band_power.shape[1] == n_ch:
+                bin_data[band_idx, window_idx] = band_power.T
             else:
                 logger.debug(
                     "Skipping bin data caching for band=%s, window=%s due to shape mismatch (%s != %s)",
-                    bn, w_i, bp.shape, (n_trials, n_ch),
+                    band_name,
+                    window_idx,
+                    band_power.shape,
+                    (n_trials, n_ch),
                 )
 
-            for c_i in range(n_ch):
-                tasks.append((b_i, w_i, c_i, bp, y_c, cov_vals, cov_valid_mask, req_samples, method, use_spearman))
+            for channel_idx in range(n_ch):
+                tasks.append(
+                    (
+                        band_idx,
+                        window_idx,
+                        channel_idx,
+                        band_power,
+                        y_c,
+                        cov_vals,
+                        cov_valid_mask,
+                        req_samples,
+                        method,
+                        use_spearman,
+                    )
+                )
 
-    if n_jobs == 1 or len(tasks) < 50:
-        results = [
-            _compute_single_condition_channel(*task)
-            for task in tasks
-        ]
-    else:
+    should_parallelize = n_jobs != 1 and len(tasks) >= PARALLELIZATION_TASK_THRESHOLD
+    if should_parallelize:
         results = Parallel(n_jobs=n_jobs, backend="loky")(
-            delayed(_compute_single_condition_channel)(
-                *task
-            )
-            for task in tasks
+            delayed(_compute_single_condition_channel)(*task) for task in tasks
         )
+    else:
+        results = [
+            _compute_single_condition_channel(*task) for task in tasks
+        ]
 
-    for b_i, w_i, c_i, r, p, n_obs in results:
+    for band_idx, window_idx, channel_idx, r, p, n_obs in results:
         if not np.isfinite(r) or not np.isfinite(p) or n_obs < req_samples:
             continue
-        corrs[b_i, w_i, c_i] = r
-        pvals[b_i, w_i, c_i] = p
-        n_valid[b_i, w_i, c_i] = n_obs
-        informative_bins[b_i].append((w_i, c_i))
+        corrs[band_idx, window_idx, channel_idx] = r
+        pvals[band_idx, window_idx, channel_idx] = p
+        n_valid[band_idx, window_idx, channel_idx] = n_obs
+        informative_bins[band_idx].append((window_idx, channel_idx))
 
     valid = np.isfinite(pvals)
     if not valid.any():
@@ -276,38 +364,42 @@ def _compute_correlations_for_condition(
     cluster_thresholds: List[Dict[str, Any]] = []
     cluster_masses: List[Dict[str, Any]] = []
 
-    for b_i, bn in enumerate(band_names):
-        band_corrs = corrs[b_i]
-        band_pvals = pvals[b_i]
-        band_data = bin_data[b_i]
-        band_info_bins = informative_bins[b_i]
+    for band_idx, band_name in enumerate(band_names):
+        band_corrs = corrs[band_idx]
+        band_pvals = pvals[band_idx]
+        band_data = bin_data[band_idx]
+        band_info_bins = informative_bins[band_idx]
 
         if not band_info_bins:
             continue
 
-        labels, pvals_corr, sig_mask, records, perm_max, c_thresh = compute_cluster_correction_2d(
-            correlations=band_corrs,
-            p_values=band_pvals,
-            bin_data=band_data,
-            informative_bins=band_info_bins,
-            y_array=y_c,
-            cluster_alpha=c_alpha,
-            n_cluster_perm=n_cluster_perm,
-            alpha=c_alpha,
-            min_valid_points=req_samples,
-            use_spearman=use_spearman,
-            cluster_rng=cluster_rng,
-            covariates_matrix=cov_vals,
-            groups=None,
-            cluster_forming_threshold=cluster_forming_threshold,
+        labels, pvals_corr, sig_mask, records, perm_max, c_thresh = (
+            compute_cluster_correction_2d(
+                correlations=band_corrs,
+                p_values=band_pvals,
+                bin_data=band_data,
+                informative_bins=band_info_bins,
+                y_array=y_c,
+                cluster_alpha=c_alpha,
+                n_cluster_perm=n_cluster_perm,
+                alpha=c_alpha,
+                min_valid_points=req_samples,
+                use_spearman=use_spearman,
+                cluster_rng=cluster_rng,
+                covariates_matrix=cov_vals,
+                groups=None,
+                cluster_forming_threshold=cluster_forming_threshold,
+            )
         )
 
-        cluster_labels[b_i] = labels
-        p_corrected[b_i] = pvals_corr
-        cluster_sig[b_i] = sig_mask
-        cluster_records.append({"band": bn, "clusters": records})
-        cluster_perm_max.append({"band": bn, "perm_max_masses": perm_max})
-        cluster_thresholds.append({"band": bn, "cluster_forming_threshold": float(c_thresh)})
+        cluster_labels[band_idx] = labels
+        p_corrected[band_idx] = pvals_corr
+        cluster_sig[band_idx] = sig_mask
+        cluster_records.append({"band": band_name, "clusters": records})
+        cluster_perm_max.append({"band": band_name, "perm_max_masses": perm_max})
+        cluster_thresholds.append(
+            {"band": band_name, "cluster_forming_threshold": float(c_thresh)}
+        )
 
         _, masses = compute_cluster_masses_2d(
             band_corrs,
@@ -316,7 +408,7 @@ def _compute_correlations_for_condition(
             cluster_forming_threshold=cluster_forming_threshold,
             config=config,
         )
-        cluster_masses.append({"band": bn, "masses": masses})
+        cluster_masses.append({"band": band_name, "masses": masses})
 
     return {
         "name": name,
@@ -335,6 +427,95 @@ def _compute_correlations_for_condition(
         "window_starts": win_s,
         "window_ends": win_e,
     }
+
+
+###################################################################
+# Condition Splitting Helpers
+###################################################################
+
+
+def _determine_condition_values(
+    events: pd.DataFrame,
+    n_trials: int,
+    temporal_cfg: Dict[str, Any],
+    config: Any,
+    logger: logging.Logger,
+    analysis_name: str = "temporal",
+) -> Tuple[List[Any], np.ndarray]:
+    """Determine condition values and vector for splitting analysis.
+    
+    Returns:
+        condition_values: List of condition values to process
+        condition_vec: Array of condition values for each trial (length n_trials)
+    """
+    split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
+    condition_column = temporal_cfg.get("condition_column", "") or ""
+    filter_value = temporal_cfg.get("filter_value", "") or ""
+    requested_values = temporal_cfg.get("condition_values", []) or []
+
+    if not condition_column:
+        condition_column = get_pain_column_from_config(config, events)
+
+    condition_vec = None
+    condition_values = []
+
+    if split_by_condition and condition_column and condition_column in events.columns:
+        condition_vec = (
+            events[condition_column].to_numpy()[:n_trials]
+            if len(events) >= n_trials
+            else events[condition_column].to_numpy()
+        )
+
+        if filter_value:
+            try:
+                filter_val = (
+                    type(condition_vec[0])(filter_value)
+                    if len(condition_vec) > 0
+                    else filter_value
+                )
+            except (ValueError, TypeError):
+                filter_val = filter_value
+            condition_values = [filter_val]
+            logger.info(
+                f"{analysis_name}: filtering to condition '{condition_column}' == '{filter_val}'"
+            )
+        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
+            exemplar = pd.Series(condition_vec).dropna()
+            exemplar_val = exemplar.iloc[0] if len(exemplar) > 0 else None
+
+            def _cast_value(value: Any) -> Any:
+                if exemplar_val is None:
+                    return value
+                try:
+                    if isinstance(exemplar_val, (np.integer, int)):
+                        return int(float(value))
+                    if isinstance(exemplar_val, (np.floating, float)):
+                        return float(value)
+                    return type(exemplar_val)(value)
+                except (ValueError, TypeError):
+                    return value
+
+            condition_values = [_cast_value(v) for v in requested_values]
+            logger.info(
+                f"{analysis_name}: using configured values for '{condition_column}': {condition_values}"
+            )
+        else:
+            condition_values = list(pd.Series(condition_vec).dropna().unique())
+            logger.info(
+                f"{analysis_name}: splitting by '{condition_column}' with values {condition_values}"
+            )
+    elif not split_by_condition:
+        logger.info(f"{analysis_name}: split_by_condition=False, computing over all trials")
+        condition_values = ["all"]
+        condition_vec = np.array(["all"] * n_trials)
+    else:
+        logger.warning(
+            f"{analysis_name}: condition column '{condition_column}' not found, computing over all trials"
+        )
+        condition_values = ["all"]
+        condition_vec = np.array(["all"] * n_trials)
+
+    return condition_values, condition_vec
 
 
 ###################################################################
@@ -410,11 +591,13 @@ def _run_tf_correlations_core(
     # Cluster correction
     n_cov = cov_df.shape[1] if cov_df is not None and not cov_df.empty else 0
     cluster_stat = np.full_like(corrs, np.nan)
-    for f_i, t_i in info_bins:
-        r, n = corrs[f_i, t_i], int(n_valid[f_i, t_i])
-        dof = n - n_cov - 2
+    for freq_idx, time_idx in info_bins:
+        r = corrs[freq_idx, time_idx]
+        n_obs = int(n_valid[freq_idx, time_idx])
+        dof = n_obs - n_cov - 2
         if np.isfinite(r) and dof > 0 and abs(r) < 1:
-            cluster_stat[f_i, t_i] = r * np.sqrt(dof / max(1e-15, 1.0 - r**2))
+            denominator = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - r**2)
+            cluster_stat[freq_idx, time_idx] = r * np.sqrt(dof / denominator)
 
     cluster_cfg = config.get("behavior_analysis.cluster_correction", {})
     n_perm = max(int(cluster_cfg.get("n_permutations", 100)), int(hm_cfg.get("n_cluster_perm", 0)))
@@ -462,21 +645,25 @@ def _run_tf_correlations_core(
     method_label = format_correlation_method_label("spearman" if use_spearman else "pearson", None)
     # Save TSV
     recs = []
-    for f_i, freq in enumerate(freqs):
-        for t_i in range(len(time_edges) - 1):
-            p_raw, p_c = pvals[f_i, t_i], c_pvals[f_i, t_i] if n_perm > 0 else np.nan
-            if not (np.isfinite(p_raw) or np.isfinite(p_c)):
+    for freq_idx, freq in enumerate(freqs):
+        for time_idx in range(len(time_edges) - 1):
+            p_raw = pvals[freq_idx, time_idx]
+            p_cluster = c_pvals[freq_idx, time_idx] if n_perm > 0 else np.nan
+            if not (np.isfinite(p_raw) or np.isfinite(p_cluster)):
                 continue
             recs.append({
-                "roi": roi_label, "freq": float(freq), "time_start": float(time_edges[t_i]),
-                "time_end": float(time_edges[t_i+1]), "r": float(corrs[f_i, t_i]),
-                "beta_std": float(corrs[f_i, t_i]),
+                "roi": roi_label,
+                "freq": float(freq),
+                "time_start": float(time_edges[time_idx]),
+                "time_end": float(time_edges[time_idx + 1]),
+                "r": float(corrs[freq_idx, time_idx]),
+                "beta_std": float(corrs[freq_idx, time_idx]),
                 "beta_kind": "standardized",
                 "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
-                "p_cluster": float(p_c) if np.isfinite(p_c) else np.nan,
-                "cluster_id": int(c_labels[f_i, t_i]) if n_perm > 0 else 0,
-                "cluster_significant": bool(c_sig[f_i, t_i]) if n_perm > 0 else False,
-                "n": int(n_valid[f_i, t_i]),
+                "p_cluster": float(p_cluster) if np.isfinite(p_cluster) else np.nan,
+                "cluster_id": int(c_labels[freq_idx, time_idx]) if n_perm > 0 else 0,
+                "cluster_significant": bool(c_sig[freq_idx, time_idx]) if n_perm > 0 else False,
+                "n": int(n_valid[freq_idx, time_idx]),
                 "method": "spearman" if use_spearman else "pearson",
                 "method_label": method_label,
             })
@@ -538,26 +725,30 @@ def _build_temporal_tsv_records(
     win_e = res["window_ends"]
 
     n_bands, n_windows, n_channels = corrs.shape
-    for b_i in range(n_bands):
-        for w_i in range(n_windows):
-            for c_i in range(n_channels):
-                r = corrs[b_i, w_i, c_i]
-                p = pvals[b_i, w_i, c_i]
+    for band_idx in range(n_bands):
+        for window_idx in range(n_windows):
+            for channel_idx in range(n_channels):
+                r = corrs[band_idx, window_idx, channel_idx]
+                p = pvals[band_idx, window_idx, channel_idx]
                 if not np.isfinite(r) or not np.isfinite(p):
                     continue
                 records.append({
                     "condition": condition,
-                    "band": band_names[b_i],
-                    "time_start": float(win_s[w_i]),
-                    "time_end": float(win_e[w_i]),
-                    "channel": ch_names[c_i] if c_i < len(ch_names) else f"ch_{c_i}",
+                    "band": band_names[band_idx],
+                    "time_start": float(win_s[window_idx]),
+                    "time_end": float(win_e[window_idx]),
+                    "channel": (
+                        ch_names[channel_idx]
+                        if channel_idx < len(ch_names)
+                        else f"ch_{channel_idx}"
+                    ),
                     "r": float(r),
                     # Regression analogue: for standardized residualized variables,
                     # the slope equals the (partial) correlation.
                     "beta_std": float(r),
                     "beta_kind": "standardized",
                     "p": float(p),
-                    "n": int(n_valid[b_i, w_i, c_i]),
+                    "n": int(n_valid[band_idx, window_idx, channel_idx]),
                     "method": method,
                     "method_label": method_label,
                 })
@@ -603,59 +794,9 @@ def _run_temporal_by_condition_core(
     n = compute_aligned_data_length(tfr, events)
 
     temporal_cfg = config.get("behavior_analysis.temporal", {}) or {}
-    split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
-    condition_column = temporal_cfg.get("condition_column", "") or ""
-    filter_value = temporal_cfg.get("filter_value", "") or ""
-    requested_values = temporal_cfg.get("condition_values", []) or []
-    requested_values = temporal_cfg.get("condition_values", []) or []
-
-    if not condition_column:
-        condition_column = get_pain_column_from_config(config, events)
-    
-    condition_vec = None
-    condition_values = []
-    if split_by_condition and condition_column and condition_column in events.columns:
-        condition_vec = events[condition_column].to_numpy()[:n] if len(events) >= n else events[condition_column].to_numpy()
-        if filter_value:
-            try:
-                fv = type(condition_vec[0])(filter_value) if len(condition_vec) > 0 else filter_value
-            except (ValueError, TypeError):
-                fv = filter_value
-            condition_values = [fv]
-            logger.info(f"Temporal correlations: filtering to condition '{condition_column}' == '{fv}'")
-        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
-            exemplar = pd.Series(condition_vec).dropna()
-            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
-
-            def _cast(v: Any) -> Any:
-                if exemplar_val is None:
-                    return v
-                try:
-                    if isinstance(exemplar_val, (np.integer, int)):
-                        return int(float(v))
-                    if isinstance(exemplar_val, (np.floating, float)):
-                        return float(v)
-                    return type(exemplar_val)(v)
-                except Exception:
-                    return v
-
-            condition_values = [_cast(v) for v in requested_values]
-            logger.info(
-                "Temporal correlations: using configured values for '%s': %s",
-                condition_column,
-                condition_values,
-            )
-        else:
-            condition_values = list(pd.Series(condition_vec).dropna().unique())
-            logger.info(f"Temporal correlations: splitting by '{condition_column}' with values {condition_values}")
-    elif not split_by_condition:
-        logger.info("Temporal correlations: split_by_condition=False, computing over all trials")
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
-    else:
-        logger.warning(f"Temporal correlations: condition column '{condition_column}' not found, computing over all trials")
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
+    condition_values, condition_vec = _determine_condition_values(
+        events, n, temporal_cfg, config, logger, analysis_name="Temporal correlations"
+    )
 
     fmax = float(np.max(tfr.freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
@@ -949,62 +1090,9 @@ def _run_itpc_temporal_by_condition_core(
     y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
     n = compute_aligned_data_length(tfr_complex, events)
     
-    # User-configurable condition splitting (same as power temporal)
-    split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
-    condition_column = temporal_cfg.get("condition_column", "") or ""
-    filter_value = temporal_cfg.get("filter_value", "") or ""
-    requested_values = temporal_cfg.get("condition_values", []) or []
-    
-    # Fall back to pain column if no condition column specified
-    if not condition_column:
-        condition_column = get_pain_column_from_config(config, events)
-    
-    condition_vec = None
-    condition_values = []
-    if split_by_condition and condition_column and condition_column in events.columns:
-        condition_vec = events[condition_column].to_numpy()[:n] if len(events) >= n else events[condition_column].to_numpy()
-        if filter_value:
-            # User specified a specific value to compute for
-            try:
-                fv = type(condition_vec[0])(filter_value) if len(condition_vec) > 0 else filter_value
-            except (ValueError, TypeError):
-                fv = filter_value
-            condition_values = [fv]
-            logger.info(f"ITPC temporal: filtering to condition '{condition_column}' == '{fv}'")
-        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
-            exemplar = pd.Series(condition_vec).dropna()
-            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
-
-            def _cast(v: Any) -> Any:
-                if exemplar_val is None:
-                    return v
-                try:
-                    if isinstance(exemplar_val, (np.integer, int)):
-                        return int(float(v))
-                    if isinstance(exemplar_val, (np.floating, float)):
-                        return float(v)
-                    return type(exemplar_val)(v)
-                except Exception:
-                    return v
-
-            condition_values = [_cast(v) for v in requested_values]
-            logger.info(
-                "ITPC temporal: using configured values for '%s': %s",
-                condition_column,
-                condition_values,
-            )
-        else:
-            # Compute for all unique values in the column
-            condition_values = list(pd.Series(condition_vec).dropna().unique())
-            logger.info(f"ITPC temporal: splitting by '{condition_column}' with values {condition_values}")
-    elif not split_by_condition:
-        logger.info("ITPC temporal: split_by_condition=False, computing over all trials")
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
-    else:
-        logger.warning(f"ITPC temporal: condition column '{condition_column}' not found, computing over all trials")
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
+    condition_values, condition_vec = _determine_condition_values(
+        events, n, temporal_cfg, config, logger, analysis_name="ITPC temporal"
+    )
     
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
@@ -1053,45 +1141,49 @@ def _run_itpc_temporal_by_condition_core(
         pvals = np.full_like(corrs, np.nan)
         n_valid = np.zeros_like(corrs, dtype=int)
         
-        for b_i, (bn, (fmin, fmax_b)) in enumerate(bands.items()):
-            fmax_eff = min(fmax_b, fmax)
-            if fmin >= fmax_eff:
+        for band_idx, (band_name, (fmin, fmax_band)) in enumerate(bands.items()):
+            fmax_effective = min(fmax_band, fmax)
+            if fmin >= fmax_effective:
                 continue
             
-            for w_i, (t0, t1) in enumerate(zip(win_s, win_e)):
+            for window_idx, (t0, t1) in enumerate(zip(win_s, win_e)):
                 trial_itpc = _extract_trial_itpc(
-                    tfr_c, fmin, fmax_eff, t0, t1, times, freqs
+                    tfr_c, fmin, fmax_effective, t0, t1, times, freqs
                 )
                 if trial_itpc is None:
                     continue
                 
                 if baseline_correction and baseline_window:
-                    bl_itpc = _extract_trial_itpc(
-                        tfr_c, fmin, fmax_eff, 
-                        baseline_window[0], baseline_window[1], 
-                        times, freqs
+                    baseline_itpc = _extract_trial_itpc(
+                        tfr_c,
+                        fmin,
+                        fmax_effective,
+                        baseline_window[0],
+                        baseline_window[1],
+                        times,
+                        freqs,
                     )
-                    if bl_itpc is not None:
-                        trial_itpc = trial_itpc - bl_itpc
+                    if baseline_itpc is not None:
+                        trial_itpc = trial_itpc - baseline_itpc
                 
-                for c_i in range(n_ch):
-                    ch_vals = trial_itpc[:, c_i]
-                    valid = np.isfinite(ch_vals) & np.isfinite(y_c)
+                for channel_idx in range(n_ch):
+                    channel_vals = trial_itpc[:, channel_idx]
+                    valid = np.isfinite(channel_vals) & np.isfinite(y_c)
                     n_obs = int(valid.sum())
                     
-                    if n_obs < 10:
+                    if n_obs < MIN_OBSERVATIONS_FOR_CORRELATION:
                         continue
                     
-                    if np.std(ch_vals[valid]) < 1e-12:
+                    if np.std(channel_vals[valid]) < MIN_VARIANCE_THRESHOLD:
                         continue
                     
                     try:
-                        r, p = corr_fn(ch_vals[valid], y_c[valid])
+                        r, p = corr_fn(channel_vals[valid], y_c[valid])
                         if np.isfinite(r) and np.isfinite(p):
-                            corrs[b_i, w_i, c_i] = float(r)
-                            pvals[b_i, w_i, c_i] = float(p)
-                            n_valid[b_i, w_i, c_i] = n_obs
-                    except Exception:
+                            corrs[band_idx, window_idx, channel_idx] = float(r)
+                            pvals[band_idx, window_idx, channel_idx] = float(p)
+                            n_valid[band_idx, window_idx, channel_idx] = n_obs
+                    except (ValueError, RuntimeWarning):
                         pass
         
         res = {
@@ -1112,25 +1204,25 @@ def _run_itpc_temporal_by_condition_core(
         )
         
         cond_records = []
-        for b_i, bn in enumerate(band_names):
-            for w_i in range(n_w):
-                for c_i in range(n_ch):
-                    r = corrs[b_i, w_i, c_i]
-                    p = pvals[b_i, w_i, c_i]
+        for band_idx, band_name in enumerate(band_names):
+            for window_idx in range(n_w):
+                for channel_idx in range(n_ch):
+                    r = corrs[band_idx, window_idx, channel_idx]
+                    p = pvals[band_idx, window_idx, channel_idx]
                     if not np.isfinite(r) or not np.isfinite(p):
                         continue
                     cond_records.append({
                         "condition": safe_name,
                         "feature": "itpc",
-                        "band": bn,
-                        "time_start": float(win_s[w_i]),
-                        "time_end": float(win_e[w_i]),
-                        "channel": ch_names[c_i],
+                        "band": band_name,
+                        "time_start": float(win_s[window_idx]),
+                        "time_end": float(win_e[window_idx]),
+                        "channel": ch_names[channel_idx],
                         "r": float(r),
                         "beta_std": float(r),
                         "beta_kind": "standardized",
                         "p": float(p),
-                        "n": int(n_valid[b_i, w_i, c_i]),
+                        "n": int(n_valid[band_idx, window_idx, channel_idx]),
                         "method": method,
                         "method_label": format_correlation_method_label(method, None),
                     })
@@ -1222,10 +1314,18 @@ def _extract_trial_erds(
     # Compute ERDS normalization
     if method == "zscore":
         baseline_std = baseline_data.std(axis=(2, 3))  # (n_trials, n_ch)
-        baseline_std = np.where(baseline_std < 1e-12, 1e-12, baseline_std)
+        baseline_std = np.where(
+            baseline_std < MIN_VARIANCE_THRESHOLD,
+            MIN_VARIANCE_THRESHOLD,
+            baseline_std,
+        )
         erds = (active_mean - baseline_mean) / baseline_std
     else:  # percent (default)
-        baseline_mean_safe = np.where(np.abs(baseline_mean) < 1e-12, 1e-12, baseline_mean)
+        baseline_mean_safe = np.where(
+            np.abs(baseline_mean) < MIN_VARIANCE_THRESHOLD,
+            MIN_VARIANCE_THRESHOLD,
+            baseline_mean,
+        )
         erds = (active_mean - baseline_mean) / baseline_mean_safe * 100.0
     
     return erds
@@ -1282,59 +1382,21 @@ def _run_erds_temporal_by_condition_core(
     y_arr = y.to_numpy() if hasattr(y, 'to_numpy') else np.asarray(y)
     n = compute_aligned_data_length(tfr, events)
     
-    split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
-    condition_column = temporal_cfg.get("condition_column", "") or ""
-    filter_value = temporal_cfg.get("filter_value", "") or ""
-    
-    if not condition_column:
-        condition_column = get_pain_column_from_config(config, events)
-    
-    condition_vec = None
-    condition_values = []
-    if split_by_condition and condition_column and condition_column in events.columns:
-        condition_vec = events[condition_column].to_numpy()[:n] if len(events) >= n else events[condition_column].to_numpy()
-        if filter_value:
-            try:
-                fv = type(condition_vec[0])(filter_value) if len(condition_vec) > 0 else filter_value
-            except (ValueError, TypeError):
-                fv = filter_value
-            condition_values = [fv]
-            logger.info(f"ERDS temporal: filtering to '{condition_column}' == '{fv}'")
-        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
-            exemplar = pd.Series(condition_vec).dropna()
-            exemplar_val = exemplar.iloc[0] if len(exemplar) else None
-
-            def _cast(v: Any) -> Any:
-                if exemplar_val is None:
-                    return v
-                try:
-                    if isinstance(exemplar_val, (np.integer, int)):
-                        return int(float(v))
-                    if isinstance(exemplar_val, (np.floating, float)):
-                        return float(v)
-                    return type(exemplar_val)(v)
-                except Exception:
-                    return v
-
-            condition_values = [_cast(v) for v in requested_values]
-            logger.info(
-                "ERDS temporal: using configured values for '%s': %s",
-                condition_column,
-                condition_values,
-            )
-        else:
-            condition_values = list(pd.Series(condition_vec).dropna().unique())
-            logger.info(f"ERDS temporal: splitting by '{condition_column}' with values {condition_values}")
-    elif not split_by_condition:
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
-    else:
-        condition_values = ["all"]
-        condition_vec = np.array(["all"] * n)
+    condition_values, condition_vec = _determine_condition_values(
+        events, n, temporal_cfg, config, logger, analysis_name="ERDS temporal"
+    )
     
     fmax = float(np.max(freqs))
     all_bands = get_bands_for_tfr(max_freq_available=fmax, config=config)
-    bands = {k: v for k, v in all_bands.items() if not selected_bands or k.lower() in [b.lower() for b in selected_bands]} or all_bands
+    if selected_bands:
+        selected_bands_lower = [b.lower() for b in selected_bands]
+        bands = {
+            k: v
+            for k, v in all_bands.items()
+            if k.lower() in selected_bands_lower
+        } or all_bands
+    else:
+        bands = all_bands
     
     corr_fn = spearmanr if use_spearman else pearsonr
     sfx = "_spearman" if use_spearman else "_pearson"
@@ -1364,46 +1426,86 @@ def _run_erds_temporal_by_condition_core(
         pvals = np.full_like(corrs, np.nan)
         n_valid = np.zeros_like(corrs, dtype=int)
         
-        for b_i, (bn, (fmin, fmax_b)) in enumerate(bands.items()):
-            fmax_eff = min(fmax_b, fmax)
-            if fmin >= fmax_eff:
+        for band_idx, (band_name, (fmin, fmax_band)) in enumerate(bands.items()):
+            fmax_effective = min(fmax_band, fmax)
+            if fmin >= fmax_effective:
                 continue
             
-            for w_i, (t0, t1) in enumerate(zip(win_s, win_e)):
+            for window_idx, (t0, t1) in enumerate(zip(win_s, win_e)):
                 trial_erds = _extract_trial_erds(
-                    tfr_c, fmin, fmax_eff, t0, t1,
-                    baseline_window[0], baseline_window[1], times, freqs, method
+                    tfr_c,
+                    fmin,
+                    fmax_effective,
+                    t0,
+                    t1,
+                    baseline_window[0],
+                    baseline_window[1],
+                    times,
+                    freqs,
+                    method,
                 )
                 if trial_erds is None:
                     continue
                 
-                for c_i in range(n_ch):
-                    ch_vals = trial_erds[:, c_i]
-                    valid = np.isfinite(ch_vals) & np.isfinite(y_c)
+                for channel_idx in range(n_ch):
+                    channel_vals = trial_erds[:, channel_idx]
+                    valid = np.isfinite(channel_vals) & np.isfinite(y_c)
                     n_obs = int(valid.sum())
-                    if n_obs < 10 or np.std(ch_vals[valid]) < 1e-12:
+                    if (
+                        n_obs < MIN_OBSERVATIONS_FOR_CORRELATION
+                        or np.std(channel_vals[valid]) < MIN_VARIANCE_THRESHOLD
+                    ):
                         continue
                     try:
-                        r, p = corr_fn(ch_vals[valid], y_c[valid])
+                        r, p = corr_fn(channel_vals[valid], y_c[valid])
                         if np.isfinite(r) and np.isfinite(p):
-                            corrs[b_i, w_i, c_i] = float(r)
-                            pvals[b_i, w_i, c_i] = float(p)
-                            n_valid[b_i, w_i, c_i] = n_obs
-                    except Exception:
+                            corrs[band_idx, window_idx, channel_idx] = float(r)
+                            pvals[band_idx, window_idx, channel_idx] = float(p)
+                            n_valid[band_idx, window_idx, channel_idx] = n_obs
+                    except (ValueError, RuntimeWarning):
                         pass
         
-        res = {"name": safe_name, "feature": "erds", "correlations": corrs, "p_values": pvals, "n_valid": n_valid, "band_names": band_names, "window_starts": win_s, "window_ends": win_e}
+        res = {
+            "name": safe_name,
+            "feature": "erds",
+            "correlations": corrs,
+            "p_values": pvals,
+            "n_valid": n_valid,
+            "band_names": band_names,
+            "window_starts": win_s,
+            "window_ends": win_e,
+        }
         erds_results[safe_name] = res
-        np.savez_compressed(out_dir / f"temporal_erds_{safe_name}{sfx}.npz", **res, times=times, ch_names=ch_names)
+        np.savez_compressed(
+            out_dir / f"temporal_erds_{safe_name}{sfx}.npz",
+            **res,
+            times=times,
+            ch_names=ch_names,
+        )
         
         cond_records = []
-        for b_i, bn in enumerate(band_names):
-            for w_i in range(n_w):
-                for c_i in range(n_ch):
-                    r, p = corrs[b_i, w_i, c_i], pvals[b_i, w_i, c_i]
+        for band_idx, band_name in enumerate(band_names):
+            for window_idx in range(n_w):
+                for channel_idx in range(n_ch):
+                    r = corrs[band_idx, window_idx, channel_idx]
+                    p = pvals[band_idx, window_idx, channel_idx]
                     if not np.isfinite(r) or not np.isfinite(p):
                         continue
-                    cond_records.append({"condition": safe_name, "feature": "erds", "band": bn, "time_start": float(win_s[w_i]), "time_end": float(win_e[w_i]), "channel": ch_names[c_i], "r": float(r), "beta_std": float(r), "beta_kind": "standardized", "p": float(p), "n": int(n_valid[b_i, w_i, c_i]), "method": corr_method, "method_label": format_correlation_method_label(corr_method, None)})
+                    cond_records.append({
+                        "condition": safe_name,
+                        "feature": "erds",
+                        "band": band_name,
+                        "time_start": float(win_s[window_idx]),
+                        "time_end": float(win_e[window_idx]),
+                        "channel": ch_names[channel_idx],
+                        "r": float(r),
+                        "beta_std": float(r),
+                        "beta_kind": "standardized",
+                        "p": float(p),
+                        "n": int(n_valid[band_idx, window_idx, channel_idx]),
+                        "method": corr_method,
+                        "method_label": format_correlation_method_label(corr_method, None),
+                    })
         all_tsv_records.extend(cond_records)
         logger.info(f"Computed ERDS temporal for condition '{safe_name}': {len(cond_records)} tests")
     

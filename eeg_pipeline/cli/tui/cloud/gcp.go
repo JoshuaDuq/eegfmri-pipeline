@@ -12,6 +12,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	sshConnectTimeoutSeconds = 5
+	vmStartupWaitDuration    = 10 * time.Second
+	defaultDirectoryPerms    = 0755
+)
+
 // Config holds GCP cloud configuration
 type Config struct {
 	// SSH settings
@@ -83,38 +89,33 @@ type (
 // CheckVMStatus checks if the GCP VM is running
 func CheckVMStatus(cfg Config) tea.Cmd {
 	return func() tea.Msg {
-		// Try SSH connection test
-		cmd := exec.Command("ssh", "-o", "ConnectTimeout=5", cfg.getRemoteTarget(), "hostname")
+		remoteTarget := cfg.getRemoteTarget()
+		timeoutOption := fmt.Sprintf("ConnectTimeout=%d", sshConnectTimeoutSeconds)
+		cmd := exec.Command("ssh", "-o", timeoutOption, remoteTarget, "hostname")
+		
 		output, err := cmd.Output()
-
 		if err != nil {
 			return VMStatusMsg{Running: false, Error: err}
 		}
 
-		return VMStatusMsg{Running: true, IP: strings.TrimSpace(string(output))}
+		hostname := strings.TrimSpace(string(output))
+		return VMStatusMsg{Running: true, IP: hostname}
 	}
 }
 
 // StartVM starts the GCP instance
 func StartVM(cfg Config) tea.Cmd {
 	return func() tea.Msg {
-		if cfg.GCPProject == "" || cfg.GCPZone == "" || cfg.GCPInstance == "" {
-			return VMStatusMsg{Running: false, Error: fmt.Errorf("GCP config not set")}
+		if err := validateGCPConfig(cfg); err != nil {
+			return VMStatusMsg{Running: false, Error: err}
 		}
 
-		cmd := exec.Command("gcloud", "compute", "instances", "start",
-			cfg.GCPInstance,
-			"--zone", cfg.GCPZone,
-			"--project", cfg.GCPProject,
-		)
-
+		cmd := buildGCPStartCommand(cfg)
 		if err := cmd.Run(); err != nil {
 			return VMStatusMsg{Running: false, Error: err}
 		}
 
-		// Wait a bit for SSH to become available
-		time.Sleep(10 * time.Second)
-
+		time.Sleep(vmStartupWaitDuration)
 		return VMStatusMsg{Running: true}
 	}
 }
@@ -122,16 +123,11 @@ func StartVM(cfg Config) tea.Cmd {
 // StopVM stops the GCP instance
 func StopVM(cfg Config) tea.Cmd {
 	return func() tea.Msg {
-		if cfg.GCPProject == "" || cfg.GCPZone == "" || cfg.GCPInstance == "" {
-			return VMStatusMsg{Running: true, Error: fmt.Errorf("GCP config not set")}
+		if err := validateGCPConfig(cfg); err != nil {
+			return VMStatusMsg{Running: true, Error: err}
 		}
 
-		cmd := exec.Command("gcloud", "compute", "instances", "stop",
-			cfg.GCPInstance,
-			"--zone", cfg.GCPZone,
-			"--project", cfg.GCPProject,
-		)
-
+		cmd := buildGCPStopCommand(cfg)
 		if err := cmd.Run(); err != nil {
 			return VMStatusMsg{Running: true, Error: err}
 		}
@@ -166,30 +162,16 @@ func SyncToRemote(ctx context.Context, cfg Config, repoRoot string) tea.Cmd {
 func RunRemoteCommand(ctx context.Context, cfg Config, pipelineCmd string) tea.Cmd {
 	return func() tea.Msg {
 		startTime := time.Now()
-
-		// Build the remote command
-		prefix := fmt.Sprintf("cd %s", cfg.RemoteBase)
-		if cfg.VenvActivate != "" {
-			prefix += fmt.Sprintf(" && source %s", cfg.VenvActivate)
-		}
-		prefix += fmt.Sprintf(" && export EEG_PIPELINE_N_JOBS=%d && export MNE_N_JOBS=%d", cfg.NJobs, cfg.NJobs)
-
-		// Strip "eeg-pipeline " prefix - BuildCommand() returns full command
-		// but python3 -m eeg_pipeline already provides the entry point
-		args := strings.TrimPrefix(pipelineCmd, "eeg-pipeline ")
-
-		fullCmd := fmt.Sprintf("%s && python3 -m eeg_pipeline %s", prefix, args)
-
-		cmd := exec.CommandContext(ctx, "ssh", cfg.getRemoteTarget(), fullCmd)
+		remoteCommand := buildRemoteCommand(cfg, pipelineCmd)
+		cmd := exec.CommandContext(ctx, "ssh", cfg.getRemoteTarget(), remoteCommand)
 
 		if err := cmd.Run(); err != nil {
-			exitCode := 0
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				exitCode = 1
+			exitCode := extractExitCode(err)
+			return RunCompleteMsg{
+				ExitCode: exitCode,
+				Error:    err,
+				Duration: time.Since(startTime),
 			}
-			return RunCompleteMsg{ExitCode: exitCode, Error: err, Duration: time.Since(startTime)}
 		}
 
 		return RunCompleteMsg{ExitCode: 0, Duration: time.Since(startTime)}
@@ -200,21 +182,16 @@ func RunRemoteCommand(ctx context.Context, cfg Config, pipelineCmd string) tea.C
 func PullDerivatives(ctx context.Context, cfg Config, localDataDir string) tea.Cmd {
 	return func() tea.Msg {
 		startTime := time.Now()
+		remotePath := buildRemoteDerivativesPath(cfg)
+		localPath := filepath.Join(localDataDir, "derivatives") + "/"
 
-		remote := fmt.Sprintf("%s:%s/eeg_pipeline/data/derivatives/", cfg.getRemoteTarget(), cfg.RemoteBase)
-		local := filepath.Join(localDataDir, "derivatives") + "/"
-
-		// Ensure local directory exists
-		os.MkdirAll(local, 0755)
-
-		args := []string{
-			"-avz", "--partial", "--progress",
-			"--exclude", "preprocessed",
-			"--exclude", ".DS_Store",
-			remote, local,
+		if err := ensureDirectoryExists(localPath); err != nil {
+			return PullCompleteMsg{Error: err, Duration: time.Since(startTime)}
 		}
 
-		cmd := exec.CommandContext(ctx, "rsync", args...)
+		rsyncArgs := buildPullRsyncArgs(remotePath, localPath)
+		cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...)
+		
 		if err := cmd.Run(); err != nil {
 			return PullCompleteMsg{Error: err, Duration: time.Since(startTime)}
 		}
@@ -223,7 +200,6 @@ func PullDerivatives(ctx context.Context, cfg Config, localDataDir string) tea.C
 	}
 }
 
-// Helper methods
 func (cfg Config) getRemoteTarget() string {
 	if cfg.RemoteUser != "" {
 		return fmt.Sprintf("%s@%s", cfg.RemoteUser, cfg.RemoteHost)
@@ -231,10 +207,79 @@ func (cfg Config) getRemoteTarget() string {
 	return cfg.RemoteHost
 }
 
-func syncCode(ctx context.Context, cfg Config, repoRoot string) error {
-	remote := fmt.Sprintf("%s:%s/", cfg.getRemoteTarget(), cfg.RemoteBase)
+func validateGCPConfig(cfg Config) error {
+	if cfg.GCPProject == "" || cfg.GCPZone == "" || cfg.GCPInstance == "" {
+		return fmt.Errorf("GCP config not set")
+	}
+	return nil
+}
 
-	args := []string{
+func buildGCPStartCommand(cfg Config) *exec.Cmd {
+	return exec.Command("gcloud", "compute", "instances", "start",
+		cfg.GCPInstance,
+		"--zone", cfg.GCPZone,
+		"--project", cfg.GCPProject,
+	)
+}
+
+func buildGCPStopCommand(cfg Config) *exec.Cmd {
+	return exec.Command("gcloud", "compute", "instances", "stop",
+		cfg.GCPInstance,
+		"--zone", cfg.GCPZone,
+		"--project", cfg.GCPProject,
+	)
+}
+
+func buildRemoteCommand(cfg Config, pipelineCmd string) string {
+	commandParts := []string{fmt.Sprintf("cd %s", cfg.RemoteBase)}
+
+	if cfg.VenvActivate != "" {
+		commandParts = append(commandParts, fmt.Sprintf("source %s", cfg.VenvActivate))
+	}
+
+	envVars := fmt.Sprintf("export EEG_PIPELINE_N_JOBS=%d && export MNE_N_JOBS=%d", cfg.NJobs, cfg.NJobs)
+	commandParts = append(commandParts, envVars)
+
+	pipelineArgs := strings.TrimPrefix(pipelineCmd, "eeg-pipeline ")
+	pythonCommand := fmt.Sprintf("python3 -m eeg_pipeline %s", pipelineArgs)
+	commandParts = append(commandParts, pythonCommand)
+
+	return strings.Join(commandParts, " && ")
+}
+
+func extractExitCode(err error) int {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return 1
+}
+
+func buildRemoteDerivativesPath(cfg Config) string {
+	return fmt.Sprintf("%s:%s/eeg_pipeline/data/derivatives/", cfg.getRemoteTarget(), cfg.RemoteBase)
+}
+
+func ensureDirectoryExists(path string) error {
+	return os.MkdirAll(path, defaultDirectoryPerms)
+}
+
+func buildPullRsyncArgs(remotePath, localPath string) []string {
+	return []string{
+		"-avz", "--partial", "--progress",
+		"--exclude", "preprocessed",
+		"--exclude", ".DS_Store",
+		remotePath, localPath,
+	}
+}
+
+func syncCode(ctx context.Context, cfg Config, repoRoot string) error {
+	remotePath := fmt.Sprintf("%s:%s/", cfg.getRemoteTarget(), cfg.RemoteBase)
+	rsyncArgs := buildCodeSyncArgs(repoRoot, remotePath)
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...)
+	return cmd.Run()
+}
+
+func buildCodeSyncArgs(repoRoot, remotePath string) []string {
+	return []string{
 		"-avz", "--delete", "--partial",
 		"--exclude", ".git",
 		"--exclude", "__pycache__",
@@ -244,26 +289,30 @@ func syncCode(ctx context.Context, cfg Config, repoRoot string) error {
 		"--exclude", ".venv311",
 		"--exclude", "eeg_pipeline/data",
 		"--exclude", ".DS_Store",
-		repoRoot + "/", remote,
+		repoRoot + "/", remotePath,
 	}
-
-	cmd := exec.CommandContext(ctx, "rsync", args...)
-	return cmd.Run()
 }
 
 func syncData(ctx context.Context, cfg Config, dataDir string) error {
-	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
-		return nil // Skip if data dir doesn't exist
+	if !directoryExists(dataDir) {
+		return nil
 	}
 
-	remote := fmt.Sprintf("%s:%s/eeg_pipeline/data/", cfg.getRemoteTarget(), cfg.RemoteBase)
+	remotePath := fmt.Sprintf("%s:%s/eeg_pipeline/data/", cfg.getRemoteTarget(), cfg.RemoteBase)
+	rsyncArgs := buildDataSyncArgs(dataDir, remotePath)
+	cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...)
+	return cmd.Run()
+}
 
-	args := []string{
+func directoryExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
+func buildDataSyncArgs(dataDir, remotePath string) []string {
+	return []string{
 		"-avz", "--delete", "--partial",
 		"--exclude", ".DS_Store",
-		dataDir + "/", remote,
+		dataDir + "/", remotePath,
 	}
-
-	cmd := exec.CommandContext(ctx, "rsync", args...)
-	return cmd.Run()
 }

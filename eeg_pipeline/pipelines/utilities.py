@@ -29,10 +29,7 @@ from eeg_pipeline.analysis.preprocessing.orchestration import (
 
 logger = logging.getLogger(__name__)
 
-
-###################################################################
-# Orchestration Functions
-###################################################################
+_UTILITY_PIPELINE_STEPS = 2
 
 
 def merge_behavior_to_events(
@@ -105,120 +102,153 @@ def run_merge_behavior(
     )
 
 
-###################################################################
-# Pipeline Class
-###################################################################
-
-
 class UtilityPipeline(PipelineBase):
     """Pipeline for utility operations (raw-to-BIDS, merge-behavior).
-    
-    Unlike other pipelines, these utilities operate on source data or 
+
+    Unlike other pipelines, these utilities operate on source data or
     BIDS raw data rather than per-subject derivatives.
     """
-    
+
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="utilities", config=config)
         self.bids_root = Path(self.config.bids_root)
-        self.source_root = Path(self.config.get("paths.source_data", "data/source_data"))
+        default_source = "data/source_data"
+        self.source_root = Path(
+            self.config.get("paths.source_data", default_source)
+        )
 
-    def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
-        """Process a single subject through raw-to-BIDS and merge-behavior."""
-        from eeg_pipeline.cli.common import ProgressReporter
-        
-        task = task or self.config.get("project.task", "thermalactive")
-        do_trim = kwargs.get(
+    def _extract_trim_flag(self, kwargs: Dict[str, Any]) -> bool:
+        """Extract trim-to-first-volume flag from kwargs.
+
+        Handles both 'do_trim_to_first_volume' and 'trim_to_first_volume'
+        for backward compatibility.
+        """
+        return kwargs.get(
             "do_trim_to_first_volume",
             kwargs.get("trim_to_first_volume", False),
         )
-        
+
+    def _extract_raw_to_bids_kwargs(
+        self, kwargs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract and normalize kwargs for raw-to-BIDS conversion."""
+        return {
+            "montage": kwargs.get(
+                "montage", self.config.get("eeg.montage", "easycap-M1")
+            ),
+            "line_freq": kwargs.get(
+                "line_freq",
+                self.config.get("preprocessing.line_freq", 60.0),
+            ),
+            "overwrite": kwargs.get("overwrite", False),
+            "zero_base_onsets": kwargs.get("zero_base_onsets", False),
+            "do_trim_to_first_volume": self._extract_trim_flag(kwargs),
+            "event_prefixes": kwargs.get("event_prefixes"),
+            "keep_all_annotations": kwargs.get("keep_all_annotations", False),
+        }
+
+    def _extract_merge_behavior_kwargs(
+        self, kwargs: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract and normalize kwargs for merge-behavior operation."""
+        return {
+            "event_prefixes": kwargs.get("event_prefixes"),
+            "event_types": kwargs.get("event_types"),
+            "dry_run": kwargs.get("dry_run", False),
+        }
+
+    def _resolve_task(self, task: Optional[str]) -> str:
+        """Resolve task name from argument or config."""
+        return task or self.config.get("project.task", "thermalactive")
+
+    def process_subject(
+        self, subject: str, task: Optional[str] = None, **kwargs: Any
+    ) -> None:
+        """Process a single subject through raw-to-BIDS and merge-behavior."""
+        from eeg_pipeline.cli.common import ProgressReporter
+
+        resolved_task = self._resolve_task(task)
+        raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
+        merge_kwargs = self._extract_merge_behavior_kwargs(kwargs)
+
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
-        total_steps = 2
-        
-        progress.subject_start(f"sub-{subject}")
-        
-        progress.step("Converting to BIDS", current=1, total=total_steps)
-        self.logger.info(f"Processing sub-{subject}: raw-to-BIDS")
+        subject_id = f"sub-{subject}"
+
+        progress.subject_start(subject_id)
+
+        progress.step(
+            "Converting to BIDS", current=1, total=_UTILITY_PIPELINE_STEPS
+        )
+        self.logger.info(f"Processing {subject_id}: raw-to-BIDS")
         run_raw_to_bids(
             source_root=self.source_root,
             bids_root=self.bids_root,
-            task=task,
+            task=resolved_task,
             subjects=[subject],
-            montage=kwargs.get("montage", self.config.get("eeg.montage", "easycap-M1")),
-            line_freq=kwargs.get("line_freq", self.config.get("preprocessing.line_freq", 60.0)),
-            overwrite=kwargs.get("overwrite", False),
-            zero_base_onsets=kwargs.get("zero_base_onsets", False),
-            do_trim_to_first_volume=do_trim,
-            event_prefixes=kwargs.get("event_prefixes"),
-            keep_all_annotations=kwargs.get("keep_all_annotations", False),
+            **raw_to_bids_kwargs,
         )
-        
-        progress.step("Merging behavior", current=2, total=total_steps)
-        self.logger.info(f"Processing sub-{subject}: merge-behavior")
+
+        progress.step(
+            "Merging behavior", current=2, total=_UTILITY_PIPELINE_STEPS
+        )
+        self.logger.info(f"Processing {subject_id}: merge-behavior")
         run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
-            task=task,
-            event_prefixes=kwargs.get("event_prefixes"),
-            event_types=kwargs.get("event_types"),
-            dry_run=kwargs.get("dry_run", False),
+            task=resolved_task,
+            **merge_kwargs,
         )
-        
-        progress.subject_done(f"sub-{subject}", success=True)
 
+        progress.subject_done(subject_id, success=True)
 
-
-    def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
+    def run_batch(
+        self, subjects: List[str], task: Optional[str] = None, **kwargs: Any
+    ) -> List[Dict[str, Any]]:
         """Run utilities for multiple subjects."""
         from eeg_pipeline.cli.common import ProgressReporter
-        
-        task = task or self.config.get("project.task", "thermalactive")
-        do_trim = kwargs.get(
-            "do_trim_to_first_volume",
-            kwargs.get("trim_to_first_volume", False),
-        )
-        
+
+        resolved_task = self._resolve_task(task)
+        raw_to_bids_kwargs = self._extract_raw_to_bids_kwargs(kwargs)
+        merge_kwargs = self._extract_merge_behavior_kwargs(kwargs)
+
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
-        total_steps = 2
-        
+
         progress.start("utilities", subjects)
-        
-        progress.step("Converting to BIDS", current=1, total=total_steps)
+
+        progress.step(
+            "Converting to BIDS", current=1, total=_UTILITY_PIPELINE_STEPS
+        )
         self.logger.info(f"Running raw-to-BIDS for {len(subjects)} subjects")
         n_converted = run_raw_to_bids(
             source_root=self.source_root,
             bids_root=self.bids_root,
-            task=task,
+            task=resolved_task,
             subjects=subjects,
-            montage=kwargs.get("montage", self.config.get("eeg.montage", "easycap-M1")),
-            line_freq=kwargs.get("line_freq", self.config.get("preprocessing.line_freq", 60.0)),
-            overwrite=kwargs.get("overwrite", False),
-            zero_base_onsets=kwargs.get("zero_base_onsets", False),
-            do_trim_to_first_volume=do_trim,
-            event_prefixes=kwargs.get("event_prefixes"),
-            keep_all_annotations=kwargs.get("keep_all_annotations", False),
+            **raw_to_bids_kwargs,
         )
-        
-        progress.step("Merging behavior", current=2, total=total_steps)
+
+        progress.step(
+            "Merging behavior", current=2, total=_UTILITY_PIPELINE_STEPS
+        )
         self.logger.info(f"Running merge-behavior for {len(subjects)} subjects")
         n_merged = run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
-            task=task,
+            task=resolved_task,
             subjects=subjects,
-            event_prefixes=kwargs.get("event_prefixes"),
-            event_types=kwargs.get("event_types"),
-            dry_run=kwargs.get("dry_run", False),
+            **merge_kwargs,
         )
-        
+
         progress.complete(success=True)
-        
-        return [{
-            "subjects": subjects,
-            "n_converted": n_converted,
-            "n_merged": n_merged,
-            "status": "success",
-        }]
+
+        return [
+            {
+                "subjects": subjects,
+                "n_converted": n_converted,
+                "n_merged": n_merged,
+                "status": "success",
+            }
+        ]
 
     def run_raw_to_bids(
         self,
@@ -233,14 +263,17 @@ class UtilityPipeline(PipelineBase):
         keep_all_annotations: bool = False,
     ) -> int:
         """Convert raw BrainVision files to BIDS format."""
-        task = task or self.config.get("project.task", "thermalactive")
+        resolved_task = self._resolve_task(task)
+        default_montage = self.config.get("eeg.montage", "easycap-M1")
+        default_line_freq = self.config.get("preprocessing.line_freq", 60.0)
+
         return run_raw_to_bids(
             source_root=self.source_root,
             bids_root=self.bids_root,
-            task=task,
+            task=resolved_task,
             subjects=subjects,
-            montage=montage or self.config.get("eeg.montage", "easycap-M1"),
-            line_freq=line_freq or self.config.get("preprocessing.line_freq", 60.0),
+            montage=montage or default_montage,
+            line_freq=line_freq or default_line_freq,
             overwrite=overwrite,
             zero_base_onsets=zero_base_onsets,
             do_trim_to_first_volume=do_trim_to_first_volume,
@@ -257,21 +290,17 @@ class UtilityPipeline(PipelineBase):
         dry_run: bool = False,
     ) -> int:
         """Merge behavioral data into BIDS events files."""
-        task = task or self.config.get("project.task", "thermalactive")
+        resolved_task = self._resolve_task(task)
         return run_merge_behavior(
             bids_root=self.bids_root,
             source_root=self.source_root,
-            task=task,
+            task=resolved_task,
             subjects=subjects,
             event_prefixes=event_prefixes,
             event_types=event_types,
             dry_run=dry_run,
         )
 
-
-###################################################################
-# Exports
-###################################################################
 
 __all__ = [
     "UtilityPipeline",

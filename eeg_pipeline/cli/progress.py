@@ -8,9 +8,16 @@ Centralized progress event types and reporting for CLI and TUI communication.
 from __future__ import annotations
 
 import json
+import os
+import resource
 import sys
+import time
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+_BYTES_PER_GB = 1024 ** 3
+_KB_PER_GB = 1024 ** 2
 
 
 class ProgressEvent(str, Enum):
@@ -33,6 +40,8 @@ class ProgressReporter:
         self.total_steps = total_steps
         self.current_step = 0
         self.current_subject = None
+        self._start_wall_time = None
+        self._start_cpu_time = None
 
     def start(self, operation: str, subjects: List[str]) -> None:
         if not self.enabled:
@@ -65,7 +74,7 @@ class ProgressReporter:
         if current is not None and total is not None:
             msg["current"] = current
             msg["total"] = total
-            msg["pct"] = round(100 * current / total) if total > 0 else 0
+            msg["pct"] = round(100.0 * current / total) if total > 0 else 0
         self._emit(msg)
 
     def log(self, level: str, message: str) -> None:
@@ -110,49 +119,60 @@ class ProgressReporter:
         self._emit(msg)
 
     def _emit(self, data: Dict[str, Any]) -> None:
-        # Inject resource usage if not already present
         if "cpu" not in data or "memory" not in data:
             usage = self._get_resource_usage()
             data.update(usage)
         print(json.dumps(data), flush=True)
 
     def _get_resource_usage(self) -> Dict[str, float]:
-        """Get current CPU and Memory usage for the process."""
+        """Get current CPU and memory usage for the process."""
         try:
-            import os
-            import resource
-            import time
-            
-            # Memory usage in GB
-            # ru_maxrss is in bytes on macOS, KB on Linux
-            mem_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            if sys.platform == 'darwin':
-                mem_gb = mem_bytes / (1024**3)
-            else:
-                mem_gb = mem_bytes / (1024**2) # KB to GB
-            
-            # CPU usage estimate (Total CPU time / Wall time since reporter start)
-            # This is a cumulative average, but better than nothing
-            if not hasattr(self, '_start_time_res'):
-                self._start_time_res = time.time()
-                self._start_cpu_res = sum(os.times()[:2])
-                return {"cpu": 0.0, "memory": mem_gb}
-            
-            elapsed = time.time() - self._start_time_res
-            if elapsed > 0:
-                cpu_delta = sum(os.times()[:2]) - self._start_cpu_res
-                cpu_pct = (cpu_delta / elapsed) * 100
-                # Clamp to reasonable range
-                cpu_pct = min(max(cpu_pct, 0.0), 100.0 * os.cpu_count())
-            else:
-                cpu_pct = 0.0
-                
+            memory_gb = self._get_memory_usage_gb()
+            cpu_percent = self._get_cpu_usage_percent()
             return {
-                "cpu": round(cpu_pct, 1),
-                "memory": round(mem_gb, 2)
+                "cpu": round(cpu_percent, 1),
+                "memory": round(memory_gb, 2)
             }
-        except Exception:
+        except (OSError, ValueError):
             return {"cpu": 0.0, "memory": 0.0}
+
+    def _get_memory_usage_gb(self) -> float:
+        """Get current memory usage in GB."""
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        maxrss = usage.ru_maxrss
+        
+        is_darwin = sys.platform == 'darwin'
+        if is_darwin:
+            memory_gb = maxrss / _BYTES_PER_GB
+        else:
+            memory_gb = maxrss / _KB_PER_GB
+        
+        return memory_gb
+
+    def _get_cpu_usage_percent(self) -> float:
+        """Get CPU usage as percentage since reporter initialization."""
+        if self._start_wall_time is None:
+            self._start_wall_time = time.time()
+            self._start_cpu_time = self._get_current_cpu_time()
+            return 0.0
+        
+        elapsed_wall_time = time.time() - self._start_wall_time
+        if elapsed_wall_time <= 0:
+            return 0.0
+        
+        current_cpu_time = self._get_current_cpu_time()
+        cpu_time_delta = current_cpu_time - self._start_cpu_time
+        cpu_percent = (cpu_time_delta / elapsed_wall_time) * 100.0
+        
+        max_cpu_percent = 100.0 * os.cpu_count()
+        cpu_percent = min(max(cpu_percent, 0.0), max_cpu_percent)
+        
+        return cpu_percent
+
+    def _get_current_cpu_time(self) -> float:
+        """Get cumulative CPU time (user + system) in seconds."""
+        times = os.times()
+        return sum(times[:2])
 
 
 def create_progress_reporter(args) -> ProgressReporter:

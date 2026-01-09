@@ -15,12 +15,129 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+from scipy import stats
 
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import get_numeric_feature_columns
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.utils.config.loader import get_config_value
+
+
+# Constants
+_MAD_NORMALIZATION_FACTOR = 0.6745
+_MIN_SAMPLES_FOR_NORMALITY_TEST = 3
+_MIN_SAMPLES_FOR_HISTOGRAM = 5
+_MAX_SAMPLES_FOR_SHAPIRO = 5000
+_NORMALITY_P_THRESHOLD = 0.05
+_MIN_VALID_SAMPLES_FOR_OUTLIER = 3
+_MAD_EPSILON = 1e-12
+
+_ICC_THRESHOLD_MODERATE = 0.5
+_ICC_THRESHOLD_GOOD = 0.75
+_ICC_THRESHOLD_EXCELLENT = 0.9
+
+_COLOR_NORMAL = "#22C55E"
+_COLOR_NON_NORMAL = "#EF4444"
+_COLOR_UNKNOWN = "#666666"
+_COLOR_GOOD = "#3B82F6"
+_COLOR_WARNING = "#F59E0B"
+_COLOR_PROBLEM = "#EF4444"
+_COLOR_EXCELLENT = "#22C55E"
+_COLOR_MODERATE = "#6366F1"
+_COLOR_CEILING = "#8B5CF6"
+
+
+def _create_empty_plot(message: str) -> plt.Figure:
+    """Create an empty plot with a message."""
+    fig, ax = plt.subplots()
+    ax.text(0.5, 0.5, message, ha="center", va="center")
+    return fig
+
+
+def _validate_dataframe(df: Optional[pd.DataFrame]) -> bool:
+    """Validate that dataframe is not None and not empty."""
+    return df is not None and isinstance(df, pd.DataFrame) and not df.empty
+
+
+def _test_normality(values: np.ndarray) -> Tuple[Optional[bool], float]:
+    """Test normality of values using appropriate test.
+    
+    Returns:
+        Tuple of (is_normal, p_value). is_normal is None if test failed.
+    """
+    try:
+        if len(values) < _MAX_SAMPLES_FOR_SHAPIRO:
+            _, p_value = stats.shapiro(values)
+        else:
+            _, p_value = stats.normaltest(values)
+        is_normal = p_value > _NORMALITY_P_THRESHOLD
+        return is_normal, p_value
+    except Exception:
+        return None, np.nan
+
+
+def _get_normality_color(is_normal: Optional[bool]) -> str:
+    """Get color code based on normality test result."""
+    if is_normal is True:
+        return _COLOR_NORMAL
+    elif is_normal is False:
+        return _COLOR_NON_NORMAL
+    else:
+        return _COLOR_UNKNOWN
+
+
+def _get_normality_indicator(is_normal: Optional[bool]) -> str:
+    """Get text indicator for normality status."""
+    if is_normal is True:
+        return "OK"
+    elif is_normal is False:
+        return "X"
+    else:
+        return "?"
+
+
+def _compute_robust_z_scores(values: np.ndarray, z_threshold: float) -> np.ndarray:
+    """Compute robust z-scores using median and MAD.
+    
+    Returns:
+        Binary array where 1 indicates outlier, 0 indicates normal.
+    """
+    valid_mask = np.isfinite(values)
+    if np.sum(valid_mask) < _MIN_VALID_SAMPLES_FOR_OUTLIER:
+        return np.zeros_like(values, dtype=float)
+    
+    median = float(np.nanmedian(values))
+    mad = float(np.nanmedian(np.abs(values - median)))
+    
+    if not np.isfinite(mad) or mad < _MAD_EPSILON:
+        return np.zeros_like(values, dtype=float)
+    
+    robust_z = _MAD_NORMALIZATION_FACTOR * (values - median) / mad
+    robust_z_abs = np.abs(robust_z)
+    return np.where(valid_mask & (robust_z_abs > z_threshold), 1.0, 0.0)
+
+
+def _count_icc_categories(icc_values: np.ndarray) -> Tuple[List[int], List[str], List[str]]:
+    """Count ICC values in each reliability category.
+    
+    Returns:
+        Tuple of (counts, labels, colors) for pie chart.
+    """
+    counts = [
+        np.sum(icc_values >= _ICC_THRESHOLD_EXCELLENT),
+        np.sum((icc_values >= _ICC_THRESHOLD_GOOD) & (icc_values < _ICC_THRESHOLD_EXCELLENT)),
+        np.sum((icc_values >= _ICC_THRESHOLD_MODERATE) & (icc_values < _ICC_THRESHOLD_GOOD)),
+        np.sum(icc_values < _ICC_THRESHOLD_MODERATE),
+    ]
+    labels = [
+        f"Excellent (≥{_ICC_THRESHOLD_EXCELLENT})",
+        f"Good ({_ICC_THRESHOLD_GOOD}-{_ICC_THRESHOLD_EXCELLENT})",
+        f"Moderate ({_ICC_THRESHOLD_MODERATE}-{_ICC_THRESHOLD_GOOD})",
+        f"Poor (<{_ICC_THRESHOLD_MODERATE})",
+    ]
+    colors = [_COLOR_EXCELLENT, _COLOR_GOOD, _COLOR_WARNING, _COLOR_PROBLEM]
+    return counts, labels, colors
 
 
 def plot_feature_distribution_grid(
@@ -34,75 +151,63 @@ def plot_feature_distribution_grid(
     config: Any = None,
 ) -> plt.Figure:
     """Grid of histograms for feature distributions with normality indicators."""
-    from scipy import stats
     plot_cfg = get_plot_config(config)
     cfg = get_config_value(config, "plotting.plots.features.quality.distribution", {})
     n_cols = cfg.get("n_cols", n_cols)
     figsize_per_plot = tuple(cfg.get("figsize_per_plot", figsize_per_plot))
     max_features = cfg.get("max_features", max_features)
 
-    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        return fig
+    if not _validate_dataframe(df):
+        return _create_empty_plot("No data")
 
     if feature_cols is None:
         feature_cols = get_numeric_feature_columns(df)
     else:
-        feature_cols = [c for c in feature_cols if c in df.columns] if feature_cols else []
+        feature_cols = [c for c in feature_cols if c in df.columns]
 
     feature_cols = feature_cols[:max_features]
     n_features = len(feature_cols)
     
     if n_features == 0:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No numeric features", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No numeric features")
     
     n_rows = (n_features + n_cols - 1) // n_cols
-    width_per_plot = float(plot_cfg.plot_type_configs.get("quality", {}).get("width_per_plot", 3.0))
-    height_per_plot = float(plot_cfg.plot_type_configs.get("quality", {}).get("height_per_plot", 2.5))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_plot * n_cols, height_per_plot * n_rows))
+    quality_config = plot_cfg.plot_type_configs.get("quality", {})
+    width_per_plot = float(quality_config.get("width_per_plot", 3.0))
+    height_per_plot = float(quality_config.get("height_per_plot", 2.5))
+    figsize = (width_per_plot * n_cols, height_per_plot * n_rows)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
     axes = np.atleast_2d(axes).flatten()
     
     for idx, col in enumerate(feature_cols):
         ax = axes[idx]
         values = df[col].dropna().values
         
-        if len(values) < 5:
+        if len(values) < _MIN_SAMPLES_FOR_HISTOGRAM:
             ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
             ax.set_title(col[:15], fontsize=plot_cfg.font.medium)
             continue
         
-        # Normality test
-        try:
-            if len(values) < 5000:
-                _, p_norm = stats.shapiro(values[:5000])
-            else:
-                _, p_norm = stats.normaltest(values)
-            is_normal = p_norm > 0.05
-        except Exception:
-            is_normal = None
-            p_norm = np.nan
-        
-        color = "#22C55E" if is_normal else "#EF4444" if is_normal is not None else "#666666"
+        is_normal, _ = _test_normality(values)
+        color = _get_normality_color(is_normal)
+        norm_indicator = _get_normality_indicator(is_normal)
         
         ax.hist(values, bins=20, color=color, alpha=0.7, edgecolor="white")
-        ax.axvline(np.mean(values), color="black", linestyle="--", linewidth=1)
-        ax.axvline(np.median(values), color="blue", linestyle=":", linewidth=1)
+        mean_value = np.mean(values)
+        median_value = np.median(values)
+        ax.axvline(mean_value, color="black", linestyle="--", linewidth=1)
+        ax.axvline(median_value, color="blue", linestyle=":", linewidth=1)
         
-        # Title with normality indicator
-        norm_text = "OK" if is_normal else "X" if is_normal is not None else "?"
-        ax.set_title(f"{col[:12]}... {norm_text}", fontsize=plot_cfg.font.small, color=color)
+        title = f"{col[:12]}... {norm_indicator}"
+        ax.set_title(title, fontsize=plot_cfg.font.small, color=color)
         ax.tick_params(labelsize=6)
     
     for idx in range(n_features, len(axes)):
         axes[idx].set_visible(False)
     
-    # Legend
     legend_elements = [
-        Patch(facecolor="#22C55E", label="Normal (p>.05)"),
-        Patch(facecolor="#EF4444", label="Non-normal"),
+        Patch(facecolor=_COLOR_NORMAL, label="Normal (p>.05)"),
+        Patch(facecolor=_COLOR_NON_NORMAL, label="Non-normal"),
     ]
     fig.legend(handles=legend_elements, loc="upper right", fontsize=plot_cfg.font.medium)
     
@@ -133,10 +238,9 @@ def plot_outlier_trials_heatmap(
     
     if figsize is None:
         figsize = plot_cfg.get_figure_size("wide", plot_type="features")
-    if quality_df is None or not isinstance(quality_df, pd.DataFrame) or quality_df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        return fig
+    
+    if not _validate_dataframe(quality_df):
+        return _create_empty_plot("No data")
 
     if feature_cols is None:
         feature_cols = get_numeric_feature_columns(quality_df)
@@ -147,33 +251,19 @@ def plot_outlier_trials_heatmap(
     df = quality_df.head(max_trials)
     
     if not feature_cols or df.empty:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No data")
     
-    # Compute robust z-scores and outlier matrix
-    outlier_matrix = np.zeros((len(df), len(feature_cols)))
+    n_trials, n_features = len(df), len(feature_cols)
+    outlier_matrix = np.zeros((n_trials, n_features))
     
     for j, col in enumerate(feature_cols):
         values = df[col].values
-        valid = np.isfinite(values)
-        if np.sum(valid) < 3:
-            continue
-
-        median = float(np.nanmedian(values))
-        mad = float(np.nanmedian(np.abs(values - median)))
-        if not np.isfinite(mad) or mad < 1e-12:
-            continue
-
-        robust_z = 0.6745 * (values - median) / mad
-        robust_z_abs = np.abs(robust_z)
-        outlier_matrix[:, j] = np.where(valid & (robust_z_abs > z_threshold), 1, 0)
+        outlier_matrix[:, j] = _compute_robust_z_scores(values, z_threshold)
     
     fig, ax = plt.subplots(figsize=figsize)
     
     im = ax.imshow(outlier_matrix, aspect="auto", cmap="Reds", vmin=0, vmax=1)
     
-    ax.set_xlabel("Feature", fontsize=plot_cfg.font.title)
     ax.set_ylabel("Trial", fontsize=plot_cfg.font.title)
     ax.set_title(
         f"Outlier Detection (robust |z| > {z_threshold})",
@@ -181,19 +271,15 @@ def plot_outlier_trials_heatmap(
         fontweight="bold",
     )
     
-    # Colorbar
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_ticks([0, 1])
     cbar.set_ticklabels(["Normal", "Outlier"])
     
-    # Summary annotation
-    n_outliers = np.sum(outlier_matrix)
+    n_outliers = int(np.sum(outlier_matrix))
     total_cells = outlier_matrix.size
-    pct = 100 * n_outliers / total_cells
-    ax.set_xlabel(
-        f"Feature ({n_outliers:.0f} outliers, {pct:.1f}% of data)",
-        fontsize=plot_cfg.font.title,
-    )
+    outlier_percentage = 100 * n_outliers / total_cells
+    xlabel = f"Feature ({n_outliers:.0f} outliers, {outlier_percentage:.1f}% of data)"
+    ax.set_xlabel(xlabel, fontsize=plot_cfg.font.title)
     
     plt.tight_layout()
     save_fig(fig, save_path)
@@ -215,44 +301,71 @@ def plot_snr_distribution(
     plot_cfg = get_plot_config(config)
     cfg = get_config_value(config, "plotting.plots.features.quality.snr", {})
     threshold_db = cfg.get("threshold_db", threshold_db)
+    
     if figsize is None:
         figsize = plot_cfg.get_figure_size("standard", plot_type="features")
+    
     if snr_col not in quality_df.columns:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, f"Column {snr_col} not found", ha="center", va="center")
-        return fig
+        return _create_empty_plot(f"Column {snr_col} not found")
     
     fig, ax = plt.subplots(figsize=figsize)
     
     values = quality_df[snr_col].dropna().values
+    below_threshold = values < threshold_db
+    above_threshold = ~below_threshold
     
-    # Color by threshold
-    below = values < threshold_db
-    
-    ax.hist(values[~below], bins=25, color="#22C55E", alpha=0.7, label=f"Good (≥{threshold_db} dB)", edgecolor="white")
-    ax.hist(values[below], bins=25, color="#EF4444", alpha=0.7, label=f"Poor (<{threshold_db} dB)", edgecolor="white")
+    ax.hist(
+        values[above_threshold],
+        bins=25,
+        color=_COLOR_NORMAL,
+        alpha=0.7,
+        label=f"Good (≥{threshold_db} dB)",
+        edgecolor="white",
+    )
+    ax.hist(
+        values[below_threshold],
+        bins=25,
+        color=_COLOR_NON_NORMAL,
+        alpha=0.7,
+        label=f"Poor (<{threshold_db} dB)",
+        edgecolor="white",
+    )
     
     ax.axvline(threshold_db, color="black", linestyle="--", linewidth=2, label="Threshold")
-    ax.axvline(np.median(values), color="blue", linestyle=":", linewidth=1.5, label=f"Median: {np.median(values):.1f} dB")
+    median_snr = np.median(values)
+    ax.axvline(
+        median_snr,
+        color="blue",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"Median: {median_snr:.1f} dB",
+    )
     
     ax.set_xlabel("Signal-to-Noise Ratio (dB)", fontsize=plot_cfg.font.title)
     ax.set_ylabel("Count", fontsize=plot_cfg.font.title)
     ax.set_title("Trial Quality: SNR Distribution", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     ax.legend(fontsize=plot_cfg.font.medium)
     
-    # Summary
-    n_poor = np.sum(below)
+    n_poor = int(np.sum(below_threshold))
     n_total = len(values)
-    ax.text(0.98, 0.98, f"{n_poor}/{n_total} ({100*n_poor/n_total:.1f}%) below threshold",
-            transform=ax.transAxes, ha="right", va="top", fontsize=plot_cfg.font.large, 
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+    poor_percentage = 100 * n_poor / n_total
+    summary_text = f"{n_poor}/{n_total} ({poor_percentage:.1f}%) below threshold"
+    ax.text(
+        0.98,
+        0.98,
+        summary_text,
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=plot_cfg.font.large,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
     
     plt.tight_layout()
     save_fig(fig, save_path)
     plt.close(fig)
     
     return fig
-
 
 
 def plot_reliability_summary(
@@ -266,45 +379,37 @@ def plot_reliability_summary(
 ) -> plt.Figure:
     """Summary plot of feature reliability with ICC categories."""
     plot_cfg = get_plot_config(config)
+    
     if icc_df.empty or icc_col not in icc_df.columns:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No ICC data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No ICC data")
     
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
-    # Left: ICC distribution
     ax1 = axes[0]
     icc_values = icc_df[icc_col].dropna().values
     
-    ax1.hist(icc_values, bins=20, color="#3B82F6", alpha=0.7, edgecolor="white")
+    ax1.hist(icc_values, bins=20, color=_COLOR_GOOD, alpha=0.7, edgecolor="white")
     
-    # Thresholds
-    for thresh, label in [(0.5, "Moderate"), (0.75, "Good"), (0.9, "Excellent")]:
-        ax1.axvline(thresh, color="gray", linestyle="--", linewidth=1, alpha=0.7)
+    thresholds = [
+        (_ICC_THRESHOLD_MODERATE, "Moderate"),
+        (_ICC_THRESHOLD_GOOD, "Good"),
+        (_ICC_THRESHOLD_EXCELLENT, "Excellent"),
+    ]
+    for threshold, label in thresholds:
+        ax1.axvline(threshold, color="gray", linestyle="--", linewidth=1, alpha=0.7)
     
     ax1.set_xlabel("ICC", fontsize=plot_cfg.font.title)
     ax1.set_ylabel("Count", fontsize=plot_cfg.font.title)
     ax1.set_title("ICC Distribution", fontsize=plot_cfg.font.title, fontweight="bold")
     ax1.set_xlim(0, 1)
     
-    # Right: Category pie chart
     ax2 = axes[1]
+    counts, labels, colors = _count_icc_categories(icc_values)
     
-    categories = ["Excellent (≥0.9)", "Good (0.75-0.9)", "Moderate (0.5-0.75)", "Poor (<0.5)"]
-    counts = [
-        np.sum(icc_values >= 0.9),
-        np.sum((icc_values >= 0.75) & (icc_values < 0.9)),
-        np.sum((icc_values >= 0.5) & (icc_values < 0.75)),
-        np.sum(icc_values < 0.5),
-    ]
-    colors = ["#22C55E", "#3B82F6", "#F59E0B", "#EF4444"]
-    
-    # Only show non-zero slices
-    valid = [(c, cat, col) for c, cat, col in zip(counts, categories, colors) if c > 0]
-    if valid:
-        counts_v, cats_v, colors_v = zip(*valid)
-        ax2.pie(counts_v, labels=cats_v, colors=colors_v, autopct="%1.0f%%", startangle=90)
+    valid_slices = [(c, label, color) for c, label, color in zip(counts, labels, colors) if c > 0]
+    if valid_slices:
+        counts_valid, labels_valid, colors_valid = zip(*valid_slices)
+        ax2.pie(counts_valid, labels=labels_valid, colors=colors_valid, autopct="%1.0f%%", startangle=90)
         ax2.set_title("Reliability Categories", fontsize=plot_cfg.font.title, fontweight="bold")
     else:
         ax2.text(0.5, 0.5, "No data", ha="center", va="center")
@@ -316,87 +421,120 @@ def plot_reliability_summary(
     return fig
 
 
+def _format_feature_issue(feature_name: str, info: Dict[str, Any]) -> Optional[str]:
+    """Format a single feature issue description."""
+    if not isinstance(info, dict) or not info.get("valid", True):
+        return None
+    
+    issue_parts = []
+    n_outliers = info.get("n_outliers", 0)
+    if n_outliers > 0:
+        issue_parts.append(f"{n_outliers} outliers")
+    
+    if info.get("is_normal") is False:
+        issue_parts.append("non-normal")
+    
+    if not issue_parts:
+        return None
+    
+    issue_text = ", ".join(issue_parts)
+    return f"  {feature_name[:30]}: {issue_text}"
+
+
 def plot_quality_summary_dashboard(
     quality_report: Dict[str, Any],
     save_path: Path,
     *,
     figsize: Tuple[float, float] = (14, 8),
+    config: Any = None,
 ) -> plt.Figure:
-    plot_cfg = get_plot_config(None) # Can add config param if needed
+    """Create a comprehensive quality summary dashboard."""
+    plot_cfg = get_plot_config(config)
     fig = plt.figure(figsize=figsize)
     
-    # Grid layout
     gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
     
-    # Top left: Summary stats
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.axis("off")
     
+    n_trials = quality_report.get("n_trials", "N/A")
+    n_features = quality_report.get("n_features", "N/A")
+    n_subjects = quality_report.get("n_subjects", "N/A")
+    missing_data = quality_report.get("missing_data", {})
+    total_missing = missing_data.get("total_missing", 0)
+    features_with_missing = missing_data.get("features_with_missing", 0)
+    
     summary_text = f"""
-    Total Trials: {quality_report.get('n_trials', 'N/A')}
-    Total Features: {quality_report.get('n_features', 'N/A')}
-    Subjects: {quality_report.get('n_subjects', 'N/A')}
+    Total Trials: {n_trials}
+    Total Features: {n_features}
+    Subjects: {n_subjects}
     
     Missing Data:
-      Total cells: {quality_report.get('missing_data', {}).get('total_missing', 0)}
-      Features affected: {quality_report.get('missing_data', {}).get('features_with_missing', 0)}
+      Total cells: {total_missing}
+      Features affected: {features_with_missing}
     """
-    ax1.text(0.1, 0.9, summary_text, transform=ax1.transAxes, fontsize=plot_cfg.font.title, va="top", family="monospace")
+    ax1.text(
+        0.1,
+        0.9,
+        summary_text,
+        transform=ax1.transAxes,
+        fontsize=plot_cfg.font.title,
+        va="top",
+        family="monospace",
+    )
     ax1.set_title("Data Summary", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
-    # Top center: Issue counts
     ax2 = fig.add_subplot(gs[0, 1])
     summary = quality_report.get("summary", {})
     
-    issues = ["Non-normal", "With outliers", "Floor effect", "Ceiling effect"]
-    counts = [
-        summary.get("non_normal_features", 0),
-        summary.get("features_with_outliers", 0),
-        summary.get("features_with_floor", 0),
-        summary.get("features_with_ceiling", 0),
-    ]
-    colors = ["#EF4444", "#F59E0B", "#6366F1", "#8B5CF6"]
+    issue_labels = ["Non-normal", "With outliers", "Floor effect", "Ceiling effect"]
+    issue_keys = ["non_normal_features", "features_with_outliers", "features_with_floor", "features_with_ceiling"]
+    issue_counts = [summary.get(key, 0) for key in issue_keys]
+    issue_colors = [_COLOR_PROBLEM, _COLOR_WARNING, _COLOR_MODERATE, _COLOR_CEILING]
     
-    ax2.barh(issues, counts, color=colors, edgecolor="white")
+    ax2.barh(issue_labels, issue_counts, color=issue_colors, edgecolor="white")
     ax2.set_xlabel("Count", fontsize=plot_cfg.font.title)
     ax2.set_title("Distribution Issues", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
-    # Top right: Problematic trials
     ax3 = fig.add_subplot(gs[0, 2])
-    prob_trials = quality_report.get("problematic_trials", {})
+    problematic_trials = quality_report.get("problematic_trials", {})
     
-    n_prob = prob_trials.get("count", 0)
+    n_problematic = problematic_trials.get("count", 0)
     n_total = quality_report.get("n_trials", 1)
-    
-    sizes = [n_prob, n_total - n_prob]
-    labels = [f"Problematic ({n_prob})", f"Good ({n_total - n_prob})"]
-    colors = ["#EF4444", "#22C55E"]
+    n_good = n_total - n_problematic
     
     if n_total > 0:
+        sizes = [n_problematic, n_good]
+        labels = [f"Problematic ({n_problematic})", f"Good ({n_good})"]
+        colors = [_COLOR_PROBLEM, _COLOR_NORMAL]
         ax3.pie(sizes, labels=labels, colors=colors, autopct="%1.1f%%", startangle=90)
     ax3.set_title("Trial Quality", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     
-    # Bottom: Feature issue details (if available)
     ax4 = fig.add_subplot(gs[1, :])
     ax4.axis("off")
     
-    dist_issues = quality_report.get("distribution_issues", {})
-    if dist_issues:
-        # Show top issues
+    distribution_issues = quality_report.get("distribution_issues", {})
+    if distribution_issues:
         issues_list = []
-        for feat, info in list(dist_issues.items())[:10]:
-            if isinstance(info, dict) and info.get("valid", True):
-                issue_str = []
-                if info.get("n_outliers", 0) > 0:
-                    issue_str.append(f"{info['n_outliers']} outliers")
-                if info.get("is_normal") == False:
-                    issue_str.append("non-normal")
-                if issue_str:
-                    issues_list.append(f"  {feat[:30]}: {', '.join(issue_str)}")
+        max_features_to_show = 10
+        for feature_name, info in list(distribution_issues.items())[:max_features_to_show]:
+            issue_text = _format_feature_issue(feature_name, info)
+            if issue_text:
+                issues_list.append(issue_text)
         
         if issues_list:
-            issues_text = "Top Feature Issues:\n" + "\n".join(issues_list[:8])
-            ax4.text(0.1, 0.9, issues_text, transform=ax4.transAxes, fontsize=plot_cfg.font.large, va="top", family="monospace")
+            max_issues_in_text = 8
+            issues_to_show = issues_list[:max_issues_in_text]
+            issues_text = "Top Feature Issues:\n" + "\n".join(issues_to_show)
+            ax4.text(
+                0.1,
+                0.9,
+                issues_text,
+                transform=ax4.transAxes,
+                fontsize=plot_cfg.font.large,
+                va="top",
+                family="monospace",
+            )
     
     ax4.set_title("Feature Details", fontsize=plot_cfg.font.suptitle, fontweight="bold")
     

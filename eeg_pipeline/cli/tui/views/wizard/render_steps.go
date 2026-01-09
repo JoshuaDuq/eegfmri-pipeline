@@ -14,14 +14,77 @@ import (
 // Step Rendering
 ///////////////////////////////////////////////////////////////////
 
-func (m Model) renderConfirmation() string {
-	content := strings.Builder{}
-
+// renderAnimatedAccent returns an animated accent character based on ticker
+func (m Model) renderAnimatedAccent() string {
 	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
+	return lipgloss.NewStyle().
 		Foreground(styles.Accent).
 		Bold(true).
 		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+}
+
+// calculateScrollWindow calculates visible line range for scrolling
+func calculateScrollWindow(totalLines, offset, effectiveHeight, overhead int) (startLine, endLine int, showIndicators bool) {
+	maxLines := effectiveHeight - overhead
+	if maxLines < minVisibleLines {
+		maxLines = minVisibleLines
+	}
+
+	if totalLines <= maxLines {
+		return 0, totalLines, false
+	}
+
+	showIndicators = true
+	startLine = offset
+	if startLine < 0 {
+		startLine = 0
+	}
+	if startLine > totalLines-maxLines {
+		startLine = totalLines - maxLines
+	}
+	if startLine < 0 {
+		startLine = 0
+	}
+	endLine = startLine + maxLines
+	return startLine, endLine, showIndicators
+}
+
+const (
+	defaultLabelWidth      = 22
+	defaultLabelWidthWide = 30
+	configOverhead         = 10
+	plotConfigOverhead     = 8
+)
+
+// renderDefaultConfigView renders the default configuration view when useDefaultAdvanced is true
+func (m Model) renderDefaultConfigView(configType string) string {
+	var b strings.Builder
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render(fmt.Sprintf("Default configuration will be used for %s.", configType)) + "\n")
+	b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	isFocused := m.advancedCursor == 0
+	cursor := "  "
+	if isFocused {
+		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+	}
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+	if isFocused {
+		labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
+	}
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
+	tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
+	b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+	return b.String()
+}
+
+func (m Model) renderConfirmation() string {
+	content := strings.Builder{}
+
+	accent := m.renderAnimatedAccent()
 
 	content.WriteString(accent + " " + styles.SectionTitleStyle.Render(" REVIEW & EXECUTE ") + "\n\n")
 
@@ -32,15 +95,7 @@ func (m Model) renderConfirmation() string {
 			"\n",
 	)
 
-	// Show subject count and estimated time
-	selectedCount := 0
-	if len(m.subjectSelected) > 0 {
-		for _, sel := range m.subjectSelected {
-			if sel {
-				selectedCount++
-			}
-		}
-	}
+	selectedCount := countSelectedStringItems(m.subjectSelected)
 	if selectedCount > 0 {
 		subjectInfo := lipgloss.NewStyle().Foreground(styles.Text).Render("Subjects:") +
 			" " +
@@ -381,12 +436,7 @@ func (m Model) renderComputationSelection() string {
 func (m Model) renderCategorySelection() string {
 	var b strings.Builder
 
-	// Section title with animated accent
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	title := "FEATURE CATEGORIES"
 	if m.CurrentStep == types.StepSelectPlotCategories {
 		title = "PLOT CATEGORIES"
@@ -479,12 +529,7 @@ func (m Model) renderCategorySelection() string {
 func (m Model) renderBandSelection() string {
 	var b strings.Builder
 
-	// Section title with animated accent
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -820,7 +865,7 @@ func (m Model) renderPlotConfig() string {
 		"  Configure output formats and resolution. Use Space to toggle/cycle.\n\n"))
 
 	options := m.getPlotConfigOptions()
-	labelWidth := 16
+	labelWidth := 16 // Plot config uses narrower width
 
 	for i, opt := range options {
 		isFocused := i == m.plotConfigCursor
@@ -1334,11 +1379,7 @@ func (m Model) renderFeaturePlotterSelection() string {
 func (m Model) renderSubjectSelection() string {
 	var b strings.Builder
 
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -1878,12 +1919,7 @@ func (m Model) renderAdvancedConfig() string {
 func (m Model) renderFeaturesAdvancedConfig() string {
 	var b strings.Builder
 
-	// Section title with animated accent
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -1894,28 +1930,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
-		b.WriteString(infoStyle.Render("Default configuration will be used for all feature parameters.") + "\n")
-		b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
-
-		labelWidth := 22
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-
-		isFocused := m.advancedCursor == 0
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
-		if isFocused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
-
-		tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-		b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
-		return b.String()
+		return m.renderDefaultConfigView("feature parameters")
 	}
 
 	if m.editingNumber {
@@ -1928,7 +1943,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	// Prepare values for display
@@ -2033,40 +2048,13 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		totalLines += len(connectivityMeasures)
 	}
 
-	// Calculate visible area - use sensible defaults if height not yet set
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
-		effectiveHeight = 40 // Reasonable default
+		effectiveHeight = defaultTerminalHeight
 	}
 
-	// Scrolling for small window sizes (list area only; header stays visible)
-	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
-	maxLines := effectiveHeight - 10
-	if maxLines < 8 {
-		maxLines = 8
-	}
-
-	// If all content fits, show everything without scrolling
-	startLine := 0
-	endLine := totalLines
-	showScrollIndicators := false
-
-	if totalLines > maxLines {
-		// Need scrolling - use the calculated offset
-		showScrollIndicators = true
-		startLine = m.advancedOffset
-		if startLine < 0 {
-			startLine = 0
-		}
-		// Clamp startLine to avoid showing empty space at bottom
-		if startLine > totalLines-maxLines {
-			startLine = totalLines - maxLines
-		}
-		if startLine < 0 {
-			startLine = 0
-		}
-		endLine = startLine + maxLines
-	}
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
 
 	// Show scroll indicator for items above
 	if showScrollIndicators && startLine > 0 {
@@ -2636,12 +2624,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 func (m Model) renderBehaviorAdvancedConfig() string {
 	var b strings.Builder
 
-	// Section title with animated accent
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -2652,28 +2635,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
 
 	if m.useDefaultAdvanced {
-		b.WriteString(infoStyle.Render("Default configuration will be used for behavior analysis.") + "\n")
-		b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
-
-		labelWidth := 22
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-
-		isFocused := m.advancedCursor == 0
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
-		if isFocused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
-
-		tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-		b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
-		return b.String()
+		return m.renderDefaultConfigView("behavior analysis")
 	}
 
 	if m.editingNumber {
@@ -2686,7 +2648,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("Space to toggle/expand · ↑↓ to navigate · Enter to proceed") + "\n\n")
 	}
 
-	labelWidth := 30
+	labelWidth := defaultLabelWidthWide
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	options := m.getBehaviorOptions()
@@ -3617,47 +3579,14 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 		}
 	}
 
-	// Calculate visible area - use sensible defaults if height not yet set
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
-		effectiveHeight = 40 // Reasonable default
+		effectiveHeight = defaultTerminalHeight
 	}
 
-	// Scrolling for small window sizes (list area only; header stays visible)
-	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
-	maxLines := effectiveHeight - 10
-	if maxLines < 8 {
-		maxLines = 8
-	}
-
-	// Note: expanded list items are rendered inline after their parent option,
-	// so we only scroll based on the options array length
 	totalLines := len(options)
-
-	// If all content fits, show everything without scrolling
-	startIdx := 0
-	endIdx := totalLines
-	showScrollIndicators := false
-
-	if totalLines > maxLines {
-		// Need scrolling - use the calculated offset
-		showScrollIndicators = true
-		startIdx = m.advancedOffset
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		// Clamp startIdx to avoid showing empty space at bottom
-		if startIdx > totalLines-maxLines {
-			startIdx = totalLines - maxLines
-		}
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		endIdx = startIdx + maxLines
-		if endIdx > totalLines {
-			endIdx = totalLines
-		}
-	}
+	startIdx, endIdx, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
 
 	// Show scroll indicator for items above
 	if showScrollIndicators && startIdx > 0 {
@@ -3746,7 +3675,7 @@ func (m Model) renderMLAdvancedConfig() string {
 	b.WriteString(infoStyle.Render("  Configure machine learning analysis parameters.") + "\n")
 	b.WriteString(infoStyle.Render("  Press Space to toggle/cycle values, Enter to proceed.") + "\n\n")
 
-	labelWidth := 22
+	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	permutationsVal := fmt.Sprintf("%d", m.mlNPerm)
@@ -3852,7 +3781,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
 
@@ -3993,7 +3922,7 @@ func (m Model) renderRawToBidsAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	montageVal := m.rawMontage
@@ -4072,7 +4001,7 @@ func (m Model) renderMergeBehaviorAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
 	}
 
-	labelWidth := 22
+	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
 	prefixVal := m.mergeEventPrefixes
@@ -4146,11 +4075,7 @@ func (m Model) renderPlottingAdvancedConfig() string {
 
 	var b strings.Builder
 
-	accentFrames := []string{"◆", "◇", "◆", "◈"}
-	accent := lipgloss.NewStyle().
-		Foreground(styles.Accent).
-		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+	accent := m.renderAnimatedAccent()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -4162,7 +4087,7 @@ func (m Model) renderPlottingAdvancedConfig() string {
 		b.WriteString(infoStyle.Render("Default plotting settings will be used.") + "\n")
 		b.WriteString(infoStyle.Render("Press Space to customize plot-specific overrides.") + "\n\n")
 
-		labelWidth := 22
+		labelWidth := defaultLabelWidth
 		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 		isFocused := m.advancedCursor == 0
 		cursor := "  "
@@ -4545,30 +4470,12 @@ func (m Model) renderPlottingAdvancedConfig() string {
 		}
 	}
 
-	// Scrolling window
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
-		effectiveHeight = 40
+		effectiveHeight = defaultTerminalHeight
 	}
-	// Overhead: header(4) + title(2) + footer(2) = 8
-	maxLines := effectiveHeight - 8
-	if maxLines < 8 {
-		maxLines = 8
-	}
-	start := 0
-	if len(lines) > maxLines {
-		start = m.advancedOffset
-		if start < 0 {
-			start = 0
-		}
-		if start > len(lines)-maxLines {
-			start = len(lines) - maxLines
-		}
-	}
-	end := len(lines)
-	if len(lines) > maxLines {
-		end = start + maxLines
-	}
+	start, end, _ := calculateScrollWindow(
+		len(lines), m.advancedOffset, effectiveHeight, plotConfigOverhead)
 
 	if start > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ... %d more above ...", start)) + "\n")

@@ -15,6 +15,92 @@ import pandas as pd
 from scipy import stats
 from typing import Any, Dict, Tuple
 
+from eeg_pipeline.utils.analysis.stats.validation import (
+    check_normality_dagostino,
+    check_normality_shapiro,
+)
+
+
+_MIN_SAMPLE_SIZE_FOR_REGRESSION = 2
+_MIN_VARIANCE_THRESHOLD = 1e-10
+_MAX_R_SQUARED_FOR_VIF = 0.9999
+_MIN_SAMPLE_SIZE_FOR_LEVERAGE = 4
+_MIN_SAMPLE_SIZE_FOR_MOMENTS = 8
+_MIN_SAMPLE_SIZE_FOR_DAGOSTINO = 20
+_COOKS_THRESHOLD_FACTOR = 4.0
+_NUMERICAL_STABILITY_EPSILON = 1e-12
+
+
+def _compute_r_squared(
+    design_matrix: np.ndarray,
+    response: np.ndarray,
+) -> float:
+    """Compute R-squared from design matrix and response.
+    
+    Parameters
+    ----------
+    design_matrix : np.ndarray
+        Design matrix with intercept column
+    response : np.ndarray
+        Response variable
+        
+    Returns
+    -------
+    float
+        R-squared value, clipped to [0, 0.9999]
+    """
+    beta = np.linalg.lstsq(design_matrix, response, rcond=None)[0]
+    predicted = design_matrix @ beta
+    
+    sum_squared_residuals = np.sum((response - predicted) ** 2)
+    sum_squared_total = np.sum((response - np.mean(response)) ** 2)
+    
+    if sum_squared_total < _MIN_VARIANCE_THRESHOLD:
+        return 0.0
+    
+    r_squared = 1.0 - (sum_squared_residuals / sum_squared_total)
+    return np.clip(r_squared, 0.0, _MAX_R_SQUARED_FOR_VIF)
+
+
+def _compute_vif_for_predictor(
+    predictor_values: np.ndarray,
+    other_predictors: np.ndarray,
+) -> float:
+    """Compute VIF for a single predictor.
+    
+    Parameters
+    ----------
+    predictor_values : np.ndarray
+        Values of the predictor being tested
+    other_predictors : np.ndarray
+        Values of all other predictors
+        
+    Returns
+    -------
+    float
+        VIF value, or np.nan if computation fails
+    """
+    min_required_samples = other_predictors.shape[1] + _MIN_SAMPLE_SIZE_FOR_REGRESSION
+    valid_mask = np.isfinite(predictor_values) & np.all(
+        np.isfinite(other_predictors), axis=1
+    )
+    
+    if valid_mask.sum() < min_required_samples:
+        return np.nan
+    
+    valid_predictor = predictor_values[valid_mask]
+    valid_other_predictors = other_predictors[valid_mask]
+    
+    intercept_column = np.ones(len(valid_predictor))
+    design_matrix = np.column_stack([intercept_column, valid_other_predictors])
+    
+    try:
+        r_squared = _compute_r_squared(design_matrix, valid_predictor)
+        vif = 1.0 / (1.0 - r_squared)
+        return float(vif)
+    except (np.linalg.LinAlgError, ValueError):
+        return np.nan
+
 
 def compute_vif(X: pd.DataFrame) -> pd.Series:
     """Compute Variance Inflation Factor for each predictor.
@@ -35,50 +121,107 @@ def compute_vif(X: pd.DataFrame) -> pd.Series:
     """
     if X.empty:
         return pd.Series(dtype=float)
-        
-    n_cols = X.shape[1]
+    
+    num_predictors = X.shape[1]
+    if num_predictors == 1:
+        return pd.Series({X.columns[0]: 1.0})
+    
     vif_values = {}
     
-    for i, col in enumerate(X.columns):
-        if n_cols == 1:
-            vif_values[col] = 1.0
-            continue
-            
-        # Regress this column on all others
-        y_temp = pd.to_numeric(X[col], errors="coerce").values
-        X_other_df = X.drop(columns=[col])
-        X_other = X_other_df.apply(pd.to_numeric, errors="coerce").values
+    for column_name in X.columns:
+        predictor_values = pd.to_numeric(X[column_name], errors="coerce").values
+        other_predictors_df = X.drop(columns=[column_name])
+        other_predictors = other_predictors_df.apply(
+            pd.to_numeric, errors="coerce"
+        ).values
         
-        mask = np.isfinite(y_temp) & np.all(np.isfinite(X_other), axis=1)
-        if mask.sum() < X_other.shape[1] + 2:
-            vif_values[col] = np.nan
-            continue
-            
-        y_v = y_temp[mask]
-        X_v = X_other[mask]
-        
-        # Add intercept
-        X_design = np.column_stack([np.ones(len(y_v)), X_v])
-        
-        # Compute R²
-        try:
-            beta = np.linalg.lstsq(X_design, y_v, rcond=None)[0]
-            y_pred = X_design @ beta
-            ss_res = np.sum((y_v - y_pred)**2)
-            ss_tot = np.sum((y_v - np.mean(y_v))**2)
-            
-            if ss_tot < 1e-10:
-                r_squared = 0.0
-            else:
-                r_squared = 1 - (ss_res / ss_tot)
-            
-            r_squared = np.clip(r_squared, 0, 0.9999)
-            vif = 1.0 / (1.0 - r_squared)
-            vif_values[col] = float(vif)
-        except (np.linalg.LinAlgError, ValueError):
-            vif_values[col] = np.nan
+        vif_values[column_name] = _compute_vif_for_predictor(
+            predictor_values, other_predictors
+        )
     
     return pd.Series(vif_values)
+
+
+def _compute_hat_matrix_diagonal(
+    design_matrix: np.ndarray,
+    covariance_matrix_inverse: np.ndarray,
+) -> np.ndarray:
+    """Compute diagonal of hat matrix.
+    
+    Parameters
+    ----------
+    design_matrix : np.ndarray
+        Design matrix with intercept column
+    covariance_matrix_inverse : np.ndarray
+        Inverse of X.T @ X
+        
+    Returns
+    -------
+    np.ndarray
+        Diagonal of hat matrix (leverage values)
+    """
+    hat_matrix = design_matrix @ covariance_matrix_inverse @ design_matrix.T
+    return np.diag(hat_matrix)
+
+
+def _compute_studentized_residuals(
+    residuals: np.ndarray,
+    mean_squared_error: float,
+    leverage_values: np.ndarray,
+) -> np.ndarray:
+    """Compute studentized residuals.
+    
+    Parameters
+    ----------
+    residuals : np.ndarray
+        Raw residuals
+    mean_squared_error : float
+        MSE from regression
+    leverage_values : np.ndarray
+        Hat values (leverage)
+        
+    Returns
+    -------
+    np.ndarray
+        Studentized residuals
+    """
+    variance_estimate = mean_squared_error * (1.0 - leverage_values)
+    denominator = np.sqrt(variance_estimate + _NUMERICAL_STABILITY_EPSILON)
+    
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return residuals / denominator
+
+
+def _compute_cooks_distance(
+    studentized_residuals: np.ndarray,
+    leverage_values: np.ndarray,
+    num_parameters: int,
+) -> np.ndarray:
+    """Compute Cook's distance for each observation.
+    
+    Parameters
+    ----------
+    studentized_residuals : np.ndarray
+        Studentized residuals
+    leverage_values : np.ndarray
+        Hat values (leverage)
+    num_parameters : int
+        Number of parameters in model (intercept + predictors)
+        
+    Returns
+    -------
+    np.ndarray
+        Cook's distance for each observation
+    """
+    leverage_complement = 1.0 - leverage_values + _NUMERICAL_STABILITY_EPSILON
+    
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cooks_distance = (
+            (studentized_residuals ** 2 / num_parameters)
+            * (leverage_values / leverage_complement)
+        )
+    
+    return cooks_distance
 
 
 def compute_leverage_and_cooks(
@@ -105,92 +248,115 @@ def compute_leverage_and_cooks(
     cooks_threshold : float
         Threshold for influential points (4/n)
     """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
-    mask = np.isfinite(x) & np.isfinite(y)
-    n = int(mask.sum())
+    predictor = np.asarray(x, dtype=float)
+    response = np.asarray(y, dtype=float)
+    valid_mask = np.isfinite(predictor) & np.isfinite(response)
+    num_valid_samples = int(valid_mask.sum())
     
-    if n < 4:
-        return np.full(len(x), np.nan), np.full(len(x), np.nan), np.full(len(x), np.nan), np.nan
+    if num_valid_samples < _MIN_SAMPLE_SIZE_FOR_LEVERAGE:
+        nan_array = np.full(len(x), np.nan)
+        return nan_array, nan_array, nan_array, np.nan
     
-    x_v = x[mask]
-    y_v = y[mask]
+    valid_predictor = predictor[valid_mask]
+    valid_response = response[valid_mask]
     
-    # Design matrix [1, x]
-    X = np.column_stack([np.ones(n), x_v])
+    intercept_column = np.ones(num_valid_samples)
+    design_matrix = np.column_stack([intercept_column, valid_predictor])
     
-    # Hat matrix diagonal
     try:
-        XtX_inv = np.linalg.inv(X.T @ X)
-        h_v = np.diag(X @ XtX_inv @ X.T)
+        covariance_matrix_inverse = np.linalg.inv(design_matrix.T @ design_matrix)
+        leverage_values = _compute_hat_matrix_diagonal(
+            design_matrix, covariance_matrix_inverse
+        )
     except np.linalg.LinAlgError:
-        return np.full(len(x), np.nan), np.full(len(x), np.nan), np.full(len(x), np.nan), np.nan
+        nan_array = np.full(len(x), np.nan)
+        return nan_array, nan_array, nan_array, np.nan
     
-    # Fitted values and residuals
-    beta = XtX_inv @ X.T @ y_v
-    y_hat = X @ beta
-    res_v = y_v - y_hat
+    coefficients = covariance_matrix_inverse @ design_matrix.T @ valid_response
+    fitted_values = design_matrix @ coefficients
+    residuals = valid_response - fitted_values
     
-    # MSE
-    p = 2  # intercept + slope
-    mse = np.sum(res_v**2) / (n - p) if n > p else 0
+    num_parameters = 2  # intercept + slope
+    degrees_of_freedom = num_valid_samples - num_parameters
+    mean_squared_error = (
+        np.sum(residuals ** 2) / degrees_of_freedom if degrees_of_freedom > 0 else 0.0
+    )
     
-    # Studentized residuals
-    with np.errstate(divide='ignore', invalid='ignore'):
-        student_v = res_v / np.sqrt(mse * (1 - h_v) + 1e-12)
+    studentized_residuals = _compute_studentized_residuals(
+        residuals, mean_squared_error, leverage_values
+    )
     
-    # Cook's distance
-    with np.errstate(divide='ignore', invalid='ignore'):
-        cooks_v = (student_v**2 / p) * (h_v / (1 - h_v + 1e-12))
+    cooks_distances = _compute_cooks_distance(
+        studentized_residuals, leverage_values, num_parameters
+    )
     
-    # Threshold: 4/n
-    cooks_threshold = 4.0 / n
+    cooks_threshold = _COOKS_THRESHOLD_FACTOR / num_valid_samples
     
-    # Map back to original indices
     leverage = np.full(len(x), np.nan)
     cooks_d = np.full(len(x), np.nan)
-    residuals = np.full(len(x), np.nan)
+    studentized_residuals_full = np.full(len(x), np.nan)
     
-    leverage[mask] = h_v
-    cooks_d[mask] = cooks_v
-    residuals[mask] = student_v
+    leverage[valid_mask] = leverage_values
+    cooks_d[valid_mask] = cooks_distances
+    studentized_residuals_full[valid_mask] = studentized_residuals
     
-    return leverage, cooks_d, residuals, cooks_threshold
+    return leverage, cooks_d, studentized_residuals_full, cooks_threshold
 
 
 def compute_normality_summary(data: np.ndarray, alpha: float = 0.05) -> Dict[str, Any]:
     """Compute multiple normality tests and provide a summary.
     
+    Parameters
+    ----------
+    data : np.ndarray
+        Data to test for normality
+    alpha : float, default=0.05
+        Significance level for tests
+        
     Returns
     -------
-    dict with keys:
-        shapiro_stat, shapiro_p: Shapiro-Wilk test
-        dagostino_stat, dagostino_p: D'Agostino K² test
-        skewness, kurtosis: Distribution moments
-        is_normal: Boolean (p > alpha for both tests)
-        n: sample size
+    Dict[str, Any]
+        Dictionary with keys:
+        - shapiro_stat: Shapiro-Wilk test statistic
+        - shapiro_p: Shapiro-Wilk p-value
+        - dagostino_stat: D'Agostino K² test statistic
+        - dagostino_p: D'Agostino K² p-value
+        - skewness: Distribution skewness
+        - kurtosis: Distribution kurtosis
+        - is_normal: Boolean (p > alpha for both tests)
+        - n: Sample size
     """
-    from eeg_pipeline.utils.analysis.stats.validation import (
-        check_normality_shapiro,
-        check_normality_dagostino
+    clean_data = np.asarray(data)
+    clean_data = clean_data[np.isfinite(clean_data)]
+    sample_size = len(clean_data)
+    
+    shapiro_result = check_normality_shapiro(clean_data, alpha=alpha)
+    dagostino_result = check_normality_dagostino(clean_data, alpha=alpha)
+    
+    has_sufficient_samples_for_moments = sample_size > _MIN_SAMPLE_SIZE_FOR_MOMENTS
+    skewness = (
+        float(stats.skew(clean_data)) if has_sufficient_samples_for_moments else np.nan
+    )
+    kurtosis = (
+        float(stats.kurtosis(clean_data))
+        if has_sufficient_samples_for_moments
+        else np.nan
     )
     
-    clean = np.asarray(data)
-    clean = clean[np.isfinite(clean)]
-    n = len(clean)
-    
-    res_s = check_normality_shapiro(clean, alpha=alpha)
-    res_d = check_normality_dagostino(clean, alpha=alpha)
+    dagostino_applicable = sample_size >= _MIN_SAMPLE_SIZE_FOR_DAGOSTINO
+    is_normal = shapiro_result.passed and (
+        dagostino_result.passed or not dagostino_applicable
+    )
     
     return {
-        "shapiro_stat": float(res_s.statistic),
-        "shapiro_p": float(res_s.p_value),
-        "dagostino_stat": float(res_d.statistic),
-        "dagostino_p": float(res_d.p_value),
-        "skewness": float(stats.skew(clean)) if n > 8 else np.nan,
-        "kurtosis": float(stats.kurtosis(clean)) if n > 8 else np.nan,
-        "is_normal": res_s.passed and (res_d.passed or n < 20),
-        "n": n,
+        "shapiro_stat": float(shapiro_result.statistic),
+        "shapiro_p": float(shapiro_result.p_value),
+        "dagostino_stat": float(dagostino_result.statistic),
+        "dagostino_p": float(dagostino_result.p_value),
+        "skewness": skewness,
+        "kurtosis": kurtosis,
+        "is_normal": is_normal,
+        "n": sample_size,
     }
 
 

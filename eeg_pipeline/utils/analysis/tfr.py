@@ -18,12 +18,23 @@ from eeg_pipeline.utils.analysis.windowing import (
     build_time_windows_fixed_size_clamped,
     time_mask_loose,
     time_mask_strict,
+    time_mask,
+    freq_mask,
 )
+from eeg_pipeline.utils.analysis.stats import (
+    validate_baseline_window_pre_stimulus,
+    _safe_float,
+)
+from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 
 
 ###################################################################
 # Constants Loading
 ###################################################################
+
+# Numerical constants
+_EPSILON_MIN_VALUE = 1e-12
+_PERCENT_TO_RATIO_DIVISOR = 100.0
 
 def _get_tfr_constants(config=None):
     if config is None:
@@ -233,9 +244,11 @@ def _extract_baseline_power_features(
     freqs = tfr.freqs
     
     for band, (fmin, fmax) in bands.items():
-        if fmax is None: fmax = freqs[-1]
+        if fmax is None:
+            fmax = freqs[-1]
         freq_mask = (freqs >= fmin) & (freqs <= fmax)
-        if not np.any(freq_mask): continue
+        if not np.any(freq_mask):
+            continue
         
         # Frequency-weighted mean across band bins (TFR frequencies are often log-spaced).
         band_freqs = np.asarray(freqs[freq_mask], dtype=float)
@@ -309,9 +322,6 @@ def compute_tfr_for_subject(
     tfr_computed: Optional[mne.time_frequency.EpochsTFR] = None,
     baseline_window: Optional[Tuple[float, float]] = None,
 ) -> Tuple[mne.time_frequency.EpochsTFR, pd.DataFrame, List[str], float, float]:
-    from eeg_pipeline.utils.analysis.stats import validate_baseline_window_pre_stimulus  # local import to avoid circular deps
-    # from eeg_pipeline.analysis.features.power import extract_baseline_power_features  # REMOVED
-
     freq_min, freq_max, n_freqs, n_cycles_factor, tfr_decim, tfr_picks = get_tfr_config(config)
 
     freqs = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
@@ -372,7 +382,7 @@ def normalize_power_with_baseline(
         logger.error("Baseline features missing; cannot normalize power features.")
         return pow_df
 
-    epsilon = float(config.get("feature_engineering.constants.epsilon_std", 1e-12))
+    epsilon = float(config.get("feature_engineering.constants.epsilon_std", _EPSILON_MIN_VALUE))
     pow_numeric = pow_df.apply(pd.to_numeric, errors="coerce")
     baseline_numeric = baseline_df.apply(pd.to_numeric, errors="coerce")
 
@@ -527,7 +537,8 @@ def canonicalize_ch_name(ch: str) -> str:
         cleaned = re.sub(r"(Ref|LE|RE|M1|M2|A1|A2|AVG|AVE)$", "", cleaned, flags=re.IGNORECASE)
         return cleaned
     except (re.error, TypeError, AttributeError) as e:
-        logging.getLogger(__name__).warning(f"Error canonicalizing channel name '{ch}': {e}; returning original")
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Error canonicalizing channel name '{ch}': {e}; returning original")
         return ch
 
 
@@ -741,6 +752,7 @@ def compute_adaptive_n_cycles(
 
 
 def _get_config_float(config: Optional[Any], key: str, default: float) -> float:
+    """Get float value from config with fallback to default."""
     if config is None:
         return default
     return float(config.get(key, default))
@@ -831,12 +843,14 @@ def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
 
 
 def resolve_tfr_workers(workers_default: int = -1) -> int:
+    """Resolve TFR worker count from environment variable or use default."""
     raw = os.getenv("EEG_TFR_WORKERS")
     if not raw or raw.strip().lower() in {"auto", ""}:
         return workers_default
 
     try:
-        return max(1, int(raw))
+        workers = int(raw)
+        return max(1, workers)
     except ValueError:
         logger = _get_logger(None)
         logger.warning(f"EEG_TFR_WORKERS={raw} invalid; using {workers_default}")
@@ -1015,7 +1029,8 @@ def _convert_ratio_to_logratio(
         return None
     
     constants = _get_tfr_constants(config)
-    tfr_obj.data = np.log10(np.maximum(tfr_obj.data, constants["min_log_value"]))
+    min_log_value = constants["min_log_value"]
+    tfr_obj.data = np.log10(np.maximum(tfr_obj.data, min_log_value))
     if hasattr(tfr_obj, "comment"):
         tfr_obj.comment = (tfr_obj.comment or "") + " | converted ratio->log10ratio"
     return tfr_obj
@@ -1036,8 +1051,9 @@ def _convert_percent_to_logratio(
         return None
     
     constants = _get_tfr_constants(config)
-    ratio = 1.0 + (tfr_obj.data / 100.0)
-    tfr_obj.data = np.log10(np.clip(ratio, constants["min_log_value"], np.inf))
+    min_log_value = constants["min_log_value"]
+    ratio = 1.0 + (tfr_obj.data / _PERCENT_TO_RATIO_DIVISOR)
+    tfr_obj.data = np.log10(np.clip(ratio, min_log_value, np.inf))
     if hasattr(tfr_obj, "comment"):
         tfr_obj.comment = (tfr_obj.comment or "") + " | converted percent->log10ratio"
     return tfr_obj
@@ -1369,11 +1385,12 @@ def _check_baseline_already_applied(
     
     constants = _get_tfr_constants(config)
     comment = getattr(tfr_obj, "comment", None)
-    if not isinstance(comment, str) or constants["baseline_sentinel"] not in comment:
+    baseline_sentinel = constants["baseline_sentinel"]
+    if not isinstance(comment, str) or baseline_sentinel not in comment:
         return False
     
     logger.warning(
-        f"Detected baseline-corrected TFR by sentinel '{constants['baseline_sentinel']}' in comment; "
+        f"Detected baseline-corrected TFR by sentinel '{baseline_sentinel}' in comment; "
         f"skipping re-application to prevent double-baselining. "
         f"Use force=True to override."
     )
@@ -1396,7 +1413,11 @@ def _clip_baseline_window(
         baseline_end_clipped = min(0.0, time_max)
         logger.warning(f"Clipping baseline end to 0.0 (was {baseline_end})")
     
-    if baseline_start_clipped != baseline_start or baseline_end_clipped != baseline_end:
+    was_clipped = (
+        baseline_start_clipped != baseline_start or 
+        baseline_end_clipped != baseline_end
+    )
+    if was_clipped:
         logger.info(
             f"Clipped baseline window from [{baseline_start}, {baseline_end}] to "
             f"[{baseline_start_clipped}, {baseline_end_clipped}] to fit data range."
@@ -1433,7 +1454,8 @@ def apply_baseline_safe(
     
     if baseline_end > 0:
         error_msg = (
-            f"Baseline window must end at or before 0 s (pre-stimulus), got [{baseline_start}, {baseline_end}]. "
+            f"Baseline window must end at or before 0 s (pre-stimulus), "
+            f"got [{baseline_start}, {baseline_end}]. "
             f"Post-stimulus baseline windows are invalid and indicate a configuration error."
         )
         logger.error(error_msg)
@@ -1463,15 +1485,19 @@ def _validate_baseline_samples(
     times_array = np.asarray(times)
     baseline_mask = (times_array >= baseline_start_clipped) & (times_array < baseline_end_clipped)
     n_samples = int(baseline_mask.sum())
+    min_required_samples = max(1, min_samples)
     
-    if baseline_start_clipped >= baseline_end_clipped or n_samples < max(1, min_samples):
+    is_invalid_window = baseline_start_clipped >= baseline_end_clipped
+    has_insufficient_samples = n_samples < min_required_samples
+    
+    if is_invalid_window or has_insufficient_samples:
         time_min_available = float(times[0])
         time_max_available = float(times[-1])
         error_msg = (
             f"Baseline window [{baseline_start_clipped}, {baseline_end_clipped}] "
             f"invalid/insufficient for available times "
             f"[{time_min_available}, {time_max_available}] (samples={n_samples}); "
-            f"at least {min_samples} required"
+            f"at least {min_required_samples} required"
         )
         logger.error(error_msg)
         raise ValueError(error_msg)
@@ -1486,11 +1512,15 @@ def _add_baseline_comment(
 ) -> None:
     constants = _get_tfr_constants(config)
     previous_comment = getattr(tfr_obj, "comment", "")
+    baseline_sentinel = constants['baseline_sentinel']
     baseline_tag = (
-        f"{constants['baseline_sentinel']}mode={mode};"
+        f"{baseline_sentinel}mode={mode};"
         f"win=({baseline_start_clipped:.3f},{baseline_end_clipped:.3f})"
     )
-    tfr_obj.comment = f"{previous_comment} | {baseline_tag}" if previous_comment else baseline_tag
+    if previous_comment:
+        tfr_obj.comment = f"{previous_comment} | {baseline_tag}"
+    else:
+        tfr_obj.comment = baseline_tag
 
 
 def log_baseline_qc(
@@ -1515,7 +1545,8 @@ def log_baseline_qc(
     epoch_means = np.nanmean(base, axis=(1, 2, 3))
     med = float(np.nanmedian(epoch_means))
     mad = float(np.nanmedian(np.abs(epoch_means - med)))
-    divisor = abs(med) if abs(med) > constants["min_divisor"] else constants["min_divisor"]
+    min_divisor = constants["min_divisor"]
+    divisor = abs(med) if abs(med) > min_divisor else min_divisor
     rcv = float(constants["mad_scaling_factor"] * mad / divisor)
     n_time = int(len(idx))
     
@@ -1525,7 +1556,8 @@ def log_baseline_qc(
     )
     logger.info(msg)
     
-    if not np.isfinite(med_temporal_std) or not np.isfinite(rcv):
+    has_finite_metrics = np.isfinite(med_temporal_std) and np.isfinite(rcv)
+    if not has_finite_metrics:
         logger.warning("Baseline QC: non-finite metrics detected; baseline may be unstable.")
 
 
@@ -1589,17 +1621,20 @@ def _apply_crop_window(
     tmin_clip = max(tmin_req, tmin_avail)
     tmax_clip = min(tmax_req, tmax_avail)
     
-    if tmin_clip > tmax_clip:
+    is_invalid_window = tmin_clip > tmax_clip
+    if is_invalid_window:
         logger.warning(
             f"Requested crop window [{tmin_req}, {tmax_req}] invalid for available times "
             f"[{tmin_avail}, {tmax_avail}]; using full range."
         )
         tmin_clip, tmax_clip = tmin_avail, tmax_avail
-    elif tmin_clip != tmin_req or tmax_clip != tmax_req:
-        logger.info(
-            f"Clipped crop window from [{tmin_req}, {tmax_req}] to "
-            f"[{tmin_clip}, {tmax_clip}] to fit data range."
-        )
+    else:
+        was_clipped = tmin_clip != tmin_req or tmax_clip != tmax_req
+        if was_clipped:
+            logger.info(
+                f"Clipped crop window from [{tmin_req}, {tmax_req}] to "
+                f"[{tmin_clip}, {tmax_clip}] to fit data range."
+            )
     
     tfr_obj.crop(tmin=tmin_clip, tmax=tmax_clip)
 
@@ -1659,10 +1694,6 @@ def band_time_masks(
     return fmask, tmask
 
 
-# Import from canonical windowing module
-from eeg_pipeline.utils.analysis.windowing import time_mask, freq_mask
-
-
 def find_tfr_path(subject: str, task: str, deriv_root: Path) -> Optional[Path]:
     primary_path = deriv_root / f"sub-{subject}" / "eeg" / f"sub-{subject}_task-{task}_power_epo-tfr.h5"
     if primary_path.exists():
@@ -1699,7 +1730,7 @@ def compute_subject_tfr(
     workers: Optional[int] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[Optional["mne.time_frequency.EpochsTFR"], Optional[pd.DataFrame]]:
-    from ..data.loading import load_epochs_for_analysis
+    from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
     
     config = load_config()
     epochs, events_df = load_epochs_for_analysis(
@@ -1957,7 +1988,9 @@ def clip_time_range(times: np.ndarray, tmin_req: float, tmax_req: float) -> Opti
     tmin_clip = float(max(times.min(), tmin_req))
     tmax_clip = float(min(times.max(), tmax_req))
     
-    if not np.isfinite(tmin_clip) or not np.isfinite(tmax_clip) or (tmax_clip <= tmin_clip):
+    is_finite = np.isfinite(tmin_clip) and np.isfinite(tmax_clip)
+    is_valid_range = tmax_clip > tmin_clip
+    if not is_finite or not is_valid_range:
         return None
     
     return tmin_clip, tmax_clip
@@ -1988,8 +2021,6 @@ def clip_time_window(
     tfr_times: np.ndarray,
     logger: Optional[logging.Logger] = None,
 ) -> Optional[Tuple[float, float]]:
-    from .stats import _safe_float
-    
     tmin_req = _safe_float(time_window[0])
     tmax_req = _safe_float(time_window[1])
     tmin_avail = float(tfr_times[0])
@@ -1997,7 +2028,8 @@ def clip_time_window(
     tmin_clip = max(tmin_req, tmin_avail)
     tmax_clip = min(tmax_req, tmax_avail)
     
-    if tmin_clip > tmax_clip:
+    is_invalid_window = tmin_clip > tmax_clip
+    if is_invalid_window:
         if logger:
             logger.warning(
                 f"Requested window [{tmin_req}, {tmax_req}] outside TFR range "
@@ -2037,15 +2069,24 @@ def interpolate_to_reference_times(
     reference_times: np.ndarray,
     config: Optional[Any] = None
 ) -> np.ndarray:
-    if values.size == 0 or times.size == 0 or reference_times.size == 0:
+    has_empty_inputs = (
+        values.size == 0 or 
+        times.size == 0 or 
+        reference_times.size == 0
+    )
+    if has_empty_inputs:
         return np.full_like(reference_times, np.nan)
     
     constants = _get_tfr_constants(config)
     finite_mask = np.isfinite(values)
-    if finite_mask.sum() < constants["min_samples_for_stats"]:
+    n_finite = finite_mask.sum()
+    min_samples = constants["min_samples_for_stats"]
+    
+    if n_finite < min_samples:
         return np.full_like(reference_times, np.nan)
     
-    if finite_mask.sum() < len(values):
+    has_missing_values = n_finite < len(values)
+    if has_missing_values:
         values = np.interp(times, times[finite_mask], values[finite_mask])
     
     return np.interp(reference_times, times, values)
@@ -2089,14 +2130,16 @@ def extract_band_time_courses(
             values_logr = series_logr[time_mask_subj]
             values_ratio = series_ratio[time_mask_subj]
             
-            if not np.any(np.isfinite(values_logr)) and not np.any(np.isfinite(values_ratio)):
+            has_finite_logr = np.any(np.isfinite(values_logr))
+            has_finite_ratio = np.any(np.isfinite(values_ratio))
+            if not has_finite_logr and not has_finite_ratio:
                 continue
             
             values_logr_ref = interpolate_to_reference_times(values_logr, times_subj, reference_times, config=config)
             values_ratio_ref = interpolate_to_reference_times(values_ratio, times_subj, reference_times, config=config)
             
             band_timecourses_logr[band].append(values_logr_ref)
-            values_pct = 100.0 * (values_ratio_ref - 1.0)
+            values_pct = _PERCENT_TO_RATIO_DIVISOR * (values_ratio_ref - 1.0)
             band_timecourses_pct[band].append(values_pct)
     
     return band_timecourses_logr, band_timecourses_pct, reference_times
@@ -2137,8 +2180,6 @@ def extract_significant_roi_channels(ch_names: List[str], mask_vec: np.ndarray, 
 
 
 def extract_roi_from_tfr(avg_tfr, roi: str, roi_map: Optional[Dict[str, List[str]]], config) -> Optional[Any]:
-    import mne
-    
     if roi_map is not None:
         chs_all = roi_map.get(roi)
         if chs_all is not None:
@@ -2184,9 +2225,6 @@ def extract_roi_contrast_data(
     Do not use the output of this function for statistical tests that require
     trial-level variance.
     """
-    from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-    import mne
-    
     if power is None or ev is None:
         return None
     
@@ -2298,12 +2336,11 @@ def compute_itpc_map(tfr_data: np.ndarray, logger: Optional[logging.Logger] = No
     n_epochs, n_ch, n_freq, n_time = tfr_data.shape
     sum_real = np.zeros((n_ch, n_freq, n_time), dtype=np.float64)
     sum_imag = np.zeros((n_ch, n_freq, n_time), dtype=np.float64)
-    eps = 1e-12
 
     for epoch_idx in range(n_epochs):
         epoch = tfr_data[epoch_idx]
         # Normalize to unit magnitude to extract phase without extra angle call
-        amp = np.abs(epoch) + eps
+        amp = np.abs(epoch) + _EPSILON_MIN_VALUE
         unit = epoch / amp
         sum_real += unit.real
         sum_imag += unit.imag
@@ -2418,5 +2455,4 @@ __all__ = [
     "restrict_epochs_to_roi",
     "apply_baseline_to_tfr",
     "compute_tfr_morlet",
-    "process_temporal_bin",
 ]

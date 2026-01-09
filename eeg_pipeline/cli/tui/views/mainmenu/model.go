@@ -193,6 +193,20 @@ func min(a, b int) int {
 	return b
 }
 
+func animatedCursor(selected bool, ticker int) string {
+	if !selected {
+		return "   "
+	}
+
+	frames := []string{"▸", "▹", "▸", "▹"}
+	frame := frames[(ticker/2)%len(frames)]
+
+	return lipgloss.NewStyle().
+		Foreground(styles.Primary).
+		Bold(true).
+		Render(" " + frame + " ")
+}
+
 func (m *Model) handleUp() {
 	if m.inUtilities {
 		if m.utilityCursor > 0 {
@@ -400,7 +414,7 @@ func (m Model) renderPipelinesColumn() string {
 
 	for i, p := range pipelines {
 		isSelected := !m.inUtilities && i == m.pipelineCursor
-		lines = append(lines, m.renderPipelineItem(i, p, isSelected))
+		lines = append(lines, m.renderPipelineItem(p, isSelected))
 	}
 
 	return strings.Join(lines, "\n")
@@ -433,12 +447,7 @@ func (m Model) renderUtilityItem(u utilityItem, selected bool) string {
 	var item strings.Builder
 
 	// Selection indicator
-	cursor := "   "
-	if selected {
-		frames := []string{"▸", "▹", "▸", "▹"}
-		frame := frames[(m.ticker/2)%len(frames)]
-		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(" " + frame + " ")
-	}
+	cursor := animatedCursor(selected, m.ticker)
 
 	// Shortcut badge
 	shortcutStyle := lipgloss.NewStyle().Foreground(styles.Muted).Render("[" + u.shortcut + "]")
@@ -459,17 +468,11 @@ func (m Model) renderUtilityItem(u utilityItem, selected bool) string {
 	return item.String()
 }
 
-func (m Model) renderPipelineItem(_ int, p pipelineItem, selected bool) string {
+func (m Model) renderPipelineItem(p pipelineItem, selected bool) string {
 	var item strings.Builder
 
 	// Selection indicator with animation
-	cursor := "   "
-	if selected {
-		// Animate the cursor
-		frames := []string{"▸", "▹", "▸", "▹"}
-		frame := frames[(m.ticker/2)%len(frames)]
-		cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(" " + frame + " ")
-	}
+	cursor := animatedCursor(selected, m.ticker)
 
 	// Shortcut badge
 	shortcutStyle := lipgloss.NewStyle().

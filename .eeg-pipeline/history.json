@@ -1,0 +1,31 @@
+{
+  "executions": [
+    {
+      "id": "20260107231134",
+      "command": "eeg-pipeline behavior compute --computations trial_table trial_table --bids-root /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/data/bids_output --deriv-root /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/data/derivatives --trial-table-format tsv --task thermalactive --subject 0000 --dry-run",
+      "pipeline": "behavior",
+      "mode": "compute",
+      "start_time": "2026-01-07T23:11:10.860348-05:00",
+      "end_time": "2026-01-07T23:11:34.883196-05:00",
+      "duration_secs": 24.022947125,
+      "exit_code": 0,
+      "success": true,
+      "subject_count": 0,
+      "error_count": 0
+    },
+    {
+      "id": "20260108220718",
+      "command": "eeg-pipeline features compute --bids-root /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/data/bids_output --deriv-root /Users/joduq24/Desktop/EEG_fMRI_Pipeline/eeg_pipeline/data/derivatives --time-range baseline -5 -0.001 --time-range ramp 0.001 3 --time-range active 3.001 10.450 --time-range full 0.001 10.450 --connectivity-measures wpli aec plv pli --conn-output-level full --no-conn-graph-metrics --conn-graph-prop 0.10 --conn-window-len 1.00 --conn-window-step 0.50 --conn-aec-mode orth --pac-phase-range 4.0 8.0 --pac-amp-range 30.0 80.0 --pac-method mvl --pac-min-epochs 2 --pac-pairs theta:gamma alpha:gamma --aperiodic-range 2.0 40.0 --aperiodic-peak-z 3.50 --aperiodic-min-r2 0.600 --aperiodic-min-points 5 --pe-order 3 --pe-delay 1 --erp-baseline --no-erp-allow-no-baseline --erp-components n1=0.10-0.20 n2=0.20-0.35 p2=0.35-0.50 --erp-lowpass-hz 30.0 --burst-threshold-method percentile --burst-threshold-percentile 95.0 --burst-min-duration 50 --burst-bands beta gamma --power-require-baseline --power-baseline-mode logratio --spectral-edge-percentile 0.95 --ratio-pairs theta:beta theta:alpha alpha:beta delta:alpha delta:theta --pac-source tfr --min-epochs 10 --no-fail-on-missing-windows --fail-on-missing-named-window --save-subject-level-features --task thermalactive --subject 0001",
+      "pipeline": "features",
+      "mode": "compute",
+      "start_time": "2026-01-08T22:07:08.155785-05:00",
+      "end_time": "2026-01-08T22:07:18.918475-05:00",
+      "duration_secs": 10.763340041,
+      "exit_code": 1,
+      "success": false,
+      "subject_count": 0,
+      "error_count": 0
+    }
+  ],
+  "max_entries": 50
+}

@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import logging
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict, Any
 
@@ -43,6 +41,31 @@ def _extract_window_features(
     aligned_epochs: Dict[str, Any],
     windows: List[Tuple[float, float]],
 ) -> np.ndarray:
+    """Compute mean channel activity within specified time windows for each trial.
+
+    Parameters
+    ----------
+    data
+        Array of shape ``(n_trials, n_channels, n_timepoints)`` containing the
+        time-domain data for each trial.
+    trial_records
+        List of ``(subject, epoch_index)`` tuples that index into
+        ``aligned_epochs`` for each trial in ``data``.
+    aligned_epochs
+        Mapping from subject ID to MNE ``Epochs`` objects that have already been
+        restricted to a common channel set.
+    windows
+        List of ``(window_start, window_end)`` time boundaries (in seconds) in
+        the *epochs* time coordinate system.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(n_trials, n_windows, n_channels)`` where each entry
+        contains the mean activity of a channel within a given time window for a
+        given trial. Entries are ``np.nan`` when the requested window lies
+        outside the available time range or when it contains no samples.
+    """
     n_trials, n_channels, n_timepoints = data.shape
     n_windows = len(windows)
     
@@ -78,17 +101,60 @@ def time_generalization_regression(
     n_perm: int = 0,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run time-generalization regression with LOSO cross-validation.
+
+    This function trains ridge regression models in one time window and tests
+    them in all other windows, yielding time-by-time generalization matrices of
+    prediction performance. Group labels are taken as subject identifiers and a
+    leave-one-subject-out (LOSO) scheme is used.
+
+    Parameters
+    ----------
+    deriv_root
+        Root directory containing derivative EEG data and behavioral targets.
+    subjects
+        Optional list of subject identifiers to include. If ``None``, all
+        available subjects are used.
+    task
+        Task identifier string used when loading epochs and targets.
+    results_dir
+        If provided, results are saved as a compressed ``.npz`` archive in this
+        directory. When ``None``, no files are written.
+    config_dict
+        Optional configuration dictionary. When ``None``, configuration is
+        loaded via :func:`load_config`.
+    n_perm
+        Number of label-permutation runs used to build a null distribution for
+        inference. When ``0``, no permutations are performed and no
+        inferential statistics are computed.
+    seed
+        Seed for the permutation random number generator.
+
+    Returns
+    -------
+    tg_r
+        Time-generalization matrix of Fisher-z–averaged Pearson correlations
+        (shape ``(n_windows, n_windows)``). May be empty when no valid folds
+        are available.
+    tg_r2
+        Corresponding matrix of averaged coefficient of determination
+        (R²) scores with the same shape as ``tg_r``.
+    window_centers_out
+        One-dimensional array of window center times (in seconds) used for both
+        axes of the time-generalization matrices. Empty if no valid windows are
+        available.
+    """
     tuples, _ = load_epochs_with_targets(deriv_root, subjects=subjects, task=task)
     trial_records, y_all_arr, groups_arr, subj_to_epochs, subj_to_y = prepare_trial_records_from_epochs(tuples)
 
-    config_local = config_dict or load_config()
-    min_subjects_for_loso = config_local.get("analysis.min_subjects_for_group", 2)
+    config = config_dict or load_config()
+    min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
     if len(np.unique(groups_arr)) < min_subjects_for_loso:
         raise RuntimeError(f"Need at least {min_subjects_for_loso} subjects for LOSO.")
 
-    active_window = tuple(config_local.get("machine_learning.analysis.time_generalization.active_window", [3.0, 10.5]))
-    window_len = config_local.get("machine_learning.analysis.time_generalization.window_len", 0.75)
-    step = config_local.get("machine_learning.analysis.time_generalization.step", 0.25)
+    active_window = tuple(config.get("machine_learning.analysis.time_generalization.active_window", [3.0, 10.5]))
+    window_len = config.get("machine_learning.analysis.time_generalization.window_len", 0.75)
+    step = config.get("machine_learning.analysis.time_generalization.step", 0.25)
 
     tmin_pl, tmax_pl = active_window
     windows = build_time_windows(window_len, step, tmin_pl, tmax_pl)
@@ -101,7 +167,7 @@ def time_generalization_regression(
     n_folds_total = len(list(logo.split(np.arange(len(trial_records)), groups=groups_arr)))
     
     def _run_time_gen(y_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        cfg = config_local
+        cfg = config
         fold_mats_r = []
         fold_mats_r2 = []
         fold_counts = []
@@ -237,7 +303,7 @@ def time_generalization_regression(
                 f"Only {n_folds_successful}/{n_folds_total} folds ({coverage_pct:.1f}%) succeeded. "
                 f"Time-generalization matrices are based on a subset of folds."
             )
-            min_subjects_for_loso = config_local.get("analysis.min_subjects_for_group", 2)
+            min_subjects_for_loso = config.get("analysis.min_subjects_for_group", 2)
             if n_folds_successful < min_subjects_for_loso:
                 raise RuntimeError(
                     f"Insufficient fold coverage ({n_folds_successful}/{n_folds_total}) "
@@ -280,7 +346,7 @@ def time_generalization_regression(
                 if total_count < min_count_per_cell:
                     continue
                 
-                clip_min, clip_max = get_fisher_z_clip_values(config_local)
+                clip_min, clip_max = get_fisher_z_clip_values(config)
                 r_clipped = np.clip(valid_r, clip_min, clip_max)
                 r_z = np.arctanh(r_clipped)
                 
@@ -375,7 +441,7 @@ def time_generalization_regression(
         logger.info(f"Time-generalization max-stat (FWER): {n_sig_maxstat}/{valid_mask.sum()} significant cells (threshold={max_stat_threshold:.3f})")
         
         # Cluster-based correction
-        cluster_threshold = config_local.get("machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
+        cluster_threshold = config.get("machine_learning.analysis.time_generalization.cluster_threshold", 0.05)
         from scipy import ndimage
         
         uncorrected_sig = p_matrix < cluster_threshold

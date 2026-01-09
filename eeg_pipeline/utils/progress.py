@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional, List, Any
+from typing import Optional, List
 from contextlib import contextmanager
 
 
@@ -77,6 +77,13 @@ class PipelineProgress:
     _started: bool = False
     _finished: bool = False
     
+    def __post_init__(self) -> None:
+        """Validate initialization parameters."""
+        if self.total <= 0:
+            raise ValueError(f"total must be positive, got {self.total}")
+        if self.log_every <= 0:
+            raise ValueError(f"log_every must be positive, got {self.log_every}")
+    
     def start(self) -> "PipelineProgress":
         """Start the progress tracker."""
         self.start_time = time.time()
@@ -103,29 +110,12 @@ class PipelineProgress:
         self.current += 1
         self.step_times.append(time.time())
         
-        # Only log at specified intervals or on last step
-        if self.current % self.log_every == 0 or self.current == self.total:
-            elapsed = time.time() - self.start_time
-            
-            # Calculate ETA
-            if self.current > 0:
-                avg_time_per_step = elapsed / self.current
-                remaining_steps = self.total - self.current
-                eta = avg_time_per_step * remaining_steps
-            else:
-                eta = 0
-            
-            # Format message
-            pct = (self.current / self.total) * 100
-            msg = f"[{self.desc}] {self.current}/{self.total} ({pct:.0f}%)"
-            
-            if eta > 0:
-                msg += f" | ETA: {self._format_duration(eta)}"
-            
-            if message:
-                msg += f" | {message}"
-            
-            self.logger.info(msg)
+        should_log = (
+            self.current % self.log_every == 0 or self.current == self.total
+        )
+        if should_log:
+            log_message = self._build_progress_message(message)
+            self.logger.info(log_message)
     
     def finish(self) -> float:
         """
@@ -137,10 +127,10 @@ class PipelineProgress:
             Total duration in seconds
         """
         if self._finished:
-            return time.time() - self.start_time
+            return self.elapsed
         
         self._finished = True
-        duration = time.time() - self.start_time
+        duration = self.elapsed
         
         self.logger.info(
             f"[{self.desc}] Completed {self.current}/{self.total} steps "
@@ -157,6 +147,32 @@ class PipelineProgress:
         """Context manager exit."""
         self.finish()
     
+    def _calculate_eta(self) -> float:
+        """Calculate estimated time remaining."""
+        if self.current == 0:
+            return 0.0
+        
+        elapsed = self.elapsed
+        avg_time_per_step = elapsed / self.current
+        remaining_steps = self.total - self.current
+        return avg_time_per_step * remaining_steps
+    
+    def _build_progress_message(self, message: Optional[str] = None) -> str:
+        """Build formatted progress log message."""
+        percentage = self.percent_complete
+        log_message = (
+            f"[{self.desc}] {self.current}/{self.total} ({percentage:.0f}%)"
+        )
+        
+        eta = self._calculate_eta()
+        if eta > 0:
+            log_message += f" | ETA: {self._format_duration(eta)}"
+        
+        if message:
+            log_message += f" | {message}"
+        
+        return log_message
+    
     @staticmethod
     def _format_duration(seconds: float) -> str:
         """Format duration as human-readable string."""
@@ -164,8 +180,8 @@ class PipelineProgress:
             return f"{seconds:.1f}s"
         elif seconds < 3600:
             minutes = int(seconds // 60)
-            secs = seconds % 60
-            return f"{minutes}m {secs:.0f}s"
+            seconds_remaining = seconds % 60
+            return f"{minutes}m {seconds_remaining:.0f}s"
         else:
             hours = int(seconds // 3600)
             minutes = int((seconds % 3600) // 60)
@@ -207,15 +223,20 @@ class BatchProgress:
     """
     
     subjects: List[str] = field(default_factory=list)
-    logger: logging.Logger = None
+    logger: Optional[logging.Logger] = None
     desc: str = "Batch"
     
     # State
     current_idx: int = 0
     start_time: float = field(default_factory=time.time)
-    subject_times: dict = field(default_factory=dict)
+    subject_times: dict[str, float] = field(default_factory=dict)
     
     _started: bool = False
+    
+    def __post_init__(self) -> None:
+        """Validate initialization parameters."""
+        if self.logger is None:
+            raise ValueError("logger is required")
     
     def start(self) -> "BatchProgress":
         """Start batch processing."""
@@ -240,15 +261,15 @@ class BatchProgress:
             self.start()
         
         self.current_idx += 1
-        start = time.time()
+        start_time = time.time()
         
-        pct = (self.current_idx / len(self.subjects)) * 100
+        percentage = (self.current_idx / len(self.subjects)) * 100
         self.logger.info(
             f"[{self.desc}] Processing sub-{subject} "
-            f"({self.current_idx}/{len(self.subjects)}, {pct:.0f}%)"
+            f"({self.current_idx}/{len(self.subjects)}, {percentage:.0f}%)"
         )
         
-        return start
+        return start_time
     
     def finish_subject(self, subject: str, start_time: float) -> None:
         """Mark completion of subject processing."""
@@ -257,31 +278,36 @@ class BatchProgress:
         
         self.logger.info(f"[{self.desc}] sub-{subject} completed in {duration:.1f}s")
     
-    def finish(self) -> dict:
+    def finish(self) -> dict[str, float | int]:
         """
         Mark batch as finished.
         
         Returns
         -------
         dict
-            Summary statistics
+            Summary statistics with keys: total_duration_s, n_subjects,
+            n_completed, mean_duration_s, min_duration_s, max_duration_s
         """
         total_duration = time.time() - self.start_time
         
         times = list(self.subject_times.values())
+        n_completed = len(self.subject_times)
+        n_subjects = len(self.subjects)
+        
         summary = {
             "total_duration_s": total_duration,
-            "n_subjects": len(self.subjects),
-            "n_completed": len(self.subject_times),
-            "mean_duration_s": sum(times) / len(times) if times else 0,
-            "min_duration_s": min(times) if times else 0,
-            "max_duration_s": max(times) if times else 0,
+            "n_subjects": n_subjects,
+            "n_completed": n_completed,
+            "mean_duration_s": sum(times) / n_completed if n_completed > 0 else 0.0,
+            "min_duration_s": min(times) if times else 0.0,
+            "max_duration_s": max(times) if times else 0.0,
         }
         
+        mean_duration = summary["mean_duration_s"]
         self.logger.info(
-            f"[{self.desc}] Batch completed: {summary['n_completed']}/{summary['n_subjects']} subjects "
+            f"[{self.desc}] Batch completed: {n_completed}/{n_subjects} subjects "
             f"in {PipelineProgress._format_duration(total_duration)} "
-            f"(avg {summary['mean_duration_s']:.1f}s/subject)"
+            f"(avg {mean_duration:.1f}s/subject)"
         )
         
         return summary
@@ -329,7 +355,11 @@ def track_progress(
         progress.finish()
 
 
-def log_step_time(logger: logging.Logger, step_name: str, start_time: float) -> None:
+def log_step_time(
+    logger: logging.Logger,
+    step_name: str,
+    start_time: float,
+) -> None:
     """
     Log the time taken for a step.
     
@@ -343,5 +373,6 @@ def log_step_time(logger: logging.Logger, step_name: str, start_time: float) -> 
         Start time from time.time()
     """
     duration = time.time() - start_time
-    logger.info(f"{step_name} completed in {PipelineProgress._format_duration(duration)}")
+    formatted_duration = PipelineProgress._format_duration(duration)
+    logger.info(f"{step_name} completed in {formatted_duration}")
 

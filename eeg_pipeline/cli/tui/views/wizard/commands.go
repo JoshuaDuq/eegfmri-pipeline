@@ -39,25 +39,20 @@ func (m Model) isCategorySelected(category string) bool {
 
 func (m Model) SelectedComputations() []string {
 	var result []string
-	hasAnyComputation := false
 
-	// Primary computations
 	for i, sel := range m.computationSelected {
 		if sel && i < len(m.computations) {
 			result = append(result, m.computations[i].Key)
-			hasAnyComputation = true
-		}
-	}
-	// Post computations (includes lag_features, pain_residual, temperature_models)
-	for i, sel := range m.postComputationSelected {
-		if sel && i < len(m.postComputations) {
-			result = append(result, m.postComputations[i].Key)
-			hasAnyComputation = true
 		}
 	}
 
-	// Auto-include trial_table if ANY computation is selected
-	// (trial_table is the foundational data structure ALL analyses need)
+	for i, sel := range m.postComputationSelected {
+		if sel && i < len(m.postComputations) {
+			result = append(result, m.postComputations[i].Key)
+		}
+	}
+
+	hasAnyComputation := len(result) > 0
 	if hasAnyComputation {
 		result = append(result, "trial_table")
 	}
@@ -212,20 +207,16 @@ func (m Model) selectedConnectivityMeasures() []string {
 func (m Model) getFilteredSubjects() []types.SubjectStatus {
 	var filtered []types.SubjectStatus
 	filterLower := strings.ToLower(m.subjectFilter)
+	hasFilter := m.subjectFilter != ""
 
 	for _, s := range m.subjects {
-		if m.subjectFilter != "" && !strings.Contains(strings.ToLower(s.ID), filterLower) {
+		if hasFilter && !strings.Contains(strings.ToLower(s.ID), filterLower) {
 			continue
 		}
 
 		if m.showOnlyValid {
-			valid := false
-			if m.Pipeline == types.PipelinePlotting {
-				valid, _ = m.validatePlottingSubject(s)
-			} else {
-				valid, _ = m.Pipeline.ValidateSubject(s)
-			}
-			if !valid {
+			isValid := m.isSubjectValid(s)
+			if !isValid {
 				continue
 			}
 		}
@@ -233,28 +224,111 @@ func (m Model) getFilteredSubjects() []types.SubjectStatus {
 		filtered = append(filtered, s)
 	}
 
-	if len(filtered) == 0 && m.subjectFilter == "" && !m.showOnlyValid {
+	noFiltersApplied := !hasFilter && !m.showOnlyValid
+	if len(filtered) == 0 && noFiltersApplied {
 		return m.subjects
 	}
 
 	return filtered
 }
 
+func (m Model) isSubjectValid(s types.SubjectStatus) bool {
+	if m.Pipeline == types.PipelinePlotting {
+		valid, _ := m.validatePlottingSubject(s)
+		return valid
+	}
+	valid, _ := m.Pipeline.ValidateSubject(s)
+	return valid
+}
+
 ///////////////////////////////////////////////////////////////////
 // Command Builder
 ///////////////////////////////////////////////////////////////////
 
+// argBuilder provides helper methods for building command arguments
+type argBuilder struct {
+	args []string
+}
+
+func newArgBuilder() *argBuilder {
+	return &argBuilder{args: make([]string, 0)}
+}
+
+func (ab *argBuilder) addIfNonZero(flag string, value float64, format string) {
+	if value != 0 {
+		ab.args = append(ab.args, flag, fmt.Sprintf(format, value))
+	}
+}
+
+func (ab *argBuilder) addIfNonZeroInt(flag string, value int) {
+	if value != 0 {
+		ab.args = append(ab.args, flag, fmt.Sprintf("%d", value))
+	}
+}
+
+func (ab *argBuilder) addIfNonEmpty(flag string, value string) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		ab.args = append(ab.args, flag, trimmed)
+	}
+}
+
+func (ab *argBuilder) addBoolFlag(flag string, value bool) {
+	if value {
+		ab.args = append(ab.args, flag)
+	} else {
+		flagName := strings.TrimPrefix(flag, "--")
+		ab.args = append(ab.args, "--no-"+flagName)
+	}
+}
+
+func (ab *argBuilder) addOptionalBoolFlag(flag string, value *bool) {
+	if value != nil {
+		ab.addBoolFlag(flag, *value)
+	}
+}
+
+func (ab *argBuilder) addListFlag(flag string, values []string) {
+	if len(values) > 0 {
+		ab.args = append(ab.args, flag)
+		ab.args = append(ab.args, values...)
+	}
+}
+
+func (ab *argBuilder) addSpaceListFlag(flag string, spec string) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed != "" {
+		ab.args = append(ab.args, flag)
+		ab.args = append(ab.args, splitSpaceList(trimmed)...)
+	}
+}
+
+func (ab *argBuilder) addSpaceListFlagWithLengthCheck(flag string, spec string, expectedLength int) {
+	trimmed := strings.TrimSpace(spec)
+	if trimmed != "" {
+		vals := splitSpaceList(trimmed)
+		if len(vals) == expectedLength {
+			ab.args = append(ab.args, flag)
+			ab.args = append(ab.args, vals...)
+		}
+	}
+}
+
+func (ab *argBuilder) build() []string {
+	return ab.args
+}
+
 func (m Model) BuildCommand() string {
 	parts := []string{"eeg-pipeline", m.Pipeline.CLICommand()}
 
-	// Positional mode (only for certain pipelines)
-	needsMode := false
-	switch m.Pipeline {
-	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior, types.PipelinePlotting, types.PipelineML:
-		needsMode = true
-	}
+	needsMode := m.Pipeline == types.PipelinePreprocessing ||
+		m.Pipeline == types.PipelineFeatures ||
+		m.Pipeline == types.PipelineBehavior ||
+		m.Pipeline == types.PipelinePlotting ||
+		m.Pipeline == types.PipelineML
 
-	if needsMode && len(m.modeOptions) > m.modeIndex {
+	hasValidModeIndex := len(m.modeOptions) > m.modeIndex
+	if needsMode && hasValidModeIndex {
 		parts = append(parts, m.modeOptions[m.modeIndex])
 	}
 
@@ -337,14 +411,11 @@ func (m Model) BuildCommand() string {
 		}
 		parts = []string{"eeg-pipeline", "utilities", mode}
 	} else if m.Pipeline != types.PipelinePlotting {
-		// Features pipeline category selection
 		cats := m.SelectedCategories()
 		if len(cats) > 0 && len(cats) < len(m.categories) {
 			parts = append(parts, "--categories")
 			parts = append(parts, cats...)
 		}
-	} else {
-		// Plotting pipeline handled above
 	}
 
 	if (m.Pipeline == types.PipelineFeatures || m.Pipeline == types.PipelineBehavior) && m.modeOptions[m.modeIndex] == styles.ModeCompute {
@@ -355,13 +426,11 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	// Path overrides for analysis pipelines
-	needsPaths := false
-	switch m.Pipeline {
-	case types.PipelinePreprocessing, types.PipelineFeatures, types.PipelineBehavior,
-		types.PipelineML, types.PipelinePlotting:
-		needsPaths = true
-	}
+	needsPaths := m.Pipeline == types.PipelinePreprocessing ||
+		m.Pipeline == types.PipelineFeatures ||
+		m.Pipeline == types.PipelineBehavior ||
+		m.Pipeline == types.PipelineML ||
+		m.Pipeline == types.PipelinePlotting
 
 	if needsPaths {
 		if m.bidsRoot != "" {
@@ -388,16 +457,9 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, spatial...)
 		}
 
-		// Time ranges
 		for _, tr := range m.TimeRanges {
-			tmin := tr.Tmin
-			if tmin == "" {
-				tmin = "none"
-			}
-			tmax := tr.Tmax
-			if tmax == "" {
-				tmax = "none"
-			}
+			tmin := normalizeTimeRangeValue(tr.Tmin)
+			tmax := normalizeTimeRangeValue(tr.Tmax)
 			parts = append(parts, "--time-range", tr.Name, tmin, tmax)
 		}
 	}
@@ -427,15 +489,14 @@ func (m Model) BuildCommand() string {
 	}
 
 	subjs := m.SelectedSubjectIDs()
-	if len(subjs) == 0 || len(subjs) == len(m.subjects) {
+	allSubjectsSelected := len(subjs) == 0 || len(subjs) == len(m.subjects)
+	if allSubjectsSelected {
 		parts = append(parts, "--all-subjects")
 	} else if len(subjs) <= 10 {
 		for _, s := range subjs {
 			parts = append(parts, "--subject", s)
 		}
 	} else {
-		// Use comma-separated list for >10 subjects instead of --all-subjects
-		// This preserves the user's exact selection
 		parts = append(parts, "--subjects", strings.Join(subjs, ","))
 	}
 
@@ -448,608 +509,214 @@ func (m Model) BuildCommand() string {
 }
 
 func (m Model) buildPlottingAdvancedArgs() []string {
-	var args []string
-
 	if m.useDefaultAdvanced {
-		return args
+		return []string{}
 	}
+
+	ab := newArgBuilder()
 
 	// Plot defaults / styling overrides (mirrors eeg_pipeline/cli/commands/plotting.py)
-	if strings.TrimSpace(m.plotBboxInches) != "" {
-		args = append(args, "--bbox-inches", strings.TrimSpace(m.plotBboxInches))
-	}
-	if m.plotPadInches != 0 {
-		args = append(args, "--pad-inches", fmt.Sprintf("%.4f", m.plotPadInches))
-	}
+	ab.addIfNonEmpty("--bbox-inches", m.plotBboxInches)
+	ab.addIfNonZero("--pad-inches", m.plotPadInches, "%.4f")
 
 	// Fonts
-	if strings.TrimSpace(m.plotFontFamily) != "" {
-		args = append(args, "--font-family", strings.TrimSpace(m.plotFontFamily))
-	}
-	if strings.TrimSpace(m.plotFontWeight) != "" {
-		args = append(args, "--font-weight", strings.TrimSpace(m.plotFontWeight))
-	}
-	if m.plotFontSizeSmall != 0 {
-		args = append(args, "--font-size-small", fmt.Sprintf("%d", m.plotFontSizeSmall))
-	}
-	if m.plotFontSizeMedium != 0 {
-		args = append(args, "--font-size-medium", fmt.Sprintf("%d", m.plotFontSizeMedium))
-	}
-	if m.plotFontSizeLarge != 0 {
-		args = append(args, "--font-size-large", fmt.Sprintf("%d", m.plotFontSizeLarge))
-	}
-	if m.plotFontSizeTitle != 0 {
-		args = append(args, "--font-size-title", fmt.Sprintf("%d", m.plotFontSizeTitle))
-	}
-	if m.plotFontSizeAnnotation != 0 {
-		args = append(args, "--font-size-annotation", fmt.Sprintf("%d", m.plotFontSizeAnnotation))
-	}
-	if m.plotFontSizeLabel != 0 {
-		args = append(args, "--font-size-label", fmt.Sprintf("%d", m.plotFontSizeLabel))
-	}
-	if m.plotFontSizeYLabel != 0 {
-		args = append(args, "--font-size-ylabel", fmt.Sprintf("%d", m.plotFontSizeYLabel))
-	}
-	if m.plotFontSizeSuptitle != 0 {
-		args = append(args, "--font-size-suptitle", fmt.Sprintf("%d", m.plotFontSizeSuptitle))
-	}
-	if m.plotFontSizeFigureTitle != 0 {
-		args = append(args, "--font-size-figure-title", fmt.Sprintf("%d", m.plotFontSizeFigureTitle))
-	}
+	ab.addIfNonEmpty("--font-family", m.plotFontFamily)
+	ab.addIfNonEmpty("--font-weight", m.plotFontWeight)
+	ab.addIfNonZeroInt("--font-size-small", m.plotFontSizeSmall)
+	ab.addIfNonZeroInt("--font-size-medium", m.plotFontSizeMedium)
+	ab.addIfNonZeroInt("--font-size-large", m.plotFontSizeLarge)
+	ab.addIfNonZeroInt("--font-size-title", m.plotFontSizeTitle)
+	ab.addIfNonZeroInt("--font-size-annotation", m.plotFontSizeAnnotation)
+	ab.addIfNonZeroInt("--font-size-label", m.plotFontSizeLabel)
+	ab.addIfNonZeroInt("--font-size-ylabel", m.plotFontSizeYLabel)
+	ab.addIfNonZeroInt("--font-size-suptitle", m.plotFontSizeSuptitle)
+	ab.addIfNonZeroInt("--font-size-figure-title", m.plotFontSizeFigureTitle)
 
 	// Layout
-	if strings.TrimSpace(m.plotLayoutTightRectSpec) != "" {
-		vals := splitSpaceList(m.plotLayoutTightRectSpec)
-		if len(vals) == 4 {
-			args = append(args, "--layout-tight-rect")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotLayoutTightRectMicrostateSpec) != "" {
-		vals := splitSpaceList(m.plotLayoutTightRectMicrostateSpec)
-		if len(vals) == 4 {
-			args = append(args, "--layout-tight-rect-microstate")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotGridSpecWidthRatiosSpec) != "" {
-		args = append(args, "--gridspec-width-ratios")
-		args = append(args, splitSpaceList(m.plotGridSpecWidthRatiosSpec)...)
-	}
-	if strings.TrimSpace(m.plotGridSpecHeightRatiosSpec) != "" {
-		args = append(args, "--gridspec-height-ratios")
-		args = append(args, splitSpaceList(m.plotGridSpecHeightRatiosSpec)...)
-	}
-	if m.plotGridSpecHspace != 0 {
-		args = append(args, "--gridspec-hspace", fmt.Sprintf("%.4f", m.plotGridSpecHspace))
-	}
-	if m.plotGridSpecWspace != 0 {
-		args = append(args, "--gridspec-wspace", fmt.Sprintf("%.4f", m.plotGridSpecWspace))
-	}
-	if m.plotGridSpecLeft != 0 {
-		args = append(args, "--gridspec-left", fmt.Sprintf("%.4f", m.plotGridSpecLeft))
-	}
-	if m.plotGridSpecRight != 0 {
-		args = append(args, "--gridspec-right", fmt.Sprintf("%.4f", m.plotGridSpecRight))
-	}
-	if m.plotGridSpecTop != 0 {
-		args = append(args, "--gridspec-top", fmt.Sprintf("%.4f", m.plotGridSpecTop))
-	}
-	if m.plotGridSpecBottom != 0 {
-		args = append(args, "--gridspec-bottom", fmt.Sprintf("%.4f", m.plotGridSpecBottom))
-	}
+	ab.addSpaceListFlagWithLengthCheck("--layout-tight-rect", m.plotLayoutTightRectSpec, 4)
+	ab.addSpaceListFlagWithLengthCheck("--layout-tight-rect-microstate", m.plotLayoutTightRectMicrostateSpec, 4)
+	ab.addSpaceListFlag("--gridspec-width-ratios", m.plotGridSpecWidthRatiosSpec)
+	ab.addSpaceListFlag("--gridspec-height-ratios", m.plotGridSpecHeightRatiosSpec)
+	ab.addIfNonZero("--gridspec-hspace", m.plotGridSpecHspace, "%.4f")
+	ab.addIfNonZero("--gridspec-wspace", m.plotGridSpecWspace, "%.4f")
+	ab.addIfNonZero("--gridspec-left", m.plotGridSpecLeft, "%.4f")
+	ab.addIfNonZero("--gridspec-right", m.plotGridSpecRight, "%.4f")
+	ab.addIfNonZero("--gridspec-top", m.plotGridSpecTop, "%.4f")
+	ab.addIfNonZero("--gridspec-bottom", m.plotGridSpecBottom, "%.4f")
 
 	// Figure sizes
-	if strings.TrimSpace(m.plotFigureSizeStandardSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeStandardSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-standard")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeMediumSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeMediumSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-medium")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeSmallSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeSmallSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-small")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeSquareSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeSquareSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-square")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeWideSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeWideSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-wide")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeTFRSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeTFRSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-tfr")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotFigureSizeTopomapSpec) != "" {
-		vals := splitSpaceList(m.plotFigureSizeTopomapSpec)
-		if len(vals) == 2 {
-			args = append(args, "--figure-size-topomap")
-			args = append(args, vals...)
-		}
-	}
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-standard", m.plotFigureSizeStandardSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-medium", m.plotFigureSizeMediumSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-small", m.plotFigureSizeSmallSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-square", m.plotFigureSizeSquareSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-wide", m.plotFigureSizeWideSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-tfr", m.plotFigureSizeTFRSpec, 2)
+	ab.addSpaceListFlagWithLengthCheck("--figure-size-topomap", m.plotFigureSizeTopomapSpec, 2)
 
 	// Colors
-	if strings.TrimSpace(m.plotColorPain) != "" {
-		args = append(args, "--color-condition-2", strings.TrimSpace(m.plotColorPain))
-	}
-	if strings.TrimSpace(m.plotColorNonpain) != "" {
-		args = append(args, "--color-condition-1", strings.TrimSpace(m.plotColorNonpain))
-	}
-	if strings.TrimSpace(m.plotColorSignificant) != "" {
-		args = append(args, "--color-significant", strings.TrimSpace(m.plotColorSignificant))
-	}
-	if strings.TrimSpace(m.plotColorNonsignificant) != "" {
-		args = append(args, "--color-nonsignificant", strings.TrimSpace(m.plotColorNonsignificant))
-	}
-	if strings.TrimSpace(m.plotColorGray) != "" {
-		args = append(args, "--color-gray", strings.TrimSpace(m.plotColorGray))
-	}
-	if strings.TrimSpace(m.plotColorLightGray) != "" {
-		args = append(args, "--color-light-gray", strings.TrimSpace(m.plotColorLightGray))
-	}
-	if strings.TrimSpace(m.plotColorBlack) != "" {
-		args = append(args, "--color-black", strings.TrimSpace(m.plotColorBlack))
-	}
-	if strings.TrimSpace(m.plotColorBlue) != "" {
-		args = append(args, "--color-blue", strings.TrimSpace(m.plotColorBlue))
-	}
-	if strings.TrimSpace(m.plotColorRed) != "" {
-		args = append(args, "--color-red", strings.TrimSpace(m.plotColorRed))
-	}
-	if strings.TrimSpace(m.plotColorNetworkNode) != "" {
-		args = append(args, "--color-network-node", strings.TrimSpace(m.plotColorNetworkNode))
-	}
+	ab.addIfNonEmpty("--color-condition-2", m.plotColorPain)
+	ab.addIfNonEmpty("--color-condition-1", m.plotColorNonpain)
+	ab.addIfNonEmpty("--color-significant", m.plotColorSignificant)
+	ab.addIfNonEmpty("--color-nonsignificant", m.plotColorNonsignificant)
+	ab.addIfNonEmpty("--color-gray", m.plotColorGray)
+	ab.addIfNonEmpty("--color-light-gray", m.plotColorLightGray)
+	ab.addIfNonEmpty("--color-black", m.plotColorBlack)
+	ab.addIfNonEmpty("--color-blue", m.plotColorBlue)
+	ab.addIfNonEmpty("--color-red", m.plotColorRed)
+	ab.addIfNonEmpty("--color-network-node", m.plotColorNetworkNode)
 
 	// Alpha
-	if m.plotAlphaGrid != 0 {
-		args = append(args, "--alpha-grid", fmt.Sprintf("%.4f", m.plotAlphaGrid))
-	}
-	if m.plotAlphaFill != 0 {
-		args = append(args, "--alpha-fill", fmt.Sprintf("%.4f", m.plotAlphaFill))
-	}
-	if m.plotAlphaCI != 0 {
-		args = append(args, "--alpha-ci", fmt.Sprintf("%.4f", m.plotAlphaCI))
-	}
-	if m.plotAlphaCILine != 0 {
-		args = append(args, "--alpha-ci-line", fmt.Sprintf("%.4f", m.plotAlphaCILine))
-	}
-	if m.plotAlphaTextBox != 0 {
-		args = append(args, "--alpha-text-box", fmt.Sprintf("%.4f", m.plotAlphaTextBox))
-	}
-	if m.plotAlphaViolinBody != 0 {
-		args = append(args, "--alpha-violin-body", fmt.Sprintf("%.4f", m.plotAlphaViolinBody))
-	}
-	if m.plotAlphaRidgeFill != 0 {
-		args = append(args, "--alpha-ridge-fill", fmt.Sprintf("%.4f", m.plotAlphaRidgeFill))
-	}
+	ab.addIfNonZero("--alpha-grid", m.plotAlphaGrid, "%.4f")
+	ab.addIfNonZero("--alpha-fill", m.plotAlphaFill, "%.4f")
+	ab.addIfNonZero("--alpha-ci", m.plotAlphaCI, "%.4f")
+	ab.addIfNonZero("--alpha-ci-line", m.plotAlphaCILine, "%.4f")
+	ab.addIfNonZero("--alpha-text-box", m.plotAlphaTextBox, "%.4f")
+	ab.addIfNonZero("--alpha-violin-body", m.plotAlphaViolinBody, "%.4f")
+	ab.addIfNonZero("--alpha-ridge-fill", m.plotAlphaRidgeFill, "%.4f")
 
 	// Scatter
-	if m.plotScatterMarkerSizeSmall != 0 {
-		args = append(args, "--scatter-marker-size-small", fmt.Sprintf("%d", m.plotScatterMarkerSizeSmall))
-	}
-	if m.plotScatterMarkerSizeLarge != 0 {
-		args = append(args, "--scatter-marker-size-large", fmt.Sprintf("%d", m.plotScatterMarkerSizeLarge))
-	}
-	if m.plotScatterMarkerSizeDefault != 0 {
-		args = append(args, "--scatter-marker-size-default", fmt.Sprintf("%d", m.plotScatterMarkerSizeDefault))
-	}
-	if m.plotScatterAlpha != 0 {
-		args = append(args, "--scatter-alpha", fmt.Sprintf("%.4f", m.plotScatterAlpha))
-	}
-	if strings.TrimSpace(m.plotScatterEdgeColor) != "" {
-		args = append(args, "--scatter-edgecolor", strings.TrimSpace(m.plotScatterEdgeColor))
-	}
-	if m.plotScatterEdgeWidth != 0 {
-		args = append(args, "--scatter-edgewidth", fmt.Sprintf("%.4f", m.plotScatterEdgeWidth))
-	}
+	ab.addIfNonZeroInt("--scatter-marker-size-small", m.plotScatterMarkerSizeSmall)
+	ab.addIfNonZeroInt("--scatter-marker-size-large", m.plotScatterMarkerSizeLarge)
+	ab.addIfNonZeroInt("--scatter-marker-size-default", m.plotScatterMarkerSizeDefault)
+	ab.addIfNonZero("--scatter-alpha", m.plotScatterAlpha, "%.4f")
+	ab.addIfNonEmpty("--scatter-edgecolor", m.plotScatterEdgeColor)
+	ab.addIfNonZero("--scatter-edgewidth", m.plotScatterEdgeWidth, "%.4f")
 
 	// Bar
-	if m.plotBarAlpha != 0 {
-		args = append(args, "--bar-alpha", fmt.Sprintf("%.4f", m.plotBarAlpha))
-	}
-	if m.plotBarWidth != 0 {
-		args = append(args, "--bar-width", fmt.Sprintf("%.4f", m.plotBarWidth))
-	}
-	if m.plotBarCapsize != 0 {
-		args = append(args, "--bar-capsize", fmt.Sprintf("%d", m.plotBarCapsize))
-	}
-	if m.plotBarCapsizeLarge != 0 {
-		args = append(args, "--bar-capsize-large", fmt.Sprintf("%d", m.plotBarCapsizeLarge))
-	}
+	ab.addIfNonZero("--bar-alpha", m.plotBarAlpha, "%.4f")
+	ab.addIfNonZero("--bar-width", m.plotBarWidth, "%.4f")
+	ab.addIfNonZeroInt("--bar-capsize", m.plotBarCapsize)
+	ab.addIfNonZeroInt("--bar-capsize-large", m.plotBarCapsizeLarge)
 
 	// Line
-	if m.plotLineWidthThin != 0 {
-		args = append(args, "--line-width-thin", fmt.Sprintf("%.4f", m.plotLineWidthThin))
-	}
-	if m.plotLineWidthStandard != 0 {
-		args = append(args, "--line-width-standard", fmt.Sprintf("%.4f", m.plotLineWidthStandard))
-	}
-	if m.plotLineWidthThick != 0 {
-		args = append(args, "--line-width-thick", fmt.Sprintf("%.4f", m.plotLineWidthThick))
-	}
-	if m.plotLineWidthBold != 0 {
-		args = append(args, "--line-width-bold", fmt.Sprintf("%.4f", m.plotLineWidthBold))
-	}
-	if m.plotLineAlphaStandard != 0 {
-		args = append(args, "--line-alpha-standard", fmt.Sprintf("%.4f", m.plotLineAlphaStandard))
-	}
-	if m.plotLineAlphaDim != 0 {
-		args = append(args, "--line-alpha-dim", fmt.Sprintf("%.4f", m.plotLineAlphaDim))
-	}
-	if m.plotLineAlphaZeroLine != 0 {
-		args = append(args, "--line-alpha-zero-line", fmt.Sprintf("%.4f", m.plotLineAlphaZeroLine))
-	}
-	if m.plotLineAlphaFitLine != 0 {
-		args = append(args, "--line-alpha-fit-line", fmt.Sprintf("%.4f", m.plotLineAlphaFitLine))
-	}
-	if m.plotLineAlphaDiagonal != 0 {
-		args = append(args, "--line-alpha-diagonal", fmt.Sprintf("%.4f", m.plotLineAlphaDiagonal))
-	}
-	if m.plotLineAlphaReference != 0 {
-		args = append(args, "--line-alpha-reference", fmt.Sprintf("%.4f", m.plotLineAlphaReference))
-	}
-	if m.plotLineRegressionWidth != 0 {
-		args = append(args, "--line-regression-width", fmt.Sprintf("%.4f", m.plotLineRegressionWidth))
-	}
-	if m.plotLineResidualWidth != 0 {
-		args = append(args, "--line-residual-width", fmt.Sprintf("%.4f", m.plotLineResidualWidth))
-	}
-	if m.plotLineQQWidth != 0 {
-		args = append(args, "--line-qq-width", fmt.Sprintf("%.4f", m.plotLineQQWidth))
-	}
+	ab.addIfNonZero("--line-width-thin", m.plotLineWidthThin, "%.4f")
+	ab.addIfNonZero("--line-width-standard", m.plotLineWidthStandard, "%.4f")
+	ab.addIfNonZero("--line-width-thick", m.plotLineWidthThick, "%.4f")
+	ab.addIfNonZero("--line-width-bold", m.plotLineWidthBold, "%.4f")
+	ab.addIfNonZero("--line-alpha-standard", m.plotLineAlphaStandard, "%.4f")
+	ab.addIfNonZero("--line-alpha-dim", m.plotLineAlphaDim, "%.4f")
+	ab.addIfNonZero("--line-alpha-zero-line", m.plotLineAlphaZeroLine, "%.4f")
+	ab.addIfNonZero("--line-alpha-fit-line", m.plotLineAlphaFitLine, "%.4f")
+	ab.addIfNonZero("--line-alpha-diagonal", m.plotLineAlphaDiagonal, "%.4f")
+	ab.addIfNonZero("--line-alpha-reference", m.plotLineAlphaReference, "%.4f")
+	ab.addIfNonZero("--line-regression-width", m.plotLineRegressionWidth, "%.4f")
+	ab.addIfNonZero("--line-residual-width", m.plotLineResidualWidth, "%.4f")
+	ab.addIfNonZero("--line-qq-width", m.plotLineQQWidth, "%.4f")
 
 	// Histogram
-	if m.plotHistBins != 0 {
-		args = append(args, "--hist-bins", fmt.Sprintf("%d", m.plotHistBins))
-	}
-	if m.plotHistBinsBehavioral != 0 {
-		args = append(args, "--hist-bins-behavioral", fmt.Sprintf("%d", m.plotHistBinsBehavioral))
-	}
-	if m.plotHistBinsResidual != 0 {
-		args = append(args, "--hist-bins-residual", fmt.Sprintf("%d", m.plotHistBinsResidual))
-	}
-	if m.plotHistBinsTFR != 0 {
-		args = append(args, "--hist-bins-tfr", fmt.Sprintf("%d", m.plotHistBinsTFR))
-	}
-	if strings.TrimSpace(m.plotHistEdgeColor) != "" {
-		args = append(args, "--hist-edgecolor", strings.TrimSpace(m.plotHistEdgeColor))
-	}
-	if m.plotHistEdgeWidth != 0 {
-		args = append(args, "--hist-edgewidth", fmt.Sprintf("%.4f", m.plotHistEdgeWidth))
-	}
-	if m.plotHistAlpha != 0 {
-		args = append(args, "--hist-alpha", fmt.Sprintf("%.4f", m.plotHistAlpha))
-	}
-	if m.plotHistAlphaResidual != 0 {
-		args = append(args, "--hist-alpha-residual", fmt.Sprintf("%.4f", m.plotHistAlphaResidual))
-	}
-	if m.plotHistAlphaTFR != 0 {
-		args = append(args, "--hist-alpha-tfr", fmt.Sprintf("%.4f", m.plotHistAlphaTFR))
-	}
+	ab.addIfNonZeroInt("--hist-bins", m.plotHistBins)
+	ab.addIfNonZeroInt("--hist-bins-behavioral", m.plotHistBinsBehavioral)
+	ab.addIfNonZeroInt("--hist-bins-residual", m.plotHistBinsResidual)
+	ab.addIfNonZeroInt("--hist-bins-tfr", m.plotHistBinsTFR)
+	ab.addIfNonEmpty("--hist-edgecolor", m.plotHistEdgeColor)
+	ab.addIfNonZero("--hist-edgewidth", m.plotHistEdgeWidth, "%.4f")
+	ab.addIfNonZero("--hist-alpha", m.plotHistAlpha, "%.4f")
+	ab.addIfNonZero("--hist-alpha-residual", m.plotHistAlphaResidual, "%.4f")
+	ab.addIfNonZero("--hist-alpha-tfr", m.plotHistAlphaTFR, "%.4f")
 
 	// KDE
-	if m.plotKdePoints != 0 {
-		args = append(args, "--kde-points", fmt.Sprintf("%d", m.plotKdePoints))
-	}
-	if strings.TrimSpace(m.plotKdeColor) != "" {
-		args = append(args, "--kde-color", strings.TrimSpace(m.plotKdeColor))
-	}
-	if m.plotKdeLinewidth != 0 {
-		args = append(args, "--kde-linewidth", fmt.Sprintf("%.4f", m.plotKdeLinewidth))
-	}
-	if m.plotKdeAlpha != 0 {
-		args = append(args, "--kde-alpha", fmt.Sprintf("%.4f", m.plotKdeAlpha))
-	}
+	ab.addIfNonZeroInt("--kde-points", m.plotKdePoints)
+	ab.addIfNonEmpty("--kde-color", m.plotKdeColor)
+	ab.addIfNonZero("--kde-linewidth", m.plotKdeLinewidth, "%.4f")
+	ab.addIfNonZero("--kde-alpha", m.plotKdeAlpha, "%.4f")
 
 	// Errorbar
-	if m.plotErrorbarMarkerSize != 0 {
-		args = append(args, "--errorbar-markersize", fmt.Sprintf("%d", m.plotErrorbarMarkerSize))
-	}
-	if m.plotErrorbarCapsize != 0 {
-		args = append(args, "--errorbar-capsize", fmt.Sprintf("%d", m.plotErrorbarCapsize))
-	}
-	if m.plotErrorbarCapsizeLarge != 0 {
-		args = append(args, "--errorbar-capsize-large", fmt.Sprintf("%d", m.plotErrorbarCapsizeLarge))
-	}
+	ab.addIfNonZeroInt("--errorbar-markersize", m.plotErrorbarMarkerSize)
+	ab.addIfNonZeroInt("--errorbar-capsize", m.plotErrorbarCapsize)
+	ab.addIfNonZeroInt("--errorbar-capsize-large", m.plotErrorbarCapsizeLarge)
 
 	// Text positions
-	if m.plotTextStatsX != 0 {
-		args = append(args, "--text-stats-x", fmt.Sprintf("%.4f", m.plotTextStatsX))
-	}
-	if m.plotTextStatsY != 0 {
-		args = append(args, "--text-stats-y", fmt.Sprintf("%.4f", m.plotTextStatsY))
-	}
-	if m.plotTextPvalueX != 0 {
-		args = append(args, "--text-pvalue-x", fmt.Sprintf("%.4f", m.plotTextPvalueX))
-	}
-	if m.plotTextPvalueY != 0 {
-		args = append(args, "--text-pvalue-y", fmt.Sprintf("%.4f", m.plotTextPvalueY))
-	}
-	if m.plotTextBootstrapX != 0 {
-		args = append(args, "--text-bootstrap-x", fmt.Sprintf("%.4f", m.plotTextBootstrapX))
-	}
-	if m.plotTextBootstrapY != 0 {
-		args = append(args, "--text-bootstrap-y", fmt.Sprintf("%.4f", m.plotTextBootstrapY))
-	}
-	if m.plotTextChannelAnnotationX != 0 {
-		args = append(args, "--text-channel-annotation-x", fmt.Sprintf("%.4f", m.plotTextChannelAnnotationX))
-	}
-	if m.plotTextChannelAnnotationY != 0 {
-		args = append(args, "--text-channel-annotation-y", fmt.Sprintf("%.4f", m.plotTextChannelAnnotationY))
-	}
-	if m.plotTextTitleY != 0 {
-		args = append(args, "--text-title-y", fmt.Sprintf("%.4f", m.plotTextTitleY))
-	}
-	if m.plotTextResidualQcTitleY != 0 {
-		args = append(args, "--text-residual-qc-title-y", fmt.Sprintf("%.4f", m.plotTextResidualQcTitleY))
-	}
+	ab.addIfNonZero("--text-stats-x", m.plotTextStatsX, "%.4f")
+	ab.addIfNonZero("--text-stats-y", m.plotTextStatsY, "%.4f")
+	ab.addIfNonZero("--text-pvalue-x", m.plotTextPvalueX, "%.4f")
+	ab.addIfNonZero("--text-pvalue-y", m.plotTextPvalueY, "%.4f")
+	ab.addIfNonZero("--text-bootstrap-x", m.plotTextBootstrapX, "%.4f")
+	ab.addIfNonZero("--text-bootstrap-y", m.plotTextBootstrapY, "%.4f")
+	ab.addIfNonZero("--text-channel-annotation-x", m.plotTextChannelAnnotationX, "%.4f")
+	ab.addIfNonZero("--text-channel-annotation-y", m.plotTextChannelAnnotationY, "%.4f")
+	ab.addIfNonZero("--text-title-y", m.plotTextTitleY, "%.4f")
+	ab.addIfNonZero("--text-residual-qc-title-y", m.plotTextResidualQcTitleY, "%.4f")
 
 	// Validation
-	if m.plotValidationMinBinsForCalibration != 0 {
-		args = append(args, "--validation-min-bins-for-calibration", fmt.Sprintf("%d", m.plotValidationMinBinsForCalibration))
-	}
-	if m.plotValidationMaxBinsForCalibration != 0 {
-		args = append(args, "--validation-max-bins-for-calibration", fmt.Sprintf("%d", m.plotValidationMaxBinsForCalibration))
-	}
-	if m.plotValidationSamplesPerBin != 0 {
-		args = append(args, "--validation-samples-per-bin", fmt.Sprintf("%d", m.plotValidationSamplesPerBin))
-	}
-	if m.plotValidationMinRoisForFDR != 0 {
-		args = append(args, "--validation-min-rois-for-fdr", fmt.Sprintf("%d", m.plotValidationMinRoisForFDR))
-	}
-	if m.plotValidationMinPvaluesForFDR != 0 {
-		args = append(args, "--validation-min-pvalues-for-fdr", fmt.Sprintf("%d", m.plotValidationMinPvaluesForFDR))
-	}
+	ab.addIfNonZeroInt("--validation-min-bins-for-calibration", m.plotValidationMinBinsForCalibration)
+	ab.addIfNonZeroInt("--validation-max-bins-for-calibration", m.plotValidationMaxBinsForCalibration)
+	ab.addIfNonZeroInt("--validation-samples-per-bin", m.plotValidationSamplesPerBin)
+	ab.addIfNonZeroInt("--validation-min-rois-for-fdr", m.plotValidationMinRoisForFDR)
+	ab.addIfNonZeroInt("--validation-min-pvalues-for-fdr", m.plotValidationMinPvaluesForFDR)
 
 	// Topomap controls
-	if m.plotTopomapContours > 0 {
-		args = append(args, "--topomap-contours", fmt.Sprintf("%d", m.plotTopomapContours))
-	}
-	if strings.TrimSpace(m.plotTopomapColormap) != "" {
-		args = append(args, "--topomap-colormap", m.plotTopomapColormap)
-	}
-	if m.plotTopomapColorbarFraction != 0 {
-		args = append(args, "--topomap-colorbar-fraction", fmt.Sprintf("%.4f", m.plotTopomapColorbarFraction))
-	}
-	if m.plotTopomapColorbarPad != 0 {
-		args = append(args, "--topomap-colorbar-pad", fmt.Sprintf("%.4f", m.plotTopomapColorbarPad))
-	}
-	if m.plotTopomapDiffAnnotation != nil {
-		if *m.plotTopomapDiffAnnotation {
-			args = append(args, "--topomap-diff-annotation-enabled")
-		} else {
-			args = append(args, "--no-topomap-diff-annotation-enabled")
-		}
-	}
-	if m.plotTopomapAnnotateDesc != nil {
-		if *m.plotTopomapAnnotateDesc {
-			args = append(args, "--topomap-annotate-descriptive")
-		} else {
-			args = append(args, "--no-topomap-annotate-descriptive")
-		}
-	}
-	if strings.TrimSpace(m.plotTopomapSigMaskMarker) != "" {
-		args = append(args, "--topomap-sig-mask-marker", strings.TrimSpace(m.plotTopomapSigMaskMarker))
-	}
-	if strings.TrimSpace(m.plotTopomapSigMaskMarkerFaceColor) != "" {
-		args = append(args, "--topomap-sig-mask-markerfacecolor", strings.TrimSpace(m.plotTopomapSigMaskMarkerFaceColor))
-	}
-	if strings.TrimSpace(m.plotTopomapSigMaskMarkerEdgeColor) != "" {
-		args = append(args, "--topomap-sig-mask-markeredgecolor", strings.TrimSpace(m.plotTopomapSigMaskMarkerEdgeColor))
-	}
-	if m.plotTopomapSigMaskLinewidth != 0 {
-		args = append(args, "--topomap-sig-mask-linewidth", fmt.Sprintf("%.4f", m.plotTopomapSigMaskLinewidth))
-	}
-	if m.plotTopomapSigMaskMarkerSize != 0 {
-		args = append(args, "--topomap-sig-mask-markersize", fmt.Sprintf("%.4f", m.plotTopomapSigMaskMarkerSize))
-	}
+	ab.addIfNonZeroInt("--topomap-contours", m.plotTopomapContours)
+	ab.addIfNonEmpty("--topomap-colormap", m.plotTopomapColormap)
+	ab.addIfNonZero("--topomap-colorbar-fraction", m.plotTopomapColorbarFraction, "%.4f")
+	ab.addIfNonZero("--topomap-colorbar-pad", m.plotTopomapColorbarPad, "%.4f")
+	ab.addOptionalBoolFlag("--topomap-diff-annotation-enabled", m.plotTopomapDiffAnnotation)
+	ab.addOptionalBoolFlag("--topomap-annotate-descriptive", m.plotTopomapAnnotateDesc)
+	ab.addIfNonEmpty("--topomap-sig-mask-marker", m.plotTopomapSigMaskMarker)
+	ab.addIfNonEmpty("--topomap-sig-mask-markerfacecolor", m.plotTopomapSigMaskMarkerFaceColor)
+	ab.addIfNonEmpty("--topomap-sig-mask-markeredgecolor", m.plotTopomapSigMaskMarkerEdgeColor)
+	ab.addIfNonZero("--topomap-sig-mask-linewidth", m.plotTopomapSigMaskLinewidth, "%.4f")
+	ab.addIfNonZero("--topomap-sig-mask-markersize", m.plotTopomapSigMaskMarkerSize, "%.4f")
 
 	// TFR controls
-	if m.plotTFRLogBase != 0 {
-		args = append(args, "--tfr-log-base", fmt.Sprintf("%.4f", m.plotTFRLogBase))
-	}
-	if m.plotTFRPercentageMultiplier != 0 {
-		args = append(args, "--tfr-percentage-multiplier", fmt.Sprintf("%.4f", m.plotTFRPercentageMultiplier))
-	}
+	ab.addIfNonZero("--tfr-log-base", m.plotTFRLogBase, "%.4f")
+	ab.addIfNonZero("--tfr-percentage-multiplier", m.plotTFRPercentageMultiplier, "%.4f")
 
 	// Sizing controls
-	if m.plotRoiWidthPerBand != 0 {
-		args = append(args, "--roi-width-per-band", fmt.Sprintf("%.4f", m.plotRoiWidthPerBand))
-	}
-	if m.plotRoiWidthPerMetric != 0 {
-		args = append(args, "--roi-width-per-metric", fmt.Sprintf("%.4f", m.plotRoiWidthPerMetric))
-	}
-	if m.plotRoiHeightPerRoi != 0 {
-		args = append(args, "--roi-height-per-roi", fmt.Sprintf("%.4f", m.plotRoiHeightPerRoi))
-	}
-
-	if m.plotPowerWidthPerBand != 0 {
-		args = append(args, "--power-width-per-band", fmt.Sprintf("%.4f", m.plotPowerWidthPerBand))
-	}
-	if m.plotPowerHeightPerSegment != 0 {
-		args = append(args, "--power-height-per-segment", fmt.Sprintf("%.4f", m.plotPowerHeightPerSegment))
-	}
-
-	if m.plotItpcWidthPerBin != 0 {
-		args = append(args, "--itpc-width-per-bin", fmt.Sprintf("%.4f", m.plotItpcWidthPerBin))
-	}
-	if m.plotItpcHeightPerBand != 0 {
-		args = append(args, "--itpc-height-per-band", fmt.Sprintf("%.4f", m.plotItpcHeightPerBand))
-	}
-	if m.plotItpcWidthPerBandBox != 0 {
-		args = append(args, "--itpc-width-per-band-box", fmt.Sprintf("%.4f", m.plotItpcWidthPerBandBox))
-	}
-	if m.plotItpcHeightBox != 0 {
-		args = append(args, "--itpc-height-box", fmt.Sprintf("%.4f", m.plotItpcHeightBox))
-	}
-
-	if strings.TrimSpace(m.plotPacCmap) != "" {
-		args = append(args, "--pac-cmap", m.plotPacCmap)
-	}
-	if m.plotPacWidthPerRoi != 0 {
-		args = append(args, "--pac-width-per-roi", fmt.Sprintf("%.4f", m.plotPacWidthPerRoi))
-	}
-	if m.plotPacHeightBox != 0 {
-		args = append(args, "--pac-height-box", fmt.Sprintf("%.4f", m.plotPacHeightBox))
-	}
-
-	if m.plotAperiodicWidthPerColumn != 0 {
-		args = append(args, "--aperiodic-width-per-column", fmt.Sprintf("%.4f", m.plotAperiodicWidthPerColumn))
-	}
-	if m.plotAperiodicHeightPerRow != 0 {
-		args = append(args, "--aperiodic-height-per-row", fmt.Sprintf("%.4f", m.plotAperiodicHeightPerRow))
-	}
-	if m.plotAperiodicNPerm != 0 {
-		args = append(args, "--aperiodic-n-perm", fmt.Sprintf("%d", m.plotAperiodicNPerm))
-	}
-
-	if m.plotQualityWidthPerPlot != 0 {
-		args = append(args, "--quality-width-per-plot", fmt.Sprintf("%.4f", m.plotQualityWidthPerPlot))
-	}
-	if m.plotQualityHeightPerPlot != 0 {
-		args = append(args, "--quality-height-per-plot", fmt.Sprintf("%.4f", m.plotQualityHeightPerPlot))
-	}
-	if m.plotQualityDistributionNCols != 0 {
-		args = append(args, "--quality-distribution-n-cols", fmt.Sprintf("%d", m.plotQualityDistributionNCols))
-	}
-	if m.plotQualityDistributionMaxFeatures != 0 {
-		args = append(args, "--quality-distribution-max-features", fmt.Sprintf("%d", m.plotQualityDistributionMaxFeatures))
-	}
-	if m.plotQualityOutlierZThreshold != 0 {
-		args = append(args, "--quality-outlier-z-threshold", fmt.Sprintf("%.4f", m.plotQualityOutlierZThreshold))
-	}
-	if m.plotQualityOutlierMaxFeatures != 0 {
-		args = append(args, "--quality-outlier-max-features", fmt.Sprintf("%d", m.plotQualityOutlierMaxFeatures))
-	}
-	if m.plotQualityOutlierMaxTrials != 0 {
-		args = append(args, "--quality-outlier-max-trials", fmt.Sprintf("%d", m.plotQualityOutlierMaxTrials))
-	}
-	if m.plotQualitySnrThresholdDb != 0 {
-		args = append(args, "--quality-snr-threshold-db", fmt.Sprintf("%.4f", m.plotQualitySnrThresholdDb))
-	}
-
-	if m.plotComplexityWidthPerMeasure != 0 {
-		args = append(args, "--complexity-width-per-measure", fmt.Sprintf("%.4f", m.plotComplexityWidthPerMeasure))
-	}
-	if m.plotComplexityHeightPerSegment != 0 {
-		args = append(args, "--complexity-height-per-segment", fmt.Sprintf("%.4f", m.plotComplexityHeightPerSegment))
-	}
-
-	if m.plotConnectivityWidthPerCircle != 0 {
-		args = append(args, "--connectivity-width-per-circle", fmt.Sprintf("%.4f", m.plotConnectivityWidthPerCircle))
-	}
-	if m.plotConnectivityWidthPerBand != 0 {
-		args = append(args, "--connectivity-width-per-band", fmt.Sprintf("%.4f", m.plotConnectivityWidthPerBand))
-	}
-	if m.plotConnectivityHeightPerMeasure != 0 {
-		args = append(args, "--connectivity-height-per-measure", fmt.Sprintf("%.4f", m.plotConnectivityHeightPerMeasure))
-	}
-	if m.plotConnectivityCircleTopFraction != 0 {
-		args = append(args, "--connectivity-circle-top-fraction", fmt.Sprintf("%.4f", m.plotConnectivityCircleTopFraction))
-	}
-	if m.plotConnectivityCircleMinLines != 0 {
-		args = append(args, "--connectivity-circle-min-lines", fmt.Sprintf("%d", m.plotConnectivityCircleMinLines))
-	}
+	ab.addIfNonZero("--roi-width-per-band", m.plotRoiWidthPerBand, "%.4f")
+	ab.addIfNonZero("--roi-width-per-metric", m.plotRoiWidthPerMetric, "%.4f")
+	ab.addIfNonZero("--roi-height-per-roi", m.plotRoiHeightPerRoi, "%.4f")
+	ab.addIfNonZero("--power-width-per-band", m.plotPowerWidthPerBand, "%.4f")
+	ab.addIfNonZero("--power-height-per-segment", m.plotPowerHeightPerSegment, "%.4f")
+	ab.addIfNonZero("--itpc-width-per-bin", m.plotItpcWidthPerBin, "%.4f")
+	ab.addIfNonZero("--itpc-height-per-band", m.plotItpcHeightPerBand, "%.4f")
+	ab.addIfNonZero("--itpc-width-per-band-box", m.plotItpcWidthPerBandBox, "%.4f")
+	ab.addIfNonZero("--itpc-height-box", m.plotItpcHeightBox, "%.4f")
+	ab.addIfNonEmpty("--pac-cmap", m.plotPacCmap)
+	ab.addIfNonZero("--pac-width-per-roi", m.plotPacWidthPerRoi, "%.4f")
+	ab.addIfNonZero("--pac-height-box", m.plotPacHeightBox, "%.4f")
+	ab.addIfNonZero("--aperiodic-width-per-column", m.plotAperiodicWidthPerColumn, "%.4f")
+	ab.addIfNonZero("--aperiodic-height-per-row", m.plotAperiodicHeightPerRow, "%.4f")
+	ab.addIfNonZeroInt("--aperiodic-n-perm", m.plotAperiodicNPerm)
+	ab.addIfNonZero("--quality-width-per-plot", m.plotQualityWidthPerPlot, "%.4f")
+	ab.addIfNonZero("--quality-height-per-plot", m.plotQualityHeightPerPlot, "%.4f")
+	ab.addIfNonZeroInt("--quality-distribution-n-cols", m.plotQualityDistributionNCols)
+	ab.addIfNonZeroInt("--quality-distribution-max-features", m.plotQualityDistributionMaxFeatures)
+	ab.addIfNonZero("--quality-outlier-z-threshold", m.plotQualityOutlierZThreshold, "%.4f")
+	ab.addIfNonZeroInt("--quality-outlier-max-features", m.plotQualityOutlierMaxFeatures)
+	ab.addIfNonZeroInt("--quality-outlier-max-trials", m.plotQualityOutlierMaxTrials)
+	ab.addIfNonZero("--quality-snr-threshold-db", m.plotQualitySnrThresholdDb, "%.4f")
+	ab.addIfNonZero("--complexity-width-per-measure", m.plotComplexityWidthPerMeasure, "%.4f")
+	ab.addIfNonZero("--complexity-height-per-segment", m.plotComplexityHeightPerSegment, "%.4f")
+	ab.addIfNonZero("--connectivity-width-per-circle", m.plotConnectivityWidthPerCircle, "%.4f")
+	ab.addIfNonZero("--connectivity-width-per-band", m.plotConnectivityWidthPerBand, "%.4f")
+	ab.addIfNonZero("--connectivity-height-per-measure", m.plotConnectivityHeightPerMeasure, "%.4f")
+	ab.addIfNonZero("--connectivity-circle-top-fraction", m.plotConnectivityCircleTopFraction, "%.4f")
+	ab.addIfNonZeroInt("--connectivity-circle-min-lines", m.plotConnectivityCircleMinLines)
 
 	// Selection overrides
-	if strings.TrimSpace(m.plotPacPairsSpec) != "" {
-		args = append(args, "--pac-pairs")
-		args = append(args, splitSpaceList(m.plotPacPairsSpec)...)
-	}
-
+	ab.addSpaceListFlag("--pac-pairs", m.plotPacPairsSpec)
 	measures := m.selectedConnectivityMeasures()
-	if len(measures) > 0 {
-		args = append(args, "--connectivity-measures")
-		args = append(args, measures...)
-	}
-
-	if strings.TrimSpace(m.plotSpectralMetricsSpec) != "" {
-		args = append(args, "--spectral-metrics")
-		args = append(args, splitSpaceList(m.plotSpectralMetricsSpec)...)
-	}
-	if strings.TrimSpace(m.plotBurstsMetricsSpec) != "" {
-		args = append(args, "--bursts-metrics")
-		args = append(args, splitSpaceList(m.plotBurstsMetricsSpec)...)
-	}
-	if strings.TrimSpace(m.plotAsymmetryStatSpec) != "" {
-		args = append(args, "--asymmetry-stat", strings.TrimSpace(m.plotAsymmetryStatSpec))
-	}
-	if strings.TrimSpace(m.plotTemporalTimeBinsSpec) != "" {
-		args = append(args, "--temporal-time-bins")
-		args = append(args, splitSpaceList(m.plotTemporalTimeBinsSpec)...)
-	}
-	if strings.TrimSpace(m.plotTemporalTimeLabelsSpec) != "" {
-		args = append(args, "--temporal-time-labels")
-		args = append(args, splitSpaceList(m.plotTemporalTimeLabelsSpec)...)
-	}
+	ab.addListFlag("--connectivity-measures", measures)
+	ab.addSpaceListFlag("--spectral-metrics", m.plotSpectralMetricsSpec)
+	ab.addSpaceListFlag("--bursts-metrics", m.plotBurstsMetricsSpec)
+	ab.addIfNonEmpty("--asymmetry-stat", m.plotAsymmetryStatSpec)
+	ab.addSpaceListFlag("--temporal-time-bins", m.plotTemporalTimeBinsSpec)
+	ab.addSpaceListFlag("--temporal-time-labels", m.plotTemporalTimeLabelsSpec)
 
 	// Comparisons
-	if m.plotCompareWindows != nil {
-		if *m.plotCompareWindows {
-			args = append(args, "--compare-windows")
-		} else {
-			args = append(args, "--no-compare-windows")
-		}
-	}
-	if strings.TrimSpace(m.plotComparisonWindowsSpec) != "" {
-		args = append(args, "--comparison-windows")
-		args = append(args, splitSpaceList(m.plotComparisonWindowsSpec)...)
-	}
-	if m.plotCompareColumns != nil {
-		if *m.plotCompareColumns {
-			args = append(args, "--compare-columns")
-		} else {
-			args = append(args, "--no-compare-columns")
-		}
-	}
-	if strings.TrimSpace(m.plotComparisonSegment) != "" {
-		args = append(args, "--comparison-segment", strings.TrimSpace(m.plotComparisonSegment))
-	}
-	if strings.TrimSpace(m.plotComparisonColumn) != "" {
-		args = append(args, "--comparison-column", strings.TrimSpace(m.plotComparisonColumn))
-	}
-	if strings.TrimSpace(m.plotComparisonValuesSpec) != "" {
-		args = append(args, "--comparison-values")
-		args = append(args, splitSpaceList(m.plotComparisonValuesSpec)...)
-	}
-	if strings.TrimSpace(m.plotComparisonLabelsSpec) != "" {
-		vals := splitSpaceList(m.plotComparisonLabelsSpec)
-		if len(vals) == 2 {
-			args = append(args, "--comparison-labels")
-			args = append(args, vals...)
-		}
-	}
-	if strings.TrimSpace(m.plotComparisonROIsSpec) != "" {
-		args = append(args, "--comparison-rois")
-		args = append(args, splitSpaceList(m.plotComparisonROIsSpec)...)
-	}
+	ab.addOptionalBoolFlag("--compare-windows", m.plotCompareWindows)
+	ab.addSpaceListFlag("--comparison-windows", m.plotComparisonWindowsSpec)
+	ab.addOptionalBoolFlag("--compare-columns", m.plotCompareColumns)
+	ab.addIfNonEmpty("--comparison-segment", m.plotComparisonSegment)
+	ab.addIfNonEmpty("--comparison-column", m.plotComparisonColumn)
+	ab.addSpaceListFlag("--comparison-values", m.plotComparisonValuesSpec)
+	ab.addSpaceListFlagWithLengthCheck("--comparison-labels", m.plotComparisonLabelsSpec, 2)
+	ab.addSpaceListFlag("--comparison-rois", m.plotComparisonROIsSpec)
 
 	// Per-plot overrides
-	args = append(args, m.buildPlotItemConfigArgs()...)
+	ab.args = append(ab.args, m.buildPlotItemConfigArgs()...)
 
-	return args
+	return ab.build()
 }
 
 func (m Model) buildPlotItemConfigArgs() []string {
@@ -2281,9 +1948,6 @@ func (m Model) buildMLAdvancedArgs() []string {
 		args = append(args, "--rng-seed", fmt.Sprintf("%d", m.rngSeed))
 	}
 
-	// NOTE: --skip-time-gen removed - not a valid CLI flag
-	// Time generalization is now a separate mode: eeg ml timegen
-
 	// ElasticNet hyperparameters
 	if strings.TrimSpace(m.elasticNetAlphaGrid) != "" && m.elasticNetAlphaGrid != "0.001,0.01,0.1,1,10" {
 		args = append(args, "--elasticnet-alpha-grid")
@@ -2441,6 +2105,13 @@ func expandUserPath(value string) string {
 		}
 	}
 	return filepath.Clean(value)
+}
+
+func normalizeTimeRangeValue(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
 }
 
 func splitListInput(value string) []string {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import Collection, Iterable, List, Optional, Set, Union
 
 from eeg_pipeline.pipelines.constants import (
     BEHAVIOR_COMPUTATIONS,
@@ -14,50 +14,91 @@ from eeg_pipeline.pipelines.constants import (
 )
 
 
-def detect_available_bands(features_dir) -> List[str]:
+###################################################################
+# Shared helpers
+###################################################################
+
+def _find_bands_in_columns(
+    columns: Iterable[str],
+    candidate_bands: Collection[str],
+) -> Set[str]:
+    """Return bands whose name pattern appears in any of the columns."""
+    found_bands: Set[str] = set()
+    for column in columns:
+        column_lower = column.lower()
+        for band in candidate_bands:
+            if f"_{band}_" in column_lower or column_lower.endswith(f"_{band}"):
+                found_bands.add(band)
+    return found_bands
+
+
+_FEATURE_AVAILABILITY_CATEGORIES = [
+    "power",
+    "connectivity",
+    "aperiodic",
+    "erp",
+    "bursts",
+    "itpc",
+    "pac",
+    "complexity",
+    "quality",
+    "erds",
+    "spectral",
+    "ratios",
+    "asymmetry",
+]
+
+
+###################################################################
+# Public API
+###################################################################
+
+
+def detect_available_bands(features_dir: Union[str, Path]) -> List[str]:
     """Detect available frequency bands from feature file columns."""
     bands = set(FREQUENCY_BANDS)
-    found_bands = set()
-    
-    features_dir = Path(features_dir)
-    for tsv_file in features_dir.glob("features_*.tsv"):
+    found_bands: Set[str] = set()
+
+    features_path = Path(features_dir)
+    for tsv_file in features_path.glob("features_*.tsv"):
         try:
             with open(tsv_file, "r") as f:
                 header = f.readline().strip()
             columns = header.split("\t")
-            
-            for col in columns:
-                col_lower = col.lower()
-                for band in bands:
-                    if f"_{band}_" in col_lower or col_lower.endswith(f"_{band}"):
-                        found_bands.add(band)
+            found_bands.update(_find_bands_in_columns(columns, bands))
         except Exception:
+            # Intentionally ignore unreadable files and continue scanning others.
             continue
-    
+
     return sorted(found_bands)
 
 
 def _empty_feature_availability() -> dict:
     """Return feature availability dict with all features marked as unavailable."""
-    all_categories = [
-        "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
-        "complexity", "quality", "erds", "spectral", "ratios", "asymmetry"
-    ]
     all_bands = FREQUENCY_BANDS
     all_computations = BEHAVIOR_COMPUTATIONS
-    
+
     return {
-        "features": {cat: {"available": False, "last_modified": None} for cat in all_categories},
-        "bands": {band: {"available": False, "last_modified": None} for band in all_bands},
-        "computations": {comp: {"available": False, "last_modified": None} for comp in all_computations},
+        "features": {
+            category: {"available": False, "last_modified": None}
+            for category in _FEATURE_AVAILABILITY_CATEGORIES
+        },
+        "bands": {
+            band: {"available": False, "last_modified": None}
+            for band in all_bands
+        },
+        "computations": {
+            computation: {"available": False, "last_modified": None}
+            for computation in all_computations
+        },
     }
 
 
-def detect_feature_availability(features_dir) -> dict:
+def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     """Detect available feature categories, bands, and computations with modification timestamps."""
     from datetime import datetime
     
-    features_dir = Path(features_dir)
+    features_path = Path(features_dir)
     result = {
         "features": {},
         "bands": {},
@@ -85,9 +126,9 @@ def detect_feature_availability(features_dir) -> dict:
     
     for category, patterns in category_patterns.items():
         found_file = None
-        if features_dir.exists():
+        if features_path.exists():
             for pattern in patterns:
-                files = list(features_dir.glob(pattern))
+                files = list(features_path.glob(pattern))
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break
@@ -100,16 +141,15 @@ def detect_feature_availability(features_dir) -> dict:
                 "available": True,
                 "last_modified": mtime_str,
             }
-            
+
             try:
                 with open(found_file, "r") as f:
                     header = f.readline().strip()
-                for col in header.split("\t"):
-                    col_lower = col.lower()
-                    for band in bands:
-                        if f"_{band}_" in col_lower or col_lower.endswith(f"_{band}"):
-                            if band not in band_times or mtime_str > band_times[band]:
-                                band_times[band] = mtime_str
+                header_columns = header.split("\t")
+                bands_in_file = _find_bands_in_columns(header_columns, bands)
+                for band in bands_in_file:
+                    if band not in band_times or mtime_str > band_times[band]:
+                        band_times[band] = mtime_str
             except Exception:
                 pass
         else:
@@ -122,7 +162,7 @@ def detect_feature_availability(features_dir) -> dict:
             result["bands"][band] = {"available": False, "last_modified": None}
     
     # Try to find stats adjacent to features
-    stats_dir = features_dir.parent / "stats"
+    stats_dir = features_path.parent / "stats"
     # Patterns are searched via rglob within stats_dir, so they can match nested subfolders.
     # Keep these aligned with outputs produced by eeg_pipeline.analysis.behavior.orchestration.
     computation_patterns = {
@@ -180,7 +220,11 @@ def detect_feature_availability(features_dir) -> dict:
     return result
 
 
-def discover_event_columns(bids_root, task: str = None, subject: str = None) -> dict:
+def discover_event_columns(
+    bids_root: Union[str, Path],
+    task: Optional[str] = None,
+    subject: Optional[str] = None,
+) -> dict:
     """Discover available columns and their unique values from events files.
     
     Returns
@@ -197,7 +241,6 @@ def discover_event_columns(bids_root, task: str = None, subject: str = None) -> 
             "file": "path/to/file"
         }
     """
-    from pathlib import Path
     import pandas as pd
     
     bids_root = Path(bids_root)
@@ -255,12 +298,14 @@ def discover_event_columns(bids_root, task: str = None, subject: str = None) -> 
     return result
 
 
-def discover_trial_table_columns(deriv_root, subject: str = None) -> dict:
+def discover_trial_table_columns(
+    deriv_root: Union[str, Path],
+    subject: Optional[str] = None,
+) -> dict:
     """Discover columns from an existing trial table.
     
     This provides more detailed columns after behavior compute has run.
     """
-    from pathlib import Path
     import pandas as pd
     
     deriv_root = Path(deriv_root)

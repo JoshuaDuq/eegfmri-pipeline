@@ -25,14 +25,9 @@ from eeg_pipeline.analysis.machine_learning.config import get_ml_config
 ###################################################################
 
 
-def create_base_preprocessing_pipeline(
-    include_scaling: bool = True,
-    config: Any = None,
-) -> Pipeline:
-    """Create base preprocessing pipeline (impute, variance filter, scale)."""
-    cfg = get_ml_config(config)
-
-    steps = [
+def _build_base_preprocessing_steps(cfg: Dict[str, Any], include_scaling: bool) -> list[tuple[str, Any]]:
+    """Build the common preprocessing steps shared by all regression pipelines."""
+    steps: list[tuple[str, Any]] = [
         ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
         ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
     ]
@@ -40,6 +35,16 @@ def create_base_preprocessing_pipeline(
     if include_scaling:
         steps.append(("scale", StandardScaler()))
 
+    return steps
+
+
+def create_base_preprocessing_pipeline(
+    include_scaling: bool = True,
+    config: Any = None,
+) -> Pipeline:
+    """Create base preprocessing pipeline (impute, variance filter, scale)."""
+    cfg = get_ml_config(config)
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=include_scaling)
     return Pipeline(steps)
 
 
@@ -50,7 +55,7 @@ def create_elasticnet_pipeline(
     """Create ElasticNet regression pipeline with target transformation."""
     cfg = get_ml_config(config)
 
-    base_steps = create_base_preprocessing_pipeline(include_scaling=True, config=config).steps
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
 
     regressor = TransformedTargetRegressor(
         regressor=ElasticNet(
@@ -65,8 +70,8 @@ def create_elasticnet_pipeline(
         ),
     )
 
-    base_steps.append(("regressor", regressor))
-    return Pipeline(base_steps)
+    steps.append(("regressor", regressor))
+    return Pipeline(steps)
 
 
 def create_ridge_pipeline(
@@ -76,7 +81,7 @@ def create_ridge_pipeline(
     """Create Ridge regression pipeline with target transformation."""
     cfg = get_ml_config(config)
 
-    base_steps = create_base_preprocessing_pipeline(include_scaling=True, config=config).steps
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=True)
 
     regressor = TransformedTargetRegressor(
         regressor=Ridge(random_state=seed),
@@ -86,8 +91,8 @@ def create_ridge_pipeline(
         ),
     )
 
-    base_steps.append(("regressor", regressor))
-    return Pipeline(base_steps)
+    steps.append(("regressor", regressor))
+    return Pipeline(steps)
 
 
 def create_rf_pipeline(
@@ -102,9 +107,8 @@ def create_rf_pipeline(
     if n_estimators is None:
         n_estimators = cfg["rf_n_estimators"]
 
-    steps = [
-        ("impute", SimpleImputer(strategy=cfg["imputer_strategy"])),
-        ("var", VarianceThreshold(threshold=cfg["variance_threshold"])),
+    steps = _build_base_preprocessing_steps(cfg=cfg, include_scaling=False)
+    steps.append(
         (
             "rf",
             RandomForestRegressor(
@@ -113,8 +117,8 @@ def create_rf_pipeline(
                 random_state=seed,
                 bootstrap=cfg["rf_bootstrap"],
             ),
-        ),
-    ]
+        )
+    )
 
     return Pipeline(steps)
 
@@ -124,7 +128,7 @@ def create_rf_pipeline(
 ###################################################################
 
 
-def build_elasticnet_param_grid(config: Any = None) -> dict:
+def build_elasticnet_param_grid(config: Any = None) -> Dict[str, Any]:
     """Build hyperparameter grid for ElasticNet including variance threshold."""
     cfg = get_ml_config(config)
 
@@ -140,18 +144,16 @@ def build_elasticnet_param_grid(config: Any = None) -> dict:
     return param_grid
 
 
-def build_ridge_param_grid(config: Any = None) -> dict:
+def build_ridge_param_grid(config: Any = None) -> Dict[str, Any]:
     """Build hyperparameter grid for Ridge regression."""
     cfg = get_ml_config(config)
     
     alpha_grid = cfg.get("ridge_alpha_grid", [0.01, 0.1, 1.0, 10.0, 100.0])
     
-    return {
-        "regressor__regressor__alpha": alpha_grid,
-    }
+    return {"regressor__regressor__alpha": alpha_grid}
 
 
-def build_rf_param_grid(config: Any = None) -> dict:
+def build_rf_param_grid(config: Any = None) -> Dict[str, Any]:
     """Build hyperparameter grid for Random Forest."""
     cfg = get_ml_config(config)
     

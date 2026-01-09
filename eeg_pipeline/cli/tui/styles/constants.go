@@ -71,10 +71,10 @@ const (
 ///////////////////////////////////////////////////////////////////
 
 const (
-	DefaultCommandTimeout = 0
+	DefaultCommandTimeout = 0 // 0 means no timeout at the TUI level
 	MaxRetryAttempts      = 3
-	MinSubjectsRequired   = 1
-	MinCategoriesRequired = 1
+	MinSubjectsRequired   = 1 // Minimum number of subjects required to enable analysis views
+	MinCategoriesRequired = 1 // Minimum number of categories required to compute behavioral summaries
 	MaxRecentErrors       = 5
 )
 

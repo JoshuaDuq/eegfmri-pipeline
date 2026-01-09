@@ -22,9 +22,7 @@ from ...utils.analysis.tfr import (
     apply_baseline_and_crop,
     resolve_tfr_workers,
 )
-from ..config import get_plot_config
 from ..core.utils import get_font_sizes, log
-from ..core.statistics import get_strict_mode
 from .channels import _save_fig
 from .contrasts import _prepare_comparison_contrast_data
 
@@ -32,6 +30,38 @@ from .contrasts import _prepare_comparison_contrast_data
 ###################################################################
 # ROI Computation and Plotting Functions
 ###################################################################
+
+
+def _filter_rois_by_config(
+    roi_tfrs: Dict[str, mne.time_frequency.EpochsTFR],
+    config,
+) -> Dict[str, mne.time_frequency.EpochsTFR]:
+    """Filter ROI TFRs based on comparison_rois configuration.
+    
+    Args:
+        roi_tfrs: Dictionary mapping ROI names to EpochsTFR objects
+        config: Configuration object
+    
+    Returns:
+        Filtered dictionary containing only requested ROIs, or original
+        if no specific ROIs are requested.
+    """
+    comparison_rois = get_config_value(
+        config, "plotting.comparisons.comparison_rois", []
+    )
+    has_specific_rois = any(roi.lower() != "all" for roi in comparison_rois)
+    
+    if not comparison_rois or not has_specific_rois:
+        return roi_tfrs
+    
+    filtered_rois = {}
+    for roi_name in comparison_rois:
+        if roi_name.lower() == "all":
+            continue
+        if roi_name in roi_tfrs:
+            filtered_rois[roi_name] = roi_tfrs[roi_name]
+    
+    return filtered_rois
 
 
 def compute_roi_tfrs(
@@ -57,30 +87,43 @@ def compute_roi_tfrs(
     if roi_map is None:
         from ...utils.analysis.tfr import build_rois_from_info as _build_rois
         roi_map = _build_rois(epochs.info, config=config)
+    
     roi_tfrs = {}
-    for roi, chs in roi_map.items():
-        picks = mne.pick_channels(epochs.ch_names, include=chs, ordered=True)
+    for roi, channel_names in roi_map.items():
+        picks = mne.pick_channels(epochs.ch_names, include=channel_names, ordered=True)
         if len(picks) == 0:
             continue
-        data = epochs.get_data()
-        roi_data = np.nanmean(data[:, picks, :], axis=1, keepdims=True)
-        info = mne.create_info([roi], sfreq=epochs.info['sfreq'], ch_types='eeg')
-        epo_roi = mne.EpochsArray(
+        
+        epochs_data = epochs.get_data()
+        roi_data = np.nanmean(epochs_data[:, picks, :], axis=1, keepdims=True)
+        
+        roi_info = mne.create_info(
+            [roi], sfreq=epochs.info['sfreq'], ch_types='eeg'
+        )
+        roi_epochs = mne.EpochsArray(
             roi_data,
-            info,
+            roi_info,
             events=epochs.events,
             event_id=epochs.event_id,
             tmin=epochs.tmin,
             metadata=epochs.metadata,
             verbose=False,
         )
-        workers_default = int(config.get("time_frequency_analysis.tfr.workers", -1)) if config else -1
+        
+        workers_default = (
+            int(config.get("time_frequency_analysis.tfr.workers", -1))
+            if config else -1
+        )
         workers = resolve_tfr_workers(workers_default=workers_default)
-        power = epo_roi.compute_tfr(
+        decim = (
+            config.get("time_frequency_analysis.tfr.decim", 4) if config else 4
+        )
+        
+        power = roi_epochs.compute_tfr(
             method="morlet",
             freqs=freqs,
             n_cycles=n_cycles,
-            decim=config.get("time_frequency_analysis.tfr.decim", 4) if config else 4,
+            decim=decim,
             picks="eeg",
             use_fft=True,
             return_itc=False,
@@ -88,6 +131,7 @@ def compute_roi_tfrs(
             n_jobs=workers,
         )
         roi_tfrs[roi] = power
+    
     return roi_tfrs
 
 
@@ -110,31 +154,65 @@ def plot_rois_all_trials(
         baseline: Baseline window tuple (tmin, tmax)
         logger: Optional logger instance
     """
-    # Filter ROIs based on config
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    has_specific = any(r.lower() != "all" for r in comp_rois)
-    if comp_rois and has_specific:
-        filtered_rois = {}
-        for r in comp_rois:
-            if r.lower() == "all": continue
-            if r in roi_tfrs:
-                filtered_rois[r] = roi_tfrs[r]
-        roi_tfrs = filtered_rois
-
+    roi_tfrs = _filter_rois_by_config(roi_tfrs, config)
     rois_dir = out_dir / "rois"
+    font_sizes = get_font_sizes()
+    
     for roi, tfr in roi_tfrs.items():
-        tfr_c = tfr.copy()
-        tfr_avg = tfr_c.average()
-        baseline_used = apply_baseline_and_crop(tfr_avg, baseline=baseline, mode="logratio", logger=logger)
+        tfr_averaged = tfr.copy().average()
+        baseline_used = apply_baseline_and_crop(
+            tfr_averaged, baseline=baseline, mode="logratio", logger=logger
+        )
         
-        ch = tfr_avg.info['ch_names'][0]
+        channel_name = tfr_averaged.info['ch_names'][0]
         roi_tag = sanitize_label(roi)
         roi_dir = rois_dir / roi_tag
 
-        fig = unwrap_figure(tfr_avg.plot(picks=ch, show=False))
-        font_sizes = get_font_sizes()
-        fig.suptitle(f"ROI: {roi} — all trials (baseline logratio)", fontsize=font_sizes["figure_title"])
-        _save_fig(fig, roi_dir, "tfr_all_trials_bl.png", config=config, logger=logger, baseline_used=baseline_used)
+        figure = unwrap_figure(tfr_averaged.plot(picks=channel_name, show=False))
+        figure.suptitle(
+            f"ROI: {roi} — all trials (baseline logratio)",
+            fontsize=font_sizes["figure_title"]
+        )
+        _save_fig(
+            figure, roi_dir, "tfr_all_trials_bl.png",
+            config=config, logger=logger, baseline_used=baseline_used
+        )
+
+
+def _plot_roi_tfr_figure(
+    tfr: mne.time_frequency.AverageTFR,
+    roi_name: str,
+    title_suffix: str,
+    output_dir: Path,
+    filename: str,
+    config,
+    baseline_used: Tuple[Optional[float], Optional[float]],
+    font_sizes: Dict[str, int],
+    logger: Optional[logging.Logger] = None,
+) -> None:
+    """Plot a single ROI TFR figure and save it.
+    
+    Args:
+        tfr: AverageTFR object to plot
+        roi_name: Name of the ROI
+        title_suffix: Suffix for the figure title
+        output_dir: Directory to save the figure
+        filename: Output filename
+        config: Configuration object
+        baseline_used: Baseline window tuple used
+        font_sizes: Dictionary of font sizes
+        logger: Optional logger instance
+    """
+    channel_name = tfr.info['ch_names'][0]
+    figure = unwrap_figure(tfr.plot(picks=channel_name, show=False))
+    figure.suptitle(
+        f"ROI: {roi_name} — {title_suffix} (baseline logratio)",
+        fontsize=font_sizes["figure_title"]
+    )
+    _save_fig(
+        figure, output_dir, filename,
+        config=config, logger=logger, baseline_used=baseline_used
+    )
 
 
 def contrast_pain_nonpain_rois(
@@ -158,50 +236,53 @@ def contrast_pain_nonpain_rois(
         baseline: Baseline window tuple (tmin, tmax)
         logger: Optional logger instance
     """
-    # Filter ROIs based on config
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    has_specific = any(r.lower() != "all" for r in comp_rois)
-    if comp_rois and has_specific:
-        filtered_rois = {}
-        for r in comp_rois:
-            if r.lower() == "all": continue
-            if r in roi_tfrs:
-                filtered_rois[r] = roi_tfrs[r]
-        roi_tfrs = filtered_rois
-
+    roi_tfrs = _filter_rois_by_config(roi_tfrs, config)
     rois_dir = out_dir / "rois"
+    font_sizes = get_font_sizes()
+    
     for roi, tfr in roi_tfrs.items():
         try:
-            tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
-                tfr, events_df, config, logger, context=f"ROI {roi} contrast"
+            tfr_subset, mask1, mask2, label1, label2, _ = (
+                _prepare_comparison_contrast_data(
+                    tfr, events_df, config, logger,
+                    context=f"ROI {roi} contrast"
+                )
             )
-            if tfr_sub is None:
+            if tfr_subset is None:
                 continue
 
-            baseline_used = apply_baseline_and_crop(tfr_sub, baseline=baseline, mode="logratio", logger=logger)
-            tfr_2 = tfr_sub[mask2].average()
-            tfr_1 = tfr_sub[mask1].average()
+            baseline_used = apply_baseline_and_crop(
+                tfr_subset, baseline=baseline, mode="logratio", logger=logger
+            )
+            tfr_condition2 = tfr_subset[mask2].average()
+            tfr_condition1 = tfr_subset[mask1].average()
 
-            ch = tfr_2.info['ch_names'][0]
             roi_tag = sanitize_label(roi)
             roi_dir = rois_dir / roi_tag
 
-            fig = unwrap_figure(tfr_2.plot(picks=ch, show=False))
-            font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — {label2} (baseline logratio)", fontsize=font_sizes["figure_title"])
-            _save_fig(fig, roi_dir, "tfr_painful_bl.png", config=config, logger=logger, baseline_used=baseline_used)
+            _plot_roi_tfr_figure(
+                tfr_condition2, roi, label2, roi_dir,
+                "tfr_painful_bl.png", config, baseline_used,
+                font_sizes, logger
+            )
 
-            fig = unwrap_figure(tfr_1.plot(picks=ch, show=False))
-            font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — {label1} (baseline logratio)", fontsize=font_sizes["figure_title"])
-            _save_fig(fig, roi_dir, "tfr_nonpain_bl.png", config=config, logger=logger, baseline_used=baseline_used)
+            _plot_roi_tfr_figure(
+                tfr_condition1, roi, label1, roi_dir,
+                "tfr_nonpain_bl.png", config, baseline_used,
+                font_sizes, logger
+            )
 
-            tfr_diff = tfr_2.copy()
-            tfr_diff.data = tfr_2.data - tfr_1.data
-            fig = unwrap_figure(tfr_diff.plot(picks=ch, show=False))
-            font_sizes = get_font_sizes()
-            fig.suptitle(f"ROI: {roi} — {label2} minus {label1} (baseline logratio)", fontsize=font_sizes["figure_title"])
-            _save_fig(fig, roi_dir, "tfr_pain_minus_nonpain_bl.png", config=config, logger=logger, baseline_used=baseline_used)
+            tfr_difference = tfr_condition2.copy()
+            tfr_difference.data = tfr_condition2.data - tfr_condition1.data
+            difference_title = f"{label2} minus {label1}"
+            _plot_roi_tfr_figure(
+                tfr_difference, roi, difference_title, roi_dir,
+                "tfr_pain_minus_nonpain_bl.png", config, baseline_used,
+                font_sizes, logger
+            )
         except (FileNotFoundError, ValueError, RuntimeError, KeyError, IndexError) as exc:
-            log(f"ROI {roi}: error while computing ROI contrasts ({exc})", logger, "error")
+            log(
+                f"ROI {roi}: error while computing ROI contrasts ({exc})",
+                logger, "error"
+            )
             continue

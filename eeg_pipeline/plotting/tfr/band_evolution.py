@@ -12,18 +12,19 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import mne
+import numpy as np
+import pandas as pd
 
 from eeg_pipeline.infra.paths import ensure_dir
+from eeg_pipeline.plotting.features.roi import get_roi_channels, get_roi_definitions
 from eeg_pipeline.plotting.io.figures import save_fig
-from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
 from eeg_pipeline.utils.data.columns import get_temperature_column_from_config
-from ...utils.analysis.tfr import get_bands_for_tfr, build_rois_from_info
+
+from ...utils.analysis.tfr import get_bands_for_tfr
 from ..config import get_plot_config
 
 
@@ -32,13 +33,15 @@ from ..config import get_plot_config
 # =============================================================================
 
 BANDS = ["delta", "theta", "alpha", "beta", "gamma"]
+
 BAND_COLORS = {
     "delta": "#1f77b4",
-    "theta": "#2ca02c", 
+    "theta": "#2ca02c",
     "alpha": "#ff7f0e",
     "beta": "#d62728",
     "gamma": "#9467bd",
 }
+
 BAND_RANGES = {
     "delta": "1-4 Hz",
     "theta": "4-8 Hz",
@@ -47,9 +50,6 @@ BAND_RANGES = {
     "gamma": "30-100 Hz",
 }
 
-# ROI definitions are now loaded from config via get_roi_definitions()
-
-# Condition colors (for display when per-plot style isn't provided)
 CONDITION_COLORS = {
     "all": "#333333",
     "condition_1": "#4C72B0",
@@ -58,10 +58,128 @@ CONDITION_COLORS = {
     "low_temp": "#1F77B4",
 }
 
+# Plotting style constants
+MIN_TRIALS_FOR_PLOT = 3
+FILL_ALPHA = 0.3
+FILL_ALPHA_OVERLAY = 0.2
+REFERENCE_LINE_ALPHA = 0.7
+REFERENCE_LINE_WIDTH = 0.5
+MAIN_LINE_WIDTH = 2.0
+SUBPLOT_LINE_WIDTH = 1.5
+BAR_WIDTH = 0.35
+BAR_ALPHA = 0.8
+BAR_CAPSIZE = 3
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def _compute_mean_sem(power_data: np.ndarray, n_trials: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute mean and standard error of the mean across trials.
+    
+    Args:
+        power_data: Power array (n_trials, n_times)
+        n_trials: Number of trials for SEM calculation
+        
+    Returns:
+        mean_power: Mean across trials (n_times,)
+        sem_power: Standard error of the mean (n_times,)
+    """
+    mean_power = np.nanmean(power_data, axis=0)
+    sem_power = np.nanstd(power_data, axis=0) / np.sqrt(n_trials)
+    return mean_power, sem_power
+
+
+def _plot_mean_sem_with_reference_lines(
+    ax: plt.Axes,
+    times: np.ndarray,
+    mean_power: np.ndarray,
+    sem_power: np.ndarray,
+    color: str,
+    linewidth: float = MAIN_LINE_WIDTH,
+    fill_alpha: float = FILL_ALPHA,
+) -> None:
+    """Plot mean ± SEM with reference lines at zero.
+    
+    Args:
+        ax: Matplotlib axes
+        times: Time array
+        mean_power: Mean power array
+        sem_power: SEM array
+        color: Line color
+        linewidth: Line width for main plot
+        fill_alpha: Alpha for fill_between
+    """
+    ax.fill_between(
+        times,
+        mean_power - sem_power,
+        mean_power + sem_power,
+        alpha=fill_alpha,
+        color=color,
+    )
+    ax.plot(times, mean_power, color=color, linewidth=linewidth)
+    ax.axhline(0, color="gray", linestyle="--", linewidth=REFERENCE_LINE_WIDTH, alpha=REFERENCE_LINE_ALPHA)
+    ax.axvline(0, color="black", linestyle="-", linewidth=REFERENCE_LINE_WIDTH, alpha=0.5)
+
+
+def _get_condition_title_labels(label1: str, label2: str) -> Dict[str, str]:
+    """Get condition title labels for plots.
+    
+    Args:
+        label1: Label for condition 1
+        label2: Label for condition 2
+        
+    Returns:
+        Dictionary mapping condition keys to display labels
+    """
+    return {
+        "all": "All Trials",
+        "condition_2": f"{label2} Trials",
+        "condition_1": f"{label1} Trials",
+        "high_temp": "High Temperature",
+        "low_temp": "Low Temperature",
+    }
+
+
+def _get_condition_header_labels(label1: str, label2: str, n_trials: int) -> Dict[str, str]:
+    """Get condition header labels with trial counts.
+    
+    Args:
+        label1: Label for condition 1
+        label2: Label for condition 2
+        n_trials: Number of trials
+        
+    Returns:
+        Dictionary mapping condition keys to header labels
+    """
+    return {
+        "all": f"All Trials\n(n={n_trials})",
+        "condition_2": f"{label2}\n(n={n_trials})",
+        "condition_1": f"{label1}\n(n={n_trials})",
+        "high_temp": f"High Temp\n(n={n_trials})",
+        "low_temp": f"Low Temp\n(n={n_trials})",
+    }
+
+
+def _get_available_rois(tfr: mne.time_frequency.EpochsTFR, config: Any) -> List[str]:
+    """Get list of ROI names that have matching channels in the TFR.
+    
+    Args:
+        tfr: EpochsTFR object
+        config: Configuration object
+        
+    Returns:
+        List of ROI names with available channels
+    """
+    rois = get_roi_definitions(config)
+    available_rois = []
+    for roi_name in rois.keys():
+        indices = _get_roi_channel_indices(tfr, roi_name, config)
+        if len(indices) > 0:
+            available_rois.append(roi_name)
+    return available_rois
+
 
 def _get_band_power_timecourse(
     tfr: mne.time_frequency.EpochsTFR,
@@ -137,10 +255,16 @@ def _get_roi_channel_indices(tfr: mne.time_frequency.EpochsTFR, roi_name: str, c
 def _create_condition_masks(
     events_df: pd.DataFrame,
     config: Any,
-) -> tuple[Dict[str, np.ndarray], str, str]:
+) -> Tuple[Dict[str, np.ndarray], str, str]:
     """Create masks for different conditions.
     
-    Returns dict with keys: 'all', 'condition_1', 'condition_2', 'high_temp', 'low_temp'
+    Args:
+        events_df: Events DataFrame
+        config: Configuration object
+        
+    Returns:
+        Tuple of (masks dict, label1, label2)
+        Masks dict has keys: 'all', 'condition_1', 'condition_2', 'high_temp', 'low_temp'
     """
     n_trials = len(events_df)
     masks = {"all": np.ones(n_trials, dtype=bool)}
@@ -158,10 +282,8 @@ def _create_condition_masks(
         mask1, mask2, label1, label2 = comp
         masks["condition_1"] = np.asarray(mask1, dtype=bool)
         masks["condition_2"] = np.asarray(mask2, dtype=bool)
-    
-    # High/low temperature (median split) using configured temperature column candidates.
+
     temp_col = get_temperature_column_from_config(config, events_df)
-    
     if temp_col:
         temps = pd.to_numeric(events_df[temp_col], errors="coerce")
         valid_temps = temps.dropna()
@@ -169,7 +291,7 @@ def _create_condition_masks(
             median_temp = valid_temps.median()
             masks["high_temp"] = (temps >= median_temp).fillna(False).values
             masks["low_temp"] = (temps < median_temp).fillna(False).values
-    
+
     return masks, str(label1), str(label2)
 
 
@@ -218,82 +340,74 @@ def plot_band_power_evolution_all_conditions(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     ensure_dir(save_dir / "evolution")
     saved = {}
-    
-    # Get condition masks
+
     masks, label1, label2 = _create_condition_masks(events_df, config)
-    conditions = ["all", "condition_2", "condition_1", "high_temp", "low_temp"]
-    conditions = [c for c in conditions if c in masks and masks[c].sum() > 0]
-    
+    condition_order = ["all", "condition_2", "condition_1", "high_temp", "low_temp"]
+    conditions = [c for c in condition_order if c in masks and masks[c].sum() > 0]
+
     if len(conditions) == 0:
         logger.warning("No valid conditions found")
         return saved
-    
+
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
-    
-    # Create figure
+
     n_bands = len(BANDS)
     n_conds = len(conditions)
-    fig, axes = plt.subplots(n_bands, n_conds, figsize=(4*n_conds, 3*n_bands), squeeze=False)
-    
+    fig, axes = plt.subplots(n_bands, n_conds, figsize=(4 * n_conds, 3 * n_bands), squeeze=False)
+
     for i, band in enumerate(BANDS):
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
-        
-        # Apply baseline correction
+
         power_bl = _apply_baseline(power, times, baseline)
-        
+
         for j, cond in enumerate(conditions):
             ax = axes[i, j]
             mask = masks[cond]
-            
+
             if mask.sum() == 0:
-                ax.text(0.5, 0.5, "No data", ha='center', va='center', transform=ax.transAxes)
+                ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
                 continue
-            
+
             cond_power = power_bl[mask]
-            mean_power = np.nanmean(cond_power, axis=0)
-            sem_power = np.nanstd(cond_power, axis=0) / np.sqrt(mask.sum())
-            
-            # Plot mean ± SEM
-            ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                           alpha=0.3, color=BAND_COLORS[band])
-            ax.plot(times, mean_power, color=BAND_COLORS[band], linewidth=2)
-            
-            # Add reference lines
-            ax.axhline(0, color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
-            ax.axvline(0, color='black', linestyle='-', linewidth=1, alpha=0.5)
-            
-            # Labels
+            mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
+            _plot_mean_sem_with_reference_lines(ax, times, mean_power, sem_power, BAND_COLORS[band])
+
             if i == 0:
-                cond_labels = {
-                    "all": f"All Trials\n(n={mask.sum()})",
-                    "condition_2": f"{label2}\n(n={mask.sum()})",
-                    "condition_1": f"{label1}\n(n={mask.sum()})",
-                    "high_temp": f"High Temp\n(n={mask.sum()})",
-                    "low_temp": f"Low Temp\n(n={mask.sum()})",
-                }
-                ax.set_title(cond_labels.get(cond, cond), fontsize=11, fontweight='bold',
-                            color=CONDITION_COLORS.get(cond, 'black'))
-            
+                header_labels = _get_condition_header_labels(label1, label2, mask.sum())
+                ax.set_title(
+                    header_labels.get(cond, cond),
+                    fontsize=11,
+                    fontweight="bold",
+                    color=CONDITION_COLORS.get(cond, "black"),
+                )
+
             if j == 0:
-                ax.set_ylabel(f"{band.upper()}\n({BAND_RANGES[band]})\n% change",
-                             fontsize=10, color=BAND_COLORS[band])
-            
+                ax.set_ylabel(
+                    f"{band.upper()}\n({BAND_RANGES[band]})\n% change",
+                    fontsize=10,
+                    color=BAND_COLORS[band],
+                )
+
             if i == n_bands - 1:
                 ax.set_xlabel("Time (s)", fontsize=10)
-            
+
             ax.set_xlim(times[0], times[-1])
-    
-    fig.suptitle("How does power in each frequency band evolve across the trial?",
-                fontsize=14, fontweight='bold', y=1.02)
-    
+
+    fig.suptitle(
+        "How does power in each frequency band evolve across the trial?",
+        fontsize=14,
+        fontweight="bold",
+        y=1.02,
+    )
+
     plt.tight_layout()
-    
+
     path = save_dir / "evolution" / f"band_power_evolution_all_conditions.{primary_ext}"
     save_fig(
         fig,
@@ -304,9 +418,9 @@ def plot_band_power_evolution_all_conditions(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )
-    
+
     saved["band_power_evolution"] = path
-    
+
     return saved
 
 
@@ -336,85 +450,67 @@ def plot_band_power_by_roi(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     ensure_dir(save_dir / "evolution")
     saved = {}
-    
+
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
-    
-    # Get available ROIs from config
-    rois = get_roi_definitions(config)
-    available_rois = []
-    for roi_name in rois.keys():
-        indices = _get_roi_channel_indices(tfr, roi_name, config)
-        if len(indices) > 0:
-            available_rois.append(roi_name)
-    
+
+    available_rois = _get_available_rois(tfr, config)
     if not available_rois:
         logger.warning("No ROIs found in TFR channels")
         return saved
-    
-    # Create one figure per condition
+
     for cond, mask in masks.items():
-        if mask.sum() < 3:
+        if mask.sum() < MIN_TRIALS_FOR_PLOT:
             continue
-        
+
         n_rois = len(available_rois)
         n_bands = len(BANDS)
-        
-        fig, axes = plt.subplots(n_rois, n_bands, figsize=(3*n_bands, 2.5*n_rois), squeeze=False)
-        
+        fig, axes = plt.subplots(n_rois, n_bands, figsize=(3 * n_bands, 2.5 * n_rois), squeeze=False)
+
         for i, roi_name in enumerate(available_rois):
             roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
-            
+
             for j, band in enumerate(BANDS):
                 ax = axes[i, j]
-                
+
                 times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
                 if len(times) == 0:
-                    ax.text(0.5, 0.5, "No data", ha='center', va='center', transform=ax.transAxes)
+                    ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
                     continue
-                
+
                 power_bl = _apply_baseline(power, times, baseline)
                 cond_power = power_bl[mask]
-                
-                mean_power = np.nanmean(cond_power, axis=0)
-                sem_power = np.nanstd(cond_power, axis=0) / np.sqrt(mask.sum())
-                
-                ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                               alpha=0.3, color=BAND_COLORS[band])
-                ax.plot(times, mean_power, color=BAND_COLORS[band], linewidth=1.5)
-                
-                ax.axhline(0, color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
-                ax.axvline(0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
-                
+                mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
+                _plot_mean_sem_with_reference_lines(
+                    ax, times, mean_power, sem_power, BAND_COLORS[band], SUBPLOT_LINE_WIDTH
+                )
+
                 if i == 0:
-                    ax.set_title(f"{band.upper()}", fontsize=10, fontweight='bold',
-                                color=BAND_COLORS[band])
-                
+                    ax.set_title(f"{band.upper()}", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
+
                 if j == 0:
                     ax.set_ylabel(f"{roi_name}\n% change", fontsize=9)
-                
+
                 if i == n_rois - 1:
                     ax.set_xlabel("Time (s)", fontsize=9)
-                
+
                 ax.tick_params(labelsize=8)
                 ax.set_xlim(times[0], times[-1])
-        
-        cond_titles = {
-            "all": "All Trials",
-            "condition_2": f"{label2} Trials",
-            "condition_1": f"{label1} Trials",
-            "high_temp": "High Temperature",
-            "low_temp": "Low Temperature",
-        }
-        fig.suptitle(f"How does power evolve in different brain regions?\n{cond_titles.get(cond, cond)} (n={mask.sum()})",
-                    fontsize=12, fontweight='bold', y=1.02)
-        
+
+        cond_titles = _get_condition_title_labels(label1, label2)
+        fig.suptitle(
+            f"How does power evolve in different brain regions?\n{cond_titles.get(cond, cond)} (n={mask.sum()})",
+            fontsize=12,
+            fontweight="bold",
+            y=1.02,
+        )
+
         plt.tight_layout()
-        
+
         path = save_dir / "evolution" / f"band_power_by_roi_{cond}.{primary_ext}"
         save_fig(
             fig,
@@ -425,10 +521,43 @@ def plot_band_power_by_roi(
             bbox_inches=plot_cfg.bbox_inches,
             pad_inches=plot_cfg.pad_inches,
         )
-        
+
         saved[f"band_power_roi_{cond}"] = path
-    
+
     return saved
+
+
+def _plot_condition_overlay(
+    ax: plt.Axes,
+    times: np.ndarray,
+    power_bl: np.ndarray,
+    masks: Dict[str, np.ndarray],
+    condition_specs: List[Tuple[str, str, str]],
+) -> None:
+    """Plot multiple conditions overlaid on the same axes.
+    
+    Args:
+        ax: Matplotlib axes
+        times: Time array
+        power_bl: Baseline-corrected power (n_trials, n_times)
+        masks: Dictionary of condition masks
+        condition_specs: List of (condition_key, color, label) tuples
+    """
+    for cond, color, label in condition_specs:
+        if cond not in masks or masks[cond].sum() < MIN_TRIALS_FOR_PLOT:
+            continue
+
+        mask = masks[cond]
+        cond_power = power_bl[mask]
+        mean_power, sem_power = _compute_mean_sem(cond_power, mask.sum())
+
+        ax.fill_between(
+            times, mean_power - sem_power, mean_power + sem_power, alpha=FILL_ALPHA_OVERLAY, color=color
+        )
+        ax.plot(times, mean_power, color=color, linewidth=MAIN_LINE_WIDTH, label=f"{label} (n={mask.sum()})")
+
+    ax.axhline(0, color="gray", linestyle="--", linewidth=REFERENCE_LINE_WIDTH)
+    ax.axvline(0, color="black", linestyle="-", linewidth=REFERENCE_LINE_WIDTH)
 
 
 def plot_condition_comparison_per_band(
@@ -457,80 +586,51 @@ def plot_condition_comparison_per_band(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     ensure_dir(save_dir / "evolution")
     saved = {}
-    
+
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
-    
-    # Create figure with 2 rows: condition comparison, temperature comparison
-    fig, axes = plt.subplots(2, len(BANDS), figsize=(3*len(BANDS), 6), squeeze=False)
-    
+
+    fig, axes = plt.subplots(2, len(BANDS), figsize=(3 * len(BANDS), 6), squeeze=False)
+
     for j, band in enumerate(BANDS):
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
-        
+
         power_bl = _apply_baseline(power, times, baseline)
-        
-        # Row 1: Condition 2 vs Condition 1
+
         ax = axes[0, j]
-        for cond, color, label in [
+        condition_specs = [
             ("condition_2", CONDITION_COLORS["condition_2"], label2),
             ("condition_1", CONDITION_COLORS["condition_1"], label1),
-        ]:
-            if cond not in masks or masks[cond].sum() < 3:
-                continue
-            
-            mask = masks[cond]
-            cond_power = power_bl[mask]
-            mean_power = np.nanmean(cond_power, axis=0)
-            sem_power = np.nanstd(cond_power, axis=0) / np.sqrt(mask.sum())
-            
-            ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                           alpha=0.2, color=color)
-            ax.plot(times, mean_power, color=color, linewidth=2, label=f"{label} (n={mask.sum()})")
-        
-        ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.axvline(0, color='black', linestyle='-', linewidth=0.5)
-        ax.set_title(f"{band.upper()}\n({BAND_RANGES[band]})", fontsize=10, 
-                    fontweight='bold', color=BAND_COLORS[band])
+        ]
+        _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
+        ax.set_title(f"{band.upper()}\n({BAND_RANGES[band]})", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
         if j == 0:
             ax.set_ylabel(f"{label2} vs {label1}\n% change", fontsize=10)
-            ax.legend(fontsize=8, loc='upper right')
+            ax.legend(fontsize=8, loc="upper right")
         ax.set_xlim(times[0], times[-1])
-        
-        # Row 2: High vs Low Temperature
+
         ax = axes[1, j]
-        for cond, color, label in [("high_temp", CONDITION_COLORS["high_temp"], "High Temp"),
-                                    ("low_temp", CONDITION_COLORS["low_temp"], "Low Temp")]:
-            if cond not in masks or masks[cond].sum() < 3:
-                continue
-            
-            mask = masks[cond]
-            cond_power = power_bl[mask]
-            mean_power = np.nanmean(cond_power, axis=0)
-            sem_power = np.nanstd(cond_power, axis=0) / np.sqrt(mask.sum())
-            
-            ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                           alpha=0.2, color=color)
-            ax.plot(times, mean_power, color=color, linewidth=2, label=f"{label} (n={mask.sum()})")
-        
-        ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.axvline(0, color='black', linestyle='-', linewidth=0.5)
+        temp_specs = [
+            ("high_temp", CONDITION_COLORS["high_temp"], "High Temp"),
+            ("low_temp", CONDITION_COLORS["low_temp"], "Low Temp"),
+        ]
+        _plot_condition_overlay(ax, times, power_bl, masks, temp_specs)
         ax.set_xlabel("Time (s)", fontsize=10)
         if j == 0:
             ax.set_ylabel("High vs Low Temp\n% change", fontsize=10)
-            ax.legend(fontsize=8, loc='upper right')
+            ax.legend(fontsize=8, loc="upper right")
         ax.set_xlim(times[0], times[-1])
-    
-    fig.suptitle("Do conditions differ in their power dynamics?",
-                fontsize=12, fontweight='bold', y=1.02)
-    
+
+    fig.suptitle("Do conditions differ in their power dynamics?", fontsize=12, fontweight="bold", y=1.02)
+
     plt.tight_layout()
-    
+
     path = save_dir / "evolution" / f"condition_comparison_per_band.{primary_ext}"
     save_fig(
         fig,
@@ -541,9 +641,9 @@ def plot_condition_comparison_per_band(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )
-    
+
     saved["condition_comparison"] = path
-    
+
     return saved
 
 
@@ -572,113 +672,80 @@ def plot_roi_condition_comparison(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     ensure_dir(save_dir / "evolution")
     saved = {}
-    
+
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
-    
-    # Focus on alpha and beta (common choices for summary figures)
+
     focus_bands = ["alpha", "beta"]
-    
-    # Get available ROIs from config
-    rois = get_roi_definitions(config)
-    available_rois = []
-    for roi_name in rois.keys():
-        indices = _get_roi_channel_indices(tfr, roi_name, config)
-        if len(indices) > 0:
-            available_rois.append(roi_name)
-    
+    available_rois = _get_available_rois(tfr, config)
     if not available_rois:
         return saved
-    
-    # Create figure: rows = ROIs, columns = bands, overlaid conditions
+
     n_rois = len(available_rois)
     n_bands = len(focus_bands)
-    
-    fig, axes = plt.subplots(n_rois, n_bands * 2, figsize=(4*n_bands*2, 2.5*n_rois), squeeze=False)
-    
+    fig, axes = plt.subplots(n_rois, n_bands * 2, figsize=(4 * n_bands * 2, 2.5 * n_rois), squeeze=False)
+
     for i, roi_name in enumerate(available_rois):
         roi_indices = _get_roi_channel_indices(tfr, roi_name, config)
-        
+
         col_idx = 0
         for band in focus_bands:
             times, power = _get_band_power_timecourse(tfr, band, config, roi_indices)
             if len(times) == 0:
                 col_idx += 2
                 continue
-            
+
             power_bl = _apply_baseline(power, times, baseline)
-            
-            # Condition comparison
+
             ax = axes[i, col_idx]
-            for cond, color, label in [
+            condition_specs = [
                 ("condition_2", CONDITION_COLORS["condition_2"], label2),
                 ("condition_1", CONDITION_COLORS["condition_1"], label1),
-            ]:
-                if cond not in masks or masks[cond].sum() < 3:
-                    continue
-                
-                mask = masks[cond]
-                mean_power = np.nanmean(power_bl[mask], axis=0)
-                sem_power = np.nanstd(power_bl[mask], axis=0) / np.sqrt(mask.sum())
-                
-                ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                               alpha=0.2, color=color)
-                ax.plot(times, mean_power, color=color, linewidth=1.5, label=label)
-            
-            ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-            ax.axvline(0, color='black', linestyle='-', linewidth=0.5)
-            
+            ]
+            _plot_condition_overlay(ax, times, power_bl, masks, condition_specs)
+
             if i == 0:
-                ax.set_title(f"{band.upper()} - {label2} vs {label1}", fontsize=10, fontweight='bold',
-                            color=BAND_COLORS[band])
+                ax.set_title(
+                    f"{band.upper()} - {label2} vs {label1}",
+                    fontsize=10,
+                    fontweight="bold",
+                    color=BAND_COLORS[band],
+                )
             if col_idx == 0:
                 ax.set_ylabel(f"{roi_name}\n% change", fontsize=9)
             if i == 0 and col_idx == 0:
-                ax.legend(fontsize=7, loc='upper right')
+                ax.legend(fontsize=7, loc="upper right")
             if i == n_rois - 1:
                 ax.set_xlabel("Time (s)", fontsize=9)
             ax.set_xlim(times[0], times[-1])
             ax.tick_params(labelsize=8)
-            
-            # Temperature comparison
+
             ax = axes[i, col_idx + 1]
-            for cond, color, label in [("high_temp", CONDITION_COLORS["high_temp"], "High"),
-                                        ("low_temp", CONDITION_COLORS["low_temp"], "Low")]:
-                if cond not in masks or masks[cond].sum() < 3:
-                    continue
-                
-                mask = masks[cond]
-                mean_power = np.nanmean(power_bl[mask], axis=0)
-                sem_power = np.nanstd(power_bl[mask], axis=0) / np.sqrt(mask.sum())
-                
-                ax.fill_between(times, mean_power - sem_power, mean_power + sem_power,
-                               alpha=0.2, color=color)
-                ax.plot(times, mean_power, color=color, linewidth=1.5, label=label)
-            
-            ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-            ax.axvline(0, color='black', linestyle='-', linewidth=0.5)
-            
+            temp_specs = [
+                ("high_temp", CONDITION_COLORS["high_temp"], "High"),
+                ("low_temp", CONDITION_COLORS["low_temp"], "Low"),
+            ]
+            _plot_condition_overlay(ax, times, power_bl, masks, temp_specs)
+
             if i == 0:
-                ax.set_title(f"{band.upper()} - Temp", fontsize=10, fontweight='bold',
-                            color=BAND_COLORS[band])
+                ax.set_title(f"{band.upper()} - Temp", fontsize=10, fontweight="bold", color=BAND_COLORS[band])
             if i == 0 and col_idx == 0:
-                ax.legend(fontsize=7, loc='upper right')
+                ax.legend(fontsize=7, loc="upper right")
             if i == n_rois - 1:
                 ax.set_xlabel("Time (s)", fontsize=9)
             ax.set_xlim(times[0], times[-1])
             ax.tick_params(labelsize=8)
-            
+
             col_idx += 2
-    
-    fig.suptitle("Which brain regions show the largest condition differences?",
-                fontsize=12, fontweight='bold', y=1.02)
-    
+
+    fig.suptitle("Which brain regions show the largest condition differences?", fontsize=12, fontweight="bold", y=1.02)
+
     plt.tight_layout()
-    
+
     path = save_dir / "evolution" / f"roi_condition_comparison.{primary_ext}"
     save_fig(
         fig,
@@ -689,10 +756,79 @@ def plot_roi_condition_comparison(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )
-    
+
     saved["roi_condition_comparison"] = path
-    
+
     return saved
+
+
+def _extract_band_values_from_dataframe(df: pd.DataFrame, band: str, value_col: str) -> float:
+    """Extract value for a specific band from filtered DataFrame.
+    
+    Args:
+        df: Filtered DataFrame
+        band: Band name
+        value_col: Column name to extract
+        
+    Returns:
+        Value for the band, or 0.0 if not found
+    """
+    band_data = df[df["band"] == band]
+    if len(band_data) > 0:
+        return band_data[value_col].values[0]
+    return 0.0
+
+
+def _plot_summary_bars(
+    ax: plt.Axes,
+    df: pd.DataFrame,
+    condition_keys: List[str],
+    condition_labels: Dict[str, str],
+    title: str,
+) -> None:
+    """Plot grouped bar chart for summary data.
+    
+    Args:
+        ax: Matplotlib axes
+        df: DataFrame with summary data
+        condition_keys: List of condition keys to plot
+        condition_labels: Dictionary mapping condition keys to display labels
+        title: Plot title
+    """
+    filtered_df = df[df["condition"].isin(condition_keys)]
+    if len(filtered_df) == 0:
+        return
+
+    x_positions = np.arange(len(BANDS))
+    n_conditions = len(condition_keys)
+
+    for i, cond in enumerate(condition_keys):
+        cond_data = filtered_df[filtered_df["condition"] == cond]
+        if len(cond_data) == 0:
+            continue
+
+        means = [_extract_band_values_from_dataframe(cond_data, band, "mean") for band in BANDS]
+        sems = [_extract_band_values_from_dataframe(cond_data, band, "sem") for band in BANDS]
+
+        offset = (i - 0.5 * (n_conditions - 1)) * BAR_WIDTH
+        label = condition_labels.get(cond, cond.replace("_", " ").title())
+        ax.bar(
+            x_positions + offset,
+            means,
+            BAR_WIDTH,
+            yerr=sems,
+            label=label,
+            color=CONDITION_COLORS.get(cond, "gray"),
+            capsize=BAR_CAPSIZE,
+            alpha=BAR_ALPHA,
+        )
+
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
+    ax.axhline(0, color="gray", linestyle="--", linewidth=REFERENCE_LINE_WIDTH)
+    ax.set_ylabel("Mean Active Power (% change)", fontsize=10)
+    ax.set_title(title, fontweight="bold", loc="left", fontsize=11)
+    ax.legend(fontsize=9)
 
 
 def plot_band_power_summary(
@@ -722,115 +858,69 @@ def plot_band_power_summary(
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     ensure_dir(save_dir / "evolution")
     saved = {}
-    
+
     masks, label1, label2 = _create_condition_masks(events_df, config)
     plot_cfg = get_plot_config(config)
     primary_ext = plot_cfg.formats[0] if plot_cfg.formats else "png"
-    
-    # Compute mean active power for each band and condition
+
     summary_data = []
-    
+
     for band in BANDS:
         times, power = _get_band_power_timecourse(tfr, band, config)
         if len(times) == 0:
             continue
-        
+
         power_bl = _apply_baseline(power, times, baseline)
-        
-        # Get active indices
+
         active_mask = (times >= active_window[0]) & (times <= active_window[1])
         if not np.any(active_mask):
             continue
-        
+
         for cond, mask in masks.items():
-            if mask.sum() < 3:
+            if mask.sum() < MIN_TRIALS_FOR_PLOT:
                 continue
-            
+
             cond_power = power_bl[mask][:, active_mask]
             mean_active = np.nanmean(cond_power)
             sem_active = np.nanstd(cond_power.mean(axis=1)) / np.sqrt(mask.sum())
-            
-            summary_data.append({
-                'band': band,
-                'condition': cond,
-                'mean': mean_active,
-                'sem': sem_active,
-                'n': mask.sum(),
-            })
-    
+
+            summary_data.append(
+                {
+                    "band": band,
+                    "condition": cond,
+                    "mean": mean_active,
+                    "sem": sem_active,
+                    "n": mask.sum(),
+                }
+            )
+
     if not summary_data:
         return saved
-    
+
     df = pd.DataFrame(summary_data)
-    
-    # Create grouped bar plot
+
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    
-    # Panel A: Condition 2 vs Condition 1
-    ax = axes[0]
-    cond_keys = ['condition_2', 'condition_1']
-    cond_df = df[df['condition'].isin(cond_keys)]
-    
-    if len(cond_df) > 0:
-        x = np.arange(len(BANDS))
-        width = 0.35
-        cond_display = {"condition_2": label2, "condition_1": label1}
-        
-        for i, cond in enumerate(cond_keys):
-            key_df = cond_df[cond_df['condition'] == cond]
-            if len(key_df) > 0:
-                means = [key_df[key_df['band'] == b]['mean'].values[0] if len(key_df[key_df['band'] == b]) > 0 else 0 for b in BANDS]
-                sems = [key_df[key_df['band'] == b]['sem'].values[0] if len(key_df[key_df['band'] == b]) > 0 else 0 for b in BANDS]
-                
-                offset = (i - 0.5) * width
-                bars = ax.bar(x + offset, means, width, yerr=sems, 
-                             label=str(cond_display.get(cond, cond)).replace('_', ' ').title(),
-                             color=CONDITION_COLORS.get(cond, 'gray'),
-                             capsize=3, alpha=0.8)
-        
-        ax.set_xticks(x)
-        ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
-        ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.set_ylabel('Mean Active Power (% change)', fontsize=10)
-        ax.set_title(f'A. {label2} vs {label1}', fontweight='bold', loc='left', fontsize=11)
-        ax.legend(fontsize=9)
-    
-    # Panel B: High vs Low Temperature
-    ax = axes[1]
-    temp_conds = ['high_temp', 'low_temp']
-    temp_df = df[df['condition'].isin(temp_conds)]
-    
-    if len(temp_df) > 0:
-        x = np.arange(len(BANDS))
-        width = 0.35
-        
-        for i, cond in enumerate(temp_conds):
-            cond_df = temp_df[temp_df['condition'] == cond]
-            if len(cond_df) > 0:
-                means = [cond_df[cond_df['band'] == b]['mean'].values[0] if len(cond_df[cond_df['band'] == b]) > 0 else 0 for b in BANDS]
-                sems = [cond_df[cond_df['band'] == b]['sem'].values[0] if len(cond_df[cond_df['band'] == b]) > 0 else 0 for b in BANDS]
-                
-                offset = (i - 0.5) * width
-                bars = ax.bar(x + offset, means, width, yerr=sems,
-                             label=cond.replace('_', ' ').title(),
-                             color=CONDITION_COLORS.get(cond, 'gray'),
-                             capsize=3, alpha=0.8)
-        
-        ax.set_xticks(x)
-        ax.set_xticklabels([b.upper() for b in BANDS], fontsize=10)
-        ax.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        ax.set_ylabel('Mean Active Power (% change)', fontsize=10)
-        ax.set_title('B. High vs Low Temperature', fontweight='bold', loc='left', fontsize=11)
-        ax.legend(fontsize=9)
-    
-    fig.suptitle("What is the overall pattern of power changes across bands and conditions?",
-                fontsize=12, fontweight='bold', y=1.02)
-    
+
+    cond_keys = ["condition_2", "condition_1"]
+    cond_labels = {"condition_2": label2, "condition_1": label1}
+    _plot_summary_bars(axes[0], df, cond_keys, cond_labels, f"A. {label2} vs {label1}")
+
+    temp_keys = ["high_temp", "low_temp"]
+    temp_labels = {key: key.replace("_", " ").title() for key in temp_keys}
+    _plot_summary_bars(axes[1], df, temp_keys, temp_labels, "B. High vs Low Temperature")
+
+    fig.suptitle(
+        "What is the overall pattern of power changes across bands and conditions?",
+        fontsize=12,
+        fontweight="bold",
+        y=1.02,
+    )
+
     plt.tight_layout()
-    
+
     path = save_dir / "evolution" / f"band_power_summary.{primary_ext}"
     save_fig(
         fig,
@@ -841,9 +931,9 @@ def plot_band_power_summary(
         bbox_inches=plot_cfg.bbox_inches,
         pad_inches=plot_cfg.pad_inches,
     )
-    
+
     saved["band_power_summary"] = path
-    
+
     return saved
 
 

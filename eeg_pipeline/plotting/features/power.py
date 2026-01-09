@@ -43,8 +43,434 @@ from scipy.stats import mannwhitneyu
 
 
 ###################################################################
+# Constants
+###################################################################
+
+FDR_ALPHA_DEFAULT = 0.05
+MIN_TRIALS_FOR_STATISTICS = 3
+MIN_CHANNELS_FOR_TOPO = 3
+CV_MODERATE_THRESHOLD = 0.5
+CV_HIGH_THRESHOLD = 1.0
+FANO_POISSON_THRESHOLD = 1.0
+HEATMAP_TEXT_THRESHOLD = 200
+MIN_TRIALS_FOR_VARIABILITY = 5
+MIN_EPOCHS_FOR_SEM = 2
+BAR_LABEL_OFFSET = 0.02
+HISTOGRAM_BINS = 15
+MIN_FONT_SIZE = 6
+MAX_FONT_SIZE = 10
+NORMALITY_ALPHA = 0.05
+
+
+###################################################################
 # Helper Functions
 ###################################################################
+
+
+def _extract_channel_names_from_columns(band_cols: List[str]) -> List[str]:
+    """Extract channel names from power column names."""
+    channel_names = []
+    for col in band_cols:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "power":
+            ident = parsed.get("identifier")
+            if ident:
+                channel_names.append(str(ident))
+                continue
+        channel_names.append(str(col))
+    return channel_names
+
+
+def _build_channel_data_map(mean_power: pd.Series) -> Dict[str, float]:
+    """Build a mapping from channel names to power values."""
+    data_map = {}
+    for col, val in mean_power.items():
+        parsed = NamingSchema.parse(str(col))
+        if not (parsed.get("valid") and parsed.get("group") == "power"):
+            continue
+        ident = parsed.get("identifier")
+        if ident:
+            data_map[str(ident)] = val
+    return data_map
+
+
+def _compute_heatmap_color_limits(
+    heatmap_data: np.ndarray,
+    vmin: Optional[float],
+    vmax: Optional[float],
+) -> Tuple[float, float]:
+    """Compute color limits for heatmap display."""
+    if vmin is None or vmax is None:
+        data_min = float(np.nanmin(heatmap_data))
+        data_max = float(np.nanmax(heatmap_data))
+        vmax_abs = max(abs(data_min), abs(data_max))
+        if vmin is None:
+            vmin = -vmax_abs
+        if vmax is None:
+            vmax = vmax_abs
+    return vmin, vmax
+
+
+def _get_comparison_segments(
+    power_df: pd.DataFrame,
+    config: Any,
+    logger: Optional[logging.Logger],
+) -> List[str]:
+    """Extract comparison segments from config or auto-detect from data."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from .utils import get_named_segments
+    
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < 2:
+        detected = get_named_segments(power_df, group="power")
+        if len(detected) >= 2:
+            segments = detected[:2]
+            if logger:
+                logger.info(f"Auto-detected segments for comparison: {segments}")
+    return segments
+
+
+def _get_comparison_rois(
+    config: Any,
+    rois: Dict[str, Any],
+) -> List[str]:
+    """Determine which ROIs to plot for comparisons."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
+        return roi_names
+    
+    roi_names = ["all"]
+    if rois:
+        roi_names.extend(list(rois.keys()))
+    return roi_names
+
+
+def _extract_band_data_for_roi(
+    power_df: pd.DataFrame,
+    bands: List[str],
+    segments: List[str],
+    roi_channels: List[str],
+) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
+    """Extract power data by band for two segments within an ROI."""
+    roi_set = set(roi_channels)
+    data_by_band = {}
+    
+    for band in bands:
+        cols1, cols2 = [], []
+        for c in power_df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not (parsed.get("valid") and parsed.get("group") == "power"):
+                continue
+            channel_id = str(parsed.get("identifier") or "")
+            if channel_id and channel_id not in roi_set:
+                continue
+            if str(parsed.get("segment") or "") == segments[0] and str(parsed.get("band") or "") == band:
+                cols1.append(c)
+            if str(parsed.get("segment") or "") == segments[1] and str(parsed.get("band") or "") == band:
+                cols2.append(c)
+        
+        if cols1 and cols2:
+            s1 = power_df[cols1].mean(axis=1)
+            s2 = power_df[cols2].mean(axis=1)
+            valid_mask = s1.notna() & s2.notna()
+            v1, v2 = s1[valid_mask].values, s2[valid_mask].values
+            if len(v1) > 0:
+                data_by_band[band] = (v1, v2)
+    
+    return data_by_band
+
+
+def _extract_column_comparison_data(
+    power_df: pd.DataFrame,
+    bands: List[str],
+    seg_name: str,
+    roi_channels: List[str],
+) -> Dict[int, pd.Series]:
+    """Extract power data by band for column comparison within an ROI."""
+    roi_set = set(roi_channels)
+    cell_data = {}
+    
+    for col_idx, band in enumerate(bands):
+        cols = []
+        for c in power_df.columns:
+            parsed = NamingSchema.parse(str(c))
+            if not (parsed.get("valid") and parsed.get("group") == "power"):
+                continue
+            channel_id = str(parsed.get("identifier") or "")
+            if channel_id and channel_id not in roi_set:
+                continue
+            if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
+                cols.append(c)
+        
+    if not cols:
+        cell_data[col_idx] = None
+    else:
+        val_series = power_df[cols].mean(axis=1)
+        cell_data[col_idx] = val_series
+    
+    return cell_data
+
+
+def _compute_column_comparison_statistics(
+    cell_data: Dict[int, Optional[pd.Series]],
+    m1: np.ndarray,
+    m2: np.ndarray,
+    bands: List[str],
+    config: Any,
+) -> Tuple[Dict[int, Tuple[float, float, float, bool]], int]:
+    """Compute Mann-Whitney U statistics for column comparison."""
+    from .utils import apply_fdr_correction
+    
+    all_pvals = []
+    pvalue_keys = []
+    
+    for col_idx, band in enumerate(bands):
+        val_series = cell_data.get(col_idx)
+        if val_series is None:
+            continue
+        
+        v1 = val_series[m1].dropna().values
+        v2 = val_series[m2].dropna().values
+        
+        if len(v1) < MIN_TRIALS_FOR_STATISTICS or len(v2) < MIN_TRIALS_FOR_STATISTICS:
+            continue
+        
+        try:
+            _, p = mannwhitneyu(v1, v2, alternative="two-sided")
+            mean_diff = np.mean(v2) - np.mean(v1)
+            pooled_std = np.sqrt(
+                ((len(v1) - 1) * np.var(v1, ddof=1) + (len(v2) - 1) * np.var(v2, ddof=1))
+                / (len(v1) + len(v2) - 2)
+            )
+            cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+            all_pvals.append(p)
+            pvalue_keys.append((col_idx, p, cohens_d))
+        except Exception:
+            pass
+    
+    qvalues = {}
+    n_significant = 0
+    if all_pvals:
+        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
+        for i, (key, p, d) in enumerate(pvalue_keys):
+            qvalues[key] = (p, qvals[i], d, rejected[i])
+        n_significant = int(np.sum(rejected))
+    
+    return qvalues, n_significant
+
+
+def _plot_window_comparison(
+    power_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    segments: List[str],
+    bands: List[str],
+    roi_names: List[str],
+    rois: Dict[str, Any],
+    all_channels: List[str],
+    stats_dir: Optional[Path],
+) -> None:
+    """Plot window comparison (paired) for power by condition."""
+    from .utils import plot_paired_comparison
+    
+    seg1, seg2 = segments[0], segments[1]
+    
+    for roi_name in roi_names:
+        if roi_name == "all":
+            roi_channels = all_channels
+        else:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+        
+        if not roi_channels:
+            continue
+        
+        data_by_band = _extract_band_data_for_roi(
+            power_df, bands, [seg1, seg2], roi_channels
+        )
+        
+        if not data_by_band:
+            continue
+        
+        roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+        suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
+        
+        plot_paired_comparison(
+            data_by_band=data_by_band,
+            subject=subject,
+            save_path=save_path,
+            feature_label="Band Power",
+            config=config,
+            logger=logger,
+            label1=seg1.capitalize(),
+            label2=seg2.capitalize(),
+            roi_name=roi_name,
+            stats_dir=stats_dir,
+        )
+
+
+def _plot_column_comparison(
+    power_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+    bands: List[str],
+    roi_names: List[str],
+    rois: Dict[str, Any],
+    all_channels: List[str],
+    stats_dir: Optional[Path],
+) -> None:
+    """Plot column comparison (unpaired) for power by condition."""
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.utils.config.loader import get_config_value
+    from .utils import load_precomputed_paired_stats, get_precomputed_qvalues, apply_fdr_correction
+    
+    comp_mask_info = extract_comparison_mask(events_df, config)
+    if not comp_mask_info:
+        if logger:
+            logger.debug("Column comparison requested but config incomplete")
+        return
+    
+    m1, m2, label1, label2 = comp_mask_info
+    seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
+    plot_cfg = get_plot_config(config)
+    segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+    band_colors = {band: get_band_color(band, config) for band in bands}
+    
+    precomputed_column_stats = None
+    if stats_dir is not None:
+        precomputed_column_stats = load_precomputed_paired_stats(
+            stats_dir=stats_dir,
+            feature_type="power",
+            comparison_type="column",
+            condition1=label1.lower(),
+            condition2=label2.lower(),
+            roi_name=None,
+        )
+        if precomputed_column_stats is not None and not precomputed_column_stats.empty:
+            if logger:
+                logger.info(f"Using pre-computed column comparison stats ({len(precomputed_column_stats)} entries)")
+    
+    use_precomputed = precomputed_column_stats is not None and not precomputed_column_stats.empty
+    
+    for roi_name in roi_names:
+        if roi_name == "all":
+            roi_channels = all_channels
+        else:
+            roi_channels = get_roi_channels(rois[roi_name], all_channels)
+        
+        if not roi_channels:
+            continue
+        
+        cell_data = _extract_column_comparison_data(
+            power_df, bands, seg_name, roi_channels
+        )
+        
+        plot_data = {}
+        for col_idx, band in enumerate(bands):
+            val_series = cell_data.get(col_idx)
+            if val_series is None:
+                plot_data[col_idx] = None
+                continue
+            v1 = val_series[m1].dropna().values
+            v2 = val_series[m2].dropna().values
+            plot_data[col_idx] = {"v1": v1, "v2": v2}
+        
+        if use_precomputed:
+            qvalues = get_precomputed_qvalues(precomputed_column_stats, bands, roi_name or "all")
+            n_significant = sum(1 for v in qvalues.values() if v[3])
+            
+            for col_idx, band in enumerate(bands):
+                if band in qvalues:
+                    p, q, d, sig = qvalues[band]
+                    qvalues[col_idx] = (p, q, d, sig)
+        else:
+            qvalues, n_significant = _compute_column_comparison_statistics(
+                cell_data, m1, m2, bands, config
+            )
+        
+        fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 5), squeeze=False)
+        
+        for col_idx, band in enumerate(bands):
+            ax = axes.flatten()[col_idx]
+            data = plot_data.get(col_idx)
+            
+            if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                       transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                ax.set_xticks([])
+                continue
+            
+            v1, v2 = data["v1"], data["v2"]
+            
+            bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+            bp["boxes"][0].set_facecolor(segment_colors["v1"])
+            bp["boxes"][0].set_alpha(0.6)
+            bp["boxes"][1].set_facecolor(segment_colors["v2"])
+            bp["boxes"][1].set_alpha(0.6)
+            
+            ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
+            ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+            
+            all_vals = np.concatenate([v1, v2])
+            ymin = np.nanmin(all_vals)
+            ymax = np.nanmax(all_vals)
+            yrange = ymax - ymin if ymax > ymin else 0.1
+            y_padding_bottom = 0.1 * yrange
+            y_padding_top = 0.3 * yrange
+            ax.set_ylim(ymin - y_padding_bottom, ymax + y_padding_top)
+            
+            if col_idx in qvalues:
+                _, q, d, sig = qvalues[col_idx]
+                sig_marker = "†" if sig else ""
+                sig_color = "#d62728" if sig else "#333333"
+                annotation_y = ymax + 0.05 * yrange
+                ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, annotation_y),
+                           ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                           fontweight="bold" if sig else "normal")
+            
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels([label1, label2], fontsize=9)
+            ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+        
+        n_trials = len(power_df)
+        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        n_tests = len(qvalues)
+        
+        stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
+        title = (f"Band Power: {label1} vs {label2} (Column Comparison)\n"
+                 f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
+                 f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+        fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+        
+        plt.tight_layout()
+        
+        roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+        suffix = f"_roi-{roi_safe}" if roi_safe else ""
+        filename = f"sub-{subject}_power_by_condition{suffix}_column"
+        
+        save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
+                 bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+        plt.close(fig)
+        
+        if logger:
+            logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant, {stats_source})")
 
 
 def plot_power_by_condition(
@@ -67,290 +493,31 @@ def plot_power_by_condition(
         return
 
     from eeg_pipeline.utils.config.loader import get_config_value, get_frequency_band_names
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from .utils import (
-        plot_paired_comparison,
-        apply_fdr_correction,
-        get_named_segments,
-    )
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    # Get segments from config or auto-detect from data
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    if not segments or len(segments) < 2:
-        detected = get_named_segments(power_df, group="power")
-        if len(detected) >= 2:
-            segments = detected[:2]
-            if logger:
-                logger.info(f"Auto-detected segments for comparison: {segments}")
-    
+    segments = _get_comparison_segments(power_df, config, logger)
     bands = list(get_frequency_band_names(config) or ["delta", "theta", "alpha", "beta", "gamma"])
     
     rois = get_roi_definitions(config)
     all_channels = extract_channels_from_columns(list(power_df.columns))
-    
-    # Determine which ROIs to plot
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    if comp_rois:
-        roi_names = []
-        for r in comp_rois:
-            if r.lower() == "all":
-                if "all" not in roi_names:
-                    roi_names.append("all")
-            elif r in rois:
-                roi_names.append(r)
-    else:
-        roi_names = ["all"]
-        if rois:
-            roi_names.extend(list(rois.keys()))
+    roi_names = _get_comparison_rois(config, rois)
     
     if logger:
         logger.info(f"Power comparison: segments={segments}, ROIs={roi_names}, compare_windows={compare_wins}, compare_columns={compare_cols}")
     
-    # Window comparison (paired) - use unified helper
     if compare_wins and len(segments) >= 2:
+        _plot_window_comparison(
+            power_df, events_df, subject, save_dir, logger, config,
+            segments, bands, roi_names, rois, all_channels, stats_dir
+        )
 
-        seg1, seg2 = segments[0], segments[1]
-        
-        for roi_name in roi_names:
-            if roi_name == "all":
-                roi_channels = all_channels
-            else:
-                roi_channels = get_roi_channels(rois[roi_name], all_channels)
-            
-            if not roi_channels:
-                continue
-            
-            roi_set = set(roi_channels)
-            
-            # Collect data by band
-            data_by_band = {}
-            for band in bands:
-                cols1, cols2 = [], []
-                for c in power_df.columns:
-                    parsed = NamingSchema.parse(str(c))
-                    if not (parsed.get("valid") and parsed.get("group") == "power"):
-                        continue
-                    channel_id = str(parsed.get("identifier") or "")
-                    if channel_id and channel_id not in roi_set:
-                        continue
-                    if str(parsed.get("segment") or "") == seg1 and str(parsed.get("band") or "") == band:
-                        cols1.append(c)
-                    if str(parsed.get("segment") or "") == seg2 and str(parsed.get("band") or "") == band:
-                        cols2.append(c)
-                
-                if cols1 and cols2:
-                    s1 = power_df[cols1].mean(axis=1)
-                    s2 = power_df[cols2].mean(axis=1)
-                    valid_mask = s1.notna() & s2.notna()
-                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
-                    if len(v1) > 0:
-                        data_by_band[band] = (v1, v2)
-            
-            if data_by_band:
-                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
-                suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                save_path = save_dir / f"sub-{subject}_power_by_condition{suffix}_window"
-                
-                plot_paired_comparison(
-                    data_by_band=data_by_band,
-                    subject=subject,
-                    save_path=save_path,
-                    feature_label="Band Power",
-                    config=config,
-                    logger=logger,
-                    label1=seg1.capitalize(),
-                    label2=seg2.capitalize(),
-                    roi_name=roi_name,
-                    stats_dir=stats_dir,
-                )
-
-    # Column comparison (unpaired)
     if compare_cols:
-        comp_mask_info = extract_comparison_mask(events_df, config)
-        if not comp_mask_info:
-            if logger:
-                logger.debug("Column comparison requested but config incomplete")
-        else:
-            m1, m2, label1, label2 = comp_mask_info
-            seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
-            plot_cfg = get_plot_config(config)
-            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
-            band_colors = {band: get_band_color(band, config) for band in bands}
-
-            # Try to load pre-computed column comparison stats
-            from .utils import load_precomputed_paired_stats, get_precomputed_qvalues
-            
-            precomputed_column_stats = None
-            if stats_dir is not None:
-                precomputed_column_stats = load_precomputed_paired_stats(
-                    stats_dir=stats_dir,
-                    feature_type="power",
-                    comparison_type="column",
-                    condition1=label1.lower(),
-                    condition2=label2.lower(),
-                    roi_name=None,
-                )
-                if precomputed_column_stats is not None and not precomputed_column_stats.empty:
-                    if logger:
-                        logger.info(f"Using pre-computed column comparison stats ({len(precomputed_column_stats)} entries)")
-
-            for roi_name in roi_names:
-                if roi_name == "all":
-                    roi_channels = all_channels
-                else:
-                    roi_channels = get_roi_channels(rois[roi_name], all_channels)
-                
-                if not roi_channels:
-                    continue
-                
-                roi_set = set(roi_channels)
-                all_pvals, pvalue_keys, cell_data = [], [], {}
-                
-                # Use pre-computed stats if available
-                use_precomputed = precomputed_column_stats is not None and not precomputed_column_stats.empty
-                
-                if use_precomputed:
-                    qvalues = get_precomputed_qvalues(precomputed_column_stats, bands, roi_name or "all")
-                    n_significant = sum(1 for v in qvalues.values() if v[3])
-                    
-                    # Still need cell_data for plotting the actual values
-                    for col_idx, band in enumerate(bands):
-                        cols = []
-                        for c in power_df.columns:
-                            parsed = NamingSchema.parse(str(c))
-                            if not (parsed.get("valid") and parsed.get("group") == "power"):
-                                continue
-                            channel_id = str(parsed.get("identifier") or "")
-                            if channel_id and channel_id not in roi_set:
-                                continue
-                            if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
-                                cols.append(c)
-                        
-                        if not cols:
-                            cell_data[col_idx] = None
-                            continue
-                        
-                        val_series = power_df[cols].mean(axis=1)
-                        v1 = val_series[m1].dropna().values
-                        v2 = val_series[m2].dropna().values
-                        cell_data[col_idx] = {"v1": v1, "v2": v2}
-                        
-                        # Map band to col_idx for q-value lookup
-                        if band in qvalues:
-                            p, q, d, sig = qvalues[band]
-                            qvalues[col_idx] = (p, q, d, sig)
-                else:
-                    # Compute on-the-fly
-                    for col_idx, band in enumerate(bands):
-                        cols = []
-                        for c in power_df.columns:
-                            parsed = NamingSchema.parse(str(c))
-                            if not (parsed.get("valid") and parsed.get("group") == "power"):
-                                continue
-                            channel_id = str(parsed.get("identifier") or "")
-                            if channel_id and channel_id not in roi_set:
-                                continue
-                            if str(parsed.get("segment") or "") == seg_name and str(parsed.get("band") or "") == band:
-                                cols.append(c)
-                        
-                        if not cols:
-                            cell_data[col_idx] = None
-                            continue
-                        
-                        val_series = power_df[cols].mean(axis=1)
-                        v1 = val_series[m1].dropna().values
-                        v2 = val_series[m2].dropna().values
-                        
-                        cell_data[col_idx] = {"v1": v1, "v2": v2}
-                        
-                        if len(v1) >= 3 and len(v2) >= 3:
-                            from scipy.stats import mannwhitneyu
-                            try:
-                                _, p = mannwhitneyu(v1, v2, alternative="two-sided")
-                                diff = np.mean(v2) - np.mean(v1)
-                                pooled_std = np.sqrt(((len(v1)-1)*np.var(v1, ddof=1) + (len(v2)-1)*np.var(v2, ddof=1)) / (len(v1)+len(v2)-2))
-                                d = diff / pooled_std if pooled_std > 0 else 0
-                                all_pvals.append(p)
-                                pvalue_keys.append((col_idx, p, d))
-                            except Exception:
-                                pass
-                    
-                    qvalues = {}
-                    n_significant = 0
-                    if all_pvals:
-                        rejected, qvals, _ = apply_fdr_correction(all_pvals, config=config)
-                        for i, (key, p, d) in enumerate(pvalue_keys):
-                            qvalues[key] = (p, qvals[i], d, rejected[i])
-                        n_significant = int(np.sum(rejected))
-                
-                fig, axes = plt.subplots(1, len(bands), figsize=(3 * len(bands), 5), squeeze=False)
-                
-                for col_idx, band in enumerate(bands):
-                    ax = axes.flatten()[col_idx]
-                    data = cell_data.get(col_idx)
-                    
-                    if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
-                        ax.text(0.5, 0.5, "No data", ha="center", va="center",
-                               transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
-                        ax.set_xticks([])
-                        continue
-                    
-                    v1, v2 = data["v1"], data["v2"]
-                    
-                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
-                    bp["boxes"][0].set_facecolor(segment_colors["v1"])
-                    bp["boxes"][0].set_alpha(0.6)
-                    bp["boxes"][1].set_facecolor(segment_colors["v2"])
-                    bp["boxes"][1].set_alpha(0.6)
-                    
-                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
-                    
-                    all_vals = np.concatenate([v1, v2])
-                    ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-                    yrange = ymax - ymin if ymax > ymin else 0.1
-                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-                    
-                    if col_idx in qvalues:
-                        _, q, d, sig = qvalues[col_idx]
-                        sig_marker = "†" if sig else ""
-                        sig_color = "#d62728" if sig else "#333333"
-                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
-                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                                   fontweight="bold" if sig else "normal")
-                    
-                    ax.set_xticks([0, 1])
-                    ax.set_xticklabels([label1, label2], fontsize=9)
-                    ax.set_title(band.capitalize(), fontweight="bold", color=band_colors[band])
-                    ax.spines["top"].set_visible(False)
-                    ax.spines["right"].set_visible(False)
-                
-                n_trials = len(power_df)
-                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
-                n_tests = len(qvalues)
-                
-                stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
-                title = (f"Band Power: {label1} vs {label2} (Column Comparison)\n"
-                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
-                fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-                
-                plt.tight_layout()
-                
-                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
-                suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                filename = f"sub-{subject}_power_by_condition{suffix}_column"
-                
-                from eeg_pipeline.plotting.io.figures import save_fig
-                save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                         bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-                plt.close(fig)
-                
-                if logger:
-                    logger.info(f"Saved power column comparison for ROI {roi_display} ({n_significant}/{n_tests} FDR significant, {stats_source})")
+        _plot_column_comparison(
+            power_df, events_df, subject, save_dir, logger, config,
+            bands, roi_names, rois, all_channels, stats_dir
+        )
 
 
 
@@ -595,26 +762,20 @@ def plot_channel_power_heatmap(
     valid_bands = []
     
     for band in bands:
-        band = str(band)
+        band_str = str(band)
         band_cols = [
-            c for c in power_cols_by_band.get(band, [])
+            c for c in power_cols_by_band.get(band_str, [])
             if NamingSchema.parse(str(c)).get("scope") == "ch"
         ]
-        if band_cols:
-            band_data = pow_df[band_cols].mean(axis=0)
-            band_means.append(band_data.values)
-            valid_bands.append(band)
-            if not channel_names:
-                extracted: List[str] = []
-                for col in band_cols:
-                    parsed = NamingSchema.parse(str(col))
-                    if parsed.get("valid") and parsed.get("group") == "power":
-                        ident = parsed.get("identifier")
-                        if ident:
-                            extracted.append(str(ident))
-                            continue
-                    extracted.append(str(col))
-                channel_names = extracted
+        if not band_cols:
+            continue
+        
+        band_data = pow_df[band_cols].mean(axis=0)
+        band_means.append(band_data.values)
+        valid_bands.append(band_str)
+        
+        if not channel_names:
+            channel_names = _extract_channel_names_from_columns(band_cols)
     
     if not band_means:
         logger.warning("No valid band data for heatmap")
@@ -627,16 +788,9 @@ def plot_channel_power_heatmap(
     fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
-    vmin = power_config.get("vmin")
-    vmax = power_config.get("vmax")
-    if vmin is None or vmax is None:
-        data_min = float(np.nanmin(heatmap_data))
-        data_max = float(np.nanmax(heatmap_data))
-        vmax_abs = max(abs(data_min), abs(data_max))
-        if vmin is None:
-            vmin = -vmax_abs
-        if vmax is None:
-            vmax = vmax_abs
+    vmin_config = power_config.get("vmin")
+    vmax_config = power_config.get("vmax")
+    vmin, vmax = _compute_heatmap_color_limits(heatmap_data, vmin_config, vmax_config)
     im = ax.imshow(heatmap_data, cmap='RdBu_r', aspect='auto', vmin=vmin, vmax=vmax)
     ax.set_xticks(range(len(channel_names)))
     ax.set_xticklabels(channel_names, rotation=45, ha='right', fontsize=plot_cfg.font.small)
@@ -652,16 +806,19 @@ def plot_channel_power_heatmap(
     ax.set_ylabel('Frequency Band', fontsize=plot_cfg.font.ylabel)
     plt.colorbar(im, ax=ax, label='log10(power/baseline)', shrink=0.8)
     
-    heatmap_threshold = features_config.get("heatmap_text_threshold", 200)
-    if len(channel_names) * len(valid_bands) <= heatmap_threshold:
+    heatmap_threshold = features_config.get("heatmap_text_threshold", HEATMAP_TEXT_THRESHOLD)
+    n_cells = len(channel_names) * len(valid_bands)
+    if n_cells <= heatmap_threshold:
         std_threshold = np.std(heatmap_data)
+        fontsize_base = heatmap_threshold / len(channel_names)
+        fontsize = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, fontsize_base))
         for i in range(len(valid_bands)):
             for j in range(len(channel_names)):
                 value = heatmap_data[i, j]
                 text = f'{value:.2f}'
-                color = 'white' if abs(value) > std_threshold else 'black'
-                fontsize = max(6, min(10, heatmap_threshold/len(channel_names)))
-                ax.text(j, i, text, ha='center', va='center', color=color, fontsize=fontsize)
+                is_high_value = abs(value) > std_threshold
+                text_color = 'white' if is_high_value else 'black'
+                ax.text(j, i, text, ha='center', va='center', color=text_color, fontsize=fontsize)
     
     plt.tight_layout()
     save_fig(
@@ -716,7 +873,7 @@ def plot_power_time_courses(
         
         epoch_time_courses = tfr_raw.data[:, :, freq_mask, :].mean(axis=(1, 2))
         mean_tc = np.nanmean(epoch_time_courses, axis=0)
-        if n_epochs >= 2:
+        if n_epochs >= MIN_EPOCHS_FOR_SEM:
             sem_tc = np.nanstd(epoch_time_courses, axis=0, ddof=1) / np.sqrt(n_epochs)
         else:
             sem_tc = np.full_like(mean_tc, np.nan, dtype=float)
@@ -784,14 +941,17 @@ def _plot_psd_by_temperature(
     Returns:
         True if plot was created, False otherwise
     """
+    MIN_TEMPERATURES_FOR_COMPARISON = 2
     unique_temps = sorted(temps.dropna().unique())
-    if len(unique_temps) < 2:
+    if len(unique_temps) < MIN_TEMPERATURES_FOR_COMPARISON:
         return False
     
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("medium", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
-    temp_colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
+    COLOR_MAP_START = 0.15
+    COLOR_MAP_END = 0.85
+    temp_colors = plt.cm.coolwarm(np.linspace(COLOR_MAP_START, COLOR_MAP_END, len(unique_temps)))
     
     active_window = _get_active_window(config)
     tfr_baseline = _get_plotting_tfr_baseline_window(config)
@@ -1109,8 +1269,10 @@ def plot_power_time_course_by_temperature(
     if freq_mask is None:
         return
     
+    COLOR_MAP_START = 0.15
+    COLOR_MAP_END = 0.85
     unique_temps = sorted(temps.dropna().unique())
-    colors = plt.cm.coolwarm(np.linspace(0.15, 0.85, len(unique_temps)))
+    colors = plt.cm.coolwarm(np.linspace(COLOR_MAP_START, COLOR_MAP_END, len(unique_temps)))
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
@@ -1167,7 +1329,14 @@ def plot_power_time_course_by_temperature(
     logger.info("Saved band time course by temperature (Induced)")
 
 
-def plot_inter_band_spatial_power_correlation(tfr, subject, save_dir, logger, config):
+def plot_inter_band_spatial_power_correlation(
+    tfr: Any,
+    subject: str,
+    save_dir: Path,
+    logger: logging.Logger,
+    config: Any,
+) -> None:
+    """Plot inter-band spatial power correlation matrix."""
     features_freq_bands = config.get("time_frequency_analysis.bands") or config.frequency_bands
     band_names = list(features_freq_bands.keys())
     n_bands = len(band_names)
@@ -1179,7 +1348,8 @@ def plot_inter_band_spatial_power_correlation(tfr, subject, save_dir, logger, co
     tmin_clip = float(max(times.min(), active_start))
     tmax_clip = float(min(times.max(), active_end))
     
-    if not np.isfinite(tmin_clip) or not np.isfinite(tmax_clip) or (tmax_clip <= tmin_clip):
+    is_valid_window = np.isfinite(tmin_clip) and np.isfinite(tmax_clip) and (tmax_clip > tmin_clip)
+    if not is_valid_window:
         logger.warning(
             f"Skipping inter-band spatial power correlation: invalid active within data range "
             f"(requested [{active_start}, {active_end}] s, "
@@ -1249,24 +1419,17 @@ def plot_power_variability_comprehensive(
     from .utils import compute_variability_metrics, test_normality
     
     plot_cfg = get_plot_config(config)
-    n_bands = len(bands)
     power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     
-    fig = plt.figure(figsize=(14, 10))
-    gs = fig.add_gridspec(3, n_bands, height_ratios=[1.5, 1, 1], hspace=0.35, wspace=0.3)
-    
     variability_data = []
-    
-    for i, band in enumerate(bands):
+    for band in bands:
         band_str = str(band)
         cols = power_cols_by_band.get(band_str, [])
-        
         if not cols:
             continue
         
         trial_means = pow_df[cols].mean(axis=1).dropna().values
-        
-        if len(trial_means) < 5:
+        if len(trial_means) < MIN_TRIALS_FOR_VARIABILITY:
             continue
         
         metrics = compute_variability_metrics(trial_means)
@@ -1287,8 +1450,11 @@ def plot_power_variability_comprehensive(
         })
     
     if not variability_data:
-        plt.close(fig)
         return
+    
+    n_bands = len(variability_data)
+    fig = plt.figure(figsize=(14, 10))
+    gs = fig.add_gridspec(3, n_bands, height_ratios=[1.5, 1, 1], hspace=0.35, wspace=0.3)
     
     ax_cv = fig.add_subplot(gs[0, :len(variability_data)//2])
     ax_fano = fig.add_subplot(gs[0, len(variability_data)//2:])
@@ -1306,14 +1472,16 @@ def plot_power_variability_comprehensive(
     ax_cv.set_title("Trial-to-Trial Variability: CV", fontsize=plot_cfg.font.title, fontweight="bold")
     ax_cv.spines["top"].set_visible(False)
     ax_cv.spines["right"].set_visible(False)
-    ax_cv.axhline(0.5, color="gray", linestyle="--", alpha=0.5, label="CV=0.5 (moderate)")
-    ax_cv.axhline(1.0, color="gray", linestyle=":", alpha=0.5, label="CV=1.0 (high)")
+    ax_cv.axhline(CV_MODERATE_THRESHOLD, color="gray", linestyle="--", alpha=0.5, label=f"CV={CV_MODERATE_THRESHOLD} (moderate)")
+    ax_cv.axhline(CV_HIGH_THRESHOLD, color="gray", linestyle=":", alpha=0.5, label=f"CV={CV_HIGH_THRESHOLD} (high)")
     ax_cv.legend(fontsize=plot_cfg.font.small, loc="upper right")
     
     for j, (bar, cv_val) in enumerate(zip(bars_cv, cvs)):
         if np.isfinite(cv_val):
-            ax_cv.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-                      f"{cv_val:.2f}", ha="center", va="bottom", fontsize=plot_cfg.font.small)
+            bar_center_x = bar.get_x() + bar.get_width() / 2
+            bar_top_y = bar.get_height() + BAR_LABEL_OFFSET
+            ax_cv.text(bar_center_x, bar_top_y, f"{cv_val:.2f}", 
+                      ha="center", va="bottom", fontsize=plot_cfg.font.small)
     
     valid_fanos = [(i, f) for i, f in enumerate(fanos) if np.isfinite(f) and f > 0]
     if valid_fanos:
@@ -1324,12 +1492,14 @@ def plot_power_variability_comprehensive(
                                 edgecolor="white", linewidth=1.5)
         ax_fano.set_xticks(range(len(fano_x)))
         ax_fano.set_xticklabels([band_names[i].upper() for i in fano_x], fontsize=plot_cfg.font.medium)
-        ax_fano.axhline(1.0, color="gray", linestyle="--", alpha=0.5, label="Fano=1 (Poisson)")
+        ax_fano.axhline(FANO_POISSON_THRESHOLD, color="gray", linestyle="--", alpha=0.5, label=f"Fano={FANO_POISSON_THRESHOLD} (Poisson)")
         ax_fano.legend(fontsize=plot_cfg.font.small, loc="upper right")
         
         for bar, fano_val in zip(bars_fano, fano_y):
-            ax_fano.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-                        f"{fano_val:.2f}", ha="center", va="bottom", fontsize=plot_cfg.font.small)
+            bar_center_x = bar.get_x() + bar.get_width() / 2
+            bar_top_y = bar.get_height() + BAR_LABEL_OFFSET
+            ax_fano.text(bar_center_x, bar_top_y, f"{fano_val:.2f}", 
+                        ha="center", va="bottom", fontsize=plot_cfg.font.small)
     else:
         ax_fano.text(0.5, 0.5, "Fano factor requires\npositive mean values", 
                     ha="center", va="center", transform=ax_fano.transAxes, fontsize=plot_cfg.font.medium)
@@ -1340,15 +1510,13 @@ def plot_power_variability_comprehensive(
     ax_fano.spines["right"].set_visible(False)
     
     for i, d in enumerate(variability_data):
-        if i >= n_bands:
-            break
         ax_dist = fig.add_subplot(gs[1, i])
         
         vals = d["values"]
         color = get_band_color(d["band"], config)
         norm_color = "#22C55E" if d["is_normal"] else "#EF4444"
         
-        ax_dist.hist(vals, bins=15, color=color, alpha=0.7, edgecolor="white", density=True)
+        ax_dist.hist(vals, bins=HISTOGRAM_BINS, color=color, alpha=0.7, edgecolor="white", density=True)
         ax_dist.axvline(np.mean(vals), color="black", linestyle="--", linewidth=1.5, label="Mean")
         ax_dist.axvline(np.median(vals), color="blue", linestyle=":", linewidth=1.5, label="Median")
         
@@ -1403,7 +1571,7 @@ def plot_power_variability_comprehensive(
     fig.suptitle(f"Power Variability Analysis (sub-{subject})", 
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
     
-    footer = f"n={len(pow_df)} trials | Shapiro-Wilk normality test α=0.05 | ✓=Normal, ✗=Non-normal"
+    footer = f"n={len(pow_df)} trials | Shapiro-Wilk normality test α={NORMALITY_ALPHA} | ✓=Normal, ✗=Non-normal"
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -1432,7 +1600,7 @@ def plot_cross_frequency_power_correlation(
     if pow_df is None or pow_df.empty:
         return
     
-    from .utils import apply_fdr_correction, get_fdr_alpha, test_normality
+    from .utils import apply_fdr_correction, get_fdr_alpha
     from scipy.stats import spearmanr
     
     plot_cfg = get_plot_config(config)
@@ -1442,10 +1610,11 @@ def plot_cross_frequency_power_correlation(
         band_str = str(band)
         cols = [c for c in pow_df.columns 
                 if c.startswith("power_") and f"_{band_str}_" in c and "_ch_" in c]
-        if cols:
-            vals = pow_df[cols].mean(axis=1).dropna().values
-            if len(vals) >= 5:
-                band_power[band_str] = vals
+        if not cols:
+            continue
+        vals = pow_df[cols].mean(axis=1).dropna().values
+        if len(vals) >= MIN_TRIALS_FOR_VARIABILITY:
+            band_power[band_str] = vals
     
     valid_bands = list(band_power.keys())
     n_bands = len(valid_bands)
@@ -1465,9 +1634,9 @@ def plot_cross_frequency_power_correlation(
                 vals1 = band_power[band1]
                 vals2 = band_power[band2]
                 min_len = min(len(vals1), len(vals2))
-                r, p = spearmanr(vals1[:min_len], vals2[:min_len])
-                corr_matrix[i, j] = r
-                pval_matrix[i, j] = p
+                correlation, p_value = spearmanr(vals1[:min_len], vals2[:min_len])
+                corr_matrix[i, j] = correlation
+                pval_matrix[i, j] = p_value
     
     upper_tri_idx = np.triu_indices(n_bands, k=1)
     pvals_upper = pval_matrix[upper_tri_idx]
@@ -1477,7 +1646,8 @@ def plot_cross_frequency_power_correlation(
     if len(pvals_upper) > 0:
         rejected, qvals, alpha_fdr_arr = apply_fdr_correction(list(pvals_upper), config=config)
         try:
-            alpha_fdr = float(np.asarray(alpha_fdr_arr).ravel()[0])
+            alpha_fdr_flat = np.asarray(alpha_fdr_arr).ravel()
+            alpha_fdr = float(alpha_fdr_flat[0])
         except Exception:
             alpha_fdr = get_fdr_alpha(config)
         qval_matrix = np.zeros((n_bands, n_bands))
@@ -1492,8 +1662,9 @@ def plot_cross_frequency_power_correlation(
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     
     ax1 = axes[0]
-    sig_mask = np.isfinite(qval_matrix) & (qval_matrix < alpha_fdr)
-    sig_mask |= np.eye(n_bands, dtype=bool)
+    is_significant = np.isfinite(qval_matrix) & (qval_matrix < alpha_fdr)
+    diagonal_mask = np.eye(n_bands, dtype=bool)
+    sig_mask = is_significant | diagonal_mask
     corr_sig_only = np.where(sig_mask, corr_matrix, np.nan)
     im1 = ax1.imshow(corr_sig_only, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
     ax1.set_xticks(range(n_bands))
@@ -1505,29 +1676,37 @@ def plot_cross_frequency_power_correlation(
     
     for i in range(n_bands):
         for j in range(n_bands):
-            r = corr_matrix[i, j]
-            p = pval_matrix[i, j]
-            q = qval_matrix[i, j]
+            correlation = corr_matrix[i, j]
+            p_value = pval_matrix[i, j]
+            q_value = qval_matrix[i, j]
             
-            text_color = "white" if abs(r) > 0.5 else "black"
+            is_high_correlation = abs(correlation) > 0.5
+            text_color = "white" if is_high_correlation else "black"
             
             if i != j:
-                sig_marker = "†" if q < 0.05 else ("*" if p < 0.05 else "")
-                text = f"{r:.2f}{sig_marker}"
+                is_fdr_significant = q_value < FDR_ALPHA_DEFAULT
+                is_uncorrected_significant = p_value < FDR_ALPHA_DEFAULT
+                sig_marker = "†" if is_fdr_significant else ("*" if is_uncorrected_significant else "")
+                text = f"{correlation:.2f}{sig_marker}"
             else:
                 text = "1.00"
             
+            fontweight = "bold" if is_fdr_significant else "normal"
             ax1.text(j, i, text, ha="center", va="center", color=text_color, 
-                    fontsize=plot_cfg.font.small, fontweight="bold" if q < 0.05 else "normal")
+                    fontsize=plot_cfg.font.small, fontweight=fontweight)
     
     cbar1 = plt.colorbar(im1, ax=ax1, shrink=0.8)
     cbar1.set_label("Spearman ρ", fontsize=plot_cfg.font.label)
     
     ax2 = axes[1]
-    log_pvals = -np.log10(pval_matrix + 1e-10)
+    EPSILON = 1e-10
+    MIN_LOG_PVAL_DISPLAY = 3
+    log_pvals = -np.log10(pval_matrix + EPSILON)
     np.fill_diagonal(log_pvals, 0)
     
-    im2 = ax2.imshow(log_pvals, cmap="YlOrRd", vmin=0, vmax=max(3, np.max(log_pvals)), aspect="equal")
+    max_log_pval = np.max(log_pvals)
+    vmax_log_pval = max(MIN_LOG_PVAL_DISPLAY, max_log_pval)
+    im2 = ax2.imshow(log_pvals, cmap="YlOrRd", vmin=0, vmax=vmax_log_pval, aspect="equal")
     ax2.set_xticks(range(n_bands))
     ax2.set_yticks(range(n_bands))
     ax2.set_xticklabels([b.capitalize() for b in valid_bands], rotation=45, ha="right",
@@ -1535,22 +1714,30 @@ def plot_cross_frequency_power_correlation(
     ax2.set_yticklabels([b.capitalize() for b in valid_bands], fontsize=plot_cfg.font.medium)
     ax2.set_title("Significance (-log₁₀ p)", fontsize=plot_cfg.font.title, fontweight="bold")
     
+    P_VALUE_THRESHOLD_DISPLAY = 0.001
+    LOG_PVAL_TEXT_THRESHOLD = 1.5
+    
     for i in range(n_bands):
         for j in range(n_bands):
-            if i != j:
-                p = pval_matrix[i, j]
-                q = qval_matrix[i, j]
-                
-                if p < 0.001:
-                    p_text = "<.001"
-                else:
-                    p_text = f"{p:.3f}"
-                
-                fdr_marker = "†" if q < 0.05 else ""
-                text_color = "white" if log_pvals[i, j] > 1.5 else "black"
-                
-                ax2.text(j, i, f"{p_text}{fdr_marker}", ha="center", va="center", 
-                        color=text_color, fontsize=plot_cfg.font.small - 1)
+            if i == j:
+                continue
+            
+            p_value = pval_matrix[i, j]
+            q_value = qval_matrix[i, j]
+            log_pval = log_pvals[i, j]
+            
+            if p_value < P_VALUE_THRESHOLD_DISPLAY:
+                p_text = "<.001"
+            else:
+                p_text = f"{p_value:.3f}"
+            
+            is_fdr_significant = q_value < FDR_ALPHA_DEFAULT
+            fdr_marker = "†" if is_fdr_significant else ""
+            is_high_log_pval = log_pval > LOG_PVAL_TEXT_THRESHOLD
+            text_color = "white" if is_high_log_pval else "black"
+            
+            ax2.text(j, i, f"{p_text}{fdr_marker}", ha="center", va="center", 
+                    color=text_color, fontsize=plot_cfg.font.small - 1)
     
     cbar2 = plt.colorbar(im2, ax=ax2, shrink=0.8)
     cbar2.set_label("-log₁₀(p)", fontsize=plot_cfg.font.label)
@@ -1564,8 +1751,8 @@ def plot_cross_frequency_power_correlation(
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=0.98)
     
     n_tests = len(pvals_upper)
-    footer = (f"n={len(pow_df)} trials | {n_tests} tests | FDR-BH α=0.05 | "
-              f"{n_significant} significant | *p<.05 uncorrected, †q<.05 FDR")
+    footer = (f"n={len(pow_df)} trials | {n_tests} tests | FDR-BH α={FDR_ALPHA_DEFAULT} | "
+              f"{n_significant} significant | *p<{FDR_ALPHA_DEFAULT} uncorrected, †q<{FDR_ALPHA_DEFAULT} FDR")
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -1594,10 +1781,11 @@ def plot_power_topomaps_from_df(
     plot_cfg = get_plot_config(config)
     power_cols_by_band = get_power_columns_by_band(pow_df, bands=[str(b) for b in bands])
     bands_to_plot = [b for b in bands if power_cols_by_band.get(str(b))]
-    if not bands_to_plot: return
+    if not bands_to_plot:
+        return
     
-    fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=max(1, min(3, len(bands_to_plot))), config=config)
-    # Ensure iterable list for downstream indexing
+    n_cols = max(1, min(3, len(bands_to_plot)))
+    fig, axes = _setup_subplot_grid(len(bands_to_plot), n_cols=n_cols, config=config)
     if not isinstance(axes, list):
         axes = list(np.ravel(axes))
     
@@ -1608,24 +1796,16 @@ def plot_power_topomaps_from_df(
         band_cols = []
         for c in power_cols_by_band.get(str(band), []):
             parsed = NamingSchema.parse(str(c))
-            if parsed.get("valid") and parsed.get("group") == "power":
-                if str(parsed.get("scope") or "") == "ch":
-                    band_cols.append(c)
+            if not (parsed.get("valid") and parsed.get("group") == "power"):
                 continue
+            if str(parsed.get("scope") or "") == "ch":
+                band_cols.append(c)
         if not band_cols:
             ax.axis('off')
             continue
             
         mean_power = pow_df[band_cols].mean(axis=0)
-        
-        data_map = {}
-        for col, val in mean_power.items():
-            parsed = NamingSchema.parse(str(col))
-            if parsed.get("valid") and parsed.get("group") == "power":
-                ident = parsed.get("identifier")
-                if ident:
-                    data_map[str(ident)] = val
-                    continue
+        data_map = _build_channel_data_map(mean_power)
         
         data_array = np.full(len(epochs_info.ch_names), np.nan)
         mask = np.zeros(len(epochs_info.ch_names), dtype=bool)
@@ -1634,7 +1814,7 @@ def plot_power_topomaps_from_df(
                 data_array[ch_idx] = data_map[ch_name]
                 mask[ch_idx] = True
         
-        if mask.sum() > 3:
+        if mask.sum() > MIN_CHANNELS_FOR_TOPO:
             im, _ = plot_topomap(
                 data_array[mask], 
                 mne.pick_info(epochs_info, np.where(mask)[0]),
@@ -1697,7 +1877,7 @@ def plot_spectral_slope_topomap(
             data_array[ch_idx] = ch_slopes[ch_name]
             mask[ch_idx] = True
     
-    if mask.sum() < 3:
+    if mask.sum() < MIN_CHANNELS_FOR_TOPO:
         return
     
     fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
@@ -1715,7 +1895,8 @@ def plot_spectral_slope_topomap(
     ax1.set_title("1/f Spectral Slope", fontweight="bold")
     
     ax2 = axes[1]
-    ax2.hist(valid_data, bins=20, color=plot_cfg.style.colors.blue, alpha=0.7, edgecolor="white")
+    SLOPE_HISTOGRAM_BINS = 20
+    ax2.hist(valid_data, bins=SLOPE_HISTOGRAM_BINS, color=plot_cfg.style.colors.blue, alpha=0.7, edgecolor="white")
     ax2.axvline(np.median(valid_data), color="red", linestyle="--", linewidth=2, 
                 label=f"Median: {np.median(valid_data):.2f}")
     ax2.set_xlabel("Slope")
@@ -1764,7 +1945,7 @@ def plot_feature_importance_ranking(
     variances = {}
     for col in numeric_cols:
         vals = features_df[col].dropna().values
-        if len(vals) >= 5:
+        if len(vals) >= MIN_TRIALS_FOR_VARIABILITY:
             variances[col] = np.var(vals)
     
     if not variances:
@@ -1774,7 +1955,11 @@ def plot_feature_importance_ranking(
     
     fig, ax = plt.subplots(figsize=(12, max(6, len(sorted_features) * 0.25)))
     
-    feature_names = [f[0][:30] + "..." if len(f[0]) > 30 else f[0] for f in sorted_features]
+    MAX_FEATURE_NAME_LENGTH = 30
+    feature_names = [
+        f[0][:MAX_FEATURE_NAME_LENGTH] + "..." if len(f[0]) > MAX_FEATURE_NAME_LENGTH else f[0] 
+        for f in sorted_features
+    ]
     feature_vars = [f[1] for f in sorted_features]
     
     from eeg_pipeline.domain.features.naming import NamingSchema
@@ -1923,7 +2108,7 @@ def plot_band_power_topomaps(
                 data_array[ch_idx] = ch_power[ch_name]
                 mask[ch_idx] = True
         
-        if mask.sum() > 3:
+        if mask.sum() > MIN_CHANNELS_FOR_TOPO:
             valid_data = data_array[mask]
             valid_info = mne.pick_info(epochs_info, np.where(mask)[0])
             

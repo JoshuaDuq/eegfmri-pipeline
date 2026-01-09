@@ -1,22 +1,28 @@
 from __future__ import annotations
 
-import os
-import time
 import json
 import logging
+import os
+import platform
+import subprocess
 import threading
+import time
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Any, Dict, List, Optional
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 from scipy.stats import norm
 
-from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path, find_clean_epochs_path
-from eeg_pipeline.infra.tsv import read_tsv
-from eeg_pipeline.infra.logging import get_logger
 from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.infra.paths import (
+    deriv_stats_path,
+    ensure_dir,
+    find_clean_epochs_path,
+)
+from eeg_pipeline.infra.tsv import read_tsv
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 logger = get_logger(__name__)
@@ -30,83 +36,124 @@ _FILE_LOG_HANDLER: Optional[logging.Handler] = None
 # Run Manifest and Logging
 ###################################################################
 
-def create_run_manifest(results_dir: Path, cli_args: dict, config: dict, run_id: Optional[str] = None) -> None:
-    import platform
-    import subprocess
+def _get_git_commit_hash() -> Optional[str]:
+    """Retrieve the current git commit hash."""
+    try:
+        output = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            cwd=Path(__file__).parent.parent,
+            text=True,
+        )
+        return output.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
+
+def _get_package_versions() -> Dict[str, Optional[str]]:
+    """Collect versions of key scientific computing packages."""
+    versions = {
+        "sklearn": None,
+        "mne": mne.__version__,
+        "pyriemann": None,
+    }
+
+    try:
+        import sklearn
+
+        versions["sklearn"] = sklearn.__version__
+    except ImportError:
+        pass
+
+    try:
+        import pyriemann
+
+        versions["pyriemann"] = pyriemann.__version__
+    except ImportError:
+        pass
+
+    return versions
+
+
+def _get_environment_info() -> Dict[str, Any]:
+    """Collect system environment information."""
+    return {
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "hostname": platform.node(),
+    }
+
+
+def _get_thread_limits() -> Dict[str, Optional[str]]:
+    """Collect thread limit environment variables."""
+    return {
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
+        "MKL_NUM_THREADS": os.environ.get("MKL_NUM_THREADS"),
+        "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
+        "NUMBA_NUM_THREADS": os.environ.get("NUMBA_NUM_THREADS"),
+    }
+
+
+def create_run_manifest(
+    results_dir: Path,
+    cli_args: dict,
+    config: dict,
+    run_id: Optional[str] = None,
+) -> None:
+    """Create a manifest file documenting the run configuration and environment."""
     manifest = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "run_id": run_id,
         "cli_args": cli_args,
         "resolved_config": config,
-        "environment": {
-            "platform": platform.platform(),
-            "python_version": platform.python_version(),
-            "machine": platform.machine(),
-            "processor": platform.processor(),
-            "hostname": platform.node(),
-        },
-        "thread_limits": {
-            "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
-            "MKL_NUM_THREADS": os.environ.get("MKL_NUM_THREADS"),
-            "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
-            "NUMBA_NUM_THREADS": os.environ.get("NUMBA_NUM_THREADS"),
-        },
+        "environment": _get_environment_info(),
+        "thread_limits": _get_thread_limits(),
+        "git_commit": _get_git_commit_hash(),
+        "package_versions": _get_package_versions(),
     }
 
-    try:
-        git_hash = (
-            subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                stderr=subprocess.DEVNULL,
-                cwd=Path(__file__).parent.parent,
-                text=True,
-            )
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        git_hash = None
-    manifest["git_commit"] = git_hash
-
-    import sklearn as _sk
-
-    manifest["package_versions"] = {"sklearn": _sk.__version__, "mne": mne.__version__}
-    try:
-        import pyriemann as _pr
-
-        manifest["package_versions"]["pyriemann"] = _pr.__version__
-    except ImportError:
-        manifest["package_versions"]["pyriemann"] = None
-
     results_dir.mkdir(parents=True, exist_ok=True)
-    with open(results_dir / "run_manifest.json", "w", encoding="utf-8") as f:
+    manifest_path = results_dir / "run_manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
 
 
-def setup_file_logging(results_dir: Path, run_id: Optional[str] = None, logger_name: str = "decode_pain") -> Path:
+def setup_file_logging(
+    results_dir: Path,
+    run_id: Optional[str] = None,
+    logger_name: str = "decode_pain",
+) -> Path:
+    """Configure file logging for the specified logger."""
     global _FILE_LOG_HANDLER
+
     logger_instance = get_logger(logger_name)
 
     with _handler_lock:
         log_dir = results_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        ts = time.strftime("%Y%m%d_%H%M%S")
-        suffix = f"_{run_id}" if run_id else ""
-        log_path = log_dir / f"{logger_name}_{ts}{suffix}.log"
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        run_suffix = f"_{run_id}" if run_id else ""
+        log_path = log_dir / f"{logger_name}_{timestamp}{run_suffix}.log"
 
         if _FILE_LOG_HANDLER is not None:
             logger_instance.removeHandler(_FILE_LOG_HANDLER)
             _FILE_LOG_HANDLER.close()
 
-        for h in logger_instance.handlers:
-            if isinstance(h, logging.FileHandler) and h.baseFilename == str(log_path):
-                return log_path
+        for handler in logger_instance.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if handler.baseFilename == str(log_path):
+                    return log_path
 
-        fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-        fh.setLevel(logging.INFO)
-        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-        logger_instance.addHandler(fh)
-        _FILE_LOG_HANDLER = fh
+        file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        file_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        file_handler.setFormatter(formatter)
+        logger_instance.addHandler(file_handler)
+        _FILE_LOG_HANDLER = file_handler
+
         return log_path
 
 
@@ -114,22 +161,29 @@ def setup_file_logging(results_dir: Path, run_id: Optional[str] = None, logger_n
 # Best Parameters I/O
 ###################################################################
 
-def prepare_best_params_path(base_path: Path, mode: str, run_id: Optional[str] = None) -> Path:
+def prepare_best_params_path(
+    base_path: Path,
+    mode: str,
+    run_id: Optional[str] = None,
+) -> Path:
+    """Prepare the path for best parameters output based on mode."""
     base_path.parent.mkdir(parents=True, exist_ok=True)
 
     if mode == "run_scoped":
-        rid = run_id or time.strftime("%Y%m%d_%H%M%S")
-        out_path = base_path.with_name(f"{base_path.stem}_{rid}{base_path.suffix}")
+        resolved_run_id = run_id or time.strftime("%Y%m%d_%H%M%S")
+        output_path = base_path.with_name(
+            f"{base_path.stem}_{resolved_run_id}{base_path.suffix}"
+        )
     else:
         if mode == "truncate":
             base_path.open("w", encoding="utf-8").close()
-        out_path = base_path
+        output_path = base_path
 
     if base_path not in _BEST_PARAMS_LOGGED:
-        logger.info(f"Best-params mode='{mode}'; resolved path: {out_path}")
+        logger.info(f"Best-params mode='{mode}'; resolved path: {output_path}")
         _BEST_PARAMS_LOGGED.add(base_path)
 
-    return out_path
+    return output_path
 
 
 def read_best_params_jsonl(path: Path) -> dict:
@@ -148,24 +202,33 @@ def read_best_params_jsonl(path: Path) -> dict:
 
 
 def read_best_params_jsonl_combined(path: Path) -> dict:
+    """Read best parameters from JSONL, combining by fold and subject."""
     combined: dict = {}
     if not path or not path.exists():
         return combined
 
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
-            rec = json.loads(line)
-            params = rec.get("best_params") or rec.get("best_params_by_r") or {}
+            record = json.loads(line)
+            params = (
+                record.get("best_params")
+                or record.get("best_params_by_r")
+                or {}
+            )
             if not isinstance(params, dict):
                 continue
 
-            fold = rec.get("fold")
-            subj = rec.get("subject") or rec.get("heldout_subject") or rec.get("heldout_subject_id")
+            fold = record.get("fold")
+            subject = (
+                record.get("subject")
+                or record.get("heldout_subject")
+                or record.get("heldout_subject_id")
+            )
 
             if fold is not None:
                 combined[int(fold)] = params
-            if subj is not None:
-                combined[str(subj)] = params
+            if subject is not None:
+                combined[str(subject)] = params
 
     return combined
 
@@ -236,10 +299,48 @@ def export_indices(
     idx_df.to_csv(save_path, sep="\t", index=False)
 
 
-###################################################################
-# Feature Importance and Topomaps
-###################################################################
+def _is_power_channel_feature(parsed: dict) -> bool:
+    """Check if parsed feature is a power channel feature."""
+    is_valid = parsed.get("valid", False)
+    is_power = parsed.get("group") == "power"
+    is_channel = parsed.get("scope") == "ch"
+    return is_valid and is_power and is_channel
 
+
+def _extract_power_channel_features(
+    feature_names: List[str],
+) -> tuple[set[str], dict[str, dict[str, list[int]]]]:
+    """Extract power channel features and build band/channel to index mapping."""
+    bands_set = set()
+    band_channel_to_indices: dict[str, dict[str, list[int]]] = {}
+
+    for index, feature_name in enumerate(feature_names):
+        parsed = NamingSchema.parse(str(feature_name))
+        if not _is_power_channel_feature(parsed):
+            continue
+
+        band = parsed.get("band")
+        channel = parsed.get("identifier")
+        if band and channel:
+            band_str = str(band)
+            channel_str = str(channel)
+            bands_set.add(band_str)
+            band_channel_to_indices.setdefault(band_str, {}).setdefault(
+                channel_str, []
+            ).append(index)
+
+    bands = sorted(bands_set)
+    return bands, band_channel_to_indices
+
+
+def _aggregate_coefficients(
+    coefficient_matrix: np.ndarray,
+    aggregate_method: str,
+) -> np.ndarray:
+    """Aggregate coefficients across samples."""
+    if aggregate_method == "signed":
+        return np.nanmean(coefficient_matrix, axis=0)
+    return np.nanmean(np.abs(coefficient_matrix), axis=0)
 
 
 def write_feature_importance_tsv(
@@ -253,62 +354,43 @@ def write_feature_importance_tsv(
     target: str = "auto",
     extra_columns: Optional[dict] = None,
 ) -> Optional[Path]:
+    """Write feature importance TSV for topomap visualization."""
     ensure_dir(stats_dir)
 
-    bands_set = set()
-    for feat in feature_names:
-        parsed = NamingSchema.parse(str(feat))
-        if not (parsed.get("valid") and parsed.get("group") == "power"):
-            continue
-        if parsed.get("scope") != "ch":
-            continue
-        band = parsed.get("band")
-        identifier = parsed.get("identifier")
-        if band and identifier:
-            bands_set.add(str(band))
-    bands = sorted(bands_set)
-
-    band_ch_to_idx: dict = {}
-    for idx, feat in enumerate(feature_names):
-        parsed = NamingSchema.parse(str(feat))
-        if not (parsed.get("valid") and parsed.get("group") == "power"):
-            continue
-        if parsed.get("scope") != "ch":
-            continue
-        band = parsed.get("band")
-        channel = parsed.get("identifier")
-        if band and channel:
-            band_ch_to_idx.setdefault(str(band), {}).setdefault(str(channel), []).append(idx)
-
-    coef_agg = np.nanmean(coef_matrix, axis=0) if aggregate == "signed" else np.nanmean(np.abs(coef_matrix), axis=0)
+    bands, band_channel_to_indices = _extract_power_channel_features(
+        feature_names
+    )
+    aggregated_coefficients = _aggregate_coefficients(coef_matrix, aggregate)
 
     rows = []
-    for b in bands:
-        ch_map = band_ch_to_idx.get(b, {})
-        for ch, idxs in ch_map.items():
-            weight = float(np.nanmean(coef_agg[idxs]))
-            rows.append(
-                {
-                    "subject": subject,
-                    "band": b,
-                    "channel": ch,
-                    "weight": weight,
-                    "mode": mode,
-                    "target": target,
-                    "method": method,
-                    "aggregate": aggregate,
-                    **(extra_columns or {}),
-                }
-            )
+    for band in bands:
+        channel_map = band_channel_to_indices.get(band, {})
+        for channel, indices in channel_map.items():
+            feature_weights = aggregated_coefficients[indices]
+            mean_weight = float(np.nanmean(feature_weights))
+
+            row = {
+                "subject": subject,
+                "band": band,
+                "channel": channel,
+                "weight": mean_weight,
+                "mode": mode,
+                "target": target,
+                "method": method,
+                "aggregate": aggregate,
+            }
+            if extra_columns:
+                row.update(extra_columns)
+            rows.append(row)
 
     if not rows:
         return None
 
-    tsv_name = f"feature_topomap_{method}_{aggregate}_{mode}_{target}.tsv"
-    out_path = stats_dir / tsv_name
-    pd.DataFrame(rows).to_csv(out_path, sep="\t", index=False)
-    logger.info(f"Saved feature importance TSV: {out_path}")
-    return out_path
+    tsv_filename = f"feature_topomap_{method}_{aggregate}_{mode}_{target}.tsv"
+    output_path = stats_dir / tsv_filename
+    pd.DataFrame(rows).to_csv(output_path, sep="\t", index=False)
+    logger.info(f"Saved feature importance TSV: {output_path}")
+    return output_path
 
 
 def aggregate_group_feature_topomaps(

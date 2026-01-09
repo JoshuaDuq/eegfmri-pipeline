@@ -16,7 +16,7 @@ import pandas as pd
 import mne
 import matplotlib.pyplot as plt
 
-from eeg_pipeline.plotting.io.figures import save_fig as central_save_fig
+from ...utils.config.loader import get_config_value, ensure_config
 from ...utils.analysis.tfr import (
     validate_baseline_indices,
     average_tfr_band,
@@ -27,9 +27,274 @@ from .contrasts import _get_baseline_window
 from .channels import _save_fig
 
 
-###################################################################
-# QC Plotting Functions
-###################################################################
+def _get_qc_config_values(config):
+    """Extract QC configuration values from config object.
+    
+    Args:
+        config: Configuration object
+        
+    Returns:
+        Dictionary with QC configuration values
+    """
+    plot_cfg = get_plot_config(config)
+    tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
+    qc_config = tfr_config.get("qc", {})
+    
+    return {
+        "epsilon_for_division": qc_config.get("epsilon_for_division", 1e-20),
+        "percentage_multiplier": tfr_config.get("percentage_multiplier", 100.0),
+        "fig_width": qc_config.get("fig_width", 8),
+        "fig_height": qc_config.get("fig_height", 3),
+        "histogram_bins": qc_config.get("histogram_bins", 50),
+        "histogram_alpha": qc_config.get("histogram_alpha", 0.8),
+    }
+
+
+def _compute_percentage_change(
+    active_values: np.ndarray,
+    baseline_values: np.ndarray,
+    epsilon: float,
+    multiplier: float,
+) -> np.ndarray:
+    """Compute percentage change from baseline to active values.
+    
+    Args:
+        active_values: Active period values
+        baseline_values: Baseline period values
+        epsilon: Small value to prevent division by zero
+        multiplier: Multiplier for percentage (typically 100.0)
+        
+    Returns:
+        Array of percentage change values
+    """
+    denominator = baseline_values + epsilon
+    raw_change = (active_values - baseline_values) / denominator
+    return raw_change * multiplier
+
+
+def _create_histogram_plot(
+    baseline_values: np.ndarray,
+    percentage_change: np.ndarray,
+    band_name: str,
+    baseline_window: Tuple[float, float],
+    active_window: Tuple[float, float],
+    config_values: dict,
+) -> plt.Figure:
+    """Create histogram plot comparing baseline and percentage change.
+    
+    Args:
+        baseline_values: Baseline power values
+        percentage_change: Percentage change values
+        band_name: Frequency band name
+        baseline_window: Baseline time window (start, end)
+        active_window: Active time window (start, end)
+        config_values: QC configuration values
+        
+    Returns:
+        Matplotlib figure object
+    """
+    fig, axes = plt.subplots(
+        1, 2,
+        figsize=(config_values["fig_width"], config_values["fig_height"]),
+        constrained_layout=True,
+    )
+    
+    axes[0].hist(
+        baseline_values,
+        bins=config_values["histogram_bins"],
+        color="tab:blue",
+        alpha=config_values["histogram_alpha"],
+    )
+    axes[0].set_title(f"Baseline power — {band_name}")
+    axes[0].set_xlabel("Power (a.u.)")
+    axes[0].set_ylabel("Count")
+    
+    axes[1].hist(
+        percentage_change,
+        bins=config_values["histogram_bins"],
+        color="tab:orange",
+        alpha=config_values["histogram_alpha"],
+    )
+    axes[1].set_title(f"% signal change (active vs baseline) — {band_name}")
+    axes[1].set_xlabel("% change")
+    axes[1].set_ylabel("Count")
+    
+    font_sizes = get_font_sizes()
+    baseline_start, baseline_end = baseline_window
+    active_start, active_end = active_window
+    fig.suptitle(
+        f"Baseline vs Active QC — {band_name}\n"
+        f"(baseline={baseline_start:.2f}–{baseline_end:.2f}s; "
+        f"active={active_start:.2f}–{active_end:.2f}s)",
+        fontsize=font_sizes["ylabel"],
+    )
+    
+    return fig
+
+
+def _compute_topomap_percentage_change(
+    tfr_avg: mne.time_frequency.AverageTFR,
+    band_name: str,
+    fmin: float,
+    fmax: float,
+    baseline_window: Tuple[float, float],
+    active_window: Tuple[float, float],
+    config_values: dict,
+) -> Optional[np.ndarray]:
+    """Compute percentage change for topomap visualization.
+    
+    Args:
+        tfr_avg: Averaged TFR object
+        band_name: Frequency band name
+        fmin: Minimum frequency
+        fmax: Maximum frequency
+        baseline_window: Baseline time window (start, end)
+        active_window: Active time window (start, end)
+        config_values: QC configuration values
+        
+    Returns:
+        Array of percentage change values per channel, or None if computation fails
+    """
+    baseline_start, baseline_end = baseline_window
+    active_start, active_end = active_window
+    
+    active_topomap = average_tfr_band(
+        tfr_avg,
+        fmin=fmin,
+        fmax=fmax,
+        tmin=float(active_start),
+        tmax=float(active_end),
+    )
+    baseline_topomap = average_tfr_band(
+        tfr_avg,
+        fmin=fmin,
+        fmax=fmax,
+        tmin=float(baseline_start),
+        tmax=float(baseline_end),
+    )
+    
+    if active_topomap is None or baseline_topomap is None:
+        return None
+    
+    return _compute_percentage_change(
+        active_topomap,
+        baseline_topomap,
+        config_values["epsilon_for_division"],
+        config_values["percentage_multiplier"],
+    )
+
+
+def _process_single_band(
+    data: np.ndarray,
+    freqs: np.ndarray,
+    times: np.ndarray,
+    band_name: str,
+    fmin: float,
+    fmax: float,
+    baseline_mask: np.ndarray,
+    active_mask: np.ndarray,
+    baseline_window: Tuple[float, float],
+    active_window: Tuple[float, float],
+    tfr_avg: Optional[mne.time_frequency.AverageTFR],
+    config_values: dict,
+    qc_dir: Path,
+    config,
+    logger: Optional[logging.Logger],
+) -> Optional[dict]:
+    """Process a single frequency band for QC analysis.
+    
+    Args:
+        data: TFR data array (epochs, channels, frequencies, times)
+        freqs: Frequency array
+        times: Time array
+        band_name: Frequency band name
+        fmin: Minimum frequency for band
+        fmax: Maximum frequency for band
+        baseline_mask: Boolean mask for baseline time points
+        active_mask: Boolean mask for active time points
+        baseline_window: Baseline time window (start, end)
+        active_window: Active time window (start, end)
+        tfr_avg: Averaged TFR object for topomap
+        config_values: QC configuration values
+        qc_dir: Output directory for QC plots
+        config: Configuration object
+        logger: Optional logger instance
+        
+    Returns:
+        Dictionary with summary statistics, or None if processing fails
+    """
+    frequency_mask = (freqs >= float(fmin)) & (
+        freqs <= (float(fmax) if fmax is not None else freqs.max())
+    )
+    if not np.any(frequency_mask):
+        return None
+    
+    baseline_data = data[:, :, frequency_mask, :][:, :, :, baseline_mask]
+    active_data = data[:, :, frequency_mask, :][:, :, :, active_mask]
+    
+    baseline_power = baseline_data.mean(axis=(2, 3))
+    active_power = active_data.mean(axis=(2, 3))
+    
+    baseline_flat = baseline_power.reshape(-1)
+    active_flat = active_power.reshape(-1)
+    
+    percentage_change = _compute_percentage_change(
+        active_flat,
+        baseline_flat,
+        config_values["epsilon_for_division"],
+        config_values["percentage_multiplier"],
+    )
+    
+    fig = _create_histogram_plot(
+        baseline_flat,
+        percentage_change,
+        band_name,
+        baseline_window,
+        active_window,
+        config_values,
+    )
+    _save_fig(
+        fig,
+        qc_dir,
+        f"qc_baseline_active_hist_{band_name}.png",
+        config=config,
+        logger=logger,
+    )
+    
+    topomap_percentage_change = None
+    if tfr_avg is not None:
+        fmin_effective = float(fmin)
+        fmax_effective = float(fmax) if fmax is not None else float(freqs.max())
+        topomap_percentage_change = _compute_topomap_percentage_change(
+            tfr_avg,
+            band_name,
+            fmin_effective,
+            fmax_effective,
+            baseline_window,
+            active_window,
+            config_values,
+        )
+    
+    summary = {
+        "band": band_name,
+        "baseline_mean": float(np.nanmean(baseline_flat)),
+        "baseline_median": float(np.nanmedian(baseline_flat)),
+        "active_mean": float(np.nanmean(active_flat)),
+        "active_median": float(np.nanmedian(active_flat)),
+        "pct_change_mean": float(np.nanmean(percentage_change)),
+        "pct_change_median": float(np.nanmedian(percentage_change)),
+        "n_baseline_samples": int(baseline_mask.sum()),
+        "n_active_samples": int(active_mask.sum()),
+    }
+    
+    if topomap_percentage_change is not None and np.isfinite(topomap_percentage_change).any():
+        summary["pct_change_mean_topomap"] = float(np.nanmean(topomap_percentage_change))
+        summary["pct_change_median_topomap"] = float(np.nanmedian(topomap_percentage_change))
+    else:
+        summary["pct_change_mean_topomap"] = float("nan")
+        summary["pct_change_median_topomap"] = float("nan")
+    
+    return summary
 
 
 def qc_baseline_active_power(
@@ -54,7 +319,7 @@ def qc_baseline_active_power(
         active_window: Active window tuple for statistics
         logger: Optional logger instance
     """
-    baseline = _get_baseline_window(config, baseline)
+    baseline_window = _get_baseline_window(config, baseline)
     qc_dir = out_dir / "qc"
     qc_dir.mkdir(parents=True, exist_ok=True)
 
@@ -68,23 +333,28 @@ def qc_baseline_active_power(
     freqs = np.asarray(tfr.freqs)
     times = np.asarray(tfr.times)
 
-    from ...utils.config.loader import get_config_value, ensure_config
     config = ensure_config(config)
-    min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
-    b_start, b_end, tmask_base_idx = validate_baseline_indices(times, baseline, min_samples=min_baseline_samples, logger=logger)
-    tmask_base = np.zeros(len(times), dtype=bool)
-    tmask_base[tmask_base_idx] = True
-    tmask_plat = (times >= active_window[0]) & (times < active_window[1])
-
-    if not np.any(tmask_plat):
-        log(f"QC skipped: active samples={int(tmask_plat.sum())}", logger, "warning")
+    min_baseline_samples = int(
+        get_config_value(
+            config,
+            "time_frequency_analysis.constants.min_samples_for_baseline_validation",
+            5,
+        )
+    )
+    baseline_start, baseline_end, baseline_indices = validate_baseline_indices(
+        times, baseline_window, min_samples=min_baseline_samples, logger=logger
+    )
+    baseline_mask = np.zeros(len(times), dtype=bool)
+    baseline_mask[baseline_indices] = True
+    
+    active_mask = (times >= active_window[0]) & (times < active_window[1])
+    if not np.any(active_mask):
+        active_sample_count = int(active_mask.sum())
+        log(f"QC skipped: active samples={active_sample_count}", logger, "warning")
         return
 
     tfr_avg = tfr.average() if isinstance(tfr, mne.time_frequency.EpochsTFR) else tfr
     
-    rows = []
-    font_sizes = get_font_sizes()
-
     band_bounds = config.get("time_frequency_analysis.bands") if config else None
     if band_bounds is None and hasattr(config, "frequency_bands"):
         band_bounds = config.frequency_bands
@@ -92,93 +362,37 @@ def qc_baseline_active_power(
         log("QC skipped: no frequency bands found in config", logger, "warning")
         return
     
+    config_values = _get_qc_config_values(config)
+    baseline_window_tuple = (baseline_start, baseline_end)
+    summary_rows = []
+    
     band_bounds_dict = {k: tuple(v) for k, v in band_bounds.items()}
-    for band, (fmin, fmax) in band_bounds_dict.items():
-        fmask = (freqs >= float(fmin)) & (freqs <= (float(fmax) if fmax is not None else freqs.max()))
-        if not np.any(fmask):
-            continue
-
-        base = data[:, :, fmask, :][:, :, :, tmask_base].mean(axis=(2, 3))
-        plat = data[:, :, fmask, :][:, :, :, tmask_plat].mean(axis=(2, 3))
-
-        base_flat = base.reshape(-1)
-        plat_flat = plat.reshape(-1)
-        plot_cfg = get_plot_config(config)
-        tfr_config = plot_cfg.plot_type_configs.get("tfr", {}) if plot_cfg else {}
-        qc_config = tfr_config.get("qc", {})
-        epsilon_for_division = qc_config.get("epsilon_for_division", 1e-20)
-        percentage_multiplier = tfr_config.get("percentage_multiplier", 100.0)
-        pct_change = ((plat_flat - base_flat) / (base_flat + epsilon_for_division)) * percentage_multiplier
-
-        qc_fig_width = qc_config.get("fig_width", 8)
-        qc_fig_height = qc_config.get("fig_height", 3)
-        histogram_bins = qc_config.get("histogram_bins", 50)
-        histogram_alpha = qc_config.get("histogram_alpha", 0.8)
-        fig, axes = plt.subplots(1, 2, figsize=(qc_fig_width, qc_fig_height), constrained_layout=True)
-        axes[0].hist(base_flat, bins=histogram_bins, color="tab:blue", alpha=histogram_alpha)
-        axes[0].set_title(f"Baseline power — {band}")
-        axes[0].set_xlabel("Power (a.u.)")
-        axes[0].set_ylabel("Count")
-        axes[1].hist(pct_change, bins=histogram_bins, color="tab:orange", alpha=histogram_alpha)
-        axes[1].set_title(f"% signal change (active vs baseline) — {band}")
-        axes[1].set_xlabel("% change")
-        axes[1].set_ylabel("Count")
-        fig.suptitle(
-            f"Baseline vs Active QC — {band}\n(baseline={b_start:.2f}–{b_end:.2f}s; active={active_window[0]:.2f}–{active_window[1]:.2f}s)",
-            fontsize=font_sizes["ylabel"],
+    for band_name, (fmin, fmax) in band_bounds_dict.items():
+        summary = _process_single_band(
+            data,
+            freqs,
+            times,
+            band_name,
+            fmin,
+            fmax,
+            baseline_mask,
+            active_mask,
+            baseline_window_tuple,
+            active_window,
+            tfr_avg,
+            config_values,
+            qc_dir,
+            config,
+            logger,
         )
-        _save_fig(fig, qc_dir, f"qc_baseline_active_hist_{band}.png", config=config, logger=logger)
+        if summary is not None:
+            summary_rows.append(summary)
 
-        topo_vals = None
-        if tfr_avg is not None:
-            fmin_eff = float(fmin)
-            fmax_eff = float(fmax) if fmax is not None else float(freqs.max())
-            topo_plat = average_tfr_band(
-                tfr_avg,
-                fmin=fmin_eff,
-                fmax=fmax_eff,
-                tmin=float(active_window[0]),
-                tmax=float(active_window[1]),
-            )
-            topo_base = average_tfr_band(
-                tfr_avg,
-                fmin=fmin_eff,
-                fmax=fmax_eff,
-                tmin=float(b_start),
-                tmax=float(b_end),
-            )
-            if topo_plat is not None and topo_base is not None:
-                plot_cfg_topo_pct = get_plot_config(config)
-                tfr_config_topo_pct = plot_cfg_topo_pct.plot_type_configs.get("tfr", {}) if plot_cfg_topo_pct else {}
-                qc_config_topo_pct = tfr_config_topo_pct.get("qc", {})
-                epsilon_for_division_topo_pct = qc_config_topo_pct.get("epsilon_for_division", 1e-20)
-                percentage_multiplier_topo_pct = tfr_config_topo_pct.get("percentage_multiplier", 100.0)
-                topo_vals = ((topo_plat - topo_base) / (topo_base + epsilon_for_division_topo_pct)) * percentage_multiplier_topo_pct
-
-        row = {
-            "band": band,
-            "baseline_mean": float(np.nanmean(base_flat)),
-            "baseline_median": float(np.nanmedian(base_flat)),
-            "active_mean": float(np.nanmean(plat_flat)),
-            "active_median": float(np.nanmedian(plat_flat)),
-            "pct_change_mean": float(np.nanmean(pct_change)),
-            "pct_change_median": float(np.nanmedian(pct_change)),
-            "n_baseline_samples": int(tmask_base.sum()),
-            "n_active_samples": int(tmask_plat.sum()),
-        }
-        if topo_vals is not None and np.isfinite(topo_vals).any():
-            row["pct_change_mean_topomap"] = float(np.nanmean(topo_vals))
-            row["pct_change_median_topomap"] = float(np.nanmedian(topo_vals))
-        else:
-            row["pct_change_mean_topomap"] = float("nan")
-            row["pct_change_median_topomap"] = float("nan")
-        rows.append(row)
-
-    if rows:
-        df = pd.DataFrame(rows)
-        df_path = qc_dir / "qc_baseline_active_summary.tsv"
-        df.to_csv(df_path, sep="\t", index=False)
-        log(f"Saved QC summary: {df_path}", logger)
+    if summary_rows:
+        summary_df = pd.DataFrame(summary_rows)
+        summary_path = qc_dir / "qc_baseline_active_summary.tsv"
+        summary_df.to_csv(summary_path, sep="\t", index=False)
+        log(f"Saved QC summary: {summary_path}", logger)
 
 
 __all__ = [

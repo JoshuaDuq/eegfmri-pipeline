@@ -11,6 +11,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	projectSetupFieldCount = 4
+	minSubjectsRequired    = 1
+	minSubjectsForGroupCV  = 2
+	timeRangeFieldCount    = 3
+)
+
 ///////////////////////////////////////////////////////////////////
 // Cursor Reset Helper
 ///////////////////////////////////////////////////////////////////
@@ -61,63 +68,85 @@ func (m *Model) resetCursorsForStep() {
 // Navigation Handlers
 ///////////////////////////////////////////////////////////////////
 
+// moveCursorInList moves cursor within a list with wraparound
+func moveCursorInList(current int, delta int, listLength int) int {
+	if listLength == 0 {
+		return 0
+	}
+	return (current + delta + listLength) % listLength
+}
+
+// clampCursor ensures cursor is within valid bounds
+func clampCursor(cursor int, maxIndex int) int {
+	if cursor < 0 {
+		return 0
+	}
+	if cursor > maxIndex {
+		return maxIndex
+	}
+	return cursor
+}
+
+// shouldSkipStep determines if a step should be skipped based on pipeline and mode
+func (m *Model) shouldSkipStep(step types.WizardStep) bool {
+	switch m.Pipeline {
+	case types.PipelineFeatures:
+		mode := m.modeOptions[m.modeIndex]
+		switch mode {
+		case "combine":
+			// For combine, only Subjects and Execute are needed
+			return step != types.StepReviewExecute && step != types.StepSelectSubjects && step != types.StepSelectMode
+		case styles.ModeVisualize:
+			// For visualize, skip bands, spatial, time, and advanced config
+			return step == types.StepSelectBands || step == types.StepSelectSpatial || step == types.StepTimeRange || step == types.StepAdvancedConfig
+		}
+	case types.PipelineBehavior:
+		mode := m.modeOptions[m.modeIndex]
+		if mode == styles.ModeVisualize {
+			// For visualize, skip computations selection, features selection, bands, and advanced config
+			return step == types.StepSelectComputations || step == types.StepSelectFeatureFiles || step == types.StepSelectBands || step == types.StepAdvancedConfig
+		}
+	case types.PipelinePlotting:
+		if step == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) handleUp() {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
-		if m.modeIndex > 0 {
-			m.modeIndex--
-		} else {
-			m.modeIndex = len(m.modeOptions) - 1
-		}
+		m.modeIndex = moveCursorInList(m.modeIndex, -1, len(m.modeOptions))
 
 	case types.StepProjectSetup:
 		if m.projectSetupCursor > 0 {
 			m.projectSetupCursor--
 		} else {
-			m.projectSetupCursor = 4 // 4 fields + 1 toggle
+			m.projectSetupCursor = projectSetupFieldCount
 		}
 
 	case types.StepSelectComputations:
 		if m.computationListFocus == 0 {
 			// Primary computations list
-			if m.computationCursor > 0 {
-				m.computationCursor--
-			} else {
-				m.computationCursor = len(m.computations) - 1
-			}
+			m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
 		} else {
 			// Post computations list
-			if m.postComputationCursor > 0 {
-				m.postComputationCursor--
-			} else {
-				m.postComputationCursor = len(m.postComputations) - 1
-			}
+			m.postComputationCursor = moveCursorInList(m.postComputationCursor, -1, len(m.postComputations))
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
-		if m.categoryIndex > 0 {
-			m.categoryIndex--
-		} else {
-			m.categoryIndex = len(m.categories) - 1
-		}
+		m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
 	case types.StepSelectSubjects:
-		if m.subjectCursor > 0 {
-			m.subjectCursor--
-		} else if len(m.subjects) > 0 {
-			m.subjectCursor = len(m.subjects) - 1
+		if len(m.subjects) > 0 {
+			m.subjectCursor = moveCursorInList(m.subjectCursor, -1, len(m.subjects))
 		}
 	case types.StepSelectBands:
-		if m.bandCursor > 0 {
-			m.bandCursor--
-		} else {
-			m.bandCursor = len(m.bands) - 1
-		}
+		m.bandCursor = moveCursorInList(m.bandCursor, -1, len(m.bands))
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
-		if m.featureFileCursor > 0 {
-			m.featureFileCursor--
-		} else if len(applicable) > 0 {
-			m.featureFileCursor = len(applicable) - 1
+		if len(applicable) > 0 {
+			m.featureFileCursor = moveCursorInList(m.featureFileCursor, -1, len(applicable))
 		}
 	case types.StepSelectPlots:
 		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, -1)
@@ -125,44 +154,23 @@ func (m *Model) handleUp() {
 		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, -1)
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
-		if len(options) == 0 {
-			break
-		}
-		if m.plotConfigCursor > 0 {
-			m.plotConfigCursor--
-		} else {
-			m.plotConfigCursor = len(options) - 1
+		if len(options) > 0 {
+			m.plotConfigCursor = moveCursorInList(m.plotConfigCursor, -1, len(options))
 		}
 	case types.StepSelectSpatial:
-		if m.spatialCursor > 0 {
-			m.spatialCursor--
-		} else {
-			m.spatialCursor = len(spatialModes) - 1
-		}
+		m.spatialCursor = moveCursorInList(m.spatialCursor, -1, len(spatialModes))
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
-			if m.editingField > 0 {
-				m.editingField--
-			} else {
-				m.editingField = 2
-			}
-		} else {
-			if m.timeRangeCursor > 0 {
-				m.timeRangeCursor--
-			} else if len(m.TimeRanges) > 0 {
-				m.timeRangeCursor = len(m.TimeRanges) - 1
-			}
+			m.editingField = moveCursorInList(m.editingField, -1, timeRangeFieldCount)
+		} else if len(m.TimeRanges) > 0 {
+			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, -1, len(m.TimeRanges))
 		}
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			listLen := m.getExpandedListLength()
 			if listLen > 0 {
-				if m.subCursor > 0 {
-					m.subCursor--
-				} else {
-					m.subCursor = listLen - 1
-				}
+				m.subCursor = moveCursorInList(m.subCursor, -1, listLen)
 			}
 			m.UpdateAdvancedOffset()
 		} else {
@@ -171,11 +179,7 @@ func (m *Model) handleUp() {
 				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, -1)
 			} else {
 				optCount := m.getAdvancedOptionCount()
-				if m.advancedCursor > 0 {
-					m.advancedCursor--
-				} else {
-					m.advancedCursor = optCount - 1
-				}
+				m.advancedCursor = moveCursorInList(m.advancedCursor, -1, optCount)
 			}
 			m.UpdateAdvancedOffset()
 		}
@@ -185,14 +189,10 @@ func (m *Model) handleUp() {
 func (m *Model) handleDown() {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
-		if m.modeIndex < len(m.modeOptions)-1 {
-			m.modeIndex++
-		} else {
-			m.modeIndex = 0
-		}
+		m.modeIndex = moveCursorInList(m.modeIndex, 1, len(m.modeOptions))
 
 	case types.StepProjectSetup:
-		if m.projectSetupCursor < 4 {
+		if m.projectSetupCursor < projectSetupFieldCount {
 			m.projectSetupCursor++
 		} else {
 			m.projectSetupCursor = 0
@@ -201,89 +201,44 @@ func (m *Model) handleDown() {
 	case types.StepSelectComputations:
 		if m.computationListFocus == 0 {
 			// Primary computations list
-			if m.computationCursor < len(m.computations)-1 {
-				m.computationCursor++
-			} else {
-				m.computationCursor = 0
-			}
+			m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
 		} else {
 			// Post computations list
-			if m.postComputationCursor < len(m.postComputations)-1 {
-				m.postComputationCursor++
-			} else {
-				m.postComputationCursor = 0
-			}
+			m.postComputationCursor = moveCursorInList(m.postComputationCursor, 1, len(m.postComputations))
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
-		if m.categoryIndex < len(m.categories)-1 {
-			m.categoryIndex++
-		} else {
-			m.categoryIndex = 0
-		}
+		m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
 	case types.StepSelectSubjects:
-		if m.subjectCursor < len(m.subjects)-1 {
-			m.subjectCursor++
-		} else {
-			m.subjectCursor = 0
-		}
+		m.subjectCursor = moveCursorInList(m.subjectCursor, 1, len(m.subjects))
 	case types.StepSelectBands:
-		if m.bandCursor < len(m.bands)-1 {
-			m.bandCursor++
-		} else {
-			m.bandCursor = 0
-		}
+		m.bandCursor = moveCursorInList(m.bandCursor, 1, len(m.bands))
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
-		if m.featureFileCursor < len(applicable)-1 {
-			m.featureFileCursor++
-		} else {
-			m.featureFileCursor = 0
-		}
+		m.featureFileCursor = moveCursorInList(m.featureFileCursor, 1, len(applicable))
 	case types.StepSelectPlots:
 		m.plotCursor = m.findNextVisiblePlot(m.plotCursor, 1)
 	case types.StepSelectFeaturePlotters:
 		m.featurePlotterCursor = m.findNextFeaturePlotter(m.featurePlotterCursor, 1)
 	case types.StepPlotConfig:
 		options := m.getPlotConfigOptions()
-		if len(options) == 0 {
-			break
-		}
-		if m.plotConfigCursor < len(options)-1 {
-			m.plotConfigCursor++
-		} else {
-			m.plotConfigCursor = 0
+		if len(options) > 0 {
+			m.plotConfigCursor = moveCursorInList(m.plotConfigCursor, 1, len(options))
 		}
 	case types.StepSelectSpatial:
-		if m.spatialCursor < len(spatialModes)-1 {
-			m.spatialCursor++
-		} else {
-			m.spatialCursor = 0
-		}
+		m.spatialCursor = moveCursorInList(m.spatialCursor, 1, len(spatialModes))
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
-			if m.editingField < 2 {
-				m.editingField++
-			} else {
-				m.editingField = 0
-			}
-		} else {
-			if m.timeRangeCursor < len(m.TimeRanges)-1 {
-				m.timeRangeCursor++
-			} else {
-				m.timeRangeCursor = 0
-			}
+			m.editingField = moveCursorInList(m.editingField, 1, timeRangeFieldCount)
+		} else if len(m.TimeRanges) > 0 {
+			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, 1, len(m.TimeRanges))
 		}
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
 			listLen := m.getExpandedListLength()
 			if listLen > 0 {
-				if m.subCursor < listLen-1 {
-					m.subCursor++
-				} else {
-					m.subCursor = 0
-				}
+				m.subCursor = moveCursorInList(m.subCursor, 1, listLen)
 			}
 			m.UpdateAdvancedOffset()
 		} else {
@@ -292,11 +247,7 @@ func (m *Model) handleDown() {
 				m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
 			} else {
 				optCount := m.getAdvancedOptionCount()
-				if m.advancedCursor < optCount-1 {
-					m.advancedCursor++
-				} else {
-					m.advancedCursor = 0
-				}
+				m.advancedCursor = moveCursorInList(m.advancedCursor, 1, optCount)
 			}
 			m.UpdateAdvancedOffset()
 		}
@@ -374,37 +325,7 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 
 		// Dynamic step skipping based on pipeline and mode
 		for m.stepIndex < len(m.steps)-1 {
-			skip := false
-			switch m.Pipeline {
-			case types.PipelineFeatures:
-				mode := m.modeOptions[m.modeIndex]
-				switch mode {
-				case "combine":
-					// For combine, only Subjects and Execute are needed
-					if m.CurrentStep != types.StepReviewExecute && m.CurrentStep != types.StepSelectSubjects && m.CurrentStep != types.StepSelectMode {
-						skip = true
-					}
-				case styles.ModeVisualize:
-					// For visualize, skip bands, spatial, time, and advanced config (handled by specialized plotting pipeline)
-					if m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepSelectSpatial || m.CurrentStep == types.StepTimeRange || m.CurrentStep == types.StepAdvancedConfig {
-						skip = true
-					}
-				}
-			case types.PipelineBehavior:
-				mode := m.modeOptions[m.modeIndex]
-				if mode == styles.ModeVisualize {
-					// For visualize, skip computations selection, features selection, bands, and advanced config
-					if m.CurrentStep == types.StepSelectComputations || m.CurrentStep == types.StepSelectFeatureFiles || m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepAdvancedConfig {
-						skip = true
-					}
-				}
-			case types.PipelinePlotting:
-				if m.CurrentStep == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
-					skip = true
-				}
-			}
-
-			if !skip {
+			if !m.shouldSkipStep(m.CurrentStep) {
 				break
 			}
 			m.stepIndex++
@@ -420,18 +341,39 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 	return m, tea.ClearScreen
 }
 
+// countSelectedItems counts the number of selected items in a map
+func countSelectedItems(selected map[int]bool) int {
+	count := 0
+	for _, sel := range selected {
+		if sel {
+			count++
+		}
+	}
+	return count
+}
+
+// countSelectedStringItems counts the number of selected items in a string-keyed map
+func countSelectedStringItems(selected map[string]bool) int {
+	count := 0
+	for _, sel := range selected {
+		if sel {
+			count++
+		}
+	}
+	return count
+}
+
 func (m *Model) validateStep() []string {
 	var errors []string
 	switch m.CurrentStep {
 
 	case types.StepSelectSubjects:
-		selectedCount := 0
+		selectedCount := countSelectedStringItems(m.subjectSelected)
 		validCount := 0
-		for subjID, sel := range m.subjectSelected {
-			if !sel {
+		for subjID, selected := range m.subjectSelected {
+			if !selected {
 				continue
 			}
-			selectedCount++
 			for _, s := range m.subjects {
 				if s.ID != subjID {
 					continue
@@ -446,9 +388,9 @@ func (m *Model) validateStep() []string {
 				break
 			}
 		}
-		minRequired := 1
+		minRequired := minSubjectsRequired
 		if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
-			minRequired = 2
+			minRequired = minSubjectsForGroupCV
 		}
 		if selectedCount < minRequired {
 			errors = append(errors, fmt.Sprintf("Select at least %d subject(s)", minRequired))
@@ -457,57 +399,29 @@ func (m *Model) validateStep() []string {
 			errors = append(errors, fmt.Sprintf("Select at least %d valid subject(s)", minRequired))
 		}
 	case types.StepSelectComputations:
-		count := 0
-		for _, sel := range m.computationSelected {
-			if sel {
-				count++
-			}
-		}
-		for _, sel := range m.postComputationSelected {
-			if sel {
-				count++
-			}
-		}
-		if count == 0 {
+		primaryCount := countSelectedItems(m.computationSelected)
+		postCount := countSelectedItems(m.postComputationSelected)
+		totalCount := primaryCount + postCount
+		if totalCount == 0 {
 			errors = append(errors, "Select at least one analysis or post-computation to run")
 		}
 	case types.StepSelectFeatureFiles:
-		count := 0
-		for _, sel := range m.featureFileSelected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedStringItems(m.featureFileSelected)
 		if count == 0 {
 			errors = append(errors, "Select at least one feature file to load")
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
-		count := 0
-		for _, sel := range m.selected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedItems(m.selected)
 		if count == 0 {
 			errors = append(errors, "Select at least one category")
 		}
 	case types.StepSelectBands:
-		count := 0
-		for _, sel := range m.bandSelected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedItems(m.bandSelected)
 		if count == 0 {
 			errors = append(errors, "Select at least one frequency band")
 		}
 	case types.StepSelectPlots:
-		count := 0
-		for _, sel := range m.plotSelected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedItems(m.plotSelected)
 		if count == 0 {
 			errors = append(errors, "Select at least one plot to generate")
 		}
@@ -534,24 +448,14 @@ func (m *Model) validateStep() []string {
 			errors = append(errors, "Select at least one feature plot")
 		}
 	case types.StepSelectSpatial:
-		count := 0
-		for _, sel := range m.spatialSelected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedItems(m.spatialSelected)
 		if count == 0 {
 			errors = append(errors, "Select at least one spatial mode")
 		}
 	case types.StepTimeRange:
 		errors = m.validateTimeRanges()
 	case types.StepPlotConfig:
-		count := 0
-		for _, sel := range m.plotFormatSelected {
-			if sel {
-				count++
-			}
-		}
+		count := countSelectedStringItems(m.plotFormatSelected)
 		if count == 0 {
 			errors = append(errors, "Select at least one output format (PNG, SVG, or PDF)")
 		}
@@ -646,7 +550,7 @@ func (m *Model) handleSpace() {
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
 			// Commit and move to next field, or exit if at end
-			if m.editingField < 2 {
+			if m.editingField < timeRangeFieldCount-1 {
 				m.editingField++
 			} else {
 				m.editingRangeIdx = -1
@@ -777,30 +681,7 @@ func (m *Model) GoBack() bool {
 
 		// Dynamic step skipping (reverse)
 		for m.stepIndex > 0 {
-			skip := false
-			switch m.Pipeline {
-			case types.PipelineFeatures:
-				mode := m.modeOptions[m.modeIndex]
-				switch mode {
-				case "combine":
-					if m.CurrentStep != types.StepReviewExecute && m.CurrentStep != types.StepSelectSubjects && m.CurrentStep != types.StepSelectMode {
-						skip = true
-					}
-				case styles.ModeVisualize:
-					if m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepSelectSpatial || m.CurrentStep == types.StepTimeRange || m.CurrentStep == types.StepAdvancedConfig {
-						skip = true
-					}
-				}
-			case types.PipelineBehavior:
-				mode := m.modeOptions[m.modeIndex]
-				if mode == styles.ModeVisualize {
-					if m.CurrentStep == types.StepSelectComputations || m.CurrentStep == types.StepSelectFeatureFiles || m.CurrentStep == types.StepSelectBands || m.CurrentStep == types.StepAdvancedConfig {
-						skip = true
-					}
-				}
-			}
-
-			if !skip {
+			if !m.shouldSkipStep(m.CurrentStep) {
 				break
 			}
 			m.stepIndex--
@@ -820,31 +701,32 @@ func (m *Model) GoBack() bool {
 func (m *Model) validate() []string {
 	var errors []string
 
-	selectedCount := 0
+	selectedCount := countSelectedStringItems(m.subjectSelected)
 	validCount := 0
 	for subjID, selected := range m.subjectSelected {
-		if selected {
-			selectedCount++
-			for _, s := range m.subjects {
-				if s.ID == subjID {
-					valid, reason := m.Pipeline.ValidateSubject(s)
-					if m.Pipeline == types.PipelinePlotting {
-						valid, reason = m.validatePlottingSubject(s)
-					}
-					if !valid {
-						errors = append(errors, fmt.Sprintf("Subject %s: %s", subjID, reason))
-					} else {
-						validCount++
-					}
-					break
-				}
+		if !selected {
+			continue
+		}
+		for _, s := range m.subjects {
+			if s.ID != subjID {
+				continue
 			}
+			valid, reason := m.Pipeline.ValidateSubject(s)
+			if m.Pipeline == types.PipelinePlotting {
+				valid, reason = m.validatePlottingSubject(s)
+			}
+			if !valid {
+				errors = append(errors, fmt.Sprintf("Subject %s: %s", subjID, reason))
+			} else {
+				validCount++
+			}
+			break
 		}
 	}
 
-	minRequired := 1
+	minRequired := minSubjectsRequired
 	if m.Pipeline == types.PipelineML && m.mlScope == MLCVScopeGroup {
-		minRequired = 2
+		minRequired = minSubjectsForGroupCV
 	}
 
 	if selectedCount < minRequired {
@@ -854,22 +736,12 @@ func (m *Model) validate() []string {
 	}
 
 	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		categoryCount := 0
-		for _, selected := range m.selected {
-			if selected {
-				categoryCount++
-			}
-		}
+		categoryCount := countSelectedItems(m.selected)
 		if categoryCount == 0 {
 			errors = append(errors, "No feature categories selected")
 		}
 
-		bandCount := 0
-		for _, selected := range m.bandSelected {
-			if selected {
-				bandCount++
-			}
-		}
+		bandCount := countSelectedItems(m.bandSelected)
 		if bandCount == 0 {
 			errors = append(errors, "No frequency bands selected")
 		}
@@ -880,44 +752,25 @@ func (m *Model) validate() []string {
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		// Validate computations selection (both primary and post)
-		computationCount := 0
-		for _, selected := range m.computationSelected {
-			if selected {
-				computationCount++
-			}
-		}
-		for _, selected := range m.postComputationSelected {
-			if selected {
-				computationCount++
-			}
-		}
-		if computationCount == 0 {
+		primaryComputationCount := countSelectedItems(m.computationSelected)
+		postComputationCount := countSelectedItems(m.postComputationSelected)
+		totalComputationCount := primaryComputationCount + postComputationCount
+		if totalComputationCount == 0 {
 			errors = append(errors, "No behavior computations selected")
 		}
 
 		// Validate feature files selection (consolidated)
-		featureFileCount := 0
-		for _, selected := range m.featureFileSelected {
-			if selected {
-				featureFileCount++
-			}
-		}
+		featureFileCount := countSelectedStringItems(m.featureFileSelected)
 		if featureFileCount == 0 {
 			errors = append(errors, "No feature files selected")
 		}
-
 	}
 
 	if m.Pipeline == types.PipelinePlotting {
 		if len(m.SelectedPlotIDs()) == 0 {
 			errors = append(errors, "No plots selected")
 		}
-		formatCount := 0
-		for _, selected := range m.plotFormatSelected {
-			if selected {
-				formatCount++
-			}
-		}
+		formatCount := countSelectedStringItems(m.plotFormatSelected)
 		if formatCount == 0 {
 			errors = append(errors, "No output formats selected")
 		}
@@ -950,20 +803,29 @@ func (m *Model) validateTimeRanges() []string {
 		if tr.Tmin != "" && tr.Tmax != "" {
 			tmin, errMin := strconv.ParseFloat(tr.Tmin, 64)
 			tmax, errMax := strconv.ParseFloat(tr.Tmax, 64)
-			if errMin == nil && errMax == nil && tmin >= tmax {
+			bothValid := errMin == nil && errMax == nil
+			startNotLessThanEnd := tmin >= tmax
+			if bothValid && startNotLessThanEnd {
 				errors = append(errors, fmt.Sprintf("Range '%s': Start time (%.3f) must be less than end time (%.3f)", tr.Name, tmin, tmax))
 			}
 		}
 	}
 
 	hasBaseline := names["baseline"]
+	baselineRequiredCategories := []string{"erds", "erp", "bursts"}
 	needsBaseline := false
 	for i, cat := range m.categories {
-		if m.selected[i] {
-			if cat == "erds" || cat == "erp" || cat == "bursts" {
+		if !m.selected[i] {
+			continue
+		}
+		for _, requiredCat := range baselineRequiredCategories {
+			if cat == requiredCat {
 				needsBaseline = true
 				break
 			}
+		}
+		if needsBaseline {
+			break
 		}
 	}
 	if needsBaseline && !hasBaseline {
@@ -1038,12 +900,12 @@ func (m *Model) findNextPlottingAdvancedRow(current int, delta int) int {
 		return 0
 	}
 	next := current
-	for i := 0; i < len(rows); i++ {
-		next = (next + delta + len(rows)) % len(rows)
-		switch rows[next].kind {
-		case plottingRowSection, plottingRowPlotInfo:
-			continue
-		default:
+	maxIterations := len(rows)
+	for i := 0; i < maxIterations; i++ {
+		next = moveCursorInList(next, delta, len(rows))
+		rowKind := rows[next].kind
+		isNonSelectableRow := rowKind == plottingRowSection || rowKind == plottingRowPlotInfo
+		if !isNonSelectableRow {
 			return next
 		}
 	}
@@ -1309,11 +1171,8 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 
 	// Clamp cursor after expand/collapse changes.
 	options = m.getFeaturesOptions()
-	if m.advancedCursor >= len(options) {
-		m.advancedCursor = len(options) - 1
-	}
-	if m.advancedCursor < 0 {
-		m.advancedCursor = 0
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
 	}
 	m.UpdateAdvancedOffset()
 }
@@ -1737,12 +1596,7 @@ func (m *Model) togglePlottingAdvancedOption() {
 		m.UpdateAdvancedOffset()
 		return
 	}
-	if m.advancedCursor >= len(rows) {
-		m.advancedCursor = len(rows) - 1
-	}
-	if m.advancedCursor < 0 {
-		m.advancedCursor = 0
-	}
+	m.advancedCursor = clampCursor(m.advancedCursor, len(rows)-1)
 	if rows[m.advancedCursor].kind == plottingRowSection || rows[m.advancedCursor].kind == plottingRowPlotInfo {
 		m.advancedCursor = m.findNextPlottingAdvancedRow(m.advancedCursor, 1)
 	}
@@ -2370,11 +2224,8 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 
 	// Clamp cursor to valid range after list might have shrunk (e.g., section collapsed)
 	options = m.getBehaviorOptions()
-	if m.advancedCursor >= len(options) {
-		m.advancedCursor = len(options) - 1
-	}
-	if m.advancedCursor < 0 {
-		m.advancedCursor = 0
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
 	}
 }
 
@@ -3396,14 +3247,15 @@ func (m Model) findNextVisiblePlot(current int, delta int) int {
 		return 0
 	}
 
-	// Try to find one
+	// Start from current position, wrapping if needed
 	next := current
 	if next < 0 {
 		next = len(m.plotItems) - 1
 	}
 
-	for i := 0; i < len(m.plotItems); i++ {
-		next = (next + delta + len(m.plotItems)) % len(m.plotItems)
+	maxIterations := len(m.plotItems)
+	for i := 0; i < maxIterations; i++ {
+		next = moveCursorInList(next, delta, len(m.plotItems))
 		if m.IsPlotCategorySelected(m.plotItems[next].Group) {
 			return next
 		}
@@ -3420,7 +3272,7 @@ func (m Model) findNextFeaturePlotter(current int, delta int) int {
 	if next < 0 {
 		next = len(items) - 1
 	}
-	return (next + delta + len(items)) % len(items)
+	return moveCursorInList(next, delta, len(items))
 }
 
 // startNumberEdit enters editing mode for the current field
@@ -3442,9 +3294,9 @@ func (m *Model) togglePlotCategory(idx int) {
 	if idx >= len(categories) {
 		return
 	}
-	key := categories[idx].Key
+	categoryKey := categories[idx].Key
 	for i, plot := range m.plotItems {
-		if strings.EqualFold(plot.Group, key) {
+		if strings.EqualFold(plot.Group, categoryKey) {
 			m.plotSelected[i] = m.selected[idx]
 		}
 	}

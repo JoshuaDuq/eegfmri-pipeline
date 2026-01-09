@@ -14,6 +14,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	historyDirName           = ".eeg-pipeline"
+	historyFileName          = "history.json"
+	historyMaxEntries        = 50
+	maxVisibleHistoryRecords = 10
+	tickInterval             = 100 * time.Millisecond
+)
+
 ///////////////////////////////////////////////////////////////////
 // Types
 ///////////////////////////////////////////////////////////////////
@@ -64,7 +72,7 @@ type Model struct {
 ///////////////////////////////////////////////////////////////////
 
 func New(repoRoot string) Model {
-	historyPath := filepath.Join(repoRoot, ".eeg-pipeline", "history.json")
+	historyPath := filepath.Join(repoRoot, historyDirName, historyFileName)
 	return Model{
 		historyPath: historyPath,
 		loading:     true,
@@ -100,14 +108,13 @@ func saveHistory(path string, records []ExecutionRecord) error {
 	}
 
 	// Keep only last 50 records
-	maxEntries := 50
-	if len(records) > maxEntries {
-		records = records[len(records)-maxEntries:]
+	if len(records) > historyMaxEntries {
+		records = records[len(records)-historyMaxEntries:]
 	}
 
 	history := historyData{
 		Executions: records,
-		MaxEntries: maxEntries,
+		MaxEntries: historyMaxEntries,
 	}
 
 	data, err := json.MarshalIndent(history, "", "  ")
@@ -120,7 +127,7 @@ func saveHistory(path string, records []ExecutionRecord) error {
 
 // AddRecord adds a new execution record to history
 func AddRecord(repoRoot string, record ExecutionRecord) error {
-	historyPath := filepath.Join(repoRoot, ".eeg-pipeline", "history.json")
+	historyPath := filepath.Join(repoRoot, historyDirName, historyFileName)
 
 	records, _ := loadHistory(historyPath)
 	records = append(records, record)
@@ -145,7 +152,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+	return tea.Tick(tickInterval, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
@@ -283,7 +290,7 @@ func (m Model) renderHistory() string {
 	var b strings.Builder
 
 	// Show at most 10 records
-	maxShow := 10
+	maxShow := maxVisibleHistoryRecords
 	if maxShow > len(m.records) {
 		maxShow = len(m.records)
 	}

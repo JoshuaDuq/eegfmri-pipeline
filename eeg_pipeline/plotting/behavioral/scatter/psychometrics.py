@@ -23,68 +23,106 @@ from eeg_pipeline.plotting.io.figures import (
 from eeg_pipeline.infra.logging import get_subject_logger
 
 
-def _plot_distribution_histogram(
+_MIN_SAMPLES_FOR_HISTOGRAM = 3
+
+
+def _compute_histogram_bins(plot_config: PlotConfig) -> int:
+    """Extract histogram bin count from configuration."""
+    behavioral_config = plot_config.get_behavioral_config()
+    default_bins = plot_config.get_histogram_bins(plot_type="behavioral")
+    return int(behavioral_config.get("histogram_bins", default_bins))
+
+
+def _add_kde_overlay(
+    ax: plt.Axes,
     data: pd.Series,
-    x_label: str,
-    title: str,
-    output_path: Path,
-    plot_cfg: PlotConfig,
-    config,
-    logger: logging.Logger,
+    bins: int,
+    plot_config: PlotConfig,
 ) -> None:
-    if data.empty or data.notna().sum() < 3:
-        logger.warning(f"Insufficient data for histogram: {title}")
+    """Add KDE overlay to histogram if sufficient data available."""
+    min_samples_for_kde = plot_config.validation.get("min_samples_for_kde", _MIN_SAMPLES_FOR_HISTOGRAM)
+    if len(data) <= min_samples_for_kde:
         return
 
-    fig_size = plot_cfg.get_figure_size("standard", plot_type="behavioral")
-    fig, ax = plt.subplots(figsize=fig_size)
-
-    band_color = get_band_color("alpha", config)
-    behavioral_config = plot_cfg.get_behavioral_config()
-    bins = int(behavioral_config.get("histogram_bins", plot_cfg.get_histogram_bins(plot_type="behavioral")))
-
-    ax.hist(
+    kde = gaussian_kde(data)
+    data_range = np.linspace(data.min(), data.max(), plot_config.style.kde_points)
+    kde_values = kde(data_range)
+    kde_scale = compute_kde_scale(
         data,
-        bins=bins,
-        color=band_color,
-        alpha=plot_cfg.style.scatter.alpha,
-        edgecolor=plot_cfg.style.histogram.edgecolor,
-        linewidth=plot_cfg.style.histogram.edgewidth,
+        hist_bins=bins,
+        kde_points=plot_config.style.kde_points,
+    )
+    scaled_kde = kde_values * kde_scale
+
+    ax.plot(
+        data_range,
+        scaled_kde,
+        color=plot_config.style.kde_color,
+        linewidth=plot_config.style.kde_linewidth,
+        alpha=plot_config.style.kde_alpha,
     )
 
-    if len(data) > plot_cfg.validation.get("min_samples_for_kde", 3):
-        kde = gaussian_kde(data)
-        data_range = np.linspace(data.min(), data.max(), plot_cfg.style.kde_points)
-        kde_vals = kde(data_range)
-        kde_scale = compute_kde_scale(data, hist_bins=bins, kde_points=plot_cfg.style.kde_points)
-        scaled_kde = kde_vals * kde_scale
-        ax.plot(
-            data_range,
-            scaled_kde,
-            color=plot_cfg.style.kde_color,
-            linewidth=plot_cfg.style.kde_linewidth,
-            alpha=plot_cfg.style.kde_alpha,
-        )
 
-    ax.set_xlabel(x_label, fontsize=plot_cfg.font.label)
-    ax.set_ylabel("Frequency", fontsize=plot_cfg.font.label)
-    ax.set_title(title, fontsize=plot_cfg.font.title, fontweight="bold")
+def _add_statistics_text(ax: plt.Axes, data: pd.Series, plot_config: PlotConfig) -> None:
+    """Add statistics text box to the plot."""
+    sample_count = len(data)
+    mean_value = data.mean()
+    std_value = data.std()
+    stats_text = f"n = {sample_count}\nMean = {mean_value:.2f}\nSD = {std_value:.2f}"
 
-    stats_text = f"n = {len(data)}\nMean = {data.mean():.2f}\nSD = {data.std():.2f}"
     ax.text(
         0.98,
         0.98,
         stats_text,
         transform=ax.transAxes,
-        fontsize=plot_cfg.font.title,
+        fontsize=plot_config.font.title,
         va="top",
         ha="right",
         bbox=dict(
             boxstyle="round",
             facecolor="white",
-            alpha=plot_cfg.style.alpha_text_box,
+            alpha=plot_config.style.alpha_text_box,
         ),
     )
+
+
+def _plot_distribution_histogram(
+    data: pd.Series,
+    x_label: str,
+    title: str,
+    output_path: Path,
+    plot_config: PlotConfig,
+    config,
+    logger: logging.Logger,
+) -> None:
+    """Plot histogram with optional KDE overlay for distribution visualization."""
+    n_valid = data.notna().sum()
+    if data.empty or n_valid < _MIN_SAMPLES_FOR_HISTOGRAM:
+        logger.warning(f"Insufficient data for histogram: {title}")
+        return
+
+    fig_size = plot_config.get_figure_size("standard", plot_type="behavioral")
+    fig, ax = plt.subplots(figsize=fig_size)
+
+    band_color = get_band_color("alpha", config)
+    bins = _compute_histogram_bins(plot_config)
+
+    ax.hist(
+        data,
+        bins=bins,
+        color=band_color,
+        alpha=plot_config.style.scatter.alpha,
+        edgecolor=plot_config.style.histogram.edgecolor,
+        linewidth=plot_config.style.histogram.edgewidth,
+    )
+
+    _add_kde_overlay(ax, data, bins, plot_config)
+
+    ax.set_xlabel(x_label, fontsize=plot_config.font.label)
+    ax.set_ylabel("Frequency", fontsize=plot_config.font.label)
+    ax.set_title(title, fontsize=plot_config.font.title, fontweight="bold")
+
+    _add_statistics_text(ax, data, plot_config)
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message=".*tight_layout.*")
@@ -93,23 +131,90 @@ def _plot_distribution_histogram(
     save_fig(
         fig,
         output_path,
-        formats=plot_cfg.formats,
-        dpi=plot_cfg.dpi,
-        bbox_inches=plot_cfg.bbox_inches,
-        pad_inches=plot_cfg.pad_inches,
+        formats=plot_config.formats,
+        dpi=plot_config.dpi,
+        bbox_inches=plot_config.bbox_inches,
+        pad_inches=plot_config.pad_inches,
         footer=_get_behavior_footer(config),
         logger=logger,
     )
     plt.close(fig)
 
 
+def _load_and_validate_psychometric_data(
+    events: pd.DataFrame,
+    temperature_columns: list[str],
+    rating_columns: list[str],
+    logger: logging.Logger,
+) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+    """Load and validate temperature and rating data from events DataFrame."""
+    temperature_column = _pick_first_column(events, temperature_columns)
+    if temperature_column is None:
+        return None, None
+
+    rating_column = _pick_first_column(events, rating_columns)
+    temperature = pd.to_numeric(events[temperature_column], errors="coerce")
+
+    valid_mask = temperature.notna()
+    if rating_column is not None:
+        rating = pd.to_numeric(events[rating_column], errors="coerce")
+        valid_mask = valid_mask & rating.notna()
+    else:
+        rating = None
+
+    temperature_valid = temperature[valid_mask]
+    rating_valid = rating[valid_mask] if rating is not None else None
+
+    return temperature_valid, rating_valid
+
+
+def _plot_temperature_rating_correlation(
+    temperature: pd.Series,
+    rating: pd.Series,
+    subject: str,
+    output_dir: Path,
+    plot_config: PlotConfig,
+    config,
+    logger: logging.Logger,
+) -> None:
+    """Generate scatter plot of temperature vs rating with correlation statistics."""
+    correlation_method = plot_config.get_behavioral_config().get("method_spearman", "spearman")
+    rng_seed = plot_config.get_behavioral_config().get("default_rng_seed", 42)
+    rng = np.random.default_rng(rng_seed)
+
+    output_path = output_dir / f"psychometrics_temp_vs_rating_sub-{subject}"
+
+    generate_correlation_scatter(
+        x_data=temperature,
+        y_data=rating,
+        x_label="Temperature (°C)",
+        y_label="Rating",
+        title_prefix=f"Psychometrics — Temperature vs Rating — sub-{subject}",
+        band_color=get_band_color("alpha", config),
+        output_path=output_path,
+        method_code=correlation_method,
+        Z_covars=None,
+        covar_names=None,
+        bootstrap_ci=0,
+        rng=rng,
+        roi_channels=None,
+        logger=logger,
+        annotated_stats=None,
+        annot_ci=None,
+        config=config,
+    )
+
+
 def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> None:
+    """Generate psychometric plots for temperature and rating data."""
     if config is None:
         raise ValueError("config is required for psychometrics plotting")
+
     log_name = config.get("output.log_file_name", "behavior_analysis.log")
     logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
-    plot_cfg = get_plot_config(config)
-    behavioral_config = plot_cfg.get_behavioral_config()
+    plot_config = get_plot_config(config)
+    behavioral_config = plot_config.get_behavioral_config()
+
     plot_subdir = behavioral_config.get("plot_subdir", "behavior")
     plots_dir = deriv_plots_path(deriv_root, subject, subdir=plot_subdir)
     stats_dir = deriv_stats_path(deriv_root, subject)
@@ -121,79 +226,51 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
         logger.warning(f"No events for psychometrics: sub-{subject}")
         return
 
-    psych_temp_columns = config.get("event_columns.temperature", [])
+    temperature_columns = config.get("event_columns.temperature", [])
     rating_columns = config.get("event_columns.rating", [])
 
-    temp_col = _pick_first_column(events, psych_temp_columns)
-    rating_col = _pick_first_column(events, rating_columns)
+    temperature_valid, rating_valid = _load_and_validate_psychometric_data(
+        events,
+        temperature_columns,
+        rating_columns,
+        logger,
+    )
 
-    if temp_col is None:
+    if temperature_valid is None:
         logger.warning(
             f"Psychometrics: no temperature column found; skipping for sub-{subject}."
         )
         return
 
-    temp = pd.to_numeric(events[temp_col], errors="coerce")
-
-    psychometrics_dir = plots_dir / "psychometrics"
-    ensure_dir(psychometrics_dir)
-
-    min_samples_for_plot = plot_cfg.validation.get("min_samples_for_plot", 5)
-
-    valid_mask = temp.notna()
-    if rating_col is not None:
-        rating = pd.to_numeric(events[rating_col], errors="coerce")
-        valid_mask = valid_mask & rating.notna()
-    else:
-        rating = None
-
-    if not valid_mask.sum() >= min_samples_for_plot:
+    n_valid = len(temperature_valid)
+    min_samples_for_plot = plot_config.validation.get("min_samples_for_plot", 5)
+    if n_valid < min_samples_for_plot:
         logger.warning(
-            f"Insufficient valid data for psychometrics (n={valid_mask.sum()} < {min_samples_for_plot}); "
+            f"Insufficient valid data for psychometrics (n={n_valid} < {min_samples_for_plot}); "
             f"skipping for sub-{subject}"
         )
         return
 
-    temp_valid = temp[valid_mask]
+    psychometrics_dir = plots_dir / "psychometrics"
+    ensure_dir(psychometrics_dir)
 
-    if rating is not None:
-        rating_valid = rating[valid_mask]
-
-        method_code = behavioral_config.get("method_spearman", "spearman")
-        default_rng_seed = behavioral_config.get("default_rng_seed", 42)
-        rng = np.random.default_rng(default_rng_seed)
-
-        x_label = "Temperature (°C)"
-        y_label = "Rating"
-
-        output_path = psychometrics_dir / f"psychometrics_temp_vs_rating_sub-{subject}"
-
-        generate_correlation_scatter(
-            x_data=temp_valid,
-            y_data=rating_valid,
-            x_label=x_label,
-            y_label=y_label,
-            title_prefix=f"Psychometrics — Temperature vs Rating — sub-{subject}",
-            band_color=get_band_color("alpha", config),
-            output_path=output_path,
-            method_code=method_code,
-            Z_covars=None,
-            covar_names=None,
-            bootstrap_ci=0,
-            rng=rng,
-            roi_channels=None,
-            logger=logger,
-            annotated_stats=None,
-            annot_ci=None,
-            config=config,
+    if rating_valid is not None:
+        _plot_temperature_rating_correlation(
+            temperature_valid,
+            rating_valid,
+            subject,
+            psychometrics_dir,
+            plot_config,
+            config,
+            logger,
         )
 
     _plot_distribution_histogram(
-        data=temp_valid,
+        data=temperature_valid,
         x_label="Temperature (°C)",
         title=f"Temperature Distribution — sub-{subject}",
         output_path=psychometrics_dir / f"psychometrics_temp_distribution_sub-{subject}",
-        plot_cfg=plot_cfg,
+        plot_config=plot_config,
         config=config,
         logger=logger,
     )

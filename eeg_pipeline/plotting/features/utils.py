@@ -12,7 +12,8 @@ This module consolidates common functionality used across multiple plotting modu
 
 from __future__ import annotations
 
-from typing import Tuple, List, Dict, Any, Optional
+from pathlib import Path
+from typing import Tuple, List, Dict, Any, Optional, Union
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -104,11 +105,11 @@ def get_numeric_feature_columns(
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return []
 
-    exclude_set = set(exclude or [])
-    exclude_set |= {"epoch", "trial", "subject", "index", "condition"}
+    default_exclude = {"epoch", "trial", "subject", "index", "condition"}
+    exclude_set = set(exclude or []) | default_exclude
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    return [c for c in numeric_cols if c not in exclude_set]
+    return [col for col in numeric_cols if col not in exclude_set]
 
 
 def get_named_segments(
@@ -119,6 +120,7 @@ def get_named_segments(
     """Return available NamingSchema segments for a feature group."""
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return []
+    
     segments = set()
     for col in df.columns:
         parsed = NamingSchema.parse(str(col))
@@ -129,6 +131,7 @@ def get_named_segments(
         segment = parsed.get("segment")
         if segment:
             segments.add(str(segment))
+    
     return sorted(segments)
 
 
@@ -141,6 +144,7 @@ def get_named_bands(
     """Return available NamingSchema bands for a feature group/segment."""
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return []
+    
     bands = set()
     for col in df.columns:
         parsed = NamingSchema.parse(str(col))
@@ -148,12 +152,54 @@ def get_named_bands(
             continue
         if group and parsed.get("group") != group:
             continue
-        if segment and str(parsed.get("segment") or "") != str(segment):
+        parsed_segment = str(parsed.get("segment") or "")
+        if segment and parsed_segment != str(segment):
             continue
         band = parsed.get("band")
         if band:
             bands.add(str(band))
+    
     return sorted(bands)
+
+
+def _matches_naming_schema_criteria(
+    parsed: Dict[str, Any],
+    group: str,
+    segment: str,
+    band: str,
+    identifier: Optional[str] = None,
+    scope: Optional[str] = None,
+    stat: Optional[str] = None,
+) -> bool:
+    """Check if parsed NamingSchema matches all specified criteria.
+    
+    Args:
+        parsed: Parsed NamingSchema dictionary
+        group: Required group name
+        segment: Required segment name
+        band: Required band name
+        identifier: Optional identifier filter
+        scope: Optional scope filter
+        stat: Optional stat filter
+    
+    Returns:
+        True if all criteria match
+    """
+    if not parsed.get("valid"):
+        return False
+    if parsed.get("group") != group:
+        return False
+    if str(parsed.get("segment") or "") != str(segment):
+        return False
+    if str(parsed.get("band") or "") != str(band):
+        return False
+    if scope and str(parsed.get("scope") or "") != str(scope):
+        return False
+    if identifier is not None and str(parsed.get("identifier") or "") != str(identifier):
+        return False
+    if stat and str(parsed.get("stat") or "") != str(stat):
+        return False
+    return True
 
 
 def select_named_columns(
@@ -170,35 +216,22 @@ def select_named_columns(
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return [], None, None
 
-    stat_preference = list(stat_preference or [])
-    scope_preference = list(scope_preference or [])
-    if not stat_preference:
-        stat_preference = [None]
-    if not scope_preference:
-        scope_preference = [None]
+    stat_prefs = list(stat_preference or [None])
+    scope_prefs = list(scope_preference or [None])
 
-    for scope in scope_preference:
-        for stat in stat_preference:
-            cols = []
+    for scope in scope_prefs:
+        for stat in stat_prefs:
+            matching_columns = []
             for col in df.columns:
                 parsed = NamingSchema.parse(str(col))
-                if not parsed.get("valid"):
-                    continue
-                if parsed.get("group") != group:
-                    continue
-                if str(parsed.get("segment") or "") != str(segment):
-                    continue
-                if str(parsed.get("band") or "") != str(band):
-                    continue
-                if scope and str(parsed.get("scope") or "") != str(scope):
-                    continue
-                if identifier is not None and str(parsed.get("identifier") or "") != str(identifier):
-                    continue
-                if stat and str(parsed.get("stat") or "") != str(stat):
-                    continue
-                cols.append(str(col))
-            if cols:
-                return cols, scope, stat
+                if _matches_naming_schema_criteria(
+                    parsed, group, segment, band, identifier, scope, stat
+                ):
+                    matching_columns.append(str(col))
+            
+            if matching_columns:
+                return matching_columns, scope, stat
+    
     return [], None, None
 
 
@@ -213,7 +246,7 @@ def collect_named_series(
     scope_preference: Optional[List[str]] = None,
 ) -> Tuple[pd.Series, Optional[str], Optional[str]]:
     """Return per-trial series aggregated across matching NamingSchema columns."""
-    cols, scope, stat = select_named_columns(
+    matching_columns, matched_scope, matched_stat = select_named_columns(
         df,
         group=group,
         segment=segment,
@@ -222,14 +255,15 @@ def collect_named_series(
         stat_preference=stat_preference,
         scope_preference=scope_preference,
     )
-    if not cols:
+    if not matching_columns:
         return pd.Series(dtype=float), None, None
 
-    if len(cols) == 1:
-        series = pd.to_numeric(df[cols[0]], errors="coerce")
+    if len(matching_columns) == 1:
+        series = pd.to_numeric(df[matching_columns[0]], errors="coerce")
     else:
-        series = df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-    return series, scope, stat
+        numeric_data = df[matching_columns].apply(pd.to_numeric, errors="coerce")
+        series = numeric_data.mean(axis=1)
+    return series, matched_scope, matched_stat
 
 
 ###################################################################
@@ -284,15 +318,16 @@ def compute_cohens_d(group1: np.ndarray, group2: np.ndarray) -> float:
     Returns:
         Cohen's d effect size (positive = group2 > group1)
     """
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
-    if g1.size < 2 or g2.size < 2:
+    group1_clean = np.asarray(group1).ravel()
+    group2_clean = np.asarray(group2).ravel()
+    group1_clean = group1_clean[np.isfinite(group1_clean)]
+    group2_clean = group2_clean[np.isfinite(group2_clean)]
+    
+    if group1_clean.size < 2 or group2_clean.size < 2:
         return 0.0
 
-    d = _cohens_d(g2, g1, pooled=True)
-    return float(d) if np.isfinite(d) else 0.0
+    effect_size = _cohens_d(group2_clean, group1_clean, pooled=True)
+    return float(effect_size) if np.isfinite(effect_size) else 0.0
 
 
 def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
@@ -344,28 +379,55 @@ def format_significance_annotation(
     q: float,
     d: float,
     significant: bool,
-    include_d: bool = True,
-    newline: bool = True
 ) -> str:
-    """Format significance annotation for plots.
+    """Format significance annotation for plots with q-value and effect size.
     
     Args:
         q: FDR-corrected q-value
         d: Cohen's d effect size
         significant: Whether test is significant after FDR
-        include_d: Include Cohen's d in annotation
-        newline: Use newline between q and d
     
     Returns:
-        Formatted annotation string
+        Formatted annotation string with q-value and effect size on separate lines
     """
     sig_marker = "†" if significant else ""
-    sep = "\n" if newline else " "
+    return f"q={q:.3f}{sig_marker}\nd={d:.2f}"
+
+
+def format_significance_annotation_compact(
+    q: float,
+    d: float,
+    significant: bool,
+) -> str:
+    """Format significance annotation for plots in compact single-line format.
     
-    if include_d:
-        return f"q={q:.3f}{sig_marker}{sep}d={d:.2f}"
-    else:
-        return f"q={q:.3f}{sig_marker}"
+    Args:
+        q: FDR-corrected q-value
+        d: Cohen's d effect size
+        significant: Whether test is significant after FDR
+    
+    Returns:
+        Formatted annotation string with q-value and effect size on one line
+    """
+    sig_marker = "†" if significant else ""
+    return f"q={q:.3f}{sig_marker} d={d:.2f}"
+
+
+def format_significance_annotation_q_only(
+    q: float,
+    significant: bool,
+) -> str:
+    """Format significance annotation for plots with q-value only.
+    
+    Args:
+        q: FDR-corrected q-value
+        significant: Whether test is significant after FDR
+    
+    Returns:
+        Formatted annotation string with q-value only
+    """
+    sig_marker = "†" if significant else ""
+    return f"q={q:.3f}{sig_marker}"
 
 
 def get_significance_color(significant: bool, config: Any = None) -> str:
@@ -524,28 +586,28 @@ def test_normality(
         data = rng.choice(data, size=max_n, replace=False)
     
     try:
-        res = check_normality_shapiro(data, alpha=alpha)
-    except Exception:
-        return True, np.nan, "Test failed"
+        result = check_normality_shapiro(data, alpha=alpha)
+    except (ValueError, RuntimeError) as e:
+        return True, np.nan, f"Test failed: {type(e).__name__}"
 
-    if not np.isfinite(res.p_value):
-        return True, np.nan, "Test failed"
+    if not np.isfinite(result.p_value):
+        return True, np.nan, "Test failed: invalid p-value"
 
-    p = float(res.p_value)
-    is_normal = p > alpha
+    p_value = float(result.p_value)
+    is_normal = p_value > alpha
 
-    if p < 0.001:
+    if p_value < 0.001:
         interpretation = "Strongly non-normal (p<.001)"
-    elif p < 0.01:
+    elif p_value < 0.01:
         interpretation = "Non-normal (p<.01)"
-    elif p < 0.05:
+    elif p_value < 0.05:
         interpretation = "Marginally non-normal (p<.05)"
-    elif p < 0.10:
+    elif p_value < 0.10:
         interpretation = "Approximately normal (p>.05)"
     else:
         interpretation = "Normal (p>.10)"
 
-    return is_normal, p, interpretation
+    return is_normal, p_value, interpretation
 
 
 ###################################################################
@@ -582,10 +644,10 @@ def compute_condition_stats(
         - ci_high: Bootstrap CI upper bound
         - n1, n2: Sample sizes
     """
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
+    group1_clean = np.asarray(group1).ravel()
+    group2_clean = np.asarray(group2).ravel()
+    group1_clean = group1_clean[np.isfinite(group1_clean)]
+    group2_clean = group2_clean[np.isfinite(group2_clean)]
     
     result = {
         "p_raw": np.nan,
@@ -595,35 +657,39 @@ def compute_condition_stats(
         "mean_diff": np.nan,
         "ci_low": np.nan,
         "ci_high": np.nan,
-        "n1": len(g1),
-        "n2": len(g2),
+        "n1": len(group1_clean),
+        "n2": len(group2_clean),
     }
     
-    if len(g1) < 3 or len(g2) < 3:
+    if len(group1_clean) < 3 or len(group2_clean) < 3:
         return result
     
     if test == "mannwhitneyu":
         try:
-            stat, p = stats.mannwhitneyu(g1, g2, alternative="two-sided")
-            result["statistic"] = float(stat)
-            result["p_raw"] = float(p)
+            statistic, p_value = stats.mannwhitneyu(
+                group1_clean, group2_clean, alternative="two-sided"
+            )
+            result["statistic"] = float(statistic)
+            result["p_raw"] = float(p_value)
         except ValueError:
             pass
     elif test == "ttest":
         try:
-            stat, p = stats.ttest_ind(g1, g2)
-            result["statistic"] = float(stat)
-            result["p_raw"] = float(p)
+            statistic, p_value = stats.ttest_ind(group1_clean, group2_clean)
+            result["statistic"] = float(statistic)
+            result["p_raw"] = float(p_value)
         except ValueError:
             pass
     
-    result["cohens_d"] = compute_cohens_d(g1, g2)
+    result["cohens_d"] = compute_cohens_d(group1_clean, group2_clean)
     result["d_interpretation"] = interpret_cohens_d(result["cohens_d"])
     
-    diff, ci_lo, ci_hi = _bootstrap_mean_diff_ci(g1, g2, n_boot=n_boot, config=config)
-    result["mean_diff"] = diff
-    result["ci_low"] = ci_lo
-    result["ci_high"] = ci_hi
+    mean_diff, ci_low, ci_high = _bootstrap_mean_diff_ci(
+        group1_clean, group2_clean, n_boot=n_boot, config=config
+    )
+    result["mean_diff"] = mean_diff
+    result["ci_low"] = ci_low
+    result["ci_high"] = ci_high
     
     return result
 
@@ -634,7 +700,6 @@ def format_stats_annotation(
     cohens_d: Optional[float] = None,
     ci_low: Optional[float] = None,
     ci_high: Optional[float] = None,
-    compact: bool = True,
 ) -> str:
     """Format standardized statistical annotation for plots.
     
@@ -646,10 +711,9 @@ def format_stats_annotation(
         cohens_d: Cohen's d effect size (optional)
         ci_low: Bootstrap CI lower bound (optional)
         ci_high: Bootstrap CI upper bound (optional)
-        compact: Use compact format (default True)
     
     Returns:
-        Formatted annotation string
+        Formatted annotation string with each metric on separate lines
     """
     lines = []
     
@@ -658,11 +722,49 @@ def format_stats_annotation(
         if q_fdr is not None and np.isfinite(q_fdr):
             q_str = f"q={q_fdr:.3f}" if q_fdr >= 0.001 else "q<.001"
             sig_marker = "†" if q_fdr < 0.05 else ""
-            if compact:
-                lines.append(f"{p_str}, {q_str}{sig_marker}")
-            else:
-                lines.append(f"{p_str}")
-                lines.append(f"{q_str}{sig_marker}")
+            lines.append(f"{p_str}")
+            lines.append(f"{q_str}{sig_marker}")
+        else:
+            sig_marker = "*" if p_raw < 0.05 else ""
+            lines.append(f"{p_str}{sig_marker}")
+    
+    if cohens_d is not None and np.isfinite(cohens_d):
+        lines.append(f"d={cohens_d:.2f}")
+    
+    if ci_low is not None and ci_high is not None:
+        if np.isfinite(ci_low) and np.isfinite(ci_high):
+            lines.append(f"95%CI [{ci_low:.2f}, {ci_high:.2f}]")
+    
+    return "\n".join(lines) if lines else ""
+
+
+def format_stats_annotation_compact(
+    p_raw: float,
+    q_fdr: Optional[float] = None,
+    cohens_d: Optional[float] = None,
+    ci_low: Optional[float] = None,
+    ci_high: Optional[float] = None,
+) -> str:
+    """Format standardized statistical annotation for plots in compact format.
+    
+    Args:
+        p_raw: Raw p-value
+        q_fdr: FDR-corrected q-value (optional)
+        cohens_d: Cohen's d effect size (optional)
+        ci_low: Bootstrap CI lower bound (optional)
+        ci_high: Bootstrap CI upper bound (optional)
+    
+    Returns:
+        Formatted annotation string with p and q on one line
+    """
+    lines = []
+    
+    if np.isfinite(p_raw):
+        p_str = f"p={p_raw:.3f}" if p_raw >= 0.001 else "p<.001"
+        if q_fdr is not None and np.isfinite(q_fdr):
+            q_str = f"q={q_fdr:.3f}" if q_fdr >= 0.001 else "q<.001"
+            sig_marker = "†" if q_fdr < 0.05 else ""
+            lines.append(f"{p_str}, {q_str}{sig_marker}")
         else:
             sig_marker = "*" if p_raw < 0.05 else ""
             lines.append(f"{p_str}{sig_marker}")
@@ -732,10 +834,10 @@ def compute_variability_metrics(
         - iqr: Interquartile range
         - mad: Median absolute deviation
     """
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
+    data_clean = np.asarray(data).ravel()
+    data_clean = data_clean[np.isfinite(data_clean)]
     
-    if len(data) < 2:
+    if len(data_clean) < 2:
         return {
             "cv": np.nan,
             "fano": np.nan,
@@ -744,24 +846,36 @@ def compute_variability_metrics(
             "mad": np.nan,
         }
     
-    mean_val = np.mean(data)
-    std_val = np.std(data, ddof=1)
-    var_val = np.var(data, ddof=1)
+    mean_value = np.mean(data_clean)
+    std_value = np.std(data_clean, ddof=1)
+    variance_value = np.var(data_clean, ddof=1)
     
-    cv = std_val / np.abs(mean_val) if np.abs(mean_val) > 1e-10 else np.nan
+    min_denominator = 1e-10
+    coefficient_of_variation = (
+        std_value / np.abs(mean_value)
+        if np.abs(mean_value) > min_denominator
+        else np.nan
+    )
     
-    fano = var_val / mean_val if mean_val > 1e-10 else np.nan
+    fano_factor = (
+        variance_value / mean_value
+        if mean_value > min_denominator
+        else np.nan
+    )
     
-    iqr = np.percentile(data, 75) - np.percentile(data, 25)
+    q75 = np.percentile(data_clean, 75)
+    q25 = np.percentile(data_clean, 25)
+    interquartile_range = q75 - q25
     
-    mad = np.median(np.abs(data - np.median(data)))
+    median_value = np.median(data_clean)
+    median_absolute_deviation = np.median(np.abs(data_clean - median_value))
     
     return {
-        "cv": float(cv),
-        "fano": float(fano),
-        "std": float(std_val),
-        "iqr": float(iqr),
-        "mad": float(mad),
+        "cv": float(coefficient_of_variation),
+        "fano": float(fano_factor),
+        "std": float(std_value),
+        "iqr": float(interquartile_range),
+        "mad": float(median_absolute_deviation),
     }
 
 
@@ -770,8 +884,180 @@ def compute_variability_metrics(
 ###################################################################
 
 
+def _compute_paired_wilcoxon_stats(
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+) -> Tuple[float, float]:
+    """Compute Wilcoxon signed-rank test and effect size for paired data.
+    
+    Args:
+        condition1_values: First condition values
+        condition2_values: Second condition values
+    
+    Returns:
+        Tuple of (p_value, effect_size_d)
+    """
+    from scipy.stats import wilcoxon
+    
+    differences = condition2_values - condition1_values
+    std_diff = np.std(differences, ddof=1)
+    effect_size = np.mean(differences) / std_diff if std_diff > 0 else 0.0
+    _, p_value = wilcoxon(condition2_values, condition1_values)
+    return float(p_value), float(effect_size)
+
+
+def _plot_single_band_comparison(
+    ax: Any,
+    condition1_values: np.ndarray,
+    condition2_values: np.ndarray,
+    band: str,
+    label1: str,
+    label2: str,
+    band_color: str,
+    condition1_color: str,
+    condition2_color: str,
+    q_value: Optional[float],
+    effect_size: Optional[float],
+    is_significant: bool,
+    plot_cfg: Any,
+    config: Any,
+) -> None:
+    """Plot single band comparison with box plots, scatter, and connecting lines.
+    
+    Args:
+        ax: Matplotlib axes
+        condition1_values: First condition values
+        condition2_values: Second condition values
+        band: Band name for title
+        label1: Label for first condition
+        label2: Label for second condition
+        band_color: Color for band title
+        condition1_color: Color for condition 1
+        condition2_color: Color for condition 2
+        q_value: FDR-corrected q-value (optional)
+        effect_size: Cohen's d effect size (optional)
+        is_significant: Whether test is significant
+        plot_cfg: Plot configuration object
+        config: Config object
+    """
+    if len(condition1_values) == 0 or len(condition2_values) == 0:
+        ax.text(
+            0.5, 0.5, "No data", ha="center", va="center",
+            transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray"
+        )
+        ax.set_xticks([])
+        return
+    
+    box_positions = [0, 1]
+    box_width = 0.4
+    
+    boxplot = ax.boxplot(
+        [condition1_values, condition2_values],
+        positions=box_positions,
+        widths=box_width,
+        patch_artist=True
+    )
+    boxplot["boxes"][0].set_facecolor(condition1_color)
+    boxplot["boxes"][0].set_alpha(0.6)
+    boxplot["boxes"][1].set_facecolor(condition2_color)
+    boxplot["boxes"][1].set_alpha(0.6)
+    
+    jitter_range = 0.08
+    condition1_jitter = np.random.uniform(-jitter_range, jitter_range, len(condition1_values))
+    condition2_jitter = np.random.uniform(-jitter_range, jitter_range, len(condition2_values))
+    
+    ax.scatter(
+        condition1_jitter, condition1_values,
+        c=condition1_color, alpha=0.3, s=6
+    )
+    ax.scatter(
+        1 + condition2_jitter, condition2_values,
+        c=condition2_color, alpha=0.3, s=6
+    )
+    
+    max_paired_lines = 100
+    if len(condition1_values) == len(condition2_values) and len(condition1_values) <= max_paired_lines:
+        for i in range(len(condition1_values)):
+            ax.plot(
+                [0, 1], [condition1_values[i], condition2_values[i]],
+                c="gray", alpha=0.15, lw=0.5
+            )
+    
+    all_values = np.concatenate([condition1_values, condition2_values])
+    y_min = np.nanmin(all_values)
+    y_max = np.nanmax(all_values)
+    y_range = y_max - y_min if y_max > y_min else 0.1
+    padding_bottom = 0.1 * y_range
+    padding_top = 0.3 * y_range
+    ax.set_ylim(y_min - padding_bottom, y_max + padding_top)
+    
+    if q_value is not None and effect_size is not None:
+        significance_marker = "†" if is_significant else ""
+        significance_color = get_significance_color(is_significant, config)
+        annotation_text = f"q={q_value:.3f}{significance_marker}\nd={effect_size:.2f}"
+        annotation_y = y_max + 0.05 * y_range
+        
+        ax.annotate(
+            annotation_text,
+            xy=(0.5, annotation_y),
+            ha="center",
+            fontsize=plot_cfg.font.medium,
+            color=significance_color,
+            fontweight="bold" if is_significant else "normal",
+        )
+    
+    ax.set_xticks(box_positions)
+    ax.set_xticklabels([label1, label2], fontsize=9)
+    ax.set_title(band.capitalize(), fontweight="bold", color=band_color)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def _load_condition_effects_files(
+    stats_dir: Path,
+    comparison_type: str,
+    suffix: str,
+) -> List[pd.DataFrame]:
+    """Load condition effects files for a specific comparison type.
+    
+    Args:
+        stats_dir: Path to stats directory
+        comparison_type: "window" or "column"
+        suffix: Optional file suffix
+    
+    Returns:
+        List of loaded DataFrames
+    """
+    from eeg_pipeline.infra.tsv import read_tsv
+    
+    result_dfs = []
+    condition_subdir = stats_dir / "condition"
+    search_dirs = [condition_subdir, stats_dir]
+    
+    base_filename = f"condition_effects_{comparison_type}"
+    patterns = [
+        f"{base_filename}{suffix}.tsv",
+        f"{base_filename}*.tsv"
+    ]
+    
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for pattern in patterns:
+            glob_pattern = pattern.replace("*", "**/*") if "**" not in pattern else pattern
+            for path in search_dir.glob(glob_pattern):
+                if path.is_file():
+                    df = read_tsv(path)
+                    if df is not None and not df.empty:
+                        normalized_df = _normalize_condition_effects_df(df, comparison_type)
+                        if normalized_df is not None and not normalized_df.empty:
+                            result_dfs.append(normalized_df)
+    
+    return result_dfs
+
+
 def load_precomputed_paired_stats(
-    stats_dir: "Path",
+    stats_dir: Union[Path, str],
     feature_type: Optional[str] = None,
     comparison_type: Optional[str] = None,
     condition1: Optional[str] = None,
@@ -798,56 +1084,34 @@ def load_precomputed_paired_stats(
         DataFrame with pre-computed statistics or None if not found
     """
     from pathlib import Path
-    from eeg_pipeline.infra.tsv import read_tsv
-    
-    stats_dir = Path(stats_dir)
-    result_dfs = []
-    
-    # Try new behavior pipeline format (condition_effects_*.tsv)
-    condition_subdir = stats_dir / "condition"
-    
-    # Try window comparison files
-    if comparison_type is None or comparison_type == "window":
-        for search_dir in [condition_subdir, stats_dir]:
-            if not search_dir.exists():
-                continue
-            for pattern in [f"condition_effects_window{suffix}.tsv", "condition_effects_window*.tsv"]:
-                for path in search_dir.glob(pattern.replace("*", "**/*") if "**" not in pattern else pattern):
-                    if path.is_file():
-                        df = read_tsv(path)
-                        if df is not None and not df.empty:
-                            df = _normalize_condition_effects_df(df, "window")
-                            if df is not None and not df.empty:
-                                result_dfs.append(df)
-    
-    # Try column comparison files
-    if comparison_type is None or comparison_type == "column":
-        for search_dir in [condition_subdir, stats_dir]:
-            if not search_dir.exists():
-                continue
-            for pattern in [f"condition_effects_column{suffix}.tsv", "condition_effects_column*.tsv"]:
-                for path in search_dir.glob(pattern.replace("*", "**/*") if "**" not in pattern else pattern):
-                    if path.is_file():
-                        df = read_tsv(path)
-                        if df is not None and not df.empty:
-                            df = _normalize_condition_effects_df(df, "column")
-                            if df is not None and not df.empty:
-                                result_dfs.append(df)
-    
-    # Combine results if we found any
-    if result_dfs:
-        combined = pd.concat(result_dfs, ignore_index=True)
-        return _apply_stats_filters(combined, feature_type, comparison_type, condition1, condition2, roi_name)
-    
-    # Fall back to legacy paired_comparisons format
     from eeg_pipeline.utils.analysis.stats.paired_comparisons import load_paired_comparisons
     
-    df = load_paired_comparisons(stats_dir, suffix=suffix)
+    stats_dir_path = Path(stats_dir)
+    result_dfs = []
     
-    if df is None or df.empty:
+    comparison_types_to_try = []
+    if comparison_type is None:
+        comparison_types_to_try = ["window", "column"]
+    elif comparison_type in ("window", "column"):
+        comparison_types_to_try = [comparison_type]
+    
+    for comp_type in comparison_types_to_try:
+        loaded_dfs = _load_condition_effects_files(stats_dir_path, comp_type, suffix)
+        result_dfs.extend(loaded_dfs)
+    
+    if result_dfs:
+        combined_df = pd.concat(result_dfs, ignore_index=True)
+        return _apply_stats_filters(
+            combined_df, feature_type, comparison_type, condition1, condition2, roi_name
+        )
+    
+    legacy_df = load_paired_comparisons(stats_dir_path, suffix=suffix)
+    if legacy_df is None or legacy_df.empty:
         return None
     
-    return _apply_stats_filters(df, feature_type, comparison_type, condition1, condition2, roi_name)
+    return _apply_stats_filters(
+        legacy_df, feature_type, comparison_type, condition1, condition2, roi_name
+    )
 
 
 def _normalize_condition_effects_df(
@@ -1015,7 +1279,7 @@ def get_precomputed_qvalues(
 
 
 def compute_or_load_column_stats(
-    stats_dir: Optional["Path"],
+    stats_dir: Optional[Union[Path, str]],
     feature_type: str,
     feature_keys: List[str],
     cell_data: Dict[int, Optional[Dict[str, np.ndarray]]],
@@ -1080,19 +1344,26 @@ def compute_or_load_column_stats(
         if data is None:
             continue
         
-        v1 = data.get("v1", np.array([]))
-        v2 = data.get("v2", np.array([]))
+        condition1_values = data.get("v1", np.array([]))
+        condition2_values = data.get("v2", np.array([]))
         
-        if len(v1) >= 3 and len(v2) >= 3:
+        if len(condition1_values) >= 3 and len(condition2_values) >= 3:
             try:
-                _, p = stats.mannwhitneyu(v1, v2, alternative="two-sided")
-                diff = np.mean(v2) - np.mean(v1)
-                n1, n2 = len(v1), len(v2)
-                pooled_std = np.sqrt(((n1-1)*np.var(v1, ddof=1) + (n2-1)*np.var(v2, ddof=1)) / (n1+n2-2))
-                d = diff / pooled_std if pooled_std > 0 else 0
-                all_pvals.append(p)
-                pvalue_keys.append((col_idx, p, d))
-            except Exception:
+                _, p_value = stats.mannwhitneyu(
+                    condition1_values, condition2_values, alternative="two-sided"
+                )
+                mean_diff = np.mean(condition2_values) - np.mean(condition1_values)
+                n1, n2 = len(condition1_values), len(condition2_values)
+                variance1 = np.var(condition1_values, ddof=1)
+                variance2 = np.var(condition2_values, ddof=1)
+                pooled_variance = ((n1 - 1) * variance1 + (n2 - 1) * variance2) / (n1 + n2 - 2)
+                pooled_std = np.sqrt(pooled_variance)
+                effect_size = mean_diff / pooled_std if pooled_std > 0 else 0
+                all_pvals.append(p_value)
+                pvalue_keys.append((col_idx, p_value, effect_size))
+            except (ValueError, RuntimeError) as e:
+                if logger:
+                    logger.debug(f"Failed to compute stats for column {col_idx}: {e}")
                 pass
     
     if all_pvals:
@@ -1107,7 +1378,7 @@ def compute_or_load_column_stats(
 def plot_paired_comparison(
     data_by_band: Dict[str, Tuple[np.ndarray, np.ndarray]],
     subject: str,
-    save_path: "Path",
+    save_path: Union[Path, str],
     feature_label: str,
     config: Any = None,
     logger: Any = None,
@@ -1116,7 +1387,7 @@ def plot_paired_comparison(
     label2: str = "Condition 2",
     roi_name: Optional[str] = None,
     precomputed_stats: Optional[pd.DataFrame] = None,
-    stats_dir: Optional["Path"] = None,
+    stats_dir: Optional[Union[Path, str]] = None,
 ) -> None:
     """Unified paired comparison plot.
     
@@ -1151,20 +1422,18 @@ def plot_paired_comparison(
         return
     
     band_order = get_band_names(config)
-    bands = [b for b in band_order if b in data_by_band]
-    bands += [b for b in data_by_band if b not in bands]
+    bands_in_order = [b for b in band_order if b in data_by_band]
+    bands_in_order += [b for b in data_by_band if b not in bands_in_order]
     
-    if not bands:
+    if not bands_in_order:
         return
     
-    n_bands = len(bands)
+    n_bands = len(bands_in_order)
     plot_cfg = get_plot_config(config)
     band_colors = get_band_colors(config)
     
-    segment_colors = {
-        "v1": "#5a7d9a",
-        "v2": "#c44e52",
-    }
+    condition1_color = "#5a7d9a"
+    condition2_color = "#c44e52"
     
     feature_type_map = {
         "Band Power": "power",
@@ -1195,102 +1464,85 @@ def plot_paired_comparison(
     use_precomputed = precomputed_stats is not None and not precomputed_stats.empty
     
     if use_precomputed:
-        qvalues = get_precomputed_qvalues(precomputed_stats, bands, roi_name or "all")
-        n_significant = sum(1 for v in qvalues.values() if v[3])
+        qvalues = get_precomputed_qvalues(precomputed_stats, bands_in_order, roi_name or "all")
+        n_significant = sum(1 for stats_tuple in qvalues.values() if stats_tuple[3])
         if logger:
             logger.debug(f"Using pre-computed statistics for {feature_label} ({len(qvalues)} bands)")
     else:
         all_pvalues = []
         pvalue_keys = []
+        min_samples = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
         
-        for band in bands:
-            v1, v2 = data_by_band[band]
+        for band in bands_in_order:
+            condition1_values, condition2_values = data_by_band[band]
             
-            min_n = int(get_config_value(config, "behavior_analysis.min_samples.default", 5))
-            if len(v1) >= min_n and len(v2) >= min_n and len(v1) == len(v2):
+            has_sufficient_samples = (
+                len(condition1_values) >= min_samples and
+                len(condition2_values) >= min_samples and
+                len(condition1_values) == len(condition2_values)
+            )
+            
+            if has_sufficient_samples:
                 try:
-                    _, p = wilcoxon(v2, v1)
-                    diff = v2 - v1
-                    pooled_std = np.std(diff, ddof=1)
-                    d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
-                    all_pvalues.append(p)
-                    pvalue_keys.append((band, p, d))
-                except Exception:
+                    p_value, effect_size = _compute_paired_wilcoxon_stats(
+                        condition1_values, condition2_values
+                    )
+                    all_pvalues.append(p_value)
+                    pvalue_keys.append((band, p_value, effect_size))
+                except (ValueError, RuntimeError) as e:
+                    if logger:
+                        logger.debug(f"Failed to compute stats for band {band}: {e}")
                     pass
         
         if all_pvalues:
             rejected, qvals, _ = apply_fdr_correction(all_pvalues, config=config)
-            for i, (band, p, d) in enumerate(pvalue_keys):
-                qvalues[band] = (p, qvals[i], d, rejected[i])
+            for i, (band, p_value, effect_size) in enumerate(pvalue_keys):
+                qvalues[band] = (p_value, qvals[i], effect_size, rejected[i])
             n_significant = int(np.sum(rejected))
     
-    # Create figure
-    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+    fig_width_per_band = 3
+    fig_height = 5
+    fig, axes = plt.subplots(
+        1, n_bands, figsize=(fig_width_per_band * n_bands, fig_height), squeeze=False
+    )
     
-    for band_idx, band in enumerate(bands):
+    for band_idx, band in enumerate(bands_in_order):
         ax = axes.flatten()[band_idx]
-        v1, v2 = data_by_band[band]
+        condition1_values, condition2_values = data_by_band[band]
         
-        if len(v1) == 0 or len(v2) == 0:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center",
-                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
-            ax.set_xticks([])
-            continue
-        
-        # Box plots
-        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
-        bp["boxes"][0].set_facecolor(segment_colors["v1"])
-        bp["boxes"][0].set_alpha(0.6)
-        bp["boxes"][1].set_facecolor(segment_colors["v2"])
-        bp["boxes"][1].set_alpha(0.6)
-        
-        # Scatter points
-        ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)),
-                  v1, c=segment_colors["v1"], alpha=0.3, s=6)
-        ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)),
-                  v2, c=segment_colors["v2"], alpha=0.3, s=6)
-        
-        # Paired connecting lines
-        if len(v1) == len(v2) and len(v1) <= 100:
-            for i in range(len(v1)):
-                ax.plot([0, 1], [v1[i], v2[i]], c="gray", alpha=0.15, lw=0.5)
-        
-        # Y-axis limits with room for annotation
-        all_vals = np.concatenate([v1, v2])
-        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-        yrange = ymax - ymin if ymax > ymin else 0.1
-        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-        
-        # Statistical annotation
+        q_value = None
+        effect_size = None
+        is_significant = False
         if band in qvalues:
-            _, q, d, sig = qvalues[band]
-            sig_marker = "†" if sig else ""
-            sig_color = get_significance_color(sig, config)
-            ax.annotate(
-                f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                xy=(0.5, ymax + 0.05 * yrange),
-                ha="center",
-                fontsize=plot_cfg.font.medium,
-                color=sig_color,
-                fontweight="bold" if sig else "normal",
-            )
+            _, q_value, effect_size, is_significant = qvalues[band]
         
-        ax.set_xticks([0, 1])
-        ax.set_xticklabels([label1, label2], fontsize=9)
-        ax.set_title(band.capitalize(), fontweight="bold", 
-                    color=band_colors.get(band, "gray"))
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
+        _plot_single_band_comparison(
+            ax=ax,
+            condition1_values=condition1_values,
+            condition2_values=condition2_values,
+            band=band,
+            label1=label1,
+            label2=label2,
+            band_color=band_colors.get(band, "gray"),
+            condition1_color=condition1_color,
+            condition2_color=condition2_color,
+            q_value=q_value,
+            effect_size=effect_size,
+            is_significant=is_significant,
+            plot_cfg=plot_cfg,
+            config=config,
+        )
     
-    # Build title - uses user-provided labels only
-    n_trials = len(data_by_band[bands[0]][0]) if bands else 0
-    n_tests = len(all_pvalues)
+    n_trials = len(data_by_band[bands_in_order[0]][0]) if bands_in_order else 0
+    n_tests = len(all_pvalues) if not use_precomputed else len(qvalues)
     
     title_parts = [f"{feature_label}: {label1} vs {label2} (Paired Comparison)"]
     
     info_parts = [f"Subject: {subject}"]
     if roi_name:
-        roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        roi_display = (
+            roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+        )
         info_parts.append(f"ROI: {roi_display}")
     info_parts.extend([
         f"N: {n_trials} trials",
@@ -1299,13 +1551,25 @@ def plot_paired_comparison(
     ])
     title_parts.append(" | ".join(info_parts))
     
-    fig.suptitle("\n".join(title_parts), fontsize=plot_cfg.font.suptitle, 
-                fontweight="bold", y=1.02)
+    fig.suptitle(
+        "\n".join(title_parts),
+        fontsize=plot_cfg.font.suptitle,
+        fontweight="bold",
+        y=1.02
+    )
     
     plt.tight_layout()
-    save_fig(fig, save_path, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+    save_fig(
+        fig, save_path,
+        formats=plot_cfg.formats,
+        dpi=plot_cfg.dpi,
+        bbox_inches=plot_cfg.bbox_inches,
+        pad_inches=plot_cfg.pad_inches
+    )
     plt.close(fig)
     
     if logger:
-        logger.info(f"Saved {feature_label} paired comparison ({n_significant}/{n_tests} FDR significant)")
+        logger.info(
+            f"Saved {feature_label} paired comparison "
+            f"({n_significant}/{n_tests} FDR significant)"
+        )

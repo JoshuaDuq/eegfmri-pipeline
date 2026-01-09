@@ -21,6 +21,188 @@ from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from eeg_pipeline.utils.formatting import sanitize_label
 
+# Constants
+ITPC_MIN = 0.0
+ITPC_MAX = 1.0
+PAC_DEFAULT_MIN = 0.0
+PAC_DEFAULT_MAX = 0.5
+PERCENTILE_LOW = 5
+PERCENTILE_HIGH = 95
+MIN_COLOR_RANGE = 0.01
+COLOR_RANGE_ADJUSTMENT = 0.005
+SCATTER_JITTER_RANGE = 0.08
+BOXPLOT_WIDTH = 0.4
+Y_RANGE_PADDING_LOW = 0.1
+Y_RANGE_PADDING_HIGH = 0.3
+STATS_ANNOTATION_OFFSET = 0.05
+DEFAULT_ALPHA_SIG = 0.05
+ROI_NAME_MAX_LENGTH = 20
+
+
+def _validate_itpc_data(itpc_map: Optional[np.ndarray], freqs: Optional[np.ndarray], 
+                        times: Optional[np.ndarray], logger: Optional[logging.Logger]) -> bool:
+    """Validate ITPC data inputs.
+    
+    Args:
+        itpc_map: ITPC map array
+        freqs: Frequency array
+        times: Time array
+        logger: Logger instance
+        
+    Returns:
+        True if data is valid, False otherwise
+    """
+    if itpc_map is None or freqs is None or times is None:
+        log_if_present(logger, "warning", "ITPC map missing; skipping heatmap")
+        return False
+    
+    if itpc_map.ndim != 3:
+        log_if_present(logger, "warning", 
+                      f"Unexpected ITPC map shape {itpc_map.shape}; skipping heatmap")
+        return False
+    
+    return True
+
+
+def _compute_color_limits(values: np.ndarray, default_min: float = 0.0, 
+                         default_max: float = 1.0) -> Tuple[float, float]:
+    """Compute color limits from data values using percentiles.
+    
+    Args:
+        values: Array of values
+        default_min: Default minimum if computation fails
+        default_max: Default maximum if computation fails
+        
+    Returns:
+        Tuple of (vmin, vmax)
+    """
+    finite_values = values[np.isfinite(values)]
+    if len(finite_values) == 0:
+        return default_min, default_max
+    
+    vmin = np.percentile(finite_values, PERCENTILE_LOW)
+    vmax = np.percentile(finite_values, PERCENTILE_HIGH)
+    
+    if np.isclose(vmin, vmax):
+        vmin = float(np.min(finite_values))
+        vmax = float(np.max(finite_values))
+    
+    if vmax - vmin < MIN_COLOR_RANGE:
+        center = (vmin + vmax) / 2
+        vmin = center - COLOR_RANGE_ADJUSTMENT
+        vmax = center + COLOR_RANGE_ADJUSTMENT
+    
+    return vmin, vmax
+
+
+def _convert_itpc_wide_to_long(itpc_df: pd.DataFrame, 
+                                logger: Optional[logging.Logger]) -> Optional[pd.DataFrame]:
+    """Convert ITPC DataFrame from wide to long format.
+    
+    Args:
+        itpc_df: DataFrame in wide format
+        logger: Logger instance
+        
+    Returns:
+        DataFrame in long format or None if conversion fails
+    """
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    
+    rows = []
+    for col in itpc_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "itpc":
+            continue
+        if parsed.get("scope") != "ch":
+            continue
+        if parsed.get("stat") not in ("val", "mean", "avg", "value"):
+            continue
+        
+        band = parsed.get("band")
+        segment = parsed.get("segment")
+        channel = parsed.get("identifier")
+        if not band or not segment or not channel:
+            continue
+        
+        itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
+        rows.append({
+            "channel": str(channel),
+            "band": str(band),
+            "time_bin": str(segment),
+            "itpc": itpc_val,
+        })
+    
+    if not rows:
+        itpc_cols = [c for c in itpc_df.columns 
+                    if c.startswith("itpc_") and "_ch_" in c]
+        if not itpc_cols:
+            log_if_present(logger, "warning", 
+                          "No ITPC columns found in wide format; skipping topomaps")
+            return None
+        
+        for col in itpc_cols:
+            parts = col.replace("itpc_", "").replace("_val", "").split("_ch_")
+            if len(parts) != 2:
+                continue
+            
+            segment_band = parts[0]
+            channel = parts[1]
+            sb_parts = segment_band.split("_")
+            if len(sb_parts) >= 2:
+                segment = sb_parts[0]
+                band = "_".join(sb_parts[1:])
+                itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
+                rows.append({
+                    "channel": channel,
+                    "band": band,
+                    "time_bin": segment,
+                    "itpc": itpc_val,
+                })
+    
+    if not rows:
+        log_if_present(logger, "warning", 
+                      "Could not parse ITPC columns; skipping topomaps")
+        return None
+    
+    return pd.DataFrame(rows)
+
+
+def _prepare_topomap_data(df_long: pd.DataFrame, info: mne.Info) -> Dict[Tuple[str, str], Tuple[List[float], mne.Info]]:
+    """Prepare topomap data from long-format DataFrame.
+    
+    Args:
+        df_long: DataFrame in long format
+        info: MNE Info object
+        
+    Returns:
+        Dictionary mapping (band, time_bin) to (values_ordered, info_subset)
+    """
+    topomap_data = {}
+    
+    for (band, time_bin), df_sub in df_long.groupby(["band", "time_bin"]):
+        ch_names = df_sub["channel"].astype(str).tolist()
+        values = df_sub["itpc"].to_numpy(dtype=float)
+        
+        picks = mne.pick_channels(info.ch_names, include=ch_names, ordered=True)
+        if len(picks) == 0:
+            continue
+        
+        info_subset = mne.pick_info(info, picks)
+        values_ordered = []
+        for ch in info_subset.ch_names:
+            try:
+                idx = ch_names.index(ch)
+                values_ordered.append(values[idx])
+            except ValueError:
+                values_ordered.append(np.nan)
+        
+        if np.any(np.isfinite(values_ordered)):
+            topomap_data[(band, time_bin)] = (values_ordered, info_subset)
+    
+    return topomap_data
+
 
 def plot_itpc_heatmap(
     itpc_map: np.ndarray,
@@ -42,12 +224,7 @@ def plot_itpc_heatmap(
         logger: Logger instance
         config: Configuration object
     """
-    if itpc_map is None or freqs is None or times is None:
-        log_if_present(logger, "warning", "ITPC map missing; skipping heatmap")
-        return
-
-    if itpc_map.ndim != 3:
-        log_if_present(logger, "warning", f"Unexpected ITPC map shape {itpc_map.shape}; skipping heatmap")
+    if not _validate_itpc_data(itpc_map, freqs, times, logger):
         return
 
     plot_cfg = get_plot_config(config)
@@ -60,8 +237,8 @@ def plot_itpc_heatmap(
         aspect="auto",
         extent=[float(times[0]), float(times[-1]), float(freqs[0]), float(freqs[-1])],
         cmap="magma",
-        vmin=0.0,
-        vmax=1.0,
+        vmin=ITPC_MIN,
+        vmax=ITPC_MAX,
     )
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Frequency (Hz)")
@@ -83,8 +260,84 @@ def plot_itpc_heatmap(
     log_if_present(logger, "info", "Saved ITPC heatmap")
 
 
+def _ensure_long_format(itpc_df: pd.DataFrame, 
+                        logger: Optional[logging.Logger]) -> Optional[pd.DataFrame]:
+    """Ensure DataFrame is in long format, converting if necessary.
+    
+    Args:
+        itpc_df: DataFrame in either long or wide format
+        logger: Logger instance
+        
+    Returns:
+        DataFrame in long format or None if conversion fails
+    """
+    required_cols = {"channel", "band", "time_bin", "itpc"}
+    if required_cols.issubset(set(itpc_df.columns)):
+        return itpc_df
+    
+    return _convert_itpc_wide_to_long(itpc_df, logger)
+
+
+def _plot_topomap_grid(axes: np.ndarray, bands: List[str], time_bins: List[str],
+                       topomap_data: Dict[Tuple[str, str], Tuple[List[float], mne.Info]],
+                       shared_colorbar: bool, all_values: List[float],
+                       plot_cfg: Any) -> Tuple[Optional[Any], float, float]:
+    """Plot topomaps in a grid layout.
+    
+    Args:
+        axes: 2D array of axes
+        bands: List of band names
+        time_bins: List of time bin names
+        topomap_data: Dictionary mapping (band, time_bin) to (values, info)
+        shared_colorbar: Whether to use shared colorbar
+        all_values: All values for shared colorbar computation
+        plot_cfg: Plot configuration
+        
+    Returns:
+        Tuple of (image object for colorbar or None, vmin, vmax)
+    """
+    if all_values and shared_colorbar:
+        vmin, vmax = _compute_color_limits(np.array(all_values), ITPC_MIN, ITPC_MAX)
+    else:
+        vmin, vmax = ITPC_MIN, ITPC_MAX
+    
+    im = None
+    for row_idx, band in enumerate(bands):
+        for col_idx, time_bin in enumerate(time_bins):
+            ax = axes[row_idx, col_idx]
+            
+            if (band, time_bin) in topomap_data:
+                values_ordered, info_subset = topomap_data[(band, time_bin)]
+                
+                if shared_colorbar:
+                    vmin_use, vmax_use = vmin, vmax
+                else:
+                    finite_values = np.array([v for v in values_ordered if np.isfinite(v)])
+                    if len(finite_values) > 0:
+                        vmin_use, vmax_use = _compute_color_limits(finite_values, ITPC_MIN, ITPC_MAX)
+                    else:
+                        vmin_use, vmax_use = ITPC_MIN, ITPC_MAX
+
+                im, _ = mne.viz.plot_topomap(
+                    values_ordered,
+                    info_subset,
+                    axes=ax,
+                    show=False,
+                    cmap="viridis",
+                    vlim=(vmin_use, vmax_use),
+                    contours=6,
+                )
+                ax.set_title(f"{band} | {time_bin}")
+            else:
+                ax.axis("off")
+                ax.text(0.5, 0.5, "No data", ha="center", va="center", 
+                       transform=ax.transAxes)
+    
+    return im, vmin, vmax
+
+
 def plot_itpc_topomaps(
-    itpc_df,
+    itpc_df: pd.DataFrame,
     info: mne.Info,
     subject: str,
     save_dir: Path,
@@ -107,74 +360,9 @@ def plot_itpc_topomaps(
         log_if_present(logger, "warning", "ITPC dataframe empty; skipping topomaps")
         return
 
-    # Check if already in long format
-    required_cols = {"channel", "band", "time_bin", "itpc"}
-    if required_cols.issubset(set(itpc_df.columns)):
-        df_long = itpc_df
-    else:
-        from eeg_pipeline.domain.features.naming import NamingSchema
-
-        rows = []
-        for col in itpc_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != "itpc":
-                continue
-            if parsed.get("scope") != "ch":
-                continue
-            if parsed.get("stat") not in ("val", "mean", "avg", "value"):
-                continue
-            band = parsed.get("band")
-            segment = parsed.get("segment")
-            channel = parsed.get("identifier")
-            if not band or not segment or not channel:
-                continue
-            itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
-            rows.append(
-                {
-                    "channel": str(channel),
-                    "band": str(band),
-                    "time_bin": str(segment),
-                    "itpc": itpc_val,
-                }
-            )
-
-        if not rows:
-            # Convert from wide format: itpc_{segment}_{band}_ch_{channel}_val
-            itpc_cols = [c for c in itpc_df.columns if c.startswith("itpc_") and "_ch_" in c]
-            if not itpc_cols:
-                log_if_present(logger, "warning", "No ITPC columns found in wide format; skipping topomaps")
-                return
-
-            for col in itpc_cols:
-                # Parse column name: itpc_{segment}_{band}_ch_{channel}_val
-                parts = col.replace("itpc_", "").replace("_val", "").split("_ch_")
-                if len(parts) != 2:
-                    continue
-                segment_band = parts[0]
-                channel = parts[1]
-                # Split segment and band
-                sb_parts = segment_band.split("_")
-                if len(sb_parts) >= 2:
-                    segment = sb_parts[0]
-                    band = "_".join(sb_parts[1:])  # Handle multi-word bands
-                    # Use mean across trials as the ITPC value for topomap
-                    itpc_val = pd.to_numeric(itpc_df[col], errors="coerce").mean()
-                    rows.append(
-                        {
-                            "channel": channel,
-                            "band": band,
-                            "time_bin": segment,
-                            "itpc": itpc_val,
-                        }
-                    )
-
-        if not rows:
-            log_if_present(logger, "warning", "Could not parse ITPC columns; skipping topomaps")
-            return
-
-        df_long = pd.DataFrame(rows)
+    df_long = _ensure_long_format(itpc_df, logger)
+    if df_long is None:
+        return
 
     plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
@@ -189,89 +377,37 @@ def plot_itpc_topomaps(
     n_rows = len(bands)
     n_cols = len(time_bins)
     
-    width_per_state = float(plot_cfg.plot_type_configs.get("itpc", {}).get("width_per_bin", 4.5))
-    height_per_state = float(plot_cfg.plot_type_configs.get("itpc", {}).get("height_per_band", 4.0))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_per_state * n_cols, height_per_state * n_rows), squeeze=False)
+    itpc_config = plot_cfg.plot_type_configs.get("itpc", {})
+    width_per_bin = float(itpc_config.get("width_per_bin", 4.5))
+    height_per_band = float(itpc_config.get("height_per_band", 4.0))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, 
+        figsize=(width_per_bin * n_cols, height_per_band * n_rows), 
+        squeeze=False
+    )
     
-    topomap_data = {}
+    topomap_data = _prepare_topomap_data(df_long, info)
     all_values = []
-    for (band, time_bin), df_sub in df_long.groupby(["band", "time_bin"]):
-        ch_names = df_sub["channel"].astype(str).tolist()
-        values = df_sub["itpc"].to_numpy(dtype=float)
-
-        picks = mne.pick_channels(info.ch_names, include=ch_names, ordered=True)
-        if len(picks) == 0:
-            continue
-
-        info_subset = mne.pick_info(info, picks)
-        values_ordered = []
-        for ch in info_subset.ch_names:
-            try:
-                idx = ch_names.index(ch)
-                values_ordered.append(values[idx])
-            except ValueError:
-                values_ordered.append(np.nan)
-
-        if not np.any(np.isfinite(values_ordered)):
-            continue
-            
-        topomap_data[(band, time_bin)] = (values_ordered, info_subset)
+    for values_ordered, _ in topomap_data.values():
         all_values.extend([v for v in values_ordered if np.isfinite(v)])
     
     shared_colorbar = bool(config.get("plotting.plots.itpc.shared_colorbar", True))
-    if all_values and shared_colorbar:
-        vmin = np.percentile(all_values, 5)
-        vmax = np.percentile(all_values, 95)
-        if np.isclose(vmin, vmax):
-            vmin = np.min(all_values)
-            vmax = np.max(all_values)
-        if vmax - vmin < 0.01:
-            center = (vmin + vmax) / 2
-            vmin = center - 0.005
-            vmax = center + 0.005
-    else:
-        vmin, vmax = 0.0, 1.0
-    
-    im = None
-    for row_idx, band in enumerate(bands):
-        for col_idx, time_bin in enumerate(time_bins):
-            ax = axes[row_idx, col_idx]
-            
-            if (band, time_bin) in topomap_data:
-                values_ordered, info_subset = topomap_data[(band, time_bin)]
-                
-                vmin_use, vmax_use = vmin, vmax
-                if not shared_colorbar and np.any(np.isfinite(values_ordered)):
-                    local = np.asarray(values_ordered)[np.isfinite(values_ordered)]
-                    vmin_use = np.percentile(local, 5)
-                    vmax_use = np.percentile(local, 95)
-                    if np.isclose(vmin_use, vmax_use):
-                        vmin_use = float(np.min(local))
-                        vmax_use = float(np.max(local))
-                    if vmax_use - vmin_use < 0.01:
-                        center = (vmin_use + vmax_use) / 2
-                        vmin_use = center - 0.005
-                        vmax_use = center + 0.005
-
-                im, _ = mne.viz.plot_topomap(
-                    values_ordered,
-                    info_subset,
-                    axes=ax,
-                    show=False,
-                    cmap="viridis",
-                    vlim=(vmin_use, vmax_use),
-                    contours=6,
-                )
-                ax.set_title(f"{band} | {time_bin}")
-            else:
-                ax.axis("off")
-                ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+    im, vmin, vmax = _plot_topomap_grid(
+        axes, bands, time_bins, topomap_data, shared_colorbar, all_values, plot_cfg
+    )
     
     for row_idx, band in enumerate(bands):
-        axes[row_idx, 0].set_ylabel(band.capitalize(), fontsize=plot_cfg.font.figure_title, fontweight="bold")
+        axes[row_idx, 0].set_ylabel(
+            band.capitalize(), 
+            fontsize=plot_cfg.font.figure_title, 
+            fontweight="bold"
+        )
     
     for col_idx, time_bin in enumerate(time_bins):
-        axes[0, col_idx].set_title(f"{time_bin}\n{axes[0, col_idx].get_title()}", fontweight="bold")
+        axes[0, col_idx].set_title(
+            f"{time_bin}\n{axes[0, col_idx].get_title()}", 
+            fontweight="bold"
+        )
     
     if shared_colorbar and im is not None:
         fig.subplots_adjust(right=0.92)
@@ -291,32 +427,111 @@ def plot_itpc_topomaps(
         pad_inches=plot_cfg.pad_inches,
     )
     plt.close(fig)
-    log_if_present(logger, "info", f"Saved ITPC topomap grid ({n_rows} bands × {n_cols} time bins)")
+    log_if_present(logger, "info", 
+                  f"Saved ITPC topomap grid ({n_rows} bands × {n_cols} time bins)")
 
 
-def _parse_itpc_columns(columns):
-    """Parse ITPC column names to extract band, time_bin, and channel.
+def _get_itpc_columns_for_roi(itpc_df: pd.DataFrame, segment: str, band: str, 
+                              roi_name: str, rois: Dict, all_channels: List[str]) -> List[str]:
+    """Get ITPC columns filtered by segment, band, and ROI.
     
     Args:
-        columns: List of column names
-    
+        itpc_df: DataFrame with ITPC columns
+        segment: Segment name
+        band: Band name
+        roi_name: ROI name
+        rois: ROI definitions dictionary
+        all_channels: List of all available channels
+        
     Returns:
-        List of tuples (col_name, band, time_bin, channel)
+        List of matching column names
     """
     from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.plotting.features.roi import get_roi_channels
+    
+    cols = []
+    roi_channels = (all_channels if roi_name == "all" 
+                   else get_roi_channels(rois.get(roi_name, []), all_channels))
+    roi_set = set(roi_channels) if roi_channels else set(all_channels)
+    
+    for col in itpc_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "itpc":
+            continue
+        if str(parsed.get("segment") or "") != segment:
+            continue
+        if str(parsed.get("band") or "") != band:
+            continue
+        
+        scope = parsed.get("scope") or ""
+        if scope in ("global", "roi"):
+            cols.append(col)
+        elif scope == "ch":
+            ch_id = str(parsed.get("identifier") or "")
+            if ch_id in roi_set:
+                cols.append(col)
+    
+    return cols
 
-    parsed = []
-    for col in columns:
-        parsed_name = NamingSchema.parse(str(col))
-        if not parsed_name.get("valid"):
-            continue
-        if parsed_name.get("group") != "itpc":
-            continue
-        band = parsed_name.get("band")
-        time_bin = parsed_name.get("segment")
-        channel = parsed_name.get("identifier")
-        parsed.append((col, band, time_bin, channel))
-    return parsed
+
+def _extract_bands_from_dataframe(df: pd.DataFrame, config: Optional[Any] = None) -> List[str]:
+    """Extract available bands from DataFrame columns.
+    
+    Args:
+        df: DataFrame with feature columns
+        config: Optional configuration object for band ordering
+        
+    Returns:
+        Sorted list of unique band names
+    """
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.plotting.features.utils import get_band_names
+    
+    band_set = set()
+    for col in df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "itpc":
+            band = parsed.get("band")
+            if band:
+                band_set.add(str(band))
+    
+    band_order = get_band_names(config) if config else []
+    bands = [b for b in band_order if b in band_set]
+    bands += [b for b in sorted(band_set) if b not in bands]
+    
+    return bands
+
+
+def _get_roi_names_for_comparison(config: Any, rois: Dict) -> List[str]:
+    """Get ROI names to use for comparison plots.
+    
+    Args:
+        config: Configuration object
+        rois: ROI definitions dictionary
+        
+    Returns:
+        List of ROI names
+    """
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if comp_rois:
+        roi_names = []
+        for r in comp_rois:
+            if r.lower() == "all":
+                if "all" not in roi_names:
+                    roi_names.append("all")
+            elif r in rois:
+                roi_names.append(r)
+        return roi_names
+    
+    roi_names = ["all"]
+    if rois:
+        roi_names.extend(list(rois.keys()))
+    
+    return roi_names
 
 
 def plot_itpc_by_condition(
@@ -347,22 +562,19 @@ def plot_itpc_by_condition(
         )
         return
 
-    from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.utils.config.loader import get_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
         plot_paired_comparison,
-        apply_fdr_correction,
         get_named_segments,
         get_band_color,
     )
-    from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
-    from scipy import stats
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions
+    from eeg_pipeline.domain.features.naming import NamingSchema
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    # Get segments from config or auto-detect from data
     segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
     if not segments or len(segments) < 2:
         detected = get_named_segments(itpc_df, group="itpc")
@@ -371,89 +583,40 @@ def plot_itpc_by_condition(
             if logger:
                 logger.info(f"Auto-detected segments for ITPC comparison: {segments}")
     
-    # Get available bands from data
-    band_set = set()
-    for col in itpc_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "itpc":
-            band = parsed.get("band")
-            if band:
-                band_set.add(str(band))
-    
-    from eeg_pipeline.plotting.features.utils import get_band_names
-    band_order = get_band_names(config)
-    bands = [b for b in band_order if b in band_set]
-    bands += [b for b in sorted(band_set) if b not in bands]
+    bands = _extract_bands_from_dataframe(itpc_df, config)
     if not bands:
         return
 
-    # Get ROI definitions
     rois = get_roi_definitions(config)
-    all_channels = set()
+    all_channels = []
     for col in itpc_df.columns:
         parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "itpc" and parsed.get("scope") == "ch":
+        if (parsed.get("valid") and parsed.get("group") == "itpc" 
+            and parsed.get("scope") == "ch"):
             ch = parsed.get("identifier")
             if ch:
-                all_channels.add(str(ch))
-    all_channels = list(all_channels)
+                all_channels.append(str(ch))
     
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    if comp_rois:
-        roi_names = []
-        for r in comp_rois:
-            if r.lower() == "all":
-                if "all" not in roi_names:
-                    roi_names.append("all")
-            elif r in rois:
-                roi_names.append(r)
-    else:
-        roi_names = ["all"]
-        if rois:
-            roi_names.extend(list(rois.keys()))
+    roi_names = _get_roi_names_for_comparison(config, rois)
     
     if logger:
-        logger.info(f"ITPC comparison: segments={segments}, ROIs={roi_names}, bands={bands}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+        logger.info(
+            f"ITPC comparison: segments={segments}, ROIs={roi_names}, "
+            f"bands={bands}, compare_windows={compare_wins}, "
+            f"compare_columns={compare_cols}"
+        )
     
     plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
     
-    # Helper to get ITPC columns for a segment/band/ROI
-    def get_itpc_columns(segment, band, roi_name):
-        """Get ITPC columns filtered by segment, band, and ROI."""
-        cols = []
-        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois.get(roi_name, []), all_channels)
-        roi_set = set(roi_channels) if roi_channels else set(all_channels)
-        
-        for col in itpc_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != "itpc":
-                continue
-            if str(parsed.get("segment") or "") != segment:
-                continue
-            if str(parsed.get("band") or "") != band:
-                continue
-            # Prefer global/roi scope, but accept ch if ROI matches
-            scope = parsed.get("scope") or ""
-            if scope in ("global", "roi"):
-                cols.append(col)
-            elif scope == "ch":
-                ch_id = str(parsed.get("identifier") or "")
-                if ch_id in roi_set:
-                    cols.append(col)
-        return cols
-    
-    # Window comparison (paired) - use unified helper
     if compare_wins and len(segments) >= 2:
         seg1, seg2 = segments[0], segments[1]
         
         for roi_name in roi_names:
             data_by_band = {}
             for band in bands:
-                cols1 = get_itpc_columns(seg1, band, roi_name)
-                cols2 = get_itpc_columns(seg2, band, roi_name)
+                cols1 = _get_itpc_columns_for_roi(itpc_df, seg1, band, roi_name, rois, all_channels)
+                cols2 = _get_itpc_columns_for_roi(itpc_df, seg2, band, roi_name, rois, all_channels)
                 
                 if not cols1 or not cols2:
                     continue
@@ -485,9 +648,9 @@ def plot_itpc_by_condition(
                     stats_dir=stats_dir,
                 )
         
-        log_if_present(logger, "info", f"Saved ITPC paired comparison plots for {len(roi_names)} ROIs")
+        log_if_present(logger, "info", 
+                      f"Saved ITPC paired comparison plots for {len(roi_names)} ROIs")
 
-    # Column comparison (unpaired)
     if compare_cols:
         comp_mask_info = extract_comparison_mask(events_df, config)
         if not comp_mask_info:
@@ -505,10 +668,9 @@ def plot_itpc_by_condition(
             n_trials = len(itpc_df)
             
             for roi_name in roi_names:
-                # Collect cell data first
                 cell_data = {}
                 for col_idx, band in enumerate(bands):
-                    cols = get_itpc_columns(seg_name, band, roi_name)
+                    cols = _get_itpc_columns_for_roi(itpc_df, seg_name, band, roi_name, rois, all_channels)
                     
                     if not cols:
                         cell_data[col_idx] = None
@@ -520,7 +682,6 @@ def plot_itpc_by_condition(
                     
                     cell_data[col_idx] = {"v1": v1, "v2": v2}
                 
-                # Compute or load column comparison stats
                 qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
                     stats_dir=stats_dir,
                     feature_type="itpc",
@@ -544,41 +705,50 @@ def plot_itpc_by_condition(
                     
                     v1, v2 = data["v1"], data["v2"]
                     
-                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=BOXPLOT_WIDTH, patch_artist=True)
                     bp["boxes"][0].set_facecolor(segment_colors["v1"])
                     bp["boxes"][0].set_alpha(0.6)
                     bp["boxes"][1].set_facecolor(segment_colors["v2"])
                     bp["boxes"][1].set_alpha(0.6)
                     
-                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    jitter_range = SCATTER_JITTER_RANGE
+                    ax.scatter(np.random.uniform(-jitter_range, jitter_range, len(v1)), v1, 
+                              c=segment_colors["v1"], alpha=0.3, s=6)
+                    ax.scatter(1 + np.random.uniform(-jitter_range, jitter_range, len(v2)), v2, 
+                              c=segment_colors["v2"], alpha=0.3, s=6)
                     
                     all_vals = np.concatenate([v1, v2])
                     ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
                     yrange = ymax - ymin if ymax > ymin else 0.1
-                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                    ax.set_ylim(ymin - Y_RANGE_PADDING_LOW * yrange, 
+                               ymax + Y_RANGE_PADDING_HIGH * yrange)
                     
                     if col_idx in qvalues:
                         _, q, d, sig = qvalues[col_idx]
                         sig_marker = "†" if sig else ""
                         sig_color = "#d62728" if sig else "#333333"
-                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
-                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                                   fontweight="bold" if sig else "normal")
+                        ax.annotate(
+                            f"q={q:.3f}{sig_marker}\nd={d:.2f}", 
+                            xy=(0.5, ymax + STATS_ANNOTATION_OFFSET * yrange),
+                            ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                            fontweight="bold" if sig else "normal"
+                        )
                     
                     ax.set_xticks([0, 1])
                     ax.set_xticklabels([label1, label2], fontsize=9)
-                    ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "gray"))
+                    ax.set_title(band.capitalize(), fontweight="bold", 
+                               color=band_colors.get(band, "gray"))
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
                 
                 n_tests = len(qvalues)
-                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                roi_display = (roi_name.replace("_", " ").title() 
+                              if roi_name != "all" else "All Channels")
                 
                 stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
                 title = (f"ITPC: {label1} vs {label2} (Column Comparison)\n"
-                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+                         f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
                 fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
                 
                 plt.tight_layout()
@@ -591,7 +761,8 @@ def plot_itpc_by_condition(
                          bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
                 plt.close(fig)
             
-            log_if_present(logger, "info", f"Saved ITPC column comparison plots for {len(roi_names)} ROIs")
+            log_if_present(logger, "info", 
+                          f"Saved ITPC column comparison plots for {len(roi_names)} ROIs")
 
 
 
@@ -636,28 +807,23 @@ def plot_pac_comodulograms(
 
     required_cols = {"roi", "phase_freq", "amp_freq", "pac"}
     if not required_cols.issubset(set(pac_df.columns)):
-        log_if_present(logger, "warning", f"PAC dataframe missing required columns {required_cols}; skipping")
+        log_if_present(logger, "warning", 
+                      f"PAC dataframe missing required columns {required_cols}; skipping")
         return
 
     from ...utils.config.loader import get_config_value, ensure_config
     config = ensure_config(config)
     plot_cfg, pac_plot_cfg = _get_pac_plot_cfg(config)
     cmap = pac_plot_cfg.get("cmap", "magma")
-    alpha_sig = pac_plot_cfg.get("alpha_sig", get_config_value(config, "statistics.sig_alpha", 0.05))
+    alpha_sig = pac_plot_cfg.get("alpha_sig", 
+                                 get_config_value(config, "statistics.sig_alpha", DEFAULT_ALPHA_SIG))
     
     all_pac_values = pac_df["pac"].dropna().values
     if len(all_pac_values) > 0:
-        vmin = np.percentile(all_pac_values, 5)
-        vmax = np.percentile(all_pac_values, 95)
-        if np.isclose(vmin, vmax):
-            vmin = np.min(all_pac_values)
-            vmax = np.max(all_pac_values)
-        if vmax - vmin < 0.01:
-            center = (vmin + vmax) / 2
-            vmin = max(0, center - 0.005)
-            vmax = center + 0.005
+        vmin, vmax = _compute_color_limits(all_pac_values, PAC_DEFAULT_MIN, PAC_DEFAULT_MAX)
+        vmin = max(0, vmin)
     else:
-        vmin, vmax = 0.0, 0.5
+        vmin, vmax = PAC_DEFAULT_MIN, PAC_DEFAULT_MAX
 
     ensure_dir(save_dir)
     
@@ -710,7 +876,8 @@ def plot_pac_comodulograms(
         )
         
         # Truncate long ROI names
-        roi_short = roi[:20] + "..." if len(roi) > 20 else roi
+        roi_short = (roi[:ROI_NAME_MAX_LENGTH] + "..." 
+                    if len(roi) > ROI_NAME_MAX_LENGTH else roi)
         ax.set_title(roi_short, fontsize=plot_cfg.font.title, fontweight='bold')
         
         if row == n_rows - 1:
@@ -797,10 +964,13 @@ def plot_pac_time_ribbons(
         grid = df_sub.pivot(index="amp_freq", columns="time", values="pac").reindex(index=amp_freqs, columns=times)
 
         fig, ax = plt.subplots(figsize=plot_cfg.get_figure_size("wide", plot_type="pac"))
-        vmin = np.nanpercentile(grid.to_numpy().flatten(), 5) if np.any(np.isfinite(grid)) else 0.0
-        vmax = np.nanpercentile(grid.to_numpy().flatten(), 95) if np.any(np.isfinite(grid)) else 1.0
-        if np.isclose(vmin, vmax):
-            vmax = vmin + 1e-3
+        grid_values = grid.to_numpy().flatten()
+        if np.any(np.isfinite(grid_values)):
+            vmin, vmax = _compute_color_limits(grid_values, 0.0, 1.0)
+            if np.isclose(vmin, vmax):
+                vmax = vmin + 1e-3
+        else:
+            vmin, vmax = 0.0, 1.0
         c = ax.pcolormesh(times, amp_freqs, grid.to_numpy(), cmap=cmap, shading="auto", vmin=vmin, vmax=vmax)
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Amplitude frequency (Hz)")
@@ -826,6 +996,92 @@ def plot_pac_time_ribbons(
         log_if_present(logger, "info", f"Saved PAC time ribbon for ROI {roi}, phase {phase_f:.1f}")
 
 
+
+
+def _get_pac_columns_for_roi(pac_df: pd.DataFrame, segment: str, pair: str, 
+                             roi_name: str, rois: Dict, all_channels: List[str]) -> List[str]:
+    """Get PAC columns filtered by segment, pair, and ROI.
+    
+    Args:
+        pac_df: DataFrame with PAC columns
+        segment: Segment name
+        pair: Phase-amplitude pair name
+        roi_name: ROI name
+        rois: ROI definitions dictionary
+        all_channels: List of all available channels
+        
+    Returns:
+        List of matching column names
+    """
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.plotting.features.roi import get_roi_channels
+    
+    cols = []
+    roi_channels = (all_channels if roi_name == "all" 
+                   else get_roi_channels(rois.get(roi_name, []), all_channels))
+    roi_set = set(roi_channels) if roi_channels else set(all_channels)
+    
+    for col in pac_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "pac":
+            continue
+        if str(parsed.get("segment") or "") != segment:
+            continue
+        if str(parsed.get("band") or "") != pair:
+            continue
+        
+        scope = parsed.get("scope") or ""
+        if scope in ("global", "roi"):
+            cols.append(col)
+        elif scope == "ch":
+            ch_id = str(parsed.get("identifier") or "")
+            if ch_id in roi_set:
+                cols.append(col)
+    
+    return cols
+
+
+def _extract_pac_pairs_from_dataframe(pac_df: pd.DataFrame, config: Any) -> List[str]:
+    """Extract available PAC pairs from DataFrame columns.
+    
+    Args:
+        pac_df: DataFrame with PAC columns
+        config: Configuration object
+        
+    Returns:
+        Sorted list of unique pair names
+    """
+    from eeg_pipeline.domain.features.naming import NamingSchema
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    all_pairs = set()
+    for col in pac_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if parsed.get("valid") and parsed.get("group") == "pac":
+            band = parsed.get("band")
+            if band:
+                all_pairs.add(str(band))
+    
+    cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
+    if cfg_pairs is None:
+        cfg_pairs = get_config_value(config, "feature_engineering.pac.pairs", None)
+    
+    ordered_pairs = []
+    for entry in cfg_pairs or []:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            ordered_pairs.append(f"{entry[0]}_{entry[1]}")
+        elif isinstance(entry, str):
+            ordered_pairs.append(entry)
+    
+    if ordered_pairs:
+        pairs = ([p for p in ordered_pairs if p in all_pairs] + 
+                [p for p in sorted(all_pairs) if p not in ordered_pairs])
+    else:
+        pairs = sorted(all_pairs)
+    
+    return pairs
 
 
 def plot_pac_by_condition(
@@ -858,20 +1114,12 @@ def plot_pac_by_condition(
     from eeg_pipeline.domain.features.naming import NamingSchema
     from eeg_pipeline.utils.config.loader import get_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.plotting.features.utils import (
-        plot_paired_comparison,
-        apply_fdr_correction,
-        get_named_segments,
-        get_named_bands,
-        collect_named_series,
-    )
-    from eeg_pipeline.plotting.features.roi import get_roi_definitions, get_roi_channels
-    from scipy import stats
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison, get_named_segments
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions
 
     compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
     compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
     
-    # Get segments from config or auto-detect from data
     segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
     if not segments or len(segments) < 2:
         detected = get_named_segments(pac_trials_df, group="pac")
@@ -880,102 +1128,39 @@ def plot_pac_by_condition(
             if logger:
                 logger.info(f"Auto-detected segments for PAC comparison: {segments}")
     
-    # Get available pairs from data
-    all_pairs = set()
-    for col in pac_trials_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "pac":
-            band = parsed.get("band")
-            if band:
-                all_pairs.add(str(band))
-    
-    # Order pairs by config if specified
-    cfg_pairs = get_config_value(config, "plotting.plots.features.pac_pairs", None)
-    if cfg_pairs is None:
-        cfg_pairs = get_config_value(config, "feature_engineering.pac.pairs", None)
-    ordered_pairs = []
-    for entry in cfg_pairs or []:
-        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-            ordered_pairs.append(f"{entry[0]}_{entry[1]}")
-        elif isinstance(entry, str):
-            ordered_pairs.append(entry)
-    if ordered_pairs:
-        pairs = [p for p in ordered_pairs if p in all_pairs] + [p for p in sorted(all_pairs) if p not in ordered_pairs]
-    else:
-        pairs = sorted(all_pairs)
-    
+    pairs = _extract_pac_pairs_from_dataframe(pac_trials_df, config)
     if not pairs:
         return
     
-    # Get ROI definitions
     rois = get_roi_definitions(config)
-    all_channels = set()
+    all_channels = []
     for col in pac_trials_df.columns:
         parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "pac" and parsed.get("scope") == "ch":
+        if (parsed.get("valid") and parsed.get("group") == "pac" 
+            and parsed.get("scope") == "ch"):
             ch = parsed.get("identifier")
             if ch:
-                all_channels.add(str(ch))
-    all_channels = list(all_channels)
+                all_channels.append(str(ch))
     
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    if comp_rois:
-        roi_names = []
-        for r in comp_rois:
-            if r.lower() == "all":
-                if "all" not in roi_names:
-                    roi_names.append("all")
-            elif r in rois:
-                roi_names.append(r)
-    else:
-        roi_names = ["all"]
-        if rois:
-            roi_names.extend(list(rois.keys()))
+    roi_names = _get_roi_names_for_comparison(config, rois)
     
     if logger:
-        logger.info(f"PAC comparison: segments={segments}, ROIs={roi_names}, pairs={pairs}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+        logger.info(
+            f"PAC comparison: segments={segments}, ROIs={roi_names}, pairs={pairs}, "
+            f"compare_windows={compare_wins}, compare_columns={compare_cols}"
+        )
     
     plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
     
-    stat_preference = ["val", "mean", "avg", "value"]
-    
-    # Helper to get PAC columns for a segment/pair/ROI
-    def get_pac_columns(segment, pair, roi_name):
-        """Get PAC columns filtered by segment, pair, and ROI."""
-        cols = []
-        roi_channels = all_channels if roi_name == "all" else get_roi_channels(rois.get(roi_name, []), all_channels)
-        roi_set = set(roi_channels) if roi_channels else set(all_channels)
-        
-        for col in pac_trials_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not parsed.get("valid"):
-                continue
-            if parsed.get("group") != "pac":
-                continue
-            if str(parsed.get("segment") or "") != segment:
-                continue
-            if str(parsed.get("band") or "") != pair:
-                continue
-            # Accept global/roi scope or ch scope in ROI
-            scope = parsed.get("scope") or ""
-            if scope in ("global", "roi"):
-                cols.append(col)
-            elif scope == "ch":
-                ch_id = str(parsed.get("identifier") or "")
-                if ch_id in roi_set:
-                    cols.append(col)
-        return cols
-    
-    # Window comparison (paired) - use unified helper
     if compare_wins and len(segments) >= 2:
         seg1, seg2 = segments[0], segments[1]
         
         for roi_name in roi_names:
-            data_by_band = {}  # Reusing dict name for compat with helper
+            data_by_band = {}
             for pair in pairs:
-                cols1 = get_pac_columns(seg1, pair, roi_name)
-                cols2 = get_pac_columns(seg2, pair, roi_name)
+                cols1 = _get_pac_columns_for_roi(pac_trials_df, seg1, pair, roi_name, rois, all_channels)
+                cols2 = _get_pac_columns_for_roi(pac_trials_df, seg2, pair, roi_name, rois, all_channels)
                 
                 if not cols1 or not cols2:
                     continue
@@ -1007,9 +1192,9 @@ def plot_pac_by_condition(
                     stats_dir=stats_dir,
                 )
         
-        log_if_present(logger, "info", f"Saved PAC paired comparison plots for {len(roi_names)} ROIs")
+        log_if_present(logger, "info", 
+                      f"Saved PAC paired comparison plots for {len(roi_names)} ROIs")
 
-    # Column comparison (unpaired)
     if compare_cols:
         comp_mask_info = extract_comparison_mask(events_df, config)
         if not comp_mask_info:
@@ -1026,10 +1211,9 @@ def plot_pac_by_condition(
             n_trials = len(pac_trials_df)
             
             for roi_name in roi_names:
-                # Collect cell data first
                 cell_data = {}
                 for col_idx, pair in enumerate(pairs):
-                    cols = get_pac_columns(seg_name, pair, roi_name)
+                    cols = _get_pac_columns_for_roi(pac_trials_df, seg_name, pair, roi_name, rois, all_channels)
                     
                     if not cols:
                         cell_data[col_idx] = None
@@ -1041,7 +1225,6 @@ def plot_pac_by_condition(
                     
                     cell_data[col_idx] = {"v1": v1, "v2": v2}
                 
-                # Compute or load column comparison stats
                 qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
                     stats_dir=stats_dir,
                     feature_type="pac",
@@ -1065,41 +1248,49 @@ def plot_pac_by_condition(
                     
                     v1, v2 = data["v1"], data["v2"]
                     
-                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
+                    bp = ax.boxplot([v1, v2], positions=[0, 1], widths=BOXPLOT_WIDTH, patch_artist=True)
                     bp["boxes"][0].set_facecolor(segment_colors["v1"])
                     bp["boxes"][0].set_alpha(0.6)
                     bp["boxes"][1].set_facecolor(segment_colors["v2"])
                     bp["boxes"][1].set_alpha(0.6)
                     
-                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    jitter_range = SCATTER_JITTER_RANGE
+                    ax.scatter(np.random.uniform(-jitter_range, jitter_range, len(v1)), v1, 
+                              c=segment_colors["v1"], alpha=0.3, s=6)
+                    ax.scatter(1 + np.random.uniform(-jitter_range, jitter_range, len(v2)), v2, 
+                              c=segment_colors["v2"], alpha=0.3, s=6)
                     
                     all_vals = np.concatenate([v1, v2])
                     ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
                     yrange = ymax - ymin if ymax > ymin else 0.1
-                    ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
+                    ax.set_ylim(ymin - Y_RANGE_PADDING_LOW * yrange, 
+                               ymax + Y_RANGE_PADDING_HIGH * yrange)
                     
                     if col_idx in qvalues:
                         _, q, d, sig = qvalues[col_idx]
                         sig_marker = "†" if sig else ""
                         sig_color = "#d62728" if sig else "#333333"
-                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
-                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                                   fontweight="bold" if sig else "normal")
+                        ax.annotate(
+                            f"q={q:.3f}{sig_marker}\nd={d:.2f}", 
+                            xy=(0.5, ymax + STATS_ANNOTATION_OFFSET * yrange),
+                            ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
+                            fontweight="bold" if sig else "normal"
+                        )
                     
                     ax.set_xticks([0, 1])
                     ax.set_xticklabels([label1, label2], fontsize=9)
-                    ax.set_title(pair.replace("_", "→"), fontweight="bold", color="#8E44AD")  # Purple for PAC
+                    ax.set_title(pair.replace("_", "→"), fontweight="bold", color="#8E44AD")
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
                 
                 n_tests = len(qvalues)
-                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                roi_display = (roi_name.replace("_", " ").title() 
+                              if roi_name != "all" else "All Channels")
                 
                 stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
                 title = (f"PAC: {label1} vs {label2} (Column Comparison)\n"
-                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
+                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+                         f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
                 fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
                 
                 plt.tight_layout()
@@ -1112,7 +1303,8 @@ def plot_pac_by_condition(
                          bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
                 plt.close(fig)
             
-            log_if_present(logger, "info", f"Saved PAC column comparison plots for {len(roi_names)} ROIs")
+            log_if_present(logger, "info", 
+                          f"Saved PAC column comparison plots for {len(roi_names)} ROIs")
 
 
 
@@ -1131,6 +1323,7 @@ def convert_pac_wide_to_long(
     records = []
     
     from eeg_pipeline.utils.config.loader import get_config_value
+    from eeg_pipeline.domain.features.naming import NamingSchema
 
     band_defs = get_config_value(config, "time_frequency_analysis.bands", {}) or {}
     center_freq_map = {}

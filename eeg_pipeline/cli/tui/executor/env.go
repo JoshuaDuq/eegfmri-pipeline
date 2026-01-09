@@ -11,22 +11,16 @@ import (
 func GetPythonCommand(repoRoot string) string {
 	// 1. Check for .venv311 (user's specific venv)
 	venvPath := filepath.Join(repoRoot, ".venv311")
-	if isDir(venvPath) {
-		pyPath := getVenvPython(venvPath)
-		if pyPath != "" {
-			return pyPath
-		}
+	if pythonPath := getVenvPython(venvPath); pythonPath != "" {
+		return pythonPath
 	}
 
-	// 2. Check for standard .venv or venv
-	venvs := []string{".venv", "venv"}
-	for _, v := range venvs {
-		venvPath := filepath.Join(repoRoot, v)
-		if isDir(venvPath) {
-			pyPath := getVenvPython(venvPath)
-			if pyPath != "" {
-				return pyPath
-			}
+	// 2. Check for standard .venv or venv in the repo root
+	venvDirNames := []string{".venv", "venv"}
+	for _, venvDirName := range venvDirNames {
+		venvPath := filepath.Join(repoRoot, venvDirName)
+		if pythonPath := getVenvPython(venvPath); pythonPath != "" {
+			return pythonPath
 		}
 	}
 
@@ -46,27 +40,19 @@ func isDir(path string) bool {
 }
 
 func getVenvPython(venvPath string) string {
-	binDir := "bin"
-	if runtime.GOOS == "windows" {
-		binDir = "Scripts"
+	if !isDir(venvPath) {
+		return ""
 	}
 
-	pyPath := filepath.Join(venvPath, binDir, "python")
-	if runtime.GOOS == "windows" {
-		pyPath += ".exe"
-	}
+	binDir := venvBinDir()
+	pythonExecutables := []string{"python", "python3"}
 
-	if fileExists(pyPath) {
-		return pyPath
-	}
-
-	// Try python3 if python doesn't exist
-	py3Path := filepath.Join(venvPath, binDir, "python3")
-	if runtime.GOOS == "windows" {
-		py3Path += ".exe"
-	}
-	if fileExists(py3Path) {
-		return py3Path
+	for _, executable := range pythonExecutables {
+		executablePath := filepath.Join(venvPath, binDir, executable)
+		executablePath = appendExeOnWindows(executablePath)
+		if fileExists(executablePath) {
+			return executablePath
+		}
 	}
 
 	return ""
@@ -75,4 +61,18 @@ func getVenvPython(venvPath string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func venvBinDir() string {
+	if runtime.GOOS == "windows" {
+		return "Scripts"
+	}
+	return "bin"
+}
+
+func appendExeOnWindows(path string) string {
+	if runtime.GOOS == "windows" {
+		return path + ".exe"
+	}
+	return path
 }

@@ -25,7 +25,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -71,13 +71,16 @@ class SHAPResult:
     def __post_init__(self):
         """Compute importance statistics."""
         if self.shap_values is not None:
-            vals = self.shap_values
-            if isinstance(vals, list):
+            shap_values_array = self.shap_values
+            if isinstance(shap_values_array, list):
                 # Multi-output: average across outputs
-                vals = np.mean(np.abs(np.stack(vals)), axis=0)
+                shap_values_array = np.mean(
+                    np.abs(np.stack(shap_values_array)),
+                    axis=0,
+                )
             
-            self.mean_abs_shap = np.mean(np.abs(vals), axis=0)
-            self.std_shap = np.std(vals, axis=0)
+            self.mean_abs_shap = np.mean(np.abs(shap_values_array), axis=0)
+            self.std_shap = np.std(shap_values_array, axis=0)
             
             self.importance_df = pd.DataFrame({
                 "feature": self.feature_names,

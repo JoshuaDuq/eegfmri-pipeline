@@ -22,6 +22,62 @@ from eeg_pipeline.plotting.features.utils import get_band_names
 from eeg_pipeline.utils.config.loader import get_config_value
 
 
+# Constants
+_VIOLIN_WIDTH = 0.7
+_VIOLIN_ALPHA = 0.6
+_VIOLIN_COLOR = "#7C3AED"
+_HISTOGRAM_BINS = 25
+_HISTOGRAM_ALPHA = 0.7
+_HISTOGRAM_EDGECOLOR = "white"
+_MEAN_LINEWIDTH = 1
+_MEAN_LINESTYLE = "--"
+_MEAN_COLOR = "black"
+
+_MIN_FIG_WIDTH = 8.0
+_MIN_FIG_HEIGHT = 4.5
+_BAND_WIDTH_FACTOR = 1.2
+_ROW_HEIGHT_FACTOR = 3.0
+
+_BOX_WIDTH = 0.4
+_BOX_ALPHA = 0.6
+_SCATTER_JITTER_RANGE = 0.08
+_SCATTER_ALPHA = 0.3
+_SCATTER_SIZE = 6
+_Y_PADDING_BOTTOM = 0.1
+_Y_PADDING_TOP = 0.3
+_Y_ANNOTATION_OFFSET = 0.05
+
+_SEGMENT_COLOR_V1 = "#5a7d9a"
+_SEGMENT_COLOR_V2 = "#c44e52"
+_SIGNIFICANT_COLOR = "#d62728"
+_NONSIGNIFICANT_COLOR = "#333333"
+_GRAY_COLOR = "gray"
+
+_DEFAULT_METRICS = [
+    "peak_freq",
+    "center_freq",
+    "bandwidth",
+    "entropy",
+    "peak_power",
+    "logratio_mean",
+    "logratio_std",
+    "slope",
+]
+
+_COMPARISON_METRICS_DEFAULT = [
+    "peak_freq",
+    "peak_power",
+    "center_freq",
+    "bandwidth",
+    "entropy",
+]
+
+_MIN_SEGMENTS_FOR_COMPARISON = 2
+_MAX_METRICS_FALLBACK = 4
+_MAX_METRICS_COMPARISON_FALLBACK = 3
+_SUBTITLE_Y_OFFSET = 1.02
+
+
 @dataclass
 class SpectralColumn:
     name: str
@@ -31,7 +87,15 @@ class SpectralColumn:
     stat: str
 
 
+def _create_empty_plot(message: str) -> plt.Figure:
+    """Create an empty plot with a centered message."""
+    fig, ax = plt.subplots()
+    ax.text(0.5, 0.5, message, ha="center", va="center")
+    return fig
+
+
 def _parse_spectral_column(col: str) -> Optional[SpectralColumn]:
+    """Parse a spectral column name into structured components."""
     parsed = NamingSchema.parse(str(col))
     if parsed.get("valid") and parsed.get("group") == "spectral":
         return SpectralColumn(
@@ -47,21 +111,25 @@ def _parse_spectral_column(col: str) -> Optional[SpectralColumn]:
         return None
 
     parts = name.split("_")
-    if len(parts) < 5:
+    min_parts_required = 5
+    if len(parts) < min_parts_required:
         return None
 
     segment = parts[1]
     band = parts[2]
     scope = parts[3]
-    if scope not in {"ch", "roi", "global"}:
+    valid_scopes = {"ch", "roi", "global"}
+    if scope not in valid_scopes:
         return None
 
     if scope == "global":
         stat = "_".join(parts[4:])
     else:
-        if len(parts) < 6:
+        min_parts_for_scope = 6
+        if len(parts) < min_parts_for_scope:
             return None
         stat = "_".join(parts[5:])
+    
     return SpectralColumn(
         name=name,
         segment=segment,
@@ -108,6 +176,46 @@ def _select_columns(
     return [], None, None
 
 
+def _get_metric_values(features_df: pd.DataFrame, columns: List[str]) -> np.ndarray:
+    """Extract numeric values from feature columns, averaging if multiple."""
+    if len(columns) == 1:
+        series = pd.to_numeric(features_df[columns[0]], errors="coerce")
+    else:
+        series = features_df[columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+    return series.dropna().values
+
+
+def _format_metric_label(metric: str) -> str:
+    """Format metric name for display."""
+    return metric.replace("_", " ").title()
+
+
+def _plot_violin_for_metric(
+    ax: plt.Axes,
+    data_list: List[np.ndarray],
+    positions: List[int],
+    band_labels: List[str],
+) -> None:
+    """Plot violin plot for a single metric."""
+    if not data_list:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        ax.set_xticks([])
+        return
+
+    parts = ax.violinplot(
+        data_list,
+        positions=positions,
+        showmedians=True,
+        widths=_VIOLIN_WIDTH,
+    )
+    for pc in parts.get("bodies", []):
+        pc.set_facecolor(_VIOLIN_COLOR)
+        pc.set_alpha(_VIOLIN_ALPHA)
+    
+    ax.set_xticks(range(len(band_labels)))
+    ax.set_xticklabels([b.capitalize() for b in band_labels])
+
+
 def plot_spectral_summary(
     features_df: pd.DataFrame,
     save_path: Path,
@@ -119,91 +227,77 @@ def plot_spectral_summary(
     """Plot spectral feature distributions by band."""
     plot_cfg = get_plot_config(config)
     entries = _collect_spectral_columns(features_df)
+    
     if not entries:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No spectral data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No spectral data")
 
     segments = sorted({e.segment for e in entries if e.segment})
     segment = _select_segment(segments, preferred="active")
+    
     if segment is None:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No spectral data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No spectral data")
 
     bands = sorted({e.band for e in entries if e.segment == segment and e.band})
     if not bands:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No spectral data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No spectral data")
 
     if metrics is None:
         metrics = get_config_value(
             config,
             "plotting.plots.features.spectral.metrics",
-            [
-                "peak_freq",
-                "center_freq",
-                "bandwidth",
-                "entropy",
-                "peak_power",
-                "logratio_mean",
-                "logratio_std",
-                "slope",
-            ],
+            _DEFAULT_METRICS,
         )
+    
     metrics = list(metrics or [])
-    metrics = [m for m in metrics if any(e.stat == m for e in entries)]
-    if not metrics:
-        metrics = sorted({e.stat for e in entries if e.stat})[:4]
+    available_metrics = [m for m in metrics if any(e.stat == m for e in entries)]
+    
+    if not available_metrics:
+        all_stats = sorted({e.stat for e in entries if e.stat})
+        available_metrics = all_stats[:_MAX_METRICS_FALLBACK]
 
     band_order = get_band_names(config)
-    bands = [b for b in band_order if b in bands] + [b for b in bands if b not in band_order]
+    ordered_bands = [b for b in band_order if b in bands]
+    remaining_bands = [b for b in bands if b not in band_order]
+    bands = ordered_bands + remaining_bands
 
-    n_rows = len(metrics)
+    n_rows = len(available_metrics)
     if figsize is None:
-        figsize = (max(8.0, len(bands) * 1.2), max(4.5, n_rows * 3.0))
+        width = max(_MIN_FIG_WIDTH, len(bands) * _BAND_WIDTH_FACTOR)
+        height = max(_MIN_FIG_HEIGHT, n_rows * _ROW_HEIGHT_FACTOR)
+        figsize = (width, height)
 
     fig, axes = plt.subplots(n_rows, 1, figsize=figsize, squeeze=False)
     axes = axes.flatten()
 
-    for ax, metric in zip(axes, metrics):
+    scope_preference = ["global", "roi", "ch"]
+    
+    for ax, metric in zip(axes, available_metrics):
         data_list = []
         positions = []
+        
         for i, band in enumerate(bands):
             cols, _, _ = _select_columns(
                 entries,
                 segment=segment,
                 band=band,
                 stat_preference=[metric],
-                scope_preference=["global", "roi", "ch"],
+                scope_preference=scope_preference,
             )
             if not cols:
                 continue
-            series = (
-                pd.to_numeric(features_df[cols[0]], errors="coerce")
-                if len(cols) == 1
-                else features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-            )
-            vals = series.dropna().values
-            if vals.size == 0:
+            
+            values = _get_metric_values(features_df, cols)
+            if values.size == 0:
                 continue
-            data_list.append(vals)
+            
+            data_list.append(values)
             positions.append(i)
 
-        if data_list:
-            parts = ax.violinplot(data_list, positions=positions, showmedians=True, widths=0.7)
-            for pc in parts.get("bodies", []):
-                pc.set_facecolor("#7C3AED")
-                pc.set_alpha(0.6)
-            ax.set_xticks(range(len(bands)))
-            ax.set_xticklabels([b.capitalize() for b in bands])
-        else:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-            ax.set_xticks([])
-
-        ax.set_ylabel(metric.replace("_", " ").title())
-        ax.set_title(metric.replace("_", " ").title(), fontweight="bold")
+        _plot_violin_for_metric(ax, data_list, positions, bands)
+        
+        metric_label = _format_metric_label(metric)
+        ax.set_ylabel(metric_label)
+        ax.set_title(metric_label, fontweight="bold")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
@@ -211,7 +305,7 @@ def plot_spectral_summary(
         f"Spectral Features by Band ({segment})",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
-        y=1.02,
+        y=_SUBTITLE_Y_OFFSET,
     )
     plt.tight_layout()
     save_fig(
@@ -236,37 +330,45 @@ def plot_spectral_edge_frequency(
     """Plot broadband spectral edge frequency distribution."""
     plot_cfg = get_plot_config(config)
     entries = _collect_spectral_columns(features_df)
+    
     if not entries:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No spectral data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No spectral data")
 
-    edge_cols = [e.name for e in entries if e.band == "broadband" and "edge" in e.stat]
+    edge_cols = [
+        e.name for e in entries
+        if e.band == "broadband" and "edge" in e.stat
+    ]
+    
     if not edge_cols:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No edge frequency data", ha="center", va="center")
-        return fig
+        return _create_empty_plot("No edge frequency data")
 
-    series = (
-        pd.to_numeric(features_df[edge_cols[0]], errors="coerce")
-        if len(edge_cols) == 1
-        else features_df[edge_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-    )
-    vals = series.dropna().values
-    if vals.size == 0:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No edge frequency data", ha="center", va="center")
-        return fig
+    values = _get_metric_values(features_df, edge_cols)
+    
+    if values.size == 0:
+        return _create_empty_plot("No edge frequency data")
 
     if figsize is None:
-        figsize = (8.0, 4.5)
+        figsize = (_MIN_FIG_WIDTH, _MIN_FIG_HEIGHT)
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.hist(vals, bins=25, color="#7C3AED", alpha=0.7, edgecolor="white")
+    ax.hist(
+        values,
+        bins=_HISTOGRAM_BINS,
+        color=_VIOLIN_COLOR,
+        alpha=_HISTOGRAM_ALPHA,
+        edgecolor=_HISTOGRAM_EDGECOLOR,
+    )
     ax.set_xlabel("Edge Frequency (Hz)")
     ax.set_ylabel("Count")
     ax.set_title("Spectral Edge Frequency", fontweight="bold")
-    ax.axvline(np.nanmean(vals), color="black", linestyle="--", linewidth=1)
+    
+    mean_value = np.nanmean(values)
+    ax.axvline(
+        mean_value,
+        color=_MEAN_COLOR,
+        linestyle=_MEAN_LINESTYLE,
+        linewidth=_MEAN_LINEWIDTH,
+    )
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
@@ -274,7 +376,7 @@ def plot_spectral_edge_frequency(
         "Broadband Spectral Edge Frequency",
         fontsize=plot_cfg.font.figure_title,
         fontweight="bold",
-        y=1.02,
+        y=_SUBTITLE_Y_OFFSET,
     )
     plt.tight_layout()
     save_fig(
@@ -289,9 +391,397 @@ def plot_spectral_edge_frequency(
     return fig
 
 
-###################################################################
-# Spectral Condition Comparison
-###################################################################
+def _get_roi_id_from_column_name(column_name: str, metric: str) -> Optional[str]:
+    """Extract ROI identifier from spectral column name."""
+    name_parts = column_name.split("_")
+    try:
+        roi_idx = name_parts.index("roi")
+        stat_parts = metric.split("_")
+        stat_start_idx = len(name_parts) - len(stat_parts)
+        roi_id = "_".join(name_parts[roi_idx + 1:stat_start_idx])
+        return roi_id
+    except (ValueError, IndexError):
+        return None
+
+
+def _normalize_roi_name(name: str) -> str:
+    """Normalize ROI name for comparison by removing separators."""
+    return name.lower().replace("_", "").replace("-", "")
+
+
+def _get_spectral_columns_for_roi(
+    entries: List[SpectralColumn],
+    segment: str,
+    band: str,
+    metric: str,
+    roi_name: str,
+) -> List[str]:
+    """Get spectral column names filtered by segment, band, metric, and ROI."""
+    columns = []
+    
+    for entry in entries:
+        if entry.segment != segment or entry.band != band or entry.stat != metric:
+            continue
+        
+        if roi_name == "all":
+            if entry.scope == "global":
+                columns.append(entry.name)
+        elif entry.scope == "roi":
+            roi_id = _get_roi_id_from_column_name(entry.name, metric)
+            if roi_id and _normalize_roi_name(roi_id) == _normalize_roi_name(roi_name):
+                columns.append(entry.name)
+    
+    if roi_name == "all" and not columns:
+        for entry in entries:
+            if (entry.segment == segment and entry.band == band and
+                entry.stat == metric and entry.scope == "roi"):
+                columns.append(entry.name)
+    
+    return columns
+
+
+def _get_comparison_configuration(
+    entries: List[SpectralColumn],
+    config: Any,
+) -> Tuple[List[str], List[str], List[str]]:
+    """Extract segments, bands, and metrics from config or data."""
+    segment_set = sorted({e.segment for e in entries if e.segment})
+    
+    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
+    if not segments or len(segments) < _MIN_SEGMENTS_FOR_COMPARISON:
+        if len(segment_set) >= _MIN_SEGMENTS_FOR_COMPARISON:
+            segments = segment_set[:_MIN_SEGMENTS_FOR_COMPARISON]
+    
+    bands = get_band_names(config)
+    if not bands:
+        bands = sorted({
+            e.band for e in entries
+            if e.band and e.band != "broadband"
+        })
+    
+    metrics = get_config_value(
+        config,
+        "plotting.plots.features.spectral.comparison_metrics",
+        None,
+    )
+    if not metrics:
+        metrics = get_config_value(
+            config,
+            "plotting.plots.features.spectral.metrics",
+            _COMPARISON_METRICS_DEFAULT,
+        )
+    
+    metrics = [m for m in metrics if any(e.stat == m for e in entries)]
+    if not metrics:
+        all_stats = sorted({e.stat for e in entries if e.stat})
+        metrics = all_stats[:_MAX_METRICS_COMPARISON_FALLBACK]
+    
+    return segments, bands, metrics
+
+
+def _get_roi_names(config: Any) -> List[str]:
+    """Get ROI names from config, including 'all' option."""
+    from eeg_pipeline.plotting.features.roi import get_roi_definitions
+    
+    rois = get_roi_definitions(config)
+    config_roi_names = list(rois.keys()) if rois else []
+    
+    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
+    if not comp_rois:
+        return ["all"] + config_roi_names
+    
+    roi_names = []
+    for r in comp_rois:
+        if r.lower() == "all":
+            if "all" not in roi_names:
+                roi_names.append("all")
+        else:
+            normalized_r = _normalize_roi_name(r)
+            for config_roi in config_roi_names:
+                if _normalize_roi_name(config_roi) == normalized_r:
+                    roi_names.append(config_roi)
+                    break
+    
+    return roi_names
+
+
+def _create_roi_suffix(roi_name: str) -> str:
+    """Create filename suffix for ROI."""
+    if roi_name.lower() == "all":
+        return ""
+    roi_safe = roi_name.replace(" ", "_").lower()
+    return f"_roi-{roi_safe}"
+
+
+def _plot_window_comparison(
+    features_df: pd.DataFrame,
+    entries: List[SpectralColumn],
+    segments: List[str],
+    bands: List[str],
+    metric: str,
+    metric_label: str,
+    roi_names: List[str],
+    subject: str,
+    save_dir: Path,
+    config: Any,
+    logger: Any,
+    stats_dir: Optional[Path],
+) -> None:
+    """Create paired window comparison plots."""
+    from eeg_pipeline.plotting.features.utils import plot_paired_comparison
+    from eeg_pipeline.plotting.io.figures import log_if_present
+    
+    seg1, seg2 = segments[0], segments[1]
+    
+    for roi_name in roi_names:
+        data_by_band = {}
+        
+        for band in bands:
+            cols1 = _get_spectral_columns_for_roi(entries, seg1, band, metric, roi_name)
+            cols2 = _get_spectral_columns_for_roi(entries, seg2, band, metric, roi_name)
+            
+            if not cols1 or not cols2:
+                continue
+            
+            series1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            series2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            
+            valid_mask = series1.notna() & series2.notna()
+            values1 = series1[valid_mask].values
+            values2 = series2[valid_mask].values
+            
+            if len(values1) > 0:
+                data_by_band[band] = (values1, values2)
+        
+        if data_by_band:
+            suffix = _create_roi_suffix(roi_name)
+            save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_window"
+            
+            plot_paired_comparison(
+                data_by_band=data_by_band,
+                subject=subject,
+                save_path=save_path,
+                feature_label=f"Spectral ({metric_label})",
+                config=config,
+                logger=logger,
+                label1=seg1.capitalize(),
+                label2=seg2.capitalize(),
+                roi_name=roi_name,
+                stats_dir=stats_dir,
+            )
+    
+    if logger:
+        log_if_present(
+            logger,
+            "info",
+            f"Saved spectral {metric_label} paired comparison plots for {len(roi_names)} ROIs",
+        )
+
+
+def _plot_column_comparison_single_band(
+    ax: plt.Axes,
+    values1: np.ndarray,
+    values2: np.ndarray,
+    band: str,
+    band_color: str,
+    label1: str,
+    label2: str,
+    qvalue_info: Optional[Tuple[float, float, float, bool]],
+    plot_cfg: Any,
+) -> None:
+    """Plot single band column comparison with boxplot and statistics."""
+    if len(values1) == 0 or len(values2) == 0:
+        ax.text(
+            0.5, 0.5, "No data",
+            ha="center", va="center",
+            transform=ax.transAxes,
+            fontsize=plot_cfg.font.title,
+            color=_GRAY_COLOR,
+        )
+        ax.set_xticks([])
+        return
+    
+    box_plot = ax.boxplot(
+        [values1, values2],
+        positions=[0, 1],
+        widths=_BOX_WIDTH,
+        patch_artist=True,
+    )
+    box_plot["boxes"][0].set_facecolor(_SEGMENT_COLOR_V1)
+    box_plot["boxes"][0].set_alpha(_BOX_ALPHA)
+    box_plot["boxes"][1].set_facecolor(_SEGMENT_COLOR_V2)
+    box_plot["boxes"][1].set_alpha(_BOX_ALPHA)
+    
+    jitter1 = np.random.uniform(-_SCATTER_JITTER_RANGE, _SCATTER_JITTER_RANGE, len(values1))
+    jitter2 = np.random.uniform(-_SCATTER_JITTER_RANGE, _SCATTER_JITTER_RANGE, len(values2))
+    ax.scatter(jitter1, values1, c=_SEGMENT_COLOR_V1, alpha=_SCATTER_ALPHA, s=_SCATTER_SIZE)
+    ax.scatter(1 + jitter2, values2, c=_SEGMENT_COLOR_V2, alpha=_SCATTER_ALPHA, s=_SCATTER_SIZE)
+    
+    all_values = np.concatenate([values1, values2])
+    y_min = np.nanmin(all_values)
+    y_max = np.nanmax(all_values)
+    y_range = y_max - y_min if y_max > y_min else 0.1
+    
+    y_padding_bottom = _Y_PADDING_BOTTOM * y_range
+    y_padding_top = _Y_PADDING_TOP * y_range
+    ax.set_ylim(y_min - y_padding_bottom, y_max + y_padding_top)
+    
+    if qvalue_info:
+        _, q, d, is_significant = qvalue_info
+        sig_marker = "†" if is_significant else ""
+        sig_color = _SIGNIFICANT_COLOR if is_significant else _NONSIGNIFICANT_COLOR
+        annotation_y = y_max + _Y_ANNOTATION_OFFSET * y_range
+        ax.annotate(
+            f"q={q:.3f}{sig_marker}\nd={d:.2f}",
+            xy=(0.5, annotation_y),
+            ha="center",
+            fontsize=plot_cfg.font.medium,
+            color=sig_color,
+            fontweight="bold" if is_significant else "normal",
+        )
+    
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels([label1, label2], fontsize=9)
+    ax.set_title(band.capitalize(), fontweight="bold", color=band_color)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def _plot_column_comparison(
+    features_df: pd.DataFrame,
+    entries: List[SpectralColumn],
+    events_df: pd.DataFrame,
+    bands: List[str],
+    metric: str,
+    metric_label: str,
+    roi_names: List[str],
+    subject: str,
+    save_dir: Path,
+    config: Any,
+    logger: Any,
+    stats_dir: Optional[Path],
+) -> None:
+    """Create unpaired column comparison plots."""
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    from eeg_pipeline.plotting.features.utils import (
+        compute_or_load_column_stats,
+        get_band_color,
+    )
+    from eeg_pipeline.plotting.io.figures import log_if_present
+    
+    comp_mask_info = extract_comparison_mask(events_df, config)
+    if not comp_mask_info:
+        if logger:
+            log_if_present(logger, "debug", "Column comparison requested but config incomplete")
+        return
+    
+    mask1, mask2, label1, label2 = comp_mask_info
+    segment_name = get_config_value(
+        config,
+        "plotting.comparisons.comparison_segment",
+        "active",
+    )
+    
+    plot_cfg = get_plot_config(config)
+    band_colors = {band: get_band_color(band, config) for band in bands}
+    n_bands = len(bands)
+    n_trials = len(features_df)
+    
+    for roi_name in roi_names:
+        cell_data = {}
+        
+        for col_idx, band in enumerate(bands):
+            cols = _get_spectral_columns_for_roi(
+                entries, segment_name, band, metric, roi_name
+            )
+            
+            if not cols:
+                cell_data[col_idx] = None
+                continue
+            
+            val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            values1 = val_series[mask1].dropna().values
+            values2 = val_series[mask2].dropna().values
+            cell_data[col_idx] = {"v1": values1, "v2": values2}
+        
+        qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
+            stats_dir=stats_dir,
+            feature_type="spectral",
+            feature_keys=bands,
+            cell_data=cell_data,
+            config=config,
+            logger=logger,
+        )
+        
+        fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
+        
+        for col_idx, band in enumerate(bands):
+            ax = axes.flatten()[col_idx]
+            data = cell_data.get(col_idx)
+            
+            if data is None:
+                values1 = np.array([])
+                values2 = np.array([])
+                qvalue_info = None
+            else:
+                values1 = data.get("v1", [])
+                values2 = data.get("v2", [])
+                qvalue_info = qvalues.get(col_idx) if col_idx in qvalues else None
+            
+            _plot_column_comparison_single_band(
+                ax,
+                values1,
+                values2,
+                band,
+                band_colors.get(band, _VIOLIN_COLOR),
+                label1,
+                label2,
+                qvalue_info,
+                plot_cfg,
+            )
+        
+        n_tests = len(qvalues)
+        roi_display = (
+            roi_name.replace("_", " ").title()
+            if roi_name.lower() != "all"
+            else "All Channels"
+        )
+        
+        stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
+        title = (
+            f"Spectral ({metric_label}): {label1} vs {label2} (Column Comparison)\n"
+            f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | "
+            f"{stats_source} | FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
+        )
+        fig.suptitle(
+            title,
+            fontsize=plot_cfg.font.suptitle,
+            fontweight="bold",
+            y=_SUBTITLE_Y_OFFSET,
+        )
+        
+        plt.tight_layout()
+        
+        suffix = _create_roi_suffix(roi_name)
+        filename = f"sub-{subject}_spectral_{metric}_by_condition{suffix}_column"
+        
+        save_fig(
+            fig,
+            save_dir / filename,
+            formats=plot_cfg.formats,
+            dpi=plot_cfg.dpi,
+            bbox_inches=plot_cfg.bbox_inches,
+            pad_inches=plot_cfg.pad_inches,
+        )
+        plt.close(fig)
+    
+    if logger:
+        log_if_present(
+            logger,
+            "info",
+            f"Saved spectral {metric_label} column comparison plots for {len(roi_names)} ROIs",
+        )
+
 
 def plot_spectral_by_condition(
     features_df: pd.DataFrame,
@@ -310,285 +800,87 @@ def plot_spectral_by_condition(
     
     If stats_dir is provided, uses pre-computed statistics from the behavior pipeline.
     """
-    from scipy import stats
     from eeg_pipeline.infra.paths import ensure_dir
-    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-    from eeg_pipeline.plotting.features.utils import (
-        plot_paired_comparison,
-        apply_fdr_correction,
-        get_band_color,
-    )
-    from eeg_pipeline.plotting.features.roi import get_roi_definitions
     from eeg_pipeline.plotting.io.figures import log_if_present
     
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    compare_wins = get_config_value(config, "plotting.comparisons.compare_windows", True)
-    compare_cols = get_config_value(config, "plotting.comparisons.compare_columns", False)
+    compare_windows = get_config_value(
+        config,
+        "plotting.comparisons.compare_windows",
+        True,
+    )
+    compare_columns = get_config_value(
+        config,
+        "plotting.comparisons.compare_columns",
+        False,
+    )
     
-    # Get spectral column entries
     entries = _collect_spectral_columns(features_df)
     if not entries:
         return
     
-    # Get segments from data
-    segment_set = sorted({e.segment for e in entries if e.segment})
-    
-    # Get segments from config or auto-detect from data
-    segments = get_config_value(config, "plotting.comparisons.comparison_windows", [])
-    if not segments or len(segments) < 2:
-        if len(segment_set) >= 2:
-            segments = segment_set[:2]
-            if logger:
-                log_if_present(logger, "info", f"Auto-detected segments for spectral comparison: {segments}")
-    
-    # Get frequency bands from config or data
-    bands = get_band_names(config)
-    if not bands:
-        bands = sorted({e.band for e in entries if e.band and e.band != "broadband"})
+    segments, bands, metrics = _get_comparison_configuration(entries, config)
     
     if not bands:
         return
     
-    # Get metrics from config or data
-    metrics = get_config_value(
-        config,
-        "plotting.plots.features.spectral.comparison_metrics",
-        None,
-    )
-    if not metrics:
-        metrics = get_config_value(
-            config,
-            "plotting.plots.features.spectral.metrics",
-            ["peak_freq", "peak_power", "center_freq", "bandwidth", "entropy"],
+    if logger and len(segments) >= _MIN_SEGMENTS_FOR_COMPARISON:
+        log_if_present(
+            logger,
+            "info",
+            f"Auto-detected segments for spectral comparison: {segments}",
         )
-    metrics = [m for m in metrics if any(e.stat == m for e in entries)]
-    if not metrics:
-        metrics = sorted({e.stat for e in entries if e.stat})[:3]
     
-    metric_labels = {m: m.replace("_", " ").title() for m in metrics}
-    
-    # Get ROI definitions
-    rois = get_roi_definitions(config)
-    config_roi_names = list(rois.keys()) if rois else []
-    
-    comp_rois = get_config_value(config, "plotting.comparisons.comparison_rois", [])
-    if comp_rois:
-        roi_names = []
-        for r in comp_rois:
-            if r.lower() == "all":
-                if "all" not in roi_names:
-                    roi_names.append("all")
-            else:
-                for config_roi in config_roi_names:
-                    if r.lower().replace("_", "").replace("-", "") == config_roi.lower().replace("_", "").replace("-", ""):
-                        roi_names.append(config_roi)
-                        break
-    else:
-        roi_names = ["all"]
-        roi_names.extend(config_roi_names)
+    metric_labels = {m: _format_metric_label(m) for m in metrics}
+    roi_names = _get_roi_names(config)
     
     if logger:
-        log_if_present(logger, "info", f"Spectral comparison: segments={segments}, ROIs={roi_names}, bands={bands}, metrics={metrics}, compare_windows={compare_wins}, compare_columns={compare_cols}")
+        log_if_present(
+            logger,
+            "info",
+            f"Spectral comparison: segments={segments}, ROIs={roi_names}, "
+            f"bands={bands}, metrics={metrics}, "
+            f"compare_windows={compare_windows}, compare_columns={compare_columns}",
+        )
     
-    plot_cfg = get_plot_config(config)
     ensure_dir(save_dir)
     
-    # Helper to get spectral columns for a segment/band/metric/ROI
-    def get_spectral_columns(segment, band, metric, roi_name):
-        """Get spectral columns filtered by segment, band, metric, and ROI."""
-        cols = []
-        for e in entries:
-            if e.segment != segment:
-                continue
-            if e.band != band:
-                continue
-            if e.stat != metric:
-                continue
-            
-            if roi_name == "all":
-                if e.scope == "global":
-                    cols.append(e.name)
-            else:
-                if e.scope == "roi":
-                    # Parse identifier from name (spectral_seg_band_roi_ROIID_stat)
-                    # The ROI ID is between "roi_" and the stat
-                    name_parts = e.name.split("_")
-                    try:
-                        roi_idx = name_parts.index("roi")
-                        # Everything from roi+1 to before stat is the ROI ID
-                        stat_parts = metric.split("_")
-                        stat_start_idx = len(name_parts) - len(stat_parts)
-                        roi_id = "_".join(name_parts[roi_idx + 1:stat_start_idx])
-                        if roi_id.lower().replace("_", "") == roi_name.lower().replace("_", ""):
-                            cols.append(e.name)
-                    except (ValueError, IndexError):
-                        pass
-        
-        # Fallback: if no global columns for "all", average all ROI columns
-        if roi_name == "all" and not cols:
-            for e in entries:
-                if e.segment != segment or e.band != band or e.stat != metric:
-                    continue
-                if e.scope == "roi":
-                    cols.append(e.name)
-        
-        return cols
-    
-    # Create plots per metric
     for metric in metrics:
         metric_label = metric_labels.get(metric, metric.upper())
         
-        # Window comparison (paired) - use unified helper
-        if compare_wins and len(segments) >= 2:
-            seg1, seg2 = segments[0], segments[1]
-            
-            for roi_name in roi_names:
-                data_by_band = {}
-                for band in bands:
-                    cols1 = get_spectral_columns(seg1, band, metric, roi_name)
-                    cols2 = get_spectral_columns(seg2, band, metric, roi_name)
-                    
-                    if not cols1 or not cols2:
-                        continue
-                    
-                    s1 = features_df[cols1].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                    s2 = features_df[cols2].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                    
-                    valid_mask = s1.notna() & s2.notna()
-                    v1, v2 = s1[valid_mask].values, s2[valid_mask].values
-                    
-                    if len(v1) > 0:
-                        data_by_band[band] = (v1, v2)
-                
-                if data_by_band:
-                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name.lower() != "all" else ""
-                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                    save_path = save_dir / f"sub-{subject}_spectral_{metric}_by_condition{suffix}_window"
-                    
-                    plot_paired_comparison(
-                        data_by_band=data_by_band,
-                        subject=subject,
-                        save_path=save_path,
-                        feature_label=f"Spectral ({metric_label})",
-                        config=config,
-                        logger=logger,
-                        label1=seg1.capitalize(),
-                        label2=seg2.capitalize(),
-                        roi_name=roi_name,
-                        stats_dir=stats_dir,
-                    )
-            
-            if logger:
-                log_if_present(logger, "info", f"Saved spectral {metric_label} paired comparison plots for {len(roi_names)} ROIs")
-
-        # Column comparison (unpaired)
-        if compare_cols:
-            comp_mask_info = extract_comparison_mask(events_df, config)
-            if not comp_mask_info:
-                if logger:
-                    log_if_present(logger, "debug", "Column comparison requested but config incomplete")
-            else:
-                m1, m2, label1, label2 = comp_mask_info
-                seg_name = get_config_value(config, "plotting.comparisons.comparison_segment", "active")
-                
-                from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats
-                
-                segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
-                band_colors = {band: get_band_color(band, config) for band in bands}
-                n_bands = len(bands)
-                n_trials = len(features_df)
-                
-                for roi_name in roi_names:
-                    # Collect cell data first
-                    cell_data = {}
-                    for col_idx, band in enumerate(bands):
-                        cols = get_spectral_columns(seg_name, band, metric, roi_name)
-                        
-                        if not cols:
-                            cell_data[col_idx] = None
-                            continue
-                        
-                        val_series = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                        v1 = val_series[m1].dropna().values
-                        v2 = val_series[m2].dropna().values
-                        
-                        cell_data[col_idx] = {"v1": v1, "v2": v2}
-                    
-                    # Compute or load column comparison stats
-                    qvalues, n_significant, use_precomputed = compute_or_load_column_stats(
-                        stats_dir=stats_dir,
-                        feature_type="spectral",
-                        feature_keys=bands,
-                        cell_data=cell_data,
-                        config=config,
-                        logger=logger,
-                    )
-                    
-                    fig, axes = plt.subplots(1, n_bands, figsize=(3 * n_bands, 5), squeeze=False)
-                    
-                    for col_idx, band in enumerate(bands):
-                        ax = axes.flatten()[col_idx]
-                        data = cell_data.get(col_idx)
-                        
-                        if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
-                            ax.text(0.5, 0.5, "No data", ha="center", va="center",
-                                   transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
-                            ax.set_xticks([])
-                            continue
-                        
-                        v1, v2 = data["v1"], data["v2"]
-                        
-                        bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
-                        bp["boxes"][0].set_facecolor(segment_colors["v1"])
-                        bp["boxes"][0].set_alpha(0.6)
-                        bp["boxes"][1].set_facecolor(segment_colors["v2"])
-                        bp["boxes"][1].set_alpha(0.6)
-                        
-                        ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-                        ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
-                        
-                        all_vals = np.concatenate([v1, v2])
-                        ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
-                        yrange = ymax - ymin if ymax > ymin else 0.1
-                        ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.3 * yrange)
-                        
-                        if col_idx in qvalues:
-                            _, q, d, sig = qvalues[col_idx]
-                            sig_marker = "†" if sig else ""
-                            sig_color = "#d62728" if sig else "#333333"
-                            ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
-                                       ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                                       fontweight="bold" if sig else "normal")
-                        
-                        ax.set_xticks([0, 1])
-                        ax.set_xticklabels([label1, label2], fontsize=9)
-                        ax.set_title(band.capitalize(), fontweight="bold", color=band_colors.get(band, "#7C3AED"))
-                        ax.spines["top"].set_visible(False)
-                        ax.spines["right"].set_visible(False)
-                    
-                    n_tests = len(qvalues)
-                    roi_display = roi_name.replace("_", " ").title() if roi_name.lower() != "all" else "All Channels"
-                    
-                    stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
-                    title = (f"Spectral ({metric_label}): {label1} vs {label2} (Column Comparison)\n"
-                             f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                             f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
-                    fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
-                    
-                    plt.tight_layout()
-                    
-                    roi_safe = roi_name.replace(" ", "_").lower() if roi_name.lower() != "all" else ""
-                    suffix = f"_roi-{roi_safe}" if roi_safe else ""
-                    filename = f"sub-{subject}_spectral_{metric}_by_condition{suffix}_column"
-                    
-                    save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                             bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
-                    plt.close(fig)
-                
-                if logger:
-                    log_if_present(logger, "info", f"Saved spectral {metric_label} column comparison plots for {len(roi_names)} ROIs")
+        if compare_windows and len(segments) >= _MIN_SEGMENTS_FOR_COMPARISON:
+            _plot_window_comparison(
+                features_df,
+                entries,
+                segments,
+                bands,
+                metric,
+                metric_label,
+                roi_names,
+                subject,
+                save_dir,
+                config,
+                logger,
+                stats_dir,
+            )
+        
+        if compare_columns:
+            _plot_column_comparison(
+                features_df,
+                entries,
+                events_df,
+                bands,
+                metric,
+                metric_label,
+                roi_names,
+                subject,
+                save_dir,
+                config,
+                logger,
+                stats_dir,
+            )
 
 
 __all__ = [

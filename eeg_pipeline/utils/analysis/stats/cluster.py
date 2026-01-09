@@ -21,17 +21,16 @@ from mne.stats import permutation_cluster_test, combine_adjacency
 if TYPE_CHECKING:
     import mne
 
-from .base import get_statistics_constants, get_fdr_alpha, get_config_value, ensure_config
+from .base import (
+    get_statistics_constants,
+    get_fdr_alpha,
+    get_config_value,
+    ensure_config,
+)
 from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh_values, fdr_bh
-from eeg_pipeline.utils.analysis.tfr import (
-    apply_baseline_to_tfr,
-    compute_tfr_morlet,
-    get_bands_for_tfr,
-    get_tfr_config,
-)
 
 
 ###################################################################
@@ -39,103 +38,181 @@ from eeg_pipeline.utils.analysis.tfr import (
 ###################################################################
 
 
+def _get_config_int(config: Any, *paths: str, default: int) -> int:
+    """Extract integer config value from multiple possible paths."""
+    for path in paths:
+        val = get_config_value(config, path, None)
+        if val is None:
+            continue
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            continue
+    return int(default)
+
+
+def _get_config_float(config: Any, *paths: str, default: float) -> float:
+    """Extract float config value from multiple possible paths."""
+    for path in paths:
+        val = get_config_value(config, path, None)
+        if val is None:
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return float(default)
+
+
 def get_cluster_test_config(config: Any) -> Dict[str, Any]:
     """Extract and validate cluster test configuration parameters."""
-    def _get_int(*paths: str, default: int) -> int:
-        for path in paths:
-            val = get_config_value(config, path, None)
-            if val is None:
-                continue
-            try:
-                return int(val)
-            except (TypeError, ValueError):
-                continue
-        return int(default)
-
-    def _get_float(*paths: str, default: float) -> float:
-        for path in paths:
-            val = get_config_value(config, path, None)
-            if val is None:
-                continue
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                continue
-        return float(default)
 
     return {
-        # Support both legacy `behavior_analysis.cluster_correction.*` and current
-        # `behavior_analysis.cluster.*` config keys (see utils/config/eeg_config.yaml).
-        "n_permutations": _get_int(
+        "n_permutations": _get_config_int(
+            config,
             "behavior_analysis.cluster.n_permutations",
             "behavior_analysis.cluster_correction.n_permutations",
             "behavior_analysis.statistics.n_permutations",
             "statistics.n_permutations",
             default=1000,
         ),
-        "alpha": _get_float(
+        "alpha": _get_config_float(
+            config,
             "statistics.alpha",
             "statistics.sig_alpha",
             "behavior_analysis.statistics.alpha",
             default=0.05,
         ),
-        "fdr_alpha": _get_float(
+        "fdr_alpha": _get_config_float(
+            config,
             "behavior_analysis.statistics.fdr_alpha",
             "statistics.fdr_alpha",
             default=0.05,
         ),
-        "cluster_forming_threshold": _get_float(
+        "cluster_forming_threshold": _get_config_float(
+            config,
             "behavior_analysis.cluster.forming_threshold",
             "behavior_analysis.cluster_correction.cluster_forming_threshold",
             default=0.05,
         ),
-        "min_timepoints": _get_int(
+        "min_timepoints": _get_config_int(
+            config,
             "behavior_analysis.cluster.min_timepoints",
             "behavior_analysis.cluster_correction.min_timepoints",
             default=2,
         ),
-        "min_channels": _get_int(
+        "min_channels": _get_config_int(
+            config,
             "behavior_analysis.cluster.min_channels",
             "behavior_analysis.cluster_correction.min_channels",
             default=1,
         ),
-        "min_cluster_size": _get_int(
+        "min_cluster_size": _get_config_int(
+            config,
             "behavior_analysis.cluster.min_cluster_size",
             "behavior_analysis.cluster_correction.min_cluster_size",
             default=5,
         ),
-        "tail": _get_int(
+        "tail": _get_config_int(
+            config,
             "behavior_analysis.cluster.tail",
             "behavior_analysis.cluster_correction.tail",
             default=0,
         ),
-        "random_seed": _get_int("project.random_state", default=42),
+        "random_seed": _get_config_int(config, "project.random_state", default=42),
         "fwer_method": get_config_value(
             config,
             "behavior_analysis.cluster.fwer_method",
-            get_config_value(config, "behavior_analysis.cluster_correction.fwer_method", "cluster"),
+            get_config_value(
+                config,
+                "behavior_analysis.cluster_correction.fwer_method",
+                "cluster",
+            ),
         ),
     }
 
 
 def compute_effect_size_map(
-    data_pain: np.ndarray,
-    data_nonpain: np.ndarray,
+    data_group_a: np.ndarray,
+    data_group_b: np.ndarray,
 ) -> np.ndarray:
     """Compute Cohen's d effect size map (channels x times or flattened)."""
-    n1 = data_pain.shape[0]
-    n2 = data_nonpain.shape[0]
+    n_group_a = data_group_a.shape[0]
+    n_group_b = data_group_b.shape[0]
 
-    mean1 = np.mean(data_pain, axis=0)
-    mean2 = np.mean(data_nonpain, axis=0)
+    mean_group_a = np.mean(data_group_a, axis=0)
+    mean_group_b = np.mean(data_group_b, axis=0)
 
-    var1 = np.var(data_pain, axis=0, ddof=1)
-    var2 = np.var(data_nonpain, axis=0, ddof=1)
+    var_group_a = np.var(data_group_a, axis=0, ddof=1)
+    var_group_b = np.var(data_group_b, axis=0, ddof=1)
 
-    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    pooled_std = np.sqrt(
+        ((n_group_a - 1) * var_group_a + (n_group_b - 1) * var_group_b)
+        / (n_group_a + n_group_b - 2)
+    )
     pooled_std = np.where(pooled_std > 0, pooled_std, 1e-10)
 
-    return (mean1 - mean2) / pooled_std
+    return (mean_group_a - mean_group_b) / pooled_std
+
+
+def compute_cohens_d_with_bootstrap_ci(
+    group_a_data: np.ndarray,
+    group_b_data: np.ndarray,
+    random_seed: int,
+    n_bootstrap: int = 1000,
+) -> Tuple[float, float, float]:
+    """Compute Cohen's d with bootstrap confidence intervals.
+
+    Args:
+        group_a_data: Data for group A (1D array)
+        group_b_data: Data for group B (1D array)
+        random_seed: Random seed for reproducibility
+        n_bootstrap: Number of bootstrap samples
+
+    Returns:
+        Tuple of (cohens_d, ci_low, ci_high)
+    """
+    n_group_a = len(group_a_data)
+    n_group_b = len(group_b_data)
+
+    mean_diff = group_a_data.mean() - group_b_data.mean()
+    pooled_std = np.sqrt(
+        ((n_group_a - 1) * group_a_data.std() ** 2 + (n_group_b - 1) * group_b_data.std() ** 2)
+        / (n_group_a + n_group_b - 2)
+    )
+    cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+
+    rng = np.random.default_rng(random_seed)
+    boot_indices_a = rng.integers(0, n_group_a, size=(n_bootstrap, n_group_a))
+    boot_indices_b = rng.integers(0, n_group_b, size=(n_bootstrap, n_group_b))
+
+    boot_samples_a = group_a_data[boot_indices_a]
+    boot_samples_b = group_b_data[boot_indices_b]
+
+    boot_means_a = boot_samples_a.mean(axis=1)
+    boot_means_b = boot_samples_b.mean(axis=1)
+    boot_vars_a = boot_samples_a.var(axis=1, ddof=1)
+    boot_vars_b = boot_samples_b.var(axis=1, ddof=1)
+
+    boot_pooled_std = np.sqrt(
+        ((n_group_a - 1) * boot_vars_a + (n_group_b - 1) * boot_vars_b)
+        / (n_group_a + n_group_b - 2)
+    )
+    boot_ds = np.where(
+        boot_pooled_std > 0,
+        (boot_means_a - boot_means_b) / boot_pooled_std,
+        np.nan,
+    )
+    boot_ds_valid = boot_ds[np.isfinite(boot_ds)]
+
+    ci_low = (
+        np.percentile(boot_ds_valid, 2.5) if len(boot_ds_valid) > 0 else np.nan
+    )
+    ci_high = (
+        np.percentile(boot_ds_valid, 97.5) if len(boot_ds_valid) > 0 else np.nan
+    )
+
+    return float(cohens_d), float(ci_low), float(ci_high)
 
 
 def save_null_distribution_data(
@@ -145,9 +222,16 @@ def save_null_distribution_data(
     band_name: str,
 ) -> None:
     """Save null distribution data for diagnostic plotting."""
+    max_masses_to_save = 10000
+    null_masses_list = (
+        null_cluster_masses.tolist()
+        if len(null_cluster_masses) < max_masses_to_save
+        else null_cluster_masses[:max_masses_to_save].tolist()
+    )
+
     data = {
         "band": band_name,
-        "null_masses": null_cluster_masses.tolist() if len(null_cluster_masses) < 10000 else null_cluster_masses[:10000].tolist(),
+        "null_masses": null_masses_list,
         "observed_masses": observed_masses.tolist(),
         "null_mean": float(np.mean(null_cluster_masses)),
         "null_std": float(np.std(null_cluster_masses)),
@@ -167,24 +251,24 @@ def build_distance_adjacency(
 ) -> Tuple[Any, List[str]]:
     """Build distance-based adjacency matrix as fallback."""
     from scipy.spatial import distance_matrix
-    from scipy import sparse
 
     positions = np.array([ch["loc"][:3] for ch in info_eeg["chs"]])
     if np.all(np.isnan(positions)) or np.allclose(positions, 0):
         logger.warning("Invalid channel positions, returning None adjacency")
         return None, []
 
-    dist = distance_matrix(positions, positions)
+    distance_matrix_2d = distance_matrix(positions, positions)
     constants = get_statistics_constants(config)
     n_neighbors = min(constants["k_neighbors_adjacency"], len(positions) - 1)
 
-    adj = np.zeros((len(positions), len(positions)), dtype=bool)
-    for i in range(len(positions)):
-        nearest = np.argsort(dist[i])[1 : n_neighbors + 1]
-        adj[i, nearest] = True
-        adj[nearest, i] = True
+    n_positions = len(positions)
+    adjacency = np.zeros((n_positions, n_positions), dtype=bool)
+    for i in range(n_positions):
+        nearest_indices = np.argsort(distance_matrix_2d[i])[1 : n_neighbors + 1]
+        adjacency[i, nearest_indices] = True
+        adjacency[nearest_indices, i] = True
 
-    return sparse.csr_matrix(adj), [ch["ch_name"] for ch in info_eeg["chs"]]
+    return sparse.csr_matrix(adjacency), [ch["ch_name"] for ch in info_eeg["chs"]]
 
 
 _EEG_ADJ_CACHE: dict[tuple[str, ...], Any] = {}
@@ -282,19 +366,21 @@ def cluster_mask_from_clusters(
     return mask
 
 
-def resolve_cluster_n_jobs(config=None) -> int:
+def resolve_cluster_n_jobs(config: Optional[Any] = None) -> int:
     """Resolve number of parallel jobs for cluster tests."""
-    raw = os.getenv("EEG_CLUSTER_N_JOBS")
-    if raw and raw.strip().lower() not in {"auto", ""}:
+    env_value = os.getenv("EEG_CLUSTER_N_JOBS")
+    if env_value and env_value.strip().lower() not in {"auto", ""}:
         try:
-            return max(1, int(raw))
+            return max(1, int(env_value))
         except ValueError:
             pass
 
-    if config is None and load_config is not None:
+    if config is None:
         try:
+            from eeg_pipeline.utils.config.loader import load_config
+
             config = load_config()
-        except Exception:
+        except (ImportError, Exception):
             pass
 
     default = -1
@@ -335,20 +421,31 @@ def cluster_test_two_sample(
     if n_jobs is None:
         n_jobs = resolve_cluster_n_jobs(config)
 
-    a_eeg = np.asarray(group_a)[:, eeg_picks]
-    b_eeg = np.asarray(group_b)[:, eeg_picks]
+    group_a_eeg = np.asarray(group_a)[:, eeg_picks]
+    group_b_eeg = np.asarray(group_b)[:, eeg_picks]
 
-    if paired and a_eeg.shape[0] == b_eeg.shape[0]:
-        diff = a_eeg - b_eeg
+    if paired and group_a_eeg.shape[0] == group_b_eeg.shape[0]:
+        differences = group_a_eeg - group_b_eeg
         t_stat, clusters, pvals, _ = permutation_cluster_1samp_test(
-            diff, n_permutations=n_permutations, adjacency=adjacency, tail=0, out_type="mask", n_jobs=n_jobs
+            differences,
+            n_permutations=n_permutations,
+            adjacency=adjacency,
+            tail=0,
+            out_type="mask",
+            n_jobs=n_jobs,
         )
     else:
         t_stat, clusters, pvals, _ = permutation_cluster_test(
-            [a_eeg, b_eeg], n_permutations=n_permutations, adjacency=adjacency, tail=1, out_type="mask", n_jobs=n_jobs
+            [group_a_eeg, group_b_eeg],
+            n_permutations=n_permutations,
+            adjacency=adjacency,
+            tail=1,
+            out_type="mask",
+            n_jobs=n_jobs,
         )
 
-    sig_eeg = cluster_mask_from_clusters(clusters, pvals, n_features=a_eeg.shape[1], alpha=alpha)
+    sig_eeg = cluster_mask_from_clusters(clusters, pvals, n_features=group_a_eeg.shape[1], alpha=alpha)
+
     sig_full = build_full_mask_from_eeg(sig_eeg, len(info["ch_names"]), eeg_picks)
 
     if len(clusters) == 0:
@@ -448,6 +545,64 @@ def cluster_test_epochs(
 ###################################################################
 
 
+def _create_band_summary_record(
+    subject: str,
+    band_name: str,
+    fmin: float,
+    fmax: float,
+    condition_column: Optional[str],
+    condition_labels: Tuple[str, str],
+    condition_values: Optional[Tuple[Any, Any]],
+    n_clusters_found: int,
+    n_significant: int,
+    cluster_p_values: np.ndarray,
+    n_condition_a_trials: int,
+    n_condition_b_trials: int,
+    n_permutations: int,
+    alpha: float,
+    n_channels: int,
+    n_timepoints: int,
+    mean_effect_size: float = np.nan,
+    max_effect_size: float = np.nan,
+) -> Dict[str, Any]:
+    """Create diagnostic summary record for a band."""
+    return {
+        "subject": f"sub-{subject}",
+        "band": band_name,
+        "condition_column": str(condition_column) if condition_column else "",
+        "condition_a_label": str(condition_labels[0]),
+        "condition_b_label": str(condition_labels[1]),
+        "condition_a_value": (
+            str(condition_values[0]) if condition_values is not None else ""
+        ),
+        "condition_b_value": (
+            str(condition_values[1]) if condition_values is not None else ""
+        ),
+        "fmin": float(fmin),
+        "fmax": float(fmax),
+        "n_clusters_found": n_clusters_found,
+        "n_significant": n_significant,
+        "min_p_value": (
+            float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan
+        ),
+        "n_condition_a_trials": n_condition_a_trials,
+        "n_condition_b_trials": n_condition_b_trials,
+        "n_pain_trials": n_condition_a_trials,
+        "n_nonpain_trials": n_condition_b_trials,
+        "n_permutations": n_permutations,
+        "alpha": alpha,
+        "n_channels": n_channels,
+        "n_timepoints": n_timepoints,
+        "mean_effect_size": mean_effect_size,
+        "max_effect_size": max_effect_size,
+        "status": (
+            "significant"
+            if n_significant > 0
+            else ("clusters_found" if n_clusters_found > 0 else "no_clusters")
+        ),
+    }
+
+
 def compute_pain_nonpain_time_cluster_test(
     subject: str,
     pain_epochs: "mne.Epochs",
@@ -491,10 +646,11 @@ def compute_pain_nonpain_time_cluster_test(
     min_cluster_size = cluster_cfg["min_cluster_size"]
     rng_seed = cluster_cfg["random_seed"]
 
-    # Save configuration for reproducibility
     cluster_cfg["n_permutations_used"] = n_permutations
     cluster_cfg["alpha_used"] = alpha
 
+    # Local import to avoid circular dependency
+    from eeg_pipeline.utils.analysis.tfr import get_tfr_config, get_bands_for_tfr
     freq_min, freq_max, _n_freqs, n_cycles_factor, decim, picks = get_tfr_config(config)
     if bands is None:
         bands = get_bands_for_tfr(max_freq_available=freq_max, config=config)
@@ -502,7 +658,7 @@ def compute_pain_nonpain_time_cluster_test(
     n_jobs = resolve_cluster_n_jobs(config=config)
     results: dict = {}
     band_cluster_refs = []
-    band_summaries: List[Dict[str, Any]] = []  # Track all bands for diagnostic summary
+    band_summaries: List[Dict[str, Any]] = []
 
     if condition_labels is None:
         if condition_values is not None and len(condition_values) == 2:
@@ -530,6 +686,8 @@ def compute_pain_nonpain_time_cluster_test(
             subject,
         )
 
+        # Local import to avoid circular dependency
+        from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet, apply_baseline_to_tfr
         tfr_pain = compute_tfr_morlet(
             pain_epochs,
             config,
@@ -574,15 +732,16 @@ def compute_pain_nonpain_time_cluster_test(
 
         if adjacency_eeg is not None:
             adjacency = combine_adjacency(n_times, adjacency_eeg)
-            X_pain = band_power_pain.reshape(band_power_pain.shape[0], -1)
-            X_nonpain = band_power_nonpain.reshape(band_power_nonpain.shape[0], -1)
+            band_power_group_a_flat = band_power_pain.reshape(band_power_pain.shape[0], -1)
+            band_power_group_b_flat = band_power_nonpain.reshape(band_power_nonpain.shape[0], -1)
 
-            # Compute effect size map (Cohen's d)
-            d_map_flat = compute_effect_size_map(X_pain, X_nonpain)
-            d_map_grid = d_map_flat.reshape(n_channels, n_times)
+            effect_size_map_flat = compute_effect_size_map(
+                band_power_group_a_flat, band_power_group_b_flat
+            )
+            effect_size_map = effect_size_map_flat.reshape(n_channels, n_times)
 
-            T_obs, clusters, cluster_p_values, H0 = permutation_cluster_test(
-                [X_pain, X_nonpain],
+            cluster_test_result = permutation_cluster_test(
+                [band_power_group_a_flat, band_power_group_b_flat],
                 n_permutations=int(n_permutations),
                 tail=1,
                 n_jobs=n_jobs,
@@ -590,23 +749,29 @@ def compute_pain_nonpain_time_cluster_test(
                 out_type="mask",
                 seed=rng_seed,
             )
+            t_stat_observed, clusters, cluster_p_values, null_distribution = (
+                cluster_test_result
+            )
 
-            # Save null distribution for diagnostic plots
-            if save_null_distributions and H0 is not None:
+            if save_null_distributions and null_distribution is not None:
                 null_dist_path = output_dir / f"null_distribution_{band_name}.json"
                 observed_masses = []
-                for c_idx, c_mask in enumerate(clusters):
-                    if c_mask.sum() > 0:
-                        observed_masses.append(float(np.abs(T_obs[c_mask]).sum()))
+                for cluster_idx, cluster_mask in enumerate(clusters):
+                    if cluster_mask.sum() > 0:
+                        observed_masses.append(
+                            float(np.abs(t_stat_observed[cluster_mask]).sum())
+                        )
                 save_null_distribution_data(
-                    np.abs(H0), np.array(observed_masses), null_dist_path, band_name
+                    np.abs(null_distribution),
+                    np.array(observed_masses),
+                    null_dist_path,
+                    band_name,
                 )
 
             n_clusters_found = len(clusters)
-            sig_inds = np.where(cluster_p_values < alpha)[0]
-            n_significant = len(sig_inds)
-            
-            # Log diagnostic info about clusters found
+            significant_indices = np.where(cluster_p_values < alpha)[0]
+            n_significant = len(significant_indices)
+
             if n_clusters_found > 0:
                 min_p = float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan
                 logger.info(
@@ -616,145 +781,132 @@ def compute_pain_nonpain_time_cluster_test(
             else:
                 logger.info("%s band: no clusters found", band_name)
             
-            sig_mask = np.zeros((n_channels, n_times), dtype=bool)
-            T_obs_grid = T_obs.reshape(n_channels, n_times)
+            significant_mask = np.zeros((n_channels, n_times), dtype=bool)
+            t_stat_grid = t_stat_observed.reshape(n_channels, n_times)
 
-            for idx in sig_inds:
-                c_mask_flat = clusters[idx]
-                c_mask = c_mask_flat.reshape(n_channels, n_times)
+            for cluster_idx in significant_indices:
+                cluster_mask_flat = clusters[cluster_idx]
+                cluster_mask = cluster_mask_flat.reshape(n_channels, n_times)
 
-                # Compute cluster mass for stability metrics
-                cluster_mass = float(np.abs(T_obs[c_mask_flat]).sum())
-                cluster_size = int(c_mask.sum())
+                cluster_mass = float(np.abs(t_stat_observed[cluster_mask_flat]).sum())
+                cluster_size = int(cluster_mask.sum())
 
-                # Enforce min_cluster_size filter
                 if cluster_size < min_cluster_size:
                     logger.debug(
-                        f"Cluster {idx} rejected: size {cluster_size} < min_cluster_size {min_cluster_size}"
+                        "Cluster %d rejected: size %d < min_cluster_size %d",
+                        cluster_idx,
+                        cluster_size,
+                        min_cluster_size,
                     )
                     continue
 
-                t_inds = np.where(c_mask.any(axis=0))[0]
-                ch_inds = np.where(c_mask.any(axis=1))[0]
-                if t_inds.size == 0 or ch_inds.size == 0:
+                time_indices = np.where(cluster_mask.any(axis=0))[0]
+                channel_indices = np.where(cluster_mask.any(axis=1))[0]
+                if time_indices.size == 0 or channel_indices.size == 0:
                     continue
-                if t_inds.size < min_timepoints or ch_inds.size < min_channels:
+                if time_indices.size < min_timepoints or channel_indices.size < min_channels:
                     continue
 
-                # Compute cluster stability metrics from null distribution
-                null_percentile = float(np.mean(np.abs(H0) <= cluster_mass) * 100) if H0 is not None else np.nan
-                mc_se = np.sqrt(cluster_p_values[idx] * (1 - cluster_p_values[idx]) / n_permutations)
+                null_percentile = (
+                    float(np.mean(np.abs(null_distribution) <= cluster_mass) * 100)
+                    if null_distribution is not None
+                    else np.nan
+                )
+                monte_carlo_se = np.sqrt(
+                    cluster_p_values[cluster_idx]
+                    * (1 - cluster_p_values[cluster_idx])
+                    / n_permutations
+                )
 
-                # Update sig_mask only for clusters that pass all filters
-                sig_mask |= c_mask
-                t_start = float(time_vec[t_inds[0]])
-                t_end = float(time_vec[t_inds[-1]])
+                significant_mask |= cluster_mask
+                time_start = float(time_vec[time_indices[0]])
+                time_end = float(time_vec[time_indices[-1]])
 
-                # Compute cluster-level effect size (Cohen's d)
-                cluster_pain = band_power_pain[:, ch_inds, :][:, :, t_inds].mean(axis=(1, 2))
-                cluster_nonpain = band_power_nonpain[:, ch_inds, :][:, :, t_inds].mean(axis=(1, 2))
+                cluster_group_a = (
+                    band_power_pain[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
+                )
+                cluster_group_b = (
+                    band_power_nonpain[:, channel_indices, :][:, :, time_indices].mean(axis=(1, 2))
+                )
 
-                n1, n2 = len(cluster_pain), len(cluster_nonpain)
-                mean_diff = cluster_pain.mean() - cluster_nonpain.mean()
-                pooled_std = np.sqrt(((n1 - 1) * cluster_pain.std()**2 + (n2 - 1) * cluster_nonpain.std()**2) / (n1 + n2 - 2))
-                cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+                cohens_d, d_ci_low, d_ci_high = compute_cohens_d_with_bootstrap_ci(
+                    cluster_group_a,
+                    cluster_group_b,
+                    random_seed=rng_seed,
+                )
 
-                # Bootstrap CI for effect size (vectorized)
-                rng_boot = np.random.default_rng(rng_seed)
-                n_boot_es = 1000
+                total_channel_time_points = n_channels * n_times
+                cluster_coverage = cluster_mask.sum() / total_channel_time_points * 100
 
-                boot_idx_pain = rng_boot.integers(0, n1, size=(n_boot_es, n1))
-                boot_idx_nonpain = rng_boot.integers(0, n2, size=(n_boot_es, n2))
-
-                boot_pain_samples = cluster_pain[boot_idx_pain]
-                boot_nonpain_samples = cluster_nonpain[boot_idx_nonpain]
-
-                boot_means_pain = boot_pain_samples.mean(axis=1)
-                boot_means_nonpain = boot_nonpain_samples.mean(axis=1)
-                boot_vars_pain = boot_pain_samples.var(axis=1, ddof=1)
-                boot_vars_nonpain = boot_nonpain_samples.var(axis=1, ddof=1)
-
-                boot_pooled = np.sqrt(((n1 - 1) * boot_vars_pain + (n2 - 1) * boot_vars_nonpain) / (n1 + n2 - 2))
-                boot_ds = np.where(boot_pooled > 0, (boot_means_pain - boot_means_nonpain) / boot_pooled, np.nan)
-                boot_ds_valid = boot_ds[np.isfinite(boot_ds)]
-
-                d_ci_low = np.percentile(boot_ds_valid, 2.5) if len(boot_ds_valid) > 0 else np.nan
-                d_ci_high = np.percentile(boot_ds_valid, 97.5) if len(boot_ds_valid) > 0 else np.nan
-
-                # Coverage metrics
-                total_ch_time = n_channels * n_times
-                cluster_coverage = c_mask.sum() / total_ch_time * 100
-
-                rec = {
+                cluster_record = {
                     "subject": f"sub-{subject}",
                     "band": band_name,
                     "condition_column": str(condition_column) if condition_column else "",
                     "condition_a_label": str(condition_labels[0]),
                     "condition_b_label": str(condition_labels[1]),
-                    "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
-                    "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
-                    "cluster_index": int(idx),
-                    "p_value": float(cluster_p_values[idx]),
-                    "t_start": t_start,
-                    "t_end": t_end,
-                    "duration_ms": float((t_end - t_start) * 1000),
-                    "n_timepoints": int(len(t_inds)),
-                    "n_channels": int(len(ch_inds)),
-                    "channels": ",".join(np.array(tfr_pain.ch_names)[ch_inds]),
-                    "t_stat_min": float(np.min(T_obs_grid[c_mask])),
-                    "t_stat_max": float(np.max(T_obs_grid[c_mask])),
-                    "t_stat_mean": float(np.mean(T_obs_grid[c_mask])),
-                    "cohens_d": float(cohens_d),
-                    "d_ci_low": float(d_ci_low),
-                    "d_ci_high": float(d_ci_high),
+                    "condition_a_value": (
+                        str(condition_values[0]) if condition_values is not None else ""
+                    ),
+                    "condition_b_value": (
+                        str(condition_values[1]) if condition_values is not None else ""
+                    ),
+                    "cluster_index": int(cluster_idx),
+                    "p_value": float(cluster_p_values[cluster_idx]),
+                    "t_start": time_start,
+                    "t_end": time_end,
+                    "duration_ms": float((time_end - time_start) * 1000),
+                    "n_timepoints": int(len(time_indices)),
+                    "n_channels": int(len(channel_indices)),
+                    "channels": ",".join(np.array(tfr_pain.ch_names)[channel_indices]),
+                    "t_stat_min": float(np.min(t_stat_grid[cluster_mask])),
+                    "t_stat_max": float(np.max(t_stat_grid[cluster_mask])),
+                    "t_stat_mean": float(np.mean(t_stat_grid[cluster_mask])),
+                    "cohens_d": cohens_d,
+                    "d_ci_low": d_ci_low,
+                    "d_ci_high": d_ci_high,
                     "coverage_pct": float(cluster_coverage),
-                    "n_ch_time_points": int(c_mask.sum()),
-                    "total_ch_time_points": int(total_ch_time),
+                    "n_ch_time_points": int(cluster_mask.sum()),
+                    "total_ch_time_points": int(total_channel_time_points),
                     "cluster_mass": cluster_mass,
                     "cluster_size": cluster_size,
                     "null_percentile": null_percentile,
-                    "mc_standard_error": float(mc_se),
+                    "mc_standard_error": monte_carlo_se,
                     "min_cluster_size_used": min_cluster_size,
                 }
-                cluster_records.append(rec)
-                band_cluster_refs.append(rec)
+                cluster_records.append(cluster_record)
+                band_cluster_refs.append(cluster_record)
 
-            # Track diagnostic summary for this band (always, regardless of significance)
-            band_summaries.append({
-                "subject": f"sub-{subject}",
-                "band": band_name,
-                "condition_column": str(condition_column) if condition_column else "",
-                "condition_a_label": str(condition_labels[0]),
-                "condition_b_label": str(condition_labels[1]),
-                "condition_a_value": str(condition_values[0]) if condition_values is not None else "",
-                "condition_b_value": str(condition_values[1]) if condition_values is not None else "",
-                "fmin": float(fmin),
-                "fmax": float(fmax),
-                "n_clusters_found": n_clusters_found,
-                "n_significant": n_significant,
-                "min_p_value": float(np.min(cluster_p_values)) if len(cluster_p_values) > 0 else np.nan,
-                "n_condition_a_trials": int(band_power_pain.shape[0]),
-                "n_condition_b_trials": int(band_power_nonpain.shape[0]),
-                # Backward-compatible aliases
-                "n_pain_trials": int(band_power_pain.shape[0]),
-                "n_nonpain_trials": int(band_power_nonpain.shape[0]),
-                "n_permutations": n_permutations,
-                "alpha": alpha,
-                "n_channels": n_channels,
-                "n_timepoints": n_times,
-                "mean_effect_size": float(np.nanmean(np.abs(d_map_grid))),
-                "max_effect_size": float(np.nanmax(np.abs(d_map_grid))),
-                "status": "significant" if n_significant > 0 else ("clusters_found" if n_clusters_found > 0 else "no_clusters"),
-            })
+            band_summaries.append(
+                _create_band_summary_record(
+                    subject=subject,
+                    band_name=band_name,
+                    fmin=fmin,
+                    fmax=fmax,
+                    condition_column=condition_column,
+                    condition_labels=condition_labels,
+                    condition_values=condition_values,
+                    n_clusters_found=n_clusters_found,
+                    n_significant=n_significant,
+                    cluster_p_values=cluster_p_values,
+                    n_condition_a_trials=int(band_power_pain.shape[0]),
+                    n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                    n_permutations=n_permutations,
+                    alpha=alpha,
+                    n_channels=n_channels,
+                    n_timepoints=n_times,
+                    mean_effect_size=float(np.nanmean(np.abs(effect_size_map))),
+                    max_effect_size=float(np.nanmax(np.abs(effect_size_map))),
+                )
+            )
 
             results[band_name] = {
                 "significant": len(cluster_records) > 0,
                 "cluster_records": cluster_records,
                 "times": time_vec,
-                "time_mask": sig_mask.any(axis=0),
-                "time_mask_channels": sig_mask,
-                "effect_size_map": d_map_grid,
-                "t_stat_map": T_obs_grid,
+                "time_mask": significant_mask.any(axis=0),
+                "time_mask_channels": significant_mask,
+                "effect_size_map": effect_size_map,
+                "t_stat_map": t_stat_grid,
                 "n_clusters_found": n_clusters_found,
                 "n_significant": n_significant,
                 "config": {
@@ -780,17 +932,19 @@ def compute_pain_nonpain_time_cluster_test(
             logger.warning(
                 "EEG adjacency unavailable; running time-only cluster tests per-channel with BH across channels."
             )
-            time_adjacency = sparse.diags([1, 1, 1], [-1, 0, 1], shape=(n_times, n_times), format="csr")
+            time_adjacency = sparse.diags(
+                [1, 1, 1], [-1, 0, 1], shape=(n_times, n_times), format="csr"
+            )
             channel_cluster_records = []
             channel_pvals = []
 
-            for ch_idx, ch_name in enumerate(tfr_pain.ch_names):
-                X_pain_ch = band_power_pain[:, ch_idx, :]
-                X_nonpain_ch = band_power_nonpain[:, ch_idx, :]
-                if X_pain_ch.shape[0] < 2 or X_nonpain_ch.shape[0] < 2:
+            for channel_idx, channel_name in enumerate(tfr_pain.ch_names):
+                band_power_group_a_ch = band_power_pain[:, channel_idx, :]
+                band_power_group_b_ch = band_power_nonpain[:, channel_idx, :]
+                if band_power_group_a_ch.shape[0] < 2 or band_power_group_b_ch.shape[0] < 2:
                     continue
-                T_obs, clusters, cluster_p_values, _ = permutation_cluster_test(
-                    [X_pain_ch, X_nonpain_ch],
+                t_stat_ch, clusters_ch, cluster_p_values_ch, _ = permutation_cluster_test(
+                    [band_power_group_a_ch, band_power_group_b_ch],
                     n_permutations=int(n_permutations),
                     tail=1,
                     n_jobs=n_jobs,
@@ -798,150 +952,177 @@ def compute_pain_nonpain_time_cluster_test(
                     out_type="mask",
                     seed=rng_seed,
                 )
-                channel_pvals.extend(cluster_p_values.tolist())
-                for idx, p_val in enumerate(cluster_p_values):
-                    t_inds = np.where(clusters[idx])[0]
-                    if t_inds.size < min_timepoints:
+                channel_pvals.extend(cluster_p_values_ch.tolist())
+                for cluster_idx_ch, p_value_ch in enumerate(cluster_p_values_ch):
+                    time_indices_ch = np.where(clusters_ch[cluster_idx_ch])[0]
+                    if time_indices_ch.size < min_timepoints:
                         continue
 
-                    cluster_pain_ch = X_pain_ch[:, t_inds].mean(axis=1)
-                    cluster_nonpain_ch = X_nonpain_ch[:, t_inds].mean(axis=1)
+                    cluster_group_a_ch = band_power_group_a_ch[:, time_indices_ch].mean(axis=1)
+                    cluster_group_b_ch = band_power_group_b_ch[:, time_indices_ch].mean(axis=1)
 
-                    n1_ch, n2_ch = len(cluster_pain_ch), len(cluster_nonpain_ch)
-                    mean_diff_ch = cluster_pain_ch.mean() - cluster_nonpain_ch.mean()
-                    pooled_std_ch = np.sqrt(((n1_ch - 1) * cluster_pain_ch.std()**2 +
-                                             (n2_ch - 1) * cluster_nonpain_ch.std()**2) / (n1_ch + n2_ch - 2))
-                    cohens_d_ch = mean_diff_ch / pooled_std_ch if pooled_std_ch > 0 else 0.0
+                    cohens_d_ch, d_ci_low_ch, d_ci_high_ch = (
+                        compute_cohens_d_with_bootstrap_ci(
+                            cluster_group_a_ch,
+                            cluster_group_b_ch,
+                            random_seed=rng_seed + channel_idx,
+                            n_bootstrap=500,
+                        )
+                    )
 
-                    rng_boot_ch = np.random.default_rng(rng_seed + ch_idx)
-                    boot_ds_ch = []
-                    for _ in range(500):
-                        boot_p = cluster_pain_ch[rng_boot_ch.integers(0, n1_ch, size=n1_ch)]
-                        boot_np = cluster_nonpain_ch[rng_boot_ch.integers(0, n2_ch, size=n2_ch)]
-                        boot_diff = boot_p.mean() - boot_np.mean()
-                        boot_pool = np.sqrt(((n1_ch - 1) * boot_p.std()**2 +
-                                             (n2_ch - 1) * boot_np.std()**2) / (n1_ch + n2_ch - 2))
-                        if boot_pool > 0:
-                            boot_ds_ch.append(boot_diff / boot_pool)
-
-                    d_ci_low_ch = np.percentile(boot_ds_ch, 2.5) if boot_ds_ch else np.nan
-                    d_ci_high_ch = np.percentile(boot_ds_ch, 97.5) if boot_ds_ch else np.nan
-
-                    rec = {
+                    channel_record = {
                         "subject": f"sub-{subject}",
                         "band": band_name,
-                        "channel": ch_name,
-                        "cluster_index": int(idx),
-                        "p_raw": float(p_val),
-                        "t_start": float(time_vec[t_inds[0]]),
-                        "t_end": float(time_vec[t_inds[-1]]),
-                        "duration_ms": float((time_vec[t_inds[-1]] - time_vec[t_inds[0]]) * 1000),
-                        "n_timepoints": int(len(t_inds)),
-                        "t_stat_min": float(np.min(T_obs[t_inds])),
-                        "t_stat_max": float(np.max(T_obs[t_inds])),
-                        "t_stat_mean": float(np.mean(T_obs[t_inds])),
-                        "cohens_d": float(cohens_d_ch),
-                        "d_ci_low": float(d_ci_low_ch),
-                        "d_ci_high": float(d_ci_high_ch),
+                        "channel": channel_name,
+                        "cluster_index": int(cluster_idx_ch),
+                        "p_raw": float(p_value_ch),
+                        "t_start": float(time_vec[time_indices_ch[0]]),
+                        "t_end": float(time_vec[time_indices_ch[-1]]),
+                        "duration_ms": float(
+                            (time_vec[time_indices_ch[-1]] - time_vec[time_indices_ch[0]]) * 1000
+                        ),
+                        "n_timepoints": int(len(time_indices_ch)),
+                        "t_stat_min": float(np.min(t_stat_ch[time_indices_ch])),
+                        "t_stat_max": float(np.max(t_stat_ch[time_indices_ch])),
+                        "t_stat_mean": float(np.mean(t_stat_ch[time_indices_ch])),
+                        "cohens_d": cohens_d_ch,
+                        "d_ci_low": d_ci_low_ch,
+                        "d_ci_high": d_ci_high_ch,
                     }
-                    channel_cluster_records.append(rec)
+                    channel_cluster_records.append(channel_record)
 
             if channel_cluster_records:
-                p_vals = np.array([rec["p_raw"] for rec in channel_cluster_records])
-                _, q_vals = fdr_bh_values(np.asarray(channel_pvals), alpha=alpha)
-                for rec, q_val in zip(channel_cluster_records, q_vals):
-                    rec["p_fdr_local"] = float(q_val) if np.isfinite(q_val) else np.nan
-                    rec["p_value"] = rec["p_fdr_local"] if np.isfinite(rec["p_fdr_local"]) else rec["p_raw"]
-                    rec["fdr_reject_local"] = bool(np.isfinite(q_val) and q_val < alpha)
+                _, q_values = fdr_bh_values(np.asarray(channel_pvals), alpha=alpha)
+                for channel_record, q_value in zip(channel_cluster_records, q_values):
+                    p_fdr_local = float(q_value) if np.isfinite(q_value) else np.nan
+                    channel_record["p_fdr_local"] = p_fdr_local
+                    channel_record["p_value"] = (
+                        p_fdr_local if np.isfinite(p_fdr_local) else channel_record["p_raw"]
+                    )
+                    channel_record["fdr_reject_local"] = (
+                        bool(np.isfinite(q_value) and q_value < alpha)
+                    )
 
-                records = pd.DataFrame(channel_cluster_records)
-                n_sig = sum(1 for rec in channel_cluster_records if rec.get("fdr_reject_local", False))
+                n_significant_channels = sum(
+                    1
+                    for record in channel_cluster_records
+                    if record.get("fdr_reject_local", False)
+                )
                 results[band_name] = {
-                    "significant": n_sig > 0,
+                    "significant": n_significant_channels > 0,
                     "cluster_records": channel_cluster_records,
                     "times": time_vec,
                     "n_clusters_found": len(channel_cluster_records),
-                    "n_significant": n_sig,
+                    "n_significant": n_significant_channels,
                 }
-                # Add to band summaries for per-channel fallback
-                band_summaries.append({
-                    "subject": f"sub-{subject}",
-                    "band": band_name,
-                    "fmin": float(fmin),
-                    "fmax": float(fmax),
-                    "n_clusters_found": len(channel_cluster_records),
-                    "n_significant": n_sig,
-                    "min_p_value": float(min(rec.get("p_raw", 1.0) for rec in channel_cluster_records)) if channel_cluster_records else np.nan,
-                    "n_pain_trials": int(band_power_pain.shape[0]),
-                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
-                    "n_permutations": n_permutations,
-                    "alpha": alpha,
-                    "n_channels": n_channels,
-                    "n_timepoints": n_times,
-                    "mean_effect_size": np.nan,  # Not computed for per-channel fallback
-                    "max_effect_size": np.nan,
-                    "status": "significant" if n_sig > 0 else ("clusters_found" if channel_cluster_records else "no_clusters"),
-                })
+                cluster_p_values_channel = np.array(
+                    [record.get("p_raw", 1.0) for record in channel_cluster_records]
+                )
+                band_summaries.append(
+                    _create_band_summary_record(
+                        subject=subject,
+                        band_name=band_name,
+                        fmin=fmin,
+                        fmax=fmax,
+                        condition_column=condition_column,
+                        condition_labels=condition_labels,
+                        condition_values=condition_values,
+                        n_clusters_found=len(channel_cluster_records),
+                        n_significant=n_significant_channels,
+                        cluster_p_values=cluster_p_values_channel,
+                        n_condition_a_trials=int(band_power_pain.shape[0]),
+                        n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                        n_permutations=n_permutations,
+                        alpha=alpha,
+                        n_channels=n_channels,
+                        n_timepoints=n_times,
+                        mean_effect_size=np.nan,
+                        max_effect_size=np.nan,
+                    )
+                )
             else:
-                results[band_name] = {"significant": False, "cluster_records": [], "n_clusters_found": 0, "n_significant": 0}
-                band_summaries.append({
-                    "subject": f"sub-{subject}",
-                    "band": band_name,
-                    "fmin": float(fmin),
-                    "fmax": float(fmax),
+                results[band_name] = {
+                    "significant": False,
+                    "cluster_records": [],
                     "n_clusters_found": 0,
                     "n_significant": 0,
-                    "min_p_value": np.nan,
-                    "n_pain_trials": int(band_power_pain.shape[0]),
-                    "n_nonpain_trials": int(band_power_nonpain.shape[0]),
-                    "n_permutations": n_permutations,
-                    "alpha": alpha,
-                    "n_channels": n_channels,
-                    "n_timepoints": n_times,
-                    "mean_effect_size": np.nan,
-                    "max_effect_size": np.nan,
-                    "status": "no_clusters",
-                })
+                }
+                band_summaries.append(
+                    _create_band_summary_record(
+                        subject=subject,
+                        band_name=band_name,
+                        fmin=fmin,
+                        fmax=fmax,
+                        condition_column=condition_column,
+                        condition_labels=condition_labels,
+                        condition_values=condition_values,
+                        n_clusters_found=0,
+                        n_significant=0,
+                        cluster_p_values=np.array([]),
+                        n_condition_a_trials=int(band_power_pain.shape[0]),
+                        n_condition_b_trials=int(band_power_nonpain.shape[0]),
+                        n_permutations=n_permutations,
+                        alpha=alpha,
+                        n_channels=n_channels,
+                        n_timepoints=n_times,
+                        mean_effect_size=np.nan,
+                        max_effect_size=np.nan,
+                    )
+                )
 
-    # Global FDR across bands (when adjacency is available)
     if band_cluster_refs:
-        p_vals = [rec["p_value"] for rec in band_cluster_refs if np.isfinite(rec["p_value"])]
-        q_vals = fdr_bh(p_vals, alpha=fdr_alpha, config=config) if p_vals else []
-        for rec, q_val in zip(band_cluster_refs, q_vals):
-            rec["p_fdr_global"] = float(q_val) if np.isfinite(q_val) else np.nan
-            rec["fdr_reject_global"] = bool(np.isfinite(q_val) and q_val < fdr_alpha)
+        p_values_global = [
+            record["p_value"]
+            for record in band_cluster_refs
+            if np.isfinite(record["p_value"])
+        ]
+        q_values_global = (
+            fdr_bh(p_values_global, alpha=fdr_alpha, config=config)
+            if p_values_global
+            else []
+        )
+        for record, q_value_global in zip(band_cluster_refs, q_values_global):
+            record["p_fdr_global"] = (
+                float(q_value_global) if np.isfinite(q_value_global) else np.nan
+            )
+            record["fdr_reject_global"] = (
+                bool(np.isfinite(q_value_global) and q_value_global < fdr_alpha)
+            )
 
-    # Save TSV outputs
     for band_name, result in results.items():
-        records = result.get("cluster_records", [])
-        if not records:
+        cluster_records = result.get("cluster_records", [])
+        if not cluster_records:
             continue
-        out_path = output_dir / f"cluster_results_{band_name}.tsv"
-        write_tsv(pd.DataFrame(records), out_path)
-        logger.info("Saved cluster results for %s to %s", band_name, out_path)
+        output_path = output_dir / f"cluster_results_{band_name}.tsv"
+        write_tsv(pd.DataFrame(cluster_records), output_path)
+        logger.info("Saved cluster results for %s to %s", band_name, output_path)
 
-    # Always save diagnostic summary (even when no significant clusters)
     if band_summaries:
         summary_df = pd.DataFrame(band_summaries)
         summary_path = output_dir / "cluster_summary.tsv"
         write_tsv(summary_df, summary_path)
-        
-        # Log final summary
-        total_found = int(summary_df["n_clusters_found"].sum())
-        total_sig = int(summary_df["n_significant"].sum())
-        bands_with_sig = int((summary_df["n_significant"] > 0).sum())
-        
+
+        total_clusters_found = int(summary_df["n_clusters_found"].sum())
+        total_significant = int(summary_df["n_significant"].sum())
+        bands_with_significant = int((summary_df["n_significant"] > 0).sum())
+
         logger.info(
-            "Cluster test summary: %d bands tested, %d total clusters found, %d significant across %d bands",
-            len(band_summaries), total_found, total_sig, bands_with_sig,
+            "Cluster test summary: %d bands tested, %d total clusters found, "
+            "%d significant across %d bands",
+            len(band_summaries),
+            total_clusters_found,
+            total_significant,
+            bands_with_significant,
         )
-        
-        if total_found > 0 and total_sig == 0:
+
+        if total_clusters_found > 0 and total_significant == 0:
             min_p_overall = float(summary_df["min_p_value"].min())
             logger.info(
-                "No clusters reached significance (alpha=%.3f). Minimum p-value observed: %.4f. "
+                "No clusters reached significance (alpha=%.3f). "
+                "Minimum p-value observed: %.4f. "
                 "Consider increasing n_permutations for more stable p-value estimates.",
-                alpha, min_p_overall,
+                alpha,
+                min_p_overall,
             )
 
     return results
@@ -970,78 +1151,104 @@ def _run_cluster_test_core(
     roi_selection = heatmap_config.get("roi_selection")
     epochs_roi = restrict_epochs_to_roi(epochs, roi_selection, config, logger)
 
-    # Resolve condition split (column + two values)
-    cond_col_cfg = str(get_config_value(config, "behavior_analysis.cluster.condition_column", "") or "").strip()
-    cond_col = cond_col_cfg if cond_col_cfg and cond_col_cfg in aligned_events.columns else get_pain_column_from_config(config, aligned_events)
-    if cond_col is None or cond_col not in aligned_events.columns:
+    condition_column_config = str(
+        get_config_value(config, "behavior_analysis.cluster.condition_column", "") or ""
+    ).strip()
+    condition_column = (
+        condition_column_config
+        if condition_column_config and condition_column_config in aligned_events.columns
+        else get_pain_column_from_config(config, aligned_events)
+    )
+    if condition_column is None or condition_column not in aligned_events.columns:
         logger.warning("Cluster condition column not found; skipping cluster test.")
         return None
 
-    cond_vals_cfg = get_config_value(config, "behavior_analysis.cluster.condition_values", []) or []
-    cond_vals: List[Any] = list(cond_vals_cfg) if isinstance(cond_vals_cfg, (list, tuple)) else [cond_vals_cfg]
-    if len(cond_vals) >= 2:
-        v_a, v_b = cond_vals[0], cond_vals[1]
+    condition_values_config = (
+        get_config_value(config, "behavior_analysis.cluster.condition_values", []) or []
+    )
+    condition_values_list: List[Any] = (
+        list(condition_values_config)
+        if isinstance(condition_values_config, (list, tuple))
+        else [condition_values_config]
+    )
+    if len(condition_values_list) >= 2:
+        value_a, value_b = condition_values_list[0], condition_values_list[1]
     else:
-        v_a, v_b = 0, 1
+        value_a, value_b = 0, 1
 
-    raw = aligned_events[cond_col]
+    condition_series = aligned_events[condition_column]
 
-    def _match_two_values(series: pd.Series, a: Any, b: Any) -> Tuple[pd.Series, pd.Series]:
-        s = series
-        # Prefer string match if object dtype or values look non-numeric.
-        if s.dtype == object:
-            s_norm = s.astype(str).str.strip().str.lower()
-            a_norm = str(a).strip().lower()
-            b_norm = str(b).strip().lower()
-            return (s_norm == a_norm), (s_norm == b_norm)
-        # Numeric match attempt
-        s_num = pd.to_numeric(s, errors="coerce")
+    def _match_condition_values(
+        series: pd.Series, val_a: Any, val_b: Any
+    ) -> Tuple[pd.Series, pd.Series]:
+        if series.dtype == object:
+            series_normalized = series.astype(str).str.strip().str.lower()
+            val_a_normalized = str(val_a).strip().lower()
+            val_b_normalized = str(val_b).strip().lower()
+            return (series_normalized == val_a_normalized), (
+                series_normalized == val_b_normalized
+            )
+
+        series_numeric = pd.to_numeric(series, errors="coerce")
         try:
-            a_num = float(a)
-            b_num = float(b)
-            return (s_num == a_num), (s_num == b_num)
-        except Exception:
-            s_str = s.astype(str).str.strip()
-            return (s_str == str(a).strip()), (s_str == str(b).strip())
+            val_a_numeric = float(val_a)
+            val_b_numeric = float(val_b)
+            return (series_numeric == val_a_numeric), (series_numeric == val_b_numeric)
+        except (TypeError, ValueError):
+            series_str = series.astype(str).str.strip()
+            return (series_str == str(val_a).strip()), (series_str == str(val_b).strip())
 
-    mask_a, mask_b = _match_two_values(raw, v_a, v_b)
-    keep = (mask_a | mask_b) & raw.notna()
-    n_keep = int(keep.sum())
-    if n_keep == 0:
-        logger.warning("Cluster condition split produced zero trials; column=%s values=%s/%s", cond_col, v_a, v_b)
-        return None
-
-    # Restrict to the two compared values only (drop other conditions / NaNs)
-    epochs_roi = epochs_roi[keep.to_numpy()]
-    aligned_events = aligned_events.loc[keep].reset_index(drop=True)
-    mask_a = mask_a.loc[keep].reset_index(drop=True)
-    mask_b = mask_b.loc[keep].reset_index(drop=True)
-
-    if int(mask_a.sum()) < 2 or int(mask_b.sum()) < 2:
+    mask_group_a, mask_group_b = _match_condition_values(
+        condition_series, value_a, value_b
+    )
+    keep_mask = (mask_group_a | mask_group_b) & condition_series.notna()
+    n_kept = int(keep_mask.sum())
+    if n_kept == 0:
         logger.warning(
-            "Insufficient trials (%s=%d, %s=%d); skipping cluster test.",
-            str(v_a),
-            int(mask_a.sum()),
-            str(v_b),
-            int(mask_b.sum()),
+            "Cluster condition split produced zero trials; column=%s values=%s/%s",
+            condition_column,
+            value_a,
+            value_b,
         )
         return None
 
-    stats_cfg = config.get("behavior_analysis.statistics", {})
-    n_perm = n_perm if n_perm > 0 else int(stats_cfg.get("n_permutations", 100))
-    alpha = float(stats_cfg.get("sig_alpha", config.get("statistics.sig_alpha", 0.05)))
-    bands = get_bands_for_tfr(max_freq_available=get_tfr_config(config)[1], config=config)
+    epochs_roi = epochs_roi[keep_mask.to_numpy()]
+    aligned_events = aligned_events.loc[keep_mask].reset_index(drop=True)
+    mask_group_a = mask_group_a.loc[keep_mask].reset_index(drop=True)
+    mask_group_b = mask_group_b.loc[keep_mask].reset_index(drop=True)
+
+    if int(mask_group_a.sum()) < 2 or int(mask_group_b.sum()) < 2:
+        logger.warning(
+            "Insufficient trials (%s=%d, %s=%d); skipping cluster test.",
+            str(value_a),
+            int(mask_group_a.sum()),
+            str(value_b),
+            int(mask_group_b.sum()),
+        )
+        return None
+
+    statistics_config = config.get("behavior_analysis.statistics", {})
+    n_permutations_used = (
+        n_perm if n_perm > 0 else int(statistics_config.get("n_permutations", 100))
+    )
+    alpha_used = float(
+        statistics_config.get("sig_alpha", config.get("statistics.sig_alpha", 0.05))
+    )
+    # Local import to avoid circular dependency
+    from eeg_pipeline.utils.analysis.tfr import get_tfr_config, get_bands_for_tfr
+    _, max_freq_available, _, _, _, _ = get_tfr_config(config)
+    bands = get_bands_for_tfr(max_freq_available=max_freq_available, config=config)
 
     return compute_pain_nonpain_time_cluster_test(
         subject=subject,
-        pain_epochs=epochs_roi[mask_a.to_numpy()],
-        nonpain_epochs=epochs_roi[mask_b.to_numpy()],
+        pain_epochs=epochs_roi[mask_group_a.to_numpy()],
+        nonpain_epochs=epochs_roi[mask_group_b.to_numpy()],
         output_dir=output_dir,
         config=config,
         bands=bands,
-        n_permutations=n_perm,
-        alpha=alpha,
-        condition_column=str(cond_col),
-        condition_values=(v_a, v_b),
-        condition_labels=(str(v_a), str(v_b)),
+        n_permutations=n_permutations_used,
+        alpha=alpha_used,
+        condition_column=str(condition_column),
+        condition_values=(value_a, value_b),
+        condition_labels=(str(value_a), str(value_b)),
     )

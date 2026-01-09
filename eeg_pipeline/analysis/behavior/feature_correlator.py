@@ -7,39 +7,37 @@ Single entry point for correlating ALL EEG features with behavioral measures.
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import logging
-import re
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, cpu_count, delayed
 
 from eeg_pipeline.context.behavior import BehaviorContext, ComputationResult, ComputationStatus
-from eeg_pipeline.utils.analysis.stats.correlation import (
-    save_correlation_results,
-    align_groups_to_series as _align_groups_to_series,
-    align_features_and_targets,
-    format_correlation_method_label,
-    normalize_correlation_method,
-    safe_correlation,
-)
+from eeg_pipeline.domain.features.naming import NamingSchema
+from eeg_pipeline.domain.features.registry import get_feature_registry
 from eeg_pipeline.infra.paths import deriv_features_path
 from eeg_pipeline.infra.tsv import read_tsv, write_tsv
-from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.config.loader import get_min_samples, get_config_value
 from eeg_pipeline.utils.analysis.stats import (
     compute_partial_correlations_with_cov_temp,
     compute_permutation_pvalues_with_cov_temp,
     fdr_bh,
 )
-from eeg_pipeline.utils.parallel import parallel_feature_types, get_n_jobs
-from joblib import Parallel, delayed, cpu_count
-from eeg_pipeline.domain.features.registry import (
-    get_feature_registry,
+from eeg_pipeline.utils.analysis.stats.correlation import (
+    align_features_and_targets,
+    align_groups_to_series as _align_groups_to_series,
+    format_correlation_method_label,
+    normalize_correlation_method,
+    safe_correlation,
+    save_correlation_results,
 )
 from eeg_pipeline.utils.analysis.stats.reliability import compute_correlation_split_half_reliability
+from eeg_pipeline.utils.config.loader import get_config_value, get_min_samples
+from eeg_pipeline.utils.parallel import get_n_jobs, parallel_feature_types
 
 
 @dataclass
@@ -173,6 +171,36 @@ class FeatureCorrelationResult:
 
     def to_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame(self.records) if self.records else pd.DataFrame()
+
+
+@dataclass
+class ColumnProcessingParams:
+    """Parameters for processing a single feature column."""
+
+    column_name: str
+    column_values: np.ndarray
+    feature_type: str
+    targets_aligned: np.ndarray
+    column_min_samples: int
+    n_total: int
+    missing_fraction: float
+    variance: float
+    covariates_aligned: Optional[pd.DataFrame]
+    temperature_aligned: Optional[pd.Series]
+    loso_groups: Optional[np.ndarray]
+    permutation_groups: Optional[np.ndarray]
+    correlation_method: str
+    robust_method: Optional[str]
+    method_label: str
+    target_name: str
+    n_permutations: int
+    n_bootstrap: int
+    random_seed: int
+    control_temperature: bool
+    control_trial_order: bool
+    compute_bayes_factor: bool
+    compute_loso_stability: bool
+    compute_reliability: bool
 
 
 # =============================================================================
@@ -387,16 +415,91 @@ def _select_primary_correlation(
 
 def _update_primary_perm_pvalue(record: Dict[str, Any]) -> None:
     """Update primary permutation p-value based on selected primary."""
-    p_perm_col_by_primary = {
+    primary_to_permutation_column = {
         "p_raw": "p_perm_raw",
         "p_partial_cov": "p_perm_partial_cov",
         "p_partial_temp": "p_perm_partial_temp",
         "p_partial_cov_temp": "p_perm_partial_cov_temp",
     }
-    perm_col = p_perm_col_by_primary.get(record.get("p_kind_primary"))
-    if perm_col is not None:
-        record["p_primary_perm"] = record.get(perm_col, np.nan)
+    primary_kind = record.get("p_kind_primary")
+    permutation_column = primary_to_permutation_column.get(primary_kind)
+    if permutation_column is not None:
+        record["p_primary_perm"] = record.get(permutation_column, np.nan)
         record["p_primary_is_permutation"] = bool(pd.notna(record.get("p_primary_perm", np.nan)))
+
+
+def _apply_fdr_correction(
+    records: List[Dict[str, Any]],
+    config: CorrelationConfig,
+    use_permutation_pvalues: bool,
+    analysis_config: Optional[Any] = None,
+) -> None:
+    """Apply FDR correction to correlation records."""
+    if not records or not config.apply_fdr:
+        return
+    
+    if use_permutation_pvalues:
+        p_values = [record.get("p_primary_perm", np.nan) for record in records]
+        p_kind = "p_primary_perm"
+    else:
+        p_values = [record.get("p_primary", np.nan) for record in records]
+        p_kind = "p_primary"
+    
+    valid_indices = [i for i, p_val in enumerate(p_values) if pd.notna(p_val)]
+    if not valid_indices:
+        return
+    
+    valid_p_values = np.array([p_values[i] for i in valid_indices])
+    q_values = fdr_bh(valid_p_values, alpha=config.fdr_alpha, config=analysis_config)
+    
+    for index, q_value in zip(valid_indices, q_values):
+        records[index]["p_fdr"] = float(q_value)
+        records[index]["q_within_family"] = float(q_value)
+        records[index]["within_family_p_kind"] = p_kind
+
+
+def _save_screening_records(
+    screening_records: List[Dict[str, Any]],
+    feature_type: str,
+    target_name: str,
+    stats_dir: Optional[Path],
+    logger: logging.Logger,
+) -> None:
+    """Save feature screening records to disk."""
+    if not screening_records or stats_dir is None:
+        return
+    
+    try:
+        from eeg_pipeline.infra.paths import ensure_dir
+        screen_dir = stats_dir / "feature_screening"
+        ensure_dir(screen_dir)
+        screen_df = pd.DataFrame(screening_records)
+        screen_path = screen_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
+        write_tsv(screen_df, screen_path)
+    except (OSError, ValueError) as exc:
+        logger.debug(f"Failed to write screening report: {exc}")
+
+
+def _apply_fdr_to_dataframe(
+    dataframe: pd.DataFrame,
+    config: CorrelationConfig,
+    analysis_config: Any,
+) -> None:
+    """Apply FDR correction to a dataframe of correlation results."""
+    if not config.apply_fdr or dataframe.empty:
+        return
+    
+    has_permutation_pvalues = (
+        "p_primary_perm" in dataframe.columns
+        and dataframe["p_primary_perm"].notna().any()
+    )
+    
+    if has_permutation_pvalues:
+        p_values = pd.to_numeric(dataframe["p_primary_perm"], errors="coerce").to_numpy()
+    else:
+        p_values = pd.to_numeric(dataframe["p_primary"], errors="coerce").to_numpy()
+    
+    dataframe["p_fdr"] = fdr_bh(p_values, alpha=config.fdr_alpha, config=analysis_config)
 
 
 def _add_loso_stability(
@@ -428,106 +531,126 @@ def _add_reliability(
     record["reliability_split_half"] = rel
 
 
-def _process_single_column(
-    col_name: str,
-    col_values: np.ndarray,
-    feature_type: str,
-    targets_aligned: np.ndarray,
-    column_min_samples: int,
-    n_total: int,
-    missing_fraction: float,
-    variance: float,
-    cov_aligned: Optional[pd.DataFrame],
-    temp_aligned: Optional[pd.Series],
-    loso_groups: Optional[np.ndarray],
-    perm_groups: Optional[np.ndarray],
-    config_method: str,
-    config_robust_method: Optional[str],
-    config_method_label: str,
-    target_name: str,
-    config_n_permutations: int,
-    config_n_bootstrap: int,
-    config_rng_seed: int,
-    control_temperature: bool,
-    control_trial_order: bool,
-    compute_bayes_factor: bool,
-    compute_loso_stability: bool,
-    compute_reliability: bool,
-) -> Optional[Dict[str, Any]]:
+def _process_single_column(params: ColumnProcessingParams) -> Optional[Dict[str, Any]]:
     """Process correlations for a single column. Designed for parallel execution."""
     from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
     
-    rng = np.random.default_rng(config_rng_seed)
+    random_generator = np.random.default_rng(params.random_seed)
     
-    r, p, n_valid = safe_correlation(
-        col_values, targets_aligned, config_method, column_min_samples, robust_method=config_robust_method
+    correlation_coefficient, p_value, n_valid = safe_correlation(
+        params.column_values,
+        params.targets_aligned,
+        params.correlation_method,
+        params.column_min_samples,
+        robust_method=params.robust_method,
     )
-    if not np.isfinite(r):
+    if not np.isfinite(correlation_coefficient):
         return None
     
-    n_cov = int(cov_aligned.shape[1]) if cov_aligned is not None else 0
+    n_covariates = int(params.covariates_aligned.shape[1]) if params.covariates_aligned is not None else 0
     record = _build_base_record(
-        col_name,
-        feature_type,
-        r,
-        p,
+        params.column_name,
+        params.feature_type,
+        correlation_coefficient,
+        p_value,
         n_valid,
-        n_total,
-        missing_fraction,
-        variance,
-        config_method,
-        n_cov,
-        config_robust_method, config_method_label, target_name
+        params.n_total,
+        params.missing_fraction,
+        params.variance,
+        params.correlation_method,
+        n_covariates,
+        params.robust_method,
+        params.method_label,
+        params.target_name,
     )
     
-    feature_series = pd.Series(col_values)
-    target_series = pd.Series(targets_aligned)
+    feature_series = pd.Series(params.column_values)
+    target_series = pd.Series(params.targets_aligned)
 
-    if config_n_bootstrap and config_n_bootstrap > 0:
+    if params.n_bootstrap > 0:
         try:
-            _add_bootstrap_ci(record, col_values, targets_aligned, config_n_bootstrap, config_method, rng)
-        except Exception as exc:
+            _add_bootstrap_ci(
+                record,
+                params.column_values,
+                params.targets_aligned,
+                params.n_bootstrap,
+                params.correlation_method,
+                random_generator,
+            )
+        except (ValueError, RuntimeError) as exc:
             record["bootstrap_error"] = str(exc)
 
-    if compute_bayes_factor:
+    if params.compute_bayes_factor:
         try:
-            _add_bayes_factor(record, col_values, targets_aligned, config_method)
-        except Exception as exc:
+            _add_bayes_factor(
+                record,
+                params.column_values,
+                params.targets_aligned,
+                params.correlation_method,
+            )
+        except (ValueError, RuntimeError) as exc:
             record["bayes_factor_error"] = str(exc)
 
-    if cov_aligned is not None or temp_aligned is not None:
+    has_covariates = params.covariates_aligned is not None
+    has_temperature = params.temperature_aligned is not None
+    if has_covariates or has_temperature:
         try:
             _add_partial_correlations(
-                record, feature_series, target_series, cov_aligned, temp_aligned,
-                config_method, feature_type, column_min_samples
+                record,
+                feature_series,
+                target_series,
+                params.covariates_aligned,
+                params.temperature_aligned,
+                params.correlation_method,
+                params.feature_type,
+                params.column_min_samples,
             )
-        except Exception as exc:
+        except (ValueError, RuntimeError) as exc:
             record["partial_corr_error"] = str(exc)
 
-    if config_n_permutations and config_n_permutations > 0:
+    if params.n_permutations > 0:
         try:
             _add_permutation_pvalues(
-                record, feature_series, target_series, cov_aligned, temp_aligned,
-                config_method, config_n_permutations, rng, perm_groups
+                record,
+                feature_series,
+                target_series,
+                params.covariates_aligned,
+                params.temperature_aligned,
+                params.correlation_method,
+                params.n_permutations,
+                random_generator,
+                params.permutation_groups,
             )
-        except Exception as exc:
+        except (ValueError, RuntimeError) as exc:
             record["permutation_error"] = str(exc)
 
-    _select_primary_correlation(record, control_temperature, control_trial_order)
+    _select_primary_correlation(record, params.control_temperature, params.control_trial_order)
 
-    if config_n_permutations and config_n_permutations > 0:
+    if params.n_permutations > 0:
         _update_primary_perm_pvalue(record)
 
-    if compute_loso_stability and loso_groups is not None:
+    has_loso_groups = params.loso_groups is not None
+    if params.compute_loso_stability and has_loso_groups:
         try:
-            _add_loso_stability(record, col_values, targets_aligned, loso_groups, config_method)
-        except Exception as exc:
+            _add_loso_stability(
+                record,
+                params.column_values,
+                params.targets_aligned,
+                params.loso_groups,
+                params.correlation_method,
+            )
+        except (ValueError, RuntimeError) as exc:
             record["loso_error"] = str(exc)
 
-    if compute_reliability:
+    if params.compute_reliability:
         try:
-            _add_reliability(record, col_values, targets_aligned, config_method)
-        except Exception as exc:
+            _add_reliability(
+                record,
+                params.column_values,
+                params.targets_aligned,
+                params.correlation_method,
+            )
+        except (ValueError, RuntimeError) as exc:
             record["reliability_error"] = str(exc)
 
     return record
@@ -549,6 +672,15 @@ class FeatureBehaviorCorrelator:
         logger: logging.Logger,
         stats_dir: Optional[Path] = None,
     ):
+        if not subject or not isinstance(subject, str):
+            raise ValueError("subject must be a non-empty string")
+        if not isinstance(deriv_root, Path):
+            raise TypeError("deriv_root must be a Path object")
+        if config is None:
+            raise ValueError("config cannot be None")
+        if logger is None:
+            raise ValueError("logger cannot be None")
+        
         self.subject = subject
         self.deriv_root = deriv_root
         self.config = config
@@ -563,20 +695,23 @@ class FeatureBehaviorCorrelator:
     def load_all_features(self) -> Dict[str, int]:
         """Load all available feature files. Returns feature counts."""
         if self._loaded:
-            return {k: len(v.columns) for k, v in self._feature_dfs.items()}
+            return {feature_type: len(dataframe.columns) for feature_type, dataframe in self._feature_dfs.items()}
 
-        counts = {}
-        for name, filename in self.registry.files.items():
-            path = self.features_dir / filename
-            if path.exists():
-                df = read_tsv(path)
-                if df is not None and not df.empty:
-                    self._feature_dfs[name] = df
-                    counts[name] = len(df.columns)
+        feature_counts = {}
+        for feature_type, filename in self.registry.files.items():
+            file_path = self.features_dir / filename
+            if not file_path.exists():
+                continue
+            
+            dataframe = read_tsv(file_path)
+            if dataframe is not None and not dataframe.empty:
+                self._feature_dfs[feature_type] = dataframe
+                feature_counts[feature_type] = len(dataframe.columns)
 
         self._loaded = True
-        self.logger.info(f"Loaded {len(self._feature_dfs)} feature files, {sum(counts.values())} features")
-        return counts
+        total_features = sum(feature_counts.values())
+        self.logger.info(f"Loaded {len(self._feature_dfs)} feature files, {total_features} features")
+        return feature_counts
 
     def correlate_all(
         self,
@@ -586,6 +721,11 @@ class FeatureBehaviorCorrelator:
         n_jobs: int = -1,
     ) -> Dict[str, FeatureCorrelationResult]:
         """Correlate all loaded features with behavioral target."""
+        if targets is None or len(targets) == 0:
+            raise ValueError("targets must be a non-empty Series")
+        if not isinstance(target_name, str) or not target_name:
+            raise ValueError("target_name must be a non-empty string")
+        
         if not self._loaded:
             self.load_all_features()
 
@@ -595,30 +735,72 @@ class FeatureBehaviorCorrelator:
         n_jobs_actual = get_n_jobs(self.config, n_jobs)
         self.logger.info(f"Correlating features with {target_name}... (n_jobs={n_jobs_actual})")
         
-        def _corr_with_groups(df, tvals, cfg, name):
+        def correlate_with_groups(dataframe, target_values, correlation_config, feature_type_name):
             return self._correlate_df(
-                df, tvals, cfg, name, target_name=target_name, subject_ids=cfg.groups
+                dataframe,
+                target_values,
+                correlation_config,
+                feature_type_name,
+                target_name=target_name,
+                subject_ids=correlation_config.groups,
             )
 
-        # Parallel correlation across feature types
         results = parallel_feature_types(
             feature_dfs=self._feature_dfs,
             targets=targets,
-            correlate_func=_corr_with_groups,
+            correlate_func=correlate_with_groups,
             corr_config=corr_config,
             n_jobs=n_jobs_actual,
             logger=self.logger,
         )
         
-        for name, result in results.items():
+        for feature_type_name, result in results.items():
             if result.n_features > 0:
-                dropped = result.n_dropped
-                total = result.n_total or (result.n_features + dropped)
+                n_dropped = result.n_dropped
+                n_total = result.n_total or (result.n_features + n_dropped)
                 self.logger.debug(
-                    f"  {name}: {result.n_features}/{total} tested, {dropped} dropped, {result.n_significant} sig"
+                    f"  {feature_type_name}: {result.n_features}/{n_total} tested, {n_dropped} dropped, {result.n_significant} sig"
                 )
 
         return results
+
+    def _align_data_for_correlation(
+        self,
+        df_aligned: pd.DataFrame,
+        targets_aligned: pd.Series,
+        config: CorrelationConfig,
+        subject_ids: Optional[np.ndarray],
+    ) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[np.ndarray], Optional[np.ndarray]]:
+        """Align covariates, temperature, and groups for correlation analysis."""
+        covariates_aligned = None
+        if config.control_temperature:
+            if config.covariates_without_temp_df is not None:
+                covariates_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
+        elif config.covariates_df is not None:
+            covariates_aligned = config.covariates_df.reindex(df_aligned.index)
+        
+        temperature_aligned = None
+        if config.control_temperature and config.temperature_series is not None:
+            temperature_aligned = config.temperature_series.reindex(df_aligned.index)
+        
+        loso_groups = None
+        permutation_groups = None
+        if subject_ids is not None:
+            try:
+                loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
+                permutation_groups = loso_groups
+            except ValueError as exc:
+                self.logger.debug(f"Group alignment failed: {exc}")
+        
+        if permutation_groups is None and config.groups is not None:
+            try:
+                permutation_groups = _align_groups_to_series(targets_aligned, config.groups)
+                if loso_groups is None:
+                    loso_groups = permutation_groups
+            except ValueError as exc:
+                self.logger.debug(f"Permutation group alignment failed: {exc}")
+        
+        return covariates_aligned, temperature_aligned, loso_groups, permutation_groups
 
     def _correlate_df(
         self,
@@ -640,37 +822,11 @@ class FeatureBehaviorCorrelator:
         if df_aligned is None or targets_aligned is None:
             return FeatureCorrelationResult(feature_type, 0, 0)
 
-        cov_aligned = None
-        temp_aligned = None
-        loso_groups = None
-        perm_groups = None
-        if config.control_temperature:
-            if config.covariates_without_temp_df is not None:
-                cov_aligned = config.covariates_without_temp_df.reindex(df_aligned.index)
-            else:
-                cov_aligned = None
-        elif config.covariates_df is not None:
-            cov_aligned = config.covariates_df.reindex(df_aligned.index)
-        if config.control_temperature and config.temperature_series is not None:
-            temp_aligned = config.temperature_series.reindex(df_aligned.index)
-        if subject_ids is not None:
-            try:
-                loso_groups = _align_groups_to_series(targets_aligned, subject_ids)
-                perm_groups = loso_groups
-            except ValueError as exc:
-                self.logger.debug(f"Group alignment failed: {exc}")
-        if perm_groups is None and config.groups is not None:
-            try:
-                perm_groups = _align_groups_to_series(targets_aligned, config.groups)
-                if loso_groups is None:
-                    loso_groups = perm_groups
-            except ValueError as exc:
-                self.logger.debug(f"Permutation group alignment failed: {exc}")
+        cov_aligned, temp_aligned, loso_groups, perm_groups = self._align_data_for_correlation(
+            df_aligned, targets_aligned, config, subject_ids
+        )
         
-        # Parallel column processing - all computation done in _process_single_column
-        n_jobs_actual = config.n_jobs
-        if n_jobs_actual == -1:
-            n_jobs_actual = max(1, cpu_count() - 1)
+        n_jobs_actual = config.n_jobs if config.n_jobs != -1 else max(1, cpu_count() - 1)
         
         base_seed = int(get_config_value(self.config, "behavior_analysis.statistics.base_seed", 42))
         if config.rng is not None:
@@ -681,25 +837,25 @@ class FeatureBehaviorCorrelator:
         loso_groups_arr = loso_groups if loso_groups is not None else None
         perm_groups_arr = perm_groups if perm_groups is not None else None
         
-        # Prepare arguments for each column (no pre-computed records needed)
-        col_args = []
+        column_params_list = []
         screening_records = []
-        for i, col_name in enumerate(df_aligned.columns):
-            col_values = pd.to_numeric(df_aligned[col_name], errors="coerce").values
-            min_samples = _infer_min_samples_for_column(col_name, feature_type, self.config)
-            valid_mask = np.isfinite(col_values) & np.isfinite(targets_arr)
+        method_label = config.method_label or format_correlation_method_label(config.method, config.robust_method)
+        
+        for column_index, column_name in enumerate(df_aligned.columns):
+            column_values = pd.to_numeric(df_aligned[column_name], errors="coerce").values
+            min_samples = _infer_min_samples_for_column(column_name, feature_type, self.config)
+            valid_mask = np.isfinite(column_values) & np.isfinite(targets_arr)
             n_valid = int(valid_mask.sum())
-            missing_fraction = 1.0 - (float(n_valid) / n_total) if n_total else 1.0
-            variance = float(np.nanvar(col_values[valid_mask])) if n_valid > 1 else np.nan
-            status = "kept"
-            reason = None
-            if not np.isfinite(variance) or np.isclose(variance, 0.0):
-                status = "dropped"
-                reason = "zero_variance"
+            missing_fraction = 1.0 - (float(n_valid) / n_total) if n_total > 0 else 1.0
+            variance = float(np.nanvar(column_values[valid_mask])) if n_valid > 1 else np.nan
+            
+            has_zero_variance = not np.isfinite(variance) or np.isclose(variance, 0.0)
+            status = "dropped" if has_zero_variance else "kept"
+            reason = "zero_variance" if has_zero_variance else None
 
             screening_records.append(
                 {
-                    "feature": str(col_name),
+                    "feature": str(column_name),
                     "feature_type": feature_type,
                     "min_samples": int(min_samples),
                     "n_valid": int(n_valid),
@@ -714,91 +870,65 @@ class FeatureBehaviorCorrelator:
             if status != "kept":
                 continue
 
-            col_args.append((
-                col_name,
-                col_values,
-                feature_type,
-                targets_arr,
-                min_samples,
-                n_total,
-                missing_fraction,
-                variance,
-                cov_aligned,
-                temp_aligned,
-                loso_groups_arr,
-                perm_groups_arr,
-                config.method,
-                config.robust_method,
-                config.method_label or format_correlation_method_label(config.method, config.robust_method),
-                target_name,
-                config.n_permutations,
-                config.n_bootstrap,
-                base_seed + i,
-                config.control_temperature,
-                config.control_trial_order,
-                config.compute_bayes_factor,
-                config.compute_loso_stability,
-                config.compute_reliability,
-            ))
-
-        if screening_records and self.stats_dir is not None:
-            try:
-                from eeg_pipeline.infra.paths import ensure_dir
-                screen_dir = self.stats_dir / "feature_screening"
-                ensure_dir(screen_dir)
-                screen_df = pd.DataFrame(screening_records)
-                screen_path = screen_dir / f"feature_screening_{feature_type}_vs_{target_name}.tsv"
-                write_tsv(screen_df, screen_path)
-            except Exception as exc:
-                self.logger.debug(f"Failed to write screening report: {exc}")
-
-        n_cols = len(col_args)
-        
-        # Use parallel processing when beneficial (>10 columns and n_jobs > 1)
-        if n_jobs_actual > 1 and n_cols > 10:
-            record_dicts = Parallel(n_jobs=n_jobs_actual, backend="loky")(
-                delayed(_process_single_column)(*args) for args in col_args
+            params = ColumnProcessingParams(
+                column_name=column_name,
+                column_values=column_values,
+                feature_type=feature_type,
+                targets_aligned=targets_arr,
+                column_min_samples=min_samples,
+                n_total=n_total,
+                missing_fraction=missing_fraction,
+                variance=variance,
+                covariates_aligned=cov_aligned,
+                temperature_aligned=temp_aligned,
+                loso_groups=loso_groups_arr,
+                permutation_groups=perm_groups_arr,
+                correlation_method=config.method,
+                robust_method=config.robust_method,
+                method_label=method_label,
+                target_name=target_name,
+                n_permutations=config.n_permutations,
+                n_bootstrap=config.n_bootstrap,
+                random_seed=base_seed + column_index,
+                control_temperature=config.control_temperature,
+                control_trial_order=config.control_trial_order,
+                compute_bayes_factor=config.compute_bayes_factor,
+                compute_loso_stability=config.compute_loso_stability,
+                compute_reliability=config.compute_reliability,
             )
-            record_dicts = [d for d in record_dicts if d is not None]
+            column_params_list.append(params)
+
+        _save_screening_records(screening_records, feature_type, target_name, self.stats_dir, self.logger)
+
+        n_columns = len(column_params_list)
+        should_use_parallel = n_jobs_actual > 1 and n_columns > 10
+        
+        if should_use_parallel:
+            record_dicts = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+                delayed(_process_single_column)(params) for params in column_params_list
+            )
+            record_dicts = [record for record in record_dicts if record is not None]
         else:
             record_dicts = []
-            for args in col_args:
-                d = _process_single_column(*args)
-                if d is not None:
-                    record_dicts.append(d)
+            for params in column_params_list:
+                record = _process_single_column(params)
+                if record is not None:
+                    record_dicts.append(record)
 
-        # Apply within-type FDR if requested
-        if record_dicts and config.apply_fdr:
-            use_perm_p = bool(config.n_permutations and config.n_permutations > 0)
-            if use_perm_p:
-                p_vals = [r.get("p_primary_perm", np.nan) for r in record_dicts]
-                p_kind = "p_primary_perm"
-            else:
-                p_vals = [r.get("p_primary", np.nan) for r in record_dicts]
-                p_kind = "p_primary"
-            valid_idx = [i for i, pv in enumerate(p_vals) if pd.notna(pv)]
-            if valid_idx:
-                q_vals = fdr_bh(
-                    np.array([p_vals[i] for i in valid_idx]),
-                    alpha=config.fdr_alpha,
-                    config=self.config,
-                )
-                for idx, q in zip(valid_idx, q_vals):
-                    record_dicts[idx]["p_fdr"] = float(q)
-                    record_dicts[idx]["q_within_family"] = float(q)
-                    record_dicts[idx]["within_family_p_kind"] = p_kind
+        use_permutation_pvalues = config.n_permutations > 0
+        _apply_fdr_correction(record_dicts, config, use_permutation_pvalues, self.config)
 
-        alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
-        n_sig = sum(
+        significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        n_significant = sum(
             1
-            for rec in record_dicts
-            if pd.notna(rec.get("p_primary", np.nan)) and float(rec.get("p_primary")) < alpha
+            for record in record_dicts
+            if pd.notna(record.get("p_primary", np.nan)) and float(record.get("p_primary")) < significance_alpha
         )
-        n_dropped = len(df_aligned.columns) - len(col_args)
+        n_dropped = len(df_aligned.columns) - len(column_params_list)
         return FeatureCorrelationResult(
             feature_type,
             len(record_dicts),
-            n_sig,
+            n_significant,
             n_total=len(df_aligned.columns),
             n_dropped=n_dropped,
             records=record_dicts,
@@ -846,103 +976,105 @@ class FeatureBehaviorCorrelator:
         """
         from eeg_pipeline.utils.analysis.tfr import get_rois
         
-        roi_defs = get_rois(self.config)
-        if not roi_defs:
+        if power_df is None or power_df.empty or targets is None or len(targets) == 0:
+            return None
+        
+        roi_definitions = get_rois(self.config)
+        if not roi_definitions:
             self.logger.debug("No ROI definitions found in config")
             return None
         
         bands = self.config.get("power.bands_to_use", ["delta", "theta", "alpha", "beta", "gamma"])
         
-        parsed_cols: List[Tuple[str, str, str, str]] = []
-        col_to_channel: Dict[str, str] = {}
-        for col in power_df.columns:
-            parsed = NamingSchema.parse(str(col))
-            if not (parsed.get("valid") and parsed.get("group") == "power"):
+        parsed_columns: List[Tuple[str, str, str, str]] = []
+        column_to_channel: Dict[str, str] = {}
+        for column in power_df.columns:
+            parsed = NamingSchema.parse(str(column))
+            is_valid_power_column = parsed.get("valid") and parsed.get("group") == "power"
+            is_channel_scope = parsed.get("scope") == "ch"
+            if not (is_valid_power_column and is_channel_scope):
                 continue
-            if parsed.get("scope") != "ch":
-                continue
+            
             band = parsed.get("band")
             segment = parsed.get("segment")
             identifier = parsed.get("identifier")
             if band and segment and identifier:
-                parsed_cols.append((str(col), str(band), str(segment), str(identifier)))
-                col_to_channel[str(col)] = str(identifier)
+                parsed_columns.append((str(column), str(band), str(segment), str(identifier)))
+                column_to_channel[str(column)] = str(identifier)
         
         method_label = format_correlation_method_label(corr_config.method, corr_config.robust_method)
         records = []
         for band in bands:
-            band_l = str(band).lower()
-            band_cols = [col for col, b, _seg, _ch in parsed_cols if b.lower() == band_l]
+            band_lower = str(band).lower()
+            band_columns = [col for col, b, _seg, _ch in parsed_columns if b.lower() == band_lower]
             
-            # Prefer active columns if available
-            active_cols = [
-                col for col, b, seg, _ch in parsed_cols
-                if b.lower() == band_l and seg.lower() == "active"
+            active_columns = [
+                col for col, b, seg, _ch in parsed_columns
+                if b.lower() == band_lower and seg.lower() == "active"
             ]
-            if active_cols:
-                band_cols = active_cols
+            if active_columns:
+                band_columns = active_columns
             
-            if not band_cols:
+            if not band_columns:
                 continue
             
-            for roi_name, patterns in roi_defs.items():
-                roi_cols = []
-                for col in band_cols:
-                    ch_name = col_to_channel.get(col)
-                    if ch_name is None:
+            for roi_name, patterns in roi_definitions.items():
+                roi_columns = []
+                for col in band_columns:
+                    channel_name = column_to_channel.get(col)
+                    if channel_name is None:
                         continue
                     for pattern in patterns:
-                        if re.match(pattern, ch_name, re.IGNORECASE):
-                            roi_cols.append(col)
+                        if re.match(pattern, channel_name, re.IGNORECASE):
+                            roi_columns.append(col)
                             break
                 
-                if not roi_cols:
+                if not roi_columns:
                     continue
                 
-                roi_vals = power_df[roi_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-                valid = roi_vals.notna() & targets.notna()
+                roi_values = power_df[roi_columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                valid_mask = roi_values.notna() & targets.notna()
                 
-                
-                r, p, n = safe_correlation(
-                    roi_vals[valid].values,
-                    targets[valid].values,
+                correlation_coefficient, p_value, n_valid = safe_correlation(
+                    roi_values[valid_mask].values,
+                    targets[valid_mask].values,
                     corr_config.method,
                     0,
                     robust_method=corr_config.robust_method,
                 )
-                if not np.isfinite(r):
+                if not np.isfinite(correlation_coefficient):
                     continue
                 
                 records.append({
                     "roi": roi_name,
                     "band": band,
-                    "r": r,
-                    "p": p,
-                    "n": n,
+                    "r": correlation_coefficient,
+                    "p": p_value,
+                    "n": n_valid,
                     "method": corr_config.method,
                     "robust_method": corr_config.robust_method,
                     "method_label": method_label,
                     "target": target_name,
                 })
             
-            overall_vals = power_df[band_cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-            valid = overall_vals.notna() & targets.notna()
-            if valid.sum() > 0:
-                r, p, n = safe_correlation(
-                    overall_vals[valid].values,
-                    targets[valid].values,
+            overall_values = power_df[band_columns].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            valid_mask = overall_values.notna() & targets.notna()
+            if valid_mask.sum() > 0:
+                correlation_coefficient, p_value, n_valid = safe_correlation(
+                    overall_values[valid_mask].values,
+                    targets[valid_mask].values,
                     corr_config.method,
                     0,
                     robust_method=corr_config.robust_method,
                 )
-                if not np.isfinite(r):
+                if not np.isfinite(correlation_coefficient):
                     continue
                 records.append({
                     "roi": "overall",
                     "band": band,
-                    "r": r,
-                    "p": p,
-                    "n": n,
+                    "r": correlation_coefficient,
+                    "p": p_value,
+                    "n": n_valid,
                     "method": corr_config.method,
                     "robust_method": corr_config.robust_method,
                     "method_label": method_label,
@@ -954,23 +1086,27 @@ class FeatureBehaviorCorrelator:
             return None
         
         df = pd.DataFrame(records)
-        # Add multiplicity control (per band) and raw aliases for consistency
         df["p_raw"] = df["p"]
         df["p_primary"] = df["p"]
         df["p_kind_primary"] = "p"
         df["p_primary_source"] = "raw"
-        if corr_config.apply_fdr and "band" in df.columns:
-            for band, mask in df.groupby("band").groups.items():
-                band_idx = list(mask)
-                p_vals = df.loc[band_idx, "p"].to_numpy()
-                df.loc[band_idx, "p_fdr"] = fdr_bh(p_vals)
-        elif corr_config.apply_fdr:
-            df["p_fdr"] = fdr_bh(df["p"].to_numpy())
-        suffix = "rating" if "rating" in target_name.lower() else "temp"
+        
+        if corr_config.apply_fdr:
+            if "band" in df.columns:
+                for band, mask in df.groupby("band").groups.items():
+                    band_indices = list(mask)
+                    band_p_values = df.loc[band_indices, "p"].to_numpy()
+                    df.loc[band_indices, "p_fdr"] = fdr_bh(
+                        band_p_values, alpha=corr_config.fdr_alpha, config=self.config
+                    )
+            else:
+                all_p_values = df["p"].to_numpy()
+                df["p_fdr"] = fdr_bh(all_p_values, alpha=corr_config.fdr_alpha, config=self.config)
+        target_suffix = "rating" if "rating" in target_name.lower() else "temp"
         method_suffix = f"_{method_label}" if method_label else ""
-        path = self.stats_dir / f"corr_stats_pow_roi_vs_{suffix}{method_suffix}.tsv"
-        write_tsv(df, path)
-        self.logger.info(f"Saved ROI correlations: {path.name} ({len(df)} rows)")
+        output_path = self.stats_dir / f"corr_stats_pow_roi_vs_{target_suffix}{method_suffix}.tsv"
+        write_tsv(df, output_path)
+        self.logger.info(f"Saved ROI correlations: {output_path.name} ({len(df)} rows)")
         return df
 
     def run_complete_analysis(
@@ -1033,44 +1169,34 @@ class FeatureBehaviorCorrelator:
         method_suffix = f"_{method_label}" if method_label else ""
         combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
         if not combined_rating_df.empty:
-            if corr_config.apply_fdr:
-                if (
-                    "p_primary_perm" in combined_rating_df.columns
-                    and combined_rating_df["p_primary_perm"].notna().any()
-                ):
-                    p_for_fdr = pd.to_numeric(combined_rating_df["p_primary_perm"], errors="coerce").to_numpy()
-                else:
-                    p_for_fdr = pd.to_numeric(combined_rating_df["p_primary"], errors="coerce").to_numpy()
-                combined_rating_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
+            _apply_fdr_to_dataframe(combined_rating_df, corr_config, self.config)
             combined_path = self.stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
             save_correlation_results(combined_rating_df, combined_path)
 
         combined_temperature_df = pd.DataFrame(temperature_records) if temperature_records else pd.DataFrame()
         if not combined_temperature_df.empty:
-            if corr_config.apply_fdr:
-                if (
-                    "p_primary_perm" in combined_temperature_df.columns
-                    and combined_temperature_df["p_primary_perm"].notna().any()
-                ):
-                    p_for_fdr = pd.to_numeric(combined_temperature_df["p_primary_perm"], errors="coerce").to_numpy()
-                else:
-                    p_for_fdr = pd.to_numeric(combined_temperature_df["p_primary"], errors="coerce").to_numpy()
-                combined_temperature_df["p_fdr"] = fdr_bh(p_for_fdr, alpha=corr_config.fdr_alpha, config=self.config)
+            _apply_fdr_to_dataframe(combined_temperature_df, corr_config, self.config)
             combined_path = self.stats_dir / f"corr_stats_all_features_vs_temperature{method_suffix}.tsv"
             save_correlation_results(combined_temperature_df, combined_path)
 
-        alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
-        n_sig = sum(1 for r in rating_records if r.get("p", 1) < alpha)
+        significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))
+        n_significant_rating = sum(
+            1 for record in rating_records
+            if record.get("p", 1.0) < significance_alpha
+        )
         self.logger.info(
-            f"Complete (rating): {len(rating_records)} correlations, {n_sig} significant "
-            f"(alpha={alpha})"
+            f"Complete (rating): {len(rating_records)} correlations, {n_significant_rating} significant "
+            f"(alpha={significance_alpha})"
         )
 
         if temperature_records:
-            n_sig_temp = sum(1 for r in temperature_records if r.get("p", 1) < alpha)
+            n_significant_temperature = sum(
+                1 for record in temperature_records
+                if record.get("p", 1.0) < significance_alpha
+            )
             self.logger.info(
-                f"Complete (temperature): {len(temperature_records)} correlations, {n_sig_temp} significant "
-                f"(alpha={alpha})"
+                f"Complete (temperature): {len(temperature_records)} correlations, {n_significant_temperature} significant "
+                f"(alpha={significance_alpha})"
             )
 
         combined_df = pd.DataFrame([*rating_records, *temperature_records]) if (rating_records or temperature_records) else pd.DataFrame()

@@ -16,6 +16,7 @@ from eeg_pipeline.plotting.behavioral.stability_groupwise import plot_stability_
 
 
 def _record_results(ctx, result) -> None:
+    """Record plot results in context if they contain 'all' key."""
     if isinstance(result, dict) and "all" in result:
         ctx.all_results.append(result)
 
@@ -126,14 +127,14 @@ def run_pain_clusters(ctx, saved_plots):
 
 @BehaviorPlotRegistry.register("dose_response", name="dose_response")
 def run_dose_response(ctx, saved_plots):
-    results = visualize_dose_response(
+    result = visualize_dose_response(
         subject=ctx.subject,
         deriv_root=ctx.deriv_root,
         task=ctx.task,
         config=ctx.config,
         logger=ctx.logger,
     )
-    saved_plots.update(results)
+    saved_plots.update(result)
 
 
 @BehaviorPlotRegistry.register("summary", name="top_predictors")
@@ -147,15 +148,9 @@ def run_top_predictors(ctx, saved_plots):
     saved_plots["top_predictors"] = ctx.plots_dir
 
 
-
-
-
-
-
-
 @BehaviorPlotRegistry.register("summary", name="temperature_models")
 def run_temperature_models(ctx, saved_plots):
-    res = plot_temperature_models(
+    result = plot_temperature_models(
         subject=ctx.subject,
         task=ctx.task,
         deriv_root=ctx.deriv_root,
@@ -163,12 +158,12 @@ def run_temperature_models(ctx, saved_plots):
         logger=ctx.logger,
         plots_dir=ctx.plots_dir,
     )
-    saved_plots.update(res)
+    saved_plots.update(result)
 
 
 @BehaviorPlotRegistry.register("summary", name="stability_groupwise")
 def run_stability_groupwise(ctx, saved_plots):
-    res = plot_stability_groupwise(
+    result = plot_stability_groupwise(
         subject=ctx.subject,
         task=ctx.task,
         deriv_root=ctx.deriv_root,
@@ -176,4 +171,4 @@ def run_stability_groupwise(ctx, saved_plots):
         logger=ctx.logger,
         plots_dir=ctx.plots_dir,
     )
-    saved_plots.update(res)
+    saved_plots.update(result)

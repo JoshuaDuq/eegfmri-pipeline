@@ -109,7 +109,6 @@ from .bootstrap import (
 from .effect_size import (
     cohens_d,
     hedges_g,
-    glass_delta,
     fisher_z_test,
     cohens_q,
     correlation_difference_effect,
@@ -159,7 +158,6 @@ from .eeg_stats import (
     compute_correlation_for_metric_state,
     compute_residuals,
     compute_robust_correlation,
-    get_fdr_alpha_from_config,
     compute_bootstrap_ci,
 )
 
@@ -388,7 +386,6 @@ __all__ = [
     # Effect Size
     "cohens_d",
     "hedges_g",
-    "glass_delta",
     "fisher_z_test",
     "cohens_q",
     "correlation_difference_effect",
@@ -428,7 +425,6 @@ __all__ = [
     "prepare_aligned_data",
     "compute_residuals",
     "compute_robust_correlation",
-    "get_fdr_alpha_from_config",
     "compute_bootstrap_ci",
     # Transform
     "center_series",

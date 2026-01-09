@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import json
 from dataclasses import dataclass, field, asdict
-from typing import Any, Optional, Tuple, Union, List, Dict
+from typing import Any, Optional, Tuple, Union, List, Dict, Callable
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,47 @@ from scipy import stats
 from .base import get_config_value, ensure_config
 
 from eeg_pipeline.utils.config.loader import get_constants
+
+
+###################################################################
+# Constants
+###################################################################
+
+DEFAULT_ALPHA = 0.05
+DEFAULT_POWER = 0.8
+DEFAULT_RANDOM_SEED = 42
+SHAPIRO_WILK_MAX_SAMPLES = 5000
+MIN_SAMPLES_FOR_SHAPIRO = 3
+MIN_SAMPLES_FOR_DAGOSTINO = 20
+MIN_SAMPLES_FOR_VARIANCE_TEST = 2
+MIN_SAMPLES_FOR_GROUP_COMPARISON = 3
+MIN_PERMUTATIONS_FOR_ALPHA = 10
+MAX_SKEW_FOR_NULL_DISTRIBUTION = 2.0
+MAX_MONTE_CARLO_SE = 0.01
+MIN_P_VALUE_FOR_MC_WARNING = 0.1
+MIN_CORRELATION_FOR_POWER_CALC = 0.01
+EFFECTIVELY_INFINITE_SAMPLE_SIZE = 999999
+
+
+###################################################################
+# Helper Functions
+###################################################################
+
+
+def _clean_finite_data(data: np.ndarray) -> np.ndarray:
+    """Extract finite values from array, flattened to 1D."""
+    data_flat = np.asarray(data).ravel()
+    return data_flat[np.isfinite(data_flat)]
+
+
+def _clean_finite_groups(*groups: np.ndarray) -> list[np.ndarray]:
+    """Clean and filter groups, keeping only those with sufficient samples."""
+    clean_groups = []
+    for group in groups:
+        cleaned = _clean_finite_data(group)
+        if len(cleaned) >= MIN_SAMPLES_FOR_VARIANCE_TEST:
+            clean_groups.append(cleaned)
+    return clean_groups
 
 
 ###################################################################
@@ -83,8 +124,8 @@ class ValidationReport:
 def validate_sample_size_for_correlation(
     n: int,
     target_r: float = 0.3,
-    power: float = 0.8,
-    alpha: float = 0.05,
+    power: float = DEFAULT_POWER,
+    alpha: float = DEFAULT_ALPHA,
 ) -> AssumptionCheckResult:
     """Check if sample size is adequate for detecting target correlation.
     
@@ -106,23 +147,27 @@ def validate_sample_size_for_correlation(
     AssumptionCheckResult
         Result with passed=True if n >= required_n
     """
-    if abs(target_r) < 0.01:
-        required_n = 999999
+    if abs(target_r) < MIN_CORRELATION_FOR_POWER_CALC:
+        required_n = EFFECTIVELY_INFINITE_SAMPLE_SIZE
     else:
-        z_r = np.arctanh(np.clip(target_r, -0.999, 0.999))
+        correlation_clipped = np.clip(target_r, -0.999, 0.999)
+        z_correlation = np.arctanh(correlation_clipped)
         z_alpha = stats.norm.ppf(1 - alpha / 2)
         z_beta = stats.norm.ppf(power)
-        required_n = int(np.ceil(((z_alpha + z_beta) / z_r) ** 2 + 3))
+        required_n = int(np.ceil(((z_alpha + z_beta) / z_correlation) ** 2 + 3))
     
     passed = n >= required_n
-    warning = "" if passed else f"Underpowered: n={n}, need n>={required_n} for power={power} to detect r={target_r}"
+    warning_message = (
+        "" if passed 
+        else f"Underpowered: n={n}, need n>={required_n} for power={power} to detect r={target_r}"
+    )
     
     return AssumptionCheckResult(
         test_name="Sample Size Adequacy",
         passed=passed,
         statistic=float(n),
         p_value=float(required_n),
-        warning_message=warning,
+        warning_message=warning_message,
         details={"target_r": target_r, "power": power, "alpha": alpha, "required_n": required_n},
     )
 
@@ -135,86 +180,94 @@ def validate_sample_size_for_correlation(
 def check_normality_shapiro(
     data: np.ndarray,
     group_name: str = "data",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
     """Check normality using Shapiro-Wilk test.
     
     Appropriate for n < 5000. For larger samples, use check_normality_dagostino.
     """
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
+    cleaned_data = _clean_finite_data(data)
     
-    if len(data) < 3:
+    if len(cleaned_data) < MIN_SAMPLES_FOR_SHAPIRO:
         return AssumptionCheckResult(
             test_name="Shapiro-Wilk",
             passed=False,
             statistic=np.nan,
             p_value=np.nan,
-            warning_message=f"{group_name}: Insufficient data for normality test (n={len(data)})",
+            warning_message=f"{group_name}: Insufficient data for normality test (n={len(cleaned_data)})",
         )
     
     # Shapiro-Wilk limited to 5000 samples
-    if len(data) > 5000:
-        data = np.random.default_rng(42).choice(data, size=5000, replace=False)
+    if len(cleaned_data) > SHAPIRO_WILK_MAX_SAMPLES:
+        rng = np.random.default_rng(DEFAULT_RANDOM_SEED)
+        cleaned_data = rng.choice(cleaned_data, size=SHAPIRO_WILK_MAX_SAMPLES, replace=False)
     
-    stat, p_value = stats.shapiro(data)
+    statistic, p_value = stats.shapiro(cleaned_data)
     passed = p_value >= alpha
     
-    warning = ""
+    warning_message = ""
     if not passed:
-        warning = f"{group_name}: Non-normal distribution (Shapiro-Wilk W={stat:.4f}, p={p_value:.4f})"
+        warning_message = (
+            f"{group_name}: Non-normal distribution "
+            f"(Shapiro-Wilk W={statistic:.4f}, p={p_value:.4f})"
+        )
         if logger:
-            logger.warning(warning)
+            logger.warning(warning_message)
     
     return AssumptionCheckResult(
         test_name="Shapiro-Wilk",
         passed=passed,
-        statistic=float(stat),
+        statistic=float(statistic),
         p_value=float(p_value),
-        warning_message=warning,
-        details={"n": len(data), "group": group_name},
+        warning_message=warning_message,
+        details={"n": len(cleaned_data), "group": group_name},
     )
 
 
 def check_normality_dagostino(
     data: np.ndarray,
     group_name: str = "data",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
     """Check normality using D'Agostino-Pearson test.
     
     Better for larger samples (n > 20).
     """
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
+    cleaned_data = _clean_finite_data(data)
     
-    if len(data) < 20:
+    if len(cleaned_data) < MIN_SAMPLES_FOR_DAGOSTINO:
         return AssumptionCheckResult(
             test_name="D'Agostino-Pearson",
             passed=False,
             statistic=np.nan,
             p_value=np.nan,
-            warning_message=f"{group_name}: Insufficient data for D'Agostino test (n={len(data)}, need 20+)",
+            warning_message=(
+                f"{group_name}: Insufficient data for D'Agostino test "
+                f"(n={len(cleaned_data)}, need {MIN_SAMPLES_FOR_DAGOSTINO}+)"
+            ),
         )
     
-    stat, p_value = stats.normaltest(data)
+    statistic, p_value = stats.normaltest(cleaned_data)
     passed = p_value >= alpha
     
-    warning = ""
+    warning_message = ""
     if not passed:
-        warning = f"{group_name}: Non-normal distribution (D'Agostino K²={stat:.4f}, p={p_value:.4f})"
+        warning_message = (
+            f"{group_name}: Non-normal distribution "
+            f"(D'Agostino K²={statistic:.4f}, p={p_value:.4f})"
+        )
         if logger:
-            logger.warning(warning)
+            logger.warning(warning_message)
     
     return AssumptionCheckResult(
         test_name="D'Agostino-Pearson",
         passed=passed,
-        statistic=float(stat),
+        statistic=float(statistic),
         p_value=float(p_value),
-        warning_message=warning,
-        details={"n": len(data), "group": group_name},
+        warning_message=warning_message,
+        details={"n": len(cleaned_data), "group": group_name},
     )
 
 
@@ -225,17 +278,16 @@ def compute_qq_data(
     
     Returns (theoretical_quantiles, sample_quantiles, slope, intercept).
     """
-    data = np.asarray(data).ravel()
-    data = data[np.isfinite(data)]
-    data_sorted = np.sort(data)
+    cleaned_data = _clean_finite_data(data)
+    sample_quantiles = np.sort(cleaned_data)
     
-    n = len(data_sorted)
-    theoretical_quantiles = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
+    sample_size = len(sample_quantiles)
+    quantile_positions = (np.arange(1, sample_size + 1) - 0.5) / sample_size
+    theoretical_quantiles = stats.norm.ppf(quantile_positions)
     
-    # Fit line
-    slope, intercept, _, _, _ = stats.linregress(theoretical_quantiles, data_sorted)
+    slope, intercept, _, _, _ = stats.linregress(theoretical_quantiles, sample_quantiles)
     
-    return theoretical_quantiles, data_sorted, float(slope), float(intercept)
+    return theoretical_quantiles, sample_quantiles, float(slope), float(intercept)
 
 
 ###################################################################
@@ -243,10 +295,61 @@ def compute_qq_data(
 ###################################################################
 
 
+def _check_variance_homogeneity(
+    *groups: np.ndarray,
+    group_names: Optional[List[str]] = None,
+    alpha: float = DEFAULT_ALPHA,
+    test_name: str = "Variance",
+    test_function: Callable[..., Tuple[float, float]] = stats.levene,
+    test_kwargs: Optional[Dict[str, Any]] = None,
+    logger: Optional[logging.Logger] = None,
+) -> AssumptionCheckResult:
+    """Common implementation for variance homogeneity tests."""
+    clean_groups = _clean_finite_groups(*groups)
+    
+    if len(clean_groups) < 2:
+        return AssumptionCheckResult(
+            test_name=test_name,
+            passed=False,
+            statistic=np.nan,
+            p_value=np.nan,
+            warning_message=f"Insufficient groups for {test_name} test",
+        )
+    
+    kwargs = test_kwargs or {}
+    statistic, p_value = test_function(*clean_groups, **kwargs)
+    passed = p_value >= alpha
+    
+    default_names = [f"Group {i+1}" for i in range(len(clean_groups))]
+    names = group_names or default_names
+    variances = {
+        name: float(np.var(group, ddof=1)) 
+        for name, group in zip(names, clean_groups)
+    }
+    
+    warning_message = ""
+    if not passed:
+        warning_message = (
+            f"Heterogeneous variances ({test_name} statistic={statistic:.4f}, "
+            f"p={p_value:.4f}): {variances}"
+        )
+        if logger:
+            logger.warning(warning_message)
+    
+    return AssumptionCheckResult(
+        test_name=test_name,
+        passed=passed,
+        statistic=float(statistic),
+        p_value=float(p_value),
+        warning_message=warning_message,
+        details={"variances": variances, "n_groups": len(clean_groups)},
+    )
+
+
 def check_variance_levene(
     *groups: np.ndarray,
     group_names: Optional[List[str]] = None,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     center: str = "median",
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
@@ -263,89 +366,35 @@ def check_variance_levene(
     center : str
         'median' (default, robust) or 'mean'
     """
-    clean_groups = []
-    for g in groups:
-        g_arr = np.asarray(g).ravel()
-        g_clean = g_arr[np.isfinite(g_arr)]
-        if len(g_clean) >= 2:
-            clean_groups.append(g_clean)
-    
-    if len(clean_groups) < 2:
-        return AssumptionCheckResult(
-            test_name="Levene",
-            passed=False,
-            statistic=np.nan,
-            p_value=np.nan,
-            warning_message="Insufficient groups for Levene's test",
-        )
-    
-    stat, p_value = stats.levene(*clean_groups, center=center)
-    passed = p_value >= alpha
-    
-    group_names = group_names or [f"Group {i+1}" for i in range(len(clean_groups))]
-    variances = {name: float(np.var(g, ddof=1)) for name, g in zip(group_names, clean_groups)}
-    
-    warning = ""
-    if not passed:
-        warning = f"Heterogeneous variances (Levene W={stat:.4f}, p={p_value:.4f}): {variances}"
-        if logger:
-            logger.warning(warning)
-    
-    return AssumptionCheckResult(
+    return _check_variance_homogeneity(
+        *groups,
+        group_names=group_names,
+        alpha=alpha,
         test_name="Levene",
-        passed=passed,
-        statistic=float(stat),
-        p_value=float(p_value),
-        warning_message=warning,
-        details={"variances": variances, "n_groups": len(clean_groups)},
+        test_function=stats.levene,
+        test_kwargs={"center": center},
+        logger=logger,
     )
 
 
 def check_variance_bartlett(
     *groups: np.ndarray,
     group_names: Optional[List[str]] = None,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
     """Check homogeneity of variance using Bartlett's test.
     
     More powerful than Levene but assumes normality.
     """
-    clean_groups = []
-    for g in groups:
-        g_arr = np.asarray(g).ravel()
-        g_clean = g_arr[np.isfinite(g_arr)]
-        if len(g_clean) >= 2:
-            clean_groups.append(g_clean)
-    
-    if len(clean_groups) < 2:
-        return AssumptionCheckResult(
-            test_name="Bartlett",
-            passed=False,
-            statistic=np.nan,
-            p_value=np.nan,
-            warning_message="Insufficient groups for Bartlett's test",
-        )
-    
-    stat, p_value = stats.bartlett(*clean_groups)
-    passed = p_value >= alpha
-    
-    group_names = group_names or [f"Group {i+1}" for i in range(len(clean_groups))]
-    variances = {name: float(np.var(g, ddof=1)) for name, g in zip(group_names, clean_groups)}
-    
-    warning = ""
-    if not passed:
-        warning = f"Heterogeneous variances (Bartlett χ²={stat:.4f}, p={p_value:.4f}): {variances}"
-        if logger:
-            logger.warning(warning)
-    
-    return AssumptionCheckResult(
+    return _check_variance_homogeneity(
+        *groups,
+        group_names=group_names,
+        alpha=alpha,
         test_name="Bartlett",
-        passed=passed,
-        statistic=float(stat),
-        p_value=float(p_value),
-        warning_message=warning,
-        details={"variances": variances, "n_groups": len(clean_groups)},
+        test_function=stats.bartlett,
+        test_kwargs=None,
+        logger=logger,
     )
 
 
@@ -359,7 +408,7 @@ def validate_permutation_distribution(
     observed_statistic: float,
     n_permutations: int,
     test_name: str = "permutation",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
     """Validate permutation test assumptions and distribution quality.
@@ -369,57 +418,65 @@ def validate_permutation_distribution(
     - Null distribution symmetry (for two-tailed tests)
     - No extreme outliers suggesting computational issues
     """
-    null = np.asarray(null_distribution).ravel()
-    null = null[np.isfinite(null)]
+    cleaned_null = _clean_finite_data(null_distribution)
     
     warnings = []
     passed = True
     details = {}
     
     # Check sufficient permutations
-    min_perm_for_alpha = int(1 / alpha) * 10
-    if n_permutations < min_perm_for_alpha:
-        warnings.append(f"Low permutation count ({n_permutations}) for α={alpha}; recommend ≥{min_perm_for_alpha}")
+    min_permutations_required = int(1 / alpha) * MIN_PERMUTATIONS_FOR_ALPHA
+    if n_permutations < min_permutations_required:
+        warnings.append(
+            f"Low permutation count ({n_permutations}) for α={alpha}; "
+            f"recommend ≥{min_permutations_required}"
+        )
         passed = False
     
     # Check null distribution properties
-    null_mean = np.mean(null)
-    null_std = np.std(null)
-    null_skew = stats.skew(null) if len(null) > 8 else 0
-    null_kurt = stats.kurtosis(null) if len(null) > 8 else 0
+    null_mean = np.mean(cleaned_null)
+    null_std = np.std(cleaned_null)
+    min_samples_for_moments = 8
+    has_sufficient_samples = len(cleaned_null) > min_samples_for_moments
+    null_skew = stats.skew(cleaned_null) if has_sufficient_samples else 0.0
+    null_kurtosis = stats.kurtosis(cleaned_null) if has_sufficient_samples else 0.0
     
     details["null_mean"] = float(null_mean)
     details["null_std"] = float(null_std)
     details["null_skew"] = float(null_skew)
-    details["null_kurtosis"] = float(null_kurt)
+    details["null_kurtosis"] = float(null_kurtosis)
     
     # Check for extreme skewness (may indicate issues)
-    if abs(null_skew) > 2:
+    if abs(null_skew) > MAX_SKEW_FOR_NULL_DISTRIBUTION:
         warnings.append(f"Highly skewed null distribution (skew={null_skew:.2f})")
     
     # Compute permutation p-value
-    n_extreme = np.sum(np.abs(null) >= np.abs(observed_statistic))
-    p_perm = (n_extreme + 1) / (len(null) + 1)
-    details["p_permutation"] = float(p_perm)
+    observed_abs = np.abs(observed_statistic)
+    n_extreme = np.sum(np.abs(cleaned_null) >= observed_abs)
+    p_permutation = (n_extreme + 1) / (len(cleaned_null) + 1)
+    details["p_permutation"] = float(p_permutation)
     details["n_extreme"] = int(n_extreme)
     
     # Check Monte Carlo error
-    mc_se = np.sqrt(p_perm * (1 - p_perm) / n_permutations)
-    details["mc_standard_error"] = float(mc_se)
+    monte_carlo_se = np.sqrt(p_permutation * (1 - p_permutation) / n_permutations)
+    details["mc_standard_error"] = float(monte_carlo_se)
     
-    if mc_se > 0.01 and p_perm < 0.1:
-        warnings.append(f"High Monte Carlo SE ({mc_se:.4f}); increase permutations for stable p-value")
+    if monte_carlo_se > MAX_MONTE_CARLO_SE and p_permutation < MIN_P_VALUE_FOR_MC_WARNING:
+        warnings.append(
+            f"High Monte Carlo SE ({monte_carlo_se:.4f}); "
+            f"increase permutations for stable p-value"
+        )
     
-    warning_msg = "; ".join(warnings) if warnings else ""
-    if warning_msg and logger:
-        logger.warning(f"{test_name}: {warning_msg}")
+    warning_message = "; ".join(warnings) if warnings else ""
+    if warning_message and logger:
+        logger.warning(f"{test_name}: {warning_message}")
     
     return AssumptionCheckResult(
         test_name=f"Permutation validation ({test_name})",
         passed=passed,
         statistic=float(observed_statistic),
-        p_value=float(p_perm),
-        warning_message=warning_msg,
+        p_value=float(p_permutation),
+        warning_message=warning_message,
         details=details,
     )
 
@@ -441,34 +498,41 @@ def check_randomization_balance(
     tolerance : float
         Acceptable deviation from expected ratio
     """
-    assignments = np.asarray(group_assignments).ravel()
-    assignments = assignments[np.isfinite(assignments)]
+    cleaned_assignments = _clean_finite_data(group_assignments)
     
-    observed_ratio = np.mean(assignments)
+    observed_ratio = np.mean(cleaned_assignments)
     deviation = abs(observed_ratio - expected_ratio)
     passed = deviation <= tolerance
     
     # Binomial test for significant imbalance
-    n = len(assignments)
-    k = int(np.sum(assignments))
-    binom_p = stats.binom_test(k, n, expected_ratio) if hasattr(stats, 'binom_test') else \
-              stats.binomtest(k, n, expected_ratio).pvalue
+    total_samples = len(cleaned_assignments)
+    n_group1 = int(np.sum(cleaned_assignments))
     
-    warning = ""
+    # Use modern binomtest if available, fallback to binom_test
+    if hasattr(stats, 'binomtest'):
+        binom_result = stats.binomtest(n_group1, total_samples, expected_ratio)
+        binom_p_value = binom_result.pvalue
+    else:
+        binom_p_value = stats.binom_test(n_group1, total_samples, expected_ratio)
+    
+    warning_message = ""
     if not passed:
-        warning = f"Imbalanced groups: observed ratio={observed_ratio:.3f}, expected={expected_ratio:.3f}"
+        warning_message = (
+            f"Imbalanced groups: observed ratio={observed_ratio:.3f}, "
+            f"expected={expected_ratio:.3f}"
+        )
         if logger:
-            logger.warning(warning)
+            logger.warning(warning_message)
     
     return AssumptionCheckResult(
         test_name="Randomization balance",
         passed=passed,
         statistic=float(observed_ratio),
-        p_value=float(binom_p),
-        warning_message=warning,
+        p_value=float(binom_p_value),
+        warning_message=warning_message,
         details={
-            "n_total": n,
-            "n_group1": k,
+            "n_total": total_samples,
+            "n_group1": n_group1,
             "expected_ratio": expected_ratio,
             "deviation": float(deviation),
         },
@@ -482,23 +546,23 @@ def check_randomization_balance(
 
 def compute_fwer_bonferroni(
     p_values: np.ndarray,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """Bonferroni correction for FWER control.
     
     Returns (adjusted_p, reject_mask, corrected_alpha).
     """
-    p = np.asarray(p_values).ravel()
-    n_tests = len(p)
+    p_flat = np.asarray(p_values).ravel()
+    n_tests = len(p_flat)
     corrected_alpha = alpha / n_tests
-    adjusted_p = np.minimum(p * n_tests, 1.0)
-    reject = p < corrected_alpha
-    return adjusted_p, reject, corrected_alpha
+    adjusted_p = np.minimum(p_flat * n_tests, 1.0)
+    reject_mask = p_flat < corrected_alpha
+    return adjusted_p, reject_mask, corrected_alpha
 
 
 def compute_fwer_holm(
     p_values: np.ndarray,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Holm-Bonferroni step-down correction for FWER control.
     
@@ -506,32 +570,32 @@ def compute_fwer_holm(
     
     Returns (adjusted_p, reject_mask).
     """
-    p = np.asarray(p_values).ravel()
-    n = len(p)
+    p_flat = np.asarray(p_values).ravel()
+    n_tests = len(p_flat)
     
-    sorted_idx = np.argsort(p)
-    sorted_p = p[sorted_idx]
+    sorted_indices = np.argsort(p_flat)
+    sorted_p_values = p_flat[sorted_indices]
     
     # Holm adjustment
-    adjusted = np.zeros(n)
-    for i, (idx, pval) in enumerate(zip(sorted_idx, sorted_p)):
-        adjusted[idx] = pval * (n - i)
+    adjusted_p = np.zeros(n_tests)
+    for i, (original_idx, p_value) in enumerate(zip(sorted_indices, sorted_p_values)):
+        adjusted_p[original_idx] = p_value * (n_tests - i)
     
-    # Enforce monotonicity
-    adjusted_sorted = adjusted[sorted_idx]
-    for i in range(1, n):
-        adjusted_sorted[i] = max(adjusted_sorted[i], adjusted_sorted[i-1])
-    adjusted[sorted_idx] = adjusted_sorted
+    # Enforce monotonicity (adjusted p-values must be non-decreasing)
+    adjusted_sorted = adjusted_p[sorted_indices]
+    for i in range(1, n_tests):
+        adjusted_sorted[i] = max(adjusted_sorted[i], adjusted_sorted[i - 1])
+    adjusted_p[sorted_indices] = adjusted_sorted
     
-    adjusted = np.minimum(adjusted, 1.0)
-    reject = adjusted < alpha
+    adjusted_p = np.minimum(adjusted_p, 1.0)
+    reject_mask = adjusted_p < alpha
     
-    return adjusted, reject
+    return adjusted_p, reject_mask
 
 
 def compute_fwer_sidak(
     p_values: np.ndarray,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """Šidák correction for FWER control.
     
@@ -539,20 +603,20 @@ def compute_fwer_sidak(
     
     Returns (adjusted_p, reject_mask, corrected_alpha).
     """
-    p = np.asarray(p_values).ravel()
-    n_tests = len(p)
+    p_flat = np.asarray(p_values).ravel()
+    n_tests = len(p_flat)
     
     corrected_alpha = 1 - (1 - alpha) ** (1 / n_tests)
-    adjusted_p = 1 - (1 - p) ** n_tests
-    reject = p < corrected_alpha
+    adjusted_p = 1 - (1 - p_flat) ** n_tests
+    reject_mask = p_flat < corrected_alpha
     
-    return adjusted_p, reject, corrected_alpha
+    return adjusted_p, reject_mask, corrected_alpha
 
 
 def validate_fwer_control(
     p_values: np.ndarray,
     method: str = "holm",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     logger: Optional[logging.Logger] = None,
 ) -> AssumptionCheckResult:
     """Validate and report FWER correction results.
@@ -566,43 +630,49 @@ def validate_fwer_control(
     alpha : float
         Family-wise error rate
     """
-    p = np.asarray(p_values).ravel()
-    p = p[np.isfinite(p)]
-    n_tests = len(p)
+    p_flat = _clean_finite_data(p_values)
+    n_tests = len(p_flat)
     
     if method == "bonferroni":
-        adjusted, reject, corrected_alpha = compute_fwer_bonferroni(p, alpha)
+        adjusted_p, reject_mask, corrected_alpha = compute_fwer_bonferroni(p_flat, alpha)
     elif method == "sidak":
-        adjusted, reject, corrected_alpha = compute_fwer_sidak(p, alpha)
+        adjusted_p, reject_mask, corrected_alpha = compute_fwer_sidak(p_flat, alpha)
     else:  # holm
-        adjusted, reject = compute_fwer_holm(p, alpha)
+        adjusted_p, reject_mask = compute_fwer_holm(p_flat, alpha)
         corrected_alpha = alpha / n_tests  # Approximate for reporting
     
-    n_reject_raw = np.sum(p < alpha)
-    n_reject_corrected = np.sum(reject)
+    n_significant_raw = np.sum(p_flat < alpha)
+    n_significant_corrected = np.sum(reject_mask)
+    
+    reduction_percentage = (
+        (n_significant_raw - n_significant_corrected) / max(n_significant_raw, 1) * 100
+    )
     
     details = {
         "n_tests": n_tests,
         "method": method,
         "alpha": alpha,
         "corrected_alpha": float(corrected_alpha),
-        "n_significant_raw": int(n_reject_raw),
-        "n_significant_corrected": int(n_reject_corrected),
-        "reduction_pct": float((n_reject_raw - n_reject_corrected) / max(n_reject_raw, 1) * 100),
+        "n_significant_raw": int(n_significant_raw),
+        "n_significant_corrected": int(n_significant_corrected),
+        "reduction_pct": float(reduction_percentage),
     }
     
-    warning = ""
-    if n_reject_raw > 0 and n_reject_corrected == 0:
-        warning = f"All {n_reject_raw} raw significant results lost after {method} correction"
+    warning_message = ""
+    if n_significant_raw > 0 and n_significant_corrected == 0:
+        warning_message = (
+            f"All {n_significant_raw} raw significant results lost "
+            f"after {method} correction"
+        )
         if logger:
-            logger.warning(warning)
+            logger.warning(warning_message)
     
     return AssumptionCheckResult(
         test_name=f"FWER control ({method})",
         passed=True,  # Correction always "passes" - it's informational
-        statistic=float(n_reject_corrected),
+        statistic=float(n_significant_corrected),
         p_value=float(corrected_alpha),
-        warning_message=warning,
+        warning_message=warning_message,
         details=details,
     )
 
@@ -612,12 +682,38 @@ def validate_fwer_control(
 ###################################################################
 
 
+def _generate_permutation_null_distribution(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    n_permutations: int,
+    random_seed: int = DEFAULT_RANDOM_SEED,
+) -> Tuple[np.ndarray, float]:
+    """Generate permutation null distribution for two-group comparison.
+    
+    Returns (null_distribution, observed_statistic).
+    """
+    combined = np.concatenate([group1, group2])
+    n_group1 = len(group1)
+    
+    observed_statistic = np.mean(group1) - np.mean(group2)
+    
+    rng = np.random.default_rng(random_seed)
+    null_distribution = np.zeros(n_permutations)
+    for i in range(n_permutations):
+        permuted = rng.permutation(combined)
+        perm_group1 = permuted[:n_group1]
+        perm_group2 = permuted[n_group1:]
+        null_distribution[i] = np.mean(perm_group1) - np.mean(perm_group2)
+    
+    return null_distribution, observed_statistic
+
+
 def validate_behavioral_contrast(
     group1: np.ndarray,
     group2: np.ndarray,
     group1_name: str = "Pain",
     group2_name: str = "Non-pain",
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     n_permutations: int = 1000,
     logger: Optional[logging.Logger] = None,
 ) -> ValidationReport:
@@ -633,56 +729,63 @@ def validate_behavioral_contrast(
     """
     report = ValidationReport()
     
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
+    cleaned_group1 = _clean_finite_data(group1)
+    cleaned_group2 = _clean_finite_data(group2)
     
     # Sample size check
-    if len(g1) < 3 or len(g2) < 3:
-        report.add_warning(f"Very small sample sizes: {group1_name}={len(g1)}, {group2_name}={len(g2)}")
+    if (len(cleaned_group1) < MIN_SAMPLES_FOR_GROUP_COMPARISON or 
+        len(cleaned_group2) < MIN_SAMPLES_FOR_GROUP_COMPARISON):
+        report.add_warning(
+            f"Very small sample sizes: {group1_name}={len(cleaned_group1)}, "
+            f"{group2_name}={len(cleaned_group2)}"
+        )
         report.set_flag("small_sample", True)
     
     # Normality checks
-    norm1 = check_normality_shapiro(g1, group1_name, alpha, logger)
-    norm2 = check_normality_shapiro(g2, group2_name, alpha, logger)
-    report.normality_checks.extend([norm1, norm2])
+    normality_check1 = check_normality_shapiro(
+        cleaned_group1, group1_name, alpha, logger
+    )
+    normality_check2 = check_normality_shapiro(
+        cleaned_group2, group2_name, alpha, logger
+    )
+    report.normality_checks.extend([normality_check1, normality_check2])
     
-    if not norm1.passed or not norm2.passed:
+    if not normality_check1.passed or not normality_check2.passed:
         report.set_flag("normality_violated", True)
         report.add_warning("Non-parametric tests recommended due to normality violation")
     
     # Variance check
-    var_check = check_variance_levene(g1, g2, group_names=[group1_name, group2_name], 
-                                       alpha=alpha, logger=logger)
-    report.variance_checks.append(var_check)
+    variance_check = check_variance_levene(
+        cleaned_group1, 
+        cleaned_group2, 
+        group_names=[group1_name, group2_name], 
+        alpha=alpha, 
+        logger=logger
+    )
+    report.variance_checks.append(variance_check)
     
-    if not var_check.passed:
+    if not variance_check.passed:
         report.set_flag("variance_heterogeneous", True)
         report.add_warning("Welch's t-test or Mann-Whitney U recommended")
     
     # Permutation validation
-    rng = np.random.default_rng(42)
-    combined = np.concatenate([g1, g2])
-    n1 = len(g1)
-    
-    # Observed statistic (difference in means)
-    obs_diff = np.mean(g1) - np.mean(g2)
-    
-    # Generate null distribution
-    null_diffs = np.zeros(n_permutations)
-    for i in range(n_permutations):
-        perm = rng.permutation(combined)
-        null_diffs[i] = np.mean(perm[:n1]) - np.mean(perm[n1:])
-    
-    perm_check = validate_permutation_distribution(
-        null_diffs, obs_diff, n_permutations, 
-        f"{group1_name} vs {group2_name}", alpha, logger
+    null_distribution, observed_statistic = _generate_permutation_null_distribution(
+        cleaned_group1, cleaned_group2, n_permutations
     )
-    report.permutation_checks.append(perm_check)
+    
+    test_name = f"{group1_name} vs {group2_name}"
+    permutation_check = validate_permutation_distribution(
+        null_distribution, 
+        observed_statistic, 
+        n_permutations, 
+        test_name, 
+        alpha, 
+        logger
+    )
+    report.permutation_checks.append(permutation_check)
     
     # Store null distribution for plotting
-    perm_check.details["null_distribution"] = null_diffs.tolist()
+    permutation_check.details["null_distribution"] = null_distribution.tolist()
     
     return report
 
@@ -769,32 +872,33 @@ def validate_baseline_window_pre_stimulus(
         If baseline_window is a tuple/list, returns the validated tuple (tmin, baseline_end).
         If baseline_window is a float, returns True if valid, False otherwise.
     """
+    STIMULUS_ONSET = 0.0
+    
+    def _log_warning_if_invalid(baseline_end_value: float) -> None:
+        """Log warning if baseline extends past stimulus."""
+        if baseline_end_value > STIMULUS_ONSET and logger:
+            logger.warning(
+                f"Baseline extends past stimulus: baseline_end={baseline_end_value}"
+            )
+    
     # Handle tuple/list input (new calling convention)
     if isinstance(baseline_window, (tuple, list)) and len(baseline_window) >= 2:
-        tmin, baseline_end_val = float(baseline_window[0]), float(baseline_window[1])
-        if baseline_end_val > 0:
-            if logger:
-                logger.warning(f"Baseline extends past stimulus: baseline_end={baseline_end_val}")
-            return (tmin, baseline_end_val)  # Return tuple even if invalid
-        return (tmin, baseline_end_val)
+        tmin = float(baseline_window[0])
+        baseline_end_value = float(baseline_window[1])
+        _log_warning_if_invalid(baseline_end_value)
+        return (tmin, baseline_end_value)
     
     # Handle old calling convention (two separate arguments)
     if baseline_end is not None:
-        baseline_end_float = float(baseline_end)
-        if baseline_end_float > 0:
-            if logger:
-                logger.warning(f"Baseline extends past stimulus: baseline_end={baseline_end_float}")
-            return False
-        return True
+        baseline_end_value = float(baseline_end)
+        _log_warning_if_invalid(baseline_end_value)
+        return baseline_end_value <= STIMULUS_ONSET
     
     # Handle single float input (treat as baseline_end)
     if isinstance(baseline_window, (int, float)):
-        baseline_end_val = float(baseline_window)
-        if baseline_end_val > 0:
-            if logger:
-                logger.warning(f"Baseline extends past stimulus: baseline_end={baseline_end_val}")
-            return False
-        return True
+        baseline_end_value = float(baseline_window)
+        _log_warning_if_invalid(baseline_end_value)
+        return baseline_end_value <= STIMULUS_ONSET
     
     raise ValueError(f"Invalid baseline_window type: {type(baseline_window)}")
 

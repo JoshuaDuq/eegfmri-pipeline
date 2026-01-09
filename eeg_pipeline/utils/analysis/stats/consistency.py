@@ -19,34 +19,188 @@ import pandas as pd
 
 
 def _sign(x: Any) -> float:
+    """Extract sign of a value, returning NaN for invalid inputs."""
     try:
-        v = float(x)
-    except Exception:
+        value = float(x)
+    except (ValueError, TypeError):
         return np.nan
-    if not np.isfinite(v) or v == 0:
-        return np.nan if not np.isfinite(v) else 0.0
-    return float(np.sign(v))
+    
+    if not np.isfinite(value):
+        return np.nan
+    if value == 0:
+        return 0.0
+    return float(np.sign(value))
 
 
 def _pick_corr_r(df: pd.DataFrame) -> pd.Series:
-    for col in ["r_primary", "r", "rho", "correlation"]:
+    """Extract correlation coefficient column from dataframe."""
+    column_names = ["r_primary", "r", "rho", "correlation"]
+    for col in column_names:
         if col in df.columns:
             return pd.to_numeric(df[col], errors="coerce")
     return pd.Series(np.nan, index=df.index, dtype=float)
 
 
 def _pick_corr_p(df: pd.DataFrame) -> pd.Series:
-    for col in ["p_primary", "p_raw", "p_value", "p"]:
+    """Extract p-value column from correlation dataframe."""
+    column_names = ["p_primary", "p_raw", "p_value", "p"]
+    for col in column_names:
         if col in df.columns:
             return pd.to_numeric(df[col], errors="coerce")
     return pd.Series(np.nan, index=df.index, dtype=float)
 
 
 def _pick_beta(df: pd.DataFrame) -> pd.Series:
-    for col in ["beta_feature", "beta", "coef", "coefficient"]:
+    """Extract beta coefficient column from dataframe."""
+    column_names = ["beta_feature", "beta", "coef", "coefficient"]
+    for col in column_names:
         if col in df.columns:
             return pd.to_numeric(df[col], errors="coerce")
     return pd.Series(np.nan, index=df.index, dtype=float)
+
+
+def _extract_unique_features(*dataframes: Optional[pd.DataFrame]) -> List[str]:
+    """Collect unique feature names from all dataframes."""
+    features: List[str] = []
+    for df in dataframes:
+        if df is None or df.empty:
+            continue
+        if "feature" not in df.columns:
+            continue
+        unique_features = df["feature"].dropna().unique()
+        features.extend([str(f) for f in unique_features])
+    return sorted(set(features))
+
+
+def _select_best_per_feature(
+    df: pd.DataFrame,
+    sort_column: str,
+) -> pd.DataFrame:
+    """Select row with minimum sort_column value per feature."""
+    sorted_df = df.sort_values(["feature", sort_column], ascending=[True, True])
+    best_per_feature = sorted_df.groupby("feature", sort=False).head(1)
+    return best_per_feature.set_index("feature")
+
+
+def _add_correlation_columns(
+    out: pd.DataFrame,
+    corr_df: pd.DataFrame,
+    target: str,
+    prefix: str,
+) -> None:
+    """Add correlation columns for a specific target."""
+    filtered = corr_df[corr_df["target"] == target]
+    if filtered.empty:
+        return
+    
+    best = _select_best_per_feature(filtered, "p_val")
+    out[f"{prefix}_r"] = out["feature"].map(best["r_val"]).astype(float)
+    out[f"{prefix}_p"] = out["feature"].map(best["p_val"]).astype(float)
+    out[f"{prefix}_sign"] = out[f"{prefix}_r"].map(_sign)
+
+
+def _add_regression_columns(
+    out: pd.DataFrame,
+    regression_df: pd.DataFrame,
+    target: str,
+    prefix: str,
+) -> None:
+    """Add regression beta columns for a specific target."""
+    filtered = regression_df[regression_df["target"] == target]
+    if filtered.empty:
+        return
+    
+    has_p_primary = "p_primary" in filtered.columns
+    if has_p_primary:
+        sorted_df = filtered.sort_values(
+            ["feature", "p_primary"], ascending=[True, True]
+        )
+    else:
+        sorted_df = filtered
+    
+    best = sorted_df.groupby("feature", sort=False).head(1).set_index("feature")
+    out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
+    
+    p_column = best.get("p_primary", best.get("p_feature", np.nan))
+    p_values = pd.to_numeric(p_column, errors="coerce")
+    out[f"{prefix}_p"] = out["feature"].map(p_values).astype(float)
+    out[f"{prefix}_sign"] = out[f"{prefix}_beta"].map(_sign)
+
+
+def _get_p_value_column(models_df: pd.DataFrame) -> Optional[str]:
+    """Determine which p-value column to use from models dataframe."""
+    if "p_primary" in models_df.columns:
+        return "p_primary"
+    if "p_feature" in models_df.columns:
+        return "p_feature"
+    return None
+
+
+def _add_model_columns(
+    out: pd.DataFrame,
+    models_df: pd.DataFrame,
+    family: str,
+    target: str,
+    prefix: str,
+) -> None:
+    """Add model beta columns for a specific family and target."""
+    if "model_family" not in models_df.columns:
+        return
+    
+    family_filtered = models_df[models_df["model_family"] == family]
+    if family_filtered.empty:
+        return
+    
+    if "target" not in family_filtered.columns:
+        return
+    
+    target_filtered = family_filtered[family_filtered["target"] == target]
+    if target_filtered.empty:
+        return
+    
+    sorted_df = target_filtered.sort_values(
+        ["feature", "p_val"], ascending=[True, True]
+    )
+    best = sorted_df.groupby("feature", sort=False).head(1).set_index("feature")
+    out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
+    out[f"{prefix}_p"] = out["feature"].map(best["p_val"]).astype(float)
+    out[f"{prefix}_sign"] = out[f"{prefix}_beta"].map(_sign)
+
+
+def _detect_sign_flip(series_a: pd.Series, series_b: pd.Series) -> pd.Series:
+    """Detect sign flips between two series."""
+    sign_a = series_a.map(_sign)
+    sign_b = series_b.map(_sign)
+    
+    both_finite = np.isfinite(sign_a) & np.isfinite(sign_b)
+    both_nonzero = (sign_a != 0) & (sign_b != 0)
+    valid = both_finite & both_nonzero
+    
+    opposite_signs = sign_a * sign_b < 0
+    return opposite_signs.where(valid, np.nan)
+
+
+def _add_sign_flip_flags(out: pd.DataFrame) -> None:
+    """Add sign flip detection columns."""
+    if "reg_rating_beta" in out.columns and "reg_pain_residual_beta" in out.columns:
+        out["flip_reg_rating_vs_pain_residual"] = _detect_sign_flip(
+            out["reg_rating_beta"], out["reg_pain_residual_beta"]
+        )
+    
+    if "corr_rating_r" in out.columns and "reg_rating_beta" in out.columns:
+        out["flip_corr_vs_reg_rating"] = _detect_sign_flip(
+            out["corr_rating_r"], out["reg_rating_beta"]
+        )
+    
+    if "corr_rating_r" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
+        out["flip_corr_vs_model_ols_rating"] = _detect_sign_flip(
+            out["corr_rating_r"], out["model_ols_hc3_rating_beta"]
+        )
+    
+    if "reg_rating_beta" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
+        out["flip_reg_vs_model_ols_rating"] = _detect_sign_flip(
+            out["reg_rating_beta"], out["model_ols_hc3_rating_beta"]
+        )
 
 
 def build_effect_direction_consistency_summary(
@@ -54,7 +208,6 @@ def build_effect_direction_consistency_summary(
     corr_df: Optional[pd.DataFrame],
     regression_df: Optional[pd.DataFrame],
     models_df: Optional[pd.DataFrame],
-    config: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Merge per-feature evidence across analyses and flag sign flips.
@@ -63,108 +216,112 @@ def build_effect_direction_consistency_summary(
       corr_rating_r, reg_rating_beta, model_ols_rating_beta, ...
       flip_* booleans for contradictions.
     """
-    meta: Dict[str, Any] = {"status": "init"}
-
-    features: List[str] = []
-    for df in [corr_df, regression_df, models_df]:
-        if df is None or df.empty or "feature" not in df.columns:
-            continue
-        features.extend([str(x) for x in df["feature"].dropna().unique().tolist()])
-    features = sorted(set(features))
+    features = _extract_unique_features(corr_df, regression_df, models_df)
     if not features:
         return pd.DataFrame(), {"status": "empty"}
 
     out = pd.DataFrame({"feature": features})
 
-    # Correlations: rating and temperature (when present)
-    if corr_df is not None and not corr_df.empty and "target" in corr_df.columns:
-        cdf = corr_df.copy()
-        cdf["target"] = cdf["target"].astype(str)
-        cdf["r_val"] = _pick_corr_r(cdf)
-        cdf["p_val"] = _pick_corr_p(cdf)
+    if _has_valid_correlation_data(corr_df):
+        _process_correlations(out, corr_df)
 
-        def _agg(target: str, prefix: str) -> None:
-            sub = cdf[cdf["target"] == target]
-            if sub.empty:
-                return
-            # Choose row with min p (primary) per feature.
-            sub = sub.sort_values(["feature", "p_val"], ascending=[True, True])
-            best = sub.groupby("feature", sort=False).head(1).set_index("feature")
-            out[f"{prefix}_r"] = out["feature"].map(best["r_val"]).astype(float)
-            out[f"{prefix}_p"] = out["feature"].map(best["p_val"]).astype(float)
-            out[f"{prefix}_sign"] = out[f"{prefix}_r"].map(_sign)
+    if _has_valid_regression_data(regression_df):
+        _process_regressions(out, regression_df)
 
-        _agg("rating", "corr_rating")
-        _agg("temperature", "corr_temperature")
+    if _has_valid_models_data(models_df):
+        _process_models(out, models_df)
 
-    # Regression: beta_feature for given outcome/target.
-    if regression_df is not None and not regression_df.empty and "target" in regression_df.columns:
-        rdf = regression_df.copy()
-        rdf["target"] = rdf["target"].astype(str)
-        rdf["beta"] = _pick_beta(rdf)
-        for target, prefix in [("rating", "reg_rating"), ("pain_residual", "reg_pain_residual"), ("temperature", "reg_temperature")]:
-            sub = rdf[rdf["target"] == target]
-            if sub.empty:
-                continue
-            sub = sub.sort_values(["feature", "p_primary"], ascending=[True, True]) if "p_primary" in sub.columns else sub
-            best = sub.groupby("feature", sort=False).head(1).set_index("feature")
-            out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
-            out[f"{prefix}_p"] = out["feature"].map(pd.to_numeric(best.get("p_primary", best.get("p_feature", np.nan)), errors="coerce")).astype(float)
-            out[f"{prefix}_sign"] = out[f"{prefix}_beta"].map(_sign)
+    _add_sign_flip_flags(out)
 
-    # Models: beta_feature by family (default use ols_hc3 for sign comparisons, but keep robust too if present)
-    if models_df is not None and not models_df.empty:
-        mdf = models_df.copy()
-        for col in ["target", "model_family"]:
-            if col in mdf.columns:
-                mdf[col] = mdf[col].astype(str)
-        mdf["beta"] = _pick_beta(mdf)
-        p_col = "p_primary" if "p_primary" in mdf.columns else ("p_feature" if "p_feature" in mdf.columns else None)
-        if p_col is not None:
-            mdf["p_val"] = pd.to_numeric(mdf[p_col], errors="coerce")
-        else:
-            mdf["p_val"] = np.nan
-
-        for fam in ["ols_hc3", "robust_rlm", "quantile_50", "logit"]:
-            if "model_family" not in mdf.columns:
-                continue
-            sub_f = mdf[mdf["model_family"] == fam]
-            if sub_f.empty:
-                continue
-            for target, prefix in [("rating", f"model_{fam}_rating"), ("pain_residual", f"model_{fam}_pain_residual")]:
-                if "target" not in sub_f.columns:
-                    continue
-                sub = sub_f[sub_f["target"] == target]
-                if sub.empty:
-                    continue
-                sub = sub.sort_values(["feature", "p_val"], ascending=[True, True])
-                best = sub.groupby("feature", sort=False).head(1).set_index("feature")
-                out[f"{prefix}_beta"] = out["feature"].map(best["beta"]).astype(float)
-                out[f"{prefix}_p"] = out["feature"].map(best["p_val"]).astype(float)
-                out[f"{prefix}_sign"] = out[f"{prefix}_beta"].map(_sign)
-
-    # Flag sign flips: rating vs pain_residual, and across methods.
-    def _flip(a: pd.Series, b: pd.Series) -> pd.Series:
-        a_s = a.map(_sign)
-        b_s = b.map(_sign)
-        ok = np.isfinite(a_s) & np.isfinite(b_s) & (a_s != 0) & (b_s != 0)
-        return (a_s * b_s < 0).where(ok, np.nan)
-
-    if "reg_rating_beta" in out.columns and "reg_pain_residual_beta" in out.columns:
-        out["flip_reg_rating_vs_pain_residual"] = _flip(out["reg_rating_beta"], out["reg_pain_residual_beta"])
-    if "corr_rating_r" in out.columns and "reg_rating_beta" in out.columns:
-        out["flip_corr_vs_reg_rating"] = _flip(out["corr_rating_r"], out["reg_rating_beta"])
-    if "corr_rating_r" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
-        out["flip_corr_vs_model_ols_rating"] = _flip(out["corr_rating_r"], out["model_ols_hc3_rating_beta"])
-    if "reg_rating_beta" in out.columns and "model_ols_hc3_rating_beta" in out.columns:
-        out["flip_reg_vs_model_ols_rating"] = _flip(out["reg_rating_beta"], out["model_ols_hc3_rating_beta"])
-
-    meta["status"] = "ok"
-    meta["n_features"] = int(len(out))
-    meta["has_correlations"] = bool(corr_df is not None and not corr_df.empty)
-    meta["has_regression"] = bool(regression_df is not None and not regression_df.empty)
-    meta["has_models"] = bool(models_df is not None and not models_df.empty)
+    meta = _build_metadata(out, corr_df, regression_df, models_df)
     return out, meta
+
+
+def _has_valid_correlation_data(corr_df: Optional[pd.DataFrame]) -> bool:
+    """Check if correlation dataframe is valid and has required columns."""
+    if corr_df is None or corr_df.empty:
+        return False
+    return "target" in corr_df.columns
+
+
+def _has_valid_regression_data(regression_df: Optional[pd.DataFrame]) -> bool:
+    """Check if regression dataframe is valid and has required columns."""
+    if regression_df is None or regression_df.empty:
+        return False
+    return "target" in regression_df.columns
+
+
+def _has_valid_models_data(models_df: Optional[pd.DataFrame]) -> bool:
+    """Check if models dataframe is valid."""
+    return models_df is not None and not models_df.empty
+
+
+def _process_correlations(out: pd.DataFrame, corr_df: pd.DataFrame) -> None:
+    """Process correlation data and add columns to output dataframe."""
+    corr_processed = corr_df.copy()
+    corr_processed["target"] = corr_processed["target"].astype(str)
+    corr_processed["r_val"] = _pick_corr_r(corr_processed)
+    corr_processed["p_val"] = _pick_corr_p(corr_processed)
+
+    _add_correlation_columns(out, corr_processed, "rating", "corr_rating")
+    _add_correlation_columns(out, corr_processed, "temperature", "corr_temperature")
+
+
+def _process_regressions(out: pd.DataFrame, regression_df: pd.DataFrame) -> None:
+    """Process regression data and add columns to output dataframe."""
+    reg_processed = regression_df.copy()
+    reg_processed["target"] = reg_processed["target"].astype(str)
+    reg_processed["beta"] = _pick_beta(reg_processed)
+
+    regression_targets = [
+        ("rating", "reg_rating"),
+        ("pain_residual", "reg_pain_residual"),
+        ("temperature", "reg_temperature"),
+    ]
+    for target, prefix in regression_targets:
+        _add_regression_columns(out, reg_processed, target, prefix)
+
+
+def _process_models(out: pd.DataFrame, models_df: pd.DataFrame) -> None:
+    """Process model data and add columns to output dataframe."""
+    models_processed = models_df.copy()
+    for col in ["target", "model_family"]:
+        if col in models_processed.columns:
+            models_processed[col] = models_processed[col].astype(str)
+    
+    models_processed["beta"] = _pick_beta(models_processed)
+    
+    p_column_name = _get_p_value_column(models_processed)
+    if p_column_name is not None:
+        models_processed["p_val"] = pd.to_numeric(
+            models_processed[p_column_name], errors="coerce"
+        )
+    else:
+        models_processed["p_val"] = np.nan
+
+    model_families = ["ols_hc3", "robust_rlm", "quantile_50", "logit"]
+    model_targets = ["rating", "pain_residual"]
+    
+    for family in model_families:
+        for target in model_targets:
+            prefix = f"model_{family}_{target}"
+            _add_model_columns(out, models_processed, family, target, prefix)
+
+
+def _build_metadata(
+    out: pd.DataFrame,
+    corr_df: Optional[pd.DataFrame],
+    regression_df: Optional[pd.DataFrame],
+    models_df: Optional[pd.DataFrame],
+) -> Dict[str, Any]:
+    """Build metadata dictionary with summary information."""
+    return {
+        "status": "ok",
+        "n_features": int(len(out)),
+        "has_correlations": bool(corr_df is not None and not corr_df.empty),
+        "has_regression": bool(regression_df is not None and not regression_df.empty),
+        "has_models": bool(models_df is not None and not models_df.empty),
+    }
 
 
 __all__ = ["build_effect_direction_consistency_summary"]

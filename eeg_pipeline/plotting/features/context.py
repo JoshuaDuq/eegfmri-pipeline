@@ -13,16 +13,18 @@ from dataclasses import dataclass, field
 import copy
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import matplotlib.figure
 
 import matplotlib.pyplot as plt
 import mne
 import pandas as pd
 
-from eeg_pipeline.infra.paths import ensure_dir
 from eeg_pipeline.infra.tsv import read_table as _read_table
 from eeg_pipeline.plotting.io.figures import save_fig as _save_fig
-from eeg_pipeline.plotting.config import get_plot_config
+from eeg_pipeline.plotting.config import PlotConfig, get_plot_config
 from eeg_pipeline.plotting.core.registry import (
     CategorizedPlotManager,
     CategorizedPlotRegistry,
@@ -32,6 +34,27 @@ from eeg_pipeline.plotting.core.registry import (
 
 class VisualizationRegistry(CategorizedPlotRegistry["FeaturePlotContext"]):
     """Registry for feature plotting functions."""
+
+
+# Feature table specifications: (attribute_name, file_stem, extensions, mode)
+_FEATURE_TABLE_SPECS: List[Tuple[str, str, List[str], str]] = [
+    ("power_df", "features_power", [".tsv"], "wide"),
+    ("connectivity_df", "features_connectivity", [".tsv"], "wide"),
+    ("aperiodic_df", "features_aperiodic", [".tsv"], "wide"),
+    ("erds_df", "features_erds", [".tsv"], "wide"),
+    ("bursts_df", "features_bursts", [".tsv"], "wide"),
+    ("quality_df", "features_quality", [".tsv"], "wide"),
+    ("spectral_df", "features_spectral", [".tsv"], "wide"),
+    ("ratios_df", "features_ratios", [".tsv"], "wide"),
+    ("asymmetry_df", "features_asymmetry", [".tsv"], "wide"),
+    ("complexity_df", "features_complexity", [".tsv"], "wide"),
+    ("pac_df", "features_pac", [".tsv"], "wide"),
+    ("pac_trials_df", "features_pac_trials", [".tsv"], "wide"),
+    ("pac_time_df", "features_pac_time", [".tsv"], "long"),
+    ("itpc_df", "features_itpc", [".tsv"], "wide"),
+    ("temporal_df", "features_temporal", [".tsv"], "wide"),
+    ("erp_df", "features_erp", [".tsv"], "wide"),
+]
 
 
 @dataclass
@@ -71,14 +94,15 @@ class FeaturePlotContext:
     _tfr_cached: bool = False
     
     def subdir(self, name: str) -> Path:
-        path = self.plots_dir / name
-        return path
+        """Get subdirectory path within plots directory."""
+        return self.plots_dir / name
     
     @property
-    def plot_cfg(self):
+    def plot_cfg(self) -> PlotConfig:
+        """Get plotting configuration."""
         return get_plot_config(self.config)
     
-    def save(self, fig, path: Path) -> None:
+    def save(self, fig: "matplotlib.figure.Figure", path: Path) -> None:
         _save_fig(fig, path, formats=self.plot_cfg.formats, dpi=self.plot_cfg.dpi)
         plt.close(fig)
     
@@ -90,15 +114,17 @@ class FeaturePlotContext:
         self._apply_window_overrides()
         self._load_feature_tables()
 
-
         self.n_trials = self._infer_trial_count()
         if self.n_trials > 0:
             self.logger.info("Loaded %d trials", self.n_trials)
 
     def _load_extraction_configs(self) -> None:
+        """Load extraction configuration files and extract window ranges."""
         self.window_ranges = {}
         self.time_range_suffixes = []
-        configs: List[Tuple[str, Optional[str], Optional[float], Optional[float]]] = []
+        
+        ExtractionConfig = Tuple[str, Optional[str], Optional[float], Optional[float]]
+        configs: List[ExtractionConfig] = []
 
         for path in sorted(self.features_dir.glob("extraction_config*.json")):
             try:
@@ -153,12 +179,14 @@ class FeaturePlotContext:
             self.logger.info("Detected extracted windows: %s", formatted)
 
     def _apply_window_overrides(self) -> None:
+        """Apply window range overrides to config if available."""
         if not self.window_ranges or self.config is None:
             return
 
         try:
             self.config = copy.deepcopy(self.config)
-        except Exception:
+        except (TypeError, AttributeError, ValueError):
+            # Config may not be deepcopy-able, continue with original
             pass
 
         baseline = self.window_ranges.get("baseline")
@@ -177,13 +205,18 @@ class FeaturePlotContext:
         self._set_config_value(f"feature_engineering.features.{label}_window", win)
 
     def _set_config_value(self, key: str, value: Any) -> None:
+        """Set nested config value, creating intermediate dicts as needed."""
         if self.config is None:
             return
+        
+        # Try direct assignment first (for dict-like configs)
         try:
             self.config[key] = value
             return
-        except Exception:
+        except (TypeError, KeyError, AttributeError):
+            # Config doesn't support direct assignment, use nested path
             pass
+        
         keys = key.split(".")
         current = self.config
         for part in keys[:-1]:
@@ -193,48 +226,33 @@ class FeaturePlotContext:
         current[keys[-1]] = value
 
     def _load_feature_tables(self) -> None:
-        table_specs = [
-            ("power_df", "features_power", [".tsv"], "wide"),
-            ("connectivity_df", "features_connectivity", [".tsv"], "wide"),
-            ("aperiodic_df", "features_aperiodic", [".tsv"], "wide"),
-            ("erds_df", "features_erds", [".tsv"], "wide"),
-            ("bursts_df", "features_bursts", [".tsv"], "wide"),
-            ("quality_df", "features_quality", [".tsv"], "wide"),
-            ("spectral_df", "features_spectral", [".tsv"], "wide"),
-            ("ratios_df", "features_ratios", [".tsv"], "wide"),
-            ("asymmetry_df", "features_asymmetry", [".tsv"], "wide"),
-            ("complexity_df", "features_complexity", [".tsv"], "wide"),
-            ("pac_df", "features_pac", [".tsv"], "wide"),
-            ("pac_trials_df", "features_pac_trials", [".tsv"], "wide"),
-            ("pac_time_df", "features_pac_time", [".tsv"], "long"),
-            ("itpc_df", "features_itpc", [".tsv"], "wide"),
-            ("temporal_df", "features_temporal", [".tsv"], "wide"),
-            ("erp_df", "features_erp", [".tsv"], "wide"),
-        ]
-
-        for attr_name, stem, exts, mode in table_specs:
+        """Load all feature data tables from TSV files."""
+        for attr_name, stem, exts, mode in _FEATURE_TABLE_SPECS:
             paths = self._collect_feature_paths(stem, exts)
             df = self._load_feature_set(paths, mode=mode, stem=stem)
             if df is not None and not df.empty:
                 setattr(self, attr_name, df)
 
     def _collect_feature_paths(self, stem: str, exts: Sequence[str]) -> List[Path]:
+        """Collect feature file paths, prioritizing base files and known suffixes."""
         paths: List[Path] = []
         suffixes = self.time_range_suffixes
 
+        # First, try base files and known suffix variants
         for ext in exts:
-            base = self.features_dir / f"{stem}{ext}"
-            if base.exists():
-                paths.append(base)
+            base_path = self.features_dir / f"{stem}{ext}"
+            if base_path.exists():
+                paths.append(base_path)
 
             for suffix in suffixes:
-                candidate = self.features_dir / f"{stem}_{suffix}{ext}"
-                if candidate.exists():
-                    paths.append(candidate)
+                candidate_path = self.features_dir / f"{stem}_{suffix}{ext}"
+                if candidate_path.exists():
+                    paths.append(candidate_path)
 
         if paths:
             return self._dedupe_paths(paths)
 
+        # Fallback: glob for any matching pattern
         for ext in exts:
             pattern = f"{stem}_*{ext}"
             for path in sorted(self.features_dir.glob(pattern)):
@@ -251,6 +269,16 @@ class FeaturePlotContext:
         mode: str,
         stem: str,
     ) -> Optional[pd.DataFrame]:
+        """Load and combine feature data from multiple files.
+        
+        Args:
+            paths: File paths to load
+            mode: "wide" (column-wise concatenation) or "long" (row-wise)
+            stem: Base filename stem for suffix extraction
+            
+        Returns:
+            Combined DataFrame or None if no valid data found
+        """
         if not paths:
             return None
 
@@ -292,12 +320,18 @@ class FeaturePlotContext:
 
         if combined.columns.duplicated().any():
             dupes = combined.columns[combined.columns.duplicated()].unique().tolist()
-            self.logger.warning("Dropping %d duplicate columns (%s)", len(dupes), ", ".join(map(str, dupes[:6])))
+            dupe_preview = ", ".join(map(str, dupes[:6]))
+            self.logger.warning(
+                "Dropping %d duplicate columns (%s)",
+                len(dupes),
+                dupe_preview,
+            )
             combined = combined.loc[:, ~combined.columns.duplicated()]
 
         return combined
 
     def _safe_read_table(self, path: Path) -> Optional[pd.DataFrame]:
+        """Safely read table file, returning None on failure."""
         if not path.exists():
             return None
         try:
@@ -307,8 +341,10 @@ class FeaturePlotContext:
             return None
 
     def _suffix_from_path(self, path: Path, stem: str) -> Optional[str]:
+        """Extract time range suffix from feature file path."""
         base = path.stem
-        if "_columns" in base or "_qc" in base or "_config" in base:
+        excluded_keywords = ["_columns", "_qc", "_config"]
+        if any(keyword in base for keyword in excluded_keywords):
             return None
         if base == stem:
             return None
@@ -318,27 +354,28 @@ class FeaturePlotContext:
         return None
 
     def _is_feature_payload(self, path: Path) -> bool:
+        """Check if path points to a feature data file (not metadata)."""
         stem = path.stem.lower()
-        if "columns" in stem:
-            return False
-        if "config" in stem:
+        excluded_keywords = ["columns", "config"]
+        if any(keyword in stem for keyword in excluded_keywords):
             return False
         if stem.endswith("_manifest"):
             return False
         return True
 
     def _dedupe_paths(self, paths: Sequence[Path]) -> List[Path]:
+        """Remove duplicate paths while preserving order."""
         seen = set()
-        out = []
+        unique_paths = []
         for path in paths:
-            if path in seen:
-                continue
-            seen.add(path)
-            out.append(path)
-        return out
+            if path not in seen:
+                seen.add(path)
+                unique_paths.append(path)
+        return unique_paths
 
     def _infer_trial_count(self) -> int:
-        candidates = [
+        """Infer trial count from first available non-empty dataframe."""
+        candidate_dataframes = [
             self.power_df,
             self.connectivity_df,
             self.aperiodic_df,
@@ -354,12 +391,12 @@ class FeaturePlotContext:
             self.temporal_df,
             self.quality_df,
         ]
-        for df in candidates:
+        for df in candidate_dataframes:
             if df is not None and not df.empty:
                 return len(df)
         return 0
     
-    def get_or_compute_tfr(self, freqs=None, n_cycles=None):
+    def get_or_compute_tfr(self) -> Optional[mne.time_frequency.EpochsTFR]:
         """Get cached TFR or compute if not available."""
         if self.tfr is not None and self._tfr_cached:
             return self.tfr
@@ -373,15 +410,15 @@ class FeaturePlotContext:
             
             self.logger.info("Computing TFR (will be cached for subsequent plots)...")
             self.tfr = compute_tfr_for_visualization(
-                self.epochs, 
+                self.epochs,
                 config=self.config,
-                logger=self.logger
+                logger=self.logger,
             )
             self._tfr_cached = True
             self.logger.info("TFR computed and cached")
             return self.tfr
-        except Exception as e:
-            self.logger.warning(f"Failed to compute TFR: {e}")
+        except Exception as exc:
+            self.logger.warning("Failed to compute TFR: %s", exc)
             return None
 
 
@@ -391,7 +428,13 @@ class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
     def __init__(self, ctx: FeaturePlotContext):
         super().__init__(ctx, logger=ctx.logger)
 
-    def run_category(self, category: str, *, plotters: Optional[List[Tuple[str, PlotterFunc["FeaturePlotContext"]]]] = None) -> None:
+    def run_category(
+        self,
+        category: str,
+        *,
+        plotters: Optional[List[Tuple[str, PlotterFunc["FeaturePlotContext"]]]] = None,
+    ) -> None:
+        """Run plotters for a specific category."""
         if plotters is None:
             plotters = VisualizationRegistry.get_plotters(category)
         from eeg_pipeline.plotting.style import use_style
@@ -400,6 +443,7 @@ class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
             super().run_category(category, plotters=plotters)
 
     def run_all(self) -> Dict[str, Path]:
+        """Run all registered plotters in preferred order."""
         categories = VisualizationRegistry.get_categories()
         preferred_order = [
             "power",
@@ -418,11 +462,12 @@ class VisualizationManager(CategorizedPlotManager["FeaturePlotContext"]):
             "quality",
         ]
 
-        ordered = [c for c in preferred_order if c in categories]
-        ordered += [c for c in categories if c not in preferred_order]
+        ordered_categories = [c for c in preferred_order if c in categories]
+        remaining_categories = [c for c in categories if c not in preferred_order]
+        ordered_categories.extend(remaining_categories)
 
-        for cat in ordered:
-            self.run_category(cat)
+        for category in ordered_categories:
+            self.run_category(category)
 
         return self.saved_plots
 

@@ -20,10 +20,35 @@ from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.infra.paths import ensure_dir, deriv_stats_path
 from eeg_pipeline.plotting.io.figures import save_fig, log_if_present
 from eeg_pipeline.infra.logging import get_logger
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from ..config import get_plot_config
 from ...utils.analysis.stats import fdr_bh
 from .utils import get_condition_colors, get_fdr_alpha
+
+
+# Constants
+MIN_SAMPLES_PER_CHANNEL_DEFAULT = 5
+MIN_CHANNELS_FOR_APERIODIC_CORR_DEFAULT = 10
+MIN_RUNS_FOR_CORRELATION = 5
+MIN_PERMUTATIONS = 10
+DEFAULT_N_PERMUTATIONS = 1000
+DEFAULT_RANDOM_STATE = 42
+PERCENTILE_LOW = 5
+PERCENTILE_HIGH = 95
+TOPO_CONTOURS = 6
+SCATTER_ALPHA = 0.6
+BOX_ALPHA = 0.6
+SCATTER_SIZE = 6
+RUN_COLUMN_CANDIDATES = ["run_id", "run", "block"]
+RATING_COLUMN_CANDIDATES = ["rating", "vas", "pain_rating", "response"]
+APERIODIC_METRICS = ["slope", "offset"]
+SLOPE_COLOR = "#8E44AD"
+OFFSET_COLOR = "#16A085"
+CONDITION_COLOR_V1 = "#5a7d9a"
+CONDITION_COLOR_V2 = "#c44e52"
+SIGNIFICANT_COLOR = "#d62728"
+NON_SIGNIFICANT_COLOR = "#333333"
 
 
 def _extract_aperiodic_data(
@@ -66,7 +91,9 @@ def _extract_aperiodic_data(
     return np.array(data), found_chs
 
 
-def _load_aperiodic_qc(subject: str, config: Any, logger: logging.Logger):
+def _load_aperiodic_qc(
+    subject: str, config: Any, logger: logging.Logger
+) -> Optional[Dict[str, Any]]:
     """Load aperiodic QC data from npz file.
     
     Args:
@@ -82,13 +109,19 @@ def _load_aperiodic_qc(subject: str, config: Any, logger: logging.Logger):
         qc_path = stats_dir / "aperiodic_qc.npz"
     except (AttributeError, TypeError):
         qc_path = None
+    
     if qc_path is None or not qc_path.exists():
-        log_if_present(logger, "warning", "Aperiodic QC sidecar not found; skipping QC plots")
+        log_if_present(
+            logger, "warning", "Aperiodic QC sidecar not found; skipping QC plots"
+        )
         return None
+    
     try:
         return np.load(qc_path, allow_pickle=True)
-    except Exception as exc:
-        log_if_present(logger, "warning", f"Failed to load aperiodic QC npz: {exc}")
+    except (OSError, IOError, ValueError) as exc:
+        log_if_present(
+            logger, "warning", f"Failed to load aperiodic QC npz: {exc}"
+        )
         return None
 
 
@@ -117,13 +150,14 @@ def plot_aperiodic_residual_spectra(
 
     plot_cfg = get_plot_config(config)
     mean_resid = np.nanmean(residual_mean, axis=0)
-    p5 = np.nanpercentile(residual_mean, 5, axis=0)
-    p95 = np.nanpercentile(residual_mean, 95, axis=0)
+    p5 = np.nanpercentile(residual_mean, PERCENTILE_LOW, axis=0)
+    p95 = np.nanpercentile(residual_mean, PERCENTILE_HIGH, axis=0)
 
     fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     ax.plot(freqs, mean_resid, label="Mean residual", color="k")
-    ax.fill_between(freqs, p5, p95, color="gray", alpha=0.3, label="5–95% channels")
+    percentile_label = f"{PERCENTILE_LOW}–{PERCENTILE_HIGH}% channels"
+    ax.fill_between(freqs, p5, p95, color="gray", alpha=0.3, label=percentile_label)
     ax.axhline(0, color="black", linestyle="--", alpha=0.5)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Residual (log PSD – fit)")
@@ -188,13 +222,17 @@ def plot_aperiodic_run_trajectories(
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("wide", plot_type="features")
     fig, axes = plt.subplots(1, 2, figsize=fig_size)
-    axes[0].errorbar(run_order, slope_means, yerr=slope_sems, fmt="o-", color="purple", capsize=3)
+    axes[0].errorbar(
+        run_order, slope_means, yerr=slope_sems, fmt="o-", color="purple", capsize=3
+    )
     axes[0].set_title("Slope by run")
     axes[0].set_ylabel("Aperiodic slope")
     axes[0].set_xlabel("Run")
     axes[0].grid(alpha=0.3)
 
-    axes[1].errorbar(run_order, offset_means, yerr=offset_sems, fmt="o-", color="teal", capsize=3)
+    axes[1].errorbar(
+        run_order, offset_means, yerr=offset_sems, fmt="o-", color="teal", capsize=3
+    )
     axes[1].set_title("Offset by run")
     axes[1].set_ylabel("Aperiodic offset")
     axes[1].set_xlabel("Run")
@@ -207,6 +245,162 @@ def plot_aperiodic_run_trajectories(
              bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
     plt.close(fig)
     log_if_present(logger, "info", "Saved aperiodic run-wise trajectories")
+
+
+def _extract_condition_masks(
+    features_df: pd.DataFrame,
+    events_df: Optional[pd.DataFrame],
+    config: Any,
+    logger: logging.Logger,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[str], Optional[str]]:
+    """Extract condition masks from events DataFrame.
+    
+    Returns:
+        Tuple of (nonpain_mask, pain_mask, label1, label2) or (None, None, None, None)
+    """
+    if events_df is None or len(features_df) != len(events_df):
+        if events_df is not None:
+            log_if_present(
+                logger,
+                "warning",
+                "Events/features length mismatch; using overall mean."
+            )
+        return None, None, None, None
+    
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    
+    comp = extract_comparison_mask(events_df, config, require_enabled=False)
+    if comp is None:
+        return None, None, None, None
+    
+    nonpain_mask, pain_mask, label1, label2 = comp
+    nonpain_mask = np.asarray(nonpain_mask, dtype=bool)
+    pain_mask = np.asarray(pain_mask, dtype=bool)
+    
+    if nonpain_mask.sum() == 0 or pain_mask.sum() == 0:
+        log_if_present(
+            logger,
+            "warning",
+            "Condition topomaps skipped (missing one condition)"
+        )
+        return None, None, None, None
+    
+    return nonpain_mask, pain_mask, label1, label2
+
+
+def _find_run_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+    """Find run/block column name from config or common candidates.
+    
+    Returns:
+        Column name or None if not found
+    """
+    run_col = None
+    if config is not None:
+        run_col = config.get("behavior_analysis.run_adjustment.column", None)
+        if run_col is not None:
+            run_col = str(run_col).strip()
+            if run_col and run_col in events_df.columns:
+                return run_col
+    
+    for candidate in RUN_COLUMN_CANDIDATES:
+        if candidate in events_df.columns:
+            return candidate
+    
+    return None
+
+
+def _get_aperiodic_column_name(channel: str, metric: str, features_df: pd.DataFrame) -> Optional[str]:
+    """Get aperiodic column name using new or old naming scheme.
+    
+    Returns:
+        Column name or None if not found
+    """
+    col_new = f"aperiodic_active_broadband_ch_{channel}_{metric}"
+    col_old = f"aper_{metric}_{channel}"
+    
+    if col_new in features_df.columns:
+        return col_new
+    if col_old in features_df.columns:
+        return col_old
+    return None
+
+
+def _compute_channel_pvalues(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    common_channels: List[str],
+    metric: str,
+    pain_mask: np.ndarray,
+    nonpain_mask: np.ndarray,
+    run_col: Optional[str],
+    config: Any,
+) -> List[float]:
+    """Compute p-values for each channel comparing pain vs nonpain.
+    
+    Returns:
+        List of p-values (may contain NaN)
+    """
+    min_samples = int(
+        get_config_value(
+            config, "statistics.min_samples_per_channel", MIN_SAMPLES_PER_CHANNEL_DEFAULT
+        )
+    )
+    p_values = []
+    
+    for channel in common_channels:
+        col = _get_aperiodic_column_name(channel, metric, features_df)
+        if col is None:
+            p_values.append(np.nan)
+            continue
+        
+        series = pd.to_numeric(features_df[col], errors="coerce")
+        
+        if run_col:
+            runs = events_df[run_col]
+            vals_pain = series[pain_mask].groupby(runs[pain_mask]).mean().dropna()
+            vals_nonpain = series[nonpain_mask].groupby(runs[nonpain_mask]).mean().dropna()
+        else:
+            vals_pain = series[pain_mask].dropna()
+            vals_nonpain = series[nonpain_mask].dropna()
+        
+        if len(vals_pain) < min_samples or len(vals_nonpain) < min_samples:
+            p_values.append(np.nan)
+            continue
+        
+        try:
+            _, pval = stats.mannwhitneyu(
+                vals_pain, vals_nonpain, alternative="two-sided"
+            )
+        except ValueError:
+            pval = np.nan
+        p_values.append(pval)
+    
+    return p_values
+
+
+def _extract_pair_data(
+    features_df: pd.DataFrame,
+    common_channels: List[str],
+    metric: str,
+    pain_mask: np.ndarray,
+    nonpain_mask: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract mean values for pain and nonpain conditions.
+    
+    Returns:
+        Tuple of (data_nonpain, data_pain) arrays
+    """
+    data_nonpain = []
+    data_pain = []
+    
+    for channel in common_channels:
+        col = _get_aperiodic_column_name(channel, metric, features_df)
+        if col is None:
+            continue
+        data_nonpain.append(features_df.loc[nonpain_mask, col].mean())
+        data_pain.append(features_df.loc[pain_mask, col].mean())
+    
+    return np.array(data_nonpain), np.array(data_pain)
 
 
 def plot_aperiodic_topomaps(
@@ -237,29 +431,16 @@ def plot_aperiodic_topomaps(
         return
 
     plot_cfg = get_plot_config(config)
-
-    pain_mask = None
-    nonpain_mask = None
-    label1 = label2 = None
-    if events_df is not None and len(features_df) == len(events_df):
-        from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-
-        comp = extract_comparison_mask(events_df, config, require_enabled=False)
-        if comp is not None:
-            nonpain_mask, pain_mask, label1, label2 = comp
-            nonpain_mask = np.asarray(nonpain_mask, dtype=bool)
-            pain_mask = np.asarray(pain_mask, dtype=bool)
-            if nonpain_mask.sum() == 0 or pain_mask.sum() == 0:
-                log_if_present(logger, "warning", "Condition topomaps skipped (missing one condition)")
-                pain_mask = nonpain_mask = None
-    elif events_df is not None:
-        log_if_present(logger, "warning", "Events/features length mismatch; using overall mean.")
+    
+    nonpain_mask, pain_mask, label1, label2 = _extract_condition_masks(
+        features_df, events_df, config, logger
+    )
 
     all_pvals: List[float] = []
     per_metric_pvals: Dict[str, List[float]] = {}
     per_metric_common: Dict[str, Dict[str, Any]] = {}
 
-    for metric in ["slope", "offset"]:
+    for metric in APERIODIC_METRICS:
         data_overall, found_chs_overall = _extract_aperiodic_data(features_df, metric, info)
         if len(data_overall) == 0:
             log_if_present(logger, "warning", f"No {metric} data found for topomap")
@@ -269,8 +450,12 @@ def plot_aperiodic_topomaps(
         try:
             picks = mne.pick_channels(info.ch_names, found_chs_overall)
             info_subset = mne.pick_info(info, picks)
-        except Exception as e:
-            log_if_present(logger, "warning", f"Failed to pick channels for {metric} topomap: {e}")
+        except (ValueError, RuntimeError) as e:
+            log_if_present(
+                logger,
+                "warning",
+                f"Failed to pick channels for {metric} topomap: {e}"
+            )
             continue
 
         per_metric_common[metric] = {
@@ -281,62 +466,50 @@ def plot_aperiodic_topomaps(
         }
 
         if pain_mask is not None and nonpain_mask is not None:
-            data_nonpain, ch_nonpain = _extract_aperiodic_data(features_df, metric, info, mask=nonpain_mask)
-            data_pain, ch_pain = _extract_aperiodic_data(features_df, metric, info, mask=pain_mask)
-            common_chs = [ch for ch in found_chs_overall if ch in ch_nonpain and ch in ch_pain]
-            if common_chs:
-                run_col = config.get("behavior_analysis.run_adjustment.column", None) if config is not None else None
-                run_col = str(run_col).strip() if run_col is not None else ""
-                if not run_col or run_col not in events_df.columns:
-                    for cand in ["run_id", "run", "block"]:
-                        if cand in events_df.columns:
-                            run_col = cand
-                            break
+            data_nonpain, ch_nonpain = _extract_aperiodic_data(
+                features_df, metric, info, mask=nonpain_mask
+            )
+            data_pain, ch_pain = _extract_aperiodic_data(
+                features_df, metric, info, mask=pain_mask
+            )
+            common_chs = [
+                ch for ch in found_chs_overall
+                if ch in ch_nonpain and ch in ch_pain
+            ]
+            
+            if common_chs and events_df is not None:
+                run_col = _find_run_column(events_df, config)
                 if run_col is None:
-                    log_if_present(logger, "warning", "No run/block column found; skipping pain vs non-pain channel tests to avoid non-independent trials.")
-                    continue
-
-                p_vals = []
-                min_samples = int(config.get("statistics.min_samples_per_channel", 5))
-                for ch in common_chs:
-                    # Try new naming first
-                    col_new = f"aperiodic_active_broadband_ch_{ch}_{metric}"
-                    col_old = f"aper_{metric}_{ch}"
-                    col = col_new if col_new in features_df.columns else col_old
-                    if col not in features_df.columns:
-                        p_vals.append(np.nan)
-                        continue
-                    series = pd.to_numeric(features_df[col], errors="coerce")
-                    if run_col:
-                        runs = events_df[run_col]
-                        vals_pain = series[pain_mask].groupby(runs[pain_mask]).mean().dropna()
-                        vals_nonpain = series[nonpain_mask].groupby(runs[nonpain_mask]).mean().dropna()
-                    else:
-                        vals_pain = series[pain_mask].dropna()
-                        vals_nonpain = series[nonpain_mask].dropna()
-
-                    if len(vals_pain) < min_samples or len(vals_nonpain) < min_samples:
-                        p_vals.append(np.nan)
-                        continue
-                    try:
-                        _, pval = stats.mannwhitneyu(vals_pain, vals_nonpain, alternative="two-sided")
-                    except ValueError:
-                        pval = np.nan
-                    p_vals.append(pval)
-
-                per_metric_pvals[metric] = p_vals
-                all_pvals.extend([p for p in p_vals if np.isfinite(p)])
-                
-                def get_col(ch, metric):
-                    c_new = f"aperiodic_active_broadband_ch_{ch}_{metric}"
-                    c_old = f"aper_{metric}_{ch}"
-                    return c_new if c_new in features_df.columns else c_old
-                
-                per_metric_common[metric]["pair_data"] = {
-                    "common_chs": common_chs,
-                    "data_nonpain": np.array([features_df.loc[nonpain_mask, get_col(ch, metric)].mean() for ch in common_chs]),
-                    "data_pain": np.array([features_df.loc[pain_mask, get_col(ch, metric)].mean() for ch in common_chs]),
-                }
+                    log_if_present(
+                        logger,
+                        "warning",
+                        "No run/block column found; skipping pain vs non-pain "
+                        "channel tests to avoid non-independent trials."
+                    )
+                else:
+                    p_vals = _compute_channel_pvalues(
+                        features_df,
+                        events_df,
+                        common_chs,
+                        metric,
+                        pain_mask,
+                        nonpain_mask,
+                        run_col,
+                        config,
+                    )
+                    
+                    per_metric_pvals[metric] = p_vals
+                    all_pvals.extend([p for p in p_vals if np.isfinite(p)])
+                    
+                    data_nonpain_arr, data_pain_arr = _extract_pair_data(
+                        features_df, common_chs, metric, pain_mask, nonpain_mask
+                    )
+                    
+                    per_metric_common[metric]["pair_data"] = {
+                        "common_chs": common_chs,
+                        "data_nonpain": data_nonpain_arr,
+                        "data_pain": data_pain_arr,
+                    }
 
     per_metric_qvals: Dict[str, np.ndarray] = {}
     if all_pvals:
@@ -359,12 +532,17 @@ def plot_aperiodic_topomaps(
         log_if_present(logger, "warning", "No aperiodic metrics available for topomap grid")
         return
     
-    has_pain_data = any(meta.get("pair_data") is not None for meta in per_metric_common.values())
+    has_pain_data = any(
+        meta.get("pair_data") is not None for meta in per_metric_common.values()
+    )
     n_cols = 4 if has_pain_data else 1
     n_rows = len(metrics)
     
-    fig_width = float(plot_cfg.plot_type_configs.get("aperiodic", {}).get("width_per_column", 5.0)) * n_cols
-    fig_height = float(plot_cfg.plot_type_configs.get("aperiodic", {}).get("height_per_row", 4.5)) * n_rows
+    aperiodic_config = plot_cfg.plot_type_configs.get("aperiodic", {})
+    width_per_column = float(aperiodic_config.get("width_per_column", 5.0))
+    height_per_row = float(aperiodic_config.get("height_per_row", 4.5))
+    fig_width = width_per_column * n_cols
+    fig_height = height_per_row * n_rows
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
     
     for row_idx, metric in enumerate(metrics):
@@ -374,8 +552,9 @@ def plot_aperiodic_topomaps(
         cmap = "RdBu_r" if metric == "slope" else "viridis"
         
         ax = axes[row_idx, 0]
-        im, _ = mne.viz.plot_topomap(
-            data_overall, info_subset, axes=ax, show=False, cmap=cmap, contours=6
+        mne.viz.plot_topomap(
+            data_overall, info_subset, axes=ax, show=False, cmap=cmap,
+            contours=TOPO_CONTOURS
         )
         ax.set_title(f"{metric.capitalize()} - Overall")
         
@@ -395,36 +574,42 @@ def plot_aperiodic_topomaps(
             q_vals = per_metric_qvals.get(metric, np.full(len(common_chs), np.nan))
             sig_mask = np.isfinite(q_vals) & (q_vals < alpha)
             
-            ax = axes[row_idx, 1]
-            mne.viz.plot_topomap(
-                data_nonpain, info_common, axes=ax, show=False, cmap=cmap, contours=6
-            )
             cond1_label = str(label1) if label1 is not None else "Condition 1"
             cond2_label = str(label2) if label2 is not None else "Condition 2"
+            
+            ax = axes[row_idx, 1]
+            mne.viz.plot_topomap(
+                data_nonpain, info_common, axes=ax, show=False, cmap=cmap,
+                contours=TOPO_CONTOURS
+            )
             ax.set_title(f"{metric.capitalize()} - {cond1_label}")
             
             ax = axes[row_idx, 2]
             mne.viz.plot_topomap(
-                data_pain, info_common, axes=ax, show=False, cmap=cmap, contours=6
+                data_pain, info_common, axes=ax, show=False, cmap=cmap,
+                contours=TOPO_CONTOURS
             )
             ax.set_title(f"{metric.capitalize()} - {cond2_label}")
             
             ax = axes[row_idx, 3]
+            mask_params = None
+            if np.any(sig_mask):
+                mask_params = dict(
+                    marker="o",
+                    markerfacecolor="none",
+                    markeredgecolor="black",
+                    linewidth=1.0,
+                    markersize=8,
+                )
             mne.viz.plot_topomap(
                 diff,
                 info_common,
                 axes=ax,
                 show=False,
                 cmap="RdBu_r",
-                contours=6,
+                contours=TOPO_CONTOURS,
                 mask=sig_mask,
-                mask_params=dict(
-                    marker="o",
-                    markerfacecolor="none",
-                    markeredgecolor="black",
-                    linewidth=1.0,
-                    markersize=8,
-                ) if np.any(sig_mask) else None,
+                mask_params=mask_params,
             )
             title = f"{metric.capitalize()} - {cond2_label} minus {cond1_label}"
             if np.any(sig_mask):
@@ -435,7 +620,11 @@ def plot_aperiodic_topomaps(
             for col_idx in range(1, n_cols):
                 axes[row_idx, col_idx].axis("off")
     
-    fig.suptitle(f"Aperiodic Component Topomaps (sub-{subject})", fontsize=14, fontweight="bold")
+    fig.suptitle(
+        f"Aperiodic Component Topomaps (sub-{subject})",
+        fontsize=14,
+        fontweight="bold"
+    )
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     
     output_name = f"sub-{subject}_aperiodic_topomaps_grid"
@@ -448,7 +637,96 @@ def plot_aperiodic_topomaps(
         pad_inches=plot_cfg.pad_inches
     )
     plt.close(fig)
-    log_if_present(logger, "info", f"Saved aperiodic topomap grid ({n_rows} metrics × {n_cols} conditions)")
+    log_if_present(
+        logger,
+        "info",
+        f"Saved aperiodic topomap grid ({n_rows} metrics × {n_cols} conditions)"
+    )
+
+
+def _find_rating_column(events_df: pd.DataFrame, config: Any) -> Optional[str]:
+    """Find rating column from config or common candidates.
+    
+    Returns:
+        Column name or None if not found
+    """
+    potential_cols = list(RATING_COLUMN_CANDIDATES)
+    config_rating = config.get("event_columns.rating") if config is not None else None
+    
+    if config_rating:
+        if isinstance(config_rating, list):
+            for col in reversed(config_rating):
+                potential_cols.insert(0, col)
+        else:
+            potential_cols.insert(0, config_rating)
+    
+    for col in potential_cols:
+        if col in events_df.columns:
+            return col
+    
+    return None
+
+
+def _find_common_slope_columns(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    config: Any,
+) -> List[str]:
+    """Find slope columns common across conditions.
+    
+    Returns:
+        List of column names
+    """
+    slope_cols = [c for c in features_df.columns if c.startswith("aper_slope_")]
+    if not slope_cols:
+        return []
+    
+    from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+    
+    comp = extract_comparison_mask(events_df, config, require_enabled=False)
+    if comp is None:
+        return [
+            col for col in slope_cols
+            if pd.to_numeric(features_df[col], errors="coerce").notna().all()
+        ]
+    
+    mask1, mask2, _, _ = comp
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    
+    common_cols = []
+    for col in slope_cols:
+        vals = pd.to_numeric(features_df[col], errors="coerce")
+        if vals[mask1].notna().all() and vals[mask2].notna().all():
+            common_cols.append(col)
+    
+    return common_cols
+
+
+def _compute_permutation_pvalue(
+    ratings: np.ndarray,
+    slopes: np.ndarray,
+    n_permutations: int,
+    rng: np.random.Generator,
+) -> float:
+    """Compute permutation p-value for correlation.
+    
+    Returns:
+        Permutation p-value
+    """
+    observed_correlation, _ = stats.spearmanr(ratings, slopes)
+    observed_abs = abs(observed_correlation)
+    
+    n_iter = max(MIN_PERMUTATIONS, n_permutations)
+    perm_ge_count = 0
+    
+    for _ in range(n_iter):
+        shuffled_ratings = rng.permutation(ratings)
+        perm_correlation, _ = stats.spearmanr(shuffled_ratings, slopes)
+        if abs(perm_correlation) >= observed_abs:
+            perm_ge_count += 1
+    
+    return (perm_ge_count + 1) / (n_iter + 1)
 
 
 def plot_aperiodic_vs_pain(
@@ -472,153 +750,131 @@ def plot_aperiodic_vs_pain(
     if features_df is None or features_df.empty or events_df is None or events_df.empty:
         return
 
-    rating_col = None
-    potential_cols = ["rating", "vas", "pain_rating", "response"]
-    config_rating = config.get("event_columns.rating")
-    
-    if config_rating:
-        if isinstance(config_rating, list):
-             for c in reversed(config_rating):
-                 potential_cols.insert(0, c)
-        else:
-             potential_cols.insert(0, config_rating)
-        
-    for col in potential_cols:
-        if col in events_df.columns:
-            rating_col = col
-            break
-            
+    rating_col = _find_rating_column(events_df, config)
     if rating_col is None:
-        log_if_present(logger, "warning", "No rating column found for aperiodic scatter plot")
+        log_if_present(
+            logger,
+            "warning",
+            "No rating column found for aperiodic scatter plot"
+        )
         return
 
-    slope_cols = [c for c in features_df.columns if c.startswith("aper_slope_")]
-    if not slope_cols:
+    if len(features_df) != len(events_df):
+        log_if_present(
+            logger,
+            "warning",
+            "Mismatch in features and events length for scatter plot"
+        )
+        return
+
+    common_slope_cols = _find_common_slope_columns(features_df, events_df, config)
+    min_channels = int(
+        get_config_value(
+            config,
+            "statistics.min_channels_for_aperiodic_corr",
+            MIN_CHANNELS_FOR_APERIODIC_CORR_DEFAULT
+        )
+    )
+    
+    if len(common_slope_cols) < min_channels:
+        log_if_present(
+            logger,
+            "warning",
+            f"Insufficient common aperiodic channels across conditions "
+            f"({len(common_slope_cols)}<{min_channels}); skipping slope vs pain plot"
+        )
         return
     
-    if "aper_slope_" in slope_cols[0]:
-        comp = None
-        if events_df is not None and len(features_df) == len(events_df):
-            from eeg_pipeline.utils.analysis.events import extract_comparison_mask
-
-            comp = extract_comparison_mask(events_df, config, require_enabled=False)
-
-        if comp is not None:
-            mask1, mask2, _, _ = comp
-            mask1 = np.asarray(mask1, dtype=bool)
-            mask2 = np.asarray(mask2, dtype=bool)
-            common_chs = []
-            for col in slope_cols:
-                vals = pd.to_numeric(features_df[col], errors="coerce")
-                if vals[mask1].notna().all() and vals[mask2].notna().all():
-                    common_chs.append(col)
-        else:
-            common_chs = [
-                col for col in slope_cols
-                if pd.to_numeric(features_df[col], errors="coerce").notna().all()
-            ]
-        min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10))
-        if len(common_chs) < min_ch:
-            log_if_present(logger, "warning", f"Insufficient common aperiodic channels across conditions ({len(common_chs)}<{min_ch}); skipping slope vs pain plot")
-            return
-        mean_slopes = features_df[common_chs].mean(axis=1)
-    else:
-        mean_slopes = features_df[slope_cols].mean(axis=1)
+    mean_slopes = features_df[common_slope_cols].mean(axis=1)
     ratings = pd.to_numeric(events_df[rating_col], errors="coerce")
-    
-    if len(mean_slopes) != len(ratings):
-        log_if_present(logger, "warning", "Mismatch in features and events length for scatter plot")
-        return
-
     valid_mask = mean_slopes.notna() & ratings.notna()
-    mean_slopes = mean_slopes[valid_mask]
-    ratings = ratings[valid_mask]
+    mean_slopes_valid = mean_slopes[valid_mask]
+    ratings_valid = ratings[valid_mask]
     events_aligned = events_df.loc[valid_mask]
 
-    good_chs: List[str] = []
-    for col in slope_cols:
-        vals = pd.to_numeric(features_df[col], errors="coerce").loc[valid_mask]
-        if vals.notna().all():
-            good_chs.append(col)
-    min_ch = int(config.get("statistics.min_channels_for_aperiodic_corr", 10))
-    if len(good_chs) < min_ch:
-        log_if_present(logger, "warning", f"Insufficient common aperiodic channels ({len(good_chs)}<{min_ch}); skipping slope vs pain plot")
+    run_col = _find_run_column(events_aligned, config)
+    if run_col is None:
+        log_if_present(
+            logger,
+            "warning",
+            "No run/block column found; skipping aperiodic slope vs pain "
+            "(cannot assume independent trials)."
+        )
         return
 
-    run_col = None
-    for cand in ["run_id", "run", "block"]:
-        if cand in events_aligned.columns:
-            run_col = cand
-            break
+    grouped = events_aligned.assign(mean_slope=mean_slopes_valid).groupby(run_col)
+    slopes_agg = grouped["mean_slope"].mean()
+    ratings_agg = grouped[rating_col].mean()
+    agg_label = f"run-mean ({run_col})"
 
-    if run_col:
-        grouped = events_aligned.assign(mean_slope=mean_slopes).groupby(run_col)
-        slopes_agg = grouped["mean_slope"].mean()
-        ratings_agg = grouped[rating_col].mean()
-        agg_label = f"run-mean ({run_col})"
-    else:
-        log_if_present(logger, "warning", "No run/block column found; skipping aperiodic slope vs pain (cannot assume independent trials).")
+    if len(slopes_agg) < MIN_RUNS_FOR_CORRELATION:
         return
 
-    if len(slopes_agg) < 5:
-        return
+    correlation, _ = stats.spearmanr(ratings_agg, slopes_agg)
 
-    r_val, _ = stats.spearmanr(ratings_agg, slopes_agg)
+    n_permutations = int(
+        get_config_value(
+            config,
+            "plotting.plots.aperiodic.n_perm",
+            get_config_value(
+                config,
+                "behavior_analysis.statistics.n_permutations",
+                DEFAULT_N_PERMUTATIONS
+            )
+        )
+    )
+    random_state = int(
+        get_config_value(config, "project.random_state", DEFAULT_RANDOM_STATE)
+    )
+    rng = np.random.default_rng(random_state)
+    
+    p_perm_slope = _compute_permutation_pvalue(
+        ratings_agg.to_numpy(),
+        slopes_agg.to_numpy(),
+        n_permutations,
+        rng,
+    )
 
-    n_perm = int(get_config_value(config, "plotting.plots.aperiodic.n_perm", get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000)))
-    rng = np.random.default_rng(int(config.get("project.random_state", 42)))
-    observed = abs(r_val)
-    perm_ge = 0
-    ratings_arr = ratings_agg.to_numpy()
-    slopes_arr = slopes_agg.to_numpy()
-    n_iter = max(10, n_perm)
-    for _ in range(n_iter):
-        shuffled = rng.permutation(ratings_arr)
-        r_perm, _ = stats.spearmanr(shuffled, slopes_arr)
-        if abs(r_perm) >= observed:
-            perm_ge += 1
-    p_perm = (perm_ge + 1) / (n_iter + 1)
-
-    p_perm_for_bh = [p_perm]
-    if any(c.startswith("aper_offset_") for c in features_df.columns):
-        offset_cols = [c for c in features_df.columns if c.startswith("aper_offset_")]
+    p_perm_for_bh = [p_perm_slope]
+    offset_cols = [c for c in features_df.columns if c.startswith("aper_offset_")]
+    if offset_cols:
         mean_offset = features_df[offset_cols].mean(axis=1)[valid_mask]
-        if len(mean_offset) == len(ratings):
-            if run_col:
-                grouped_off = events_aligned.assign(mean_offset=mean_offset).groupby(run_col)
-                off_agg = grouped_off["mean_offset"].mean()
-                ratings_off = grouped_off[rating_col].mean()
-            else:
-                off_agg = mean_offset
-                ratings_off = ratings
-            if len(off_agg) >= 5:
-                r_off, _ = stats.spearmanr(ratings_off, off_agg)
-                observed_off = abs(r_off)
-                perm_ge_off = 0
-                off_arr = off_agg.to_numpy()
-                ratings_off_arr = ratings_off.to_numpy()
-                for _ in range(n_iter):
-                    shuffled_off = rng.permutation(ratings_off_arr)
-                    r_perm_off, _ = stats.spearmanr(shuffled_off, off_arr)
-                    if abs(r_perm_off) >= observed_off:
-                        perm_ge_off += 1
-                p_perm_off = (perm_ge_off + 1) / (n_iter + 1)
-                p_perm_for_bh.append(p_perm_off)
+        if len(mean_offset) == len(ratings_valid):
+            grouped_off = events_aligned.assign(mean_offset=mean_offset).groupby(run_col)
+            off_agg = grouped_off["mean_offset"].mean()
+            ratings_off = grouped_off[rating_col].mean()
+            
+            if len(off_agg) >= MIN_RUNS_FOR_CORRELATION:
+                p_perm_offset = _compute_permutation_pvalue(
+                    ratings_off.to_numpy(),
+                    off_agg.to_numpy(),
+                    n_permutations,
+                    rng,
+                )
+                p_perm_for_bh.append(p_perm_offset)
+    
     q_vals_perm = fdr_bh(p_perm_for_bh, config=config)
-    q_perm = q_vals_perm[0] if q_vals_perm.size else p_perm
+    q_perm = q_vals_perm[0] if q_vals_perm.size > 0 else p_perm_slope
 
     plot_cfg = get_plot_config(config)
     fig_size = plot_cfg.get_figure_size("standard", plot_type="features")
     fig, ax = plt.subplots(figsize=fig_size)
     
-    sns.scatterplot(x=ratings_agg, y=slopes_agg, ax=ax, alpha=0.6)
-    sns.regplot(x=ratings_agg, y=slopes_agg, ax=ax, scatter=False, lowess=True, line_kws={'color': 'red'})
+    sns.scatterplot(x=ratings_agg, y=slopes_agg, ax=ax, alpha=SCATTER_ALPHA)
+    sns.regplot(
+        x=ratings_agg,
+        y=slopes_agg,
+        ax=ax,
+        scatter=False,
+        lowess=True,
+        line_kws={"color": "red"}
+    )
     
     ax.set_xlabel(f"Rating ({rating_col}, {agg_label})")
     ax.set_ylabel("Mean Aperiodic Slope")
     ax.set_title(
         f"Aperiodic Slope vs Rating (sub-{subject})\n"
-        f"Spearman r={r_val:.2f}, perm q={q_perm:.3f}"
+        f"Spearman r={correlation:.2f}, perm q={q_perm:.3f}"
     )
     
     output_name = f"sub-{subject}_aperiodic_slope_vs_rating"
@@ -654,7 +910,6 @@ def plot_aperiodic_by_condition(
     if features_df is None or features_df.empty or events_df is None:
         return
 
-    from eeg_pipeline.utils.config.loader import get_config_value
     from eeg_pipeline.utils.analysis.events import extract_comparison_mask
     from eeg_pipeline.plotting.features.utils import (
         plot_paired_comparison,
@@ -675,9 +930,8 @@ def plot_aperiodic_by_condition(
             if logger:
                 logger.info(f"Auto-detected segments for aperiodic comparison: {segments}")
     
-    # Aperiodic uses metrics (slope, offset) instead of bands
-    metrics = ["slope", "offset"]
-    metric_colors = {"slope": "#8E44AD", "offset": "#16A085"}  # Purple for slope, teal for offset
+    metrics = APERIODIC_METRICS
+    metric_colors = {"slope": SLOPE_COLOR, "offset": OFFSET_COLOR}
     
     # Get ROI definitions
     rois = get_roi_definitions(config)
@@ -792,7 +1046,7 @@ def plot_aperiodic_by_condition(
             
             from eeg_pipeline.plotting.features.utils import compute_or_load_column_stats
             
-            segment_colors = {"v1": "#5a7d9a", "v2": "#c44e52"}
+            segment_colors = {"v1": CONDITION_COLOR_V1, "v2": CONDITION_COLOR_V2}
             n_metrics = len(metrics)
             n_trials = len(features_df)
             
@@ -822,15 +1076,24 @@ def plot_aperiodic_by_condition(
                     logger=logger,
                 )
                 
-                fig, axes = plt.subplots(1, n_metrics, figsize=(4 * n_metrics, 5), squeeze=False)
+                fig_width_per_metric = 4
+                fig_height = 5
+                fig, axes = plt.subplots(
+                    1, n_metrics,
+                    figsize=(fig_width_per_metric * n_metrics, fig_height),
+                    squeeze=False
+                )
                 
                 for col_idx, metric in enumerate(metrics):
                     ax = axes.flatten()[col_idx]
                     data = cell_data.get(col_idx)
                     
                     if data is None or len(data.get("v1", [])) == 0 or len(data.get("v2", [])) == 0:
-                        ax.text(0.5, 0.5, "No data", ha="center", va="center",
-                               transform=ax.transAxes, fontsize=plot_cfg.font.title, color="gray")
+                        ax.text(
+                            0.5, 0.5, "No data", ha="center", va="center",
+                            transform=ax.transAxes, fontsize=plot_cfg.font.title,
+                            color="gray"
+                        )
                         ax.set_xticks([])
                         continue
                     
@@ -838,12 +1101,25 @@ def plot_aperiodic_by_condition(
                     
                     bp = ax.boxplot([v1, v2], positions=[0, 1], widths=0.4, patch_artist=True)
                     bp["boxes"][0].set_facecolor(segment_colors["v1"])
-                    bp["boxes"][0].set_alpha(0.6)
+                    bp["boxes"][0].set_alpha(BOX_ALPHA)
                     bp["boxes"][1].set_facecolor(segment_colors["v2"])
-                    bp["boxes"][1].set_alpha(0.6)
+                    bp["boxes"][1].set_alpha(BOX_ALPHA)
                     
-                    ax.scatter(np.random.uniform(-0.08, 0.08, len(v1)), v1, c=segment_colors["v1"], alpha=0.3, s=6)
-                    ax.scatter(1 + np.random.uniform(-0.08, 0.08, len(v2)), v2, c=segment_colors["v2"], alpha=0.3, s=6)
+                    scatter_jitter = 0.08
+                    ax.scatter(
+                        np.random.uniform(-scatter_jitter, scatter_jitter, len(v1)),
+                        v1,
+                        c=segment_colors["v1"],
+                        alpha=0.3,
+                        s=SCATTER_SIZE
+                    )
+                    ax.scatter(
+                        1 + np.random.uniform(-scatter_jitter, scatter_jitter, len(v2)),
+                        v2,
+                        c=segment_colors["v2"],
+                        alpha=0.3,
+                        s=SCATTER_SIZE
+                    )
                     
                     all_vals = np.concatenate([v1, v2])
                     ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
@@ -853,34 +1129,71 @@ def plot_aperiodic_by_condition(
                     if col_idx in qvalues:
                         _, q, d, sig = qvalues[col_idx]
                         sig_marker = "†" if sig else ""
-                        sig_color = "#d62728" if sig else "#333333"
-                        ax.annotate(f"q={q:.3f}{sig_marker}\nd={d:.2f}", xy=(0.5, ymax + 0.05 * yrange),
-                                   ha="center", fontsize=plot_cfg.font.medium, color=sig_color,
-                                   fontweight="bold" if sig else "normal")
+                        sig_color = SIGNIFICANT_COLOR if sig else NON_SIGNIFICANT_COLOR
+                        annotation_y = ymax + 0.05 * yrange
+                        ax.annotate(
+                            f"q={q:.3f}{sig_marker}\nd={d:.2f}",
+                            xy=(0.5, annotation_y),
+                            ha="center",
+                            fontsize=plot_cfg.font.medium,
+                            color=sig_color,
+                            fontweight="bold" if sig else "normal"
+                        )
                     
                     ax.set_xticks([0, 1])
                     ax.set_xticklabels([label1, label2], fontsize=9)
-                    ax.set_title(metric.capitalize(), fontweight="bold", color=metric_colors.get(metric, "gray"))
+                    metric_color = metric_colors.get(metric, "gray")
+                    ax.set_title(
+                        metric.capitalize(), fontweight="bold", color=metric_color
+                    )
                     ax.spines["top"].set_visible(False)
                     ax.spines["right"].set_visible(False)
                 
                 n_tests = len(qvalues)
-                roi_display = roi_name.replace("_", " ").title() if roi_name != "all" else "All Channels"
+                roi_display = (
+                    roi_name.replace("_", " ").title()
+                    if roi_name != "all"
+                    else "All Channels"
+                )
                 
-                stats_source = "pre-computed" if use_precomputed else "Mann-Whitney U"
-                title = (f"Aperiodic: {label1} vs {label2} (Column Comparison)\n"
-                         f"Subject: {subject} | ROI: {roi_display} | N: {n_trials} trials | {stats_source} | "
-                         f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)")
-                fig.suptitle(title, fontsize=plot_cfg.font.suptitle, fontweight="bold", y=1.02)
+                stats_source = (
+                    "pre-computed" if use_precomputed else "Mann-Whitney U"
+                )
+                title = (
+                    f"Aperiodic: {label1} vs {label2} (Column Comparison)\n"
+                    f"Subject: {subject} | ROI: {roi_display} | "
+                    f"N: {n_trials} trials | {stats_source} | "
+                    f"FDR: {n_significant}/{n_tests} significant (†=q<0.05)"
+                )
+                fig.suptitle(
+                    title,
+                    fontsize=plot_cfg.font.suptitle,
+                    fontweight="bold",
+                    y=1.02
+                )
                 
                 plt.tight_layout()
                 
-                roi_safe = roi_name.replace(" ", "_").lower() if roi_name != "all" else ""
+                roi_safe = (
+                    roi_name.replace(" ", "_").lower()
+                    if roi_name != "all"
+                    else ""
+                )
                 suffix = f"_roi-{roi_safe}" if roi_safe else ""
                 filename = f"sub-{subject}_aperiodic_by_condition{suffix}_column"
                 
-                save_fig(fig, save_dir / filename, formats=plot_cfg.formats, dpi=plot_cfg.dpi,
-                         bbox_inches=plot_cfg.bbox_inches, pad_inches=plot_cfg.pad_inches)
+                save_fig(
+                    fig,
+                    save_dir / filename,
+                    formats=plot_cfg.formats,
+                    dpi=plot_cfg.dpi,
+                    bbox_inches=plot_cfg.bbox_inches,
+                    pad_inches=plot_cfg.pad_inches
+                )
                 plt.close(fig)
             
-            log_if_present(logger, "info", f"Saved aperiodic column comparison plots for {len(roi_names)} ROIs")
+            log_if_present(
+                logger,
+                "info",
+                f"Saved aperiodic column comparison plots for {len(roi_names)} ROIs"
+            )

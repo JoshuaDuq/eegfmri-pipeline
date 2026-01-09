@@ -36,6 +36,19 @@ def _prepare_block_metadata_for_permutation(
     groups_arr: np.ndarray,
     logger: logging.Logger,
 ) -> Optional[np.ndarray]:
+    """
+    Construct an array of block labels aligned to the trial-wise feature matrix.
+
+    This function walks over subjects, loads their corresponding BIDS events TSV files,
+    and uses the `kept_indices` manifest to recover which original epochs were
+    retained in preprocessing. It then assigns each trial a `block` label, using
+    the epoch index stored in `trial_records` to look up the corresponding block.
+
+    If any subject is missing a valid events file, lacks a `block` column, or has
+    inconsistent `kept_indices`, the function logs an informative message and
+    returns ``None`` to signal that block-aware permutation importance cannot
+    proceed.
+    """
     blocks = np.full(len(trial_records), np.nan)
     bids_root = Path(deriv_root).parent
     
@@ -98,6 +111,28 @@ def _is_feature_constant_within_blocks(
     threshold: Optional[float] = None,
     config: Optional[Any] = None,
 ) -> np.ndarray:
+    """
+    Identify features whose mean value is effectively constant across blocks.
+
+    For each feature, the function computes the mean value within each block and
+    then evaluates the standard deviation of these block-wise means. Features
+    whose between-block standard deviation is below ``threshold`` are marked as
+    constant. When ``threshold`` is ``None``, it is loaded from the configuration
+    via ``machine_learning.constants.min_variance_threshold``.
+
+    Parameters
+    ----------
+    X
+        Two-dimensional feature matrix of shape ``(n_trials, n_features)``.
+    blocks
+        One-dimensional array of block labels of length ``n_trials``.
+    threshold
+        Minimum standard deviation of block-wise means required to consider a
+        feature non-constant. When ``None``, the value is obtained from the
+        configuration.
+    config
+        Optional configuration object; only used when ``threshold`` is ``None``.
+    """
     if threshold is None:
         from eeg_pipeline.utils.config.loader import ensure_config
         config = ensure_config(config)
@@ -131,6 +166,22 @@ def _build_per_subject_indices(
     return per_subject_indices
 
 
+def _weighted_mean_z(z_list, w_list) -> float:
+    """
+    Compute a weighted mean of Fisher z-transformed correlations.
+
+    Non-finite weights or z-values are treated as zero contribution, matching the
+    original in-place handling in the permutation importance computation.
+    """
+    w = np.asarray(w_list, dtype=float)
+    z = np.asarray(z_list, dtype=float)
+    w = np.where(np.isfinite(w), w, 0.0)
+    z = np.where(np.isfinite(z), z, 0.0)
+    if np.sum(w) <= 0:
+        return np.nan
+    return float(np.sum(z * w) / np.sum(w))
+
+
 def _compute_permutation_importance_for_feature(
     feature_idx: int,
     X: np.ndarray,
@@ -143,6 +194,18 @@ def _compute_permutation_importance_for_feature(
     logger: logging.Logger,
     config: Optional[Any] = None,
 ) -> float:
+    """
+    Estimate permutation importance for a single feature using nested CV.
+
+    The function performs Leave-One-Group-Out cross-validation, optionally
+    respecting experimental blocks, and measures the change in Fisher
+    z-transformed correlation between predictions and targets when the selected
+    feature is permuted within groups/blocks. It returns the difference between
+    the back-transformed mean correlation in the original and permuted cases.
+
+    All early-return paths (e.g., insufficient finite targets, too few groups,
+    constant features) yield ``np.nan`` to make failure modes explicit.
+    """
     # Drop samples with non-finite targets to avoid failures in CV/regression
     valid_y_mask = np.isfinite(y)
     if not np.any(valid_y_mask):
@@ -305,16 +368,7 @@ def _compute_permutation_importance_for_feature(
     
     if not orig_z_vals or not perm_z_vals:
         return np.nan
-    
-    def _weighted_mean_z(z_list, w_list):
-        w = np.asarray(w_list, dtype=float)
-        z = np.asarray(z_list, dtype=float)
-        w = np.where(np.isfinite(w), w, 0.0)
-        z = np.where(np.isfinite(z), z, 0.0)
-        if np.sum(w) <= 0:
-            return np.nan
-        return float(np.sum(z * w) / np.sum(w))
-    
+
     z_orig_mean = _weighted_mean_z(orig_z_vals, orig_weights)
     z_perm_mean = _weighted_mean_z(perm_z_vals, perm_weights)
     

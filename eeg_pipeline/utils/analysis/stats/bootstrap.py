@@ -15,6 +15,60 @@ from scipy import stats
 from .base import get_n_bootstrap, get_n_permutations, get_ci_level
 from .correlation import compute_correlation
 
+# Minimum sample sizes for valid statistics
+MIN_SAMPLES_PERMUTATION = 3
+MIN_SAMPLES_BOOTSTRAP_CORR = 4
+MIN_SAMPLES_BOOTSTRAP_MEAN = 3
+MIN_SAMPLES_BCA = 5
+
+# Minimum bootstrap replicates for valid confidence intervals
+MIN_BOOTSTRAP_REPLICATES = 10
+MIN_BOOTSTRAP_REPLICATES_BCA = 50
+MIN_JACKKNIFE_REPLICATES = 3
+
+# Numerical thresholds
+DENOMINATOR_THRESHOLD = 1e-12
+PERCENTILE_CLIP_MIN = 0.01
+PERCENTILE_CLIP_MAX = 0.99
+
+
+def _get_bootstrap_config(
+    n_boot: Optional[int],
+    rng: Optional[np.random.Generator],
+    config: Optional[Any],
+) -> Tuple[int, np.random.Generator]:
+    """Get bootstrap configuration values."""
+    if n_boot is None:
+        n_boot = get_n_bootstrap(config)
+    if rng is None:
+        rng = np.random.default_rng()
+    return n_boot, rng
+
+
+def _filter_finite_pairs(
+    x: np.ndarray,
+    y: np.ndarray,
+    groups: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """Filter out non-finite values from paired arrays."""
+    x = np.asarray(x).ravel()
+    y = np.asarray(y).ravel()
+    valid = np.isfinite(x) & np.isfinite(y)
+    x_valid = x[valid]
+    y_valid = y[valid]
+    groups_valid = groups[valid] if groups is not None else None
+    return x_valid, y_valid, groups_valid
+
+
+def _compute_percentile_bounds(
+    ci_level: float,
+) -> Tuple[float, float]:
+    """Compute lower and upper percentile bounds for confidence interval."""
+    alpha = 1 - ci_level
+    lower_percentile = 100 * alpha / 2
+    upper_percentile = 100 * (1 - alpha / 2)
+    return lower_percentile, upper_percentile
+
 
 def permute_within_groups(
     n: int,
@@ -67,27 +121,26 @@ def perm_pval_simple(
     if rng is None:
         rng = np.random.default_rng()
 
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-
-    valid = np.isfinite(x) & np.isfinite(y)
-    if np.sum(valid) < 3:
+    x_valid, y_valid, groups_valid = _filter_finite_pairs(x, y, groups)
+    n_valid = len(x_valid)
+    if n_valid < MIN_SAMPLES_PERMUTATION:
         return np.nan
 
-    x_v = x[valid]
-    y_v = y[valid]
-    groups_v = groups[valid] if groups is not None else None
-
-    r_obs, _ = compute_correlation(x_v, y_v, method)
-    if not np.isfinite(r_obs):
+    observed_correlation, _ = compute_correlation(x_valid, y_valid, method)
+    if not np.isfinite(observed_correlation):
         return np.nan
 
+    observed_abs = np.abs(observed_correlation)
     n_extreme = 0
     for _ in range(n_perm):
-        perm_idx = permute_within_groups(len(x_v), rng, groups_v)
-        r_perm, _ = compute_correlation(x_v[perm_idx], y_v, method)
-        if np.isfinite(r_perm) and np.abs(r_perm) >= np.abs(r_obs):
-            n_extreme += 1
+        perm_indices = permute_within_groups(n_valid, rng, groups_valid)
+        perm_correlation, _ = compute_correlation(
+            x_valid[perm_indices], y_valid, method
+        )
+        if np.isfinite(perm_correlation):
+            perm_abs = np.abs(perm_correlation)
+            if perm_abs >= observed_abs:
+                n_extreme += 1
 
     return (n_extreme + 1) / (n_perm + 1)
 
@@ -105,40 +158,32 @@ def bootstrap_corr_ci(
     
     Returns (ci_low, ci_high).
     """
-    if n_boot is None:
-        n_boot = get_n_bootstrap(config)
-    if rng is None:
-        rng = np.random.default_rng()
-
+    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     ci_level = get_ci_level(config)
 
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-
-    valid = np.isfinite(x) & np.isfinite(y)
-    n_valid = np.sum(valid)
-    if n_valid < 4:
+    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    n_valid = len(x_valid)
+    if n_valid < MIN_SAMPLES_BOOTSTRAP_CORR:
         return np.nan, np.nan
 
-    x_v = x[valid]
-    y_v = y[valid]
-
-    boot_rs = []
+    bootstrap_correlations = []
     for _ in range(n_boot):
-        idx = rng.integers(0, n_valid, size=n_valid)
-        r, _ = compute_correlation(x_v[idx], y_v[idx], method)
-        if np.isfinite(r):
-            boot_rs.append(r)
+        indices = rng.integers(0, n_valid, size=n_valid)
+        correlation, _ = compute_correlation(
+            x_valid[indices], y_valid[indices], method
+        )
+        if np.isfinite(correlation):
+            bootstrap_correlations.append(correlation)
 
-    if len(boot_rs) < 10:
+    if len(bootstrap_correlations) < MIN_BOOTSTRAP_REPLICATES:
         return np.nan, np.nan
 
-    boot_rs = np.array(boot_rs)
-    alpha = 1 - ci_level
-    lo = np.percentile(boot_rs, 100 * alpha / 2)
-    hi = np.percentile(boot_rs, 100 * (1 - alpha / 2))
+    bootstrap_correlations = np.array(bootstrap_correlations)
+    lower_percentile, upper_percentile = _compute_percentile_bounds(ci_level)
+    ci_low = np.percentile(bootstrap_correlations, lower_percentile)
+    ci_high = np.percentile(bootstrap_correlations, upper_percentile)
 
-    return float(lo), float(hi)
+    return float(ci_low), float(ci_high)
 
 
 def bootstrap_mean_ci(
@@ -152,28 +197,27 @@ def bootstrap_mean_ci(
 
     Returns (mean, ci_low, ci_high).
     """
-    if n_boot is None:
-        n_boot = get_n_bootstrap(config)
+    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     if ci_level is None:
         ci_level = get_ci_level(config)
-    if rng is None:
-        rng = np.random.default_rng()
 
-    x = np.asarray(data).ravel()
-    x = x[np.isfinite(x)]
-    if x.size < 3:
+    data_valid = np.asarray(data).ravel()
+    data_valid = data_valid[np.isfinite(data_valid)]
+    n_valid = data_valid.size
+    if n_valid < MIN_SAMPLES_BOOTSTRAP_MEAN:
         return np.nan, np.nan, np.nan
 
-    n = x.size
-    boot_means = np.empty(int(n_boot), dtype=float)
-    for i in range(int(n_boot)):
-        idx = rng.integers(0, n, size=n)
-        boot_means[i] = float(np.mean(x[idx]))
+    bootstrap_means = np.empty(n_boot, dtype=float)
+    for i in range(n_boot):
+        indices = rng.integers(0, n_valid, size=n_valid)
+        bootstrap_means[i] = np.mean(data_valid[indices])
 
-    alpha = 1 - float(ci_level)
-    lo = float(np.percentile(boot_means, 100 * alpha / 2))
-    hi = float(np.percentile(boot_means, 100 * (1 - alpha / 2)))
-    return float(np.mean(x)), lo, hi
+    mean_observed = np.mean(data_valid)
+    lower_percentile, upper_percentile = _compute_percentile_bounds(ci_level)
+    ci_low = np.percentile(bootstrap_means, lower_percentile)
+    ci_high = np.percentile(bootstrap_means, upper_percentile)
+
+    return float(mean_observed), float(ci_low), float(ci_high)
 
 
 def bootstrap_mean_diff_ci(
@@ -185,32 +229,89 @@ def bootstrap_mean_diff_ci(
     config: Optional[Any] = None,
 ) -> Tuple[float, float, float]:
     """Bootstrap percentile CI for mean difference (group2 - group1)."""
-    if n_boot is None:
-        n_boot = get_n_bootstrap(config)
+    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     if ci_level is None:
         ci_level = get_ci_level(config)
-    if rng is None:
-        rng = np.random.default_rng()
 
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
-    if g1.size < 3 or g2.size < 3:
+    group1_valid = np.asarray(group1).ravel()
+    group2_valid = np.asarray(group2).ravel()
+    group1_valid = group1_valid[np.isfinite(group1_valid)]
+    group2_valid = group2_valid[np.isfinite(group2_valid)]
+
+    n1 = group1_valid.size
+    n2 = group2_valid.size
+    if n1 < MIN_SAMPLES_BOOTSTRAP_MEAN or n2 < MIN_SAMPLES_BOOTSTRAP_MEAN:
         return np.nan, np.nan, np.nan
 
-    n1 = g1.size
-    n2 = g2.size
-    boot_diffs = np.empty(int(n_boot), dtype=float)
-    for i in range(int(n_boot)):
-        idx1 = rng.integers(0, n1, size=n1)
-        idx2 = rng.integers(0, n2, size=n2)
-        boot_diffs[i] = float(np.mean(g2[idx2]) - np.mean(g1[idx1]))
+    bootstrap_differences = np.empty(n_boot, dtype=float)
+    for i in range(n_boot):
+        indices1 = rng.integers(0, n1, size=n1)
+        indices2 = rng.integers(0, n2, size=n2)
+        mean1 = np.mean(group1_valid[indices1])
+        mean2 = np.mean(group2_valid[indices2])
+        bootstrap_differences[i] = mean2 - mean1
 
-    alpha = 1 - float(ci_level)
-    lo = float(np.percentile(boot_diffs, 100 * alpha / 2))
-    hi = float(np.percentile(boot_diffs, 100 * (1 - alpha / 2)))
-    return float(np.mean(g2) - np.mean(g1)), lo, hi
+    observed_diff = np.mean(group2_valid) - np.mean(group1_valid)
+    lower_percentile, upper_percentile = _compute_percentile_bounds(ci_level)
+    ci_low = np.percentile(bootstrap_differences, lower_percentile)
+    ci_high = np.percentile(bootstrap_differences, upper_percentile)
+
+    return float(observed_diff), float(ci_low), float(ci_high)
+
+
+def _compute_bias_correction(
+    bootstrap_correlations: np.ndarray,
+    observed_correlation: float,
+) -> float:
+    """Compute bias correction factor z0 for BCa method."""
+    proportion_below_observed = np.mean(bootstrap_correlations < observed_correlation)
+    z0 = stats.norm.ppf(proportion_below_observed)
+    return z0 if np.isfinite(z0) else 0.0
+
+
+def _compute_acceleration_factor(
+    x_valid: np.ndarray,
+    y_valid: np.ndarray,
+    method: str,
+) -> Optional[float]:
+    """Compute acceleration factor a for BCa method using jackknife.
+    
+    Returns None if insufficient jackknife replicates, otherwise returns
+    acceleration factor (may be 0.0 if denominator is too small).
+    """
+    n_valid = len(x_valid)
+    jackknife_correlations = []
+    for i in range(n_valid):
+        mask = np.ones(n_valid, dtype=bool)
+        mask[i] = False
+        correlation, _ = compute_correlation(x_valid[mask], y_valid[mask], method)
+        if np.isfinite(correlation):
+            jackknife_correlations.append(correlation)
+
+    if len(jackknife_correlations) < MIN_JACKKNIFE_REPLICATES:
+        return None
+
+    jackknife_correlations = np.array(jackknife_correlations)
+    jackknife_mean = np.mean(jackknife_correlations)
+    deviations = jackknife_mean - jackknife_correlations
+    numerator = np.sum(deviations ** 3)
+    denominator = 6 * (np.sum(deviations ** 2) ** 1.5)
+
+    if np.abs(denominator) > DENOMINATOR_THRESHOLD:
+        return numerator / denominator
+    return 0.0
+
+
+def _compute_bca_adjusted_percentile(
+    alpha_quantile: float,
+    bias_correction: float,
+    acceleration: float,
+) -> float:
+    """Compute BCa-adjusted percentile from quantile."""
+    z_alpha = stats.norm.ppf(alpha_quantile)
+    denominator = 1 - acceleration * (bias_correction + z_alpha)
+    adjusted_z = bias_correction + (bias_correction + z_alpha) / denominator
+    return stats.norm.cdf(adjusted_z)
 
 
 def bootstrap_ci_bca(
@@ -226,80 +327,54 @@ def bootstrap_ci_bca(
     
     Returns (ci_low, ci_high).
     """
-    if n_boot is None:
-        n_boot = get_n_bootstrap(config)
-    if rng is None:
-        rng = np.random.default_rng()
-
+    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     ci_level = get_ci_level(config)
 
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-
-    valid = np.isfinite(x) & np.isfinite(y)
-    n_valid = np.sum(valid)
-    if n_valid < 5:
+    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    n_valid = len(x_valid)
+    if n_valid < MIN_SAMPLES_BCA:
         return np.nan, np.nan
 
-    x_v = x[valid]
-    y_v = y[valid]
-
-    r_obs, _ = compute_correlation(x_v, y_v, method)
-    if not np.isfinite(r_obs):
+    observed_correlation, _ = compute_correlation(x_valid, y_valid, method)
+    if not np.isfinite(observed_correlation):
         return np.nan, np.nan
 
-    # Bootstrap replicates
-    boot_rs = []
+    bootstrap_correlations = []
     for _ in range(n_boot):
-        idx = rng.integers(0, n_valid, size=n_valid)
-        r, _ = compute_correlation(x_v[idx], y_v[idx], method)
-        if np.isfinite(r):
-            boot_rs.append(r)
+        indices = rng.integers(0, n_valid, size=n_valid)
+        correlation, _ = compute_correlation(
+            x_valid[indices], y_valid[indices], method
+        )
+        if np.isfinite(correlation):
+            bootstrap_correlations.append(correlation)
 
-    if len(boot_rs) < 50:
+    if len(bootstrap_correlations) < MIN_BOOTSTRAP_REPLICATES_BCA:
         return bootstrap_corr_ci(x, y, method, n_boot, rng, config)
 
-    boot_rs = np.array(boot_rs)
+    bootstrap_correlations = np.array(bootstrap_correlations)
 
-    # Bias correction factor
-    z0 = stats.norm.ppf(np.mean(boot_rs < r_obs))
-    if not np.isfinite(z0):
-        z0 = 0.0
+    bias_correction = _compute_bias_correction(bootstrap_correlations, observed_correlation)
+    acceleration = _compute_acceleration_factor(x_valid, y_valid, method)
 
-    # Acceleration factor (jackknife)
-    jack_rs = []
-    for i in range(n_valid):
-        mask = np.ones(n_valid, dtype=bool)
-        mask[i] = False
-        r, _ = compute_correlation(x_v[mask], y_v[mask], method)
-        if np.isfinite(r):
-            jack_rs.append(r)
-
-    if len(jack_rs) < 3:
+    if acceleration is None:
         return bootstrap_corr_ci(x, y, method, n_boot, rng, config)
-
-    jack_rs = np.array(jack_rs)
-    jack_mean = np.mean(jack_rs)
-    num = np.sum((jack_mean - jack_rs) ** 3)
-    denom = 6 * (np.sum((jack_mean - jack_rs) ** 2) ** 1.5)
-
-    a = num / denom if np.abs(denom) > 1e-12 else 0.0
 
     alpha = 1 - ci_level
+    lower_quantile = alpha / 2
+    upper_quantile = 1 - alpha / 2
 
-    def adjusted_percentile(alpha_q):
-        z_alpha = stats.norm.ppf(alpha_q)
-        adj = z0 + (z0 + z_alpha) / (1 - a * (z0 + z_alpha))
-        return stats.norm.cdf(adj)
+    lower_percentile = _compute_bca_adjusted_percentile(
+        lower_quantile, bias_correction, acceleration
+    )
+    upper_percentile = _compute_bca_adjusted_percentile(
+        upper_quantile, bias_correction, acceleration
+    )
 
-    lo_pct = adjusted_percentile(alpha / 2)
-    hi_pct = adjusted_percentile(1 - alpha / 2)
+    lower_percentile = np.clip(lower_percentile, PERCENTILE_CLIP_MIN, PERCENTILE_CLIP_MAX)
+    upper_percentile = np.clip(upper_percentile, PERCENTILE_CLIP_MIN, PERCENTILE_CLIP_MAX)
 
-    lo_pct = np.clip(lo_pct, 0.01, 0.99)
-    hi_pct = np.clip(hi_pct, 0.01, 0.99)
+    ci_low = np.percentile(bootstrap_correlations, 100 * lower_percentile)
+    ci_high = np.percentile(bootstrap_correlations, 100 * upper_percentile)
 
-    lo = np.percentile(boot_rs, 100 * lo_pct)
-    hi = np.percentile(boot_rs, 100 * hi_pct)
-
-    return float(lo), float(hi)
+    return float(ci_low), float(ci_high)
 

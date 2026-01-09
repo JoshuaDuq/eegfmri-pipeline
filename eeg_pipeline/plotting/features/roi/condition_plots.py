@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from scipy import stats
 
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.events import extract_comparison_mask
+from eeg_pipeline.utils.config.loader import get_config_value
 from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.plotting.io.figures import save_fig
 from eeg_pipeline.plotting.features.utils import (
@@ -22,6 +24,8 @@ from eeg_pipeline.plotting.features.utils import (
     collect_named_series,
     get_named_segments,
     get_named_bands,
+    safe_mannwhitneyu,
+    compute_cohens_d,
 )
 
 from .core import (
@@ -35,10 +39,259 @@ from .core import (
 )
 
 
+###################################################################
+# CONSTANTS
+###################################################################
+
+_MIN_SAMPLES_FOR_TEST = 3
+_BOXPLOT_WIDTH = 0.4
+_SCATTER_JITTER_RANGE = 0.08
+_BOX_ALPHA = 0.6
+_SCATTER_ALPHA = 0.3
+_SCATTER_SIZE = 6
+_Y_RANGE_PADDING_BOTTOM = 0.1
+_Y_RANGE_PADDING_TOP = 0.25
+_Y_ANNOTATION_OFFSET = 0.05
+
+
+###################################################################
+# HELPER FUNCTIONS
+###################################################################
+
+
+def _validate_dataframes(
+    features_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    logger: Optional[logging.Logger] = None,
+) -> bool:
+    """Validate that dataframes are valid and aligned.
+    
+    Returns:
+        True if valid, False otherwise
+    """
+    if features_df is None or features_df.empty or events_df is None:
+        return False
+    if len(features_df) != len(events_df):
+        if logger:
+            logger.warning(
+                "Dataframe length mismatch: %d feature rows vs %d events",
+                len(features_df),
+                len(events_df),
+            )
+        return False
+    return True
+
+
 def _get_comparison_masks(events_df: pd.DataFrame, config: Any) -> Optional[tuple[np.ndarray, np.ndarray, str, str]]:
+    """Extract comparison masks from events dataframe.
+    
+    Returns:
+        Tuple of (mask1, mask2, label1, label2) or None if invalid
+    """
     if events_df is None or events_df.empty:
         return None
     return extract_comparison_mask(events_df, config, require_enabled=False)
+
+
+def _validate_masks(mask1: np.ndarray, mask2: np.ndarray) -> bool:
+    """Validate that comparison masks have sufficient samples.
+    
+    Returns:
+        True if both masks have at least one sample, False otherwise
+    """
+    mask1 = np.asarray(mask1, dtype=bool)
+    mask2 = np.asarray(mask2, dtype=bool)
+    return int(mask1.sum()) > 0 and int(mask2.sum()) > 0
+
+
+def _compute_statistics(
+    vals_1: np.ndarray,
+    vals_2: np.ndarray,
+    min_samples: int = _MIN_SAMPLES_FOR_TEST,
+) -> Optional[Tuple[float, float]]:
+    """Compute Mann-Whitney U test and Cohen's d.
+    
+    Args:
+        vals_1: First group values
+        vals_2: Second group values
+        min_samples: Minimum samples required for test
+    
+    Returns:
+        Tuple of (p_value, cohens_d) or None if insufficient samples
+    """
+    if len(vals_1) < min_samples or len(vals_2) < min_samples:
+        return None
+    
+    _, p_value = safe_mannwhitneyu(vals_1, vals_2, min_n=min_samples)
+    cohens_d = compute_cohens_d(vals_1, vals_2)
+    
+    if not np.isfinite(p_value) or not np.isfinite(cohens_d):
+        return None
+    
+    return float(p_value), float(cohens_d)
+
+
+def _format_roi_name(roi_name: str) -> str:
+    """Format ROI name for display (shorten common terms).
+    
+    Args:
+        roi_name: Original ROI name
+    
+    Returns:
+        Formatted name with line breaks and abbreviations
+    """
+    formatted = roi_name.replace("_", "\n")
+    formatted = formatted.replace("Contra", "C")
+    formatted = formatted.replace("Ipsi", "I")
+    return formatted
+
+
+def _plot_boxplot_with_scatter(
+    ax: plt.Axes,
+    vals_1: np.ndarray,
+    vals_2: np.ndarray,
+    color1: str,
+    color2: str,
+    label1: str,
+    label2: str,
+    plot_cfg: Optional[Any] = None,
+) -> None:
+    """Plot boxplot with overlaid scatter points for two groups.
+    
+    Args:
+        ax: Matplotlib axes
+        vals_1: First group values
+        vals_2: Second group values
+        color1: Color for first group
+        color2: Color for second group
+        label1: Label for first group
+        label2: Label for second group
+        plot_cfg: Plot configuration object (optional, for fontsize)
+    """
+    bp = ax.boxplot(
+        [vals_1, vals_2],
+        positions=[0, 1],
+        widths=_BOXPLOT_WIDTH,
+        patch_artist=True,
+    )
+    bp["boxes"][0].set_facecolor(color1)
+    bp["boxes"][0].set_alpha(_BOX_ALPHA)
+    bp["boxes"][1].set_facecolor(color2)
+    bp["boxes"][1].set_alpha(_BOX_ALPHA)
+    
+    jitter_1 = np.random.uniform(-_SCATTER_JITTER_RANGE, _SCATTER_JITTER_RANGE, len(vals_1))
+    jitter_2 = np.random.uniform(-_SCATTER_JITTER_RANGE, _SCATTER_JITTER_RANGE, len(vals_2))
+    
+    ax.scatter(jitter_1, vals_1, c=color1, alpha=_SCATTER_ALPHA, s=_SCATTER_SIZE)
+    ax.scatter(1 + jitter_2, vals_2, c=color2, alpha=_SCATTER_ALPHA, s=_SCATTER_SIZE)
+    
+    fontsize = plot_cfg.font.small if plot_cfg else None
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels([label1, label2], fontsize=fontsize)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+
+def _add_statistics_annotation(
+    ax: plt.Axes,
+    q_value: float,
+    cohens_d: float,
+    is_significant: bool,
+    plot_cfg: Any,
+    config: Optional[Any] = None,
+    y_position: Optional[float] = None,
+) -> None:
+    """Add statistics annotation to plot.
+    
+    Args:
+        ax: Matplotlib axes
+        q_value: FDR-corrected q-value
+        cohens_d: Cohen's d effect size
+        is_significant: Whether result is significant
+        plot_cfg: Plot configuration object
+        config: Config object for color lookup (optional)
+        y_position: Y position for annotation (if None, uses transform)
+    """
+    sig_marker = "†" if is_significant else ""
+    annotation_text = f"q={q_value:.3f}{sig_marker}\nd={cohens_d:.2f}"
+    sig_color = get_significance_color(is_significant, config)
+    
+    if y_position is not None:
+        ax.annotate(
+            annotation_text,
+            xy=(0.5, y_position),
+            ha="center",
+            fontsize=plot_cfg.font.annotation,
+            color=sig_color,
+            fontweight="bold" if is_significant else "normal",
+        )
+    else:
+        ax.text(
+            0.5,
+            0.95,
+            annotation_text,
+            transform=ax.transAxes,
+            ha="center",
+            fontsize=plot_cfg.font.annotation,
+            va="top",
+        )
+
+
+def _get_active_window_label(config: Any) -> str:
+    """Get formatted active window label from config.
+    
+    Returns:
+        Formatted string like "3.0-10.5s"
+    """
+    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+    return f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+
+
+def _filter_columns_by_criteria(
+    columns: List[str],
+    *,
+    group: Optional[str] = None,
+    segment: Optional[str] = None,
+    band: Optional[str] = None,
+    scope: Optional[str] = None,
+    stat: Optional[str] = None,
+    identifiers: Optional[set] = None,
+) -> List[str]:
+    """Filter feature columns by naming schema criteria.
+    
+    Args:
+        columns: List of column names to filter
+        group: Feature group (e.g., "power", "itpc")
+        segment: Time segment (e.g., "active", "baseline")
+        band: Frequency band
+        scope: Feature scope (e.g., "ch", "roi", "global")
+        stat: Statistic type (e.g., "val", "mean")
+        identifiers: Set of channel/ROI identifiers to match
+    
+    Returns:
+        List of matching column names
+    """
+    matching_cols = []
+    for col in columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if group and parsed.get("group") != group:
+            continue
+        if segment and str(parsed.get("segment") or "") != str(segment):
+            continue
+        if band and str(parsed.get("band") or "") != str(band):
+            continue
+        if scope and str(parsed.get("scope") or "") != str(scope):
+            continue
+        if stat and str(parsed.get("stat") or "") != str(stat):
+            continue
+        if identifiers is not None:
+            identifier = str(parsed.get("identifier") or "")
+            if identifier and identifier not in identifiers:
+                continue
+        matching_cols.append(str(col))
+    return matching_cols
 
 
 def _get_named_identifiers(
@@ -137,32 +390,18 @@ def plot_power_by_roi_band_condition(
     Each cell shows a 2-condition box+strip comparison.
     FDR-corrected significance markers applied across all tests.
     """
-
-    if features_df is None or features_df.empty or events_df is None:
-        return
-    if len(features_df) != len(events_df):
-        if logger:
-            logger.warning(
-                "Power ROI plot skipped: %d feature rows vs %d events",
-                len(features_df),
-                len(events_df),
-            )
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
     plot_cfg = get_plot_config(config)
-
-    from eeg_pipeline.utils.config.loader import get_config_value
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    active_label = _get_active_window_label(config)
 
     segments = get_named_segments(features_df, group="power")
     if not segments:
@@ -203,27 +442,20 @@ def plot_power_by_roi_band_condition(
     for row_idx, roi_name in enumerate(roi_names):
         roi_patterns = rois[roi_name]
         roi_channels = get_roi_channels(roi_patterns, all_channels)
+        roi_set = set(roi_channels)
 
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
 
-            cols = []
-            roi_set = set(roi_channels)
-            for c in features_df.columns:
-                parsed = NamingSchema.parse(str(c))
-                if not parsed.get("valid"):
-                    continue
-                if parsed.get("group") != "power":
-                    continue
-                if parsed.get("segment") != segment:
-                    continue
-                if parsed.get("band") != band:
-                    continue
-                if parsed.get("scope") != "ch":
-                    continue
-                if parsed.get("identifier") not in roi_set:
-                    continue
-                cols.append(str(c))
+            cols = _filter_columns_by_criteria(
+                features_df.columns,
+                group="power",
+                segment=segment,
+                band=band,
+                scope="ch",
+                identifiers=roi_set,
+            )
+            
             roi_vals = (
                 features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
                 if cols
@@ -232,25 +464,13 @@ def plot_power_by_roi_band_condition(
 
             vals_1 = roi_vals[mask1].dropna().values
             vals_2 = roi_vals[mask2].dropna().values
-
             plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_1) > 3 and len(vals_2) > 3:
-                _, p = stats.mannwhitneyu(vals_1, vals_2)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                    )
-                    / (len(vals_1) + len(vals_2) - 2)
-                )
-                d = (
-                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
-                all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+            stats_result = _compute_statistics(vals_1, vals_2)
+            if stats_result is not None:
+                p_value, cohens_d = stats_result
+                all_pvalues.append(p_value)
+                pvalue_keys.append((key, p_value, cohens_d))
 
     qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
     if all_pvalues:
@@ -288,49 +508,11 @@ def plot_power_by_roi_band_condition(
                 continue
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
-
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
                 if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    ax.text(
-                        0.5,
-                        0.95,
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        transform=ax.transAxes,
-                        ha="center",
-                        fontsize=plot_cfg.font.annotation,
-                        va="top",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+                    _, q_value, cohens_d, is_sig = qvalues[key]
+                    _add_statistics_annotation(ax, q_value, cohens_d, is_sig, plot_cfg, config)
 
             if row_idx == 0:
                 ax.set_title(
@@ -340,13 +522,12 @@ def plot_power_by_roi_band_condition(
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -389,25 +570,18 @@ def plot_complexity_by_roi_band_condition(
     Creates a grid: rows = ROIs (9), cols = frequency bands (5).
     FDR-corrected significance markers applied across all tests.
     """
-
-    if features_df is None or features_df.empty or events_df is None:
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
     plot_cfg = get_plot_config(config)
-
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    active_label = _get_active_window_label(config)
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -430,13 +604,7 @@ def plot_complexity_by_roi_band_condition(
     }
     metric_label = metric_labels.get(metric, metric.upper())
 
-    segments = []
-    for col in features_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if parsed.get("valid") and parsed.get("group") == "comp":
-            segment = str(parsed.get("segment") or "")
-            if segment:
-                segments.append(segment)
+    segments = get_named_segments(features_df, group="comp")
     segment = "active" if "active" in segments else (segments[0] if segments else "active")
 
     plot_data: Dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
@@ -450,50 +618,31 @@ def plot_complexity_by_roi_band_condition(
         for col_idx, band in enumerate(bands):
             key = (row_idx, col_idx)
 
-            roi_vals = pd.Series([np.nan] * len(features_df))
-            roi_set = set(roi_channels)
-            cols: List[str] = []
-            for c in features_df.columns:
-                parsed = NamingSchema.parse(str(c))
-                if not parsed.get("valid"):
-                    continue
-                if parsed.get("group") != "comp":
-                    continue
-                if str(parsed.get("segment") or "") != segment:
-                    continue
-                if str(parsed.get("band") or "") != str(band):
-                    continue
-                if str(parsed.get("scope") or "") != "ch":
-                    continue
-                if str(parsed.get("stat") or "") != str(metric):
-                    continue
-                if str(parsed.get("identifier") or "") not in roi_set:
-                    continue
-                cols.append(str(c))
+            cols = _filter_columns_by_criteria(
+                features_df.columns,
+                group="comp",
+                segment=segment,
+                band=band,
+                scope="ch",
+                stat=metric,
+                identifiers=set(roi_channels),
+            )
 
-            if cols:
-                roi_vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+            roi_vals = (
+                features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
+                if cols
+                else pd.Series([np.nan] * len(features_df), index=features_df.index)
+            )
 
             vals_1 = roi_vals[mask1].dropna().values
             vals_2 = roi_vals[mask2].dropna().values
             plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_1) > 3 and len(vals_2) > 3:
-                _, p = stats.mannwhitneyu(vals_1, vals_2)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                    )
-                    / (len(vals_1) + len(vals_2) - 2)
-                )
-                d = (
-                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
-                all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+            stats_result = _compute_statistics(vals_1, vals_2)
+            if stats_result is not None:
+                p_value, cohens_d = stats_result
+                all_pvalues.append(p_value)
+                pvalue_keys.append((key, p_value, cohens_d))
 
     qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
     if all_pvalues:
@@ -531,49 +680,11 @@ def plot_complexity_by_roi_band_condition(
                 continue
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
-
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
                 if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    ax.text(
-                        0.5,
-                        0.95,
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        transform=ax.transAxes,
-                        ha="center",
-                        fontsize=plot_cfg.font.annotation,
-                        va="top",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+                    _, q_value, cohens_d, is_sig = qvalues[key]
+                    _add_statistics_annotation(ax, q_value, cohens_d, is_sig, plot_cfg, config)
 
             if row_idx == 0:
                 ax.set_title(
@@ -583,13 +694,12 @@ def plot_complexity_by_roi_band_condition(
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -631,23 +741,17 @@ def plot_aperiodic_by_roi_condition(
     Creates a grid: rows = ROIs (9), cols = metrics (slope, offset).
     FDR-corrected significance markers applied across all tests.
     """
-
-    if features_df is None or features_df.empty or events_df is None:
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    active_label = _get_active_window_label(config)
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -678,8 +782,10 @@ def plot_aperiodic_by_roi_condition(
             key = (row_idx, col_idx)
 
             cols = []
+            pattern_prefix = f"aperiodic_active_broadband_ch_"
+            pattern_suffix = f"_{metric}"
             for col in features_df.columns:
-                if f"aperiodic_active_broadband_ch_" in col and f"_{metric}" in col:
+                if pattern_prefix in col and pattern_suffix in col:
                     for ch in roi_channels:
                         if f"_ch_{ch}_" in col:
                             cols.append(col)
@@ -695,22 +801,11 @@ def plot_aperiodic_by_roi_condition(
 
             plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_1) > 3 and len(vals_2) > 3:
-                _, p = stats.mannwhitneyu(vals_1, vals_2)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                    )
-                    / (len(vals_1) + len(vals_2) - 2)
-                )
-                d = (
-                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
-                all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+            stats_result = _compute_statistics(vals_1, vals_2)
+            if stats_result is not None:
+                p_value, cohens_d = stats_result
+                all_pvalues.append(p_value)
+                pvalue_keys.append((key, p_value, cohens_d))
 
     qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
     if all_pvalues:
@@ -744,60 +839,21 @@ def plot_aperiodic_by_roi_condition(
                 continue
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
-
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
                 if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    ax.text(
-                        0.5,
-                        0.95,
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        transform=ax.transAxes,
-                        ha="center",
-                        fontsize=plot_cfg.font.annotation,
-                        va="top",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+                    _, q_value, cohens_d, is_sig = qvalues[key]
+                    _add_statistics_annotation(ax, q_value, cohens_d, is_sig, plot_cfg, config)
 
             if row_idx == 0:
                 ax.set_title(metric.capitalize(), fontweight="bold", fontsize=plot_cfg.font.title)
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -840,23 +896,17 @@ def plot_connectivity_by_roi_band_condition(
     Creates a grid: rows = ROIs (9), cols = frequency bands (5).
     Each cell shows pain vs non-pain within-ROI mean connectivity.
     """
-
-    if features_df is None or features_df.empty or events_df is None:
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
-    from eeg_pipeline.utils.config.loader import get_config_value
-
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active_label = f"{active_window[0]:.1f}-{active_window[1]:.1f}s"
+    active_label = _get_active_window_label(config)
 
     rois = get_roi_definitions(config)
     if not rois:
@@ -926,61 +976,21 @@ def plot_connectivity_by_roi_band_condition(
             vals_2 = roi_vals[mask2].dropna().values
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
-
-                if len(vals_1) > 3 and len(vals_2) > 3:
-                    _, p = stats.mannwhitneyu(vals_1, vals_2)
-                    pooled_std = np.sqrt(
-                        (
-                            (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                            + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                        )
-                        / (len(vals_1) + len(vals_2) - 2)
-                    )
-                    d = (
-                        (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                        if pooled_std > 0
-                        else 0
-                    )
-                    sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
+                stats_result = _compute_statistics(vals_1, vals_2)
+                if stats_result is not None:
+                    p_value, cohens_d = stats_result
+                    sig_marker = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*" if p_value < 0.05 else ""
                     ax.text(
                         0.5,
                         0.95,
-                        f"p={p:.3f}{sig}\nd={d:.2f}",
+                        f"p={p_value:.3f}{sig_marker}\nd={cohens_d:.2f}",
                         transform=ax.transAxes,
                         ha="center",
                         fontsize=plot_cfg.font.annotation,
                         va="top",
                     )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
 
             if row_idx == 0:
                 ax.set_title(
@@ -990,13 +1000,12 @@ def plot_connectivity_by_roi_band_condition(
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     fig.suptitle(
         f"Within-ROI {measure_label} by Band: Active ({active_label}) (sub-{subject})\nN: {n_1} {label1}, {n_2} {label2}",
         fontsize=plot_cfg.font.figure_title,
@@ -1034,25 +1043,14 @@ def plot_itpc_by_roi_band_condition(
     Each cell shows pain vs non-pain box+strip comparison.
     FDR-corrected significance markers applied across all tests.
     """
-
-    if features_df is None or features_df.empty or events_df is None:
-        return
-    if len(features_df) != len(events_df):
-        if logger:
-            logger.warning(
-                "ITPC ROI plot skipped: %d feature rows vs %d events",
-                len(features_df),
-                len(events_df),
-            )
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
     segments = get_named_segments(features_df, group="itpc")
@@ -1120,22 +1118,11 @@ def plot_itpc_by_roi_band_condition(
 
             plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_1) > 3 and len(vals_2) > 3:
-                _, p = stats.mannwhitneyu(vals_1, vals_2)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                    )
-                    / (len(vals_1) + len(vals_2) - 2)
-                )
-                d = (
-                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
-                all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+            stats_result = _compute_statistics(vals_1, vals_2)
+            if stats_result is not None:
+                p_value, cohens_d = stats_result
+                all_pvalues.append(p_value)
+                pvalue_keys.append((key, p_value, cohens_d))
 
     qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
     if all_pvalues:
@@ -1169,54 +1156,17 @@ def plot_itpc_by_roi_band_condition(
                 continue
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
-
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
                 all_vals = np.concatenate([vals_1, vals_2])
                 ymin, ymax = np.nanmin(all_vals), np.nanmax(all_vals)
                 yrange = ymax - ymin if ymax > ymin else 0.1
-                ax.set_ylim(ymin - 0.1 * yrange, ymax + 0.25 * yrange)
+                ax.set_ylim(ymin - _Y_RANGE_PADDING_BOTTOM * yrange, ymax + _Y_RANGE_PADDING_TOP * yrange)
 
                 if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    sig_color = "#d62728" if sig else "#333333"
-                    ax.annotate(
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        xy=(0.5, ymax + 0.05 * yrange),
-                        ha="center",
-                        fontsize=plot_cfg.font.annotation,
-                        color=sig_color,
-                        fontweight="bold" if sig else "normal",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+                    _, q_value, cohens_d, is_sig = qvalues[key]
+                    y_position = ymax + _Y_ANNOTATION_OFFSET * yrange
+                    _add_statistics_annotation(ax, q_value, cohens_d, is_sig, plot_cfg, config, y_position=y_position)
 
             if row_idx == 0:
                 ax.set_title(
@@ -1226,13 +1176,12 @@ def plot_itpc_by_roi_band_condition(
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 
@@ -1276,25 +1225,14 @@ def plot_pac_by_roi_condition(
     Shows phase-amplitude coupling for different band pairs.
     PAC columns: pac_active_{phase}_{amp}_ch_{channel}_val
     """
-
-    if features_df is None or features_df.empty or events_df is None:
-        return
-    if len(features_df) != len(events_df):
-        if logger:
-            logger.warning(
-                "PAC ROI plot skipped: %d feature rows vs %d events",
-                len(features_df),
-                len(events_df),
-            )
+    if not _validate_dataframes(features_df, events_df, logger):
         return
 
     comp = _get_comparison_masks(events_df, config)
     if comp is None:
         return
     mask1, mask2, label1, label2 = comp
-    mask1 = np.asarray(mask1, dtype=bool)
-    mask2 = np.asarray(mask2, dtype=bool)
-    if int(mask1.sum()) == 0 or int(mask2.sum()) == 0:
+    if not _validate_masks(mask1, mask2):
         return
 
     segments = get_named_segments(features_df, group="pac")
@@ -1372,22 +1310,11 @@ def plot_pac_by_roi_condition(
 
             plot_data[key] = (vals_1, vals_2)
 
-            if len(vals_1) > 3 and len(vals_2) > 3:
-                _, p = stats.mannwhitneyu(vals_1, vals_2)
-                pooled_std = np.sqrt(
-                    (
-                        (len(vals_1) - 1) * np.var(vals_1, ddof=1)
-                        + (len(vals_2) - 1) * np.var(vals_2, ddof=1)
-                    )
-                    / (len(vals_1) + len(vals_2) - 2)
-                )
-                d = (
-                    (np.mean(vals_2) - np.mean(vals_1)) / pooled_std
-                    if pooled_std > 0
-                    else 0
-                )
-                all_pvalues.append(p)
-                pvalue_keys.append((key, p, d))
+            stats_result = _compute_statistics(vals_1, vals_2)
+            if stats_result is not None:
+                p_value, cohens_d = stats_result
+                all_pvalues.append(p_value)
+                pvalue_keys.append((key, p_value, cohens_d))
 
     qvalues: Dict[tuple[int, int], tuple[float, float, float, bool]] = {}
     if all_pvalues:
@@ -1424,49 +1351,11 @@ def plot_pac_by_roi_condition(
                 continue
 
             if len(vals_1) > 0 and len(vals_2) > 0:
-                bp = ax.boxplot(
-                    [vals_1, vals_2],
-                    positions=[0, 1],
-                    widths=0.4,
-                    patch_artist=True,
-                )
-                bp["boxes"][0].set_facecolor(color1)
-                bp["boxes"][0].set_alpha(0.6)
-                bp["boxes"][1].set_facecolor(color2)
-                bp["boxes"][1].set_alpha(0.6)
-
-                ax.scatter(
-                    np.random.uniform(-0.08, 0.08, len(vals_1)),
-                    vals_1,
-                    c=color1,
-                    alpha=0.3,
-                    s=6,
-                )
-                ax.scatter(
-                    1 + np.random.uniform(-0.08, 0.08, len(vals_2)),
-                    vals_2,
-                    c=color2,
-                    alpha=0.3,
-                    s=6,
-                )
+                _plot_boxplot_with_scatter(ax, vals_1, vals_2, color1, color2, tick1, tick2, plot_cfg)
 
                 if key in qvalues:
-                    _, q, d, sig = qvalues[key]
-                    sig_marker = "†" if sig else ""
-                    ax.text(
-                        0.5,
-                        0.95,
-                        f"q={q:.3f}{sig_marker}\nd={d:.2f}",
-                        transform=ax.transAxes,
-                        ha="center",
-                        fontsize=plot_cfg.font.annotation,
-                        va="top",
-                    )
-
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels([tick1, tick2], fontsize=plot_cfg.font.small)
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
+                    _, q_value, cohens_d, is_sig = qvalues[key]
+                    _add_statistics_annotation(ax, q_value, cohens_d, is_sig, plot_cfg, config)
 
             if row_idx == 0:
                 pair_label = pair.replace("_", "→")
@@ -1477,13 +1366,12 @@ def plot_pac_by_roi_condition(
                     fontsize=plot_cfg.font.title,
                 )
             if col_idx == 0:
-                short_name = roi_name.replace("_", "\n").replace("Contra", "C").replace(
-                    "Ipsi", "I"
-                )
-                ax.set_ylabel(short_name, fontsize=plot_cfg.font.medium)
+                ax.set_ylabel(_format_roi_name(roi_name), fontsize=plot_cfg.font.medium)
 
-    n_1 = int(mask1.sum())
-    n_2 = int(mask2.sum())
+    mask1_bool = np.asarray(mask1, dtype=bool)
+    mask2_bool = np.asarray(mask2, dtype=bool)
+    n_1 = int(mask1_bool.sum())
+    n_2 = int(mask2_bool.sum())
     n_tests = len(all_pvalues)
     n_sig = sum(1 for k in qvalues if qvalues[k][3])
 

@@ -13,7 +13,7 @@ Extracts spectral peak features for pain research:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -448,17 +448,19 @@ def extract_spectral_features(
         if psds.ndim != 3:
             continue
 
-        keep = np.ones_like(freqs, dtype=bool)
+        freq_keep_mask = np.ones_like(freqs, dtype=bool)
         if exclude_line and freqs.size > 0 and line_width > 0 and n_harm > 0:
             for base in line_freqs:
                 if not np.isfinite(base) or base <= 0:
                     continue
                 for h in range(1, n_harm + 1):
                     f0 = base * h
-                    keep &= ~((freqs >= (f0 - line_width)) & (freqs <= (f0 + line_width)))
+                    freq_keep_mask &= ~(
+                        (freqs >= (f0 - line_width)) & (freqs <= (f0 + line_width))
+                    )
 
-        freqs_use = freqs[keep] if np.any(~keep) else freqs
-        psds_use = psds[:, :, keep] if np.any(~keep) else psds
+        freqs_use = freqs[freq_keep_mask] if np.any(~freq_keep_mask) else freqs
+        psds_use = psds[:, :, freq_keep_mask] if np.any(~freq_keep_mask) else psds
 
         for ep_idx in range(n_epochs):
             record = records[ep_idx]

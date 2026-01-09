@@ -14,7 +14,13 @@ type BreadcrumbStep struct {
 	Skipped   bool
 }
 
-func RenderBreadcrumb(steps []BreadcrumbStep, width int, ticker int) string {
+var animatedFrames = []string{"◉", "●", "◉", "◎"}
+
+func frameFromTicker(animationTick int) string {
+	return animatedFrames[(animationTick/3)%len(animatedFrames)]
+}
+
+func RenderBreadcrumb(steps []BreadcrumbStep, width int, animationTick int) string {
 	if len(steps) == 0 {
 		return ""
 	}
@@ -31,8 +37,7 @@ func RenderBreadcrumb(steps []BreadcrumbStep, width int, ticker int) string {
 			icon = lipgloss.NewStyle().Foreground(Success).Render("●")
 			nameStyle = lipgloss.NewStyle().Foreground(TextDim)
 		} else if step.Current {
-			frames := []string{"◉", "●", "◉", "◎"}
-			frame := frames[(ticker/3)%len(frames)]
+			frame := frameFromTicker(animationTick)
 			icon = lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(frame)
 			nameStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 		} else if step.Skipped {
@@ -66,7 +71,7 @@ func RenderStepCounter(current, total int) string {
 	return counterStyle.Render(fmt.Sprintf("Step %d of %d", current, total))
 }
 
-func RenderProgressDots(current, total int, ticker int) string {
+func RenderProgressDots(current, total int, animationTick int) string {
 	var dots []string
 
 	for i := 0; i < total; i++ {
@@ -74,8 +79,7 @@ func RenderProgressDots(current, total int, ticker int) string {
 		if i < current {
 			dot = lipgloss.NewStyle().Foreground(Success).Render("●")
 		} else if i == current {
-			frames := []string{"◉", "●", "◉", "◎"}
-			frame := frames[(ticker/3)%len(frames)]
+			frame := frameFromTicker(animationTick)
 			dot = lipgloss.NewStyle().Foreground(Primary).Bold(true).Render(frame)
 		} else {
 			dot = lipgloss.NewStyle().Foreground(Muted).Render("○")

@@ -22,6 +22,14 @@ from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 
 
+_MICROVOLTS_TO_VOLTS = 1e-6
+_SAVGOL_POLYORDER = 2
+_MIN_SMOOTH_WINDOW_LENGTH = 5
+_DEFAULT_LOWPASS_HZ = 30.0
+_MILLISECONDS_PER_SECOND = 1000.0
+_MIN_EPOCHS_FOR_ERP = 2
+
+
 def _infer_peak_mode(window_name: str) -> str:
     name = str(window_name).strip().lower()
     if name.startswith("n"):
@@ -44,6 +52,68 @@ def _parse_peak_label(window_name: str) -> Optional[Tuple[str, str]]:
     return polarity, suffix
 
 
+def _apply_smoothing(
+    data: np.ndarray,
+    smooth_samples: int,
+) -> np.ndarray:
+    window_length = int(smooth_samples)
+    n_times = data.shape[2]
+    
+    if window_length < _MIN_SMOOTH_WINDOW_LENGTH or window_length >= n_times:
+        return data
+    
+    if window_length % 2 == 0:
+        window_length += 1
+    
+    try:
+        smoothed_data = savgol_filter(
+            data,
+            window_length=window_length,
+            polyorder=_SAVGOL_POLYORDER,
+            axis=2,
+            mode="interp",
+        )
+        return smoothed_data
+    except (ValueError, TypeError):
+        return data
+
+
+def _find_peak_in_signal(
+    signal: np.ndarray,
+    times: np.ndarray,
+    mode: str,
+    prominence: Optional[float],
+) -> Tuple[float, float]:
+    cleaned_signal = np.nan_to_num(signal, nan=np.nanmedian(signal))
+    
+    if mode == "neg":
+        search_signal = -cleaned_signal
+    elif mode == "pos":
+        search_signal = cleaned_signal
+    else:
+        search_signal = np.abs(cleaned_signal)
+    
+    has_valid_prominence = (
+        prominence is not None
+        and np.isfinite(prominence)
+        and prominence > 0
+    )
+    
+    if has_valid_prominence:
+        peaks, properties = find_peaks(search_signal, prominence=float(prominence))
+        if peaks.size > 0:
+            prominences = properties.get("prominences", np.ones_like(peaks))
+            best_peak_idx = int(peaks[np.argmax(prominences)])
+            peak_value = float(cleaned_signal[best_peak_idx])
+            peak_time = float(times[best_peak_idx])
+            return peak_value, peak_time
+    
+    best_peak_idx = int(np.nanargmax(search_signal))
+    peak_value = float(cleaned_signal[best_peak_idx])
+    peak_time = float(times[best_peak_idx])
+    return peak_value, peak_time
+
+
 def _compute_peaks(
     data: np.ndarray,
     times: np.ndarray,
@@ -53,50 +123,63 @@ def _compute_peaks(
     prominence: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     has_finite = np.isfinite(data).any(axis=2)
-    n_epochs, n_series, n_times = data.shape
+    n_epochs, n_series, _ = data.shape
     peak_vals = np.full((n_epochs, n_series), np.nan)
     peak_times = np.full((n_epochs, n_series), np.nan)
-
-    use_smooth = int(smooth_samples) if smooth_samples is not None else 0
-    if use_smooth and use_smooth >= 5 and use_smooth < n_times:
-        if use_smooth % 2 == 0:
-            use_smooth += 1
-        try:
-            data_s = savgol_filter(data, window_length=use_smooth, polyorder=2, axis=2, mode="interp")
-        except Exception:
-            data_s = data
-    else:
-        data_s = data
-
-    for e in range(n_epochs):
-        for s in range(n_series):
-            y = data_s[e, s]
-            if not np.isfinite(y).any():
+    
+    smoothed_data = _apply_smoothing(data, smooth_samples)
+    
+    for epoch_idx in range(n_epochs):
+        for series_idx in range(n_series):
+            signal = smoothed_data[epoch_idx, series_idx]
+            if not np.isfinite(signal).any():
                 continue
-            y0 = np.nan_to_num(y, nan=np.nanmedian(y))
-            if mode == "neg":
-                y_search = -y0
-            elif mode == "pos":
-                y_search = y0
-            else:
-                y_search = np.abs(y0)
-
-            if prominence is not None and np.isfinite(prominence) and prominence > 0:
-                peaks, props = find_peaks(y_search, prominence=float(prominence))
-                if peaks.size:
-                    best = int(peaks[np.argmax(props.get("prominences", np.ones_like(peaks)))])
-                    peak_vals[e, s] = float(y0[best])
-                    peak_times[e, s] = float(times[best])
-                    continue
-
-            # Fallback: argmax on requested mode
-            best = int(np.nanargmax(y_search))
-            peak_vals[e, s] = float(y0[best])
-            peak_times[e, s] = float(times[best])
-
+            
+            peak_value, peak_time = _find_peak_in_signal(
+                signal,
+                times,
+                mode,
+                prominence,
+            )
+            peak_vals[epoch_idx, series_idx] = peak_value
+            peak_times[epoch_idx, series_idx] = peak_time
+    
     peak_vals[~has_finite] = np.nan
     peak_times[~has_finite] = np.nan
     return peak_vals, peak_times
+
+
+def _build_feature_names(
+    segment: str,
+    scope: str,
+    peak_mode: str,
+    channel_name: Optional[str] = None,
+) -> Tuple[str, str, str, str]:
+    peak_stat = f"peak_{peak_mode}"
+    latency_stat = f"latency_{peak_mode}"
+    
+    if scope == "global":
+        mean_name = NamingSchema.build("erp", segment, "broadband", "global", "mean")
+        peak_name = NamingSchema.build("erp", segment, "broadband", "global", peak_stat)
+        latency_name = NamingSchema.build("erp", segment, "broadband", "global", latency_stat)
+        auc_name = NamingSchema.build("erp", segment, "broadband", "global", "auc")
+    else:
+        mean_name = NamingSchema.build("erp", segment, "broadband", scope, "mean", channel=channel_name)
+        peak_name = NamingSchema.build("erp", segment, "broadband", scope, peak_stat, channel=channel_name)
+        latency_name = NamingSchema.build("erp", segment, "broadband", scope, latency_stat, channel=channel_name)
+        auc_name = NamingSchema.build("erp", segment, "broadband", scope, "auc", channel=channel_name)
+    
+    return mean_name, peak_name, latency_name, auc_name
+
+
+def _compute_auc(
+    data: np.ndarray,
+    times: np.ndarray,
+) -> np.ndarray:
+    has_finite = np.isfinite(data).any(axis=2)
+    auc_vals = np.trapz(np.nan_to_num(data, nan=0.0), times, axis=2)
+    auc_vals[~has_finite] = np.nan
+    return auc_vals
 
 
 def _append_series_features(
@@ -119,30 +202,36 @@ def _append_series_features(
         smooth_samples=int(smooth_samples),
         prominence=prominence,
     )
-    has_finite = np.isfinite(data).any(axis=2)
-    auc_vals = np.trapz(np.nan_to_num(data, nan=0.0), times, axis=2)
-    auc_vals[~has_finite] = np.nan
-
-    peak_stat = f"peak_{peak_mode}"
-    lat_stat = f"latency_{peak_mode}"
-
-    for idx, name in enumerate(names):
-        if scope == "global":
-            mean_col = NamingSchema.build("erp", segment, "broadband", "global", "mean")
-            peak_col = NamingSchema.build("erp", segment, "broadband", "global", peak_stat)
-            lat_col = NamingSchema.build("erp", segment, "broadband", "global", lat_stat)
-            auc_col = NamingSchema.build("erp", segment, "broadband", "global", "auc")
-        else:
-            mean_col = NamingSchema.build("erp", segment, "broadband", scope, "mean", channel=name)
-            peak_col = NamingSchema.build("erp", segment, "broadband", scope, peak_stat, channel=name)
-            lat_col = NamingSchema.build("erp", segment, "broadband", scope, lat_stat, channel=name)
-            auc_col = NamingSchema.build("erp", segment, "broadband", scope, "auc", channel=name)
-
-        output[mean_col] = mean_vals[:, idx]
-        output[peak_col] = peak_vals[:, idx]
-        output[lat_col] = peak_times[:, idx]
-        output[auc_col] = auc_vals[:, idx]
+    auc_vals = _compute_auc(data, times)
+    
+    for idx, channel_name in enumerate(names):
+        mean_name, peak_name, latency_name, auc_name = _build_feature_names(
+            segment,
+            scope,
+            peak_mode,
+            channel_name if scope != "global" else None,
+        )
+        
+        output[mean_name] = mean_vals[:, idx]
+        output[peak_name] = peak_vals[:, idx]
+        output[latency_name] = peak_times[:, idx]
+        output[auc_name] = auc_vals[:, idx]
+    
     return peak_vals, peak_times
+
+
+def _build_peak_pair_names(
+    pair_label: str,
+    scope: str,
+    channel_name: Optional[str] = None,
+) -> Tuple[str, str]:
+    if scope == "global":
+        ptp_name = NamingSchema.build("erp", pair_label, "broadband", "global", "ptp")
+        latency_diff_name = NamingSchema.build("erp", pair_label, "broadband", "global", "latency_diff")
+    else:
+        ptp_name = NamingSchema.build("erp", pair_label, "broadband", scope, "ptp", channel=channel_name)
+        latency_diff_name = NamingSchema.build("erp", pair_label, "broadband", scope, "latency_diff", channel=channel_name)
+    return ptp_name, latency_diff_name
 
 
 def _append_peak_pair_features(
@@ -154,15 +243,14 @@ def _append_peak_pair_features(
     ptp_vals: np.ndarray,
     lat_diff: np.ndarray,
 ) -> None:
-    for idx, name in enumerate(names):
-        if scope == "global":
-            ptp_col = NamingSchema.build("erp", pair_label, "broadband", "global", "ptp")
-            lat_col = NamingSchema.build("erp", pair_label, "broadband", "global", "latency_diff")
-        else:
-            ptp_col = NamingSchema.build("erp", pair_label, "broadband", scope, "ptp", channel=name)
-            lat_col = NamingSchema.build("erp", pair_label, "broadband", scope, "latency_diff", channel=name)
-        output[ptp_col] = ptp_vals[:, idx]
-        output[lat_col] = lat_diff[:, idx]
+    for idx, channel_name in enumerate(names):
+        ptp_name, latency_diff_name = _build_peak_pair_names(
+            pair_label,
+            scope,
+            channel_name if scope != "global" else None,
+        )
+        output[ptp_name] = ptp_vals[:, idx]
+        output[latency_diff_name] = lat_diff[:, idx]
 
 
 def _build_component_masks(
@@ -173,31 +261,250 @@ def _build_component_masks(
     masks: Dict[str, np.ndarray] = {}
     if not isinstance(components, list):
         return masks
+    
     for comp in components:
         if not isinstance(comp, dict):
             continue
+        
         name = str(comp.get("name", "")).strip().lower()
         start = comp.get("start")
         end = comp.get("end")
+        
         if not name or start is None or end is None:
             continue
+        
         try:
-            start_f = float(start)
-            end_f = float(end)
+            start_time = float(start)
+            end_time = float(end)
         except (TypeError, ValueError):
             continue
-        if not np.isfinite(start_f) or not np.isfinite(end_f) or end_f <= start_f:
+        
+        if not np.isfinite(start_time) or not np.isfinite(end_time):
             continue
-        mask = (times >= start_f) & (times < end_f)
+        if end_time <= start_time:
+            continue
+        
+        mask = (times >= start_time) & (times < end_time)
         if np.any(mask):
             masks[name] = mask
+    
     return masks
+
+
+def _parse_erp_config(
+    config: Any,
+) -> Dict[str, Any]:
+    if not hasattr(config, "get"):
+        return {}
+    return config.get("feature_engineering.erp", {})
+
+
+def _parse_lowpass_filter(
+    erp_cfg: Dict[str, Any],
+) -> Optional[float]:
+    lowpass_hz = erp_cfg.get("lowpass_hz", _DEFAULT_LOWPASS_HZ)
+    if lowpass_hz is None:
+        return None
+    
+    try:
+        lowpass_hz = float(lowpass_hz)
+    except (TypeError, ValueError):
+        return _DEFAULT_LOWPASS_HZ
+    
+    if not np.isfinite(lowpass_hz) or lowpass_hz <= 0:
+        return None
+    
+    return lowpass_hz
+
+
+def _apply_lowpass_filter(
+    epochs: Any,
+    picks: np.ndarray,
+    lowpass_hz: float,
+    logger: Any,
+) -> np.ndarray:
+    try:
+        filtered_epochs = epochs.copy().filter(
+            l_freq=None,
+            h_freq=lowpass_hz,
+            picks=picks,
+            verbose=False,
+        )
+        data = filtered_epochs.get_data(picks=picks)
+        logger.info("ERP: Applied %.1f Hz low-pass filter for peak detection", lowpass_hz)
+        return data
+    except Exception as exc:
+        logger.warning("ERP: Low-pass filter failed (%s); using unfiltered data", exc)
+        return epochs.get_data(picks=picks)
+
+
+def _parse_smoothing_config(
+    erp_cfg: Dict[str, Any],
+    sampling_rate: float,
+) -> int:
+    smooth_ms = erp_cfg.get("smooth_ms", 0.0)
+    try:
+        smooth_ms = float(smooth_ms)
+    except (TypeError, ValueError):
+        smooth_ms = 0.0
+    
+    if smooth_ms <= 0:
+        return 0
+    
+    smooth_samples = int(round(sampling_rate * smooth_ms / _MILLISECONDS_PER_SECOND))
+    return smooth_samples
+
+
+def _parse_peak_prominence(
+    erp_cfg: Dict[str, Any],
+) -> Optional[float]:
+    peak_prom_uv = erp_cfg.get("peak_prominence_uv", None)
+    if peak_prom_uv is None:
+        return None
+    
+    try:
+        peak_prominence = float(peak_prom_uv) * _MICROVOLTS_TO_VOLTS
+    except (TypeError, ValueError):
+        return None
+    
+    return peak_prominence
+
+
+def _apply_baseline_correction(
+    data: np.ndarray,
+    baseline_mask: Optional[np.ndarray],
+    allow_no_baseline: bool,
+    logger: Any,
+) -> np.ndarray:
+    if baseline_mask is None or not np.any(baseline_mask):
+        if allow_no_baseline:
+            logger.info("ERP: baseline window missing; proceeding without baseline correction.")
+            return data
+        raise ValueError(
+            "ERP baseline correction requested but baseline window is missing or empty."
+        )
+    
+    baseline = np.nanmean(data[:, :, baseline_mask], axis=2, keepdims=True)
+    return data - baseline
+
+
+def _process_channel_features(
+    output: Dict[str, np.ndarray],
+    seg_data: np.ndarray,
+    seg_times: np.ndarray,
+    ch_names: List[str],
+    seg_name: str,
+    peak_mode: str,
+    smooth_samples: int,
+    peak_prominence: Optional[float],
+) -> Tuple[np.ndarray, np.ndarray]:
+    peak_vals, peak_times = _append_series_features(
+        output,
+        seg_data,
+        ch_names,
+        seg_times,
+        seg_name,
+        "ch",
+        peak_mode,
+        smooth_samples=smooth_samples,
+        prominence=peak_prominence,
+    )
+    return peak_vals, peak_times
+
+
+def _process_roi_features(
+    output: Dict[str, np.ndarray],
+    seg_data: np.ndarray,
+    seg_times: np.ndarray,
+    roi_map: Dict[str, List[int]],
+    seg_name: str,
+    peak_mode: str,
+    smooth_samples: int,
+    peak_prominence: Optional[float],
+) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    roi_names = []
+    roi_series = []
+    
+    for roi_name, channel_indices in roi_map.items():
+        if not channel_indices:
+            continue
+        roi_names.append(roi_name)
+        roi_series.append(np.nanmean(seg_data[:, channel_indices, :], axis=1))
+    
+    if not roi_series:
+        return np.array([]), np.array([]), []
+    
+    roi_stack = np.stack(roi_series, axis=1)
+    peak_vals, peak_times = _append_series_features(
+        output,
+        roi_stack,
+        roi_names,
+        seg_times,
+        seg_name,
+        "roi",
+        peak_mode,
+        smooth_samples=smooth_samples,
+        prominence=peak_prominence,
+    )
+    return peak_vals, peak_times, roi_names
+
+
+def _process_global_features(
+    output: Dict[str, np.ndarray],
+    seg_data: np.ndarray,
+    seg_times: np.ndarray,
+    seg_name: str,
+    peak_mode: str,
+    smooth_samples: int,
+    peak_prominence: Optional[float],
+) -> Tuple[np.ndarray, np.ndarray]:
+    global_series = np.nanmean(seg_data, axis=1, keepdims=True)
+    peak_vals, peak_times = _append_series_features(
+        output,
+        global_series,
+        ["global"],
+        seg_times,
+        seg_name,
+        "global",
+        peak_mode,
+        smooth_samples=smooth_samples,
+        prominence=peak_prominence,
+    )
+    return peak_vals, peak_times
+
+
+def _find_matching_peak_pairs(
+    segments: Dict[str, Tuple[np.ndarray, np.ndarray, List[str]]],
+) -> List[Tuple[str, str, str]]:
+    negative_by_suffix: Dict[str, str] = {}
+    positive_by_suffix: Dict[str, str] = {}
+    
+    for segment_name in segments.keys():
+        parsed = _parse_peak_label(segment_name)
+        if not parsed:
+            continue
+        
+        polarity, suffix = parsed
+        if polarity == "n" and suffix not in negative_by_suffix:
+            negative_by_suffix[suffix] = segment_name
+        elif polarity == "p" and suffix not in positive_by_suffix:
+            positive_by_suffix[suffix] = segment_name
+    
+    matching_pairs = []
+    common_suffixes = sorted(set(negative_by_suffix) & set(positive_by_suffix))
+    
+    for suffix in common_suffixes:
+        negative_segment = negative_by_suffix[suffix]
+        positive_segment = positive_by_suffix[suffix]
+        matching_pairs.append((negative_segment, positive_segment, suffix))
+    
+    return matching_pairs
 
 
 def extract_erp_features(
     ctx: Any,  # FeatureContext
 ) -> Tuple[pd.DataFrame, List[str]]:
-    valid, err = validate_extractor_inputs(ctx, "ERP", min_epochs=2)
+    valid, err = validate_extractor_inputs(ctx, "ERP", min_epochs=_MIN_EPOCHS_FOR_ERP)
     if not valid:
         ctx.logger.warning(err)
         return pd.DataFrame(), []
@@ -208,74 +515,39 @@ def extract_erp_features(
         ctx.logger.warning("ERP: No EEG channels available; skipping extraction.")
         return pd.DataFrame(), []
 
-    erp_cfg = ctx.config.get("feature_engineering.erp", {}) if hasattr(ctx.config, "get") else {}
+    erp_cfg = _parse_erp_config(ctx.config)
+    times = epochs.times
+    spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
     
-    # Apply low-pass filter for ERP peak detection (standard practice)
-    lowpass_hz = erp_cfg.get("lowpass_hz", 30.0)
-    try:
-        lowpass_hz = float(lowpass_hz) if lowpass_hz is not None else None
-    except Exception:
-        lowpass_hz = 30.0
-    
-    if lowpass_hz is not None and np.isfinite(lowpass_hz) and lowpass_hz > 0:
-        try:
-            epochs_filt = epochs.copy().filter(
-                l_freq=None,
-                h_freq=lowpass_hz,
-                picks=picks,
-                verbose=False,
-            )
-            data = epochs_filt.get_data(picks=picks)
-            ctx.logger.info("ERP: Applied %.1f Hz low-pass filter for peak detection", lowpass_hz)
-        except Exception as exc:
-            ctx.logger.warning("ERP: Low-pass filter failed (%s); using unfiltered data", exc)
-            data = epochs.get_data(picks=picks)
+    lowpass_hz = _parse_lowpass_filter(erp_cfg)
+    if lowpass_hz is not None:
+        data = _apply_lowpass_filter(epochs, picks, lowpass_hz, ctx.logger)
     else:
         data = epochs.get_data(picks=picks)
     
-    times = epochs.times
-    spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
-
+    sampling_rate = float(epochs.info["sfreq"])
+    smooth_samples = _parse_smoothing_config(erp_cfg, sampling_rate)
+    peak_prominence = _parse_peak_prominence(erp_cfg)
+    
     baseline_correction = bool(erp_cfg.get("baseline_correction", True))
     allow_no_baseline = bool(erp_cfg.get("allow_no_baseline", False))
-    smooth_ms = erp_cfg.get("smooth_ms", 0.0)
-    try:
-        smooth_ms = float(smooth_ms)
-    except Exception:
-        smooth_ms = 0.0
-    smooth_samples = int(round(float(epochs.info["sfreq"]) * smooth_ms / 1000.0)) if smooth_ms > 0 else 0
-    peak_prom_uv = erp_cfg.get("peak_prominence_uv", None)
-    peak_prominence = None
-    if peak_prom_uv is not None:
-        try:
-            peak_prominence = float(peak_prom_uv) * 1e-6
-        except Exception:
-            peak_prominence = None
-
+    
     if baseline_correction:
         baseline_mask = ctx.windows.get_mask("baseline") if ctx.windows is not None else None
-        if baseline_mask is None or not np.any(baseline_mask):
-            if allow_no_baseline:
-                ctx.logger.info("ERP: baseline window missing; proceeding without baseline correction.")
-            else:
-                raise ValueError(
-                    "ERP baseline correction requested but baseline window is missing or empty."
-                )
-        else:
-            baseline = np.nanmean(data[:, :, baseline_mask], axis=2, keepdims=True)
-            data = data - baseline
+        data = _apply_baseline_correction(data, baseline_mask, allow_no_baseline, ctx.logger)
 
     segment_masks = get_segment_masks(times, ctx.windows, ctx.config)
     component_masks = _build_component_masks(times, erp_cfg)
-    if component_masks:
-        for name, mask in component_masks.items():
-            if name not in segment_masks:
-                segment_masks[name] = mask
+    
+    for name, mask in component_masks.items():
+        if name not in segment_masks:
+            segment_masks[name] = mask
+    
     if not segment_masks:
         return pd.DataFrame(), []
 
-    output: Dict[str, np.ndarray] = {}
     min_samples = int(erp_cfg.get("min_samples", MIN_SAMPLES_DEFAULT))
+    output: Dict[str, np.ndarray] = {}
     peak_cache: Dict[str, Dict[str, Tuple[np.ndarray, np.ndarray, List[str]]]] = {
         "ch": {},
         "roi": {},
@@ -293,95 +565,75 @@ def extract_erp_features(
             continue
         if mask is None or np.sum(mask) < min_samples:
             continue
+        
         seg_times = times[mask]
         seg_data = data[:, :, mask]
         peak_mode = _infer_peak_mode(seg_name)
 
         if "channels" in spatial_modes:
-            peak_vals, peak_times = _append_series_features(
+            peak_vals, peak_times = _process_channel_features(
                 output,
                 seg_data,
-                ch_names,
                 seg_times,
+                ch_names,
                 seg_name,
-                "ch",
                 peak_mode,
-                smooth_samples=smooth_samples,
-                prominence=peak_prominence,
+                smooth_samples,
+                peak_prominence,
             )
             peak_cache["ch"][seg_name] = (peak_vals, peak_times, ch_names)
 
         if "roi" in spatial_modes and roi_map:
-            roi_names = []
-            roi_series = []
-            for roi_name, ch_indices in roi_map.items():
-                if ch_indices:
-                    roi_names.append(roi_name)
-                    roi_series.append(np.nanmean(seg_data[:, ch_indices, :], axis=1))
-            if roi_series:
-                roi_stack = np.stack(roi_series, axis=1)
-                peak_vals, peak_times = _append_series_features(
-                    output,
-                    roi_stack,
-                    roi_names,
-                    seg_times,
-                    seg_name,
-                    "roi",
-                    peak_mode,
-                    smooth_samples=smooth_samples,
-                    prominence=peak_prominence,
-                )
+            peak_vals, peak_times, roi_names = _process_roi_features(
+                output,
+                seg_data,
+                seg_times,
+                roi_map,
+                seg_name,
+                peak_mode,
+                smooth_samples,
+                peak_prominence,
+            )
+            if roi_names:
                 peak_cache["roi"][seg_name] = (peak_vals, peak_times, roi_names)
 
         if "global" in spatial_modes:
-            global_series = np.nanmean(seg_data, axis=1, keepdims=True)
-            peak_vals, peak_times = _append_series_features(
+            peak_vals, peak_times = _process_global_features(
                 output,
-                global_series,
-                ["global"],
+                seg_data,
                 seg_times,
                 seg_name,
-                "global",
                 peak_mode,
-                smooth_samples=smooth_samples,
-                prominence=peak_prominence,
+                smooth_samples,
+                peak_prominence,
             )
             peak_cache["global"][seg_name] = (peak_vals, peak_times, ["global"])
 
     for scope, segments in peak_cache.items():
         if not segments:
             continue
-        neg_by_suffix: Dict[str, str] = {}
-        pos_by_suffix: Dict[str, str] = {}
-        for seg_name in segments.keys():
-            parsed = _parse_peak_label(seg_name)
-            if not parsed:
-                continue
-            polarity, suffix = parsed
-            if polarity == "n" and suffix not in neg_by_suffix:
-                neg_by_suffix[suffix] = seg_name
-            elif polarity == "p" and suffix not in pos_by_suffix:
-                pos_by_suffix[suffix] = seg_name
-
-        for suffix in sorted(set(neg_by_suffix) & set(pos_by_suffix)):
-            neg_seg = neg_by_suffix[suffix]
-            pos_seg = pos_by_suffix[suffix]
-            neg_vals, neg_times, neg_names = segments[neg_seg]
-            pos_vals, pos_times, pos_names = segments[pos_seg]
+        
+        matching_pairs = _find_matching_peak_pairs(segments)
+        
+        for neg_segment, pos_segment, suffix in matching_pairs:
+            neg_vals, neg_times, neg_names = segments[neg_segment]
+            pos_vals, pos_times, pos_names = segments[pos_segment]
+            
             if scope != "global" and neg_names != pos_names:
                 continue
 
-            pair_label = f"{neg_seg}{pos_seg}".replace("_", "")
+            pair_label = f"{neg_segment}{pos_segment}".replace("_", "")
             ptp_vals = pos_vals - neg_vals
-            lat_diff = pos_times - neg_times
-            names = ["global"] if scope == "global" else pos_names
+            latency_diff = pos_times - neg_times
+            channel_names = ["global"] if scope == "global" else pos_names
+            
             _append_peak_pair_features(
                 output,
                 scope=scope,
                 pair_label=pair_label,
-                names=names,
+                names=channel_names,
                 ptp_vals=ptp_vals,
-                lat_diff=lat_diff,
+                lat_diff=latency_diff,
             )
 
     if not output:

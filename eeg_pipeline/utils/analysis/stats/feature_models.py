@@ -21,11 +21,22 @@ from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features
 
 
+# Constants
+_NUMERICAL_TOLERANCE = 1e-12
+_LOGIT_MAX_ITERATIONS = 200
+_QUANTILE_MEDIAN = 0.5
+_DEFAULT_FDR_ALPHA = 0.05
+_MIN_FEATURES_FOR_PARALLEL = 10
+_MAX_DUMMY_LEVELS = 20
+_MIN_BINARY_LEVELS = 2
+
+
 def _get(config: Any, key: str, default: Any) -> Any:
+    """Safely get a value from config, returning default if unavailable."""
     try:
         if hasattr(config, "get"):
             return config.get(key, default)
-    except Exception:
+    except (AttributeError, KeyError, TypeError):
         pass
     return default
 
@@ -44,7 +55,7 @@ def _build_covariate_design(
     covariate_cols: List[str],
     *,
     add_intercept: bool = True,
-    max_dummies: int = 20,
+    max_dummies: int = _MAX_DUMMY_LEVELS,
 ) -> Tuple[np.ndarray, List[str]]:
     use = df[covariate_cols].copy() if covariate_cols else pd.DataFrame(index=df.index)
     parts = []
@@ -81,20 +92,25 @@ def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
 
 
 def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray) -> np.ndarray:
+    """Compute HC3 heteroscedasticity-consistent standard errors."""
     n, p = X.shape
-    resid = y - X @ beta
+    residuals = y - X @ beta
     try:
         XtX_inv = np.linalg.inv(X.T @ X)
     except np.linalg.LinAlgError:
         return np.full(p, np.nan)
-    h = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
-    denom = (1.0 - h)
-    denom = np.where(np.isfinite(denom) & (np.abs(denom) > 1e-12), denom, np.nan)
-    w = (resid**2) / (denom**2)
-    w = np.where(np.isfinite(w), w, 0.0)
-    middle = X.T @ (X * w[:, None])
-    cov = XtX_inv @ middle @ XtX_inv
-    return np.sqrt(np.diag(cov))
+    
+    leverage = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
+    leverage_complement = 1.0 - leverage
+    is_valid = np.isfinite(leverage_complement) & (np.abs(leverage_complement) > _NUMERICAL_TOLERANCE)
+    leverage_complement = np.where(is_valid, leverage_complement, np.nan)
+    
+    weights = (residuals**2) / (leverage_complement**2)
+    weights = np.where(np.isfinite(weights), weights, 0.0)
+    
+    middle_matrix = X.T @ (X * weights[:, None])
+    covariance = XtX_inv @ middle_matrix @ XtX_inv
+    return np.sqrt(np.diag(covariance))
 
 
 def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
@@ -110,8 +126,8 @@ def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
 @dataclass
 class FeatureModelsConfig:
     enabled: bool = False
-    outcomes: List[str] = None  # type: ignore[assignment]
-    families: List[str] = None  # type: ignore[assignment]
+    outcomes: Optional[List[str]] = None
+    families: Optional[List[str]] = None
     include_temperature: bool = True
     temperature_control: str = "linear"  # "linear" | "rating_hat" | "spline"
     include_trial_order: bool = True
@@ -150,6 +166,268 @@ class FeatureModelsConfig:
         )
 
 
+def _extract_interaction_terms(
+    feature_idx: int,
+    names: List[str],
+    model_params: Any,
+    model_pvalues: Optional[Any] = None,
+) -> Tuple[float, float]:
+    """Extract interaction term beta and p-value if present."""
+    if "feature_x_temperature" not in names:
+        return np.nan, np.nan
+    
+    interaction_idx = names.index("feature_x_temperature")
+    beta_interaction = float(model_params[interaction_idx])
+    
+    if model_pvalues is not None and hasattr(model_pvalues, "__getitem__"):
+        p_interaction = float(model_pvalues[interaction_idx])
+    else:
+        p_interaction = np.nan
+    
+    return beta_interaction, p_interaction
+
+
+def _build_base_record(
+    feature: str,
+    target: str,
+    model_family: str,
+    n_samples: int,
+    beta_feature: float,
+    se_feature: float,
+    stat_feature: float,
+    p_feature: float,
+    p_source: str,
+    beta_interaction: float = np.nan,
+    p_interaction: float = np.nan,
+) -> Dict[str, Any]:
+    """Build base record dictionary for model results."""
+    return {
+        "feature": feature,
+        "target": target,
+        "model_family": model_family,
+        "n": n_samples,
+        "beta_feature": beta_feature,
+        "se_feature": se_feature,
+        "stat_feature": stat_feature,
+        "p_feature": p_feature,
+        "odds_ratio": np.nan,
+        "auc": np.nan,
+        "delta_auc": np.nan,
+        "pseudo_r2_mcfadden": np.nan,
+        "beta_interaction": beta_interaction,
+        "p_interaction": p_interaction,
+        "p_primary": p_feature,
+        "p_raw": p_feature,
+        "p_kind_primary": "p_feature",
+        "p_primary_source": p_source,
+    }
+
+
+def _fit_logit_model(
+    feature: str,
+    target: str,
+    y_binary: np.ndarray,
+    X_base: np.ndarray,
+    X_full: np.ndarray,
+    names: List[str],
+    n_samples: int,
+    sm: Any,
+) -> Optional[Dict[str, Any]]:
+    """Fit logistic regression model and return results record."""
+    unique_values = np.unique(y_binary[np.isfinite(y_binary)])
+    if len(unique_values) < _MIN_BINARY_LEVELS:
+        return None
+    
+    try:
+        model_reduced = sm.Logit(y_binary, X_base).fit(disp=False, maxiter=_LOGIT_MAX_ITERATIONS)
+        model_full = sm.Logit(y_binary, X_full).fit(disp=False, maxiter=_LOGIT_MAX_ITERATIONS)
+    except (ValueError, np.linalg.LinAlgError, Exception):
+        return None
+    
+    feature_idx = names.index("feature")
+    beta = float(model_full.params[feature_idx])
+    se = float(model_full.bse[feature_idx]) if np.isfinite(model_full.bse[feature_idx]) else np.nan
+    
+    if hasattr(model_full, "tvalues"):
+        z = float(model_full.tvalues[feature_idx])
+    else:
+        z = beta / (se + _NUMERICAL_TOLERANCE)
+    
+    if hasattr(model_full, "pvalues"):
+        p = float(model_full.pvalues[feature_idx])
+    else:
+        p = float(2 * stats.norm.sf(abs(z)))
+    
+    odds_ratio = float(np.exp(beta)) if np.isfinite(beta) else np.nan
+    
+    log_likelihood_full = float(model_full.llf) if hasattr(model_full, "llf") else np.nan
+    log_likelihood_reduced = float(model_reduced.llf) if hasattr(model_reduced, "llf") else np.nan
+    
+    if np.isfinite(log_likelihood_full) and np.isfinite(log_likelihood_reduced) and log_likelihood_reduced != 0:
+        mcfadden_r2 = 1.0 - (log_likelihood_full / log_likelihood_reduced)
+    else:
+        mcfadden_r2 = np.nan
+    
+    auc = np.nan
+    delta_auc = np.nan
+    try:
+        from sklearn.metrics import roc_auc_score
+        yhat_full = np.asarray(model_full.predict(X_full), dtype=float)
+        yhat_reduced = np.asarray(model_reduced.predict(X_base), dtype=float)
+        
+        if np.isfinite(yhat_full).all():
+            auc = float(roc_auc_score(y_binary, yhat_full))
+        if np.isfinite(yhat_reduced).all():
+            auc_reduced = float(roc_auc_score(y_binary, yhat_reduced))
+            if np.isfinite(auc) and np.isfinite(auc_reduced):
+                delta_auc = auc - auc_reduced
+    except (ImportError, ValueError, Exception):
+        pass
+    
+    beta_interaction, p_interaction = _extract_interaction_terms(
+        feature_idx, names, model_full.params, model_full.pvalues if hasattr(model_full, "pvalues") else None
+    )
+    
+    record = _build_base_record(
+        feature, target, "logit", n_samples, beta, se, z, p, "mle",
+        beta_interaction, p_interaction
+    )
+    record.update({
+        "odds_ratio": odds_ratio,
+        "auc": auc,
+        "delta_auc": delta_auc,
+        "pseudo_r2_mcfadden": mcfadden_r2,
+    })
+    return record
+
+
+def _fit_quantile_model(
+    feature: str,
+    target: str,
+    y_continuous: np.ndarray,
+    X_full: np.ndarray,
+    names: List[str],
+    n_samples: int,
+    sm: Any,
+) -> Optional[Dict[str, Any]]:
+    """Fit quantile regression model and return results record."""
+    try:
+        model = sm.QuantReg(y_continuous, X_full)
+        result = model.fit(q=_QUANTILE_MEDIAN)
+    except (ValueError, np.linalg.LinAlgError, Exception):
+        return None
+    
+    feature_idx = names.index("feature")
+    beta = float(result.params[feature_idx])
+    
+    if hasattr(result, "bse"):
+        se = float(result.bse[feature_idx])
+    else:
+        se = np.nan
+    
+    if hasattr(result, "tvalues"):
+        t_stat = float(result.tvalues[feature_idx])
+    else:
+        t_stat = beta / (se + _NUMERICAL_TOLERANCE)
+    
+    if hasattr(result, "pvalues"):
+        p = float(result.pvalues[feature_idx])
+    else:
+        p = float(2 * stats.norm.sf(abs(t_stat)))
+    
+    beta_interaction, p_interaction = _extract_interaction_terms(
+        feature_idx, names, result.params,
+        result.pvalues if hasattr(result, "pvalues") else None
+    )
+    
+    record = _build_base_record(
+        feature, target, "quantile_50", n_samples, beta, se, t_stat, p, "quantreg",
+        beta_interaction, p_interaction
+    )
+    return record
+
+
+def _fit_robust_rlm_model(
+    feature: str,
+    target: str,
+    y_continuous: np.ndarray,
+    X_full: np.ndarray,
+    names: List[str],
+    n_samples: int,
+    sm: Any,
+) -> Optional[Dict[str, Any]]:
+    """Fit robust regression model and return results record."""
+    try:
+        result = sm.RLM(y_continuous, X_full, M=sm.robust.norms.HuberT()).fit()
+    except (ValueError, np.linalg.LinAlgError, Exception):
+        return None
+    
+    feature_idx = names.index("feature")
+    beta = float(result.params[feature_idx])
+    
+    if hasattr(result, "bse"):
+        se = float(result.bse[feature_idx])
+    else:
+        se = np.nan
+    
+    if np.isfinite(se):
+        z = beta / (se + _NUMERICAL_TOLERANCE)
+    else:
+        z = np.nan
+    
+    if np.isfinite(z):
+        p = float(2 * stats.norm.sf(abs(z)))
+    else:
+        p = np.nan
+    
+    beta_interaction, _ = _extract_interaction_terms(feature_idx, names, result.params)
+    
+    record = _build_base_record(
+        feature, target, "robust_rlm", n_samples, beta, se, z, p, "rlm",
+        beta_interaction, np.nan
+    )
+    return record
+
+
+def _fit_ols_hc3_model(
+    feature: str,
+    target: str,
+    y_continuous: np.ndarray,
+    X_full: np.ndarray,
+    names: List[str],
+    n_samples: int,
+) -> Optional[Dict[str, Any]]:
+    """Fit OLS with HC3 standard errors and return results record."""
+    beta = _ols_fit(X_full, y_continuous)
+    if beta is None:
+        return None
+    
+    y_predicted = X_full @ beta
+    r2_full = _r2(y_continuous, y_predicted)
+    se = _hc3_se(X_full, y_continuous, beta)
+    
+    degrees_of_freedom = max(int(len(y_continuous) - X_full.shape[1]), 1)
+    t_stats = beta / (se + _NUMERICAL_TOLERANCE)
+    p_values = 2 * stats.t.sf(np.abs(t_stats), df=degrees_of_freedom)
+    
+    feature_idx = names.index("feature")
+    beta_feature = float(beta[feature_idx])
+    se_feature = float(se[feature_idx]) if np.isfinite(se[feature_idx]) else np.nan
+    t_stat_feature = float(t_stats[feature_idx]) if np.isfinite(t_stats[feature_idx]) else np.nan
+    p_feature = float(p_values[feature_idx]) if np.isfinite(p_values[feature_idx]) else np.nan
+    
+    beta_interaction, p_interaction = _extract_interaction_terms(
+        feature_idx, names, beta, p_values
+    )
+    
+    record = _build_base_record(
+        feature, target, "ols_hc3", n_samples, beta_feature, se_feature,
+        t_stat_feature, p_feature, "hc3", beta_interaction, p_interaction
+    )
+    record["r2"] = float(r2_full) if np.isfinite(r2_full) else np.nan
+    return record
+
+
 def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Series], Dict[str, Any]]:
     meta: Dict[str, Any] = {"binary_outcome_kind": kind}
     if kind == "pain_binary" and "pain_binary" in df.columns:
@@ -163,6 +441,55 @@ def _derive_binary_outcome(df: pd.DataFrame, kind: str) -> Tuple[Optional[pd.Ser
         meta["rating_median"] = med
         return (r > med).astype(float), meta
     return None, {"binary_outcome_kind": kind, "status": "missing"}
+
+
+def _prepare_feature_data(
+    feature: str,
+    trial_df: pd.DataFrame,
+    y_all: pd.Series,
+    X_base: np.ndarray,
+    X_base_names: List[str],
+    cfg: "FeatureModelsConfig",
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], List[str], int]:
+    """Prepare feature and outcome data, returning validated arrays and design matrix."""
+    feature_raw = pd.to_numeric(trial_df[feature], errors="coerce")
+    feature_values = feature_raw.to_numpy(dtype=float)
+    if cfg.standardize:
+        feature_values = _zscore(feature_values)
+
+    temperature_values = None
+    if cfg.include_interaction and "temperature" in trial_df.columns:
+        temperature_raw = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
+        temperature_values = _zscore(temperature_raw) if cfg.standardize else temperature_raw
+
+    outcome_values = pd.to_numeric(y_all, errors="coerce").to_numpy(dtype=float)
+    is_valid = (
+        np.isfinite(outcome_values) &
+        np.isfinite(feature_values) &
+        np.all(np.isfinite(X_base), axis=1)
+    )
+    if temperature_values is not None:
+        is_valid = is_valid & np.isfinite(temperature_values)
+    
+    n_valid = int(is_valid.sum())
+    if n_valid < cfg.min_samples:
+        return None, None, None, None, [], 0
+
+    outcome_valid = outcome_values[is_valid]
+    feature_valid = feature_values[is_valid]
+    X_base_valid = X_base[is_valid]
+
+    design_parts = [X_base_valid, feature_valid[:, None]]
+    design_names = [*X_base_names, "feature"]
+    
+    if temperature_values is not None:
+        temperature_valid = temperature_values[is_valid]
+        interaction_term = (feature_valid * temperature_valid)[:, None]
+        design_parts.append(interaction_term)
+        design_names.append("feature_x_temperature")
+    
+    X_full = np.column_stack(design_parts)
+    return outcome_valid, feature_valid, X_base_valid, X_full, design_names, n_valid
 
 
 def _process_single_feature_models(
@@ -180,165 +507,216 @@ def _process_single_feature_models(
     """Process all model families for a single feature."""
     records: List[Dict[str, Any]] = []
     
-    x_raw = pd.to_numeric(trial_df[feat], errors="coerce")
-    x = x_raw.to_numpy(dtype=float)
-    if cfg.standardize:
-        x = _zscore(x)
-
-    t_use = None
-    if cfg.include_interaction and "temperature" in trial_df.columns:
-        t = pd.to_numeric(trial_df["temperature"], errors="coerce").to_numpy(dtype=float)
-        t_use = _zscore(t) if cfg.standardize else t
-
-    y = pd.to_numeric(y_all, errors="coerce").to_numpy(dtype=float)
-    valid = np.isfinite(y) & np.isfinite(x) & np.all(np.isfinite(X_base), axis=1)
-    if t_use is not None:
-        valid = valid & np.isfinite(t_use)
-    if int(valid.sum()) < cfg.min_samples:
+    prepared = _prepare_feature_data(feat, trial_df, y_all, X_base, X_base_names, cfg)
+    y_valid, _, X_base_valid, X_full, names, n_samples = prepared
+    
+    if y_valid is None:
         return records
 
-    y_v = y[valid]
-    x_v = x[valid]
-    Xb_v = X_base[valid]
-
-    X_parts = [Xb_v, x_v[:, None]]
-    names = [*X_base_names, "feature"]
-    if t_use is not None:
-        X_parts.append((x_v * t_use[valid])[:, None])
-        names.append("feature_x_temperature")
-    X = np.column_stack(X_parts)
-
+    sm = None
     if has_statsmodels:
         try:
             import statsmodels.api as sm
         except ImportError:
-            sm = None
-    else:
-        sm = None
+            pass
 
-    for fam in families:
-        fam = str(fam).lower()
-        if fam in ("logit", "logistic", "logistic_regression"):
+    for family in families:
+        family_lower = str(family).strip().lower()
+        
+        if family_lower in ("logit", "logistic", "logistic_regression"):
             if not is_binary or sm is None:
                 continue
-            y_bin = y_v
-            if int(np.unique(y_bin[np.isfinite(y_bin)]).size) < 2:
-                continue
-            try:
-                model_red = sm.Logit(y_bin, Xb_v).fit(disp=False, maxiter=200)
-                model = sm.Logit(y_bin, X).fit(disp=False, maxiter=200)
-            except Exception:
-                continue
-            idx = names.index("feature")
-            beta = float(model.params[idx])
-            se = float(model.bse[idx]) if np.isfinite(model.bse[idx]) else np.nan
-            z = float(model.tvalues[idx]) if hasattr(model, "tvalues") else (beta / (se + 1e-12))
-            p = float(model.pvalues[idx]) if hasattr(model, "pvalues") else float(2 * stats.norm.sf(abs(z)))
-            or_ = float(np.exp(beta)) if np.isfinite(beta) else np.nan
-            llf = float(model.llf) if hasattr(model, "llf") else np.nan
-            llf0 = float(model_red.llf) if hasattr(model_red, "llf") else np.nan
-            mcfadden = 1.0 - (llf / llf0) if np.isfinite(llf) and np.isfinite(llf0) and llf0 != 0 else np.nan
-
-            auc = np.nan
-            delta_auc = np.nan
-            try:
-                from sklearn.metrics import roc_auc_score
-                yhat = np.asarray(model.predict(X), dtype=float)
-                yhat0 = np.asarray(model_red.predict(Xb_v), dtype=float)
-                auc = float(roc_auc_score(y_bin, yhat)) if np.isfinite(yhat).all() else np.nan
-                auc0 = float(roc_auc_score(y_bin, yhat0)) if np.isfinite(yhat0).all() else np.nan
-                delta_auc = auc - auc0 if np.isfinite(auc) and np.isfinite(auc0) else np.nan
-            except Exception:
-                pass
-
-            records.append({
-                "feature": feat, "target": out_name, "model_family": "logit",
-                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
-                "stat_feature": z, "p_feature": p, "odds_ratio": or_,
-                "auc": auc, "delta_auc": delta_auc, "pseudo_r2_mcfadden": mcfadden,
-                "beta_interaction": float(model.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                "p_interaction": float(model.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(model, "pvalues") else np.nan,
-                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "mle",
-            })
-            continue
-
-        if fam in ("quantile_50", "quantile", "median"):
+            record = _fit_logit_model(feat, out_name, y_valid, X_base_valid, X_full, names, n_samples, sm)
+            if record is not None:
+                records.append(record)
+        
+        elif family_lower in ("quantile_50", "quantile", "median"):
             if is_binary or sm is None:
                 continue
-            try:
-                mod = sm.QuantReg(y_v, X)
-                res = mod.fit(q=0.5)
-            except Exception:
-                continue
-            idx = names.index("feature")
-            beta = float(res.params[idx])
-            se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
-            t = float(res.tvalues[idx]) if hasattr(res, "tvalues") else (beta / (se + 1e-12))
-            p = float(res.pvalues[idx]) if hasattr(res, "pvalues") else float(2 * stats.norm.sf(abs(t)))
-            records.append({
-                "feature": feat, "target": out_name, "model_family": "quantile_50",
-                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
-                "stat_feature": t, "p_feature": p, "odds_ratio": np.nan,
-                "auc": np.nan, "delta_auc": np.nan, "pseudo_r2_mcfadden": np.nan,
-                "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                "p_interaction": float(res.pvalues[names.index("feature_x_temperature")]) if "feature_x_temperature" in names and hasattr(res, "pvalues") else np.nan,
-                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "quantreg",
-            })
-            continue
-
-        if fam in ("robust_rlm", "rlm", "huber"):
+            record = _fit_quantile_model(feat, out_name, y_valid, X_full, names, n_samples, sm)
+            if record is not None:
+                records.append(record)
+        
+        elif family_lower in ("robust_rlm", "rlm", "huber"):
             if is_binary or sm is None:
                 continue
-            try:
-                res = sm.RLM(y_v, X, M=sm.robust.norms.HuberT()).fit()
-            except Exception:
-                continue
-            idx = names.index("feature")
-            beta = float(res.params[idx])
-            se = float(res.bse[idx]) if hasattr(res, "bse") else np.nan
-            z = beta / (se + 1e-12) if np.isfinite(se) else np.nan
-            p = float(2 * stats.norm.sf(abs(z))) if np.isfinite(z) else np.nan
-            records.append({
-                "feature": feat, "target": out_name, "model_family": "robust_rlm",
-                "n": int(valid.sum()), "beta_feature": beta, "se_feature": se,
-                "stat_feature": float(z) if np.isfinite(z) else np.nan, "p_feature": p,
-                "odds_ratio": np.nan, "auc": np.nan, "delta_auc": np.nan,
-                "pseudo_r2_mcfadden": np.nan,
-                "beta_interaction": float(res.params[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                "p_interaction": np.nan,
-                "p_primary": p, "p_raw": p, "p_kind_primary": "p_feature", "p_primary_source": "rlm",
-            })
-            continue
-
-        if fam in ("ols_hc3", "ols"):
+            record = _fit_robust_rlm_model(feat, out_name, y_valid, X_full, names, n_samples, sm)
+            if record is not None:
+                records.append(record)
+        
+        elif family_lower in ("ols_hc3", "ols"):
             if is_binary:
                 continue
-            beta = _ols_fit(X, y_v)
-            if beta is None:
-                continue
-            y_hat = X @ beta
-            r2_full = _r2(y_v, y_hat)
-            se = _hc3_se(X, y_v, beta)
-            dof = max(int(len(y_v) - X.shape[1]), 1)
-            t_stats = beta / (se + 1e-12)
-            p_vals = 2 * stats.t.sf(np.abs(t_stats), df=dof)
-            idx = names.index("feature")
-            beta_f = float(beta[idx])
-            p_f = float(p_vals[idx]) if np.isfinite(p_vals[idx]) else np.nan
-            records.append({
-                "feature": feat, "target": out_name, "model_family": "ols_hc3",
-                "n": int(valid.sum()), "beta_feature": beta_f,
-                "se_feature": float(se[idx]) if np.isfinite(se[idx]) else np.nan,
-                "stat_feature": float(t_stats[idx]) if np.isfinite(t_stats[idx]) else np.nan,
-                "p_feature": p_f, "odds_ratio": np.nan, "auc": np.nan, "delta_auc": np.nan,
-                "pseudo_r2_mcfadden": np.nan,
-                "r2": float(r2_full) if np.isfinite(r2_full) else np.nan,
-                "beta_interaction": float(beta[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                "p_interaction": float(p_vals[names.index("feature_x_temperature")]) if "feature_x_temperature" in names else np.nan,
-                "p_primary": p_f, "p_raw": p_f, "p_kind_primary": "p_feature", "p_primary_source": "hc3",
-            })
+            record = _fit_ols_hc3_model(feat, out_name, y_valid, X_full, names, n_samples)
+            if record is not None:
+                records.append(record)
 
     return records
+
+
+def _select_valid_features(
+    trial_df: pd.DataFrame,
+    feature_cols: List[str],
+    min_samples: int,
+    max_features: Optional[int],
+) -> Tuple[List[str], Dict[str, Any]]:
+    """Select valid features based on data quality and variance."""
+    meta: Dict[str, Any] = {}
+    candidates: List[str] = []
+    
+    for col in feature_cols:
+        if col not in trial_df.columns:
+            continue
+        feature_values = pd.to_numeric(trial_df[col], errors="coerce")
+        n_valid = int(feature_values.notna().sum())
+        if n_valid < min_samples:
+            continue
+        
+        feature_array = feature_values.to_numpy(dtype=float)
+        std_dev = float(np.nanstd(feature_array, ddof=1))
+        if std_dev <= _NUMERICAL_TOLERANCE:
+            continue
+        candidates.append(col)
+
+    if max_features is not None and max_features > 0 and len(candidates) > max_features:
+        variance_feature_pairs = []
+        for col in candidates:
+            feature_values = pd.to_numeric(trial_df[col], errors="coerce").to_numpy(dtype=float)
+            variance = float(np.nanvar(feature_values, ddof=1))
+            variance_feature_pairs.append((variance, col))
+        
+        variance_feature_pairs.sort(reverse=True)
+        candidates = [col for _, col in variance_feature_pairs[:max_features]]
+        meta["max_features_applied"] = max_features
+    
+    return candidates, meta
+
+
+def _build_temperature_covariates(
+    trial_df: pd.DataFrame,
+    outcome_name: str,
+    temperature_control: str,
+    include_temperature: bool,
+    config: Any,
+) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
+    """Build temperature-related covariates based on control strategy."""
+    covariates: List[str] = []
+    temp_design_df = None
+    temp_meta: Dict[str, Any] = {"temperature_control_requested": temperature_control}
+    
+    if not include_temperature or outcome_name == "temperature":
+        return covariates, temp_design_df, temp_meta
+    
+    temp_control_lower = str(temperature_control or "linear").strip().lower()
+    
+    if temp_control_lower in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
+        if "rating_hat_from_temp" in trial_df.columns:
+            covariates.append("rating_hat_from_temp")
+            temp_meta.update({
+                "temperature_control_used": "rating_hat",
+                "temperature_control_column": "rating_hat_from_temp"
+            })
+        elif "temperature" in trial_df.columns:
+            covariates.append("temperature")
+            temp_meta.update({
+                "temperature_control_used": "linear",
+                "temperature_control_fallback": "temperature"
+            })
+    
+    elif temp_control_lower in ("spline", "rcs", "restricted_cubic"):
+        if "temperature" in trial_df.columns:
+            from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
+            
+            temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
+                trial_df["temperature"],
+                config=config,
+                key_prefix="behavior_analysis.models.temperature_spline",
+                name_prefix="temperature_rcs",
+            )
+            for col in spline_cols:
+                if col not in covariates:
+                    covariates.append(col)
+            temp_meta.update({
+                "temperature_control_used": "spline",
+                "temperature_control_column": "temperature",
+                "temperature_spline": spline_meta
+            })
+        elif "rating_hat_from_temp" in trial_df.columns:
+            covariates.append("rating_hat_from_temp")
+            temp_meta.update({
+                "temperature_control_used": "rating_hat_fallback",
+                "temperature_control_column": "rating_hat_from_temp"
+            })
+    
+    elif "temperature" in trial_df.columns:
+        covariates.append("temperature")
+        temp_meta.update({
+            "temperature_control_used": "linear",
+            "temperature_control_column": "temperature"
+        })
+    
+    return covariates, temp_design_df, temp_meta
+
+
+def _build_additional_covariates(
+    trial_df: pd.DataFrame,
+    cfg: "FeatureModelsConfig",
+    config: Any,
+) -> List[str]:
+    """Build additional covariates (trial order, previous terms, run/block)."""
+    covariates: List[str] = []
+    
+    if cfg.include_trial_order:
+        if "trial_index_within_group" in trial_df.columns:
+            covariates.append("trial_index_within_group")
+        elif "trial_index" in trial_df.columns:
+            covariates.append("trial_index")
+    
+    if cfg.include_prev_terms:
+        prev_term_candidates = ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]
+        for col in prev_term_candidates:
+            if col in trial_df.columns:
+                covariates.append(col)
+    
+    if cfg.include_run_block:
+        run_col_config = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        run_col_candidates = [run_col_config, "run_id", "run", "block"]
+        seen = set()
+        for col in run_col_candidates:
+            if col and col not in seen and col in trial_df.columns:
+                seen.add(col)
+                covariates.append(col)
+    
+    return covariates
+
+
+def _prepare_outcome_data(
+    trial_df: pd.DataFrame,
+    outcome_name: str,
+) -> Tuple[Optional[pd.Series], bool, str, Dict[str, Any]]:
+    """Prepare outcome data, handling binary and continuous outcomes."""
+    outcome_name_str = str(outcome_name)
+    meta: Dict[str, Any] = {}
+    
+    if outcome_name_str == "pain_binary":
+        outcome_series, binary_meta = _derive_binary_outcome(trial_df, "pain_binary")
+        meta.update(binary_meta)
+        if outcome_series is None:
+            return None, False, outcome_name_str, meta
+        return outcome_series, True, outcome_name_str, meta
+    
+    if outcome_name_str in ("rating_median", "rating_median_split"):
+        outcome_series, binary_meta = _derive_binary_outcome(trial_df, outcome_name_str)
+        meta.update(binary_meta)
+        if outcome_series is None:
+            return None, False, outcome_name_str, meta
+        return outcome_series, True, "pain_binary_derived", meta
+    
+    if outcome_name_str not in trial_df.columns:
+        return None, False, outcome_name_str, meta
+    
+    outcome_series = pd.to_numeric(trial_df[outcome_name_str], errors="coerce")
+    return outcome_series, False, outcome_name_str, meta
 
 
 def run_feature_model_families(
@@ -360,138 +738,52 @@ def run_feature_model_families(
     if not cfg.enabled:
         return pd.DataFrame(), {**meta, "status": "disabled"}
 
-    rng_seed = int(_get(config, "project.random_state", 42))
-    meta["random_state"] = rng_seed
+    random_seed = int(_get(config, "project.random_state", 42))
+    meta["random_state"] = random_seed
     n_jobs_actual = get_n_jobs(config, cfg.n_jobs)
 
-    candidates: List[str] = []
-    for col in feature_cols:
-        if col not in trial_df.columns:
-            continue
-        x = pd.to_numeric(trial_df[col], errors="coerce")
-        if int(x.notna().sum()) < cfg.min_samples:
-            continue
-        if float(np.nanstd(x.to_numpy(dtype=float), ddof=1)) <= 1e-12:
-            continue
-        candidates.append(col)
-
-    if cfg.max_features is not None:
-        try:
-            max_f = int(cfg.max_features)
-        except Exception:
-            max_f = None
-        if max_f is not None and max_f > 0 and len(candidates) > max_f:
-            vars_ = []
-            for col in candidates:
-                x = pd.to_numeric(trial_df[col], errors="coerce").to_numpy(dtype=float)
-                vars_.append((float(np.nanvar(x, ddof=1)), col))
-            vars_.sort(reverse=True)
-            candidates = [c for _v, c in vars_[:max_f]]
-            meta["max_features_applied"] = max_f
+    candidates, feature_selection_meta = _select_valid_features(
+        trial_df, feature_cols, cfg.min_samples, cfg.max_features
+    )
+    meta.update(feature_selection_meta)
 
     try:
         import statsmodels.api as sm
         import statsmodels.formula.api as smf  # noqa: F401
-        _has_statsmodels = True
-    except Exception:
-        sm = None  # type: ignore[assignment]
-        _has_statsmodels = False
-    meta["has_statsmodels"] = _has_statsmodels
+        has_statsmodels = True
+    except ImportError:
+        has_statsmodels = False
+    meta["has_statsmodels"] = has_statsmodels
 
     records: List[Dict[str, Any]] = []
     for outcome in cfg.outcomes:
-        out_name = str(outcome)
+        outcome_series, is_binary, outcome_name, outcome_meta = _prepare_outcome_data(trial_df, outcome)
+        if outcome_series is None:
+            continue
+        
+        meta.setdefault("binary_outcome", {}).update(outcome_meta)
 
-        if out_name == "pain_binary":
-            y_s, bin_meta = _derive_binary_outcome(trial_df, "pain_binary")
-            meta.setdefault("binary_outcome", {}).update(bin_meta)
-            if y_s is None:
-                continue
-            y_all = y_s
-            is_binary = True
-        elif out_name in ("rating_median", "rating_median_split"):
-            y_s, bin_meta = _derive_binary_outcome(trial_df, out_name)
-            meta.setdefault("binary_outcome", {}).update(bin_meta)
-            if y_s is None:
-                continue
-            y_all = y_s
-            is_binary = True
-            out_name = "pain_binary_derived"
-        else:
-            if out_name not in trial_df.columns:
-                continue
-            y_all = pd.to_numeric(trial_df[out_name], errors="coerce")
-            is_binary = False
-
-        # Outcome-specific covariates (avoid leaking temperature into temperature outcome).
-        covariates: List[str] = []
-        temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
-        temp_design_df = None
-        temp_meta: Dict[str, Any] = {"temperature_control_requested": temp_ctrl}
-        if cfg.include_temperature and out_name != "temperature":
-            if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
-                if "rating_hat_from_temp" in trial_df.columns:
-                    covariates.append("rating_hat_from_temp")
-                    temp_meta.update({"temperature_control_used": "rating_hat", "temperature_control_column": "rating_hat_from_temp"})
-                elif "temperature" in trial_df.columns:
-                    covariates.append("temperature")
-                    temp_meta.update({"temperature_control_used": "linear", "temperature_control_fallback": "temperature"})
-            elif temp_ctrl in ("spline", "rcs", "restricted_cubic"):
-                if "temperature" in trial_df.columns:
-                    from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
-
-                    temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
-                        trial_df["temperature"],
-                        config=config,
-                        key_prefix="behavior_analysis.models.temperature_spline",
-                        name_prefix="temperature_rcs",
-                    )
-                    for c in spline_cols:
-                        if c not in covariates:
-                            covariates.append(c)
-                    temp_meta.update({"temperature_control_used": "spline", "temperature_control_column": "temperature", "temperature_spline": spline_meta})
-                elif "rating_hat_from_temp" in trial_df.columns:
-                    covariates.append("rating_hat_from_temp")
-                    temp_meta.update({"temperature_control_used": "rating_hat_fallback", "temperature_control_column": "rating_hat_from_temp"})
-            elif "temperature" in trial_df.columns:
-                covariates.append("temperature")
-                temp_meta.update({"temperature_control_used": "linear", "temperature_control_column": "temperature"})
-
-        if cfg.include_trial_order:
-            if "trial_index_within_group" in trial_df.columns:
-                covariates.append("trial_index_within_group")
-            elif "trial_index" in trial_df.columns:
-                covariates.append("trial_index")
-        if cfg.include_prev_terms:
-            for c in ["prev_temperature", "prev_rating", "delta_temperature", "delta_rating"]:
-                if c in trial_df.columns:
-                    covariates.append(c)
-        if cfg.include_run_block:
-            run_col = str(_get(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
-            candidates = [run_col, "run_id", "run", "block"]
-            seen = set()
-            for c in candidates:
-                if not c or c in seen:
-                    continue
-                seen.add(c)
-                if c in trial_df.columns:
-                    covariates.append(c)
-
-        base_present = [c for c in covariates if c in trial_df.columns]
-        base = trial_df[base_present].copy() if base_present else pd.DataFrame(index=trial_df.index)
+        temp_covariates, temp_design_df, temp_meta = _build_temperature_covariates(
+            trial_df, outcome_name, cfg.temperature_control, cfg.include_temperature, config
+        )
+        additional_covariates = _build_additional_covariates(trial_df, cfg, config)
+        
+        all_covariates = temp_covariates + additional_covariates
+        covariates_present = [c for c in all_covariates if c in trial_df.columns]
+        
+        base_df = trial_df[covariates_present].copy() if covariates_present else pd.DataFrame(index=trial_df.index)
         if temp_design_df is not None:
-            for c in covariates:
-                if c in base.columns:
-                    continue
-                if c in temp_design_df.columns:
-                    base[c] = temp_design_df[c]
+            for col in all_covariates:
+                if col not in base_df.columns and col in temp_design_df.columns:
+                    base_df[col] = temp_design_df[col]
 
-        X_base, X_base_names = _build_covariate_design(base, covariates, add_intercept=True)
-        meta.setdefault("temperature_control_by_outcome", {})[out_name] = temp_meta
-        meta.setdefault("covariates_by_outcome", {})[out_name] = list(covariates)
+        X_base, X_base_names = _build_covariate_design(base_df, all_covariates, add_intercept=True)
+        meta.setdefault("temperature_control_by_outcome", {})[outcome_name] = temp_meta
+        meta.setdefault("covariates_by_outcome", {})[outcome_name] = list(all_covariates)
 
         feature_args = [
-            (feat, trial_df, y_all, X_base, X_base_names, cfg, cfg.families, is_binary, out_name, _has_statsmodels)
+            (feat, trial_df, outcome_series, X_base, X_base_names, cfg, cfg.families,
+             is_binary, outcome_name, has_statsmodels)
             for feat in candidates
         ]
         
@@ -499,25 +791,26 @@ def run_feature_model_families(
             feature_args,
             _process_single_feature_models,
             n_jobs=n_jobs_actual,
-            min_features_for_parallel=10,
+            min_features_for_parallel=_MIN_FEATURES_FOR_PARALLEL,
         )
-        for rec_list in outcome_records:
-            if isinstance(rec_list, list):
-                records.extend(rec_list)
-            elif rec_list is not None:
-                records.append(rec_list)
+        for record_list in outcome_records:
+            if isinstance(record_list, list):
+                records.extend(record_list)
+            elif record_list is not None:
+                records.append(record_list)
 
     if not records:
         return pd.DataFrame(), {**meta, "status": "empty"}
 
-    out = pd.DataFrame(records)
-    # Within-file FDR (non-global)
-    p_for_fdr = pd.to_numeric(out["p_primary"], errors="coerce").to_numpy()
-    out["p_fdr"] = fdr_bh(p_for_fdr, alpha=float(_get(config, "behavior_analysis.statistics.fdr_alpha", 0.05)), config=config)
+    results_df = pd.DataFrame(records)
+    p_values_for_fdr = pd.to_numeric(results_df["p_primary"], errors="coerce").to_numpy()
+    fdr_alpha = float(_get(config, "behavior_analysis.statistics.fdr_alpha", _DEFAULT_FDR_ALPHA))
+    results_df["p_fdr"] = fdr_bh(p_values_for_fdr, alpha=fdr_alpha, config=config)
+    
     meta["status"] = "ok"
-    meta["n_rows"] = int(len(out))
-    meta["n_features"] = int(out["feature"].nunique()) if "feature" in out.columns else 0
-    return out, meta
+    meta["n_rows"] = int(len(results_df))
+    meta["n_features"] = int(results_df["feature"].nunique()) if "feature" in results_df.columns else 0
+    return results_df, meta
 
 
 __all__ = ["FeatureModelsConfig", "run_feature_model_families"]

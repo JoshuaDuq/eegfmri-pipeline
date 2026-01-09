@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Callable, Dict, Generic, List, Optional, Tuple, TypeVar
 
 CtxT = TypeVar("CtxT")
 PlotterFunc = Callable[[CtxT, Dict[str, Path]], None]
+
+
+def _resolve_logger(ctx: CtxT, logger: Optional[logging.Logger]) -> logging.Logger:
+    if logger is not None:
+        return logger
+    if hasattr(ctx, "logger"):
+        return ctx.logger
+    return logging.getLogger(__name__)
 
 
 class CategorizedPlotRegistry(Generic[CtxT]):
@@ -53,8 +60,14 @@ class CategorizedPlotRegistry(Generic[CtxT]):
 class CategorizedPlotManager(Generic[CtxT]):
     def __init__(self, ctx: CtxT, *, logger: Optional[logging.Logger] = None):
         self.ctx = ctx
-        self.logger = logger or getattr(ctx, "logger", logging.getLogger(__name__))
+        self.logger = _resolve_logger(ctx, logger)
         self.saved_plots: Dict[str, Path] = {}
+
+    def _execute_plotter(self, name: str, func: PlotterFunc[CtxT]) -> None:
+        try:
+            func(self.ctx, self.saved_plots)
+        except Exception as exc:
+            self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
 
     def run_category(self, category: str, *, plotters: List[Tuple[str, PlotterFunc[CtxT]]]) -> None:
         if not plotters:
@@ -65,11 +78,8 @@ class CategorizedPlotManager(Generic[CtxT]):
         self.logger.info(f"Generating {n_plotters} plots for '{category}'...")
 
         for idx, (name, func) in enumerate(plotters, 1):
-            try:
-                self.logger.info(f"  [{idx}/{n_plotters}] {name}...")
-                func(self.ctx, self.saved_plots)
-            except Exception as exc:
-                self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
+            self.logger.info(f"  [{idx}/{n_plotters}] {name}...")
+            self._execute_plotter(name, func)
 
     def run_selected(
         self,
@@ -77,15 +87,11 @@ class CategorizedPlotManager(Generic[CtxT]):
         *,
         all_plotters: List[Tuple[str, str, PlotterFunc[CtxT]]],
     ) -> Dict[str, Path]:
-        names = set(plot_names)
+        selected_names = set(plot_names)
         for _category, name, func in all_plotters:
-            if name not in names:
-                continue
-            try:
+            if name in selected_names:
                 self.logger.info(f"Running {name}...")
-                func(self.ctx, self.saved_plots)
-            except Exception as exc:
-                self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
+                self._execute_plotter(name, func)
 
         return self.saved_plots
 
@@ -106,20 +112,22 @@ class FlatPlotRegistry(Generic[CtxT]):
         return list(cls._registry)
 
 
-@dataclass
 class FlatPlotManager(Generic[CtxT]):
-    ctx: CtxT
-    logger: logging.Logger
-    saved_plots: Dict[str, Path]
-
     def __init__(self, ctx: CtxT, *, logger: Optional[logging.Logger] = None):
         self.ctx = ctx
-        self.logger = logger or getattr(ctx, "logger", logging.getLogger(__name__))
-        self.saved_plots = {}
+        self.logger = _resolve_logger(ctx, logger)
+        self.saved_plots: Dict[str, Path] = {}
+
+    def _execute_plotter(self, name: str, func: PlotterFunc[CtxT]) -> None:
+        try:
+            self.logger.info(f"Running plotter: {name}")
+            func(self.ctx, self.saved_plots)
+        except Exception as exc:
+            self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)
 
     def run_all(self, *, plotters: List[Tuple[str, PlotterFunc[CtxT]]]) -> Dict[str, Path]:
         for name, func in plotters:
-            self._run_single(name, func)
+            self._execute_plotter(name, func)
         return self.saved_plots
 
     def run_selected(
@@ -128,15 +136,8 @@ class FlatPlotManager(Generic[CtxT]):
         *,
         plotters: List[Tuple[str, PlotterFunc[CtxT]]],
     ) -> Dict[str, Path]:
-        names = set(plot_names)
+        selected_names = set(plot_names)
         for name, func in plotters:
-            if name in names:
-                self._run_single(name, func)
+            if name in selected_names:
+                self._execute_plotter(name, func)
         return self.saved_plots
-
-    def _run_single(self, name: str, func: PlotterFunc[CtxT]) -> None:
-        try:
-            self.logger.info(f"Running plotter: {name}")
-            func(self.ctx, self.saved_plots)
-        except Exception as exc:
-            self.logger.error(f"Plotter '{name}' failed: {exc}", exc_info=True)

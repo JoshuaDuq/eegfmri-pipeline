@@ -10,6 +10,49 @@ from typing import Any, List
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 
 
+def _print_discovery_report(result: dict) -> None:
+    """Pretty-print discovery results to stdout."""
+    print("=" * 50)
+    print("       COLUMN DISCOVERY REPORT")
+    print("=" * 50)
+    print()
+
+    if not result["columns"]:
+        print("  No columns discovered.")
+        print("  Make sure you have events files in your BIDS directory")
+        print("  or have run behavior compute to create trial tables.")
+        return
+
+    print(f"  Source: {result.get('source', 'unknown')}")
+    if result.get("file"):
+        print(f"  File: {result['file']}")
+    print()
+
+    print("  AVAILABLE COLUMNS")
+    print("  " + "-" * 30)
+    for col in result["columns"]:
+        has_values = col in result["values"]
+        val_indicator = (
+            f" ({len(result['values'][col])} values)" if has_values else ""
+        )
+        print(f"    • {col}{val_indicator}")
+    print()
+
+    if result["values"]:
+        print("  COLUMN VALUES")
+        print("  " + "-" * 30)
+        for col, vals in sorted(result["values"].items()):
+            if len(vals) <= 10:
+                vals_str = ", ".join(str(v) for v in vals)
+            else:
+                vals_str = (
+                    ", ".join(str(v) for v in vals[:8])
+                    + f", ... (+{len(vals) - 8} more)"
+                )
+            print(f"    {col}: {vals_str}")
+    print()
+
+
 def setup_discover(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the discover command parser."""
     parser = subparsers.add_parser(
@@ -52,22 +95,22 @@ def run_discover(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         discover_trial_table_columns,
     )
     from eeg_pipeline.infra.paths import resolve_deriv_root
-    
+
     task = resolve_task(args.task, config)
     bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
     deriv_root = resolve_deriv_root(config=config)
-    
+
     result = {
         "columns": [],
         "values": {},
         "source": None,
         "sources_checked": [],
     }
-    
+
     subject = args.subject
     if not subject and subjects:
         subject = subjects[0]
-    
+
     if args.source in ["events", "all"] and bids_root:
         events_data = discover_event_columns(bids_root, task=task, subject=subject)
         if events_data["columns"]:
@@ -81,7 +124,7 @@ def run_discover(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                 for col, vals in events_data["values"].items():
                     if col not in result["values"]:
                         result["values"][col] = vals
-    
+
     if args.source in ["trial-table", "all"]:
         trial_data = discover_trial_table_columns(deriv_root, subject=subject)
         if trial_data["columns"]:
@@ -95,47 +138,14 @@ def run_discover(args: argparse.Namespace, subjects: List[str], config: Any) -> 
                 for col, vals in trial_data["values"].items():
                     if col not in result["values"]:
                         result["values"][col] = vals
-    
+
     if args.column:
         if args.column in result["values"]:
             result["values"] = {args.column: result["values"][args.column]}
         else:
             result["values"] = {}
-    
+
     if args.output_json:
         print(json_module.dumps(result, indent=2))
     else:
-        print("=" * 50)
-        print("       COLUMN DISCOVERY REPORT")
-        print("=" * 50)
-        print()
-        
-        if not result["columns"]:
-            print("  No columns discovered.")
-            print("  Make sure you have events files in your BIDS directory")
-            print("  or have run behavior compute to create trial tables.")
-            return
-        
-        print(f"  Source: {result.get('source', 'unknown')}")
-        if result.get("file"):
-            print(f"  File: {result['file']}")
-        print()
-        
-        print("  AVAILABLE COLUMNS")
-        print("  " + "-" * 30)
-        for col in result["columns"]:
-            has_values = col in result["values"]
-            val_indicator = f" ({len(result['values'][col])} values)" if has_values else ""
-            print(f"    • {col}{val_indicator}")
-        print()
-        
-        if result["values"]:
-            print("  COLUMN VALUES")
-            print("  " + "-" * 30)
-            for col, vals in sorted(result["values"].items()):
-                if len(vals) <= 10:
-                    vals_str = ", ".join(str(v) for v in vals)
-                else:
-                    vals_str = ", ".join(str(v) for v in vals[:8]) + f", ... (+{len(vals) - 8} more)"
-                print(f"    {col}: {vals_str}")
-        print()
+        _print_discovery_report(result)

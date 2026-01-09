@@ -1,17 +1,13 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/eeg-pipeline/tui/styles"
 )
 
-///////////////////////////////////////////////////////////////////
-// Breadcrumb Component
-///////////////////////////////////////////////////////////////////
-
-// Breadcrumb renders a navigation breadcrumb trail
 type Breadcrumb struct {
 	Items     []string
 	Separator string
@@ -30,21 +26,18 @@ func (b Breadcrumb) View() string {
 	}
 
 	var parts []string
+	lastIndex := len(b.Items) - 1
 	for i, item := range b.Items {
 		style := lipgloss.NewStyle().Foreground(styles.Muted)
-		if i == len(b.Items)-1 {
+		if i == lastIndex {
 			style = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 		}
 		parts = append(parts, style.Render(item))
 	}
 
-	sep := lipgloss.NewStyle().Foreground(styles.Secondary).Render(b.Separator)
-	return strings.Join(parts, sep)
+	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render(b.Separator)
+	return strings.Join(parts, separator)
 }
-
-///////////////////////////////////////////////////////////////////
-// Toast/Notification Component
-///////////////////////////////////////////////////////////////////
 
 type ToastType int
 
@@ -75,8 +68,21 @@ func (t *Toast) Tick() {
 	if t.TicksLeft > 0 {
 		t.TicksLeft--
 	}
-	if t.TicksLeft <= 0 {
+	if t.TicksLeft == 0 {
 		t.Visible = false
+	}
+}
+
+func (t Toast) toastColors() (icon string, bgColor, fgColor lipgloss.Color) {
+	switch t.Type {
+	case ToastSuccess:
+		return styles.CheckMark, styles.Success, lipgloss.Color("#000000")
+	case ToastWarning:
+		return styles.WarningMark, styles.Warning, lipgloss.Color("#000000")
+	case ToastError:
+		return styles.CrossMark, styles.Error, lipgloss.Color("#FFFFFF")
+	default:
+		return "ℹ", styles.Accent, lipgloss.Color("#000000")
 	}
 }
 
@@ -85,28 +91,7 @@ func (t Toast) View() string {
 		return ""
 	}
 
-	var icon string
-	var bgColor, fgColor lipgloss.Color
-
-	switch t.Type {
-	case ToastSuccess:
-		icon = styles.CheckMark
-		bgColor = styles.Success
-		fgColor = lipgloss.Color("#000000")
-	case ToastWarning:
-		icon = styles.WarningMark
-		bgColor = styles.Warning
-		fgColor = lipgloss.Color("#000000")
-	case ToastError:
-		icon = styles.CrossMark
-		bgColor = styles.Error
-		fgColor = lipgloss.Color("#FFFFFF")
-	default:
-		icon = "ℹ"
-		bgColor = styles.Accent
-		fgColor = lipgloss.Color("#000000")
-	}
-
+	icon, bgColor, fgColor := t.toastColors()
 	style := lipgloss.NewStyle().
 		Foreground(fgColor).
 		Background(bgColor).
@@ -116,9 +101,7 @@ func (t Toast) View() string {
 	return style.Render(icon + " " + t.Message)
 }
 
-///////////////////////////////////////////////////////////////////
-// Help Overlay Component
-///////////////////////////////////////////////////////////////////
+const helpKeyWidth = 12
 
 type HelpItem struct {
 	Key         string
@@ -156,20 +139,17 @@ func (h HelpOverlay) View() string {
 
 	var content strings.Builder
 
-	// Title
-	title := lipgloss.NewStyle().
+	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
-		MarginBottom(1).
-		Render(h.Title)
-	content.WriteString(title + "\n\n")
+		MarginBottom(1)
+	content.WriteString(titleStyle.Render(h.Title) + "\n\n")
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(styles.Accent).
 		Bold(true).
-		Width(12)
-	descStyle := lipgloss.NewStyle().
-		Foreground(styles.Text)
+		Width(helpKeyWidth)
+	descStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	sectionStyle := lipgloss.NewStyle().
 		Foreground(styles.TextDim).
 		Bold(true).
@@ -177,20 +157,22 @@ func (h HelpOverlay) View() string {
 
 	sectionOrder := []string{"Navigation", "Selection", "Actions", "General"}
 	for _, sectionName := range sectionOrder {
-		items, ok := h.Sections[sectionName]
-		if !ok || len(items) == 0 {
+		items, exists := h.Sections[sectionName]
+		if !exists || len(items) == 0 {
 			continue
 		}
 
 		content.WriteString(sectionStyle.Render(sectionName) + "\n")
 		for _, item := range items {
-			content.WriteString(keyStyle.Render(item.Key) + descStyle.Render(item.Description) + "\n")
+			keyText := keyStyle.Render(item.Key)
+			descText := descStyle.Render(item.Description)
+			content.WriteString(keyText + descText + "\n")
 		}
 		content.WriteString("\n")
 	}
 
-	// Dismiss hint
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("Press ? or Esc to close"))
+	dismissHint := lipgloss.NewStyle().Foreground(styles.Muted).Render("Press ? or Esc to close")
+	content.WriteString(dismissHint)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
@@ -200,10 +182,6 @@ func (h HelpOverlay) View() string {
 
 	return box.Render(content.String())
 }
-
-///////////////////////////////////////////////////////////////////
-// Spinner Component
-///////////////////////////////////////////////////////////////////
 
 type Spinner struct {
 	Frames []string
@@ -240,14 +218,12 @@ func (s *Spinner) Tick() {
 }
 
 func (s Spinner) View() string {
-	frame := lipgloss.NewStyle().Foreground(styles.Accent).Render(s.Frames[s.Index])
-	label := lipgloss.NewStyle().Foreground(styles.Text).Render(s.Label)
-	return frame + " " + label
+	frameStyle := lipgloss.NewStyle().Foreground(styles.Accent)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	return frameStyle.Render(s.Frames[s.Index]) + " " + labelStyle.Render(s.Label)
 }
 
-///////////////////////////////////////////////////////////////////
-// Progress Indicator Component
-///////////////////////////////////////////////////////////////////
+const percentagePaddingWidth = 3
 
 type ProgressStyle int
 
@@ -285,35 +261,51 @@ func (p Progress) Percent() float64 {
 	return float64(p.Current) / float64(p.Total)
 }
 
+func (p Progress) renderBar(filled, empty int) string {
+	filledStyle := lipgloss.NewStyle().Foreground(styles.Primary)
+	emptyStyle := lipgloss.NewStyle().Foreground(styles.Secondary)
+
+	var filledChar, emptyChar string
+	switch p.Style {
+	case ProgressStyleLine:
+		filledChar = "━"
+		emptyChar = "─"
+	case ProgressStyleDots:
+		filledChar = "●"
+		emptyChar = "○"
+	default:
+		filledChar = "█"
+		emptyChar = "░"
+	}
+
+	return filledStyle.Render(strings.Repeat(filledChar, filled)) +
+		emptyStyle.Render(strings.Repeat(emptyChar, empty))
+}
+
+func (p Progress) renderPercentage(percent float64) string {
+	percentInt := int(percent * 100)
+	percentStr := fmt.Sprintf("%d%%", percentInt)
+	paddingNeeded := percentagePaddingWidth - len(percentStr)
+	if paddingNeeded < 0 {
+		paddingNeeded = 0
+	}
+
+	paddedPercent := strings.Repeat(" ", paddingNeeded) + percentStr
+	return lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(paddedPercent)
+}
+
 func (p Progress) View() string {
-	pct := p.Percent()
-	filled := int(pct * float64(p.Width))
+	percent := p.Percent()
+	filled := int(percent * float64(p.Width))
 	if filled > p.Width {
 		filled = p.Width
 	}
+	empty := p.Width - filled
 
-	var bar string
-	switch p.Style {
-	case ProgressStyleLine:
-		bar = lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("━", filled))
-		bar += lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("─", p.Width-filled))
-	case ProgressStyleDots:
-		bar = lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("●", filled))
-		bar += lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("○", p.Width-filled))
-	default: // Block
-		bar = lipgloss.NewStyle().Foreground(styles.Primary).Render(strings.Repeat("█", filled))
-		bar += lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("░", p.Width-filled))
-	}
-
-	pctStr := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(
-		strings.Repeat(" ", 3-len(string(rune(int(pct*100))))) + string(rune(int(pct*100))) + "%")
-
-	return bar + " " + pctStr
+	bar := p.renderBar(filled, empty)
+	percentText := p.renderPercentage(percent)
+	return bar + " " + percentText
 }
-
-///////////////////////////////////////////////////////////////////
-// Scroll Indicator Component
-///////////////////////////////////////////////////////////////////
 
 type ScrollIndicator struct {
 	Current    int
@@ -330,32 +322,30 @@ func (s ScrollIndicator) CanScrollDown() bool {
 }
 
 func (s ScrollIndicator) View() string {
-	var parts []string
+	baseStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	activeStyle := lipgloss.NewStyle().Foreground(styles.Primary)
 
-	upStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	downStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-
+	upArrow := baseStyle.Render("▲")
 	if s.CanScrollUp() {
-		upStyle = upStyle.Foreground(styles.Primary)
+		upArrow = activeStyle.Render("▲")
 	}
+
+	downArrow := baseStyle.Render("▼")
 	if s.CanScrollDown() {
-		downStyle = downStyle.Foreground(styles.Primary)
+		downArrow = activeStyle.Render("▼")
 	}
 
-	parts = append(parts, upStyle.Render("▲"))
-	parts = append(parts, downStyle.Render("▼"))
-
-	return strings.Join(parts, " ")
+	return upArrow + " " + downArrow
 }
-
-///////////////////////////////////////////////////////////////////
-// Info Panel Component
-///////////////////////////////////////////////////////////////////
 
 type InfoRow struct {
 	Label string
 	Value string
 	Style lipgloss.Style
+}
+
+func (r InfoRow) hasCustomStyle() bool {
+	return r.Style.String() != ""
 }
 
 type InfoPanel struct {
@@ -383,27 +373,28 @@ func (p InfoPanel) View() string {
 	var content strings.Builder
 
 	if p.Title != "" {
-		content.WriteString(styles.SectionTitleStyle.Render(" "+p.Title+" ") + "\n\n")
+		titleText := " " + p.Title + " "
+		content.WriteString(styles.SectionTitleStyle.Render(titleText) + "\n\n")
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(p.LabelWidth)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	defaultValueStyle := lipgloss.NewStyle().Foreground(styles.Text)
 
 	for _, row := range p.Rows {
-		vs := valueStyle
-		// Check if a custom style was provided by checking if it has any foreground set
-		if row.Style.String() != "" {
-			vs = row.Style
+		valueStyle := defaultValueStyle
+		if row.hasCustomStyle() {
+			valueStyle = row.Style
 		}
-		content.WriteString(labelStyle.Render(row.Label+":") + " " + vs.Render(row.Value) + "\n")
+
+		labelText := labelStyle.Render(row.Label + ":")
+		valueText := valueStyle.Render(row.Value)
+		content.WriteString(labelText + " " + valueText + "\n")
 	}
 
 	return content.String()
 }
 
-///////////////////////////////////////////////////////////////////
-// Status Bar Component
-///////////////////////////////////////////////////////////////////
+const statusBarSeparator = " │ "
 
 type StatusBar struct {
 	LeftItems   []string
@@ -428,37 +419,44 @@ func (s *StatusBar) SetRight(items ...string) {
 	s.RightItems = items
 }
 
+func (s StatusBar) calculateSpacing() (leftPad, rightPad int) {
+	leftText := strings.Join(s.LeftItems, statusBarSeparator)
+	centerText := strings.Join(s.CenterItems, statusBarSeparator)
+	rightText := strings.Join(s.RightItems, statusBarSeparator)
+
+	leftLen := lipgloss.Width(leftText)
+	centerLen := lipgloss.Width(centerText)
+	rightLen := lipgloss.Width(rightText)
+
+	totalContentLen := leftLen + centerLen + rightLen
+	remainingSpace := s.Width - totalContentLen
+	if remainingSpace < 0 {
+		remainingSpace = 0
+	}
+
+	leftPad = remainingSpace / 2
+	rightPad = remainingSpace - leftPad
+	return
+}
+
 func (s StatusBar) View() string {
 	style := lipgloss.NewStyle().
 		Foreground(styles.TextDim).
 		Width(s.Width)
 
-	left := strings.Join(s.LeftItems, " │ ")
-	center := strings.Join(s.CenterItems, " │ ")
-	right := strings.Join(s.RightItems, " │ ")
+	leftText := strings.Join(s.LeftItems, statusBarSeparator)
+	centerText := strings.Join(s.CenterItems, statusBarSeparator)
+	rightText := strings.Join(s.RightItems, statusBarSeparator)
 
-	// Calculate spacing
-	leftLen := lipgloss.Width(left)
-	centerLen := lipgloss.Width(center)
-	rightLen := lipgloss.Width(right)
-
-	totalContent := leftLen + centerLen + rightLen
-	remainingSpace := s.Width - totalContent
-	if remainingSpace < 0 {
-		remainingSpace = 0
-	}
-
-	leftPad := remainingSpace / 2
-	rightPad := remainingSpace - leftPad
-
-	content := left + strings.Repeat(" ", leftPad) + center + strings.Repeat(" ", rightPad) + right
+	leftPad, rightPad := s.calculateSpacing()
+	content := leftText +
+		strings.Repeat(" ", leftPad) +
+		centerText +
+		strings.Repeat(" ", rightPad) +
+		rightText
 
 	return style.Render(content)
 }
-
-///////////////////////////////////////////////////////////////////
-// Confirmation Dialog Component
-///////////////////////////////////////////////////////////////////
 
 type ConfirmDialog struct {
 	Title       string
@@ -506,20 +504,17 @@ func (c ConfirmDialog) View() string {
 
 	var content strings.Builder
 
-	// Title
-	title := lipgloss.NewStyle().
+	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(styles.Warning).
-		Render(c.Title)
-	content.WriteString(title + "\n\n")
+		Foreground(styles.Warning)
+	content.WriteString(titleStyle.Render(c.Title) + "\n\n")
 
-	// Message
-	content.WriteString(lipgloss.NewStyle().Foreground(styles.Text).Render(c.Message) + "\n\n")
+	messageStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	content.WriteString(messageStyle.Render(c.Message) + "\n\n")
 
-	// Buttons
-	confirmBtn := styles.BadgeSuccessStyle.Render(" [Y] " + c.ConfirmText + " ")
-	cancelBtn := styles.BadgeErrorStyle.Render(" [N] " + c.CancelText + " ")
-	content.WriteString(confirmBtn + "  " + cancelBtn)
+	confirmButton := styles.BadgeSuccessStyle.Render(" [Y] " + c.ConfirmText + " ")
+	cancelButton := styles.BadgeErrorStyle.Render(" [N] " + c.CancelText + " ")
+	content.WriteString(confirmButton + "  " + cancelButton)
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -530,9 +525,8 @@ func (c ConfirmDialog) View() string {
 	return box.Render(content.String())
 }
 
-///////////////////////////////////////////////////////////////////
-// Table Component
-///////////////////////////////////////////////////////////////////
+const tableSelectionPadding = "  "
+const tableSelectedPrefix = styles.CheckMark + " "
 
 type TableColumn struct {
 	Header string
@@ -587,10 +581,7 @@ func (t *Table) ToggleSelected() {
 	}
 }
 
-func (t Table) View() string {
-	var content strings.Builder
-
-	// Header
+func (t Table) renderHeader() string {
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -601,57 +592,68 @@ func (t Table) View() string {
 		cell := headerStyle.Width(col.Width).Render(col.Header)
 		headerCells = append(headerCells, cell)
 	}
-	content.WriteString(strings.Join(headerCells, "") + "\n")
+	return strings.Join(headerCells, "") + "\n"
+}
 
-	// Rows
-	endIdx := t.ScrollTop + t.VisibleRows
-	if endIdx > len(t.Rows) {
-		endIdx = len(t.Rows)
+func (t Table) renderRow(row TableRow, rowIndex int) string {
+	isCursor := rowIndex == t.CursorIndex
+	rowStyle := lipgloss.NewStyle().Foreground(styles.Text)
+	if isCursor {
+		rowStyle = rowStyle.Bold(true).Foreground(styles.Primary)
 	}
 
-	for i := t.ScrollTop; i < endIdx; i++ {
-		row := t.Rows[i]
-		isCursor := i == t.CursorIndex
-
-		rowStyle := lipgloss.NewStyle().Foreground(styles.Text)
-		if isCursor {
-			rowStyle = rowStyle.Bold(true).Foreground(styles.Primary)
+	var rowCells []string
+	for j, cell := range row.Cells {
+		if j >= len(t.Columns) {
+			break
 		}
 
-		var rowCells []string
-		for j, cell := range row.Cells {
-			if j < len(t.Columns) {
-				cellContent := cell
-				if j == 0 && row.Selected {
-					cellContent = styles.CheckMark + " " + cellContent
-				} else if j == 0 {
-					cellContent = "  " + cellContent
-				}
-				c := rowStyle.Width(t.Columns[j].Width).Render(cellContent)
-				rowCells = append(rowCells, c)
+		cellContent := cell
+		if j == 0 {
+			if row.Selected {
+				cellContent = tableSelectedPrefix + cellContent
+			} else {
+				cellContent = tableSelectionPadding + cellContent
 			}
 		}
-		content.WriteString(strings.Join(rowCells, "") + "\n")
+
+		renderedCell := rowStyle.Width(t.Columns[j].Width).Render(cellContent)
+		rowCells = append(rowCells, renderedCell)
+	}
+	return strings.Join(rowCells, "") + "\n"
+}
+
+func (t Table) View() string {
+	var content strings.Builder
+
+	content.WriteString(t.renderHeader())
+
+	endIndex := t.ScrollTop + t.VisibleRows
+	if endIndex > len(t.Rows) {
+		endIndex = len(t.Rows)
+	}
+
+	for i := t.ScrollTop; i < endIndex; i++ {
+		content.WriteString(t.renderRow(t.Rows[i], i))
 	}
 
 	return content.String()
 }
 
-///////////////////////////////////////////////////////////////////
-// ASCII Art/Logo Component
-///////////////////////////////////////////////////////////////////
-
-func RenderLogo(style lipgloss.Style) string {
-	logo := `
+const logoASCII = `
  ███████╗███████╗ ██████╗ 
  ██╔════╝██╔════╝██╔════╝ 
  █████╗  █████╗  ██║  ███╗
  ██╔══╝  ██╔══╝  ██║   ██║
  ███████╗███████╗╚██████╔╝
  ╚══════╝╚══════╝ ╚═════╝ `
-	return style.Render(logo)
+
+const miniLogoText = "◆ EEG Pipeline"
+
+func RenderLogo(style lipgloss.Style) string {
+	return style.Render(logoASCII)
 }
 
 func RenderMiniLogo(style lipgloss.Style) string {
-	return style.Render("◆ EEG Pipeline")
+	return style.Render(miniLogoText)
 }

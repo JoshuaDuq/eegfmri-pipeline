@@ -41,33 +41,36 @@ from ..core.topomaps import create_scalpmean_tfr_from_existing
 
 
 def _compute_active_statistics(
-    arr: np.ndarray,
+    tfr_data: np.ndarray,
     times: np.ndarray,
     active_window: Tuple[float, float],
     config,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[float, float, np.ndarray]:
-    """Compute statistics for a active window in TFR data.
+    """Compute statistics for an active window in TFR data.
     
     Args:
-        arr: TFR data array (freqs x times)
+        tfr_data: TFR data array (freqs x times)
         times: Time points array
         active_window: Tuple of (tmin, tmax) for active window
         config: Configuration object
         logger: Optional logger instance
         
     Returns:
-        Tuple of (mean, percentage_change, time_mask)
+        Tuple of (mean_logratio, percentage_change, time_mask)
     """
-    tmin_req, tmax_req = active_window
+    tmin_required, tmax_required = active_window
     strict_mode = get_strict_mode(config)
+    
     if strict_mode:
-        tmask = time_mask_strict(times, tmin_req, tmax_req)
+        time_mask = time_mask_strict(times, tmin_required, tmax_required)
     else:
-        tmask = time_mask_loose(times, tmin_req, tmax_req, logger)
-    mu = float(np.nanmean(arr[:, tmask]))
-    pct = logratio_to_pct(mu)
-    return mu, pct, tmask
+        time_mask = time_mask_loose(times, tmin_required, tmax_required, logger)
+    
+    mean_logratio = float(np.nanmean(tfr_data[:, time_mask]))
+    percentage_change = logratio_to_pct(mean_logratio)
+    
+    return mean_logratio, percentage_change, time_mask
 
 
 def _build_filename_stem(
@@ -99,16 +102,20 @@ def _build_filename_stem(
     if band:
         header_parts.append(f"band-{band}")
     
-    baseline_str = format_baseline_window_string(baseline_used)
-    if baseline_str not in stem:
-        stem = f"{stem}_{baseline_str}"
+    baseline_string = format_baseline_window_string(baseline_used)
+    if baseline_string not in stem:
+        stem = f"{stem}_{baseline_string}"
+    
     if header_parts:
         stem = f"{'_'.join(header_parts)}_{stem}"
     
     return stem
 
 
-def _build_footer_text(config, baseline_used: Tuple[float, float]) -> Optional[str]:
+def _build_footer_text(
+    config,
+    baseline_used: Tuple[float, float],
+) -> Optional[str]:
     """Build footer text for TFR plots with baseline information.
     
     Args:
@@ -118,17 +125,24 @@ def _build_footer_text(config, baseline_used: Tuple[float, float]) -> Optional[s
     Returns:
         Footer text string or None if config doesn't support it
     """
-    default_footer_template = "tfr_baseline"
-    baseline_decimal_places = 2
-    
     if not hasattr(config, "get"):
         return None
     
-    template_name = config.get("output.tfr_footer_template", default_footer_template)
+    DEFAULT_FOOTER_TEMPLATE = "tfr_baseline"
+    BASELINE_DECIMAL_PLACES = 2
+    
+    template_name = config.get("output.tfr_footer_template", DEFAULT_FOOTER_TEMPLATE)
+    baseline_min, baseline_max = baseline_used
+    baseline_string = (
+        f"[{float(baseline_min):.{BASELINE_DECIMAL_PLACES}f}, "
+        f"{float(baseline_max):.{BASELINE_DECIMAL_PLACES}f}] s"
+    )
+    
     footer_kwargs = {
         "baseline_window": baseline_used,
-        "baseline": f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s",
+        "baseline": baseline_string,
     }
+    
     return build_footer(template_name, config, **footer_kwargs)
 
 
@@ -137,12 +151,12 @@ def _save_fig(
     out_dir: Path,
     name: str,
     config,
-    formats=None,
+    baseline_used: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
-    baseline_used: Optional[Tuple[float, float]] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
     band: Optional[str] = None,
+    formats: Optional[list] = None,
 ) -> None:
     """Save figure with proper formatting and footer.
     
@@ -151,79 +165,93 @@ def _save_fig(
         out_dir: Output directory path
         name: Base filename
         config: Configuration object
-        formats: Optional list of file formats (defaults to config formats)
+        baseline_used: Baseline window tuple
         logger: Optional logger instance
-        baseline_used: Optional baseline window tuple
         subject: Optional subject identifier
         task: Optional task identifier
         band: Optional frequency band identifier
+        formats: Optional list of file formats (defaults to config formats)
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if baseline_used is None:
-        override = config.get("plotting.tfr.default_baseline_window", None)
-        if isinstance(override, (list, tuple)) and len(override) == 2:
-            baseline_used = tuple(override)
-        else:
-            baseline_used = tuple(config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01]))
-
-    figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
-    stem = _build_filename_stem(name, baseline_used, subject, task, band)
+    figures = fig_obj if isinstance(fig_obj, list) else [fig_obj]
+    filename_stem = _build_filename_stem(name, baseline_used, subject, task, band)
     
-    plot_cfg = get_plot_config(config)
-    exts = formats if formats else list(plot_cfg.formats) if plot_cfg.formats else ["png"]
+    plot_config = get_plot_config(config)
+    DEFAULT_FORMAT = "png"
+    file_extensions = (
+        formats
+        if formats
+        else list(plot_config.formats) if plot_config.formats else [DEFAULT_FORMAT]
+    )
     
     footer_text = _build_footer_text(config, baseline_used)
 
-    for i, f in enumerate(figs):
-        out_name = f"{stem}.{exts[0]}" if i == 0 else f"{stem}_{i+1}.{exts[0]}"
-        out_path = out_dir / out_name
+    for index, figure in enumerate(figures):
+        if index == 0:
+            output_name = f"{filename_stem}.{file_extensions[0]}"
+        else:
+            output_name = f"{filename_stem}_{index + 1}.{file_extensions[0]}"
+        
+        output_path = out_dir / output_name
         central_save_fig(
-            f,
-            out_path,
+            figure,
+            output_path,
             logger=logger,
             footer=footer_text,
-            formats=tuple(exts),
-            dpi=plot_cfg.dpi,
-            bbox_inches=plot_cfg.bbox_inches,
-            pad_inches=plot_cfg.pad_inches,
+            formats=tuple(file_extensions),
+            dpi=plot_config.dpi,
+            bbox_inches=plot_config.bbox_inches,
+            pad_inches=plot_config.pad_inches,
         )
 
 
 def _plot_scalpmean_tfr(
-    tfr_sm,
+    tfr_scalpmean,
     title: str,
     filename: str,
     vlim: Optional[Tuple[float, float]],
     out_dir: Path,
     config,
-    logger: Optional[logging.Logger],
     baseline_used: Tuple[float, float],
+    logger: Optional[logging.Logger] = None,
     subject: Optional[str] = None,
     task: Optional[str] = None,
 ) -> None:
     """Plot a scalp-mean TFR figure.
     
     Args:
-        tfr_sm: Scalp-mean TFR object (AverageTFR)
+        tfr_scalpmean: Scalp-mean TFR object (AverageTFR)
         title: Figure title
         filename: Output filename
         vlim: Optional value limits tuple (vmin, vmax)
         out_dir: Output directory path
         config: Configuration object
-        logger: Optional logger instance
         baseline_used: Baseline window tuple
+        logger: Optional logger instance
         subject: Optional subject identifier
         task: Optional task identifier
     """
     font_sizes = get_font_sizes()
-    ch_name = tfr_sm.info['ch_names'][0]
-    plot_kwargs = {"picks": ch_name, "show": False}
+    channel_name = tfr_scalpmean.info["ch_names"][0]
+    
+    plot_kwargs = {"picks": channel_name, "show": False}
     if vlim is not None:
         plot_kwargs["vlim"] = vlim
-    fig = unwrap_figure(tfr_sm.plot(**plot_kwargs))
-    fig.suptitle(title, fontsize=font_sizes["figure_title"])
-    _save_fig(fig, out_dir, filename, config=config, logger=logger, baseline_used=baseline_used, subject=subject, task=task)
+    
+    figure = unwrap_figure(tfr_scalpmean.plot(**plot_kwargs))
+    figure.suptitle(title, fontsize=font_sizes["figure_title"])
+    
+    _save_fig(
+        figure,
+        out_dir,
+        filename,
+        config,
+        baseline_used,
+        logger=logger,
+        subject=subject,
+        task=task,
+    )
 
 
 ###################################################################
@@ -253,26 +281,143 @@ def plot_scalpmean_all_trials(
         subject: Optional subject identifier
         task: Optional task identifier
     """
-    tfr_avg, baseline_used = apply_baseline_and_average(tfr, baseline, logger)
+    tfr_averaged, baseline_used = apply_baseline_and_average(tfr, baseline, logger)
     
-    eeg_picks = extract_eeg_picks(tfr_avg, exclude_bads=False)
+    eeg_picks = extract_eeg_picks(tfr_averaged, exclude_bads=False)
     if len(eeg_picks) == 0:
         log("No EEG channels found for scalp-averaged plot", logger, "warning")
         return
     
-    tfr_sm = create_scalpmean_tfr_from_existing(tfr_avg, eeg_picks)
+    tfr_scalpmean = create_scalpmean_tfr_from_existing(tfr_averaged, eeg_picks)
     
-    times = np.asarray(tfr_sm.times)
-    arr = np.asarray(tfr_sm.data[0])
-    vabs = robust_sym_vlim(arr)
-    _, pct, _ = _compute_active_statistics(arr, times, active_window, config, logger)
+    times = np.asarray(tfr_scalpmean.times)
+    tfr_data = np.asarray(tfr_scalpmean.data[0])
+    absolute_vlim = robust_sym_vlim(tfr_data)
+    
+    _, percentage_change, _ = _compute_active_statistics(
+        tfr_data, times, active_window, config, logger
+    )
+    
+    title = (
+        f"Scalp-averaged TFR — all trials (baseline logratio)\n"
+        f"vlim ±{absolute_vlim:.2f}; mean %Δ vs BL={percentage_change:+.0f}%"
+    )
+    vlim = (-absolute_vlim, +absolute_vlim)
     
     _plot_scalpmean_tfr(
-        tfr_sm,
-        f"Scalp-averaged TFR — all trials (baseline logratio)\nvlim ±{vabs:.2f}; mean %Δ vs BL={pct:+.0f}%",
+        tfr_scalpmean,
+        title,
         "tfr_scalpmean_all_trials.png",
-        (-vabs, +vabs),
-        out_dir, config, logger, baseline_used, subject, task
+        vlim,
+        out_dir,
+        config,
+        baseline_used,
+        logger=logger,
+        subject=subject,
+        task=task,
+    )
+
+
+def _create_scalpmean_contrast_plots(
+    tfr_condition_1,
+    tfr_condition_2,
+    tfr_difference,
+    label_1: str,
+    label_2: str,
+    times: np.ndarray,
+    active_window: Tuple[float, float],
+    baseline_used: Tuple[float, float],
+    out_dir: Path,
+    config,
+    logger: Optional[logging.Logger] = None,
+    subject: Optional[str] = None,
+    task: Optional[str] = None,
+) -> None:
+    """Create and save three scalp-mean contrast plots.
+    
+    Args:
+        tfr_condition_1: Scalp-mean TFR for condition 1
+        tfr_condition_2: Scalp-mean TFR for condition 2
+        tfr_difference: Scalp-mean TFR for difference (condition 2 - condition 1)
+        label_1: Label for condition 1
+        label_2: Label for condition 2
+        times: Time points array
+        active_window: Active window tuple for statistics
+        baseline_used: Baseline window tuple
+        out_dir: Output directory path
+        config: Configuration object
+        logger: Optional logger instance
+        subject: Optional subject identifier
+        task: Optional task identifier
+    """
+    tfr_data_1 = np.asarray(tfr_condition_1.data[0])
+    tfr_data_2 = np.asarray(tfr_condition_2.data[0])
+    tfr_data_diff = np.asarray(tfr_difference.data[0])
+    
+    absolute_vlim_conditions = robust_sym_vlim([tfr_data_1, tfr_data_2])
+    absolute_vlim_difference = robust_sym_vlim(tfr_data_diff)
+    
+    _, percentage_change_1, _ = _compute_active_statistics(
+        tfr_data_1, times, active_window, config, logger
+    )
+    _, percentage_change_2, _ = _compute_active_statistics(
+        tfr_data_2, times, active_window, config, logger
+    )
+    _, percentage_change_diff, _ = _compute_active_statistics(
+        tfr_data_diff, times, active_window, config, logger
+    )
+    
+    vlim_conditions = (-absolute_vlim_conditions, +absolute_vlim_conditions)
+    vlim_difference = (-absolute_vlim_difference, +absolute_vlim_difference)
+    
+    title_condition_2 = (
+        f"Scalp-averaged TFR — {label_2} (baseline logratio)\n"
+        f"vlim ±{absolute_vlim_conditions:.2f}; mean %Δ vs BL={percentage_change_2:+.0f}%"
+    )
+    title_condition_1 = (
+        f"Scalp-averaged TFR — {label_1} (baseline logratio)\n"
+        f"vlim ±{absolute_vlim_conditions:.2f}; mean %Δ vs BL={percentage_change_1:+.0f}%"
+    )
+    title_difference = (
+        f"Scalp-averaged TFR — {label_2} minus {label_1} (baseline logratio)\n"
+        f"vlim ±{absolute_vlim_difference:.2f}; mean %Δ vs BL={percentage_change_diff:+.0f}%"
+    )
+    
+    _plot_scalpmean_tfr(
+        tfr_condition_2,
+        title_condition_2,
+        "tfr_scalpmean_pain_bl.png",
+        vlim_conditions,
+        out_dir,
+        config,
+        baseline_used,
+        logger=logger,
+        subject=subject,
+        task=task,
+    )
+    _plot_scalpmean_tfr(
+        tfr_condition_1,
+        title_condition_1,
+        "tfr_scalpmean_nonpain_bl.png",
+        vlim_conditions,
+        out_dir,
+        config,
+        baseline_used,
+        logger=logger,
+        subject=subject,
+        task=task,
+    )
+    _plot_scalpmean_tfr(
+        tfr_difference,
+        title_difference,
+        "tfr_scalpmean_pain_minus_non_bl.png",
+        vlim_difference,
+        out_dir,
+        config,
+        baseline_used,
+        logger=logger,
+        subject=subject,
+        task=task,
     )
 
 
@@ -304,52 +449,50 @@ def contrast_scalpmean_pain_nonpain(
     """
     from .contrasts import _prepare_comparison_contrast_data
 
-    tfr_sub, mask1, mask2, label1, label2, _ = _prepare_comparison_contrast_data(
+    tfr_subset, mask_1, mask_2, label_1, label_2, _ = _prepare_comparison_contrast_data(
         tfr, events_df, config, logger, context="Scalpmean contrast"
     )
-    if tfr_sub is None:
+    if tfr_subset is None:
         return
 
-    tfr_1 = tfr_sub[mask1].average()
-    tfr_2 = tfr_sub[mask2].average()
+    tfr_condition_1 = tfr_subset[mask_1].average()
+    tfr_condition_2 = tfr_subset[mask_2].average()
 
-    baseline_used = apply_baseline_and_crop(tfr_1, baseline=baseline, mode="logratio", logger=logger)
-    apply_baseline_and_crop(tfr_2, baseline=baseline, mode="logratio", logger=logger)
+    baseline_used = apply_baseline_and_crop(
+        tfr_condition_1, baseline=baseline, mode="logratio", logger=logger
+    )
+    apply_baseline_and_crop(
+        tfr_condition_2, baseline=baseline, mode="logratio", logger=logger
+    )
 
-    eeg_picks_1 = extract_eeg_picks(tfr_1, exclude_bads=False)
-    eeg_picks_2 = extract_eeg_picks(tfr_2, exclude_bads=False)
+    eeg_picks_1 = extract_eeg_picks(tfr_condition_1, exclude_bads=False)
+    eeg_picks_2 = extract_eeg_picks(tfr_condition_2, exclude_bads=False)
     
     if len(eeg_picks_1) == 0 or len(eeg_picks_2) == 0:
         log("No EEG channels found for scalp-averaged contrast", logger, "warning")
         return
     
-    tfr_1_sm = create_scalpmean_tfr_from_existing(tfr_1, eeg_picks_1)
-    tfr_2_sm = create_scalpmean_tfr_from_existing(tfr_2, eeg_picks_2)
-    tfr_diff_sm = tfr_2_sm.copy()
-    tfr_diff_sm.data = tfr_2_sm.data - tfr_1_sm.data
-    tfr_diff_sm.comment = "cond2-minus-cond1"
+    tfr_scalpmean_1 = create_scalpmean_tfr_from_existing(tfr_condition_1, eeg_picks_1)
+    tfr_scalpmean_2 = create_scalpmean_tfr_from_existing(tfr_condition_2, eeg_picks_2)
     
-    arr_1 = np.asarray(tfr_1_sm.data[0])
-    arr_2 = np.asarray(tfr_2_sm.data[0])
-    arr_diff = np.asarray(tfr_diff_sm.data[0])
+    tfr_difference = tfr_scalpmean_2.copy()
+    tfr_difference.data = tfr_scalpmean_2.data - tfr_scalpmean_1.data
+    tfr_difference.comment = "cond2-minus-cond1"
     
-    vabs_pn = robust_sym_vlim([arr_1, arr_2])
-    vabs_diff = robust_sym_vlim(arr_diff)
-
-    times = np.asarray(tfr_1.times)
-    _, pct_1, _ = _compute_active_statistics(arr_1, times, active_window, config, logger)
-    _, pct_2, _ = _compute_active_statistics(arr_2, times, active_window, config, logger)
-    _, pct_diff, _ = _compute_active_statistics(arr_diff, times, active_window, config, logger)
-
-    _plot_scalpmean_tfr(
-        tfr_2_sm, f"Scalp-averaged TFR — {label2} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_2:+.0f}%",
-        "tfr_scalpmean_pain_bl.png", (-vabs_pn, +vabs_pn), out_dir, config, logger, baseline_used, subject, task
-    )
-    _plot_scalpmean_tfr(
-        tfr_1_sm, f"Scalp-averaged TFR — {label1} (baseline logratio)\nvlim ±{vabs_pn:.2f}; mean %Δ vs BL={pct_1:+.0f}%",
-        "tfr_scalpmean_nonpain_bl.png", (-vabs_pn, +vabs_pn), out_dir, config, logger, baseline_used, subject, task
-    )
-    _plot_scalpmean_tfr(
-        tfr_diff_sm, f"Scalp-averaged TFR — {label2} minus {label1} (baseline logratio)\nvlim ±{vabs_diff:.2f}; mean %Δ vs BL={pct_diff:+.0f}%",
-        "tfr_scalpmean_pain_minus_non_bl.png", (-vabs_diff, +vabs_diff), out_dir, config, logger, baseline_used, subject, task
+    times = np.asarray(tfr_condition_1.times)
+    
+    _create_scalpmean_contrast_plots(
+        tfr_scalpmean_1,
+        tfr_scalpmean_2,
+        tfr_difference,
+        label_1,
+        label_2,
+        times,
+        active_window,
+        baseline_used,
+        out_dir,
+        config,
+        logger=logger,
+        subject=subject,
+        task=task,
     )

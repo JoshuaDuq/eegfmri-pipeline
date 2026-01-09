@@ -6,9 +6,36 @@ import argparse
 import json as json_module
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from eeg_pipeline.cli.common import add_task_arg
+
+
+def get_dir_size(root: Path) -> int:
+    """Return total size in bytes of all files under the given directory."""
+    total_size = 0
+    if root.exists():
+        for path in root.rglob("*"):
+            if path.is_file():
+                total_size += path.stat().st_size
+    return total_size
+
+
+def format_size(size_bytes: int) -> str:
+    """Format a byte size into a human-readable string."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+
+def is_old_enough(path: Path, days: Optional[int]) -> bool:
+    """Return True if the given path is older than the specified number of days."""
+    if days is None:
+        return True
+    modification_time = datetime.fromtimestamp(path.stat().st_mtime)
+    return datetime.now() - modification_time > timedelta(days=days)
 
 
 def setup_clean(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -62,36 +89,15 @@ def setup_clean(subparsers: argparse._SubParsersAction) -> argparse.ArgumentPars
 def run_clean(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the clean command."""
     from eeg_pipeline.infra.paths import resolve_deriv_root
-    
+
     deriv_root = resolve_deriv_root(config=config)
-    
-    def get_dir_size(path: Path) -> int:
-        total = 0
-        if path.exists():
-            for f in path.rglob("*"):
-                if f.is_file():
-                    total += f.stat().st_size
-        return total
-    
-    def format_size(size_bytes: int) -> str:
-        for unit in ["B", "KB", "MB", "GB"]:
-            if size_bytes < 1024:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024
-        return f"{size_bytes:.1f} TB"
-    
-    def is_old_enough(path: Path, days: int) -> bool:
-        if days is None:
-            return True
-        mtime = datetime.fromtimestamp(path.stat().st_mtime)
-        return datetime.now() - mtime > timedelta(days=days)
-    
+
     targets = {
         "plots": deriv_root / "plots",
         "cache": deriv_root / ".cache",
         "logs": deriv_root / "logs",
     }
-    
+
     to_remove = []
     total_size = 0
     

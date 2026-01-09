@@ -734,6 +734,67 @@ class FeatureQCResult:
     metadata: Dict[str, Any]
 
 
+def _check_within_run_variance(
+    df_trials: pd.DataFrame,
+    feature_col: str,
+    run_col: str,
+    min_variance: float,
+) -> bool:
+    """Check if feature has sufficient variance within runs."""
+    run_variances = df_trials.groupby(run_col)[feature_col].apply(
+        lambda x: pd.to_numeric(x, errors="coerce").var()
+    )
+    all_runs_constant = (run_variances.fillna(0) < min_variance).all()
+    return not all_runs_constant
+
+
+def _evaluate_feature_quality(
+    feature_col: str,
+    values: pd.Series,
+    df_trials: pd.DataFrame,
+    max_missing_pct: float,
+    min_variance: float,
+    check_within_run: bool,
+    run_col: str,
+) -> Dict[str, Any]:
+    """Evaluate quality metrics for a single feature."""
+    total_count = len(values)
+    missing_count = values.isna().sum()
+    missing_pct = missing_count / total_count if total_count > 0 else 1.0
+    valid_count = values.notna().sum()
+    variance = values.var() if valid_count > 1 else 0.0
+    
+    within_run_ok = True
+    if check_within_run and run_col in df_trials.columns:
+        within_run_ok = _check_within_run_variance(df_trials, feature_col, run_col, min_variance)
+    
+    return {
+        "feature": feature_col,
+        "n_total": total_count,
+        "n_missing": missing_count,
+        "missing_pct": missing_pct,
+        "variance": variance,
+        "within_run_variance_ok": within_run_ok,
+        "passed": True,
+    }
+
+
+def _classify_feature_failure(
+    feature_col: str,
+    qc_metrics: Dict[str, Any],
+    max_missing_pct: float,
+    min_variance: float,
+) -> Optional[str]:
+    """Classify why a feature failed QC, returning failure reason or None if passed."""
+    if qc_metrics["missing_pct"] > max_missing_pct:
+        return "high_missingness"
+    if qc_metrics["variance"] < min_variance:
+        return "near_zero_variance"
+    if not qc_metrics["within_run_variance_ok"]:
+        return "constant_within_run"
+    return None
+
+
 def stage_feature_qc_screen(
     ctx: BehaviorContext,
     config: Any,
@@ -749,78 +810,65 @@ def stage_feature_qc_screen(
     - Reliability: ICC or split-half < threshold (optional)
     """
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Feature QC: trial table missing; skipping.")
         return FeatureQCResult([], {}, pd.DataFrame(), {"status": "skipped"})
 
-    feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
+    feature_cols = [col for col in df_trials.columns if str(col).startswith(FEATURE_COLUMN_PREFIXES)]
     if not feature_cols:
         return FeatureQCResult([], {}, pd.DataFrame(), {"status": "no_features"})
 
-    # QC thresholds from config
-    max_missing_pct = float(get_config_value(ctx.config, "behavior_analysis.feature_qc.max_missing_pct", 0.2))
-    min_variance = float(get_config_value(ctx.config, "behavior_analysis.feature_qc.min_variance", 1e-10))
-    check_within_run = bool(get_config_value(ctx.config, "behavior_analysis.feature_qc.check_within_run_variance", True))
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    max_missing_pct = float(get_config_value(
+        ctx.config, "behavior_analysis.feature_qc.max_missing_pct", MAX_MISSING_PCT_DEFAULT
+    ))
+    min_variance = float(get_config_value(
+        ctx.config, "behavior_analysis.feature_qc.min_variance", MIN_VARIANCE_THRESHOLD
+    ))
+    check_within_run = bool(get_config_value(
+        ctx.config, "behavior_analysis.feature_qc.check_within_run_variance", True
+    ))
+    run_col = str(get_config_value(
+        ctx.config, "behavior_analysis.run_adjustment.column", "run_id"
+    ) or "run_id").strip()
 
-    passed = []
-    failed: Dict[str, List[str]] = {
+    passed_features = []
+    failed_features: Dict[str, List[str]] = {
         "high_missingness": [],
         "near_zero_variance": [],
         "constant_within_run": [],
     }
     qc_records: List[Dict[str, Any]] = []
 
-    for col in feature_cols:
-        vals = pd.to_numeric(df_trials[col], errors="coerce")
-        n_total = len(vals)
-        n_missing = vals.isna().sum()
-        missing_pct = n_missing / n_total if n_total > 0 else 1.0
-        variance = vals.var() if vals.notna().sum() > 1 else 0.0
-
-        # Check within-run variance
-        within_run_ok = True
-        if check_within_run and run_col in df_trials.columns:
-            run_vars = df_trials.groupby(run_col)[col].apply(lambda x: pd.to_numeric(x, errors="coerce").var())
-            if (run_vars.fillna(0) < min_variance).all():
-                within_run_ok = False
-
-        qc_records.append({
-            "feature": col,
-            "n_total": n_total,
-            "n_missing": n_missing,
-            "missing_pct": missing_pct,
-            "variance": variance,
-            "within_run_variance_ok": within_run_ok,
-            "passed": True,
-        })
-
-        # Apply filters
-        if missing_pct > max_missing_pct:
-            failed["high_missingness"].append(col)
-            qc_records[-1]["passed"] = False
-        elif variance < min_variance:
-            failed["near_zero_variance"].append(col)
-            qc_records[-1]["passed"] = False
-        elif not within_run_ok:
-            failed["constant_within_run"].append(col)
-            qc_records[-1]["passed"] = False
+    for feature_col in feature_cols:
+        values = pd.to_numeric(df_trials[feature_col], errors="coerce")
+        qc_metrics = _evaluate_feature_quality(
+            feature_col, values, df_trials, max_missing_pct, min_variance, check_within_run, run_col
+        )
+        
+        failure_reason = _classify_feature_failure(feature_col, qc_metrics, max_missing_pct, min_variance)
+        if failure_reason:
+            failed_features[failure_reason].append(feature_col)
+            qc_metrics["passed"] = False
         else:
-            passed.append(col)
+            passed_features.append(feature_col)
+        
+        qc_records.append(qc_metrics)
 
     qc_df = pd.DataFrame(qc_records)
-    n_failed = sum(len(v) for v in failed.values())
+    n_failed = sum(len(feature_list) for feature_list in failed_features.values())
     
+    n_total = len(feature_cols)
+    n_passed = len(passed_features)
+    pass_rate = 100 * n_passed / n_total if n_total > 0 else 0.0
     ctx.logger.info(
         "Feature QC: %d/%d passed (%.1f%%), %d failed",
-        len(passed), len(feature_cols), 100 * len(passed) / len(feature_cols) if feature_cols else 0, n_failed
+        n_passed, n_total, pass_rate, n_failed
     )
     
-    for reason, cols in failed.items():
-        if cols:
-            ctx.logger.info("  %s: %d features", reason, len(cols))
+    for reason, feature_list in failed_features.items():
+        if feature_list:
+            ctx.logger.info("  %s: %d features", reason, len(feature_list))
 
-    # Write QC results
     from eeg_pipeline.infra.tsv import write_tsv
     suffix = _feature_suffix_from_context(ctx)
     out_dir = _get_stats_subfolder(ctx, "feature_qc")
@@ -828,8 +876,8 @@ def stage_feature_qc_screen(
 
     metadata = {
         "status": "ok",
-        "n_total": len(feature_cols),
-        "n_passed": len(passed),
+        "n_total": n_total,
+        "n_passed": n_passed,
         "n_failed": n_failed,
         "thresholds": {
             "max_missing_pct": max_missing_pct,
@@ -839,7 +887,7 @@ def stage_feature_qc_screen(
     }
     ctx.data_qc["feature_qc_screen"] = metadata
 
-    return FeatureQCResult(passed, failed, qc_df, metadata)
+    return FeatureQCResult(passed_features, failed_features, qc_df, metadata)
 
 
 ###################################################################
@@ -1084,6 +1132,24 @@ CATEGORY_PREFIX_MAP = {
     "temporal": "temporal_",
 }
 
+# Constants for validation thresholds
+MIN_SAMPLES_DEFAULT = 10
+MIN_SAMPLES_RUN_LEVEL = 3
+MIN_VARIANCE_THRESHOLD = 1e-10
+CONSTANT_VARIANCE_THRESHOLD = 1e-12
+MAX_MISSING_PCT_DEFAULT = 0.2
+FDR_ALPHA_DEFAULT = 0.05
+MIN_FEATURES_FOR_ANALYSIS = 1
+MIN_TRIALS_FOR_ANALYSIS = 1
+
+
+def _is_dataframe_valid(df: Optional[pd.DataFrame]) -> bool:
+    """Check if DataFrame is not None and not empty.
+    
+    Encapsulates boundary condition for DataFrame validation.
+    """
+    return df is not None and not df.empty
+
 
 def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
     """Helper to get a subfolder within stats_dir and ensure it exists."""
@@ -1094,83 +1160,131 @@ def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
 
 def _find_stats_path(ctx: BehaviorContext, filename: str) -> Optional[Path]:
     """Helper to find a file in stats_dir or its subfolders."""
-    # 1. Check in specific subfolder if we can infer kind
     kind = _infer_output_kind(filename)
     if kind != "unknown":
-        p = ctx.stats_dir / kind / filename
-        if p.exists():
-            return p
+        candidate_path = ctx.stats_dir / kind / filename
+        if candidate_path.exists():
+            return candidate_path
     
-    # 2. Check in root stats_dir
-    p = ctx.stats_dir / filename
-    if p.exists():
-        return p
+    root_path = ctx.stats_dir / filename
+    if root_path.exists():
+        return root_path
     
-    # 3. Search all subfolders
-    for p in ctx.stats_dir.rglob(filename):
-        if p.is_file():
-            return p
+    for candidate_path in ctx.stats_dir.rglob(filename):
+        if candidate_path.is_file():
+            return candidate_path
             
     return None
 
 
-def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
-    def _signature() -> str:
-        parts = []
-        for name, df in ctx.iter_feature_tables():
-            if df is None or df.empty:
-                continue
-            col_blob = ",".join(str(c) for c in df.columns)
-            parts.append(f"{name}:{df.shape[0]}:{df.shape[1]}:{col_blob}")
-        payload = "|".join(parts)
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def _compute_feature_signature(ctx: BehaviorContext) -> str:
+    """Compute hash signature of feature tables for caching."""
+    parts = []
+    for name, df in ctx.iter_feature_tables():
+        if not _is_dataframe_valid(df):
+            continue
+        column_names = ",".join(str(c) for c in df.columns)
+        parts.append(f"{name}:{df.shape[0]}:{df.shape[1]}:{column_names}")
+    payload = "|".join(parts)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    signature = _signature()
+
+def _validate_feature_index_alignment(df: pd.DataFrame, name: str, base_index: pd.Index, logger: Any) -> None:
+    """Validate that feature DataFrame index matches base index."""
+    if not df.index.equals(base_index):
+        expected_rows = len(base_index)
+        message = (
+            f"Feature index mismatch for {name}: expected alignment of "
+            f"{expected_rows} rows."
+        )
+        logger.error(message)
+        raise ValueError(message)
+
+
+def _check_duplicate_columns(df: pd.DataFrame, context: str, logger: Any) -> None:
+    """Check for duplicate columns and raise if found."""
+    if df.columns.duplicated().any():
+        duplicate_names = [str(c) for c in df.columns[df.columns.duplicated()].unique()]
+        message = f"Duplicate feature columns {context}: {duplicate_names}"
+        logger.error(message)
+        raise ValueError(message)
+
+
+def _rename_feature_columns_with_prefix(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    """Rename columns to include prefix if not already present."""
+    rename_map = {
+        col: col if str(col).startswith(prefix) else f"{prefix}{col}"
+        for col in df.columns
+    }
+    return df.rename(columns=rename_map)
+
+
+def _check_cross_table_column_overlap(new_df: pd.DataFrame, existing_dfs: List[pd.DataFrame], logger: Any) -> None:
+    """Check for column name overlap between new DataFrame and existing ones."""
+    existing_columns = pd.Index([])
+    for prev_df in existing_dfs:
+        existing_columns = existing_columns.append(prev_df.columns)
+    
+    overlap = existing_columns.intersection(new_df.columns)
+    if not overlap.empty:
+        overlap_list = [str(c) for c in overlap.tolist()]
+        message = f"Duplicate feature columns across tables: {overlap_list}"
+        logger.error(message)
+        raise ValueError(message)
+
+
+def combine_features(ctx: BehaviorContext) -> pd.DataFrame:
+    """Combine all feature tables into a single DataFrame with caching."""
+    signature = _compute_feature_signature(ctx)
     if ctx._combined_features_df is not None and ctx._combined_features_signature == signature:
         return ctx._combined_features_df
 
-    dfs = []
+    feature_dataframes = []
     base_index = None
+    
     for name, df in ctx.iter_feature_tables():
-        if df is not None and not df.empty:
-            if base_index is None:
-                base_index = df.index
-            elif not df.index.equals(base_index):
-                msg = (
-                    f"Feature index mismatch for {name}: expected alignment of "
-                    f"{len(base_index)} rows."
-                )
-                ctx.logger.error(msg)
-                raise ValueError(msg)
-            prefix = f"{name}_"
-            df = df.rename(columns={c: c if str(c).startswith(prefix) else f"{prefix}{c}" for c in df.columns})
+        if not _is_dataframe_valid(df):
+            continue
+        
+        if base_index is None:
+            base_index = df.index
+        else:
+            _validate_feature_index_alignment(df, name, base_index, ctx.logger)
+        
+        prefix = f"{name}_"
+        df_renamed = _rename_feature_columns_with_prefix(df, prefix)
+        _check_duplicate_columns(df_renamed, f"within {name}", ctx.logger)
+        
+        if feature_dataframes:
+            _check_cross_table_column_overlap(df_renamed, feature_dataframes, ctx.logger)
+        
+        feature_dataframes.append(df_renamed)
 
-            if df.columns.duplicated().any():
-                dupes = [str(c) for c in df.columns[df.columns.duplicated()].unique()]
-                msg = f"Duplicate feature columns within {name}: {dupes}"
-                ctx.logger.error(msg)
-                raise ValueError(msg)
-
-            if dfs:
-                existing_cols = pd.Index([])
-                for prev in dfs:
-                    existing_cols = existing_cols.append(prev.columns)
-                overlap = existing_cols.intersection(df.columns)
-                if not overlap.empty:
-                    msg = f"Duplicate feature columns across tables: {[str(c) for c in overlap.tolist()]}"
-                    ctx.logger.error(msg)
-                    raise ValueError(msg)
-            dfs.append(df)
-
-    combined = pd.concat(dfs, axis=1) if dfs else pd.DataFrame()
-    if not combined.empty and combined.columns.duplicated().any():
-        dupes = [str(c) for c in combined.columns[combined.columns.duplicated()].unique()]
-        msg = f"Duplicate feature columns after combining: {dupes}"
-        ctx.logger.error(msg)
-        raise ValueError(msg)
+    combined = pd.concat(feature_dataframes, axis=1) if feature_dataframes else pd.DataFrame()
+    if not combined.empty:
+        _check_duplicate_columns(combined, "after combining", ctx.logger)
+    
     ctx._combined_features_df = combined
     ctx._combined_features_signature = signature
     return combined
+
+
+def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Add change score columns to a feature DataFrame."""
+    if not _is_dataframe_valid(df):
+        return df
+    
+    from eeg_pipeline.utils.analysis.stats.correlation import compute_change_features
+    
+    change_df = compute_change_features(df)
+    if not _is_dataframe_valid(change_df):
+        return df
+    
+    new_columns = [col for col in change_df.columns if col not in df.columns]
+    if not new_columns:
+        return df
+    
+    return pd.concat([df, change_df[new_columns]], axis=1)
 
 
 def add_change_scores(ctx: BehaviorContext) -> None:
@@ -1178,23 +1292,12 @@ def add_change_scores(ctx: BehaviorContext) -> None:
     if ctx._change_scores_added or not ctx.compute_change_scores:
         return
 
-    from eeg_pipeline.utils.analysis.stats.correlation import compute_change_features
-
-    def _augment(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
-        if df is None or df.empty:
-            return df
-        change_df = compute_change_features(df)
-        if change_df is None or change_df.empty:
-            return df
-        new_cols = [c for c in change_df.columns if c not in df.columns]
-        return pd.concat([df, change_df[new_cols]], axis=1) if new_cols else df
-
-    ctx.power_df = _augment(ctx.power_df)
-    ctx.connectivity_df = _augment(ctx.connectivity_df)
-    ctx.aperiodic_df = _augment(ctx.aperiodic_df)
-    ctx.itpc_df = _augment(ctx.itpc_df)
-    ctx.pac_df = _augment(ctx.pac_df)
-    ctx.complexity_df = _augment(ctx.complexity_df)
+    ctx.power_df = _augment_dataframe_with_change_scores(ctx.power_df)
+    ctx.connectivity_df = _augment_dataframe_with_change_scores(ctx.connectivity_df)
+    ctx.aperiodic_df = _augment_dataframe_with_change_scores(ctx.aperiodic_df)
+    ctx.itpc_df = _augment_dataframe_with_change_scores(ctx.itpc_df)
+    ctx.pac_df = _augment_dataframe_with_change_scores(ctx.pac_df)
+    ctx.complexity_df = _augment_dataframe_with_change_scores(ctx.complexity_df)
     ctx._change_scores_added = True
 
 
@@ -1231,10 +1334,12 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     Single responsibility: Prepare all inputs needed for correlation computation.
     """
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is not None:
-        ctx.logger.info("Correlations design: loaded trial table (%d rows, %d cols)", df_trials.shape[0], df_trials.shape[1])
-
-    if df_trials is None or df_trials.empty:
+    if _is_dataframe_valid(df_trials):
+        ctx.logger.info(
+            "Correlations design: loaded trial table (%d rows, %d cols)",
+            df_trials.shape[0], df_trials.shape[1]
+        )
+    else:
         ctx.logger.warning("Correlations design: trial table missing; skipping.")
         return None
 
@@ -1348,9 +1453,11 @@ def stage_correlate_effect_sizes(
 
             skip_reason = None
             if int(finite_xy.sum()) >= min_samples:
-                if float(np.nanstd(x_arr[finite_xy], ddof=1)) <= 1e-12:
+                feature_std = float(np.nanstd(x_arr[finite_xy], ddof=1))
+                target_std = float(np.nanstd(y_arr[finite_xy], ddof=1))
+                if feature_std <= CONSTANT_VARIANCE_THRESHOLD:
                     skip_reason = "feature_constant"
-                elif float(np.nanstd(y_arr[finite_xy], ddof=1)) <= 1e-12:
+                elif target_std <= CONSTANT_VARIANCE_THRESHOLD:
                     skip_reason = "target_constant"
 
             r_raw, p_raw, n = safe_correlation(x_arr, y_arr, method, min_samples, robust_method=robust_method)
@@ -1676,14 +1783,18 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
     from eeg_pipeline.analysis.behavior.api import run_pain_sensitivity_correlations
 
-    # Load trial table with all features
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Pain sensitivity: trial table missing; skipping.")
         return pd.DataFrame()
 
-    if "temperature" not in df_trials.columns or "rating" not in df_trials.columns:
-        ctx.logger.warning("Pain sensitivity: requires 'temperature' and 'rating' columns; skipping.")
+    required_columns = {"temperature", "rating"}
+    missing_columns = required_columns - set(df_trials.columns)
+    if missing_columns:
+        ctx.logger.warning(
+            "Pain sensitivity: requires %s columns; missing: %s. Skipping.",
+            required_columns, missing_columns
+        )
         return pd.DataFrame()
 
     method = getattr(config, "method", "spearman")
@@ -1712,14 +1823,15 @@ def stage_pain_sensitivity(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
         config=ctx.config,
     )
     
-    # Apply FDR correction
-    if psi_df is not None and not psi_df.empty:
-        p_col = "p_psi" if "p_psi" in psi_df.columns else "p_value" if "p_value" in psi_df.columns else None
-        if p_col:
-            p_vals = pd.to_numeric(psi_df[p_col], errors="coerce").to_numpy()
-            psi_df["p_fdr"] = fdr_bh(p_vals, alpha=float(getattr(config, "fdr_alpha", 0.05)), config=ctx.config)
+    if _is_dataframe_valid(psi_df):
+        p_value_columns = ["p_psi", "p_value"]
+        p_column = next((col for col in p_value_columns if col in psi_df.columns), None)
+        if p_column:
+            p_values = pd.to_numeric(psi_df[p_column], errors="coerce").to_numpy()
+            fdr_alpha = float(getattr(config, "fdr_alpha", FDR_ALPHA_DEFAULT))
+            psi_df["p_fdr"] = fdr_bh(p_values, alpha=fdr_alpha, config=ctx.config)
 
-    return psi_df if psi_df is not None else pd.DataFrame()
+    return psi_df if _is_dataframe_valid(psi_df) else pd.DataFrame()
 
 
 
@@ -1877,7 +1989,7 @@ def stage_trial_table(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     Composes: compute_trial_table + write_trial_table
     """
     result = compute_trial_table(ctx, config)
-    if result is None or result.df.empty:
+    if result is None or not _is_dataframe_valid(result.df):
         ctx.logger.warning("Trial table: no data to write")
         return None
     return write_trial_table(ctx, result)
@@ -1897,7 +2009,7 @@ def stage_lag_features(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     from eeg_pipeline.infra.tsv import write_tsv
 
     df = _load_trial_table_df(ctx)
-    if df is None or df.empty:
+    if not _is_dataframe_valid(df):
         ctx.logger.warning("Lag features: trial table missing; skipping.")
         return None
 
@@ -1932,12 +2044,17 @@ def stage_pain_residual(ctx: BehaviorContext, config: Any) -> Optional[Path]:
     from eeg_pipeline.infra.tsv import write_tsv
 
     df = _load_trial_table_df(ctx)
-    if df is None or df.empty:
+    if not _is_dataframe_valid(df):
         ctx.logger.warning("Pain residual: trial table missing; skipping.")
         return None
 
-    if "temperature" not in df.columns or "rating" not in df.columns:
-        ctx.logger.warning("Pain residual: requires 'temperature' and 'rating' columns; skipping.")
+    required_columns = {"temperature", "rating"}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        ctx.logger.warning(
+            "Pain residual: requires %s columns; missing: %s. Skipping.",
+            required_columns, missing_columns
+        )
         return None
 
     df_augmented, resid_meta = add_pain_residual(df, ctx.config)
@@ -2014,18 +2131,24 @@ def write_temperature_models(
     out_dir = _get_stats_subfolder(ctx, "temperature_models")
 
     if model_comparison is not None:
-        if model_comparison.df is not None and not model_comparison.df.empty:
-            write_tsv(model_comparison.df, out_dir / f"model_comparison{suffix}.tsv")
-        (out_dir / f"model_comparison{suffix}.metadata.json").write_text(
+        if _is_dataframe_valid(model_comparison.df):
+            comparison_path = out_dir / f"model_comparison{suffix}.tsv"
+            write_tsv(model_comparison.df, comparison_path)
+        
+        metadata_path = out_dir / f"model_comparison{suffix}.metadata.json"
+        metadata_path.write_text(
             json.dumps(model_comparison.metadata, indent=2, default=str)
         )
         ctx.data_qc["temperature_model_comparison"] = model_comparison.metadata
         ctx.logger.info("Temperature model comparison saved: %s", out_dir.name)
 
     if breakpoint is not None:
-        if breakpoint.df is not None and not breakpoint.df.empty:
-            write_tsv(breakpoint.df, out_dir / f"breakpoint_candidates{suffix}.tsv")
-        (out_dir / f"breakpoint_test{suffix}.metadata.json").write_text(
+        if _is_dataframe_valid(breakpoint.df):
+            breakpoint_path = out_dir / f"breakpoint_candidates{suffix}.tsv"
+            write_tsv(breakpoint.df, breakpoint_path)
+        
+        metadata_path = out_dir / f"breakpoint_test{suffix}.metadata.json"
+        metadata_path.write_text(
             json.dumps(breakpoint.metadata, indent=2, default=str)
         )
         ctx.data_qc["temperature_breakpoint_test"] = breakpoint.metadata
@@ -2040,12 +2163,17 @@ def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any
     Composes: compute_temp_model_comparison + compute_temp_breakpoints + write_temperature_models
     """
     df = _load_trial_table_df(ctx)
-    if df is None or df.empty:
+    if not _is_dataframe_valid(df):
         ctx.logger.warning("Temperature models: trial table missing; skipping.")
         return {"status": "skipped_missing_data"}
 
-    if "temperature" not in df.columns or "rating" not in df.columns:
-        ctx.logger.warning("Temperature models: requires 'temperature' and 'rating' columns; skipping.")
+    required_columns = {"temperature", "rating"}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        ctx.logger.warning(
+            "Temperature models: requires %s columns; missing: %s. Skipping.",
+            required_columns, missing_columns
+        )
         return {"status": "skipped_missing_columns"}
 
     meta: Dict[str, Any] = {"status": "init"}
@@ -2076,19 +2204,24 @@ def stage_temperature_models(ctx: BehaviorContext, config: Any) -> Dict[str, Any
 
 
 def _load_trial_table_df(ctx: BehaviorContext) -> Optional[pd.DataFrame]:
+    """Load trial table DataFrame from disk with fallback search."""
     from eeg_pipeline.infra.tsv import read_table
+    
     suffix = _feature_suffix_from_context(ctx)
-    # Prefer subfolder, fallback to root
-    fnames = [f"trials{suffix}.tsv", f"trials{suffix}.parquet"]
-    for fname in fnames:
-        p = _find_stats_path(ctx, fname)
-        if p:
-            return read_table(p)
+    preferred_filenames = [f"trials{suffix}.tsv", f"trials{suffix}.parquet"]
+    
+    for filename in preferred_filenames:
+        path = _find_stats_path(ctx, filename)
+        if path is not None:
+            return read_table(path)
 
-    # Fallback: any trials tsv/parquet
-    candidates = sorted(ctx.stats_dir.rglob("trials*.tsv")) or sorted(ctx.stats_dir.rglob("trials*.parquet"))
-    if candidates:
-        return read_table(candidates[0])
+    tsv_candidates = sorted(ctx.stats_dir.rglob("trials*.tsv"))
+    parquet_candidates = sorted(ctx.stats_dir.rglob("trials*.parquet"))
+    all_candidates = tsv_candidates or parquet_candidates
+    
+    if all_candidates:
+        return read_table(all_candidates[0])
+    
     return None
 
 
@@ -2102,7 +2235,7 @@ def stage_trial_table_validate(ctx: BehaviorContext, config: Any) -> Dict[str, A
         return {"enabled": False, "status": "disabled"}
 
     df = _load_trial_table_df(ctx)
-    if df is None or df.empty:
+    if not _is_dataframe_valid(df):
         return {"enabled": True, "status": "missing_trial_table"}
 
     suffix = _feature_suffix_from_context(ctx)
@@ -2112,7 +2245,7 @@ def stage_trial_table_validate(ctx: BehaviorContext, config: Any) -> Dict[str, A
     summary_path = out_dir / f"trial_table_validation_summary{suffix}.tsv"
     report_path = out_dir / f"trial_table_validation{suffix}.json"
     try:
-        if result.summary_df is not None and not result.summary_df.empty:
+        if _is_dataframe_valid(result.summary_df):
             write_tsv(result.summary_df, summary_path)
         report_path.write_text(json.dumps(result.report, indent=2, default=str))
     except Exception as exc:
@@ -2198,8 +2331,12 @@ def _crossfit_confound_selection(
         train_mask = df_trials[run_col] != held_out_run
         df_train = df_trials[train_mask]
         
-        if len(df_train) < 10:
-            logger.debug(f"Crossfit fold {held_out_run}: too few train samples ({len(df_train)})")
+        min_samples_for_crossfit = MIN_SAMPLES_DEFAULT
+        if len(df_train) < min_samples_for_crossfit:
+            logger.debug(
+                "Crossfit fold %s: too few train samples (%d)",
+                held_out_run, len(df_train)
+            )
             continue
         
         # Select confounds on training data
@@ -2208,14 +2345,20 @@ def _crossfit_confound_selection(
             if qc_col not in df_train.columns:
                 continue
             
-            # Check correlation with rating in training data
-            if "rating" in df_train.columns:
-                valid_mask = df_train[qc_col].notna() & df_train["rating"].notna()
-                if valid_mask.sum() >= 10:
-                    from scipy.stats import spearmanr
-                    r, p = spearmanr(df_train.loc[valid_mask, qc_col], df_train.loc[valid_mask, "rating"])
-                    if p < alpha:
-                        fold_selected.append(qc_col)
+            if "rating" not in df_train.columns:
+                continue
+            
+            valid_mask = df_train[qc_col].notna() & df_train["rating"].notna()
+            if valid_mask.sum() < MIN_SAMPLES_DEFAULT:
+                continue
+            
+            from scipy.stats import spearmanr
+            correlation_coef, p_value = spearmanr(
+                df_train.loc[valid_mask, qc_col],
+                df_train.loc[valid_mask, "rating"]
+            )
+            if p_value < alpha:
+                fold_selected.append(qc_col)
         
         # Limit to max_covariates
         fold_selected = fold_selected[:max_covariates]
@@ -2228,15 +2371,18 @@ def _crossfit_confound_selection(
         return {"consistent_covariates": [], "fold_selections": fold_selections}
     
     selection_counts = Counter(all_selected)
-    consistency_threshold = max(1, n_folds // 2)  # At least half of folds
+    min_fold_agreement = 0.5
+    consistency_threshold = max(1, int(n_folds * min_fold_agreement))
     
     consistent_covariates = [
         cov for cov, count in selection_counts.items()
         if count >= consistency_threshold
     ][:max_covariates]
     
-    logger.info(f"Crossfit: {n_folds} folds, {len(consistent_covariates)} consistent covariates "
-                f"(threshold={consistency_threshold})")
+    logger.info(
+        "Crossfit: %d folds, %d consistent covariates (threshold=%d)",
+        n_folds, len(consistent_covariates), consistency_threshold
+    )
     
     return {
         "consistent_covariates": consistent_covariates,
@@ -2281,8 +2427,9 @@ def apply_selected_qc_covariates(
     if cov_add.empty:
         return []
 
-    if ctx.covariates_df is None or ctx.covariates_df.empty:
-        ctx.covariates_df = pd.DataFrame(index=ctx.aligned_events.index if ctx.aligned_events is not None else None)
+    if not _is_dataframe_valid(ctx.covariates_df):
+        index = ctx.aligned_events.index if ctx.aligned_events is not None else None
+        ctx.covariates_df = pd.DataFrame(index=index)
 
     cov_add.index = ctx.covariates_df.index
     for c in cov_add.columns:
@@ -2317,7 +2464,7 @@ def stage_confounds(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     from eeg_pipeline.infra.tsv import write_tsv
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Confounds: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -2430,7 +2577,7 @@ def stage_regression(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     method_suffix = f"_{method_label}" if method_label else ""
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Regression: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -2495,7 +2642,7 @@ def stage_models(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     method_suffix = f"_{method_label}" if method_label else ""
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Models: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -2544,7 +2691,7 @@ def stage_stability(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     method_suffix = f"_{method_label}" if method_label else ""
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Stability: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -2643,7 +2790,7 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
     method_suffix = f"_{method_label}" if method_label else ""
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.info("Influence: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -2659,7 +2806,7 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
         config=ctx.config,
     )
     ctx.data_qc["influence_diagnostics"] = meta
-    if out_df is None or out_df.empty:
+    if not _is_dataframe_valid(out_df):
         return pd.DataFrame()
     # Attach high-level temperature-control info (useful when spline/rating_hat are enabled).
     try:
@@ -2686,7 +2833,35 @@ def stage_influence(ctx: BehaviorContext, config: Any, results: Any) -> pd.DataF
     return out_df
 
 
+def _compute_series_statistics(series: pd.Series) -> Dict[str, Any]:
+    """Compute basic statistics for a numeric series."""
+    valid_values = series.notna()
+    n_valid = int(valid_values.sum())
+    
+    if n_valid == 0:
+        return {
+            "n_non_nan": 0,
+            "min": np.nan,
+            "max": np.nan,
+            "mean": np.nan,
+            "std": np.nan,
+        }
+    
+    numeric_series = pd.to_numeric(series, errors="coerce")
+    has_values = numeric_series.notna().any()
+    has_multiple = n_valid > 1
+    
+    return {
+        "n_non_nan": n_valid,
+        "min": float(numeric_series.min()) if has_values else np.nan,
+        "max": float(numeric_series.max()) if has_values else np.nan,
+        "mean": float(numeric_series.mean()) if has_values else np.nan,
+        "std": float(numeric_series.std(ddof=1)) if has_multiple else np.nan,
+    }
+
+
 def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
+    """Build behavior quality control summary."""
     qc: Dict[str, Any] = {
         "subject": ctx.subject,
         "task": ctx.task,
@@ -2700,24 +2875,10 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
         qc["data_qc"] = ctx.data_qc
 
     if ctx.targets is not None:
-        s = pd.to_numeric(ctx.targets, errors="coerce")
-        qc["rating"] = {
-            "n_non_nan": int(s.notna().sum()),
-            "min": float(s.min()) if s.notna().any() else np.nan,
-            "max": float(s.max()) if s.notna().any() else np.nan,
-            "mean": float(s.mean()) if s.notna().any() else np.nan,
-            "std": float(s.std(ddof=1)) if s.notna().sum() > 1 else np.nan,
-        }
+        qc["rating"] = _compute_series_statistics(ctx.targets)
 
     if ctx.temperature is not None:
-        t = pd.to_numeric(ctx.temperature, errors="coerce")
-        qc["temperature"] = {
-            "n_non_nan": int(t.notna().sum()),
-            "min": float(t.min()) if t.notna().any() else np.nan,
-            "max": float(t.max()) if t.notna().any() else np.nan,
-            "mean": float(t.mean()) if t.notna().any() else np.nan,
-            "std": float(t.std(ddof=1)) if t.notna().sum() > 1 else np.nan,
-        }
+        qc["temperature"] = _compute_series_statistics(ctx.temperature)
 
     if ctx.targets is not None and ctx.temperature is not None:
         s = pd.to_numeric(ctx.targets, errors="coerce")
@@ -2762,13 +2923,14 @@ def build_behavior_qc(ctx: BehaviorContext) -> Dict[str, Any]:
                     ),
                 }
 
-    if ctx.covariates_df is not None and not ctx.covariates_df.empty:
+    if _is_dataframe_valid(ctx.covariates_df):
         cov = ctx.covariates_df
         qc["covariates"] = {
             "n_covariates": int(cov.shape[1]),
-            "columns": [str(c) for c in cov.columns],
+            "columns": [str(col) for col in cov.columns],
             "missing_fraction_by_column": {
-                str(c): float(pd.to_numeric(cov[c], errors="coerce").isna().mean()) for c in cov.columns
+                str(col): float(pd.to_numeric(cov[col], errors="coerce").isna().mean())
+                for col in cov.columns
             },
         }
 
@@ -3140,13 +3302,18 @@ def stage_condition_column(
     from eeg_pipeline.infra.tsv import write_tsv
 
     fail_fast = get_config_value(ctx.config, "behavior_analysis.condition.fail_fast", True)
-    primary_unit = str(get_config_value(ctx.config, "behavior_analysis.condition.primary_unit", "trial")).strip().lower()
-    use_run_unit = primary_unit in {"run", "run_mean", "runmean", "run_level"}
-    run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    primary_unit = str(get_config_value(
+        ctx.config, "behavior_analysis.condition.primary_unit", "trial"
+    )).strip().lower()
+    run_unit_values = {"run", "run_mean", "runmean", "run_level"}
+    use_run_unit = primary_unit in run_unit_values
+    run_col = str(get_config_value(
+        ctx.config, "behavior_analysis.run_adjustment.column", "run_id"
+    ) or "run_id").strip()
 
     if df_trials is None:
         df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Condition column: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -3249,16 +3416,22 @@ def stage_condition_window(
     from eeg_pipeline.infra.tsv import write_tsv
 
     if compare_windows is None:
-        compare_windows = get_config_value(ctx.config, "behavior_analysis.condition.compare_windows", [])
+        compare_windows = get_config_value(
+            ctx.config, "behavior_analysis.condition.compare_windows", []
+        )
     
-    if not compare_windows or len(compare_windows) < 2:
+    min_windows_required = 2
+    if not compare_windows or len(compare_windows) < min_windows_required:
         if compare_windows:
-            ctx.logger.warning(f"Window comparison requires at least 2 windows, got: {compare_windows}")
+            ctx.logger.warning(
+                "Window comparison requires at least %d windows, got: %s",
+                min_windows_required, compare_windows
+            )
         return pd.DataFrame()
 
     if df_trials is None:
         df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Condition window: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -3296,7 +3469,7 @@ def stage_condition(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     - stage_condition_window
     """
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Condition: trial table missing; skipping.")
         return pd.DataFrame()
 
@@ -3677,12 +3850,17 @@ def stage_mediation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     from eeg_pipeline.analysis.behavior.api import run_mediation_analysis
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.info("Mediation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    if "temperature" not in df_trials.columns or "rating" not in df_trials.columns:
-        ctx.logger.warning("Mediation: requires 'temperature' and 'rating' columns; skipping.")
+    required_columns = {"temperature", "rating"}
+    missing_columns = required_columns - set(df_trials.columns)
+    if missing_columns:
+        ctx.logger.warning(
+            "Mediation: requires %s columns; missing: %s. Skipping.",
+            required_columns, missing_columns
+        )
         return pd.DataFrame()
 
     feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]
@@ -4177,12 +4355,17 @@ def stage_moderation(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
     method_suffix = f"_{method_label}" if method_label else ""
 
     df_trials = _load_trial_table_df(ctx)
-    if df_trials is None or df_trials.empty:
+    if not _is_dataframe_valid(df_trials):
         ctx.logger.warning("Moderation: trial table missing; skipping.")
         return pd.DataFrame()
 
-    if "temperature" not in df_trials.columns or "rating" not in df_trials.columns:
-        ctx.logger.warning("Moderation: requires 'temperature' and 'rating' columns; skipping.")
+    required_columns = {"temperature", "rating"}
+    missing_columns = required_columns - set(df_trials.columns)
+    if missing_columns:
+        ctx.logger.warning(
+            "Moderation: requires %s columns; missing: %s. Skipping.",
+            required_columns, missing_columns
+        )
         return pd.DataFrame()
 
     feature_cols = [c for c in df_trials.columns if str(c).startswith(FEATURE_COLUMN_PREFIXES)]

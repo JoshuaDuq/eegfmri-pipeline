@@ -1,21 +1,46 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
-import logging
 
+import mne
 import numpy as np
 import pandas as pd
-import mne
 
-from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.infra.tsv import read_tsv
-from ..config.loader import ConfigDict
 from eeg_pipeline.utils.config.loader import get_config_value
-
-
+from eeg_pipeline.utils.data.columns import pick_target_column
+from ..config.loader import ConfigDict
 
 EEGConfig = ConfigDict
+
+
+def _filter_finite_targets(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    meta: pd.DataFrame,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, pd.DataFrame]:
+    """Filter out samples with non-finite target values."""
+    finite_mask = np.isfinite(y)
+    if np.all(finite_mask):
+        return X, y, groups, meta
+
+    X_filtered = X[finite_mask]
+    y_filtered = y[finite_mask]
+    groups_filtered = groups[finite_mask]
+    meta_filtered = meta.loc[finite_mask].reset_index(drop=True)
+    return X_filtered, y_filtered, groups_filtered, meta_filtered
+
+
+def _find_block_column(aligned_events: pd.DataFrame) -> Optional[pd.Series]:
+    """Find block/run identifier column from aligned events."""
+    for candidate in ("block", "run_id", "run", "session"):
+        if candidate in aligned_events.columns:
+            return pd.to_numeric(aligned_events[candidate], errors="coerce")
+    return None
 
 
 def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
@@ -31,8 +56,6 @@ def _load_trial_alignment_manifest(
     manifest_path: Path,
     logger: Optional[logging.Logger] = None,
 ) -> pd.DataFrame:
-    import json as json_module
-    
     if logger is None:
         logger = logging.getLogger(__name__)
 
@@ -43,19 +66,21 @@ def _load_trial_alignment_manifest(
             f"Run 03_feature_extraction.py first to generate features with proper alignment."
         )
 
-    if manifest_path.suffix == ".json" or manifest_path.name.endswith(".tsv"):
+    if manifest_path.suffix == ".json":
         try:
             with open(manifest_path, "r") as f:
                 content = f.read().strip()
             if content.startswith("{"):
-                data = json_module.loads(content)
+                data = json.loads(content)
                 n_epochs = data.get("n_epochs", 0)
                 manifest = pd.DataFrame({"trial_index": list(range(n_epochs))})
-                logger.debug(f"Loaded JSON trial alignment manifest: {n_epochs} trials from {manifest_path}")
+                logger.debug(
+                    f"Loaded JSON trial alignment manifest: {n_epochs} trials from {manifest_path}"
+                )
                 return manifest
-        except (json_module.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError):
             pass
-    
+
     manifest = read_tsv(manifest_path)
     if "trial_index" not in manifest.columns:
         raise ValueError(
@@ -69,25 +94,15 @@ def _load_trial_alignment_manifest(
     return manifest
 
 
-def _resolve_columns(
+def _find_target_column(
     df: pd.DataFrame,
     config: EEGConfig,
-    deriv_root: Path,
-) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    rating_cols = config.get("event_columns.rating", [])
-    temp_cols = config.get("event_columns.temperature", [])
-    pain_cols = config.get("event_columns.pain_binary", [])
-
-    def _pick_first_existing(candidates: List[str]) -> Optional[str]:
-        for cand in candidates:
-            if cand in df.columns:
-                return cand
+) -> Optional[str]:
+    """Find target column from dataframe using config."""
+    rating_columns = config.get("event_columns.rating", [])
+    if not rating_columns:
         return None
-
-    pain_col = _pick_first_existing(list(pain_cols) if pain_cols else [])
-    temp_col = _pick_first_existing(list(temp_cols) if temp_cols else [])
-    rating_col = _pick_first_existing(list(rating_cols) if rating_cols else [])
-    return pain_col, temp_col, rating_col
+    return pick_target_column(df, target_columns=list(rating_columns))
 
 
 def load_ml_data(
@@ -140,16 +155,15 @@ def load_ml_data(
             f"Re-run 03_feature_extraction.py to regenerate features with proper alignment."
         )
 
-    constants = {"TARGET_COLUMNS": config.get("event_columns.rating", [])}
-    tgt_col = pick_target_column(y_df, constants=constants)
+    rating_columns = config.get("event_columns.rating", [])
+    tgt_col = pick_target_column(y_df, target_columns=list(rating_columns) if rating_columns else [])
     if tgt_col is None:
-        _, _, rating_col = _resolve_columns(y_df, config=config, deriv_root=deriv_root)
-        if rating_col is None:
+        tgt_col = _find_target_column(y_df, config)
+        if tgt_col is None:
             raise ValueError(
                 f"No suitable target column found in {y_path} for subject {sub}, task {task}. "
                 f"Available columns: {list(y_df.columns)}"
             )
-        tgt_col = rating_col
 
     y = pd.to_numeric(y_df[tgt_col], errors="coerce")
 
@@ -168,17 +182,17 @@ def load_ml_data(
 
     groups = np.array([sub] * len(X))
 
-    trial_index = None
-    if "trial_index" in manifest.columns:
+    if "trial_index" in manifest.columns and len(manifest) == len(mask_valid):
         trial_index = pd.to_numeric(manifest["trial_index"], errors="coerce")
-    if trial_index is None or len(trial_index) != len(mask_valid):
-        trial_index = pd.Series(list(range(len(mask_valid))))
+        trial_index_filtered = trial_index.loc[mask_valid].to_numpy(dtype=float)
+    else:
+        trial_index_filtered = np.arange(len(X), dtype=float)
 
     meta = pd.DataFrame(
         {
             "subject_id": [sub] * len(X),
             "trial_id": list(range(len(X))),
-            "trial_index": trial_index.loc[mask_valid].to_numpy(dtype=float),
+            "trial_index": trial_index_filtered,
         }
     )
 
@@ -226,8 +240,8 @@ def load_multiple_subjects_ml_data(
     trial_ids: List[int] = []
     subj_ids: List[str] = []
 
-    col_template = None
-    col_sets: List[set] = []
+    first_subject_columns: Optional[List[str]] = None
+    column_sets: List[set] = []
     n_found = 0
 
     for s in subjects:
@@ -244,9 +258,9 @@ def load_multiple_subjects_ml_data(
             logger.warning(f"Skipping {s}: {exc}")
             continue
 
-        if col_template is None:
-            col_template = list(X.columns)
-        col_sets.append(set(X.columns))
+        if first_subject_columns is None:
+            first_subject_columns = list(X.columns)
+        column_sets.append(set(X.columns))
 
         n = len(X)
         X_list.append(X)
@@ -262,15 +276,18 @@ def load_multiple_subjects_ml_data(
             "Run 03_feature_extraction.py first."
         )
 
-    if col_template is None:
+    if first_subject_columns is None:
         raise RuntimeError("No feature columns detected.")
 
-    # Stable feature harmonization: intersect across all subjects, keep first-subject order.
-    common_cols = set.intersection(*col_sets) if col_sets else set(col_template)
-    col_template = [c for c in col_template if c in common_cols]
-    if not col_template:
+    common_columns = (
+        set.intersection(*column_sets) if column_sets else set(first_subject_columns)
+    )
+    harmonized_columns = [c for c in first_subject_columns if c in common_columns]
+    if not harmonized_columns:
         raise RuntimeError("No overlapping features across subjects after harmonization.")
-    X_all = pd.concat([Xi.loc[:, col_template].copy() for Xi in X_list], axis=0, ignore_index=True)
+    X_all = pd.concat(
+        [Xi.loc[:, harmonized_columns].copy() for Xi in X_list], axis=0, ignore_index=True
+    )
     y_all = pd.concat(y_list, axis=0, ignore_index=True)
     groups = np.array(g_list)
 
@@ -325,12 +342,11 @@ def load_epochs_with_targets(
     for s in subjects:
         sub = f"sub-{s}" if not str(s).startswith("sub-") else str(s)
 
-        epochs_path = None
         try:
             from eeg_pipeline.infra.paths import find_clean_epochs_path
 
             epochs_path = find_clean_epochs_path(s, task, deriv_root=deriv_root, config=config)
-        except Exception:
+        except (FileNotFoundError, ValueError, KeyError):
             epochs_path = None
 
         if epochs_path is None or not Path(epochs_path).exists():
@@ -339,7 +355,8 @@ def load_epochs_with_targets(
 
         epochs = mne.read_epochs(epochs_path, preload=True, verbose=False)
         epochs.set_montage(mne.channels.make_standard_montage("standard_1005"))
-        if len(epochs.info.get("bads", [])) > 0:
+        bad_channels = epochs.info.get("bads", [])
+        if bad_channels:
             epochs.interpolate_bads(reset_bads=True)
 
         manifest_path = _get_trial_alignment_manifest_path(deriv_root, str(s))
@@ -365,8 +382,10 @@ def load_epochs_with_targets(
             logger.warning(f"No aligned events/targets for {sub}; skipping.")
             continue
 
-        target_columns = list(config.get("event_columns.rating", []) or [])
-        tgt_col = pick_target_column(aligned, target_columns=target_columns)
+        rating_columns = config.get("event_columns.rating", [])
+        tgt_col = pick_target_column(
+            aligned, target_columns=list(rating_columns) if rating_columns else []
+        )
         if tgt_col is None:
             logger.warning(f"No suitable target column for {sub}; skipping.")
             continue
@@ -384,15 +403,12 @@ def load_epochs_with_targets(
             continue
 
         out.append((sub, epochs, y))
-        ch_sets.append(
-            set(
-                [
-                    ch
-                    for ch in epochs.info["ch_names"]
-                    if epochs.get_channel_types(picks=[ch])[0] == "eeg"
-                ]
-            )
-        )
+        eeg_channels = [
+            ch
+            for ch in epochs.info["ch_names"]
+            if epochs.get_channel_types(picks=[ch])[0] == "eeg"
+        ]
+        ch_sets.append(set(eeg_channels))
 
     if not out:
         raise RuntimeError("No epochs + targets could be loaded for any subject.")
@@ -400,9 +416,10 @@ def load_epochs_with_targets(
     if not ch_sets:
         return out, []
 
-    common_channels = (
-        sorted(set.intersection(*ch_sets)) if len(ch_sets) > 1 else sorted(ch_sets[0])
-    )
+    if len(ch_sets) > 1:
+        common_channels = sorted(set.intersection(*ch_sets))
+    else:
+        common_channels = sorted(ch_sets[0]) if ch_sets else []
     return out, common_channels
 
 
@@ -438,20 +455,20 @@ def load_active_matrix(
             log.warning(f"No epochs for sub-{sub}; skipping")
             continue
 
-        target_cols = config.get("event_columns.rating", [])
-        target_col = None
-        for col in target_cols:
-            if col in aligned_events.columns:
-                target_col = col
-                break
+        rating_columns = config.get("event_columns.rating", [])
+        target_col = pick_target_column(
+            aligned_events, target_columns=list(rating_columns) if rating_columns else []
+        )
         if target_col is None:
             log.warning(f"No target column for sub-{sub}; skipping")
             continue
 
         y_sub = pd.to_numeric(aligned_events[target_col], errors="coerce").to_numpy()
 
-        picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
-        if picks is None or len(picks) == 0:
+        picks = mne.pick_types(
+            epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+        )
+        if len(picks) == 0:
             log.warning(f"No EEG channels for sub-{sub}; skipping")
             continue
 
@@ -459,12 +476,16 @@ def load_active_matrix(
         times = np.asarray(epochs.times, dtype=float)
         sfreq = float(epochs.info["sfreq"])
 
-        baseline_window = get_config_value(config, "time_frequency_analysis.baseline_window", [-3.0, -0.5])
-        active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
+        baseline_window = get_config_value(
+            config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
+        )
+        active_window = get_config_value(
+            config, "time_frequency_analysis.active_window", [3.0, 10.5]
+        )
         try:
             b0, b1 = float(baseline_window[0]), float(baseline_window[1])
             a0, a1 = float(active_window[0]), float(active_window[1])
-        except Exception:
+        except (ValueError, TypeError, IndexError):
             b0, b1 = -3.0, -0.5
             a0, a1 = 3.0, 10.5
 
@@ -495,14 +516,9 @@ def load_active_matrix(
         y_blocks.append(y_sub)
         groups.extend([sub] * len(y_sub))
         meta_rec = {"subject_id": [sub] * len(y_sub)}
-        # Preserve block/run identifiers for block-aware nulls and diagnostics.
-        block_series = None
-        for cand in ("block", "run_id", "run", "session"):
-            if cand in aligned_events.columns:
-                block_series = aligned_events[cand]
-                break
+        block_series = _find_block_column(aligned_events)
         if block_series is not None:
-            meta_rec["block"] = pd.to_numeric(block_series, errors="coerce").to_numpy()
+            meta_rec["block"] = block_series.to_numpy()
         meta_blocks.append(pd.DataFrame(meta_rec))
 
     if not X_blocks:
@@ -513,14 +529,8 @@ def load_active_matrix(
     groups_arr = np.asarray(groups)
     meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
 
-    finite_mask = np.isfinite(y_all)
-    if not np.all(finite_mask):
-        X = X[finite_mask]
-        y_all = y_all[finite_mask]
-        groups_arr = groups_arr[finite_mask]
-        meta = meta.loc[finite_mask].reset_index(drop=True)
+    X, y_all, groups_arr, meta = _filter_finite_targets(X, y_all, groups_arr, meta)
 
-    # Required by machine learning export utilities; keep stable ordering with current X/y.
     meta = meta.reset_index(drop=True)
     meta["trial_id"] = np.arange(len(meta), dtype=int)
 
@@ -561,13 +571,10 @@ def load_epoch_windows(
             log.warning(f"No epochs for sub-{sub}; skipping")
             continue
 
-        target_cols = config.get("event_columns.rating", [])
-        target_col = None
-        for col in target_cols:
-            if col in aligned_events.columns:
-                target_col = col
-                break
-
+        rating_columns = config.get("event_columns.rating", [])
+        target_col = pick_target_column(
+            aligned_events, target_columns=list(rating_columns) if rating_columns else []
+        )
         if target_col is None:
             log.warning(f"No target column for sub-{sub}; skipping")
             continue
@@ -587,12 +594,9 @@ def load_epoch_windows(
             continue
 
         if window_centers is None:
-            window_centers = np.array(
-                [
-                    times[i * step_samples + window_samples // 2]
-                    for i in range(n_windows)
-                ]
-            )
+            window_centers = np.array([
+                times[i * step_samples + window_samples // 2] for i in range(n_windows)
+            ])
 
         X_sub = np.zeros((len(data), n_windows, data.shape[1]))
         for w in range(n_windows):
@@ -612,15 +616,12 @@ def load_epoch_windows(
     groups_arr = np.asarray(groups)
     meta = pd.DataFrame({"subject_id": groups_arr})
 
-    finite_mask = np.isfinite(y_all)
-    if not np.all(finite_mask):
-        X_windows = X_windows[finite_mask]
-        y_all = y_all[finite_mask]
-        groups_arr = groups_arr[finite_mask]
-        meta = meta.loc[finite_mask].reset_index(drop=True)
+    X_windows, y_all, groups_arr, meta = _filter_finite_targets(
+        X_windows, y_all, groups_arr, meta
+    )
 
     if window_centers is None:
-        window_centers = np.array([])
+        window_centers = np.array([], dtype=float)
 
     return X_windows, y_all, groups_arr, window_centers, meta
 
@@ -641,13 +642,15 @@ def extract_epoch_data_block(
     trial_records: List[Tuple[str, int]],
     aligned_epochs: Dict[str, mne.Epochs],
 ) -> np.ndarray:
+    """Extract epoch data for specified trial indices."""
     X_list = []
-    for i in indices:
-        sub_i, ti = trial_records[int(i)]
+    for idx in indices:
+        subject_id, trial_idx = trial_records[int(idx)]
+        epochs = aligned_epochs[subject_id]
         try:
-            X_i = aligned_epochs[sub_i].get_data(picks="eeg", reject_by_annotation=None)[ti]
+            X_i = epochs.get_data(picks="eeg", reject_by_annotation=None)[trial_idx]
         except TypeError:
-            X_i = aligned_epochs[sub_i].get_data(picks="eeg")[ti]
+            X_i = epochs.get_data(picks="eeg")[trial_idx]
         X_list.append(X_i)
     return np.stack(X_list, axis=0)
 
@@ -667,16 +670,17 @@ def prepare_trial_records_from_epochs(
     subj_to_epochs: Dict[str, mne.Epochs] = {}
     subj_to_y: Dict[str, pd.Series] = {}
 
-    for sub, epochs, y in tuples:
-        n = min(len(epochs), len(y))
-        if n == 0:
+    for subject_id, epochs, y in tuples:
+        n_trials = min(len(epochs), len(y))
+        if n_trials == 0:
             continue
-        subj_to_epochs[sub] = epochs
-        subj_to_y[sub] = pd.to_numeric(y.iloc[:n], errors="coerce")
-        for ti in range(n):
-            trial_records.append((sub, ti))
-            y_all_list.append(float(subj_to_y[sub].iloc[ti]))
-            groups_list.append(sub)
+        subj_to_epochs[subject_id] = epochs
+        y_numeric = pd.to_numeric(y.iloc[:n_trials], errors="coerce")
+        subj_to_y[subject_id] = y_numeric
+        for trial_idx in range(n_trials):
+            trial_records.append((subject_id, trial_idx))
+            y_all_list.append(float(y_numeric.iloc[trial_idx]))
+            groups_list.append(subject_id)
 
     if len(trial_records) == 0:
         raise RuntimeError("No trial data available.")
@@ -707,9 +711,11 @@ def load_kept_indices(
     if len(dropped_indices_raw) == 0:
         return None
 
-    dropped_indices = set(dropped_indices_raw.astype(int).tolist())
-    kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices])
-    logger.info(f"{subject_label}: {len(dropped_indices)} trials dropped, {len(kept_indices)} kept")
+    dropped_indices_set = set(dropped_indices_raw.astype(int).tolist())
+    kept_indices = np.array([i for i in range(n_events) if i not in dropped_indices_set])
+    logger.info(
+        f"{subject_label}: {len(dropped_indices_set)} trials dropped, {len(kept_indices)} kept"
+    )
     return kept_indices
 
 
@@ -717,19 +723,22 @@ def extract_channel_importance_from_coefficients(
     coef_matrix: np.ndarray,
     feature_names: List[str],
 ) -> pd.DataFrame:
+    """Extract channel importance from coefficient matrix using feature naming schema."""
     from eeg_pipeline.domain.features.naming import NamingSchema
 
     channel_band_to_indices: Dict[Tuple[str, str], List[int]] = {}
-    for idx, feat in enumerate(feature_names):
-        parsed = NamingSchema.parse(str(feat))
-        if not (parsed.get("valid") and parsed.get("group") == "power"):
+    for idx, feature_name in enumerate(feature_names):
+        parsed = NamingSchema.parse(str(feature_name))
+        is_valid_power = parsed.get("valid") and parsed.get("group") == "power"
+        is_channel_scope = parsed.get("scope") == "ch"
+        if not (is_valid_power and is_channel_scope):
             continue
-        if parsed.get("scope") != "ch":
-            continue
+
         band = parsed.get("band")
         channel = parsed.get("identifier")
         if band and channel:
-            channel_band_to_indices.setdefault((str(channel), str(band)), []).append(idx)
+            key = (str(channel), str(band))
+            channel_band_to_indices.setdefault(key, []).append(idx)
 
     channel_to_all_indices: Dict[str, List[int]] = {}
     for (channel, _band), indices in channel_band_to_indices.items():
@@ -743,11 +752,12 @@ def extract_channel_importance_from_coefficients(
         channel_mean_abs = np.nanmean(np.abs(channel_coefs), axis=1)
 
         for fold_idx in range(n_folds):
-            if np.isfinite(channel_mean_abs[fold_idx]):
+            importance_value = channel_mean_abs[fold_idx]
+            if np.isfinite(importance_value):
                 channel_importance_data.append(
                     {
                         "channel": str(channel),
-                        "importance": float(channel_mean_abs[fold_idx]),
+                        "importance": float(importance_value),
                         "fold": float(fold_idx),
                     }
                 )
@@ -846,44 +856,43 @@ def ml_build_feature_matrix(
             continue
         
         y_sub = bundle.targets.to_numpy()
-        
+
         feature_dfs = []
-        
-        if feature_set == "power" or feature_set == "combined":
+        include_all = feature_set == "combined"
+
+        if feature_set == "power" or include_all:
             if bundle.power_df is not None and not bundle.power_df.empty:
                 numeric_cols = bundle.power_df.select_dtypes(include=[np.number]).columns
                 feature_dfs.append(bundle.power_df[numeric_cols])
-        
-        if feature_set == "connectivity" or feature_set == "combined":
+
+        if feature_set == "connectivity" or include_all:
             if bundle.connectivity_df is not None and not bundle.connectivity_df.empty:
                 numeric_cols = bundle.connectivity_df.select_dtypes(include=[np.number]).columns
                 feature_dfs.append(bundle.connectivity_df[numeric_cols])
-        
-        if feature_set == "itpc" or feature_set == "combined":
+
+        if feature_set == "itpc" or include_all:
             if bundle.itpc_df is not None and not bundle.itpc_df.empty:
                 numeric_cols = bundle.itpc_df.select_dtypes(include=[np.number]).columns
                 feature_dfs.append(bundle.itpc_df[numeric_cols])
-        
-        if feature_set == "aperiodic" or feature_set == "combined":
+
+        if feature_set == "aperiodic" or include_all:
             if bundle.aperiodic_df is not None and not bundle.aperiodic_df.empty:
                 numeric_cols = bundle.aperiodic_df.select_dtypes(include=[np.number]).columns
                 feature_dfs.append(bundle.aperiodic_df[numeric_cols])
-        
+
         if not feature_dfs:
             log.warning(f"No {feature_set} features found for sub-{sub}; skipping")
             continue
-        
-        if len(feature_dfs) == 1:
-            features_df = feature_dfs[0]
-        else:
-            features_df = pd.concat(feature_dfs, axis=1)
+
+        features_df = feature_dfs[0] if len(feature_dfs) == 1 else pd.concat(feature_dfs, axis=1)
         
         if len(features_df) != len(y_sub):
-            log.warning(f"Feature/target length mismatch for sub-{sub}: {len(features_df)} != {len(y_sub)}; skipping")
+            log.warning(
+                f"Feature/target length mismatch for sub-{sub}: "
+                f"{len(features_df)} != {len(y_sub)}; skipping"
+            )
             continue
-        
-        X_sub = features_df.to_numpy().astype(float)
-        
+
         if feature_cols is None:
             feature_cols = list(features_df.columns)
         elif list(features_df.columns) != feature_cols:
@@ -891,8 +900,10 @@ def ml_build_feature_matrix(
             if not common_cols:
                 log.warning(f"No common features for sub-{sub}; skipping")
                 continue
-            X_sub = features_df[common_cols].to_numpy().astype(float)
+            features_df = features_df[common_cols]
             feature_cols = common_cols
+
+        X_sub = features_df.to_numpy().astype(float)
         
         X_blocks.append(X_sub)
         y_blocks.append(y_sub)
@@ -908,17 +919,15 @@ def ml_build_feature_matrix(
     y_all = np.concatenate(y_blocks)
     groups_arr = np.asarray(groups)
     meta = pd.concat(meta_blocks, axis=0, ignore_index=True)
-    
-    finite_mask = np.isfinite(y_all)
-    if not np.all(finite_mask):
-        X = X[finite_mask]
-        y_all = y_all[finite_mask]
-        groups_arr = groups_arr[finite_mask]
-        meta = meta.loc[finite_mask].reset_index(drop=True)
-    
+
+    X, y_all, groups_arr, meta = _filter_finite_targets(X, y_all, groups_arr, meta)
+
     meta = meta.reset_index(drop=True)
     meta["trial_id"] = np.arange(len(meta), dtype=int)
-    
-    log.info(f"Built ML feature matrix: {feature_set}, shape={X.shape}, n_subjects={len(np.unique(groups_arr))}")
-    
+
+    log.info(
+        f"Built ML feature matrix: {feature_set}, shape={X.shape}, "
+        f"n_subjects={len(np.unique(groups_arr))}"
+    )
+
     return X, y_all, groups_arr, feature_cols or [], meta

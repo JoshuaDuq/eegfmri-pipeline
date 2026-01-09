@@ -39,6 +39,30 @@ from ..core.statistics import get_strict_mode
 ###################################################################
 
 
+def _filter_channels_by_names(
+    available_channels: List[str],
+    requested_channels: List[str],
+    logger: Optional[logging.Logger] = None,
+) -> List[str]:
+    """Filter available channels by requested channel names (case-insensitive).
+    
+    Args:
+        available_channels: List of available channel names
+        requested_channels: List of requested channel names
+        logger: Optional logger instance
+        
+    Returns:
+        Filtered list of channel names that match requested channels
+    """
+    requested_set = {ch.upper() for ch in requested_channels}
+    filtered = [ch for ch in available_channels if ch.upper() in requested_set]
+    if not filtered and logger:
+        logger.warning(
+            f"No matching channels found for specified channels: {requested_channels}"
+        )
+    return filtered
+
+
 def _pick_central_channel(info, preferred: str = "Cz", logger: Optional[logging.Logger] = None) -> str:
     """Pick a central channel for plotting, preferring the specified channel.
     
@@ -77,7 +101,7 @@ def _compute_active_statistics(
     config,
     logger: Optional[logging.Logger] = None,
 ) -> Tuple[float, float, np.ndarray]:
-    """Compute statistics for a active window in TFR data.
+    """Compute statistics for an active window in TFR data.
     
     Args:
         arr: TFR data array (freqs x times)
@@ -119,7 +143,8 @@ def _build_filename_stem(
     Returns:
         Formatted filename stem
     """
-    stem, _ = (name.rsplit(".", 1) + [""])[:2]
+    name_parts = name.rsplit(".", 1)
+    stem = name_parts[0] if len(name_parts) > 1 else name
     
     header_parts = []
     if subject:
@@ -155,11 +180,46 @@ def _build_footer_text(config, baseline_used: Tuple[float, float]) -> Optional[s
         return None
     
     template_name = config.get("output.tfr_footer_template", default_footer_template)
+    baseline_str = f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s"
     footer_kwargs = {
         "baseline_window": baseline_used,
-        "baseline": f"[{float(baseline_used[0]):.{baseline_decimal_places}f}, {float(baseline_used[1]):.{baseline_decimal_places}f}] s",
+        "baseline": baseline_str,
     }
     return build_footer(template_name, config, **footer_kwargs)
+
+
+def _get_baseline_window(config) -> Tuple[float, float]:
+    """Get baseline window from config with fallback logic.
+    
+    Args:
+        config: Configuration object
+        
+    Returns:
+        Baseline window tuple (tmin, tmax)
+    """
+    override = config.get("plotting.tfr.default_baseline_window", None)
+    if isinstance(override, (list, tuple)) and len(override) == 2:
+        return tuple(override)
+    default_window = config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
+    return tuple(default_window)
+
+
+def _get_output_formats(formats, config) -> List[str]:
+    """Get output file formats with fallback logic.
+    
+    Args:
+        formats: Optional list of formats
+        config: Configuration object
+        
+    Returns:
+        List of format strings
+    """
+    if formats is not None:
+        return formats
+    plot_cfg = get_plot_config(config)
+    if plot_cfg.formats:
+        return list(plot_cfg.formats)
+    return ["png"]
 
 
 def _save_fig(
@@ -191,24 +251,20 @@ def _save_fig(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if baseline_used is None:
-        override = config.get("plotting.tfr.default_baseline_window", None)
-        if isinstance(override, (list, tuple)) and len(override) == 2:
-            baseline_used = tuple(override)
-        else:
-            baseline_used = tuple(
-                config.get("time_frequency_analysis.baseline_window", [-5.0, -0.01])
-            )
+        baseline_used = _get_baseline_window(config)
 
     figs = fig_obj if isinstance(fig_obj, list) else [fig_obj]
     stem = _build_filename_stem(name, baseline_used, subject, task, band)
     
     plot_cfg = get_plot_config(config)
-    exts = formats if formats else list(plot_cfg.formats) if plot_cfg.formats else ["png"]
-    
+    exts = _get_output_formats(formats, config)
     footer_text = _build_footer_text(config, baseline_used)
 
     for i, f in enumerate(figs):
-        out_name = f"{stem}.{exts[0]}" if i == 0 else f"{stem}_{i+1}.{exts[0]}"
+        if i == 0:
+            out_name = f"{stem}.{exts[0]}"
+        else:
+            out_name = f"{stem}_{i+1}.{exts[0]}"
         out_path = out_dir / out_name
         central_save_fig(
             f,
@@ -258,7 +314,17 @@ def _plot_single_tfr_figure(
         plot_kwargs["vlim"] = vlim
     fig = unwrap_figure(tfr.plot(**plot_kwargs))
     fig.suptitle(title, fontsize=font_sizes["figure_title"])
-    _save_fig(fig, out_dir, filename, config=config, logger=logger, baseline_used=baseline_used, subject=subject, task=task, band=band)
+    _save_fig(
+        fig,
+        out_dir,
+        filename,
+        config=config,
+        logger=logger,
+        baseline_used=baseline_used,
+        subject=subject,
+        task=task,
+        band=band,
+    )
 
 
 ###################################################################
@@ -280,7 +346,10 @@ def plot_cz_all_trials_raw(
         config: Configuration object
         logger: Optional logger instance
     """
-    tfr_avg = tfr.copy().average() if isinstance(tfr, mne.time_frequency.EpochsTFR) else tfr.copy()
+    if isinstance(tfr, mne.time_frequency.EpochsTFR):
+        tfr_avg = tfr.copy().average()
+    else:
+        tfr_avg = tfr.copy()
     central_ch = _pick_central_channel(tfr_avg.info, preferred="Cz", logger=logger)
     fig = unwrap_figure(tfr_avg.plot(picks=central_ch, show=False))
     font_sizes = get_font_sizes()
@@ -319,11 +388,20 @@ def plot_cz_all_trials(
     times = np.asarray(tfr_avg.times)
     _, pct, _ = _compute_active_statistics(arr, times, active_window, config, logger)
 
+    title = (
+        f"{central_ch} TFR — all trials (baseline logratio)\n"
+        f"vlim ±{vabs:.2f}; mean %Δ vs BL={pct:+.0f}%"
+    )
     _plot_single_tfr_figure(
-        tfr_avg, central_ch, (-vabs, +vabs),
-        f"{central_ch} TFR — all trials (baseline logratio)\nvlim ±{vabs:.2f}; mean %Δ vs BL={pct:+.0f}%",
+        tfr_avg,
+        central_ch,
+        (-vabs, +vabs),
+        title,
         f"tfr_{central_ch}_all_trials.png",
-        out_dir, config, logger, baseline_used
+        out_dir,
+        config,
+        logger,
+        baseline_used,
     )
 
 
@@ -355,21 +433,28 @@ def plot_channels_all_trials(
 
     ch_names = tfr_avg.info["ch_names"]
     if channels is not None:
-        channels_set = {ch.upper() for ch in channels}
-        ch_names = [ch for ch in ch_names if ch.upper() in channels_set]
+        ch_names = _filter_channels_by_names(ch_names, channels, logger)
         if not ch_names:
-            if logger:
-                logger.warning(f"No matching channels found for specified channels: {channels}")
             return
     
     ch_dir = out_dir / "channels"
     ch_dir.mkdir(parents=True, exist_ok=True)
 
     for ch in ch_names:
+        title = f"{ch} — all trials (baseline logratio)"
+        filename = f"tfr_{ch}_all_trials.png"
         _plot_single_tfr_figure(
-            tfr_avg, ch, None, f"{ch} — all trials (baseline logratio)",
-            f"tfr_{ch}_all_trials.png", ch_dir, config, logger, baseline_used,
-            subject=subject, task=task
+            tfr_avg,
+            ch,
+            None,
+            title,
+            filename,
+            ch_dir,
+            config,
+            logger,
+            baseline_used,
+            subject=subject,
+            task=task,
         )
 
 
@@ -417,11 +502,8 @@ def contrast_channels_pain_nonpain(
 
     ch_names = tfr_2.info["ch_names"]
     if channels is not None:
-        channels_set = {ch.upper() for ch in channels}
-        ch_names = [ch for ch in ch_names if ch.upper() in channels_set]
+        ch_names = _filter_channels_by_names(ch_names, channels, logger)
         if not ch_names:
-            if logger:
-                logger.warning(f"No matching channels found for specified channels: {channels}")
             return
     
     ch_dir = out_dir / "channels"

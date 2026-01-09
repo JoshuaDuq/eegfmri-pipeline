@@ -11,6 +11,7 @@ const (
 	PipelinePlotting
 	PipelineMergePsychoPyData
 	PipelineRawToBIDS
+	pipelineCount // Sentinel for bounds checking
 )
 
 // TimeRange represents a named time interval
@@ -20,18 +21,43 @@ type TimeRange struct {
 	Tmax string
 }
 
+// pipelineNames maps pipeline types to their display names
+var pipelineNames = [pipelineCount]string{
+	PipelinePreprocessing:     "Preprocessing",
+	PipelineFeatures:          "Features",
+	PipelineBehavior:          "Behavior",
+	PipelineML:                "Machine Learning",
+	PipelinePlotting:          "Plotting",
+	PipelineMergePsychoPyData: "Merge PsychoPy Data",
+	PipelineRawToBIDS:         "Raw to BIDS",
+}
+
+// pipelineCommands maps pipeline types to their CLI subcommand names
+var pipelineCommands = [pipelineCount]string{
+	PipelinePreprocessing:     "preprocessing",
+	PipelineFeatures:          "features",
+	PipelineBehavior:          "behavior",
+	PipelineML:                "ml",
+	PipelinePlotting:          "plotting",
+	PipelineMergePsychoPyData: "utilities",
+	PipelineRawToBIDS:         "utilities",
+}
+
+// pipelineDescriptions maps pipeline types to their descriptions
+var pipelineDescriptions = [pipelineCount]string{
+	PipelinePreprocessing:     "Bad channels, ICA, epochs",
+	PipelineFeatures:          "Extract EEG features (power, connectivity...)",
+	PipelineBehavior:          "EEG-behavior analysis",
+	PipelineML:                "Machine learning: LOSO regression & time generalization",
+	PipelinePlotting:          "Generate curated visualization suites",
+	PipelineMergePsychoPyData: "Merge PsychoPy data into BIDS events files",
+	PipelineRawToBIDS:         "Convert raw BrainVision data to BIDS",
+}
+
+// String returns the display name for the pipeline
 func (p Pipeline) String() string {
-	names := []string{
-		"Preprocessing",
-		"Features",
-		"Behavior",
-		"Machine Learning",
-		"Plotting",
-		"Merge PsychoPy Data",
-		"Raw to BIDS",
-	}
-	if int(p) < len(names) {
-		return names[p]
+	if p.isValid() {
+		return pipelineNames[p]
 	}
 	return "Unknown"
 }
@@ -39,93 +65,90 @@ func (p Pipeline) String() string {
 // CLICommand returns the canonical CLI subcommand name for this pipeline.
 // This is the actual command accepted by the Python CLI (eeg-pipeline <cmd>).
 func (p Pipeline) CLICommand() string {
-	commands := []string{
-		"preprocessing", // PipelinePreprocessing
-		"features",      // PipelineFeatures
-		"behavior",      // PipelineBehavior
-		"ml",            // PipelineML (NOT "machine learning")
-		"plotting",      // PipelinePlotting
-		"utilities",     // PipelineMergePsychoPyData (handled specially)
-		"utilities",     // PipelineRawToBIDS (handled specially)
-	}
-	if int(p) < len(commands) {
-		return commands[p]
+	if p.isValid() {
+		return pipelineCommands[p]
 	}
 	return "unknown"
 }
 
+// Description returns a human-readable description of what the pipeline does
 func (p Pipeline) Description() string {
-	descriptions := []string{
-		"Bad channels, ICA, epochs",
-		"Extract EEG features (power, connectivity...)",
-		"EEG-behavior analysis",
-		"Machine learning: LOSO regression & time generalization",
-		"Generate curated visualization suites",
-		"Merge PsychoPy data into BIDS events files",
-		"Convert raw BrainVision data to BIDS",
-	}
-	if int(p) < len(descriptions) {
-		return descriptions[p]
+	if p.isValid() {
+		return pipelineDescriptions[p]
 	}
 	return ""
+}
+
+// isValid checks if the pipeline value is within valid bounds
+func (p Pipeline) isValid() bool {
+	return p >= 0 && p < pipelineCount
 }
 
 // WizardStep represents steps in the pipeline wizard
 type WizardStep int
 
 const (
-	StepSelectMode            WizardStep = iota
-	StepProjectSetup                     // Project/task/path setup
-	StepSelectComputations               // For behavior: which analyses to run
-	StepSelectFeatureFiles               // For behavior: which feature files to load
-	StepConfigureOptions                 // Category selection (features) or per-computation features
-	StepSelectBands                      // Frequency band selection (features)
-	StepSelectSpatial                    // Spatial aggregation mode (roi/channels/global)
-	StepTimeRange                        // Time range input for feature extraction
-	StepAdvancedConfig                   // Advanced pipeline configuration
-	StepSelectPlots                      // Plotting: plot selection
-	StepSelectFeaturePlotters            // Plotting: choose which feature plotters to run within selected feature suites
-	StepSelectPlotCategories             // Plotting: category selection (ERP, TFR, etc.)
-	StepPlotConfig                       // Plotting: output config
+	StepSelectMode WizardStep = iota
+	StepProjectSetup
+	StepSelectComputations
+	StepSelectFeatureFiles
+	StepConfigureOptions
+	StepSelectBands
+	StepSelectSpatial
+	StepTimeRange
+	StepAdvancedConfig
+	StepSelectPlots
+	StepSelectFeaturePlotters
+	StepSelectPlotCategories
+	StepPlotConfig
 	StepSelectSubjects
 	StepReviewExecute
+	wizardStepCount // Sentinel for bounds checking
 )
 
+// wizardStepNames maps wizard steps to their display names
+var wizardStepNames = [wizardStepCount]string{
+	StepSelectMode:            "Select Mode",
+	StepProjectSetup:          "Project Setup",
+	StepSelectComputations:    "Select Computations",
+	StepSelectFeatureFiles:    "Select Feature Files",
+	StepConfigureOptions:      "Configure Options",
+	StepSelectBands:           "Select Bands",
+	StepSelectSpatial:         "Select Spatial",
+	StepTimeRange:             "Time Range",
+	StepAdvancedConfig:        "Advanced Config",
+	StepSelectPlots:           "Select Plots",
+	StepSelectFeaturePlotters: "Select Feature Plotters",
+	StepSelectPlotCategories:  "Select Plot Categories",
+	StepPlotConfig:            "Plot Config",
+	StepSelectSubjects:        "Select Subjects",
+	StepReviewExecute:         "Review & Execute",
+}
+
+// String returns the display name for the wizard step
 func (s WizardStep) String() string {
-	names := []string{
-		"Select Mode",
-		"Project Setup",
-		"Select Computations",
-		"Select Feature Files",
-		"Configure Options",
-		"Select Bands",
-		"Select Spatial",
-		"Time Range",
-		"Advanced Config",
-		"Select Plots",
-		"Select Feature Plotters",
-		"Select Plot Categories",
-		"Plot Config",
-		"Select Subjects",
-		"Review & Execute",
-	}
-	if int(s) < len(names) {
-		return names[s]
+	if s.isValid() {
+		return wizardStepNames[s]
 	}
 	return "Unknown"
+}
+
+// isValid checks if the wizard step value is within valid bounds
+func (s WizardStep) isValid() bool {
+	return s >= 0 && s < wizardStepCount
 }
 
 // AvailabilityInfo holds availability status with last modified timestamp
 type AvailabilityInfo struct {
 	Available    bool
-	LastModified string // ISO timestamp
+	LastModified string
 }
 
 // FeatureAvailability holds per-feature, per-band, and computation availability with timestamps
 type FeatureAvailability struct {
 	Features     map[string]AvailabilityInfo
 	Bands        map[string]AvailabilityInfo
-	Computations map[string]AvailabilityInfo // Behavior computation outputs
+	Computations map[string]AvailabilityInfo
 }
 
 // SubjectStatus represents processing status for a subject
@@ -139,17 +162,13 @@ type SubjectStatus struct {
 	EpochMetadata       map[string]float64 `json:"epoch_metadata"`
 }
 
-// Pipeline validation methods
-
 // RequiresEpochs returns true if the pipeline needs epoched data
 func (p Pipeline) RequiresEpochs() bool {
 	switch p {
-	case PipelinePreprocessing, PipelineRawToBIDS:
-		return false // Works with raw BIDS data or source data
 	case PipelineFeatures:
-		return true // Need epochs
-	case PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData:
-		return false // Need features or other raw data
+		return true
+	case PipelinePreprocessing, PipelineRawToBIDS, PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData:
+		return false
 	default:
 		return false
 	}
@@ -159,13 +178,14 @@ func (p Pipeline) RequiresEpochs() bool {
 func (p Pipeline) RequiresFeatures() bool {
 	switch p {
 	case PipelineBehavior, PipelineML:
-		return true // Need pre-computed features
+		return true
 	default:
 		return false
 	}
 }
 
-// ValidateSubject checks if a subject meets the pipeline's data requirements
+// ValidateSubject checks if a subject meets the pipeline's data requirements.
+// Returns true if valid, false with a reason string if invalid.
 func (p Pipeline) ValidateSubject(s SubjectStatus) (valid bool, reason string) {
 	if p.RequiresEpochs() && !s.HasEpochs {
 		return false, "missing epochs"
@@ -180,18 +200,16 @@ func (p Pipeline) ValidateSubject(s SubjectStatus) (valid bool, reason string) {
 func (p Pipeline) GetDataSource() string {
 	switch p {
 	case PipelinePreprocessing, PipelineMergePsychoPyData:
-		return "bids" // Raw BIDS data or source folder (handled by CLI)
+		return "bids"
 	case PipelineRawToBIDS:
-		return "source_data" // Raw source data
-	case PipelineFeatures:
-		return "epochs" // Epoched data
-	case PipelineBehavior:
-		return "epochs" // Subject discovery needs epochs; feature availability checked separately
+		return "source_data"
+	case PipelineFeatures, PipelineBehavior:
+		return "epochs"
 	case PipelineML:
-		return "features" // Extracted features
+		return "features"
 	case PipelinePlotting:
-		return "all" // Mixed plot types across derivatives
+		return "all"
 	default:
-		return "epochs" // Default to epochs
+		return "epochs"
 	}
 }

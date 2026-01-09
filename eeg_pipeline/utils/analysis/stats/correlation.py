@@ -9,26 +9,46 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.linalg import lstsq
+from scipy.special import hyp2f1
 
-from .base import get_ci_level, get_config_value
+from .base import (
+    CorrelationStats,
+    ensure_config,
+    get_ci_level,
+    get_config_value,
+    get_min_samples_for_correlation,
+)
 from .fdr import fdr_bh
 from .formatting import _safe_float
+from .permutation import compute_permutation_pvalues, compute_temp_permutation_pvalues
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
-from pathlib import Path
+
+# Constants
+_VALID_CORR_METHODS = {"spearman", "pearson"}
+_MIN_SAMPLES_CORRELATION = 3
 
 
 def get_correlation_method(use_spearman: bool) -> str:
     """Return correlation method name."""
     return "spearman" if use_spearman else "pearson"
-
-
-_VALID_CORR_METHODS = {"spearman", "pearson"}
+_MIN_SAMPLES_PSI = 5
+_MIN_SAMPLES_BAYES = 4
+_MIN_SAMPLES_RELIABILITY = 10
+_EPSILON_STD = 1e-12
+_EPSILON_STD_STRICT = 1e-10
+_EPSILON_CORRELATION = 1e-12
+_DEFAULT_PRIOR_WIDTH = 0.707
+_DEFAULT_WINSORIZE_TRIM = 0.2
+_DEFAULT_SHEPHERD_ALPHA = 0.05
+_DEFAULT_PERCENTAGE_BEND_BETA = 0.2
 
 
 def normalize_correlation_method(method: Optional[str], default: str = "spearman") -> str:
@@ -37,7 +57,7 @@ def normalize_correlation_method(method: Optional[str], default: str = "spearman
         return default
     try:
         cleaned = str(method).strip().lower()
-    except Exception:
+    except (AttributeError, TypeError):
         return default
     return cleaned if cleaned in _VALID_CORR_METHODS else default
 
@@ -45,15 +65,11 @@ def normalize_correlation_method(method: Optional[str], default: str = "spearman
 def format_correlation_method_label(method: Optional[str], robust_method: Optional[str] = None) -> str:
     """Format the exact correlation method label for outputs."""
     base = normalize_correlation_method(method, default="spearman")
-    if robust_method:
-        label = f"{base}_{robust_method}"
-    else:
-        label = base
+    label = f"{base}_{robust_method}" if robust_method else base
     try:
-        cleaned = str(label).strip().lower()
-    except Exception:
+        cleaned = str(label).strip().lower().replace(" ", "_")
+    except (AttributeError, TypeError):
         cleaned = "unknown"
-    cleaned = cleaned.replace(" ", "_")
     return cleaned or "unknown"
 
 
@@ -71,22 +87,18 @@ def compute_correlation(
     y = np.asarray(y).ravel()
 
     valid = np.isfinite(x) & np.isfinite(y)
-    if np.sum(valid) < 3:
+    if np.sum(valid) < _MIN_SAMPLES_CORRELATION:
         return np.nan, np.nan
 
     x_v, y_v = x[valid], y[valid]
 
-    if np.std(x_v) < 1e-12 or np.std(y_v) < 1e-12:
+    if np.std(x_v) < _EPSILON_STD or np.std(y_v) < _EPSILON_STD:
         return np.nan, np.nan
 
     if isinstance(method, bool):
         method = "spearman" if method else "pearson"
-    if not isinstance(method, str):
-        raise TypeError("method must be a string ('spearman'/'pearson')")
-
-    method = method.lower().strip()
-    if method not in {"spearman", "pearson"}:
-        raise ValueError("method must be 'spearman' or 'pearson'")
+    
+    method = normalize_correlation_method(method, default="spearman")
 
     if method == "spearman":
         r, p = stats.spearmanr(x_v, y_v)
@@ -148,21 +160,33 @@ class CorrelationRecord:
         """Convert to dict for DataFrame."""
         effect_size = self._interpret_effect_size()
         d = {
-            self.identifier_type: self.identifier, "band": self.band,
-            "r": self.correlation, "p": self.p_value, "n": self.n_valid,
-            "method": self.method, "ci_low": self.ci_low, "ci_high": self.ci_high,
-            "p_perm": self.p_perm, "q": self.q_value, "analysis": self.analysis_type,
+            self.identifier_type: self.identifier,
+            "band": self.band,
+            "r": self.correlation,
+            "p": self.p_value,
+            "n": self.n_valid,
+            "method": self.method,
+            "ci_low": self.ci_low,
+            "ci_high": self.ci_high,
+            "p_perm": self.p_perm,
+            "q": self.q_value,
+            "analysis": self.analysis_type,
             "effect_size": effect_size,
         }
-        if np.isfinite(self.r_partial): d["r_partial"] = self.r_partial
-        if np.isfinite(self.p_partial): d["p_partial"] = self.p_partial
-        if self.n_partial > 0: d["n_partial"] = self.n_partial
+        
+        if np.isfinite(self.r_partial):
+            d["r_partial"] = self.r_partial
+        if np.isfinite(self.p_partial):
+            d["p_partial"] = self.p_partial
+        if self.n_partial > 0:
+            d["n_partial"] = self.n_partial
         if np.isfinite(self.r_partial_temp):
             d["r_partial_given_temp"] = self.r_partial_temp
             d["r_partial_temp"] = self.r_partial_temp
         if np.isfinite(self.p_partial_temp):
             d["p_partial_given_temp"] = self.p_partial_temp
             d["p_partial_temp"] = self.p_partial_temp
+        
         d.update(self.extra_fields)
         return d
 
@@ -206,6 +230,94 @@ def build_correlation_record(identifier: str, band: str, r: float, p: float, n: 
     )
 
 
+def _apply_condition_mask(
+    feature_df: pd.DataFrame,
+    target_arr: np.ndarray,
+    condition_mask: Optional[np.ndarray],
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """Apply condition mask to feature dataframe and target array."""
+    if condition_mask is None:
+        return feature_df, target_arr
+    
+    if hasattr(condition_mask, 'dtype') and condition_mask.dtype == bool:
+        idx = np.where(condition_mask)[0]
+    else:
+        idx = condition_mask
+    
+    return feature_df.iloc[idx], target_arr[idx]
+
+
+def _align_feature_target_lengths(
+    feature_df: pd.DataFrame,
+    target_arr: np.ndarray,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """Align feature dataframe and target array to same length."""
+    n_features, n_targets = len(feature_df), len(target_arr)
+    if n_features != n_targets:
+        n_use = min(n_features, n_targets)
+        return feature_df.iloc[:n_use], target_arr[:n_use]
+    return feature_df, target_arr
+
+
+def _extract_feature_metadata(
+    col: str,
+    feature_classifier: Optional[Any],
+    analysis_type: str,
+) -> Tuple[str, str, str]:
+    """Extract feature metadata (feature_type, identifier, band)."""
+    if feature_classifier:
+        feature_type, _, meta = feature_classifier(col)
+        identifier = meta.get("identifier", col)
+        band = meta.get("band", "N/A")
+    else:
+        feature_type, identifier, band = analysis_type, col, "N/A"
+    return feature_type, identifier, band
+
+
+def _compute_bootstrap_and_permutation(
+    vals: np.ndarray,
+    target_arr: np.ndarray,
+    valid_mask: np.ndarray,
+    method: str,
+    n_bootstrap: int,
+    n_permutations: int,
+    ci_level: float,
+    rng: np.random.Generator,
+    groups: Optional[np.ndarray],
+) -> Tuple[float, float, float]:
+    """Compute bootstrap CI and permutation p-value if requested."""
+    ci_low = ci_high = p_perm = np.nan
+    
+    if n_bootstrap > 0:
+        # Local import to avoid circular dependency
+        from .eeg_stats import compute_bootstrap_ci
+        ci_low, ci_high = compute_bootstrap_ci(
+            vals[valid_mask],
+            target_arr[valid_mask],
+            n_bootstrap=n_bootstrap,
+            ci_level=ci_level,
+            method=method,
+            rng=rng,
+        )
+    
+    if n_permutations > 0:
+        x_series = pd.Series(vals[valid_mask])
+        y_series = pd.Series(target_arr[valid_mask])
+        p_perm, _, _ = compute_permutation_pvalues(
+            x_series,
+            y_series,
+            covariates_df=None,
+            temp_series=None,
+            method=method,
+            n_perm=n_permutations,
+            n_eff=int(valid_mask.sum()),
+            rng=rng,
+            groups=groups,
+        )
+    
+    return ci_low, ci_high, p_perm
+
+
 def correlate_features_loop(
     feature_df: pd.DataFrame,
     target_values: Union[pd.Series, np.ndarray],
@@ -225,95 +337,63 @@ def correlate_features_loop(
 ) -> Tuple[List[CorrelationRecord], pd.DataFrame]:
     """Correlate all features with target values."""
     if min_samples is None:
-        from .base import ensure_config
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+        min_samples = get_min_samples_for_correlation(config)
     
     if feature_df.empty:
         return [], pd.DataFrame()
 
     target_arr = target_values.values if isinstance(target_values, pd.Series) else np.asarray(target_values)
-    if condition_mask is not None:
-        if hasattr(condition_mask, 'dtype') and condition_mask.dtype == bool:
-            idx = np.where(condition_mask)[0]
-        else:
-            idx = condition_mask
-        feature_df = feature_df.iloc[idx]
-        target_arr = target_arr[idx]
-
-    n_f, n_t = len(feature_df), len(target_arr)
-    if n_f != n_t:
-        n_use = min(n_f, n_t)
-        feature_df, target_arr = feature_df.iloc[:n_use], target_arr[:n_use]
+    feature_df, target_arr = _apply_condition_mask(feature_df, target_arr, condition_mask)
+    feature_df, target_arr = _align_feature_target_lengths(feature_df, target_arr)
 
     rng = rng or np.random.default_rng()
     ci_level = get_ci_level(config)
-
     method_label = format_correlation_method_label(method, robust_method)
+    
     records = []
     for col in feature_df.columns:
         vals = pd.to_numeric(feature_df[col], errors="coerce").to_numpy()
-        if feature_classifier:
-            ft, subtype, meta = feature_classifier(col)
-            ident = meta.get("identifier", col)
-            band = meta.get("band", "N/A")
-        else:
-            ft, ident, band = analysis_type, col, "N/A"
+        feature_type, identifier, band = _extract_feature_metadata(
+            col, feature_classifier, analysis_type
+        )
 
         valid_mask = np.isfinite(vals) & np.isfinite(target_arr)
         n_valid = int(valid_mask.sum())
 
         r, p, n = safe_correlation(vals, target_arr, method, min_samples, robust_method=robust_method)
-        ci_low = ci_high = p_perm = np.nan
-
-        if np.isfinite(r) and n_valid >= (min_samples or 0):
-            if n_bootstrap and n_bootstrap > 0:
-                from .eeg_stats import compute_bootstrap_ci
-
-                ci_low, ci_high = compute_bootstrap_ci(
-                    vals[valid_mask],
-                    target_arr[valid_mask],
-                    n_bootstrap=n_bootstrap,
-                    ci_level=ci_level,
-                    method=method,
-                    rng=rng,
-                )
-
-            if n_permutations and n_permutations > 0:
-                from .permutation import compute_permutation_pvalues
-
-                x_series = pd.Series(vals[valid_mask])
-                y_series = pd.Series(target_arr[valid_mask])
-                p_perm, _, _ = compute_permutation_pvalues(
-                    x_series,
-                    y_series,
-                    covariates_df=None,
-                    temp_series=None,
-                    method=method,
-                    n_perm=n_permutations,
-                    n_eff=n_valid,
-                    rng=rng,
-                    groups=groups,
-                )
+        
+        if np.isfinite(r) and n_valid >= min_samples:
+            ci_low, ci_high, p_perm = _compute_bootstrap_and_permutation(
+                vals, target_arr, valid_mask, method, n_bootstrap,
+                n_permutations, ci_level, rng, groups
+            )
+        else:
+            ci_low = ci_high = p_perm = np.nan
 
         if np.isfinite(r):
             records.append(build_correlation_record(
-                ident,
+                identifier,
                 band,
                 r,
                 p,
                 n,
                 method_label,
                 identifier_type=identifier_type,
-                analysis_type=ft,
+                analysis_type=feature_type,
                 ci_low=ci_low,
                 ci_high=ci_high,
                 p_perm=p_perm,
             ))
 
     if logger:
-        logger.info(f"  {len(records)} features, {sum(1 for r in records if r.is_significant)} sig")
-    return records, pd.DataFrame([r.to_dict() for r in records]) if records else pd.DataFrame()
+        n_significant = sum(1 for r in records if r.is_significant)
+        logger.info(f"  {len(records)} features, {n_significant} sig")
+    
+    if not records:
+        return [], pd.DataFrame()
+    
+    return records, pd.DataFrame([r.to_dict() for r in records])
 
 
 def safe_correlation(
@@ -331,9 +411,8 @@ def safe_correlation(
     Options: "percentage_bend", "winsorized", "shepherd"
     """
     if min_samples is None:
-        from .base import ensure_config
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
+        min_samples = get_min_samples_for_correlation(config)
     
     method = normalize_correlation_method(method, default="spearman")
     x = np.asarray(x).ravel()
@@ -348,22 +427,23 @@ def safe_correlation(
     if n_valid < min_samples:
         return np.nan, np.nan, n_valid
 
-    x_c, y_c = x[mask], y[mask]
+    x_clean, y_clean = x[mask], y[mask]
     
-    if np.std(x_c) == 0 or np.std(y_c) == 0:
+    if np.std(x_clean) < _EPSILON_STD or np.std(y_clean) < _EPSILON_STD:
         return np.nan, np.nan, n_valid
 
     try:
         if robust_method:
-            r, p = compute_robust_correlation(x_c, y_c, method=robust_method)
+            r, p = compute_robust_correlation(x_clean, y_clean, method=robust_method)
         elif method == "spearman":
-            r, p = stats.spearmanr(x_c, y_c, nan_policy="omit")
+            r, p = stats.spearmanr(x_clean, y_clean, nan_policy="omit")
         else:
-            r, p = stats.pearsonr(x_c, y_c)
+            r, p = stats.pearsonr(x_clean, y_clean)
             
-        return (float(r) if np.isfinite(r) else np.nan,
-                float(p) if np.isfinite(p) else np.nan, n_valid)
-    except Exception:
+        r_float = float(r) if np.isfinite(r) else np.nan
+        p_float = float(p) if np.isfinite(p) else np.nan
+        return r_float, p_float, n_valid
+    except (ValueError, RuntimeError, np.linalg.LinAlgError):
         return np.nan, np.nan, n_valid
 
 
@@ -380,19 +460,19 @@ def compute_pain_sensitivity_index(
     valid = ratings.notna() & temperatures.notna()
     psi = pd.Series(np.nan, index=ratings.index)
 
-    if valid.sum() < 5:
+    if valid.sum() < _MIN_SAMPLES_PSI:
         return psi
 
-    r_valid = ratings[valid].values
-    t_valid = temperatures[valid].values
+    ratings_valid = ratings[valid].values
+    temps_valid = temperatures[valid].values
 
-    X = np.column_stack([np.ones(len(t_valid)), t_valid])
+    design_matrix = np.column_stack([np.ones(len(temps_valid)), temps_valid])
     try:
-        beta = np.linalg.lstsq(X, r_valid, rcond=None)[0]
-        predicted = X @ beta
-        psi.loc[valid] = r_valid - predicted
+        beta = lstsq(design_matrix, ratings_valid, rcond=None)[0]
+        predicted = design_matrix @ beta
+        psi.loc[valid] = ratings_valid - predicted
     except np.linalg.LinAlgError:
-        psi.loc[valid] = r_valid
+        psi.loc[valid] = ratings_valid
 
     return psi
 
@@ -462,6 +542,44 @@ class CorrelationResult:
         }
 
 
+def _align_psi_inputs(
+    features_df: pd.DataFrame,
+    ratings: pd.Series,
+    temperatures: pd.Series,
+    min_samples: int,
+    logger: Optional[logging.Logger],
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series]]:
+    """Align features, ratings, and temperatures for PSI computation."""
+    if features_df is None or features_df.empty or ratings is None or temperatures is None:
+        return None, None, None
+
+    common_index = features_df.index.intersection(ratings.index).intersection(temperatures.index)
+
+    if common_index.empty:
+        if logger:
+            logger.error("No overlapping samples across features, ratings, and temperatures for PSI")
+        return None, None, None
+
+    features_aligned = features_df.loc[common_index]
+    ratings_aligned = ratings.loc[common_index]
+    temps_aligned = temperatures.loc[common_index]
+
+    valid_mask = ratings_aligned.notna() & temps_aligned.notna()
+    if valid_mask.sum() < min_samples:
+        if logger:
+            logger.warning(
+                "Insufficient valid samples for PSI after alignment "
+                f"(found {valid_mask.sum()}, need >= {min_samples})"
+            )
+        return None, None, None
+
+    return (
+        features_aligned.loc[valid_mask],
+        ratings_aligned.loc[valid_mask],
+        temps_aligned.loc[valid_mask],
+    )
+
+
 def run_pain_sensitivity_correlations(
     features_df: pd.DataFrame,
     ratings: pd.Series,
@@ -474,39 +592,10 @@ def run_pain_sensitivity_correlations(
 ) -> pd.DataFrame:
     """Correlate features with pain sensitivity index."""
     method_label = format_correlation_method_label(method, robust_method)
-    def _align_psi_inputs() -> Tuple[Optional[pd.DataFrame], Optional[pd.Series], Optional[pd.Series]]:
-        if features_df is None or features_df.empty or ratings is None or temperatures is None:
-            return None, None, None
-
-        common_index = features_df.index
-        common_index = common_index.intersection(ratings.index)
-        common_index = common_index.intersection(temperatures.index)
-
-        if common_index.empty:
-            if logger:
-                logger.error("No overlapping samples across features, ratings, and temperatures for PSI")
-            return None, None, None
-
-        feat_aligned = features_df.loc[common_index]
-        ratings_aligned = ratings.loc[common_index]
-        temps_aligned = temperatures.loc[common_index]
-
-        valid_mask = ratings_aligned.notna() & temps_aligned.notna()
-        if valid_mask.sum() < min_samples:
-            if logger:
-                logger.warning(
-                    "Insufficient valid samples for PSI after alignment "
-                    f"(found {valid_mask.sum()}, need >= {min_samples})"
-                )
-            return None, None, None
-
-        return (
-            feat_aligned.loc[valid_mask],
-            ratings_aligned.loc[valid_mask],
-            temps_aligned.loc[valid_mask],
-        )
-
-    feat_aligned, ratings_aligned, temps_aligned = _align_psi_inputs()
+    
+    feat_aligned, ratings_aligned, temps_aligned = _align_psi_inputs(
+        features_df, ratings, temperatures, min_samples, logger
+    )
     if feat_aligned is None or ratings_aligned is None or temps_aligned is None:
         return pd.DataFrame()
 
@@ -561,16 +650,21 @@ def run_pain_sensitivity_correlations(
     if out.empty:
         return out
 
-    # Standardize to the pipeline-wide schema used by validation/global FDR.
     out["p_raw"] = pd.to_numeric(out.get("p_psi", np.nan), errors="coerce")
     out["p_primary"] = out["p_raw"]
     out["p_kind_primary"] = "p_psi"
     out["p_primary_source"] = "psi"
-    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)) if config is not None else 0.05
+    
+    alpha = float(get_config_value(config, "behavior_analysis.statistics.fdr_alpha", 0.05)) if config else 0.05
     try:
-        out["p_fdr"] = fdr_bh(pd.to_numeric(out["p_primary"], errors="coerce").to_numpy(), alpha=alpha, config=config)
-    except Exception:
+        out["p_fdr"] = fdr_bh(
+            pd.to_numeric(out["p_primary"], errors="coerce").to_numpy(),
+            alpha=alpha,
+            config=config
+        )
+    except (ValueError, RuntimeError):
         pass
+    
     return out
 
 
@@ -579,7 +673,7 @@ def run_pain_sensitivity_correlations(
 ###################################################################
 
 
-def _align_groups_to_series(
+def align_groups_to_series(
     series: pd.Series,
     groups: Optional[Union[pd.Series, np.ndarray]],
 ) -> Optional[np.ndarray]:
@@ -597,14 +691,7 @@ def _align_groups_to_series(
     return arr
 
 
-def align_groups_to_series(
-    series: pd.Series,
-    groups: Optional[Union[pd.Series, np.ndarray]],
-) -> Optional[np.ndarray]:
-    return _align_groups_to_series(series, groups)
-
-
-def _align_features_and_targets(
+def align_features_and_targets(
     df: pd.DataFrame,
     targets: pd.Series,
     min_samples: int,
@@ -633,16 +720,7 @@ def _align_features_and_targets(
     return df.loc[valid_mask], targets.loc[valid_mask]
 
 
-def align_features_and_targets(
-    df: pd.DataFrame,
-    targets: pd.Series,
-    min_samples: int,
-    logger: logging.Logger,
-) -> Tuple[Optional[pd.DataFrame], Optional[pd.Series]]:
-    return _align_features_and_targets(df, targets, min_samples, logger)
-
-
-def _build_temp_record_unified(
+def build_temp_record_unified(
     x: pd.Series,
     temp: Optional[pd.Series],
     cov_no_temp: Optional[pd.DataFrame],
@@ -657,120 +735,42 @@ def _build_temp_record_unified(
     if temp is None or (hasattr(temp, "empty") and temp.empty):
         return None
 
-    from . import compute_bootstrap_ci, compute_temp_permutation_pvalues, prepare_aligned_data
-
-    x_a, temp_a, cov_a, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
-    if len(x_a) == 0 or len(temp_a) == 0:
+    # Local import to avoid circular dependency
+    from .partial import prepare_aligned_data
+    x_aligned, temp_aligned, cov_aligned, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
+    if len(x_aligned) == 0 or len(temp_aligned) == 0:
         return None
 
     try:
-        grp = _align_groups_to_series(x_a, groups if groups is not None else getattr(cfg, "groups", None))
+        group_labels = groups if groups is not None else getattr(cfg, "groups", None)
+        grp = align_groups_to_series(x_aligned, group_labels)
     except ValueError:
         grp = None
 
-    min_s = getattr(cfg, "min_samples_channel", None) or getattr(cfg, "min_samples_roi", 0)
-    r, p, _ = safe_correlation(x_a, temp_a, cfg.method, min_s)
+    min_samples = getattr(cfg, "min_samples_channel", None) or getattr(cfg, "min_samples_roi", 0)
+    r, p, _ = safe_correlation(x_aligned, temp_aligned, cfg.method, min_samples)
 
-    ci_lo, ci_hi = np.nan, np.nan
-    p_perm = np.nan
+    ci_low = ci_high = p_perm = np.nan
 
     if getattr(cfg, "bootstrap", 0) > 0:
-        ci_lo, ci_hi = compute_bootstrap_ci(
-            x_a, temp_a, cfg.bootstrap, 0.95,
-            "spearman" if getattr(cfg, "use_spearman", False) else "pearson", cfg.rng
+        # Local import to avoid circular dependency
+        from .eeg_stats import compute_bootstrap_ci
+        method_str = "spearman" if getattr(cfg, "use_spearman", False) else "pearson"
+        ci_low, ci_high = compute_bootstrap_ci(
+            x_aligned, temp_aligned, cfg.bootstrap, 0.95, method_str, cfg.rng
         )
 
     if getattr(cfg, "n_perm", 0) > 0:
         p_perm, _ = compute_temp_permutation_pvalues(
-            x_a, temp_a, cov_a, cfg.method, cfg.n_perm, cfg.rng,
+            x_aligned, temp_aligned, cov_aligned, cfg.method, cfg.n_perm, cfg.rng,
             band, identifier, getattr(cfg, "logger", None), groups=grp
         )
 
     return build_correlation_record(
-        identifier, band, r, p, len(x_a), cfg.method,
-        ci_low=ci_lo, ci_high=ci_hi, p_perm=p_perm,
+        identifier, band, r, p, len(x_aligned), cfg.method,
+        ci_low=ci_low, ci_high=ci_high, p_perm=p_perm,
         identifier_type=id_key, **extra,
     ).to_dict()
-
-
-def build_temp_record_unified(
-    x: pd.Series,
-    temp: Optional[pd.Series],
-    cov_no_temp: Optional[pd.DataFrame],
-    identifier: str,
-    id_key: str,
-    band: str,
-    cfg: Any,
-    groups: Optional[np.ndarray] = None,
-    **extra: Any,
-) -> Optional[Dict[str, Any]]:
-    return _build_temp_record_unified(
-        x,
-        temp,
-        cov_no_temp,
-        identifier,
-        id_key,
-        band,
-        cfg,
-        groups=groups,
-        **extra,
-    )
-
-
-def _compute_roi_correlation_stats(
-    x: pd.Series,
-    y: pd.Series,
-    x_a: np.ndarray,
-    y_a: np.ndarray,
-    cov: Optional[pd.DataFrame],
-    temp: Optional[pd.Series],
-    n_eff: int,
-    band: str,
-    roi: str,
-    context: str,
-    cfg: Any,
-    groups: Optional[np.ndarray] = None,
-    me_records: Optional[List[Dict]] = None,
-) -> Any:
-    """Compute comprehensive correlation statistics for an ROI."""
-    from . import compute_bootstrap_ci, compute_partial_correlations, compute_permutation_pvalues
-    from .base import CorrelationStats
-
-    method = getattr(cfg, "method", "spearman")
-    r, p = compute_correlation(x_a, y_a, method)
-
-    r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
-        x, y, cov, temp, cfg.method, context, getattr(cfg, "logger", None), cfg.min_samples_roi
-    )
-
-    ci_lo, ci_hi = compute_bootstrap_ci(
-        x_a, y_a, cfg.bootstrap, 0.95,
-        "spearman" if getattr(cfg, "use_spearman", False) else "pearson", cfg.rng
-    )
-
-    x_series = pd.Series(x_a) if not isinstance(x_a, pd.Series) else x_a
-    y_series = pd.Series(y_a) if not isinstance(y_a, pd.Series) else y_a
-
-    p_perm, p_part_perm, p_part_temp_perm = compute_permutation_pvalues(
-        x_series, y_series, cov, temp, cfg.method, cfg.n_perm, n_eff, cfg.rng,
-        band, roi, groups=groups
-    )
-
-    return CorrelationStats(
-        correlation=r,
-        p_value=p,
-        ci_low=ci_lo,
-        ci_high=ci_hi,
-        r_partial=r_part,
-        p_partial=p_part,
-        n_partial=n_part,
-        r_partial_temp=r_part_temp,
-        p_partial_temp=p_part_temp,
-        n_partial_temp=n_part_temp,
-        p_perm=p_perm,
-        p_partial_perm=p_part_perm,
-        p_partial_temp_perm=p_part_temp_perm,
-    )
 
 
 def compute_roi_correlation_stats(
@@ -787,21 +787,46 @@ def compute_roi_correlation_stats(
     cfg: Any,
     groups: Optional[np.ndarray] = None,
     me_records: Optional[List[Dict]] = None,
-) -> Any:
-    return _compute_roi_correlation_stats(
-        x,
-        y,
-        x_a,
-        y_a,
-        cov,
-        temp,
-        n_eff,
-        band,
-        roi,
-        context,
-        cfg,
-        groups=groups,
-        me_records=me_records,
+) -> CorrelationStats:
+    """Compute comprehensive correlation statistics for an ROI."""
+    method = getattr(cfg, "method", "spearman")
+    r, p = compute_correlation(x_a, y_a, method)
+
+    # Local import to avoid circular dependency
+    from .partial import compute_partial_correlations
+    r_part, p_part, n_part, r_part_temp, p_part_temp, n_part_temp = compute_partial_correlations(
+        x, y, cov, temp, cfg.method, context, getattr(cfg, "logger", None), cfg.min_samples_roi
+    )
+
+    # Local import to avoid circular dependency
+    from .eeg_stats import compute_bootstrap_ci
+    method_str = "spearman" if getattr(cfg, "use_spearman", False) else "pearson"
+    ci_low, ci_high = compute_bootstrap_ci(
+        x_a, y_a, cfg.bootstrap, 0.95, method_str, cfg.rng
+    )
+
+    x_series = pd.Series(x_a) if not isinstance(x_a, pd.Series) else x_a
+    y_series = pd.Series(y_a) if not isinstance(y_a, pd.Series) else y_a
+
+    p_perm, p_part_perm, p_part_temp_perm = compute_permutation_pvalues(
+        x_series, y_series, cov, temp, cfg.method, cfg.n_perm, n_eff, cfg.rng,
+        band, roi, groups=groups
+    )
+
+    return CorrelationStats(
+        correlation=r,
+        p_value=p,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        r_partial=r_part,
+        p_partial=p_part,
+        n_partial=n_part,
+        r_partial_temp=r_part_temp,
+        p_partial_temp=p_part_temp,
+        n_partial_temp=n_part_temp,
+        p_perm=p_perm,
+        p_partial_perm=p_part_perm,
+        p_partial_temp_perm=p_part_temp_perm,
     )
 
 
@@ -897,24 +922,24 @@ def weighted_fisher_aggregate(
     if np.sum(valid) == 0:
         return np.nan, np.nan, np.nan, 0
 
-    rs_v = rs_arr[valid]
-    ws_v = ws_arr[valid]
-    ws_v = ws_v / ws_v.sum()
+    rs_valid = rs_arr[valid]
+    ws_valid = ws_arr[valid]
+    ws_normalized = ws_valid / ws_valid.sum()
 
-    zs = np.array([fisher_z(r) for r in rs_v])
-    z_mean = np.sum(zs * ws_v)
+    zs = np.array([fisher_z(r, config) for r in rs_valid])
+    z_mean = np.sum(zs * ws_normalized)
     r_mean = inverse_fisher_z(z_mean)
 
     if len(zs) > 1:
-        var_z = np.sum(ws_v * (zs - z_mean) ** 2)
+        var_z = np.sum(ws_normalized * (zs - z_mean) ** 2)
         se = np.sqrt(var_z / len(zs))
         z_crit = stats.norm.ppf((1 + ci_level) / 2)
-        ci_lo = inverse_fisher_z(z_mean - z_crit * se)
-        ci_hi = inverse_fisher_z(z_mean + z_crit * se)
+        ci_low = inverse_fisher_z(z_mean - z_crit * se)
+        ci_high = inverse_fisher_z(z_mean + z_crit * se)
     else:
-        ci_lo = ci_hi = r_mean
+        ci_low = ci_high = r_mean
 
-    return float(r_mean), float(ci_lo), float(ci_hi), int(np.sum(valid))
+    return float(r_mean), float(ci_low), float(ci_high), int(np.sum(valid))
 
 
 def joint_valid_mask(*arrays: Sequence, require_all: bool = True) -> np.ndarray:
@@ -940,29 +965,27 @@ def partial_corr_xy_given_Z(
     
     Returns (r_partial, p_value, n).
     """
-    from scipy.linalg import lstsq
-
     df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
-    if len(df) < Z.shape[1] + 3:
+    min_required = Z.shape[1] + _MIN_SAMPLES_CORRELATION
+    if len(df) < min_required:
         return np.nan, np.nan, 0
 
-    X_mat = df[Z.columns].values
-    X_mat = np.column_stack([np.ones(len(X_mat)), X_mat])
+    design_matrix = df[Z.columns].values
+    design_matrix = np.column_stack([np.ones(len(design_matrix)), design_matrix])
 
     x_vals = df["x"].values
     y_vals = df["y"].values
 
-    # Residualize
     try:
-        beta_x, *_ = lstsq(X_mat, x_vals)
-        beta_y, *_ = lstsq(X_mat, y_vals)
-    except Exception:
+        beta_x, *_ = lstsq(design_matrix, x_vals)
+        beta_y, *_ = lstsq(design_matrix, y_vals)
+    except (np.linalg.LinAlgError, ValueError):
         return np.nan, np.nan, 0
 
-    res_x = x_vals - X_mat @ beta_x
-    res_y = y_vals - X_mat @ beta_y
+    residuals_x = x_vals - design_matrix @ beta_x
+    residuals_y = y_vals - design_matrix @ beta_y
 
-    r, p = compute_correlation(res_x, res_y, method)
+    r, p = compute_correlation(residuals_x, residuals_y, method)
     return float(r), float(p), len(df)
 
 
@@ -991,8 +1014,10 @@ def compute_partial_corr(
     return partial_corr_xy_given_Z(x, y, Z, method, config)
 
 
-def normalize_series(s: pd.Series, epsilon: float = 1e-12) -> pd.Series:
+def normalize_series(s: pd.Series, epsilon: Optional[float] = None) -> pd.Series:
     """Z-score normalize a series."""
+    if epsilon is None:
+        epsilon = _EPSILON_STD
     std = s.std()
     if std < epsilon:
         return pd.Series(np.zeros_like(s.values), index=s.index)
@@ -1021,7 +1046,7 @@ def compute_correlation_pvalue(r_values: List[float], config: Optional[Any] = No
 def compute_bayes_factor_correlation(
     x: np.ndarray,
     y: np.ndarray,
-    prior_width: float = 0.707,
+    prior_width: float = _DEFAULT_PRIOR_WIDTH,
     method: str = "spearman",
 ) -> Tuple[float, str]:
     """
@@ -1053,72 +1078,62 @@ def compute_bayes_factor_correlation(
         30-100: Very strong
         >100: Extreme
     """
-    from scipy.special import hyp2f1
-    
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
     
     valid = np.isfinite(x) & np.isfinite(y)
     n = int(np.sum(valid))
     
-    if n < 4:
+    if n < _MIN_SAMPLES_BAYES:
         return np.nan, "insufficient_data"
     
-    x_v, y_v = x[valid], y[valid]
+    x_valid, y_valid = x[valid], y[valid]
     
-    # Compute correlation
+    method = normalize_correlation_method(method, default="spearman")
     if method == "spearman":
-        r, _ = stats.spearmanr(x_v, y_v)
+        r, _ = stats.spearmanr(x_valid, y_valid)
     else:
-        r, _ = stats.pearsonr(x_v, y_v)
+        r, _ = stats.pearsonr(x_valid, y_valid)
     
     if not np.isfinite(r) or np.abs(r) >= 1:
         return np.nan, "invalid_r"
     
-    # JZS Bayes Factor approximation (Wetzels & Wagenmakers, 2012)
-    # BF10 ≈ ((1 + t²/ν)^(-(ν+1)/2)) / Beta((1/2), (ν/2)) * integral term
-    # Simplified approximation using hypergeometric function
-    r2 = r ** 2
+    r_squared = r ** 2
     
-    # Compute BF10 using the exact formula for correlation
-    # Based on Ly et al. (2016) "Harold Jeffreys's default Bayes factor hypothesis tests explained"
     try:
-        # Log BF10 for numerical stability
         log_bf = (
             np.log(np.sqrt(2) / prior_width)
             + 0.5 * np.log(n - 1)
-            + ((n - 1) / 2) * np.log(1 - r2)
-            + np.log(hyp2f1(0.5, 0.5, (n + 1) / 2, r2))
+            + ((n - 1) / 2) * np.log(1 - r_squared)
+            + np.log(hyp2f1(0.5, 0.5, (n + 1) / 2, r_squared))
         )
         bf10 = np.exp(log_bf)
     except (ValueError, OverflowError, RuntimeWarning):
-        # Fallback: simpler approximation
-        t = r * np.sqrt((n - 2) / (1 - r2))
-        bf10 = np.sqrt((n + 1) / (2 * np.pi)) * (1 + t**2 / n) ** (-(n + 1) / 2)
+        t_stat = r * np.sqrt((n - 2) / (1 - r_squared))
+        bf10 = np.sqrt((n + 1) / (2 * np.pi)) * (1 + t_stat**2 / n) ** (-(n + 1) / 2)
     
-    # Interpretation
     if bf10 < 1/100:
-        interp = "extreme_H0"
+        interpretation = "extreme_H0"
     elif bf10 < 1/30:
-        interp = "very_strong_H0"
+        interpretation = "very_strong_H0"
     elif bf10 < 1/10:
-        interp = "strong_H0"
+        interpretation = "strong_H0"
     elif bf10 < 1/3:
-        interp = "moderate_H0"
+        interpretation = "moderate_H0"
     elif bf10 < 1:
-        interp = "anecdotal_H0"
+        interpretation = "anecdotal_H0"
     elif bf10 < 3:
-        interp = "anecdotal_H1"
+        interpretation = "anecdotal_H1"
     elif bf10 < 10:
-        interp = "moderate_H1"
+        interpretation = "moderate_H1"
     elif bf10 < 30:
-        interp = "strong_H1"
+        interpretation = "strong_H1"
     elif bf10 < 100:
-        interp = "very_strong_H1"
+        interpretation = "very_strong_H1"
     else:
-        interp = "extreme_H1"
+        interpretation = "extreme_H1"
     
-    return float(bf10), interp
+    return float(bf10), interpretation
 
 
 ###################################################################
@@ -1171,7 +1186,11 @@ def compute_robust_correlation(
         return stats.spearmanr(x_v, y_v)
 
 
-def _percentage_bend_correlation(x: np.ndarray, y: np.ndarray, beta: float = 0.2) -> Tuple[float, float]:
+def _percentage_bend_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    beta: float = _DEFAULT_PERCENTAGE_BEND_BETA,
+) -> Tuple[float, float]:
     """
     Percentage bend correlation (Wilcox, 1994).
     
@@ -1179,40 +1198,35 @@ def _percentage_bend_correlation(x: np.ndarray, y: np.ndarray, beta: float = 0.2
     """
     n = len(x)
     
-    # Compute median and MAD
-    mx, my = np.median(x), np.median(y)
-    mad_x = np.median(np.abs(x - mx))
-    mad_y = np.median(np.abs(y - my))
+    median_x, median_y = np.median(x), np.median(y)
+    mad_x = np.median(np.abs(x - median_x))
+    mad_y = np.median(np.abs(y - median_y))
     
-    if mad_x < 1e-12 or mad_y < 1e-12:
+    if mad_x < _EPSILON_STD or mad_y < _EPSILON_STD:
         return stats.spearmanr(x, y)
     
-    # Bend parameter
     omega_x = (beta * (n - 1) + 0.5) / n
     omega_y = (beta * (n - 1) + 0.5) / n
     
-    # Critical values
-    crit_x = np.percentile(np.abs(x - mx) / mad_x, 100 * (1 - beta))
-    crit_y = np.percentile(np.abs(y - my) / mad_y, 100 * (1 - beta))
+    crit_x = np.percentile(np.abs(x - median_x) / mad_x, 100 * (1 - beta))
+    crit_y = np.percentile(np.abs(y - median_y) / mad_y, 100 * (1 - beta))
     
-    # Winsorize
-    x_pb = np.clip((x - mx) / mad_x, -crit_x, crit_x)
-    y_pb = np.clip((y - my) / mad_y, -crit_y, crit_y)
+    x_bent = np.clip((x - median_x) / mad_x, -crit_x, crit_x)
+    y_bent = np.clip((y - median_y) / mad_y, -crit_y, crit_y)
     
-    # Compute correlation on bent data
-    r, _ = stats.pearsonr(x_pb, y_pb)
+    r, _ = stats.pearsonr(x_bent, y_bent)
     
-    # Approximate p-value using t-distribution
-    from .base import ensure_config
-    config = ensure_config(None)
-    epsilon = float(get_config_value(config, "statistics.constants.correlation_epsilon", 1e-12))
-    t = r * np.sqrt((n - 2) / (1 - r**2 + epsilon))
-    p = 2 * (1 - stats.t.cdf(np.abs(t), df=n - 2))
+    t_stat = r * np.sqrt((n - 2) / (1 - r**2 + _EPSILON_CORRELATION))
+    p = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=n - 2))
     
     return float(r), float(p)
 
 
-def _winsorized_correlation(x: np.ndarray, y: np.ndarray, trim: float = 0.2) -> Tuple[float, float]:
+def _winsorized_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    trim: float = _DEFAULT_WINSORIZE_TRIM,
+) -> Tuple[float, float]:
     """
     Winsorized correlation (replaces extreme values with percentiles).
     """
@@ -1222,54 +1236,53 @@ def _winsorized_correlation(x: np.ndarray, y: np.ndarray, trim: float = 0.2) -> 
     if k < 1:
         return stats.pearsonr(x, y)
     
-    # Winsorize both arrays
     def winsorize(arr):
         sorted_arr = np.sort(arr)
         lower, upper = sorted_arr[k], sorted_arr[-(k+1)]
         return np.clip(arr, lower, upper)
     
-    x_w = winsorize(x)
-    y_w = winsorize(y)
+    x_winsorized = winsorize(x)
+    y_winsorized = winsorize(y)
     
-    r, _ = stats.pearsonr(x_w, y_w)
+    r, _ = stats.pearsonr(x_winsorized, y_winsorized)
     
-    # Approximate p-value
-    n_eff = n - 2 * k
-    if n_eff < 3:
+    n_effective = n - 2 * k
+    if n_effective < _MIN_SAMPLES_CORRELATION:
         return float(r), np.nan
     
-    t = r * np.sqrt((n_eff - 2) / (1 - r**2 + 1e-12))
-    p = 2 * (1 - stats.t.cdf(np.abs(t), df=n_eff - 2))
+    t_stat = r * np.sqrt((n_effective - 2) / (1 - r**2 + _EPSILON_CORRELATION))
+    p = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=n_effective - 2))
     
     return float(r), float(p)
 
 
-def _shepherd_correlation(x: np.ndarray, y: np.ndarray, alpha: float = 0.05) -> Tuple[float, float]:
+def _shepherd_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    alpha: float = _DEFAULT_SHEPHERD_ALPHA,
+) -> Tuple[float, float]:
     """
     Shepherd's pi correlation (removes bivariate outliers via bootstrap MAD).
     """
     n = len(x)
     
-    # Compute Mahalanobis-like distance using MAD
-    mx, my = np.median(x), np.median(y)
-    mad_x = np.median(np.abs(x - mx)) * 1.4826  # Scale to match std
-    mad_y = np.median(np.abs(y - my)) * 1.4826
+    median_x, median_y = np.median(x), np.median(y)
+    mad_scale = 1.4826
+    mad_x = np.median(np.abs(x - median_x)) * mad_scale
+    mad_y = np.median(np.abs(y - median_y)) * mad_scale
     
-    if mad_x < 1e-12 or mad_y < 1e-12:
+    if mad_x < _EPSILON_STD or mad_y < _EPSILON_STD:
         return stats.spearmanr(x, y)
     
-    # Standardize
-    x_std = (x - mx) / mad_x
-    y_std = (y - my) / mad_y
+    x_standardized = (x - median_x) / mad_x
+    y_standardized = (y - median_y) / mad_y
     
-    # Distance from center
-    dist = np.sqrt(x_std**2 + y_std**2)
+    distance = np.sqrt(x_standardized**2 + y_standardized**2)
     
-    # Remove outliers (top alpha fraction by distance)
-    threshold = np.percentile(dist, 100 * (1 - alpha))
-    inliers = dist <= threshold
+    threshold = np.percentile(distance, 100 * (1 - alpha))
+    inliers = distance <= threshold
     
-    if np.sum(inliers) < 4:
+    if np.sum(inliers) < _MIN_SAMPLES_BAYES:
         return stats.spearmanr(x, y)
     
     r, p = stats.spearmanr(x[inliers], y[inliers])
@@ -1384,7 +1397,7 @@ def compute_correlation_reliability(
     valid = np.isfinite(feature_values) & np.isfinite(target_values)
     n = int(np.sum(valid))
     
-    if n < 10:
+    if n < _MIN_SAMPLES_RELIABILITY:
         return np.nan, np.nan, np.nan
     
     x = feature_values[valid]
@@ -1397,7 +1410,6 @@ def compute_correlation_reliability(
         reliability = _spearman_brown(r_half)
         return reliability, np.nan, np.nan
     
-    # Random split-half
     reliabilities = []
     indices = np.arange(n)
     
@@ -1418,10 +1430,10 @@ def compute_correlation_reliability(
         return np.nan, np.nan, np.nan
     
     reliability = float(np.mean(reliabilities))
-    ci_lo = float(np.percentile(reliabilities, 2.5))
-    ci_hi = float(np.percentile(reliabilities, 97.5))
+    ci_low = float(np.percentile(reliabilities, 2.5))
+    ci_high = float(np.percentile(reliabilities, 97.5))
     
-    return reliability, ci_lo, ci_hi
+    return reliability, ci_low, ci_high
 
 
 def _spearman_brown(r: float) -> float:
@@ -1515,7 +1527,7 @@ def correlate_single_feature(
     
     x, y = feature_values[valid], target_values[valid]
     
-    if np.std(x) < 1e-10 or np.std(y) < 1e-10:
+    if np.std(x) < _EPSILON_STD_STRICT or np.std(y) < _EPSILON_STD_STRICT:
         return (np.nan,) * 8 + (n_valid,)
     
     r_raw, p_raw = compute_correlation(x, y, method)

@@ -59,6 +59,9 @@ const (
 // Model
 ///////////////////////////////////////////////////////////////////
 
+// Model holds all state required to render and manage a single
+// pipeline execution view, including process status, log output,
+// resource usage and UI layout.
 type Model struct {
 	Command        string
 	Status         Status
@@ -139,6 +142,8 @@ type Model struct {
 // Constructors
 ///////////////////////////////////////////////////////////////////
 
+// New creates a new execution model for the given shell command,
+// initializing log viewport and sensible default view settings.
 func New(command string) Model {
 	vp := viewport.New(80, styles.DefaultLogHeight)
 	vp.Style = lipgloss.NewStyle().
@@ -170,6 +175,9 @@ func New(command string) Model {
 	}
 }
 
+// NewWithRoot creates a new execution model and associates it with
+// a specific repository root used for resolving Python entry points
+// and output locations.
 func NewWithRoot(command string, repoRoot string) Model {
 	m := New(command)
 	m.RepoRoot = repoRoot
@@ -180,6 +188,8 @@ func NewWithRoot(command string, repoRoot string) Model {
 // Messages
 ///////////////////////////////////////////////////////////////////
 
+// CommandStartedMsg is emitted once the subprocess has started and
+// exposes the running command and its output channels to the model.
 type CommandStartedMsg struct {
 	Cmd        *exec.Cmd
 	OutputChan chan string
@@ -190,18 +200,23 @@ type CommandStartedMsg struct {
 // Tea Model Implementation
 ///////////////////////////////////////////////////////////////////
 
+// Init implements tea.Model and starts the periodic ticker used
+// to drive UI animations and elapsed time updates.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.tick(),
 	)
 }
 
+// tick schedules the next TickMsg using the configured interval.
 func (m Model) tick() tea.Cmd {
 	return tea.Tick(time.Millisecond*time.Duration(styles.TickIntervalMs), func(t time.Time) tea.Msg {
 		return messages.TickMsg{}
 	})
 }
 
+// Start creates and launches the underlying Python process for the
+// configured command and wires up stdout/stderr streaming.
 func (m *Model) Start() tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -426,6 +441,8 @@ func (m Model) listenForResourceUpdates() tea.Cmd {
 	}
 }
 
+// Update implements tea.Model and routes incoming messages to update
+// execution state, logs, resource metrics and view dimensions.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case messages.TickMsg:
@@ -728,6 +745,9 @@ func (m *Model) updateViewportSize() {
 // Output Processing
 ///////////////////////////////////////////////////////////////////
 
+// processOutputLine ingests a single stdout/stderr line from the
+// running process, updating progress state when the line contains a
+// structured JSON event or appending it to the textual log stream.
 func (m *Model) processOutputLine(line string) {
 	if strings.HasPrefix(line, "{") {
 		var event struct {
@@ -979,6 +999,9 @@ func wrapText(text string, width int) []string {
 	return lines
 }
 
+// updateLogViewport rebuilds the viewport contents from the current
+// log buffer, applying level filters, search highlighting and soft
+// line-wrapping to match the available width.
 func (m *Model) updateLogViewport() {
 	var filtered []string
 	query := strings.ToLower(m.searchQuery)
@@ -1069,6 +1092,8 @@ func (m Model) extractErrorSummary() string {
 // View
 ///////////////////////////////////////////////////////////////////
 
+// View implements tea.Model and composes all execution subviews
+// (header, info, progress, logs and footer) into a single string.
 func (m Model) View() string {
 	var b strings.Builder
 
@@ -1100,6 +1125,8 @@ func (m Model) View() string {
 	return b.String()
 }
 
+// renderCompletionSummary produces a compact summary card shown
+// once execution has finished, including timing, errors and outputs.
 func (m Model) renderCompletionSummary() string {
 	var b strings.Builder
 
@@ -1276,6 +1303,8 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%d hr %d min", hours, mins)
 }
 
+// renderHeader renders the top title bar indicating local vs cloud
+// execution and colors it according to the current status.
 func (m Model) renderHeader() string {
 	title := " PIPELINE EXECUTION "
 	if m.IsCloud {
@@ -1303,6 +1332,8 @@ func (m Model) renderHeader() string {
 	return lipgloss.PlaceHorizontal(m.width-4, lipgloss.Center, header)
 }
 
+// renderInfoPanel renders high‑level execution metadata such as
+// command, elapsed time, current subject and failure counts.
 func (m Model) renderInfoPanel() string {
 	info := strings.Builder{}
 
@@ -1377,6 +1408,8 @@ func (m Model) averageSubjectDuration() time.Duration {
 	return total / time.Duration(len(m.SubjectDurations))
 }
 
+// renderProgressSection renders the main progress overview including
+// overall completion, current subject/step and optional cloud stages.
 func (m Model) renderProgressSection() string {
 	var b strings.Builder
 
@@ -1477,6 +1510,8 @@ func (m Model) renderProgressSection() string {
 	return b.String()
 }
 
+// renderMetricsDashboard renders memory usage, optional epoch info
+// and per‑core CPU utilization when resource monitoring is active.
 func (m Model) renderMetricsDashboard() string {
 	if m.Status == StatusPending {
 		return ""
@@ -1685,6 +1720,8 @@ func (m Model) renderLogSection() string {
 	return b.String()
 }
 
+// renderCloudStages renders a compact multi‑stage indicator used
+// during cloud execution (sync, run, pull).
 func (m Model) renderCloudStages() string {
 	stages := []struct {
 		stage CloudStage
@@ -1718,6 +1755,8 @@ func (m Model) renderCloudStages() string {
 	return strings.Join(parts, "   ")
 }
 
+// renderAnimatedProgressBar renders the main progress bar with a
+// color gradient and animated leading edge while running.
 func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	if width < styles.MinProgressBarWidth {
 		width = styles.MinProgressBarWidth
@@ -1762,6 +1801,8 @@ func (m Model) renderAnimatedProgressBar(p float64, width int) string {
 	return bar + pct
 }
 
+// renderMiniProgressBar renders a lightweight, single‑color bar for
+// step‑level progress where space is more constrained.
 func (m Model) renderMiniProgressBar(p float64, width int) string {
 	if width < styles.MinProgressBarWidth {
 		width = styles.MinProgressBarWidth
@@ -1773,6 +1814,8 @@ func (m Model) renderMiniProgressBar(p float64, width int) string {
 	return bar + empty
 }
 
+// renderStatus renders a small status badge summarizing the current
+// execution state with an appropriate color and icon.
 func (m Model) renderStatus() string {
 	style := lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	switch m.Status {
@@ -2161,6 +2204,8 @@ func getPerCoreUsageMacOS(numCores int) []float64 {
 // Public Methods
 ///////////////////////////////////////////////////////////////////
 
+// IsDone reports whether the execution has reached a terminal
+// state (success, failure or user cancellation).
 func (m Model) IsDone() bool {
 	return m.Status == StatusSuccess || m.Status == StatusFailed || m.Status == StatusCancelled
 }
@@ -2169,14 +2214,20 @@ func (m Model) WasSuccessful() bool {
 	return m.Status == StatusSuccess
 }
 
+// AddOutput appends a new log line to the model, applying the same
+// cleaning, error tracking and viewport updates as streamed output.
 func (m *Model) AddOutput(line string) {
 	m.addLog(line)
 }
 
+// SetStatus forces the execution status; primarily useful in tests
+// or higher‑level orchestration code.
 func (m *Model) SetStatus(status Status) {
 	m.Status = status
 }
 
+// SetSize updates the model’s notion of terminal width/height and
+// recomputes the log viewport dimensions accordingly.
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height

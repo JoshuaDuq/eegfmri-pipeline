@@ -10,9 +10,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import mne
-from scipy.stats import ttest_rel, ttest_ind, t as t_dist
 
-from ..config import get_plot_config
+from eeg_pipeline.utils.config.loader import ensure_config, get_config_value
 from .utils import log
 from eeg_pipeline.plotting.io.figures import get_viz_params
 from ...utils.analysis.tfr import extract_trial_band_power
@@ -22,9 +21,11 @@ from ...utils.analysis.stats import (
 )
 
 
-###################################################################
-# Configuration Helpers
-###################################################################
+# Constants
+MIN_SUBJECTS_REQUIRED = 2
+EMPTY_CLUSTER_RESULT = (None, None, None, None)
+DEFAULT_ALPHA = 0.05
+DEFAULT_N_PERMUTATIONS = 100
 
 
 def get_strict_mode(config) -> bool:
@@ -36,14 +37,66 @@ def get_strict_mode(config) -> bool:
     Returns:
         Strict mode boolean (default: True)
     """
-    from eeg_pipeline.utils.config.loader import ensure_config, get_config_value
     config = ensure_config(config)
     return get_config_value(config, "analysis.strict_mode", True)
 
 
-###################################################################
-# Cluster Significance Computation
-###################################################################
+def _validate_mask_length(
+    sig_mask: Optional[np.ndarray],
+    expected_len: Optional[int],
+    logger=None,
+) -> bool:
+    """Validate significance mask length matches expected length.
+    
+    Args:
+        sig_mask: Significance mask array
+        expected_len: Expected length for validation
+        logger: Optional logger instance
+    
+    Returns:
+        True if valid or no validation needed, False if mismatch
+    """
+    if sig_mask is None or expected_len is None:
+        return True
+    
+    if len(sig_mask) != expected_len:
+        if logger:
+            log(
+                f"Cluster significance mask length mismatch: "
+                f"sig_mask length={len(sig_mask)}, diff_data_len={expected_len}. "
+                f"Discarding results.",
+                logger,
+                "warning"
+            )
+        return False
+    return True
+
+
+def _handle_cluster_test_error(
+    error: Exception,
+    config,
+    logger=None,
+) -> Tuple[Optional[np.ndarray], Optional[float], Optional[int], Optional[float]]:
+    """Handle cluster test errors with appropriate logging and strict mode.
+    
+    Args:
+        error: Exception that occurred
+        config: Config dictionary
+        logger: Optional logger instance
+    
+    Returns:
+        Empty cluster result tuple
+    """
+    if logger:
+        log(
+            f"Cluster test failed: {type(error).__name__}: {error}",
+            logger,
+            "warning"
+        )
+    strict_mode = get_strict_mode(config)
+    if strict_mode:
+        raise
+    return EMPTY_CLUSTER_RESULT
 
 
 def compute_cluster_significance(
@@ -78,26 +131,118 @@ def compute_cluster_significance(
     """
     try:
         sig_mask, cluster_p_min, cluster_k, cluster_mass = cluster_test_epochs(
-            tfr, mask1, mask2, fmin=fmin, fmax=fmax_eff, tmin=tmin, tmax=tmax,
-            paired=False, config=config
+            tfr,
+            mask1,
+            mask2,
+            fmin=fmin,
+            fmax=fmax_eff,
+            tmin=tmin,
+            tmax=tmax,
+            paired=False,
+            config=config
         )
-        if sig_mask is not None and diff_data_len is not None and len(sig_mask) != diff_data_len:
-            if logger:
-                log(
-                    f"Cluster significance mask length mismatch: sig_mask length={len(sig_mask)}, "
-                    f"diff_data_len={diff_data_len}. Discarding results.",
-                    logger,
-                    "warning"
-                )
-            return None, None, None, None
+        
+        if not _validate_mask_length(sig_mask, diff_data_len, logger):
+            return EMPTY_CLUSTER_RESULT
+        
         return sig_mask, cluster_p_min, cluster_k, cluster_mass
     except (ValueError, RuntimeError) as e:
-        if logger:
-            log(f"Cluster test failed: {type(e).__name__}: {e}", logger, "warning")
-        strict_mode = get_strict_mode(config)
-        if strict_mode:
-            raise
-        return None, None, None, None
+        return _handle_cluster_test_error(e, config, logger)
+
+
+def _extract_subject_means(
+    tfr_list: List[mne.time_frequency.EpochsTFR],
+    fmin: float,
+    fmax: float,
+    tmin: float,
+    tmax: float,
+) -> Tuple[List[np.ndarray], List[mne.time_frequency.EpochsTFR], Optional[mne.Info]]:
+    """Extract mean band power for each subject in TFR list.
+    
+    Args:
+        tfr_list: List of EpochsTFR objects
+        fmin: Minimum frequency
+        fmax: Maximum frequency
+        tmin: Minimum time
+        tmax: Maximum time
+    
+    Returns:
+        Tuple of (mean_arrays, valid_tfr_list, reference_info)
+    """
+    mean_arrays = []
+    valid_tfr_list = []
+    reference_info = None
+    
+    for tfr in tfr_list:
+        if not isinstance(tfr, mne.time_frequency.EpochsTFR):
+            continue
+        
+        data = extract_trial_band_power(tfr, fmin, fmax, tmin, tmax)
+        if data is None or data.shape[0] == 0:
+            continue
+        
+        mean = np.nanmean(data, axis=0)
+        if mean.ndim == 0:
+            mean = mean.reshape(1)
+        
+        if reference_info is None:
+            reference_info = tfr.info
+        
+        mean_arrays.append(mean)
+        valid_tfr_list.append(tfr)
+    
+    return mean_arrays, valid_tfr_list, reference_info
+
+
+def _find_common_channels(
+    tfr_list: List[mne.time_frequency.EpochsTFR],
+) -> List[str]:
+    """Find common channels across all TFR objects.
+    
+    Args:
+        tfr_list: List of EpochsTFR objects
+    
+    Returns:
+        Sorted list of common channel names
+    """
+    if not tfr_list:
+        return []
+    
+    channel_sets = [set(tfr.info["ch_names"]) for tfr in tfr_list]
+    common_channels = set.intersection(*channel_sets) if channel_sets else set()
+    return sorted(common_channels)
+
+
+def _align_channels_to_common(
+    mean_arrays: List[np.ndarray],
+    tfr_list: List[mne.time_frequency.EpochsTFR],
+    common_channels: List[str],
+) -> List[np.ndarray]:
+    """Align subject means to common channel set.
+    
+    Args:
+        mean_arrays: List of mean arrays per subject
+        tfr_list: List of corresponding TFR objects
+        common_channels: List of common channel names
+    
+    Returns:
+        List of aligned arrays
+    """
+    aligned_arrays = []
+    
+    for mean_array, tfr in zip(mean_arrays, tfr_list):
+        channel_indices = [
+            tfr.info["ch_names"].index(ch)
+            for ch in common_channels
+            if ch in tfr.info["ch_names"]
+        ]
+        
+        if len(channel_indices) != len(common_channels):
+            continue
+        
+        aligned_arrays.append(mean_array[channel_indices])
+    
+    return aligned_arrays
 
 
 def compute_cluster_significance_from_combined(
@@ -129,123 +274,102 @@ def compute_cluster_significance_from_combined(
         Returns (None, None, None, None) on failure
     """
     if not tfr1_list or not tfr2_list:
-        return None, None, None, None
+        return EMPTY_CLUSTER_RESULT
     
-    min_subjects = 2
-    if len(tfr1_list) < min_subjects or len(tfr2_list) < min_subjects:
+    if (len(tfr1_list) < MIN_SUBJECTS_REQUIRED or
+            len(tfr2_list) < MIN_SUBJECTS_REQUIRED):
         if logger:
-            log("Cluster test requires at least 2 subjects per condition; skipping.", logger, "warning")
-        return None, None, None, None
+            log(
+                f"Cluster test requires at least {MIN_SUBJECTS_REQUIRED} subjects "
+                f"per condition; skipping.",
+                logger,
+                "warning"
+            )
+        return EMPTY_CLUSTER_RESULT
     
-    subject_a_means = []
-    subject_b_means = []
-    tfr_a_list_valid = []
-    tfr_b_list_valid = []
-    reference_info = None
+    subject_a_means, tfr_a_valid, reference_info = _extract_subject_means(
+        tfr1_list, fmin, fmax_eff, tmin, tmax
+    )
+    subject_b_means, tfr_b_valid, _ = _extract_subject_means(
+        tfr2_list, fmin, fmax_eff, tmin, tmax
+    )
     
-    for tfr_a, tfr_b in zip(tfr1_list, tfr2_list):
-        if not isinstance(tfr_a, mne.time_frequency.EpochsTFR) or not isinstance(tfr_b, mne.time_frequency.EpochsTFR):
-            continue
-        
-        data_a = extract_trial_band_power(tfr_a, fmin, fmax_eff, tmin, tmax)
-        data_b = extract_trial_band_power(tfr_b, fmin, fmax_eff, tmin, tmax)
-        
-        if data_a is None or data_b is None:
-            continue
-        
-        if data_a.shape[0] == 0 or data_b.shape[0] == 0:
-            continue
-        
-        mean_a = np.nanmean(data_a, axis=0)
-        mean_b = np.nanmean(data_b, axis=0)
-        
-        if mean_a.ndim == 0:
-            mean_a = mean_a.reshape(1)
-        if mean_b.ndim == 0:
-            mean_b = mean_b.reshape(1)
-        
-        if reference_info is None:
-            reference_info = tfr_a.info
-        
-        subject_a_means.append(mean_a)
-        subject_b_means.append(mean_b)
-        tfr_a_list_valid.append(tfr_a)
-        tfr_b_list_valid.append(tfr_b)
-    
-    if len(subject_a_means) < min_subjects:
+    if (len(subject_a_means) < MIN_SUBJECTS_REQUIRED or
+            len(subject_b_means) < MIN_SUBJECTS_REQUIRED):
         if logger:
-            log("Insufficient subjects with valid data for cluster test; skipping.", logger, "warning")
-        return None, None, None, None
+            log(
+                "Insufficient subjects with valid data for cluster test; skipping.",
+                logger,
+                "warning"
+            )
+        return EMPTY_CLUSTER_RESULT
     
-    ch_sets = [set(tfr.info["ch_names"]) for tfr in tfr_a_list_valid]
-    ch_sets.extend([set(tfr.info["ch_names"]) for tfr in tfr_b_list_valid])
-    common_chs = list(sorted(set.intersection(*ch_sets))) if ch_sets else []
+    all_valid_tfr = tfr_a_valid + tfr_b_valid
+    common_channels = _find_common_channels(all_valid_tfr)
     
-    if len(common_chs) == 0:
+    if not common_channels:
         if logger:
-            log("No common channels across subjects for cluster test; skipping.", logger, "warning")
-        return None, None, None, None
+            log(
+                "No common channels across subjects for cluster test; skipping.",
+                logger,
+                "warning"
+            )
+        return EMPTY_CLUSTER_RESULT
     
-    group_a_array = []
-    group_b_array = []
+    group_a_aligned = _align_channels_to_common(
+        subject_a_means, tfr_a_valid, common_channels
+    )
+    group_b_aligned = _align_channels_to_common(
+        subject_b_means, tfr_b_valid, common_channels
+    )
     
-    for mean_a, mean_b, tfr_a, tfr_b in zip(subject_a_means, subject_b_means, tfr_a_list_valid, tfr_b_list_valid):
-        ch_indices_a = [tfr_a.info["ch_names"].index(ch) for ch in common_chs if ch in tfr_a.info["ch_names"]]
-        ch_indices_b = [tfr_b.info["ch_names"].index(ch) for ch in common_chs if ch in tfr_b.info["ch_names"]]
-        
-        if len(ch_indices_a) != len(common_chs) or len(ch_indices_b) != len(common_chs):
-            continue
-        
-        group_a_array.append(mean_a[ch_indices_a])
-        group_b_array.append(mean_b[ch_indices_b])
-    
-    if len(group_a_array) < min_subjects or len(group_b_array) < min_subjects:
+    if (len(group_a_aligned) < MIN_SUBJECTS_REQUIRED or
+            len(group_b_aligned) < MIN_SUBJECTS_REQUIRED):
         if logger:
-            log("Insufficient subjects after channel alignment for cluster test; skipping.", logger, "warning")
-        return None, None, None, None
+            log(
+                "Insufficient subjects after channel alignment for cluster test; "
+                "skipping.",
+                logger,
+                "warning"
+            )
+        return EMPTY_CLUSTER_RESULT
     
-    group_a_subjects = np.stack(group_a_array, axis=0)
-    group_b_subjects = np.stack(group_b_array, axis=0)
+    group_a_subjects = np.stack(group_a_aligned, axis=0)
+    group_b_subjects = np.stack(group_b_aligned, axis=0)
     
-    info_common = mne.pick_info(reference_info, [reference_info["ch_names"].index(ch) for ch in common_chs])
+    channel_indices = [
+        reference_info["ch_names"].index(ch) for ch in common_channels
+    ]
+    info_common = mne.pick_info(reference_info, channel_indices)
     
     try:
-        from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
         config = ensure_config(config)
-        sig_mask_full, cluster_p_min, cluster_k, cluster_mass = cluster_test_two_sample_arrays(
-            group_a_subjects, group_b_subjects, info_common,
-            alpha=get_config_value(config, "statistics.sig_alpha", 0.05),
-            paired=False,
-            n_permutations=get_config_value(config, "statistics.cluster_n_perm", 100),
-            config=config
+        alpha = get_config_value(config, "statistics.sig_alpha", DEFAULT_ALPHA)
+        n_permutations = get_config_value(
+            config, "statistics.cluster_n_perm", DEFAULT_N_PERMUTATIONS
+        )
+        
+        sig_mask_full, cluster_p_min, cluster_k, cluster_mass = (
+            cluster_test_two_sample_arrays(
+                group_a_subjects,
+                group_b_subjects,
+                info_common,
+                alpha=alpha,
+                paired=False,
+                n_permutations=n_permutations,
+                config=config
+            )
         )
         
         if sig_mask_full is None:
-            return None, None, None, None
+            return EMPTY_CLUSTER_RESULT
         
-        if diff_data_len is not None and len(sig_mask_full) != diff_data_len:
-            if logger:
-                log(
-                    f"Cluster significance mask length mismatch: sig_mask length={len(sig_mask_full)}, "
-                    f"diff_data_len={diff_data_len}. Discarding results.",
-                    logger,
-                    "warning"
-                )
-            return None, None, None, None
+        if not _validate_mask_length(sig_mask_full, diff_data_len, logger):
+            return EMPTY_CLUSTER_RESULT
         
         return sig_mask_full, cluster_p_min, cluster_k, cluster_mass
     except (ValueError, RuntimeError) as e:
-        if logger:
-            log(f"Cluster test failed: {type(e).__name__}: {e}", logger, "warning")
-        strict_mode = get_strict_mode(config)
-        if strict_mode:
-            raise
-        return None, None, None, None
-
-
-###################################################################
-# Significance Mask Computation
-###################################################################
+        return _handle_cluster_test_error(e, config, logger)
 
 
 def compute_significance_mask(
@@ -279,19 +403,57 @@ def compute_significance_mask(
         return None, {}
     
     sig_mask, cluster_p_min, cluster_k, cluster_mass = cluster_test_epochs(
-        tfr_sub, mask_a, mask_b, fmin=fmin, fmax=fmax, tmin=tmin, tmax=tmax,
-        paired=False, config=config
+        tfr_sub,
+        mask_a,
+        mask_b,
+        fmin=fmin,
+        fmax=fmax,
+        tmin=tmin,
+        tmax=tmax,
+        paired=False,
+        config=config
     )
-    return sig_mask, {
+    
+    cluster_info = {
         "cluster_p_min": cluster_p_min,
         "cluster_k": cluster_k,
         "cluster_mass": cluster_mass
     }
+    return sig_mask, cluster_info
 
 
-###################################################################
-# Statistical Title Building
-###################################################################
+def _get_test_type_description(paired: bool) -> str:
+    """Get description string for test type.
+    
+    Args:
+        paired: Whether test is paired
+    
+    Returns:
+        Test type description string
+    """
+    if paired:
+        return "paired cluster-based permutation test"
+    return "cluster-based permutation test (two-sample, unpaired)"
+
+
+def _format_baseline_correction(
+    baseline_used: Optional[Tuple[Optional[float], Optional[float]]],
+) -> str:
+    """Format baseline correction string for title.
+    
+    Args:
+        baseline_used: Optional tuple of (baseline_start, baseline_end)
+    
+    Returns:
+        Formatted baseline correction string
+    """
+    if baseline_used is None:
+        return "baseline correction: logratio"
+    
+    bl_start, bl_end = baseline_used
+    if bl_start is not None and bl_end is not None:
+        return f"baseline correction: logratio [{bl_start:.2f}, {bl_end:.2f}]s"
+    return "baseline correction: logratio"
 
 
 def build_statistical_title(
@@ -321,39 +483,30 @@ def build_statistical_title(
     if not viz_params["diff_annotation_enabled"]:
         return ""
     
-    from eeg_pipeline.utils.config.loader import get_config_value, ensure_config
     config = ensure_config(config)
-    alpha = get_config_value(config, "statistics.sig_alpha", 0.05)
-    n_perm = get_config_value(config, "statistics.cluster_n_perm", 100)
+    alpha = get_config_value(config, "statistics.sig_alpha", DEFAULT_ALPHA)
+    n_perm = get_config_value(
+        config, "statistics.cluster_n_perm", DEFAULT_N_PERMUTATIONS
+    )
     
     parts = []
+    test_type = _get_test_type_description(paired)
+    parts.append(f"Statistical test: {test_type}")
     
     if is_group:
-        test_type = "paired cluster-based permutation test" if paired else "cluster-based permutation test (two-sample, unpaired)"
-        parts.append(f"Statistical test: {test_type}")
         if n_subjects is not None:
             parts.append(f"N={n_subjects} subjects")
     else:
-        test_type = "paired cluster-based permutation test" if paired else "cluster-based permutation test (two-sample, unpaired)"
-        parts.append(f"Statistical test: {test_type}")
         if n_trials_pain is not None and n_trials_non is not None:
-            parts.append(f"n_pain={n_trials_pain}, n_non={n_trials_non} trials")
+            parts.append(
+                f"n_pain={n_trials_pain}, n_non={n_trials_non} trials"
+            )
     
     parts.append(f"n_permutations={n_perm}")
     parts.append(f"alpha={alpha:.3f}")
-    
-    if baseline_used is not None:
-        bl_start, bl_end = baseline_used
-        if bl_start is not None and bl_end is not None:
-            parts.append(f"baseline correction: logratio [{bl_start:.2f}, {bl_end:.2f}]s")
-        else:
-            parts.append("baseline correction: logratio")
-    else:
-        parts.append("baseline correction: logratio")
-    
+    parts.append(_format_baseline_correction(baseline_used))
     parts.append("data transformation: log10(power/baseline)")
     parts.append("adjacency: channel spatial adjacency matrix")
     parts.append("cluster threshold: mass-based")
     
     return " | ".join(parts)
-

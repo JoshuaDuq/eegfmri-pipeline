@@ -13,9 +13,7 @@ from typing import Optional, List, Any, Dict, Tuple
 import pandas as pd
 import numpy as np
 
-from ..config.loader import load_config, ConfigDict
 from eeg_pipeline.infra.tsv import read_tsv
-from eeg_pipeline.infra.paths import deriv_stats_path
 from .covariates import _build_covariate_matrices
 
 
@@ -27,14 +25,28 @@ def _build_correlation_stats_candidates(
 ) -> List[str]:
     """Build list of candidate filenames for precomputed correlation stats."""
     method_suffix = f"_{method_label}" if method_label else ""
-    candidates = [f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.tsv"]
+    base_filename = f"corr_stats_{feature_type}_vs_{target_suffix}{method_suffix}.tsv"
+    
+    candidates = [base_filename]
+    
     if target_suffix_alt:
-        candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.tsv")
+        alt_filename = f"corr_stats_{feature_type}_vs_{target_suffix_alt}{method_suffix}.tsv"
+        candidates.append(alt_filename)
+    
     if method_label:
         candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix}.tsv")
         if target_suffix_alt:
             candidates.append(f"corr_stats_{feature_type}_vs_{target_suffix_alt}.tsv")
+    
     return candidates
+
+
+def _determine_target_suffixes(target: str) -> Tuple[str, Optional[str]]:
+    """Determine target suffix and alternative suffix from target string."""
+    is_rating = "rating" in target.lower()
+    target_suffix = "rating" if is_rating else "temperature"
+    target_suffix_alt = "temp" if target_suffix == "temperature" else None
+    return target_suffix, target_suffix_alt
 
 
 def load_precomputed_correlations(
@@ -57,6 +69,8 @@ def load_precomputed_correlations(
         Correlation target: "rating" or "temperature"
     logger : Logger, optional
         Logger instance
+    method_label : str, optional
+        Method label to append to filename
         
     Returns
     -------
@@ -67,28 +81,45 @@ def load_precomputed_correlations(
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    target_suffix = "rating" if "rating" in target.lower() else "temperature"
-    target_suffix_alt = "temp" if target_suffix == "temperature" else None
-
+    target_suffix, target_suffix_alt = _determine_target_suffixes(target)
+    
     candidates = _build_correlation_stats_candidates(
         feature_type,
         target_suffix,
         target_suffix_alt,
         method_label=method_label,
     )
+    
     if not candidates:
         logger.warning(f"Unknown feature type for stats loading: {feature_type}")
         return None
 
-    for fname in candidates:
-        fpath = stats_dir / fname
-        if not fpath.exists():
+    for filename in candidates:
+        filepath = stats_dir / filename
+        if not filepath.exists():
             continue
-        df = read_tsv(fpath)
-        if df is not None and not df.empty:
-            return df
+        
+        dataframe = read_tsv(filepath)
+        if dataframe is not None and not dataframe.empty:
+            return dataframe
 
     return None
+
+
+def _find_roi_column(dataframe: pd.DataFrame) -> Optional[str]:
+    """Find the ROI/channel/feature column name in the dataframe."""
+    possible_columns = ["roi", "channel", "feature"]
+    return next((col for col in possible_columns if col in dataframe.columns), None)
+
+
+def _find_band_column(dataframe: pd.DataFrame) -> Optional[str]:
+    """Find the band column name in the dataframe."""
+    return "band" if "band" in dataframe.columns else None
+
+
+def _extract_stat_value(row: pd.Series, key: str, default: Any = np.nan) -> Any:
+    """Extract a statistic value from a row with a default fallback."""
+    return row.get(key, default)
 
 
 def get_precomputed_stats_for_roi_band(
@@ -100,44 +131,133 @@ def get_precomputed_stats_for_roi_band(
     """
     Extract precomputed stats for a specific ROI and band from a stats DataFrame.
     
-    Returns dict with keys: r, p, n, ci_low, ci_high, fdr_reject
+    Parameters
+    ----------
+    stats_df : pd.DataFrame, optional
+        DataFrame containing precomputed statistics
+    roi : str
+        Region of interest identifier
+    band : str
+        Frequency band identifier
+    logger : Logger, optional
+        Logger instance (currently unused, kept for API compatibility)
+        
+    Returns
+    -------
+    Dict[str, Any]
+        Dictionary with keys: r, p, n, ci_low, ci_high, q, fdr_reject
+        Returns empty dict if stats_df is None, empty, or matching row not found
     """
     if stats_df is None or stats_df.empty:
         return {}
 
-    # Filter by ROI/channel and band
-    # Column names vary across analysis outputs.
-    roi_col = next((c for c in ["roi", "channel", "feature"] if c in stats_df.columns), None)
-    if not roi_col:
+    roi_column = _find_roi_column(stats_df)
+    if roi_column is None:
         return {}
 
-    band_col = "band" if "band" in stats_df.columns else None
-    if band_col is None:
-        # Some stats tables may encode band in other columns or not at all.
-        # For ROI scatter plots, band is required.
+    band_column = _find_band_column(stats_df)
+    if band_column is None:
         return {}
         
-    subset = stats_df[
-        (stats_df[roi_col].astype(str) == roi)
-        & (stats_df[band_col].astype(str) == band)
+    matching_rows = stats_df[
+        (stats_df[roi_column].astype(str) == roi)
+        & (stats_df[band_column].astype(str) == band)
     ]
     
-    if len(subset) == 0:
+    if len(matching_rows) == 0:
         return {}
         
-    row = subset.iloc[0]
+    row = matching_rows.iloc[0]
 
-    fdr_reject = bool(row.get("fdr_reject", False))
-    q_val = row.get("q_global", row.get("q", np.nan))
+    q_global = _extract_stat_value(row, "q_global", np.nan)
+    q_value = q_global if not np.isnan(q_global) else _extract_stat_value(row, "q", np.nan)
+    fdr_reject = bool(_extract_stat_value(row, "fdr_reject", False))
+    
     return {
-        "r": row.get("r", np.nan),
-        "p": row.get("p", np.nan),
-        "n": row.get("n", 0),
-        "ci_low": row.get("ci_low", np.nan),
-        "ci_high": row.get("ci_high", np.nan),
-        "q": q_val,
+        "r": _extract_stat_value(row, "r", np.nan),
+        "p": _extract_stat_value(row, "p", np.nan),
+        "n": _extract_stat_value(row, "n", 0),
+        "ci_low": _extract_stat_value(row, "ci_low", np.nan),
+        "ci_high": _extract_stat_value(row, "ci_high", np.nan),
+        "q": q_value,
         "fdr_reject": fdr_reject,
     }
+
+
+def _load_epochs_for_subject(
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    config,
+    logger: logging.Logger,
+):
+    """Load epochs for a subject and task."""
+    from .epochs import load_epochs_for_analysis
+    
+    epochs, _ = load_epochs_for_analysis(
+        subject,
+        task,
+        align="strict",
+        preload=False,
+        deriv_root=deriv_root,
+        bids_root=config.bids_root,
+        logger=logger,
+        config=config,
+    )
+    return epochs
+
+
+def _load_features_for_subject(
+    subject: str,
+    task: str,
+    deriv_root: Path,
+    config,
+    epochs,
+):
+    """Load features and targets for a subject."""
+    from .feature_io import _load_features_and_targets
+    
+    temporal_df, active_df, conn_df, y, info = _load_features_and_targets(
+        subject, task, deriv_root, config, epochs=epochs
+    )
+    return temporal_df, active_df, conn_df, y, info
+
+
+def _load_aligned_events_and_covariates(
+    epochs,
+    subject: str,
+    task: str,
+    config,
+    logger: logging.Logger,
+    partial_covars: Optional[List[str]],
+):
+    """Load aligned events and build covariate matrices."""
+    from .alignment import get_aligned_events
+    from .covariates import extract_temperature_data
+    
+    aligned_events = get_aligned_events(
+        epochs,
+        subject,
+        task,
+        strict=True,
+        logger=logger,
+        bids_root=config.bids_root,
+        config=config,
+    )
+    
+    temp_series, temp_col = extract_temperature_data(aligned_events, config)
+    Z_df_full, Z_df_temp = _build_covariate_matrices(
+        aligned_events, partial_covars, temp_col, config
+    )
+    
+    return aligned_events, temp_series, Z_df_full, Z_df_temp
+
+
+def _build_roi_map(info, config):
+    """Build ROI map from info object."""
+    from ..analysis.tfr import build_rois_from_info
+    
+    return build_rois_from_info(info, config)
 
 
 def load_subject_scatter_data(
@@ -161,41 +281,55 @@ def load_subject_scatter_data(
     """
     Load all data required for subject behavioral scatter plots.
     
-    Returns 9-tuple:
+    Parameters
+    ----------
+    subject : str
+        Subject identifier
+    task : str
+        Task identifier
+    deriv_root : Path
+        Root directory for derivatives
+    config
+        Configuration object
+    logger : logging.Logger
+        Logger instance
+    partial_covars : List[str], optional
+        List of partial covariate names
+        
+    Returns
+    -------
+    Tuple of 9 optional values:
         temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
+        Returns tuple of None values if loading fails
     """
-    from .feature_io import _load_features_and_targets
-    from .epochs import load_epochs_for_analysis
-    from .alignment import get_aligned_events
-    from .covariates import extract_temperature_data
-    from ..analysis.tfr import build_rois_from_info
-    
     try:
-        epochs, _ = load_epochs_for_analysis(
-            subject, task, 
-            align="strict", 
-            preload=False, 
-            deriv_root=deriv_root,
-            bids_root=config.bids_root,
-            logger=logger, 
-            config=config
+        epochs = _load_epochs_for_subject(subject, task, deriv_root, config, logger)
+        
+        temporal_df, active_df, conn_df, y, info = _load_features_for_subject(
+            subject, task, deriv_root, config, epochs
         )
         
-        temporal_df, active_df, conn_df, y, info = _load_features_and_targets(
-            subject, task, deriv_root, config, epochs=epochs
+        _, temp_series, Z_df_full, Z_df_temp = _load_aligned_events_and_covariates(
+            epochs, subject, task, config, logger, partial_covars
         )
         
-        aligned_events = get_aligned_events(
-            epochs, subject, task, strict=True, 
-            logger=logger, bids_root=config.bids_root, config=config
+        roi_map = _build_roi_map(info, config)
+        
+        return (
+            temporal_df,
+            active_df,
+            y,
+            info,
+            temp_series,
+            Z_df_full,
+            Z_df_temp,
+            roi_map,
+            conn_df,
         )
-        
-        temp_series, temp_col = extract_temperature_data(aligned_events, config)
-        Z_df_full, Z_df_temp = _build_covariate_matrices(aligned_events, partial_covars, temp_col, config)
-        roi_map = build_rois_from_info(info, config)
-        
-        return temporal_df, active_df, y, info, temp_series, Z_df_full, Z_df_temp, roi_map, conn_df
         
     except Exception as e:
+        # Catch all exceptions to gracefully handle any loading failure
+        # (FileNotFoundError, ValueError, etc.) and return None values.
+        # This allows callers to handle missing data without crashing.
         logger.error(f"Failed to load scatter data for sub-{subject}: {e}")
         return None, None, None, None, None, None, None, None, None

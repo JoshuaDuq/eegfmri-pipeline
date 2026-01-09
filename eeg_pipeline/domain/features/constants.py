@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from typing import Tuple, Any, Dict, List, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional, Tuple
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from eeg_pipeline.types import PrecomputedData, TimeWindows
+    from eeg_pipeline.context.features import FeatureContext
 
 ###################################################################
 # Feature Categories and Groups
@@ -66,7 +71,10 @@ def validate_precomputed(
 ) -> Tuple[bool, str]:
     """Validate precomputed data structure.
     
-    Returns (is_valid, error_message).
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, error_message). If valid, error_message is empty string.
     """
     if precomputed is None:
         return False, "precomputed is None"
@@ -77,17 +85,14 @@ def validate_precomputed(
     if precomputed.data.size == 0:
         return False, "precomputed.data is empty"
     
-    if require_windows:
-        if precomputed.windows is None:
-            return False, "precomputed.windows is None"
+    if require_windows and precomputed.windows is None:
+        return False, "precomputed.windows is None"
     
-    if require_bands:
-        if not precomputed.band_data:
-            return False, "precomputed.band_data is empty"
+    if require_bands and not precomputed.band_data:
+        return False, "precomputed.band_data is empty"
     
-    if require_psd:
-        if precomputed.psd_data is None:
-            return False, "precomputed.psd_data is None"
+    if require_psd and precomputed.psd_data is None:
+        return False, "precomputed.psd_data is None"
     
     return True, ""
 
@@ -102,7 +107,10 @@ def validate_extractor_inputs(
 ) -> Tuple[bool, str]:
     """Validate common inputs for feature extractors.
     
-    Returns (is_valid, error_message).
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, error_message). If valid, error_message is empty string.
     """
     if ctx is None:
         return False, f"{extractor_name}: context is None"
@@ -120,19 +128,34 @@ def validate_extractor_inputs(
     return True, ""
 
 
-def get_segment_mask(windows: Any, segment_name: str) -> Optional[np.ndarray]:
+def get_segment_mask(
+    windows: Any,
+    segment_name: str,
+) -> Optional[np.ndarray]:
     """Get segment mask using consistent access pattern.
     
     Standardizes access to window masks across all feature modules.
+    Attempts to use the preferred `get_mask` method first, then falls
+    back to dictionary access if available.
+    
+    Parameters
+    ----------
+    windows : Any
+        Window object with either `get_mask` method or `masks` dict attribute.
+    segment_name : str
+        Name of the segment to retrieve.
+    
+    Returns
+    -------
+    Optional[np.ndarray]
+        Boolean mask array for the segment, or None if not found.
     """
     if windows is None or not segment_name:
         return None
 
-    # 1. Preferred method
     if hasattr(windows, "get_mask"):
         return windows.get_mask(segment_name)
 
-    # 2. Generic dictionary
     if hasattr(windows, "masks") and isinstance(windows.masks, dict):
         return windows.masks.get(segment_name)
 

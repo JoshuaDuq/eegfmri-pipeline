@@ -69,24 +69,12 @@ func DiscoverColumns(repoRoot string, task string) tea.Cmd {
 			args = append(args, "--task", task)
 		}
 
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		output, err := cmd.Output()
-
+		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
-			cmd = exec.Command("python3", args...)
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			output, err = cmd.Output()
-
-			if err != nil {
-				return messages.ColumnsDiscoveredMsg{
-					Columns: nil,
-					Values:  nil,
-					Error:   err,
-				}
+			return messages.ColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
 			}
 		}
 
@@ -120,25 +108,12 @@ func LoadSubjects(repoRoot string, task string, pipeline types.Pipeline) tea.Cmd
 		source := pipeline.GetDataSource()
 		args = append(args, "--source", source)
 
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot // Set to project root
-		// Disable colored output and enable unbuffered output
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		output, err := cmd.Output()
-
+		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
-			cmd = exec.Command("python3", args...)
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			output, err = cmd.Output()
-
-			if err != nil {
-				// Return actual error instead of silent fallback
-				return messages.SubjectsLoadedMsg{
-					Subjects: nil,
-					Error:    err,
-				}
+			// Return actual error instead of silent fallback
+			return messages.SubjectsLoadedMsg{
+				Subjects: nil,
+				Error:    err,
 			}
 		}
 
@@ -169,19 +144,9 @@ func LoadPlotters(repoRoot string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"-m", "eeg_pipeline", "info", "plotters", "--json"}
 
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		output, err := cmd.Output()
+		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
-			cmd = exec.Command("python3", args...)
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			output, err = cmd.Output()
-			if err != nil {
-				return messages.PlottersLoadedMsg{Error: err}
-			}
+			return messages.PlottersLoadedMsg{Error: err}
 		}
 
 		var response PlottersResponse
@@ -198,22 +163,10 @@ func LoadConfigSummary(repoRoot string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"-m", "eeg_pipeline", "info", "config", "--json"}
 
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		output, err := cmd.Output()
-
+		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
-			cmd = exec.Command("python3", args...)
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			output, err = cmd.Output()
-
-			if err != nil {
-				return messages.ConfigLoadedMsg{
-					Error: err,
-				}
+			return messages.ConfigLoadedMsg{
+				Error: err,
 			}
 		}
 
@@ -243,22 +196,10 @@ func LoadConfigKeys(repoRoot string, keys []string) tea.Cmd {
 		args := []string{"-m", "eeg_pipeline", "info", "config", "--json", "--keys"}
 		args = append(args, keys...)
 
-		pyCmd := GetPythonCommand(repoRoot)
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = repoRoot
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-		output, err := cmd.Output()
-
+		output, err := runPythonJSONCommand(repoRoot, args)
 		if err != nil {
-			cmd = exec.Command("python3", args...)
-			cmd.Dir = repoRoot
-			cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-			output, err = cmd.Output()
-
-			if err != nil {
-				return messages.ConfigKeysLoadedMsg{
-					Error: err,
-				}
+			return messages.ConfigKeysLoadedMsg{
+				Error: err,
 			}
 		}
 
@@ -601,4 +542,30 @@ func (ps *ProgressStreamer) WaitForEvent() tea.Cmd {
 		}
 		return event
 	}
+}
+
+// runPythonJSONCommand executes a Python module command in the repository root,
+// ensuring consistent environment configuration and a python3 fallback. It
+// returns the command's stdout if successful, or an error if both attempts fail.
+func runPythonJSONCommand(repoRoot string, args []string) ([]byte, error) {
+	pyCmd := GetPythonCommand(repoRoot)
+	cmd := exec.Command(pyCmd, args...)
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+
+	output, err := cmd.Output()
+	if err == nil {
+		return output, nil
+	}
+
+	fallbackCmd := exec.Command("python3", args...)
+	fallbackCmd.Dir = repoRoot
+	fallbackCmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+
+	output, err = fallbackCmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	return output, nil
 }

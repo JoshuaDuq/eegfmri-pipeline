@@ -18,6 +18,19 @@ from eeg_pipeline.plotting.core.registry import (
     CategorizedPlotRegistry,
     PlotterFunc,
 )
+from eeg_pipeline.plotting.style import use_style
+
+# Preferred execution order for plot categories
+CATEGORY_EXECUTION_ORDER = [
+    "psychometrics",
+    "scatter",
+    "temporal",
+    "dose_response",
+    "mediation",
+    "moderation",
+    "diagnostics",
+    "summary",
+]
 
 
 class BehaviorPlotRegistry(CategorizedPlotRegistry["BehaviorPlotContext"]):
@@ -38,9 +51,9 @@ class BehaviorPlotContext:
     
     rating_stats: Optional[Any] = None
     temp_stats: Optional[Any] = None
-    all_results: List[Any] = None
-    
-    def __post_init__(self):
+    all_results: Optional[List[Any]] = None
+
+    def __post_init__(self) -> None:
         if self.all_results is None:
             self.all_results = []
 
@@ -53,36 +66,28 @@ class BehaviorPlotManager(CategorizedPlotManager["BehaviorPlotContext"]):
 
     def run_category(self, category: str) -> None:
         plotters = BehaviorPlotRegistry.get_plotters(category)
-        from eeg_pipeline.plotting.style import use_style
-
         with use_style():
             super().run_category(category, plotters=plotters)
 
     def run_all(self) -> Dict[str, Path]:
         categories = BehaviorPlotRegistry.get_categories()
-        preferred_order = [
-            "psychometrics",
-            "scatter",
-            "temporal",
-            "dose_response",
-            "mediation",
-            "moderation",
-            "diagnostics",
-            "summary",
+        category_set = set(categories)
+
+        ordered_categories = [
+            cat for cat in CATEGORY_EXECUTION_ORDER if cat in category_set
         ]
+        remaining_categories = [
+            cat for cat in categories if cat not in CATEGORY_EXECUTION_ORDER
+        ]
+        ordered_categories.extend(remaining_categories)
 
-        ordered = [c for c in preferred_order if c in categories]
-        ordered += [c for c in categories if c not in preferred_order]
-
-        for cat in ordered:
-            self.run_category(cat)
+        for category in ordered_categories:
+            self.run_category(category)
 
         return self.saved_plots
 
     def run_selected(self, plot_names: List[str]) -> Dict[str, Path]:
         all_plotters = BehaviorPlotRegistry.get_all_plotters()
-        from eeg_pipeline.plotting.style import use_style
-
         with use_style():
             return super().run_selected(plot_names, all_plotters=all_plotters)
 

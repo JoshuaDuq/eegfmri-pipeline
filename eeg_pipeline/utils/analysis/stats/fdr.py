@@ -11,7 +11,7 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -22,55 +22,63 @@ if TYPE_CHECKING:
     pass
 
 
-def infer_fdr_family(fpath: Path, df: pd.DataFrame) -> str:
-    name = fpath.stem
+def infer_fdr_family(file_path: Path, df: pd.DataFrame) -> str:
+    """Infer FDR family identifier from file path and dataframe."""
+    file_name = file_path.stem
+    
     if "test_family" in df.columns and df["test_family"].notna().any():
         try:
-            return str(df["test_family"].dropna().iloc[0])
-        except Exception:
+            family_value = df["test_family"].dropna().iloc[0]
+            return str(family_value)
+        except (IndexError, KeyError):
             pass
 
-    corr_match = re.match(r"corr_stats_(.+)_vs_(.+)", name)
-    if corr_match:
-        feature_part, target_part = corr_match.groups()
+    correlation_match = re.match(r"corr_stats_(.+)_vs_(.+)", file_name)
+    if correlation_match:
+        feature_part, target_part = correlation_match.groups()
         return f"target:{target_part}|features:{feature_part}"
 
     if "target" in df.columns and df["target"].notna().any():
         try:
-            tgt = str(df["target"].dropna().iloc[0])
-            ftype = (
-                str(df["feature_type"].dropna().iloc[0])
-                if "feature_type" in df.columns and df["feature_type"].notna().any()
-                else None
-            )
-            return f"target:{tgt}|features:{ftype}" if ftype else f"target:{tgt}"
-        except Exception:
+            target_value = str(df["target"].dropna().iloc[0])
+            feature_type = None
+            if "feature_type" in df.columns and df["feature_type"].notna().any():
+                feature_type = str(df["feature_type"].dropna().iloc[0])
+            
+            if feature_type:
+                return f"target:{target_value}|features:{feature_type}"
+            return f"target:{target_value}"
+        except (IndexError, KeyError):
             pass
 
-    return name
+    return file_name
 
 
 def select_p_column_for_fdr(df: pd.DataFrame) -> Optional[str]:
-    if "p_primary_perm" in df.columns:
-        p = pd.to_numeric(df["p_primary_perm"], errors="coerce")
-        if p.notna().any():
-            return "p_primary_perm"
-    if "p_primary" in df.columns:
-        p = pd.to_numeric(df["p_primary"], errors="coerce")
-        if p.notna().any():
-            return "p_primary"
-    if "p_psi" in df.columns:
-        return "p_psi"
-    if "sobel_p" in df.columns:
-        return "sobel_p"
-    if "fixed_p" in df.columns:
-        return "fixed_p"
-    if "p_raw" in df.columns:
-        return "p_raw"
-    if "p" in df.columns:
-        return "p"
-    if "p_value" in df.columns:
-        return "p_value"
+    """Select appropriate p-value column for FDR correction.
+    
+    Priority order:
+    1. p_primary_perm (if has valid values)
+    2. p_primary (if has valid values)
+    3. p_psi, sobel_p, fixed_p, p_raw, p, p_value (if exists)
+    """
+    priority_columns = [
+        "p_primary_perm",
+        "p_primary",
+    ]
+    
+    for column in priority_columns:
+        if column not in df.columns:
+            continue
+        p_values = pd.to_numeric(df[column], errors="coerce")
+        if p_values.notna().any():
+            return column
+    
+    fallback_columns = ["p_psi", "sobel_p", "fixed_p", "p_raw", "p", "p_value"]
+    for column in fallback_columns:
+        if column in df.columns:
+            return column
+    
     return None
 
 
@@ -87,28 +95,28 @@ def fdr_bh(
     if alpha is None:
         alpha = get_fdr_alpha(config)
 
-    pvals_arr = np.asarray(list(pvals), dtype=float)
-    qvals = np.full_like(pvals_arr, np.nan, dtype=float)
+    p_values_array = np.asarray(list(pvals), dtype=float)
+    q_values = np.full_like(p_values_array, np.nan, dtype=float)
 
-    valid_mask = np.isfinite(pvals_arr)
+    valid_mask = np.isfinite(p_values_array)
     if not np.any(valid_mask):
-        return qvals
+        return q_values
 
-    pv = pvals_arr[valid_mask]
-    order = np.argsort(pv)
-    ranked = pv[order]
-    n = ranked.size
+    valid_p_values = p_values_array[valid_mask]
+    sort_order = np.argsort(valid_p_values)
+    sorted_p_values = valid_p_values[sort_order]
+    n_tests = sorted_p_values.size
 
-    denom = np.arange(1, n + 1, dtype=float)
-    adjusted = ranked * n / denom
-    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
-    adjusted = np.clip(adjusted, 0.0, 1.0)
+    ranks = np.arange(1, n_tests + 1, dtype=float)
+    adjusted_p_values = sorted_p_values * n_tests / ranks
+    adjusted_p_values = np.minimum.accumulate(adjusted_p_values[::-1])[::-1]
+    adjusted_p_values = np.clip(adjusted_p_values, 0.0, 1.0)
 
-    restored = np.empty_like(adjusted)
-    restored[order] = adjusted
+    restored_q_values = np.empty_like(adjusted_p_values)
+    restored_q_values[sort_order] = adjusted_p_values
 
-    qvals[valid_mask] = restored
-    return qvals
+    q_values[valid_mask] = restored_q_values
+    return q_values
 
 
 def fdr_bhy(
@@ -126,16 +134,16 @@ def fdr_bhy(
     if alpha is None:
         alpha = get_fdr_alpha(config)
 
-    pvals_arr = np.asarray(list(pvals), dtype=float)
-    n = len(pvals_arr)
+    p_values_array = np.asarray(list(pvals), dtype=float)
+    n_tests = len(p_values_array)
     
-    if n == 0:
+    if n_tests == 0:
         return np.array([])
     
-    harmonic_sum = sum(1.0 / i for i in range(1, n + 1))
+    harmonic_sum = sum(1.0 / i for i in range(1, n_tests + 1))
     adjusted_alpha = alpha / harmonic_sum
     
-    return fdr_bh(pvals_arr, alpha=adjusted_alpha, config=config)
+    return fdr_bh(p_values_array, alpha=adjusted_alpha, config=config)
 
 
 def fdr_bh_reject(
@@ -151,296 +159,438 @@ def fdr_bh_reject(
     if alpha is None:
         alpha = get_fdr_alpha(config)
 
-    p = np.asarray(pvals, dtype=float)
-    if p.size == 0:
+    p_values = np.asarray(pvals, dtype=float)
+    if p_values.size == 0:
         return np.array([], dtype=bool), np.nan
 
-    valid_mask = np.isfinite(p)
+    valid_mask = np.isfinite(p_values)
     if not np.any(valid_mask):
-        return np.zeros_like(p, dtype=bool), np.nan
+        return np.zeros_like(p_values, dtype=bool), np.nan
 
-    p_valid = p[valid_mask]
-    order = np.argsort(p_valid)
-    ranked = np.arange(1, len(p_valid) + 1)
-    thresh = (ranked / len(p_valid)) * alpha
-    passed = p_valid[order] <= thresh
+    valid_p_values = p_values[valid_mask]
+    sort_order = np.argsort(valid_p_values)
+    sorted_p_values = valid_p_values[sort_order]
+    n_tests = len(valid_p_values)
+    
+    ranks = np.arange(1, n_tests + 1)
+    thresholds = (ranks / n_tests) * alpha
+    passed_threshold = sorted_p_values <= thresholds
 
-    if not np.any(passed):
-        return np.zeros_like(p, dtype=bool), np.nan
+    if not np.any(passed_threshold):
+        return np.zeros_like(p_values, dtype=bool), np.nan
 
-    k_max = np.max(np.where(passed)[0])
-    crit = float(p_valid[order][k_max])
+    max_passed_index = np.max(np.where(passed_threshold)[0])
+    critical_value = float(sorted_p_values[max_passed_index])
 
-    reject = np.zeros_like(p, dtype=bool)
-    reject[valid_mask] = p_valid <= crit
+    reject_mask = np.zeros_like(p_values, dtype=bool)
+    reject_mask[valid_mask] = valid_p_values <= critical_value
 
-    return reject, crit
+    return reject_mask, critical_value
 
 
-def fdr_correction(p_values: np.ndarray, alpha: float = 0.05):
+def fdr_correction(
+    p_values: np.ndarray,
+    alpha: float = 0.05,
+) -> Tuple[np.ndarray, np.ndarray, float]:
     """Apply Benjamini-Hochberg FDR correction.
     
     Returns:
         q_values: Adjusted p-values
-        reject: Boolean mask of rejected hypotheses
+        reject_mask: Boolean mask of rejected hypotheses
         critical_p: Critical p-value threshold
     """
     q_values = fdr_bh(p_values, alpha=alpha)
-    reject, critical_p = fdr_bh_reject(p_values, alpha)
-    return q_values, reject, critical_p
+    reject_mask, critical_p = fdr_bh_reject(p_values, alpha)
+    return q_values, reject_mask, critical_p
+
+
+def _collect_tsv_files(
+    stats_dir: Path,
+    include_glob: Union[str, Iterable[str]],
+    exclude_globs: Optional[Iterable[str]],
+) -> list[Path]:
+    """Collect TSV files matching include/exclude patterns."""
+    stats_dir = Path(stats_dir)
+    
+    if isinstance(include_glob, str):
+        files = list(stats_dir.rglob(include_glob))
+    else:
+        files = []
+        for pattern in include_glob:
+            files.extend(list(stats_dir.rglob(pattern)))
+        seen = set()
+        files = [f for f in files if not (f in seen or seen.add(f))]
+    
+    if exclude_globs:
+        excluded = set()
+        for pattern in exclude_globs:
+            excluded.update(stats_dir.glob(pattern))
+        files = [f for f in files if f not in excluded]
+    
+    return files
+
+
+def _extract_p_values_by_family(
+    files: list[Path],
+) -> Tuple[Dict[str, list[float]], Dict[str, list[Tuple[Path, int, str]]]]:
+    """Extract p-values grouped by family from TSV files."""
+    from eeg_pipeline.infra.tsv import read_tsv
+    
+    all_p_by_family: Dict[str, list[float]] = defaultdict(list)
+    file_refs_by_family: Dict[str, list[Tuple[Path, int, str]]] = defaultdict(list)
+
+    for file_path in files:
+        df = read_tsv(file_path)
+        if df is None or df.empty:
+            continue
+
+        p_column = select_p_column_for_fdr(df)
+        if p_column is None:
+            continue
+
+        family = infer_fdr_family(file_path, df)
+        
+        p_series = pd.to_numeric(df[p_column], errors="coerce")
+        valid_mask = p_series.notna()
+        valid_indices = np.where(valid_mask)[0]
+        
+        for index in valid_indices:
+            p_value = float(p_series.iloc[index])
+            all_p_by_family[family].append(p_value)
+            file_refs_by_family[family].append((file_path, index, p_column))
+    
+    return all_p_by_family, file_refs_by_family
+
+
+def _apply_fdr_to_families(
+    all_p_by_family: Dict[str, list[float]],
+    file_refs_by_family: Dict[str, list[Tuple[Path, int, str]]],
+    alpha: float,
+    logger: Optional[logging.Logger],
+) -> Tuple[Dict[str, Any], Dict[Path, list[Tuple[int, float, bool, str, str]]]]:
+    """Apply FDR correction to each family and prepare file updates."""
+    summary = {"n_tests": 0, "n_rejected": 0, "alpha": alpha, "families": {}}
+    file_updates: Dict[Path, list[Tuple[int, float, bool, str, str]]] = defaultdict(list)
+
+    for family, p_list in all_p_by_family.items():
+        p_array = np.array(p_list)
+        q_array, reject_mask, critical_p = fdr_correction(p_array, alpha)
+
+        n_tests = len(p_array)
+        n_rejected = int(reject_mask.sum())
+        summary["n_tests"] += n_tests
+        summary["n_rejected"] += n_rejected
+        
+        p_kind = None
+        if file_refs_by_family[family]:
+            p_kind = str(file_refs_by_family[family][0][2])
+        
+        summary["families"][family] = {
+            "n_tests": n_tests,
+            "n_rejected": n_rejected,
+            "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
+            "p_kind": p_kind,
+        }
+
+        if logger:
+            logger.info(
+                f"Global FDR [{family}]: {n_rejected}/{n_tests} rejected at alpha={alpha}"
+            )
+
+        for (file_path, index, p_column), q_value, rejected in zip(
+            file_refs_by_family[family], q_array, reject_mask
+        ):
+            file_updates[file_path].append((index, q_value, rejected, family, p_column))
+    
+    return summary, file_updates
+
+
+def _update_dataframes_with_fdr_results(
+    file_updates: Dict[Path, list[Tuple[int, float, bool, str, str]]],
+    logger: Optional[logging.Logger],
+) -> None:
+    """Update dataframes with FDR correction results."""
+    from eeg_pipeline.infra.tsv import read_tsv, write_tsv
+    
+    for file_path, updates in file_updates.items():
+        try:
+            df = read_tsv(file_path)
+            if df is None:
+                continue
+            
+            _ensure_fdr_columns_exist(df)
+            
+            for index, q_value, rejected, family, p_column in updates:
+                if index < len(df):
+                    df.loc[index, "q_global"] = q_value
+                    df.loc[index, "fdr_reject"] = bool(rejected)
+                    df.loc[index, "fdr_family"] = family
+                    df.loc[index, "fdr_p_kind"] = p_column
+            
+            write_tsv(df, file_path)
+        except (IOError, ValueError, KeyError) as error:
+            if logger:
+                logger.warning(f"Failed to update {file_path.name}: {error}")
+
+
+def _ensure_fdr_columns_exist(df: pd.DataFrame) -> None:
+    """Ensure required FDR columns exist in dataframe."""
+    if "q_global" not in df.columns:
+        df["q_global"] = np.nan
+    if "fdr_reject" not in df.columns:
+        df["fdr_reject"] = False
+    if "fdr_family" not in df.columns:
+        df["fdr_family"] = pd.Series([None] * len(df), dtype="object")
+    else:
+        df["fdr_family"] = df["fdr_family"].astype("object")
+    if "fdr_p_kind" not in df.columns:
+        df["fdr_p_kind"] = pd.Series([None] * len(df), dtype="object")
+    else:
+        df["fdr_p_kind"] = df["fdr_p_kind"].astype("object")
 
 
 def apply_global_fdr(
-    stats_dir: "Path",
+    stats_dir: Path,
     alpha: float = 0.05,
     logger: Optional[logging.Logger] = None,
     include_glob: Union[str, Iterable[str]] = "*.tsv",
     exclude_globs: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Apply global FDR correction across correlation files within families."""
-    from pathlib import Path
-    from eeg_pipeline.infra.tsv import read_tsv, write_tsv
-    
-    stats_dir = Path(stats_dir)
-    if isinstance(include_glob, str):
-        files = list(stats_dir.rglob(include_glob))
-    else:
-        files = []
-        for pat in include_glob:
-            files.extend(list(stats_dir.rglob(pat)))
-        # Remove duplicates while preserving order
-        seen = set()
-        files = [f for f in files if not (f in seen or seen.add(f))]
-    if exclude_globs:
-        excluded = set()
-        for pat in exclude_globs:
-            excluded.update(stats_dir.glob(pat))
-        files = [f for f in files if f not in excluded]
+    files = _collect_tsv_files(stats_dir, include_glob, exclude_globs)
     if not files:
         if logger:
             logger.warning(f"No TSV files found in {stats_dir}")
         return {"n_tests": 0, "n_rejected": 0}
     
-    all_p_by_family: Dict[str, list] = defaultdict(list)
-    file_refs_by_family: Dict[str, list] = defaultdict(list)
-
-    def infer_family(fpath: Path, df: pd.DataFrame) -> str:
-        return infer_fdr_family(fpath, df)
-
-    def select_p_column(df: pd.DataFrame) -> Optional[str]:
-        return select_p_column_for_fdr(df)
-
-    for fpath in files:
-        df = read_tsv(fpath)
-        if df is None or df.empty:
-            continue
-
-        p_col = select_p_column(df)
-        if p_col is None:
-            continue
-
-        family = infer_family(fpath, df)
-        
-        p_series = pd.to_numeric(df[p_col], errors="coerce")
-        valid_mask = p_series.notna()
-        valid_indices = np.where(valid_mask)[0]
-        
-        for i in valid_indices:
-            all_p_by_family[family].append(float(p_series.iloc[i]))
-            file_refs_by_family[family].append((fpath, i, p_col))
-    
+    all_p_by_family, file_refs_by_family = _extract_p_values_by_family(files)
     if not all_p_by_family:
         if logger:
             logger.warning("No valid p-values found for FDR correction")
         return {"n_tests": 0, "n_rejected": 0}
     
-    summary = {"n_tests": 0, "n_rejected": 0, "alpha": alpha, "families": {}}
-    file_updates: Dict[Path, list] = defaultdict(list)
-
-    for family, p_list in all_p_by_family.items():
-        p_arr = np.array(p_list)
-        q_arr, reject, critical_p = fdr_correction(p_arr, alpha)
-
-        summary["n_tests"] += len(p_arr)
-        summary["n_rejected"] += int(reject.sum())
-        summary["families"][family] = {
-            "n_tests": len(p_arr),
-            "n_rejected": int(reject.sum()),
-            "critical_p": float(critical_p) if np.isfinite(critical_p) else np.nan,
-            "p_kind": str(file_refs_by_family[family][0][2]) if file_refs_by_family[family] else None,
-        }
-
-        if logger:
-            logger.info(
-                f"Global FDR [{family}]: {int(reject.sum())}/{len(p_arr)} rejected at alpha={alpha}"
-            )
-
-        for (fpath, idx, p_col), q, rej in zip(file_refs_by_family[family], q_arr, reject):
-            file_updates[fpath].append((idx, q, rej, family, p_col))
-    
-    for fpath, updates in file_updates.items():
-        try:
-            df = read_tsv(fpath)
-            if df is None:
-                continue
-            
-            if "q_global" not in df.columns:
-                df["q_global"] = np.nan
-            if "fdr_reject" not in df.columns:
-                df["fdr_reject"] = False
-            if "fdr_family" not in df.columns:
-                df["fdr_family"] = pd.Series([None] * len(df), dtype="object")
-            else:
-                df["fdr_family"] = df["fdr_family"].astype("object")
-
-            if "fdr_p_kind" not in df.columns:
-                df["fdr_p_kind"] = pd.Series([None] * len(df), dtype="object")
-            else:
-                df["fdr_p_kind"] = df["fdr_p_kind"].astype("object")
-            
-            for idx, q, rej, family, p_col in updates:
-                if idx < len(df):
-                    df.loc[idx, "q_global"] = q
-                    df.loc[idx, "fdr_reject"] = bool(rej)
-                    df.loc[idx, "fdr_family"] = family
-                    df.loc[idx, "fdr_p_kind"] = p_col
-            
-            write_tsv(df, fpath)
-        except Exception as e:
-            if logger:
-                logger.warning(f"Failed to update {fpath.name}: {e}")
+    summary, file_updates = _apply_fdr_to_families(
+        all_p_by_family, file_refs_by_family, alpha, logger
+    )
+    _update_dataframes_with_fdr_results(file_updates, logger)
     
     return summary
 
 
 def fdr_bh_mask(
-    p_vals: np.ndarray,
+    p_values: np.ndarray,
     alpha: Optional[float] = None,
     config: Optional[Any] = None,
 ) -> Optional[np.ndarray]:
     """Return boolean mask of significant values after BH-FDR."""
-    if p_vals is None or len(p_vals) == 0:
+    if p_values is None or len(p_values) == 0:
         return None
-    reject, _ = fdr_bh_reject(p_vals, alpha, config)
-    return reject
+    reject_mask, _ = fdr_bh_reject(p_values, alpha, config)
+    return reject_mask
 
 
 def fdr_bh_values(
-    p_vals: np.ndarray,
+    p_values: np.ndarray,
     alpha: Optional[float] = None,
     config: Optional[Any] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """Return (q_values, reject_mask) after BH-FDR."""
-    if p_vals is None or len(p_vals) == 0:
+    if p_values is None or len(p_values) == 0:
         return None, None
-    qvals = fdr_bh(p_vals, alpha, config)
-    reject, _ = fdr_bh_reject(p_vals, alpha, config)
-    return qvals, reject
+    q_values = fdr_bh(p_values, alpha, config)
+    reject_mask, _ = fdr_bh_reject(p_values, alpha, config)
+    return q_values, reject_mask
 
 
-def bh_adjust(pvals: np.ndarray, config: Optional[Any] = None) -> np.ndarray:
+def bh_adjust(
+    p_values: np.ndarray,
+    config: Optional[Any] = None,
+) -> np.ndarray:
     """Simple BH adjustment without config."""
     from eeg_pipeline.utils.config.loader import get_config_value, load_config
     if config is None:
         config = load_config()
     alpha = float(get_config_value(config, "statistics.fdr_alpha", 0.05))
-    return fdr_bh(pvals, alpha=alpha)
+    return fdr_bh(p_values, alpha=alpha)
+
+
+def select_permutation_p_values_for_fdr(
+    results_df: pd.DataFrame,
+) -> np.ndarray:
+    """Select permutation p-values from results DataFrame for FDR."""
+    if "p_perm" in results_df.columns:
+        return results_df["p_perm"].values
+    return select_raw_p_values_for_fdr(results_df)
+
+
+def select_raw_p_values_for_fdr(
+    results_df: pd.DataFrame,
+) -> np.ndarray:
+    """Select raw p-values from results DataFrame for FDR."""
+    if "p_value" in results_df.columns:
+        return results_df["p_value"].values
+    if "p" in results_df.columns:
+        return results_df["p"].values
+    return np.array([])
 
 
 def select_p_values_for_fdr(
     results_df: pd.DataFrame,
-    use_permutation_p: bool,
+    use_permutation_p: bool = True,
 ) -> np.ndarray:
-    """Select appropriate p-values from results DataFrame for FDR."""
-    if use_permutation_p and "p_perm" in results_df.columns:
-        return results_df["p_perm"].values
-    if "p_value" in results_df.columns:
-        return results_df["p_value"].values
-    return results_df["p"].values if "p" in results_df.columns else np.array([])
+    """Select appropriate p-values from results DataFrame for FDR.
+    
+    Maintains backward compatibility with flag argument.
+    Prefer using select_permutation_p_values_for_fdr or 
+    select_raw_p_values_for_fdr directly.
+    """
+    if use_permutation_p:
+        return select_permutation_p_values_for_fdr(results_df)
+    return select_raw_p_values_for_fdr(results_df)
 
 
 def filter_significant_predictors(
     results_df: pd.DataFrame,
     alpha: Optional[float] = None,
     config: Optional[Any] = None,
-    p_col: str = "p",
-    q_col: str = "q_value",
+    p_column: str = "p",
+    q_column: str = "q_value",
 ) -> pd.DataFrame:
     """Filter results to significant predictors after FDR."""
     if alpha is None:
         alpha = get_fdr_alpha(config)
 
-    if q_col not in results_df.columns:
-        results_df = results_df.copy()
-        results_df[q_col] = fdr_bh(results_df[p_col].values, alpha, config)
+    results_df = results_df.copy()
+    if q_column not in results_df.columns:
+        p_values = results_df[p_column].values
+        results_df[q_column] = fdr_bh(p_values, alpha, config)
 
-    return results_df[results_df[q_col] <= alpha].copy()
+    significant_mask = results_df[q_column] <= alpha
+    return results_df[significant_mask].copy()
 
 
-# ============================================================================
-# FDR Utilities
-# ============================================================================
-
-def apply_fdr_correction_and_save(
+def apply_fdr_correction_with_permutation_p_and_save(
     results_df: pd.DataFrame,
-    output_path: "Path",
+    output_path: Path,
     config: Any,
     logger: logging.Logger,
-    use_permutation_p: bool = True,
 ) -> None:
-    """Apply FDR correction and save results."""
+    """Apply FDR correction using permutation p-values and save results."""
     if results_df.empty or "p" not in results_df.columns:
         return
     
     alpha = get_fdr_alpha(config)
-    p_vec = select_p_values_for_fdr(results_df, use_permutation_p)
+    p_values = select_permutation_p_values_for_fdr(results_df)
     
-    rej, crit = fdr_bh_reject(p_vec, alpha=alpha)
-    results_df["fdr_reject"] = rej
-    results_df["fdr_crit_p"] = crit
+    reject_mask, critical_value = fdr_bh_reject(p_values, alpha=alpha)
+    results_df["fdr_reject"] = reject_mask
+    results_df["fdr_crit_p"] = critical_value
     
     results_df.to_csv(output_path, sep="\t", index=False)
     logger.info(f"Saved {len(results_df)} results to {output_path}")
 
 
+def apply_fdr_correction_with_raw_p_and_save(
+    results_df: pd.DataFrame,
+    output_path: Path,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Apply FDR correction using raw p-values and save results."""
+    if results_df.empty or "p" not in results_df.columns:
+        return
+    
+    alpha = get_fdr_alpha(config)
+    p_values = select_raw_p_values_for_fdr(results_df)
+    
+    reject_mask, critical_value = fdr_bh_reject(p_values, alpha=alpha)
+    results_df["fdr_reject"] = reject_mask
+    results_df["fdr_crit_p"] = critical_value
+    
+    results_df.to_csv(output_path, sep="\t", index=False)
+    logger.info(f"Saved {len(results_df)} results to {output_path}")
+
+
+def apply_fdr_correction_and_save(
+    results_df: pd.DataFrame,
+    output_path: Path,
+    config: Any,
+    logger: logging.Logger,
+    use_permutation_p: bool = True,
+) -> None:
+    """Apply FDR correction and save results.
+    
+    Maintains backward compatibility with flag argument.
+    Prefer using apply_fdr_correction_with_permutation_p_and_save or
+    apply_fdr_correction_with_raw_p_and_save directly.
+    """
+    if use_permutation_p:
+        apply_fdr_correction_with_permutation_p_and_save(
+            results_df, output_path, config, logger
+        )
+    else:
+        apply_fdr_correction_with_raw_p_and_save(
+            results_df, output_path, config, logger
+        )
+
+
 def get_pvalue_series(df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     """Extract permutation and raw p-value series."""
-    p_perm = pd.Series(index=df.index, dtype=float)
-    p_raw = pd.Series(index=df.index, dtype=float)
+    permutation_p_series = pd.Series(index=df.index, dtype=float)
+    raw_p_series = pd.Series(index=df.index, dtype=float)
     
-    for col in ["p_partial_perm", "p_partial_temp_perm", "p_perm"]:
-        if col in df.columns:
-            vals = pd.to_numeric(df[col], errors="coerce")
-            mask = vals.notna()
-            p_perm.loc[mask] = vals.loc[mask]
+    permutation_columns = ["p_partial_perm", "p_partial_temp_perm", "p_perm"]
+    for column in permutation_columns:
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce")
+        valid_mask = values.notna()
+        permutation_p_series.loc[valid_mask] = values.loc[valid_mask]
     
-    for col in ["p", "p_value", "p_partial", "p_partial_temp"]:
-        if col in df.columns:
-            vals = pd.to_numeric(df[col], errors="coerce")
-            mask = vals.notna()
-            p_raw.loc[mask] = vals.loc[mask]
+    raw_columns = ["p", "p_value", "p_partial", "p_partial_temp"]
+    for column in raw_columns:
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce")
+        valid_mask = values.notna()
+        raw_p_series.loc[valid_mask] = values.loc[valid_mask]
     
-    return p_perm, p_raw
+    return permutation_p_series, raw_p_series
 
 
-def extract_pvalue_from_dataframe(df: pd.DataFrame, row_idx: int) -> Tuple[float, str]:
+def extract_pvalue_from_dataframe(
+    df: pd.DataFrame,
+    row_index: int,
+) -> Tuple[float, str]:
     """Extract p-value for a row with column name."""
-    if row_idx < 0 or row_idx >= len(df):
+    if row_index < 0 or row_index >= len(df):
         return np.nan, ""
     
-    for col in ["p_partial_perm", "p_partial_temp_perm", "p_perm", "p", "p_value", "p_partial"]:
-        if col in df.columns:
-            p = pd.to_numeric(df.iloc[row_idx][col], errors="coerce")
-            if pd.notna(p):
-                return float(p), col
+    p_value_columns = [
+        "p_partial_perm",
+        "p_partial_temp_perm",
+        "p_perm",
+        "p",
+        "p_value",
+        "p_partial",
+    ]
+    
+    for column in p_value_columns:
+        if column not in df.columns:
+            continue
+        
+        p_value = pd.to_numeric(df.iloc[row_index][column], errors="coerce")
+        if pd.notna(p_value):
+            return float(p_value), column
     
     return np.nan, ""
 
 
 def should_apply_fisher_transform(prefix: str) -> bool:
     """Check if Fisher transform should be applied for measure."""
-    measure = prefix.split("_", 1)[0].lower()
-    return measure in ("aec", "aec_orth", "corr", "pearsonr")
+    measure_name = prefix.split("_", 1)[0].lower()
+    measures_requiring_fisher = ("aec", "aec_orth", "corr", "pearsonr")
+    return measure_name in measures_requiring_fisher
 
 
 def get_cluster_correction_config(
@@ -453,14 +603,39 @@ def get_cluster_correction_config(
     if default_rng_seed is None:
         default_rng_seed = int(get_config_value(config, "project.random_state", 42))
     
-    cluster_cfg = config.get("behavior_analysis.cluster_correction", {}) if config else {}
-    cluster_alpha = float(heatmap_config.get("cluster_alpha", cluster_cfg.get("alpha", alpha)))
-    from eeg_pipeline.utils.config.loader import get_config_value
-    default_n_perm = int(get_config_value(config, "behavior_analysis.cluster_correction.default_n_permutations", get_config_value(config, "statistics.cluster_n_perm", 100)))
-    n_perm = int(heatmap_config.get("n_cluster_perm", cluster_cfg.get("n_permutations", default_n_perm)))
-    seed = int(heatmap_config.get("cluster_rng_seed", cluster_cfg.get("rng_seed", default_rng_seed)))
+    cluster_config = (
+        config.get("behavior_analysis.cluster_correction", {}) if config else {}
+    )
     
-    return cluster_alpha, n_perm, np.random.default_rng(seed), seed
+    cluster_alpha = float(
+        heatmap_config.get("cluster_alpha", cluster_config.get("alpha", alpha))
+    )
+    
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
+    default_n_permutations = int(
+        get_config_value(
+            config,
+            "behavior_analysis.cluster_correction.default_n_permutations",
+            get_config_value(config, "statistics.cluster_n_perm", 100),
+        )
+    )
+    n_permutations = int(
+        heatmap_config.get(
+            "n_cluster_perm",
+            cluster_config.get("n_permutations", default_n_permutations),
+        )
+    )
+    
+    rng_seed = int(
+        heatmap_config.get(
+            "cluster_rng_seed",
+            cluster_config.get("rng_seed", default_rng_seed),
+        )
+    )
+    
+    random_generator = np.random.default_rng(rng_seed)
+    return cluster_alpha, n_permutations, random_generator, rng_seed
 
 
 def compute_fdr_rejections_for_heatmap(
@@ -469,19 +644,29 @@ def compute_fdr_rejections_for_heatmap(
     config: Any,
 ) -> Tuple[Dict[Tuple[int, int], bool], float]:
     """Compute FDR rejections for heatmap."""
-    upper_idx = np.triu_indices(n_nodes, k=1)
-    p_upper = p_value_matrix[upper_idx]
-    valid = np.isfinite(p_upper)
-    p_valid = p_upper[valid]
+    upper_triangle_indices = np.triu_indices(n_nodes, k=1)
+    upper_p_values = p_value_matrix[upper_triangle_indices]
+    valid_mask = np.isfinite(upper_p_values)
+    valid_p_values = upper_p_values[valid_mask]
     
     alpha = get_fdr_alpha(config)
-    rej, crit = fdr_bh_reject(p_valid, alpha=alpha)
+    reject_mask, critical_value = fdr_bh_reject(valid_p_values, alpha=alpha)
     
-    pairs = [(upper_idx[0][k], upper_idx[1][k]) for k in np.where(valid)[0]]
-    rej_map = {pair: bool(rej[k]) for k, pair in enumerate(pairs)}
-    crit_val = float(np.max(p_valid[rej])) if np.any(rej) else np.nan
+    valid_indices = np.where(valid_mask)[0]
+    node_pairs = [
+        (upper_triangle_indices[0][idx], upper_triangle_indices[1][idx])
+        for idx in valid_indices
+    ]
+    rejection_map = {
+        pair: bool(reject_mask[k]) for k, pair in enumerate(node_pairs)
+    }
     
-    return rej_map, crit_val
+    if np.any(reject_mask):
+        critical_p_value = float(np.max(valid_p_values[reject_mask]))
+    else:
+        critical_p_value = np.nan
+    
+    return rejection_map, critical_p_value
 
 
 def hierarchical_fdr(
@@ -557,19 +742,19 @@ def hierarchical_fdr(
         if p_col not in family_df.columns:
             continue
         
-        p_vals = pd.to_numeric(family_df[p_col], errors="coerce").to_numpy()
-        valid = np.isfinite(p_vals)
+        p_values = pd.to_numeric(family_df[p_col], errors="coerce").to_numpy()
+        valid_mask = np.isfinite(p_values)
         
-        if not np.any(valid):
+        if not np.any(valid_mask):
             continue
         
-        q_vals = fdr_bh(p_vals, alpha=alpha, config=config)
-        reject = q_vals < alpha
+        q_values = fdr_bh(p_values, alpha=alpha, config=config)
+        reject_mask = q_values < alpha
         
-        df.loc[mask, "q_within_family"] = q_vals
-        df.loc[mask, "reject_within_family"] = reject
-        df.loc[mask, "family_n_tests"] = int(valid.sum())
-        df.loc[mask, "family_n_reject"] = int(reject.sum()) if np.any(valid) else 0
+        df.loc[mask, "q_within_family"] = q_values
+        df.loc[mask, "reject_within_family"] = reject_mask
+        df.loc[mask, "family_n_tests"] = int(valid_mask.sum())
+        df.loc[mask, "family_n_reject"] = int(reject_mask.sum())
     
     # Apply global FDR
     if p_col in df.columns:
@@ -603,12 +788,12 @@ def compute_effective_n(n_tests: int, correlation_matrix: Optional[np.ndarray] =
     
     try:
         eigenvalues = np.linalg.eigvalsh(correlation_matrix)
-        eigenvalues = eigenvalues[eigenvalues > 0]
+        positive_eigenvalues = eigenvalues[eigenvalues > 0]
         
-        # Li & Ji (2005) method
-        n_eff = 1 + (n_tests - 1) * (1 - np.var(eigenvalues) / n_tests)
-        return max(1, int(np.ceil(n_eff)))
-    except Exception:
+        eigenvalue_variance = np.var(positive_eigenvalues)
+        effective_n = 1 + (n_tests - 1) * (1 - eigenvalue_variance / n_tests)
+        return max(1, int(np.ceil(effective_n)))
+    except (np.linalg.LinAlgError, ValueError):
         return n_tests
 
 
@@ -622,31 +807,45 @@ def build_correlation_matrices_for_prefix(
     min_samples: int = 3,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """Build correlation matrices for connectivity prefix."""
-    from .correlation import compute_correlation  # Local import to avoid circular dependency
+    from .correlation import compute_correlation
     
-    n = len(node_to_index)
-    r_mat = np.full((n, n), np.nan)
-    p_mat = np.full((n, n), np.nan)
+    n_nodes = len(node_to_index)
+    correlation_matrix = np.full((n_nodes, n_nodes), np.nan)
+    p_value_matrix = np.full((n_nodes, n_nodes), np.nan)
     
-    for col in prefix_columns:
-        parts = col.split(prefix + "_", 1)
+    for column in prefix_columns:
+        parts = column.split(prefix + "_", 1)
         if len(parts) < 2:
             continue
-        pair = parts[-1]
+        pair_string = parts[-1]
         
-        for sep in ["--", "-", "_"]:
-            if sep in pair:
-                nodes = pair.split(sep)
-                if len(nodes) == 2:
-                    a, b = nodes
-                    if a in node_to_index and b in node_to_index:
-                        i, j = node_to_index[a], node_to_index[b]
-                        edge = pd.to_numeric(connectivity_df[col], errors="coerce")
-                        valid = edge.notna() & target_values.notna()
-                        if valid.sum() >= min_samples:
-                            r, p = compute_correlation(edge[valid].values, target_values[valid].values, "spearman" if use_spearman else "pearson")
-                            r_mat[i, j] = r_mat[j, i] = r
-                            p_mat[i, j] = p_mat[j, i] = p
+        for separator in ["--", "-", "_"]:
+            if separator in pair_string:
+                node_names = pair_string.split(separator)
+                if len(node_names) != 2:
                     break
+                
+                node_a, node_b = node_names
+                if node_a not in node_to_index or node_b not in node_to_index:
+                    break
+                
+                node_index_a = node_to_index[node_a]
+                node_index_b = node_to_index[node_b]
+                
+                edge_values = pd.to_numeric(connectivity_df[column], errors="coerce")
+                valid_mask = edge_values.notna() & target_values.notna()
+                
+                if valid_mask.sum() >= min_samples:
+                    correlation_method = "spearman" if use_spearman else "pearson"
+                    correlation_value, p_value = compute_correlation(
+                        edge_values[valid_mask].values,
+                        target_values[valid_mask].values,
+                        correlation_method,
+                    )
+                    correlation_matrix[node_index_a, node_index_b] = correlation_value
+                    correlation_matrix[node_index_b, node_index_a] = correlation_value
+                    p_value_matrix[node_index_a, node_index_b] = p_value
+                    p_value_matrix[node_index_b, node_index_a] = p_value
+                break
     
-    return r_mat, p_mat
+    return correlation_matrix, p_value_matrix

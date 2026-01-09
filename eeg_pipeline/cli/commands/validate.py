@@ -5,9 +5,15 @@ from __future__ import annotations
 import argparse
 import json as json_module
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
+
+_MAX_SUBJECTS_TO_VALIDATE = 10
+_MAX_ISSUES_TO_DISPLAY = 10
+_MAX_WARNINGS_TO_DISPLAY = 10
+_MAX_ERROR_MESSAGE_LENGTH = 50
+_MAX_READ_ERROR_LENGTH = 60
 
 
 def setup_validate(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -46,226 +52,431 @@ def setup_validate(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     return parser
 
 
-def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
-    """Execute the validate command."""
+def _collect_subjects_to_validate(
+    subjects_arg: Optional[List[str]],
+    deriv_root: Path,
+    task: str,
+    config: Any,
+) -> List[str]:
+    """Collect subjects to validate from arguments or discover from filesystem."""
     from eeg_pipeline.utils.data.subjects import (
         _collect_subjects_from_derivatives_epochs,
         _collect_subjects_from_features,
     )
-    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path, deriv_stats_path
-    
+
+    if subjects_arg:
+        return [subject.replace("sub-", "") for subject in subjects_arg]
+
+    epochs_subjects = set(
+        _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
+    )
+    features_subjects = set(_collect_subjects_from_features(deriv_root))
+    return list(epochs_subjects | features_subjects)
+
+
+def _validate_tsv_schema(
+    path: Path, *, required: List[str], any_of: Optional[List[str]] = None
+) -> Optional[str]:
+    """Validate TSV file has required columns and optionally one of any_of columns."""
+    import pandas as pd
+
+    try:
+        df = pd.read_csv(path, sep="\t", nrows=5)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError) as exc:
+        error_message = str(exc)[:_MAX_READ_ERROR_LENGTH]
+        return f"Read error: {error_message}"
+
+    available_columns = set(df.columns.astype(str).tolist())
+    missing_required = [col for col in required if col not in available_columns]
+
+    if missing_required:
+        return f"Missing columns: {', '.join(missing_required)}"
+
+    if any_of:
+        has_any_column = any(col in available_columns for col in any_of)
+        if not has_any_column:
+            return f"Missing one of: {', '.join(any_of)}"
+
+    return None
+
+
+def _validate_structure(
+    deriv_root: Path, issues: List[Dict[str, str]], warnings: List[Dict[str, str]], passed: List[str]
+) -> None:
+    """Validate basic directory structure."""
+    epochs_dir = deriv_root / "epochs"
+    if epochs_dir.exists():
+        passed.append("Epochs directory exists")
+    else:
+        issues.append({"type": "structure", "message": "Epochs directory not found"})
+
+    features_root = deriv_root / "features"
+    if features_root.exists():
+        passed.append("Features directory exists")
+    else:
+        warnings.append({
+            "type": "structure",
+            "message": "No features directory (run features compute first)",
+        })
+
+
+def _validate_epochs(
+    deriv_root: Path,
+    subjects: List[str],
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Validate epoch files for subjects."""
+    import mne
+
+    subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
+
+    for subject in subjects_to_check:
+        subject_epochs_dir = deriv_root / "epochs" / f"sub-{subject}"
+
+        if not subject_epochs_dir.exists():
+            warnings.append({
+                "type": "epochs",
+                "subject": subject,
+                "message": "No epochs directory",
+            })
+            continue
+
+        epoch_files = list(subject_epochs_dir.glob("*-epo.fif"))
+        if not epoch_files:
+            warnings.append({
+                "type": "epochs",
+                "subject": subject,
+                "message": "No epoch files found",
+            })
+            continue
+
+        try:
+            epochs = mne.read_epochs(epoch_files[0], preload=False, verbose=False)
+            num_epochs = len(epochs)
+            passed.append(f"sub-{subject}: {num_epochs} epochs valid")
+        except (OSError, ValueError, RuntimeError) as exc:
+            error_message = str(exc)[:_MAX_ERROR_MESSAGE_LENGTH]
+            issues.append({
+                "type": "epochs",
+                "subject": subject,
+                "message": f"Corrupt epoch file: {error_message}",
+            })
+
+
+def _validate_features(
+    deriv_root: Path,
+    subjects: List[str],
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Validate feature files for subjects."""
+    import pandas as pd
+
+    from eeg_pipeline.infra.paths import deriv_features_path
+
+    subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
+
+    for subject in subjects_to_check:
+        features_dir = deriv_features_path(deriv_root, subject)
+        if not features_dir.exists():
+            continue
+
+        tsv_files = list(features_dir.glob("features_*.tsv"))
+        if not tsv_files:
+            warnings.append({
+                "type": "features",
+                "subject": subject,
+                "message": "No feature files",
+            })
+            continue
+
+        for tsv_file in tsv_files:
+            try:
+                df = pd.read_csv(tsv_file, sep="\t", nrows=5)
+
+                has_epoch_or_trial = "epoch" in df.columns or "trial" in df.columns
+                if not has_epoch_or_trial:
+                    warnings.append({
+                        "type": "features",
+                        "subject": subject,
+                        "file": tsv_file.name,
+                        "message": "Missing epoch/trial column",
+                    })
+
+                columns_with_nan = df.columns[df.isna().any()].tolist()
+                if columns_with_nan:
+                    nan_columns_preview = ", ".join(columns_with_nan[:3])
+                    warnings.append({
+                        "type": "features",
+                        "subject": subject,
+                        "file": tsv_file.name,
+                        "message": f"NaN in columns: {nan_columns_preview}",
+                    })
+                else:
+                    passed.append(f"sub-{subject}: {tsv_file.name} valid")
+
+            except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError) as exc:
+                error_message = str(exc)[:40]
+                issues.append({
+                    "type": "features",
+                    "subject": subject,
+                    "file": tsv_file.name,
+                    "message": f"Read error: {error_message}",
+                })
+
+
+def _validate_behavior(
+    deriv_root: Path,
+    subjects: List[str],
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Validate behavior analysis files for subjects."""
+    from eeg_pipeline.infra.paths import deriv_stats_path
+
+    behavior_checks = [
+        (
+            "correlations",
+            "correlations*.tsv",
+            ["feature", "target", "p_primary"],
+            ["r_primary", "r"],
+        ),
+        ("pain_sensitivity", "pain_sensitivity*.tsv", ["feature", "p_primary"], None),
+        (
+            "regression",
+            "regression_feature_effects*.tsv",
+            ["feature", "target", "beta_feature", "p_primary"],
+            None,
+        ),
+        (
+            "models",
+            "models_feature_effects*.tsv",
+            ["feature", "target", "model_family", "beta_feature", "p_primary"],
+            None,
+        ),
+        (
+            "condition_effects",
+            "condition_effects*.tsv",
+            ["feature", "p_primary"],
+            None,
+        ),
+    ]
+
+    subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
+
+    for subject in subjects_to_check:
+        stats_dir = deriv_stats_path(deriv_root, subject)
+        if not stats_dir.exists():
+            warnings.append({
+                "type": "behavior",
+                "subject": subject,
+                "message": "No stats directory (run behavior compute first)",
+            })
+            continue
+
+        trials_files = list(stats_dir.glob("trials*.tsv")) or list(
+            stats_dir.glob("trials*.parquet")
+        )
+        if trials_files:
+            passed.append(
+                f"sub-{subject}: trial table present ({trials_files[0].name})"
+            )
+        else:
+            warnings.append({
+                "type": "behavior",
+                "subject": subject,
+                "message": "Missing trials*.tsv (trial table not found)",
+            })
+
+        for check_name, pattern, required_cols, any_of_cols in behavior_checks:
+            for path in stats_dir.glob(pattern):
+                error = _validate_tsv_schema(
+                    path, required=required_cols, any_of=any_of_cols
+                )
+                if error:
+                    warnings.append({
+                        "type": "behavior",
+                        "subject": subject,
+                        "file": path.name,
+                        "message": f"{check_name}: {error}",
+                    })
+                else:
+                    passed.append(f"sub-{subject}: {path.name} schema OK")
+
+
+def _validate_bids(
+    config: Any,
+    issues: List[Dict[str, str]],
+    warnings: List[Dict[str, str]],
+    passed: List[str],
+) -> None:
+    """Validate BIDS structure."""
+    bids_root = getattr(config, "bids_root", None)
+
+    if not bids_root or not Path(bids_root).exists():
+        warnings.append({
+            "type": "bids",
+            "message": "BIDS root not configured or not found",
+        })
+        return
+
+    bids_path = Path(bids_root)
+    description_file = bids_path / "dataset_description.json"
+    if description_file.exists():
+        passed.append("dataset_description.json exists")
+    else:
+        issues.append({
+            "type": "bids",
+            "message": "Missing dataset_description.json",
+        })
+
+    participants_file = bids_path / "participants.tsv"
+    if participants_file.exists():
+        passed.append("participants.tsv exists")
+    else:
+        warnings.append({"type": "bids", "message": "Missing participants.tsv"})
+
+
+def _determine_status(issues: List[Any], warnings: List[Any]) -> str:
+    """Determine overall validation status."""
+    if issues:
+        return "error"
+    if warnings:
+        return "warning"
+    return "ok"
+
+
+def _format_subject_prefix(issue_or_warning: Dict[str, Any]) -> str:
+    """Format subject prefix for display."""
+    subject = issue_or_warning.get("subject", "")
+    return f"sub-{subject}: " if subject else ""
+
+
+def _output_json_report(
+    subjects: List[str],
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Output validation results as JSON."""
+    status = _determine_status(issues, warnings)
+    report = {
+        "status": status,
+        "subjects_checked": len(subjects),
+        "issues": issues,
+        "warnings": warnings,
+        "passed": len(passed),
+    }
+    print(json_module.dumps(report, indent=2))
+
+
+def _output_text_report(
+    mode: str,
+    subjects: List[str],
+    issues: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+    passed: List[str],
+) -> None:
+    """Output validation results as formatted text."""
+    print("=" * 50)
+    print("       DATA VALIDATION REPORT")
+    print("=" * 50)
+    print()
+    print(f"  Mode: {mode}")
+    print(f"  Subjects checked: {len(subjects)}")
+    print()
+
+    if issues:
+        print("  ✗ ERRORS")
+        print("  " + "-" * 30)
+        issues_to_display = issues[:_MAX_ISSUES_TO_DISPLAY]
+        for issue in issues_to_display:
+            subject_prefix = _format_subject_prefix(issue)
+            print(f"    {subject_prefix}{issue['message']}")
+        remaining_issues = len(issues) - _MAX_ISSUES_TO_DISPLAY
+        if remaining_issues > 0:
+            print(f"    ... and {remaining_issues} more")
+        print()
+
+    if warnings:
+        print("  ⚠ WARNINGS")
+        print("  " + "-" * 30)
+        warnings_to_display = warnings[:_MAX_WARNINGS_TO_DISPLAY]
+        for warning in warnings_to_display:
+            subject_prefix = _format_subject_prefix(warning)
+            print(f"    {subject_prefix}{warning['message']}")
+        remaining_warnings = len(warnings) - _MAX_WARNINGS_TO_DISPLAY
+        if remaining_warnings > 0:
+            print(f"    ... and {remaining_warnings} more")
+        print()
+
+    print("  SUMMARY")
+    print("  " + "-" * 30)
+    status = _determine_status(issues, warnings)
+    status_text = (
+        "✗ FAILED" if status == "error" else ("⚠ WARNINGS" if status == "warning" else "✓ PASSED")
+    )
+    status_color_code = (
+        "\033[91m" if status == "error" else ("\033[93m" if status == "warning" else "\033[92m")
+    )
+    print(f"  Status: {status_color_code}{status_text}\033[0m")
+    print(f"  Passed: {len(passed)}")
+    print(f"  Issues: {len(issues)}")
+    print(f"  Warnings: {len(warnings)}")
+    print()
+
+
+def _should_validate_mode(mode: str, target_mode: str) -> bool:
+    """Check if validation mode should run for given target mode."""
+    return mode in [target_mode, "all"]
+
+
+def run_validate(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Execute the validate command."""
+    from eeg_pipeline.infra.paths import resolve_deriv_root
+
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
-    
-    issues = []
-    warnings = []
-    passed = []
-    
-    if args.subjects:
-        validate_subjects = [s.replace("sub-", "") for s in args.subjects]
-    else:
-        epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
-        features_subjects = set(_collect_subjects_from_features(deriv_root))
-        validate_subjects = list(epochs_subjects | features_subjects)
-    
-    if not validate_subjects:
+
+    subjects_to_validate = _collect_subjects_to_validate(
+        args.subjects, deriv_root, task, config
+    )
+
+    if not subjects_to_validate:
         if args.output_json:
-            print(json_module.dumps({"status": "no_subjects", "issues": [], "warnings": []}))
+            print(json_module.dumps({
+                "status": "no_subjects",
+                "issues": [],
+                "warnings": [],
+            }))
         else:
             print("No subjects found to validate")
         return
-    
-    if args.mode in ["quick", "all"]:
-        epochs_dir = deriv_root / "epochs"
-        if not epochs_dir.exists():
-            issues.append({"type": "structure", "message": "Epochs directory not found"})
-        else:
-            passed.append("Epochs directory exists")
-        
-        features_root = deriv_root / "features"
-        if not features_root.exists():
-            warnings.append({"type": "structure", "message": "No features directory (run features compute first)"})
-        else:
-            passed.append("Features directory exists")
-    
-    if args.mode in ["epochs", "all"]:
-        import mne
-        
-        for subj in validate_subjects[:10]:
-            subj_epochs_dir = deriv_root / "epochs" / f"sub-{subj}"
-            if not subj_epochs_dir.exists():
-                warnings.append({"type": "epochs", "subject": subj, "message": "No epochs directory"})
-                continue
-            
-            epoch_files = list(subj_epochs_dir.glob("*-epo.fif"))
-            if not epoch_files:
-                warnings.append({"type": "epochs", "subject": subj, "message": "No epoch files found"})
-                continue
-            
-            try:
-                epochs = mne.read_epochs(epoch_files[0], preload=False, verbose=False)
-                n_epochs = len(epochs)
-                passed.append(f"sub-{subj}: {n_epochs} epochs valid")
-            except Exception as e:
-                issues.append({"type": "epochs", "subject": subj, "message": f"Corrupt epoch file: {str(e)[:50]}"})
-    
-    if args.mode in ["features", "all"]:
-        import pandas as pd
-        
-        for subj in validate_subjects[:10]:
-            features_dir = deriv_features_path(deriv_root, subj)
-            if not features_dir.exists():
-                continue
-            
-            tsv_files = list(features_dir.glob("features_*.tsv"))
-            if not tsv_files:
-                warnings.append({"type": "features", "subject": subj, "message": "No feature files"})
-                continue
-            
-            for tsv in tsv_files:
-                try:
-                    df = pd.read_csv(tsv, sep="\t", nrows=5)
-                    
-                    if "epoch" not in df.columns and "trial" not in df.columns:
-                        warnings.append({
-                            "type": "features",
-                            "subject": subj,
-                            "file": tsv.name,
-                            "message": "Missing epoch/trial column"
-                        })
-                    
-                    nan_cols = df.columns[df.isna().any()].tolist()
-                    if nan_cols:
-                        warnings.append({
-                            "type": "features",
-                            "subject": subj,
-                            "file": tsv.name,
-                            "message": f"NaN in columns: {', '.join(nan_cols[:3])}"
-                        })
-                    else:
-                        passed.append(f"sub-{subj}: {tsv.name} valid")
-                        
-                except Exception as e:
-                    issues.append({
-                        "type": "features",
-                        "subject": subj,
-                        "file": tsv.name,
-                        "message": f"Read error: {str(e)[:40]}"
-                    })
 
-    if args.mode in ["behavior", "all"]:
-        import pandas as pd
+    issues: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    passed: List[str] = []
 
-        def _validate_tsv_schema(path: Path, *, required: List[str], any_of: Optional[List[str]] = None) -> Optional[str]:
-            try:
-                df = pd.read_csv(path, sep="\t", nrows=5)
-            except Exception as exc:
-                return f"Read error: {str(exc)[:60]}"
-            cols = set(df.columns.astype(str).tolist())
-            missing = [c for c in required if c not in cols]
-            if missing:
-                return f"Missing columns: {', '.join(missing)}"
-            if any_of:
-                if not any(c in cols for c in any_of):
-                    return f"Missing one of: {', '.join(any_of)}"
-            return None
+    if _should_validate_mode(args.mode, "quick"):
+        _validate_structure(deriv_root, issues, warnings, passed)
 
-        behavior_checks = [
-            ("correlations", "correlations*.tsv", ["feature", "target", "p_primary"], ["r_primary", "r"]),
-            ("pain_sensitivity", "pain_sensitivity*.tsv", ["feature", "p_primary"], None),
-            ("regression", "regression_feature_effects*.tsv", ["feature", "target", "beta_feature", "p_primary"], None),
-            ("models", "models_feature_effects*.tsv", ["feature", "target", "model_family", "beta_feature", "p_primary"], None),
-            ("condition_effects", "condition_effects*.tsv", ["feature", "p_primary"], None),
-        ]
+    if _should_validate_mode(args.mode, "epochs"):
+        _validate_epochs(deriv_root, subjects_to_validate, issues, warnings, passed)
 
-        for subj in validate_subjects[:10]:
-            stats_dir = deriv_stats_path(deriv_root, subj)
-            if not stats_dir.exists():
-                warnings.append({"type": "behavior", "subject": subj, "message": "No stats directory (run behavior compute first)"})
-                continue
+    if _should_validate_mode(args.mode, "features"):
+        _validate_features(deriv_root, subjects_to_validate, issues, warnings, passed)
 
-            trials_files = list(stats_dir.glob("trials*.tsv")) or list(stats_dir.glob("trials*.parquet"))
-            if not trials_files:
-                warnings.append({"type": "behavior", "subject": subj, "message": "Missing trials*.tsv (trial table not found)"})
-            else:
-                passed.append(f"sub-{subj}: trial table present ({trials_files[0].name})")
+    if _should_validate_mode(args.mode, "behavior"):
+        _validate_behavior(deriv_root, subjects_to_validate, issues, warnings, passed)
 
-            for check_name, pattern, required_cols, any_of_cols in behavior_checks:
-                for path in stats_dir.glob(pattern):
-                    err = _validate_tsv_schema(path, required=required_cols, any_of=any_of_cols)
-                    if err:
-                        warnings.append({
-                            "type": "behavior",
-                            "subject": subj,
-                            "file": path.name,
-                            "message": f"{check_name}: {err}",
-                        })
-                    else:
-                        passed.append(f"sub-{subj}: {path.name} schema OK")
-    
-    if args.mode in ["bids", "all"]:
-        bids_root = config.bids_root if hasattr(config, "bids_root") else None
-        
-        if bids_root and Path(bids_root).exists():
-            desc_file = Path(bids_root) / "dataset_description.json"
-            if desc_file.exists():
-                passed.append("dataset_description.json exists")
-            else:
-                issues.append({"type": "bids", "message": "Missing dataset_description.json"})
-            
-            participants_file = Path(bids_root) / "participants.tsv"
-            if participants_file.exists():
-                passed.append("participants.tsv exists")
-            else:
-                warnings.append({"type": "bids", "message": "Missing participants.tsv"})
-        else:
-            warnings.append({"type": "bids", "message": "BIDS root not configured or not found"})
-    
+    if _should_validate_mode(args.mode, "bids"):
+        _validate_bids(config, issues, warnings, passed)
+
     if args.output_json:
-        print(json_module.dumps({
-            "status": "error" if issues else ("warning" if warnings else "ok"),
-            "subjects_checked": len(validate_subjects),
-            "issues": issues,
-            "warnings": warnings,
-            "passed": len(passed),
-        }, indent=2))
+        _output_json_report(subjects_to_validate, issues, warnings, passed)
     else:
-        print("=" * 50)
-        print("       DATA VALIDATION REPORT")
-        print("=" * 50)
-        print()
-        print(f"  Mode: {args.mode}")
-        print(f"  Subjects checked: {len(validate_subjects)}")
-        print()
-        
-        if issues:
-            print("  ✗ ERRORS")
-            print("  " + "-" * 30)
-            for issue in issues[:10]:
-                subj = issue.get("subject", "")
-                subj_str = f"sub-{subj}: " if subj else ""
-                print(f"    {subj_str}{issue['message']}")
-            if len(issues) > 10:
-                print(f"    ... and {len(issues) - 10} more")
-            print()
-        
-        if warnings:
-            print("  ⚠ WARNINGS")
-            print("  " + "-" * 30)
-            for warn in warnings[:10]:
-                subj = warn.get("subject", "")
-                subj_str = f"sub-{subj}: " if subj else ""
-                print(f"    {subj_str}{warn['message']}")
-            if len(warnings) > 10:
-                print(f"    ... and {len(warnings) - 10} more")
-            print()
-        
-        print("  SUMMARY")
-        print("  " + "-" * 30)
-        summary_status = "✗ FAILED" if issues else ("⚠ WARNINGS" if warnings else "✓ PASSED")
-        status_color = "\033[91m" if issues else ("\033[93m" if warnings else "\033[92m")
-        print(f"  Status: {status_color}{summary_status}\033[0m")
-        print(f"  Passed: {len(passed)}")
-        print(f"  Issues: {len(issues)}")
-        print(f"  Warnings: {len(warnings)}")
-        print()
+        _output_text_report(args.mode, subjects_to_validate, issues, warnings, passed)

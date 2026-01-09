@@ -7,7 +7,6 @@ This module consolidates all feature extraction entry points:
 - FeaturePipeline: PipelineBase subclass for batch processing
 - extract_all_features: TFR-based feature extraction
 - extract_precomputed_features: Precomputed-based feature extraction
-- extract_precomputed_features: Precomputed-based feature extraction
 
 The pipeline class selects TFR vs precomputed mode internally based on config.
 
@@ -26,7 +25,9 @@ Usage:
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
@@ -35,11 +36,30 @@ import pandas as pd
 if TYPE_CHECKING:
     import mne
 
+from eeg_pipeline.analysis.features.api import (
+    extract_all_features,
+    extract_precomputed_features,
+)
+from eeg_pipeline.analysis.features.preparation import precompute_data
+from eeg_pipeline.analysis.features.results import (
+    ExtractionResult,
+    FeatureExtractionResult,
+    FeatureSet,
+)
+from eeg_pipeline.analysis.features.selection import resolve_feature_categories
 from eeg_pipeline.context.features import FeatureContext
+from eeg_pipeline.infra.paths import (
+    _load_events_df,
+    deriv_features_path,
+    ensure_dir,
+)
+from eeg_pipeline.infra.tsv import write_tsv
 from eeg_pipeline.pipelines.base import PipelineBase
-from eeg_pipeline.types import PrecomputedData
-from eeg_pipeline.infra.paths import deriv_features_path, deriv_plots_path, ensure_dir, _load_events_df
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
+from eeg_pipeline.types import PrecomputedData
+from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
+from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
+from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.utils.data.columns import pick_target_column
 from eeg_pipeline.utils.data.epochs import load_epochs_for_analysis
 from eeg_pipeline.utils.data.features import align_feature_dataframes
@@ -48,122 +68,348 @@ from eeg_pipeline.utils.data.feature_io import (
     save_dropped_trials_log,
     save_trial_alignment_manifest,
 )
-from eeg_pipeline.utils.config.loader import get_frequency_band_names
-
-from eeg_pipeline.analysis.features.api import (
-    extract_all_features as _extract_all_features,
-    extract_precomputed_features as _extract_precomputed_features,
-)
-from eeg_pipeline.analysis.features.selection import resolve_feature_categories
-from eeg_pipeline.analysis.features.results import (
-    FeatureSet,
-    ExtractionResult,
-    FeatureExtractionResult,
-)
 
 
-###################################################################
-# TFR-Based Feature Extraction
-###################################################################
+_FEATURE_ACCUMULATOR_KEYS = [
+    "power",
+    "baseline",
+    "connectivity",
+    "aperiodic",
+    "erp",
+    "itpc",
+    "pac",
+    "pac_trials",
+    "pac_time",
+    "complexity",
+    "bursts",
+    "spectral",
+    "erds",
+    "ratios",
+    "asymmetry",
+    "quality",
+]
+
+_TFR_CATEGORIES = {"power", "itpc", "pac"}
+_PRECOMPUTE_CATEGORIES = {
+    "connectivity",
+    "erds",
+    "ratios",
+    "asymmetry",
+    "pac",
+    "complexity",
+    "bursts",
+}
 
 
-def _resolve_feature_categories(config: Any, requested: Optional[List[str]]) -> List[str]:
-    return resolve_feature_categories(config, requested)
+def _resolve_time_ranges(explicit_windows: Optional[List[Dict[str, Any]]], tmin: Optional[float], tmax: Optional[float]) -> List[Dict[str, Any]]:
+    """Resolve time ranges from explicit windows or single range parameters."""
+    if explicit_windows:
+        return list(explicit_windows)
+    return [{"name": None, "tmin": tmin, "tmax": tmax}]
 
 
-def extract_all_features(
-    ctx: FeatureContext,
-) -> FeatureExtractionResult:
-    return _extract_all_features(ctx)
+def _calculate_total_steps(n_ranges: int) -> int:
+    """Calculate total progress steps: load + 3 per time range (extract, align, save)."""
+    return 1 + (n_ranges * 3)
 
 
-###################################################################
-# Precomputed-Based Feature Extraction
-###################################################################
+def _load_fixed_templates(templates_path: Optional[Path], logger: Any) -> tuple[Optional[np.ndarray], Optional[List[str]]]:
+    """Load fixed templates from file if path exists."""
+    if templates_path is None or not templates_path.exists():
+        return None, None
+    
+    data = np.load(templates_path)
+    templates = data["templates"]
+    ch_names = data.get("ch_names")
+    logger.info(f"Loaded fixed templates from {templates_path}")
+    return templates, ch_names
 
 
-def extract_precomputed_features(
+def _precompute_tfr_if_needed(
     epochs: "mne.Epochs",
-    bands: List[str],
+    time_ranges: List[Dict[str, Any]],
+    feature_categories: List[str],
     config: Any,
     logger: Any,
-    *,
-    feature_groups: Optional[List[str]] = None,
-    events_df: Optional[pd.DataFrame] = None,
-    precomputed: Optional[PrecomputedData] = None,
-) -> ExtractionResult:
-    return _extract_precomputed_features(
+) -> Optional[Any]:
+    """Pre-compute TFR on full epochs if multiple ranges and TFR categories requested."""
+    needs_tfr = len(time_ranges) > 1 and any(cat in feature_categories for cat in _TFR_CATEGORIES)
+    if not needs_tfr:
+        return None
+    
+    logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
+    return compute_tfr_morlet(epochs, config, logger=logger)
+
+
+def _precompute_intermediates_if_needed(
+    epochs: "mne.Epochs",
+    time_ranges: List[Dict[str, Any]],
+    feature_categories: List[str],
+    bands: Optional[List[str]],
+    config: Any,
+    logger: Any,
+) -> Optional[PrecomputedData]:
+    """Pre-compute shared intermediates if multiple ranges and precompute categories requested."""
+    needs_precompute = len(time_ranges) > 1 and any(
+        cat in feature_categories for cat in _PRECOMPUTE_CATEGORIES
+    )
+    if not needs_precompute:
+        return None
+    
+    logger.info("Pre-computing shared intermediates on full epochs for multi-range extraction...")
+    resolved_bands = bands or get_frequency_band_names(config)
+    windows_spec = TimeWindowSpec(
+        times=epochs.times,
+        config=config,
+        sampling_rate=float(epochs.info["sfreq"]),
+        logger=logger,
+        explicit_windows=time_ranges,
+    )
+    return precompute_data(
         epochs,
-        bands,
+        resolved_bands,
         config,
         logger,
-        feature_groups=feature_groups,
-        events_df=events_df,
-        precomputed=precomputed,
+        compute_psd_data=True,
+        windows_spec=windows_spec,
     )
 
 
+def _create_feature_accumulator() -> Dict[str, List[pd.DataFrame]]:
+    """Create accumulator dictionary for merging features from multiple time ranges."""
+    return {key: [] for key in _FEATURE_ACCUMULATOR_KEYS}
 
 
-###################################################################
-# Pipeline Class
-###################################################################
+def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]:
+    """Extract all feature DataFrames and column lists from extraction result."""
+    return {
+        "pow_df": features.pow_df,
+        "pow_cols": features.pow_cols,
+        "baseline_df": features.baseline_df,
+        "baseline_cols": features.baseline_cols,
+        "conn_df": features.conn_df,
+        "conn_cols": features.conn_cols,
+        "aper_df": features.aper_df,
+        "aper_cols": features.aper_cols,
+        "erp_df": features.erp_df,
+        "erp_cols": features.erp_cols,
+        "itpc_df": features.phase_df,
+        "itpc_cols": features.phase_cols,
+        "itpc_trial_df": features.itpc_trial_df,
+        "itpc_trial_cols": features.itpc_trial_cols,
+        "pac_df": features.pac_df,
+        "pac_trials_df": features.pac_trials_df,
+        "pac_time_df": features.pac_time_df,
+        "comp_df": features.comp_df,
+        "comp_cols": features.comp_cols,
+        "bursts_df": features.bursts_df,
+        "bursts_cols": features.bursts_cols,
+        "spectral_df": features.spectral_df,
+        "spectral_cols": features.spectral_cols,
+        "erds_df": features.erds_df,
+        "erds_cols": features.erds_cols,
+        "ratios_df": features.ratios_df,
+        "ratios_cols": features.ratios_cols,
+        "asymmetry_df": features.asymmetry_df,
+        "asymmetry_cols": features.asymmetry_cols,
+        "quality_df": features.quality_df,
+        "quality_cols": features.quality_cols,
+        "aper_qc": features.aper_qc,
+    }
+
+
+def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionResult) -> Dict[str, pd.DataFrame]:
+    """Build extra blocks dictionary for alignment, filtering out None/empty DataFrames."""
+    extra_blocks = {
+        "itpc": unpacked["itpc_df"],
+        "itpc_trial": unpacked["itpc_trial_df"],
+        "pac": unpacked["pac_df"],
+        "pac_trials": unpacked["pac_trials_df"],
+        "pac_time": unpacked["pac_time_df"],
+        "complexity": unpacked["comp_df"],
+        "spectral": unpacked["spectral_df"],
+        "erp": unpacked["erp_df"],
+        "bursts": unpacked["bursts_df"],
+        "erds": unpacked["erds_df"],
+        "ratios": features.ratios_df,
+        "asymmetry": features.asymmetry_df,
+        "quality": features.quality_df,
+    }
+    return {
+        k: v
+        for k, v in extra_blocks.items()
+        if v is not None and not getattr(v, "empty", False)
+    }
+
+
+def _update_from_aligned_extra(
+    unpacked: Dict[str, Any],
+    features: FeatureExtractionResult,
+    extra_aligned: Dict[str, pd.DataFrame],
+) -> None:
+    """Update unpacked dict and features object with aligned extra blocks."""
+    unpacked["itpc_df"] = extra_aligned.get("itpc", unpacked["itpc_df"])
+    unpacked["itpc_trial_df"] = extra_aligned.get("itpc_trial", unpacked["itpc_trial_df"])
+    unpacked["pac_df"] = extra_aligned.get("pac", unpacked["pac_df"])
+    unpacked["pac_trials_df"] = extra_aligned.get("pac_trials", unpacked["pac_trials_df"])
+    unpacked["pac_time_df"] = extra_aligned.get("pac_time", unpacked["pac_time_df"])
+    unpacked["comp_df"] = extra_aligned.get("complexity", unpacked["comp_df"])
+    unpacked["spectral_df"] = extra_aligned.get("spectral", unpacked["spectral_df"])
+    unpacked["erp_df"] = extra_aligned.get("erp", unpacked["erp_df"])
+    unpacked["bursts_df"] = extra_aligned.get("bursts", unpacked["bursts_df"])
+    unpacked["erds_df"] = extra_aligned.get("erds", unpacked["erds_df"])
+    features.ratios_df = extra_aligned.get("ratios", features.ratios_df)
+    features.asymmetry_df = extra_aligned.get("asymmetry", features.asymmetry_df)
+    features.quality_df = extra_aligned.get("quality", features.quality_df)
+
+
+def _build_feature_qc(features: FeatureExtractionResult, ctx: FeatureContext) -> Dict[str, Any]:
+    """Build feature QC dictionary from extraction result and context."""
+    qc: Dict[str, Any] = {}
+    if features.aper_qc is not None:
+        qc["aperiodic"] = features.aper_qc
+    if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
+        try:
+            qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
+        except TypeError:
+            qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+    return qc
+
+
+def _accumulate_features(
+    accumulated: Dict[str, List[pd.DataFrame]],
+    unpacked: Dict[str, Any],
+    features: FeatureExtractionResult,
+    aligned: Dict[str, pd.DataFrame],
+) -> None:
+    """Accumulate aligned features for later merging."""
+    feature_mapping = {
+        "power": aligned.get("pow_df_aligned"),
+        "baseline": aligned.get("baseline_df_aligned"),
+        "connectivity": aligned.get("conn_df_aligned"),
+        "aperiodic": aligned.get("aper_df_aligned"),
+        "erp": unpacked["erp_df"],
+        "itpc": unpacked["itpc_df"],
+        "pac": unpacked["pac_df"],
+        "pac_trials": unpacked["pac_trials_df"],
+        "pac_time": unpacked["pac_time_df"],
+        "complexity": unpacked["comp_df"],
+        "bursts": unpacked["bursts_df"],
+        "spectral": unpacked["spectral_df"],
+        "erds": unpacked["erds_df"],
+        "ratios": features.ratios_df,
+        "asymmetry": features.asymmetry_df,
+        "quality": features.quality_df,
+    }
+    
+    for key, df in feature_mapping.items():
+        if df is not None and not df.empty:
+            accumulated[key].append(df)
+
+
+def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Merge DataFrames by concatenating columns, avoiding duplicates."""
+    valid_dfs = [df for df in dfs if df is not None and not df.empty]
+    if not valid_dfs:
+        return None
+    if len(valid_dfs) == 1:
+        return valid_dfs[0]
+    
+    merged = pd.concat(valid_dfs, axis=1)
+    merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
+    return merged
+
+
+def _save_merged_features(
+    accumulated: Dict[str, List[pd.DataFrame]],
+    features_dir: Path,
+    logger: Any,
+) -> None:
+    """Merge and save accumulated features from multiple time ranges."""
+    feature_file_mapping = {
+        "power": ("features_power.tsv", ["power", "baseline"]),
+        "connectivity": ("features_connectivity.tsv", ["connectivity"]),
+        "aperiodic": ("features_aperiodic.tsv", ["aperiodic"]),
+        "erp": ("features_erp.tsv", ["erp"]),
+        "itpc": ("features_itpc.tsv", ["itpc"]),
+        "pac": ("features_pac.tsv", ["pac"]),
+        "pac_trials": ("features_pac_trials.tsv", ["pac_trials"]),
+        "complexity": ("features_complexity.tsv", ["complexity"]),
+        "bursts": ("features_bursts.tsv", ["bursts"]),
+        "spectral": ("features_spectral.tsv", ["spectral"]),
+        "erds": ("features_erds.tsv", ["erds"]),
+        "ratios": ("features_ratios.tsv", ["ratios"]),
+        "asymmetry": ("features_asymmetry.tsv", ["asymmetry"]),
+        "quality": ("features_quality.tsv", ["quality"]),
+    }
+    
+    for filename, keys in feature_file_mapping.values():
+        dfs_to_merge = []
+        for key in keys:
+            dfs_to_merge.extend(accumulated.get(key, []))
+        
+        merged_df = _merge_dataframes(dfs_to_merge)
+        if merged_df is not None:
+            write_tsv(merged_df, features_dir / filename)
+            feature_name = filename.replace("features_", "").replace(".tsv", "")
+            logger.info(f"Saved merged {feature_name} features: {merged_df.shape[1]} columns")
+
+
+def _save_extraction_config(
+    config: Dict[str, Any],
+    features_dir: Path,
+    suffix: Optional[str],
+    logger: Any,
+) -> None:
+    """Save extraction configuration to JSON file."""
+    config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
+    config_path = features_dir / config_name
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    logger.info(f"Saved extraction config: {config_path}")
 
 
 class FeaturePipeline(PipelineBase):
     """Pipeline for EEG feature extraction."""
-    
-    def __init__(self, config: Optional[Any] = None):
-        super().__init__(
-            name="feature_extraction",
-            config=config,
-        )
 
-    def run_batch(self, subjects: List[str], task: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
-        ledger = super().run_batch(subjects, task=task, **kwargs)
-        
-        return ledger
+    def __init__(self, config: Optional[Any] = None):
+        super().__init__(name="feature_extraction", config=config)
 
     def process_subject(self, subject: str, task: Optional[str] = None, **kwargs) -> None:
         from eeg_pipeline.cli.common import ProgressReporter
-        
+
         task = task or self.config.get("project.task")
         if task is None:
             raise ValueError("Missing required config value: project.task")
-        fixed_templates_path = kwargs.get("fixed_templates_path")
-        feature_categories = _resolve_feature_categories(self.config, kwargs.get("feature_categories"))
-        
-        # Initialize progress reporter
+
+        feature_categories = resolve_feature_categories(
+            self.config, kwargs.get("feature_categories")
+        )
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
-        
+
         self.logger.info(f"=== Feature extraction: sub-{subject}, task-{task} ===")
         self.logger.info("Feature categories: %s", ", ".join(feature_categories))
-        
         progress.subject_start(f"sub-{subject}")
-        
+
         features_dir = deriv_features_path(self.deriv_root, subject)
         ensure_dir(features_dir)
-        
         setup_matplotlib(self.config)
 
-        # Determine time ranges early to calculate total steps
         explicit_windows = kwargs.get("time_ranges")
-        time_ranges_raw = list(explicit_windows) if explicit_windows else None
-        if not time_ranges_raw:
-            time_ranges_raw = [
-                {"name": None, "tmin": kwargs.get("tmin"), "tmax": kwargs.get("tmax")}
-            ]
-        
-        # Calculate total steps dynamically: load + 3 per time range (extract, align, save)
-        n_ranges = len(time_ranges_raw)
-        total_steps = 1 + (n_ranges * 3)
+        time_ranges = _resolve_time_ranges(explicit_windows, kwargs.get("tmin"), kwargs.get("tmax"))
+        total_steps = _calculate_total_steps(len(time_ranges))
         current_step = 0
 
         current_step += 1
         progress.step("Loading epochs", current=current_step, total=total_steps)
         epochs, aligned_events = load_epochs_for_analysis(
-            subject, task, align="strict", preload=True,
-            deriv_root=self.deriv_root, logger=self.logger, config=self.config,
+            subject,
+            task,
+            align="strict",
+            preload=True,
+            deriv_root=self.deriv_root,
+            logger=self.logger,
+            config=self.config,
         )
 
         if epochs is None:
@@ -176,11 +422,21 @@ class FeaturePipeline(PipelineBase):
             progress.error("no_events", "No aligned events")
             return
 
-        original_events = _load_events_df(subject, task, bids_root=self.config.bids_root, config=self.config)
+        original_events = _load_events_df(
+            subject, task, bids_root=self.config.bids_root, config=self.config
+        )
         if original_events is not None:
-            save_dropped_trials_log(epochs, original_events, features_dir / "dropped_trials.tsv", self.logger)
+            save_dropped_trials_log(
+                epochs, original_events, features_dir / "dropped_trials.tsv", self.logger
+            )
 
-        save_trial_alignment_manifest(aligned_events, epochs, features_dir / "trial_alignment.json", self.config, self.logger)
+        save_trial_alignment_manifest(
+            aligned_events,
+            epochs,
+            features_dir / "trial_alignment.json",
+            self.config,
+            self.logger,
+        )
 
         target_columns = list(self.config.get("event_columns.rating", []) or [])
         target_col = pick_target_column(aligned_events, target_columns=target_columns)
@@ -190,96 +446,45 @@ class FeaturePipeline(PipelineBase):
 
         y = pd.to_numeric(aligned_events[target_col], errors="coerce")
 
-        fixed_templates = None
-        fixed_template_ch_names = None
-        if fixed_templates_path and fixed_templates_path.exists():
-            data = np.load(fixed_templates_path)
-            fixed_templates = data["templates"]
-            fixed_template_ch_names = data.get("ch_names")
-            self.logger.info(f"Loaded fixed templates from {fixed_templates_path}")
+        fixed_templates_path = kwargs.get("fixed_templates_path")
+        fixed_templates, fixed_template_ch_names = _load_fixed_templates(
+            fixed_templates_path, self.logger
+        )
 
-        # Time ranges already determined above for step calculation
-        time_ranges = time_ranges_raw
-        ranges_to_process = time_ranges
+        tfr_full = _precompute_tfr_if_needed(
+            epochs, time_ranges, feature_categories, self.config, self.logger
+        )
 
-        # Optimization: Pre-compute TFR on full epochs if we have multiple ranges
-        # and TFR is needed for the requested categories.
-        tfr_full = None
-        tfr_categories = {"power", "itpc", "pac"}
-        if len(time_ranges) > 1 and any(cat in feature_categories for cat in tfr_categories):
-            from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
-            self.logger.info("Pre-computing TFR on full epochs for multi-range extraction...")
-            tfr_full = compute_tfr_morlet(epochs, self.config, logger=self.logger)
+        precomputed_full = _precompute_intermediates_if_needed(
+            epochs,
+            time_ranges,
+            feature_categories,
+            kwargs.get("bands"),
+            self.config,
+            self.logger,
+        )
 
-        # Optimization: Pre-compute shared intermediates on full epochs
-        precomputed_full = None
-        precompute_categories = {
-            "connectivity", "erds", "ratios", "asymmetry", "pac", "complexity", "bursts"
-        }
-        if len(time_ranges) > 1 and any(cat in feature_categories for cat in precompute_categories):
-            from eeg_pipeline.analysis.features.preparation import precompute_data
-            from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec
-            self.logger.info("Pre-computing shared intermediates on full epochs for multi-range extraction...")
-            # Use all bands requested or in config
-            bands = kwargs.get("bands") or get_frequency_band_names(self.config)
-            # Create a TimeWindowSpec using the user-specified time ranges, not config
-            user_windows_spec = TimeWindowSpec(
-                times=epochs.times,
-                config=self.config,
-                sampling_rate=float(epochs.info["sfreq"]),
-                logger=self.logger,
-                explicit_windows=time_ranges,  # Pass user's time ranges
-            )
-            precomputed_full = precompute_data(
-                epochs,
-                bands,
-                self.config,
-                self.logger,
-                compute_psd_data=True,
-                windows_spec=user_windows_spec,
-            )
-
-        # Accumulators for merging features from all time ranges into default files
-        # This ensures all segment features (baseline, active, ramp, etc.) are available
-        # in the default feature files for behavior analysis
-        accumulated_features: Dict[str, List[pd.DataFrame]] = {
-            "power": [],
-            "baseline": [],
-            "connectivity": [],
-            "aperiodic": [],
-            "erp": [],
-            "itpc": [],
-            "pac": [],
-            "pac_trials": [],
-            "pac_time": [],
-            "complexity": [],
-            "bursts": [],
-            "spectral": [],
-            "erds": [],
-            "ratios": [],
-            "asymmetry": [],
-            "quality": [],
-        }
+        accumulated_features = _create_feature_accumulator()
         accumulated_y = None
-        
-        for tr_spec in ranges_to_process:
+
+        for tr_spec in time_ranges:
             name = tr_spec.get("name")
             tmin = tr_spec.get("tmin")
             tmax = tr_spec.get("tmax")
 
-            # Validate and swap if needed
             if tmin is not None and tmax is not None and tmin > tmax:
                 self.logger.warning(
                     f"Time range '{name}' has tmin ({tmin}) > tmax ({tmax}). Swapping values."
                 )
                 tmin, tmax = tmax, tmin
-            
-            # Treat "full" as default (no suffix)
+
             suffix = name if name and name.lower() != "full" else None
-            
             range_info = f"range '{name}'" if name else "default range"
             self.logger.info(f"--- Processing {range_info} ({tmin} to {tmax}s) ---")
 
+            spatial_modes = kwargs.get("spatial_modes") or self.config.get(
+                "feature_engineering.spatial_modes", ["roi", "channels", "global"]
+            )
             ctx = FeatureContext(
                 subject=subject,
                 task=task,
@@ -291,8 +496,8 @@ class FeaturePipeline(PipelineBase):
                 fixed_templates=fixed_templates,
                 fixed_template_ch_names=fixed_template_ch_names,
                 feature_categories=feature_categories,
-                bands=kwargs.get("bands"),  # Runtime band override
-                spatial_modes=kwargs.get("spatial_modes") or self.config.get("feature_engineering.spatial_modes", ["roi", "channels", "global"]),
+                bands=kwargs.get("bands"),
+                spatial_modes=spatial_modes,
                 tmin=tmin,
                 tmax=tmax,
                 name=name,
@@ -301,75 +506,51 @@ class FeaturePipeline(PipelineBase):
                 precomputed=precomputed_full,
                 explicit_windows=explicit_windows,
             )
-            
-            # Pass progress reporter to context
             ctx.progress = progress
             ctx.total_steps = total_steps
             ctx.current_step = current_step
 
             current_step += 1
-            progress.step(f"Extracting features ({name or 'full'})", current=current_step, total=total_steps)
+            progress.step(
+                f"Extracting features ({name or 'full'})",
+                current=current_step,
+                total=total_steps,
+            )
             features = extract_all_features(ctx)
 
-            pow_df = features.pow_df
-            pow_cols = features.pow_cols
-            baseline_df = features.baseline_df
-            baseline_cols = features.baseline_cols
-            conn_df = features.conn_df
-            conn_cols = features.conn_cols
-            aper_df = features.aper_df
-            aper_cols = features.aper_cols
-            erp_df = features.erp_df
-            erp_cols = features.erp_cols
-            itpc_df = features.phase_df
-            itpc_cols = features.phase_cols
-            itpc_trial_df = features.itpc_trial_df
-            itpc_trial_cols = features.itpc_trial_cols
-            pac_df = features.pac_df
-            pac_trials_df = features.pac_trials_df
-            pac_time_df = features.pac_time_df
-            comp_df = features.comp_df
-            comp_cols = features.comp_cols
-            bursts_df = features.bursts_df
-            bursts_cols = features.bursts_cols
-            spectral_df = features.spectral_df
-            spectral_cols = features.spectral_cols
-            erds_df = features.erds_df
-            erds_cols = features.erds_cols
-
-            power_bands = get_frequency_band_names(self.config)
+            unpacked = _unpack_feature_results(features)
 
             current_step += 1
-            progress.step(f"Aligning features ({name or 'full'})", current=current_step, total=total_steps)
+            progress.step(
+                f"Aligning features ({name or 'full'})",
+                current=current_step,
+                total=total_steps,
+            )
             self.logger.info(f"Aligning features for {range_info}...")
 
             critical_features = ["target"]
             if "power" in ctx.feature_categories:
-                critical_features.append("power")
-                critical_features.append("baseline")
+                critical_features.extend(["power", "baseline"])
 
-            extra_blocks = {
-                "itpc": itpc_df,
-                "itpc_trial": itpc_trial_df,
-                "pac": pac_df,
-                "pac_trials": pac_trials_df,
-                "pac_time": pac_time_df,
-                "complexity": comp_df,
-                "spectral": spectral_df,
-                "erp": erp_df,
-                "bursts": bursts_df,
-                "erds": erds_df,
-                "ratios": features.ratios_df,
-                "asymmetry": features.asymmetry_df,
-                "quality": features.quality_df,
-            }
-            extra_blocks = {k: v for k, v in extra_blocks.items() if v is not None and not getattr(v, "empty", False)}
+            extra_blocks = _build_extra_blocks(unpacked, features)
 
             (
-                pow_df_aligned, baseline_df_aligned, conn_df_aligned,
-                aper_df_aligned, y_aligned, retention_stats
+                pow_df_aligned,
+                baseline_df_aligned,
+                conn_df_aligned,
+                aper_df_aligned,
+                y_aligned,
+                retention_stats,
             ) = align_feature_dataframes(
-                pow_df, baseline_df, conn_df, aper_df, y, aligned_events, features_dir, self.logger, self.config,
+                unpacked["pow_df"],
+                unpacked["baseline_df"],
+                unpacked["conn_df"],
+                unpacked["aper_df"],
+                y,
+                aligned_events,
+                features_dir,
+                self.logger,
+                self.config,
                 critical_features=critical_features,
                 extra_blocks=extra_blocks,
             )
@@ -379,61 +560,46 @@ class FeaturePipeline(PipelineBase):
                 continue
 
             extra_aligned = retention_stats.get("extra_aligned", {})
-            itpc_df = extra_aligned.get("itpc", itpc_df)
-            itpc_trial_df = extra_aligned.get("itpc_trial", itpc_trial_df)
-            pac_df = extra_aligned.get("pac", pac_df)
-            pac_trials_df = extra_aligned.get("pac_trials", pac_trials_df)
-            pac_time_df = extra_aligned.get("pac_time", pac_time_df)
-            comp_df = extra_aligned.get("complexity", comp_df)
-            spectral_df = extra_aligned.get("spectral", spectral_df)
-            erp_df = extra_aligned.get("erp", erp_df)
-            bursts_df = extra_aligned.get("bursts", bursts_df)
-            erds_df = extra_aligned.get("erds", erds_df)
-            features.ratios_df = extra_aligned.get("ratios", features.ratios_df)
-            features.asymmetry_df = extra_aligned.get("asymmetry", features.asymmetry_df)
-            features.quality_df = extra_aligned.get("quality", features.quality_df)
+            _update_from_aligned_extra(unpacked, features, extra_aligned)
 
-            feature_qc: Dict[str, Any] = {}
-            if features.aper_qc is not None:
-                feature_qc["aperiodic"] = features.aper_qc
-            if ctx.precomputed is not None and getattr(ctx.precomputed, "qc", None) is not None:
-                try:
-                    feature_qc["precomputed_intermediates"] = asdict(ctx.precomputed.qc)
-                except TypeError:
-                    feature_qc["precomputed_intermediates"] = getattr(ctx.precomputed, "qc", None)
+            feature_qc = _build_feature_qc(features, ctx)
 
             current_step += 1
-            progress.step(f"Saving features ({name or 'full'})", current=current_step, total=total_steps)
-            
+            progress.step(
+                f"Saving features ({name or 'full'})",
+                current=current_step,
+                total=total_steps,
+            )
+
             combined_df = save_all_features(
                 pow_df=pow_df_aligned,
-                pow_cols=pow_cols,
+                pow_cols=unpacked["pow_cols"],
                 baseline_df=baseline_df_aligned,
-                baseline_cols=baseline_cols,
+                baseline_cols=unpacked["baseline_cols"],
                 conn_df=conn_df_aligned,
-                conn_cols=conn_cols,
+                conn_cols=unpacked["conn_cols"],
                 aper_df=aper_df_aligned,
-                aper_cols=aper_cols,
-                erp_df=erp_df,
-                erp_cols=erp_cols,
-                itpc_df=itpc_df,
-                itpc_cols=itpc_cols,
-                pac_df=pac_df,
-                pac_trials_df=pac_trials_df,
-                pac_time_df=pac_time_df,
+                aper_cols=unpacked["aper_cols"],
+                erp_df=unpacked["erp_df"],
+                erp_cols=unpacked["erp_cols"],
+                itpc_df=unpacked["itpc_df"],
+                itpc_cols=unpacked["itpc_cols"],
+                pac_df=unpacked["pac_df"],
+                pac_trials_df=unpacked["pac_trials_df"],
+                pac_time_df=unpacked["pac_time_df"],
                 aper_qc=features.aper_qc,
                 y=y_aligned,
                 features_dir=features_dir,
                 logger=self.logger,
                 config=self.config,
-                comp_df=comp_df,
-                comp_cols=comp_cols,
-                bursts_df=bursts_df,
-                bursts_cols=bursts_cols,
-                spectral_df=spectral_df,
-                spectral_cols=spectral_cols,
-                erds_df=erds_df,
-                erds_cols=erds_cols,
+                comp_df=unpacked["comp_df"],
+                comp_cols=unpacked["comp_cols"],
+                bursts_df=unpacked["bursts_df"],
+                bursts_cols=unpacked["bursts_cols"],
+                spectral_df=unpacked["spectral_df"],
+                spectral_cols=unpacked["spectral_cols"],
+                erds_df=unpacked["erds_df"],
+                erds_cols=unpacked["erds_cols"],
                 ratios_df=features.ratios_df,
                 ratios_cols=features.ratios_cols,
                 asymmetry_df=features.asymmetry_df,
@@ -443,53 +609,38 @@ class FeaturePipeline(PipelineBase):
                 feature_qc=feature_qc or None,
                 suffix=suffix,
             )
-            
-            # Accumulate features for merging when processing multiple time ranges
-            if len(ranges_to_process) > 1:
-                if pow_df_aligned is not None and not pow_df_aligned.empty:
-                    accumulated_features["power"].append(pow_df_aligned)
-                if baseline_df_aligned is not None and not baseline_df_aligned.empty:
-                    accumulated_features["baseline"].append(baseline_df_aligned)
-                if conn_df_aligned is not None and not conn_df_aligned.empty:
-                    accumulated_features["connectivity"].append(conn_df_aligned)
-                if aper_df_aligned is not None and not aper_df_aligned.empty:
-                    accumulated_features["aperiodic"].append(aper_df_aligned)
-                if erp_df is not None and not erp_df.empty:
-                    accumulated_features["erp"].append(erp_df)
-                if itpc_df is not None and not itpc_df.empty:
-                    accumulated_features["itpc"].append(itpc_df)
-                if pac_df is not None and not pac_df.empty:
-                    accumulated_features["pac"].append(pac_df)
-                if pac_trials_df is not None and not pac_trials_df.empty:
-                    accumulated_features["pac_trials"].append(pac_trials_df)
-                if pac_time_df is not None and not pac_time_df.empty:
-                    accumulated_features["pac_time"].append(pac_time_df)
-                if comp_df is not None and not comp_df.empty:
-                    accumulated_features["complexity"].append(comp_df)
-                if bursts_df is not None and not bursts_df.empty:
-                    accumulated_features["bursts"].append(bursts_df)
-                if spectral_df is not None and not spectral_df.empty:
-                    accumulated_features["spectral"].append(spectral_df)
-                if erds_df is not None and not erds_df.empty:
-                    accumulated_features["erds"].append(erds_df)
-                if features.ratios_df is not None and not features.ratios_df.empty:
-                    accumulated_features["ratios"].append(features.ratios_df)
-                if features.asymmetry_df is not None and not features.asymmetry_df.empty:
-                    accumulated_features["asymmetry"].append(features.asymmetry_df)
-                if features.quality_df is not None and not features.quality_df.empty:
-                    accumulated_features["quality"].append(features.quality_df)
+
+            if len(time_ranges) > 1:
+                aligned_dict = {
+                    "pow_df_aligned": pow_df_aligned,
+                    "baseline_df_aligned": baseline_df_aligned,
+                    "conn_df_aligned": conn_df_aligned,
+                    "aper_df_aligned": aper_df_aligned,
+                }
+                _accumulate_features(accumulated_features, unpacked, features, aligned_dict)
                 if accumulated_y is None and y_aligned is not None:
                     accumulated_y = y_aligned
 
-
             n_trials = len(y_aligned)
             n_pow = pow_df_aligned.shape[1] if pow_df_aligned is not None else 0
-            n_conn = conn_df_aligned.shape[1] if conn_df_aligned is not None and not conn_df_aligned.empty else 0
-            n_aper = aper_df_aligned.shape[1] if aper_df_aligned is not None and not aper_df_aligned.empty else 0
-            n_spectral = spectral_df.shape[1] if spectral_df is not None and not spectral_df.empty else 0
+            n_conn = (
+                conn_df_aligned.shape[1]
+                if conn_df_aligned is not None and not conn_df_aligned.empty
+                else 0
+            )
+            n_aper = (
+                aper_df_aligned.shape[1]
+                if aper_df_aligned is not None and not aper_df_aligned.empty
+                else 0
+            )
+            n_spectral = (
+                unpacked["spectral_df"].shape[1]
+                if unpacked["spectral_df"] is not None
+                and not unpacked["spectral_df"].empty
+                else 0
+            )
             n_total = combined_df.shape[1] if combined_df is not None else 0
 
-            # Save extraction configuration metadata
             extraction_config = {
                 "name": name,
                 "spatial_modes": ctx.spatial_modes,
@@ -502,139 +653,52 @@ class FeaturePipeline(PipelineBase):
                 "subject": subject,
                 "task": task,
             }
-            config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
-            config_path = features_dir / config_name
-            import json
-            with open(config_path, "w") as f:
-                json.dump(extraction_config, f, indent=2)
-            self.logger.info(f"Saved extraction config: {config_path}")
+            _save_extraction_config(extraction_config, features_dir, suffix, self.logger)
 
             self.logger.info(
-                f"Done {range_info}: sub-{subject}, trials={n_trials}, power={n_pow}, conn={n_conn}, "
-                f"aper={n_aper}, spectral={n_spectral}, total={n_total}"
+                f"Done {range_info}: sub-{subject}, trials={n_trials}, "
+                f"power={n_pow}, conn={n_conn}, aper={n_aper}, "
+                f"spectral={n_spectral}, total={n_total}"
             )
 
-        # Merge accumulated features from multiple time ranges into default (unsuffixed) files
-        # This ensures all segment features are available for behavior analysis correlations
-        if len(ranges_to_process) > 1:
-            self.logger.info("Merging features from all time ranges into consolidated default files...")
-            
-            from eeg_pipeline.infra.tsv import write_tsv
-            
-            def _merge_dfs(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
-                """Merge DataFrames by concatenating columns, avoiding duplicates."""
-                if not dfs:
-                    return None
-                # Filter out empty DataFrames
-                valid_dfs = [df for df in dfs if df is not None and not df.empty]
-                if not valid_dfs:
-                    return None
-                if len(valid_dfs) == 1:
-                    return valid_dfs[0]
-                # Concatenate column-wise, keeping only unique columns
-                merged = pd.concat(valid_dfs, axis=1)
-                # Drop duplicate columns (keeping first occurrence)
-                merged = merged.loc[:, ~merged.columns.duplicated(keep="first")]
-                return merged
-            
-            # Merge and save each feature type
-            merged_power = _merge_dfs(accumulated_features["power"] + accumulated_features["baseline"])
-            if merged_power is not None:
-                write_tsv(merged_power, features_dir / "features_power.tsv")
-                self.logger.info(f"Saved merged power features: {merged_power.shape[1]} columns")
-            
-            merged_conn = _merge_dfs(accumulated_features["connectivity"])
-            if merged_conn is not None:
-                write_tsv(merged_conn, features_dir / "features_connectivity.tsv")
-                self.logger.info(f"Saved merged connectivity features: {merged_conn.shape[1]} columns")
-            
-            merged_aper = _merge_dfs(accumulated_features["aperiodic"])
-            if merged_aper is not None:
-                write_tsv(merged_aper, features_dir / "features_aperiodic.tsv")
-                self.logger.info(f"Saved merged aperiodic features: {merged_aper.shape[1]} columns")
-            
-            merged_erp = _merge_dfs(accumulated_features["erp"])
-            if merged_erp is not None:
-                write_tsv(merged_erp, features_dir / "features_erp.tsv")
-                self.logger.info(f"Saved merged ERP features: {merged_erp.shape[1]} columns")
-            
-            merged_itpc = _merge_dfs(accumulated_features["itpc"])
-            if merged_itpc is not None:
-                write_tsv(merged_itpc, features_dir / "features_itpc.tsv")
-                self.logger.info(f"Saved merged ITPC features: {merged_itpc.shape[1]} columns")
-            
-            merged_pac = _merge_dfs(accumulated_features["pac"])
-            if merged_pac is not None:
-                write_tsv(merged_pac, features_dir / "features_pac.tsv")
-                self.logger.info(f"Saved merged PAC features: {merged_pac.shape[1]} columns")
-            
-            merged_pac_trials = _merge_dfs(accumulated_features["pac_trials"])
-            if merged_pac_trials is not None:
-                write_tsv(merged_pac_trials, features_dir / "features_pac_trials.tsv")
-                self.logger.info(f"Saved merged PAC trials features: {merged_pac_trials.shape[1]} columns")
-            
-            merged_comp = _merge_dfs(accumulated_features["complexity"])
-            if merged_comp is not None:
-                write_tsv(merged_comp, features_dir / "features_complexity.tsv")
-                self.logger.info(f"Saved merged complexity features: {merged_comp.shape[1]} columns")
-            
-            merged_bursts = _merge_dfs(accumulated_features["bursts"])
-            if merged_bursts is not None:
-                write_tsv(merged_bursts, features_dir / "features_bursts.tsv")
-                self.logger.info(f"Saved merged bursts features: {merged_bursts.shape[1]} columns")
-            
-            merged_spectral = _merge_dfs(accumulated_features["spectral"])
-            if merged_spectral is not None:
-                write_tsv(merged_spectral, features_dir / "features_spectral.tsv")
-                self.logger.info(f"Saved merged spectral features: {merged_spectral.shape[1]} columns")
-            
-            merged_erds = _merge_dfs(accumulated_features["erds"])
-            if merged_erds is not None:
-                write_tsv(merged_erds, features_dir / "features_erds.tsv")
-                self.logger.info(f"Saved merged ERDS features: {merged_erds.shape[1]} columns")
-            
-            merged_ratios = _merge_dfs(accumulated_features["ratios"])
-            if merged_ratios is not None:
-                write_tsv(merged_ratios, features_dir / "features_ratios.tsv")
-                self.logger.info(f"Saved merged ratios features: {merged_ratios.shape[1]} columns")
-            
-            merged_asymmetry = _merge_dfs(accumulated_features["asymmetry"])
-            if merged_asymmetry is not None:
-                write_tsv(merged_asymmetry, features_dir / "features_asymmetry.tsv")
-                self.logger.info(f"Saved merged asymmetry features: {merged_asymmetry.shape[1]} columns")
-            
-            merged_quality = _merge_dfs(accumulated_features["quality"])
-            if merged_quality is not None:
-                write_tsv(merged_quality, features_dir / "features_quality.tsv")
-                self.logger.info(f"Saved merged quality features: {merged_quality.shape[1]} columns")
-            
-            # Save targets (use the first valid one since they should all be the same)
+        if len(time_ranges) > 1:
+            self.logger.info(
+                "Merging features from all time ranges into consolidated default files..."
+            )
+            _save_merged_features(accumulated_features, features_dir, self.logger)
+
             if accumulated_y is not None:
                 rating_columns = self.config.get("event_columns.rating", ["vas_rating"])
                 target_column_name = rating_columns[0] if rating_columns else "vas_rating"
-                write_tsv(accumulated_y.to_frame(name=target_column_name), features_dir / "target_vas_ratings.tsv")
+                write_tsv(
+                    accumulated_y.to_frame(name=target_column_name),
+                    features_dir / "target_vas_ratings.tsv",
+                )
                 self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
-            
-            # Save merged extraction config summarizing all time ranges
+
             merged_extraction_config = {
                 "merged": True,
-                "time_ranges": [tr.get("name") for tr in ranges_to_process],
-                "spatial_modes": kwargs.get("spatial_modes") or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
+                "time_ranges": [tr.get("name") for tr in time_ranges],
+                "spatial_modes": kwargs.get("spatial_modes")
+                or self.config.get("feature_engineering.spatial_modes", ["roi", "global"]),
                 "aggregation_method": kwargs.get("aggregation_method", "mean"),
                 "feature_categories": feature_categories,
                 "n_trials": len(accumulated_y) if accumulated_y is not None else 0,
                 "subject": subject,
                 "task": task,
             }
-            import json
-            with open(features_dir / "extraction_config.json", "w") as f:
-                json.dump(merged_extraction_config, f, indent=2)
+            _save_extraction_config(
+                merged_extraction_config, features_dir, None, self.logger
+            )
             self.logger.info("Saved merged extraction config")
 
         progress.subject_done(f"sub-{subject}", success=True)
 
 
-def process_subject(subject: str, task: Optional[str] = None, config: Optional[Any] = None, **kwargs: Any) -> None:
+def process_subject(
+    subject: str, task: Optional[str] = None, config: Optional[Any] = None, **kwargs: Any
+) -> None:
+    """Process a single subject through the feature extraction pipeline."""
     pipeline = FeaturePipeline(config=config)
     pipeline.process_subject(subject, task=task, **kwargs)
 
@@ -645,6 +709,7 @@ def extract_features_for_subjects(
     config: Optional[Any] = None,
     **kwargs: Any,
 ) -> List[Dict[str, Any]]:
+    """Extract features for multiple subjects."""
     pipeline = FeaturePipeline(config=config)
     return pipeline.run_batch(subjects, task=task, **kwargs)
 

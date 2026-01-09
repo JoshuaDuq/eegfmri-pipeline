@@ -13,7 +13,6 @@ from ..config.loader import ConfigDict
 from eeg_pipeline.infra.paths import find_clean_epochs_path, load_events_df
 from .alignment import align_events_to_epochs, validate_alignment
 
-
 EEGConfig = ConfigDict
 
 
@@ -25,7 +24,7 @@ def apply_baseline(
     epochs: mne.Epochs,
     baseline_window: Tuple[float, float],
     logger: Optional[logging.Logger] = None,
-    config=None,
+    config: Optional[EEGConfig] = None,
 ) -> mne.Epochs:
     from ..analysis.tfr import validate_baseline_indices
 
@@ -33,16 +32,17 @@ def apply_baseline(
     validate_baseline_indices(times, baseline_window, logger=logger, config=config)
     baseline_start = float(baseline_window[0])
     baseline_end = float(baseline_window[1])
+    baseline_end_clamped = min(baseline_end, 0.0)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        return epochs.copy().apply_baseline((baseline_start, min(baseline_end, 0.0)))
+        return epochs.copy().apply_baseline((baseline_start, baseline_end_clamped))
 
 
 def crop_epochs(
     epochs: mne.Epochs,
     crop_tmin: Optional[float],
     crop_tmax: Optional[float],
-    include_tmax_in_crop: bool,
+    include_tmax: bool,
     logger: Optional[logging.Logger] = None,
 ) -> mne.Epochs:
     if crop_tmin is None and crop_tmax is None:
@@ -55,12 +55,13 @@ def crop_epochs(
         raise ValueError(f"Invalid crop window: tmin={time_min}, tmax={time_max}")
 
     epochs_copy = epochs.copy()
-    if not getattr(epochs_copy, "preload", False):
+    is_preloaded = getattr(epochs_copy, "preload", False)
+    if not is_preloaded:
         epochs_copy.load_data()
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        return epochs_copy.crop(tmin=time_min, tmax=time_max, include_tmax=include_tmax_in_crop)
+        return epochs_copy.crop(tmin=time_min, tmax=time_max, include_tmax=include_tmax)
 
 
 def process_temperature_levels(
@@ -69,8 +70,9 @@ def process_temperature_levels(
 ) -> Tuple[List, Dict, bool]:
     temperature_series = epochs.metadata[temperature_column]
     numeric_values = pd.to_numeric(temperature_series, errors="coerce")
+    all_numeric = numeric_values.notna().all()
 
-    if numeric_values.notna().all():
+    if all_numeric:
         levels = np.sort(numeric_values.unique())
         labels = {
             value: str(int(value)) if float(value).is_integer() else str(value)
@@ -84,26 +86,18 @@ def process_temperature_levels(
 
 def build_epoch_query_string(
     column: str,
-    level,
+    level: Any,
     is_numeric: bool,
-    labels: Optional[Dict] = None,
+    labels: Optional[Dict[Any, str]] = None,
 ) -> Tuple[str, str]:
     if labels is None:
         labels = {}
 
     if is_numeric:
-        try:
-            value = float(level)
-        except (TypeError, ValueError):
-            value = level
-        label = labels.get(level)
-        if label is None:
-            try:
-                label = str(int(value)) if float(value).is_integer() else str(value)
-            except Exception:
-                label = str(level)
+        value = _convert_to_numeric_value(level)
+        label = _get_numeric_label(level, value, labels)
         query = f"{column} == {value}"
-        return query, str(label)
+        return query, label
 
     value_str = str(level)
     label = labels.get(level, value_str)
@@ -111,18 +105,35 @@ def build_epoch_query_string(
     return query, str(label)
 
 
-def select_epochs_by_value(epochs: mne.Epochs, column: str, value) -> mne.Epochs:
+def _convert_to_numeric_value(level: Any) -> float:
+    try:
+        return float(level)
+    except (TypeError, ValueError):
+        return level
+
+
+def _get_numeric_label(level: Any, value: Any, labels: Dict[Any, str]) -> str:
+    label = labels.get(level)
+    if label is not None:
+        return str(label)
+    try:
+        if float(value).is_integer():
+            return str(int(value))
+        return str(value)
+    except (TypeError, ValueError):
+        return str(level)
+
+
+def select_epochs_by_value(epochs: mne.Epochs, column: str, value: Any) -> mne.Epochs:
     if epochs.metadata is None or column not in epochs.metadata.columns:
         raise ValueError(f"Column '{column}' not found in epochs.metadata")
 
-    val_expr = value if isinstance(value, (int, float)) else f"'{value}'"
-    selected = epochs[f"{column} == {val_expr}"]
+    value_expression = value if isinstance(value, (int, float)) else f"'{value}'"
+    query_string = f"{column} == {value_expression}"
+    selected = epochs[query_string]
+    
     if len(selected) == 0:
-        available_values = (
-            sorted(epochs.metadata[column].unique().tolist())
-            if column in epochs.metadata.columns
-            else []
-        )
+        available_values = sorted(epochs.metadata[column].unique().tolist())
         raise ValueError(
             f"No epochs found for {column} == {value}. "
             f"Available values: {available_values}"
@@ -134,7 +145,9 @@ def select_epochs_by_value(epochs: mne.Epochs, column: str, value) -> mne.Epochs
 # Epoch Loading and Alignment
 ###################################################################
 
-def _validate_event_columns(events_df: pd.DataFrame, config: EEGConfig, logger: logging.Logger) -> None:
+def _validate_event_columns(
+    events_df: pd.DataFrame, config: EEGConfig, logger: logging.Logger
+) -> None:
     if events_df is None or events_df.empty:
         return
 
@@ -143,14 +156,7 @@ def _validate_event_columns(events_df: pd.DataFrame, config: EEGConfig, logger: 
         logger.warning("No event_columns found in config; skipping validation")
         return
 
-    missing_columns = []
-    for logical_name, candidates in event_cols_config.items():
-        if not isinstance(candidates, (list, tuple)):
-            continue
-        found = any(col in events_df.columns for col in candidates)
-        if not found:
-            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
-
+    missing_columns = _find_missing_event_columns(events_df, event_cols_config)
     if missing_columns:
         available = list(events_df.columns)
         error_msg = (
@@ -162,9 +168,25 @@ def _validate_event_columns(events_df: pd.DataFrame, config: EEGConfig, logger: 
         raise ValueError(error_msg)
 
 
-def _validate_load_epochs_params(align: str, config: Any) -> None:
-    if align not in ("strict", "warn", "none"):
-        raise ValueError(f"align must be one of 'strict', 'warn', 'none', got '{align}'")
+def _find_missing_event_columns(
+    events_df: pd.DataFrame, event_cols_config: Dict[str, Any]
+) -> List[str]:
+    missing_columns = []
+    for logical_name, candidates in event_cols_config.items():
+        if not isinstance(candidates, (list, tuple)):
+            continue
+        found = any(col in events_df.columns for col in candidates)
+        if not found:
+            missing_columns.append(f"event_columns.{logical_name} (tried: {candidates})")
+    return missing_columns
+
+
+def _validate_load_epochs_params(align: str, config: Optional[Any]) -> None:
+    valid_align_modes = ("strict", "warn", "none")
+    if align not in valid_align_modes:
+        raise ValueError(
+            f"align must be one of {valid_align_modes}, got '{align}'"
+        )
     if config is None:
         raise ValueError("config is required for load_epochs_for_analysis")
 
@@ -175,15 +197,17 @@ def _load_epochs_and_events(
     deriv_root: Optional[Path],
     bids_root: Optional[Path],
     preload: bool,
-    config,
-    constants,
+    config: EEGConfig,
+    constants: Optional[Any],
     logger: logging.Logger,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
     epochs_path = find_clean_epochs_path(
         subject, task, deriv_root=deriv_root, config=config, constants=constants
     )
     if epochs_path is None or not epochs_path.exists():
-        logger.error(f"Could not find cleaned epochs file for sub-{subject}, task-{task}")
+        logger.error(
+            f"Could not find cleaned epochs file for sub-{subject}, task-{task}"
+        )
         return None, None
 
     logger.info(f"Loading epochs: {epochs_path}")
@@ -214,41 +238,73 @@ def _handle_alignment_mismatch(
     if n_events == n_epochs:
         return aligned_events
 
-    diff = abs(n_events - n_epochs)
+    mismatch_count = abs(n_events - n_epochs)
+    can_trim = allow_trim and mismatch_count <= min_alignment_samples
 
-    if allow_trim and diff <= min_alignment_samples:
-        logger.warning(
-            f"Alignment length mismatch for sub-{subject}, task-{task}: "
-            f"events={n_events}, epochs={n_epochs}, diff={diff}. "
-            f"Trimming enabled (max_tolerable_mismatch={min_alignment_samples})."
+    if can_trim:
+        return _trim_aligned_events(
+            aligned_events, n_events, n_epochs, subject, task, mismatch_count, logger
         )
-        if n_events > n_epochs:
-            return aligned_events.iloc[:n_epochs].reset_index(drop=True)
-        else:
-            from eeg_pipeline.infra.logging import log_and_raise_error
 
-            error_msg = (
-                f"Alignment length mismatch for sub-{subject}, task-{task}: "
-                f"events={n_events}, epochs={n_epochs}, diff={diff}. "
-                f"Cannot trim when events < epochs."
-            )
-            log_and_raise_error(logger, error_msg)
-    else:
-        from eeg_pipeline.infra.logging import log_and_raise_error
-
-        reason = (
-            "allow_misaligned_trim=False"
-            if not allow_trim
-            else f"mismatch ({diff}) exceeds max_tolerable_mismatch ({min_alignment_samples})"
-        )
-        error_msg = (
-            f"Alignment length mismatch for sub-{subject}, task-{task}: "
-            f"events={n_events}, epochs={n_epochs}, diff={diff}. "
-            f"Cannot proceed: {reason}"
-        )
-        log_and_raise_error(logger, error_msg)
-
+    _raise_alignment_mismatch_error(
+        n_events, n_epochs, mismatch_count, allow_trim, min_alignment_samples, subject, task, logger
+    )
     return aligned_events
+
+
+def _trim_aligned_events(
+    aligned_events: pd.DataFrame,
+    n_events: int,
+    n_epochs: int,
+    subject: str,
+    task: str,
+    mismatch_count: int,
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    from eeg_pipeline.infra.logging import log_and_raise_error
+
+    logger.warning(
+        f"Alignment length mismatch for sub-{subject}, task-{task}: "
+        f"events={n_events}, epochs={n_epochs}, diff={mismatch_count}. "
+        f"Trimming enabled."
+    )
+    if n_events > n_epochs:
+        return aligned_events.iloc[:n_epochs].reset_index(drop=True)
+
+    error_msg = (
+        f"Alignment length mismatch for sub-{subject}, task-{task}: "
+        f"events={n_events}, epochs={n_epochs}, diff={mismatch_count}. "
+        f"Cannot trim when events < epochs."
+    )
+    log_and_raise_error(logger, error_msg)
+    return aligned_events
+
+
+def _raise_alignment_mismatch_error(
+    n_events: int,
+    n_epochs: int,
+    mismatch_count: int,
+    allow_trim: bool,
+    min_alignment_samples: int,
+    subject: str,
+    task: str,
+    logger: logging.Logger,
+) -> None:
+    from eeg_pipeline.infra.logging import log_and_raise_error
+
+    if not allow_trim:
+        reason = "allow_misaligned_trim=False"
+    else:
+        reason = (
+            f"mismatch ({mismatch_count}) exceeds "
+            f"max_tolerable_mismatch ({min_alignment_samples})"
+        )
+    error_msg = (
+        f"Alignment length mismatch for sub-{subject}, task-{task}: "
+        f"events={n_events}, epochs={n_epochs}, diff={mismatch_count}. "
+        f"Cannot proceed: {reason}"
+    )
+    log_and_raise_error(logger, error_msg)
 
 
 def load_epochs_for_analysis(
@@ -259,18 +315,18 @@ def load_epochs_for_analysis(
     deriv_root: Optional[Path] = None,
     bids_root: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
-    config=None,
-    constants=None,
+    config: Optional[EEGConfig] = None,
+    constants: Optional[Any] = None,
     use_cache: bool = True,
 ) -> Tuple[Optional[mne.Epochs], Optional[pd.DataFrame]]:
     if logger is None:
         logger = logging.getLogger(__name__)
 
     _validate_load_epochs_params(align, config)
+    if config is None:
+        raise ValueError("config is required")
 
-    allow_trim = bool(config.get("alignment.allow_misaligned_trim"))
-    min_alignment_samples = int(config.get("alignment.min_alignment_samples"))
-
+    alignment_config = _extract_alignment_config(config)
     epochs, events_df = _load_epochs_and_events(
         subject, task, deriv_root, bids_root, preload, config, constants, logger
     )
@@ -278,46 +334,117 @@ def load_epochs_for_analysis(
         return None, None
 
     if events_df is None:
-        if align == "strict":
-            raise ValueError(
-                f"Events TSV not found for sub-{subject}, task-{task}. Required when align='strict'"
-            )
-        logger.warning("Events TSV not found; metadata will not be set.")
-        return epochs, None
+        return _handle_missing_events(epochs, align, subject, task, logger)
 
     logger.info(f"Loaded events: {len(events_df)} rows")
     logger.debug(
-        f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}"
+        f"Alignment parameters: allow_misaligned_trim={alignment_config['allow_trim']}, "
+        f"min_alignment_samples={alignment_config['min_samples']}"
     )
 
     _validate_event_columns(events_df, config, logger)
+    aligned_events = _attempt_alignment(
+        events_df, epochs, align, subject, task, alignment_config, logger
+    )
 
+    if aligned_events is None:
+        return _handle_alignment_failure(epochs, events_df, align, subject, task, alignment_config)
+
+    aligned_events = _handle_alignment_mismatch(
+        aligned_events,
+        epochs,
+        subject,
+        task,
+        alignment_config["allow_trim"],
+        alignment_config["min_samples"],
+        logger,
+    )
+
+    _verify_final_alignment_length(aligned_events, epochs, subject, task, logger)
+    validation_passed = validate_alignment(
+        aligned_events, epochs, logger, strict=(align == "strict")
+    )
+
+    if not validation_passed:
+        return _handle_validation_failure(epochs, align, subject, task, logger)
+
+    if use_cache:
+        epochs._behavioral = aligned_events  # type: ignore[attr-defined]
+    return epochs, aligned_events
+
+
+def _extract_alignment_config(config: EEGConfig) -> Dict[str, Any]:
+    return {
+        "allow_trim": bool(config.get("alignment.allow_misaligned_trim")),
+        "min_samples": int(config.get("alignment.min_alignment_samples")),
+    }
+
+
+def _handle_missing_events(
+    epochs: mne.Epochs,
+    align: str,
+    subject: str,
+    task: str,
+    logger: logging.Logger,
+) -> Tuple[mne.Epochs, None]:
+    if align == "strict":
+        raise ValueError(
+            f"Events TSV not found for sub-{subject}, task-{task}. "
+            f"Required when align='strict'"
+        )
+    logger.warning("Events TSV not found; metadata will not be set.")
+    return epochs, None
+
+
+def _attempt_alignment(
+    events_df: pd.DataFrame,
+    epochs: mne.Epochs,
+    align: str,
+    subject: str,
+    task: str,
+    alignment_config: Dict[str, Any],
+    logger: logging.Logger,
+) -> Optional[pd.DataFrame]:
     try:
-        aligned_events = align_events_to_epochs(events_df, epochs, logger=logger)
+        return align_events_to_epochs(events_df, epochs, logger=logger)
     except ValueError as err:
         if align == "strict":
             raise ValueError(
                 f"Alignment failed for sub-{subject}, task-{task} in strict mode: {err}. "
-                f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}"
+                f"Alignment parameters: allow_misaligned_trim={alignment_config['allow_trim']}, "
+                f"min_alignment_samples={alignment_config['min_samples']}"
             ) from err
         if align == "warn":
             logger.warning(f"Alignment failed: {err}")
-        aligned_events = None
+        return None
 
-    if aligned_events is None:
-        if align == "strict":
-            raise ValueError(
-                f"Could not align events to epochs for sub-{subject}, task-{task}. "
-                f"Events have {len(events_df)} rows, epochs have {len(epochs)} epochs. "
-                f"Alignment parameters: allow_misaligned_trim={allow_trim}, min_alignment_samples={min_alignment_samples}. "
-                f"This is required when align='strict'."
-            )
-        return epochs, None
 
-    aligned_events = _handle_alignment_mismatch(
-        aligned_events, epochs, subject, task, allow_trim, min_alignment_samples, logger
-    )
+def _handle_alignment_failure(
+    epochs: mne.Epochs,
+    events_df: pd.DataFrame,
+    align: str,
+    subject: str,
+    task: str,
+    alignment_config: Dict[str, Any],
+) -> Tuple[mne.Epochs, None]:
+    if align == "strict":
+        raise ValueError(
+            f"Could not align events to epochs for sub-{subject}, task-{task}. "
+            f"Events have {len(events_df)} rows, epochs have {len(epochs)} epochs. "
+            f"Alignment parameters: allow_misaligned_trim={alignment_config['allow_trim']}, "
+            f"min_alignment_samples={alignment_config['min_samples']}. "
+            f"This is required when align='strict'."
+        )
+    return epochs, None
 
+
+def _verify_final_alignment_length(
+    aligned_events: pd.DataFrame,
+    epochs: mne.Epochs,
+    subject: str,
+    task: str,
+    logger: logging.Logger,
+) -> None:
     if len(aligned_events) != len(epochs):
         error_msg = (
             f"Failed to align events to epochs for sub-{subject}, task-{task}: "
@@ -327,26 +454,26 @@ def load_epochs_for_analysis(
         logger.error(error_msg)
         raise ValueError(error_msg)
 
-    validation_result = validate_alignment(
-        aligned_events, epochs, logger, strict=(align == "strict"), config=config
-    )
-    if not validation_result:
-        if align == "strict":
-            raise ValueError(
-                f"Alignment validation failed for sub-{subject}, task-{task} with strict mode."
-            )
-        logger.warning("Alignment validation failed; returning None for aligned events")
-        return epochs, None
 
-    if use_cache:
-        epochs._behavioral = aligned_events  # type: ignore[attr-defined]
-    return epochs, aligned_events
+def _handle_validation_failure(
+    epochs: mne.Epochs,
+    align: str,
+    subject: str,
+    task: str,
+    logger: logging.Logger,
+) -> Tuple[mne.Epochs, None]:
+    if align == "strict":
+        raise ValueError(
+            f"Alignment validation failed for sub-{subject}, task-{task} with strict mode."
+        )
+    logger.warning("Alignment validation failed; returning None for aligned events")
+    return epochs, None
 
 
 def load_epochs_with_aligned_events(
     subject: str,
     task: str,
-    config,
+    config: EEGConfig,
     deriv_root: Optional[Path] = None,
     bids_root: Optional[Path] = None,
     preload: bool = True,
@@ -371,25 +498,35 @@ def load_epochs_with_aligned_events(
 # Column Resolution Utilities
 ###################################################################
 
-def pick_event_columns(df: pd.DataFrame, config) -> Dict[str, Optional[str]]:
-    out: Dict[str, Optional[str]] = {"rating": None, "temperature": None, "pain_binary": None}
-    rating_cols = config.get("event_columns.rating")
-    temp_cols = config.get("event_columns.temperature")
-    pain_cols = config.get("event_columns.pain_binary")
+def pick_event_columns(
+    df: pd.DataFrame, config: EEGConfig
+) -> Dict[str, Optional[str]]:
+    result: Dict[str, Optional[str]] = {
+        "rating": None,
+        "temperature": None,
+        "pain_binary": None,
+    }
+    column_mappings = {
+        "rating": config.get("event_columns.rating"),
+        "temperature": config.get("event_columns.temperature"),
+        "pain_binary": config.get("event_columns.pain_binary"),
+    }
 
-    for cand in rating_cols:
-        if cand in df.columns:
-            out["rating"] = cand
-            break
-    for cand in temp_cols:
-        if cand in df.columns:
-            out["temperature"] = cand
-            break
-    for cand in pain_cols:
-        if cand in df.columns:
-            out["pain_binary"] = cand
-            break
-    return out
+    for key, candidate_columns in column_mappings.items():
+        result[key] = _find_first_matching_column(df, candidate_columns)
+
+    return result
+
+
+def _find_first_matching_column(
+    df: pd.DataFrame, candidate_columns: Any
+) -> Optional[str]:
+    if not isinstance(candidate_columns, (list, tuple)):
+        return None
+    for candidate in candidate_columns:
+        if candidate in df.columns:
+            return candidate
+    return None
 
 
 def resolve_columns(
@@ -409,17 +546,13 @@ def resolve_columns(
 
 
 __all__ = [
-    # Epoch processing
     "apply_baseline",
     "crop_epochs",
     "process_temperature_levels",
     "build_epoch_query_string",
     "select_epochs_by_value",
-    # Epoch loading
-    "_validate_event_columns",
     "load_epochs_for_analysis",
     "load_epochs_with_aligned_events",
-    # Column resolution
     "pick_event_columns",
     "resolve_columns",
 ]

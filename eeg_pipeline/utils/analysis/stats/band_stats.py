@@ -7,13 +7,17 @@ Inter-band correlations and power statistics.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
+
 from .base import get_statistics_constants
+from .bootstrap import bootstrap_corr_ci
 from .correlation import compute_correlation
 
 
@@ -24,7 +28,10 @@ def compute_band_spatial_correlation(
     """Compute spatial correlation between bands."""
     if len(band1_channels) <= 1 or len(band2_channels) <= 1:
         return np.nan
-    return float(np.corrcoef(band1_channels, band2_channels)[0, 1])
+    
+    correlation_matrix = np.corrcoef(band1_channels, band2_channels)
+    correlation_coefficient = correlation_matrix[0, 1]
+    return float(correlation_coefficient)
 
 
 def compute_band_pair_correlation(
@@ -35,17 +42,19 @@ def compute_band_pair_correlation(
     if vec_i is None or vec_j is None:
         return np.nan
     
-    common = sorted(set(vec_i.keys()) & set(vec_j.keys()))
-    if len(common) < 2:
+    common_channels = sorted(set(vec_i.keys()) & set(vec_j.keys()))
+    if len(common_channels) < 2:
         return np.nan
     
-    vals_i = np.array([vec_i[ch] for ch in common])
-    vals_j = np.array([vec_j[ch] for ch in common])
+    values_i = np.array([vec_i[ch] for ch in common_channels])
+    values_j = np.array([vec_j[ch] for ch in common_channels])
     
-    if np.std(vals_i) < 1e-12 or np.std(vals_j) < 1e-12:
+    epsilon_std = 1e-12
+    if np.std(values_i) < epsilon_std or np.std(values_j) < epsilon_std:
         return np.nan
     
-    return float(np.corrcoef(vals_i, vals_j)[0, 1])
+    correlation_matrix = np.corrcoef(values_i, values_j)
+    return float(correlation_matrix[0, 1])
 
 
 def compute_subject_band_correlation_matrix(
@@ -53,22 +62,28 @@ def compute_subject_band_correlation_matrix(
     band_names: List[str],
 ) -> np.ndarray:
     """Compute inter-band correlation matrix for one subject."""
-    n = len(band_names)
-    mat = np.eye(n)
-    for i, bi in enumerate(band_names):
-        for j in range(i + 1, n):
-            r = compute_band_pair_correlation(band_vectors.get(bi), band_vectors.get(band_names[j]))
-            mat[i, j] = mat[j, i] = r
-    return mat
+    n_bands = len(band_names)
+    correlation_matrix = np.eye(n_bands)
+    
+    for i, band_i in enumerate(band_names):
+        for j in range(i + 1, n_bands):
+            band_j = band_names[j]
+            vector_i = band_vectors.get(band_i)
+            vector_j = band_vectors.get(band_j)
+            correlation = compute_band_pair_correlation(vector_i, vector_j)
+            correlation_matrix[i, j] = correlation
+            correlation_matrix[j, i] = correlation
+    
+    return correlation_matrix
 
 
 def fisher_z_transform_mean(r_values: np.ndarray, config: Optional[Any] = None) -> float:
     """Compute Fisher z-transformed mean of correlations."""
-    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
     clip_min, clip_max = get_fisher_z_clip_values(config)
     r_clipped = np.clip(r_values, clip_min, clip_max)
     z_scores = np.arctanh(r_clipped)
-    return float(np.tanh(np.mean(z_scores)))
+    z_mean = np.mean(z_scores)
+    return float(np.tanh(z_mean))
 
 
 def compute_group_band_correlation_matrix(
@@ -76,19 +91,23 @@ def compute_group_band_correlation_matrix(
     n_bands: int,
 ) -> np.ndarray:
     """Aggregate inter-band correlations across subjects."""
-    group_mat = np.eye(n_bands)
-    arr = np.stack(per_subject_correlations, axis=0)
+    group_matrix = np.eye(n_bands)
+    stacked_correlations = np.stack(per_subject_correlations, axis=0)
     
     for i in range(n_bands):
         for j in range(i + 1, n_bands):
-            r_vals = arr[:, i, j]
-            r_vals = r_vals[np.isfinite(r_vals)]
-            if r_vals.size == 0:
-                group_mat[i, j] = group_mat[j, i] = np.nan
+            correlation_values = stacked_correlations[:, i, j]
+            correlation_values = correlation_values[np.isfinite(correlation_values)]
+            
+            if correlation_values.size == 0:
+                group_matrix[i, j] = np.nan
+                group_matrix[j, i] = np.nan
             else:
-                group_mat[i, j] = group_mat[j, i] = fisher_z_transform_mean(r_vals)
+                mean_correlation = fisher_z_transform_mean(correlation_values)
+                group_matrix[i, j] = mean_correlation
+                group_matrix[j, i] = mean_correlation
     
-    return group_mat
+    return group_matrix
 
 
 def compute_band_statistics_array(
@@ -97,16 +116,27 @@ def compute_band_statistics_array(
     config: Optional[Any] = None,
 ) -> Tuple[float, float, float, int]:
     """Compute band statistics from array."""
-    clean = values[np.isfinite(values)]
-    if clean.size == 0:
+    clean_values = values[np.isfinite(values)]
+    if clean_values.size == 0:
         return np.nan, np.nan, np.nan, 0
     
-    mean_val = float(np.mean(clean))
-    n = len(clean)
-    se = float(np.std(clean, ddof=1) / np.sqrt(n)) if n > 1 else np.nan
-    delta = ci_multiplier * se if np.isfinite(se) else np.nan
+    mean_value = float(np.mean(clean_values))
+    n_samples = len(clean_values)
     
-    return mean_val, mean_val - delta if np.isfinite(delta) else np.nan, mean_val + delta if np.isfinite(delta) else np.nan, n
+    if n_samples > 1:
+        standard_error = float(np.std(clean_values, ddof=1) / np.sqrt(n_samples))
+    else:
+        standard_error = np.nan
+    
+    if np.isfinite(standard_error):
+        margin = ci_multiplier * standard_error
+        ci_low = mean_value - margin
+        ci_high = mean_value + margin
+    else:
+        ci_low = np.nan
+        ci_high = np.nan
+    
+    return mean_value, ci_low, ci_high, n_samples
 
 
 def compute_inter_band_correlation_statistics(
@@ -116,33 +146,49 @@ def compute_inter_band_correlation_statistics(
     config: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Compute inter-band correlation statistics across subjects."""
-    from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
     clip_min, clip_max = get_fisher_z_clip_values(config)
-    rows = []
+    results = []
     n_bands = len(band_names)
     
     for i in range(n_bands):
         for j in range(i + 1, n_bands):
-            r_vals = np.array([cm[i, j] for cm in per_subject_correlations])
-            r_vals = r_vals[np.isfinite(r_vals)]
-            if r_vals.size == 0:
+            correlation_values = np.array([matrix[i, j] for matrix in per_subject_correlations])
+            correlation_values = correlation_values[np.isfinite(correlation_values)]
+            
+            if correlation_values.size == 0:
                 continue
             
-            z_scores = np.arctanh(np.clip(r_vals, clip_min, clip_max))
+            r_clipped = np.clip(correlation_values, clip_min, clip_max)
+            z_scores = np.arctanh(r_clipped)
             z_mean = float(np.mean(z_scores))
-            n = len(z_scores)
-            se = float(np.std(z_scores, ddof=1) / np.sqrt(n)) if n > 1 else np.nan
+            n_subjects = len(z_scores)
             
-            rows.append({
+            if n_subjects > 1:
+                standard_error = float(np.std(z_scores, ddof=1) / np.sqrt(n_subjects))
+            else:
+                standard_error = np.nan
+            
+            r_group = float(np.tanh(z_mean))
+            
+            if np.isfinite(standard_error):
+                z_low = z_mean - ci_multiplier * standard_error
+                z_high = z_mean + ci_multiplier * standard_error
+                r_ci_low = float(np.tanh(z_low))
+                r_ci_high = float(np.tanh(z_high))
+            else:
+                r_ci_low = np.nan
+                r_ci_high = np.nan
+            
+            results.append({
                 "band_i": band_names[i],
                 "band_j": band_names[j],
-                "r_group": float(np.tanh(z_mean)),
-                "r_ci_low": float(np.tanh(z_mean - ci_multiplier * se)) if np.isfinite(se) else np.nan,
-                "r_ci_high": float(np.tanh(z_mean + ci_multiplier * se)) if np.isfinite(se) else np.nan,
-                "n_subjects": n,
+                "r_group": r_group,
+                "r_ci_low": r_ci_low,
+                "r_ci_high": r_ci_high,
+                "n_subjects": n_subjects,
             })
     
-    return rows
+    return results
 
 
 def compute_correlation_ci_fisher(
@@ -153,7 +199,13 @@ def compute_correlation_ci_fisher(
     """Compute CI from Fisher z mean and SE."""
     if not np.isfinite(se):
         return np.nan, np.nan
-    return float(np.tanh(z_mean - ci_multiplier * se)), float(np.tanh(z_mean + ci_multiplier * se))
+    
+    z_low = z_mean - ci_multiplier * se
+    z_high = z_mean + ci_multiplier * se
+    ci_low = float(np.tanh(z_low))
+    ci_high = float(np.tanh(z_high))
+    
+    return ci_low, ci_high
 
 
 def compute_band_correlations(
@@ -164,48 +216,58 @@ def compute_band_correlations(
     min_samples: int = 3,
 ) -> Tuple[List[str], np.ndarray, np.ndarray]:
     """Compute channel-wise correlations for a band."""
-    band_l = str(band).lower()
-
+    band_lower = str(band).lower()
+    
     # Canonical NamingSchema columns:
     # power_{segment}_{band}_ch_{channel}_{stat}
     prefix = "power_"
-    token = f"_{band_l}_ch_"
-    candidate_cols = [
-        c
-        for c in pow_df.columns
-        if str(c).lower().startswith(prefix) and token in str(c).lower()
+    token = f"_{band_lower}_ch_"
+    candidate_columns = [
+        col
+        for col in pow_df.columns
+        if str(col).lower().startswith(prefix) and token in str(col).lower()
     ]
-
-    if not candidate_cols:
+    
+    if not candidate_columns:
         return [], np.array([]), np.array([])
-
-    import re
-
+    
     # Example: power_active_alpha_ch_Fz_logratio
-    pattern = re.compile(rf"^power_[^_]+_{re.escape(band_l)}_ch_(.+?)_", re.IGNORECASE)
-    band_cols: List[str] = []
-    ch_names: List[str] = []
-    for col in candidate_cols:
-        m = pattern.match(str(col))
-        if m is None:
+    pattern = re.compile(
+        rf"^power_[^_]+_{re.escape(band_lower)}_ch_(.+?)_",
+        re.IGNORECASE
+    )
+    band_columns: List[str] = []
+    channel_names: List[str] = []
+    
+    for col in candidate_columns:
+        match = pattern.match(str(col))
+        if match is None:
             continue
-        band_cols.append(col)
-        ch_names.append(m.group(1))
-
-    if not band_cols:
+        band_columns.append(col)
+        channel_names.append(match.group(1))
+    
+    if not band_columns:
         return [], np.array([]), np.array([])
-    corrs, pvals = [], []
     
-    for col in band_cols:
-        valid = pd.concat([pow_df[col], y], axis=1).dropna()
-        if len(valid) >= min_samples:
-            r, p = stats.spearmanr(valid.iloc[:, 0], valid.iloc[:, 1])
+    correlations = []
+    p_values = []
+    
+    for col in band_columns:
+        valid_data = pd.concat([pow_df[col], y], axis=1).dropna()
+        
+        if len(valid_data) >= min_samples:
+            correlation, p_value = stats.spearmanr(
+                valid_data.iloc[:, 0],
+                valid_data.iloc[:, 1]
+            )
         else:
-            r, p = np.nan, 1.0
-        corrs.append(r)
-        pvals.append(p)
+            correlation = np.nan
+            p_value = 1.0
+        
+        correlations.append(correlation)
+        p_values.append(p_value)
     
-    return ch_names, np.array(corrs), np.array(pvals)
+    return channel_names, np.array(correlations), np.array(p_values)
 
 
 def compute_connectivity_correlations(
@@ -219,22 +281,29 @@ def compute_connectivity_correlations(
     max_pvalue: float = 0.05,
 ) -> Tuple[List[float], List[str]]:
     """Compute significant connectivity correlations."""
-    correlations, connections = [], []
-    prefix = f'{measure}_{band}_'
+    correlations = []
+    connections = []
+    prefix = f"{measure}_{band}_"
+    epsilon_std = 1e-12
     
     for col in measure_cols:
-        valid = ~(conn_df[col].isna() | y.isna())
-        if valid.sum() < min_samples:
+        valid_mask = ~(conn_df[col].isna() | y.isna())
+        if valid_mask.sum() < min_samples:
             continue
         
-        x_v, y_v = conn_df[col][valid].to_numpy(), y[valid].to_numpy()
-        if np.std(x_v) <= 0 or np.std(y_v) <= 0:
+        x_values = conn_df[col][valid_mask].to_numpy()
+        y_values = y[valid_mask].to_numpy()
+        
+        if np.std(x_values) < epsilon_std or np.std(y_values) < epsilon_std:
             continue
         
-        r, p = stats.spearmanr(x_v, y_v)
-        if abs(r) > min_correlation and p < max_pvalue:
-            correlations.append(r)
-            connections.append(col.replace(prefix, '').replace('conn_', ''))
+        correlation, p_value = stats.spearmanr(x_values, y_values)
+        
+        is_significant = abs(correlation) > min_correlation and p_value < max_pvalue
+        if is_significant:
+            correlations.append(correlation)
+            connection_name = col.replace(prefix, "").replace("conn_", "")
+            connections.append(connection_name)
     
     return correlations, connections
 
@@ -248,22 +317,35 @@ def compute_correlation_stats(
     min_samples: int = 3,
 ) -> Tuple[float, float, int, Tuple[float, float]]:
     """Compute correlation with optional bootstrap CI."""
-    from .bootstrap import bootstrap_corr_ci
+    valid_mask = np.isfinite(x) & np.isfinite(y)
+    n_effective = int(valid_mask.sum())
     
-    mask = np.isfinite(x) & np.isfinite(y)
-    n_eff = int(mask.sum())
+    if n_effective < min_samples:
+        return np.nan, np.nan, n_effective, (np.nan, np.nan)
     
-    if n_eff < min_samples:
-        return np.nan, np.nan, n_eff, (np.nan, np.nan)
+    x_valid = x[valid_mask]
+    y_valid = y[valid_mask]
+    correlation, p_value = compute_correlation(x_valid, y_valid, method_code)
     
-    x_v, y_v = x[mask], y[mask]
-    r, p = compute_correlation(x_v, y_v, method_code)
-    
-    ci = (np.nan, np.nan)
     if bootstrap_ci > 0:
-        ci = bootstrap_corr_ci(x_v, y_v, method_code, n_boot=bootstrap_ci, rng=rng)
+        confidence_interval = bootstrap_corr_ci(
+            x_valid,
+            y_valid,
+            method_code,
+            n_boot=bootstrap_ci,
+            rng=rng
+        )
+    else:
+        confidence_interval = (np.nan, np.nan)
     
-    return float(r), float(p), n_eff, ci
+    return float(correlation), float(p_value), n_effective, confidence_interval
+
+
+def _safe_float(value: Any) -> float:
+    """Convert value to float, handling None and NaN."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return np.nan
+    return float(value)
 
 
 def compute_partial_residuals_stats(
@@ -276,34 +358,39 @@ def compute_partial_residuals_stats(
     rng: np.random.Generator,
 ) -> Tuple[float, float, int, Tuple[float, float]]:
     """Compute partial correlation statistics from residuals."""
-    from .bootstrap import bootstrap_corr_ci
-    
-    def _sf(v):
-        if v is None or (isinstance(v, float) and np.isnan(v)):
-            return np.nan
-        return float(v)
-    
-    r_resid = p_resid = np.nan
+    r_residual = np.nan
+    p_residual = np.nan
     n_partial = n_res
     
     if stats_df is not None:
-        r_resid = _sf(stats_df.get("r_partial", np.nan))
-        p_resid = _sf(stats_df.get("p_partial", np.nan))
+        r_residual = _safe_float(stats_df.get("r_partial", np.nan))
+        p_residual = _safe_float(stats_df.get("p_partial", np.nan))
         n_partial = int(stats_df.get("n_partial", n_partial))
     
-    if not np.isfinite(r_resid):
-        # Always use pearson for residuals (even if method is spearman, 
+    if not np.isfinite(r_residual):
+        # Always use pearson for residuals (even if method is spearman,
         # ranked residuals are Pearson-correlated to get Spearman partial)
-        r_resid, p_resid = compute_correlation(x_res, y_res, method="pearson")
+        r_residual, p_residual = compute_correlation(
+            x_res,
+            y_res,
+            method="pearson"
+        )
     
-    ci = (np.nan, np.nan)
     if bootstrap_ci > 0:
-        ci = bootstrap_corr_ci(x_res, y_res, method_code, n_boot=bootstrap_ci, rng=rng)
+        confidence_interval = bootstrap_corr_ci(
+            x_res,
+            y_res,
+            method_code,
+            n_boot=bootstrap_ci,
+            rng=rng
+        )
+    else:
+        confidence_interval = (np.nan, np.nan)
     
-    return float(r_resid), float(p_resid), n_partial, ci
-
-
-
-
-
+    return (
+        float(r_residual),
+        float(p_residual),
+        n_partial,
+        confidence_interval
+    )
 

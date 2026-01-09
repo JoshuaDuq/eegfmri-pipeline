@@ -11,7 +11,7 @@ Consolidated module containing:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -30,10 +30,11 @@ def center_series(series: pd.Series) -> pd.Series:
 
 def zscore_series(series: pd.Series) -> pd.Series:
     """Z-score normalize series."""
+    mean = series.mean()
     std_val = series.std(ddof=1)
     if std_val <= 0:
         return pd.Series(dtype=float)
-    return (series - series.mean()) / std_val
+    return (series - mean) / std_val
 
 
 def apply_pooling_strategy(
@@ -66,6 +67,49 @@ def prepare_data_without_validation(
     return x_data, y_data, len(x_data)
 
 
+def _align_and_validate_series(
+    x_array: np.ndarray,
+    y_array: np.ndarray,
+) -> Tuple[pd.Series, pd.Series]:
+    """Align series to same length and remove NaNs."""
+    x_series = pd.Series(np.asarray(x_array))
+    y_series = pd.Series(np.asarray(y_array))
+    
+    min_length = min(len(x_series), len(y_series))
+    x_series = x_series.iloc[:min_length]
+    y_series = y_series.iloc[:min_length]
+    
+    valid_mask = x_series.notna() & y_series.notna()
+    return x_series[valid_mask], y_series[valid_mask]
+
+
+def _process_subject_data(
+    x_array: np.ndarray,
+    y_array: np.ndarray,
+    subject_id: str,
+    pooling_strategy: str,
+) -> Tuple[pd.Series, pd.Series, List[str]]:
+    """Process single subject's data and return normalized series with IDs."""
+    x_series, y_series = _align_and_validate_series(x_array, y_array)
+    
+    if x_series.empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float), []
+    
+    x_normalized, y_normalized = apply_pooling_strategy(
+        x_series, y_series, pooling_strategy
+    )
+    
+    if x_normalized.empty:
+        return pd.Series(dtype=float), pd.Series(dtype=float), []
+    
+    n_samples = len(x_normalized)
+    subject_ids = [subject_id] * n_samples
+    x_reset = x_normalized.reset_index(drop=True)
+    y_reset = y_normalized.reset_index(drop=True)
+    
+    return x_reset, y_reset, subject_ids
+
+
 def prepare_group_data(
     x_lists: List[np.ndarray],
     y_lists: List[np.ndarray],
@@ -76,31 +120,27 @@ def prepare_group_data(
     x_series_list, y_series_list, subject_ids = [], [], []
 
     for idx, (x_array, y_array) in enumerate(zip(x_lists, y_lists)):
-        x_s = pd.Series(np.asarray(x_array))
-        y_s = pd.Series(np.asarray(y_array))
+        subject_id = (
+            subj_order[idx] if idx < len(subj_order) else str(idx)
+        )
+        x_normalized, y_normalized, ids = _process_subject_data(
+            x_array, y_array, subject_id, pooling_strategy
+        )
         
-        min_len = min(len(x_s), len(y_s))
-        x_s, y_s = x_s.iloc[:min_len], y_s.iloc[:min_len]
-        
-        valid = x_s.notna() & y_s.notna()
-        x_s, y_s = x_s[valid], y_s[valid]
-        
-        if x_s.empty:
+        if x_normalized.empty:
             continue
         
-        x_norm, y_norm = apply_pooling_strategy(x_s, y_s, pooling_strategy)
-        if x_norm.empty:
-            continue
-        
-        subject_id = subj_order[idx] if idx < len(subj_order) else str(idx)
-        subject_ids.extend([subject_id] * len(x_norm))
-        x_series_list.append(x_norm.reset_index(drop=True))
-        y_series_list.append(y_norm.reset_index(drop=True))
+        x_series_list.append(x_normalized)
+        y_series_list.append(y_normalized)
+        subject_ids.extend(ids)
 
     if not x_series_list:
         return pd.Series(dtype=float), pd.Series(dtype=float), []
     
-    return pd.concat(x_series_list, ignore_index=True), pd.concat(y_series_list, ignore_index=True), subject_ids
+    x_concatenated = pd.concat(x_series_list, ignore_index=True)
+    y_concatenated = pd.concat(y_series_list, ignore_index=True)
+    
+    return x_concatenated, y_concatenated, subject_ids
 
 
 ###################################################################
@@ -113,15 +153,21 @@ def compute_linear_residuals(
     y_data: pd.Series,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute linear regression residuals."""
-    x_series = pd.to_numeric(x_data, errors="coerce")
-    y_series = pd.to_numeric(y_data, errors="coerce")
-    mask = x_series.notna() & y_series.notna()
-    x_clean = x_series[mask].to_numpy(dtype=float)
-    y_clean = y_series[mask].to_numpy(dtype=float)
-    slope, intercept, _, _, _ = stats.linregress(x_clean, y_clean)
-    fitted = intercept + slope * x_clean
-    residuals = y_clean - fitted
-    return fitted, residuals, x_clean
+    x_numeric = pd.to_numeric(x_data, errors="coerce")
+    y_numeric = pd.to_numeric(y_data, errors="coerce")
+    valid_mask = x_numeric.notna() & y_numeric.notna()
+    
+    x_valid = x_numeric[valid_mask].to_numpy(dtype=float)
+    y_valid = y_numeric[valid_mask].to_numpy(dtype=float)
+    
+    regression_result = stats.linregress(x_valid, y_valid)
+    slope = regression_result.slope
+    intercept = regression_result.intercept
+    
+    fitted_values = intercept + slope * x_valid
+    residuals = y_valid - fitted_values
+    
+    return fitted_values, residuals, x_valid
 
 
 def fit_linear_regression(
@@ -138,22 +184,47 @@ def fit_linear_regression(
     return polynomial(x_range)
 
 
+def _create_bin_mask(
+    y_pred: np.ndarray,
+    bin_edges: np.ndarray,
+    bin_index: int,
+    is_last_bin: bool,
+) -> np.ndarray:
+    """Create boolean mask for values in specified bin."""
+    lower_bound = bin_edges[bin_index]
+    upper_bound = bin_edges[bin_index + 1]
+    
+    if is_last_bin:
+        return (y_pred >= lower_bound) & (y_pred <= upper_bound)
+    return (y_pred >= lower_bound) & (y_pred < upper_bound)
+
+
 def compute_binned_statistics(
     y_pred: np.ndarray,
     y_true: np.ndarray,
     n_bins: int,
 ) -> Tuple[List[float], List[float], List[float]]:
     """Compute binned means and standard errors."""
-    bins = np.linspace(y_pred.min(), y_pred.max(), n_bins + 1)
+    y_min = y_pred.min()
+    y_max = y_pred.max()
+    bin_edges = np.linspace(y_min, y_max, n_bins + 1)
+    
     bin_centers, bin_means, bin_stds = [], [], []
     
-    for i in range(n_bins):
-        is_last = i == n_bins - 1
-        mask = (y_pred >= bins[i]) & (y_pred <= bins[i+1] if is_last else y_pred < bins[i+1])
-        if mask.sum() > 0:
-            bin_centers.append((bins[i] + bins[i+1]) / 2)
-            bin_means.append(np.mean(y_true[mask]))
-            bin_stds.append(np.std(y_true[mask]) / np.sqrt(mask.sum()))
+    for bin_idx in range(n_bins):
+        is_last_bin = bin_idx == n_bins - 1
+        bin_mask = _create_bin_mask(y_pred, bin_edges, bin_idx, is_last_bin)
+        n_samples_in_bin = bin_mask.sum()
+        
+        if n_samples_in_bin > 0:
+            bin_center = (bin_edges[bin_idx] + bin_edges[bin_idx + 1]) / 2
+            y_true_in_bin = y_true[bin_mask]
+            bin_mean = np.mean(y_true_in_bin)
+            bin_std = np.std(y_true_in_bin) / np.sqrt(n_samples_in_bin)
+            
+            bin_centers.append(bin_center)
+            bin_means.append(bin_mean)
+            bin_stds.append(bin_std)
     
     return bin_centers, bin_means, bin_stds
 
@@ -161,6 +232,34 @@ def compute_binned_statistics(
 ###################################################################
 # Aperiodic Fitting
 ###################################################################
+
+
+def _reject_peaks(
+    frequencies: np.ndarray,
+    psd_values: np.ndarray,
+    peak_rejection_z: float,
+    min_points: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Reject spectral peaks using robust outlier detection."""
+    mad = stats.median_abs_deviation(
+        psd_values, scale="normal", nan_policy="omit"
+    )
+    median_psd = np.median(psd_values) if np.isfinite(psd_values).any() else np.nan
+    
+    mad_threshold = 1e-12
+    is_mad_valid = np.isfinite(mad) and mad > mad_threshold
+    is_median_valid = np.isfinite(median_psd)
+    
+    if not (is_mad_valid and is_median_valid):
+        return frequencies, psd_values
+    
+    rejection_threshold = median_psd + peak_rejection_z * mad
+    keep_mask = psd_values <= rejection_threshold
+    
+    if keep_mask.sum() >= min_points:
+        return frequencies[keep_mask], psd_values[keep_mask]
+    
+    return frequencies, psd_values
 
 
 def fit_aperiodic(
@@ -171,23 +270,21 @@ def fit_aperiodic(
 ) -> Tuple[float, float]:
     """Fit aperiodic (1/f) component to log-log PSD."""
     finite_mask = np.isfinite(log_freqs) & np.isfinite(log_psd)
-    freq = log_freqs[finite_mask]
-    psd_vals = log_psd[finite_mask]
+    frequencies = log_freqs[finite_mask]
+    psd_values = log_psd[finite_mask]
     
-    if freq.size < min_points:
+    if frequencies.size < min_points:
         return np.nan, np.nan
     
-    mad = stats.median_abs_deviation(psd_vals, scale="normal", nan_policy="omit")
-    median = np.median(psd_vals) if np.isfinite(psd_vals).any() else np.nan
+    frequencies, psd_values = _reject_peaks(
+        frequencies, psd_values, peak_rejection_z, min_points
+    )
     
-    if np.isfinite(mad) and mad > 1e-12 and np.isfinite(median):
-        keep_mask = psd_vals <= median + peak_rejection_z * mad
-        if keep_mask.sum() >= min_points:
-            freq = freq[keep_mask]
-            psd_vals = psd_vals[keep_mask]
+    if frequencies.size < min_points:
+        return np.nan, np.nan
     
     try:
-        slope, intercept = np.polyfit(freq, psd_vals, 1)
+        slope, intercept = np.polyfit(frequencies, psd_values, 1)
         return float(intercept), float(slope)
     except (ValueError, np.linalg.LinAlgError):
         return np.nan, np.nan
@@ -226,11 +323,18 @@ def compute_consensus_labels(
     n_timepoints: int,
 ) -> np.ndarray:
     """Compute consensus microstate labels across trials."""
-    labels = np.zeros(n_timepoints, dtype=int)
-    for t in range(n_timepoints):
-        counts = np.bincount([labels_all_trials[trial][t] for trial in range(len(labels_all_trials))])
-        labels[t] = np.argmax(counts)
-    return labels
+    consensus_labels = np.zeros(n_timepoints, dtype=int)
+    n_trials = len(labels_all_trials)
+    
+    for timepoint_idx in range(n_timepoints):
+        trial_labels_at_timepoint = [
+            labels_all_trials[trial_idx][timepoint_idx]
+            for trial_idx in range(n_trials)
+        ]
+        label_counts = np.bincount(trial_labels_at_timepoint)
+        consensus_labels[timepoint_idx] = np.argmax(label_counts)
+    
+    return consensus_labels
 
 
 def compute_inter_band_coupling_matrix(
@@ -242,28 +346,86 @@ def compute_inter_band_coupling_matrix(
     """Compute inter-band coupling matrix."""
     from .band_stats import compute_band_spatial_correlation
     
-    n = len(band_names)
-    mat = np.zeros((n, n))
+    n_bands = len(band_names)
+    coupling_matrix = np.zeros((n_bands, n_bands))
     
-    for i, b1 in enumerate(band_names):
-        fmin1, fmax1 = features_freq_bands[b1]
-        fm1 = (tfr_avg.freqs >= fmin1) & (tfr_avg.freqs <= fmax1)
-        if not fm1.any():
-            continue
-        mat[i, i] = 1.0
-        b1_ch = extract_band_channel_means_func(tfr_avg, fm1)
+    for band_1_idx, band_1_name in enumerate(band_names):
+        fmin_1, fmax_1 = features_freq_bands[band_1_name]
+        freq_mask_1 = (tfr_avg.freqs >= fmin_1) & (tfr_avg.freqs <= fmax_1)
         
-        for j in range(i + 1, n):
-            b2 = band_names[j]
-            fmin2, fmax2 = features_freq_bands[b2]
-            fm2 = (tfr_avg.freqs >= fmin2) & (tfr_avg.freqs <= fmax2)
-            if not fm2.any():
+        if not freq_mask_1.any():
+            continue
+        
+        coupling_matrix[band_1_idx, band_1_idx] = 1.0
+        band_1_channels = extract_band_channel_means_func(tfr_avg, freq_mask_1)
+        
+        for band_2_idx in range(band_1_idx + 1, n_bands):
+            band_2_name = band_names[band_2_idx]
+            fmin_2, fmax_2 = features_freq_bands[band_2_name]
+            freq_mask_2 = (tfr_avg.freqs >= fmin_2) & (tfr_avg.freqs <= fmax_2)
+            
+            if not freq_mask_2.any():
                 continue
-            b2_ch = extract_band_channel_means_func(tfr_avg, fm2)
-            r = compute_band_spatial_correlation(b1_ch, b2_ch)
-            mat[i, j] = mat[j, i] = r
+            
+            band_2_channels = extract_band_channel_means_func(
+                tfr_avg, freq_mask_2
+            )
+            correlation = compute_band_spatial_correlation(
+                band_1_channels, band_2_channels
+            )
+            coupling_matrix[band_1_idx, band_2_idx] = correlation
+            coupling_matrix[band_2_idx, band_1_idx] = correlation
     
-    return mat
+    return coupling_matrix
+
+
+def _extract_channel_power_values(
+    dataframe: pd.DataFrame,
+    band_name: str,
+    channels: List[str],
+) -> List[float]:
+    """Extract power values for all channels from dataframe."""
+    power_values = []
+    for channel in channels:
+        column_name = f"pow_{band_name}_{channel}"
+        if column_name in dataframe.columns:
+            numeric_values = pd.to_numeric(
+                dataframe[column_name], errors="coerce"
+            )
+            mean_value = float(numeric_values.mean())
+            power_values.append(mean_value)
+        else:
+            power_values.append(np.nan)
+    return power_values
+
+
+def _compute_band_statistics(
+    subject_power_arrays: np.ndarray,
+    band_name: str,
+    channels: List[str],
+) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    """Compute mean, std, and n_subjects for each channel in a band."""
+    mean_per_channel = np.nanmean(subject_power_arrays, axis=0)
+    n_subjects_per_channel = np.sum(
+        np.isfinite(subject_power_arrays), axis=0
+    )
+    std_per_channel = np.nanstd(subject_power_arrays, axis=0, ddof=1)
+    
+    statistics = []
+    for channel_idx, channel_name in enumerate(channels):
+        mean_value = mean_per_channel[channel_idx]
+        std_value = std_per_channel[channel_idx]
+        n_subjects = n_subjects_per_channel[channel_idx]
+        
+        statistics.append({
+            "band": band_name,
+            "channel": channel_name,
+            "mean": float(mean_value) if np.isfinite(mean_value) else np.nan,
+            "std": float(std_value) if np.isfinite(std_value) else np.nan,
+            "n_subjects": int(n_subjects),
+        })
+    
+    return mean_per_channel, statistics
 
 
 def compute_group_channel_power_statistics(
@@ -275,32 +437,22 @@ def compute_group_channel_power_statistics(
     heatmap_rows, stats_rows = [], []
     
     for band in bands:
-        band_str = str(band)
-        subj_means = []
-        for _, df in subj_pow.items():
-            vals = []
-            for ch in all_channels:
-                col = f"pow_{band_str}_{ch}"
-                if col in df.columns:
-                    vals.append(float(pd.to_numeric(df[col], errors="coerce").mean()))
-                else:
-                    vals.append(np.nan)
-            subj_means.append(vals)
+        band_name = str(band)
+        subject_means = []
         
-        arr = np.asarray(subj_means, dtype=float)
-        mean_across = np.nanmean(arr, axis=0)
-        heatmap_rows.append(mean_across)
+        for dataframe in subj_pow.values():
+            channel_values = _extract_channel_power_values(
+                dataframe, band_name, all_channels
+            )
+            subject_means.append(channel_values)
         
-        n_eff = np.sum(np.isfinite(arr), axis=0)
-        std_across = np.nanstd(arr, axis=0, ddof=1)
+        subject_arrays = np.asarray(subject_means, dtype=float)
+        mean_per_channel, band_statistics = _compute_band_statistics(
+            subject_arrays, band_name, all_channels
+        )
         
-        for j, ch in enumerate(all_channels):
-            stats_rows.append({
-                "band": band_str, "channel": ch,
-                "mean": float(mean_across[j]) if np.isfinite(mean_across[j]) else np.nan,
-                "std": float(std_across[j]) if np.isfinite(std_across[j]) else np.nan,
-                "n_subjects": int(n_eff[j]),
-            })
+        heatmap_rows.append(mean_per_channel)
+        stats_rows.extend(band_statistics)
     
     return heatmap_rows, stats_rows
 

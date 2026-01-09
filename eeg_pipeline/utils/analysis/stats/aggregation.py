@@ -13,30 +13,78 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .base import get_ci_level, get_config_value
+from .base import get_ci_level
 from .correlation import fisher_z, inverse_fisher_z
+
+
+_MIN_SAMPLES_FOR_STATISTICS = 2
+
+
+def _get_z_critical_value(ci_level: float) -> float:
+    """Compute z-critical value for given confidence interval level."""
+    return float(stats.norm.ppf((1 + ci_level) / 2))
+
+
+def _filter_finite_values(values: np.ndarray) -> np.ndarray:
+    """Extract finite values from array."""
+    return values[np.isfinite(values)]
+
+
+def _compute_mean_confidence_interval(
+    values: np.ndarray,
+    z_critical: float,
+) -> Tuple[float, float, float]:
+    """Compute mean and confidence interval bounds from values.
+    
+    Returns
+    -------
+    Tuple[float, float, float]
+        (mean, ci_lower, ci_upper)
+    """
+    n = len(values)
+    mean = float(np.mean(values))
+    standard_error = float(np.std(values, ddof=1) / np.sqrt(n))
+    margin_of_error = z_critical * standard_error
+    
+    ci_lower = mean - margin_of_error
+    ci_upper = mean + margin_of_error
+    
+    return mean, ci_lower, ci_upper
 
 
 def compute_group_channel_statistics(
     channel_data: Dict[str, np.ndarray],
     config: Optional[Any] = None,
 ) -> Dict[str, Tuple[float, float, float]]:
-    """Compute mean, CI for each channel across subjects."""
+    """Compute mean and confidence intervals for each channel across subjects.
+    
+    Parameters
+    ----------
+    channel_data : Dict[str, np.ndarray]
+        Dictionary mapping channel names to arrays of values across subjects
+    config : Optional[Any]
+        Configuration object for CI level
+        
+    Returns
+    -------
+    Dict[str, Tuple[float, float, float]]
+        Dictionary mapping channel names to (mean, ci_lower, ci_upper)
+    """
     ci_level = get_ci_level(config)
-    z_crit = stats.norm.ppf((1 + ci_level) / 2)
+    z_critical = _get_z_critical_value(ci_level)
     
     results = {}
-    for ch, values in channel_data.items():
-        valid = values[np.isfinite(values)]
-        if len(valid) < 2:
-            results[ch] = (np.nan, np.nan, np.nan)
+    for channel_name, values in channel_data.items():
+        valid_values = _filter_finite_values(values)
+        
+        if len(valid_values) < _MIN_SAMPLES_FOR_STATISTICS:
+            results[channel_name] = (np.nan, np.nan, np.nan)
             continue
         
-        mean = np.mean(valid)
-        se = np.std(valid, ddof=1) / np.sqrt(len(valid))
-        ci_lo = mean - z_crit * se
-        ci_hi = mean + z_crit * se
-        results[ch] = (mean, ci_lo, ci_hi)
+        mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
+            valid_values, z_critical
+        )
+        results[channel_name] = (mean, ci_lower, ci_upper)
     
     return results
 
@@ -45,18 +93,31 @@ def compute_channel_confidence_interval(
     z_scores: np.ndarray,
     config: Optional[Any] = None,
 ) -> Tuple[float, float]:
-    """Compute CI from z-transformed values."""
-    ci_level = get_ci_level(config)
-    valid = z_scores[np.isfinite(z_scores)]
+    """Compute confidence interval from z-transformed values.
     
-    if len(valid) < 2:
+    Parameters
+    ----------
+    z_scores : np.ndarray
+        Array of z-transformed values
+    config : Optional[Any]
+        Configuration object for CI level
+        
+    Returns
+    -------
+    Tuple[float, float]
+        (ci_lower, ci_upper) in z-space
+    """
+    ci_level = get_ci_level(config)
+    valid_z_scores = _filter_finite_values(z_scores)
+    
+    if len(valid_z_scores) < _MIN_SAMPLES_FOR_STATISTICS:
         return np.nan, np.nan
     
-    z_mean = np.mean(valid)
-    se = np.std(valid, ddof=1) / np.sqrt(len(valid))
-    z_crit = stats.norm.ppf((1 + ci_level) / 2)
+    z_mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
+        valid_z_scores, _get_z_critical_value(ci_level)
+    )
     
-    return float(z_mean - z_crit * se), float(z_mean + z_crit * se)
+    return ci_lower, ci_upper
 
 
 def pool_data_by_strategy(
@@ -64,55 +125,125 @@ def pool_data_by_strategy(
     y_lists: List[np.ndarray],
     strategy: str = "concatenate",
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Pool data across subjects using specified strategy."""
+    """Pool data across subjects using specified strategy.
+    
+    Parameters
+    ----------
+    x_lists : List[np.ndarray]
+        List of x arrays, one per subject
+    y_lists : List[np.ndarray]
+        List of y arrays, one per subject
+    strategy : str
+        Pooling strategy: "concatenate" or "mean"
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Pooled (x, y) arrays
+        
+    Raises
+    ------
+    ValueError
+        If strategy is not recognized
+    """
     if strategy == "concatenate":
-        x_all = np.concatenate([x for x in x_lists if len(x) > 0])
-        y_all = np.concatenate([y for y in y_lists if len(y) > 0])
-        return x_all, y_all
+        return _pool_by_concatenation(x_lists, y_lists)
     elif strategy == "mean":
-        x_means = [np.nanmean(x) for x in x_lists if len(x) > 0]
-        y_means = [np.nanmean(y) for y in y_lists if len(y) > 0]
-        return np.array(x_means), np.array(y_means)
+        return _pool_by_mean(x_lists, y_lists)
     else:
         raise ValueError(f"Unknown pooling strategy: {strategy}")
+
+
+def _pool_by_concatenation(
+    x_lists: List[np.ndarray],
+    y_lists: List[np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Concatenate all non-empty arrays."""
+    x_pooled = np.concatenate([x for x in x_lists if len(x) > 0])
+    y_pooled = np.concatenate([y for y in y_lists if len(y) > 0])
+    return x_pooled, y_pooled
+
+
+def _pool_by_mean(
+    x_lists: List[np.ndarray],
+    y_lists: List[np.ndarray],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute mean of each non-empty array."""
+    x_means = [np.nanmean(x) for x in x_lists if len(x) > 0]
+    y_means = [np.nanmean(y) for y in y_lists if len(y) > 0]
+    return np.array(x_means), np.array(y_means)
 
 
 def compute_band_summary_statistics(
     band_data: pd.Series,
     config: Optional[Any] = None,
 ) -> Tuple[float, float, float, int]:
-    """Compute mean, CI low, CI high, n for band data."""
+    """Compute summary statistics for band data.
+    
+    Parameters
+    ----------
+    band_data : pd.Series
+        Series of band values across subjects
+    config : Optional[Any]
+        Configuration object for CI level
+        
+    Returns
+    -------
+    Tuple[float, float, float, int]
+        (mean, ci_lower, ci_upper, sample_size)
+    """
+    valid_values = band_data.dropna().values
+    n_samples = len(valid_values)
+    
+    if n_samples < _MIN_SAMPLES_FOR_STATISTICS:
+        return np.nan, np.nan, np.nan, n_samples
+    
     ci_level = get_ci_level(config)
-    valid = band_data.dropna().values
-    n = len(valid)
+    z_critical = _get_z_critical_value(ci_level)
+    mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
+        valid_values, z_critical
+    )
     
-    if n < 2:
-        return np.nan, np.nan, np.nan, n
-    
-    mean = np.mean(valid)
-    se = np.std(valid, ddof=1) / np.sqrt(n)
-    z_crit = stats.norm.ppf((1 + ci_level) / 2)
-    
-    return float(mean), float(mean - z_crit * se), float(mean + z_crit * se), n
+    return mean, ci_lower, ci_upper, n_samples
 
 
 def compute_band_summaries(
     means_df: pd.DataFrame,
     bands_present: List[str],
+    config: Optional[Any] = None,
 ) -> pd.DataFrame:
-    """Compute summary statistics for each band."""
+    """Compute summary statistics for each band.
+    
+    Parameters
+    ----------
+    means_df : pd.DataFrame
+        DataFrame with band columns containing mean values per subject
+    bands_present : List[str]
+        List of band names to process
+    config : Optional[Any]
+        Configuration object for CI level
+        
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns: band, mean, ci_low, ci_high, n
+    """
     summaries = []
-    for band in bands_present:
-        if band not in means_df.columns:
+    for band_name in bands_present:
+        if band_name not in means_df.columns:
             continue
-        mean, ci_lo, ci_hi, n = compute_band_summary_statistics(means_df[band])
+        
+        mean, ci_lower, ci_upper, sample_size = compute_band_summary_statistics(
+            means_df[band_name], config
+        )
         summaries.append({
-            "band": band,
+            "band": band_name,
             "mean": mean,
-            "ci_low": ci_lo,
-            "ci_high": ci_hi,
-            "n": n,
+            "ci_low": ci_lower,
+            "ci_high": ci_upper,
+            "n": sample_size,
         })
+    
     return pd.DataFrame(summaries)
 
 
@@ -120,15 +251,31 @@ def compute_fisher_transformed_mean(
     edge_df: pd.DataFrame,
     config: Optional[Any] = None,
 ) -> pd.Series:
-    """Compute Fisher-transformed mean correlation per edge."""
-    def fisher_mean(vals):
-        valid = vals[np.isfinite(vals)]
-        if len(valid) == 0:
-            return np.nan
-        zs = [fisher_z(v) for v in valid]
-        return inverse_fisher_z(np.mean(zs))
+    """Compute Fisher-transformed mean correlation per edge.
     
-    return edge_df.apply(fisher_mean)
+    Parameters
+    ----------
+    edge_df : pd.DataFrame
+        DataFrame where each column is an edge and rows are subjects
+    config : Optional[Any]
+        Configuration object (passed to fisher_z)
+        
+    Returns
+    -------
+    pd.Series
+        Series of Fisher-aggregated mean correlations per edge
+    """
+    def _fisher_mean_per_edge(values: pd.Series) -> float:
+        """Compute Fisher-transformed mean for a single edge."""
+        valid_values = _filter_finite_values(values.values)
+        if len(valid_values) == 0:
+            return np.nan
+        
+        z_transformed = [fisher_z(v, config) for v in valid_values]
+        z_mean = np.mean(z_transformed)
+        return inverse_fisher_z(z_mean)
+    
+    return edge_df.apply(_fisher_mean_per_edge)
 
 
 def compute_group_band_statistics(
@@ -137,55 +284,96 @@ def compute_group_band_statistics(
     ci_multiplier: Optional[float] = None,
     config: Optional[Any] = None,
 ) -> Tuple[List[str], List[float], List[float], List[float], List[int]]:
-    """Compute group statistics for bands."""
+    """Compute group statistics for bands.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with band columns and subject rows
+    bands : List[str]
+        List of band names to process
+    ci_multiplier : Optional[float]
+        Pre-computed z-critical value. If None, computed from config.
+    config : Optional[Any]
+        Configuration object for CI level
+        
+    Returns
+    -------
+    Tuple[List[str], List[float], List[float], List[float], List[int]]
+        (band_names, means, ci_lowers, ci_uppers, sample_sizes)
+    """
     if ci_multiplier is None:
         ci_level = get_ci_level(config)
-        ci_multiplier = stats.norm.ppf((1 + ci_level) / 2)
+        ci_multiplier = _get_z_critical_value(ci_level)
     
     band_names = []
     means = []
-    ci_lows = []
-    ci_highs = []
-    counts = []
+    ci_lowers = []
+    ci_uppers = []
+    sample_sizes = []
     
-    for band in bands:
-        if band not in df.columns:
+    for band_name in bands:
+        if band_name not in df.columns:
             continue
         
-        values = df[band].dropna().values
-        n = len(values)
-        if n < 2:
+        valid_values = df[band_name].dropna().values
+        sample_size = len(valid_values)
+        
+        if sample_size < _MIN_SAMPLES_FOR_STATISTICS:
             continue
         
-        mean = np.mean(values)
-        se = np.std(values, ddof=1) / np.sqrt(n)
+        mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
+            valid_values, ci_multiplier
+        )
         
-        band_names.append(band)
+        band_names.append(band_name)
         means.append(mean)
-        ci_lows.append(mean - ci_multiplier * se)
-        ci_highs.append(mean + ci_multiplier * se)
-        counts.append(n)
+        ci_lowers.append(ci_lower)
+        ci_uppers.append(ci_upper)
+        sample_sizes.append(sample_size)
     
-    return band_names, means, ci_lows, ci_highs, counts
+    return band_names, means, ci_lowers, ci_uppers, sample_sizes
 
 
 def compute_error_bars_from_ci_dicts(
     values: List[float],
     ci_dicts: List[Optional[Dict[str, List[float]]]],
 ) -> Tuple[List[float], List[float]]:
-    """Convert CI dicts to error bar arrays."""
-    lower_errs = []
-    upper_errs = []
+    """Convert confidence interval dictionaries to error bar arrays.
     
-    for val, ci in zip(values, ci_dicts):
-        if ci is None or "low" not in ci or "high" not in ci:
-            lower_errs.append(0)
-            upper_errs.append(0)
-        else:
-            lower_errs.append(val - ci["low"][0] if ci["low"] else 0)
-            upper_errs.append(ci["high"][0] - val if ci["high"] else 0)
+    Parameters
+    ----------
+    values : List[float]
+        List of mean values
+    ci_dicts : List[Optional[Dict[str, List[float]]]]
+        List of CI dictionaries with "low" and "high" keys
+        
+    Returns
+    -------
+    Tuple[List[float], List[float]]
+        (lower_errors, upper_errors) where errors are distances from mean
+    """
+    lower_errors = []
+    upper_errors = []
     
-    return lower_errs, upper_errs
+    for mean_value, ci_dict in zip(values, ci_dicts):
+        if not _has_valid_ci_dict(ci_dict):
+            lower_errors.append(0.0)
+            upper_errors.append(0.0)
+            continue
+        
+        ci_lower_value = ci_dict["low"][0] if ci_dict["low"] else mean_value
+        ci_upper_value = ci_dict["high"][0] if ci_dict["high"] else mean_value
+        
+        lower_errors.append(mean_value - ci_lower_value)
+        upper_errors.append(ci_upper_value - mean_value)
+    
+    return lower_errors, upper_errors
+
+
+def _has_valid_ci_dict(ci_dict: Optional[Dict[str, List[float]]]) -> bool:
+    """Check if CI dictionary has required keys."""
+    return ci_dict is not None and "low" in ci_dict and "high" in ci_dict
 
 
 def compute_error_bars_from_arrays(
@@ -193,25 +381,58 @@ def compute_error_bars_from_arrays(
     ci_lower: List[float],
     ci_upper: List[float],
 ) -> np.ndarray:
-    """Convert CI arrays to error bar format."""
-    lower_errs = [m - l for m, l in zip(means, ci_lower)]
-    upper_errs = [u - m for m, u in zip(means, ci_upper)]
-    return np.array([lower_errs, upper_errs])
+    """Convert confidence interval arrays to error bar format.
+    
+    Parameters
+    ----------
+    means : List[float]
+        List of mean values
+    ci_lower : List[float]
+        List of lower CI bounds
+    ci_upper : List[float]
+        List of upper CI bounds
+        
+    Returns
+    -------
+    np.ndarray
+        Array of shape (2, n) where first row is lower errors,
+        second row is upper errors
+    """
+    lower_errors = [mean - lower for mean, lower in zip(means, ci_lower)]
+    upper_errors = [upper - mean for mean, upper in zip(means, ci_upper)]
+    return np.array([lower_errors, upper_errors])
 
 
 def count_trials_by_condition(
     events_df: pd.DataFrame,
     pain_col: str = "pain_binary",
 ) -> Dict[str, int]:
-    """Count trials by pain/nonpain condition."""
+    """Count trials by pain/nonpain condition.
+    
+    Parameters
+    ----------
+    events_df : pd.DataFrame
+        DataFrame with trial events
+    pain_col : str
+        Column name containing pain condition (1=pain, 0=nonpain)
+        
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary with keys: "pain", "nonpain", "total"
+    """
     if pain_col not in events_df.columns:
         return {"total": len(events_df)}
     
-    pain_vals = events_df[pain_col].values
+    pain_values = events_df[pain_col].values
+    pain_count = int(np.sum(pain_values == 1))
+    nonpain_count = int(np.sum(pain_values == 0))
+    total_count = len(events_df)
+    
     return {
-        "pain": int(np.sum(pain_vals == 1)),
-        "nonpain": int(np.sum(pain_vals == 0)),
-        "total": len(events_df),
+        "pain": pain_count,
+        "nonpain": nonpain_count,
+        "total": total_count,
     }
 
 
@@ -219,13 +440,29 @@ def compute_duration_p_value(
     nonpain_data: np.ndarray,
     pain_data: np.ndarray,
 ) -> float:
-    """Compute p-value for duration difference (Mann-Whitney)."""
-    valid_np = nonpain_data[np.isfinite(nonpain_data)]
-    valid_p = pain_data[np.isfinite(pain_data)]
+    """Compute p-value for duration difference using Mann-Whitney U test.
     
-    if len(valid_np) < 2 or len(valid_p) < 2:
+    Parameters
+    ----------
+    nonpain_data : np.ndarray
+        Array of nonpain condition durations
+    pain_data : np.ndarray
+        Array of pain condition durations
+        
+    Returns
+    -------
+    float
+        p-value from Mann-Whitney U test, or np.nan if insufficient data
+    """
+    valid_nonpain = _filter_finite_values(nonpain_data)
+    valid_pain = _filter_finite_values(pain_data)
+    
+    if (len(valid_nonpain) < _MIN_SAMPLES_FOR_STATISTICS or
+            len(valid_pain) < _MIN_SAMPLES_FOR_STATISTICS):
         return np.nan
     
-    _, p = stats.mannwhitneyu(valid_np, valid_p, alternative="two-sided")
-    return float(p)
+    _, p_value = stats.mannwhitneyu(
+        valid_nonpain, valid_pain, alternative="two-sided"
+    )
+    return float(p_value)
 

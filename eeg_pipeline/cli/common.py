@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, List, Optional
 
+from eeg_pipeline.cli.progress import (
+    ProgressEvent,
+    ProgressReporter,
+    create_progress_reporter,
+)
 from eeg_pipeline.infra.paths import resolve_deriv_root
 
 
@@ -21,11 +25,8 @@ MIN_SUBJECTS_KEY = "analysis.min_subjects_for_group"
 MIN_SUBJECTS_FOR_ML = 2
 
 
-###################################################################
-# Common Argument Helpers
-###################################################################
-
 def add_common_subject_args(parser: argparse.ArgumentParser) -> None:
+    """Add mutually exclusive subject selection arguments to parser."""
     subject_group = parser.add_mutually_exclusive_group()
     subject_group.add_argument(
         "--group", type=str,
@@ -42,6 +43,7 @@ def add_common_subject_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_task_arg(parser: argparse.ArgumentParser) -> None:
+    """Add task label argument to parser."""
     parser.add_argument(
         "--task", "-t", type=str, default=None,
         help="Task label (default from config)"
@@ -87,13 +89,15 @@ def add_output_format_args(parser: argparse.ArgumentParser) -> None:
 
 
 def resolve_task(task: Optional[str], config: Any) -> str:
-    resolved = task or config.get(DEFAULT_TASK_KEY)
-    if resolved is None:
+    """Resolve task label from argument or config."""
+    task_label = task or config.get(DEFAULT_TASK_KEY)
+    if task_label is None:
         raise ValueError(f"Missing required config value: {DEFAULT_TASK_KEY}")
-    return resolved
+    return task_label
 
 
 def validate_subjects_not_empty(subjects: List[str], operation: str) -> None:
+    """Validate that subjects list is not empty."""
     if not subjects:
         raise ValueError(f"No subjects specified for {operation}")
 
@@ -103,6 +107,7 @@ def validate_min_subjects(
     min_count: int,
     operation: str
 ) -> None:
+    """Validate that subjects list meets minimum count requirement."""
     if len(subjects) < min_count:
         raise ValueError(
             f"{operation} requires at least {min_count} subjects, "
@@ -111,35 +116,31 @@ def validate_min_subjects(
 
 
 def get_deriv_root(config: Any) -> Path:
+    """Get derivatives root path from config."""
     return resolve_deriv_root(config=config)
 
-
-###################################################################
-# Progress Streaming Protocol (re-exported from progress module)
-###################################################################
-
-from eeg_pipeline.cli.progress import (
-    ProgressEvent,
-    ProgressReporter,
-    create_progress_reporter,
-)
-
-
-###################################################################
-# JSON Output Helpers
-###################################################################
 
 def output_json(data: Any) -> None:
     """Print data as formatted JSON."""
     print(json.dumps(data, indent=2, default=str))
 
 
-def output_result(args: argparse.Namespace, data: Any, text_formatter=None) -> None:
+def output_text(data: Any) -> None:
+    """Print data as plain text."""
+    print(data)
+
+
+def output_formatted_text(data: Any, formatter: Callable[[Any], str]) -> None:
+    """Print data formatted by the provided formatter function."""
+    print(formatter(data))
+
+
+def output_result(args: argparse.Namespace, data: Any, text_formatter: Optional[Callable[[Any], str]] = None) -> None:
     """Output result as JSON or formatted text based on args."""
     if getattr(args, "output_json", False):
         output_json(data)
-    elif text_formatter:
-        print(text_formatter(data))
+    elif text_formatter is not None:
+        output_formatted_text(data, text_formatter)
     else:
-        print(data)
+        output_text(data)
 

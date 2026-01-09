@@ -34,19 +34,19 @@ import pandas as pd
 
 
 DOMAINS = {
-    "power": "power",         # Band power
-    "spectral": "spectral",   # Peak frequency, IAF
-    "aper": "aper",           # Aperiodic 1/f
-    "erp": "erp",             # ERP/LEP features
-    "erds": "erds",           # Event-related desync/sync
-    "ratio": "ratio",         # Band power ratios
-    "asym": "asym",           # Hemispheric asymmetry
-    "conn": "conn",           # Connectivity
-    "itpc": "itpc",           # Inter-trial phase coherence
-    "pac": "pac",             # Phase-amplitude coupling
-    "comp": "comp",           # Complexity
-    "bursts": "bursts",       # Burst dynamics
-    "qual": "qual",           # Quality metrics
+    "power": "power",
+    "spectral": "spectral",
+    "aper": "aper",
+    "erp": "erp",
+    "erds": "erds",
+    "ratio": "ratio",
+    "asym": "asym",
+    "conn": "conn",
+    "itpc": "itpc",
+    "pac": "pac",
+    "comp": "comp",
+    "bursts": "bursts",
+    "qual": "qual",
 }
 
 TIME_LABELS = {
@@ -123,24 +123,23 @@ class NamingSchema:
         channel: Optional[str] = None,
         channel_pair: Optional[str] = None,
     ) -> str:
+        if scope not in ("ch", "chpair", "roi", "global"):
+            raise ValueError(f"Unknown scope: {scope}")
+
         parts = [group, segment, band, scope]
 
         if scope == "ch":
-            if not channel:
+            if channel is None:
                 raise ValueError("Channel must be provided for scope='ch'")
             parts.append(channel)
         elif scope == "roi":
-            if not channel:
+            if channel is None:
                 raise ValueError("ROI name must be provided for scope='roi'")
-            parts.append(channel)  # ROI name passed via channel parameter
+            parts.append(channel)
         elif scope == "chpair":
-            if not channel_pair:
+            if channel_pair is None:
                 raise ValueError("Channel pair must be provided for scope='chpair'")
             parts.append(channel_pair)
-        elif scope == "global":
-            pass
-        else:
-            raise ValueError(f"Unknown scope: {scope}")
 
         parts.append(stat)
         return "_".join(parts)
@@ -152,34 +151,39 @@ class NamingSchema:
             return {"valid": False}
 
         scope_tokens = {"global", "ch", "chpair", "roi"}
-        try:
-            scope_idx = None
-            for idx in range(2, len(parts)):
-                if parts[idx] in scope_tokens:
-                    scope_idx = idx
-                    break
-            if scope_idx is None:
-                return {"valid": False}
+        scope_idx = None
+        for idx in range(2, len(parts)):
+            if parts[idx] in scope_tokens:
+                scope_idx = idx
+                break
 
-            res = {
-                "group": parts[0],
-                "segment": parts[1],
-                "band": "_".join(parts[2:scope_idx]),
-                "scope": parts[scope_idx],
-                "valid": True,
-            }
-
-            if res["scope"] == "global":
-                res["stat"] = "_".join(parts[scope_idx + 1 :])
-            elif res["scope"] in ["ch", "chpair", "roi"]:
-                if scope_idx + 1 >= len(parts):
-                    return {"valid": False}
-                res["identifier"] = parts[scope_idx + 1]
-                res["stat"] = "_".join(parts[scope_idx + 2 :])
-
-            return res
-        except IndexError:
+        if scope_idx is None:
             return {"valid": False}
+
+        group = parts[0]
+        segment = parts[1]
+        band = "_".join(parts[2:scope_idx])
+        scope = parts[scope_idx]
+
+        result = {
+            "group": group,
+            "segment": segment,
+            "band": band,
+            "scope": scope,
+            "valid": True,
+        }
+
+        if scope == "global":
+            result["stat"] = "_".join(parts[scope_idx + 1:])
+        elif scope in ("ch", "chpair", "roi"):
+            if scope_idx + 1 >= len(parts):
+                return {"valid": False}
+            result["identifier"] = parts[scope_idx + 1]
+            result["stat"] = "_".join(parts[scope_idx + 2:])
+        else:
+            return {"valid": False}
+
+        return result
 
 
 ###################################################################
@@ -193,16 +197,21 @@ def get_fine_time_bins(
     n_bins: int = 7,
 ) -> List[Dict[str, Any]]:
     """Generate fine temporal bins for HRF modeling."""
-    duration = (active_end - active_start) / n_bins
+    if active_end <= active_start:
+        raise ValueError("active_end must be greater than active_start")
+    if n_bins < 1:
+        raise ValueError("n_bins must be at least 1")
+
+    bin_duration = (active_end - active_start) / n_bins
     bins = []
-    for i in range(n_bins):
-        start = active_start + i * duration
-        end = start + duration
+    for bin_index in range(n_bins):
+        bin_start = active_start + bin_index * bin_duration
+        bin_end = bin_start + bin_duration
         bins.append(
             {
-                "start": round(start, 2),
-                "end": round(end, 2),
-                "label": f"t{i+1}",
+                "start": round(bin_start, 2),
+                "end": round(bin_end, 2),
+                "label": f"t{bin_index + 1}",
             }
         )
     return bins
@@ -250,25 +259,27 @@ def parse_feature_name(name: str) -> FeatureMetadata:
 
     if scope == "global":
         identifier = None
-        stat = "_".join(parts[4:])
+        statistic = "_".join(parts[4:])
     elif scope in ("ch", "chpair", "roi"):
         if len(parts) >= 6:
             identifier = parts[4]
-            stat = "_".join(parts[5:])
+            statistic = "_".join(parts[5:])
         else:
             identifier = parts[4] if len(parts) > 4 else "unknown"
-            stat = "unknown"
+            statistic = "unknown"
     else:
-        group = parts[0]
-        stat = parts[-1]
+        statistic = parts[-1]
         return FeatureMetadata(
-            name,
+            name=name,
             group=group,
             segment="unknown",
             band="unknown",
             scope="unknown",
-            statistic=stat,
+            statistic=statistic,
         )
+
+    scope_description = identifier if identifier else scope
+    description = f"{group} feature on {segment} in {band} band ({scope_description})"
 
     return FeatureMetadata(
         name=name,
@@ -277,8 +288,8 @@ def parse_feature_name(name: str) -> FeatureMetadata:
         band=band,
         scope=scope,
         identifier=identifier,
-        statistic=stat,
-        description=f"{group} feature on {segment} in {band} band ({scope if not identifier else identifier})",
+        statistic=statistic,
+        description=description,
     )
 
 
@@ -304,6 +315,29 @@ def _make_json_serializable(obj: Any) -> Any:
     return obj
 
 
+def _create_feature_entry(feature_name: str, parsed: dict) -> Dict[str, Any]:
+    """Create a feature entry from parsed naming schema."""
+    if parsed.get("valid"):
+        return {
+            "name": feature_name,
+            "group": parsed.get("group"),
+            "segment": parsed.get("segment"),
+            "band": parsed.get("band"),
+            "scope": parsed.get("scope"),
+            "identifier": parsed.get("identifier"),
+            "statistic": parsed.get("stat"),
+        }
+    return {
+        "name": feature_name,
+        "group": "unknown",
+        "segment": "unknown",
+        "band": "unknown",
+        "scope": "unknown",
+        "identifier": None,
+        "statistic": None,
+    }
+
+
 def generate_manifest(
     feature_columns: List[str],
     config: Any = None,
@@ -312,33 +346,11 @@ def generate_manifest(
     qc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     features = []
-    for col in feature_columns:
-        name = str(col)
-        parsed = NamingSchema.parse(name)
-        if parsed.get("valid"):
-            features.append(
-                {
-                    "name": name,
-                    "group": parsed.get("group"),
-                    "segment": parsed.get("segment"),
-                    "band": parsed.get("band"),
-                    "scope": parsed.get("scope"),
-                    "identifier": parsed.get("identifier"),
-                    "statistic": parsed.get("stat"),
-                }
-            )
-        else:
-            features.append(
-                {
-                    "name": name,
-                    "group": "unknown",
-                    "segment": "unknown",
-                    "band": "unknown",
-                    "scope": "unknown",
-                    "identifier": None,
-                    "statistic": None,
-                }
-            )
+    for column_name in feature_columns:
+        feature_name = str(column_name)
+        parsed = NamingSchema.parse(feature_name)
+        feature_entry = _create_feature_entry(feature_name, parsed)
+        features.append(feature_entry)
 
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -367,16 +379,21 @@ def save_features_organized(
     qc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Path]:
     output_dir = Path(output_dir)
-    sub_dir = output_dir / f"sub-{subject}" / "eeg" / "features"
-    sub_dir.mkdir(parents=True, exist_ok=True)
+    subject_dir = output_dir / f"sub-{subject}" / "eeg" / "features"
+    subject_dir.mkdir(parents=True, exist_ok=True)
 
-    base_name = f"sub-{subject}_task-{task}"
-    features_path = sub_dir / f"{base_name}_features.tsv"
+    base_filename = f"sub-{subject}_task-{task}"
+    features_path = subject_dir / f"{base_filename}_features.tsv"
     df.to_csv(features_path, sep="\t", index=False)
 
-    feature_cols = [c for c in df.columns if c not in ["condition", "trial", "epoch", "subject"]]
-    manifest = generate_manifest(feature_cols, config=config, subject=subject, task=task, qc=qc)
-    manifest_path = sub_dir / f"{base_name}_features_manifest.json"
+    metadata_columns = {"condition", "trial", "epoch", "subject"}
+    feature_columns = [
+        column for column in df.columns if column not in metadata_columns
+    ]
+    manifest = generate_manifest(
+        feature_columns, config=config, subject=subject, task=task, qc=qc
+    )
+    manifest_path = subject_dir / f"{base_filename}_features_manifest.json"
     save_manifest(manifest, manifest_path)
 
     return {

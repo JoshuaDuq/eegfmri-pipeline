@@ -7,7 +7,8 @@ including connectivity matrix operations and topomap data preparation.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import logging
 
 import mne
 import numpy as np
@@ -59,6 +60,119 @@ def find_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     return None
 
 
+def _find_power_column(
+    pow_cols: List[str],
+    band: str,
+    channel: str,
+    period: str,
+) -> Optional[str]:
+    """Find power column for a specific band, channel, and period.
+    
+    Args:
+        pow_cols: Available power column names
+        band: Power band name
+        channel: Channel name
+        period: Period name ('active', 'early', 'mid', 'late')
+    
+    Returns:
+        First matching column name, or None if not found
+    """
+    candidates = [
+        f"power_{period}_{band}_ch_{channel}_logratio",
+        f"power_{period}_{band}_ch_{channel}_log10raw",
+        f"pow_{band}_{channel}_{period}",
+    ]
+    pow_cols_set = set(pow_cols)
+    for candidate in candidates:
+        if candidate in pow_cols_set:
+            return candidate
+    return None
+
+
+def _determine_statistic_type(column_names: List[str]) -> str:
+    """Determine statistic type from column names.
+    
+    Args:
+        column_names: List of column names to check
+    
+    Returns:
+        Statistic type: 'logratio' or 'log10raw'
+    """
+    has_logratio = any(name.endswith("_logratio") for name in column_names)
+    return "logratio" if has_logratio else "log10raw"
+
+
+def _add_active_power_column(
+    pow_df: pd.DataFrame,
+    pow_cols: List[str],
+    band: str,
+    channel: str,
+    col_name_to_series: Dict[str, pd.Series],
+    active_cols: List[str],
+) -> None:
+    """Add active power column for a band-channel combination.
+    
+    Tries to find a direct active column first, otherwise averages
+    early/mid/late periods if all are available.
+    
+    Args:
+        pow_df: DataFrame containing power features
+        pow_cols: List of power column names
+        band: Power band name
+        channel: Channel name
+        col_name_to_series: Dictionary to populate with series
+        active_cols: List to populate with column names
+    """
+    preferred = _find_power_column(pow_cols, band, channel, "active")
+    if preferred is not None:
+        col_name_to_series[preferred] = pow_df[preferred]
+        active_cols.append(preferred)
+        return
+
+    early = _find_power_column(pow_cols, band, channel, "early")
+    mid = _find_power_column(pow_cols, band, channel, "mid")
+    late = _find_power_column(pow_cols, band, channel, "late")
+
+    if early is not None and mid is not None and late is not None:
+        active_value = pow_df[[early, mid, late]].mean(axis=1)
+        statistic_type = _determine_statistic_type([early, mid, late])
+        output_name = f"power_active_{band}_ch_{channel}_{statistic_type}"
+        col_name_to_series[output_name] = active_value
+        active_cols.append(output_name)
+
+
+def _add_baseline_columns(
+    baseline_df: pd.DataFrame,
+    baseline_cols: List[str],
+    band: str,
+    channel: str,
+    col_name_to_series: Dict[str, pd.Series],
+    active_cols: List[str],
+) -> None:
+    """Add baseline columns for a band-channel combination.
+    
+    Args:
+        baseline_df: DataFrame containing baseline features
+        baseline_cols: List of baseline column names
+        band: Power band name
+        channel: Channel name
+        col_name_to_series: Dictionary to populate with series
+        active_cols: List to populate with column names
+    """
+    if baseline_df.empty:
+        return
+
+    candidates = [
+        f"power_baseline_{band}_ch_{channel}_mean",
+        f"baseline_{band}_{channel}",
+    ]
+    baseline_col = find_column(baseline_df, candidates)
+    
+    if baseline_col is not None:
+        col_name_to_series[baseline_col] = baseline_df[baseline_col]
+        active_cols.append(baseline_col)
+
+
 def build_active_features(
     pow_df: pd.DataFrame,
     pow_cols: List[str],
@@ -66,7 +180,7 @@ def build_active_features(
     baseline_cols: List[str],
     ch_names: List[str],
     power_bands: List[str],
-    logger: Any,
+    logger: logging.Logger,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """Construct active-averaged band power DataFrame.
     
@@ -82,73 +196,17 @@ def build_active_features(
     Returns:
         Tuple of (active DataFrame, list of active column names)
     """
-    col_name_to_series = {}
-    active_cols = []
-
-    def _first_present(candidates: List[str]) -> Optional[str]:
-        for name in candidates:
-            if name in pow_cols:
-                return name
-        return None
+    col_name_to_series: Dict[str, pd.Series] = {}
+    active_cols: List[str] = []
 
     for band in power_bands:
-        for ch in ch_names:
-            preferred = _first_present(
-                [
-                    f"power_active_{band}_ch_{ch}_logratio",
-                    f"power_active_{band}_ch_{ch}_log10raw",
-                    f"pow_{band}_{ch}_active",
-                ]
+        for channel in ch_names:
+            _add_active_power_column(
+                pow_df, pow_cols, band, channel, col_name_to_series, active_cols
             )
-            if preferred is not None:
-                out_name = preferred
-                col_name_to_series[out_name] = pow_df[preferred]
-                active_cols.append(out_name)
-                continue
-
-            early = _first_present(
-                [
-                    f"power_early_{band}_ch_{ch}_logratio",
-                    f"power_early_{band}_ch_{ch}_log10raw",
-                    f"pow_{band}_{ch}_early",
-                ]
+            _add_baseline_columns(
+                baseline_df, baseline_cols, band, channel, col_name_to_series, active_cols
             )
-            mid = _first_present(
-                [
-                    f"power_mid_{band}_ch_{ch}_logratio",
-                    f"power_mid_{band}_ch_{ch}_log10raw",
-                    f"pow_{band}_{ch}_mid",
-                ]
-            )
-            late = _first_present(
-                [
-                    f"power_late_{band}_ch_{ch}_logratio",
-                    f"power_late_{band}_ch_{ch}_log10raw",
-                    f"pow_{band}_{ch}_late",
-                ]
-            )
-
-            if early is not None and mid is not None and late is not None:
-                active_val = pow_df[[early, mid, late]].mean(axis=1)
-
-                stat = "logratio" if any(s.endswith("_logratio") for s in [early, mid, late]) else "log10raw"
-                out_name = f"power_active_{band}_ch_{ch}_{stat}"
-                col_name_to_series[out_name] = active_val
-                active_cols.append(out_name)
-
-        if not baseline_df.empty:
-            for ch in ch_names:
-                baseline_col = None
-                for candidate in [
-                    f"power_baseline_{band}_ch_{ch}_mean",
-                    f"baseline_{band}_{ch}",
-                ]:
-                    if candidate in baseline_cols:
-                        baseline_col = candidate
-                        break
-                if baseline_col is not None:
-                    col_name_to_series[baseline_col] = baseline_df[baseline_col]
-                    active_cols.append(baseline_col)
 
     active_df = pd.DataFrame(col_name_to_series)
     active_df = active_df.reindex(columns=active_cols)
@@ -174,18 +232,35 @@ def flatten_lower_triangles(
     
     Returns:
         Tuple of (DataFrame with flattened values, list of column names)
+    
+    Raises:
+        ValueError: If connectivity_trials is not 3D or has invalid shape
     """
     if connectivity_trials.ndim != 3:
         raise ValueError("Connectivity array must be 3D (trials, nodes, nodes)")
+    
+    n_trials, n_nodes, n_nodes_check = connectivity_trials.shape
+    if n_nodes != n_nodes_check:
+        raise ValueError("Connectivity array must be square in last two dimensions")
 
-    n_trials, n_nodes, _ = connectivity_trials.shape
-    lower_tri_i, lower_tri_j = np.tril_indices(n_nodes, k=-1)
-    flattened_data = connectivity_trials[:, lower_tri_i, lower_tri_j]
+    lower_triangle_row_indices, lower_triangle_col_indices = np.tril_indices(
+        n_nodes, k=-1
+    )
+    flattened_data = connectivity_trials[
+        :, lower_triangle_row_indices, lower_triangle_col_indices
+    ]
 
-    if labels is not None and len(labels) == n_nodes:
-        pair_names = [f"{labels[i]}__{labels[j]}" for i, j in zip(lower_tri_i, lower_tri_j)]
+    has_valid_labels = labels is not None and len(labels) == n_nodes
+    if has_valid_labels:
+        pair_names = [
+            f"{labels[i]}__{labels[j]}"
+            for i, j in zip(lower_triangle_row_indices, lower_triangle_col_indices)
+        ]
     else:
-        pair_names = [f"n{i}_n{j}" for i, j in zip(lower_tri_i, lower_tri_j)]
+        pair_names = [
+            f"n{i}_n{j}"
+            for i, j in zip(lower_triangle_row_indices, lower_triangle_col_indices)
+        ]
 
     column_names = [f"{prefix}_{pair}" for pair in pair_names]
     return pd.DataFrame(flattened_data), column_names
@@ -196,7 +271,10 @@ def flatten_lower_triangles(
 ###################################################################
 
 
-def prepare_topomap_correlation_data(band_data: Dict, info: mne.Info) -> Tuple[np.ndarray, np.ndarray]:
+def prepare_topomap_correlation_data(
+    band_data: Dict[str, Any],
+    info: mne.Info,
+) -> Tuple[np.ndarray, np.ndarray]:
     """Prepare correlation data for topomap visualization.
     
     Args:
@@ -205,16 +283,37 @@ def prepare_topomap_correlation_data(band_data: Dict, info: mne.Info) -> Tuple[n
     
     Returns:
         Tuple of (topomap data array, significance mask array)
+    
+    Raises:
+        KeyError: If band_data is missing required keys
+        ValueError: If array lengths are inconsistent
     """
-    n_info_chs = len(info["ch_names"])
-    topo_data = np.zeros(n_info_chs)
-    topo_mask = np.zeros(n_info_chs, dtype=bool)
+    required_keys = ["channels", "correlations", "significant_mask"]
+    missing_keys = [key for key in required_keys if key not in band_data]
+    if missing_keys:
+        raise KeyError(f"band_data missing required keys: {missing_keys}")
 
-    for j, info_ch in enumerate(info["ch_names"]):
-        if info_ch in band_data["channels"]:
-            ch_idx = band_data["channels"].index(info_ch)
-            if np.isfinite(band_data["correlations"][ch_idx]):
-                topo_data[j] = band_data["correlations"][ch_idx]
-            topo_mask[j] = bool(band_data["significant_mask"][ch_idx])
+    channels = band_data["channels"]
+    correlations = band_data["correlations"]
+    significant_mask = band_data["significant_mask"]
 
-    return topo_data, topo_mask
+    if len(correlations) != len(channels) or len(significant_mask) != len(channels):
+        raise ValueError(
+            "channels, correlations, and significant_mask must have same length"
+        )
+
+    n_info_channels = len(info["ch_names"])
+    topomap_data = np.zeros(n_info_channels)
+    topomap_mask = np.zeros(n_info_channels, dtype=bool)
+
+    for info_channel_idx, info_channel_name in enumerate(info["ch_names"]):
+        if info_channel_name in channels:
+            band_channel_idx = channels.index(info_channel_name)
+            correlation_value = correlations[band_channel_idx]
+            
+            if np.isfinite(correlation_value):
+                topomap_data[info_channel_idx] = correlation_value
+            
+            topomap_mask[info_channel_idx] = bool(significant_mask[band_channel_idx])
+
+    return topomap_data, topomap_mask

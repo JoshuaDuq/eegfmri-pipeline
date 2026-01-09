@@ -8,14 +8,34 @@ for permutation distributions, cluster-mass histograms, and p-p plots.
 
 from __future__ import annotations
 
-from typing import Dict, List, Union, Optional, Tuple, Any
+from typing import Dict, List, Union, Optional, Any
 from pathlib import Path
 import json
+import datetime
 
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde, uniform
 from scipy import stats
+
+from .fdr import fdr_bh
+from .validation import (
+    compute_fwer_bonferroni,
+    compute_fwer_holm,
+    compute_fwer_sidak,
+)
+
+
+# Constants
+DEFAULT_CORRELATION_VMAX = 0.5
+KS_CRITICAL_ALPHA_05 = 1.36
+MIN_DEGREES_OF_FREEDOM = 1
+MIN_SAMPLE_SIZE_FOR_QQ = 3
+MIN_SAMPLE_SIZE_FOR_KDE = 2
+SHAPIRO_WILK_MAX_SAMPLE_SIZE = 5000
+MAX_OBSERVED_MASSES_TO_RETURN = 100
+ARRAY_TRUNCATION_LENGTH = 100
+KDE_PADDING_FACTOR = 0.1
 
 
 ###################################################################
@@ -43,7 +63,7 @@ def compute_correlation_vmax(data: Union[np.ndarray, List[Dict]]) -> float:
     if isinstance(data, np.ndarray):
         finite_vals = data[np.isfinite(data)]
         if len(finite_vals) == 0:
-            return 0.5
+            return DEFAULT_CORRELATION_VMAX
         return max(abs(np.min(finite_vals)), abs(np.max(finite_vals)))
     
     all_corrs = []
@@ -52,13 +72,15 @@ def compute_correlation_vmax(data: Union[np.ndarray, List[Dict]]) -> float:
         sig_corrs = bd['correlations'][sig_mask]
         all_corrs.extend(sig_corrs[np.isfinite(sig_corrs)])
     
+    if not all_corrs:
+        all_corrs = []
+        for bd in data:
+            all_corrs.extend(bd['correlations'][np.isfinite(bd['correlations'])])
+    
     if all_corrs:
         return max(abs(np.min(all_corrs)), abs(np.max(all_corrs)))
     
-    all_corrs = []
-    for bd in data:
-        all_corrs.extend(bd['correlations'][np.isfinite(bd['correlations'])])
-    return max(abs(np.min(all_corrs)), abs(np.max(all_corrs))) if all_corrs else 0.5
+    return DEFAULT_CORRELATION_VMAX
 
 
 ###################################################################
@@ -130,7 +152,10 @@ def compute_cluster_mass_histogram_data(
     bin_edges = np.linspace(all_masses.min(), all_masses.max(), n_bins + 1)
     
     null_counts, _ = np.histogram(null, bins=bin_edges, density=True)
-    obs_counts, _ = np.histogram(obs, bins=bin_edges, density=True) if len(obs) > 0 else (np.zeros(n_bins), bin_edges)
+    if len(obs) > 0:
+        obs_counts, _ = np.histogram(obs, bins=bin_edges, density=True)
+    else:
+        obs_counts = np.zeros(n_bins)
     
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     
@@ -152,7 +177,11 @@ def compute_cluster_mass_histogram_data(
         "n_observed_clusters": len(obs),
         "n_significant_95": n_sig_95,
         "n_significant_99": n_sig_99,
-        "observed_masses": obs.tolist() if len(obs) < 100 else obs[:100].tolist(),
+        "observed_masses": (
+            obs.tolist()
+            if len(obs) < MAX_OBSERVED_MASSES_TO_RETURN
+            else obs[:MAX_OBSERVED_MASSES_TO_RETURN].tolist()
+        ),
     }
 
 
@@ -183,7 +212,7 @@ def compute_pp_plot_data(
     
     # Compute confidence bands (Kolmogorov-Smirnov)
     alpha = 0.05
-    ks_critical = 1.36 / np.sqrt(n)  # Approximate for alpha=0.05
+    ks_critical_value = KS_CRITICAL_ALPHA_05 / np.sqrt(n)
     
     # Subsample for plotting if too many points
     if n > n_points:
@@ -201,7 +230,7 @@ def compute_pp_plot_data(
         "ks_pvalue": float(ks_p),
         "uniform_rejected": ks_p < 0.05,
         "n_pvalues": n,
-        "ci_band_width": float(ks_critical),
+        "ci_band_width": float(ks_critical_value),
         "proportion_below_05": float(np.mean(p < 0.05)),
         "proportion_below_01": float(np.mean(p < 0.01)),
         "expected_below_05": 0.05,
@@ -225,7 +254,7 @@ def compute_qq_plot_data(
     x = np.asarray(data).ravel()
     x = x[np.isfinite(x)]
     
-    if len(x) < 3:
+    if len(x) < MIN_SAMPLE_SIZE_FOR_QQ:
         return {"error": "Insufficient data"}
     
     x_sorted = np.sort(x)
@@ -234,14 +263,10 @@ def compute_qq_plot_data(
     # Theoretical quantiles
     probs = (np.arange(1, n + 1) - 0.5) / n
     
-    if distribution == "norm":
-        theoretical = stats.norm.ppf(probs)
-        dist_name = "Normal"
-    elif distribution == "t":
-        # Estimate df from data
-        df = max(n - 1, 1)
-        theoretical = stats.t.ppf(probs, df)
-        dist_name = f"t(df={df})"
+    if distribution == "t":
+        degrees_of_freedom = max(n - 1, MIN_DEGREES_OF_FREEDOM)
+        theoretical = stats.t.ppf(probs, degrees_of_freedom)
+        dist_name = f"t(df={degrees_of_freedom})"
     else:
         theoretical = stats.norm.ppf(probs)
         dist_name = "Normal"
@@ -250,7 +275,7 @@ def compute_qq_plot_data(
     slope, intercept, r_value, _, _ = stats.linregress(theoretical, x_sorted)
     
     # Shapiro-Wilk test
-    if len(x) <= 5000:
+    if len(x) <= SHAPIRO_WILK_MAX_SAMPLE_SIZE:
         sw_stat, sw_p = stats.shapiro(x)
     else:
         sw_stat, sw_p = np.nan, np.nan
@@ -277,7 +302,6 @@ def compute_effect_size_distribution_data(
     effect_sizes: np.ndarray,
     ci_lows: Optional[np.ndarray] = None,
     ci_highs: Optional[np.ndarray] = None,
-    labels: Optional[List[str]] = None,
     n_bins: int = 30,
 ) -> Dict[str, Any]:
     """Compute data for effect size distribution visualization.
@@ -355,8 +379,10 @@ def compute_bootstrap_distribution_data(
     
     # CI bounds
     alpha = 1 - ci_level
-    ci_low = float(np.percentile(boot, 100 * alpha / 2))
-    ci_high = float(np.percentile(boot, 100 * (1 - alpha / 2)))
+    lower_percentile = 100 * alpha / 2
+    upper_percentile = 100 * (1 - alpha / 2)
+    ci_low = float(np.percentile(boot, lower_percentile))
+    ci_high = float(np.percentile(boot, upper_percentile))
     
     # Bias-corrected estimate
     boot_mean = float(np.mean(boot))
@@ -396,17 +422,20 @@ def compute_raincloud_data(
         x = np.asarray(data).ravel()
         x = x[np.isfinite(x)]
         
-        if len(x) < 2:
+        if len(x) < MIN_SAMPLE_SIZE_FOR_KDE:
             result["groups"][name] = {"error": "Insufficient data"}
             continue
         
         # KDE
         try:
             kde = gaussian_kde(x)
-            x_range = np.linspace(x.min() - 0.1 * np.ptp(x), 
-                                  x.max() + 0.1 * np.ptp(x), kde_points)
+            data_range = np.ptp(x)
+            padding = KDE_PADDING_FACTOR * data_range
+            x_min = x.min() - padding
+            x_max = x.max() + padding
+            x_range = np.linspace(x_min, x_max, kde_points)
             kde_vals = kde(x_range)
-        except Exception:
+        except (np.linalg.LinAlgError, ValueError):
             x_range = np.array([])
             kde_vals = np.array([])
         
@@ -460,7 +489,8 @@ def compute_spaghetti_plot_data(
     # Compute group means and CIs
     group_means = np.nanmean(data_matrix, axis=0)
     group_stds = np.nanstd(data_matrix, axis=0)
-    group_sems = group_stds / np.sqrt(np.sum(~np.isnan(data_matrix), axis=0))
+    n_per_condition = np.sum(~np.isnan(data_matrix), axis=0)
+    group_sems = group_stds / np.sqrt(n_per_condition)
     
     # Individual trajectories
     trajectories = []
@@ -497,9 +527,6 @@ def compute_correction_comparison_data(
     
     Compares raw, Bonferroni, Holm, Šidák, and FDR-BH corrections.
     """
-    from .fdr import fdr_bh
-    from .validation import compute_fwer_bonferroni, compute_fwer_holm, compute_fwer_sidak
-    
     p = np.asarray(p_values).ravel()
     p = p[np.isfinite(p)]
     n = len(p)
@@ -531,7 +558,7 @@ def compute_correction_comparison_data(
             },
             "holm": {
                 "n_significant": int(np.sum(holm_reject)),
-                "threshold": float(alpha / n),  # Approximate
+                "threshold": float(alpha / n),
                 "adjusted_p": holm_adj.tolist(),
             },
             "sidak": {
@@ -573,8 +600,6 @@ def create_provenance_block(
     
     Returns dict suitable for embedding in figures or saving as JSON.
     """
-    import datetime
-    
     provenance = {
         "timestamp": datetime.datetime.now().isoformat(),
         "sample_size": sample_size,
@@ -625,7 +650,7 @@ def format_provenance_text(provenance: Dict[str, Any], max_chars: int = 100) -> 
 def save_stats_for_plot(
     stats_dict: Dict[str, Any],
     plot_path: Path,
-    format: str = "json",
+    output_format: str = "json",
 ) -> Path:
     """Save statistics used for a plot alongside the figure.
     
@@ -633,27 +658,23 @@ def save_stats_for_plot(
     """
     plot_path = Path(plot_path)
     
-    if format == "json":
+    if output_format == "json":
         stats_path = plot_path.with_suffix(".stats.json")
         with open(stats_path, "w") as f:
             json.dump(stats_dict, f, indent=2, default=str)
-    elif format == "csv":
+    elif output_format == "csv":
         stats_path = plot_path.with_suffix(".stats.csv")
-        # Flatten dict for CSV
         flat_dict = {}
         for k, v in stats_dict.items():
             if isinstance(v, (list, np.ndarray)):
-                flat_dict[k] = str(v)[:100]  # Truncate arrays
+                truncated_str = str(v)[:ARRAY_TRUNCATION_LENGTH]
+                flat_dict[k] = truncated_str
             else:
                 flat_dict[k] = v
         pd.DataFrame([flat_dict]).to_csv(stats_path, index=False)
     else:
-        raise ValueError(f"Unknown format: {format}")
+        raise ValueError(f"Unknown format: {output_format}")
     
     return stats_path
-
-
-
-
 
 

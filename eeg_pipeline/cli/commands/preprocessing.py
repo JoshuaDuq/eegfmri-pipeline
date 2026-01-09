@@ -141,58 +141,104 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
     return parser
 
 
-def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
-    """Execute the preprocessing command."""
-    from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+def _validate_epoch_parameters(args: argparse.Namespace) -> None:
+    """Validate epoch parameter constraints."""
+    if args.tmin is not None and args.tmax is not None:
+        if args.tmin >= args.tmax:
+            raise ValueError(
+                f"Epoch start time ({args.tmin}s) must be less than end time ({args.tmax}s)"
+            )
     
-    progress = create_progress_reporter(args)
-    task = resolve_task(args.task, config)
+    if args.baseline is not None:
+        baseline_start, baseline_end = args.baseline
+        if baseline_start >= baseline_end:
+            raise ValueError(
+                f"Baseline start ({baseline_start}s) must be less than end ({baseline_end}s)"
+            )
+        if args.tmin is not None and baseline_end > args.tmin:
+            raise ValueError(
+                f"Baseline end ({baseline_end}s) must not exceed epoch start ({args.tmin}s)"
+            )
 
+
+def _update_path_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with path overrides from arguments."""
     if args.bids_root:
         config.setdefault("paths", {})["bids_root"] = args.bids_root
     if args.deriv_root:
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+
+
+def _update_preprocessing_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with preprocessing parameter overrides."""
+    preprocessing_config = config.setdefault("preprocessing", {})
     
-    # Preprocessing overrides
     if args.resample:
-        config.setdefault("preprocessing", {})["resample_freq"] = args.resample
+        preprocessing_config["resample_freq"] = args.resample
     if args.l_freq is not None:
-        config.setdefault("preprocessing", {})["l_freq"] = args.l_freq
+        preprocessing_config["l_freq"] = args.l_freq
     if args.h_freq is not None:
-        config.setdefault("preprocessing", {})["h_freq"] = args.h_freq
+        preprocessing_config["h_freq"] = args.h_freq
     if args.notch:
-        config.setdefault("preprocessing", {})["notch_freq"] = args.notch
-    
-    # ICA overrides
-    if args.ica_method:
-        config.setdefault("ica", {})["method"] = args.ica_method
-    if args.ica_components:
-        config.setdefault("ica", {})["n_components"] = args.ica_components
-    if args.prob_threshold:
-        config.setdefault("ica", {})["probability_threshold"] = args.prob_threshold
-    if args.ica_labels_to_keep:
-        config.setdefault("ica", {})["labels_to_keep"] = args.ica_labels_to_keep
+        preprocessing_config["notch_freq"] = args.notch
     if args.line_freq:
-        config.setdefault("preprocessing", {})["line_freq"] = args.line_freq
-        
-    # Epoch overrides
+        preprocessing_config["line_freq"] = args.line_freq
+
+
+def _update_ica_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with ICA parameter overrides."""
+    ica_config = config.setdefault("ica", {})
+    
+    if args.ica_method:
+        ica_config["method"] = args.ica_method
+    if args.ica_components:
+        ica_config["n_components"] = args.ica_components
+    if args.prob_threshold:
+        ica_config["probability_threshold"] = args.prob_threshold
+    if args.ica_labels_to_keep:
+        ica_config["labels_to_keep"] = args.ica_labels_to_keep
+
+
+def _update_epochs_config(args: argparse.Namespace, config: Any) -> None:
+    """Update config with epoch parameter overrides."""
+    epochs_config = config.setdefault("epochs", {})
+    
     if args.tmin is not None:
-        config.setdefault("epochs", {})["tmin"] = args.tmin
+        epochs_config["tmin"] = args.tmin
     if args.tmax is not None:
-        config.setdefault("epochs", {})["tmax"] = args.tmax
+        epochs_config["tmax"] = args.tmax
     if args.baseline:
-        config.setdefault("epochs", {})["baseline"] = tuple(args.baseline)
+        epochs_config["baseline"] = tuple(args.baseline)
     if args.no_baseline:
-        config.setdefault("epochs", {})["baseline"] = None
+        epochs_config["baseline"] = None
     if args.reject is not None:
-        # Convert µV to V for MNE (MNE uses V internally)
-        config.setdefault("epochs", {})["reject"] = {"eeg": args.reject * 1e-6}
+        microvolts_to_volts = 1e-6
+        epochs_config["reject"] = {"eeg": args.reject * microvolts_to_volts}
+
+
+def _resolve_n_jobs(args: argparse.Namespace, config: Any) -> int:
+    """Resolve number of parallel jobs from args or config."""
+    if args.n_jobs is not None:
+        return args.n_jobs
+    return config.get("preprocessing.n_jobs", 1)
+
+
+def run_preprocessing(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Execute the preprocessing command."""
+    from eeg_pipeline.pipelines.preprocessing import PreprocessingPipeline
+    
+    _validate_epoch_parameters(args)
+    
+    progress = create_progress_reporter(args)
+    task = resolve_task(args.task, config)
+
+    _update_path_config(args, config)
+    _update_preprocessing_config(args, config)
+    _update_ica_config(args, config)
+    _update_epochs_config(args, config)
     
     pipeline = PreprocessingPipeline(config=config)
-    
-    n_jobs = args.n_jobs
-    if n_jobs is None:
-        n_jobs = config.get("preprocessing.n_jobs", 1)
+    n_jobs = _resolve_n_jobs(args, config)
 
     pipeline.run_batch(
         subjects=subjects,

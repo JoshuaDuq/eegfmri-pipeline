@@ -2,6 +2,17 @@ package styles
 
 import "github.com/charmbracelet/lipgloss"
 
+const (
+	presetSelectorPrefix = "▸ "
+	presetSelectorIndent = "  "
+	presetDescriptionSep = " — "
+	presetBadgePrefix    = "Preset: "
+)
+
+const (
+	shortcutTextColor = lipgloss.Color("#000000")
+)
+
 type Preset struct {
 	Key         string
 	Name        string
@@ -72,44 +83,66 @@ var BehaviorPresets = []Preset{
 	},
 }
 
-func RenderPresetSelector(presets []Preset, selectedIdx int, width int) string {
-	var content string
+func shortcutBadgeStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(shortcutTextColor).
+		Background(Accent).
+		Bold(true).
+		Padding(0, 1)
+}
 
-	headerStyle := lipgloss.NewStyle().
+func presetNameStyle(isSelected bool) lipgloss.Style {
+	style := lipgloss.NewStyle().Foreground(Text).PaddingLeft(1)
+	if isSelected {
+		style = style.Foreground(Primary).Bold(true)
+	}
+	return style
+}
+
+func presetDescriptionStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(TextDim).Italic(true)
+}
+
+func presetHeaderStyle() lipgloss.Style {
+	return lipgloss.NewStyle().
 		Foreground(TextDim).
 		Italic(true).
 		MarginBottom(1)
+}
 
-	content += headerStyle.Render("Quick Presets (press key to apply):") + "\n\n"
+func renderPresetLine(preset Preset, isSelected bool) string {
+	shortcutStyle := shortcutBadgeStyle()
+	nameStyle := presetNameStyle(isSelected)
+	descStyle := presetDescriptionStyle()
+
+	shortcutText := shortcutStyle.Render(preset.Shortcut)
+	nameText := nameStyle.Render(preset.Icon + " " + preset.Name)
+	descText := descStyle.Render(presetDescriptionSep + preset.Description)
+
+	return shortcutText + nameText + " " + descText
+}
+
+func renderPresetPrefix(isSelected bool) string {
+	if isSelected {
+		return lipgloss.NewStyle().Foreground(Primary).Render(presetSelectorPrefix)
+	}
+	return presetSelectorIndent
+}
+
+func RenderPresetSelector(presets []Preset, selectedIdx int, width int) string {
+	header := presetHeaderStyle().Render("Quick Presets (press key to apply):") + "\n\n"
+
+	var output string
+	output += header
 
 	for i, preset := range presets {
 		isSelected := i == selectedIdx
-
-		shortcutStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(Accent).
-			Bold(true).
-			Padding(0, 1)
-
-		nameStyle := lipgloss.NewStyle().Foreground(Text).PaddingLeft(1)
-		descStyle := lipgloss.NewStyle().Foreground(TextDim).Italic(true)
-
-		if isSelected {
-			nameStyle = nameStyle.Foreground(Primary).Bold(true)
-		}
-
-		line := shortcutStyle.Render(preset.Shortcut) +
-			nameStyle.Render(preset.Icon+" "+preset.Name) +
-			" " + descStyle.Render("— "+preset.Description)
-
-		if isSelected {
-			content += lipgloss.NewStyle().Foreground(Primary).Render("▸ ") + line + "\n"
-		} else {
-			content += "  " + line + "\n"
-		}
+		prefix := renderPresetPrefix(isSelected)
+		line := renderPresetLine(preset, isSelected)
+		output += prefix + line + "\n"
 	}
 
-	return content
+	return output
 }
 
 func RenderPresetBadge(presetName string) string {
@@ -117,10 +150,6 @@ func RenderPresetBadge(presetName string) string {
 		return ""
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#000000")).
-		Background(Accent).
-		Bold(true).
-		Padding(0, 1).
-		Render("Preset: " + presetName)
+	return shortcutBadgeStyle().
+		Render(presetBadgePrefix + presetName)
 }

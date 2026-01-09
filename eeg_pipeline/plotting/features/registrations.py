@@ -7,15 +7,21 @@ Each function registers with VisualizationRegistry to be called during feature v
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import numpy as np
+import pandas as pd
 import mne
 
 from eeg_pipeline.plotting.features.context import FeaturePlotContext, VisualizationRegistry
 from eeg_pipeline.plotting.core.runner import safe_plot
 from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
-from eeg_pipeline.utils.analysis.tfr import compute_tfr_for_visualization
+from eeg_pipeline.utils.analysis.tfr import (
+    compute_tfr_for_visualization,
+    compute_tfr_morlet,
+)
 from eeg_pipeline.utils.analysis.windowing import sliding_window_centers
+from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
 from eeg_pipeline.utils.config.loader import get_frequency_band_names, get_config_value
 from eeg_pipeline.domain.features.naming import NamingSchema
 
@@ -80,6 +86,7 @@ from eeg_pipeline.plotting.features.power import (
     plot_band_power_topomaps,
     plot_spectral_slope_topomap,
     plot_power_topomaps_from_df,
+    plot_power_spectral_density,
 )
 from eeg_pipeline.plotting.features.roi import (
     plot_band_segment_condition,
@@ -137,8 +144,6 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
         )
 
         if ctx.all_features is not None:
-
-
             safe_plot(
                 ctx,
                 saved_files,
@@ -157,7 +162,10 @@ def aperiodic_suite(ctx: FeaturePlotContext, saved_files):
                 ["baseline", "active"],
             )
 
-        if ctx.temporal_df is None and ctx.all_features is not None and ctx.aligned_events is not None:
+        has_temporal_data = ctx.temporal_df is None
+        has_all_features = ctx.all_features is not None
+        has_aligned_events = ctx.aligned_events is not None
+        if has_temporal_data and has_all_features and has_aligned_events:
             safe_plot(
                 ctx,
                 saved_files,
@@ -255,11 +263,12 @@ def plot_connectivity_dynamics(ctx: FeaturePlotContext, saved_files):
     if ctx.connectivity_df is None:
         return
 
+    window_label_pattern = re.compile(r"^sw(\d+)corr_all_")
     sw_labels = sorted(
         {
             match.group(1)
             for col in ctx.connectivity_df.columns
-            for match in [re.match(r"^sw(\d+)corr_all_", col)]
+            for match in [window_label_pattern.match(col)]
             if match
         }
     )
@@ -839,7 +848,12 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
                 itpc_map = data.get("itpc_map")
                 freqs = data.get("freqs")
                 times = data.get("times")
-                if itpc_map is not None and freqs is not None and times is not None:
+                has_valid_itpc_data = (
+                    itpc_map is not None
+                    and freqs is not None
+                    and times is not None
+                )
+                if has_valid_itpc_data:
                     safe_plot(
                         ctx,
                         saved_files,
@@ -890,7 +904,6 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             ctx.config,
         )
 
-
         safe_plot(
             ctx,
             saved_files,
@@ -926,7 +939,6 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
             "itpc",
             "ITPC",
         )
-
 
 
 ###################################################################
@@ -1029,9 +1041,6 @@ def plot_tfr(ctx: FeaturePlotContext, saved_files):
         ctx.logger,
     )
 
-    from eeg_pipeline.plotting.features.power import plot_power_spectral_density
-    from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
-
     tfr = compute_tfr_morlet(ctx.epochs, ctx.config, ctx.logger)
     if tfr is None:
         return
@@ -1070,7 +1079,6 @@ def plot_power_condition_comparison(ctx: FeaturePlotContext, saved_files):
         logger=ctx.logger,
         config=ctx.config,
     )
-
 
     if ctx.all_features is not None and ctx.aligned_events is not None:
         safe_plot(
@@ -1128,6 +1136,7 @@ def plot_power_variability(ctx: FeaturePlotContext, saved_files):
         logger=ctx.logger,
         config=ctx.config,
     )
+
 
 @VisualizationRegistry.register("power")
 def plot_power_summary(ctx: FeaturePlotContext, saved_files):
@@ -1206,53 +1215,69 @@ def plot_power_summary(ctx: FeaturePlotContext, saved_files):
 ###################################################################
 
 
+def _normalize_condition_key(label: str) -> str:
+    """Normalize condition label to a valid key format."""
+    key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
+    if key in {"non_pain", "nopain", "no_pain"}:
+        return "nonpain"
+    return key or "condition"
+
+
+def _build_epoch_query(col: str, value: Any) -> str:
+    """Build an epoch query string for a column and value."""
+    col_expr = f"`{col}`"
+    try:
+        numeric_value = pd.to_numeric(str(value), errors="coerce")
+        if not np.isnan(numeric_value):
+            if float(numeric_value).is_integer():
+                return f"{col_expr} == {int(numeric_value)}"
+            return f"{col_expr} == {float(numeric_value)}"
+    except Exception:
+        pass
+    return f"{col_expr} == {repr(str(value))}"
+
+
+def _resolve_erp_conditions(
+    epochs: mne.Epochs,
+    events_df: pd.DataFrame,
+    config: Any,
+) -> dict[str, str] | None:
+    """Resolve ERP condition queries from comparison spec."""
+    spec = resolve_comparison_spec(events_df, config, require_enabled=False)
+    if spec is None:
+        return None
+
+    col, v1, v2, label1, label2 = spec
+    candidates = {
+        _normalize_condition_key(label1): _build_epoch_query(col, v1),
+        _normalize_condition_key(label2): _build_epoch_query(col, v2),
+    }
+
+    available_conditions = {}
+    for name, query in candidates.items():
+        try:
+            if len(epochs[query]) > 0:
+                available_conditions[name] = query
+        except Exception:
+            continue
+
+    return available_conditions if available_conditions else None
+
+
 @VisualizationRegistry.register("erp")
 def erp_suite(ctx: FeaturePlotContext, saved_files):
     if ctx.epochs is None:
         return
 
     erp_dir = ctx.subdir("erp")
-    
-    # Conditions for contrast
+
     conditions = None
     if ctx.aligned_events is not None:
-        from eeg_pipeline.utils.analysis.events import resolve_comparison_spec
-        import numpy as np
-        import pandas as pd
-
-        def _condition_key(label: str) -> str:
-            key = str(label).strip().lower().replace(" ", "_").replace("-", "_")
-            if key in {"non_pain", "nopain", "no_pain"}:
-                return "nonpain"
-            return key or "condition"
-
-        def _query_for_value(col: str, value: Any) -> str:
-            col_expr = f"`{col}`"
-            try:
-                v_num = pd.to_numeric(str(value), errors="coerce")
-                if not np.isnan(v_num):
-                    if float(v_num).is_integer():
-                        return f"{col_expr} == {int(v_num)}"
-                    return f"{col_expr} == {float(v_num)}"
-            except Exception:
-                pass
-            return f"{col_expr} == {repr(str(value))}"
-
-        spec = resolve_comparison_spec(ctx.aligned_events, ctx.config, require_enabled=False)
-        if spec is not None:
-            col, v1, v2, label1, label2 = spec
-            candidates = {
-                _condition_key(label1): _query_for_value(col, v1),
-                _condition_key(label2): _query_for_value(col, v2),
-            }
-            available_conditions = {}
-            for name, query in candidates.items():
-                try:
-                    if len(ctx.epochs[query]) > 0:
-                        available_conditions[name] = query
-                except Exception:
-                    continue
-            conditions = available_conditions if available_conditions else None
+        conditions = _resolve_erp_conditions(
+            ctx.epochs,
+            ctx.aligned_events,
+            ctx.config,
+        )
 
     safe_plot(
         ctx,
@@ -1315,6 +1340,24 @@ def erp_suite(ctx: FeaturePlotContext, saved_files):
     )
 
 
+def _find_snr_column(quality_df: pd.DataFrame) -> str | None:
+    """Find SNR column from quality dataframe using naming schema."""
+    for col in quality_df.columns:
+        parsed = NamingSchema.parse(str(col))
+        if not parsed.get("valid"):
+            continue
+        if parsed.get("group") != "quality":
+            continue
+        if parsed.get("scope") != "global":
+            continue
+        if parsed.get("stat") == "snr":
+            snr_col = str(col)
+            if parsed.get("segment") == "active":
+                return snr_col
+            return snr_col
+    return None
+
+
 ###################################################################
 # Summary / Quality
 ###################################################################
@@ -1352,19 +1395,7 @@ def quality_suite(ctx: FeaturePlotContext, saved_files):
         config=ctx.config,
     )
 
-    snr_col = None
-    for col in ctx.quality_df.columns:
-        parsed = NamingSchema.parse(str(col))
-        if not parsed.get("valid"):
-            continue
-        if parsed.get("group") != "quality":
-            continue
-        if parsed.get("scope") != "global":
-            continue
-        if parsed.get("stat") == "snr":
-            snr_col = str(col)
-            if parsed.get("segment") == "active":
-                break
+    snr_col = _find_snr_column(ctx.quality_df)
 
     if snr_col is not None:
         safe_plot(

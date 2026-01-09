@@ -21,24 +21,29 @@ from eeg_pipeline.utils.config.loader import get_config_value
 
 
 def _extract_itpc_columns(features_df: pd.DataFrame, band: str, roi_channels: List[str]) -> List[str]:
-    cols: List[str] = []
+    """Extract ITPC column names matching band and ROI channels."""
     roi_set = set(roi_channels)
+    matching_columns = []
+    
     for col in features_df.columns:
         parsed = NamingSchema.parse(str(col))
         if not parsed.get("valid"):
             continue
-        if parsed.get("group") != "itpc":
+        
+        is_itpc_feature = (
+            parsed.get("group") == "itpc"
+            and parsed.get("segment") == "active"
+            and parsed.get("band") == band
+            and parsed.get("scope") == "ch"
+        )
+        if not is_itpc_feature:
             continue
-        if parsed.get("segment") != "active":
-            continue
-        if parsed.get("band") != band:
-            continue
-        if parsed.get("scope") != "ch":
-            continue
-        ch = parsed.get("identifier")
-        if ch in roi_set:
-            cols.append(str(col))
-    return cols
+        
+        channel_identifier = parsed.get("identifier")
+        if channel_identifier in roi_set:
+            matching_columns.append(str(col))
+    
+    return matching_columns
 
 
 def _extract_itpc_values(
@@ -47,11 +52,16 @@ def _extract_itpc_values(
     roi_channels: List[str],
     metric: Optional[str] = None,
 ) -> Tuple[pd.Series, bool]:
-    cols = _extract_itpc_columns(features_df, band, roi_channels)
-    if not cols:
+    """Extract ITPC values by averaging across ROI channels for the given band."""
+    matching_columns = _extract_itpc_columns(features_df, band, roi_channels)
+    if not matching_columns:
         return pd.Series(dtype=float), False
-    vals = features_df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
-    return vals, True
+    
+    roi_data = features_df[matching_columns]
+    numeric_data = roi_data.apply(pd.to_numeric, errors="coerce")
+    averaged_values = numeric_data.mean(axis=1)
+    
+    return averaged_values, True
 
 
 def _format_itpc_title(band_title: str, roi: str, target: str, metric: Optional[str]) -> str:
@@ -91,13 +101,15 @@ def plot_itpc_roi_scatter(
     behavioral_config = get_plot_config(config).get_behavioral_config()
     default_rng_seed = behavioral_config.get("default_rng_seed", 42)
     rng = rng or np.random.default_rng(default_rng_seed)
-    robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
-    if robust_method is not None:
-        robust_method = str(robust_method).strip().lower() or None
-    method_label = format_correlation_method_label(
-        "spearman" if use_spearman else "pearson",
-        robust_method,
-    )
+    
+    raw_robust_method = get_config_value(config, "behavior_analysis.robust_correlation", None)
+    robust_method = None
+    if raw_robust_method is not None:
+        normalized_method = str(raw_robust_method).strip().lower()
+        robust_method = normalized_method if normalized_method else None
+    
+    correlation_method = "spearman" if use_spearman else "pearson"
+    method_label = format_correlation_method_label(correlation_method, robust_method)
 
     data = setup_scatter_context(subject, deriv_root, task, plots_dir, "itpc", config, logger)
     if data is None:
@@ -108,9 +120,12 @@ def plot_itpc_roi_scatter(
     if itpc_df is None or itpc_df.empty:
         logger.warning("ITPC features not found at %s", itpc_path)
         return {"significant": [], "all": []}
-    if len(itpc_df) != len(data.y):
+    
+    num_itpc_samples = len(itpc_df)
+    num_target_samples = len(data.rating_series)
+    if num_itpc_samples != num_target_samples:
         raise ValueError(
-            f"Length mismatch: ITPC features ({len(itpc_df)}) != targets ({len(data.y)})"
+            f"Length mismatch: ITPC features ({num_itpc_samples}) != targets ({num_target_samples})"
         )
     data.features_df = itpc_df
 
@@ -133,6 +148,9 @@ def plot_itpc_roi_scatter(
         else None
     )
 
+    frequency_bands_config = config.get("frequency_bands", {})
+    bands_to_use = config.get("power.bands_to_use") or list(frequency_bands_config.keys())
+    
     results = create_roi_scatter_plots(
         data=data,
         feature_type="itpc",
@@ -141,12 +159,12 @@ def plot_itpc_roi_scatter(
         x_label_formatter=_format_itpc_x_label,
         filename_formatter=_format_itpc_filename,
         feature_name_formatter=_format_itpc_feature_name,
-        bands=config.get("power.bands_to_use") or list(config.get("frequency_bands", {}).keys()),
+        bands=bands_to_use,
         metrics=None,
-        method_code="spearman" if use_spearman else "pearson",
+        method_code=correlation_method,
         bootstrap_ci=bootstrap_ci,
         rng=rng,
-        do_temp=do_temp,
+        include_temperature=do_temp,
         rating_stats=rating_stats,
         temp_stats=temp_stats,
         logger=logger,

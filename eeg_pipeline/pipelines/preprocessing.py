@@ -32,9 +32,11 @@ from eeg_pipeline.pipelines.base import PipelineBase
 logger = logging.getLogger(__name__)
 
 
-###################################################################
-# Preprocessing Pipeline Class
-###################################################################
+STEP_BAD_CHANNELS = "bad-channels"
+STEP_ICA_FIT = "ica-fit"
+STEP_ICA_LABEL = "ica-label"
+STEP_EPOCHS = "epochs"
+STEP_STATS = "stats"
 
 
 class PreprocessingPipeline(PipelineBase):
@@ -58,7 +60,7 @@ class PreprocessingPipeline(PipelineBase):
     def __init__(self, config: Optional[Any] = None):
         super().__init__(name="preprocessing", config=config)
         self.bids_root = Path(self.config.bids_root)
-        
+    
     def process_subject(
         self,
         subject: str,
@@ -72,16 +74,14 @@ class PreprocessingPipeline(PipelineBase):
             task: Task name (defaults to config value)
             **kwargs: Additional options:
                 - mode: 'full', 'bad-channels', 'ica', or 'epochs'
-                - use_pyprep: Whether to use PyPREP for bad channels
                 - use_icalabel: Whether to use mne-icalabel
                 - n_jobs: Number of parallel jobs
                 - progress: ProgressReporter for TUI feedback
         """
         from eeg_pipeline.cli.common import ProgressReporter
         
-        task = task or self.config.get("project.task", "thermalactive")
+        resolved_task = task or self.config.get("project.task", "thermalactive")
         mode = kwargs.get("mode", "full")
-        use_pyprep = kwargs.get("use_pyprep", True)
         use_icalabel = kwargs.get("use_icalabel", True)
         n_jobs = kwargs.get("n_jobs", 1)
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
@@ -89,36 +89,16 @@ class PreprocessingPipeline(PipelineBase):
         progress.subject_start(f"sub-{subject}")
         
         steps = self._get_steps_for_mode(mode)
-        total_steps = len(steps)
+        subjects = [subject]
         
-        for i, step in enumerate(steps, 1):
-            progress.step(step, current=i, total=total_steps)
-            
-            if step == "bad-channels":
-                self._run_bad_channel_detection(
-                    subjects=[subject],
-                    task=task,
-                    n_jobs=n_jobs,
-                )
-            elif step == "ica-fit":
-                self._run_ica_fitting(
-                    subjects=[subject],
-                    task=task,
-                    use_icalabel=use_icalabel,
-                )
-            elif step == "ica-label":
-                if use_icalabel:
-                    self._run_ica_labeling(
-                        subjects=[subject],
-                        task=task,
-                    )
-            elif step == "epochs":
-                self._run_epoch_creation(
-                    subjects=[subject],
-                    task=task,
-                )
-            elif step == "stats":
-                self._collect_stats(task=task)
+        self._execute_steps(
+            steps=steps,
+            subjects=subjects,
+            task=resolved_task,
+            use_icalabel=use_icalabel,
+            n_jobs=n_jobs,
+            progress=progress,
+        )
         
         progress.subject_done(f"sub-{subject}", success=True)
     
@@ -140,44 +120,24 @@ class PreprocessingPipeline(PipelineBase):
         """
         from eeg_pipeline.cli.common import ProgressReporter
         
-        task = task or self.config.get("project.task", "thermalactive")
+        resolved_task = task or self.config.get("project.task", "thermalactive")
         mode = kwargs.get("mode", "full")
+        use_icalabel = kwargs.get("use_icalabel", True)
+        n_jobs = kwargs.get("n_jobs", 1)
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
         
         progress.start("preprocessing", subjects)
         
         steps = self._get_steps_for_mode(mode)
-        total_steps = len(steps)
         
-        for i, step in enumerate(steps, 1):
-            progress.step(step, current=i, total=total_steps)
-            self.logger.info(f"Running step: {step}")
-            
-            if step == "bad-channels":
-                self._run_bad_channel_detection(
-                    subjects=subjects,
-                    task=task,
-                    n_jobs=kwargs.get("n_jobs", 1),
-                )
-            elif step == "ica-fit":
-                self._run_ica_fitting(
-                    subjects=subjects,
-                    task=task,
-                    use_icalabel=kwargs.get("use_icalabel", True),
-                )
-            elif step == "ica-label":
-                if kwargs.get("use_icalabel", True):
-                    self._run_ica_labeling(
-                        subjects=subjects,
-                        task=task,
-                    )
-            elif step == "epochs":
-                self._run_epoch_creation(
-                    subjects=subjects,
-                    task=task,
-                )
-            elif step == "stats":
-                self._collect_stats(task=task)
+        self._execute_steps(
+            steps=steps,
+            subjects=subjects,
+            task=resolved_task,
+            use_icalabel=use_icalabel,
+            n_jobs=n_jobs,
+            progress=progress,
+        )
         
         progress.complete(success=True)
         
@@ -187,18 +147,67 @@ class PreprocessingPipeline(PipelineBase):
             "status": "success",
         }]
     
+    def _normalize_subjects(self, subjects: List[str]) -> str | List[str]:
+        """Normalize subjects list to 'all' string if needed."""
+        if subjects == ["all"]:
+            return "all"
+        return subjects
+    
     def _get_steps_for_mode(self, mode: str) -> List[str]:
         """Get preprocessing steps for the given mode."""
-        if mode == "full":
-            return ["bad-channels", "ica-fit", "ica-label", "epochs", "stats"]
-        elif mode == "bad-channels":
-            return ["bad-channels"]
-        elif mode == "ica":
-            return ["ica-fit", "ica-label"]
-        elif mode == "epochs":
-            return ["epochs", "stats"]
-        else:
+        mode_steps = {
+            "full": [STEP_BAD_CHANNELS, STEP_ICA_FIT, STEP_ICA_LABEL, STEP_EPOCHS, STEP_STATS],
+            "bad-channels": [STEP_BAD_CHANNELS],
+            "ica": [STEP_ICA_FIT, STEP_ICA_LABEL],
+            "epochs": [STEP_EPOCHS, STEP_STATS],
+        }
+        
+        if mode not in mode_steps:
             raise ValueError(f"Unknown preprocessing mode: {mode}")
+        
+        return mode_steps[mode]
+    
+    def _execute_steps(
+        self,
+        steps: List[str],
+        subjects: List[str],
+        task: str,
+        use_icalabel: bool,
+        n_jobs: int,
+        progress: Any,
+    ) -> None:
+        """Execute preprocessing steps in sequence."""
+        total_steps = len(steps)
+        
+        for i, step in enumerate(steps, 1):
+            progress.step(step, current=i, total=total_steps)
+            self.logger.info(f"Running step: {step}")
+            
+            if step == STEP_BAD_CHANNELS:
+                self._run_bad_channel_detection(
+                    subjects=subjects,
+                    task=task,
+                    n_jobs=n_jobs,
+                )
+            elif step == STEP_ICA_FIT:
+                self._run_ica_fitting(
+                    subjects=subjects,
+                    task=task,
+                    use_icalabel=use_icalabel,
+                )
+            elif step == STEP_ICA_LABEL:
+                if use_icalabel:
+                    self._run_ica_labeling(
+                        subjects=subjects,
+                        task=task,
+                    )
+            elif step == STEP_EPOCHS:
+                self._run_epoch_creation(
+                    subjects=subjects,
+                    task=task,
+                )
+            elif step == STEP_STATS:
+                self._collect_stats(task=task)
     
     def _run_bad_channel_detection(
         self,
@@ -212,13 +221,15 @@ class PreprocessingPipeline(PipelineBase):
             synchronize_bad_channels_across_runs,
         )
         
-        self.logger.info(f"Running PyPREP bad channel detection for {len(subjects)} subjects")
+        normalized_subjects = self._normalize_subjects(subjects)
+        subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
+        self.logger.info(f"Running PyPREP bad channel detection for {subject_count} subjects")
         
         run_bads_detection(
             bids_path=str(self.bids_root),
             pipeline_path=str(self.deriv_root),
             task=task,
-            subjects=subjects if subjects != ["all"] else "all",
+            subjects=normalized_subjects,
             n_jobs=n_jobs,
             montage=self.config.get("eeg.montage", "easycap-M1"),
             l_pass=self.config.get("preprocessing.h_freq", 100),
@@ -228,10 +239,25 @@ class PreprocessingPipeline(PipelineBase):
         synchronize_bad_channels_across_runs(
             bids_path=str(self.bids_root),
             task=task,
-            subjects=subjects if subjects != ["all"] else "all",
+            subjects=normalized_subjects,
         )
         
         self.logger.info("Bad channel detection complete")
+    
+    def _get_ica_fitting_steps(self, use_icalabel: bool) -> str:
+        """Get MNE-BIDS pipeline steps for ICA fitting."""
+        base_steps = [
+            "init",
+            "preprocessing/_01_data_quality",
+            "preprocessing/_04_frequency_filter",
+            "preprocessing/_05_regress_artifact",
+            "preprocessing/_06a1_fit_ica",
+        ]
+        
+        if not use_icalabel:
+            base_steps.append("preprocessing/_06a2_find_ica_artifacts")
+        
+        return ",".join(base_steps)
     
     def _run_ica_fitting(
         self,
@@ -241,11 +267,7 @@ class PreprocessingPipeline(PipelineBase):
     ) -> None:
         """Run ICA fitting via MNE-BIDS pipeline."""
         config_file = self._get_or_create_config(subjects, task)
-        
-        if use_icalabel:
-            steps = "init,preprocessing/_01_data_quality,preprocessing/_04_frequency_filter,preprocessing/_05_regress_artifact,preprocessing/_06a1_fit_ica"
-        else:
-            steps = "init,preprocessing/_01_data_quality,preprocessing/_04_frequency_filter,preprocessing/_05_regress_artifact,preprocessing/_06a1_fit_ica,preprocessing/_06a2_find_ica_artifacts"
+        steps = self._get_ica_fitting_steps(use_icalabel)
         
         self._run_mne_bids_pipeline(config_file, steps)
         
@@ -259,12 +281,14 @@ class PreprocessingPipeline(PipelineBase):
         """Run ICA component labeling using mne-icalabel."""
         from eeg_pipeline.preprocessing.pipeline.ica import run_ica_label
         
-        self.logger.info(f"Running ICA labeling for {len(subjects)} subjects")
+        normalized_subjects = self._normalize_subjects(subjects)
+        subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
+        self.logger.info(f"Running ICA labeling for {subject_count} subjects")
         
         run_ica_label(
             pipeline_path=str(self.deriv_root),
             task=task,
-            subjects=subjects if subjects != ["all"] else "all",
+            subjects=normalized_subjects,
             prob_threshold=self.config.get("ica.probability_threshold", 0.8),
             labels_to_keep=self.config.get("ica.labels_to_keep", ["brain", "other"]),
         )
@@ -301,11 +325,14 @@ class PreprocessingPipeline(PipelineBase):
     
     def _run_mne_bids_pipeline(self, config_file: str, steps: str) -> None:
         """Run MNE-BIDS pipeline with specified steps."""
-        cmd = [
-            sys.executable,
-            "-c",
-            f"from mne_bids_pipeline._main import main; import sys; sys.argv = ['mne_bids_pipeline', '--config={config_file}', '--steps={steps}']; main()",
-        ]
+        python_code = (
+            "from mne_bids_pipeline._main import main; "
+            "import sys; "
+            f"sys.argv = ['mne_bids_pipeline', '--config={config_file}', '--steps={steps}']; "
+            "main()"
+        )
+        
+        cmd = [sys.executable, "-c", python_code]
         
         self.logger.info(f"Running MNE-BIDS pipeline: {steps}")
         
@@ -344,10 +371,11 @@ class PreprocessingPipeline(PipelineBase):
     
     def _generate_config(self, subjects: List[str], task: str) -> str:
         """Generate MNE-BIDS pipeline configuration."""
-        subjects_str = repr(subjects) if subjects != ["all"] else '"all"'
+        normalized_subjects = self._normalize_subjects(subjects)
+        subjects_repr = repr(normalized_subjects) if isinstance(normalized_subjects, list) else '"all"'
         
-        l_freq = self.config.get("preprocessing.l_freq", 0.1)
-        h_freq = self.config.get("preprocessing.h_freq", 100)
+        low_freq = self.config.get("preprocessing.l_freq", 0.1)
+        high_freq = self.config.get("preprocessing.h_freq", 100)
         notch_freq = self.config.get("preprocessing.notch_freq", 60)
         ica_method = self.config.get("ica.method", "fastica")
         ica_n_components = self.config.get("ica.n_components", 0.99)
@@ -365,13 +393,13 @@ bids_root = r"{self.bids_root}"
 deriv_root = r"{self.deriv_root}"
 
 task = "{task}"
-subjects = {subjects_str}
+subjects = {subjects_repr}
 
 ch_types = ["eeg"]
 eeg_reference = "average"
 
-l_freq = {l_freq}
-h_freq = {h_freq}
+l_freq = {low_freq}
+h_freq = {high_freq}
 notch_freq = {notch_freq}
 
 ica_method = "{ica_method}"
@@ -383,10 +411,5 @@ baseline = {baseline}
 
 reject = {reject}
 '''
-
-
-###################################################################
-# Exports
-###################################################################
 
 __all__ = ["PreprocessingPipeline"]

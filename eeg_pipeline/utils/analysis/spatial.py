@@ -14,7 +14,7 @@ Aggregation methods:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,32 +22,67 @@ import pandas as pd
 from eeg_pipeline.utils.analysis.channels import build_roi_map
 
 
+_SPATIAL_MODE_ROI = "roi"
+_SPATIAL_MODE_CHANNELS = "channels"
+_SPATIAL_MODE_GLOBAL = "global"
+_AGGREGATION_MEAN = "mean"
+_AGGREGATION_MEDIAN = "median"
+
+
 def get_roi_definitions(config: Any) -> Dict[str, List[str]]:
-    """Get ROI definitions from config."""
+    """Get ROI definitions from config with fallback hierarchy."""
     from eeg_pipeline.utils.config.loader import get_config_value
     
-    # Try to get from project-specific section first
-    rois = get_config_value(config, "project.roi_definitions", None)
-    if rois:
-        return rois
-        
-    # Fallback to general spatial section
-    rois = get_config_value(config, "spatial.roi_definitions", {})
-    if rois:
-        return rois
-
-    # Legacy fallbacks
-    rois = get_config_value(config, "rois", {})
-    if not rois:
-        rois = get_config_value(config, "time_frequency_analysis.rois", {})
-    return rois
+    config_paths = [
+        "project.roi_definitions",
+        "spatial.roi_definitions",
+        "rois",
+        "time_frequency_analysis.rois",
+    ]
+    
+    for path in config_paths:
+        rois = get_config_value(config, path, None)
+        if rois:
+            return rois
+    
+    return {}
 
 
-def _aggregate_func(method: str = "mean"):
-    """Return the appropriate aggregation function."""
-    if method == "median":
+def _get_aggregation_function(method: str) -> Callable:
+    """Return aggregation function for given method."""
+    if method == _AGGREGATION_MEDIAN:
         return np.nanmedian
     return np.nanmean
+
+
+def _aggregate_channels(
+    data: np.ndarray,
+    channel_indices: np.ndarray,
+    aggregation_func: Callable,
+    has_time_dimension: bool,
+) -> np.ndarray:
+    """Aggregate data across specified channel indices."""
+    if has_time_dimension:
+        return aggregation_func(data[:, channel_indices, :], axis=1)
+    return aggregation_func(data[:, channel_indices], axis=1)
+
+
+def _extract_channel_data(
+    data: np.ndarray,
+    channel_index: int,
+    has_time_dimension: bool,
+) -> np.ndarray:
+    """Extract data for a single channel."""
+    if has_time_dimension:
+        return data[:, channel_index, :]
+    return data[:, channel_index]
+
+
+def _build_feature_name(prefix: str, suffix: str) -> str:
+    """Build feature name from prefix and suffix."""
+    if prefix:
+        return f"{prefix}_{suffix}"
+    return suffix
 
 
 def aggregate_by_spatial_modes(
@@ -80,42 +115,43 @@ def aggregate_by_spatial_modes(
     -------
     dict mapping feature names to arrays of shape (n_epochs,) or (n_epochs, n_times)
     """
+    if data.ndim not in (2, 3):
+        raise ValueError(
+            f"Expected 2D or 3D data, got {data.ndim}D array with shape {data.shape}"
+        )
+    if len(ch_names) != data.shape[1]:
+        raise ValueError(
+            f"Channel count mismatch: {len(ch_names)} names for {data.shape[1]} channels"
+        )
+    
     results: Dict[str, np.ndarray] = {}
-    agg_func = _aggregate_func(aggregation_method)
+    aggregation_func = _get_aggregation_function(aggregation_method)
+    has_time_dimension = data.ndim == 3
     
-    # Handle different data shapes
-    has_time = data.ndim == 3
+    if _SPATIAL_MODE_GLOBAL in spatial_modes:
+        global_data = _aggregate_channels(
+            data, np.arange(data.shape[1]), aggregation_func, has_time_dimension
+        )
+        feature_name = _build_feature_name(feature_prefix, _SPATIAL_MODE_GLOBAL)
+        results[feature_name] = global_data
     
-    if "global" in spatial_modes:
-        # Aggregate across all channels
-        if has_time:
-            global_agg = agg_func(data, axis=1)  # (n_epochs, n_times)
-        else:
-            global_agg = agg_func(data, axis=1)  # (n_epochs,)
-        name = f"{feature_prefix}_global" if feature_prefix else "global"
-        results[name] = global_agg
+    if _SPATIAL_MODE_ROI in spatial_modes:
+        roi_definitions = get_roi_definitions(config)
+        if roi_definitions:
+            roi_map = build_roi_map(ch_names, roi_definitions)
+            for roi_name, channel_indices in roi_map.items():
+                if len(channel_indices) > 0:
+                    roi_data = _aggregate_channels(
+                        data, np.array(channel_indices), aggregation_func, has_time_dimension
+                    )
+                    feature_name = _build_feature_name(feature_prefix, roi_name)
+                    results[feature_name] = roi_data
     
-    if "roi" in spatial_modes:
-        roi_defs = get_roi_definitions(config)
-        if roi_defs:
-            roi_map = build_roi_map(ch_names, roi_defs)
-            for roi_name, ch_indices in roi_map.items():
-                if len(ch_indices) > 0:
-                    if has_time:
-                        roi_agg = agg_func(data[:, ch_indices, :], axis=1)
-                    else:
-                        roi_agg = agg_func(data[:, ch_indices], axis=1)
-                    name = f"{feature_prefix}_{roi_name}" if feature_prefix else roi_name
-                    results[name] = roi_agg
-    
-    if "channels" in spatial_modes:
-        for ch_idx, ch_name in enumerate(ch_names):
-            if has_time:
-                ch_data = data[:, ch_idx, :]
-            else:
-                ch_data = data[:, ch_idx]
-            name = f"{feature_prefix}_{ch_name}" if feature_prefix else ch_name
-            results[name] = ch_data
+    if _SPATIAL_MODE_CHANNELS in spatial_modes:
+        for channel_idx, channel_name in enumerate(ch_names):
+            channel_data = _extract_channel_data(data, channel_idx, has_time_dimension)
+            feature_name = _build_feature_name(feature_prefix, channel_name)
+            results[feature_name] = channel_data
     
     return results
 
@@ -128,7 +164,7 @@ def apply_spatial_aggregation(
     roi_map: Optional[Dict[str, List[int]]] = None,
 ) -> Dict[str, np.ndarray]:
     """
-    Centralized helper to apply spatial aggregation from context.
+    Apply spatial aggregation from FeatureContext.
     
     Parameters
     ----------
@@ -147,36 +183,57 @@ def apply_spatial_aggregation(
     -------
     dict of feature_name -> values
     """
-    spatial_modes = getattr(ctx, 'spatial_modes', ['roi', 'global'])
-    aggregation_method = getattr(ctx, 'aggregation_method', 'mean')
-    agg_func = _aggregate_func(aggregation_method)
+    if data.ndim != 2:
+        raise ValueError(
+            f"Expected 2D data (n_epochs, n_channels), got {data.ndim}D array with shape {data.shape}"
+        )
+    if len(ch_names) != data.shape[1]:
+        raise ValueError(
+            f"Channel count mismatch: {len(ch_names)} names for {data.shape[1]} channels"
+        )
     
-    # Build ROI map if not provided and needed
-    if roi_map is None and 'roi' in spatial_modes:
-        roi_defs = get_roi_definitions(ctx.config)
-        if roi_defs:
-            roi_map = build_roi_map(ch_names, roi_defs)
-        else:
-            roi_map = {}
+    spatial_modes = getattr(ctx, "spatial_modes", [_SPATIAL_MODE_ROI, _SPATIAL_MODE_GLOBAL])
+    aggregation_method = getattr(ctx, "aggregation_method", _AGGREGATION_MEAN)
+    aggregation_func = _get_aggregation_function(aggregation_method)
+    
+    if roi_map is None and _SPATIAL_MODE_ROI in spatial_modes:
+        roi_definitions = get_roi_definitions(ctx.config)
+        roi_map = build_roi_map(ch_names, roi_definitions) if roi_definitions else {}
     
     results: Dict[str, np.ndarray] = {}
     
-    # Per-channel (only if 'channels' in spatial_modes)
-    if 'channels' in spatial_modes:
-        for ch_idx, ch_name in enumerate(ch_names):
-            results[f"{feature_prefix}_{ch_name}"] = data[:, ch_idx]
+    if _SPATIAL_MODE_CHANNELS in spatial_modes:
+        for channel_idx, channel_name in enumerate(ch_names):
+            feature_name = _build_feature_name(feature_prefix, channel_name)
+            results[feature_name] = data[:, channel_idx]
     
-    # Global aggregation (only if 'global' in spatial_modes)
-    if 'global' in spatial_modes:
-        results[f"{feature_prefix}_global"] = agg_func(data, axis=1)
+    if _SPATIAL_MODE_GLOBAL in spatial_modes:
+        feature_name = _build_feature_name(feature_prefix, _SPATIAL_MODE_GLOBAL)
+        results[feature_name] = aggregation_func(data, axis=1)
     
-    # ROI aggregation (only if 'roi' in spatial_modes and roi_map exists)
-    if 'roi' in spatial_modes and roi_map:
-        for roi_name, ch_indices in roi_map.items():
-            if len(ch_indices) > 0:
-                results[f"{feature_prefix}_{roi_name}"] = agg_func(data[:, ch_indices], axis=1)
+    if _SPATIAL_MODE_ROI in spatial_modes and roi_map:
+        for roi_name, channel_indices in roi_map.items():
+            if len(channel_indices) > 0:
+                feature_name = _build_feature_name(feature_prefix, roi_name)
+                results[feature_name] = aggregation_func(data[:, channel_indices], axis=1)
     
     return results
+
+
+def _find_channel_column(
+    feature_df: pd.DataFrame,
+    base_feature_name: str,
+    channel_name: str,
+) -> Optional[str]:
+    """Find column name matching pattern {base_feature_name}_{channel_name} or variants."""
+    exact_pattern = f"{base_feature_name}_{channel_name}"
+    prefix_pattern = f"{exact_pattern}_"
+    
+    for column in feature_df.columns:
+        column_str = str(column)
+        if column_str == exact_pattern or column_str.startswith(prefix_pattern):
+            return column_str
+    return None
 
 
 def aggregate_features_df(
@@ -193,36 +250,32 @@ def aggregate_features_df(
     
     Returns aggregated DataFrame and list of new column names.
     """
-    results_dict: Dict[str, np.ndarray] = {}
-    n_rows = len(feature_df)
-    
-    # Extract per-channel data
-    ch_data = {}
-    for ch_name in ch_names:
-        col_pattern = f"{base_feature_name}_{ch_name}"
-        matching_cols = [c for c in feature_df.columns if c == col_pattern or c.startswith(f"{col_pattern}_")]
-        if matching_cols:
-            ch_data[ch_name] = feature_df[matching_cols[0]].values
-    
-    if not ch_data:
+    if feature_df.empty:
         return pd.DataFrame(), []
     
-    # Stack into array
-    ch_list = list(ch_data.keys())
-    data_array = np.column_stack([ch_data[ch] for ch in ch_list])  # (n_epochs, n_channels)
+    channel_data: Dict[str, np.ndarray] = {}
+    found_channel_names: List[str] = []
+    
+    for channel_name in ch_names:
+        column_name = _find_channel_column(feature_df, base_feature_name, channel_name)
+        if column_name is not None:
+            channel_data[channel_name] = feature_df[column_name].values
+            found_channel_names.append(channel_name)
+    
+    if not channel_data:
+        return pd.DataFrame(), []
+    
+    data_array = np.column_stack([channel_data[ch] for ch in found_channel_names])
     
     aggregated = aggregate_by_spatial_modes(
         data_array,
-        ch_list,
+        found_channel_names,
         spatial_modes,
         config,
         feature_prefix=base_feature_name,
     )
     
-    for name, values in aggregated.items():
-        results_dict[name] = values
-    
-    result_df = pd.DataFrame(results_dict)
+    result_df = pd.DataFrame(aggregated)
     return result_df, list(result_df.columns)
 
 
@@ -246,9 +299,10 @@ def generate_output_filename(
         parts.append(spatial_str)
     
     if tmin is not None or tmax is not None:
-        tmin_str = f"{tmin:.1f}" if tmin is not None else "None"
-        tmax_str = f"{tmax:.1f}" if tmax is not None else "None"
-        parts.append(f"t{tmin_str}-{tmax_str}")
+        tmin_formatted = f"{tmin:.1f}" if tmin is not None else "None"
+        tmax_formatted = f"{tmax:.1f}" if tmax is not None else "None"
+        time_range_str = f"t{tmin_formatted}-{tmax_formatted}"
+        parts.append(time_range_str)
     
     return "_".join(parts)
 
@@ -267,32 +321,33 @@ def crop_epochs_to_time_range(
     if tmin is None and tmax is None:
         return epochs
     
-    actual_tmin = epochs.tmin
-    actual_tmax = epochs.tmax
+    available_tmin = epochs.tmin
+    available_tmax = epochs.tmax
     
-    crop_tmin = tmin if tmin is not None else actual_tmin
-    crop_tmax = tmax if tmax is not None else actual_tmax
+    requested_tmin = tmin if tmin is not None else available_tmin
+    requested_tmax = tmax if tmax is not None else available_tmax
     
-    # Swap if needed
-    if crop_tmin > crop_tmax:
+    if requested_tmin > requested_tmax:
         if logger:
-            logger.warning(f"Time range [{crop_tmin}, {crop_tmax}] is reversed; swapping values.")
-        crop_tmin, crop_tmax = crop_tmax, crop_tmin
+            logger.warning(
+                f"Time range [{requested_tmin}, {requested_tmax}] is reversed; swapping values."
+            )
+        requested_tmin, requested_tmax = requested_tmax, requested_tmin
 
-    # Clamp to available range
-    crop_tmin = max(crop_tmin, actual_tmin)
-    crop_tmax = min(crop_tmax, actual_tmax)
+    clamped_tmin = max(requested_tmin, available_tmin)
+    clamped_tmax = min(requested_tmax, available_tmax)
     
-    if crop_tmin >= crop_tmax:
+    if clamped_tmin >= clamped_tmax:
         if logger:
-            logger.warning(f"Invalid time range [{crop_tmin}, {crop_tmax}], using full range")
+            logger.warning(
+                f"Invalid time range [{clamped_tmin}, {clamped_tmax}], using full range"
+            )
         return epochs
     
     if logger:
-        logger.info(f"Cropping epochs to time range [{crop_tmin:.2f}, {crop_tmax:.2f}] s")
+        logger.info(f"Cropping epochs to time range [{clamped_tmin:.2f}, {clamped_tmax:.2f}] s")
     
-    # MNE requires data to be loaded for cropping if we want to avoid errors
     if not epochs.preload:
         epochs.load_data()
         
-    return epochs.copy().crop(tmin=crop_tmin, tmax=crop_tmax)
+    return epochs.copy().crop(tmin=clamped_tmin, tmax=clamped_tmax)

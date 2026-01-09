@@ -20,6 +20,18 @@ import numpy as np
 
 
 # ──────────────────────────────────────────────────────────────────
+# Constants
+# ──────────────────────────────────────────────────────────────────
+
+# MAD to standard deviation conversion factor (for normal distribution)
+MAD_TO_STD_FACTOR = 1.4826
+
+# Numerical stability thresholds
+EPSILON_SMALL = 1e-12
+EPSILON_STD = 1e-10
+
+
+# ──────────────────────────────────────────────────────────────────
 # Safe Aggregation Functions
 # ──────────────────────────────────────────────────────────────────
 
@@ -128,7 +140,7 @@ def safe_divide(
     numerator: np.ndarray,
     denominator: np.ndarray,
     default: float = 0.0,
-    min_denom: float = 1e-12,
+    min_denom: float = EPSILON_SMALL,
 ) -> np.ndarray:
     """
     Safe division avoiding divide-by-zero.
@@ -138,16 +150,17 @@ def safe_divide(
     denom = np.asarray(denominator)
     numer = np.asarray(numerator)
     
-    safe_denom = np.where(np.abs(denom) < min_denom, 1.0, denom)
+    is_denom_too_small = np.abs(denom) < min_denom
+    safe_denom = np.where(is_denom_too_small, 1.0, denom)
     result = numer / safe_denom
     
-    return np.where(np.abs(denom) < min_denom, default, result)
+    return np.where(is_denom_too_small, default, result)
 
 
 def safe_log(
     arr: np.ndarray,
     base: float = 10,
-    min_val: float = 1e-12,
+    min_val: float = EPSILON_SMALL,
 ) -> np.ndarray:
     """Safe logarithm clamping minimum value."""
     arr_safe = np.maximum(np.abs(arr), min_val)
@@ -172,7 +185,7 @@ def safe_sqrt(arr: np.ndarray, default: float = 0.0) -> np.ndarray:
 def robust_zscore(
     arr: np.ndarray,
     axis: Optional[int] = None,
-    min_std: float = 1e-10,
+    min_std: float = EPSILON_STD,
 ) -> np.ndarray:
     """
     Z-score normalization with minimum std protection.
@@ -182,8 +195,7 @@ def robust_zscore(
     median = np.nanmedian(arr, axis=axis, keepdims=True)
     mad = np.nanmedian(np.abs(arr - median), axis=axis, keepdims=True)
     
-    # Scale MAD to approximate std
-    std_approx = mad * 1.4826
+    std_approx = mad * MAD_TO_STD_FACTOR
     std_approx = np.maximum(std_approx, min_std)
     
     return (arr - median) / std_approx
@@ -192,7 +204,7 @@ def robust_zscore(
 def zscore(
     arr: np.ndarray,
     axis: Optional[int] = None,
-    min_std: float = 1e-10,
+    min_std: float = EPSILON_STD,
 ) -> np.ndarray:
     """Standard z-score with min_std protection."""
     mean = np.nanmean(arr, axis=axis, keepdims=True)
@@ -211,13 +223,13 @@ def minmax_scale(
     arr_max = np.nanmax(arr, axis=axis, keepdims=True)
     
     range_val = arr_max - arr_min
-    range_val = np.where(range_val < 1e-12, 1.0, range_val)
+    is_constant = range_val < EPSILON_SMALL
+    range_val = np.where(is_constant, 1.0, range_val)
     
     scaled = (arr - arr_min) / range_val
     
-    # Apply feature range
-    lo, hi = feature_range
-    return scaled * (hi - lo) + lo
+    range_low, range_high = feature_range
+    return scaled * (range_high - range_low) + range_low
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -234,10 +246,10 @@ def clip_outliers(
     mean = np.nanmean(arr, axis=axis, keepdims=True)
     std = np.nanstd(arr, axis=axis, keepdims=True)
     
-    lower = mean - n_std * std
-    upper = mean + n_std * std
+    lower_bound = mean - n_std * std
+    upper_bound = mean + n_std * std
     
-    return np.clip(arr, lower, upper)
+    return np.clip(arr, lower_bound, upper_bound)
 
 
 def winsorize(
@@ -246,13 +258,14 @@ def winsorize(
     axis: Optional[int] = None,
 ) -> np.ndarray:
     """Winsorize array by percentile limits."""
-    lower_pct = limits[0] * 100
-    upper_pct = (1 - limits[1]) * 100
+    lower_limit, upper_limit = limits
+    lower_percentile = lower_limit * 100
+    upper_percentile = (1 - upper_limit) * 100
     
-    lower = np.nanpercentile(arr, lower_pct, axis=axis, keepdims=True)
-    upper = np.nanpercentile(arr, upper_pct, axis=axis, keepdims=True)
+    lower_bound = np.nanpercentile(arr, lower_percentile, axis=axis, keepdims=True)
+    upper_bound = np.nanpercentile(arr, upper_percentile, axis=axis, keepdims=True)
     
-    return np.clip(arr, lower, upper)
+    return np.clip(arr, lower_bound, upper_bound)
 
 
 def detect_outliers_zscore(
@@ -275,10 +288,12 @@ def detect_outliers_iqr(
     q3 = np.nanpercentile(arr, 75, axis=axis, keepdims=True)
     iqr = q3 - q1
     
-    lower = q1 - k * iqr
-    upper = q3 + k * iqr
+    lower_bound = q1 - k * iqr
+    upper_bound = q3 + k * iqr
     
-    return (arr < lower) | (arr > upper)
+    is_below_lower = arr < lower_bound
+    is_above_upper = arr > upper_bound
+    return is_below_lower | is_above_upper
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -307,13 +322,14 @@ def validate_array(
     if arr.size < min_size:
         return False, f"{name} has size {arr.size}, need >= {min_size}"
     
-    nan_frac = 1 - valid_fraction(arr)
+    valid_frac = valid_fraction(arr)
+    nan_fraction = 1 - valid_frac
     
-    if not allow_nan and nan_frac > 0:
+    if not allow_nan and nan_fraction > 0:
         return False, f"{name} contains NaN values"
     
-    if nan_frac > max_nan_fraction:
-        return False, f"{name} has {nan_frac:.1%} NaN (max {max_nan_fraction:.1%})"
+    if nan_fraction > max_nan_fraction:
+        return False, f"{name} has {nan_fraction:.1%} NaN (max {max_nan_fraction:.1%})"
     
     return True, "OK"
 
@@ -338,18 +354,23 @@ def nanmean_with_fraction(data: np.ndarray, mask: np.ndarray) -> Tuple[float, fl
     -------
     mean_val : float
         Mean value (NaN if no valid samples)
-    frac : float
+    valid_fraction : float
         Fraction of valid samples (valid / total)
-    valid : int
+    valid_count : int
         Number of valid samples
-    total : int
+    total_count : int
         Total number of samples in mask
     """
-    masked = data[mask]
-    total = int(masked.size)
-    finite_mask = np.isfinite(masked)
-    valid = int(np.sum(finite_mask))
-    mean_val = float(np.nanmean(masked)) if valid > 0 else np.nan
-    frac = float(valid / total) if total > 0 else 0.0
-    return mean_val, frac, valid, total
+    masked_data = data[mask]
+    total_count = int(masked_data.size)
+    is_finite = np.isfinite(masked_data)
+    valid_count = int(np.sum(is_finite))
+    
+    has_valid_samples = valid_count > 0
+    mean_val = float(np.nanmean(masked_data)) if has_valid_samples else np.nan
+    
+    has_samples = total_count > 0
+    valid_fraction = float(valid_count / total_count) if has_samples else 0.0
+    
+    return mean_val, valid_fraction, valid_count, total_count
 

@@ -13,16 +13,46 @@ Standardized normalization methods for EEG features:
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any, Tuple, Literal
+from typing import Optional, List, Dict, Tuple, Literal, Any
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.config.loader import get_feature_constant
+from eeg_pipeline.utils.config.loader import get_feature_constant, load_config
 
 
 NormMethod = Literal["zscore", "robust", "minmax", "rank", "log", "none"]
+
+DEFAULT_EPSILON = 1e-12
+MIN_SAMPLES_FOR_NORMALIZATION = 2
+DEFAULT_EXCLUDE_COLUMNS = ["condition", "epoch", "trial", "subject", "run", "run_id"]
+
+
+def _get_epsilon(config: Optional[Any] = None) -> float:
+    """Get epsilon constant from config with fallback."""
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:
+            return DEFAULT_EPSILON
+    
+    return float(get_feature_constant(config, "EPSILON_STD", DEFAULT_EPSILON))
+
+
+def _extract_finite_values(
+    values: np.ndarray,
+    reference_values: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Extract finite values from array or reference array."""
+    source = reference_values if reference_values is not None else values
+    return source[np.isfinite(source)]
+
+
+def _validate_normalization_input(values: np.ndarray) -> bool:
+    """Validate that array has sufficient finite values for normalization."""
+    finite_values = _extract_finite_values(values)
+    return len(finite_values) >= MIN_SAMPLES_FOR_NORMALIZATION
 
 
 def zscore_normalize(
@@ -30,6 +60,7 @@ def zscore_normalize(
     *,
     reference_values: Optional[np.ndarray] = None,
     epsilon: Optional[float] = None,
+    config: Optional[Any] = None,
 ) -> np.ndarray:
     """
     Z-score normalization: (x - mean) / std.
@@ -40,32 +71,27 @@ def zscore_normalize(
         Values to normalize
     reference_values : Optional[np.ndarray]
         Values to compute mean/std from (for train/test split)
-    epsilon : float
-        Minimum std to avoid division by zero
+    epsilon : Optional[float]
+        Minimum std to avoid division by zero. If None, uses config.
+    config : Optional[Any]
+        Configuration object for epsilon lookup
     
     Returns
     -------
     np.ndarray
         Normalized values
     """
-    ref = reference_values if reference_values is not None else values
-    ref_finite = ref[np.isfinite(ref)]
-    
-    if len(ref_finite) < 2:
+    if not _validate_normalization_input(values):
         return np.full_like(values, np.nan, dtype=float)
     
-    mean = np.mean(ref_finite)
-    std = np.std(ref_finite, ddof=1)
-    if epsilon is None:
-        # Get epsilon from config if available
-        try:
-            from eeg_pipeline.utils.config.loader import load_config, get_config_value
-            config = load_config()
-            epsilon = get_config_value(config, "feature_engineering.constants.epsilon_normalization", 1e-12)
-        except Exception:
-            epsilon = 1e-12  # Fallback default epsilon
-    std = max(std, epsilon)
+    reference_finite = _extract_finite_values(values, reference_values)
+    mean = np.mean(reference_finite)
+    std = np.std(reference_finite, ddof=1)
     
+    if epsilon is None:
+        epsilon = _get_epsilon(config)
+    
+    std = max(std, epsilon)
     return (values - mean) / std
 
 
@@ -74,6 +100,7 @@ def robust_normalize(
     *,
     reference_values: Optional[np.ndarray] = None,
     epsilon: Optional[float] = None,
+    config: Optional[Any] = None,
 ) -> np.ndarray:
     """
     Robust normalization using median and MAD.
@@ -86,26 +113,27 @@ def robust_normalize(
         Values to normalize
     reference_values : Optional[np.ndarray]
         Values to compute median/MAD from
-    epsilon : float
-        Minimum MAD to avoid division by zero
+    epsilon : Optional[float]
+        Minimum MAD to avoid division by zero. If None, uses config.
+    config : Optional[Any]
+        Configuration object for epsilon lookup
     
     Returns
     -------
     np.ndarray
         Normalized values
     """
-    ref = reference_values if reference_values is not None else values
-    ref_finite = ref[np.isfinite(ref)]
-    
-    if len(ref_finite) < 2:
+    if not _validate_normalization_input(values):
         return np.full_like(values, np.nan, dtype=float)
     
-    median = np.median(ref_finite)
-    mad = stats.median_abs_deviation(ref_finite, scale="normal")
-    if epsilon is None:
-        epsilon = 1e-12  # Default epsilon
-    mad = max(mad, epsilon)
+    reference_finite = _extract_finite_values(values, reference_values)
+    median = np.median(reference_finite)
+    mad = stats.median_abs_deviation(reference_finite, scale="normal")
     
+    if epsilon is None:
+        epsilon = _get_epsilon(config)
+    
+    mad = max(mad, epsilon)
     return (values - median) / mad
 
 
@@ -132,14 +160,12 @@ def minmax_normalize(
     np.ndarray
         Normalized values
     """
-    ref = reference_values if reference_values is not None else values
-    ref_finite = ref[np.isfinite(ref)]
-    
-    if len(ref_finite) < 2:
+    if not _validate_normalization_input(values):
         return np.full_like(values, np.nan, dtype=float)
     
-    min_val = np.min(ref_finite)
-    max_val = np.max(ref_finite)
+    reference_finite = _extract_finite_values(values, reference_values)
+    min_val = np.min(reference_finite)
+    max_val = np.max(reference_finite)
     
     if max_val == min_val:
         return np.full_like(values, feature_range[0], dtype=float)
@@ -174,15 +200,15 @@ def rank_normalize(
     finite_mask = np.isfinite(values)
     result = np.full_like(values, np.nan, dtype=float)
     
-    if np.sum(finite_mask) < 2:
+    finite_count = np.sum(finite_mask)
+    if finite_count < MIN_SAMPLES_FOR_NORMALIZATION:
         return result
     
     finite_values = values[finite_mask]
     ranks = stats.rankdata(finite_values, method=method)
     
-    # Normalize ranks to 0-1
-    n = len(ranks)
-    result[finite_mask] = (ranks - 1) / (n - 1) if n > 1 else 0.5
+    normalized_ranks = (ranks - 1) / (finite_count - 1) if finite_count > 1 else 0.5
+    result[finite_mask] = normalized_ranks
     
     return result
 
@@ -192,6 +218,7 @@ def log_normalize(
     *,
     epsilon: Optional[float] = None,
     base: float = np.e,
+    config: Optional[Any] = None,
 ) -> np.ndarray:
     """
     Log transformation for positively skewed data.
@@ -200,10 +227,12 @@ def log_normalize(
     ----------
     values : np.ndarray
         Values to transform (should be positive)
-    epsilon : float
-        Small value to add before log
+    epsilon : Optional[float]
+        Small value to add before log. If None, uses config.
     base : float
         Log base (e for natural log, 10 for log10)
+    config : Optional[Any]
+        Configuration object for epsilon lookup
     
     Returns
     -------
@@ -211,14 +240,88 @@ def log_normalize(
         Log-transformed values
     """
     if epsilon is None:
-        epsilon = 1e-12  # Default epsilon
+        epsilon = _get_epsilon(config)
+    
     safe_values = np.maximum(values, epsilon)
+    
     if base == np.e:
         return np.log(safe_values)
-    elif base == 10:
+    if base == 10:
         return np.log10(safe_values)
-    else:
-        return np.log(safe_values) / np.log(base)
+    
+    return np.log(safe_values) / np.log(base)
+
+
+def _get_numeric_columns(
+    df: pd.DataFrame,
+    exclude_columns: List[str],
+) -> List[str]:
+    """Extract numeric columns excluding specified columns."""
+    return [
+        col
+        for col in df.columns
+        if col not in exclude_columns
+        and pd.api.types.is_numeric_dtype(df[col])
+    ]
+
+
+def _get_normalization_function(method: NormMethod):
+    """Get normalization function for given method."""
+    norm_functions = {
+        "zscore": zscore_normalize,
+        "robust": robust_normalize,
+        "minmax": minmax_normalize,
+        "rank": rank_normalize,
+        "log": log_normalize,
+    }
+    return norm_functions.get(method, zscore_normalize)
+
+
+def _normalize_column_all_data(
+    df: pd.DataFrame,
+    col: str,
+    norm_fn,
+    method: NormMethod,
+    reference_df: Optional[pd.DataFrame] = None,
+    config: Optional[Any] = None,
+) -> np.ndarray:
+    """Normalize a column using all data."""
+    values = df[col].to_numpy(dtype=float)
+    
+    if method in ("rank", "log"):
+        return norm_fn(values, config=config)
+    
+    ref_values = None
+    if reference_df is not None and col in reference_df.columns:
+        ref_values = reference_df[col].to_numpy(dtype=float)
+    
+    return norm_fn(values, reference_values=ref_values, config=config)
+
+
+def _normalize_column_by_group(
+    df: pd.DataFrame,
+    col: str,
+    group_column: str,
+    norm_fn,
+    method: NormMethod,
+    config: Optional[Any] = None,
+) -> np.ndarray:
+    """Normalize a column within each group."""
+    result = np.full(len(df), np.nan, dtype=float)
+    groups = df[group_column].unique()
+    
+    for group in groups:
+        mask = df[group_column] == group
+        group_values = df.loc[mask, col].to_numpy(dtype=float)
+        
+        if method in ("rank", "log"):
+            normalized = norm_fn(group_values, config=config)
+        else:
+            normalized = norm_fn(group_values, config=config)
+        
+        result[mask] = normalized
+    
+    return result
 
 
 def normalize_features(
@@ -230,6 +333,7 @@ def normalize_features(
     run_column: Optional[str] = None,
     exclude_columns: Optional[List[str]] = None,
     reference_df: Optional[pd.DataFrame] = None,
+    config: Optional[Any] = None,
 ) -> pd.DataFrame:
     """
     Normalize all numeric features in a DataFrame.
@@ -254,6 +358,8 @@ def normalize_features(
     reference_df : Optional[pd.DataFrame]
         Separate DataFrame to compute normalization parameters from
         (e.g., training set for train/test split)
+    config : Optional[Any]
+        Configuration object for epsilon lookup
     
     Returns
     -------
@@ -264,85 +370,38 @@ def normalize_features(
         return df.copy()
     
     if exclude_columns is None:
-        exclude_columns = ["condition", "epoch", "trial", "subject", "run", "run_id"]
+        exclude_columns = DEFAULT_EXCLUDE_COLUMNS.copy()
     
+    numeric_columns = _get_numeric_columns(df, exclude_columns)
+    if not numeric_columns:
+        return df.copy()
+    
+    norm_fn = _get_normalization_function(method)
     result = df.copy()
     
-    # Get numeric columns
-    numeric_cols = [c for c in df.columns 
-                   if c not in exclude_columns 
-                   and pd.api.types.is_numeric_dtype(df[c])]
-    
-    if not numeric_cols:
-        return result
-    
-    # Select normalization function
-    norm_funcs = {
-        "zscore": zscore_normalize,
-        "robust": robust_normalize,
-        "minmax": minmax_normalize,
-        "rank": rank_normalize,
-        "log": log_normalize,
-    }
-    norm_fn = norm_funcs.get(method, zscore_normalize)
-    
     if reference == "all":
-        # Normalize using all data
-        for col in numeric_cols:
-            values = df[col].to_numpy(dtype=float)
-            ref_values = None
-            if reference_df is not None and col in reference_df.columns:
-                ref_values = reference_df[col].to_numpy(dtype=float)
-            
-            if method == "rank":
-                result[col] = norm_fn(values)
-            elif method == "log":
-                result[col] = norm_fn(values)
-            else:
-                result[col] = norm_fn(values, reference_values=ref_values)
+        for col in numeric_columns:
+            result[col] = _normalize_column_all_data(
+                df, col, norm_fn, method, reference_df, config
+            )
     
     elif reference == "condition" and condition_column and condition_column in df.columns:
-        # Normalize within each condition
-        conditions = df[condition_column].unique()
-        
-        for col in numeric_cols:
-            for cond in conditions:
-                mask = df[condition_column] == cond
-                values = df.loc[mask, col].to_numpy(dtype=float)
-                
-                if method == "rank":
-                    result.loc[mask, col] = norm_fn(values)
-                elif method == "log":
-                    result.loc[mask, col] = norm_fn(values)
-                else:
-                    result.loc[mask, col] = norm_fn(values)
+        for col in numeric_columns:
+            result[col] = _normalize_column_by_group(
+                df, col, condition_column, norm_fn, method, config
+            )
     
     elif reference == "run" and run_column and run_column in df.columns:
-        # Normalize within each run (for scanner drift)
-        runs = df[run_column].unique()
-        
-        for col in numeric_cols:
-            for run in runs:
-                mask = df[run_column] == run
-                values = df.loc[mask, col].to_numpy(dtype=float)
-                
-                if method == "rank":
-                    result.loc[mask, col] = norm_fn(values)
-                elif method == "log":
-                    result.loc[mask, col] = norm_fn(values)
-                else:
-                    result.loc[mask, col] = norm_fn(values)
+        for col in numeric_columns:
+            result[col] = _normalize_column_by_group(
+                df, col, run_column, norm_fn, method, config
+            )
     
     else:
-        # Fallback to all
-        for col in numeric_cols:
-            values = df[col].to_numpy(dtype=float)
-            if method == "rank":
-                result[col] = norm_fn(values)
-            elif method == "log":
-                result[col] = norm_fn(values)
-            else:
-                result[col] = norm_fn(values)
+        for col in numeric_columns:
+            result[col] = _normalize_column_all_data(
+                df, col, norm_fn, method, None, config
+            )
     
     return result
 
@@ -353,6 +412,7 @@ def normalize_train_test(
     method: NormMethod = "zscore",
     *,
     exclude_columns: Optional[List[str]] = None,
+    config: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Normalize train and test DataFrames using training statistics only.
@@ -369,6 +429,8 @@ def normalize_train_test(
         Normalization method
     exclude_columns : Optional[List[str]]
         Columns to exclude
+    config : Optional[Any]
+        Configuration object for epsilon lookup
     
     Returns
     -------
@@ -376,17 +438,23 @@ def normalize_train_test(
         Normalized (train, test) DataFrames
     """
     if exclude_columns is None:
-        exclude_columns = ["condition", "epoch", "trial", "subject", "run", "run_id"]
+        exclude_columns = DEFAULT_EXCLUDE_COLUMNS.copy()
     
-    # Normalize train
     train_norm = normalize_features(
-        train_df, method=method, reference="all", exclude_columns=exclude_columns
+        train_df,
+        method=method,
+        reference="all",
+        exclude_columns=exclude_columns,
+        config=config,
     )
     
-    # Normalize test using train statistics
     test_norm = normalize_features(
-        test_df, method=method, reference="all", 
-        exclude_columns=exclude_columns, reference_df=train_df
+        test_df,
+        method=method,
+        reference="all",
+        exclude_columns=exclude_columns,
+        reference_df=train_df,
+        config=config,
     )
     
     return train_norm, test_norm
@@ -404,45 +472,44 @@ class FeatureNormalizer:
         self,
         method: NormMethod = "zscore",
         exclude_columns: Optional[List[str]] = None,
+        config: Optional[Any] = None,
     ):
         self.method = method
-        self.exclude_columns = exclude_columns or [
-            "condition", "epoch", "trial", "subject", "run", "run_id"
-        ]
+        self.exclude_columns = exclude_columns or DEFAULT_EXCLUDE_COLUMNS.copy()
+        self.config = config
         self.params_: Dict[str, Dict[str, float]] = {}
         self.fitted_ = False
     
     def fit(self, df: pd.DataFrame) -> "FeatureNormalizer":
         """Fit normalizer to training data."""
-        numeric_cols = [c for c in df.columns 
-                       if c not in self.exclude_columns 
-                       and pd.api.types.is_numeric_dtype(df[c])]
+        numeric_columns = _get_numeric_columns(df, self.exclude_columns)
+        epsilon = _get_epsilon(self.config)
         
-        for col in numeric_cols:
+        for col in numeric_columns:
             values = df[col].to_numpy(dtype=float)
-            finite = values[np.isfinite(values)]
+            finite_values = _extract_finite_values(values)
             
-            if len(finite) < 2:
+            if not _validate_normalization_input(values):
                 self.params_[col] = {"valid": False}
                 continue
             
             if self.method == "zscore":
                 self.params_[col] = {
                     "valid": True,
-                    "mean": float(np.mean(finite)),
-                    "std": float(max(np.std(finite, ddof=1), 1e-12)),  # Default epsilon_std
+                    "mean": float(np.mean(finite_values)),
+                    "std": float(max(np.std(finite_values, ddof=1), epsilon)),
                 }
             elif self.method == "robust":
                 self.params_[col] = {
                     "valid": True,
-                    "median": float(np.median(finite)),
-                    "mad": float(max(stats.median_abs_deviation(finite, scale="normal"), 1e-12)),  # Default epsilon_std
+                    "median": float(np.median(finite_values)),
+                    "mad": float(max(stats.median_abs_deviation(finite_values, scale="normal"), epsilon)),
                 }
             elif self.method == "minmax":
                 self.params_[col] = {
                     "valid": True,
-                    "min": float(np.min(finite)),
-                    "max": float(np.max(finite)),
+                    "min": float(np.min(finite_values)),
+                    "max": float(np.max(finite_values)),
                 }
             else:
                 self.params_[col] = {"valid": True}
@@ -479,11 +546,10 @@ class FeatureNormalizer:
             elif self.method == "rank":
                 result[col] = rank_normalize(values)
             elif self.method == "log":
-                result[col] = log_normalize(values)
+                result[col] = log_normalize(values, config=self.config)
         
         return result
     
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Fit and transform in one step."""
         return self.fit(df).transform(df)
-

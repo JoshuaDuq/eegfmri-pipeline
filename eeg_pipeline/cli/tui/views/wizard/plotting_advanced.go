@@ -9,6 +9,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	// UI layout constants
+	defaultViewHeight        = 40
+	headerOverheadLines      = 10
+	minimumVisibleLines      = 8
+	initialLineCapacity      = 256
+	maxAvailableItemsDisplay = 4
+
+	// Cursor animation
+	accentFrameCount = 4
+	accentFrameStep  = 3
+)
+
 // plotDefaults holds all default values from eeg_config.yaml plotting section
 var plotDefaults = struct {
 	// Defaults & Output
@@ -351,1437 +364,1051 @@ var plotDefaults = struct {
 }
 
 func (m Model) renderPlottingAdvancedConfigV2() string {
-	var b strings.Builder
+	var builder strings.Builder
 
+	m.renderPlottingAdvancedHeader(&builder)
+	if m.useDefaultAdvanced {
+		return m.renderMinimalView(&builder)
+	}
+
+	m.renderHelpText(&builder)
+	lines := m.buildAllLines()
+	m.renderLinesWithScrolling(&builder, lines)
+
+	return builder.String()
+}
+
+func (m Model) renderPlottingAdvancedHeader(builder *strings.Builder) {
 	accentFrames := []string{"◆", "◇", "◆", "◈"}
+	frameIndex := (m.ticker / accentFrameStep) % accentFrameCount
 	accent := lipgloss.NewStyle().
 		Foreground(styles.Accent).
 		Bold(true).
-		Render(accentFrames[(m.ticker/3)%len(accentFrames)])
+		Render(accentFrames[frameIndex])
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
 		MarginLeft(1)
-	b.WriteString(accent + titleStyle.Render(" ADVANCED PLOT SETTINGS") + "\n\n")
 
+	builder.WriteString(accent + titleStyle.Render(" ADVANCED PLOT SETTINGS") + "\n\n")
+}
+
+func (m Model) renderMinimalView(builder *strings.Builder) string {
 	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	builder.WriteString(infoStyle.Render("Default configuration will be used for plotting.") + "\n")
+	builder.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
 
-	// Minimal view when using defaults
-	if m.useDefaultAdvanced {
-		b.WriteString(infoStyle.Render("Default configuration will be used for plotting.") + "\n")
-		b.WriteString(infoStyle.Render("Press Space to customize settings.") + "\n\n")
-
-		labelWidth := 22
-		hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-
-		isFocused := m.advancedCursor == 0
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
-		if isFocused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-		b.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
-
-		tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
-		b.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
-		return b.String()
-	}
-
-	if m.editingNumber || m.editingText {
-		b.WriteString(infoStyle.Render("Enter a value, then press Enter to confirm or Esc to cancel.") + "\n\n")
-	} else if m.expandedOption >= 0 {
-		b.WriteString(infoStyle.Render("Space to select item · ↑↓ to navigate · Esc to close list") + "\n\n")
-	} else {
-		b.WriteString(infoStyle.Render("Space to expand/edit · ↑↓ to navigate · Enter to proceed") + "\n\n")
-	}
-
-	labelWidth := 28
+	const labelWidth = 22
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 
-	type line struct {
-		text    string
-		focused bool
-	}
-	lines := make([]line, 0, 256)
+	isFocused := m.advancedCursor == 0
+	cursor := m.renderCursor(isFocused)
+	labelStyle := m.buildLabelStyle(labelWidth, isFocused)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-	isDisabled := func(opt optionType) bool {
-		return m.useDefaultAdvanced && opt != optUseDefaults
-	}
+	builder.WriteString(cursor + labelStyle.Render("Configuration:") + " " + valueStyle.Render("Using Defaults") + "  " + hintStyle.Render("Space to customize") + "\n")
 
-	triState := func(v *bool) string {
-		if v == nil {
-			return "default"
-		}
-		if *v {
-			return "ON"
-		}
-		return "OFF"
-	}
+	tipStyle := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).PaddingLeft(4)
+	builder.WriteString("\n" + tipStyle.Render("Tip: In Custom mode, sections are collapsible for easier navigation.") + "\n")
+	return builder.String()
+}
 
-	formatFloat := func(v float64, defaultVal float64, fmtStr string) string {
-		if v == 0 {
-			return fmt.Sprintf(fmtStr+" (default)", defaultVal)
-		}
-		return fmt.Sprintf(fmtStr, v)
+func (m Model) renderHelpText(builder *strings.Builder) {
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+
+	var helpText string
+	switch {
+	case m.editingNumber || m.editingText:
+		helpText = "Enter a value, then press Enter to confirm or Esc to cancel."
+	case m.expandedOption >= 0:
+		helpText = "Space to select item · ↑↓ to navigate · Esc to close list"
+	default:
+		helpText = "Space to expand/edit · ↑↓ to navigate · Enter to proceed"
 	}
 
-	formatInt := func(v int, defaultVal int) string {
-		if v == 0 {
-			return fmt.Sprintf("%d (default)", defaultVal)
-		}
-		return fmt.Sprintf("%d", v)
-	}
+	builder.WriteString(infoStyle.Render(helpText) + "\n\n")
+}
 
-	formatString := func(v string, defaultVal string) string {
-		if strings.TrimSpace(v) == "" {
-			return fmt.Sprintf("(default: %s)", defaultVal)
-		}
-		return v
-	}
+type renderLine struct {
+	text string
+}
 
-	availableHint := func(prefix string, items []string) string {
-		if len(items) == 0 {
-			return ""
-		}
-		max := 4
-		if len(items) < max {
-			max = len(items)
-		}
-		suffix := ""
-		if len(items) > max {
-			suffix = fmt.Sprintf(" (+%d)", len(items)-max)
-		}
-		return fmt.Sprintf("%s: %s%s", prefix, strings.Join(items[:max], " "), suffix)
-	}
-
-	groupLine := func(opt optionType, label string, expanded bool, hint string, focused bool) line {
-		cursor := "  "
-		if focused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-
-		arrow := "▸"
-		if expanded {
-			arrow = "▾"
-		}
-
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
-		if focused {
-			labelStyle = labelStyle.Foreground(styles.Primary)
-		}
-		if isDisabled(opt) {
-			labelStyle = labelStyle.Faint(true)
-		}
-
-		return line{
-			text: cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, label)) + "  " + hintStyle.Render(hint),
-		}
-	}
-
-	valueLine := func(opt optionType, label string, value string, hint string, focused bool) line {
-		cursor := "  "
-		if focused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
-		if focused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		if isDisabled(opt) {
-			labelStyle = labelStyle.Faint(true)
-			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-		}
-
-		displayVal := value
-		if strings.TrimSpace(displayVal) == "" {
-			displayVal = "(default)"
-		}
-		return line{
-			text: cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(displayVal) + "  " + hintStyle.Render(hint),
-		}
-	}
+func (m Model) buildAllLines() []renderLine {
+	const labelWidth = 28
+	lines := make([]renderLine, 0, initialLineCapacity)
 
 	rows := m.getPlottingAdvancedRows()
-	plotByID := make(map[string]PlotItem, len(m.plotItems))
-	for _, p := range m.plotItems {
-		plotByID[p.ID] = p
-	}
-
-	sectionLine := func(label string, focused bool) line {
-		cursor := "  "
-		if focused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		style := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-		if focused {
-			style = style.Underline(true)
-		}
-		return line{text: cursor + style.Render(label)}
-	}
-
-	plotHeaderLine := func(plot PlotItem, expanded bool, focused bool) line {
-		cursor := "  "
-		if focused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		arrow := "▸"
-		if expanded {
-			arrow = "▾"
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
-		if focused {
-			labelStyle = labelStyle.Foreground(styles.Primary)
-		}
-		metaStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-		return line{
-			text: cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, plot.Name)) + "  " + metaStyle.Render(plot.ID),
-		}
-	}
-
-	plotValueLine := func(label string, value string, hint string, focused bool) line {
-		cursor := "  "
-		if focused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
-		}
-		labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
-		if focused {
-			labelStyle = labelStyle.Foreground(styles.Primary).Bold(true)
-		}
-		valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-		displayVal := value
-		if strings.TrimSpace(displayVal) == "" {
-			displayVal = "(default)"
-		}
-		indent := "   "
-		return line{
-			text: cursor + indent + labelStyle.Render(label+":") + " " + valueStyle.Render(displayVal) + "  " + hintStyle.Render(hint),
-		}
-	}
+	plotByID := m.buildPlotMap()
 
 	for i, row := range rows {
 		focused := m.advancedCursor == i
-
-		switch row.kind {
-		case plottingRowSection:
-			lines = append(lines, sectionLine(row.label, focused))
-			continue
-		case plottingRowPlotInfo:
-			info := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(row.label)
-			lines = append(lines, line{text: "     " + info})
-			continue
-		case plottingRowPlotHeader:
-			plot := plotByID[row.plotID]
-			lines = append(lines, plotHeaderLine(plot, m.plotItemConfigExpanded[row.plotID], focused))
-			continue
-		case plottingRowPlotField:
-			plot := plotByID[row.plotID]
-			cfg := m.plotItemConfigs[row.plotID]
-			_ = plot
-
-			switch row.plotField {
-			case plotItemConfigFieldTfrDefaultBaselineWindow:
-				val := formatString(cfg.TfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow)
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldTfrDefaultBaselineWindow {
-					val = m.textBuffer + "█"
-				}
-				lines = append(lines, plotValueLine("tfr_baseline", val, "tmin tmax", focused))
-			case plotItemConfigFieldCompareWindows:
-				lines = append(lines, plotValueLine("compare_windows", triState(cfg.CompareWindows), "default/ON/OFF", focused))
-			case plotItemConfigFieldComparisonWindows:
-				val := formatString(cfg.ComparisonWindowsSpec, "baseline active")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonWindows {
-					val = m.textBuffer + "█"
-				}
-				hint := "e.g. baseline active"
-				if avail := availableHint("available", m.availableWindows); avail != "" {
-					hint = hint + " · " + avail
-				}
-				lines = append(lines, plotValueLine("windows", val, hint, focused))
-			case plotItemConfigFieldCompareColumns:
-				lines = append(lines, plotValueLine("compare_columns", triState(cfg.CompareColumns), "default/ON/OFF", focused))
-			case plotItemConfigFieldComparisonSegment:
-				val := formatString(cfg.ComparisonSegment, "active")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonSegment {
-					val = m.textBuffer + "█"
-				}
-				hint := "segment name"
-				if avail := availableHint("available", m.availableWindows); avail != "" {
-					hint = hint + " · " + avail
-				}
-				lines = append(lines, plotValueLine("segment", val, hint, focused))
-			case plotItemConfigFieldComparisonColumn:
-				val := formatString(cfg.ComparisonColumn, "(unset)")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonColumn {
-					val = m.textBuffer + "█"
-				}
-				hint := "events.tsv column"
-				if avail := availableHint("available", m.availableColumns); avail != "" {
-					hint = hint + " · " + avail
-				}
-				lines = append(lines, plotValueLine("column", val, hint, focused))
-			case plotItemConfigFieldComparisonValues:
-				val := formatString(cfg.ComparisonValuesSpec, "0 1")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonValues {
-					val = m.textBuffer + "█"
-				}
-				lines = append(lines, plotValueLine("values", val, "e.g. 0 1", focused))
-			case plotItemConfigFieldComparisonLabels:
-				val := formatString(cfg.ComparisonLabelsSpec, "(from values)")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonLabels {
-					val = m.textBuffer + "█"
-				}
-				lines = append(lines, plotValueLine("labels", val, "e.g. condA condB or \"High\" \"Low\"", focused))
-			case plotItemConfigFieldComparisonROIs:
-				val := formatString(cfg.ComparisonROIsSpec, "(all)")
-				if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == plotItemConfigFieldComparisonROIs {
-					val = m.textBuffer + "█"
-				}
-				lines = append(lines, plotValueLine("rois", val, "e.g. all Frontal Midline_ACC_MCC", focused))
-			}
-			continue
-		}
-
-		opt := row.opt
-		switch opt {
-		case optUseDefaults:
-			lines = append(lines, valueLine(opt, "Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip overrides", focused))
-
-		case optPlotGroupDefaults:
-			lines = append(lines, groupLine(opt, "Defaults & Output", m.plotGroupDefaultsExpanded, "bbox/padding overrides", focused))
-		case optPlotGroupFonts:
-			lines = append(lines, groupLine(opt, "Fonts", m.plotGroupFontsExpanded, "matplotlib font defaults", focused))
-		case optPlotGroupLayout:
-			lines = append(lines, groupLine(opt, "Layout", m.plotGroupLayoutExpanded, "tight_layout & gridspec", focused))
-		case optPlotGroupFigureSizes:
-			lines = append(lines, groupLine(opt, "Figure Sizes", m.plotGroupFigureSizesExpanded, "default figure sizes", focused))
-		case optPlotGroupColors:
-			lines = append(lines, groupLine(opt, "Colors", m.plotGroupColorsExpanded, "palette overrides", focused))
-		case optPlotGroupAlpha:
-			lines = append(lines, groupLine(opt, "Alpha", m.plotGroupAlphaExpanded, "opacity overrides", focused))
-		case optPlotGroupScatter:
-			lines = append(lines, groupLine(opt, "Scatter", m.plotGroupScatterExpanded, "marker & edge styling", focused))
-		case optPlotGroupBar:
-			lines = append(lines, groupLine(opt, "Bars", m.plotGroupBarExpanded, "bar styling", focused))
-		case optPlotGroupLine:
-			lines = append(lines, groupLine(opt, "Lines", m.plotGroupLineExpanded, "line widths & alpha", focused))
-		case optPlotGroupHistogram:
-			lines = append(lines, groupLine(opt, "Histogram", m.plotGroupHistogramExpanded, "bins & styling", focused))
-		case optPlotGroupKDE:
-			lines = append(lines, groupLine(opt, "KDE", m.plotGroupKDEExpanded, "density styling", focused))
-		case optPlotGroupErrorbar:
-			lines = append(lines, groupLine(opt, "Errorbars", m.plotGroupErrorbarExpanded, "errorbar sizing", focused))
-		case optPlotGroupText:
-			lines = append(lines, groupLine(opt, "Text Positions", m.plotGroupTextExpanded, "annotation placement", focused))
-		case optPlotGroupValidation:
-			lines = append(lines, groupLine(opt, "Validation", m.plotGroupValidationExpanded, "min samples, bins, etc", focused))
-		case optPlotGroupTFRMisc:
-			lines = append(lines, groupLine(opt, "TFR Misc", m.plotGroupTFRMiscExpanded, "baseline defaults", focused))
-
-		case optPlotGroupTopomap:
-			lines = append(lines, groupLine(opt, "Topomap", m.plotGroupTopomapExpanded, "topomap rendering", focused))
-		case optPlotGroupTFR:
-			lines = append(lines, groupLine(opt, "TFR", m.plotGroupTFRExpanded, "time-frequency controls", focused))
-		case optPlotGroupSizing:
-			lines = append(lines, groupLine(opt, "Plot Sizing", m.plotGroupSizingExpanded, "per-plot sizing", focused))
-		case optPlotGroupSelection:
-			lines = append(lines, groupLine(opt, "Selections", m.plotGroupSelectionExpanded, "metric lists & measures", focused))
-		case optPlotGroupComparisons:
-			lines = append(lines, groupLine(opt, "Comparisons", m.plotGroupComparisonsExpanded, "condition/segment comparisons", focused))
-
-		// Defaults / styling (strings)
-		case optPlotBboxInches:
-			val := formatString(m.plotBboxInches, plotDefaults.bboxInches)
-			if m.editingText && m.editingTextField == textFieldPlotBboxInches {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bbox_inches", val, "e.g. tight", focused))
-		case optPlotFontFamily:
-			val := formatString(m.plotFontFamily, plotDefaults.fontFamily)
-			if m.editingText && m.editingTextField == textFieldPlotFontFamily {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_family", val, "matplotlib font family", focused))
-		case optPlotFontWeight:
-			val := formatString(m.plotFontWeight, plotDefaults.fontWeight)
-			if m.editingText && m.editingTextField == textFieldPlotFontWeight {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_weight", val, "e.g. normal/bold", focused))
-		case optPlotLayoutTightRect:
-			val := formatString(m.plotLayoutTightRectSpec, plotDefaults.layoutTightRect)
-			if m.editingText && m.editingTextField == textFieldPlotLayoutTightRect {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "tight_rect", val, "left bottom right top", focused))
-		case optPlotLayoutTightRectMicrostate:
-			val := formatString(m.plotLayoutTightRectMicrostateSpec, plotDefaults.layoutTightRectMicrostate)
-			if m.editingText && m.editingTextField == textFieldPlotLayoutTightRectMicrostate {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "tight_rect_micro", val, "left bottom right top", focused))
-		case optPlotGridSpecWidthRatios:
-			val := formatString(m.plotGridSpecWidthRatiosSpec, plotDefaults.gridSpecWidthRatios)
-			if m.editingText && m.editingTextField == textFieldPlotGridSpecWidthRatios {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "gridspec_width", val, "space-separated", focused))
-		case optPlotGridSpecHeightRatios:
-			val := formatString(m.plotGridSpecHeightRatiosSpec, plotDefaults.gridSpecHeightRatios)
-			if m.editingText && m.editingTextField == textFieldPlotGridSpecHeightRatios {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "gridspec_height", val, "space-separated", focused))
-		case optPlotFigureSizeStandard:
-			val := formatString(m.plotFigureSizeStandardSpec, plotDefaults.figureSizeStandard)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeStandard {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_std", val, "W H", focused))
-		case optPlotFigureSizeMedium:
-			val := formatString(m.plotFigureSizeMediumSpec, plotDefaults.figureSizeMedium)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeMedium {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_med", val, "W H", focused))
-		case optPlotFigureSizeSmall:
-			val := formatString(m.plotFigureSizeSmallSpec, plotDefaults.figureSizeSmall)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeSmall {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_small", val, "W H", focused))
-		case optPlotFigureSizeSquare:
-			val := formatString(m.plotFigureSizeSquareSpec, plotDefaults.figureSizeSquare)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeSquare {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_square", val, "W H", focused))
-		case optPlotFigureSizeWide:
-			val := formatString(m.plotFigureSizeWideSpec, plotDefaults.figureSizeWide)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeWide {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_wide", val, "W H", focused))
-		case optPlotFigureSizeTFR:
-			val := formatString(m.plotFigureSizeTFRSpec, plotDefaults.figureSizeTFR)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeTFR {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_tfr", val, "W H", focused))
-		case optPlotFigureSizeTopomap:
-			val := formatString(m.plotFigureSizeTopomapSpec, plotDefaults.figureSizeTopomap)
-			if m.editingText && m.editingTextField == textFieldPlotFigureSizeTopomap {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "figsize_topomap", val, "W H", focused))
-
-		case optPlotColorPain:
-			val := formatString(m.plotColorPain, plotDefaults.colorPain)
-			if m.editingText && m.editingTextField == textFieldPlotColorPain {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_condition_2", val, "hex or named color", focused))
-		case optPlotColorNonpain:
-			val := formatString(m.plotColorNonpain, plotDefaults.colorNonpain)
-			if m.editingText && m.editingTextField == textFieldPlotColorNonpain {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_condition_1", val, "hex or named color", focused))
-		case optPlotColorSignificant:
-			val := formatString(m.plotColorSignificant, plotDefaults.colorSignificant)
-			if m.editingText && m.editingTextField == textFieldPlotColorSignificant {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_sig", val, "hex or named color", focused))
-		case optPlotColorNonsignificant:
-			val := formatString(m.plotColorNonsignificant, plotDefaults.colorNonsignificant)
-			if m.editingText && m.editingTextField == textFieldPlotColorNonsignificant {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_nonsig", val, "hex or named color", focused))
-		case optPlotColorGray:
-			val := formatString(m.plotColorGray, plotDefaults.colorGray)
-			if m.editingText && m.editingTextField == textFieldPlotColorGray {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_gray", val, "hex or named color", focused))
-		case optPlotColorLightGray:
-			val := formatString(m.plotColorLightGray, plotDefaults.colorLightGray)
-			if m.editingText && m.editingTextField == textFieldPlotColorLightGray {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_light_gray", val, "hex or named color", focused))
-		case optPlotColorBlack:
-			val := formatString(m.plotColorBlack, plotDefaults.colorBlack)
-			if m.editingText && m.editingTextField == textFieldPlotColorBlack {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_black", val, "hex or named color", focused))
-		case optPlotColorBlue:
-			val := formatString(m.plotColorBlue, plotDefaults.colorBlue)
-			if m.editingText && m.editingTextField == textFieldPlotColorBlue {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_blue", val, "hex or named color", focused))
-		case optPlotColorRed:
-			val := formatString(m.plotColorRed, plotDefaults.colorRed)
-			if m.editingText && m.editingTextField == textFieldPlotColorRed {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_red", val, "hex or named color", focused))
-		case optPlotColorNetworkNode:
-			val := formatString(m.plotColorNetworkNode, plotDefaults.colorNetworkNode)
-			if m.editingText && m.editingTextField == textFieldPlotColorNetworkNode {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "color_net_node", val, "hex or named color", focused))
-
-		case optPlotScatterEdgecolor:
-			val := formatString(m.plotScatterEdgeColor, plotDefaults.scatterEdgecolor)
-			if m.editingText && m.editingTextField == textFieldPlotScatterEdgecolor {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_edgecolor", val, "hex or named color", focused))
-		case optPlotHistEdgecolor:
-			val := formatString(m.plotHistEdgeColor, plotDefaults.histEdgecolor)
-			if m.editingText && m.editingTextField == textFieldPlotHistEdgecolor {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_edgecolor", val, "hex or named color", focused))
-		case optPlotKdeColor:
-			val := formatString(m.plotKdeColor, plotDefaults.kdeColor)
-			if m.editingText && m.editingTextField == textFieldPlotKdeColor {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "kde_color", val, "hex or named color", focused))
-
-		case optPlotTopomapColormap:
-			val := formatString(m.plotTopomapColormap, plotDefaults.topomapColormap)
-			if m.editingText && m.editingTextField == textFieldPlotTopomapColormap {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "topomap_cmap", val, "matplotlib cmap", focused))
-		case optPlotTopomapSigMaskMarker:
-			val := formatString(m.plotTopomapSigMaskMarker, plotDefaults.topomapSigMaskMarker)
-			if m.editingText && m.editingTextField == textFieldPlotTopomapSigMaskMarker {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "sig_mask_marker", val, "e.g. o/x/.", focused))
-		case optPlotTopomapSigMaskMarkerFaceColor:
-			val := formatString(m.plotTopomapSigMaskMarkerFaceColor, plotDefaults.topomapSigMaskMarkerFaceColor)
-			if m.editingText && m.editingTextField == textFieldPlotTopomapSigMaskMarkerFaceColor {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "sig_mask_face", val, "hex or named color", focused))
-		case optPlotTopomapSigMaskMarkerEdgeColor:
-			val := formatString(m.plotTopomapSigMaskMarkerEdgeColor, plotDefaults.topomapSigMaskMarkerEdgeColor)
-			if m.editingText && m.editingTextField == textFieldPlotTopomapSigMaskMarkerEdgeColor {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "sig_mask_edge", val, "hex or named color", focused))
-		case optPlotTfrDefaultBaselineWindow:
-			val := formatString(m.plotTfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow)
-			if m.editingText && m.editingTextField == textFieldPlotTfrDefaultBaselineWindow {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "tfr_baseline", val, "tmin tmax", focused))
-		case optPlotPacCmap:
-			val := formatString(m.plotPacCmap, "magma")
-			if m.editingText && m.editingTextField == textFieldPlotPacCmap {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "pac_cmap", val, "matplotlib cmap", focused))
-
-		// Numbers (generic display + buffer override)
-		case optPlotPadInches:
-			val := formatFloat(m.plotPadInches, plotDefaults.padInches, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotPadInches) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "pad_inches", val, "float inches", focused))
-		case optPlotFontSizeSmall:
-			val := formatInt(m.plotFontSizeSmall, plotDefaults.fontSizeSmall)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeSmall) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_small", val, "int", focused))
-		case optPlotFontSizeMedium:
-			val := formatInt(m.plotFontSizeMedium, plotDefaults.fontSizeMedium)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeMedium) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_medium", val, "int", focused))
-		case optPlotFontSizeLarge:
-			val := formatInt(m.plotFontSizeLarge, plotDefaults.fontSizeLarge)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeLarge) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_large", val, "int", focused))
-		case optPlotFontSizeTitle:
-			val := formatInt(m.plotFontSizeTitle, plotDefaults.fontSizeTitle)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeTitle) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_title", val, "int", focused))
-		case optPlotFontSizeAnnotation:
-			val := formatInt(m.plotFontSizeAnnotation, plotDefaults.fontSizeAnnotation)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeAnnotation) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_annot", val, "int", focused))
-		case optPlotFontSizeLabel:
-			val := formatInt(m.plotFontSizeLabel, plotDefaults.fontSizeLabel)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeLabel) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_label", val, "int", focused))
-		case optPlotFontSizeYLabel:
-			val := formatInt(m.plotFontSizeYLabel, plotDefaults.fontSizeYLabel)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeYLabel) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_ylabel", val, "int", focused))
-		case optPlotFontSizeSuptitle:
-			val := formatInt(m.plotFontSizeSuptitle, plotDefaults.fontSizeSuptitle)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeSuptitle) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_suptitle", val, "int", focused))
-		case optPlotFontSizeFigureTitle:
-			val := formatInt(m.plotFontSizeFigureTitle, plotDefaults.fontSizeFigureTitle)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotFontSizeFigureTitle) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "font_figtitle", val, "int", focused))
-
-		case optPlotGridSpecHspace:
-			val := formatFloat(m.plotGridSpecHspace, plotDefaults.gridSpecHspace, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecHspace) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hspace", val, "float", focused))
-		case optPlotGridSpecWspace:
-			val := formatFloat(m.plotGridSpecWspace, plotDefaults.gridSpecWspace, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecWspace) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "wspace", val, "float", focused))
-		case optPlotGridSpecLeft:
-			val := formatFloat(m.plotGridSpecLeft, plotDefaults.gridSpecLeft, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecLeft) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "left", val, "float [0..1]", focused))
-		case optPlotGridSpecRight:
-			val := formatFloat(m.plotGridSpecRight, plotDefaults.gridSpecRight, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecRight) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "right", val, "float [0..1]", focused))
-		case optPlotGridSpecTop:
-			val := formatFloat(m.plotGridSpecTop, plotDefaults.gridSpecTop, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecTop) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "top", val, "float [0..1]", focused))
-		case optPlotGridSpecBottom:
-			val := formatFloat(m.plotGridSpecBottom, plotDefaults.gridSpecBottom, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotGridSpecBottom) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bottom", val, "float [0..1]", focused))
-
-		case optPlotAlphaGrid:
-			val := formatFloat(m.plotAlphaGrid, plotDefaults.alphaGrid, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaGrid) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_grid", val, "float [0..1]", focused))
-		case optPlotAlphaFill:
-			val := formatFloat(m.plotAlphaFill, plotDefaults.alphaFill, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaFill) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_fill", val, "float [0..1]", focused))
-		case optPlotAlphaCI:
-			val := formatFloat(m.plotAlphaCI, plotDefaults.alphaCI, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaCI) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_ci", val, "float [0..1]", focused))
-		case optPlotAlphaCILine:
-			val := formatFloat(m.plotAlphaCILine, plotDefaults.alphaCILine, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaCILine) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_ci_line", val, "float [0..1]", focused))
-		case optPlotAlphaTextBox:
-			val := formatFloat(m.plotAlphaTextBox, plotDefaults.alphaTextBox, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaTextBox) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_text_box", val, "float [0..1]", focused))
-		case optPlotAlphaViolinBody:
-			val := formatFloat(m.plotAlphaViolinBody, plotDefaults.alphaViolinBody, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaViolinBody) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_violin", val, "float [0..1]", focused))
-		case optPlotAlphaRidgeFill:
-			val := formatFloat(m.plotAlphaRidgeFill, plotDefaults.alphaRidgeFill, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAlphaRidgeFill) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "alpha_ridge", val, "float [0..1]", focused))
-
-		case optPlotScatterMarkerSizeSmall:
-			val := formatInt(m.plotScatterMarkerSizeSmall, plotDefaults.scatterMarkerSizeSmall)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotScatterMarkerSizeSmall) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_ms_small", val, "int", focused))
-		case optPlotScatterMarkerSizeLarge:
-			val := formatInt(m.plotScatterMarkerSizeLarge, plotDefaults.scatterMarkerSizeLarge)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotScatterMarkerSizeLarge) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_ms_large", val, "int", focused))
-		case optPlotScatterMarkerSizeDefault:
-			val := formatInt(m.plotScatterMarkerSizeDefault, plotDefaults.scatterMarkerSizeDefault)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotScatterMarkerSizeDefault) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_ms_default", val, "int", focused))
-		case optPlotScatterAlpha:
-			val := formatFloat(m.plotScatterAlpha, plotDefaults.scatterAlpha, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotScatterAlpha) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_alpha", val, "float [0..1]", focused))
-		case optPlotScatterEdgewidth:
-			val := formatFloat(m.plotScatterEdgeWidth, plotDefaults.scatterEdgewidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotScatterEdgewidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "scatter_edgew", val, "float", focused))
-
-		case optPlotBarAlpha:
-			val := formatFloat(m.plotBarAlpha, plotDefaults.barAlpha, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotBarAlpha) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bar_alpha", val, "float [0..1]", focused))
-		case optPlotBarWidth:
-			val := formatFloat(m.plotBarWidth, plotDefaults.barWidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotBarWidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bar_width", val, "float", focused))
-		case optPlotBarCapsize:
-			val := formatInt(m.plotBarCapsize, plotDefaults.barCapsize)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotBarCapsize) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bar_capsize", val, "int", focused))
-		case optPlotBarCapsizeLarge:
-			val := formatInt(m.plotBarCapsizeLarge, plotDefaults.barCapsizeLarge)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotBarCapsizeLarge) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bar_capsize_lg", val, "int", focused))
-
-		case optPlotLineWidthThin:
-			val := formatFloat(m.plotLineWidthThin, plotDefaults.lineWidthThin, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineWidthThin) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_thin", val, "float", focused))
-		case optPlotLineWidthStandard:
-			val := formatFloat(m.plotLineWidthStandard, plotDefaults.lineWidthStandard, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineWidthStandard) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_std", val, "float", focused))
-		case optPlotLineWidthThick:
-			val := formatFloat(m.plotLineWidthThick, plotDefaults.lineWidthThick, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineWidthThick) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_thick", val, "float", focused))
-		case optPlotLineWidthBold:
-			val := formatFloat(m.plotLineWidthBold, plotDefaults.lineWidthBold, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineWidthBold) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_bold", val, "float", focused))
-		case optPlotLineAlphaStandard:
-			val := formatFloat(m.plotLineAlphaStandard, plotDefaults.lineAlphaStandard, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaStandard) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_std", val, "float [0..1]", focused))
-		case optPlotLineAlphaDim:
-			val := formatFloat(m.plotLineAlphaDim, plotDefaults.lineAlphaDim, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaDim) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_dim", val, "float [0..1]", focused))
-		case optPlotLineAlphaZeroLine:
-			val := formatFloat(m.plotLineAlphaZeroLine, plotDefaults.lineAlphaZeroLine, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaZeroLine) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_zero", val, "float [0..1]", focused))
-		case optPlotLineAlphaFitLine:
-			val := formatFloat(m.plotLineAlphaFitLine, plotDefaults.lineAlphaFitLine, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaFitLine) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_fit", val, "float [0..1]", focused))
-		case optPlotLineAlphaDiagonal:
-			val := formatFloat(m.plotLineAlphaDiagonal, plotDefaults.lineAlphaDiagonal, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaDiagonal) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_diag", val, "float [0..1]", focused))
-		case optPlotLineAlphaReference:
-			val := formatFloat(m.plotLineAlphaReference, plotDefaults.lineAlphaReference, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineAlphaReference) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_a_ref", val, "float [0..1]", focused))
-		case optPlotLineRegressionWidth:
-			val := formatFloat(m.plotLineRegressionWidth, plotDefaults.lineRegressionWidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineRegressionWidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_reg", val, "float", focused))
-		case optPlotLineResidualWidth:
-			val := formatFloat(m.plotLineResidualWidth, plotDefaults.lineResidualWidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineResidualWidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_resid", val, "float", focused))
-		case optPlotLineQQWidth:
-			val := formatFloat(m.plotLineQQWidth, plotDefaults.lineQQWidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotLineQQWidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "line_w_qq", val, "float", focused))
-
-		case optPlotHistBins:
-			val := formatInt(m.plotHistBins, plotDefaults.histBins)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistBins) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_bins", val, "int", focused))
-		case optPlotHistBinsBehavioral:
-			val := formatInt(m.plotHistBinsBehavioral, plotDefaults.histBinsBehavioral)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistBinsBehavioral) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_bins_beh", val, "int", focused))
-		case optPlotHistBinsResidual:
-			val := formatInt(m.plotHistBinsResidual, plotDefaults.histBinsResidual)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistBinsResidual) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_bins_resid", val, "int", focused))
-		case optPlotHistBinsTFR:
-			val := formatInt(m.plotHistBinsTFR, plotDefaults.histBinsTFR)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistBinsTFR) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_bins_tfr", val, "int", focused))
-		case optPlotHistEdgewidth:
-			val := formatFloat(m.plotHistEdgeWidth, plotDefaults.histEdgewidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistEdgewidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_edgew", val, "float", focused))
-		case optPlotHistAlpha:
-			val := formatFloat(m.plotHistAlpha, plotDefaults.histAlpha, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistAlpha) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_alpha", val, "float [0..1]", focused))
-		case optPlotHistAlphaResidual:
-			val := formatFloat(m.plotHistAlphaResidual, plotDefaults.histAlphaResidual, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistAlphaResidual) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_alpha_resid", val, "float [0..1]", focused))
-		case optPlotHistAlphaTFR:
-			val := formatFloat(m.plotHistAlphaTFR, plotDefaults.histAlphaTFR, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotHistAlphaTFR) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "hist_alpha_tfr", val, "float [0..1]", focused))
-
-		case optPlotKdePoints:
-			val := formatInt(m.plotKdePoints, plotDefaults.kdePoints)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotKdePoints) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "kde_points", val, "int", focused))
-		case optPlotKdeLinewidth:
-			val := formatFloat(m.plotKdeLinewidth, plotDefaults.kdeLinewidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotKdeLinewidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "kde_linew", val, "float", focused))
-		case optPlotKdeAlpha:
-			val := formatFloat(m.plotKdeAlpha, plotDefaults.kdeAlpha, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotKdeAlpha) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "kde_alpha", val, "float [0..1]", focused))
-
-		case optPlotErrorbarMarkersize:
-			val := formatInt(m.plotErrorbarMarkerSize, plotDefaults.errorbarMarkersize)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotErrorbarMarkersize) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "err_ms", val, "int", focused))
-		case optPlotErrorbarCapsize:
-			val := formatInt(m.plotErrorbarCapsize, plotDefaults.errorbarCapsize)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotErrorbarCapsize) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "err_capsize", val, "int", focused))
-		case optPlotErrorbarCapsizeLarge:
-			val := formatInt(m.plotErrorbarCapsizeLarge, plotDefaults.errorbarCapsizeLarge)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotErrorbarCapsizeLarge) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "err_capsize_lg", val, "int", focused))
-
-		case optPlotTextStatsX:
-			val := formatFloat(m.plotTextStatsX, plotDefaults.textStatsX, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextStatsX) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_stats_x", val, "float", focused))
-		case optPlotTextStatsY:
-			val := formatFloat(m.plotTextStatsY, plotDefaults.textStatsY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextStatsY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_stats_y", val, "float", focused))
-		case optPlotTextPvalueX:
-			val := formatFloat(m.plotTextPvalueX, plotDefaults.textPvalueX, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextPvalueX) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_p_x", val, "float", focused))
-		case optPlotTextPvalueY:
-			val := formatFloat(m.plotTextPvalueY, plotDefaults.textPvalueY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextPvalueY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_p_y", val, "float", focused))
-		case optPlotTextBootstrapX:
-			val := formatFloat(m.plotTextBootstrapX, plotDefaults.textBootstrapX, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextBootstrapX) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_boot_x", val, "float", focused))
-		case optPlotTextBootstrapY:
-			val := formatFloat(m.plotTextBootstrapY, plotDefaults.textBootstrapY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextBootstrapY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_boot_y", val, "float", focused))
-		case optPlotTextChannelAnnotationX:
-			val := formatFloat(m.plotTextChannelAnnotationX, plotDefaults.textChannelAnnotationX, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextChannelAnnotationX) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_chan_x", val, "float", focused))
-		case optPlotTextChannelAnnotationY:
-			val := formatFloat(m.plotTextChannelAnnotationY, plotDefaults.textChannelAnnotationY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextChannelAnnotationY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_chan_y", val, "float", focused))
-		case optPlotTextTitleY:
-			val := formatFloat(m.plotTextTitleY, plotDefaults.textTitleY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextTitleY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_title_y", val, "float", focused))
-		case optPlotTextResidualQcTitleY:
-			val := formatFloat(m.plotTextResidualQcTitleY, plotDefaults.textResidualQcTitleY, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTextResidualQcTitleY) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "text_residqc_y", val, "float", focused))
-
-		case optPlotValidationMinBinsForCalibration:
-			val := formatInt(m.plotValidationMinBinsForCalibration, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinBinsForCalibration) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_bins_cal", val, "int", focused))
-		case optPlotValidationMaxBinsForCalibration:
-			val := formatInt(m.plotValidationMaxBinsForCalibration, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMaxBinsForCalibration) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "max_bins_cal", val, "int", focused))
-		case optPlotValidationSamplesPerBin:
-			val := formatInt(m.plotValidationSamplesPerBin, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationSamplesPerBin) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "samples_per_bin", val, "int", focused))
-		case optPlotValidationMinRoisForFDR:
-			val := formatInt(m.plotValidationMinRoisForFDR, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinRoisForFDR) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_rois_fdr", val, "int", focused))
-		case optPlotValidationMinPvaluesForFDR:
-			val := formatInt(m.plotValidationMinPvaluesForFDR, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotValidationMinPvaluesForFDR) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "min_p_fdr", val, "int", focused))
-
-		// Plot overrides & selections (existing)
-		case optPlotTopomapContours:
-			val := formatInt(m.plotTopomapContours, plotDefaults.topomapContours)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTopomapContours) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "topomap_contours", val, "int", focused))
-		case optPlotTopomapColorbarFraction:
-			val := formatFloat(m.plotTopomapColorbarFraction, plotDefaults.topomapColorbarFraction, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTopomapColorbarFraction) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "cbar_fraction", val, "float [0..1]", focused))
-		case optPlotTopomapColorbarPad:
-			val := formatFloat(m.plotTopomapColorbarPad, plotDefaults.topomapColorbarPad, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTopomapColorbarPad) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "cbar_pad", val, "float [0..1]", focused))
-		case optPlotTopomapDiffAnnotation:
-			lines = append(lines, valueLine(opt, "diff_annotate", triState(m.plotTopomapDiffAnnotation), "tri-state", focused))
-		case optPlotTopomapAnnotateDescriptive:
-			lines = append(lines, valueLine(opt, "annotate_desc", triState(m.plotTopomapAnnotateDesc), "tri-state", focused))
-		case optPlotTopomapSigMaskLinewidth:
-			val := formatFloat(m.plotTopomapSigMaskLinewidth, plotDefaults.topomapSigMaskLinewidth, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTopomapSigMaskLinewidth) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "sig_mask_lw", val, "float", focused))
-		case optPlotTopomapSigMaskMarkersize:
-			val := formatFloat(m.plotTopomapSigMaskMarkerSize, plotDefaults.topomapSigMaskMarkerSize, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTopomapSigMaskMarkersize) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "sig_mask_ms", val, "float", focused))
-
-		case optPlotTFRLogBase:
-			val := formatFloat(m.plotTFRLogBase, plotDefaults.tfrLogBase, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTFRLogBase) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "tfr_log_base", val, "float", focused))
-		case optPlotTFRPercentageMultiplier:
-			val := formatFloat(m.plotTFRPercentageMultiplier, plotDefaults.tfrPercentageMultiplier, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotTFRPercentageMultiplier) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "tfr_pct_mult", val, "float", focused))
-
-		case optPlotRoiWidthPerBand:
-			val := formatFloat(m.plotRoiWidthPerBand, plotDefaults.roiWidthPerBand, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotRoiWidthPerBand) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "roi_w_per_band", val, "float", focused))
-		case optPlotRoiWidthPerMetric:
-			val := formatFloat(m.plotRoiWidthPerMetric, plotDefaults.roiWidthPerMetric, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotRoiWidthPerMetric) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "roi_w_per_metric", val, "float", focused))
-		case optPlotRoiHeightPerRoi:
-			val := formatFloat(m.plotRoiHeightPerRoi, plotDefaults.roiHeightPerRoi, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotRoiHeightPerRoi) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "roi_h_per_roi", val, "float", focused))
-		case optPlotPowerWidthPerBand:
-			val := formatFloat(m.plotPowerWidthPerBand, plotDefaults.powerWidthPerBand, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotPowerWidthPerBand) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "power_w_per_band", val, "float", focused))
-		case optPlotPowerHeightPerSegment:
-			val := formatFloat(m.plotPowerHeightPerSegment, plotDefaults.powerHeightPerSegment, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotPowerHeightPerSegment) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "power_h_per_seg", val, "float", focused))
-		case optPlotItpcWidthPerBin:
-			val := formatFloat(m.plotItpcWidthPerBin, plotDefaults.itpcWidthPerBin, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotItpcWidthPerBin) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "itpc_w_per_bin", val, "float", focused))
-		case optPlotItpcHeightPerBand:
-			val := formatFloat(m.plotItpcHeightPerBand, plotDefaults.itpcHeightPerBand, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotItpcHeightPerBand) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "itpc_h_per_band", val, "float", focused))
-		case optPlotItpcWidthPerBandBox:
-			val := formatFloat(m.plotItpcWidthPerBandBox, plotDefaults.itpcWidthPerBandBox, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotItpcWidthPerBandBox) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "itpc_w_box", val, "float", focused))
-		case optPlotItpcHeightBox:
-			val := formatFloat(m.plotItpcHeightBox, plotDefaults.itpcHeightBox, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotItpcHeightBox) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "itpc_h_box", val, "float", focused))
-		case optPlotPacWidthPerRoi:
-			val := formatFloat(m.plotPacWidthPerRoi, plotDefaults.pacWidthPerRoi, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotPacWidthPerRoi) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "pac_w_per_roi", val, "float", focused))
-		case optPlotPacHeightBox:
-			val := formatFloat(m.plotPacHeightBox, plotDefaults.pacHeightBox, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotPacHeightBox) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "pac_h_box", val, "float", focused))
-		case optPlotAperiodicWidthPerColumn:
-			val := formatFloat(m.plotAperiodicWidthPerColumn, plotDefaults.aperiodicWidthPerColumn, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAperiodicWidthPerColumn) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "aper_w_per_col", val, "float", focused))
-		case optPlotAperiodicHeightPerRow:
-			val := formatFloat(m.plotAperiodicHeightPerRow, plotDefaults.aperiodicHeightPerRow, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAperiodicHeightPerRow) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "aper_h_per_row", val, "float", focused))
-		case optPlotAperiodicNPerm:
-			val := formatInt(m.plotAperiodicNPerm, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotAperiodicNPerm) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "aper_n_perm", val, "int", focused))
-		case optPlotQualityWidthPerPlot:
-			val := formatFloat(m.plotQualityWidthPerPlot, plotDefaults.qualityWidthPerPlot, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityWidthPerPlot) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_w", val, "float", focused))
-		case optPlotQualityHeightPerPlot:
-			val := formatFloat(m.plotQualityHeightPerPlot, plotDefaults.qualityHeightPerPlot, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityHeightPerPlot) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_h", val, "float", focused))
-		case optPlotQualityDistributionNCols:
-			val := formatInt(m.plotQualityDistributionNCols, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityDistributionNCols) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_n_cols", val, "int", focused))
-		case optPlotQualityDistributionMaxFeatures:
-			val := formatInt(m.plotQualityDistributionMaxFeatures, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityDistributionMaxFeatures) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_max_feat", val, "int", focused))
-		case optPlotQualityOutlierZThreshold:
-			val := formatFloat(m.plotQualityOutlierZThreshold, 0, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityOutlierZThreshold) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_z_thr", val, "float", focused))
-		case optPlotQualityOutlierMaxFeatures:
-			val := formatInt(m.plotQualityOutlierMaxFeatures, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityOutlierMaxFeatures) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_out_max_feat", val, "int", focused))
-		case optPlotQualityOutlierMaxTrials:
-			val := formatInt(m.plotQualityOutlierMaxTrials, 0)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualityOutlierMaxTrials) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_out_max_trials", val, "int", focused))
-		case optPlotQualitySnrThresholdDb:
-			val := formatFloat(m.plotQualitySnrThresholdDb, 0, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotQualitySnrThresholdDb) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "quality_snr_db", val, "float", focused))
-		case optPlotComplexityWidthPerMeasure:
-			val := formatFloat(m.plotComplexityWidthPerMeasure, plotDefaults.complexityWidthPerMeasure, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotComplexityWidthPerMeasure) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "comp_w_per_meas", val, "float", focused))
-		case optPlotComplexityHeightPerSegment:
-			val := formatFloat(m.plotComplexityHeightPerSegment, plotDefaults.complexityHeightPerSegment, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotComplexityHeightPerSegment) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "comp_h_per_seg", val, "float", focused))
-		case optPlotConnectivityWidthPerCircle:
-			val := formatFloat(m.plotConnectivityWidthPerCircle, plotDefaults.connectivityWidthPerCircle, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotConnectivityWidthPerCircle) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "conn_w_circle", val, "float", focused))
-		case optPlotConnectivityWidthPerBand:
-			val := formatFloat(m.plotConnectivityWidthPerBand, plotDefaults.connectivityWidthPerBand, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotConnectivityWidthPerBand) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "conn_w_band", val, "float", focused))
-		case optPlotConnectivityHeightPerMeasure:
-			val := formatFloat(m.plotConnectivityHeightPerMeasure, plotDefaults.connectivityHeightPerMeasure, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotConnectivityHeightPerMeasure) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "conn_h_meas", val, "float", focused))
-		case optPlotConnectivityCircleTopFraction:
-			val := formatFloat(m.plotConnectivityCircleTopFraction, 0, "%.4f")
-			if m.editingNumber && m.isCurrentlyEditing(optPlotConnectivityCircleTopFraction) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "conn_top_frac", val, "float [0..1]", focused))
-		case optPlotConnectivityCircleMinLines:
-			val := formatInt(m.plotConnectivityCircleMinLines, plotDefaults.connectivityCircleMinLines)
-			if m.editingNumber && m.isCurrentlyEditing(optPlotConnectivityCircleMinLines) {
-				val = m.numberBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "conn_min_lines", val, "int", focused))
-
-		case optPlotConnectivityMeasures:
-			val := formatString(m.getTextFieldValue(textFieldPlotConnectivityMeasures), "")
-			if m.editingText && m.editingTextField == textFieldPlotConnectivityMeasures {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "connectivity_measures", val, "space-separated (e.g. aec wpli)", focused))
-
-		case optPlotPacPairs:
-			val := formatString(m.plotPacPairsSpec, "")
-			if m.editingText && m.editingTextField == textFieldPlotPacPairs {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "pac_pairs", val, "space-separated", focused))
-		case optPlotSpectralMetrics:
-			val := formatString(m.plotSpectralMetricsSpec, "")
-			if m.editingText && m.editingTextField == textFieldPlotSpectralMetrics {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "spectral_metrics", val, "space-separated", focused))
-		case optPlotBurstsMetrics:
-			val := formatString(m.plotBurstsMetricsSpec, "")
-			if m.editingText && m.editingTextField == textFieldPlotBurstsMetrics {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "bursts_metrics", val, "space-separated", focused))
-		case optPlotAsymmetryStat:
-			val := formatString(m.plotAsymmetryStatSpec, "index")
-			if m.editingText && m.editingTextField == textFieldPlotAsymmetryStat {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "asymmetry_stat", val, "e.g. index", focused))
-		case optPlotTemporalTimeBins:
-			val := formatString(m.plotTemporalTimeBinsSpec, "")
-			if m.editingText && m.editingTextField == textFieldPlotTemporalTimeBins {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "temporal_bins", val, "space-separated", focused))
-		case optPlotTemporalTimeLabels:
-			val := formatString(m.plotTemporalTimeLabelsSpec, "")
-			if m.editingText && m.editingTextField == textFieldPlotTemporalTimeLabels {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "temporal_labels", val, "space-separated", focused))
-
-		case optPlotCompareWindows:
-			lines = append(lines, valueLine(opt, "compare_windows", triState(m.plotCompareWindows), "tri-state", focused))
-		case optPlotComparisonWindows:
-			val := m.plotComparisonWindowsSpec
-			if val == "" {
-				val = "(select windows)"
-			}
-			if m.editingText && m.editingTextField == textFieldPlotComparisonWindows {
-				val = m.textBuffer + "█"
-			}
-			hint := "Space to select"
-			if len(m.availableWindows) > 0 {
-				hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
-			}
-			lines = append(lines, valueLine(opt, "comparison_windows", val, hint, focused))
-			// Render expanded windows list
-			if m.expandedOption == expandedPlotComparisonWindows && focused && len(m.availableWindows) > 0 {
-				for j, win := range m.availableWindows {
-					isSubFocused := j == m.subCursor
-					isSelected := m.isColumnValueSelected(win)
-					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
-					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
-					if isSubFocused {
-						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-					}
-					lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(win)})
-				}
-			}
-		case optPlotCompareColumns:
-			lines = append(lines, valueLine(opt, "compare_columns", triState(m.plotCompareColumns), "tri-state", focused))
-		case optPlotComparisonSegment:
-			val := formatString(m.plotComparisonSegment, plotDefaults.comparisonSegment)
-			if m.editingText && m.editingTextField == textFieldPlotComparisonSegment {
-				val = m.textBuffer + "█"
-			}
-			hint := "segment name"
-			if avail := availableHint("available", m.availableWindows); avail != "" {
-				hint = hint + " · " + avail
-			}
-			lines = append(lines, valueLine(opt, "comparison_segment", val, hint, focused))
-		case optPlotComparisonColumn:
-			val := m.plotComparisonColumn
-			if val == "" {
-				val = "(select column)"
-			}
-			if m.editingText && m.editingTextField == textFieldPlotComparisonColumn {
-				val = m.textBuffer + "█"
-			}
-			hint := "Space to select"
-			if len(m.discoveredColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
-			}
-			lines = append(lines, valueLine(opt, "comparison_column", val, hint, focused))
-			// Render expanded column list
-			if m.expandedOption == expandedPlotComparisonColumn && focused && len(m.discoveredColumns) > 0 {
-				for j, col := range m.discoveredColumns {
-					isSubFocused := j == m.subCursor
-					isSelected := m.plotComparisonColumn == col
-					checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
-					itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
-					if isSubFocused {
-						itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-					}
-					lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(col)})
-				}
-			}
-		case optPlotComparisonValues:
-			if m.plotComparisonColumn == "" {
-				lines = append(lines, valueLine(opt, "comparison_values", "(select column first)", "requires column selection", focused))
-			} else {
-				val := m.plotComparisonValuesSpec
-				if val == "" {
-					val = "(select values)"
-				}
-				if m.editingText && m.editingTextField == textFieldPlotComparisonValues {
-					val = m.textBuffer + "█"
-				}
-				hint := "Space to select"
-				if vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn); len(vals) > 0 {
-					hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.plotComparisonColumn)
-				}
-				lines = append(lines, valueLine(opt, "comparison_values", val, hint, focused))
-				// Render expanded values list
-				if m.expandedOption == expandedPlotComparisonValues && focused {
-					vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn)
-					if len(vals) > 0 {
-						for j, v := range vals {
-							isSubFocused := j == m.subCursor
-							isSelected := m.isColumnValueSelected(v)
-							checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
-							itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
-							if isSubFocused {
-								itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
-							}
-							lines = append(lines, line{text: "      " + checkbox + " " + itemStyle.Render(v)})
-						}
-					}
-				}
-			}
-		case optPlotComparisonLabels:
-			val := formatString(m.plotComparisonLabelsSpec, plotDefaults.comparisonLabels)
-			if m.editingText && m.editingTextField == textFieldPlotComparisonLabels {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "comparison_labels", val, "2 labels; supports quotes", focused))
-		case optPlotComparisonROIs:
-			val := formatString(m.plotComparisonROIsSpec, plotDefaults.comparisonROIs)
-			if m.editingText && m.editingTextField == textFieldPlotComparisonROIs {
-				val = m.textBuffer + "█"
-			}
-			lines = append(lines, valueLine(opt, "comparison_rois", val, "space-separated (empty = all)", focused))
-
-		default:
-			// Fallback: keep UI robust even if new options are added without
-			// wiring; still show a line so the list remains navigable.
-			lines = append(lines, valueLine(opt, fmt.Sprintf("opt_%d", opt), "(unwired)", "Space to edit (TODO)", focused))
-		}
+		line := m.renderRow(row, plotByID, labelWidth, focused)
+		lines = append(lines, line...)
 	}
 
-	effectiveHeight := m.height
-	if effectiveHeight <= 0 {
-		effectiveHeight = 40
+	return lines
+}
+
+func (m Model) buildPlotMap() map[string]PlotItem {
+	plotByID := make(map[string]PlotItem, len(m.plotItems))
+	for _, plot := range m.plotItems {
+		plotByID[plot.ID] = plot
 	}
-	// Overhead: header(4) + title(2) + help(2) + footer(2) = 10
-	maxLines := effectiveHeight - 10
-	if maxLines < 8 {
-		maxLines = 8
+	return plotByID
+}
+
+func formatTriState(value *bool) string {
+	if value == nil {
+		return "default"
+	}
+	if *value {
+		return "ON"
+	}
+	return "OFF"
+}
+
+func formatFloatValue(value float64, defaultValue float64, format string) string {
+	if value == 0 {
+		return fmt.Sprintf(format+" (default)", defaultValue)
+	}
+	return fmt.Sprintf(format, value)
+}
+
+func formatIntValue(value int, defaultValue int) string {
+	if value == 0 {
+		return fmt.Sprintf("%d (default)", defaultValue)
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func formatStringValue(value string, defaultValue string) string {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Sprintf("(default: %s)", defaultValue)
+	}
+	return value
+}
+
+func buildAvailableHint(prefix string, items []string) string {
+	if len(items) == 0 {
+		return ""
 	}
 
-	start := 0
-	end := len(lines)
-	showScroll := false
-	if len(lines) > maxLines {
-		showScroll = true
-		start = m.advancedOffset
-		if start < 0 {
-			start = 0
-		}
-		if start > len(lines)-maxLines {
-			start = len(lines) - maxLines
-		}
-		if start < 0 {
-			start = 0
-		}
-		end = start + maxLines
-		if end > len(lines) {
-			end = len(lines)
-		}
+	maxItems := maxAvailableItemsDisplay
+	if len(items) < maxItems {
+		maxItems = len(items)
 	}
+
+	suffix := ""
+	if len(items) > maxItems {
+		suffix = fmt.Sprintf(" (+%d)", len(items)-maxItems)
+	}
+
+	return fmt.Sprintf("%s: %s%s", prefix, strings.Join(items[:maxItems], " "), suffix)
+}
+
+func (m Model) isOptionDisabled(opt optionType) bool {
+	return m.useDefaultAdvanced && opt != optUseDefaults
+}
+
+func (m Model) renderCursor(isFocused bool) string {
+	if isFocused {
+		return lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+	}
+	return "  "
+}
+
+func (m Model) buildLabelStyle(width int, isFocused bool) lipgloss.Style {
+	style := lipgloss.NewStyle().Foreground(styles.Text).Width(width)
+	if isFocused {
+		style = style.Foreground(styles.Primary).Bold(true)
+	}
+	return style
+}
+
+func (m Model) renderGroupLine(opt optionType, label string, expanded bool, hint string, focused bool) renderLine {
+	cursor := m.renderCursor(focused)
+	arrow := m.getExpansionArrow(expanded)
+	labelStyle := m.buildGroupLabelStyle(focused, m.isOptionDisabled(opt))
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, label)) + "  " + hintStyle.Render(hint)
+	return renderLine{text: text}
+}
+
+func (m Model) renderValueLine(opt optionType, label string, value string, hint string, focused bool, labelWidth int) renderLine {
+	cursor := m.renderCursor(focused)
+	labelStyle := m.buildLabelStyle(labelWidth, focused)
+	valueStyle := m.buildValueStyle(opt)
+
+	displayValue := value
+	if strings.TrimSpace(displayValue) == "" {
+		displayValue = "(default)"
+	}
+
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	text := cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(displayValue) + "  " + hintStyle.Render(hint)
+	return renderLine{text: text}
+}
+
+func (m Model) getExpansionArrow(expanded bool) string {
+	if expanded {
+		return "▾"
+	}
+	return "▸"
+}
+
+func (m Model) buildGroupLabelStyle(focused bool, disabled bool) lipgloss.Style {
+	style := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
+	if focused {
+		style = style.Foreground(styles.Primary)
+	}
+	if disabled {
+		style = style.Faint(true)
+	}
+	return style
+}
+
+func (m Model) buildValueStyle(opt optionType) lipgloss.Style {
+	if m.isOptionDisabled(opt) {
+		return lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	}
+	return lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+}
+
+func (m Model) renderSectionLine(label string, focused bool) renderLine {
+	cursor := m.renderCursor(focused)
+	style := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+	if focused {
+		style = style.Underline(true)
+	}
+	return renderLine{text: cursor + style.Render(label)}
+}
+
+func (m Model) renderPlotHeaderLine(plot PlotItem, expanded bool, focused bool) renderLine {
+	cursor := m.renderCursor(focused)
+	arrow := m.getExpansionArrow(expanded)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Bold(true)
+	if focused {
+		labelStyle = labelStyle.Foreground(styles.Primary)
+	}
+	metaStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+	text := cursor + labelStyle.Render(fmt.Sprintf("%s %s", arrow, plot.Name)) + "  " + metaStyle.Render(plot.ID)
+	return renderLine{text: text}
+}
+
+func (m Model) renderPlotValueLine(label string, value string, hint string, focused bool, labelWidth int) renderLine {
+	cursor := m.renderCursor(focused)
+	labelStyle := m.buildLabelStyle(labelWidth, focused)
+	valueStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	displayValue := value
+	if strings.TrimSpace(displayValue) == "" {
+		displayValue = "(default)"
+	}
+
+	const indent = "   "
+	text := cursor + indent + labelStyle.Render(label+":") + " " + valueStyle.Render(displayValue) + "  " + hintStyle.Render(hint)
+	return renderLine{text: text}
+}
+
+func (m Model) renderRow(row plottingAdvancedRow, plotByID map[string]PlotItem, labelWidth int, focused bool) []renderLine {
+	switch row.kind {
+	case plottingRowSection:
+		return []renderLine{m.renderSectionLine(row.label, focused)}
+	case plottingRowPlotInfo:
+		infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+		return []renderLine{{text: "     " + infoStyle.Render(row.label)}}
+	case plottingRowPlotHeader:
+		plot := plotByID[row.plotID]
+		return []renderLine{m.renderPlotHeaderLine(plot, m.plotItemConfigExpanded[row.plotID], focused)}
+	case plottingRowPlotField:
+		return m.renderPlotField(row, plotByID, labelWidth, focused)
+	case plottingRowOption:
+		return m.renderOption(row.opt, labelWidth, focused)
+	default:
+		return []renderLine{{text: fmt.Sprintf("Unknown row kind: %d", row.kind)}}
+	}
+}
+
+func (m Model) renderPlotField(row plottingAdvancedRow, plotByID map[string]PlotItem, labelWidth int, focused bool) []renderLine {
+	plot := plotByID[row.plotID]
+	cfg := m.plotItemConfigs[row.plotID]
+	_ = plot
+
+	switch row.plotField {
+	case plotItemConfigFieldTfrDefaultBaselineWindow:
+		value := m.getPlotFieldTextValue(cfg.TfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow, row, plotItemConfigFieldTfrDefaultBaselineWindow)
+		return []renderLine{m.renderPlotValueLine("tfr_baseline", value, "tmin tmax", focused, labelWidth)}
+	case plotItemConfigFieldCompareWindows:
+		value := formatTriState(cfg.CompareWindows)
+		return []renderLine{m.renderPlotValueLine("compare_windows", value, "default/ON/OFF", focused, labelWidth)}
+	case plotItemConfigFieldComparisonWindows:
+		value := m.getPlotFieldTextValue(cfg.ComparisonWindowsSpec, "baseline active", row, plotItemConfigFieldComparisonWindows)
+		hint := m.buildComparisonWindowsHint()
+		return []renderLine{m.renderPlotValueLine("windows", value, hint, focused, labelWidth)}
+	case plotItemConfigFieldCompareColumns:
+		value := formatTriState(cfg.CompareColumns)
+		return []renderLine{m.renderPlotValueLine("compare_columns", value, "default/ON/OFF", focused, labelWidth)}
+	case plotItemConfigFieldComparisonSegment:
+		value := m.getPlotFieldTextValue(cfg.ComparisonSegment, "active", row, plotItemConfigFieldComparisonSegment)
+		hint := m.buildComparisonSegmentHint()
+		return []renderLine{m.renderPlotValueLine("segment", value, hint, focused, labelWidth)}
+	case plotItemConfigFieldComparisonColumn:
+		value := m.getPlotFieldTextValue(cfg.ComparisonColumn, "(unset)", row, plotItemConfigFieldComparisonColumn)
+		hint := m.buildComparisonColumnHint()
+		return []renderLine{m.renderPlotValueLine("column", value, hint, focused, labelWidth)}
+	case plotItemConfigFieldComparisonValues:
+		value := m.getPlotFieldTextValue(cfg.ComparisonValuesSpec, "0 1", row, plotItemConfigFieldComparisonValues)
+		return []renderLine{m.renderPlotValueLine("values", value, "e.g. 0 1", focused, labelWidth)}
+	case plotItemConfigFieldComparisonLabels:
+		value := m.getPlotFieldTextValue(cfg.ComparisonLabelsSpec, "(from values)", row, plotItemConfigFieldComparisonLabels)
+		return []renderLine{m.renderPlotValueLine("labels", value, "e.g. condA condB or \"High\" \"Low\"", focused, labelWidth)}
+	case plotItemConfigFieldComparisonROIs:
+		value := m.getPlotFieldTextValue(cfg.ComparisonROIsSpec, "(all)", row, plotItemConfigFieldComparisonROIs)
+		return []renderLine{m.renderPlotValueLine("rois", value, "e.g. all Frontal Midline_ACC_MCC", focused, labelWidth)}
+	default:
+		return []renderLine{{text: fmt.Sprintf("Unknown plot field: %d", row.plotField)}}
+	}
+}
+
+func (m Model) getPlotFieldTextValue(currentValue string, defaultValue string, row plottingAdvancedRow, field plotItemConfigField) string {
+	value := formatStringValue(currentValue, defaultValue)
+	if m.editingText && m.editingPlotID == row.plotID && m.editingPlotField == field {
+		value = m.textBuffer + "█"
+	}
+	return value
+}
+
+func (m Model) buildComparisonWindowsHint() string {
+	hint := "e.g. baseline active"
+	if avail := buildAvailableHint("available", m.availableWindows); avail != "" {
+		hint = hint + " · " + avail
+	}
+	return hint
+}
+
+func (m Model) buildComparisonSegmentHint() string {
+	hint := "segment name"
+	if avail := buildAvailableHint("available", m.availableWindows); avail != "" {
+		hint = hint + " · " + avail
+	}
+	return hint
+}
+
+func (m Model) buildComparisonColumnHint() string {
+	hint := "events.tsv column"
+	if avail := buildAvailableHint("available", m.availableColumns); avail != "" {
+		hint = hint + " · " + avail
+	}
+	return hint
+}
+
+func (m Model) formatTextFieldWithBuffer(field textField, currentValue string, defaultValue string) string {
+	value := formatStringValue(currentValue, defaultValue)
+	if m.editingText && m.editingTextField == field {
+		value = m.textBuffer + "█"
+	}
+	return value
+}
+
+func (m Model) getFloatFieldValue(opt optionType, currentValue float64, defaultValue float64, format string) string {
+	value := formatFloatValue(currentValue, defaultValue, format)
+	if m.editingNumber && m.isCurrentlyEditing(opt) {
+		value = m.numberBuffer + "█"
+	}
+	return value
+}
+
+func (m Model) getIntFieldValue(opt optionType, currentValue int, defaultValue int) string {
+	value := formatIntValue(currentValue, defaultValue)
+	if m.editingNumber && m.isCurrentlyEditing(opt) {
+		value = m.numberBuffer + "█"
+	}
+	return value
+}
+
+func (m Model) renderOption(opt optionType, labelWidth int, focused bool) []renderLine {
+	switch opt {
+	case optUseDefaults:
+		value := m.boolToOnOff(m.useDefaultAdvanced)
+		return []renderLine{m.renderValueLine(opt, "Use Defaults", value, "Skip overrides", focused, labelWidth)}
+	case optPlotGroupDefaults:
+		return []renderLine{m.renderGroupLine(opt, "Defaults & Output", m.plotGroupDefaultsExpanded, "bbox/padding overrides", focused)}
+	case optPlotGroupFonts:
+		return []renderLine{m.renderGroupLine(opt, "Fonts", m.plotGroupFontsExpanded, "matplotlib font defaults", focused)}
+	case optPlotGroupLayout:
+		return []renderLine{m.renderGroupLine(opt, "Layout", m.plotGroupLayoutExpanded, "tight_layout & gridspec", focused)}
+	case optPlotGroupFigureSizes:
+		return []renderLine{m.renderGroupLine(opt, "Figure Sizes", m.plotGroupFigureSizesExpanded, "default figure sizes", focused)}
+	case optPlotGroupColors:
+		return []renderLine{m.renderGroupLine(opt, "Colors", m.plotGroupColorsExpanded, "palette overrides", focused)}
+	case optPlotGroupAlpha:
+		return []renderLine{m.renderGroupLine(opt, "Alpha", m.plotGroupAlphaExpanded, "opacity overrides", focused)}
+	case optPlotGroupScatter:
+		return []renderLine{m.renderGroupLine(opt, "Scatter", m.plotGroupScatterExpanded, "marker & edge styling", focused)}
+	case optPlotGroupBar:
+		return []renderLine{m.renderGroupLine(opt, "Bars", m.plotGroupBarExpanded, "bar styling", focused)}
+	case optPlotGroupLine:
+		return []renderLine{m.renderGroupLine(opt, "Lines", m.plotGroupLineExpanded, "line widths & alpha", focused)}
+	case optPlotGroupHistogram:
+		return []renderLine{m.renderGroupLine(opt, "Histogram", m.plotGroupHistogramExpanded, "bins & styling", focused)}
+	case optPlotGroupKDE:
+		return []renderLine{m.renderGroupLine(opt, "KDE", m.plotGroupKDEExpanded, "density styling", focused)}
+	case optPlotGroupErrorbar:
+		return []renderLine{m.renderGroupLine(opt, "Errorbars", m.plotGroupErrorbarExpanded, "errorbar sizing", focused)}
+	case optPlotGroupText:
+		return []renderLine{m.renderGroupLine(opt, "Text Positions", m.plotGroupTextExpanded, "annotation placement", focused)}
+	case optPlotGroupValidation:
+		return []renderLine{m.renderGroupLine(opt, "Validation", m.plotGroupValidationExpanded, "min samples, bins, etc", focused)}
+	case optPlotGroupTFRMisc:
+		return []renderLine{m.renderGroupLine(opt, "TFR Misc", m.plotGroupTFRMiscExpanded, "baseline defaults", focused)}
+	case optPlotGroupTopomap:
+		return []renderLine{m.renderGroupLine(opt, "Topomap", m.plotGroupTopomapExpanded, "topomap rendering", focused)}
+	case optPlotGroupTFR:
+		return []renderLine{m.renderGroupLine(opt, "TFR", m.plotGroupTFRExpanded, "time-frequency controls", focused)}
+	case optPlotGroupSizing:
+		return []renderLine{m.renderGroupLine(opt, "Plot Sizing", m.plotGroupSizingExpanded, "per-plot sizing", focused)}
+	case optPlotGroupSelection:
+		return []renderLine{m.renderGroupLine(opt, "Selections", m.plotGroupSelectionExpanded, "metric lists & measures", focused)}
+	case optPlotGroupComparisons:
+		return []renderLine{m.renderGroupLine(opt, "Comparisons", m.plotGroupComparisonsExpanded, "condition/segment comparisons", focused)}
+
+	case optPlotBboxInches:
+		value := m.formatTextFieldWithBuffer(textFieldPlotBboxInches, m.plotBboxInches, plotDefaults.bboxInches)
+		return []renderLine{m.renderValueLine(opt, "bbox_inches", value, "e.g. tight", focused, labelWidth)}
+	case optPlotFontFamily:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFontFamily, m.plotFontFamily, plotDefaults.fontFamily)
+		return []renderLine{m.renderValueLine(opt, "font_family", value, "matplotlib font family", focused, labelWidth)}
+	case optPlotFontWeight:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFontWeight, m.plotFontWeight, plotDefaults.fontWeight)
+		return []renderLine{m.renderValueLine(opt, "font_weight", value, "e.g. normal/bold", focused, labelWidth)}
+	case optPlotLayoutTightRect:
+		value := m.formatTextFieldWithBuffer(textFieldPlotLayoutTightRect, m.plotLayoutTightRectSpec, plotDefaults.layoutTightRect)
+		return []renderLine{m.renderValueLine(opt, "tight_rect", value, "left bottom right top", focused, labelWidth)}
+	case optPlotLayoutTightRectMicrostate:
+		value := m.formatTextFieldWithBuffer(textFieldPlotLayoutTightRectMicrostate, m.plotLayoutTightRectMicrostateSpec, plotDefaults.layoutTightRectMicrostate)
+		return []renderLine{m.renderValueLine(opt, "tight_rect_micro", value, "left bottom right top", focused, labelWidth)}
+	case optPlotGridSpecWidthRatios:
+		value := m.formatTextFieldWithBuffer(textFieldPlotGridSpecWidthRatios, m.plotGridSpecWidthRatiosSpec, plotDefaults.gridSpecWidthRatios)
+		return []renderLine{m.renderValueLine(opt, "gridspec_width", value, "space-separated", focused, labelWidth)}
+	case optPlotGridSpecHeightRatios:
+		value := m.formatTextFieldWithBuffer(textFieldPlotGridSpecHeightRatios, m.plotGridSpecHeightRatiosSpec, plotDefaults.gridSpecHeightRatios)
+		return []renderLine{m.renderValueLine(opt, "gridspec_height", value, "space-separated", focused, labelWidth)}
+	case optPlotFigureSizeStandard:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeStandard, m.plotFigureSizeStandardSpec, plotDefaults.figureSizeStandard)
+		return []renderLine{m.renderValueLine(opt, "figsize_std", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeMedium:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeMedium, m.plotFigureSizeMediumSpec, plotDefaults.figureSizeMedium)
+		return []renderLine{m.renderValueLine(opt, "figsize_med", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeSmall:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeSmall, m.plotFigureSizeSmallSpec, plotDefaults.figureSizeSmall)
+		return []renderLine{m.renderValueLine(opt, "figsize_small", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeSquare:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeSquare, m.plotFigureSizeSquareSpec, plotDefaults.figureSizeSquare)
+		return []renderLine{m.renderValueLine(opt, "figsize_square", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeWide:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeWide, m.plotFigureSizeWideSpec, plotDefaults.figureSizeWide)
+		return []renderLine{m.renderValueLine(opt, "figsize_wide", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeTFR:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeTFR, m.plotFigureSizeTFRSpec, plotDefaults.figureSizeTFR)
+		return []renderLine{m.renderValueLine(opt, "figsize_tfr", value, "W H", focused, labelWidth)}
+	case optPlotFigureSizeTopomap:
+		value := m.formatTextFieldWithBuffer(textFieldPlotFigureSizeTopomap, m.plotFigureSizeTopomapSpec, plotDefaults.figureSizeTopomap)
+		return []renderLine{m.renderValueLine(opt, "figsize_topomap", value, "W H", focused, labelWidth)}
+
+	case optPlotColorPain:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorPain, m.plotColorPain, plotDefaults.colorPain)
+		return []renderLine{m.renderValueLine(opt, "color_condition_2", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorNonpain:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorNonpain, m.plotColorNonpain, plotDefaults.colorNonpain)
+		return []renderLine{m.renderValueLine(opt, "color_condition_1", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorSignificant:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorSignificant, m.plotColorSignificant, plotDefaults.colorSignificant)
+		return []renderLine{m.renderValueLine(opt, "color_sig", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorNonsignificant:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorNonsignificant, m.plotColorNonsignificant, plotDefaults.colorNonsignificant)
+		return []renderLine{m.renderValueLine(opt, "color_nonsig", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorGray:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorGray, m.plotColorGray, plotDefaults.colorGray)
+		return []renderLine{m.renderValueLine(opt, "color_gray", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorLightGray:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorLightGray, m.plotColorLightGray, plotDefaults.colorLightGray)
+		return []renderLine{m.renderValueLine(opt, "color_light_gray", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorBlack:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorBlack, m.plotColorBlack, plotDefaults.colorBlack)
+		return []renderLine{m.renderValueLine(opt, "color_black", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorBlue:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorBlue, m.plotColorBlue, plotDefaults.colorBlue)
+		return []renderLine{m.renderValueLine(opt, "color_blue", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorRed:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorRed, m.plotColorRed, plotDefaults.colorRed)
+		return []renderLine{m.renderValueLine(opt, "color_red", value, "hex or named color", focused, labelWidth)}
+	case optPlotColorNetworkNode:
+		value := m.formatTextFieldWithBuffer(textFieldPlotColorNetworkNode, m.plotColorNetworkNode, plotDefaults.colorNetworkNode)
+		return []renderLine{m.renderValueLine(opt, "color_net_node", value, "hex or named color", focused, labelWidth)}
+	case optPlotScatterEdgecolor:
+		value := m.formatTextFieldWithBuffer(textFieldPlotScatterEdgecolor, m.plotScatterEdgeColor, plotDefaults.scatterEdgecolor)
+		return []renderLine{m.renderValueLine(opt, "scatter_edgecolor", value, "hex or named color", focused, labelWidth)}
+	case optPlotHistEdgecolor:
+		value := m.formatTextFieldWithBuffer(textFieldPlotHistEdgecolor, m.plotHistEdgeColor, plotDefaults.histEdgecolor)
+		return []renderLine{m.renderValueLine(opt, "hist_edgecolor", value, "hex or named color", focused, labelWidth)}
+	case optPlotKdeColor:
+		value := m.formatTextFieldWithBuffer(textFieldPlotKdeColor, m.plotKdeColor, plotDefaults.kdeColor)
+		return []renderLine{m.renderValueLine(opt, "kde_color", value, "hex or named color", focused, labelWidth)}
+	case optPlotTopomapColormap:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTopomapColormap, m.plotTopomapColormap, plotDefaults.topomapColormap)
+		return []renderLine{m.renderValueLine(opt, "topomap_cmap", value, "matplotlib cmap", focused, labelWidth)}
+	case optPlotTopomapSigMaskMarker:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTopomapSigMaskMarker, m.plotTopomapSigMaskMarker, plotDefaults.topomapSigMaskMarker)
+		return []renderLine{m.renderValueLine(opt, "sig_mask_marker", value, "e.g. o/x/.", focused, labelWidth)}
+	case optPlotTopomapSigMaskMarkerFaceColor:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTopomapSigMaskMarkerFaceColor, m.plotTopomapSigMaskMarkerFaceColor, plotDefaults.topomapSigMaskMarkerFaceColor)
+		return []renderLine{m.renderValueLine(opt, "sig_mask_face", value, "hex or named color", focused, labelWidth)}
+	case optPlotTopomapSigMaskMarkerEdgeColor:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTopomapSigMaskMarkerEdgeColor, m.plotTopomapSigMaskMarkerEdgeColor, plotDefaults.topomapSigMaskMarkerEdgeColor)
+		return []renderLine{m.renderValueLine(opt, "sig_mask_edge", value, "hex or named color", focused, labelWidth)}
+	case optPlotTfrDefaultBaselineWindow:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTfrDefaultBaselineWindow, m.plotTfrDefaultBaselineWindowSpec, plotDefaults.tfrDefaultBaselineWindow)
+		return []renderLine{m.renderValueLine(opt, "tfr_baseline", value, "tmin tmax", focused, labelWidth)}
+	case optPlotPacCmap:
+		value := m.formatTextFieldWithBuffer(textFieldPlotPacCmap, m.plotPacCmap, "magma")
+		return []renderLine{m.renderValueLine(opt, "pac_cmap", value, "matplotlib cmap", focused, labelWidth)}
+
+	case optPlotPadInches:
+		value := m.getFloatFieldValue(optPlotPadInches, m.plotPadInches, plotDefaults.padInches, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "pad_inches", value, "float inches", focused, labelWidth)}
+	case optPlotFontSizeSmall:
+		value := m.getIntFieldValue(optPlotFontSizeSmall, m.plotFontSizeSmall, plotDefaults.fontSizeSmall)
+		return []renderLine{m.renderValueLine(opt, "font_small", value, "int", focused, labelWidth)}
+	case optPlotFontSizeMedium:
+		value := m.getIntFieldValue(optPlotFontSizeMedium, m.plotFontSizeMedium, plotDefaults.fontSizeMedium)
+		return []renderLine{m.renderValueLine(opt, "font_medium", value, "int", focused, labelWidth)}
+	case optPlotFontSizeLarge:
+		value := m.getIntFieldValue(optPlotFontSizeLarge, m.plotFontSizeLarge, plotDefaults.fontSizeLarge)
+		return []renderLine{m.renderValueLine(opt, "font_large", value, "int", focused, labelWidth)}
+	case optPlotFontSizeTitle:
+		value := m.getIntFieldValue(optPlotFontSizeTitle, m.plotFontSizeTitle, plotDefaults.fontSizeTitle)
+		return []renderLine{m.renderValueLine(opt, "font_title", value, "int", focused, labelWidth)}
+	case optPlotFontSizeAnnotation:
+		value := m.getIntFieldValue(optPlotFontSizeAnnotation, m.plotFontSizeAnnotation, plotDefaults.fontSizeAnnotation)
+		return []renderLine{m.renderValueLine(opt, "font_annot", value, "int", focused, labelWidth)}
+	case optPlotFontSizeLabel:
+		value := m.getIntFieldValue(optPlotFontSizeLabel, m.plotFontSizeLabel, plotDefaults.fontSizeLabel)
+		return []renderLine{m.renderValueLine(opt, "font_label", value, "int", focused, labelWidth)}
+	case optPlotFontSizeYLabel:
+		value := m.getIntFieldValue(optPlotFontSizeYLabel, m.plotFontSizeYLabel, plotDefaults.fontSizeYLabel)
+		return []renderLine{m.renderValueLine(opt, "font_ylabel", value, "int", focused, labelWidth)}
+	case optPlotFontSizeSuptitle:
+		value := m.getIntFieldValue(optPlotFontSizeSuptitle, m.plotFontSizeSuptitle, plotDefaults.fontSizeSuptitle)
+		return []renderLine{m.renderValueLine(opt, "font_suptitle", value, "int", focused, labelWidth)}
+	case optPlotFontSizeFigureTitle:
+		value := m.getIntFieldValue(optPlotFontSizeFigureTitle, m.plotFontSizeFigureTitle, plotDefaults.fontSizeFigureTitle)
+		return []renderLine{m.renderValueLine(opt, "font_figtitle", value, "int", focused, labelWidth)}
+	case optPlotGridSpecHspace:
+		value := m.getFloatFieldValue(optPlotGridSpecHspace, m.plotGridSpecHspace, plotDefaults.gridSpecHspace, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "hspace", value, "float", focused, labelWidth)}
+	case optPlotGridSpecWspace:
+		value := m.getFloatFieldValue(optPlotGridSpecWspace, m.plotGridSpecWspace, plotDefaults.gridSpecWspace, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "wspace", value, "float", focused, labelWidth)}
+	case optPlotGridSpecLeft:
+		value := m.getFloatFieldValue(optPlotGridSpecLeft, m.plotGridSpecLeft, plotDefaults.gridSpecLeft, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "left", value, "float [0..1]", focused, labelWidth)}
+	case optPlotGridSpecRight:
+		value := m.getFloatFieldValue(optPlotGridSpecRight, m.plotGridSpecRight, plotDefaults.gridSpecRight, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "right", value, "float [0..1]", focused, labelWidth)}
+	case optPlotGridSpecTop:
+		value := m.getFloatFieldValue(optPlotGridSpecTop, m.plotGridSpecTop, plotDefaults.gridSpecTop, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "top", value, "float [0..1]", focused, labelWidth)}
+	case optPlotGridSpecBottom:
+		value := m.getFloatFieldValue(optPlotGridSpecBottom, m.plotGridSpecBottom, plotDefaults.gridSpecBottom, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "bottom", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaGrid:
+		value := m.getFloatFieldValue(optPlotAlphaGrid, m.plotAlphaGrid, plotDefaults.alphaGrid, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_grid", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaFill:
+		value := m.getFloatFieldValue(optPlotAlphaFill, m.plotAlphaFill, plotDefaults.alphaFill, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_fill", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaCI:
+		value := m.getFloatFieldValue(optPlotAlphaCI, m.plotAlphaCI, plotDefaults.alphaCI, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_ci", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaCILine:
+		value := m.getFloatFieldValue(optPlotAlphaCILine, m.plotAlphaCILine, plotDefaults.alphaCILine, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_ci_line", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaTextBox:
+		value := m.getFloatFieldValue(optPlotAlphaTextBox, m.plotAlphaTextBox, plotDefaults.alphaTextBox, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_text_box", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaViolinBody:
+		value := m.getFloatFieldValue(optPlotAlphaViolinBody, m.plotAlphaViolinBody, plotDefaults.alphaViolinBody, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_violin", value, "float [0..1]", focused, labelWidth)}
+	case optPlotAlphaRidgeFill:
+		value := m.getFloatFieldValue(optPlotAlphaRidgeFill, m.plotAlphaRidgeFill, plotDefaults.alphaRidgeFill, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "alpha_ridge", value, "float [0..1]", focused, labelWidth)}
+
+	case optPlotScatterMarkerSizeSmall:
+		value := m.getIntFieldValue(optPlotScatterMarkerSizeSmall, m.plotScatterMarkerSizeSmall, plotDefaults.scatterMarkerSizeSmall)
+		return []renderLine{m.renderValueLine(opt, "scatter_ms_small", value, "int", focused, labelWidth)}
+	case optPlotScatterMarkerSizeLarge:
+		value := m.getIntFieldValue(optPlotScatterMarkerSizeLarge, m.plotScatterMarkerSizeLarge, plotDefaults.scatterMarkerSizeLarge)
+		return []renderLine{m.renderValueLine(opt, "scatter_ms_large", value, "int", focused, labelWidth)}
+	case optPlotScatterMarkerSizeDefault:
+		value := m.getIntFieldValue(optPlotScatterMarkerSizeDefault, m.plotScatterMarkerSizeDefault, plotDefaults.scatterMarkerSizeDefault)
+		return []renderLine{m.renderValueLine(opt, "scatter_ms_default", value, "int", focused, labelWidth)}
+	case optPlotScatterAlpha:
+		value := m.getFloatFieldValue(optPlotScatterAlpha, m.plotScatterAlpha, plotDefaults.scatterAlpha, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "scatter_alpha", value, "float [0..1]", focused, labelWidth)}
+	case optPlotScatterEdgewidth:
+		value := m.getFloatFieldValue(optPlotScatterEdgewidth, m.plotScatterEdgeWidth, plotDefaults.scatterEdgewidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "scatter_edgew", value, "float", focused, labelWidth)}
+	case optPlotBarAlpha:
+		value := m.getFloatFieldValue(optPlotBarAlpha, m.plotBarAlpha, plotDefaults.barAlpha, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "bar_alpha", value, "float [0..1]", focused, labelWidth)}
+	case optPlotBarWidth:
+		value := m.getFloatFieldValue(optPlotBarWidth, m.plotBarWidth, plotDefaults.barWidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "bar_width", value, "float", focused, labelWidth)}
+	case optPlotBarCapsize:
+		value := m.getIntFieldValue(optPlotBarCapsize, m.plotBarCapsize, plotDefaults.barCapsize)
+		return []renderLine{m.renderValueLine(opt, "bar_capsize", value, "int", focused, labelWidth)}
+	case optPlotBarCapsizeLarge:
+		value := m.getIntFieldValue(optPlotBarCapsizeLarge, m.plotBarCapsizeLarge, plotDefaults.barCapsizeLarge)
+		return []renderLine{m.renderValueLine(opt, "bar_capsize_lg", value, "int", focused, labelWidth)}
+	case optPlotLineWidthThin:
+		value := m.getFloatFieldValue(optPlotLineWidthThin, m.plotLineWidthThin, plotDefaults.lineWidthThin, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_thin", value, "float", focused, labelWidth)}
+	case optPlotLineWidthStandard:
+		value := m.getFloatFieldValue(optPlotLineWidthStandard, m.plotLineWidthStandard, plotDefaults.lineWidthStandard, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_std", value, "float", focused, labelWidth)}
+	case optPlotLineWidthThick:
+		value := m.getFloatFieldValue(optPlotLineWidthThick, m.plotLineWidthThick, plotDefaults.lineWidthThick, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_thick", value, "float", focused, labelWidth)}
+	case optPlotLineWidthBold:
+		value := m.getFloatFieldValue(optPlotLineWidthBold, m.plotLineWidthBold, plotDefaults.lineWidthBold, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_bold", value, "float", focused, labelWidth)}
+	case optPlotLineAlphaStandard:
+		value := m.getFloatFieldValue(optPlotLineAlphaStandard, m.plotLineAlphaStandard, plotDefaults.lineAlphaStandard, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_std", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineAlphaDim:
+		value := m.getFloatFieldValue(optPlotLineAlphaDim, m.plotLineAlphaDim, plotDefaults.lineAlphaDim, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_dim", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineAlphaZeroLine:
+		value := m.getFloatFieldValue(optPlotLineAlphaZeroLine, m.plotLineAlphaZeroLine, plotDefaults.lineAlphaZeroLine, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_zero", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineAlphaFitLine:
+		value := m.getFloatFieldValue(optPlotLineAlphaFitLine, m.plotLineAlphaFitLine, plotDefaults.lineAlphaFitLine, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_fit", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineAlphaDiagonal:
+		value := m.getFloatFieldValue(optPlotLineAlphaDiagonal, m.plotLineAlphaDiagonal, plotDefaults.lineAlphaDiagonal, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_diag", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineAlphaReference:
+		value := m.getFloatFieldValue(optPlotLineAlphaReference, m.plotLineAlphaReference, plotDefaults.lineAlphaReference, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_a_ref", value, "float [0..1]", focused, labelWidth)}
+	case optPlotLineRegressionWidth:
+		value := m.getFloatFieldValue(optPlotLineRegressionWidth, m.plotLineRegressionWidth, plotDefaults.lineRegressionWidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_reg", value, "float", focused, labelWidth)}
+	case optPlotLineResidualWidth:
+		value := m.getFloatFieldValue(optPlotLineResidualWidth, m.plotLineResidualWidth, plotDefaults.lineResidualWidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_resid", value, "float", focused, labelWidth)}
+	case optPlotLineQQWidth:
+		value := m.getFloatFieldValue(optPlotLineQQWidth, m.plotLineQQWidth, plotDefaults.lineQQWidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "line_w_qq", value, "float", focused, labelWidth)}
+
+	case optPlotHistBins:
+		value := m.getIntFieldValue(optPlotHistBins, m.plotHistBins, plotDefaults.histBins)
+		return []renderLine{m.renderValueLine(opt, "hist_bins", value, "int", focused, labelWidth)}
+	case optPlotHistBinsBehavioral:
+		value := m.getIntFieldValue(optPlotHistBinsBehavioral, m.plotHistBinsBehavioral, plotDefaults.histBinsBehavioral)
+		return []renderLine{m.renderValueLine(opt, "hist_bins_beh", value, "int", focused, labelWidth)}
+	case optPlotHistBinsResidual:
+		value := m.getIntFieldValue(optPlotHistBinsResidual, m.plotHistBinsResidual, plotDefaults.histBinsResidual)
+		return []renderLine{m.renderValueLine(opt, "hist_bins_resid", value, "int", focused, labelWidth)}
+	case optPlotHistBinsTFR:
+		value := m.getIntFieldValue(optPlotHistBinsTFR, m.plotHistBinsTFR, plotDefaults.histBinsTFR)
+		return []renderLine{m.renderValueLine(opt, "hist_bins_tfr", value, "int", focused, labelWidth)}
+	case optPlotHistEdgewidth:
+		value := m.getFloatFieldValue(optPlotHistEdgewidth, m.plotHistEdgeWidth, plotDefaults.histEdgewidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "hist_edgew", value, "float", focused, labelWidth)}
+	case optPlotHistAlpha:
+		value := m.getFloatFieldValue(optPlotHistAlpha, m.plotHistAlpha, plotDefaults.histAlpha, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "hist_alpha", value, "float [0..1]", focused, labelWidth)}
+	case optPlotHistAlphaResidual:
+		value := m.getFloatFieldValue(optPlotHistAlphaResidual, m.plotHistAlphaResidual, plotDefaults.histAlphaResidual, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "hist_alpha_resid", value, "float [0..1]", focused, labelWidth)}
+	case optPlotHistAlphaTFR:
+		value := m.getFloatFieldValue(optPlotHistAlphaTFR, m.plotHistAlphaTFR, plotDefaults.histAlphaTFR, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "hist_alpha_tfr", value, "float [0..1]", focused, labelWidth)}
+	case optPlotKdePoints:
+		value := m.getIntFieldValue(optPlotKdePoints, m.plotKdePoints, plotDefaults.kdePoints)
+		return []renderLine{m.renderValueLine(opt, "kde_points", value, "int", focused, labelWidth)}
+	case optPlotKdeLinewidth:
+		value := m.getFloatFieldValue(optPlotKdeLinewidth, m.plotKdeLinewidth, plotDefaults.kdeLinewidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "kde_linew", value, "float", focused, labelWidth)}
+	case optPlotKdeAlpha:
+		value := m.getFloatFieldValue(optPlotKdeAlpha, m.plotKdeAlpha, plotDefaults.kdeAlpha, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "kde_alpha", value, "float [0..1]", focused, labelWidth)}
+	case optPlotErrorbarMarkersize:
+		value := m.getIntFieldValue(optPlotErrorbarMarkersize, m.plotErrorbarMarkerSize, plotDefaults.errorbarMarkersize)
+		return []renderLine{m.renderValueLine(opt, "err_ms", value, "int", focused, labelWidth)}
+	case optPlotErrorbarCapsize:
+		value := m.getIntFieldValue(optPlotErrorbarCapsize, m.plotErrorbarCapsize, plotDefaults.errorbarCapsize)
+		return []renderLine{m.renderValueLine(opt, "err_capsize", value, "int", focused, labelWidth)}
+	case optPlotErrorbarCapsizeLarge:
+		value := m.getIntFieldValue(optPlotErrorbarCapsizeLarge, m.plotErrorbarCapsizeLarge, plotDefaults.errorbarCapsizeLarge)
+		return []renderLine{m.renderValueLine(opt, "err_capsize_lg", value, "int", focused, labelWidth)}
+	case optPlotTextStatsX:
+		value := m.getFloatFieldValue(optPlotTextStatsX, m.plotTextStatsX, plotDefaults.textStatsX, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_stats_x", value, "float", focused, labelWidth)}
+	case optPlotTextStatsY:
+		value := m.getFloatFieldValue(optPlotTextStatsY, m.plotTextStatsY, plotDefaults.textStatsY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_stats_y", value, "float", focused, labelWidth)}
+	case optPlotTextPvalueX:
+		value := m.getFloatFieldValue(optPlotTextPvalueX, m.plotTextPvalueX, plotDefaults.textPvalueX, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_p_x", value, "float", focused, labelWidth)}
+	case optPlotTextPvalueY:
+		value := m.getFloatFieldValue(optPlotTextPvalueY, m.plotTextPvalueY, plotDefaults.textPvalueY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_p_y", value, "float", focused, labelWidth)}
+	case optPlotTextBootstrapX:
+		value := m.getFloatFieldValue(optPlotTextBootstrapX, m.plotTextBootstrapX, plotDefaults.textBootstrapX, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_boot_x", value, "float", focused, labelWidth)}
+	case optPlotTextBootstrapY:
+		value := m.getFloatFieldValue(optPlotTextBootstrapY, m.plotTextBootstrapY, plotDefaults.textBootstrapY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_boot_y", value, "float", focused, labelWidth)}
+	case optPlotTextChannelAnnotationX:
+		value := m.getFloatFieldValue(optPlotTextChannelAnnotationX, m.plotTextChannelAnnotationX, plotDefaults.textChannelAnnotationX, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_chan_x", value, "float", focused, labelWidth)}
+	case optPlotTextChannelAnnotationY:
+		value := m.getFloatFieldValue(optPlotTextChannelAnnotationY, m.plotTextChannelAnnotationY, plotDefaults.textChannelAnnotationY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_chan_y", value, "float", focused, labelWidth)}
+	case optPlotTextTitleY:
+		value := m.getFloatFieldValue(optPlotTextTitleY, m.plotTextTitleY, plotDefaults.textTitleY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_title_y", value, "float", focused, labelWidth)}
+	case optPlotTextResidualQcTitleY:
+		value := m.getFloatFieldValue(optPlotTextResidualQcTitleY, m.plotTextResidualQcTitleY, plotDefaults.textResidualQcTitleY, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "text_residqc_y", value, "float", focused, labelWidth)}
+	case optPlotValidationMinBinsForCalibration:
+		value := m.getIntFieldValue(optPlotValidationMinBinsForCalibration, m.plotValidationMinBinsForCalibration, 0)
+		return []renderLine{m.renderValueLine(opt, "min_bins_cal", value, "int", focused, labelWidth)}
+	case optPlotValidationMaxBinsForCalibration:
+		value := m.getIntFieldValue(optPlotValidationMaxBinsForCalibration, m.plotValidationMaxBinsForCalibration, 0)
+		return []renderLine{m.renderValueLine(opt, "max_bins_cal", value, "int", focused, labelWidth)}
+	case optPlotValidationSamplesPerBin:
+		value := m.getIntFieldValue(optPlotValidationSamplesPerBin, m.plotValidationSamplesPerBin, 0)
+		return []renderLine{m.renderValueLine(opt, "samples_per_bin", value, "int", focused, labelWidth)}
+	case optPlotValidationMinRoisForFDR:
+		value := m.getIntFieldValue(optPlotValidationMinRoisForFDR, m.plotValidationMinRoisForFDR, 0)
+		return []renderLine{m.renderValueLine(opt, "min_rois_fdr", value, "int", focused, labelWidth)}
+	case optPlotValidationMinPvaluesForFDR:
+		value := m.getIntFieldValue(optPlotValidationMinPvaluesForFDR, m.plotValidationMinPvaluesForFDR, 0)
+		return []renderLine{m.renderValueLine(opt, "min_p_fdr", value, "int", focused, labelWidth)}
+
+	case optPlotTopomapContours:
+		value := m.getIntFieldValue(optPlotTopomapContours, m.plotTopomapContours, plotDefaults.topomapContours)
+		return []renderLine{m.renderValueLine(opt, "topomap_contours", value, "int", focused, labelWidth)}
+	case optPlotTopomapColorbarFraction:
+		value := m.getFloatFieldValue(optPlotTopomapColorbarFraction, m.plotTopomapColorbarFraction, plotDefaults.topomapColorbarFraction, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "cbar_fraction", value, "float [0..1]", focused, labelWidth)}
+	case optPlotTopomapColorbarPad:
+		value := m.getFloatFieldValue(optPlotTopomapColorbarPad, m.plotTopomapColorbarPad, plotDefaults.topomapColorbarPad, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "cbar_pad", value, "float [0..1]", focused, labelWidth)}
+	case optPlotTopomapDiffAnnotation:
+		value := formatTriState(m.plotTopomapDiffAnnotation)
+		return []renderLine{m.renderValueLine(opt, "diff_annotate", value, "tri-state", focused, labelWidth)}
+	case optPlotTopomapAnnotateDescriptive:
+		value := formatTriState(m.plotTopomapAnnotateDesc)
+		return []renderLine{m.renderValueLine(opt, "annotate_desc", value, "tri-state", focused, labelWidth)}
+	case optPlotTopomapSigMaskLinewidth:
+		value := m.getFloatFieldValue(optPlotTopomapSigMaskLinewidth, m.plotTopomapSigMaskLinewidth, plotDefaults.topomapSigMaskLinewidth, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "sig_mask_lw", value, "float", focused, labelWidth)}
+	case optPlotTopomapSigMaskMarkersize:
+		value := m.getFloatFieldValue(optPlotTopomapSigMaskMarkersize, m.plotTopomapSigMaskMarkerSize, plotDefaults.topomapSigMaskMarkerSize, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "sig_mask_ms", value, "float", focused, labelWidth)}
+	case optPlotTFRLogBase:
+		value := m.getFloatFieldValue(optPlotTFRLogBase, m.plotTFRLogBase, plotDefaults.tfrLogBase, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "tfr_log_base", value, "float", focused, labelWidth)}
+	case optPlotTFRPercentageMultiplier:
+		value := m.getFloatFieldValue(optPlotTFRPercentageMultiplier, m.plotTFRPercentageMultiplier, plotDefaults.tfrPercentageMultiplier, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "tfr_pct_mult", value, "float", focused, labelWidth)}
+
+	case optPlotRoiWidthPerBand:
+		value := m.getFloatFieldValue(optPlotRoiWidthPerBand, m.plotRoiWidthPerBand, plotDefaults.roiWidthPerBand, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "roi_w_per_band", value, "float", focused, labelWidth)}
+	case optPlotRoiWidthPerMetric:
+		value := m.getFloatFieldValue(optPlotRoiWidthPerMetric, m.plotRoiWidthPerMetric, plotDefaults.roiWidthPerMetric, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "roi_w_per_metric", value, "float", focused, labelWidth)}
+	case optPlotRoiHeightPerRoi:
+		value := m.getFloatFieldValue(optPlotRoiHeightPerRoi, m.plotRoiHeightPerRoi, plotDefaults.roiHeightPerRoi, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "roi_h_per_roi", value, "float", focused, labelWidth)}
+	case optPlotPowerWidthPerBand:
+		value := m.getFloatFieldValue(optPlotPowerWidthPerBand, m.plotPowerWidthPerBand, plotDefaults.powerWidthPerBand, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "power_w_per_band", value, "float", focused, labelWidth)}
+	case optPlotPowerHeightPerSegment:
+		value := m.getFloatFieldValue(optPlotPowerHeightPerSegment, m.plotPowerHeightPerSegment, plotDefaults.powerHeightPerSegment, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "power_h_per_seg", value, "float", focused, labelWidth)}
+	case optPlotItpcWidthPerBin:
+		value := m.getFloatFieldValue(optPlotItpcWidthPerBin, m.plotItpcWidthPerBin, plotDefaults.itpcWidthPerBin, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "itpc_w_per_bin", value, "float", focused, labelWidth)}
+	case optPlotItpcHeightPerBand:
+		value := m.getFloatFieldValue(optPlotItpcHeightPerBand, m.plotItpcHeightPerBand, plotDefaults.itpcHeightPerBand, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "itpc_h_per_band", value, "float", focused, labelWidth)}
+	case optPlotItpcWidthPerBandBox:
+		value := m.getFloatFieldValue(optPlotItpcWidthPerBandBox, m.plotItpcWidthPerBandBox, plotDefaults.itpcWidthPerBandBox, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "itpc_w_box", value, "float", focused, labelWidth)}
+	case optPlotItpcHeightBox:
+		value := m.getFloatFieldValue(optPlotItpcHeightBox, m.plotItpcHeightBox, plotDefaults.itpcHeightBox, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "itpc_h_box", value, "float", focused, labelWidth)}
+	case optPlotPacWidthPerRoi:
+		value := m.getFloatFieldValue(optPlotPacWidthPerRoi, m.plotPacWidthPerRoi, plotDefaults.pacWidthPerRoi, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "pac_w_per_roi", value, "float", focused, labelWidth)}
+	case optPlotPacHeightBox:
+		value := m.getFloatFieldValue(optPlotPacHeightBox, m.plotPacHeightBox, plotDefaults.pacHeightBox, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "pac_h_box", value, "float", focused, labelWidth)}
+	case optPlotAperiodicWidthPerColumn:
+		value := m.getFloatFieldValue(optPlotAperiodicWidthPerColumn, m.plotAperiodicWidthPerColumn, plotDefaults.aperiodicWidthPerColumn, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "aper_w_per_col", value, "float", focused, labelWidth)}
+	case optPlotAperiodicHeightPerRow:
+		value := m.getFloatFieldValue(optPlotAperiodicHeightPerRow, m.plotAperiodicHeightPerRow, plotDefaults.aperiodicHeightPerRow, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "aper_h_per_row", value, "float", focused, labelWidth)}
+	case optPlotAperiodicNPerm:
+		value := m.getIntFieldValue(optPlotAperiodicNPerm, m.plotAperiodicNPerm, 0)
+		return []renderLine{m.renderValueLine(opt, "aper_n_perm", value, "int", focused, labelWidth)}
+	case optPlotQualityWidthPerPlot:
+		value := m.getFloatFieldValue(optPlotQualityWidthPerPlot, m.plotQualityWidthPerPlot, plotDefaults.qualityWidthPerPlot, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "quality_w", value, "float", focused, labelWidth)}
+	case optPlotQualityHeightPerPlot:
+		value := m.getFloatFieldValue(optPlotQualityHeightPerPlot, m.plotQualityHeightPerPlot, plotDefaults.qualityHeightPerPlot, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "quality_h", value, "float", focused, labelWidth)}
+	case optPlotQualityDistributionNCols:
+		value := m.getIntFieldValue(optPlotQualityDistributionNCols, m.plotQualityDistributionNCols, 0)
+		return []renderLine{m.renderValueLine(opt, "quality_n_cols", value, "int", focused, labelWidth)}
+	case optPlotQualityDistributionMaxFeatures:
+		value := m.getIntFieldValue(optPlotQualityDistributionMaxFeatures, m.plotQualityDistributionMaxFeatures, 0)
+		return []renderLine{m.renderValueLine(opt, "quality_max_feat", value, "int", focused, labelWidth)}
+	case optPlotQualityOutlierZThreshold:
+		value := m.getFloatFieldValue(optPlotQualityOutlierZThreshold, m.plotQualityOutlierZThreshold, 0, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "quality_z_thr", value, "float", focused, labelWidth)}
+	case optPlotQualityOutlierMaxFeatures:
+		value := m.getIntFieldValue(optPlotQualityOutlierMaxFeatures, m.plotQualityOutlierMaxFeatures, 0)
+		return []renderLine{m.renderValueLine(opt, "quality_out_max_feat", value, "int", focused, labelWidth)}
+	case optPlotQualityOutlierMaxTrials:
+		value := m.getIntFieldValue(optPlotQualityOutlierMaxTrials, m.plotQualityOutlierMaxTrials, 0)
+		return []renderLine{m.renderValueLine(opt, "quality_out_max_trials", value, "int", focused, labelWidth)}
+	case optPlotQualitySnrThresholdDb:
+		value := m.getFloatFieldValue(optPlotQualitySnrThresholdDb, m.plotQualitySnrThresholdDb, 0, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "quality_snr_db", value, "float", focused, labelWidth)}
+	case optPlotComplexityWidthPerMeasure:
+		value := m.getFloatFieldValue(optPlotComplexityWidthPerMeasure, m.plotComplexityWidthPerMeasure, plotDefaults.complexityWidthPerMeasure, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "comp_w_per_meas", value, "float", focused, labelWidth)}
+	case optPlotComplexityHeightPerSegment:
+		value := m.getFloatFieldValue(optPlotComplexityHeightPerSegment, m.plotComplexityHeightPerSegment, plotDefaults.complexityHeightPerSegment, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "comp_h_per_seg", value, "float", focused, labelWidth)}
+	case optPlotConnectivityWidthPerCircle:
+		value := m.getFloatFieldValue(optPlotConnectivityWidthPerCircle, m.plotConnectivityWidthPerCircle, plotDefaults.connectivityWidthPerCircle, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "conn_w_circle", value, "float", focused, labelWidth)}
+	case optPlotConnectivityWidthPerBand:
+		value := m.getFloatFieldValue(optPlotConnectivityWidthPerBand, m.plotConnectivityWidthPerBand, plotDefaults.connectivityWidthPerBand, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "conn_w_band", value, "float", focused, labelWidth)}
+	case optPlotConnectivityHeightPerMeasure:
+		value := m.getFloatFieldValue(optPlotConnectivityHeightPerMeasure, m.plotConnectivityHeightPerMeasure, plotDefaults.connectivityHeightPerMeasure, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "conn_h_meas", value, "float", focused, labelWidth)}
+	case optPlotConnectivityCircleTopFraction:
+		value := m.getFloatFieldValue(optPlotConnectivityCircleTopFraction, m.plotConnectivityCircleTopFraction, 0, "%.4f")
+		return []renderLine{m.renderValueLine(opt, "conn_top_frac", value, "float [0..1]", focused, labelWidth)}
+	case optPlotConnectivityCircleMinLines:
+		value := m.getIntFieldValue(optPlotConnectivityCircleMinLines, m.plotConnectivityCircleMinLines, plotDefaults.connectivityCircleMinLines)
+		return []renderLine{m.renderValueLine(opt, "conn_min_lines", value, "int", focused, labelWidth)}
+
+	case optPlotConnectivityMeasures:
+		value := m.formatTextFieldWithBuffer(textFieldPlotConnectivityMeasures, m.getTextFieldValue(textFieldPlotConnectivityMeasures), "")
+		return []renderLine{m.renderValueLine(opt, "connectivity_measures", value, "space-separated (e.g. aec wpli)", focused, labelWidth)}
+	case optPlotPacPairs:
+		value := m.formatTextFieldWithBuffer(textFieldPlotPacPairs, m.plotPacPairsSpec, "")
+		return []renderLine{m.renderValueLine(opt, "pac_pairs", value, "space-separated", focused, labelWidth)}
+	case optPlotSpectralMetrics:
+		value := m.formatTextFieldWithBuffer(textFieldPlotSpectralMetrics, m.plotSpectralMetricsSpec, "")
+		return []renderLine{m.renderValueLine(opt, "spectral_metrics", value, "space-separated", focused, labelWidth)}
+	case optPlotBurstsMetrics:
+		value := m.formatTextFieldWithBuffer(textFieldPlotBurstsMetrics, m.plotBurstsMetricsSpec, "")
+		return []renderLine{m.renderValueLine(opt, "bursts_metrics", value, "space-separated", focused, labelWidth)}
+	case optPlotAsymmetryStat:
+		value := m.formatTextFieldWithBuffer(textFieldPlotAsymmetryStat, m.plotAsymmetryStatSpec, "index")
+		return []renderLine{m.renderValueLine(opt, "asymmetry_stat", value, "e.g. index", focused, labelWidth)}
+	case optPlotTemporalTimeBins:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTemporalTimeBins, m.plotTemporalTimeBinsSpec, "")
+		return []renderLine{m.renderValueLine(opt, "temporal_bins", value, "space-separated", focused, labelWidth)}
+	case optPlotTemporalTimeLabels:
+		value := m.formatTextFieldWithBuffer(textFieldPlotTemporalTimeLabels, m.plotTemporalTimeLabelsSpec, "")
+		return []renderLine{m.renderValueLine(opt, "temporal_labels", value, "space-separated", focused, labelWidth)}
+	case optPlotCompareWindows:
+		value := formatTriState(m.plotCompareWindows)
+		return []renderLine{m.renderValueLine(opt, "compare_windows", value, "tri-state", focused, labelWidth)}
+	case optPlotComparisonWindows:
+		return m.renderComparisonWindowsOption(opt, focused, labelWidth)
+	case optPlotCompareColumns:
+		value := formatTriState(m.plotCompareColumns)
+		return []renderLine{m.renderValueLine(opt, "compare_columns", value, "tri-state", focused, labelWidth)}
+	case optPlotComparisonSegment:
+		value := m.formatTextFieldWithBuffer(textFieldPlotComparisonSegment, m.plotComparisonSegment, plotDefaults.comparisonSegment)
+		hint := m.buildComparisonSegmentHint()
+		return []renderLine{m.renderValueLine(opt, "comparison_segment", value, hint, focused, labelWidth)}
+	case optPlotComparisonColumn:
+		return m.renderComparisonColumnOption(opt, focused, labelWidth)
+	case optPlotComparisonValues:
+		return m.renderComparisonValuesOption(opt, focused, labelWidth)
+	case optPlotComparisonLabels:
+		value := m.formatTextFieldWithBuffer(textFieldPlotComparisonLabels, m.plotComparisonLabelsSpec, plotDefaults.comparisonLabels)
+		return []renderLine{m.renderValueLine(opt, "comparison_labels", value, "2 labels; supports quotes", focused, labelWidth)}
+	case optPlotComparisonROIs:
+		value := m.formatTextFieldWithBuffer(textFieldPlotComparisonROIs, m.plotComparisonROIsSpec, plotDefaults.comparisonROIs)
+		return []renderLine{m.renderValueLine(opt, "comparison_rois", value, "space-separated (empty = all)", focused, labelWidth)}
+
+	default:
+		// Fallback: keep UI robust even if new options are added without
+		// wiring; still show a line so the list remains navigable.
+		return []renderLine{m.renderValueLine(opt, fmt.Sprintf("opt_%d", opt), "(unwired)", "Space to edit (TODO)", focused, labelWidth)}
+	}
+}
+
+func (m Model) renderLinesWithScrolling(builder *strings.Builder, lines []renderLine) {
+	effectiveHeight := m.getEffectiveHeight()
+	maxLines := m.calculateMaxVisibleLines(effectiveHeight)
+	start, end, showScroll := m.calculateScrollBounds(len(lines), maxLines)
 
 	if showScroll && start > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more items above", start)) + "\n")
-	}
-	for i := start; i < end; i++ {
-		b.WriteString(lines[i].text + "\n")
-	}
-	if showScroll && end < len(lines) {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more items below", len(lines)-end)) + "\n")
+		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		builder.WriteString(scrollStyle.Render(fmt.Sprintf("  ↑ %d more items above", start)) + "\n")
 	}
 
-	return b.String()
+	for i := start; i < end; i++ {
+		builder.WriteString(lines[i].text + "\n")
+	}
+
+	if showScroll && end < len(lines) {
+		scrollStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		builder.WriteString(scrollStyle.Render(fmt.Sprintf("  ↓ %d more items below", len(lines)-end)) + "\n")
+	}
+}
+
+func (m Model) getEffectiveHeight() int {
+	if m.height <= 0 {
+		return defaultViewHeight
+	}
+	return m.height
+}
+
+func (m Model) calculateMaxVisibleLines(effectiveHeight int) int {
+	maxLines := effectiveHeight - headerOverheadLines
+	if maxLines < minimumVisibleLines {
+		return minimumVisibleLines
+	}
+	return maxLines
+}
+
+func (m Model) calculateScrollBounds(totalLines int, maxLines int) (start int, end int, showScroll bool) {
+	if totalLines <= maxLines {
+		return 0, totalLines, false
+	}
+
+	showScroll = true
+	start = m.advancedOffset
+	if start < 0 {
+		start = 0
+	}
+	if start > totalLines-maxLines {
+		start = totalLines - maxLines
+	}
+	if start < 0 {
+		start = 0
+	}
+
+	end = start + maxLines
+	if end > totalLines {
+		end = totalLines
+	}
+
+	return start, end, showScroll
+}
+
+func (m Model) renderExpandedListItems(items []string, isSelected func(string) bool) []renderLine {
+	lines := make([]renderLine, 0, len(items))
+	for j, item := range items {
+		isSubFocused := j == m.subCursor
+		selected := isSelected(item)
+		checkbox := styles.RenderCheckbox(selected, isSubFocused)
+		itemStyle := lipgloss.NewStyle().Foreground(styles.Text)
+		if isSubFocused {
+			itemStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
+		}
+		lines = append(lines, renderLine{text: "      " + checkbox + " " + itemStyle.Render(item)})
+	}
+	return lines
+}
+
+func (m Model) renderComparisonWindowsOption(opt optionType, focused bool, labelWidth int) []renderLine {
+	value := m.plotComparisonWindowsSpec
+	if value == "" {
+		value = "(select windows)"
+	}
+	if m.editingText && m.editingTextField == textFieldPlotComparisonWindows {
+		value = m.textBuffer + "█"
+	}
+	hint := "Space to select"
+	if len(m.availableWindows) > 0 {
+		hint = fmt.Sprintf("Space to select · %d windows available", len(m.availableWindows))
+	}
+	lines := []renderLine{m.renderValueLine(opt, "comparison_windows", value, hint, focused, labelWidth)}
+
+	if m.expandedOption == expandedPlotComparisonWindows && focused && len(m.availableWindows) > 0 {
+		expandedLines := m.renderExpandedListItems(m.availableWindows, m.isColumnValueSelected)
+		lines = append(lines, expandedLines...)
+	}
+	return lines
+}
+
+func (m Model) renderComparisonColumnOption(opt optionType, focused bool, labelWidth int) []renderLine {
+	value := m.plotComparisonColumn
+	if value == "" {
+		value = "(select column)"
+	}
+	if m.editingText && m.editingTextField == textFieldPlotComparisonColumn {
+		value = m.textBuffer + "█"
+	}
+	hint := "Space to select"
+	if len(m.discoveredColumns) > 0 {
+		hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+	}
+	lines := []renderLine{m.renderValueLine(opt, "comparison_column", value, hint, focused, labelWidth)}
+
+	if m.expandedOption == expandedPlotComparisonColumn && focused && len(m.discoveredColumns) > 0 {
+		expandedLines := m.renderExpandedListItems(m.discoveredColumns, func(col string) bool {
+			return m.plotComparisonColumn == col
+		})
+		lines = append(lines, expandedLines...)
+	}
+	return lines
+}
+
+func (m Model) renderComparisonValuesOption(opt optionType, focused bool, labelWidth int) []renderLine {
+	if m.plotComparisonColumn == "" {
+		return []renderLine{m.renderValueLine(opt, "comparison_values", "(select column first)", "requires column selection", focused, labelWidth)}
+	}
+
+	value := m.plotComparisonValuesSpec
+	if value == "" {
+		value = "(select values)"
+	}
+	if m.editingText && m.editingTextField == textFieldPlotComparisonValues {
+		value = m.textBuffer + "█"
+	}
+	hint := "Space to select"
+	vals := m.GetDiscoveredColumnValues(m.plotComparisonColumn)
+	if len(vals) > 0 {
+		hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.plotComparisonColumn)
+	}
+	lines := []renderLine{m.renderValueLine(opt, "comparison_values", value, hint, focused, labelWidth)}
+
+	if m.expandedOption == expandedPlotComparisonValues && focused && len(vals) > 0 {
+		expandedLines := m.renderExpandedListItems(vals, m.isColumnValueSelected)
+		lines = append(lines, expandedLines...)
+	}
+	return lines
 }

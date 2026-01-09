@@ -16,9 +16,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-///////////////////////////////////////////////////////////////////
-// Types
-///////////////////////////////////////////////////////////////////
+const (
+	tickIntervalMs     = 150
+	headerSeparatorLen = 60
+	subjectLabelWidth  = 12
+	subjectBarWidth    = 25
+	featureLabelWidth  = 14
+	featureBarWidth    = 20
+)
 
 type StatsData struct {
 	TotalSubjects     int            `json:"total_subjects"`
@@ -39,10 +44,6 @@ type loadStatsMsg struct {
 
 type tickMsg struct{}
 
-///////////////////////////////////////////////////////////////////
-// Model
-///////////////////////////////////////////////////////////////////
-
 type Model struct {
 	stats      StatsData
 	loading    bool
@@ -55,20 +56,12 @@ type Model struct {
 	ticker int
 }
 
-///////////////////////////////////////////////////////////////////
-// Constructor
-///////////////////////////////////////////////////////////////////
-
 func New(repoRoot string) Model {
 	return Model{
 		repoRoot: repoRoot,
 		loading:  true,
 	}
 }
-
-///////////////////////////////////////////////////////////////////
-// Tea Model Implementation
-///////////////////////////////////////////////////////////////////
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -78,46 +71,63 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) tick() tea.Cmd {
-	return tea.Tick(time.Millisecond*150, func(t time.Time) tea.Msg {
+	return tea.Tick(time.Millisecond*tickIntervalMs, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
 
 func (m Model) loadStats() tea.Cmd {
 	return func() tea.Msg {
-		pyCmd := executor.GetPythonCommand(m.repoRoot)
-		args := []string{"-m", "eeg_pipeline", "stats", "--json"}
-
-		cmd := exec.Command(pyCmd, args...)
-		cmd.Dir = m.repoRoot
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
-
-		stdout, err := cmd.StdoutPipe()
+		output, err := m.executeStatsCommand()
 		if err != nil {
 			return loadStatsMsg{Error: err}
 		}
 
-		if err := cmd.Start(); err != nil {
-			return loadStatsMsg{Error: err}
-		}
-
-		var output strings.Builder
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			output.WriteString(scanner.Text())
-		}
-
-		if err := cmd.Wait(); err != nil {
-			return loadStatsMsg{Error: err}
-		}
-
-		var data StatsData
-		if err := json.Unmarshal([]byte(output.String()), &data); err != nil {
+		data, err := m.parseStatsOutput(output)
+		if err != nil {
 			return loadStatsMsg{Error: err}
 		}
 
 		return loadStatsMsg{Data: data}
 	}
+}
+
+func (m Model) executeStatsCommand() (string, error) {
+	pythonCmd := executor.GetPythonCommand(m.repoRoot)
+	args := []string{"-m", "eeg_pipeline", "stats", "--json"}
+
+	cmd := exec.Command(pythonCmd, args...)
+	cmd.Dir = m.repoRoot
+	cmd.Env = append(os.Environ(), "NO_COLOR=1", "PYTHONUNBUFFERED=1")
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	var output strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		output.WriteString(scanner.Text())
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", err
+	}
+
+	return output.String(), nil
+}
+
+func (m Model) parseStatsOutput(output string) (StatsData, error) {
+	var data StatsData
+	if err := json.Unmarshal([]byte(output), &data); err != nil {
+		return StatsData{}, err
+	}
+	return data, nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -127,54 +137,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 
 	case loadStatsMsg:
-		m.loading = false
-		if msg.Error != nil {
-			m.loadError = msg.Error
-		} else {
-			m.stats = msg.Data
-			m.lastUpdate = time.Now()
-		}
-		return m, nil
+		return m.handleLoadStatsMsg(msg)
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "r":
-			m.loading = true
-			m.loadError = nil
-			return m, m.loadStats()
-		}
+		return m.handleKeyMsg(msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
 	}
 
 	return m, nil
 }
 
-///////////////////////////////////////////////////////////////////
-// View
-///////////////////////////////////////////////////////////////////
+func (m Model) handleLoadStatsMsg(msg loadStatsMsg) (tea.Model, tea.Cmd) {
+	m.loading = false
+	if msg.Error != nil {
+		m.loadError = msg.Error
+	} else {
+		m.stats = msg.Data
+		m.lastUpdate = time.Now()
+	}
+	return m, nil
+}
+
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "r" {
+		m.loading = true
+		m.loadError = nil
+		return m, m.loadStats()
+	}
+	return m, nil
+}
 
 func (m Model) View() string {
 	var b strings.Builder
 
-	// Header
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n")
-
-	if m.loading {
-		b.WriteString(m.renderLoading())
-	} else if m.loadError != nil {
-		b.WriteString(m.renderError())
-	} else {
-		b.WriteString(m.renderStats())
-	}
-
+	b.WriteString(m.renderContent())
 	b.WriteString("\n")
 	b.WriteString(m.renderFooter())
 
 	return styles.BoxStyle.Render(b.String())
+}
+
+func (m Model) renderContent() string {
+	if m.loading {
+		return m.renderLoading()
+	}
+	if m.loadError != nil {
+		return m.renderError()
+	}
+	return m.renderStats()
 }
 
 func (m Model) renderHeader() string {
@@ -185,19 +201,20 @@ func (m Model) renderHeader() string {
 
 	separator := lipgloss.NewStyle().
 		Foreground(styles.Secondary).
-		Render(strings.Repeat("─", 60))
+		Render(strings.Repeat("─", headerSeparatorLen))
 
 	return title + "\n" + separator
 }
 
 func (m Model) renderLoading() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	frame := frames[m.ticker%len(frames)]
+	spinnerFrames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	frameIndex := m.ticker % len(spinnerFrames)
+	currentFrame := spinnerFrames[frameIndex]
 
-	spinner := lipgloss.NewStyle().Foreground(styles.Accent).Render(frame)
-	text := lipgloss.NewStyle().Foreground(styles.Text).Render(" Loading project statistics...")
+	spinner := lipgloss.NewStyle().Foreground(styles.Accent).Render(currentFrame)
+	loadingText := lipgloss.NewStyle().Foreground(styles.Text).Render(" Loading project statistics...")
 
-	return "\n\n  " + spinner + text + "\n\n"
+	return "\n\n  " + spinner + loadingText + "\n\n"
 }
 
 func (m Model) renderError() string {
@@ -205,45 +222,51 @@ func (m Model) renderError() string {
 		Foreground(styles.Error).
 		Bold(true)
 
-	msgStyle := lipgloss.NewStyle().
+	messageStyle := lipgloss.NewStyle().
 		Foreground(styles.TextDim)
 
-	return "\n\n" +
-		errorStyle.Render("  "+styles.CrossMark+" Failed to load statistics") + "\n" +
-		msgStyle.Render("  "+m.loadError.Error()) + "\n\n"
+	errorMessage := errorStyle.Render("  " + styles.CrossMark + " Failed to load statistics")
+	errorDetails := messageStyle.Render("  " + m.loadError.Error())
+
+	return "\n\n" + errorMessage + "\n" + errorDetails + "\n\n"
 }
 
 func (m Model) renderStats() string {
 	var b strings.Builder
 
-	// Task info
 	b.WriteString("\n")
-	taskLine := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Task: ") +
-		lipgloss.NewStyle().Foreground(styles.Accent).Render(m.stats.Task)
-	b.WriteString(taskLine + "\n\n")
-
-	// Subject Progress Card
+	b.WriteString(m.renderTaskInfo())
+	b.WriteString("\n")
 	b.WriteString(m.renderSubjectProgress())
 	b.WriteString("\n")
-
-	// Feature Categories Card
 	b.WriteString(m.renderFeatureCategories())
 	b.WriteString("\n")
-
-	// Last update
-	if !m.lastUpdate.IsZero() {
-		updateTime := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(
-			"  Last updated: " + m.lastUpdate.Format("15:04:05"))
-		b.WriteString(updateTime + "\n")
-	}
+	b.WriteString(m.renderLastUpdate())
 
 	return b.String()
+}
+
+func (m Model) renderTaskInfo() string {
+	taskLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Render("  Task: ")
+	taskValue := lipgloss.NewStyle().Foreground(styles.Accent).Render(m.stats.Task)
+	return taskLabel + taskValue
+}
+
+func (m Model) renderLastUpdate() string {
+	if m.lastUpdate.IsZero() {
+		return ""
+	}
+	updateTime := m.lastUpdate.Format("15:04:05")
+	updateText := lipgloss.NewStyle().
+		Foreground(styles.Muted).
+		Italic(true).
+		Render("  Last updated: " + updateTime)
+	return updateText + "\n"
 }
 
 func (m Model) renderSubjectProgress() string {
 	var b strings.Builder
 
-	// Section header
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -251,74 +274,90 @@ func (m Model) renderSubjectProgress() string {
 		Render(" SUBJECTS ")
 	b.WriteString("  " + header + "\n\n")
 
-	// Stats with mini progress bars
-	total := m.stats.TotalSubjects
-
-	items := []struct {
+	totalSubjects := m.stats.TotalSubjects
+	subjectItems := []struct {
 		label string
 		count int
 		color lipgloss.Color
 	}{
-		{"Total", total, styles.Text},
+		{"Total", totalSubjects, styles.Text},
 		{"BIDS", m.stats.BidsSubjects, styles.Accent},
 		{"Epochs", m.stats.EpochsSubjects, styles.Warning},
 		{"Features", m.stats.FeaturesSubjects, styles.Success},
 	}
 
-	labelWidth := 12
-	barWidth := 25
-
-	for _, item := range items {
-		label := lipgloss.NewStyle().
-			Foreground(styles.TextDim).
-			Width(labelWidth).
-			Render("  " + item.label)
-
-		pct := 0.0
-		if total > 0 && item.label != "Total" {
-			pct = float64(item.count) / float64(total)
-		} else if item.label == "Total" {
-			pct = 1.0
-		}
-
-		bar := m.renderMiniBar(pct, barWidth, item.color)
-
-		countStr := lipgloss.NewStyle().
-			Foreground(item.color).
-			Bold(true).
-			Width(5).
-			Align(lipgloss.Right).
-			Render(fmt.Sprintf("%d", item.count))
-
-		pctStr := ""
-		if item.label != "Total" && total > 0 {
-			pctStr = lipgloss.NewStyle().
-				Foreground(styles.Muted).
-				Render(fmt.Sprintf(" (%.0f%%)", pct*100))
-		}
-
-		b.WriteString(label + countStr + " " + bar + pctStr + "\n")
+	for _, item := range subjectItems {
+		b.WriteString(m.renderSubjectItem(item, totalSubjects))
 	}
 
 	return b.String()
 }
 
-func (m Model) renderMiniBar(pct float64, width int, color lipgloss.Color) string {
-	filled := int(pct * float64(width))
-	if filled > width {
-		filled = width
+func (m Model) renderSubjectItem(item struct {
+	label string
+	count int
+	color lipgloss.Color
+}, totalSubjects int) string {
+	label := lipgloss.NewStyle().
+		Foreground(styles.TextDim).
+		Width(subjectLabelWidth).
+		Render("  " + item.label)
+
+	percentage := m.calculatePercentage(item.count, totalSubjects, item.label == "Total")
+	progressBar := m.renderMiniBar(percentage, subjectBarWidth, item.color)
+
+	countText := lipgloss.NewStyle().
+		Foreground(item.color).
+		Bold(true).
+		Width(5).
+		Align(lipgloss.Right).
+		Render(fmt.Sprintf("%d", item.count))
+
+	percentageText := m.formatPercentageText(percentage, item.label == "Total")
+
+	return label + countText + " " + progressBar + percentageText + "\n"
+}
+
+func (m Model) calculatePercentage(count, total int, isTotal bool) float64 {
+	if isTotal {
+		return 1.0
 	}
+	if total == 0 {
+		return 0.0
+	}
+	return float64(count) / float64(total)
+}
 
-	bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", filled))
-	empty := lipgloss.NewStyle().Foreground(styles.Secondary).Render(strings.Repeat("░", width-filled))
+func (m Model) formatPercentageText(percentage float64, isTotal bool) string {
+	if isTotal {
+		return ""
+	}
+	percentageValue := percentage * 100
+	return lipgloss.NewStyle().
+		Foreground(styles.Muted).
+		Render(fmt.Sprintf(" (%.0f%%)", percentageValue))
+}
 
-	return bar + empty
+func (m Model) renderMiniBar(percentage float64, width int, color lipgloss.Color) string {
+	filledWidth := int(percentage * float64(width))
+	if filledWidth > width {
+		filledWidth = width
+	}
+	emptyWidth := width - filledWidth
+
+	filledBar := lipgloss.NewStyle().
+		Foreground(color).
+		Render(strings.Repeat("█", filledWidth))
+	emptyBar := lipgloss.NewStyle().
+		Foreground(styles.Secondary).
+		Render(strings.Repeat("░", emptyWidth))
+
+	return filledBar + emptyBar
 }
 
 func (m Model) renderFeatureCategories() string {
 	var b strings.Builder
 
-	// Section header
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(styles.Primary).
@@ -327,71 +366,51 @@ func (m Model) renderFeatureCategories() string {
 	b.WriteString("  " + header + "\n\n")
 
 	if len(m.stats.FeatureCategories) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render("    No feature data available\n"))
+		noDataMessage := lipgloss.NewStyle().
+			Foreground(styles.Muted).
+			Italic(true).
+			Render("    No feature data available\n")
+		b.WriteString(noDataMessage)
 		return b.String()
 	}
 
-	total := m.stats.FeaturesSubjects
-	if total == 0 {
-		total = m.stats.TotalSubjects
-	}
-
-	categories := []string{
+	totalSubjects := m.getTotalForFeatureCategories()
+	featureCategories := []string{
 		"power", "connectivity", "aperiodic", "bursts", "complexity",
 		"itpc", "pac", "quality", "erds", "spectral", "ratios", "asymmetry",
 	}
 
-	for _, cat := range categories {
-		count, ok := m.stats.FeatureCategories[cat]
-		if !ok {
-			count = 0
-		}
-
-		pct := 0.0
-		if total > 0 {
-			pct = float64(count) / float64(total)
-		}
-
-		// Icon based on category
-		icon := m.getCategoryIcon(cat)
-
-		label := lipgloss.NewStyle().
-			Foreground(styles.TextDim).
-			Width(14).
-			Render("  " + icon + " " + cat)
-
-		bar := m.renderMiniBar(pct, 20, styles.Primary)
-
-		countStr := lipgloss.NewStyle().
-			Foreground(styles.Text).
-			Render(fmt.Sprintf(" %d/%d", count, total))
-
-		b.WriteString(label + bar + countStr + "\n")
+	for _, category := range featureCategories {
+		b.WriteString(m.renderFeatureCategory(category, totalSubjects))
 	}
 
 	return b.String()
 }
 
-func (m Model) getCategoryIcon(cat string) string {
-	icons := map[string]string{
-		"power":        "▸",
-		"connectivity": "▸",
-		"aperiodic":    "▸",
+func (m Model) getTotalForFeatureCategories() int {
+	if m.stats.FeaturesSubjects > 0 {
+		return m.stats.FeaturesSubjects
+	}
+	return m.stats.TotalSubjects
+}
 
-		"bursts":     "▸",
-		"complexity": "▸",
-		"itpc":       "▸",
-		"pac":        "▸",
-		"quality":    "▸",
-		"erds":       "▸",
-		"spectral":   "▸",
-		"ratios":     "▸",
-		"asymmetry":  "▸",
-	}
-	if icon, ok := icons[cat]; ok {
-		return icon
-	}
-	return "•"
+func (m Model) renderFeatureCategory(category string, totalSubjects int) string {
+	count := m.stats.FeatureCategories[category]
+	percentage := m.calculatePercentage(count, totalSubjects, false)
+
+	categoryIcon := styles.BulletMark
+	label := lipgloss.NewStyle().
+		Foreground(styles.TextDim).
+		Width(featureLabelWidth).
+		Render("  " + categoryIcon + " " + category)
+
+	progressBar := m.renderMiniBar(percentage, featureBarWidth, styles.Primary)
+
+	countText := lipgloss.NewStyle().
+		Foreground(styles.Text).
+		Render(fmt.Sprintf(" %d/%d", count, totalSubjects))
+
+	return label + progressBar + countText + "\n"
 }
 
 func (m Model) renderFooter() string {
@@ -400,13 +419,13 @@ func (m Model) renderFooter() string {
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 
-	separator := lipgloss.NewStyle().Foreground(styles.Secondary).Render("  │  ")
-	return styles.FooterStyle.Render(strings.Join(hints, separator))
-}
+	hintSeparator := lipgloss.NewStyle().
+		Foreground(styles.Secondary).
+		Render("  │  ")
+	hintsText := strings.Join(hints, hintSeparator)
 
-///////////////////////////////////////////////////////////////////
-// Public Methods
-///////////////////////////////////////////////////////////////////
+	return styles.FooterStyle.Render(hintsText)
+}
 
 func (m Model) IsLoading() bool {
 	return m.loading

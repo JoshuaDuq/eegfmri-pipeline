@@ -18,7 +18,7 @@ Usage:
 
 Lazy Imports:
     Many plotting functions use lazy imports to reduce startup time.
-    Access them directly from this module - they will be loaded on first use:
+    Access them directly from this module - they will be loaded on first use.
 """
 
 # Configuration
@@ -63,7 +63,7 @@ def __getattr__(name: str):
         "create_scalpmean_tfr_from_existing": "core",
         "get_strict_mode": "core",
         "compute_cluster_significance_from_combined": "core",
-        "compute_significance_mask": "core",  # TFR significance mask (different from connectivity)
+        "compute_significance_mask": "core",
         # Features
         "plot_channel_power_heatmap": "features",
         "plot_power_time_courses": "features",
@@ -94,6 +94,7 @@ def __getattr__(name: str):
         "plot_aperiodic_run_trajectories": "features",
         "plot_aperiodic_topomaps": "features",
         "plot_aperiodic_vs_pain": "features",
+        "visualize_features_for_subjects": "features",
         # ERP
         "visualize_subject_erp": "erp",
         "visualize_erp_for_subjects": "erp",
@@ -120,7 +121,6 @@ def __getattr__(name: str):
         "plot_power_roi_scatter": "behavioral",
         "plot_temporal_correlation_topomaps_by_pain": "behavioral",
         "plot_pain_nonpain_clusters": "behavioral",
-
         "visualize_subject_behavior": "behavioral",
         "visualize_behavior_for_subjects": "behavioral",
         # Machine Learning
@@ -139,9 +139,6 @@ def __getattr__(name: str):
         "plot_incremental_validity": "machine_learning",
         "plot_feature_importance_top_n": "machine_learning",
         "plot_feature_importance_stability": "machine_learning",
-        "visualize_features_for_subjects": "features",
-        "visualize_tfr_for_subjects": "tfr",
-        "visualize_behavior_for_subjects": "behavioral",
     }
 
     if name in _module_map:

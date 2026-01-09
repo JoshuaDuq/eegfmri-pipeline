@@ -17,29 +17,182 @@ Parameters that should be computed fold-specifically:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass, field
 
+import mne
 import numpy as np
+import pandas as pd
+from scipy.signal import find_peaks
+
+
+# Constants
+MIN_TRIALS_FOR_IAF = 5
+MIN_FREQ_POINTS_FOR_FIT = 10
+MIN_FREQ_HZ = 1.0
+MAX_FREQ_HZ = 40.0
+PSD_FMIN_OFFSET_HZ = 4.0
+PSD_FMAX_SAFETY_MARGIN_HZ = 0.5
+FIT_FMIN_HZ = 2.0
+FIT_FMAX_HZ = 40.0
+EPSILON_FREQ = 1e-6
+EPSILON_PSD = 1e-20
+EPSILON_ITPC = 1e-12
+DEFAULT_ALPHA_MIN_HZ = 6.0
+DEFAULT_ALPHA_MAX_HZ = 14.0
+DEFAULT_ALPHA_WIDTH_HZ = 2.0
+DEFAULT_ALPHA_RANGE_HZ = (7.0, 13.0)
+DEFAULT_IAF_PROMINENCE = 0.05
+DEFAULT_STD_WHEN_ZERO = 1.0
 
 
 @dataclass
 class FoldSpecificParams:
     """Container for fold-specific parameters computed on training data only."""
-    
+
     fold_idx: int
     train_indices: np.ndarray
     test_indices: np.ndarray
-    
+
     iaf_hz: Optional[float] = None
     frequency_bands: Optional[Dict[str, Tuple[float, float]]] = None
-    
+
     feature_means: Optional[Dict[str, float]] = None
     feature_stds: Optional[Dict[str, float]] = None
-    
+
     global_itpc: Optional[Dict[str, np.ndarray]] = None
-    
+
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def _log_warning(logger: Any, message: str, *args: Any) -> None:
+    """Log warning if logger is available."""
+    if logger:
+        logger.warning(message, *args)
+
+
+def _log_info(logger: Any, message: str, *args: Any) -> None:
+    """Log info if logger is available."""
+    if logger:
+        logger.info(message, *args)
+
+
+def _log_debug(logger: Any, message: str, *args: Any) -> None:
+    """Log debug if logger is available."""
+    if logger:
+        logger.debug(message, *args)
+
+
+def _extract_iaf_config(config: Any) -> Dict[str, Any]:
+    """Extract IAF configuration from config object."""
+    if hasattr(config, "get"):
+        return config.get("feature_engineering.bands", {})
+    return {}
+
+
+def _validate_train_mask(train_mask: np.ndarray, min_trials: int = MIN_TRIALS_FOR_IAF) -> bool:
+    """Validate that training mask has sufficient trials."""
+    return np.any(train_mask) and np.sum(train_mask) >= min_trials
+
+
+def _compute_power_spectral_density(
+    train_data: np.ndarray,
+    sfreq: float,
+    alpha_fmin: float,
+    logger: Any,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    """Compute power spectral density for IAF estimation."""
+    fmin = max(MIN_FREQ_HZ, alpha_fmin - PSD_FMIN_OFFSET_HZ)
+    fmax = min(MAX_FREQ_HZ, sfreq / 2.0 - PSD_FMAX_SAFETY_MARGIN_HZ)
+
+    try:
+        psds, freqs = mne.time_frequency.psd_array_multitaper(
+            train_data,
+            sfreq=sfreq,
+            fmin=fmin,
+            fmax=fmax,
+            adaptive=True,
+            normalization="full",
+            verbose=False,
+        )
+        return np.asarray(psds, dtype=float), np.asarray(freqs, dtype=float)
+    except Exception as exc:
+        _log_warning(logger, "CV hygiene: PSD computation failed for IAF: %s", exc)
+        return None, None
+
+
+def _compute_aperiodic_residual(
+    freqs: np.ndarray,
+    mean_psd: np.ndarray,
+) -> Optional[np.ndarray]:
+    """Compute aperiodic residual by fitting and subtracting 1/f slope."""
+    log_freqs = np.log10(np.maximum(freqs, EPSILON_FREQ))
+    log_power = np.log10(np.maximum(mean_psd, EPSILON_PSD))
+
+    fit_mask = (freqs >= FIT_FMIN_HZ) & (freqs <= FIT_FMAX_HZ) & np.isfinite(log_power)
+    if np.sum(fit_mask) < MIN_FREQ_POINTS_FOR_FIT:
+        return None
+
+    try:
+        slope, intercept = np.polyfit(log_freqs[fit_mask], log_power[fit_mask], 1)
+        residual = log_power - (intercept + slope * log_freqs)
+        return residual
+    except (np.linalg.LinAlgError, ValueError):
+        return log_power
+
+
+def _estimate_iaf_from_residual(
+    freqs: np.ndarray,
+    residual: np.ndarray,
+    alpha_fmin: float,
+    alpha_fmax: float,
+    prominence: float,
+) -> Optional[float]:
+    """Estimate IAF from residual spectrum using peak detection or weighted mean."""
+    alpha_mask = (freqs >= alpha_fmin) & (freqs <= alpha_fmax) & np.isfinite(residual)
+    if not np.any(alpha_mask):
+        return None
+
+    residual_in_alpha = residual[alpha_mask]
+    peaks, peak_properties = find_peaks(residual_in_alpha, prominence=prominence)
+
+    if peaks.size > 0:
+        prominences = peak_properties.get("prominences", np.ones_like(peaks))
+        best_peak_idx = int(peaks[np.argmax(prominences)])
+        iaf_hz = float(freqs[alpha_mask][best_peak_idx])
+    else:
+        positive_residual = np.maximum(residual_in_alpha, 0.0)
+        residual_sum = float(np.sum(positive_residual))
+        if residual_sum > 0:
+            weighted_freqs = freqs[alpha_mask] * positive_residual
+            iaf_hz = float(np.sum(weighted_freqs) / residual_sum)
+        else:
+            return None
+
+    if np.isfinite(iaf_hz):
+        return iaf_hz
+    return None
+
+
+def _build_frequency_bands_from_iaf(
+    iaf_hz: float,
+    config: Any,
+    alpha_width_hz: float,
+) -> Dict[str, Tuple[float, float]]:
+    """Build frequency band definitions adjusted for individual alpha frequency."""
+    from eeg_pipeline.utils.config.loader import get_frequency_bands
+
+    base_bands = dict(get_frequency_bands(config))
+    alpha_min = max(DEFAULT_ALPHA_MIN_HZ, iaf_hz - alpha_width_hz)
+    alpha_max = min(DEFAULT_ALPHA_MAX_HZ, iaf_hz + alpha_width_hz)
+
+    return {
+        "delta": base_bands.get("delta", (1.0, 3.9)),
+        "theta": (max(3.0, iaf_hz - 6.0), max(4.0, alpha_min)),
+        "alpha": (alpha_min, alpha_max),
+        "beta": (max(13.0, alpha_max), base_bands.get("beta", (13.0, 30.0))[1]),
+        "gamma": base_bands.get("gamma", (30.1, 80.0)),
+    }
 
 
 def compute_iaf_for_fold(
@@ -51,9 +204,9 @@ def compute_iaf_for_fold(
 ) -> Tuple[Optional[float], Optional[Dict[str, Tuple[float, float]]]]:
     """
     Compute Individual Alpha Frequency (IAF) using ONLY training fold trials.
-    
+
     This prevents leakage from test trials into band definition.
-    
+
     Parameters
     ----------
     epochs_data : np.ndarray
@@ -66,7 +219,7 @@ def compute_iaf_for_fold(
         Configuration object
     logger : Any
         Logger instance
-        
+
     Returns
     -------
     iaf_hz : float or None
@@ -74,100 +227,52 @@ def compute_iaf_for_fold(
     frequency_bands : dict or None
         IAF-adjusted frequency band definitions
     """
-    import mne
-    from scipy.signal import find_peaks
-    
-    if not np.any(train_mask):
-        if logger:
-            logger.warning("CV hygiene: No training trials for IAF estimation")
-        return None, None
-    
-    train_data = epochs_data[train_mask]
-    if train_data.shape[0] < 5:
-        if logger:
-            logger.warning("CV hygiene: Too few training trials (%d) for reliable IAF estimation", train_data.shape[0])
-        return None, None
-    
-    iaf_cfg = config.get("feature_engineering.bands", {}) if hasattr(config, "get") else {}
-    alpha_range = iaf_cfg.get("iaf_search_range_hz", [7.0, 13.0])
-    alpha_fmin, alpha_fmax = float(alpha_range[0]), float(alpha_range[1])
-    prom = float(iaf_cfg.get("iaf_min_prominence", 0.05))
-    
-    try:
-        psds, freqs = mne.time_frequency.psd_array_multitaper(
-            train_data,
-            sfreq=sfreq,
-            fmin=max(1.0, alpha_fmin - 4.0),
-            fmax=min(40.0, sfreq / 2.0 - 0.5),
-            adaptive=True,
-            normalization="full",
-            verbose=False,
+    if not _validate_train_mask(train_mask):
+        n_trials = int(np.sum(train_mask)) if np.any(train_mask) else 0
+        _log_warning(
+            logger,
+            "CV hygiene: Too few training trials (%d) for reliable IAF estimation",
+            n_trials,
         )
-    except Exception as exc:
-        if logger:
-            logger.warning("CV hygiene: PSD computation failed for IAF: %s", exc)
         return None, None
-    
-    psds = np.asarray(psds, dtype=float)
-    freqs = np.asarray(freqs, dtype=float)
-    
+
+    train_data = epochs_data[train_mask]
+    iaf_config = _extract_iaf_config(config)
+
+    alpha_range = iaf_config.get("iaf_search_range_hz", list(DEFAULT_ALPHA_RANGE_HZ))
+    alpha_fmin = float(alpha_range[0])
+    alpha_fmax = float(alpha_range[1])
+    prominence = float(iaf_config.get("iaf_min_prominence", DEFAULT_IAF_PROMINENCE))
+    alpha_width_hz = float(iaf_config.get("alpha_width_hz", DEFAULT_ALPHA_WIDTH_HZ))
+
+    psds, freqs = _compute_power_spectral_density(train_data, sfreq, alpha_fmin, logger)
+    if psds is None or freqs is None:
+        return None, None
+
     if psds.ndim != 3 or freqs.size == 0:
         return None, None
-    
+
     mean_psd = np.nanmean(psds, axis=(0, 1))
-    
-    log_f = np.log10(np.maximum(freqs, 1e-6))
-    log_p = np.log10(np.maximum(mean_psd, 1e-20))
-    
-    fit_mask = (freqs >= 2.0) & (freqs <= 40.0) & np.isfinite(log_p)
-    if np.sum(fit_mask) < 10:
+    residual = _compute_aperiodic_residual(freqs, mean_psd)
+    if residual is None:
         return None, None
-    
-    try:
-        slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-        resid = log_p - (intercept + slope * log_f)
-    except (np.linalg.LinAlgError, ValueError):
-        resid = log_p
-    
-    a_mask = (freqs >= alpha_fmin) & (freqs <= alpha_fmax) & np.isfinite(resid)
-    if not np.any(a_mask):
+
+    iaf_hz = _estimate_iaf_from_residual(
+        freqs, residual, alpha_fmin, alpha_fmax, prominence
+    )
+    if iaf_hz is None:
         return None, None
-    
-    y = resid[a_mask]
-    peaks, props = find_peaks(y, prominence=prom)
-    
-    iaf = np.nan
-    if peaks.size:
-        best = int(peaks[np.argmax(props.get("prominences", np.ones_like(peaks)))])
-        iaf = float(freqs[a_mask][best])
-    else:
-        y_pos = np.maximum(y, 0.0)
-        denom = float(np.sum(y_pos))
-        if denom > 0:
-            iaf = float(np.sum(freqs[a_mask] * y_pos) / denom)
-    
-    if not np.isfinite(iaf):
-        return None, None
-    
-    width = float(iaf_cfg.get("alpha_width_hz", 2.0))
-    alpha_min = max(6.0, iaf - width)
-    alpha_max = min(14.0, iaf + width)
-    
-    from eeg_pipeline.utils.config.loader import get_frequency_bands
-    base_bands = dict(get_frequency_bands(config))
-    
-    freq_bands = {
-        "delta": base_bands.get("delta", [1.0, 3.9]),
-        "theta": [max(3.0, iaf - 6.0), max(4.0, alpha_min)],
-        "alpha": [alpha_min, alpha_max],
-        "beta": [max(13.0, alpha_max), base_bands.get("beta", [13.0, 30.0])[1]],
-        "gamma": base_bands.get("gamma", [30.1, 80.0]),
-    }
-    
-    if logger:
-        logger.info("CV hygiene: Estimated fold-specific IAF=%.2f Hz from %d training trials", iaf, train_data.shape[0])
-    
-    return iaf, freq_bands
+
+    frequency_bands = _build_frequency_bands_from_iaf(iaf_hz, config, alpha_width_hz)
+
+    _log_info(
+        logger,
+        "CV hygiene: Estimated fold-specific IAF=%.2f Hz from %d training trials",
+        iaf_hz,
+        train_data.shape[0],
+    )
+
+    return iaf_hz, frequency_bands
 
 
 def compute_global_itpc_for_fold(
@@ -177,10 +282,10 @@ def compute_global_itpc_for_fold(
 ) -> np.ndarray:
     """
     Compute global ITPC using ONLY training fold trials.
-    
+
     ITPC is inherently a cross-trial measure, so it must be computed
     within folds to avoid leakage.
-    
+
     Parameters
     ----------
     complex_tfr_data : np.ndarray
@@ -189,37 +294,37 @@ def compute_global_itpc_for_fold(
         Boolean mask indicating training trials
     logger : Any
         Logger instance
-        
+
     Returns
     -------
     itpc_map : np.ndarray
         ITPC values (n_channels, n_freqs, n_times) computed on training trials only
     """
     if not np.any(train_mask):
-        if logger:
-            logger.warning("CV hygiene: No training trials for ITPC computation")
+        _log_warning(logger, "CV hygiene: No training trials for ITPC computation")
         return np.full(complex_tfr_data.shape[1:], np.nan)
-    
+
     train_data = complex_tfr_data[train_mask]
-    
-    eps = 1e-12
-    unit = train_data / (np.abs(train_data) + eps)
-    itpc_map = np.abs(np.mean(unit, axis=0))
-    
-    if logger:
-        logger.debug("CV hygiene: Computed fold-specific ITPC from %d training trials", train_data.shape[0])
-    
+    unit_vectors = train_data / (np.abs(train_data) + EPSILON_ITPC)
+    itpc_map = np.abs(np.mean(unit_vectors, axis=0))
+
+    _log_debug(
+        logger,
+        "CV hygiene: Computed fold-specific ITPC from %d training trials",
+        train_data.shape[0],
+    )
+
     return itpc_map
 
 
 def compute_feature_scaling_for_fold(
-    features_df: "pd.DataFrame",
+    features_df: pd.DataFrame,
     train_mask: np.ndarray,
     logger: Any = None,
 ) -> Tuple[Dict[str, float], Dict[str, float]]:
     """
     Compute feature scaling parameters (mean, std) using ONLY training fold trials.
-    
+
     Parameters
     ----------
     features_df : pd.DataFrame
@@ -228,7 +333,7 @@ def compute_feature_scaling_for_fold(
         Boolean mask indicating training trials
     logger : Any
         Logger instance
-        
+
     Returns
     -------
     means : dict
@@ -236,39 +341,42 @@ def compute_feature_scaling_for_fold(
     stds : dict
         Standard deviation per feature (computed on training data)
     """
-    import pandas as pd
-    
     if not np.any(train_mask):
-        if logger:
-            logger.warning("CV hygiene: No training trials for feature scaling")
+        _log_warning(logger, "CV hygiene: No training trials for feature scaling")
         return {}, {}
-    
+
     train_df = features_df.iloc[train_mask]
-    
     means = {}
     stds = {}
-    
-    for col in train_df.columns:
-        series = pd.to_numeric(train_df[col], errors="coerce")
-        means[col] = float(series.mean())
-        stds[col] = float(series.std())
-        if stds[col] == 0 or not np.isfinite(stds[col]):
-            stds[col] = 1.0
-    
-    if logger:
-        logger.debug("CV hygiene: Computed fold-specific scaling from %d training trials", int(np.sum(train_mask)))
-    
+
+    for column in train_df.columns:
+        numeric_series = pd.to_numeric(train_df[column], errors="coerce")
+        column_mean = float(numeric_series.mean())
+        column_std = float(numeric_series.std())
+
+        means[column] = column_mean
+        if column_std == 0 or not np.isfinite(column_std):
+            stds[column] = DEFAULT_STD_WHEN_ZERO
+        else:
+            stds[column] = column_std
+
+    _log_debug(
+        logger,
+        "CV hygiene: Computed fold-specific scaling from %d training trials",
+        int(np.sum(train_mask)),
+    )
+
     return means, stds
 
 
 def apply_fold_specific_scaling(
-    features_df: "pd.DataFrame",
+    features_df: pd.DataFrame,
     means: Dict[str, float],
     stds: Dict[str, float],
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """
     Apply fold-specific scaling parameters to a feature DataFrame.
-    
+
     Parameters
     ----------
     features_df : pd.DataFrame
@@ -277,39 +385,59 @@ def apply_fold_specific_scaling(
         Mean values per feature
     stds : dict
         Standard deviation per feature
-        
+
     Returns
     -------
     scaled_df : pd.DataFrame
         Scaled feature DataFrame
     """
-    import pandas as pd
-    
-    scaled = features_df.copy()
-    
-    for col in scaled.columns:
-        if col in means and col in stds:
-            series = pd.to_numeric(scaled[col], errors="coerce")
-            scaled[col] = (series - means[col]) / stds[col]
-    
-    return scaled
+    scaled_df = features_df.copy()
+
+    for column in scaled_df.columns:
+        if column in means and column in stds:
+            numeric_series = pd.to_numeric(scaled_df[column], errors="coerce")
+            scaled_df[column] = (numeric_series - means[column]) / stds[column]
+
+    return scaled_df
+
+
+def _should_compute_iaf(config: Any) -> bool:
+    """Determine if IAF should be computed based on configuration."""
+    if hasattr(config, "get"):
+        return bool(config.get("feature_engineering.bands.use_iaf", False))
+    return False
+
+
+def _compute_iaf_for_context(
+    epochs: Any,
+    train_mask: np.ndarray,
+    config: Any,
+    logger: Any,
+) -> Tuple[Optional[float], Optional[Dict[str, Tuple[float, float]]]]:
+    """Compute IAF parameters for fold context."""
+    picks = mne.pick_types(
+        epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads"
+    )
+    epochs_data = epochs.get_data(picks=picks)
+    sfreq = float(epochs.info["sfreq"])
+
+    return compute_iaf_for_fold(epochs_data, sfreq, train_mask, config, logger)
 
 
 def create_fold_specific_context(
-    epochs,
+    epochs: Any,
     train_indices: np.ndarray,
     test_indices: np.ndarray,
     fold_idx: int,
     config: Any,
     logger: Any = None,
-    compute_iaf: bool = True,
 ) -> FoldSpecificParams:
     """
     Create a FoldSpecificParams object with all fold-specific parameters.
-    
+
     This is the main entry point for CV hygiene - call this at the start
     of each fold to get properly computed parameters.
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
@@ -324,9 +452,7 @@ def create_fold_specific_context(
         Configuration object
     logger : Any
         Logger instance
-    compute_iaf : bool
-        Whether to compute fold-specific IAF
-        
+
     Returns
     -------
     FoldSpecificParams
@@ -335,37 +461,33 @@ def create_fold_specific_context(
     n_epochs = len(epochs)
     train_mask = np.zeros(n_epochs, dtype=bool)
     train_mask[train_indices] = True
-    
+
     params = FoldSpecificParams(
         fold_idx=fold_idx,
         train_indices=train_indices,
         test_indices=test_indices,
     )
-    
-    use_iaf = bool(config.get("feature_engineering.bands.use_iaf", False)) if hasattr(config, "get") else False
-    
-    if compute_iaf and use_iaf:
-        import mne
-        picks = mne.pick_types(epochs.info, eeg=True, meg=False, eog=False, stim=False, exclude="bads")
-        data = epochs.get_data(picks=picks)
-        sfreq = float(epochs.info["sfreq"])
-        
-        iaf, freq_bands = compute_iaf_for_fold(data, sfreq, train_mask, config, logger)
-        params.iaf_hz = iaf
-        params.frequency_bands = freq_bands
-    
+
+    if _should_compute_iaf(config):
+        iaf_hz, frequency_bands = _compute_iaf_for_context(
+            epochs, train_mask, config, logger
+        )
+        params.iaf_hz = iaf_hz
+        params.frequency_bands = frequency_bands
+
     params.metadata["n_train"] = int(np.sum(train_mask))
     params.metadata["n_test"] = len(test_indices)
-    
-    if logger:
-        logger.info(
-            "CV hygiene: Created fold %d context (train=%d, test=%d, IAF=%.2f Hz)",
-            fold_idx,
-            params.metadata["n_train"],
-            params.metadata["n_test"],
-            params.iaf_hz if params.iaf_hz is not None else np.nan,
-        )
-    
+
+    iaf_display = params.iaf_hz if params.iaf_hz is not None else np.nan
+    _log_info(
+        logger,
+        "CV hygiene: Created fold %d context (train=%d, test=%d, IAF=%.2f Hz)",
+        fold_idx,
+        params.metadata["n_train"],
+        params.metadata["n_test"],
+        iaf_display,
+    )
+
     return params
 
 

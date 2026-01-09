@@ -10,18 +10,21 @@ it reports issues and summaries but does not drop trials/features.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
-    try:
-        if hasattr(config, "get"):
+def _get_config_value(config: Any, key: str, default: Any) -> Any:
+    """Extract a value from a config object (dict-like or object with get method)."""
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        try:
             return config.get(key, default)
-    except Exception:
-        pass
+        except (AttributeError, TypeError):
+            return default
     return default
 
 
@@ -31,23 +34,53 @@ class TrialTableValidationResult:
     report: Dict[str, Any]
 
 
+def _compute_numeric_statistics(series: pd.Series) -> Dict[str, Any]:
+    """Compute basic statistics for a numeric series."""
+    numeric_series = pd.to_numeric(series, errors="coerce")
+    has_valid_values = numeric_series.notna()
+    
+    if not has_valid_values.any():
+        return {
+            "n_non_nan": 0,
+            "min": np.nan,
+            "max": np.nan,
+        }
+    
+    return {
+        "n_non_nan": int(has_valid_values.sum()),
+        "min": float(numeric_series.min()),
+        "max": float(numeric_series.max()),
+    }
+
+
 def _summarize_missingness(df: pd.DataFrame) -> pd.DataFrame:
-    recs = []
-    n = int(len(df))
+    """Summarize missingness and uniqueness for each column."""
+    records = []
+    n_rows = len(df)
+    
     for col in df.columns:
-        s = df[col]
-        frac = float(s.isna().mean()) if n else np.nan
-        recs.append(
+        series = df[col]
+        n_missing = series.isna().sum()
+        missing_frac = float(n_missing / n_rows) if n_rows > 0 else np.nan
+        n_unique = series.nunique(dropna=True)
+        
+        records.append(
             {
                 "column": str(col),
-                "dtype": str(s.dtype),
-                "n_rows": n,
-                "n_missing": int(s.isna().sum()),
-                "missing_frac": frac,
-                "n_unique_non_nan": int(pd.Series(s).nunique(dropna=True)),
+                "dtype": str(series.dtype),
+                "n_rows": n_rows,
+                "n_missing": int(n_missing),
+                "missing_frac": missing_frac,
+                "n_unique_non_nan": int(n_unique),
             }
         )
-    return pd.DataFrame(recs).sort_values(["missing_frac", "n_unique_non_nan"], ascending=[False, True])
+    
+    sort_by_missing_frac = False
+    sort_by_uniqueness = True
+    return pd.DataFrame(records).sort_values(
+        ["missing_frac", "n_unique_non_nan"],
+        ascending=[sort_by_missing_frac, sort_by_uniqueness]
+    )
 
 
 def validate_trial_table(
@@ -82,77 +115,97 @@ def validate_trial_table(
     # Epoch monotonicity / duplicates
     if "epoch" in df.columns:
         epoch = pd.to_numeric(df["epoch"], errors="coerce")
+        has_valid_epochs = epoch.notna()
+        n_valid_epochs = int(has_valid_epochs.sum())
+        n_duplicates = int(epoch.duplicated().sum())
+        is_monotonic = (
+            bool(epoch.is_monotonic_increasing)
+            if has_valid_epochs.any()
+            else False
+        )
+        
         report["checks"]["epoch"] = {
-            "n_non_nan": int(epoch.notna().sum()),
-            "n_duplicates": int(epoch.duplicated().sum()),
-            "is_monotonic_increasing": bool(epoch.is_monotonic_increasing) if epoch.notna().any() else False,
+            "n_non_nan": n_valid_epochs,
+            "n_duplicates": n_duplicates,
+            "is_monotonic_increasing": is_monotonic,
         }
-        if report["checks"]["epoch"]["n_duplicates"] > 0:
+        
+        if n_duplicates > 0:
             warnings.append("Epoch column contains duplicates")
-        if epoch.notna().any() and not report["checks"]["epoch"]["is_monotonic_increasing"]:
+        if has_valid_epochs.any() and not is_monotonic:
             warnings.append("Epoch column is not monotonic increasing (table may be unsorted)")
 
     # Rating statistics (no range validation)
     if "rating" in df.columns:
-        r = pd.to_numeric(df["rating"], errors="coerce")
-        ok = r.notna()
-        report["checks"]["rating"] = {
-            "n_non_nan": int(ok.sum()),
-            "min": float(r.min()) if ok.any() else np.nan,
-            "max": float(r.max()) if ok.any() else np.nan,
-        }
+        report["checks"]["rating"] = _compute_numeric_statistics(df["rating"])
 
     # Temperature statistics (no range validation)
     if "temperature" in df.columns:
-        t = pd.to_numeric(df["temperature"], errors="coerce")
-        ok = t.notna()
-        report["checks"]["temperature"] = {
-            "n_non_nan": int(ok.sum()),
-            "min": float(t.min()) if ok.any() else np.nan,
-            "max": float(t.max()) if ok.any() else np.nan,
-        }
+        report["checks"]["temperature"] = _compute_numeric_statistics(df["temperature"])
 
-    # pain_binary sanity
+    # pain_binary validation
     if "pain_binary" in df.columns:
-        pb = pd.to_numeric(df["pain_binary"], errors="coerce")
-        ok = pb.notna()
-        unique = sorted(pd.Series(pb[ok]).unique().tolist())
-        non_binary = int((~pb.isin([0, 1]) & ok).sum())
+        pain_binary = pd.to_numeric(df["pain_binary"], errors="coerce")
+        has_valid_values = pain_binary.notna()
+        valid_values = pain_binary[has_valid_values]
+        unique_values = sorted(valid_values.unique().tolist())
+        
+        is_binary = pain_binary.isin([0, 1])
+        non_binary_mask = ~is_binary & has_valid_values
+        n_non_binary = int(non_binary_mask.sum())
+        
         report["checks"]["pain_binary"] = {
-            "n_non_nan": int(ok.sum()),
-            "unique_values": unique,
-            "n_non_binary": non_binary,
+            "n_non_nan": int(has_valid_values.sum()),
+            "unique_values": unique_values,
+            "n_non_binary": n_non_binary,
         }
-        if non_binary > 0:
-            warnings.append(f"pain_binary contains {non_binary} non-(0/1) values")
+        if n_non_binary > 0:
+            warnings.append(f"pain_binary contains {n_non_binary} non-(0/1) values")
 
     # Trial index within group should be non-negative and (usually) restart within run/block.
     if "trial_index_within_group" in df.columns:
-        ti = pd.to_numeric(df["trial_index_within_group"], errors="coerce")
-        ok = ti.notna()
-        neg = int((ti < 0).sum())
+        trial_index = pd.to_numeric(df["trial_index_within_group"], errors="coerce")
+        has_valid_values = trial_index.notna()
+        n_negative = int((trial_index < 0).sum())
+        
         report["checks"]["trial_index_within_group"] = {
-            "n_non_nan": int(ok.sum()),
-            "min": float(ti.min()) if ok.any() else np.nan,
-            "max": float(ti.max()) if ok.any() else np.nan,
-            "n_negative": neg,
+            "n_non_nan": int(has_valid_values.sum()),
+            "min": float(trial_index.min()) if has_valid_values.any() else np.nan,
+            "max": float(trial_index.max()) if has_valid_values.any() else np.nan,
+            "n_negative": n_negative,
         }
-        if neg > 0:
+        if n_negative > 0:
             warnings.append("trial_index_within_group has negative values")
 
         group_cols = [c for c in ["run", "block"] if c in df.columns]
         if group_cols and "epoch" in df.columns:
-            bad_groups = 0
-            for _g, gdf in df.groupby(group_cols, dropna=False, sort=False):
-                x = pd.to_numeric(gdf["trial_index_within_group"], errors="coerce")
-                if x.notna().any() and not (x.dropna().astype(int).values == np.arange(int(x.notna().sum()))).all():
-                    bad_groups += 1
-            report["checks"]["trial_index_within_group"]["n_groups_mismatch"] = int(bad_groups)
-            if bad_groups > 0:
-                warnings.append("trial_index_within_group does not look like 0..N-1 within some groups")
+            n_groups_mismatch = 0
+            for _group_key, group_df in df.groupby(group_cols, dropna=False, sort=False):
+                trial_indices = pd.to_numeric(
+                    group_df["trial_index_within_group"],
+                    errors="coerce"
+                )
+                has_valid_indices = trial_indices.notna()
+                
+                if not has_valid_indices.any():
+                    continue
+                
+                valid_indices = trial_indices[has_valid_indices].astype(int).values
+                n_valid = len(valid_indices)
+                expected_indices = np.arange(n_valid)
+                is_sequential = np.array_equal(valid_indices, expected_indices)
+                
+                if not is_sequential:
+                    n_groups_mismatch += 1
+            
+            report["checks"]["trial_index_within_group"]["n_groups_mismatch"] = n_groups_mismatch
+            if n_groups_mismatch > 0:
+                warnings.append(
+                    f"trial_index_within_group does not look like 0..N-1 within {n_groups_mismatch} groups"
+                )
 
     # Feature column inventory (non-gating)
-    prefixes = (
+    feature_prefixes = (
         "power_",
         "conn_",
         "aperiodic_",
@@ -168,41 +221,71 @@ def validate_trial_table(
         "asymmetry_",
         "summary_",
     )
-    feature_cols = [c for c in df.columns if str(c).startswith(prefixes)]
+    feature_columns = [
+        col for col in df.columns
+        if str(col).startswith(feature_prefixes)
+    ]
+    n_feature_columns = len(feature_columns)
+    
     report["checks"]["features"] = {
-        "n_feature_columns": int(len(feature_cols)),
+        "n_feature_columns": n_feature_columns,
         "n_total_columns": int(df.shape[1]),
-        "has_any_features": bool(len(feature_cols) > 0),
+        "has_any_features": n_feature_columns > 0,
     }
-    if len(feature_cols) == 0:
+    if n_feature_columns == 0:
         warnings.append("No feature columns detected (expected prefixes not found)")
 
     # Constant columns (non-gating)
-    constant_cols = []
-    for c in df.columns:
-        s = df[c]
-        if s.dtype == object:
+    constant_columns = []
+    numeric_std_threshold = 1e-12
+    min_values_for_std_check = 2
+    
+    for col in df.columns:
+        series = df[col]
+        if series.dtype == object:
             continue
-        x = pd.to_numeric(s, errors="coerce")
-        x = x[np.isfinite(x)]
-        if x.size >= 2 and float(np.nanstd(x, ddof=1)) <= 1e-12:
-            constant_cols.append(str(c))
-    if constant_cols:
-        report["checks"]["constant_columns"] = constant_cols[:200]
-        warnings.append(f"{len(constant_cols)} numeric columns look constant (std≈0)")
+        
+        numeric_values = pd.to_numeric(series, errors="coerce")
+        finite_values = numeric_values[np.isfinite(numeric_values)]
+        
+        if finite_values.size < min_values_for_std_check:
+            continue
+        
+        std_value = np.nanstd(finite_values, ddof=1)
+        is_effectively_constant = float(std_value) <= numeric_std_threshold
+        
+        if is_effectively_constant:
+            constant_columns.append(str(col))
+    
+    if constant_columns:
+        max_reported_constant_cols = 200
+        report["checks"]["constant_columns"] = constant_columns[:max_reported_constant_cols]
+        warnings.append(
+            f"{len(constant_columns)} numeric columns look constant (std≤{numeric_std_threshold})"
+        )
 
     summary_df = _summarize_missingness(df)
-    high_missing = float(_get(config, "behavior_analysis.trial_table.validate.high_missing_frac", 0.5))
-    n_high_missing = int((summary_df["missing_frac"] > high_missing).sum())
+    default_high_missing_threshold = 0.5
+    config_key = "behavior_analysis.trial_table.validate.high_missing_frac"
+    high_missing_threshold = float(
+        _get_config_value(config, config_key, default_high_missing_threshold)
+    )
+    
+    columns_above_threshold = summary_df["missing_frac"] > high_missing_threshold
+    n_high_missing = int(columns_above_threshold.sum())
+    
     report["checks"]["missingness"] = {
-        "high_missing_frac_threshold": high_missing,
+        "high_missing_frac_threshold": high_missing_threshold,
         "n_columns_high_missing": n_high_missing,
     }
     if n_high_missing > 0:
-        warnings.append(f"{n_high_missing} columns have missing_frac > {high_missing}")
+        warnings.append(
+            f"{n_high_missing} columns have missing_frac > {high_missing_threshold}"
+        )
 
     report["warnings"] = warnings
-    report["status"] = "ok" if not missing_required else "missing_required_columns"
+    has_missing_required = len(missing_required) > 0
+    report["status"] = "missing_required_columns" if has_missing_required else "ok"
     return TrialTableValidationResult(summary_df=summary_df, report=report)
 
 

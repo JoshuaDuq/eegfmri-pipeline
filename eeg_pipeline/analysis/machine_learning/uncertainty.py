@@ -25,14 +25,13 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.base import clone, BaseEstimator
-from sklearn.model_selection import cross_val_predict
+from sklearn.base import clone
 
 
 ###################################################################
@@ -58,7 +57,7 @@ class PredictionIntervalResult:
     widths: Optional[np.ndarray] = None
     
     def __post_init__(self):
-        """Compute metrics if y_true is available."""
+        """Compute interval width-based summary metrics."""
         self.widths = self.upper - self.lower
         self.mean_width = float(np.mean(self.widths))
         self.median_width = float(np.median(self.widths))
@@ -385,7 +384,7 @@ class CalibrationResult:
     bin_confidences: Optional[np.ndarray] = None
     bin_counts: Optional[np.ndarray] = None
     
-    def compute_metrics(self, y_true: np.ndarray, n_bins: int = 10):
+    def compute_metrics(self, y_true: np.ndarray, n_bins: int = 10) -> None:
         """Compute calibration metrics given true labels."""
         y_true = np.asarray(y_true)
         
@@ -483,7 +482,7 @@ def calibrate_classifier(
     if method == "beta":
         # Beta calibration (if available)
         try:
-            from betacal import BetaCalibration
+            from betacal import BetaCalibration  # type: ignore[reportMissingImports]
             cal = BetaCalibration()
             cal_probs_train = model.predict_proba(X_cal)[:, 1]
             cal.fit(cal_probs_train.reshape(-1, 1), y_cal)

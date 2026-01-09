@@ -14,6 +14,7 @@ import (
 // Types
 ///////////////////////////////////////////////////////////////////
 
+// ActionType represents the kind of quick action the user can trigger.
 type ActionType int
 
 const (
@@ -33,13 +34,52 @@ type Action struct {
 	Shortcut    string
 }
 
+var headerFrames = []string{"◆", "◇", "◆", "◈"}
+var cursorFrames = []string{"▸", "▹", "▸", "▹"}
+
 var quickActions = []Action{
-	{ActionStats, "Project Stats", "View subject & feature analytics", "◆", "S"},
-	{ActionHistory, "History", "View recent pipeline executions", "◇", "H"},
-	{ActionValidate, "Validate", "Check data integrity", "◈", "V"},
-	{ActionExport, "Export", "Export features to CSV", "◇", "X"},
-	{ActionConfig, "Config", "View configuration", "◆", "C"},
-	{ActionRefresh, "Refresh", "Reload subject data", "◈", "R"},
+	{
+		Type:        ActionStats,
+		Name:        "Project Stats",
+		Description: "View subject & feature analytics",
+		Icon:        "◆",
+		Shortcut:    "S",
+	},
+	{
+		Type:        ActionHistory,
+		Name:        "History",
+		Description: "View recent pipeline executions",
+		Icon:        "◇",
+		Shortcut:    "H",
+	},
+	{
+		Type:        ActionValidate,
+		Name:        "Validate",
+		Description: "Check data integrity",
+		Icon:        "◈",
+		Shortcut:    "V",
+	},
+	{
+		Type:        ActionExport,
+		Name:        "Export",
+		Description: "Export features to CSV",
+		Icon:        "◇",
+		Shortcut:    "X",
+	},
+	{
+		Type:        ActionConfig,
+		Name:        "Config",
+		Description: "View configuration",
+		Icon:        "◆",
+		Shortcut:    "C",
+	},
+	{
+		Type:        ActionRefresh,
+		Name:        "Refresh",
+		Description: "Reload subject data",
+		Icon:        "◈",
+		Shortcut:    "R",
+	},
 }
 
 type tickMsg struct{}
@@ -48,6 +88,7 @@ type tickMsg struct{}
 // Model
 ///////////////////////////////////////////////////////////////////
 
+// Model is the Bubble Tea model for the quick actions popover.
 type Model struct {
 	cursor         int
 	Visible        bool
@@ -63,6 +104,7 @@ type Model struct {
 // Constructor
 ///////////////////////////////////////////////////////////////////
 
+// New creates a new quick actions model with default state.
 func New() Model {
 	return Model{
 		cursor:  0,
@@ -149,7 +191,6 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Animated header with pulsing icon
-	headerFrames := []string{"◆", "◇", "◆", "◈"}
 	headerIcon := lipgloss.NewStyle().
 		Foreground(styles.Accent).
 		Bold(true).
@@ -196,7 +237,6 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 	// Animated cursor indicator
 	cursor := "  "
 	if isCursor {
-		cursorFrames := []string{"▸", "▹", "▸", "▹"}
 		cursor = lipgloss.NewStyle().
 			Foreground(styles.Primary).
 			Bold(true).
@@ -244,17 +284,20 @@ func (m Model) renderAction(action Action, isCursor bool) string {
 // Public Methods
 ///////////////////////////////////////////////////////////////////
 
+// Show makes the quick actions popover visible and resets navigation state.
 func (m *Model) Show() {
 	m.Visible = true
 	m.Done = false
 	m.cursor = 0
 }
 
+// Hide hides the quick actions popover.
 func (m *Model) Hide() {
 	m.Visible = false
 }
 
+// Reset clears the completion state and selected action.
 func (m *Model) Reset() {
 	m.Done = false
-	m.SelectedAction = 0
+	m.SelectedAction = ActionStats
 }

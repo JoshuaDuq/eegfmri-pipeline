@@ -8,7 +8,9 @@ the pipeline for type safety and IDE support.
 from __future__ import annotations
 
 import os
-# Ensure environment variable is set before numpy import
+
+# Suppress macOS NumPy compatibility warning
+# Must be set before numpy import
 os.environ.setdefault("NUMPY_SKIP_MACOS_CHECK", "1")
 
 from dataclasses import dataclass, field
@@ -211,14 +213,12 @@ class BatchResult:
 # Callback Types
 ###################################################################
 
-# Progress callback: receives (stage_name, fraction_complete 0-1)
 ProgressCallback = Callable[[str, float], None]
-LoggerType = Any  # logging.Logger, but avoid import
+LoggerType = Any  # Avoids circular import; represents logging.Logger
 
 
 def null_progress(stage: str, fraction: float) -> None:
-    """No-op progress callback for when progress reporting is disabled."""
-    pass
+    """No-op progress callback when progress reporting is disabled."""
 
 
 ###################################################################
@@ -301,48 +301,56 @@ class TimeWindows:
     name: Optional[str] = None
 
     def _empty_mask(self) -> np.ndarray:
-        """Return an empty mask matching the stored mask length."""
+        """Return an empty boolean mask matching stored mask dimensions."""
         if self.baseline_mask is not None:
-            return np.zeros_like(self.baseline_mask, dtype=bool)
-        if self.active_mask is not None:
-            return np.zeros_like(self.active_mask, dtype=bool)
-        if self.times is not None:
-            return np.zeros_like(self.times, dtype=bool)
-        return np.array([], dtype=bool)
+            reference = self.baseline_mask
+        elif self.active_mask is not None:
+            reference = self.active_mask
+        elif self.times is not None:
+            reference = self.times
+        else:
+            return np.array([], dtype=bool)
+
+        return np.zeros_like(reference, dtype=bool)
 
     def get_mask(self, name: str) -> np.ndarray:
         """Retrieve a boolean mask by semantic name."""
-        if name is None:
-            return self._empty_mask()
         raw_key = str(name)
         key = raw_key.lower()
 
-        # 1. Check specialized fields
-        if key in {"baseline", "pre", "prestim"}:
+        baseline_aliases = {"baseline", "pre", "prestim"}
+        if key in baseline_aliases:
             return self.baseline_mask
-        if key in {"active", "stim", "task"}:
+
+        active_aliases = {"active", "stim", "task"}
+        if key in active_aliases:
             return self.active_mask
 
-        # 2. Check generic dictionary
         if raw_key in self.masks:
             return self.masks[raw_key]
         if key in self.masks:
             return self.masks[key]
 
-        # 3. Dynamic "ramp" computation (compatibility)
         if key == "ramp":
-            if (
-                self.times is not None
-                and np.isfinite(self.baseline_range[1])
-                and np.isfinite(self.active_range[0])
-            ):
-                ramp_mask = (self.times >= self.baseline_range[1]) & (
-                    self.times < self.active_range[0]
-                )
-                if np.any(ramp_mask):
-                    return ramp_mask
+            ramp_mask = self._compute_ramp_mask()
+            if ramp_mask is not None:
+                return ramp_mask
 
         return self._empty_mask()
+
+    def _compute_ramp_mask(self) -> Optional[np.ndarray]:
+        """Compute ramp mask between baseline and active ranges."""
+        if self.times is None:
+            return None
+        if not np.isfinite(self.baseline_range[1]):
+            return None
+        if not np.isfinite(self.active_range[0]):
+            return None
+
+        ramp_mask = (self.times >= self.baseline_range[1]) & (
+            self.times < self.active_range[0]
+        )
+        return ramp_mask if np.any(ramp_mask) else None
 
 
 @dataclass
@@ -410,19 +418,33 @@ class PrecomputedData:
     def crop(self, tmin: float, tmax: float) -> PrecomputedData:
         """Create a new PrecomputedData object cropped to the time range."""
         from eeg_pipeline.utils.analysis.tfr import time_mask
-        from eeg_pipeline.utils.analysis.windowing import TimeWindowSpec, time_windows_from_spec
-        
+
         mask = time_mask(self.times, tmin, tmax)
         if not np.any(mask):
             return self
-            
-        tmin_idx = int(np.where(mask)[0][0])
-        tmax_idx = int(np.where(mask)[0][-1]) + 1
-        
+
+        tmin_idx, tmax_idx = self._get_crop_indices(mask)
         new_times = self.times[mask]
         new_data = self.data[..., mask]
-        
-        cropped = PrecomputedData(
+
+        cropped = self._create_cropped_base(new_times, new_data)
+        self._crop_band_data(cropped, tmin_idx, tmax_idx)
+        self._crop_gfp(cropped, mask)
+        cropped.psd_data = None
+        cropped.windows = self._recompute_windows(new_times)
+
+        return cropped
+
+    def _get_crop_indices(self, mask: np.ndarray) -> Tuple[int, int]:
+        """Extract start and end indices from a boolean mask."""
+        indices = np.where(mask)[0]
+        return int(indices[0]), int(indices[-1]) + 1
+
+    def _create_cropped_base(
+        self, new_times: np.ndarray, new_data: np.ndarray
+    ) -> "PrecomputedData":
+        """Create base PrecomputedData with cropped time and data."""
+        return PrecomputedData(
             data=new_data,
             times=new_times,
             sfreq=self.sfreq,
@@ -433,44 +455,59 @@ class PrecomputedData:
             spatial_modes=self.spatial_modes,
             frequency_bands=self.frequency_bands,
         )
-        
-        # Crop band data
-        for band, bd in self.band_data.items():
-            cropped.band_data[band] = bd.crop(tmin_idx, tmax_idx)
-            
-        # Crop GFP
+
+    def _crop_band_data(
+        self, cropped: "PrecomputedData", tmin_idx: int, tmax_idx: int
+    ) -> None:
+        """Crop all band data to the specified indices."""
+        for band, band_data in self.band_data.items():
+            cropped.band_data[band] = band_data.crop(tmin_idx, tmax_idx)
+
+    def _crop_gfp(self, cropped: "PrecomputedData", mask: np.ndarray) -> None:
+        """Crop GFP arrays using the time mask."""
         if self.gfp is not None:
             cropped.gfp = self.gfp[..., mask]
         for band, gfp_arr in self.gfp_band.items():
             cropped.gfp_band[band] = gfp_arr[..., mask]
-            
-        # PSD needs to be recomputed if it was computed on a different window,
-        # but for now we just clear it or leave it as is if it's already range-specific.
-        # Most extractors will recompute PSD if missing.
-        cropped.psd_data = None 
-            
-        # Recompute windows for the new time range (preserve explicit ranges if available)
-        explicit_windows = None
-        if self.windows is not None and getattr(self.windows, "ranges", None):
-            explicit_windows = [
-                {"name": name, "tmin": rng[0], "tmax": rng[1]}
-                for name, rng in self.windows.ranges.items()
-                if isinstance(rng, (list, tuple)) and len(rng) >= 2
-            ]
+
+    def _recompute_windows(self, new_times: np.ndarray) -> Optional[TimeWindows]:
+        """Recompute time windows for the cropped time range."""
+        from eeg_pipeline.utils.analysis.windowing import (
+            TimeWindowSpec,
+            time_windows_from_spec,
+        )
+
+        explicit_windows = self._extract_explicit_windows()
+        window_name = self.windows.name if self.windows is not None else None
+
         try:
             spec = TimeWindowSpec(
                 times=new_times,
                 config=self.config,
                 sampling_rate=self.sfreq,
                 logger=self.logger,
-                name=getattr(self.windows, "name", None) if self.windows is not None else None,
+                name=window_name,
                 explicit_windows=explicit_windows,
             )
-            cropped.windows = time_windows_from_spec(spec, logger=self.logger, strict=False)
-        except Exception:
-            cropped.windows = None
-            
-        return cropped
+            return time_windows_from_spec(spec, logger=self.logger, strict=False)
+        except (ValueError, TypeError, KeyError):
+            return None
+
+    def _extract_explicit_windows(self) -> Optional[List[Dict[str, Any]]]:
+        """Extract explicit window ranges from existing windows."""
+        if self.windows is None or not hasattr(self.windows, "ranges"):
+            return None
+
+        ranges = self.windows.ranges
+        if not ranges:
+            return None
+
+        explicit_windows = []
+        for name, rng in ranges.items():
+            if isinstance(rng, (list, tuple)) and len(rng) >= 2:
+                explicit_windows.append({"name": name, "tmin": rng[0], "tmax": rng[1]})
+
+        return explicit_windows if explicit_windows else None
 
     def with_windows(self, windows: Optional[TimeWindows]) -> PrecomputedData:
         """Return a shallow copy with updated time windows."""

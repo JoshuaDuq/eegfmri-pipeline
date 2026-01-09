@@ -6,7 +6,7 @@ Common helper functions for creating standardized plots across the pipeline.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,11 +14,11 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.patches import Patch
 
-from eeg_pipeline.plotting.config import get_plot_config
 from eeg_pipeline.utils.analysis.stats import fdr_bh
 from eeg_pipeline.plotting.core.colors import (
-    get_band_colors as _get_band_colors,
-    get_significance_colors as _get_significance_colors,
+    DEFAULT_NEGATIVE_DIRECTION_COLOR,
+    get_band_colors,
+    get_significance_colors,
 )
 
 
@@ -27,81 +27,54 @@ from eeg_pipeline.plotting.core.colors import (
 ###################################################################
 
 
-def get_significance_colors(config: Any = None) -> Tuple[str, str]:
-    """Get significant/non-significant colors from config.
-    
-    Returns:
-        Tuple of (significant_color, nonsignificant_color)
-    """
-    return _get_significance_colors(config)
-
-
-def get_band_colors() -> Dict[str, str]:
-    """Get standard frequency band colors.
-    
-    Returns:
-        Dictionary mapping band names to hex colors
-    """
-    return _get_band_colors()
+CORRELATION_COLORMAP = "RdBu_r"
+EFFECT_SIZE_COLORMAP = "PuOr_r"
 
 
 def get_correlation_cmap() -> str:
     """Get standard correlation colormap name."""
-    return "RdBu_r"
+    return CORRELATION_COLORMAP
 
 
 def get_effect_cmap() -> str:
     """Get standard effect size colormap name."""
-    return "PuOr_r"
-
-
-def get_significance_color(
-    p_value: float,
-    alpha: float = 0.05,
-    config: Any = None,
-) -> str:
-    """Get color based on significance.
-    
-    Args:
-        p_value: P-value to check
-        alpha: Significance threshold
-        config: Pipeline config
-    
-    Returns:
-        Color string
-    """
-    sig_color, nonsig_color = get_significance_colors(config)
-    return sig_color if pd.notna(p_value) and p_value < alpha else nonsig_color
-
-
-def get_direction_color(
-    value: float,
-    p_value: Optional[float] = None,
-    alpha: float = 0.05,
-    config: Any = None,
-) -> str:
-    """Get color based on value direction and significance.
-    
-    Args:
-        value: Effect value (positive/negative)
-        p_value: Optional p-value for significance
-        alpha: Significance threshold
-        config: Pipeline config
-    
-    Returns:
-        Color string
-    """
-    sig_color, nonsig_color = get_significance_colors(config)
-    
-    if p_value is not None and (pd.isna(p_value) or p_value >= alpha):
-        return nonsig_color
-    
-    return sig_color if value > 0 else "#4C72B0"  # Blue for negative
+    return EFFECT_SIZE_COLORMAP
 
 
 ###################################################################
 # Plotting Utilities
 ###################################################################
+
+
+def _determine_marker(
+    p_value: float,
+    q_value: Optional[float],
+    alpha: float,
+    fdr_alpha: Optional[float],
+    marker: str,
+    fdr_marker: str,
+) -> Optional[str]:
+    """Determine which marker to use based on significance.
+    
+    Args:
+        p_value: P-value
+        q_value: Optional q-value for FDR correction
+        alpha: Significance threshold
+        fdr_alpha: Optional FDR alpha threshold
+        marker: Marker for uncorrected significance
+        fdr_marker: Marker for FDR-corrected significance
+    
+    Returns:
+        Marker string or None if not significant
+    """
+    use_fdr_correction = q_value is not None and fdr_alpha is not None
+    if use_fdr_correction and pd.notna(q_value) and q_value < fdr_alpha:
+        return fdr_marker
+    
+    if pd.notna(p_value) and p_value < alpha:
+        return marker
+    
+    return None
 
 
 def add_significance_markers(
@@ -128,27 +101,29 @@ def add_significance_markers(
         fdr_alpha: Optional FDR alpha threshold
         fdr_marker: Marker character for FDR-significant cells
     """
-    if p_values is None or data_values is None:
+    if p_values is None or p_values.empty:
         return
-    if p_values.empty or data_values.empty:
+    if data_values is None or data_values.empty:
         return
     
-    use_q = q_values is not None and fdr_alpha is not None
-    if use_q and not q_values.empty:
+    use_fdr_correction = q_values is not None and fdr_alpha is not None
+    if use_fdr_correction and not q_values.empty:
         q_values = q_values.reindex_like(p_values)
     
     for i, row in enumerate(p_values.index):
         for j, col in enumerate(p_values.columns):
             if row not in data_values.index or col not in data_values.columns:
                 continue
+            
             p_val = p_values.loc[row, col]
-            marker_text = None
-            if use_q and q_values is not None and row in q_values.index and col in q_values.columns:
+            q_val = None
+            if use_fdr_correction and row in q_values.index and col in q_values.columns:
                 q_val = q_values.loc[row, col]
-                if pd.notna(q_val) and q_val < fdr_alpha:
-                    marker_text = fdr_marker
-            if marker_text is None and pd.notna(p_val) and p_val < alpha:
-                marker_text = marker
+            
+            marker_text = _determine_marker(
+                p_val, q_val, alpha, fdr_alpha, marker, fdr_marker
+            )
+            
             if marker_text:
                 ax.text(
                     j + 0.5,
@@ -169,17 +144,23 @@ def compute_q_values_table(
 ) -> Optional[pd.DataFrame]:
     """BH-FDR adjustment for a rectangular p-value table.
     
-    Returns a DataFrame of q-values aligned to the input.
+    Args:
+        p_values: DataFrame of p-values
+        alpha: FDR alpha threshold
+        config: Pipeline config
+    
+    Returns:
+        DataFrame of q-values aligned to input, or None if input is invalid
     """
     if p_values is None or p_values.empty:
         return None
     
-    flat = pd.to_numeric(p_values.stack(), errors="coerce")
-    if flat.empty:
+    flattened_p_values = pd.to_numeric(p_values.stack(), errors="coerce")
+    if flattened_p_values.empty:
         return None
     
-    q_flat = fdr_bh(flat.values, alpha=alpha, config=config)
-    q_series = pd.Series(q_flat, index=flat.index)
+    q_values_flat = fdr_bh(flattened_p_values.values, alpha=alpha, config=config)
+    q_series = pd.Series(q_values_flat, index=flattened_p_values.index)
     return q_series.unstack().reindex_like(p_values)
 
 
@@ -205,18 +186,23 @@ def create_horizontal_bar_plot(
         height: Bar height
         add_zero_line: Whether to add vertical line at x=0
     """
-    y_pos = np.arange(len(values))
+    if len(values) != len(labels):
+        raise ValueError(
+            f"Values and labels must have same length: {len(values)} vs {len(labels)}"
+        )
+    
+    y_positions = np.arange(len(values))
     
     if colors is None:
         sig_color, nonsig_color = get_significance_colors(config)
         colors = [sig_color if v > 0 else nonsig_color for v in values]
     
-    ax.barh(y_pos, values, color=colors, alpha=alpha, height=height)
+    ax.barh(y_positions, values, color=colors, alpha=alpha, height=height)
     
     if add_zero_line:
         ax.axvline(0, color="gray", linestyle="-", linewidth=1)
     
-    ax.set_yticks(y_pos)
+    ax.set_yticks(y_positions)
     ax.set_yticklabels(labels, fontsize=8)
 
 
@@ -224,7 +210,7 @@ def create_correlation_heatmap(
     ax: plt.Axes,
     data: pd.DataFrame,
     vmax: Optional[float] = None,
-    cmap: str = "RdBu_r",
+    cmap: str = CORRELATION_COLORMAP,
     annot: bool = True,
     fmt: str = ".2f",
     annot_fontsize: int = 9,
@@ -251,14 +237,22 @@ def create_correlation_heatmap(
         return
     
     if vmax is None:
-        vmax = max(0.3, data.abs().max().max())
+        max_absolute_value = data.abs().max().max()
+        vmax = max(0.3, max_absolute_value)
     
     sns.heatmap(
-        data, ax=ax, cmap=cmap, center=0,
-        vmin=-vmax, vmax=vmax,
-        annot=annot, fmt=fmt, annot_kws={"size": annot_fontsize},
+        data,
+        ax=ax,
+        cmap=cmap,
+        center=0,
+        vmin=-vmax,
+        vmax=vmax,
+        annot=annot,
+        fmt=fmt,
+        annot_kws={"size": annot_fontsize},
         cbar_kws={"label": cbar_label, "shrink": 0.8},
-        linewidths=linewidths, linecolor=linecolor,
+        linewidths=linewidths,
+        linecolor=linecolor,
     )
 
 
@@ -278,9 +272,11 @@ def add_effect_size_guidelines(
         medium: Medium effect threshold
         large: Large effect threshold
     """
-    line_func = ax.axvline if orientation == "vertical" else ax.axhline
+    is_vertical = orientation == "vertical"
+    line_func = ax.axvline if is_vertical else ax.axhline
     
-    for threshold in [-large, -medium, -small, small, medium, large]:
+    thresholds = [-large, -medium, -small, small, medium, large]
+    for threshold in thresholds:
         line_func(threshold, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
 
 
@@ -337,8 +333,12 @@ def format_stats_summary(
     Returns:
         Formatted summary string
     """
-    pct = 100 * n_significant / n_total if n_total > 0 else 0
-    return f"Significant {effect_type}: {n_significant}/{n_total} ({pct:.1f}%)"
+    if n_total == 0:
+        percentage = 0.0
+    else:
+        percentage = 100 * n_significant / n_total
+    
+    return f"Significant {effect_type}: {n_significant}/{n_total} ({percentage:.1f}%)"
 
 
 ###################################################################
@@ -367,7 +367,7 @@ def add_significance_legend(
     if include_direction:
         legend_elements = [
             Patch(facecolor=sig_color, label="Positive (p<0.05)"),
-            Patch(facecolor="#4C72B0", label="Negative (p<0.05)"),
+            Patch(facecolor=DEFAULT_NEGATIVE_DIRECTION_COLOR, label="Negative (p<0.05)"),
             Patch(facecolor=nonsig_color, label="Not significant"),
         ]
     else:
@@ -398,9 +398,11 @@ def add_band_legend(
     if bands is None:
         bands = list(band_colors.keys())
     
+    default_color = "gray"
     legend_elements = [
-        Patch(facecolor=band_colors.get(b, "gray"), label=b.title())
-        for b in bands if b in band_colors
+        Patch(facecolor=band_colors.get(band, default_color), label=band.title())
+        for band in bands
+        if band in band_colors
     ]
     
     ax.legend(handles=legend_elements, loc=loc, fontsize=fontsize)

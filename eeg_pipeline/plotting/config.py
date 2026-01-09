@@ -13,10 +13,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-###################################################################
-# Configuration Dataclasses
-###################################################################
+DEFAULT_FALLBACK_COLOR = "#666666"
+DEFAULT_FIGURE_SIZE = (10.0, 8.0)
 
 
 @dataclass
@@ -97,7 +95,6 @@ class ColorPalette:
     blue: str = "#1f77b4"
     significant: str = "#C42847"
     nonsignificant: str = "#666666"
-    # Legacy names retained for backward compatibility; prefer condition_1/condition_2 in config/UI.
     pain: str = "crimson"
     nonpain: str = "navy"
     network_node: str = "#87CEEB"
@@ -133,7 +130,7 @@ class TextPosition:
     stats_x: float = 0.05
     stats_y: float = 0.95
     p_value_x: float = 0.98
-    p_value_y: float = 0.88  # Lowered from 0.98 to avoid title overlap
+    p_value_y: float = 0.88
     bootstrap_x: float = 0.02
     bootstrap_y: float = 0.98
     channel_annotation_x: float = 0.02
@@ -179,22 +176,61 @@ class PlotConfig:
         
         defaults = plotting.get("defaults", {})
         styling = plotting.get("styling", {})
-        figure_sizes_dict = plotting.get("figure_sizes", {})
+        
+        plot_types = cls._build_plot_type_configs(plotting)
+        layout_rects = cls._build_layout_rects(defaults)
+        gridspec_params = cls._build_gridspec_params(defaults)
+        figure_sizes = cls._build_figure_sizes(plotting.get("figure_sizes", {}))
+        
+        font = cls._build_font_config(defaults)
+        style = cls._build_style_config(styling)
+        text_position = cls._build_text_position(styling)
+        
+        return cls(
+            dpi=defaults.get("dpi", 300),
+            savefig_dpi=defaults.get("savefig_dpi", 600),
+            formats=tuple(defaults.get("formats", ["png", "svg"])),
+            bbox_inches=defaults.get("bbox_inches", "tight"),
+            pad_inches=defaults.get("pad_inches", 0.02),
+            font=font,
+            style=style,
+            text_position=text_position,
+            figure_sizes=figure_sizes,
+            plot_type_configs=plot_types,
+            validation=plotting.get("validation", {}),
+            layout_rects=layout_rects,
+            gridspec_params=gridspec_params,
+        )
+    
+    @staticmethod
+    def _build_plot_type_configs(plotting: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """Build plot type configurations dictionary."""
         plots_config = plotting.get("plots", {})
         behavioral_config = plotting.get("behavioral", {})
-        validation_dict = plotting.get("validation", {})
         
         plot_types = dict(plots_config) if isinstance(plots_config, dict) else {}
         if isinstance(behavioral_config, dict) and behavioral_config:
             plot_types["behavioral"] = behavioral_config
         
+        return plot_types
+    
+    @staticmethod
+    def _build_layout_rects(defaults: Dict[str, Any]) -> Dict[str, List[float]]:
+        """Build layout rectangles dictionary."""
         layout = defaults.get("layout", {})
-        layout_rects = {
+        return {
             "tight_rect": layout.get("tight_rect", [0, 0.03, 1, 1]),
-            "tight_rect_microstate": layout.get("tight_rect_microstate", [0, 0.02, 1, 0.96]),
+            "tight_rect_microstate": layout.get(
+                "tight_rect_microstate", [0, 0.02, 1, 0.96]
+            ),
         }
+    
+    @staticmethod
+    def _build_gridspec_params(defaults: Dict[str, Any]) -> Dict[str, Any]:
+        """Build gridspec parameters dictionary."""
+        layout = defaults.get("layout", {})
         gridspec_config = layout.get("gridspec", {})
-        gridspec_params = {
+        return {
             "width_ratios": gridspec_config.get("width_ratios", [4, 1]),
             "height_ratios": gridspec_config.get("height_ratios", [1, 4]),
             "hspace": gridspec_config.get("hspace", 0.15),
@@ -204,7 +240,10 @@ class PlotConfig:
             "top": gridspec_config.get("top", 0.80),
             "bottom": gridspec_config.get("bottom", 0.12),
         }
-        
+    
+    @staticmethod
+    def _build_figure_sizes(figure_sizes_dict: Dict[str, Any]) -> Dict[str, Tuple[float, float]]:
+        """Build figure sizes dictionary from config."""
         figure_sizes = {}
         for name, size in figure_sizes_dict.items():
             if isinstance(size, list) and len(size) == 2:
@@ -215,10 +254,14 @@ class PlotConfig:
                         figure_sizes[f"{name}_{sub_name}"] = (sub_size, sub_size)
                     elif isinstance(sub_size, list) and len(sub_size) == 2:
                         figure_sizes[f"{name}_{sub_name}"] = tuple(sub_size)
-        
+        return figure_sizes
+    
+    @staticmethod
+    def _build_font_config(defaults: Dict[str, Any]) -> FontConfig:
+        """Build font configuration from defaults."""
         font_dict = defaults.get("font", {})
         font_sizes = font_dict.get("sizes", {})
-        font = FontConfig(
+        return FontConfig(
             small=font_sizes.get("small", 7),
             medium=font_sizes.get("medium", 8),
             large=font_sizes.get("large", 9),
@@ -231,10 +274,48 @@ class PlotConfig:
             family=font_dict.get("family", "sans-serif"),
             weight=font_dict.get("weight", "normal"),
         )
+    
+    @staticmethod
+    def _build_style_config(styling: Dict[str, Any]) -> PlotStyleConfig:
+        """Build complete style configuration from styling dict."""
+        scatter = PlotConfig._build_scatter_style(styling)
+        bar = PlotConfig._build_bar_style(styling)
+        line = PlotConfig._build_line_style(styling)
+        histogram = PlotConfig._build_histogram_style(styling)
+        colors = PlotConfig._build_color_palette(styling)
         
+        kde_dict = styling.get("kde", {})
+        alpha_dict = styling.get("alpha", {})
+        errorbar_dict = styling.get("errorbar", {})
+        
+        return PlotStyleConfig(
+            scatter=scatter,
+            bar=bar,
+            line=line,
+            histogram=histogram,
+            kde_points=kde_dict.get("points", 100),
+            kde_color=kde_dict.get("color", "darkblue"),
+            kde_linewidth=kde_dict.get("linewidth", 1.5),
+            kde_alpha=kde_dict.get("alpha", 0.8),
+            errorbar_markersize=errorbar_dict.get("markersize", 4),
+            errorbar_capsize=errorbar_dict.get("capsize", 2),
+            errorbar_capsize_large=errorbar_dict.get("capsize_large", 3),
+            colors=colors,
+            alpha_grid=alpha_dict.get("grid", 0.3),
+            alpha_fill=alpha_dict.get("fill", 0.6),
+            alpha_text_box=alpha_dict.get("text_box", 0.8),
+            alpha_violin_body=alpha_dict.get("violin_body", 0.6),
+            alpha_ridge_fill=alpha_dict.get("ridge_fill", 0.6),
+            alpha_ci=alpha_dict.get("ci", 0.1),
+            alpha_ci_line=alpha_dict.get("ci_line", 0.5),
+        )
+    
+    @staticmethod
+    def _build_scatter_style(styling: Dict[str, Any]) -> ScatterStyle:
+        """Build scatter plot style from styling dict."""
         scatter_dict = styling.get("scatter", {})
         marker_sizes = scatter_dict.get("marker_size", {})
-        scatter = ScatterStyle(
+        return ScatterStyle(
             marker_size_small=marker_sizes.get("small", 3),
             marker_size_large=marker_sizes.get("large", 30),
             marker_size_default=marker_sizes.get("default", 30),
@@ -242,19 +323,25 @@ class PlotConfig:
             edgecolor=scatter_dict.get("edgecolor", "white"),
             edgewidth=scatter_dict.get("edgewidth", 0.3),
         )
-        
+    
+    @staticmethod
+    def _build_bar_style(styling: Dict[str, Any]) -> BarStyle:
+        """Build bar plot style from styling dict."""
         bar_dict = styling.get("bar", {})
-        bar = BarStyle(
+        return BarStyle(
             alpha=bar_dict.get("alpha", 0.8),
             width=bar_dict.get("width", 0.6),
             capsize=bar_dict.get("capsize", 4),
             capsize_large=bar_dict.get("capsize_large", 3),
         )
-        
+    
+    @staticmethod
+    def _build_line_style(styling: Dict[str, Any]) -> LineStyle:
+        """Build line plot style from styling dict."""
         line_dict = styling.get("line", {})
         line_widths = line_dict.get("width", {})
         line_alphas = line_dict.get("alpha", {})
-        line = LineStyle(
+        return LineStyle(
             width_thin=line_widths.get("thin", 0.5),
             width_standard=line_widths.get("standard", 0.75),
             width_thick=line_widths.get("thick", 1.0),
@@ -269,9 +356,12 @@ class PlotConfig:
             residual_width=line_dict.get("residual_width", 1.0),
             qq_width=line_dict.get("qq_width", 0.4),
         )
-        
+    
+    @staticmethod
+    def _build_histogram_style(styling: Dict[str, Any]) -> HistogramStyle:
+        """Build histogram style from styling dict."""
         hist_dict = styling.get("histogram", {})
-        histogram = HistogramStyle(
+        return HistogramStyle(
             bins=hist_dict.get("bins", 30),
             bins_behavioral=hist_dict.get("bins_behavioral", 15),
             bins_residual=hist_dict.get("bins_residual", 20),
@@ -282,12 +372,18 @@ class PlotConfig:
             alpha_residual=hist_dict.get("alpha_residual", 0.75),
             alpha_tfr=hist_dict.get("alpha_tfr", 0.8),
         )
-        
-        kde_dict = styling.get("kde", {})
+    
+    @staticmethod
+    def _build_color_palette(styling: Dict[str, Any]) -> ColorPalette:
+        """Build color palette from styling dict."""
         colors_dict = styling.get("colors", {})
-        condition_1 = colors_dict.get("condition_1", colors_dict.get("nonpain", "navy"))
-        condition_2 = colors_dict.get("condition_2", colors_dict.get("pain", "crimson"))
-        colors = ColorPalette(
+        condition_1 = colors_dict.get(
+            "condition_1", colors_dict.get("nonpain", "navy")
+        )
+        condition_2 = colors_dict.get(
+            "condition_2", colors_dict.get("pain", "crimson")
+        )
+        return ColorPalette(
             gray=colors_dict.get("gray", "#555555"),
             light_gray=colors_dict.get("light_gray", "#999999"),
             black=colors_dict.get("black", "k"),
@@ -299,32 +395,12 @@ class PlotConfig:
             nonpain=condition_1,
             network_node=colors_dict.get("network_node", "#87CEEB"),
         )
-        
-        alpha_dict = styling.get("alpha", {})
-        style = PlotStyleConfig(
-            scatter=scatter,
-            bar=bar,
-            line=line,
-            histogram=histogram,
-            kde_points=kde_dict.get("points", 100),
-            kde_color=kde_dict.get("color", "darkblue"),
-            kde_linewidth=kde_dict.get("linewidth", 1.5),
-            kde_alpha=kde_dict.get("alpha", 0.8),
-            errorbar_markersize=styling.get("errorbar", {}).get("markersize", 4),
-            errorbar_capsize=styling.get("errorbar", {}).get("capsize", 2),
-            errorbar_capsize_large=styling.get("errorbar", {}).get("capsize_large", 3),
-            colors=colors,
-            alpha_grid=alpha_dict.get("grid", 0.3),
-            alpha_fill=alpha_dict.get("fill", 0.6),
-            alpha_text_box=alpha_dict.get("text_box", 0.8),
-            alpha_violin_body=alpha_dict.get("violin_body", 0.6),
-            alpha_ridge_fill=alpha_dict.get("ridge_fill", 0.6),
-            alpha_ci=alpha_dict.get("ci", 0.1),
-            alpha_ci_line=alpha_dict.get("ci_line", 0.5),
-        )
-        
+    
+    @staticmethod
+    def _build_text_position(styling: Dict[str, Any]) -> TextPosition:
+        """Build text position configuration from styling dict."""
         text_pos_dict = styling.get("text_position", {})
-        text_position = TextPosition(
+        return TextPosition(
             stats_x=text_pos_dict.get("stats_x", 0.05),
             stats_y=text_pos_dict.get("stats_y", 0.95),
             p_value_x=text_pos_dict.get("p_value_x", 0.98),
@@ -335,22 +411,6 @@ class PlotConfig:
             channel_annotation_y=text_pos_dict.get("channel_annotation_y", 0.94),
             title_y=text_pos_dict.get("title_y", 0.975),
             residual_qc_title_y=text_pos_dict.get("residual_qc_title_y", 1.02),
-        )
-        
-        return cls(
-            dpi=defaults.get("dpi", 300),
-            savefig_dpi=defaults.get("savefig_dpi", 600),
-            formats=tuple(defaults.get("formats", ["png", "svg"])),
-            bbox_inches=defaults.get("bbox_inches", "tight"),
-            pad_inches=defaults.get("pad_inches", 0.02),
-            font=font,
-            style=style,
-            text_position=text_position,
-            figure_sizes=figure_sizes,
-            plot_type_configs=plot_types,
-            validation=validation_dict,
-            layout_rects=layout_rects,
-            gridspec_params=gridspec_params,
         )
     
     @classmethod
@@ -381,12 +441,16 @@ class PlotConfig:
             return self.plot_type_configs[plot_type].get(key)
         return None
     
-    def get_figure_size(self, size_name: str, plot_type: Optional[str] = None) -> Tuple[float, float]:
+    def get_figure_size(
+        self, size_name: str, plot_type: Optional[str] = None
+    ) -> Tuple[float, float]:
         override = self._get_plot_type_override(plot_type, "figure_size")
         if override:
             size_name = override
         
-        return self.figure_sizes.get(size_name, self.figure_sizes.get("standard", (10.0, 8.0)))
+        return self.figure_sizes.get(
+            size_name, self.figure_sizes.get("standard", DEFAULT_FIGURE_SIZE)
+        )
     
     def get_scatter_marker_size(self, plot_type: Optional[str] = None) -> int:
         override = self._get_plot_type_override(plot_type, "scatter_marker_size")
@@ -413,23 +477,37 @@ class PlotConfig:
         """Get color value, ensuring it's a valid hex string."""
         import matplotlib.colors as mcolors
         
-        if plot_type and plot_type in self.plot_type_configs:
-            colors = self.plot_type_configs[plot_type].get("colors", {})
-            if color_name in colors:
-                color_val = colors[color_name]
-                if color_val is None:
-                    return "#666666"
-                color_str = str(color_val)
-                # Convert to hex if needed
-                try:
-                    if color_str.startswith("#"):
-                        return color_str
-                    # Convert named color to hex
-                    rgba = mcolors.to_rgba(color_str)
-                    return mcolors.to_hex(rgba)
-                except (ValueError, TypeError):
-                    return "#666666"
+        plot_type_color = self._get_color_from_plot_type(
+            color_name, plot_type, mcolors
+        )
+        if plot_type_color is not None:
+            return plot_type_color
         
+        color_value = self._get_color_from_defaults(color_name)
+        return self._convert_to_hex(color_value, mcolors)
+    
+    def _get_color_from_plot_type(
+        self,
+        color_name: str,
+        plot_type: Optional[str],
+        mcolors: Any,
+    ) -> Optional[str]:
+        """Get color from plot type specific config if available."""
+        if not plot_type or plot_type not in self.plot_type_configs:
+            return None
+        
+        colors = self.plot_type_configs[plot_type].get("colors", {})
+        if color_name not in colors:
+            return None
+        
+        color_value = colors[color_name]
+        if color_value is None:
+            return DEFAULT_FALLBACK_COLOR
+        
+        return self._convert_to_hex(color_value, mcolors)
+    
+    def _get_color_from_defaults(self, color_name: str) -> str:
+        """Get color value from default color map."""
         color_map = {
             "gray": self.style.colors.gray,
             "light_gray": self.style.colors.light_gray,
@@ -438,28 +516,29 @@ class PlotConfig:
             "blue": self.style.colors.blue,
             "significant": self.style.colors.significant,
             "nonsignificant": self.style.colors.nonsignificant,
-            # Condition colors (preferred)
             "condition_1": self.style.colors.nonpain,
             "condition_2": self.style.colors.pain,
-            # Backward compatible aliases
             "pain": self.style.colors.pain,
             "nonpain": self.style.colors.nonpain,
             "network_node": self.style.colors.network_node,
         }
-        color_val = color_map.get(color_name, self.style.colors.gray)
-        if color_val is None:
-            return "#666666"
-        color_str = str(color_val)
+        return color_map.get(color_name, self.style.colors.gray)
+    
+    @staticmethod
+    def _convert_to_hex(color_value: Any, mcolors: Any) -> str:
+        """Convert color value to hex string."""
+        if color_value is None:
+            return DEFAULT_FALLBACK_COLOR
         
-        # Convert to hex if not already
+        color_str = str(color_value)
+        if color_str.startswith("#"):
+            return color_str
+        
         try:
-            if color_str.startswith("#"):
-                return color_str
-            # Convert named color (crimson, navy, k, etc.) to hex
             rgba = mcolors.to_rgba(color_str)
             return mcolors.to_hex(rgba)
         except (ValueError, TypeError):
-            return "#666666"  # Fallback
+            return DEFAULT_FALLBACK_COLOR
     
     def get_histogram_bins(self, plot_type: Optional[str] = None) -> int:
         """Get histogram bins based on plot type.
@@ -478,7 +557,7 @@ class PlotConfig:
             return self.style.histogram.bins_residual
         return self.style.histogram.bins
     
-    def get_layout_rect(self, rect_name: str = "tight_rect") -> list:
+    def get_layout_rect(self, rect_name: str = "tight_rect") -> List[float]:
         """Get layout rectangle from stored config.
         
         Args:
@@ -487,25 +566,24 @@ class PlotConfig:
         Returns:
             List [left, bottom, right, top]
         """
-        return self.layout_rects.get(rect_name, [0, 0.03, 1, 1] if rect_name == "tight_rect" else [0, 0.02, 1, 0.96])
+        default_tight = [0, 0.03, 1, 1]
+        default_microstate = [0, 0.02, 1, 0.96]
+        default_rect = default_tight if rect_name == "tight_rect" else default_microstate
+        return self.layout_rects.get(rect_name, default_rect)
     
     def get_gridspec_params(self) -> Dict[str, Any]:
         """Get gridspec layout parameters from stored config.
         
         Returns:
-            Dictionary with gridspec parameters (width_ratios, height_ratios, hspace, wspace, left, right, top, bottom)
+            Dictionary with gridspec parameters.
         """
         return self.gridspec_params.copy()
     
     def get_behavioral_config(self) -> Dict[str, Any]:
         """Get behavioral plotting configuration.
         
-        Returns behavioral-specific configuration dictionary from plot_type_configs.
-        This method centralizes behavioral config access to break circular dependencies.
-        
         Returns:
             Dictionary containing behavioral plot configuration parameters.
-            Returns empty dict if "behavioral" key is not present in plot_type_configs.
         """
         return self.plot_type_configs.get("behavioral", {})
 
@@ -540,32 +618,45 @@ def get_plot_config(config: Optional[Any] = None) -> PlotConfig:
             _plot_config_cache = PlotConfig.get_defaults()
         return _plot_config_cache
     
-    config_dict = {}
-    
-    if isinstance(config, dict):
-        config_dict = config
-    elif hasattr(config, "get"):
-        try:
-            plotting_dict = config.get("plotting", {})
-            if isinstance(plotting_dict, dict):
-                config_dict = {"plotting": plotting_dict}
-            else:
-                config_dict = {}
-        except (TypeError, AttributeError):
-            logger.warning("Could not extract plotting config, using defaults")
-            return PlotConfig.get_defaults()
-    else:
-        try:
-            if hasattr(config, "__dict__"):
-                config_dict = dict(config)
-            elif hasattr(config, "items"):
-                config_dict = dict(config)
-        except (TypeError, AttributeError):
-            logger.warning("Could not convert config to dict, using defaults")
-            return PlotConfig.get_defaults()
-    
+    config_dict = _extract_config_dict(config)
     _plot_config_cache = PlotConfig.from_config(config_dict)
     return _plot_config_cache
+
+
+def _extract_config_dict(config: Any) -> Dict[str, Any]:
+    """Extract plotting config dictionary from various config types."""
+    if isinstance(config, dict):
+        return config
+    
+    if hasattr(config, "get"):
+        return _extract_from_dict_like(config)
+    
+    return _extract_from_object_like(config)
+
+
+def _extract_from_dict_like(config: Any) -> Dict[str, Any]:
+    """Extract config from dict-like object."""
+    try:
+        plotting_dict = config.get("plotting", {})
+        if isinstance(plotting_dict, dict):
+            return {"plotting": plotting_dict}
+        return {}
+    except (TypeError, AttributeError):
+        logger.warning("Could not extract plotting config, using defaults")
+        return {}
+
+
+def _extract_from_object_like(config: Any) -> Dict[str, Any]:
+    """Extract config from object-like structure."""
+    try:
+        if hasattr(config, "__dict__"):
+            return dict(config)
+        if hasattr(config, "items"):
+            return dict(config)
+        return {}
+    except (TypeError, AttributeError):
+        logger.warning("Could not convert config to dict, using defaults")
+        return {}
 
 
 def reset_plot_config_cache() -> None:

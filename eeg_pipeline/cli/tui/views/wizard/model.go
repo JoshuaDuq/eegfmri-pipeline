@@ -18,6 +18,27 @@ import (
 )
 
 ///////////////////////////////////////////////////////////////////
+// Constants
+///////////////////////////////////////////////////////////////////
+
+const (
+	// Time range editing states
+	noRangeEditing = -1
+	fieldName      = 0
+	fieldTmin      = 1
+	fieldTmax      = 2
+	numTimeRangeFields = 3
+
+	// Scroll offset calculation
+	minVisibleLines = 8
+	defaultTerminalHeight = 40
+
+
+	// Minimum buffer length for single character input
+	singleCharLength = 1
+)
+
+///////////////////////////////////////////////////////////////////
 // Data Definitions
 ///////////////////////////////////////////////////////////////////
 
@@ -537,8 +558,8 @@ type Model struct {
 	// Time range input (for features pipeline)
 	TimeRanges      []types.TimeRange
 	timeRangeCursor int // Which range is focused
-	editingRangeIdx int // Which range is being edited (-1 for none)
-	editingField    int // 0=name, 1=tmin, 2=tmax
+	editingRangeIdx int // Which range is being edited (noRangeEditing for none)
+	editingField    int // fieldName, fieldTmin, or fieldTmax
 
 	// Feature availability with timestamps
 	featureAvailability map[string]bool
@@ -822,7 +843,7 @@ type Model struct {
 	advancedOffset     int  // Scroll offset for advanced config lists
 
 	// Multi-select expansion state for advanced config
-	expandedOption int // -1 = none expanded
+	expandedOption int // expandedNone = none expanded
 	subCursor      int // Cursor within the expanded list
 
 	// Text input mode for numeric config values
@@ -1361,8 +1382,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		spatialSelected:         make(map[int]bool),
 		helpOverlay:             help,
 		// Advanced config defaults (shared)
-		useDefaultAdvanced:                true,
-		expandedOption:                    expandedNone, // No option expanded initially
+		useDefaultAdvanced: true,
+		expandedOption:     expandedNone,
 		connectivityMeasures:              make(map[int]bool),
 		featGroupConnectivityExpanded:     false,
 		featGroupPACExpanded:              false,
@@ -1768,7 +1789,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		{Name: "baseline", Tmin: "", Tmax: ""},
 		{Name: "active", Tmin: "", Tmax: ""},
 	}
-	m.editingRangeIdx = -1
+	m.editingRangeIdx = noRangeEditing
 
 	switch pipeline {
 	case types.PipelineFeatures:
@@ -2000,11 +2021,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.filteringSubject = false
 			case "backspace":
-				if len(m.subjectFilter) > 0 {
+				if hasContent := len(m.subjectFilter) > 0; hasContent {
 					m.subjectFilter = m.subjectFilter[:len(m.subjectFilter)-1]
 				}
 			default:
-				if len(msg.String()) == 1 {
+				if isSingleChar := len(msg.String()) == singleCharLength; isSingleChar {
 					m.subjectFilter += msg.String()
 				}
 			}
@@ -2049,11 +2070,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editingPlotField = plotItemConfigFieldNone
 				return m, nil
 			case "backspace":
-				if len(m.textBuffer) > 0 {
+				if hasContent := len(m.textBuffer) > 0; hasContent {
 					m.textBuffer = m.textBuffer[:len(m.textBuffer)-1]
 				}
 			default:
-				if len(msg.String()) == 1 {
+				if isSingleChar := len(msg.String()) == singleCharLength; isSingleChar {
 					m.textBuffer += msg.String()
 				}
 			}
@@ -2071,13 +2092,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editingNumber = false
 				m.numberBuffer = ""
 			case "backspace":
-				if len(m.numberBuffer) > 0 {
+				if hasContent := len(m.numberBuffer) > 0; hasContent {
 					m.numberBuffer = m.numberBuffer[:len(m.numberBuffer)-1]
 				}
 			default:
 				// Accept digits, decimal point, and minus sign
 				char := msg.String()
-				if len(char) == 1 && (char >= "0" && char <= "9" || char == "." || char == "-") {
+				isValidNumericChar := len(char) == singleCharLength && 
+					(char >= "0" && char <= "9" || char == "." || char == "-")
+				if isValidNumericChar {
 					m.numberBuffer += char
 				}
 			}
@@ -2085,43 +2108,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Handle time range input for tmin/tmax
-		if m.editingRangeIdx >= 0 && m.editingRangeIdx < len(m.TimeRanges) {
+		isEditingRange := m.editingRangeIdx >= 0 && m.editingRangeIdx < len(m.TimeRanges)
+		if isEditingRange {
 			switch msg.String() {
 			case "esc":
-				m.editingRangeIdx = -1
+				m.editingRangeIdx = noRangeEditing
 			case "enter":
 				// Commit and move to next field, or exit if at end
-				if m.editingField < 2 {
-					m.editingField++
+				isLastField := m.editingField >= fieldTmax
+				if isLastField {
+					m.editingRangeIdx = noRangeEditing
+					m.editingField = fieldName
 				} else {
-					m.editingRangeIdx = -1
-					m.editingField = 0
+					m.editingField++
 				}
 			case "tab":
 				// Cycle through fields
-				m.editingField = (m.editingField + 1) % 3
+				m.editingField = (m.editingField + 1) % numTimeRangeFields
 			case "backspace":
 				ref := &m.TimeRanges[m.editingRangeIdx]
-				if m.editingField == 0 && len(ref.Name) > 0 {
+				isNameField := m.editingField == fieldName
+				isTminField := m.editingField == fieldTmin
+				isTmaxField := m.editingField == fieldTmax
+				
+				if isNameField && len(ref.Name) > 0 {
 					ref.Name = ref.Name[:len(ref.Name)-1]
-				} else if m.editingField == 1 && len(ref.Tmin) > 0 {
+				} else if isTminField && len(ref.Tmin) > 0 {
 					ref.Tmin = ref.Tmin[:len(ref.Tmin)-1]
-				} else if m.editingField == 2 && len(ref.Tmax) > 0 {
+				} else if isTmaxField && len(ref.Tmax) > 0 {
 					ref.Tmax = ref.Tmax[:len(ref.Tmax)-1]
 				}
 			default:
-				r := msg.String()
-				if len(r) == 1 {
+				char := msg.String()
+				if len(char) == singleCharLength {
 					ref := &m.TimeRanges[m.editingRangeIdx]
-					if m.editingField == 0 {
-						ref.Name += r
+					if m.editingField == fieldName {
+						ref.Name += char
 					} else {
 						// For numeric fields, only accept digits, dot, minus
-						if (r >= "0" && r <= "9") || r == "." || r == "-" {
-							if m.editingField == 1 {
-								ref.Tmin += r
+						isNumericChar := (char >= "0" && char <= "9") || char == "." || char == "-"
+						if isNumericChar {
+							if m.editingField == fieldTmin {
+								ref.Tmin += char
 							} else {
-								ref.Tmax += r
+								ref.Tmax += char
 							}
 						}
 					}
@@ -2154,26 +2184,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.handleTab()
 		case "a":
-			if m.CurrentStep == types.StepTimeRange && m.editingRangeIdx == -1 {
+			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
+			isNotEditing := m.editingRangeIdx == noRangeEditing
+			if isTimeRangeStep && isNotEditing {
 				newName := fmt.Sprintf("range%d", len(m.TimeRanges)+1)
 				m.TimeRanges = append(m.TimeRanges, types.TimeRange{Name: newName, Tmin: "", Tmax: ""})
 				m.timeRangeCursor = len(m.TimeRanges) - 1
 				m.editingRangeIdx = m.timeRangeCursor
-				m.editingField = 0 // Focus Name for new range
+				m.editingField = fieldName
 			} else {
 				m.selectAll()
 			}
 		case "d", "x":
-			if m.CurrentStep == types.StepTimeRange && m.editingRangeIdx == -1 {
-				if len(m.TimeRanges) > 0 {
-					idx := m.timeRangeCursor
-					m.TimeRanges = append(m.TimeRanges[:idx], m.TimeRanges[idx+1:]...)
-					if m.timeRangeCursor >= len(m.TimeRanges) {
-						m.timeRangeCursor = len(m.TimeRanges) - 1
-					}
-					if m.timeRangeCursor < 0 {
-						m.timeRangeCursor = 0
-					}
+			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
+			isNotEditing := m.editingRangeIdx == noRangeEditing
+			hasRanges := len(m.TimeRanges) > 0
+			if isTimeRangeStep && isNotEditing && hasRanges {
+				idx := m.timeRangeCursor
+				m.TimeRanges = append(m.TimeRanges[:idx], m.TimeRanges[idx+1:]...)
+				if m.timeRangeCursor >= len(m.TimeRanges) {
+					m.timeRangeCursor = len(m.TimeRanges) - 1
+				}
+				if m.timeRangeCursor < 0 {
+					m.timeRangeCursor = 0
 				}
 			}
 		case "n":
@@ -2263,36 +2296,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // UpdateComputationOffset calculates and updates the scrolling offset for the computations list.
 func (m *Model) UpdateComputationOffset() {
 	// Match overhead with renderComputationSelection (12 lines)
-	maxLines := m.height - 12
-	if maxLines < 8 {
-		maxLines = 8
+	overheadLines := 12
+	maxVisibleLines := m.height - overheadLines
+	if maxVisibleLines < minVisibleLines {
+		maxVisibleLines = minVisibleLines
 	}
 
-	total := len(m.computations)
-	if total <= 0 {
-		m.computationOffset = 0
-		return
-	}
-	cursorLine := m.computationCursor
-	if cursorLine < 0 {
-		cursorLine = 0
-	}
-	if cursorLine >= total {
-		cursorLine = total - 1
-	}
-
-	if cursorLine < m.computationOffset {
-		m.computationOffset = cursorLine
-	} else if cursorLine >= m.computationOffset+maxLines {
-		m.computationOffset = cursorLine - maxLines + 1
-	}
-
-	if m.computationOffset < 0 {
-		m.computationOffset = 0
-	}
-	if total > maxLines && m.computationOffset > total-maxLines {
-		m.computationOffset = total - maxLines
-	}
+	totalLines := len(m.computations)
+	m.computationOffset = calculateScrollOffset(
+		m.computationCursor,
+		m.computationOffset,
+		totalLines,
+		maxVisibleLines,
+	)
 }
 
 // UpdateAdvancedOffset calculates and updates the scrolling offset for advanced config lists.
@@ -2300,13 +2316,14 @@ func (m *Model) UpdateAdvancedOffset() {
 	// Use a fallback height if terminal size not yet received
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
-		effectiveHeight = 40 // Reasonable default for most terminals
+		effectiveHeight = defaultTerminalHeight
 	}
 
 	// Total height minus overhead - must match render functions
-	maxLines := effectiveHeight - 10
-	if maxLines < 8 {
-		maxLines = 8
+	overheadLines := 10
+	maxLines := effectiveHeight - overheadLines
+	if maxLines < minVisibleLines {
+		maxLines = minVisibleLines
 	}
 
 	totalLines := 0
@@ -2352,38 +2369,22 @@ func (m *Model) UpdateAdvancedOffset() {
 		m.advancedOffset = 0
 		return
 	}
-	if cursorLine < 0 {
-		cursorLine = 0
-	}
-	if cursorLine >= totalLines {
-		cursorLine = totalLines - 1
-	}
-
-	maxOffset := totalLines - maxLines
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-
-	if cursorLine < m.advancedOffset {
-		m.advancedOffset = cursorLine
-	} else if cursorLine >= m.advancedOffset+maxLines {
-		m.advancedOffset = cursorLine - maxLines + 1
-	}
-
-	if m.advancedOffset < 0 {
-		m.advancedOffset = 0
-	}
-	if m.advancedOffset > maxOffset {
-		m.advancedOffset = maxOffset
-	}
+	
+	m.advancedOffset = calculateScrollOffset(
+		cursorLine,
+		m.advancedOffset,
+		totalLines,
+		maxLines,
+	)
 }
 
 // UpdatePlotOffset calculates and updates the scrolling offset for the plots list
 func (m *Model) UpdatePlotOffset() {
 	// Match overhead with renderPlotSelection (10-14 lines)
-	maxLines := m.height - 10
-	if maxLines < 8 {
-		maxLines = 8
+	overheadLines := 10
+	maxLines := m.height - overheadLines
+	if maxLines < minVisibleLines {
+		maxLines = minVisibleLines
 	}
 
 	// Reconstruct the list logic to find cursor position
@@ -2411,20 +2412,12 @@ func (m *Model) UpdatePlotOffset() {
 		return
 	}
 
-	// Adjust offset
-	if cursorLine < m.plotOffset {
-		m.plotOffset = cursorLine
-	} else if cursorLine >= m.plotOffset+maxLines {
-		m.plotOffset = cursorLine - maxLines + 1
-	}
-
-	// Bound check
-	if m.plotOffset < 0 {
-		m.plotOffset = 0
-	}
-	if lineIdx > maxLines && m.plotOffset > lineIdx-maxLines {
-		m.plotOffset = lineIdx - maxLines
-	}
+	m.plotOffset = calculateScrollOffset(
+		cursorLine,
+		m.plotOffset,
+		lineIdx,
+		maxLines,
+	)
 }
 
 func (m Model) selectedFeaturePlotterCategories() []string {
@@ -2464,9 +2457,10 @@ func (m Model) featurePlotterItems() []PlotterInfo {
 
 func (m *Model) UpdateFeaturePlotterOffset() {
 	// Match overhead with renderFeaturePlotterSelection (10 lines)
-	maxLines := m.height - 10
-	if maxLines < 8 {
-		maxLines = 8
+	overheadLines := 10
+	maxLines := m.height - overheadLines
+	if maxLines < minVisibleLines {
+		maxLines = minVisibleLines
 	}
 
 	items := m.featurePlotterItems()
@@ -2492,17 +2486,12 @@ func (m *Model) UpdateFeaturePlotterOffset() {
 		return
 	}
 
-	if cursorLine < m.featurePlotterOffset {
-		m.featurePlotterOffset = cursorLine
-	} else if cursorLine >= m.featurePlotterOffset+maxLines {
-		m.featurePlotterOffset = cursorLine - maxLines + 1
-	}
-	if m.featurePlotterOffset < 0 {
-		m.featurePlotterOffset = 0
-	}
-	if lineIdx > maxLines && m.featurePlotterOffset > lineIdx-maxLines {
-		m.featurePlotterOffset = lineIdx - maxLines
-	}
+	m.featurePlotterOffset = calculateScrollOffset(
+		cursorLine,
+		m.featurePlotterOffset,
+		lineIdx,
+		maxLines,
+	)
 }
 
 func min(a, b int) int {
@@ -2510,6 +2499,42 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// calculateScrollOffset computes the scroll offset to keep the cursor visible.
+// It ensures the cursor stays within the visible area when scrolling.
+func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLines int) int {
+	if totalLines <= 0 {
+		return 0
+	}
+	
+	// Clamp cursor to valid range
+	if cursorLine < 0 {
+		cursorLine = 0
+	}
+	if cursorLine >= totalLines {
+		cursorLine = totalLines - 1
+	}
+	
+	// Adjust offset to keep cursor visible
+	if cursorLine < currentOffset {
+		currentOffset = cursorLine
+	} else if cursorLine >= currentOffset+maxVisibleLines {
+		currentOffset = cursorLine - maxVisibleLines + 1
+	}
+	
+	// Ensure offset is non-negative
+	if currentOffset < 0 {
+		currentOffset = 0
+	}
+	
+	// Ensure offset doesn't exceed maximum
+	maxOffset := totalLines - maxVisibleLines
+	if maxOffset > 0 && currentOffset > maxOffset {
+		currentOffset = maxOffset
+	}
+	
+	return currentOffset
 }
 
 func (m Model) plotCountsForGroup(group string) (total int, selected int) {
@@ -2534,20 +2559,23 @@ func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int)
 			continue
 		}
 		total++
-		ok := true
-		if plot.RequiresEpochs && !s.HasEpochs {
+		
+		hasEpochs := !plot.RequiresEpochs || s.HasEpochs
+		hasFeatures := !plot.RequiresFeatures || s.HasFeatures
+		hasStats := !plot.RequiresStats || s.HasStats
+		isAvailable := hasEpochs && hasFeatures && hasStats
+		
+		if !hasEpochs {
 			missing["epochs"]++
-			ok = false
 		}
-		if plot.RequiresFeatures && !s.HasFeatures {
+		if !hasFeatures {
 			missing["features"]++
-			ok = false
 		}
-		if plot.RequiresStats && !s.HasStats {
+		if !hasStats {
 			missing["stats"]++
-			ok = false
 		}
-		if ok {
+		
+		if isAvailable {
 			available++
 		}
 	}
@@ -2577,8 +2605,8 @@ func (m *Model) updateFeatureAvailability() {
 	m.featureLastModified = make(map[string]string)
 
 	for _, s := range m.subjects {
-		// Only consider selected subjects
-		if !m.subjectSelected[s.ID] {
+		isSelected := m.subjectSelected[s.ID]
+		if !isSelected {
 			continue
 		}
 
@@ -2589,8 +2617,11 @@ func (m *Model) updateFeatureAvailability() {
 		for cat, info := range s.FeatureAvailability.Features {
 			if info.Available {
 				m.featureAvailability[cat] = true
-				if info.LastModified != "" {
-					if existing, ok := m.featureLastModified[cat]; !ok || info.LastModified > existing {
+				hasLastModified := info.LastModified != ""
+				if hasLastModified {
+					existing, exists := m.featureLastModified[cat]
+					isNewer := !exists || info.LastModified > existing
+					if isNewer {
 						m.featureLastModified[cat] = info.LastModified
 					}
 				}
@@ -2605,7 +2636,8 @@ func (m *Model) updateComputationAvailability() {
 	m.computationLastModified = make(map[string]string)
 
 	for _, s := range m.subjects {
-		if !m.subjectSelected[s.ID] {
+		isSelected := m.subjectSelected[s.ID]
+		if !isSelected {
 			continue
 		}
 
@@ -2616,8 +2648,11 @@ func (m *Model) updateComputationAvailability() {
 		for comp, info := range s.FeatureAvailability.Computations {
 			if info.Available {
 				m.computationAvailability[comp] = true
-				if info.LastModified != "" {
-					if existing, ok := m.computationLastModified[comp]; !ok || info.LastModified > existing {
+				hasLastModified := info.LastModified != ""
+				if hasLastModified {
+					existing, exists := m.computationLastModified[comp]
+					isNewer := !exists || info.LastModified > existing
+					if isNewer {
 						m.computationLastModified[comp] = info.LastModified
 					}
 				}

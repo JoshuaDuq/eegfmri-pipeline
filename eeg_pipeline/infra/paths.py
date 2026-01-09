@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import glob
+import json
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+import pandas as pd
 from mne_bids import BIDSPath
 
 from eeg_pipeline.utils.config.loader import ConfigDict
@@ -12,16 +16,24 @@ from eeg_pipeline.utils.config.loader import ConfigDict
 
 EEGConfig = ConfigDict
 
+# BIDS naming constants
+SUBJECT_PREFIX = "sub-"
+CLEAN_PROCESSING_TOKENS = ("proc-clean", "proc-cleaned", "clean")
+EPOCHS_SUFFIX = "epo.fif"
+EVENTS_SUFFIX = "events.tsv"
+
 
 def _normalize_subject_label(subject: str) -> str:
-    if subject.startswith("sub-"):
+    """Ensure subject label has 'sub-' prefix."""
+    if subject.startswith(SUBJECT_PREFIX):
         return subject
-    return f"sub-{subject}"
+    return f"{SUBJECT_PREFIX}{subject}"
 
 
-def _normalize_subject_id(subject: str) -> str:
-    if subject.startswith("sub-"):
-        return subject.replace("sub-", "")
+def _extract_subject_id(subject: str) -> str:
+    """Extract subject ID by removing 'sub-' prefix if present."""
+    if subject.startswith(SUBJECT_PREFIX):
+        return subject.replace(SUBJECT_PREFIX, "", 1)
     return subject
 
 
@@ -30,8 +42,7 @@ def ensure_dir(p: Path) -> None:
 
 
 def find_first(pattern: str) -> Optional[Path]:
-    import glob
-
+    """Find first file matching pattern, sorted alphabetically."""
     candidates = sorted(glob.glob(pattern))
     return Path(candidates[0]) if candidates else None
 
@@ -42,8 +53,9 @@ def bids_sub_eeg_path(bids_root: Path, subject: str) -> Path:
 
 
 def bids_events_path(bids_root: Path, subject: str, task: str) -> Path:
+    """Construct BIDS events file path for subject and task."""
     subject_label = _normalize_subject_label(subject)
-    return bids_sub_eeg_path(bids_root, subject) / f"{subject_label}_task-{task}_events.tsv"
+    return bids_sub_eeg_path(bids_root, subject) / f"{subject_label}_task-{task}_{EVENTS_SUFFIX}"
 
 
 def deriv_sub_eeg_path(deriv_root: Path, subject: str) -> Path:
@@ -86,26 +98,52 @@ def find_connectivity_features_path(deriv_root: Path, subject: str) -> Path:
     return Path(deriv_root) / sub / "eeg" / "features" / "features_connectivity.tsv"
 
 
+def _resolve_path_from_config(
+    path_value: Optional[Path],
+    config: Optional[EEGConfig],
+    config_attr: Optional[str],
+    config_key: Optional[str],
+    constants: Optional[Dict[str, Any]],
+    constants_key: Optional[str],
+    error_message: str,
+) -> Path:
+    """Resolve path from multiple sources: direct value, config, or constants."""
+    if path_value is not None:
+        return Path(path_value)
+
+    if config is not None:
+        if config_attr is not None:
+            config_path = getattr(config, config_attr, None)
+            if config_path is not None:
+                return Path(config_path)
+
+        if config_key is not None:
+            config_path = config.get(config_key)
+            if config_path is not None:
+                return Path(config_path)
+
+    if constants is not None and constants_key is not None:
+        if constants_key in constants:
+            return Path(constants[constants_key])
+
+    raise ValueError(error_message)
+
+
 def _resolve_deriv_root(
     deriv_root: Optional[Path],
     config: Optional[EEGConfig] = None,
     constants: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    if deriv_root is not None:
-        return Path(deriv_root)
-
-    if config is not None:
-        try:
-            deriv_path = config.deriv_root
-            if deriv_path is not None:
-                return Path(deriv_path)
-        except AttributeError:
-            pass
-
-    if constants is not None and "DERIV_ROOT" in constants:
-        return Path(constants["DERIV_ROOT"])
-
-    raise ValueError("Either deriv_root, config, or constants must be provided to resolve derivatives root")
+    """Resolve derivatives root path from multiple sources."""
+    return _resolve_path_from_config(
+        path_value=deriv_root,
+        config=config,
+        config_attr="deriv_root",
+        config_key=None,
+        constants=constants,
+        constants_key="DERIV_ROOT",
+        error_message="Either deriv_root, config, or constants must be provided to resolve derivatives root",
+    )
 
 
 def resolve_deriv_root(
@@ -114,17 +152,19 @@ def resolve_deriv_root(
     config: Optional[EEGConfig] = None,
     constants: Optional[Dict[str, Any]] = None,
 ) -> Path:
+    """Resolve derivatives root path from multiple sources (public API)."""
     return _resolve_deriv_root(deriv_root=deriv_root, config=config, constants=constants)
 
 
 def _check_clean_tokens(filename: str) -> bool:
-    clean_tokens = ("proc-clean", "proc-cleaned", "clean")
-    return any(token in filename for token in clean_tokens)
+    """Check if filename contains clean processing tokens."""
+    return any(token in filename for token in CLEAN_PROCESSING_TOKENS)
 
 
-def _search_standard_bids_paths(root: Path, subject_clean: str, task: str) -> Optional[Path]:
+def _search_standard_bids_paths(root: Path, subject_id: str, task: str) -> Optional[Path]:
+    """Search standard BIDS paths for clean epochs file."""
     bids_path = BIDSPath(
-        subject=subject_clean,
+        subject=subject_id,
         task=task,
         datatype="eeg",
         processing="clean",
@@ -136,9 +176,11 @@ def _search_standard_bids_paths(root: Path, subject_clean: str, task: str) -> Op
     if bids_path.fpath and bids_path.fpath.exists():
         return bids_path.fpath
 
+    subject_label = f"{SUBJECT_PREFIX}{subject_id}"
+    filename = f"{subject_label}_task-{task}_proc-clean_{EPOCHS_SUFFIX}"
     standard_paths = [
-        root / f"sub-{subject_clean}" / "eeg" / f"sub-{subject_clean}_task-{task}_proc-clean_epo.fif",
-        root / "preprocessed" / f"sub-{subject_clean}" / "eeg" / f"sub-{subject_clean}_task-{task}_proc-clean_epo.fif",
+        root / subject_label / "eeg" / filename,
+        root / "preprocessed" / subject_label / "eeg" / filename,
     ]
 
     for path in standard_paths:
@@ -150,14 +192,16 @@ def _search_standard_bids_paths(root: Path, subject_clean: str, task: str) -> Op
 
 def _search_directory_for_epochs(
     directory: Path,
-    subject_clean: str,
+    subject_id: str,
     task: str,
     prefer_clean: bool = True,
 ) -> Optional[Path]:
+    """Search directory for epochs files matching subject and task."""
     if not directory.exists():
         return None
 
-    pattern = f"sub-{subject_clean}_task-{task}*epo.fif"
+    subject_label = f"{SUBJECT_PREFIX}{subject_id}"
+    pattern = f"{subject_label}_task-{task}*{EPOCHS_SUFFIX}"
     candidates = sorted(directory.glob(pattern))
     if not candidates:
         return None
@@ -177,22 +221,24 @@ def _find_clean_epochs_path(
     constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
 ) -> Optional[Path]:
+    """Find path to clean epochs file for subject and task."""
     root = _resolve_deriv_root(deriv_root, config, constants)
-    subject_clean = _normalize_subject_id(subject)
+    subject_id = _extract_subject_id(subject)
 
-    standard_path = _search_standard_bids_paths(root, subject_clean, task)
+    standard_path = _search_standard_bids_paths(root, subject_id, task)
     if standard_path:
         return standard_path
 
+    subject_label = f"{SUBJECT_PREFIX}{subject_id}"
     search_directories = [
-        (root / f"sub-{subject_clean}" / "eeg", True),
-        (root / "preprocessed" / f"sub-{subject_clean}" / "eeg", True),
-        (root / f"sub-{subject_clean}", False),
+        (root / subject_label / "eeg", True),
+        (root / "preprocessed" / subject_label / "eeg", True),
+        (root / subject_label, False),
         (root / "preprocessed", True),
     ]
 
     for directory, prefer_clean in search_directories:
-        found_path = _search_directory_for_epochs(directory, subject_clean, task, prefer_clean)
+        found_path = _search_directory_for_epochs(directory, subject_id, task, prefer_clean)
         if found_path:
             return found_path
 
@@ -221,32 +267,22 @@ def _resolve_bids_root(
     constants: Optional[Dict[str, Any]],
     config: Optional[EEGConfig],
 ) -> Path:
-    if bids_root is not None:
-        return Path(bids_root)
-
-    if config is not None:
-        try:
-            cfg_bids_root = config.bids_root
-            if cfg_bids_root is not None:
-                return Path(cfg_bids_root)
-        except AttributeError:
-            pass
-
-        cfg_bids_root = config.get("paths.bids_root")
-        if cfg_bids_root is not None:
-            return Path(cfg_bids_root)
-
-    if constants is not None and "BIDS_ROOT" in constants:
-        return Path(constants["BIDS_ROOT"])
-
-    raise ValueError(
-        "BIDS root not configured. Set paths.bids_root in eeg_config.yaml or pass bids_root parameter."
+    """Resolve BIDS root path from multiple sources."""
+    return _resolve_path_from_config(
+        path_value=bids_root,
+        config=config,
+        config_attr="bids_root",
+        config_key="paths.bids_root",
+        constants=constants,
+        constants_key="BIDS_ROOT",
+        error_message="BIDS root not configured. Set paths.bids_root in eeg_config.yaml or pass bids_root parameter.",
     )
 
 
-def _find_events_path(bids_root: Path, subject_clean: str, task: str) -> Optional[Path]:
+def _find_events_path(bids_root: Path, subject_id: str, task: str) -> Optional[Path]:
+    """Find events file path for subject and task."""
     bids_path = BIDSPath(
-        subject=subject_clean,
+        subject=subject_id,
         task=task,
         datatype="eeg",
         suffix="events",
@@ -258,7 +294,8 @@ def _find_events_path(bids_root: Path, subject_clean: str, task: str) -> Optiona
     if bids_path.fpath is not None:
         return bids_path.fpath
 
-    fallback_path = bids_root / f"sub-{subject_clean}" / "eeg" / f"sub-{subject_clean}_task-{task}_events.tsv"
+    subject_label = f"{SUBJECT_PREFIX}{subject_id}"
+    fallback_path = bids_root / subject_label / "eeg" / f"{subject_label}_task-{task}_{EVENTS_SUFFIX}"
     return fallback_path
 
 
@@ -266,15 +303,14 @@ def _load_events_df(
     subject: str,
     task: str,
     bids_root: Optional[Path] = None,
-    constants=None,
+    constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
-) -> Optional[Any]:
-    import pandas as pd
-
+) -> Optional[pd.DataFrame]:
+    """Load events DataFrame from BIDS events file."""
     root = _resolve_bids_root(bids_root, constants, config)
-    subject_clean = _normalize_subject_id(subject)
+    subject_id = _extract_subject_id(subject)
 
-    events_path = _find_events_path(root, subject_clean, task)
+    events_path = _find_events_path(root, subject_id, task)
     if events_path is None or not events_path.exists():
         return None
 
@@ -286,9 +322,10 @@ def load_events_df(
     task: str,
     bids_root: Optional[Path] = None,
     *,
-    constants=None,
+    constants: Optional[Dict[str, Any]] = None,
     config: Optional[EEGConfig] = None,
-) -> Optional[Any]:
+) -> Optional[pd.DataFrame]:
+    """Load events DataFrame from BIDS events file (public API)."""
     return _load_events_df(
         subject=subject,
         task=task,
@@ -299,27 +336,26 @@ def load_events_df(
 
 
 def extract_subject_id_from_path(path: Path) -> Optional[str]:
-    import re
-
+    """Extract subject ID from path using BIDS naming convention."""
     path_str = str(path)
-    match = re.search(r"sub-(\d+)", path_str)
+    pattern = rf"{SUBJECT_PREFIX}(\d+)"
+    match = re.search(pattern, path_str)
     return match.group(1) if match else None
 
 
 def ensure_derivatives_dataset_description(
     deriv_root: Optional[Path] = None,
-    constants=None,
-    config=None,
+    constants: Optional[Dict[str, Any]] = None,
+    config: Optional[EEGConfig] = None,
 ) -> None:
-    import json
-
+    """Ensure derivatives dataset_description.json exists with BIDS metadata."""
     root = _resolve_deriv_root(deriv_root, config, constants)
 
     desc_path = root / "dataset_description.json"
     if desc_path.exists():
         return
 
-    meta = {
+    metadata = {
         "Name": "EEG Pipeline Derivatives",
         "BIDSVersion": "1.8.0",
         "DatasetType": "derivative",
@@ -333,12 +369,12 @@ def ensure_derivatives_dataset_description(
     }
     ensure_dir(root)
     with open(desc_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
 
 
 __all__ = [
     "_normalize_subject_label",
-    "_normalize_subject_id",
+    "_extract_subject_id",
     "ensure_dir",
     "find_first",
     "bids_sub_eeg_path",

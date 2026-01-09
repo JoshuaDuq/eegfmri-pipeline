@@ -7,27 +7,57 @@ and creating topomap visualizations.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
-from dataclasses import dataclass
-import os
 import logging
+import os
 import warnings
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import mne
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from eeg_pipeline.utils.config.loader import get_nested_value, load_config
+import matplotlib.pyplot as plt
+import mne
+import numpy as np
+import seaborn as sns
 
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.utils.formatting import sanitize_label, format_baseline_string
+from eeg_pipeline.utils.config.loader import get_nested_value, load_config
 
 
-_PLOT_DEFAULT_DPI = None
-_PLOT_DEFAULT_FORMATS = None
-_PLOT_DEFAULT_BBOX = None
-_PLOT_DEFAULT_PAD = None
+class _PlotDefaults:
+    """Encapsulates default plotting parameters to avoid global mutable state."""
+
+    def __init__(self):
+        self.dpi: Optional[int] = None
+        self.formats: Optional[Tuple[str, ...]] = None
+        self.bbox_inches: Optional[str] = None
+        self.pad_inches: Optional[float] = None
+
+    def initialize_from_constants(self, constants: Dict[str, Any]) -> None:
+        """Initialize defaults from constants dictionary."""
+        plot_config = SaveFigConfig.from_constants(constants)
+        self.dpi = plot_config.dpi
+        self.formats = plot_config.formats
+        self.bbox_inches = plot_config.bbox_inches
+        self.pad_inches = plot_config.pad_inches
+
+    def get_dpi(self, fallback: int = 150) -> int:
+        """Get DPI with fallback."""
+        return self.dpi if self.dpi is not None else fallback
+
+    def get_formats(self, fallback: Tuple[str, ...] = ("png",)) -> Tuple[str, ...]:
+        """Get formats with fallback."""
+        return self.formats if self.formats is not None else fallback
+
+    def get_bbox_inches(self, fallback: str = "tight") -> str:
+        """Get bbox_inches with fallback."""
+        return self.bbox_inches if self.bbox_inches is not None else fallback
+
+    def get_pad_inches(self, fallback: float = 0.1) -> float:
+        """Get pad_inches with fallback."""
+        return self.pad_inches if self.pad_inches is not None else fallback
+
+
+_plot_defaults = _PlotDefaults()
 
 
 @dataclass
@@ -65,71 +95,151 @@ class SaveFigConfig:
 PlotConfig = SaveFigConfig
 
 
-def _get_plot_constants(constants=None):
-    global _PLOT_DEFAULT_DPI, _PLOT_DEFAULT_FORMATS, _PLOT_DEFAULT_BBOX, _PLOT_DEFAULT_PAD
-    if _PLOT_DEFAULT_DPI is None:
-        if constants is None:
-            raise ValueError("constants is required for _get_plot_constants")
-        plot_config = SaveFigConfig.from_constants(constants)
-        _PLOT_DEFAULT_DPI = plot_config.dpi
-        _PLOT_DEFAULT_FORMATS = plot_config.formats
-        _PLOT_DEFAULT_BBOX = plot_config.bbox_inches
-        _PLOT_DEFAULT_PAD = plot_config.pad_inches
+def _initialize_plot_defaults(constants: Dict[str, Any]) -> None:
+    """Initialize plot defaults from constants dictionary."""
+    if constants is None:
+        raise ValueError("constants is required for _initialize_plot_defaults")
+    _plot_defaults.initialize_from_constants(constants)
 
 
-def build_footer(template_name: str, config, **kwargs) -> str:
+def build_footer(template_name: str, config: Dict[str, Any], **kwargs) -> str:
+    """Build footer string from template configuration.
+    
+    Args:
+        template_name: Name of the footer template to use.
+        config: Configuration dictionary containing footer templates.
+        **kwargs: Variables to format into the template.
+        
+    Returns:
+        Formatted footer string.
+        
+    Raises:
+        ValueError: If config is None or template_name is not found.
+    """
     if config is None:
         raise ValueError("config is required for build_footer")
     templates = config.get("visualization.footer_templates", {})
     if template_name not in templates:
+        available = list(templates.keys())
         raise ValueError(
-            f"Footer template '{template_name}' not found in config. Available: {list(templates.keys())}"
+            f"Footer template '{template_name}' not found in config. "
+            f"Available templates: {available}"
         )
     template = templates[template_name]
     return template.format(**kwargs)
 
 
-def unwrap_figure(obj):
+def unwrap_figure(obj: Any) -> Any:
+    """Extract figure from list if wrapped, otherwise return as-is.
+    
+    Args:
+        obj: Figure object or list containing a figure.
+        
+    Returns:
+        The figure object.
+    """
     return obj[0] if isinstance(obj, list) else obj
 
 
-def get_behavior_footer(config, *, inference: Optional[str] = None, alpha: Optional[float] = None) -> str:
-    bwin = tuple(config.get("time_frequency_analysis.baseline_window"))
-    baseline_str = f"Baseline: [{float(bwin[0]):.2f}, {float(bwin[1]):.2f}] s"
+def _format_baseline_string(config: Dict[str, Any]) -> str:
+    """Format baseline window string from configuration."""
+    baseline_window = tuple(config.get("time_frequency_analysis.baseline_window"))
+    start_time = float(baseline_window[0])
+    end_time = float(baseline_window[1])
+    return f"Baseline: [{start_time:.2f}, {end_time:.2f}] s"
+
+
+def get_behavior_footer(
+    config: Dict[str, Any],
+    *,
+    inference: Optional[str] = None,
+    alpha: Optional[float] = None,
+) -> str:
+    """Build footer string for behavioral analysis plots.
+    
+    Args:
+        config: Configuration dictionary.
+        inference: Optional inference method name.
+        alpha: Optional significance level.
+        
+    Returns:
+        Formatted footer string with baseline and significance information.
+    """
+    baseline_str = _format_baseline_string(config)
+    
     if inference is None:
         fdr_alpha = config.get("behavior_analysis.statistics.fdr_alpha")
         return f"{baseline_str} | Significance: BH-FDR α={fdr_alpha}"
 
     if alpha is not None and np.isfinite(alpha):
-        return f"{baseline_str} | {inference} (α={float(alpha):.3g})"
+        alpha_str = f" (α={float(alpha):.3g})"
+        return f"{baseline_str} | {inference}{alpha_str}"
+    
     return f"{baseline_str} | {inference}"
 
 
-def get_band_color(band: str, config=None) -> str:
+def get_band_color(band: str, config: Optional[Dict[str, Any]] = None) -> str:
+    """Get color for frequency band from configuration.
+    
+    Args:
+        band: Frequency band name.
+        config: Optional configuration dictionary.
+        
+    Returns:
+        Color string for the band.
+    """
     from eeg_pipeline.plotting.core.colors import get_band_color as _get_band_color
 
     return _get_band_color(band, config)
 
 
-def logratio_to_pct(v):
-    v_arr = np.asarray(v, dtype=float)
-    return (np.power(10.0, v_arr) - 1.0) * 100.0
+def logratio_to_pct(logratio: float | np.ndarray) -> float | np.ndarray:
+    """Convert log-ratio to percentage change.
+    
+    Args:
+        logratio: Log-ratio value(s).
+        
+    Returns:
+        Percentage change value(s).
+    """
+    logratio_array = np.asarray(logratio, dtype=float)
+    return (np.power(10.0, logratio_array) - 1.0) * 100.0
 
 
-def pct_to_logratio(p):
-    p_arr = np.asarray(p, dtype=float)
-    return np.log10(np.clip(1.0 + (p_arr / 100.0), 1e-9, None))
+def pct_to_logratio(percentage: float | np.ndarray) -> float | np.ndarray:
+    """Convert percentage change to log-ratio.
+    
+    Args:
+        percentage: Percentage change value(s).
+        
+    Returns:
+        Log-ratio value(s).
+    """
+    percentage_array = np.asarray(percentage, dtype=float)
+    min_value = 1e-9
+    clipped = np.clip(1.0 + (percentage_array / 100.0), min_value, None)
+    return np.log10(clipped)
 
 
-def get_viz_params(config=None):
+def get_viz_params(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Get visualization parameters from configuration.
+    
+    Args:
+        config: Optional configuration dictionary. If None, attempts to load default.
+        
+    Returns:
+        Dictionary of visualization parameters.
+        
+    Raises:
+        ValueError: If config cannot be loaded.
+    """
     if config is None:
         try:
             config = load_config()
-        except Exception:
-            pass
-
-    if config is None:
-        raise ValueError("config is required for get_viz_params")
+        except Exception as e:
+            raise ValueError(
+                f"config is required for get_viz_params and could not be loaded: {e}"
+            ) from e
 
     default_sig_mask_params = {
         "marker": "o",
@@ -152,8 +262,49 @@ def get_viz_params(config=None):
     }
 
 
-def plot_topomap_on_ax(ax, data, info, mask=None, mask_params=None, vmin=None, vmax=None, config=None):
+def _add_descriptive_annotation(fig: plt.Figure) -> None:
+    """Add descriptive annotation to figure if not already present."""
+    annotation_text = "Descriptive topomap; see stats for inference (FDR/cluster)"
+    annotation_key = "_descriptive_note_added"
+    
+    if not getattr(fig, annotation_key, False):
+        fig.text(
+            0.02,
+            0.02,
+            annotation_text,
+            fontsize=7,
+            ha="left",
+            va="bottom",
+            alpha=0.7,
+        )
+        setattr(fig, annotation_key, True)
+
+
+def plot_topomap_on_ax(
+    ax: plt.Axes,
+    data: np.ndarray,
+    info: mne.Info,
+    mask: Optional[np.ndarray] = None,
+    mask_params: Optional[Dict[str, Any]] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Plot topomap on given axes.
+    
+    Args:
+        ax: Matplotlib axes to plot on.
+        data: Data array for topomap.
+        info: MNE Info object with channel positions.
+        mask: Optional mask array.
+        mask_params: Optional mask parameters.
+        vmin: Optional minimum value for colormap.
+        vmax: Optional maximum value for colormap.
+        config: Optional configuration dictionary.
+    """
     viz_params = get_viz_params(config)
+    vlim = (vmin, vmax) if vmin is not None and vmax is not None else None
+    
     mne.viz.plot_topomap(
         data,
         info,
@@ -164,32 +315,15 @@ def plot_topomap_on_ax(ax, data, info, mask=None, mask_params=None, vmin=None, v
         sensors=True,
         contours=viz_params["topo_contours"],
         cmap=viz_params["topo_cmap"],
-        vlim=(vmin, vmax) if vmin is not None and vmax is not None else None,
+        vlim=vlim,
     )
+    
     if viz_params["annotate_descriptive_topo"] and hasattr(ax, "figure"):
-        fig = ax.figure
-        if not getattr(fig, "_descriptive_note_added", False):
-            fig.text(
-                0.02,
-                0.02,
-                "Descriptive topomap; see stats for inference (FDR/cluster)",
-                fontsize=7,
-                ha="left",
-                va="bottom",
-                alpha=0.7,
-            )
-            setattr(fig, "_descriptive_note_added", True)
+        _add_descriptive_annotation(ax.figure)
 
 
-def robust_sym_vlim(
-    arrs: "np.ndarray | list[np.ndarray]",
-    q_low: Optional[float] = None,
-    q_high: Optional[float] = None,
-    cap: Optional[float] = None,
-    min_v: Optional[float] = None,
-    adaptive_multiplier: Optional[float] = None,
-    config: Optional[Dict[str, Any]] = None,
-) -> float:
+def _get_robust_vlim_defaults(config: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """Get default parameters for robust symmetric value limits."""
     defaults = {
         "q_low": 0.01,
         "q_high": 0.99,
@@ -197,138 +331,281 @@ def robust_sym_vlim(
         "min_v": 1e-6,
         "adaptive_multiplier": 2.0,
     }
-
-    if config is None:
-        config = load_config()
-
+    
     if config is not None:
         vlim_config = config.get("visualization.robust_vlim", {})
-        defaults.update({k: float(vlim_config.get(k, v)) for k, v in defaults.items()})
+        for key, default_value in defaults.items():
+            if key in vlim_config:
+                defaults[key] = float(vlim_config[key])
+    
+    return defaults
 
-    q_low = q_low or defaults["q_low"]
-    q_high = q_high or defaults["q_high"]
-    cap = cap or defaults["cap"]
-    min_v = min_v or defaults["min_v"]
-    adaptive_multiplier = adaptive_multiplier or defaults["adaptive_multiplier"]
 
+def _flatten_arrays(arrs: np.ndarray | list[np.ndarray]) -> np.ndarray:
+    """Flatten array(s) into a single 1D array."""
     if isinstance(arrs, (list, tuple)):
-        flat = np.concatenate([np.asarray(a).ravel() for a in arrs if a is not None])
-    else:
-        flat = np.asarray(arrs).ravel()
+        arrays = [np.asarray(a).ravel() for a in arrs if a is not None]
+        if not arrays:
+            return np.array([])
+        return np.concatenate(arrays)
+    return np.asarray(arrs).ravel()
 
-    flat = flat[np.isfinite(flat)]
-    if flat.size == 0:
+
+def _compute_robust_symmetric_limit(
+    flat_data: np.ndarray,
+    q_low: float,
+    q_high: float,
+    cap: float,
+    min_v: float,
+    adaptive_multiplier: float,
+) -> float:
+    """Compute robust symmetric value limit from flattened data."""
+    if flat_data.size == 0:
         return cap
+    
+    finite_data = flat_data[np.isfinite(flat_data)]
+    if finite_data.size == 0:
+        return cap
+    
+    low_quantile = np.nanquantile(finite_data, q_low)
+    high_quantile = np.nanquantile(finite_data, q_high)
+    max_abs_value = float(max(abs(low_quantile), abs(high_quantile)))
+    
+    if not np.isfinite(max_abs_value) or max_abs_value <= 0:
+        return min_v
+    
+    scaled_value = max_abs_value * adaptive_multiplier
+    return min(scaled_value, float(cap))
 
-    lo = np.nanquantile(flat, q_low)
-    hi = np.nanquantile(flat, q_high)
-    v = float(max(abs(lo), abs(hi)))
 
-    if not np.isfinite(v) or v <= 0:
-        v = min_v
-    else:
-        v = v * adaptive_multiplier
-
-    return min(v, float(cap))
-
-
-def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:
-    import matplotlib
-
-    _backend_set = getattr(matplotlib, "_backend_set_for_pipeline", False)
-    if not _backend_set:
-        try:
-            matplotlib.use("Agg", force=False)
-            matplotlib._backend_set_for_pipeline = True
-        except Exception:
-            pass
-
-    dpi = 300
-    if config is not None:
-        dpi = get_nested_value(config, "plotting.defaults.savefig_dpi", 300)
-
-    sns.set_theme(context="paper", style="white", font_scale=1.05)
-    plt.rcParams.update(
-        {
-            "axes.spines.top": False,
-            "axes.spines.right": False,
-            "axes.linewidth": 0.8,
-            "grid.color": "0.85",
-            "grid.linestyle": "--",
-            "grid.linewidth": 0.8,
-            "savefig.dpi": dpi,
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Arial", "DejaVu Sans"],
-        }
+def robust_sym_vlim(
+    arrs: np.ndarray | list[np.ndarray],
+    q_low: Optional[float] = None,
+    q_high: Optional[float] = None,
+    cap: Optional[float] = None,
+    min_v: Optional[float] = None,
+    adaptive_multiplier: Optional[float] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> float:
+    """Compute robust symmetric value limits for visualization.
+    
+    Args:
+        arrs: Array or list of arrays to compute limits from.
+        q_low: Lower quantile (default from config).
+        q_high: Upper quantile (default from config).
+        cap: Maximum value cap (default from config).
+        min_v: Minimum value (default from config).
+        adaptive_multiplier: Multiplier for computed value (default from config).
+        config: Optional configuration dictionary.
+        
+    Returns:
+        Symmetric value limit for visualization.
+    """
+    defaults = _get_robust_vlim_defaults(config)
+    
+    quantile_low = q_low if q_low is not None else defaults["q_low"]
+    quantile_high = q_high if q_high is not None else defaults["q_high"]
+    value_cap = cap if cap is not None else defaults["cap"]
+    min_value = min_v if min_v is not None else defaults["min_v"]
+    multiplier = adaptive_multiplier if adaptive_multiplier is not None else defaults["adaptive_multiplier"]
+    
+    flat_data = _flatten_arrays(arrs)
+    
+    return _compute_robust_symmetric_limit(
+        flat_data, quantile_low, quantile_high, value_cap, min_value, multiplier
     )
 
 
-def extract_plotting_constants(config, save_formats: Optional[List[str]] = None):
+def _configure_matplotlib_backend() -> None:
+    """Configure matplotlib to use non-interactive backend."""
+    import matplotlib
+    
+    backend_key = "_backend_set_for_pipeline"
+    if not getattr(matplotlib, backend_key, False):
+        try:
+            matplotlib.use("Agg", force=False)
+            setattr(matplotlib, backend_key, True)
+        except Exception:
+            pass
+
+
+def setup_matplotlib(config: Optional[Dict[str, Any]] = None) -> None:
+    """Configure matplotlib and seaborn for pipeline plotting.
+    
+    Sets up non-interactive backend, theme, and default parameters.
+    
+    Args:
+        config: Optional configuration dictionary for DPI settings.
+    """
+    _configure_matplotlib_backend()
+    
+    default_dpi = 300
+    dpi = get_nested_value(config, "plotting.defaults.savefig_dpi", default_dpi) if config else default_dpi
+
+    sns.set_theme(context="paper", style="white", font_scale=1.05)
+    
+    rc_params = {
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.linewidth": 0.8,
+        "grid.color": "0.85",
+        "grid.linestyle": "--",
+        "grid.linewidth": 0.8,
+        "savefig.dpi": dpi,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "DejaVu Sans"],
+    }
+    plt.rcParams.update(rc_params)
+
+
+def extract_plotting_constants(
+    config: Dict[str, Any],
+    save_formats: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Extract plotting constants from configuration.
+    
+    Args:
+        config: Configuration dictionary.
+        save_formats: Optional list of formats to override config.
+        
+    Returns:
+        Dictionary of plotting constants.
+        
+    Raises:
+        ValueError: If config is None.
+    """
     if config is None:
         raise ValueError("config is required for extract_plotting_constants")
 
+    default_dpi = 300
+    default_formats = ["svg"]
+    default_bbox = "tight"
+    default_pad = 0.02
+
     return {
-        "FIG_DPI": int(config.get("plotting.defaults.savefig_dpi", 300)),
-        "SAVE_FORMATS": save_formats or list(config.get("plotting.defaults.formats", ["svg"])),
-        "output.bbox_inches": config.get("plotting.defaults.bbox_inches", "tight"),
-        "output.pad_inches": float(config.get("plotting.defaults.pad_inches", 0.02)),
+        "FIG_DPI": int(config.get("plotting.defaults.savefig_dpi", default_dpi)),
+        "SAVE_FORMATS": save_formats or list(config.get("plotting.defaults.formats", default_formats)),
+        "output.bbox_inches": config.get("plotting.defaults.bbox_inches", default_bbox),
+        "output.pad_inches": float(config.get("plotting.defaults.pad_inches", default_pad)),
     }
 
 
-def extract_eeg_picks(epochs_or_info, exclude_bads: bool = True):
+def extract_eeg_picks(
+    epochs_or_info: Any,
+    exclude_bads: bool = True,
+) -> np.ndarray:
+    """Extract EEG channel picks from epochs or info object.
+    
+    Args:
+        epochs_or_info: MNE epochs object or Info object.
+        exclude_bads: Whether to exclude bad channels.
+        
+    Returns:
+        Array of channel indices.
+    """
     if hasattr(epochs_or_info, "info"):
         info = epochs_or_info.info
     else:
         info = epochs_or_info
 
-    exclude = "bads" if exclude_bads else []
-    return mne.pick_types(info, eeg=True, meg=False, eog=False, stim=False, exclude=exclude)
+    exclude_channels = "bads" if exclude_bads else []
+    return mne.pick_types(
+        info, eeg=True, meg=False, eog=False, stim=False, exclude=exclude_channels
+    )
 
 
-def log_if_present(logger, level: str, message: str):
-    if logger:
+def log_if_present(logger: Optional[logging.Logger], level: str, message: str) -> None:
+    """Log message if logger is provided.
+    
+    Args:
+        logger: Optional logger instance.
+        level: Log level name (e.g., "info", "warning").
+        message: Message to log.
+    """
+    if logger is not None:
         getattr(logger, level)(message)
 
 
-def validate_picks(picks, logger):
+def validate_picks(picks: np.ndarray, logger: Optional[logging.Logger]) -> bool:
+    """Validate that picks array is not empty.
+    
+    Args:
+        picks: Array of channel picks.
+        logger: Optional logger for warnings.
+        
+    Returns:
+        True if picks are valid, False otherwise.
+    """
     if len(picks) == 0:
         log_if_present(logger, "warning", "No valid EEG channels found")
         return False
     return True
 
 
-def get_default_config():
+def get_default_config() -> Dict[str, Any]:
+    """Load and return default configuration.
+    
+    Returns:
+        Configuration dictionary.
+    """
     return load_config()
 
 
 def _prepare_figure_footer(
     footer: Optional[str],
     footer_template_name: Optional[str],
-    footer_kwargs: Optional[dict],
-    constants,
+    footer_kwargs: Optional[Dict[str, Any]],
+    constants: Optional[Dict[str, Any]],
 ) -> Optional[str]:
+    """Prepare figure footer from template or use provided footer.
+    
+    Args:
+        footer: Optional pre-formatted footer string.
+        footer_template_name: Optional template name to use.
+        footer_kwargs: Optional keyword arguments for template.
+        constants: Optional constants dictionary (unused, kept for compatibility).
+        
+    Returns:
+        Footer string or None.
+    """
     if footer is not None:
         return footer
 
-    if footer_template_name is None or constants is None:
+    if footer_template_name is None:
         return None
 
     try:
-        cfg = load_config()
-        return build_footer(footer_template_name, cfg, **(footer_kwargs or {}))
+        config = load_config()
+        return build_footer(footer_template_name, config, **(footer_kwargs or {}))
     except (KeyError, ValueError, AttributeError):
         return None
 
 
 def _should_add_footer(footer: Optional[str]) -> bool:
+    """Determine if footer should be added to figure.
+    
+    Args:
+        footer: Footer string to check.
+        
+    Returns:
+        True if footer should be added, False otherwise.
+    """
     if footer is None:
         return False
 
-    footer_env = os.getenv("FIG_FOOTER_OFF", "0").lower()
-    return footer_env not in {"1", "true", "yes"}
+    footer_env_var = "FIG_FOOTER_OFF"
+    footer_env_value = os.getenv(footer_env_var, "0").lower()
+    disabled_values = {"1", "true", "yes"}
+    return footer_env_value not in disabled_values
 
 
 def _apply_tight_layout(fig: plt.Figure, rect: Optional[Tuple[float, float, float, float]]) -> None:
+    """Apply tight layout to figure with fallback.
+    
+    Args:
+        fig: Figure to adjust.
+        rect: Optional rectangle tuple for tight_layout.
+    """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         try:
@@ -337,7 +614,8 @@ def _apply_tight_layout(fig: plt.Figure, rect: Optional[Tuple[float, float, floa
             else:
                 fig.tight_layout()
         except RuntimeError:
-            fig.subplots_adjust(bottom=0.06)
+            fallback_bottom = 0.06
+            fig.subplots_adjust(bottom=fallback_bottom)
 
 
 def _prepare_figure_layout(
@@ -362,21 +640,37 @@ def _save_figure_with_fallback(
     bbox_inches: str,
     pad_inches: float,
 ) -> bool:
+    """Save figure with fallback to Agg backend if needed.
+    
+    Args:
+        fig: Figure to save.
+        output_path: Path to save figure.
+        dpi: DPI for saved figure.
+        bbox_inches: Bounding box setting.
+        pad_inches: Padding in inches.
+        
+    Returns:
+        True if successful, False otherwise.
+    """
     try:
         fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, pad_inches=pad_inches)
         return True
-    except AttributeError as e:
-        if "copy_from_bbox" not in str(e):
+    except AttributeError as error:
+        error_message = str(error)
+        if "copy_from_bbox" not in error_message:
             raise
+        
         try:
             return _save_figure_with_agg_backend(fig, output_path, dpi, bbox_inches, pad_inches)
-        except Exception as e2:
-            logging.getLogger(__name__).warning(
-                f"Failed to save figure {output_path} with fallback backend: {e2}"
+        except Exception as fallback_error:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Failed to save figure {output_path} with fallback backend: {fallback_error}"
             )
             return False
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Failed to save figure {output_path}: {e}")
+    except Exception as error:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to save figure {output_path}: {error}")
         return False
 
 
@@ -387,16 +681,28 @@ def _save_figure_with_agg_backend(
     bbox_inches: str,
     pad_inches: float,
 ) -> bool:
+    """Save figure using Agg backend.
+    
+    Args:
+        fig: Figure to save.
+        output_path: Path to save figure.
+        dpi: DPI for saved figure.
+        bbox_inches: Bounding box setting.
+        pad_inches: Padding in inches.
+        
+    Returns:
+        True if successful, False otherwise.
+    """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-    old_canvas = fig.canvas
+    original_canvas = fig.canvas
 
     try:
         fig.canvas = FigureCanvasAgg(fig)
         fig.savefig(output_path, dpi=dpi, bbox_inches=bbox_inches, pad_inches=pad_inches)
         return True
     finally:
-        fig.canvas = old_canvas
+        fig.canvas = original_canvas
 
 
 def _save_figure_to_formats(
@@ -407,12 +713,25 @@ def _save_figure_to_formats(
     bbox_inches: str,
     pad_inches: float,
 ) -> List[Path]:
+    """Save figure to multiple formats.
+    
+    Args:
+        fig: Figure to save.
+        base_path: Base path without extension.
+        formats: Tuple of format extensions.
+        dpi: DPI for saved figure.
+        bbox_inches: Bounding box setting.
+        pad_inches: Padding in inches.
+        
+    Returns:
+        List of successfully saved file paths.
+    """
     saved_paths = []
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        for ext in formats:
-            output_path = base_path.with_suffix(f".{ext}")
+        for extension in formats:
+            output_path = base_path.with_suffix(f".{extension}")
             if _save_figure_with_fallback(fig, output_path, dpi, bbox_inches, pad_inches):
                 saved_paths.append(output_path)
 
@@ -421,46 +740,67 @@ def _save_figure_to_formats(
 
 def save_fig(
     fig: plt.Figure,
-    path,
-    logger=None,
+    path: str | Path,
+    logger: Optional[logging.Logger] = None,
     footer: Optional[str] = None,
     formats: Optional[Tuple[str, ...]] = None,
     dpi: Optional[int] = None,
     bbox_inches: Optional[str] = None,
     pad_inches: Optional[float] = None,
     tight_layout_rect: Optional[Tuple[float, float, float, float]] = None,
-    constants=None,
+    constants: Optional[Dict[str, Any]] = None,
     footer_template_name: Optional[str] = None,
-    footer_kwargs: Optional[dict] = None,
-):
-    path = Path(path)
-    ensure_dir(path.parent)
-    base_path = path.with_suffix("") if path.suffix else path
+    footer_kwargs: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Save figure to file(s) in specified format(s).
+    
+    Args:
+        fig: Figure to save.
+        path: Output path (extension will be replaced based on formats).
+        logger: Optional logger for status messages.
+        footer: Optional pre-formatted footer string.
+        formats: Optional tuple of format extensions (default from config).
+        dpi: Optional DPI (default from config).
+        bbox_inches: Optional bounding box setting (default from config).
+        pad_inches: Optional padding in inches (default from config).
+        tight_layout_rect: Optional rectangle tuple for tight_layout.
+        constants: Optional constants dictionary for initialization.
+        footer_template_name: Optional footer template name.
+        footer_kwargs: Optional keyword arguments for footer template.
+    """
+    output_path = Path(path)
+    ensure_dir(output_path.parent)
+    base_path = output_path.with_suffix("") if output_path.suffix else output_path
 
     if constants is not None:
-        _get_plot_constants(constants=constants)
+        _initialize_plot_defaults(constants)
 
-    formats = formats or _PLOT_DEFAULT_FORMATS or ("png",)
-    dpi = dpi if dpi is not None else (_PLOT_DEFAULT_DPI or 150)
-    bbox_inches = bbox_inches or (_PLOT_DEFAULT_BBOX or "tight")
-    pad_inches = pad_inches if pad_inches is not None else (_PLOT_DEFAULT_PAD or 0.1)
+    default_formats = ("png",)
+    default_dpi = 150
+    default_bbox = "tight"
+    default_pad = 0.1
 
-    footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs, constants)
-    _prepare_figure_layout(fig, footer, tight_layout_rect)
+    save_formats = formats or _plot_defaults.get_formats(default_formats)
+    save_dpi = dpi if dpi is not None else _plot_defaults.get_dpi(default_dpi)
+    save_bbox = bbox_inches or _plot_defaults.get_bbox_inches(default_bbox)
+    save_pad = pad_inches if pad_inches is not None else _plot_defaults.get_pad_inches(default_pad)
 
-    saved_paths = _save_figure_to_formats(fig, base_path, formats, dpi, bbox_inches, pad_inches)
+    prepared_footer = _prepare_figure_footer(footer, footer_template_name, footer_kwargs, constants)
+    _prepare_figure_layout(fig, prepared_footer, tight_layout_rect)
+
+    saved_paths = _save_figure_to_formats(fig, base_path, save_formats, save_dpi, save_bbox, save_pad)
 
     plt.close(fig)
 
     if logger is not None:
-        filenames = ", ".join(p.name for p in saved_paths)
+        filenames = ", ".join(saved_path.name for saved_path in saved_paths)
         logger.info(f"  Saved: {filenames}")
 
 
 __all__ = [
     "SaveFigConfig",
     "PlotConfig",
-    "_get_plot_constants",
+    "_initialize_plot_defaults",
     "build_footer",
     "unwrap_figure",
     "get_behavior_footer",

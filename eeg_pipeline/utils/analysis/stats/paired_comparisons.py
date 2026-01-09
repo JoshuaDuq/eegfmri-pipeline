@@ -24,11 +24,36 @@ from scipy import stats
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.effect_size import cohens_d, hedges_g
-from eeg_pipeline.utils.config.loader import (
-    get_config_value,
-    get_frequency_band_names,
-)
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+
+
+###################################################################
+# Constants
+###################################################################
+
+
+MIN_STD_FOR_COHENS_D = 1e-10
+MIN_SAMPLES_FOR_BOOTSTRAP = 3
+DEFAULT_CI_LEVEL = 0.95
+DEFAULT_FDR_ALPHA = 0.05
+DEFAULT_N_BOOT = 1000
+DEFAULT_MIN_SAMPLES_PAIRED = 5
+DEFAULT_MIN_SAMPLES_UNPAIRED = 3
+
+FEATURE_TYPE_GROUPS = {
+    "power": "power",
+    "aperiodic": "aperiodic",
+    "connectivity": "conn",
+    "spectral": "spectral",
+    "erds": "erds",
+    "ratios": "ratio",
+    "asymmetry": "asym",
+    "itpc": "itpc",
+    "pac": "pac",
+    "complexity": "comp",
+    "bursts": "bursts",
+    "microstates": "micro",
+}
 
 
 ###################################################################
@@ -106,7 +131,7 @@ class PairedComparisonSummary:
 def safe_wilcoxon(
     x: np.ndarray,
     y: np.ndarray,
-    min_n: int = 5,
+    min_n: int = DEFAULT_MIN_SAMPLES_PAIRED,
     alternative: str = "two-sided",
 ) -> Tuple[float, float]:
     """Safely compute Wilcoxon signed-rank test for paired samples.
@@ -147,7 +172,7 @@ def safe_wilcoxon(
 def safe_mannwhitneyu(
     group1: np.ndarray,
     group2: np.ndarray,
-    min_n: int = 3,
+    min_n: int = DEFAULT_MIN_SAMPLES_UNPAIRED,
     alternative: str = "two-sided",
 ) -> Tuple[float, float]:
     """Safely compute Mann-Whitney U test for independent samples.
@@ -192,7 +217,7 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
     diff = after - before
     std_diff = np.std(diff, ddof=1)
     
-    if std_diff < 1e-10:
+    if std_diff < MIN_STD_FOR_COHENS_D:
         return 0.0
     
     return float(np.mean(diff) / std_diff)
@@ -201,8 +226,8 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
 def bootstrap_mean_diff_ci(
     x: np.ndarray,
     y: np.ndarray,
-    n_boot: int = 1000,
-    ci_level: float = 0.95,
+    n_boot: int = DEFAULT_N_BOOT,
+    ci_level: float = DEFAULT_CI_LEVEL,
     rng: Optional[np.random.Generator] = None,
 ) -> Tuple[float, float]:
     """Compute bootstrap confidence interval for mean difference.
@@ -227,7 +252,7 @@ def bootstrap_mean_diff_ci(
     x = x[valid]
     y = y[valid]
     
-    if len(x) < 3:
+    if len(x) < MIN_SAMPLES_FOR_BOOTSTRAP:
         return np.nan, np.nan
     
     diff = y - x
@@ -310,6 +335,50 @@ def collect_segment_data(
     return df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
 
+def bootstrap_unpaired_mean_diff_ci(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    n_boot: int = DEFAULT_N_BOOT,
+    ci_level: float = DEFAULT_CI_LEVEL,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[float, float]:
+    """Compute bootstrap confidence interval for mean difference of unpaired samples.
+    
+    Args:
+        group1: First group values
+        group2: Second group values
+        n_boot: Number of bootstrap iterations
+        ci_level: Confidence level (default 0.95)
+        rng: Random number generator
+    
+    Returns:
+        Tuple of (ci_low, ci_high)
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    
+    if len(g1) < MIN_SAMPLES_FOR_BOOTSTRAP or len(g2) < MIN_SAMPLES_FOR_BOOTSTRAP:
+        return np.nan, np.nan
+    
+    boot_diffs = np.empty(n_boot)
+    for i in range(n_boot):
+        idx1 = rng.integers(0, len(g1), size=len(g1))
+        idx2 = rng.integers(0, len(g2), size=len(g2))
+        boot_diffs[i] = np.mean(g2[idx2]) - np.mean(g1[idx1])
+    
+    alpha = 1 - ci_level
+    ci_low = np.percentile(boot_diffs, 100 * alpha / 2)
+    ci_high = np.percentile(boot_diffs, 100 * (1 - alpha / 2))
+    
+    return float(ci_low), float(ci_high)
+
+
 ###################################################################
 # Paired Comparison Computation
 ###################################################################
@@ -323,8 +392,8 @@ def compute_window_comparison(
     band: str,
     roi_name: str,
     roi_channels: Optional[List[str]],
-    min_samples: int = 5,
-    n_boot: int = 1000,
+    min_samples: int = DEFAULT_MIN_SAMPLES_PAIRED,
+    n_boot: int = DEFAULT_N_BOOT,
     rng: Optional[np.random.Generator] = None,
 ) -> Optional[PairedComparisonResult]:
     """Compute paired comparison between two time windows."""
@@ -346,6 +415,8 @@ def compute_window_comparison(
     g = hedges_g(v1, v2)
     ci_low, ci_high = bootstrap_mean_diff_ci(v1, v2, n_boot=n_boot, rng=rng)
     
+    hedges_g_finite = g if np.isfinite(g) else d
+    
     return PairedComparisonResult(
         feature_type=group,
         comparison_type="window",
@@ -361,7 +432,7 @@ def compute_window_comparison(
         statistic=stat,
         p_value=p,
         effect_size_d=d,
-        effect_size_g=g if np.isfinite(g) else d,
+        effect_size_g=hedges_g_finite,
         ci_low=ci_low,
         ci_high=ci_high,
         test_method="wilcoxon",
@@ -379,8 +450,8 @@ def compute_condition_comparison(
     roi_channels: Optional[List[str]],
     label1: str,
     label2: str,
-    min_samples: int = 3,
-    n_boot: int = 1000,
+    min_samples: int = DEFAULT_MIN_SAMPLES_UNPAIRED,
+    n_boot: int = DEFAULT_N_BOOT,
     rng: Optional[np.random.Generator] = None,
 ) -> Optional[PairedComparisonResult]:
     """Compute unpaired comparison between two conditions."""
@@ -399,16 +470,12 @@ def compute_condition_comparison(
     d = cohens_d(v2, v1, pooled=True)
     g = hedges_g(v2, v1)
     
-    ci_low, ci_high = np.nan, np.nan
-    if len(v1) >= 3 and len(v2) >= 3:
-        all_vals = np.concatenate([v1, v2])
-        boot_diffs = []
-        for _ in range(n_boot):
-            idx1 = rng.integers(0, len(v1), size=len(v1)) if rng else np.random.randint(0, len(v1), size=len(v1))
-            idx2 = rng.integers(0, len(v2), size=len(v2)) if rng else np.random.randint(0, len(v2), size=len(v2))
-            boot_diffs.append(np.mean(v2[idx2]) - np.mean(v1[idx1]))
-        ci_low = float(np.percentile(boot_diffs, 2.5))
-        ci_high = float(np.percentile(boot_diffs, 97.5))
+    ci_low, ci_high = bootstrap_unpaired_mean_diff_ci(
+        v1, v2, n_boot=n_boot, rng=rng
+    )
+    
+    cohens_d_finite = d if np.isfinite(d) else np.nan
+    hedges_g_finite = g if np.isfinite(g) else np.nan
     
     return PairedComparisonResult(
         feature_type=group,
@@ -424,8 +491,8 @@ def compute_condition_comparison(
         mean_diff=float(np.nanmean(v2) - np.nanmean(v1)),
         statistic=stat,
         p_value=p,
-        effect_size_d=d if np.isfinite(d) else np.nan,
-        effect_size_g=g if np.isfinite(g) else np.nan,
+        effect_size_d=cohens_d_finite,
+        effect_size_g=hedges_g_finite,
         ci_low=ci_low,
         ci_high=ci_high,
         test_method="mannwhitneyu",
@@ -478,9 +545,9 @@ def compute_all_paired_comparisons(
     events_df: Optional[pd.DataFrame],
     config: Any,
     logger: Optional[logging.Logger] = None,
-    min_samples: int = 5,
-    n_boot: int = 1000,
-    fdr_alpha: float = 0.05,
+    min_samples: int = DEFAULT_MIN_SAMPLES_PAIRED,
+    n_boot: int = DEFAULT_N_BOOT,
+    fdr_alpha: float = DEFAULT_FDR_ALPHA,
     rng: Optional[np.random.Generator] = None,
 ) -> PairedComparisonSummary:
     """Compute ALL possible paired comparisons for all feature types.
@@ -518,28 +585,13 @@ def compute_all_paired_comparisons(
         if mask_result is not None:
             condition_masks, condition_labels = mask_result
     
-    feature_type_groups = {
-        "power": "power",
-        "aperiodic": "aperiodic",
-        "connectivity": "conn",
-        "spectral": "spectral",
-        "erds": "erds",
-        "ratios": "ratio",
-        "asymmetry": "asym",
-        "itpc": "itpc",
-        "pac": "pac",
-        "complexity": "comp",
-        "bursts": "bursts",
-        "microstates": "micro",
-    }
-    
     all_segments_compared = set()
     
     for feat_name, df in feature_dfs.items():
         if df is None or df.empty:
             continue
         
-        group = feature_type_groups.get(feat_name, feat_name)
+        group = FEATURE_TYPE_GROUPS.get(feat_name, feat_name)
         all_channels = get_channels_from_columns(list(df.columns))
         
         segments = _extract_segments_from_df(df, group)

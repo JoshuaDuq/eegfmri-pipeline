@@ -9,12 +9,55 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Callable, List, Optional, TypeVar, Union
+from typing import Any, Callable, List, Optional, TypeVar
 
 import numpy as np
 import pandas as pd
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _find_dataframe_in_args(args: tuple, kwargs: dict) -> Optional[pd.DataFrame]:
+    """Find first DataFrame in function arguments."""
+    for arg in args:
+        if isinstance(arg, pd.DataFrame):
+            return arg
+    for val in kwargs.values():
+        if isinstance(val, pd.DataFrame):
+            return val
+    return None
+
+
+def _validate_dataframe(
+    df: pd.DataFrame,
+    name: str,
+    min_samples: int,
+    require_finite: bool,
+) -> None:
+    """Validate DataFrame has sufficient samples."""
+    if len(df) < min_samples:
+        raise ValueError(
+            f"{name}: insufficient samples ({len(df)} < {min_samples})"
+        )
+    if require_finite:
+        numeric_cols = df.select_dtypes(include=[np.number])
+        has_nan = numeric_cols.isna().any().any()
+        if has_nan:
+            raise ValueError(f"{name}: contains NaN values")
+
+
+def _validate_array(
+    arr: np.ndarray,
+    name: str,
+    min_samples: int,
+) -> None:
+    """Validate array has sufficient finite samples."""
+    finite_count = np.sum(np.isfinite(arr))
+    if finite_count < min_samples:
+        raise ValueError(
+            f"{name}: insufficient finite samples "
+            f"({finite_count} < {min_samples})"
+        )
 
 
 def validate_input(
@@ -46,32 +89,24 @@ def validate_input(
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # Get arguments to validate
-            to_check = []
+            arguments_to_validate = []
             if arg_names:
                 for name in arg_names:
                     if name in kwargs:
-                        to_check.append((name, kwargs[name]))
+                        arguments_to_validate.append((name, kwargs[name]))
             else:
-                # Check first two positional args by default
                 for i, arg in enumerate(args[:2]):
-                    to_check.append((f"arg{i}", arg))
+                    arguments_to_validate.append((f"arg{i}", arg))
 
-            for name, val in to_check:
-                if val is None:
+            for name, value in arguments_to_validate:
+                if value is None:
                     continue
 
-                if isinstance(val, pd.DataFrame):
-                    if len(val) < min_samples:
-                        raise ValueError(f"{name}: insufficient samples ({len(val)} < {min_samples})")
-                    if require_finite and val.select_dtypes(include=[np.number]).isna().any().any():
-                        pass  # Allow NaN in DataFrames, handle in function
-
-                elif isinstance(val, (pd.Series, np.ndarray)):
-                    arr = np.asarray(val)
-                    finite_count = np.sum(np.isfinite(arr))
-                    if finite_count < min_samples:
-                        raise ValueError(f"{name}: insufficient finite samples ({finite_count} < {min_samples})")
+                if isinstance(value, pd.DataFrame):
+                    _validate_dataframe(value, name, min_samples, require_finite)
+                elif isinstance(value, (pd.Series, np.ndarray)):
+                    array = np.asarray(value)
+                    _validate_array(array, name, min_samples)
 
             return func(*args, **kwargs)
 
@@ -100,28 +135,42 @@ def log_execution(
 
     def decorator(func: F) -> F:
         logger = logging.getLogger(func.__module__)
+        function_name = func.__qualname__
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            func_name = func.__qualname__
-
             if log_args:
-                logger.log(level, f"Calling {func_name} with args={args}, kwargs={kwargs}")
+                logger.log(
+                    level,
+                    f"Calling {function_name} with args={args}, kwargs={kwargs}",
+                )
             else:
-                logger.log(level, f"Calling {func_name}")
+                logger.log(level, f"Calling {function_name}")
 
             result = func(*args, **kwargs)
 
             if log_result:
-                logger.log(level, f"{func_name} returned: {type(result)}")
+                result_type = type(result).__name__
+                logger.log(level, f"{function_name} returned: {result_type}")
             else:
-                logger.log(level, f"{func_name} completed")
+                logger.log(level, f"{function_name} completed")
 
             return result
 
         return wrapper  # type: ignore
 
     return decorator
+
+
+def _is_empty(value: Any) -> bool:
+    """Check if value is None or empty."""
+    if value is None:
+        return True
+    if isinstance(value, (pd.DataFrame, pd.Series)):
+        return value.empty
+    if isinstance(value, np.ndarray):
+        return value.size == 0
+    return False
 
 
 def handle_empty_input(default_return: Any = None) -> Callable[[F], F]:
@@ -137,18 +186,9 @@ def handle_empty_input(default_return: Any = None) -> Callable[[F], F]:
             if not args:
                 return default_return
 
-            first_arg = args[0]
-
-            if first_arg is None:
+            first_argument = args[0]
+            if _is_empty(first_argument):
                 return default_return
-
-            if isinstance(first_arg, (pd.DataFrame, pd.Series)):
-                if first_arg.empty:
-                    return default_return
-
-            if isinstance(first_arg, np.ndarray):
-                if first_arg.size == 0:
-                    return default_return
 
             return func(*args, **kwargs)
 
@@ -167,23 +207,13 @@ def require_columns(*columns: str) -> Callable[[F], F]:
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            # Find DataFrame in args
-            df = None
-            for arg in args:
-                if isinstance(arg, pd.DataFrame):
-                    df = arg
-                    break
-            
-            if df is None:
-                for val in kwargs.values():
-                    if isinstance(val, pd.DataFrame):
-                        df = val
-                        break
-
-            if df is not None:
-                missing = set(columns) - set(df.columns)
-                if missing:
-                    raise ValueError(f"Missing required columns: {missing}")
+            dataframe = _find_dataframe_in_args(args, kwargs)
+            if dataframe is not None:
+                required_columns = set(columns)
+                existing_columns = set(dataframe.columns)
+                missing_columns = required_columns - existing_columns
+                if missing_columns:
+                    raise ValueError(f"Missing required columns: {missing_columns}")
 
             return func(*args, **kwargs)
 
@@ -196,23 +226,29 @@ def cache_result(maxsize: int = 128) -> Callable[[F], F]:
     """
     Simple memoization decorator for functions with hashable args.
     
-    Uses functools.lru_cache under the hood.
+    Uses functools.lru_cache under the hood. Falls back to direct call
+    if arguments are not hashable.
     """
 
     def decorator(func: F) -> F:
-        cached = functools.lru_cache(maxsize=maxsize)(func)
+        cached_func = functools.lru_cache(maxsize=maxsize)(func)
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
-                # Try to use cached version
-                return cached(*args, **kwargs)
-            except TypeError:
-                # Args not hashable, call directly
-                return func(*args, **kwargs)
+                return cached_func(*args, **kwargs)
+            except TypeError as error:
+                error_message = str(error)
+                is_unhashable_error = (
+                    "unhashable type" in error_message
+                    or "not hashable" in error_message.lower()
+                )
+                if is_unhashable_error:
+                    return func(*args, **kwargs)
+                raise
 
-        wrapper.cache_clear = cached.cache_clear  # type: ignore
-        wrapper.cache_info = cached.cache_info  # type: ignore
+        wrapper.cache_clear = cached_func.cache_clear  # type: ignore
+        wrapper.cache_info = cached_func.cache_info  # type: ignore
 
         return wrapper  # type: ignore
 

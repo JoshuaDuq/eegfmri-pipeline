@@ -10,47 +10,60 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// resetTerminal restores the terminal to a clean state
-// This handles cleanup if the program exits abnormally
-func resetTerminal() {
-	// Disable mouse tracking modes
-	fmt.Print("\033[?1000l") // Disable mouse click tracking
-	fmt.Print("\033[?1002l") // Disable mouse button tracking
-	fmt.Print("\033[?1003l") // Disable all mouse tracking
-	fmt.Print("\033[?1006l") // Disable SGR mouse mode
+const (
+	ansiDisableMouseClick    = "\033[?1000l"
+	ansiDisableMouseButton   = "\033[?1002l"
+	ansiDisableMouseTracking = "\033[?1003l"
+	ansiDisableSGRMouse      = "\033[?1006l"
+	ansiExitAlternateScreen   = "\033[?1049l"
+)
 
-	// Exit alternate screen buffer
-	fmt.Print("\033[?1049l")
+func disableMouseTracking() {
+	fmt.Print(ansiDisableMouseClick)
+	fmt.Print(ansiDisableMouseButton)
+	fmt.Print(ansiDisableMouseTracking)
+	fmt.Print(ansiDisableSGRMouse)
+}
 
-	// Reset terminal attributes using stty
+func exitAlternateScreen() {
+	fmt.Print(ansiExitAlternateScreen)
+}
+
+func resetTerminalAttributes() {
 	cmd := exec.Command("stty", "sane")
 	cmd.Stdin = os.Stdin
-	cmd.Run()
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to reset terminal attributes: %v\n", err)
+	}
+}
+
+func resetTerminal() {
+	disableMouseTracking()
+	exitAlternateScreen()
+	resetTerminalAttributes()
+}
+
+func handlePanic() {
+	if r := recover(); r != nil {
+		resetTerminal()
+		fmt.Fprintf(os.Stderr, "TUI crashed: %v\n", r)
+		os.Exit(1)
+	}
 }
 
 func main() {
-	// Ensure terminal is reset on panic
-	defer func() {
-		if r := recover(); r != nil {
-			resetTerminal()
-			fmt.Fprintf(os.Stderr, "TUI crashed: %v\n", r)
-			os.Exit(1)
-		}
-	}()
+	defer handlePanic()
 
-	p := tea.NewProgram(
+	program := tea.NewProgram(
 		app.New(),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
 
-	_, err := p.Run()
+	defer resetTerminal()
 
-	// Always reset terminal on exit (normal or error)
-	resetTerminal()
-
-	if err != nil {
-		fmt.Printf("Error running TUI: %v\n", err)
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
 }

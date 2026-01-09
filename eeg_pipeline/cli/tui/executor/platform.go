@@ -10,6 +10,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func runCommandOutputTrimmed(cmd *exec.Cmd) (string, error) {
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // CopyToClipboard copies text to the system clipboard in a cross-platform way
 func CopyToClipboard(text string) error {
 	var cmd *exec.Cmd
@@ -97,31 +105,16 @@ func PickFolder(prompt string, field string) tea.Cmd {
 		case "darwin":
 			cmd := exec.Command("osascript", "-e",
 				fmt.Sprintf(`POSIX path of (choose folder with prompt "%s")`, prompt))
-			output, cmdErr := cmd.Output()
-			if cmdErr != nil {
-				err = cmdErr
-			} else {
-				path = strings.TrimSpace(string(output))
-			}
+			path, err = runCommandOutputTrimmed(cmd)
 
 		case "linux":
 			// Try zenity first, then kdialog
 			if _, lookErr := exec.LookPath("zenity"); lookErr == nil {
 				cmd := exec.Command("zenity", "--file-selection", "--directory", "--title", prompt)
-				output, cmdErr := cmd.Output()
-				if cmdErr != nil {
-					err = cmdErr
-				} else {
-					path = strings.TrimSpace(string(output))
-				}
+				path, err = runCommandOutputTrimmed(cmd)
 			} else if _, lookErr := exec.LookPath("kdialog"); lookErr == nil {
 				cmd := exec.Command("kdialog", "--getexistingdirectory", ".", "--title", prompt)
-				output, cmdErr := cmd.Output()
-				if cmdErr != nil {
-					err = cmdErr
-				} else {
-					path = strings.TrimSpace(string(output))
-				}
+				path, err = runCommandOutputTrimmed(cmd)
 			} else {
 				// Fallback: prompt user to type path manually
 				err = fmt.Errorf("no folder picker available (install zenity or kdialog), please type path manually")
@@ -139,12 +132,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 `, prompt)
 			cmd := exec.Command("powershell", "-Command", psScript)
-			output, cmdErr := cmd.Output()
-			if cmdErr != nil {
-				err = cmdErr
-			} else {
-				path = strings.TrimSpace(string(output))
-			}
+			path, err = runCommandOutputTrimmed(cmd)
 
 		default:
 			err = fmt.Errorf("unsupported platform: %s", runtime.GOOS)
@@ -161,17 +149,17 @@ func GetPlatform() string {
 
 // IsMac returns true if running on macOS
 func IsMac() bool {
-	return runtime.GOOS == "darwin"
+	return GetPlatform() == "darwin"
 }
 
 // IsLinux returns true if running on Linux
 func IsLinux() bool {
-	return runtime.GOOS == "linux"
+	return GetPlatform() == "linux"
 }
 
 // IsWindows returns true if running on Windows
 func IsWindows() bool {
-	return runtime.GOOS == "windows"
+	return GetPlatform() == "windows"
 }
 
 // GetHomeDir returns the user's home directory

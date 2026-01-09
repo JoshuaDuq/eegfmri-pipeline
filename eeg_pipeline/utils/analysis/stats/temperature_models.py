@@ -15,19 +15,173 @@ import numpy as np
 import pandas as pd
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
+def _get_config_value(config: Any, key: str, default: Any) -> Any:
+    """Extract value from config object, returning default if unavailable."""
+    if config is None:
+        return default
     try:
         if hasattr(config, "get"):
             return config.get(key, default)
-    except Exception:
+    except (AttributeError, KeyError, TypeError):
         pass
     return default
 
 
-def _rmse(y: np.ndarray, y_hat: np.ndarray) -> float:
-    y = np.asarray(y, dtype=float)
-    y_hat = np.asarray(y_hat, dtype=float)
-    return float(np.sqrt(np.mean((y - y_hat) ** 2))) if y.size else np.nan
+def _calculate_rmse(observed: np.ndarray, predicted: np.ndarray) -> float:
+    """Calculate root mean squared error between observed and predicted values."""
+    observed = np.asarray(observed, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+    if observed.size == 0:
+        return np.nan
+    squared_errors = (observed - predicted) ** 2
+    mean_squared_error = np.mean(squared_errors)
+    return float(np.sqrt(mean_squared_error))
+
+
+def _validate_and_prepare_data(
+    temperature: pd.Series, rating: pd.Series, min_samples: int
+) -> Tuple[Optional[pd.DataFrame], Dict[str, Any]]:
+    """Validate inputs and prepare aligned, clean data for modeling."""
+    temperature_numeric = pd.to_numeric(temperature, errors="coerce")
+    rating_numeric = pd.to_numeric(rating, errors="coerce")
+    
+    common_index = temperature_numeric.index.intersection(rating_numeric.index)
+    temperature_aligned = temperature_numeric.loc[common_index]
+    rating_aligned = rating_numeric.loc[common_index]
+    
+    is_valid = temperature_aligned.notna() & rating_aligned.notna()
+    n_valid = int(is_valid.sum())
+    
+    meta = {"n_valid": n_valid, "min_samples": min_samples}
+    if n_valid < min_samples:
+        return None, {**meta, "status": "skipped_insufficient_samples"}
+    
+    data = pd.DataFrame(
+        {
+            "temp": temperature_aligned[is_valid].to_numpy(dtype=float),
+            "rating": rating_aligned[is_valid].to_numpy(dtype=float),
+        }
+    )
+    return data, meta
+
+
+def _check_statsmodels_availability() -> Tuple[bool, Any]:
+    """Check if statsmodels.formula.api is available."""
+    try:
+        import statsmodels.formula.api as smf
+        return True, smf
+    except ImportError:
+        return False, None
+
+
+def _extract_model_metrics(model: Any, n_samples: int, data: pd.DataFrame, predictions: np.ndarray) -> Dict[str, Any]:
+    """Extract model fit metrics from a fitted statsmodels model."""
+    n_params = int(getattr(model, "df_model", np.nan)) + 1 if hasattr(model, "df_model") else np.nan
+    aic = float(model.aic) if np.isfinite(model.aic) else np.nan
+    bic = float(model.bic) if np.isfinite(model.bic) else np.nan
+    r_squared = float(model.rsquared) if hasattr(model, "rsquared") else np.nan
+    
+    observed = data["rating"].to_numpy()
+    all_predictions_finite = np.isfinite(predictions).all()
+    rmse = _calculate_rmse(observed, predictions) if all_predictions_finite else np.nan
+    
+    return {
+        "n": n_samples,
+        "k_params": n_params,
+        "aic": aic,
+        "bic": bic,
+        "r2": r_squared,
+        "rmse": rmse,
+    }
+
+
+def _fit_single_model(smf: Any, model_name: str, formula: str, data: pd.DataFrame, n_samples: int) -> Optional[Dict[str, Any]]:
+    """Fit a single model and return its metrics, or None if fitting fails."""
+    try:
+        model = smf.ols(formula, data=data).fit()
+    except (ValueError, AttributeError, TypeError):
+        return None
+    
+    try:
+        predictions = np.asarray(model.predict(data), dtype=float)
+    except (ValueError, AttributeError):
+        predictions = np.full(n_samples, np.nan)
+    
+    metrics = _extract_model_metrics(model, n_samples, data, predictions)
+    return {
+        "model": model_name,
+        "formula": formula,
+        **metrics,
+    }
+
+
+def _build_polynomial_terms(degree: int) -> str:
+    """Build polynomial terms string for given degree."""
+    if degree < 2:
+        return ""
+    terms = [f"I(temp**{k})" for k in range(2, degree + 1)]
+    return " + ".join(terms)
+
+
+def _get_polynomial_degrees(config: Any) -> List[int]:
+    """Extract and validate polynomial degrees from config."""
+    degrees_raw = _get_config_value(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", [2, 3])
+    if not isinstance(degrees_raw, (list, tuple)) or not degrees_raw:
+        return [2, 3]
+    
+    valid_degrees = []
+    for degree_raw in degrees_raw:
+        try:
+            degree = int(degree_raw)
+            if 2 <= degree <= 5:
+                valid_degrees.append(degree)
+        except (ValueError, TypeError):
+            continue
+    return valid_degrees if valid_degrees else [2, 3]
+
+
+def _get_spline_df_candidates(config: Any) -> List[int]:
+    """Extract and validate spline degrees of freedom from config."""
+    df_candidates_raw = _get_config_value(config, "behavior_analysis.pain_residual.spline_df_candidates", [3, 4, 5])
+    if not isinstance(df_candidates_raw, (list, tuple)) or not df_candidates_raw:
+        return [3, 4, 5]
+    
+    valid_df = []
+    for df_raw in df_candidates_raw:
+        try:
+            df = int(df_raw)
+            if df >= 3:
+                valid_df.append(df)
+        except (ValueError, TypeError):
+            continue
+    return valid_df if valid_df else [3, 4, 5]
+
+
+def _fit_all_models(smf: Any, data: pd.DataFrame, config: Any) -> List[Dict[str, Any]]:
+    """Fit all candidate models (linear, polynomial, spline)."""
+    n_samples = len(data)
+    model_results = []
+    
+    linear_result = _fit_single_model(smf, "linear", "rating ~ temp", data, n_samples)
+    if linear_result is not None:
+        model_results.append(linear_result)
+    
+    polynomial_degrees = _get_polynomial_degrees(config)
+    for degree in polynomial_degrees:
+        terms = _build_polynomial_terms(degree)
+        formula = f"rating ~ temp + {terms}"
+        result = _fit_single_model(smf, f"poly{degree}", formula, data, n_samples)
+        if result is not None:
+            model_results.append(result)
+    
+    spline_df_candidates = _get_spline_df_candidates(config)
+    for df in spline_df_candidates:
+        formula = f"rating ~ bs(temp, df={df}, degree=3)"
+        result = _fit_single_model(smf, f"spline_df{df}", formula, data, n_samples)
+        if result is not None:
+            model_results.append(result)
+    
+    return model_results
 
 
 def compare_temperature_rating_models(
@@ -37,91 +191,180 @@ def compare_temperature_rating_models(
     config: Optional[Any] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Compare linear / polynomial / spline models for rating ~ f(temperature)."""
-    temp = pd.to_numeric(temperature, errors="coerce")
-    y = pd.to_numeric(rating, errors="coerce")
-    idx = temp.index.intersection(y.index)
-    temp = temp.loc[idx]
-    y = y.loc[idx]
-
-    valid = temp.notna() & y.notna()
-    n = int(valid.sum())
-    min_samples = int(_get(config, "behavior_analysis.pain_residual.model_comparison.min_samples", 10))
-    meta: Dict[str, Any] = {"n_valid": n, "min_samples": min_samples}
-    if n < min_samples:
-        return pd.DataFrame(), {**meta, "status": "skipped_insufficient_samples"}
-
-    data = pd.DataFrame({"temp": temp[valid].to_numpy(dtype=float), "rating": y[valid].to_numpy(dtype=float)})
-
-    try:
-        import statsmodels.formula.api as smf
-        _has_statsmodels = True
-    except Exception:
-        smf = None  # type: ignore[assignment]
-        _has_statsmodels = False
-
-    meta["has_statsmodels"] = _has_statsmodels
-    if not _has_statsmodels:
+    min_samples = int(_get_config_value(config, "behavior_analysis.pain_residual.model_comparison.min_samples", 10))
+    data, meta = _validate_and_prepare_data(temperature, rating, min_samples)
+    if data is None:
+        return pd.DataFrame(), meta
+    
+    has_statsmodels, smf = _check_statsmodels_availability()
+    meta["has_statsmodels"] = has_statsmodels
+    if not has_statsmodels:
         return pd.DataFrame(), {**meta, "status": "missing_statsmodels"}
-
-    recs: List[Dict[str, Any]] = []
-
-    def _add(name: str, formula: str) -> None:
-        try:
-            model = smf.ols(formula, data=data).fit()
-        except Exception:
-            return
-        try:
-            yhat = np.asarray(model.predict(data), dtype=float)
-        except Exception:
-            yhat = np.full(n, np.nan)
-        recs.append(
-            {
-                "model": name,
-                "formula": formula,
-                "n": n,
-                "k_params": int(getattr(model, "df_model", np.nan)) + 1 if hasattr(model, "df_model") else np.nan,
-                "aic": float(model.aic) if np.isfinite(model.aic) else np.nan,
-                "bic": float(model.bic) if np.isfinite(model.bic) else np.nan,
-                "r2": float(model.rsquared) if hasattr(model, "rsquared") else np.nan,
-                "rmse": _rmse(data["rating"].to_numpy(), yhat) if np.isfinite(yhat).all() else np.nan,
-            }
-        )
-
-    _add("linear", "rating ~ temp")
-
-    degrees = _get(config, "behavior_analysis.pain_residual.model_comparison.poly_degrees", [2, 3])
-    if not isinstance(degrees, (list, tuple)) or not degrees:
-        degrees = [2, 3]
-    for d in degrees:
-        try:
-            deg = int(d)
-        except Exception:
-            continue
-        if deg < 2 or deg > 5:
-            continue
-        terms = " + ".join([f"I(temp**{k})" for k in range(2, deg + 1)])
-        _add(f"poly{deg}", f"rating ~ temp + {terms}")
-
-    df_candidates = _get(config, "behavior_analysis.pain_residual.spline_df_candidates", [3, 4, 5])
-    if not isinstance(df_candidates, (list, tuple)) or not df_candidates:
-        df_candidates = [3, 4, 5]
-    for df_k in df_candidates:
-        try:
-            k = int(df_k)
-        except Exception:
-            continue
-        if k < 3:
-            continue
-        _add(f"spline_df{k}", f"rating ~ bs(temp, df={k}, degree=3)")
-
-    if not recs:
+    
+    model_results = _fit_all_models(smf, data, config)
+    if not model_results:
         return pd.DataFrame(), {**meta, "status": "empty"}
+    
+    results_df = pd.DataFrame(model_results).sort_values("aic", ascending=True)
+    best_model = results_df.iloc[0].to_dict() if len(results_df) > 0 else {}
+    
+    best_aic = best_model.get("aic")
+    meta.update(
+        {
+            "status": "ok",
+            "best_model": best_model.get("model"),
+            "best_aic": best_aic,
+        }
+    )
+    
+    if best_aic is not None and np.isfinite(best_aic):
+        results_df["delta_aic"] = results_df["aic"] - float(best_aic)
+    else:
+        results_df["delta_aic"] = np.nan
+    
+    return results_df, meta
 
-    out = pd.DataFrame(recs).sort_values("aic", ascending=True)
-    best = out.iloc[0].to_dict() if len(out) else {}
-    meta.update({"status": "ok", "best_model": best.get("model"), "best_aic": best.get("aic")})
-    out["delta_aic"] = out["aic"] - float(best.get("aic")) if best.get("aic") is not None else np.nan
-    return out, meta
+
+def _check_statsmodels_api_availability() -> Tuple[bool, Any]:
+    """Check if statsmodels.api is available."""
+    try:
+        import statsmodels.api as sm
+        return True, sm
+    except ImportError:
+        return False, None
+
+
+def _fit_linear_baseline(sm: Any, temperatures: np.ndarray, ratings: np.ndarray) -> Tuple[Any, Dict[str, Any]]:
+    """Fit baseline linear model and return model with error info if it fails."""
+    design_matrix = sm.add_constant(temperatures, has_constant="add")
+    try:
+        model = sm.OLS(ratings, design_matrix).fit()
+        return model, {}
+    except (ValueError, np.linalg.LinAlgError) as exc:
+        return None, {"status": "failed_linear", "error": str(exc)}
+
+
+def _get_breakpoint_search_range(temperatures: np.ndarray, config: Any) -> Tuple[Optional[float], Optional[float], Dict[str, Any]]:
+    """Determine valid temperature range for breakpoint search."""
+    quantile_low = float(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", 0.15))
+    quantile_high = float(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", 0.85))
+    
+    temperature_low = float(np.quantile(temperatures, quantile_low))
+    temperature_high = float(np.quantile(temperatures, quantile_high))
+    
+    if not np.isfinite(temperature_low) or not np.isfinite(temperature_high):
+        return None, None, {"status": "skipped_invalid_temperature_range"}
+    
+    if temperature_high <= temperature_low:
+        return None, None, {"status": "skipped_invalid_temperature_range"}
+    
+    return temperature_low, temperature_high, {}
+
+
+def _generate_breakpoint_candidates(temperature_low: float, temperature_high: float, config: Any) -> np.ndarray:
+    """Generate candidate breakpoint values for search."""
+    n_candidates_raw = int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", 15))
+    n_candidates = max(n_candidates_raw, 5)
+    return np.linspace(temperature_low, temperature_high, num=n_candidates)
+
+
+def _create_hinge_feature(temperatures: np.ndarray, breakpoint: float) -> np.ndarray:
+    """Create hinge feature: max(0, temperature - breakpoint)."""
+    return np.maximum(0.0, temperatures - breakpoint)
+
+
+def _build_hinge_design_matrix(temperatures: np.ndarray, hinge: np.ndarray) -> np.ndarray:
+    """Build design matrix for hinge model: [intercept, temperature, hinge]."""
+    n_samples = len(temperatures)
+    intercept = np.ones(n_samples)
+    return np.column_stack([intercept, temperatures, hinge])
+
+
+def _extract_hinge_model_metrics(model: Any, breakpoint: float) -> Dict[str, Any]:
+    """Extract metrics from a fitted hinge model."""
+    aic = float(model.aic) if np.isfinite(model.aic) else np.nan
+    bic = float(model.bic) if np.isfinite(model.bic) else np.nan
+    r_squared = float(model.rsquared) if hasattr(model, "rsquared") else np.nan
+    
+    beta_temp = float(model.params[1]) if len(model.params) > 1 else np.nan
+    beta_hinge = float(model.params[2]) if len(model.params) > 2 else np.nan
+    
+    p_hinge = float(model.pvalues[2]) if hasattr(model, "pvalues") and len(model.pvalues) > 2 else np.nan
+    
+    return {
+        "breakpoint_c": breakpoint,
+        "aic": aic,
+        "bic": bic,
+        "r2": r_squared,
+        "beta_temp": beta_temp,
+        "beta_hinge": beta_hinge,
+        "p_hinge": p_hinge,
+    }
+
+
+def _fit_hinge_model(sm: Any, temperatures: np.ndarray, ratings: np.ndarray, breakpoint: float) -> Optional[Dict[str, Any]]:
+    """Fit a single hinge model at given breakpoint."""
+    hinge = _create_hinge_feature(temperatures, breakpoint)
+    design_matrix = _build_hinge_design_matrix(temperatures, hinge)
+    
+    try:
+        model = sm.OLS(ratings, design_matrix).fit()
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+    
+    return _extract_hinge_model_metrics(model, breakpoint)
+
+
+def _find_best_breakpoint(sm: Any, temperatures: np.ndarray, ratings: np.ndarray, candidates: np.ndarray) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Search for best breakpoint by fitting hinge models at all candidates."""
+    results = []
+    best_result = None
+    
+    for breakpoint in candidates:
+        result = _fit_hinge_model(sm, temperatures, ratings, float(breakpoint))
+        if result is None:
+            continue
+        
+        results.append(result)
+        if best_result is None:
+            best_result = result
+        elif np.isfinite(result["aic"]) and result["aic"] < best_result["aic"]:
+            best_result = result
+    
+    return results, best_result
+
+
+def _calculate_f_test(linear_model: Any, hinge_model: Any, n_observations: int) -> Tuple[float, float]:
+    """Calculate F-test comparing linear vs hinge model."""
+    residual_sum_squares_linear = float(np.sum(linear_model.resid ** 2))
+    residual_sum_squares_hinge = float(np.sum(hinge_model.resid ** 2))
+    
+    df_linear = int(linear_model.df_model) + 1 if hasattr(linear_model, "df_model") else 2
+    df_hinge = int(hinge_model.df_model) + 1 if hasattr(hinge_model, "df_model") else 3
+    
+    df_numerator = max(df_hinge - df_linear, 1)
+    df_denominator = max(n_observations - df_hinge, 1)
+    
+    if n_observations <= df_hinge or residual_sum_squares_hinge <= 0:
+        return np.nan, np.nan
+    
+    if residual_sum_squares_linear < residual_sum_squares_hinge:
+        return np.nan, np.nan
+    
+    numerator = (residual_sum_squares_linear - residual_sum_squares_hinge) / df_numerator
+    denominator = residual_sum_squares_hinge / df_denominator
+    
+    if denominator <= 0:
+        return np.nan, np.nan
+    
+    f_statistic = numerator / denominator
+    if not np.isfinite(f_statistic):
+        return np.nan, np.nan
+    
+    from scipy.stats import f as f_distribution
+    
+    p_value = float(f_distribution.sf(f_statistic, dfn=df_numerator, dfd=df_denominator))
+    return f_statistic, p_value
 
 
 def fit_temperature_breakpoint_test(
@@ -135,113 +378,61 @@ def fit_temperature_breakpoint_test(
 
     Model: rating ~ temp + max(0, temp - c)
     """
-    temp = pd.to_numeric(temperature, errors="coerce")
-    y = pd.to_numeric(rating, errors="coerce")
-    idx = temp.index.intersection(y.index)
-    temp = temp.loc[idx]
-    y = y.loc[idx]
-
-    valid = temp.notna() & y.notna()
-    n = int(valid.sum())
-    min_samples = int(_get(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", 12))
-    meta: Dict[str, Any] = {"n_valid": n, "min_samples": min_samples}
-    if n < min_samples:
-        return pd.DataFrame(), {**meta, "status": "skipped_insufficient_samples"}
-
-    data = pd.DataFrame({"temp": temp[valid].to_numpy(dtype=float), "rating": y[valid].to_numpy(dtype=float)})
-
-    try:
-        import statsmodels.api as sm
-        _has_statsmodels = True
-    except Exception:
-        sm = None  # type: ignore[assignment]
-        _has_statsmodels = False
-    meta["has_statsmodels"] = _has_statsmodels
-    if not _has_statsmodels:
+    min_samples = int(_get_config_value(config, "behavior_analysis.pain_residual.breakpoint_test.min_samples", 12))
+    data, meta = _validate_and_prepare_data(temperature, rating, min_samples)
+    if data is None:
+        return pd.DataFrame(), meta
+    
+    has_statsmodels, sm = _check_statsmodels_api_availability()
+    meta["has_statsmodels"] = has_statsmodels
+    if not has_statsmodels:
         return pd.DataFrame(), {**meta, "status": "missing_statsmodels"}
-
-    # Baseline linear model
-    X0 = sm.add_constant(data["temp"].to_numpy(dtype=float), has_constant="add")
-    try:
-        m0 = sm.OLS(data["rating"].to_numpy(dtype=float), X0).fit()
-    except Exception as exc:
-        return pd.DataFrame(), {**meta, "status": "failed_linear", "error": str(exc)}
-
-    q_lo = float(_get(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_low", 0.15))
-    q_hi = float(_get(config, "behavior_analysis.pain_residual.breakpoint_test.quantile_high", 0.85))
-    n_candidates = int(_get(config, "behavior_analysis.pain_residual.breakpoint_test.n_candidates", 15))
-
-    temps = data["temp"].to_numpy(dtype=float)
-    lo = float(np.quantile(temps, q_lo))
-    hi = float(np.quantile(temps, q_hi))
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-        return pd.DataFrame(), {**meta, "status": "skipped_invalid_temperature_range"}
-
-    candidates = np.linspace(lo, hi, num=max(n_candidates, 5))
-
-    recs: List[Dict[str, Any]] = []
-    best = None
-    for c in candidates:
-        hinge = np.maximum(0.0, temps - float(c))
-        X = np.column_stack([np.ones(len(temps)), temps, hinge])
-        try:
-            m = sm.OLS(data["rating"].to_numpy(dtype=float), X).fit()
-        except Exception:
-            continue
-        rec = {
-            "breakpoint_c": float(c),
-            "aic": float(m.aic) if np.isfinite(m.aic) else np.nan,
-            "bic": float(m.bic) if np.isfinite(m.bic) else np.nan,
-            "r2": float(m.rsquared) if hasattr(m, "rsquared") else np.nan,
-            "beta_temp": float(m.params[1]) if len(m.params) > 1 else np.nan,
-            "beta_hinge": float(m.params[2]) if len(m.params) > 2 else np.nan,
-            "p_hinge": float(m.pvalues[2]) if hasattr(m, "pvalues") and len(m.pvalues) > 2 else np.nan,
-        }
-        recs.append(rec)
-        if best is None or (np.isfinite(rec["aic"]) and rec["aic"] < best["aic"]):
-            best = rec
-
-    if not recs or best is None:
+    
+    temperatures = data["temp"].to_numpy(dtype=float)
+    ratings = data["rating"].to_numpy(dtype=float)
+    
+    linear_model, error_meta = _fit_linear_baseline(sm, temperatures, ratings)
+    if linear_model is None:
+        return pd.DataFrame(), {**meta, **error_meta}
+    
+    temperature_low, temperature_high, range_error_meta = _get_breakpoint_search_range(temperatures, config)
+    if temperature_low is None or temperature_high is None:
+        return pd.DataFrame(), {**meta, **range_error_meta}
+    
+    breakpoint_candidates = _generate_breakpoint_candidates(temperature_low, temperature_high, config)
+    breakpoint_results, best_result = _find_best_breakpoint(sm, temperatures, ratings, breakpoint_candidates)
+    
+    if not breakpoint_results or best_result is None:
         return pd.DataFrame(), {**meta, "status": "empty"}
-
-    out = pd.DataFrame(recs).sort_values("aic", ascending=True)
-
-    # Nested-model F test: linear (2 params) vs hinge (3 params) at best breakpoint.
-    c_best = float(best["breakpoint_c"])
-    hinge_best = np.maximum(0.0, temps - c_best)
-    X1 = np.column_stack([np.ones(len(temps)), temps, hinge_best])
+    
+    results_df = pd.DataFrame(breakpoint_results).sort_values("aic", ascending=True)
+    
+    best_breakpoint = float(best_result["breakpoint_c"])
+    hinge_best = _create_hinge_feature(temperatures, best_breakpoint)
+    design_matrix_best = _build_hinge_design_matrix(temperatures, hinge_best)
+    
     try:
-        m1 = sm.OLS(data["rating"].to_numpy(dtype=float), X1).fit()
-    except Exception as exc:
-        return out, {**meta, "status": "ok", "best_breakpoint": c_best, "f_test_error": str(exc)}
-
-    rss0 = float(np.sum(m0.resid**2))
-    rss1 = float(np.sum(m1.resid**2))
-    df0 = int(m0.df_model) + 1 if hasattr(m0, "df_model") else 2
-    df1 = int(m1.df_model) + 1 if hasattr(m1, "df_model") else 3
-    n_obs = int(len(temps))
-    if n_obs > df1 and rss1 > 0 and rss0 >= rss1:
-        num = (rss0 - rss1) / max(df1 - df0, 1)
-        den = rss1 / max(n_obs - df1, 1)
-        f_stat = num / den if den > 0 else np.nan
-        from scipy.stats import f as f_dist
-
-        p_f = float(f_dist.sf(f_stat, dfn=max(df1 - df0, 1), dfd=max(n_obs - df1, 1))) if np.isfinite(f_stat) else np.nan
-    else:
-        f_stat = np.nan
-        p_f = np.nan
-
+        hinge_model_best = sm.OLS(ratings, design_matrix_best).fit()
+    except (ValueError, np.linalg.LinAlgError) as exc:
+        return results_df, {**meta, "status": "ok", "best_breakpoint": best_breakpoint, "f_test_error": str(exc)}
+    
+    f_statistic, f_p_value = _calculate_f_test(linear_model, hinge_model_best, len(temperatures))
+    
+    best_aic = float(best_result["aic"])
+    linear_aic = float(linear_model.aic) if np.isfinite(linear_model.aic) else np.nan
+    delta_aic = float(best_aic - linear_aic) if np.isfinite(best_aic) and np.isfinite(linear_aic) else np.nan
+    
     meta.update(
         {
             "status": "ok",
-            "best_breakpoint": c_best,
-            "best_aic": float(best["aic"]),
-            "delta_aic_vs_linear": float(best["aic"] - float(m0.aic)) if np.isfinite(m0.aic) and np.isfinite(best["aic"]) else np.nan,
-            "f_test_stat": f_stat,
-            "f_test_p": p_f,
+            "best_breakpoint": best_breakpoint,
+            "best_aic": best_aic,
+            "delta_aic_vs_linear": delta_aic,
+            "f_test_stat": f_statistic,
+            "f_test_p": f_p_value,
         }
     )
-    return out, meta
+    return results_df, meta
 
 
 __all__ = ["compare_temperature_rating_models", "fit_temperature_breakpoint_test"]

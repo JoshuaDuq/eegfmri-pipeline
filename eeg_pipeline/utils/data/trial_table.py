@@ -17,10 +17,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from eeg_pipeline.context.behavior import BehaviorContext
 
 
 @dataclass
@@ -35,12 +38,22 @@ def _safe_numeric(series: Optional[pd.Series]) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
 
 
+def _get_pain_column_from_events(config: Any, events: pd.DataFrame) -> Optional[str]:
+    """Extract pain column name from config and events, returning None on failure."""
+    try:
+        from eeg_pipeline.utils.data.columns import get_pain_column_from_config
+
+        return get_pain_column_from_config(config, events)
+    except (AttributeError, KeyError, ValueError):
+        return None
+
+
 def _pick_event_columns(events: pd.DataFrame, candidates: List[str]) -> Dict[str, pd.Series]:
-    out: Dict[str, pd.Series] = {}
-    for c in candidates:
-        if c in events.columns and c not in out:
-            out[c] = events[c]
-    return out
+    selected_columns: Dict[str, pd.Series] = {}
+    for candidate in candidates:
+        if candidate in events.columns and candidate not in selected_columns:
+            selected_columns[candidate] = events[candidate]
+    return selected_columns
 
 
 def build_subject_trial_table(
@@ -64,52 +77,55 @@ def build_subject_trial_table(
     if ctx.targets is None:
         raise ValueError("ctx.targets is required")
 
-    n = int(len(ctx.targets))
+    n_trials = int(len(ctx.targets))
     events = ctx.aligned_events.reset_index(drop=True)
-    if len(events) != n:
-        raise ValueError(f"Trial table requires aligned events length {len(events)} == targets length {n}")
+    if len(events) != n_trials:
+        raise ValueError(
+            f"Trial table requires aligned events length {len(events)} == targets length {n_trials}"
+        )
 
+    subject = getattr(ctx, "subject", None)
+    task = getattr(ctx, "task", None)
     meta: Dict[str, Any] = {
-        "subject": getattr(ctx, "subject", None),
-        "task": getattr(ctx, "task", None),
-        "n_trials": n,
+        "subject": subject,
+        "task": task,
+        "n_trials": n_trials,
         "include_features": bool(include_features),
         "include_covariates": bool(include_covariates),
         "include_events": bool(include_events),
     }
 
-    df = pd.DataFrame(index=np.arange(n))
-    df["subject"] = str(getattr(ctx, "subject", ""))
-    df["task"] = str(getattr(ctx, "task", ""))
-    df["epoch"] = np.arange(n, dtype=int)
+    df = pd.DataFrame(index=np.arange(n_trials))
+    df["subject"] = str(subject or "")
+    df["task"] = str(task or "")
+    df["epoch"] = np.arange(n_trials, dtype=int)
 
-    selection = getattr(getattr(ctx, "epochs", None), "selection", None)
+    epochs = getattr(ctx, "epochs", None)
+    selection = getattr(epochs, "selection", None) if epochs is not None else None
     if selection is not None:
         try:
             selection_arr = np.asarray(selection, dtype=int)
-            if selection_arr.shape[0] == n:
+            if selection_arr.shape[0] == n_trials:
                 df["original_event_index"] = selection_arr
                 meta["has_original_event_index"] = True
-        except Exception:
+            else:
+                meta["has_original_event_index"] = False
+        except (ValueError, TypeError) as exc:
             meta["has_original_event_index"] = False
+            meta["selection_error"] = str(exc)
 
     df["rating"] = _safe_numeric(ctx.targets).reset_index(drop=True)
-    if getattr(ctx, "temperature", None) is not None:
-        df["temperature"] = _safe_numeric(ctx.temperature).reset_index(drop=True)
+    temperature = getattr(ctx, "temperature", None)
+    if temperature is not None:
+        df["temperature"] = _safe_numeric(temperature).reset_index(drop=True)
 
-    # Pain condition coding (if present)
-    try:
-        from eeg_pipeline.utils.data.columns import get_pain_column_from_config
-
-        pain_col = get_pain_column_from_config(ctx.config, events)
-    except Exception:
-        pain_col = None
+    pain_col = _get_pain_column_from_events(ctx.config, events)
     if pain_col is not None and pain_col in events.columns:
         df["pain_binary"] = pd.to_numeric(events[pain_col], errors="coerce")
         meta["pain_column"] = str(pain_col)
 
     if include_events:
-        keep = [
+        standard_event_columns = [
             "trial",
             "trial_type",
             "condition",
@@ -117,38 +133,66 @@ def build_subject_trial_table(
             "block",
             "response_time",
         ]
+        columns_to_keep = standard_event_columns.copy()
         if extra_event_columns:
-            keep.extend([str(c) for c in extra_event_columns])
-        cols = _pick_event_columns(events, keep)
-        for k, v in cols.items():
-            if k in df.columns:
+            columns_to_keep.extend([str(c) for c in extra_event_columns])
+        event_columns = _pick_event_columns(events, columns_to_keep)
+        for column_name, column_data in event_columns.items():
+            if column_name in df.columns:
                 continue
-            df[k] = v.reset_index(drop=True)
+            df[column_name] = column_data.reset_index(drop=True)
 
-    if include_covariates and getattr(ctx, "covariates_df", None) is not None and not ctx.covariates_df.empty:
-        cov = ctx.covariates_df.copy()
-        cov = cov.reset_index(drop=True)
-        for c in cov.columns:
-            name = str(c)
-            if name in df.columns:
-                name = f"cov_{name}"
-            df[name] = pd.to_numeric(cov[c], errors="coerce")
+    if include_covariates:
+        covariates_df = getattr(ctx, "covariates_df", None)
+        has_covariates = covariates_df is not None and not covariates_df.empty
+        if has_covariates:
+            covariates = covariates_df.copy().reset_index(drop=True)
+            for cov_column in covariates.columns:
+                column_name = str(cov_column)
+                if column_name in df.columns:
+                    column_name = f"cov_{column_name}"
+                df[column_name] = pd.to_numeric(covariates[cov_column], errors="coerce")
 
     if include_features:
         from eeg_pipeline.analysis.behavior.orchestration import combine_features
 
-        feats = combine_features(ctx)
-        if feats is not None and not feats.empty:
-            feats = feats.reset_index(drop=True)
-            # Avoid accidental overwrites of metadata columns.
-            collisions = set(df.columns).intersection(set(str(c) for c in feats.columns))
-            if collisions:
-                feats = feats.rename(columns={c: f"feat_{c}" for c in feats.columns if str(c) in collisions})
-                meta["feature_column_collisions"] = sorted(str(c) for c in collisions)
-            df = pd.concat([df, feats], axis=1)
+        features = combine_features(ctx)
+        if features is not None and not features.empty:
+            features = features.reset_index(drop=True)
+            existing_columns = set(df.columns)
+            feature_column_names = {str(c) for c in features.columns}
+            column_collisions = existing_columns.intersection(feature_column_names)
+            if column_collisions:
+                rename_map = {
+                    c: f"feat_{c}" for c in features.columns if str(c) in column_collisions
+                }
+                features = features.rename(columns=rename_map)
+                meta["feature_column_collisions"] = sorted(column_collisions)
+            df = pd.concat([df, features], axis=1)
 
     meta["n_columns"] = int(df.shape[1])
     return TrialTableBuildResult(df=df, metadata=meta)
+
+
+def _compute_lag_and_delta_for_group(
+    group: pd.DataFrame,
+    temperature_col: str,
+    rating_col: str,
+    has_temperature: bool,
+    has_rating: bool,
+) -> pd.DataFrame:
+    """Compute lagged and delta features for a single group."""
+    result = group.copy()
+    if has_temperature:
+        temperature = pd.to_numeric(result[temperature_col], errors="coerce")
+        result["prev_temperature"] = temperature.shift(1)
+        result["delta_temperature"] = temperature - temperature.shift(1)
+    if has_rating:
+        rating = pd.to_numeric(result[rating_col], errors="coerce")
+        result["prev_rating"] = rating.shift(1)
+        result["delta_rating"] = rating - rating.shift(1)
+    result["trial_index_within_group"] = np.arange(len(result), dtype=int)
+    return result
 
 
 def add_lag_and_delta_features(
@@ -159,40 +203,45 @@ def add_lag_and_delta_features(
     group_columns: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add lagged and delta variables (prev_*, delta_*) within runs/blocks if available."""
-    df = df.copy()
+    result_df = df.copy()
 
-    group_columns = [c for c in (group_columns or ["run_id", "run", "block"]) if c in df.columns]
-    meta: Dict[str, Any] = {"group_columns": group_columns}
+    default_group_columns = ["run_id", "run", "block"]
+    candidate_columns = group_columns or default_group_columns
+    available_group_columns = [
+        col for col in candidate_columns if col in result_df.columns
+    ]
+    meta: Dict[str, Any] = {"group_columns": available_group_columns}
 
-    if "epoch" in df.columns:
-        df = df.sort_values("epoch", kind="stable").reset_index(drop=True)
+    if "epoch" in result_df.columns:
+        result_df = result_df.sort_values("epoch", kind="stable").reset_index(drop=True)
 
-    has_temp = temperature_col in df.columns
-    has_rating = rating_col in df.columns
-    if not has_temp and not has_rating:
+    has_temperature = temperature_col in result_df.columns
+    has_rating = rating_col in result_df.columns
+    if not has_temperature and not has_rating:
         meta["status"] = "skipped_no_columns"
-        return df, meta
+        return result_df, meta
 
-    def _apply(group: pd.DataFrame) -> pd.DataFrame:
-        g = group.copy()
-        if has_temp:
-            t = pd.to_numeric(g[temperature_col], errors="coerce")
-            g["prev_temperature"] = t.shift(1)
-            g["delta_temperature"] = t - t.shift(1)
-        if has_rating:
-            y = pd.to_numeric(g[rating_col], errors="coerce")
-            g["prev_rating"] = y.shift(1)
-            g["delta_rating"] = y - y.shift(1)
-        g["trial_index_within_group"] = np.arange(len(g), dtype=int)
-        return g
+    def apply_to_group(group: pd.DataFrame) -> pd.DataFrame:
+        return _compute_lag_and_delta_for_group(
+            group, temperature_col, rating_col, has_temperature, has_rating
+        )
 
-    if group_columns:
-        df = df.groupby(group_columns, dropna=False, sort=False, group_keys=False).apply(_apply)
+    if available_group_columns:
+        result_df = result_df.groupby(
+            available_group_columns, dropna=False, sort=False, group_keys=False
+        ).apply(apply_to_group)
     else:
-        df = _apply(df)
+        result_df = apply_to_group(result_df)
 
     meta["status"] = "ok"
-    return df.reset_index(drop=True), meta
+    return result_df.reset_index(drop=True), meta
+
+
+def _get_config_value_safe(config: Any, key: str, default: Any = None) -> Any:
+    """Safely get config value, returning default if config lacks get method."""
+    if hasattr(config, "get"):
+        return config.get(key, default)
+    return default
 
 
 def add_pain_residual(
@@ -206,59 +255,78 @@ def add_pain_residual(
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add a flexible temperature→rating fit and define pain_residual = rating - f(temp)."""
     enabled = bool(
-        getattr(config, "get", lambda *_args, **_kwargs: False)(
-            "behavior_analysis.pain_residual.enabled", True
-        )
+        _get_config_value_safe(config, "behavior_analysis.pain_residual.enabled", True)
     )
     meta: Dict[str, Any] = {"enabled": enabled}
     if not enabled:
         return df, meta
-    if temperature_col not in df.columns or rating_col not in df.columns:
+
+    has_required_columns = (
+        temperature_col in df.columns and rating_col in df.columns
+    )
+    if not has_required_columns:
         meta["status"] = "skipped_missing_columns"
         return df, meta
 
     from eeg_pipeline.utils.analysis.stats.pain_residual import fit_temperature_rating_curve
 
-    temp = pd.to_numeric(df[temperature_col], errors="coerce")
+    temperature = pd.to_numeric(df[temperature_col], errors="coerce")
     rating = pd.to_numeric(df[rating_col], errors="coerce")
-    pred, resid, model_meta = fit_temperature_rating_curve(temp, rating, config=config)
+    prediction, residual, model_meta = fit_temperature_rating_curve(
+        temperature, rating, config=config
+    )
     meta.update(model_meta)
 
-    out = df.copy()
-    out[out_pred_col] = pred
-    out[out_resid_col] = resid
-    
-    # Optional cross-fit (out-of-run prediction) to avoid optimistic residualization when f(temp) is flexible.
-    # Uses GroupKFold on run_id (or configured group column) when available.
+    result = df.copy()
+    result[out_pred_col] = prediction
+    result[out_resid_col] = residual
     crossfit_enabled = bool(
-        getattr(config, "get", lambda *_args, **_kwargs: False)(
-            "behavior_analysis.pain_residual.crossfit.enabled", False
+        _get_config_value_safe(
+            config, "behavior_analysis.pain_residual.crossfit.enabled", False
         )
     )
     if crossfit_enabled:
         from eeg_pipeline.utils.config.loader import get_config_value
 
-        group_col = str(
+        default_group_col = get_config_value(
+            config, "behavior_analysis.run_adjustment.column", "run_id"
+        )
+        group_col_raw = get_config_value(
+            config,
+            "behavior_analysis.pain_residual.crossfit.group_column",
+            default_group_col,
+        )
+        group_col = str(group_col_raw or "").strip()
+        n_splits_required = int(
             get_config_value(
-                config,
-                "behavior_analysis.pain_residual.crossfit.group_column",
-                get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id"),
+                config, "behavior_analysis.pain_residual.crossfit.n_splits", 5
             )
-            or ""
-        ).strip()
-        n_splits_req = int(get_config_value(config, "behavior_analysis.pain_residual.crossfit.n_splits", 5))
-        method = str(get_config_value(config, "behavior_analysis.pain_residual.crossfit.method", "spline")).strip().lower()
+        )
+        method_raw = get_config_value(
+            config, "behavior_analysis.pain_residual.crossfit.method", "spline"
+        )
+        method = str(method_raw).strip().lower()
 
-        meta["crossfit"] = {"enabled": True, "status": "init", "group_column": group_col or None, "method": method}
+        meta["crossfit"] = {
+            "enabled": True,
+            "status": "init",
+            "group_column": group_col or None,
+            "method": method,
+        }
 
-        groups = out[group_col] if group_col and group_col in out.columns else None
-        valid = temp.notna() & rating.notna()
+        groups = (
+            result[group_col] if group_col and group_col in result.columns else None
+        )
+        valid_mask = temperature.notna() & rating.notna()
         if groups is not None:
-            valid = valid & pd.Series(groups).notna()
+            groups_series = pd.Series(groups, index=result.index)
+            valid_mask = valid_mask & groups_series.notna()
 
-        min_samples = int(get_config_value(config, "behavior_analysis.pain_residual.min_samples", 10))
-        n_valid = int(valid.sum())
-        if n_valid < min_samples:
+        min_samples_required = int(
+            get_config_value(config, "behavior_analysis.pain_residual.min_samples", 10)
+        )
+        n_valid_samples = int(valid_mask.sum())
+        if n_valid_samples < min_samples_required:
             meta["crossfit"]["status"] = "skipped_insufficient_samples"
         else:
             try:
@@ -266,81 +334,119 @@ def add_pain_residual(
                 from sklearn.pipeline import Pipeline
                 from sklearn.linear_model import Ridge
                 from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
-            except Exception as exc:
+            except ImportError as exc:
                 meta["crossfit"]["status"] = "skipped_missing_sklearn"
                 meta["crossfit"]["error"] = str(exc)
             else:
-                idx = out.index[valid]
-                X = temp.loc[idx].to_numpy(dtype=float)[:, None]
-                y = rating.loc[idx].to_numpy(dtype=float)
+                valid_indices = result.index[valid_mask]
+                X = temperature.loc[valid_indices].to_numpy(dtype=float)[:, None]
+                y = rating.loc[valid_indices].to_numpy(dtype=float)
 
                 if groups is None:
                     meta["crossfit"]["status"] = "skipped_missing_groups"
                 else:
-                    g = pd.Series(groups, index=out.index).loc[idx].to_numpy()
-                    unique_g = pd.unique(g)
-                    unique_g = unique_g[~pd.isna(unique_g)]
-                    n_groups = int(len(unique_g))
+                    group_values = (
+                        pd.Series(groups, index=result.index)
+                        .loc[valid_indices]
+                        .to_numpy()
+                    )
+                    unique_groups = pd.unique(group_values)
+                    unique_groups = unique_groups[~pd.isna(unique_groups)]
+                    n_groups = int(len(unique_groups))
                     if n_groups < 2:
-                        meta["crossfit"]["status"] = "skipped_missing_groups"
+                        meta["crossfit"]["status"] = "skipped_insufficient_groups"
                     else:
-                        n_splits = max(2, min(n_splits_req, n_groups))
-                        if method == "poly":
-                            deg = int(get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2))
-                            deg = max(1, min(deg, 5))
-                            model = Pipeline(
-                                [
-                                    ("poly", PolynomialFeatures(degree=deg, include_bias=False)),
-                                    ("ridge", Ridge(alpha=1.0)),
-                                ]
-                            )
-                            meta["crossfit"]["poly_degree"] = int(deg)
-                        else:
-                            n_knots = int(get_config_value(config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5))
-                            n_knots = max(3, min(n_knots, 12))
-                            model = Pipeline(
-                                [
-                                    ("spline", SplineTransformer(n_knots=n_knots, degree=3, include_bias=False)),
-                                    ("ridge", Ridge(alpha=1.0)),
-                                ]
-                            )
-                            meta["crossfit"]["spline_n_knots"] = int(n_knots)
+                        n_splits = max(2, min(n_splits_required, n_groups))
+                        model = _build_crossfit_model(config, method)
+                        _update_crossfit_meta_for_method(meta, config, method)
 
-                        cv_pred = np.full(len(idx), np.nan, dtype=float)
+                        cv_predictions = np.full(len(valid_indices), np.nan, dtype=float)
                         splitter = GroupKFold(n_splits=n_splits)
-                        for train, test in splitter.split(X, y, groups=g):
-                            model.fit(X[train], y[train])
-                            cv_pred[test] = model.predict(X[test])
+                        for train_idx, test_idx in splitter.split(X, y, groups=group_values):
+                            model.fit(X[train_idx], y[train_idx])
+                            cv_predictions[test_idx] = model.predict(X[test_idx])
 
-                        pred_full = pd.Series(np.nan, index=out.index, dtype=float)
-                        pred_full.loc[idx] = cv_pred
-                        resid_full = pd.Series(np.nan, index=out.index, dtype=float)
-                        resid_full.loc[idx] = y - cv_pred
+                        prediction_full = pd.Series(np.nan, index=result.index, dtype=float)
+                        prediction_full.loc[valid_indices] = cv_predictions
+                        residual_full = pd.Series(np.nan, index=result.index, dtype=float)
+                        residual_full.loc[valid_indices] = y - cv_predictions
 
-                        out[f"{out_pred_col}_cv"] = pred_full
-                        out[f"{out_resid_col}_cv"] = resid_full
+                        result[f"{out_pred_col}_cv"] = prediction_full
+                        result[f"{out_resid_col}_cv"] = residual_full
                         meta["crossfit"]["status"] = "ok"
-                        meta["crossfit"]["n_valid"] = int(n_valid)
+                        meta["crossfit"]["n_valid"] = int(n_valid_samples)
                         meta["crossfit"]["n_groups"] = int(n_groups)
                         meta["crossfit"]["n_splits"] = int(n_splits)
-    return out, meta
+    return result, meta
 
 
+def _build_crossfit_model(config: Any, method: str) -> Any:
+    """Build sklearn Pipeline model for crossfit based on method."""
+    from sklearn.pipeline import Pipeline
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import SplineTransformer, PolynomialFeatures
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    if method == "poly":
+        degree = int(
+            get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2)
+        )
+        degree = max(1, min(degree, 5))
+        return Pipeline(
+            [
+                ("poly", PolynomialFeatures(degree=degree, include_bias=False)),
+                ("ridge", Ridge(alpha=1.0)),
+            ]
+        )
+    else:
+        n_knots = int(
+            get_config_value(
+                config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5
+            )
+        )
+        n_knots = max(3, min(n_knots, 12))
+        return Pipeline(
+            [
+                ("spline", SplineTransformer(n_knots=n_knots, degree=3, include_bias=False)),
+                ("ridge", Ridge(alpha=1.0)),
+            ]
+        )
+
+
+def _update_crossfit_meta_for_method(meta: Dict[str, Any], config: Any, method: str) -> None:
+    """Update crossfit metadata with method-specific parameters."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+
+    if method == "poly":
+        degree = int(
+            get_config_value(config, "behavior_analysis.pain_residual.poly_degree", 2)
+        )
+        degree = max(1, min(degree, 5))
+        meta["crossfit"]["poly_degree"] = int(degree)
+    else:
+        n_knots = int(
+            get_config_value(
+                config, "behavior_analysis.pain_residual.crossfit.spline_n_knots", 5
+            )
+        )
+        n_knots = max(3, min(n_knots, 12))
+        meta["crossfit"]["spline_n_knots"] = int(n_knots)
 
 
 def save_trial_table(
     result: TrialTableBuildResult,
     out_path: Path,
     *,
-    format: str = "tsv",
+    format: str = "tsv",  # noqa: A002
 ) -> Path:
+    """Save trial table to file in specified format."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fmt = str(format).strip().lower()
-    if fmt in {"tsv", "txt"}:
+    format_normalized = str(format).strip().lower()
+    if format_normalized in {"tsv", "txt"}:
         from eeg_pipeline.infra.tsv import write_tsv
+
         write_tsv(result.df, out_path, index=False)
-    elif fmt == "parquet":
-        # Discouraged but kept for legacy fallback if explicitly requested
+    elif format_normalized == "parquet":
         result.df.to_parquet(out_path, index=False)
     else:
         raise ValueError(f"Unsupported trial table format: {format}")

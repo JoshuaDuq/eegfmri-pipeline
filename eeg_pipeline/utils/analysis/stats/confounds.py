@@ -18,48 +18,109 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_fdr_alpha
 from eeg_pipeline.utils.analysis.stats.correlation import safe_correlation
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except Exception:
-        pass
-    return default
-
-
-def _match_any(name: str, patterns: List[str]) -> bool:
-    for pat in patterns:
+def _matches_any_pattern(name: str, patterns: List[str]) -> bool:
+    """Check if name matches any of the provided regex patterns."""
+    for pattern in patterns:
         try:
-            if re.search(pat, name):
+            if re.search(pattern, name):
                 return True
         except re.error:
-            if pat in name:
+            if pattern in name:
                 return True
     return False
 
 
 def select_qc_columns(df: pd.DataFrame, config: Any) -> List[str]:
-    patterns = _get(
+    """Select QC columns from dataframe based on config patterns."""
+    default_patterns = [
+        r"^quality_.*_global_",
+        r"^quality_.*_ch_",
+    ]
+    patterns = get_config_value(
         config,
         "behavior_analysis.confounds.qc_column_patterns",
-        [
-            r"^quality_.*_global_",
-            r"^quality_.*_ch_",
-        ],
+        default_patterns,
     )
-    patterns = [str(p) for p in patterns] if isinstance(patterns, (list, tuple)) else [str(patterns)]
+    if isinstance(patterns, (list, tuple)):
+        patterns = [str(p) for p in patterns]
+    else:
+        patterns = [str(patterns)]
+    
+    excluded_columns = {"rating", "temperature", "pain_residual"}
     candidates = []
     for col in df.columns:
-        name = str(col)
-        if name in {"rating", "temperature", "pain_residual"}:
+        column_name = str(col)
+        if column_name in excluded_columns:
             continue
-        if _match_any(name, patterns):
-            candidates.append(name)
+        if _matches_any_pattern(column_name, patterns):
+            candidates.append(column_name)
     return candidates
+
+
+def _compute_correlation_record(
+    qc_values: np.ndarray,
+    target_values: np.ndarray,
+    qc_name: str,
+    target_name: str,
+    method: str,
+    robust_method: Optional[str],
+    min_samples: int,
+) -> Optional[Dict[str, Any]]:
+    """Compute correlation between QC and target, return record if valid."""
+    correlation, p_value, n_valid = safe_correlation(
+        qc_values,
+        target_values,
+        method=method,
+        min_samples=min_samples,
+        robust_method=robust_method,
+    )
+    if not np.isfinite(correlation) or not np.isfinite(p_value):
+        return None
+    
+    return {
+        "qc_metric": qc_name,
+        "target": target_name,
+        "r": float(correlation),
+        "p": float(p_value),
+        "n": int(n_valid),
+        "method": method,
+        "robust_method": robust_method,
+    }
+
+
+def _apply_fdr_correction_by_target(audit_df: pd.DataFrame, config: Any) -> pd.DataFrame:
+    """Apply FDR correction within each target group."""
+    audit_df = audit_df.copy()
+    audit_df["q"] = np.nan
+    fdr_alpha = get_fdr_alpha(config)
+    
+    for target in audit_df["target"].unique():
+        target_mask = audit_df["target"] == target
+        p_values = pd.to_numeric(
+            audit_df.loc[target_mask, "p"],
+            errors="coerce"
+        ).to_numpy()
+        audit_df.loc[target_mask, "q"] = fdr_bh(
+            p_values,
+            alpha=fdr_alpha,
+            config=config,
+        )
+    return audit_df
+
+
+def _add_fdr_aliases(audit_df: pd.DataFrame) -> pd.DataFrame:
+    """Add convenience aliases for integration with global FDR tooling."""
+    audit_df = audit_df.copy()
+    audit_df["p_primary"] = audit_df["p"]
+    audit_df["p_raw"] = audit_df["p"]
+    audit_df["p_kind_primary"] = "p"
+    audit_df["p_primary_source"] = "raw"
+    return audit_df
 
 
 def audit_qc_confounds(
@@ -71,60 +132,65 @@ def audit_qc_confounds(
     robust_method: Optional[str] = None,
     min_samples: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-    """Return (audit_df, metadata)."""
-    targets = targets or ["rating", "temperature"]
-    qc_cols = select_qc_columns(trial_df, config)
+    """Audit QC metrics for associations with target variables.
+    
+    Returns
+    -------
+    audit_df : pd.DataFrame
+        DataFrame with correlation results (r, p, q) for each QC-target pair
+    metadata : Dict[str, Any]
+        Metadata about the audit process
+    """
+    default_targets = ["rating", "temperature"]
+    targets = targets or default_targets
+    qc_columns = select_qc_columns(trial_df, config)
 
-    meta: Dict[str, Any] = {
-        "n_qc_candidates": int(len(qc_cols)),
+    metadata: Dict[str, Any] = {
+        "n_qc_candidates": int(len(qc_columns)),
         "targets": list(targets),
     }
-    if not qc_cols:
-        return pd.DataFrame(), {**meta, "status": "empty"}
+    
+    if not qc_columns:
+        return pd.DataFrame(), {**metadata, "status": "empty"}
 
     records: List[Dict[str, Any]] = []
     for target in targets:
         if target not in trial_df.columns:
             continue
-        y = pd.to_numeric(trial_df[target], errors="coerce").to_numpy()
-        for qc in qc_cols:
-            x = pd.to_numeric(trial_df[qc], errors="coerce").to_numpy()
-            r, p, n = safe_correlation(x, y, method=method, min_samples=min_samples, robust_method=robust_method)
-            if not np.isfinite(r) or not np.isfinite(p):
-                continue
-            records.append(
-                {
-                    "qc_metric": qc,
-                    "target": target,
-                    "r": float(r),
-                    "p": float(p),
-                    "n": int(n),
-                    "method": method,
-                    "robust_method": robust_method,
-                }
+        
+        target_values = pd.to_numeric(
+            trial_df[target],
+            errors="coerce"
+        ).to_numpy()
+        
+        for qc_column in qc_columns:
+            qc_values = pd.to_numeric(
+                trial_df[qc_column],
+                errors="coerce"
+            ).to_numpy()
+            
+            record = _compute_correlation_record(
+                qc_values,
+                target_values,
+                qc_column,
+                target,
+                method,
+                robust_method,
+                min_samples,
             )
+            if record is not None:
+                records.append(record)
 
     if not records:
-        return pd.DataFrame(), {**meta, "status": "no_valid_tests"}
+        return pd.DataFrame(), {**metadata, "status": "no_valid_tests"}
 
-    out = pd.DataFrame(records)
+    audit_df = pd.DataFrame(records)
+    audit_df = _apply_fdr_correction_by_target(audit_df, config)
+    audit_df = _add_fdr_aliases(audit_df)
 
-    # Within-target FDR.
-    out["q"] = np.nan
-    for tgt in out["target"].unique():
-        mask = out["target"] == tgt
-        pvals = pd.to_numeric(out.loc[mask, "p"], errors="coerce").to_numpy()
-        out.loc[mask, "q"] = fdr_bh(pvals, alpha=float(_get(config, "behavior_analysis.statistics.fdr_alpha", 0.05)), config=config)
-
-    # Convenience aliases for integration with global FDR tooling (optional).
-    out["p_primary"] = out["p"]
-    out["p_raw"] = out["p"]
-    out["p_kind_primary"] = "p"
-    out["p_primary_source"] = "raw"
-
-    meta["status"] = "ok"
-    meta["n_tests"] = int(len(out))
-    return out, meta
+    metadata["status"] = "ok"
+    metadata["n_tests"] = int(len(audit_df))
+    return audit_df, metadata
 
 
 def select_significant_qc_covariates(
@@ -135,20 +201,41 @@ def select_significant_qc_covariates(
     max_covariates: int = 3,
     prefer_target: str = "rating",
 ) -> List[str]:
-    """Pick QC metrics to add as covariates, based on FDR q-values."""
+    """Select QC metrics to use as covariates based on FDR q-values.
+    
+    Prioritizes metrics confounded with the preferred target, then by
+    absolute correlation strength.
+    """
     if audit_df is None or audit_df.empty:
         return []
-    df = audit_df.copy()
-    df["q"] = pd.to_numeric(df.get("q", np.nan), errors="coerce")
-    df = df[np.isfinite(df["q"]) & (df["q"] < float(alpha))]
-    if df.empty:
+    
+    filtered_df = audit_df.copy()
+    filtered_df["q"] = pd.to_numeric(
+        filtered_df.get("q", np.nan),
+        errors="coerce"
+    )
+    filtered_df = filtered_df[
+        np.isfinite(filtered_df["q"]) & (filtered_df["q"] < float(alpha))
+    ]
+    
+    if filtered_df.empty:
         return []
-    # Prefer metrics confounded with rating (or specified target), then strongest |r|.
-    df["abs_r"] = pd.to_numeric(df.get("r", np.nan), errors="coerce").abs()
-    df["is_prefer"] = (df["target"].astype(str) == str(prefer_target))
-    df = df.sort_values(["is_prefer", "abs_r"], ascending=[False, False])
-    picked = df["qc_metric"].astype(str).tolist()
-    return list(dict.fromkeys(picked))[: int(max_covariates)]
+    
+    filtered_df["abs_r"] = pd.to_numeric(
+        filtered_df.get("r", np.nan),
+        errors="coerce"
+    ).abs()
+    filtered_df["is_prefer"] = (
+        filtered_df["target"].astype(str) == str(prefer_target)
+    )
+    filtered_df = filtered_df.sort_values(
+        ["is_prefer", "abs_r"],
+        ascending=[False, False],
+    )
+    
+    selected_metrics = filtered_df["qc_metric"].astype(str).tolist()
+    unique_metrics = list(dict.fromkeys(selected_metrics))
+    return unique_metrics[:int(max_covariates)]
 
 
 __all__ = [

@@ -4,10 +4,39 @@ from __future__ import annotations
 
 import argparse
 import json as json_module
+import logging
+from pathlib import Path
 from typing import Any, List
 
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
-from eeg_pipeline.cli.commands.base import detect_available_bands, detect_feature_availability, _empty_feature_availability
+from eeg_pipeline.cli.commands.base import (
+    detect_available_bands,
+    detect_feature_availability,
+    _empty_feature_availability,
+)
+
+
+MODE_SUBJECTS = "subjects"
+MODE_FEATURES = "features"
+MODE_CONFIG = "config"
+MODE_VERSION = "version"
+MODE_PLOTTERS = "plotters"
+
+SOURCE_BIDS = "bids"
+SOURCE_EPOCHS = "epochs"
+SOURCE_FEATURES = "features"
+SOURCE_SOURCE_DATA = "source_data"
+SOURCE_ALL = "all"
+
+DISCOVERY_SOURCE_BIDS = "bids"
+DISCOVERY_SOURCE_DERIVATIVES_EPOCHS = "derivatives_epochs"
+DISCOVERY_SOURCE_FEATURES = "features"
+DISCOVERY_SOURCE_SOURCE_DATA = "source_data"
+
+EXTRACTION_CONFIG_FILENAME = "extraction_config.json"
+EXTRACTION_CONFIG_PATTERN = "extraction_config_*.json"
+FEATURES_FILE_PATTERN = "features_*.tsv"
+STATS_FILE_PATTERNS = ("*.tsv", "*.npz", "*.csv", "*.json")
 
 
 def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -20,7 +49,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=["subjects", "features", "config", "version", "plotters"],
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS],
         help="What to show: subjects, features for a subject, config summary, or version",
     )
     parser.add_argument(
@@ -37,8 +66,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "--source",
-        choices=["bids", "epochs", "features", "source_data", "all"],
-        default="epochs",
+        choices=[SOURCE_BIDS, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
+        default=SOURCE_EPOCHS,
         help="Discovery source for subjects (default: epochs)",
     )
     parser.add_argument(
@@ -56,308 +85,379 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     return parser
 
 
-def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
-    """Execute the info command."""
+def _configure_logging_for_json_output() -> logging.Logger:
+    """Configure logging to suppress output when JSON is requested."""
+    logging.getLogger("mne").setLevel(logging.ERROR)
+    logging.getLogger("nilearn").setLevel(logging.ERROR)
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.CRITICAL)
+    return logger
+
+
+def _get_logger(output_json: bool) -> logging.Logger:
+    """Get logger, suppressing output if JSON mode is enabled."""
+    if output_json:
+        return _configure_logging_for_json_output()
+    from eeg_pipeline.infra.logging import get_logger
+    return get_logger(__name__)
+
+
+def _map_source_to_discovery_sources(source: str) -> List[str]:
+    """Map source argument to list of discovery source names."""
+    if source == SOURCE_ALL:
+        return [
+            DISCOVERY_SOURCE_BIDS,
+            DISCOVERY_SOURCE_DERIVATIVES_EPOCHS,
+            DISCOVERY_SOURCE_FEATURES,
+            DISCOVERY_SOURCE_SOURCE_DATA,
+        ]
+    if source == SOURCE_BIDS:
+        return [DISCOVERY_SOURCE_BIDS]
+    if source == SOURCE_FEATURES:
+        return [DISCOVERY_SOURCE_FEATURES]
+    if source == SOURCE_SOURCE_DATA:
+        return [DISCOVERY_SOURCE_SOURCE_DATA]
+    return [DISCOVERY_SOURCE_DERIVATIVES_EPOCHS]
+
+
+def _get_discovery_policy(source: str) -> str:
+    """Get discovery policy based on source."""
+    return "union" if source == SOURCE_ALL else "intersection"
+
+
+def _extract_subject_id(subject_string: str) -> str:
+    """Extract subject ID from subject string (removes 'sub-' prefix if present)."""
+    return subject_string.replace("sub-", "")
+
+
+def _print_json_output(data: dict) -> None:
+    """Print data as formatted JSON."""
+    print(json_module.dumps(data, indent=2))
+
+
+def _handle_plotters_mode(output_json: bool) -> None:
+    """Handle plotters mode: list available feature plotters."""
+    from eeg_pipeline.plotting.features import registrations as _feature_plotters  # noqa: F401
+    from eeg_pipeline.plotting.features.context import VisualizationRegistry
+
+    feature_plotters = {}
+    for category in sorted(VisualizationRegistry.get_categories()):
+        plotters = []
+        for name, _func in VisualizationRegistry.get_plotters(category):
+            plotters.append(
+                {
+                    "id": f"{category}.{name}",
+                    "category": category,
+                    "name": name,
+                }
+            )
+        feature_plotters[category] = plotters
+
+    if output_json:
+        _print_json_output({"feature_plotters": feature_plotters})
+    else:
+        for category, plotters in feature_plotters.items():
+            print(f"{category}:")
+            for plotter in plotters:
+                print(f"  - {plotter['name']}")
+
+
+def _get_available_time_windows(features_dir: Path, config: Any) -> List[str]:
+    """Extract available time windows from extraction config or fallback to static config."""
+    if not features_dir.exists():
+        return []
+
+    extraction_config_path = features_dir / EXTRACTION_CONFIG_FILENAME
+    if extraction_config_path.exists():
+        try:
+            extraction_meta = json_module.loads(extraction_config_path.read_text())
+            if extraction_meta.get("merged") and extraction_meta.get("time_ranges"):
+                windows = [w for w in extraction_meta["time_ranges"] if w is not None]
+                if windows:
+                    return windows
+        except (json_module.JSONDecodeError, OSError, KeyError):
+            pass
+
+    try:
+        suffixed_configs = list(features_dir.glob(EXTRACTION_CONFIG_PATTERN))
+        windows = []
+        for cfg_path in suffixed_configs:
+            stem = cfg_path.stem
+            if stem.startswith("extraction_config_"):
+                window_name = stem.replace("extraction_config_", "")
+                if window_name and window_name not in windows:
+                    windows.append(window_name)
+        if windows:
+            return sorted(windows)
+    except OSError:
+        pass
+
+    return list(config.get("time_windows", {}).keys())
+
+
+def _get_available_event_columns(bids_root: Path, subject_id: str, task: str) -> List[str]:
+    """Get available event columns from BIDS events file."""
+    from eeg_pipeline.infra.paths import bids_events_path
+    import pandas as pd
+
+    events_path = bids_events_path(bids_root, subject_id, task)
+    if not events_path.exists():
+        return []
+
+    try:
+        df = pd.read_csv(events_path, sep="\t", nrows=1)
+        return sorted(list(df.columns))
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+        return []
+
+
+def _build_subject_status_json(
+    discovered_subjects: List[str],
+    epochs_subjects: set,
+    features_subjects: set,
+    deriv_root: Path,
+    task: str,
+    config: Any,
+) -> dict:
+    """Build JSON output for subject status mode."""
+    from eeg_pipeline.utils.data.subjects import get_epoch_metadata
+    from eeg_pipeline.infra.paths import deriv_features_path, deriv_stats_path
+
+    results = []
+    for subj in discovered_subjects:
+        status = {
+            "subject": f"sub-{subj}",
+            "epochs": subj in epochs_subjects,
+            "features": subj in features_subjects,
+        }
+        results.append(status)
+
+    global_epoch_metadata = {}
+    for subj in discovered_subjects:
+        if subj in epochs_subjects:
+            global_epoch_metadata = get_epoch_metadata(subj, task, deriv_root, config=config)
+            if global_epoch_metadata:
+                break
+
+    available_windows = []
+    for result in results:
+        subj_id = _extract_subject_id(result["subject"])
+        features_dir = deriv_features_path(deriv_root, subj_id)
+        windows = _get_available_time_windows(features_dir, config)
+        if windows:
+            available_windows = windows
+            break
+
+    available_columns = []
+    for result in results:
+        subj_id = _extract_subject_id(result["subject"])
+        columns = _get_available_event_columns(config.bids_root, subj_id, task)
+        if columns:
+            available_columns = columns
+            break
+
+    json_results = []
+    for result in results:
+        subj_id = _extract_subject_id(result["subject"])
+        available_bands = []
+        has_stats = False
+
+        if result["features"] or result["epochs"]:
+            features_dir = deriv_features_path(deriv_root, subj_id)
+            feature_availability = detect_feature_availability(features_dir)
+            if features_dir.exists():
+                available_bands = detect_available_bands(features_dir)
+        else:
+            feature_availability = _empty_feature_availability()
+
+        stats_dir = deriv_stats_path(deriv_root, subj_id)
+        if stats_dir.exists():
+            for pattern in STATS_FILE_PATTERNS:
+                if any(stats_dir.glob(pattern)):
+                    has_stats = True
+                    break
+
+        metadata = {}
+        if result["epochs"]:
+            metadata = get_epoch_metadata(subj_id, task, deriv_root, config=config)
+            if not metadata and global_epoch_metadata:
+                metadata = global_epoch_metadata
+
+        json_results.append({
+            "id": subj_id,
+            "has_epochs": result["epochs"],
+            "has_features": result["features"],
+            "has_stats": has_stats,
+            "epoch_metadata": metadata,
+            "available_bands": available_bands,
+            "feature_availability": feature_availability,
+        })
+
+    return {
+        "subjects": json_results,
+        "count": len(json_results),
+        "available_windows": available_windows,
+        "available_event_columns": available_columns,
+    }
+
+
+def _handle_subjects_mode(
+    args: argparse.Namespace,
+    deriv_root: Path,
+    task: str,
+    config: Any,
+    logger: logging.Logger,
+) -> None:
+    """Handle subjects mode: list available subjects."""
     from eeg_pipeline.utils.data.subjects import (
         get_available_subjects,
         _collect_subjects_from_bids,
         _collect_subjects_from_derivatives_epochs,
         _collect_subjects_from_features,
-        get_epoch_metadata,
     )
-    from eeg_pipeline.utils.data.feature_io import load_feature_bundle
-    from eeg_pipeline.infra.paths import resolve_deriv_root, deriv_features_path, deriv_stats_path
-    from eeg_pipeline.infra.logging import get_logger
-    
-    # Suppress logging when JSON output requested to keep output clean for parsing
-    if args.output_json:
-        import logging
-        logging.getLogger("mne").setLevel(logging.ERROR)
-        logging.getLogger("nilearn").setLevel(logging.ERROR)
-        
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.CRITICAL)  # Suppress all but critical
+
+    sources = _map_source_to_discovery_sources(args.source)
+    policy = _get_discovery_policy(args.source)
+
+    discovered = get_available_subjects(
+        config=config,
+        deriv_root=deriv_root,
+        task=task,
+        discovery_sources=sources,
+        subject_discovery_policy=policy,
+        logger=logger,
+    )
+
+    if args.status:
+        epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
+        features_subjects = set(_collect_subjects_from_features(deriv_root))
+
+        if args.output_json:
+            output = _build_subject_status_json(
+                discovered,
+                epochs_subjects,
+                features_subjects,
+                deriv_root,
+                task,
+                config,
+            )
+            _print_json_output(output)
+        else:
+            for subj in discovered:
+                epoch_mark = "x" if subj in epochs_subjects else " "
+                feat_mark = "x" if subj in features_subjects else " "
+                print(f"sub-{subj}  [{epoch_mark}]epochs  [{feat_mark}]features")
+            print(f"\nTotal: {len(discovered)} subjects")
     else:
-        logger = get_logger(__name__)
-    
+        if args.output_json:
+            json_results = [
+                {"id": subj_id, "has_epochs": False, "has_features": False}
+                for subj_id in discovered
+            ]
+            _print_json_output({"subjects": json_results, "count": len(discovered)})
+        else:
+            for subj in discovered:
+                print(f"sub-{subj}")
+            print(f"\nTotal: {len(discovered)} subjects")
+
+
+def _handle_features_mode(
+    subject_id: str,
+    deriv_root: Path,
+    output_json: bool,
+) -> None:
+    """Handle features mode: list features for a subject."""
+    from eeg_pipeline.infra.paths import deriv_features_path
+    import pandas as pd
+
+    features_dir = deriv_features_path(deriv_root, subject_id)
+
+    if not features_dir.exists():
+        print(f"No features directory found for sub-{subject_id}")
+        return
+
+    feature_files = sorted(features_dir.glob(FEATURES_FILE_PATTERN))
+    results = []
+
+    for fpath in feature_files:
+        try:
+            df = pd.read_csv(fpath, sep="\t", nrows=1)
+            results.append({"file": fpath.name, "columns": len(df.columns)})
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
+            results.append({"file": fpath.name, "columns": "error"})
+
+    if output_json:
+        _print_json_output({"subject": f"sub-{subject_id}", "features": results})
+    else:
+        print(f"Features for sub-{subject_id}:")
+        for result in results:
+            print(f"  {result['file']}: {result['columns']} columns")
+        print(f"\nTotal: {len(results)} feature files")
+
+
+def _handle_config_mode(args: argparse.Namespace, config: Any, deriv_root: Path, task: str) -> None:
+    """Handle config mode: show configuration values."""
+    if args.keys:
+        values = {key: config.get(key) for key in args.keys}
+        if args.output_json:
+            _print_json_output(values)
+        else:
+            for key, value in values.items():
+                print(f"{key}: {value}")
+    elif args.target:
+        value = config.get(args.target)
+        if args.output_json:
+            _print_json_output({args.target: value})
+        else:
+            print(f"{args.target}: {value}")
+    else:
+        summary = {
+            "bids_root": str(config.bids_root) if hasattr(config, "bids_root") else None,
+            "deriv_root": str(deriv_root),
+            "source_root": config.get("paths.source_data"),
+            "task": task,
+            "preprocessing_n_jobs": config.get("preprocessing.n_jobs", 1),
+            "n_subjects": len(config.subjects) if hasattr(config, "subjects") and config.subjects else 0,
+        }
+        if args.output_json:
+            _print_json_output(summary)
+        else:
+            print("Configuration Summary:")
+            for key, value in summary.items():
+                print(f"  {key}: {value}")
+
+
+def _handle_version_mode(output_json: bool) -> None:
+    """Handle version mode: show package version."""
+    import eeg_pipeline
+
+    version = getattr(eeg_pipeline, "__version__", "unknown")
+    if output_json:
+        _print_json_output({"version": version})
+    else:
+        print(f"eeg-pipeline version: {version}")
+
+
+def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Execute the info command."""
+    from eeg_pipeline.infra.paths import resolve_deriv_root
+
+    logger = _get_logger(args.output_json)
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
 
-    if args.mode == "plotters":
-        from eeg_pipeline.plotting.features import registrations as _feature_plotters  # noqa: F401
-        from eeg_pipeline.plotting.features.context import VisualizationRegistry
-
-        feature_plotters = {}
-        for category in sorted(VisualizationRegistry.get_categories()):
-            plotters = []
-            for name, _func in VisualizationRegistry.get_plotters(category):
-                plotters.append(
-                    {
-                        "id": f"{category}.{name}",
-                        "category": category,
-                        "name": name,
-                    }
-                )
-            feature_plotters[category] = plotters
-
-        if args.output_json:
-            print(json_module.dumps({"feature_plotters": feature_plotters}, indent=2))
-        else:
-            for category, plotters in feature_plotters.items():
-                print(f"{category}:")
-                for p in plotters:
-                    print(f"  - {p['name']}")
-        return
-
-    if args.mode == "subjects":
-        if args.source == "all":
-            sources = ["bids", "derivatives_epochs", "features", "source_data"]
-        elif args.source == "bids":
-            sources = ["bids"]
-        elif args.source == "features":
-            sources = ["features"]
-        elif args.source == "source_data":
-            sources = ["source_data"]
-        else:
-            sources = ["derivatives_epochs"]
-        
-        source_map = {
-            "bids": _collect_subjects_from_bids,
-            "derivatives_epochs": lambda: _collect_subjects_from_derivatives_epochs(deriv_root, task, config),
-            "features": lambda: _collect_subjects_from_features(deriv_root),
-        }
-        
-        # Use union policy for "all" source to show subjects with at least epochs
-        policy = "union" if args.source == "all" else "intersection"
-        discovered = get_available_subjects(
-            config=config,
-            deriv_root=deriv_root,
-            task=task,
-            discovery_sources=sources,
-            subject_discovery_policy=policy,
-            logger=logger,
-        )
-        
-        if args.status:
-            epochs_subjects = set(_collect_subjects_from_derivatives_epochs(deriv_root, task, config))
-            features_subjects = set(_collect_subjects_from_features(deriv_root))
-            
-            results = []
-            for subj in discovered:
-                status = {
-                    "subject": f"sub-{subj}",
-                    "epochs": subj in epochs_subjects,
-                    "features": subj in features_subjects,
-                }
-                results.append(status)
-            
-            if args.output_json:
-                json_results = []
-                
-                # Try to get epoch metadata from the first valid subject to show generic bounds
-                global_epoch_metadata = {}
-                for subj in discovered:
-                    if subj in epochs_subjects:
-                        global_epoch_metadata = get_epoch_metadata(subj, task, deriv_root, config=config)
-                        if global_epoch_metadata:
-                            break
-
-                # Get available time windows from computed features (extraction_config.json)
-                # This reflects what the user actually specified during feature extraction,
-                # not the default config time_windows section
-                available_windows = []
-                for r in results:
-                    subj_id = r["subject"].replace("sub-", "")
-                    features_dir = deriv_features_path(deriv_root, subj_id)
-                    if not features_dir.exists():
-                        continue
-                    
-                    # First try the merged extraction_config.json
-                    extraction_config_path = features_dir / "extraction_config.json"
-                    if extraction_config_path.exists():
-                        try:
-                            extraction_meta = json_module.loads(extraction_config_path.read_text())
-                            # Check for merged config with time_ranges list
-                            if extraction_meta.get("merged") and extraction_meta.get("time_ranges"):
-                                available_windows = [
-                                    w for w in extraction_meta["time_ranges"] 
-                                    if w is not None
-                                ]
-                                if available_windows:
-                                    break
-                        except Exception:
-                            pass
-                    
-                    # If no merged config, look for suffixed extraction_config_{name}.json files
-                    if not available_windows:
-                        try:
-                            suffixed_configs = list(features_dir.glob("extraction_config_*.json"))
-                            for cfg_path in suffixed_configs:
-                                # Extract window name from filename: extraction_config_{name}.json
-                                stem = cfg_path.stem  # extraction_config_{name}
-                                if stem.startswith("extraction_config_"):
-                                    window_name = stem.replace("extraction_config_", "")
-                                    if window_name and window_name not in available_windows:
-                                        available_windows.append(window_name)
-                            if available_windows:
-                                # Sort for consistency
-                                available_windows = sorted(available_windows)
-                                break
-                        except Exception:
-                            continue
-                
-                # Fallback to static config if no extraction_config.json found
-                if not available_windows:
-                    available_windows = list(config.get("time_windows", {}).keys())
-                
-                # Get event columns from first subject that has them
-                available_columns = []
-                from eeg_pipeline.infra.paths import bids_events_path
-                for r in results:
-                    subj_id = r["subject"].replace("sub-", "")
-                    evt_path = bids_events_path(config.bids_root, subj_id, task)
-                    if evt_path.exists():
-                        try:
-                            import pandas as pd
-                            df = pd.read_csv(evt_path, sep="\t", nrows=1)
-                            available_columns = sorted(list(df.columns))
-                            if available_columns:
-                                break
-                        except Exception:
-                            continue
-
-                for r in results:
-                    subj_id = r["subject"].replace("sub-", "")
-                    available_bands = []
-                    has_stats = False
-                    
-                    if r["features"] or r["epochs"]:
-                        features_dir = deriv_features_path(deriv_root, subj_id)
-                        # Even if features dir doesn't exist, we might have stats
-                        feature_availability = detect_feature_availability(features_dir)
-                        if features_dir.exists():
-                            available_bands = detect_available_bands(features_dir)
-                    else:
-                        # No features or epochs - return explicit unavailable status for all
-                        feature_availability = _empty_feature_availability()
-
-                    stats_dir = deriv_stats_path(deriv_root, subj_id)
-                    if stats_dir.exists():
-                        for pattern in ("*.tsv", "*.npz", "*.csv", "*.json"):
-                            if any(stats_dir.glob(pattern)):
-                                has_stats = True
-                                break
-                    
-                    # Get metadata for this subject if available
-                    metadata = {}
-                    if r["epochs"]:
-                        metadata = get_epoch_metadata(subj_id, task, deriv_root, config=config)
-                        # If subject metadata failed, fallback to global first successful one
-                        if not metadata and global_epoch_metadata:
-                            metadata = global_epoch_metadata
-
-                    json_results.append({
-                        "id": subj_id,
-                        "has_epochs": r["epochs"],
-                        "has_features": r["features"],
-                        "has_stats": has_stats,
-                        "epoch_metadata": metadata,
-                        "available_bands": available_bands,
-                        "feature_availability": feature_availability,
-                    })
-                
-                output = {
-                    "subjects": json_results, 
-                    "count": len(json_results),
-                    "available_windows": available_windows,
-                    "available_event_columns": available_columns
-                }
-                print(json_module.dumps(output, indent=2))
-            else:
-                for r in results:
-                    epoch_mark = "x" if r["epochs"] else " "
-                    feat_mark = "x" if r["features"] else " "
-                    print(f"{r['subject']}  [{epoch_mark}]epochs  [{feat_mark}]features")
-                print(f"\nTotal: {len(results)} subjects")
-        else:
-            if args.output_json:
-                json_results = [{"id": s, "has_epochs": False, "has_features": False} for s in discovered]
-                print(json_module.dumps({"subjects": json_results, "count": len(discovered)}, indent=2))
-            else:
-                for subj in discovered:
-                    print(f"sub-{subj}")
-                print(f"\nTotal: {len(discovered)} subjects")
-    
-    elif args.mode == "features":
+    if args.mode == MODE_PLOTTERS:
+        _handle_plotters_mode(args.output_json)
+    elif args.mode == MODE_SUBJECTS:
+        _handle_subjects_mode(args, deriv_root, task, config, logger)
+    elif args.mode == MODE_FEATURES:
         if not args.target:
             print("Error: subject ID required for features mode")
             print("Usage: eeg-pipeline info features <SUBJECT_ID>")
             return
-        
-        subject = args.target.replace("sub-", "")
-        features_dir = deriv_features_path(deriv_root, subject)
-        
-        if not features_dir.exists():
-            print(f"No features directory found for sub-{subject}")
-            return
-        
-        feature_files = list(features_dir.glob("features_*.tsv"))
-        results = []
-        
-        for fpath in sorted(feature_files):
-            import pandas as pd
-            try:
-                df = pd.read_csv(fpath, sep="\t", nrows=1)
-                n_cols = len(df.columns)
-                results.append({
-                    "file": fpath.name,
-                    "columns": n_cols,
-                })
-            except Exception:
-                results.append({"file": fpath.name, "columns": "error"})
-        
-        if args.output_json:
-            print(json_module.dumps({"subject": f"sub-{subject}", "features": results}))
-        else:
-            print(f"Features for sub-{subject}:")
-            for r in results:
-                print(f"  {r['file']}: {r['columns']} columns")
-            print(f"\nTotal: {len(results)} feature files")
-    
-    elif args.mode == "config":
-        if args.keys:
-            values = {key: config.get(key) for key in args.keys}
-            if args.output_json:
-                print(json_module.dumps(values, indent=2))
-            else:
-                for key, value in values.items():
-                    print(f"{key}: {value}")
-        elif args.target:
-            value = config.get(args.target)
-            if args.output_json:
-                print(json_module.dumps({args.target: value}))
-            else:
-                print(f"{args.target}: {value}")
-        else:
-            summary = {
-                "bids_root": str(config.bids_root) if hasattr(config, "bids_root") else None,
-                "deriv_root": str(deriv_root),
-                "source_root": config.get("paths.source_data"),
-                "task": task,
-                "preprocessing_n_jobs": config.get("preprocessing.n_jobs", 1),
-                "n_subjects": len(config.subjects) if hasattr(config, "subjects") and config.subjects else 0,
-            }
-            if args.output_json:
-                print(json_module.dumps(summary, indent=2))
-            else:
-                print("Configuration Summary:")
-                for k, v in summary.items():
-                    print(f"  {k}: {v}")
-    
-    elif args.mode == "version":
-        import eeg_pipeline
-        version = getattr(eeg_pipeline, "__version__", "unknown")
-        if args.output_json:
-            print(json_module.dumps({"version": version}))
-        else:
-            print(f"eeg-pipeline version: {version}")
+        subject_id = _extract_subject_id(args.target)
+        _handle_features_mode(subject_id, deriv_root, args.output_json)
+    elif args.mode == MODE_CONFIG:
+        _handle_config_mode(args, config, deriv_root, task)
+    elif args.mode == MODE_VERSION:
+        _handle_version_mode(args.output_json)

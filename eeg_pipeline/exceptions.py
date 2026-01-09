@@ -8,7 +8,7 @@ and context for debugging and error handling.
 
 from __future__ import annotations
 
-from typing import Optional, Any, List
+from typing import Any, Optional
 
 
 class EEGPipelineError(Exception):
@@ -20,10 +20,10 @@ class EEGPipelineError(Exception):
         super().__init__(message)
 
     def __str__(self) -> str:
-        if self.context:
-            ctx_str = ", ".join(f"{k}={v}" for k, v in self.context.items())
-            return f"{self.message} [{ctx_str}]"
-        return self.message
+        if not self.context:
+            return self.message
+        context_items = ", ".join(f"{key}={value}" for key, value in self.context.items())
+        return f"{self.message} [{context_items}]"
 
 
 class ConfigurationError(EEGPipelineError):
@@ -88,7 +88,8 @@ class SubjectProcessingError(EEGPipelineError):
         self.subject = subject
         self.step = step
         self.cause = cause
-        self.__cause__ = cause
+        if cause is not None:
+            self.__cause__ = cause
 
 
 class FeatureExtractionError(EEGPipelineError):
@@ -136,7 +137,7 @@ class PreprocessingError(EEGPipelineError):
 class PipelineNotFoundError(EEGPipelineError):
     """Raised when a requested pipeline is not registered."""
 
-    def __init__(self, pipeline_name: str, available: Optional[List[str]] = None):
+    def __init__(self, pipeline_name: str, available: Optional[list[str]] = None):
         message = f"Pipeline '{pipeline_name}' not found"
         context = {"requested": pipeline_name}
         if available:
@@ -160,7 +161,12 @@ class InsufficientDataError(DataValidationError):
         details = {"required": required, "actual": actual}
         if data_type:
             details["data_type"] = data_type
-        super().__init__(message, subject=subject, validation_type="insufficient_data", details=details)
+        super().__init__(
+            message,
+            subject=subject,
+            validation_type="insufficient_data",
+            details=details,
+        )
         self.required = required
         self.actual = actual
 

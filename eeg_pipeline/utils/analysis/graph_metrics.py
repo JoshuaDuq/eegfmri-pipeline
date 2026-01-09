@@ -15,7 +15,7 @@ Metrics:
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import networkx as nx
@@ -38,13 +38,20 @@ def symmetrize_adjacency(adj: np.ndarray) -> np.ndarray:
     -------
     np.ndarray
         Symmetrized matrix with zero diagonal
+    
+    Raises
+    ------
+    ValueError
+        If adjacency matrix is not square
     """
-    adj = np.asarray(adj, dtype=float)
-    if adj.ndim != 2 or adj.shape[0] != adj.shape[1]:
-        raise ValueError(f"Adjacency must be square; got shape {adj.shape}")
-    adj = 0.5 * (adj + adj.T)
-    np.fill_diagonal(adj, 0.0)
-    return adj
+    adjacency = np.asarray(adj, dtype=float)
+    if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
+        raise ValueError(
+            f"Adjacency must be square; got shape {adjacency.shape}"
+        )
+    adjacency = 0.5 * (adjacency + adjacency.T)
+    np.fill_diagonal(adjacency, 0.0)
+    return adjacency
 
 
 def threshold_adjacency(
@@ -68,33 +75,44 @@ def threshold_adjacency(
     -------
     np.ndarray
         Binary adjacency matrix
+    
+    Raises
+    ------
+    ValueError
+        If top_proportion is not in [0, 1]
     """
-    adj = np.asarray(adj, dtype=float)
+    adjacency = np.asarray(adj, dtype=float)
     
     if top_proportion is not None:
-        # Get upper triangle values
-        triu_idx = np.triu_indices_from(adj, k=1)
-        values = adj[triu_idx]
-        values = values[np.isfinite(values)]
+        if not 0.0 <= top_proportion <= 1.0:
+            raise ValueError(
+                f"top_proportion must be in [0, 1]; got {top_proportion}"
+            )
+        upper_triangle_indices = np.triu_indices_from(adjacency, k=1)
+        edge_values = adjacency[upper_triangle_indices]
+        finite_values = edge_values[np.isfinite(edge_values)]
         
-        if len(values) == 0:
-            return np.zeros_like(adj)
+        if len(finite_values) == 0:
+            return np.zeros_like(adjacency)
         
-        threshold = np.percentile(values, 100 * (1 - top_proportion))
+        percentile_threshold = 100 * (1 - top_proportion)
+        threshold = np.percentile(finite_values, percentile_threshold)
     
     if threshold is None:
         threshold = 0.0
     
-    binary = (adj >= threshold).astype(float)
-    np.fill_diagonal(binary, 0.0)
-    return binary
+    binary_adjacency = (adjacency >= threshold).astype(float)
+    np.fill_diagonal(binary_adjacency, 0.0)
+    return binary_adjacency
 
 
 # =============================================================================
 # Graph Metrics
 # =============================================================================
 
-def compute_global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> float:
+def compute_global_efficiency_weighted(
+    adj: np.ndarray, eps: float = 1e-9
+) -> float:
     """
     Compute weighted global efficiency of a network.
     
@@ -111,37 +129,41 @@ def compute_global_efficiency_weighted(adj: np.ndarray, eps: float = 1e-9) -> fl
     Returns
     -------
     float
-        Global efficiency value
+        Global efficiency value, or np.nan if computation fails
     """
-    G = nx.from_numpy_array(adj)
+    graph = nx.from_numpy_array(adj)
     
-    # Convert weights to lengths (higher weight = shorter path)
-    lengths = {}
-    for u, v, data in G.edges(data=True):
-        w = abs(data.get("weight", 0.0))
-        lengths[(u, v)] = 1.0 / (w + eps)
-    nx.set_edge_attributes(G, lengths, "length")
+    edge_lengths = {}
+    for source, target, edge_data in graph.edges(data=True):
+        weight = abs(edge_data.get("weight", 0.0))
+        edge_lengths[(source, target)] = 1.0 / (weight + eps)
+    nx.set_edge_attributes(graph, edge_lengths, "length")
 
     try:
-        sp_lengths = dict(nx.all_pairs_dijkstra_path_length(G, weight="length"))
+        shortest_path_lengths = dict(
+            nx.all_pairs_dijkstra_path_length(graph, weight="length")
+        )
     except (nx.NetworkXError, ValueError, KeyError):
         return np.nan
 
-    n = G.number_of_nodes()
-    if n <= 1:
+    num_nodes = graph.number_of_nodes()
+    if num_nodes <= 1:
         return np.nan
 
-    inv_dist = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = sp_lengths.get(i, {}).get(j, np.inf)
-            if np.isfinite(d) and d > 0:
-                inv_dist.append(1.0 / d)
+    inverse_distances = []
+    for source_node in range(num_nodes):
+        for target_node in range(source_node + 1, num_nodes):
+            path_length = shortest_path_lengths.get(source_node, {}).get(
+                target_node, np.inf
+            )
+            if np.isfinite(path_length) and path_length > 0:
+                inverse_distances.append(1.0 / path_length)
 
-    if not inv_dist:
+    if not inverse_distances:
         return np.nan
 
-    return float((2.0 / (n * (n - 1))) * np.sum(inv_dist))
+    normalization_factor = 2.0 / (num_nodes * (num_nodes - 1))
+    return float(normalization_factor * np.sum(inverse_distances))
 
 
 def compute_small_world_sigma(
@@ -165,19 +187,22 @@ def compute_small_world_sigma(
     Returns
     -------
     float
-        Small-world sigma value
+        Small-world sigma value, or np.nan if computation fails
     """
-    G = nx.from_numpy_array(adj_bin)
+    if n_rand < 1:
+        raise ValueError(f"n_rand must be >= 1; got {n_rand}")
     
-    if nx.number_of_nodes(G) < 3 or nx.number_of_edges(G) == 0:
+    graph = nx.from_numpy_array(adj_bin)
+    
+    if nx.number_of_nodes(graph) < 3 or nx.number_of_edges(graph) == 0:
         return np.nan
     
-    # Use largest connected component
-    if not nx.is_connected(G):
-        G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
+    if not nx.is_connected(graph):
+        largest_component = max(nx.connected_components(graph), key=len)
+        graph = graph.subgraph(largest_component).copy()
     
     try:
-        return float(nx.sigma(G, niter=n_rand, seed=42))
+        return float(nx.sigma(graph, niter=n_rand, seed=42))
     except (nx.NetworkXError, ZeroDivisionError, ValueError):
         return np.nan
 
@@ -204,128 +229,308 @@ def compute_participation_coefficient(
     np.ndarray
         Participation coefficient for each node
     """
-    n = adj.shape[0]
+    num_nodes = adj.shape[0]
     
     if not community_labels:
-        return np.full(n, np.nan, dtype=float)
+        return np.full(num_nodes, np.nan, dtype=float)
     
-    unique_comms = sorted(set(community_labels.values()))
-    if len(unique_comms) < 2:
-        return np.full(n, np.nan, dtype=float)
+    unique_communities = sorted(set(community_labels.values()))
+    if len(unique_communities) < 2:
+        return np.full(num_nodes, np.nan, dtype=float)
     
-    adj = np.maximum(adj, 0.0)
-    deg = adj.sum(axis=1)
-    pc = np.full(n, np.nan, dtype=float)
+    adjacency = np.maximum(adj, 0.0)
+    node_degrees = adjacency.sum(axis=1)
+    participation_coefficients = np.full(num_nodes, np.nan, dtype=float)
     
-    for i in range(n):
-        k_i = deg[i]
-        if k_i <= 0:
+    for node_idx in range(num_nodes):
+        node_degree = node_degrees[node_idx]
+        if node_degree <= 0:
             continue
         
-        accum = 0.0
-        for comm in unique_comms:
-            idx = [j for j, c in community_labels.items() if c == comm]
-            if not idx:
+        squared_proportion_sum = 0.0
+        for community in unique_communities:
+            community_node_indices = [
+                j
+                for j, label in community_labels.items()
+                if label == community
+            ]
+            if not community_node_indices:
                 continue
-            k_ic = np.sum(adj[i, idx])
-            accum += (k_ic / k_i) ** 2
+            connections_to_community = np.sum(
+                adjacency[node_idx, community_node_indices]
+            )
+            proportion = connections_to_community / node_degree
+            squared_proportion_sum += proportion ** 2
         
-        pc[i] = 1.0 - accum
+        participation_coefficients[node_idx] = 1.0 - squared_proportion_sum
     
-    return pc
+    return participation_coefficients
+
+
+def compute_clustering_coefficient_weighted(adj: np.ndarray) -> np.ndarray:
+    """
+    Compute weighted clustering coefficient per node.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Weighted adjacency matrix
+    
+    Returns
+    -------
+    np.ndarray
+        Clustering coefficient for each node
+    """
+    graph = nx.from_numpy_array(adj)
+    clustering_dict = nx.clustering(graph, weight="weight")
+    num_nodes = adj.shape[0]
+    return np.array(
+        [clustering_dict.get(node_idx, np.nan) for node_idx in range(num_nodes)]
+    )
+
+
+def compute_clustering_coefficient_binary(adj: np.ndarray) -> np.ndarray:
+    """
+    Compute binary clustering coefficient per node.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Adjacency matrix (treated as binary)
+    
+    Returns
+    -------
+    np.ndarray
+        Clustering coefficient for each node
+    """
+    graph = nx.from_numpy_array(adj)
+    clustering_dict = nx.clustering(graph, weight=None)
+    num_nodes = adj.shape[0]
+    return np.array(
+        [clustering_dict.get(node_idx, np.nan) for node_idx in range(num_nodes)]
+    )
 
 
 def compute_clustering_coefficient(adj: np.ndarray, weighted: bool = True) -> np.ndarray:
-    """Compute clustering coefficient per node."""
-    G = nx.from_numpy_array(adj)
-    weight = "weight" if weighted else None
-    cc_dict = nx.clustering(G, weight=weight)
-    return np.array([cc_dict.get(i, np.nan) for i in range(adj.shape[0])])
+    """
+    Compute clustering coefficient per node.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Adjacency matrix
+    weighted : bool
+        If True, use weighted clustering; if False, use binary
+    
+    Returns
+    -------
+    np.ndarray
+        Clustering coefficient for each node
+    
+    Note
+    ----
+    This function is maintained for backward compatibility.
+    Prefer using compute_clustering_coefficient_weighted or
+    compute_clustering_coefficient_binary for clarity.
+    """
+    if weighted:
+        return compute_clustering_coefficient_weighted(adj)
+    return compute_clustering_coefficient_binary(adj)
 
 
 def compute_betweenness_centrality(adj: np.ndarray) -> np.ndarray:
-    """Compute betweenness centrality per node."""
-    G = nx.from_numpy_array(adj)
-    if G.number_of_edges() == 0:
+    """
+    Compute betweenness centrality per node.
+    
+    Betweenness centrality measures the fraction of shortest paths
+    that pass through each node.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Weighted adjacency matrix
+    
+    Returns
+    -------
+    np.ndarray
+        Betweenness centrality for each node
+    """
+    graph = nx.from_numpy_array(adj)
+    if graph.number_of_edges() == 0:
         return np.full(adj.shape[0], np.nan)
     try:
-        bc = nx.betweenness_centrality(G, weight="weight")
-        return np.array([bc.get(i, np.nan) for i in range(adj.shape[0])])
+        betweenness_dict = nx.betweenness_centrality(graph, weight="weight")
+        num_nodes = adj.shape[0]
+        return np.array(
+            [
+                betweenness_dict.get(node_idx, np.nan)
+                for node_idx in range(num_nodes)
+            ]
+        )
     except (nx.NetworkXError, ValueError, ZeroDivisionError):
         return np.full(adj.shape[0], np.nan)
 
 
-def compute_eigenvector_centrality(adj: np.ndarray, max_iter: int = 100) -> np.ndarray:
-    """Compute eigenvector centrality per node."""
-    G = nx.from_numpy_array(adj)
-    if G.number_of_edges() == 0:
+def compute_eigenvector_centrality(
+    adj: np.ndarray, max_iter: int = 100
+) -> np.ndarray:
+    """
+    Compute eigenvector centrality per node.
+    
+    Eigenvector centrality measures a node's importance based on
+    the importance of its neighbors.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Weighted adjacency matrix
+    max_iter : int
+        Maximum iterations (not used by numpy implementation)
+    
+    Returns
+    -------
+    np.ndarray
+        Eigenvector centrality for each node
+    """
+    graph = nx.from_numpy_array(adj)
+    if graph.number_of_edges() == 0:
         return np.full(adj.shape[0], np.nan)
     try:
-        ec = nx.eigenvector_centrality_numpy(G, weight="weight")
-        return np.array([ec.get(i, np.nan) for i in range(adj.shape[0])])
+        eigenvector_dict = nx.eigenvector_centrality_numpy(
+            graph, weight="weight"
+        )
+        num_nodes = adj.shape[0]
+        return np.array(
+            [
+                eigenvector_dict.get(node_idx, np.nan)
+                for node_idx in range(num_nodes)
+            ]
+        )
     except (nx.NetworkXError, ValueError, np.linalg.LinAlgError):
         return np.full(adj.shape[0], np.nan)
 
 
-def compute_rich_club_coefficient(adj: np.ndarray, k: int = None) -> float:
-    """Compute rich club coefficient (tendency of high-degree nodes to connect)."""
-    G = nx.from_numpy_array(adj > 0)  # Binary graph
-    if G.number_of_edges() == 0:
+def compute_rich_club_coefficient(adj: np.ndarray, k: Optional[int] = None) -> float:
+    """
+    Compute rich club coefficient.
+    
+    Measures the tendency of high-degree nodes to connect to each other.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Adjacency matrix (converted to binary)
+    k : int, optional
+        Degree threshold. If None, uses median degree
+    
+    Returns
+    -------
+    float
+        Rich club coefficient, or np.nan if computation fails
+    """
+    binary_adjacency = adj > 0
+    graph = nx.from_numpy_array(binary_adjacency)
+    if graph.number_of_edges() == 0:
         return np.nan
     try:
-        rc = nx.rich_club_coefficient(G, normalized=False)
-        if not rc:
+        rich_club_dict = nx.rich_club_coefficient(graph, normalized=False)
+        if not rich_club_dict:
             return np.nan
-        if k is not None and k in rc:
-            return float(rc[k])
-        degrees = [d for _, d in G.degree()]
-        if not degrees:
+        if k is not None and k in rich_club_dict:
+            return float(rich_club_dict[k])
+        node_degrees = [degree for _, degree in graph.degree()]
+        if not node_degrees:
             return np.nan
-        median_k = int(np.median(degrees))
-        return float(rc.get(median_k, np.nan))
+        median_degree = int(np.median(node_degrees))
+        return float(rich_club_dict.get(median_degree, np.nan))
     except (nx.NetworkXError, ValueError, ZeroDivisionError, KeyError):
         return np.nan
 
 
 def compute_characteristic_path_length(adj: np.ndarray) -> float:
-    """Compute characteristic path length (average shortest path)."""
-    G = nx.from_numpy_array(adj)
-    if G.number_of_edges() == 0:
+    """
+    Compute characteristic path length (average shortest path).
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Adjacency matrix (treated as unweighted)
+    
+    Returns
+    -------
+    float
+        Characteristic path length, or np.nan if computation fails
+    """
+    graph = nx.from_numpy_array(adj)
+    if graph.number_of_edges() == 0:
         return np.nan
-    if not nx.is_connected(G):
-        G = G.subgraph(max(nx.connected_components(G), key=len)).copy()
-    if G.number_of_nodes() < 2:
+    if not nx.is_connected(graph):
+        largest_component = max(nx.connected_components(graph), key=len)
+        graph = graph.subgraph(largest_component).copy()
+    if graph.number_of_nodes() < 2:
         return np.nan
     try:
-        return float(nx.average_shortest_path_length(G, weight=None))
+        return float(nx.average_shortest_path_length(graph, weight=None))
     except (nx.NetworkXError, ValueError, ZeroDivisionError):
         return np.nan
 
 
 def compute_network_segregation_integration(
-    adj: np.ndarray, community_map: dict, labels: np.ndarray
-) -> tuple:
-    """Compute network segregation and integration. Returns (segregation, integration)."""
-    from typing import Tuple
+    adj: np.ndarray, community_map: Dict[str, str], labels: np.ndarray
+) -> Tuple[float, float]:
+    """
+    Compute network segregation and integration.
+    
+    Segregation: proportion of connections within communities.
+    Integration: proportion of connections between communities.
+    
+    Parameters
+    ----------
+    adj : np.ndarray
+        Adjacency matrix
+    community_map : Dict[str, str]
+        Mapping from label string to community identifier
+    labels : np.ndarray
+        Node labels corresponding to adjacency matrix rows/columns
+    
+    Returns
+    -------
+    Tuple[float, float]
+        (segregation, integration), or (np.nan, np.nan) if computation fails
+    """
     if not community_map or adj.size == 0:
         return np.nan, np.nan
-    comms = [community_map.get(str(l), None) for l in labels]
-    n_nodes = adj.shape[0]
-    within_sum = between_sum = total_sum = 0.0
-    for i in range(n_nodes):
-        for j in range(i + 1, n_nodes):
-            w = abs(adj[i, j])
-            if not np.isfinite(w):
+    
+    node_communities = [
+        community_map.get(str(label), None) for label in labels
+    ]
+    num_nodes = adj.shape[0]
+    within_community_sum = 0.0
+    between_community_sum = 0.0
+    total_connection_sum = 0.0
+    
+    for source_node in range(num_nodes):
+        for target_node in range(source_node + 1, num_nodes):
+            connection_weight = abs(adj[source_node, target_node])
+            if not np.isfinite(connection_weight):
                 continue
-            total_sum += w
-            if comms[i] is not None and comms[j] is not None:
-                if comms[i] == comms[j]:
-                    within_sum += w
+            
+            total_connection_sum += connection_weight
+            source_community = node_communities[source_node]
+            target_community = node_communities[target_node]
+            
+            if source_community is not None and target_community is not None:
+                if source_community == target_community:
+                    within_community_sum += connection_weight
                 else:
-                    between_sum += w
-    if total_sum == 0:
+                    between_community_sum += connection_weight
+    
+    if total_connection_sum == 0:
         return np.nan, np.nan
-    return float(within_sum / total_sum), float(between_sum / total_sum)
+    
+    segregation = float(within_community_sum / total_connection_sum)
+    integration = float(between_community_sum / total_connection_sum)
+    return segregation, integration
 
 
 

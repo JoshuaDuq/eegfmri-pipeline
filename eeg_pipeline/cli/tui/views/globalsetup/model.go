@@ -261,21 +261,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "left", "h":
 			m.sectionIndex = (m.sectionIndex - 1 + len(m.sections)) % len(m.sections)
-			m.fieldCursor = 0
-			m.statusMessage = ""
-			m.statusIsError = false
-			m.editingText = false
-			m.textBuffer = ""
-			m.editingField = 0
+			m.resetSectionState()
 			return m, tea.ClearScreen
 		case "right", "l":
 			m.sectionIndex = (m.sectionIndex + 1) % len(m.sections)
-			m.fieldCursor = 0
-			m.statusMessage = ""
-			m.statusIsError = false
-			m.editingText = false
-			m.textBuffer = ""
-			m.editingField = 0
+			m.resetSectionState()
 			return m, tea.ClearScreen
 		case "up", "k":
 			m.moveCursor(-1)
@@ -511,23 +501,25 @@ func (m Model) renderReview() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
 		"Configuration is automatically saved. Use R to reset to defaults.") + "\n\n")
 
+	highlight := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
 	task := m.task
 	if task == "" {
 		task = "(default)"
 	}
-	b.WriteString("Task: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(task) + "\n")
+	b.WriteString("Task: " + highlight.Render(task) + "\n")
 
 	randomState := m.randomState
 	if randomState == "" {
 		randomState = "(default: 42)"
 	}
-	b.WriteString("Random State: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(randomState) + "\n")
+	b.WriteString("Random State: " + highlight.Render(randomState) + "\n")
 
 	subjectList := m.subjectList
 	if subjectList == "" {
 		subjectList = "(all subjects)"
 	}
-	b.WriteString("Subject List: " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(subjectList) + "\n")
+	b.WriteString("Subject List: " + highlight.Render(subjectList) + "\n")
 
 	if m.bidsRoot != "" {
 		b.WriteString("BIDS Root: " + m.bidsRoot + "\n")
@@ -567,6 +559,15 @@ func (m *Model) moveCursor(delta int) {
 		}
 		m.fieldCursor = (m.fieldCursor + delta + len(fields)) % len(fields)
 	}
+}
+
+func (m *Model) resetSectionState() {
+	m.fieldCursor = 0
+	m.statusMessage = ""
+	m.statusIsError = false
+	m.editingText = false
+	m.textBuffer = ""
+	m.editingField = 0
 }
 
 func (m *Model) activateSelection() (tea.Model, tea.Cmd) {

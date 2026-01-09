@@ -11,7 +11,7 @@ Functions for assessing measurement reliability and predictive validity:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import logging
 
 import numpy as np
@@ -20,8 +20,100 @@ from scipy import stats
 
 
 ###################################################################
+# Constants
+###################################################################
+
+DEFAULT_ALPHA = 0.05
+DEFAULT_POWER = 0.8
+DEFAULT_RANDOM_STATE = 42
+MIN_SAMPLES_FOR_CORRELATION = 3
+MIN_SAMPLES_FOR_SPLIT_HALF = 4
+MIN_SAMPLES_FOR_RELIABILITY = 10
+MIN_SAMPLES_PER_SPLIT = 10
+MIN_SAMPLES_FOR_CALIBRATION = 10
+MIN_SAMPLES_FOR_POWER = 4
+RELIABILITY_THRESHOLD_ACCEPTABLE = 0.7
+RELIABILITY_THRESHOLD_GOOD = 0.8
+RELIABILITY_THRESHOLD_EXCELLENT = 0.9
+DEFAULT_N_SPLITS = 100
+DEFAULT_N_BOOTSTRAP = 1000
+DEFAULT_N_FOLDS = 5
+DEFAULT_N_PERMUTATIONS = 100
+DEFAULT_N_BINS = 10
+DEFAULT_SAMPLE_FRACTION = 0.5
+MIN_CORRELATION_FOR_POWER = 0.001
+EFFECTIVELY_INFINITE_N = 999999
+DEFAULT_ALPHA_VALUES = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+DEFAULT_ELASTICNET_L1_RATIOS = [0.1, 0.5, 0.9]
+DEFAULT_RF_N_ESTIMATORS = 100
+DEFAULT_RF_MAX_DEPTH = 5
+MIN_SAMPLES_FOR_CV = 10
+MIN_FOLDS = 2
+MIN_SAMPLES_FOR_CORRELATION_SPLIT_HALF = 20
+
+
+###################################################################
 # Intraclass Correlation Coefficient (ICC)
 ###################################################################
+
+
+def _compute_icc_one_way_single(ms_rows: float, ms_within: float, k: int) -> float:
+    """Compute ICC(1,1): One-way random, single rater."""
+    return (ms_rows - ms_within) / (ms_rows + (k - 1) * ms_within)
+
+
+def _compute_icc_two_way_random_single(ms_rows: float, ms_error: float, ms_cols: float, n: int, k: int) -> float:
+    """Compute ICC(2,1): Two-way random, single rater."""
+    denominator = ms_rows + (k - 1) * ms_error + k * (ms_cols - ms_error) / n
+    return (ms_rows - ms_error) / denominator
+
+
+def _compute_icc_two_way_mixed_single(ms_rows: float, ms_error: float, k: int) -> float:
+    """Compute ICC(3,1): Two-way mixed, single rater."""
+    return (ms_rows - ms_error) / (ms_rows + (k - 1) * ms_error)
+
+
+def _compute_icc_one_way_average(ms_rows: float, ms_within: float) -> float:
+    """Compute ICC(1,k): One-way random, average of k raters."""
+    return (ms_rows - ms_within) / ms_rows
+
+
+def _compute_icc_two_way_random_average(ms_rows: float, ms_error: float, ms_cols: float, n: int) -> float:
+    """Compute ICC(2,k): Two-way random, average of k raters."""
+    return (ms_rows - ms_error) / (ms_rows + (ms_cols - ms_error) / n)
+
+
+def _compute_icc_two_way_mixed_average(ms_rows: float, ms_error: float) -> float:
+    """Compute ICC(3,k): Two-way mixed, average of k raters."""
+    return (ms_rows - ms_error) / ms_rows
+
+
+def _compute_icc_confidence_intervals(
+    ms_rows: float,
+    ms_error: float,
+    n: int,
+    k: int,
+) -> Tuple[float, float]:
+    """Compute 95% confidence intervals for ICC using F-distribution."""
+    if ms_error <= 0:
+        return np.nan, np.nan
+    
+    f_value = ms_rows / ms_error
+    if not (np.isfinite(f_value) and f_value > 0):
+        return np.nan, np.nan
+    
+    df1 = n - 1
+    df2 = (n - 1) * (k - 1)
+    f_critical_upper = stats.f.ppf(0.975, df1, df2)
+    f_critical_lower = stats.f.ppf(0.975, df2, df1)
+    
+    f_low = f_value / f_critical_upper
+    f_high = f_value * f_critical_lower
+    
+    ci_low = (f_low - 1) / (f_low + k - 1)
+    ci_high = (f_high - 1) / (f_high + k - 1)
+    
+    return float(ci_low), float(ci_high)
 
 
 def compute_icc(
@@ -57,81 +149,66 @@ def compute_icc(
     if data.ndim != 2:
         return np.nan, np.nan, np.nan
     
-    n, k = data.shape
-    if n < 2 or k < 2:
+    n_subjects, n_raters = data.shape
+    if n_subjects < 2 or n_raters < 2:
         return np.nan, np.nan, np.nan
     
-    # Grand mean
     grand_mean = np.mean(data)
-    
-    # Row means (subjects)
     row_means = np.mean(data, axis=1)
-    
-    # Column means (raters/sessions)
     col_means = np.mean(data, axis=0)
     
-    # Sum of squares
     ss_total = np.sum((data - grand_mean) ** 2)
-    ss_rows = k * np.sum((row_means - grand_mean) ** 2)  # Between subjects
-    ss_cols = n * np.sum((col_means - grand_mean) ** 2)  # Between raters
-    ss_error = ss_total - ss_rows - ss_cols  # Residual
+    ss_rows = n_raters * np.sum((row_means - grand_mean) ** 2)
+    ss_cols = n_subjects * np.sum((col_means - grand_mean) ** 2)
+    ss_error = ss_total - ss_rows - ss_cols
     
-    # Mean squares
-    ms_rows = ss_rows / (n - 1)
-    ms_cols = ss_cols / (k - 1)
-    ms_error = ss_error / ((n - 1) * (k - 1))
+    ms_rows = ss_rows / (n_subjects - 1)
+    ms_cols = ss_cols / (n_raters - 1)
+    ms_error = ss_error / ((n_subjects - 1) * (n_raters - 1))
     
-    # Compute ICC based on type
-    if icc_type in ["ICC(1,1)", "ICC1"]:
-        # One-way random, single rater
-        ms_within = (ss_cols + ss_error) / (n * (k - 1))
-        icc = (ms_rows - ms_within) / (ms_rows + (k - 1) * ms_within)
-        
-    elif icc_type in ["ICC(2,1)", "ICC2"]:
-        # Two-way random, single rater (most common)
-        icc = (ms_rows - ms_error) / (ms_rows + (k - 1) * ms_error + k * (ms_cols - ms_error) / n)
-        
-    elif icc_type in ["ICC(3,1)", "ICC3"]:
-        # Two-way mixed, single rater
-        icc = (ms_rows - ms_error) / (ms_rows + (k - 1) * ms_error)
-        
-    elif icc_type in ["ICC(1,k)", "ICC1k"]:
-        # One-way random, average of k raters
-        ms_within = (ss_cols + ss_error) / (n * (k - 1))
-        icc = (ms_rows - ms_within) / ms_rows
-        
-    elif icc_type in ["ICC(2,k)", "ICC2k"]:
-        # Two-way random, average of k raters
-        icc = (ms_rows - ms_error) / (ms_rows + (ms_cols - ms_error) / n)
-        
-    elif icc_type in ["ICC(3,k)", "ICC3k"]:
-        # Two-way mixed, average of k raters
-        icc = (ms_rows - ms_error) / ms_rows
-        
+    icc_type_upper = icc_type.upper()
+    if icc_type_upper in ["ICC(1,1)", "ICC1"]:
+        ms_within = (ss_cols + ss_error) / (n_subjects * (n_raters - 1))
+        icc = _compute_icc_one_way_single(ms_rows, ms_within, n_raters)
+    elif icc_type_upper in ["ICC(2,1)", "ICC2"]:
+        icc = _compute_icc_two_way_random_single(ms_rows, ms_error, ms_cols, n_subjects, n_raters)
+    elif icc_type_upper in ["ICC(3,1)", "ICC3"]:
+        icc = _compute_icc_two_way_mixed_single(ms_rows, ms_error, n_raters)
+    elif icc_type_upper in ["ICC(1,K)", "ICC1K"]:
+        ms_within = (ss_cols + ss_error) / (n_subjects * (n_raters - 1))
+        icc = _compute_icc_one_way_average(ms_rows, ms_within)
+    elif icc_type_upper in ["ICC(2,K)", "ICC2K"]:
+        icc = _compute_icc_two_way_random_average(ms_rows, ms_error, ms_cols, n_subjects)
+    elif icc_type_upper in ["ICC(3,K)", "ICC3K"]:
+        icc = _compute_icc_two_way_mixed_average(ms_rows, ms_error)
     else:
         raise ValueError(f"Unknown ICC type: {icc_type}")
     
-    # Confidence intervals using F-distribution approximation
-    # Simplified CI calculation
-    f_value = ms_rows / ms_error if ms_error > 0 else np.inf
-    df1 = n - 1
-    df2 = (n - 1) * (k - 1)
+    ci_low, ci_high = _compute_icc_confidence_intervals(ms_rows, ms_error, n_subjects, n_raters)
+    icc_clipped = float(np.clip(icc, -1, 1))
     
-    if np.isfinite(f_value) and f_value > 0:
-        f_low = f_value / stats.f.ppf(0.975, df1, df2)
-        f_high = f_value * stats.f.ppf(0.975, df2, df1)
-        
-        ci_low = (f_low - 1) / (f_low + k - 1)
-        ci_high = (f_high - 1) / (f_high + k - 1)
+    return icc_clipped, ci_low, ci_high
+
+
+def _compute_correlation(x: np.ndarray, y: np.ndarray, method: str) -> float:
+    """Compute correlation using specified method."""
+    if method == "spearman":
+        r, _ = stats.spearmanr(x, y)
     else:
-        ci_low, ci_high = np.nan, np.nan
-    
-    return float(np.clip(icc, -1, 1)), float(ci_low), float(ci_high)
+        r, _ = stats.pearsonr(x, y)
+    return r if np.isfinite(r) else np.nan
+
+
+def _apply_spearman_brown(r: float) -> float:
+    """Apply Spearman-Brown prophecy formula."""
+    if r <= -1 or not np.isfinite(r):
+        return np.nan
+    return (2 * r) / (1 + r)
 
 
 def compute_split_half_reliability(
     data: np.ndarray,
-    n_splits: int = 100,
+    n_splits: int = DEFAULT_N_SPLITS,
     method: str = "spearman",
     rng: Optional[np.random.Generator] = None,
 ) -> Tuple[float, float, float]:
@@ -165,33 +242,26 @@ def compute_split_half_reliability(
         data = data.reshape(-1, 1)
     
     n_trials = data.shape[0]
-    if n_trials < 4:
+    if n_trials < MIN_SAMPLES_FOR_SPLIT_HALF:
         return np.nan, np.nan, np.nan
     
     correlations = []
+    half_size = n_trials // 2
     
     for _ in range(n_splits):
-        # Random split
         indices = rng.permutation(n_trials)
-        half = n_trials // 2
+        half1_indices = indices[:half_size]
+        half2_indices = indices[half_size:2 * half_size]
         
-        half1 = data[indices[:half]].mean(axis=0)
-        half2 = data[indices[half:half + half]].mean(axis=0)
+        half1_means = data[half1_indices].mean(axis=0)
+        half2_means = data[half2_indices].mean(axis=0)
         
-        if len(half1) < 2:
-            # Single feature case
-            half1_vals = data[indices[:half], 0]
-            half2_vals = data[indices[half:half + half], 0]
-            
-            if method == "spearman":
-                r, _ = stats.spearmanr(half1_vals, half2_vals)
-            else:
-                r, _ = stats.pearsonr(half1_vals, half2_vals)
+        if len(half1_means) == 1:
+            half1_values = data[half1_indices, 0]
+            half2_values = data[half2_indices, 0]
+            r = _compute_correlation(half1_values, half2_values, method)
         else:
-            if method == "spearman":
-                r, _ = stats.spearmanr(half1, half2)
-            else:
-                r, _ = stats.pearsonr(half1, half2)
+            r = _compute_correlation(half1_means, half2_means, method)
         
         if np.isfinite(r):
             correlations.append(r)
@@ -199,26 +269,22 @@ def compute_split_half_reliability(
     if not correlations:
         return np.nan, np.nan, np.nan
     
-    # Mean split-half correlation
-    mean_r = np.mean(correlations)
+    mean_correlation = np.mean(correlations)
+    reliability = _apply_spearman_brown(mean_correlation)
     
-    # Spearman-Brown prophecy formula
-    reliability = (2 * mean_r) / (1 + mean_r) if mean_r > -1 else np.nan
+    boot_reliabilities = [
+        _apply_spearman_brown(r) for r in correlations
+        if np.isfinite(_apply_spearman_brown(r))
+    ]
     
-    # Bootstrap CI
-    boot_reliabilities = []
-    for r in correlations:
-        sb = (2 * r) / (1 + r) if r > -1 else np.nan
-        if np.isfinite(sb):
-            boot_reliabilities.append(sb)
-    
-    if len(boot_reliabilities) > 10:
-        ci_low = np.percentile(boot_reliabilities, 2.5)
-        ci_high = np.percentile(boot_reliabilities, 97.5)
+    min_samples_for_ci = 10
+    if len(boot_reliabilities) > min_samples_for_ci:
+        ci_low = float(np.percentile(boot_reliabilities, 2.5))
+        ci_high = float(np.percentile(boot_reliabilities, 97.5))
     else:
         ci_low, ci_high = np.nan, np.nan
     
-    return float(reliability), float(ci_low), float(ci_high)
+    return float(reliability), ci_low, ci_high
 
 
 def compute_feature_reliability(
@@ -302,7 +368,7 @@ def compute_feature_reliability(
 
 def hierarchical_fdr(
     p_values: Dict[str, np.ndarray],
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     method: str = "bh",
 ) -> Dict[str, Dict[str, Any]]:
     """Apply hierarchical FDR correction across multiple families.
@@ -385,7 +451,7 @@ def hierarchical_fdr(
 
 def compute_hierarchical_fdr_summary(
     stats_dir,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
     config: Optional[Any] = None,
     include_glob: Union[str, Iterable[str]] = "corr_stats_*.tsv",
 ) -> pd.DataFrame:
@@ -493,12 +559,105 @@ def compute_hierarchical_fdr_summary(
 ###################################################################
 
 
+def _create_ridge_model(alpha_values: List[float]) -> Any:
+    """Create Ridge regression model with cross-validation."""
+    from sklearn.linear_model import RidgeCV
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+    
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("regressor", RidgeCV(alphas=alpha_values))
+    ])
+
+
+def _create_elasticnet_model(alpha_values: List[float]) -> Any:
+    """Create ElasticNet regression model with cross-validation."""
+    from sklearn.linear_model import ElasticNetCV
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+    
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("regressor", ElasticNetCV(
+            alphas=alpha_values,
+            l1_ratio=DEFAULT_ELASTICNET_L1_RATIOS,
+            cv=3,
+            max_iter=5000
+        ))
+    ])
+
+
+def _create_random_forest_model() -> Any:
+    """Create Random Forest regression model."""
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+    
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("regressor", RandomForestRegressor(
+            n_estimators=DEFAULT_RF_N_ESTIMATORS,
+            max_depth=DEFAULT_RF_MAX_DEPTH,
+            random_state=DEFAULT_RANDOM_STATE
+        ))
+    ])
+
+
+def _create_model(model_type: str, alpha_values: Optional[List[float]]) -> Any:
+    """Create model based on type."""
+    if alpha_values is None:
+        alpha_values = DEFAULT_ALPHA_VALUES
+    
+    if model_type == "ridge":
+        return _create_ridge_model(alpha_values)
+    elif model_type == "elasticnet":
+        return _create_elasticnet_model(alpha_values)
+    elif model_type == "rf":
+        return _create_random_forest_model()
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+
+
+def _extract_feature_weights(model: Any, n_features: int) -> np.ndarray:
+    """Extract feature weights from fitted model."""
+    regressor = model.named_steps["regressor"]
+    if hasattr(regressor, "coef_"):
+        return regressor.coef_
+    elif hasattr(regressor, "feature_importances_"):
+        return regressor.feature_importances_
+    else:
+        return np.full(n_features, np.nan)
+
+
+def _compute_cv_predictions(
+    model: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    n_folds: int,
+) -> Tuple[np.ndarray, float, float]:
+    """Compute cross-validated predictions and metrics."""
+    from sklearn.model_selection import KFold, cross_val_predict
+    from sklearn.metrics import r2_score, mean_absolute_error
+    
+    cv = KFold(n_splits=n_folds, shuffle=True, random_state=DEFAULT_RANDOM_STATE)
+    
+    try:
+        predictions = cross_val_predict(model, X, y, cv=cv)
+        r2 = r2_score(y, predictions)
+        mae = mean_absolute_error(y, predictions)
+        return predictions, r2, mae
+    except (ValueError, RuntimeError, AttributeError) as e:
+        logging.warning(f"CV prediction failed: {e}")
+        return np.full_like(y, np.nan), np.nan, np.nan
+
+
 def cross_validated_prediction(
     X: np.ndarray,
     y: np.ndarray,
     model_type: str = "ridge",
-    n_folds: int = 5,
-    n_permutations: int = 100,
+    n_folds: int = DEFAULT_N_FOLDS,
+    n_permutations: int = DEFAULT_N_PERMUTATIONS,
     alpha_values: Optional[List[float]] = None,
     rng: Optional[np.random.Generator] = None,
 ) -> Dict[str, Any]:
@@ -533,9 +692,7 @@ def cross_validated_prediction(
         - p_value: Permutation p-value
     """
     from sklearn.model_selection import KFold, cross_val_predict
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-    from sklearn.metrics import r2_score, mean_absolute_error
+    from sklearn.metrics import r2_score
     
     if rng is None:
         rng = np.random.default_rng()
@@ -543,13 +700,12 @@ def cross_validated_prediction(
     X = np.asarray(X)
     y = np.asarray(y).ravel()
     
-    # Handle NaN
     valid_mask = np.isfinite(y) & np.all(np.isfinite(X), axis=1)
     X_clean = X[valid_mask]
     y_clean = y[valid_mask]
     
     n_samples = len(y_clean)
-    if n_samples < 10:
+    if n_samples < MIN_SAMPLES_FOR_CV:
         return {
             "cv_r2": np.nan,
             "cv_mae": np.nan,
@@ -559,79 +715,38 @@ def cross_validated_prediction(
             "p_value": np.nan,
         }
     
-    # Adjust folds if needed
-    n_folds = min(n_folds, n_samples // 2)
-    if n_folds < 2:
-        n_folds = 2
+    n_folds_adjusted = max(MIN_FOLDS, min(n_folds, n_samples // 2))
+    model = _create_model(model_type, alpha_values)
     
-    # Select model
-    if alpha_values is None:
-        alpha_values = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+    cv_predictions, cv_r2, cv_mae = _compute_cv_predictions(
+        model, X_clean, y_clean, n_folds_adjusted
+    )
     
-    if model_type == "ridge":
-        from sklearn.linear_model import RidgeCV
-        model = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", RidgeCV(alphas=alpha_values))
-        ])
-    elif model_type == "elasticnet":
-        from sklearn.linear_model import ElasticNetCV
-        model = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", ElasticNetCV(alphas=alpha_values, l1_ratio=[0.1, 0.5, 0.9], cv=3, max_iter=5000))
-        ])
-    elif model_type == "rf":
-        from sklearn.ensemble import RandomForestRegressor
-        model = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42))
-        ])
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
-    
-    # Cross-validated predictions
-    cv = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-    
-    try:
-        cv_predictions = cross_val_predict(model, X_clean, y_clean, cv=cv)
-        cv_r2 = r2_score(y_clean, cv_predictions)
-        cv_mae = mean_absolute_error(y_clean, cv_predictions)
-    except Exception:
-        cv_predictions = np.full_like(y_clean, np.nan)
-        cv_r2 = np.nan
-        cv_mae = np.nan
-    
-    # Fit final model for feature weights
     try:
         model.fit(X_clean, y_clean)
-        if hasattr(model.named_steps["regressor"], "coef_"):
-            feature_weights = model.named_steps["regressor"].coef_
-        elif hasattr(model.named_steps["regressor"], "feature_importances_"):
-            feature_weights = model.named_steps["regressor"].feature_importances_
-        else:
-            feature_weights = np.full(X.shape[1], np.nan)
-    except Exception:
+        feature_weights = _extract_feature_weights(model, X.shape[1])
+    except (ValueError, RuntimeError, AttributeError) as e:
+        logging.warning(f"Model fitting failed: {e}")
         feature_weights = np.full(X.shape[1], np.nan)
     
-    # Permutation null
+    cv = KFold(n_splits=n_folds_adjusted, shuffle=True, random_state=DEFAULT_RANDOM_STATE)
     null_r2 = []
     for _ in range(n_permutations):
-        y_perm = rng.permutation(y_clean)
+        y_permuted = rng.permutation(y_clean)
         try:
-            cv_pred_perm = cross_val_predict(model, X_clean, y_perm, cv=cv)
-            null_r2.append(r2_score(y_perm, cv_pred_perm))
-        except Exception:
-            pass
+            predictions_perm = cross_val_predict(model, X_clean, y_permuted, cv=cv)
+            null_r2.append(r2_score(y_permuted, predictions_perm))
+        except (ValueError, RuntimeError, AttributeError):
+            continue
     
-    null_r2 = np.array(null_r2)
+    null_r2_array = np.array(null_r2)
     
-    # Permutation p-value
-    if len(null_r2) > 0 and np.isfinite(cv_r2):
-        p_value = (np.sum(null_r2 >= cv_r2) + 1) / (len(null_r2) + 1)
+    if len(null_r2_array) > 0 and np.isfinite(cv_r2):
+        n_exceeding = np.sum(null_r2_array >= cv_r2)
+        p_value = (n_exceeding + 1) / (len(null_r2_array) + 1)
     else:
         p_value = np.nan
     
-    # Expand predictions to original size
     full_predictions = np.full_like(y, np.nan)
     full_predictions[valid_mask] = cv_predictions
     
@@ -640,7 +755,7 @@ def cross_validated_prediction(
         "cv_mae": float(cv_mae),
         "cv_predictions": full_predictions,
         "feature_weights": feature_weights,
-        "null_r2": null_r2,
+        "null_r2": null_r2_array,
         "p_value": float(p_value),
         "n_samples": n_samples,
         "n_features": X.shape[1],
@@ -651,7 +766,7 @@ def cross_validated_prediction(
 def compute_calibration_curve(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    n_bins: int = 10,
+    n_bins: int = DEFAULT_N_BINS,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute calibration curve for regression predictions.
     
@@ -683,22 +798,27 @@ def compute_calibration_curve(
     if len(y_true) < n_bins:
         return np.array([]), np.array([]), np.array([])
     
-    # Bin by predicted values
-    bin_edges = np.percentile(y_pred, np.linspace(0, 100, n_bins + 1))
-    bin_edges[-1] += 1e-10  # Include max value
+    percentile_levels = np.linspace(0, 100, n_bins + 1)
+    bin_edges = np.percentile(y_pred, percentile_levels)
+    bin_edges[-1] += 1e-10
     
     bin_centers = []
-    mean_true = []
+    mean_true_values = []
     bin_counts = []
     
     for i in range(n_bins):
-        mask = (y_pred >= bin_edges[i]) & (y_pred < bin_edges[i + 1])
-        if mask.sum() > 0:
-            bin_centers.append(np.mean(y_pred[mask]))
-            mean_true.append(np.mean(y_true[mask]))
-            bin_counts.append(mask.sum())
+        in_bin_mask = (y_pred >= bin_edges[i]) & (y_pred < bin_edges[i + 1])
+        n_in_bin = in_bin_mask.sum()
+        if n_in_bin > 0:
+            bin_centers.append(np.mean(y_pred[in_bin_mask]))
+            mean_true_values.append(np.mean(y_true[in_bin_mask]))
+            bin_counts.append(n_in_bin)
     
-    return np.array(bin_centers), np.array(mean_true), np.array(bin_counts)
+    return (
+        np.array(bin_centers),
+        np.array(mean_true_values),
+        np.array(bin_counts),
+    )
 
 
 ###################################################################
@@ -708,8 +828,8 @@ def compute_calibration_curve(
 
 def compute_required_n_for_correlation(
     r: float,
-    power: float = 0.8,
-    alpha: float = 0.05,
+    power: float = DEFAULT_POWER,
+    alpha: float = DEFAULT_ALPHA,
     alternative: str = "two-sided",
 ) -> int:
     """Compute required sample size to detect a correlation.
@@ -730,22 +850,21 @@ def compute_required_n_for_correlation(
     int
         Required sample size.
     """
-    if abs(r) < 0.01:
-        return 999999  # Effectively infinite
+    min_correlation_for_power = 0.01
+    if abs(r) < min_correlation_for_power:
+        return EFFECTIVELY_INFINITE_N
     
-    # Fisher z transformation
-    z_r = np.arctanh(np.clip(r, -0.999, 0.999))
+    max_correlation_for_transform = 0.999
+    z_r = np.arctanh(np.clip(r, -max_correlation_for_transform, max_correlation_for_transform))
     
-    # Z-scores for alpha and power
     if alternative == "two-sided":
         z_alpha = stats.norm.ppf(1 - alpha / 2)
     else:
         z_alpha = stats.norm.ppf(1 - alpha)
     
     z_beta = stats.norm.ppf(power)
-    
-    # Required n
-    n = ((z_alpha + z_beta) / z_r) ** 2 + 3
+    n_adjustment = 3
+    n = ((z_alpha + z_beta) / z_r) ** 2 + n_adjustment
     
     return int(np.ceil(n))
 
@@ -753,7 +872,7 @@ def compute_required_n_for_correlation(
 def assess_statistical_power(
     n: int,
     r: float,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
 ) -> float:
     """Assess statistical power for a correlation test.
     
@@ -771,23 +890,23 @@ def assess_statistical_power(
     float
         Statistical power (0-1).
     """
-    if n < 4 or abs(r) < 0.001:
+    if n < MIN_SAMPLES_FOR_POWER or abs(r) < MIN_CORRELATION_FOR_POWER:
         return 0.0
     
-    # Fisher z transformation
-    z_r = np.arctanh(np.clip(r, -0.999, 0.999))
+    max_correlation_for_transform = 0.999
+    z_r = np.arctanh(np.clip(r, -max_correlation_for_transform, max_correlation_for_transform))
     
-    # Standard error
-    se = 1 / np.sqrt(n - 3)
+    df_adjustment = 3
+    standard_error = 1 / np.sqrt(n - df_adjustment)
     
-    # Non-centrality parameter
-    ncp = z_r / se
+    non_centrality_parameter = z_r / standard_error
     
-    # Critical value
-    z_crit = stats.norm.ppf(1 - alpha / 2)
+    z_critical = stats.norm.ppf(1 - alpha / 2)
     
-    # Power
-    power = 1 - stats.norm.cdf(z_crit - ncp) + stats.norm.cdf(-z_crit - ncp)
+    power = (
+        1 - stats.norm.cdf(z_critical - non_centrality_parameter) +
+        stats.norm.cdf(-z_critical - non_centrality_parameter)
+    )
     
     return float(np.clip(power, 0, 1))
 
@@ -796,7 +915,7 @@ def is_underpowered(
     n: int,
     r: float,
     min_power: float = 0.5,
-    alpha: float = 0.05,
+    alpha: float = DEFAULT_ALPHA,
 ) -> bool:
     """Check if a correlation test is underpowered.
     
@@ -831,7 +950,7 @@ def compute_feature_split_half_reliability(
     n_boot: int,
     use_spearman: bool,
     rng: np.random.Generator,
-    min_samples_per_split: int = 10,
+    min_samples_per_split: int = MIN_SAMPLES_PER_SPLIT,
 ) -> Tuple[float, float, float]:
     """Split-half reliability across feature-level correlations.
     
@@ -876,28 +995,36 @@ def compute_feature_split_half_reliability(
         Xa, Xb = feature_matrix[idx_a], feature_matrix[idx_b]
         ya, yb = ratings[idx_a], ratings[idx_b]
 
-        ra = []
-        rb = []
+        correlations_a = []
+        correlations_b = []
+        method = "spearman" if use_spearman else "pearson"
+        
         for col in range(feature_matrix.shape[1]):
-            fa = Xa[:, col]
-            fb = Xb[:, col]
-            if use_spearman:
-                r_a, _ = stats.spearmanr(fa, ya)
-                r_b, _ = stats.spearmanr(fb, yb)
-            else:
-                r_a, _ = stats.pearsonr(fa, ya)
-                r_b, _ = stats.pearsonr(fb, yb)
-            ra.append(r_a if np.isfinite(r_a) else np.nan)
-            rb.append(r_b if np.isfinite(r_b) else np.nan)
+            feature_a = Xa[:, col]
+            feature_b = Xb[:, col]
+            
+            r_a = _compute_correlation(feature_a, ya, method)
+            r_b = _compute_correlation(feature_b, yb, method)
+            
+            correlations_a.append(r_a)
+            correlations_b.append(r_b)
 
-        ra = np.asarray(ra, dtype=float)
-        rb = np.asarray(rb, dtype=float)
-        mask = np.isfinite(ra) & np.isfinite(rb)
-        if not np.any(mask):
+        correlations_a = np.asarray(correlations_a, dtype=float)
+        correlations_b = np.asarray(correlations_b, dtype=float)
+        valid_mask = np.isfinite(correlations_a) & np.isfinite(correlations_b)
+        
+        if not np.any(valid_mask):
             continue
-        r_half, _ = stats.spearmanr(ra[mask], rb[mask]) if use_spearman else stats.pearsonr(ra[mask], rb[mask])
+        
+        r_half = _compute_correlation(
+            correlations_a[valid_mask],
+            correlations_b[valid_mask],
+            method
+        )
+        
         if np.isfinite(r_half):
-            rel_values.append((2 * r_half) / (1 + r_half))  # Spearman-Brown
+            reliability = _apply_spearman_brown(r_half)
+            rel_values.append(reliability)
 
     if not rel_values:
         return np.nan, np.nan, np.nan
@@ -913,7 +1040,7 @@ def compute_correlation_split_half_reliability(
     x: np.ndarray,
     y: np.ndarray,
     method: str = "spearman",
-    n_splits: int = 100,
+    n_splits: int = DEFAULT_N_SPLITS,
     rng: Optional[np.random.Generator] = None,
 ) -> float:
     """Compute split-half reliability for a single correlation with Spearman-Brown correction.
@@ -937,40 +1064,38 @@ def compute_correlation_split_half_reliability(
         Spearman-Brown corrected reliability
     """
     if rng is None:
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(DEFAULT_RANDOM_STATE)
     
-    valid = np.isfinite(x) & np.isfinite(y)
-    n_valid = int(valid.sum())
+    valid_mask = np.isfinite(x) & np.isfinite(y)
+    n_valid = int(valid_mask.sum())
     
-    if n_valid < 20:
+    if n_valid < MIN_SAMPLES_FOR_CORRELATION_SPLIT_HALF:
         return np.nan
     
-    x_v, y_v = x[valid], y[valid]
+    x_valid = x[valid_mask]
+    y_valid = y[valid_mask]
     indices = np.arange(n_valid)
     
     correlations = []
+    half_size = n_valid // 2
+    
     for _ in range(n_splits):
         rng.shuffle(indices)
-        half = n_valid // 2
-        idx1, idx2 = indices[:half], indices[half:2*half]
+        idx1 = indices[:half_size]
+        idx2 = indices[half_size:2 * half_size]
         
-        if method == "spearman":
-            r1, _ = stats.spearmanr(x_v[idx1], y_v[idx1])
-            r2, _ = stats.spearmanr(x_v[idx2], y_v[idx2])
-        else:
-            r1, _ = stats.pearsonr(x_v[idx1], y_v[idx1])
-            r2, _ = stats.pearsonr(x_v[idx2], y_v[idx2])
+        r1 = _compute_correlation(x_valid[idx1], y_valid[idx1], method)
+        r2 = _compute_correlation(x_valid[idx2], y_valid[idx2], method)
         
         if np.isfinite(r1) and np.isfinite(r2):
-            correlations.append((r1 + r2) / 2)
+            mean_correlation = (r1 + r2) / 2
+            correlations.append(mean_correlation)
     
     if not correlations:
         return np.nan
     
-    r_half = np.mean(correlations)
-    if r_half <= -1 or not np.isfinite(r_half):
-        return np.nan
-    return float((2 * r_half) / (1 + r_half))
+    mean_half_correlation = np.mean(correlations)
+    return float(_apply_spearman_brown(mean_half_correlation))
 
 
 def get_subject_seed(base_seed: int, subject: str) -> int:
@@ -1005,34 +1130,42 @@ class ReliabilityResult:
     n_samples: int
     method: str
     
-    def is_acceptable(self, threshold: float = 0.7) -> bool:
+    def is_acceptable(self, threshold: float = RELIABILITY_THRESHOLD_ACCEPTABLE) -> bool:
         return self.reliability >= threshold
     
-    def is_good(self, threshold: float = 0.8) -> bool:
+    def is_good(self, threshold: float = RELIABILITY_THRESHOLD_GOOD) -> bool:
         return self.reliability >= threshold
     
-    def is_excellent(self, threshold: float = 0.9) -> bool:
+    def is_excellent(self, threshold: float = RELIABILITY_THRESHOLD_EXCELLENT) -> bool:
         return self.reliability >= threshold
 
 
 def _pearson_with_ci(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]:
     """Compute Pearson correlation with 95% CI via Fisher z-transform."""
-    mask = np.isfinite(x) & np.isfinite(y)
-    x_clean, y_clean = x[mask], y[mask]
+    valid_mask = np.isfinite(x) & np.isfinite(y)
+    x_clean = x[valid_mask]
+    y_clean = y[valid_mask]
     n = len(x_clean)
-    if n < 3:
+    
+    if n < MIN_SAMPLES_FOR_CORRELATION:
         return np.nan, np.nan, np.nan
+    
     r, _ = stats.pearsonr(x_clean, y_clean)
-    z = np.arctanh(r)
-    se = 1.0 / np.sqrt(n - 3)
-    return float(r), float(np.tanh(z - 1.96 * se)), float(np.tanh(z + 1.96 * se))
+    z_fisher = np.arctanh(r)
+    
+    df_adjustment = 3
+    standard_error = 1.0 / np.sqrt(n - df_adjustment)
+    z_critical_95 = 1.96
+    
+    ci_lower = float(np.tanh(z_fisher - z_critical_95 * standard_error))
+    ci_upper = float(np.tanh(z_fisher + z_critical_95 * standard_error))
+    
+    return float(r), ci_lower, ci_upper
 
 
 def _spearman_brown(r: float) -> float:
     """Apply Spearman-Brown prophecy formula."""
-    if np.isnan(r) or r <= -1:
-        return np.nan
-    return (2 * r) / (1 + r)
+    return _apply_spearman_brown(r)
 
 
 def compute_odd_even_reliability(
@@ -1099,9 +1232,9 @@ def compute_bootstrap_reliability(
     df: pd.DataFrame,
     feature_columns: Optional[List[str]] = None,
     *,
-    n_iterations: int = 1000,
-    sample_fraction: float = 0.5,
-    random_state: int = 42,
+    n_iterations: int = DEFAULT_N_BOOTSTRAP,
+    sample_fraction: float = DEFAULT_SAMPLE_FRACTION,
+    random_state: int = DEFAULT_RANDOM_STATE,
     exclude_columns: Optional[List[str]] = None,
     progress: ProgressCallback = None,
 ) -> Dict[str, ReliabilityResult]:
@@ -1193,8 +1326,8 @@ def compute_dataframe_reliability(
     *,
     feature_columns: Optional[List[str]] = None,
     exclude_columns: Optional[List[str]] = None,
-    n_iterations: int = 100,
-    random_state: int = 42,
+    n_iterations: int = DEFAULT_N_SPLITS,
+    random_state: int = DEFAULT_RANDOM_STATE,
     progress: ProgressCallback = None,
 ) -> pd.DataFrame:
     """Compute reliability for all features in a wide-format DataFrame.
@@ -1254,7 +1387,7 @@ def compute_dataframe_reliability(
 def filter_reliable_features(
     df: pd.DataFrame,
     reliability_df: pd.DataFrame,
-    threshold: float = 0.7,
+    threshold: float = RELIABILITY_THRESHOLD_ACCEPTABLE,
     *,
     keep_metadata_cols: bool = True,
     metadata_cols: Optional[List[str]] = None,

@@ -24,6 +24,8 @@ import pandas as pd
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.base import clone
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 
 from eeg_pipeline.analysis.machine_learning.cv import (
     compute_metrics,

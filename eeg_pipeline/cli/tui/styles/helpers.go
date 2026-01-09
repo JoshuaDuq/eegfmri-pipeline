@@ -25,49 +25,15 @@ type ListLayout struct {
 // based on terminal height, cursor position, and total items.
 // headerRows is the number of rows reserved for headers/footers.
 func CalculateListLayout(termHeight, cursorIdx, totalItems, headerRows int) ListLayout {
-	// Calculate available rows for list content
-	availableRows := termHeight - headerRows
-	if availableRows < MinListItems {
-		availableRows = MinListItems
-	}
+	availableRows := calculateAvailableRows(termHeight, headerRows)
 
-	// If all items fit, show everything without scrolling
 	if totalItems <= availableRows {
-		return ListLayout{
-			MaxItems:     availableRows,
-			StartIdx:     0,
-			EndIdx:       totalItems,
-			ShowScrollUp: false,
-			ShowScrollDn: false,
-			TotalItems:   totalItems,
-			CursorIdx:    cursorIdx,
-		}
+		return createFullViewLayout(availableRows, cursorIdx, totalItems)
 	}
 
-	// Calculate start and end indices with cursor tracking
-	startIdx := 0
-
-	// Keep cursor in view with margin
-	if cursorIdx < ListScrollMargin {
-		startIdx = 0
-	} else if cursorIdx >= totalItems-ListScrollMargin {
-		startIdx = totalItems - availableRows
-	} else {
-		startIdx = cursorIdx - availableRows/2
-	}
-
-	// Clamp start index
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	if startIdx > totalItems-availableRows {
-		startIdx = totalItems - availableRows
-	}
-
-	endIdx := startIdx + availableRows
-	if endIdx > totalItems {
-		endIdx = totalItems
-	}
+	startIdx := calculateStartIndex(cursorIdx, totalItems, availableRows)
+	startIdx = clampStartIndex(startIdx, totalItems, availableRows)
+	endIdx := clampEndIndex(startIdx, availableRows, totalItems)
 
 	return ListLayout{
 		MaxItems:     availableRows,
@@ -78,6 +44,55 @@ func CalculateListLayout(termHeight, cursorIdx, totalItems, headerRows int) List
 		TotalItems:   totalItems,
 		CursorIdx:    cursorIdx,
 	}
+}
+
+func calculateAvailableRows(termHeight, headerRows int) int {
+	availableRows := termHeight - headerRows
+	if availableRows < MinListItems {
+		return MinListItems
+	}
+	return availableRows
+}
+
+func createFullViewLayout(availableRows, cursorIdx, totalItems int) ListLayout {
+	return ListLayout{
+		MaxItems:     availableRows,
+		StartIdx:     0,
+		EndIdx:       totalItems,
+		ShowScrollUp: false,
+		ShowScrollDn: false,
+		TotalItems:   totalItems,
+		CursorIdx:    cursorIdx,
+	}
+}
+
+func calculateStartIndex(cursorIdx, totalItems, availableRows int) int {
+	if cursorIdx < ListScrollMargin {
+		return 0
+	}
+	if cursorIdx >= totalItems-ListScrollMargin {
+		return totalItems - availableRows
+	}
+	return cursorIdx - availableRows/2
+}
+
+func clampStartIndex(startIdx, totalItems, availableRows int) int {
+	if startIdx < 0 {
+		return 0
+	}
+	maxStart := totalItems - availableRows
+	if startIdx > maxStart {
+		return maxStart
+	}
+	return startIdx
+}
+
+func clampEndIndex(startIdx, availableRows, totalItems int) int {
+	endIdx := startIdx + availableRows
+	if endIdx > totalItems {
+		return totalItems
+	}
+	return endIdx
 }
 
 // RenderScrollIndicator returns scroll indicator text for a list
@@ -96,8 +111,8 @@ func RenderScrollUpIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	return lipgloss.NewStyle().Foreground(TextDim).Render(
-		"  ↑ " + formatScrollCount(count) + " more above")
+	text := fmt.Sprintf("  ↑ %d more above", count)
+	return lipgloss.NewStyle().Foreground(TextDim).Render(text)
 }
 
 // RenderScrollDownIndicator returns a formatted "more below" indicator
@@ -105,12 +120,8 @@ func RenderScrollDownIndicator(count int) string {
 	if count <= 0 {
 		return ""
 	}
-	return lipgloss.NewStyle().Foreground(TextDim).Render(
-		"  ↓ " + formatScrollCount(count) + " more below")
-}
-
-func formatScrollCount(n int) string {
-	return fmt.Sprintf("%d", n)
+	text := fmt.Sprintf("  ↓ %d more below", count)
+	return lipgloss.NewStyle().Foreground(TextDim).Render(text)
 }
 
 // IsTerminalTooSmall returns true if terminal dimensions are too small to render properly
@@ -255,35 +266,20 @@ func RenderValidationIndicator(valid bool, reason string) string {
 
 // RenderProgressBar creates a visual progress bar with polished edge caps
 func RenderProgressBar(progress float64, width int, showPct bool) string {
-	if width < 5 {
-		width = 5
-	}
-	if width > MaxProgressBarWidth {
-		width = MaxProgressBarWidth
-	}
-
-	// Reserve space for caps
+	width = clampProgressBarWidth(width, 5)
 	innerWidth := width - 2
-	filled := int(progress * float64(innerWidth))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > innerWidth {
-		filled = innerWidth
-	}
+	filled := clampFilledAmount(progress, innerWidth)
 
-	// Build bar with edge caps for polished look
 	leftCap := lipgloss.NewStyle().Foreground(Primary).Render("▐")
 	rightCap := lipgloss.NewStyle().Foreground(Secondary).Render("▌")
+	filledBar := ProgressFilledStyle.Render(repeatString("█", filled))
+	emptyBar := ProgressEmptyStyle.Render(repeatString("░", innerWidth-filled))
 
-	bar := leftCap
-	bar += ProgressFilledStyle.Render(repeatString("█", filled))
-	bar += ProgressEmptyStyle.Render(repeatString("░", innerWidth-filled))
-	bar += rightCap
+	bar := leftCap + filledBar + emptyBar + rightCap
 
 	if showPct {
-		pct := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
-		bar += pct.Render(formatPercent(progress))
+		percentStyle := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
+		bar += percentStyle.Render(formatPercent(progress))
 	}
 
 	return bar
@@ -291,18 +287,10 @@ func RenderProgressBar(progress float64, width int, showPct bool) string {
 
 // RenderMiniProgressBar creates a compact progress bar
 func RenderMiniProgressBar(progress float64, width int, color lipgloss.Color) string {
-	filled := int(progress * float64(width))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
-
-	bar := lipgloss.NewStyle().Foreground(color).Render(repeatString("█", filled))
-	bar += lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled))
-
-	return bar
+	filled := clampFilledAmount(progress, width)
+	filledBar := lipgloss.NewStyle().Foreground(color).Render(repeatString("█", filled))
+	emptyBar := lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled))
+	return filledBar + emptyBar
 }
 
 // RenderDivider creates a horizontal divider
@@ -321,20 +309,20 @@ func RenderDivider(width int, style DividerStyle) string {
 	return lipgloss.NewStyle().Foreground(Secondary).Render(repeatString(char, width))
 }
 
-// RenderTitle creates a styled title with optional underline
-func RenderTitle(text string, underline bool) string {
-	title := lipgloss.NewStyle().
+// RenderTitle creates a styled title
+func RenderTitle(text string) string {
+	return lipgloss.NewStyle().
 		Bold(true).
 		Foreground(Primary).
 		Render(text)
+}
 
-	if underline {
-		width := len(text)
-		line := lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("─", width))
-		return title + "\n" + line
-	}
-
-	return title
+// RenderTitleWithUnderline creates a styled title with an underline
+func RenderTitleWithUnderline(text string) string {
+	title := RenderTitle(text)
+	underlineWidth := len(text)
+	underline := lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("─", underlineWidth))
+	return title + "\n" + underline
 }
 
 // RenderSubtitle creates a styled subtitle
@@ -410,68 +398,67 @@ func RenderBlockSpinner(tick int) string {
 
 // RenderGradientProgressBar creates a gradient-styled progress bar with color transitions
 func RenderGradientProgressBar(progress float64, width int) string {
-	if width < 10 {
-		width = 10
-	}
-	if width > MaxProgressBarWidth {
-		width = MaxProgressBarWidth
-	}
+	width = clampProgressBarWidth(width, 10)
+	filled := clampFilledAmount(progress, width)
 
-	filled := int(progress * float64(width))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
+	bar := buildGradientBar(filled, width)
+	emptyBar := lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled))
+	percentStyle := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
 
+	return bar + emptyBar + percentStyle.Render(formatPercent(progress))
+}
+
+const (
+	gradientFirstThreshold  = 0.33
+	gradientSecondThreshold = 0.66
+)
+
+func buildGradientBar(filled, totalWidth int) string {
 	var bar string
 	for i := 0; i < filled; i++ {
-		pct := float64(i) / float64(width)
-		if pct < 0.33 {
-			bar += lipgloss.NewStyle().Foreground(Accent).Render("█")
-		} else if pct < 0.66 {
-			bar += lipgloss.NewStyle().Foreground(Primary).Render("█")
-		} else {
-			bar += lipgloss.NewStyle().Foreground(Success).Render("█")
-		}
+		position := float64(i) / float64(totalWidth)
+		color := selectGradientColor(position)
+		bar += lipgloss.NewStyle().Foreground(color).Render("█")
 	}
-	bar += lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled))
+	return bar
+}
 
-	pctStr := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
-	return bar + pctStr.Render(formatPercent(progress))
+func selectGradientColor(position float64) lipgloss.Color {
+	if position < gradientFirstThreshold {
+		return Accent
+	}
+	if position < gradientSecondThreshold {
+		return Primary
+	}
+	return Success
 }
 
 // RenderAnimatedProgressBar creates an animated progress bar with a leading edge
 func RenderAnimatedProgressBar(progress float64, width int, tick int) string {
-	if width < 10 {
-		width = 10
-	}
-	if width > MaxProgressBarWidth {
-		width = MaxProgressBarWidth
-	}
-
-	filled := int(progress * float64(width))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
+	width = clampProgressBarWidth(width, 10)
+	filled := clampFilledAmount(progress, width)
 
 	leadChars := []string{"▓", "▒", "░"}
 	leadIdx := tick % len(leadChars)
 
-	bar := lipgloss.NewStyle().Foreground(Primary).Render(repeatString("█", filled))
-	if filled < width && filled > 0 {
-		bar += lipgloss.NewStyle().Foreground(Accent).Render(leadChars[leadIdx])
-		bar += lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled-1))
-	} else {
-		bar += lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", width-filled))
-	}
+	filledBar := lipgloss.NewStyle().Foreground(Primary).Render(repeatString("█", filled))
+	emptyBar := buildAnimatedEmptyBar(filled, width, leadChars[leadIdx])
+	percentStyle := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
 
-	pctStr := lipgloss.NewStyle().Bold(true).Foreground(Primary).Width(5).Align(lipgloss.Right)
-	return bar + pctStr.Render(formatPercent(progress))
+	return filledBar + emptyBar + percentStyle.Render(formatPercent(progress))
+}
+
+func buildAnimatedEmptyBar(filled, width int, leadChar string) string {
+	remaining := width - filled
+	if remaining == 0 {
+		return ""
+	}
+	if filled > 0 {
+		lead := lipgloss.NewStyle().Foreground(Accent).Render(leadChar)
+		empty := lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", remaining-1))
+		return lead + empty
+	}
+	return lipgloss.NewStyle().Foreground(Secondary).Render(repeatString("░", remaining))
 }
 
 // RenderCompactStats renders a compact key-value pair line
@@ -498,33 +485,54 @@ func RenderCompactStats(items map[string]string) string {
 
 // RenderStepIndicator creates a visual step indicator with connecting lines
 func RenderStepIndicator(current, total int, tick int) string {
-	var steps []string
-	for i := 1; i <= total; i++ {
-		num := repeatString(" ", 0) + string(rune('0'+i)) + repeatString(" ", 0)
-		if i < current {
-			steps = append(steps, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(Success).
-				Bold(true).
-				Padding(0, 1).
-				Render(CheckMark))
-		} else if i == current {
-			pulseStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(Primary).
-				Bold(true).
-				Padding(0, 1)
-			steps = append(steps, pulseStyle.Render(num))
-		} else {
-			steps = append(steps, lipgloss.NewStyle().
-				Foreground(TextDim).
-				Padding(0, 1).
-				Render(num))
-		}
-	}
-
+	steps := buildStepIndicators(current, total)
 	connector := lipgloss.NewStyle().Foreground(Secondary).Render("──")
 	return lipgloss.JoinHorizontal(lipgloss.Center, intersperse(steps, connector)...)
+}
+
+func buildStepIndicators(current, total int) []string {
+	steps := make([]string, 0, total)
+	for i := 1; i <= total; i++ {
+		step := renderStepIndicator(i, current)
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+func renderStepIndicator(stepNum, currentStep int) string {
+	stepText := string(rune('0' + stepNum))
+	if stepNum < currentStep {
+		return renderCompletedStep()
+	}
+	if stepNum == currentStep {
+		return renderCurrentStep(stepText)
+	}
+	return renderPendingStep(stepText)
+}
+
+func renderCompletedStep() string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(Success).
+		Bold(true).
+		Padding(0, 1).
+		Render(CheckMark)
+}
+
+func renderCurrentStep(stepText string) string {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(Primary).
+		Bold(true).
+		Padding(0, 1).
+		Render(stepText)
+}
+
+func renderPendingStep(stepText string) string {
+	return lipgloss.NewStyle().
+		Foreground(TextDim).
+		Padding(0, 1).
+		Render(stepText)
 }
 
 func intersperse(elems []string, sep string) []string {
@@ -621,19 +629,50 @@ func repeatString(s string, count int) string {
 	return result
 }
 
-func formatPercent(p float64) string {
-	pct := int(p * 100)
-	if pct < 0 {
-		pct = 0
+func clampProgressBarWidth(width, minWidth int) int {
+	if width < minWidth {
+		return minWidth
 	}
-	if pct > 100 {
-		pct = 100
+	if width > MaxProgressBarWidth {
+		return MaxProgressBarWidth
 	}
+	return width
+}
 
-	if pct < 10 {
-		return "  " + string(rune('0'+pct)) + "%"
-	} else if pct < 100 {
-		return " " + string(rune('0'+pct/10)) + string(rune('0'+pct%10)) + "%"
+func clampFilledAmount(progress float64, maxWidth int) int {
+	filled := int(progress * float64(maxWidth))
+	if filled < 0 {
+		return 0
+	}
+	if filled > maxWidth {
+		return maxWidth
+	}
+	return filled
+}
+
+func formatPercent(progress float64) string {
+	percent := clampPercent(int(progress * 100))
+	return formatPercentString(percent)
+}
+
+func clampPercent(percent int) int {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
+}
+
+func formatPercentString(percent int) string {
+	if percent < 10 {
+		return fmt.Sprintf("  %d%%", percent)
+	}
+	if percent < 100 {
+		tens := percent / 10
+		ones := percent % 10
+		return fmt.Sprintf(" %d%d%%", tens, ones)
 	}
 	return "100%"
 }
