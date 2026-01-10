@@ -13,6 +13,7 @@ to eliminate duplicated spatial aggregation and graph metric logic.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import time
 import numpy as np
@@ -42,6 +43,132 @@ from eeg_pipeline.utils.analysis.graph_metrics import (
 )
 
 from eeg_pipeline.analysis.features.preparation import precompute_data
+
+
+###################################################################
+# Connectivity Configuration
+###################################################################
+
+
+@dataclass
+class ConnectivityConfig:
+    """Normalized connectivity configuration with validated types.
+
+    Single-pass config validation eliminates redundant conn_cfg.get() calls.
+    """
+    measures: List[str]
+    granularity: str
+    phase_estimator: str
+    output_level: str
+    mode: str
+    aec_mode: str
+    n_freqs_per_band: int
+    n_cycles: Optional[float]
+    decim: int
+    min_segment_samples: int
+    min_segment_sec: float
+    min_cycles_per_band: float
+    min_epochs_per_group: int
+    enable_graph_metrics: bool
+    enable_aec: bool
+    enable_aec_raw: bool
+    enable_aec_z: bool
+    graph_top_prop: float
+    small_world_n_rand: int
+    force_within_epoch_for_ml: bool
+    warn_if_no_spatial_transform: bool
+
+    @classmethod
+    def from_dict(cls, cfg: Dict[str, Any]) -> "ConnectivityConfig":
+        """Create normalized config from raw dict with validation."""
+        conn_cfg = cfg.get("feature_engineering.connectivity", {}) if hasattr(cfg, "get") else {}
+
+        measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
+        if isinstance(measures_cfg, (list, tuple)):
+            measures = [str(m).strip().lower() for m in measures_cfg]
+        else:
+            measures = ["wpli2_debiased", "aec"]
+
+        granularity = str(conn_cfg.get("granularity", "trial")).strip().lower()
+        if granularity not in {"trial", "condition", "subject"}:
+            granularity = "trial"
+
+        phase_estimator = str(conn_cfg.get("phase_estimator", "within_epoch")).strip().lower()
+        if phase_estimator not in {"within_epoch", "across_epochs"}:
+            phase_estimator = "within_epoch"
+
+        output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
+        if output_level not in {"full", "global_only"}:
+            output_level = "full"
+
+        mode = str(conn_cfg.get("mode", "cwt_morlet")).strip().lower()
+
+        aec_mode = str(conn_cfg.get("aec_mode", "orth")).strip().lower()
+
+        n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
+
+        n_cycles = conn_cfg.get("n_cycles", None)
+        try:
+            n_cycles = float(n_cycles) if n_cycles is not None else None
+        except Exception:
+            n_cycles = None
+
+        decim = int(conn_cfg.get("decim", 1))
+        min_segment_samples = int(conn_cfg.get("min_segment_samples", 50))
+        min_segment_sec = float(conn_cfg.get("min_segment_sec", 1.0))
+        min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
+        min_epochs_per_group = int(conn_cfg.get("min_epochs_per_group", 5))
+
+        enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
+        enable_aec = bool(conn_cfg.get("enable_aec", True))
+
+        aec_output_modes = conn_cfg.get("aec_output", ["r"])
+        if isinstance(aec_output_modes, str):
+            aec_output_modes = [aec_output_modes]
+        aec_output_modes = [str(m).strip().lower() for m in aec_output_modes]
+        enable_aec_raw = "r" in aec_output_modes
+        enable_aec_z = "z" in aec_output_modes
+
+        graph_top_prop = conn_cfg.get("graph_top_prop", 0.1)
+        try:
+            graph_top_prop = float(graph_top_prop)
+        except (ValueError, TypeError):
+            graph_top_prop = 0.1
+        if not np.isfinite(graph_top_prop) or graph_top_prop <= 0 or graph_top_prop > 1:
+            graph_top_prop = 0.1
+
+        small_world_n_rand = conn_cfg.get("small_world_n_rand", 100)
+        try:
+            small_world_n_rand = int(small_world_n_rand)
+        except (ValueError, TypeError):
+            small_world_n_rand = 100
+
+        force_within_epoch_for_ml = bool(conn_cfg.get("force_within_epoch_for_ml", True))
+        warn_if_no_spatial_transform = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
+
+        return cls(
+            measures=measures,
+            granularity=granularity,
+            phase_estimator=phase_estimator,
+            output_level=output_level,
+            mode=mode,
+            aec_mode=aec_mode,
+            n_freqs_per_band=n_freqs_per_band,
+            n_cycles=n_cycles,
+            decim=decim,
+            min_segment_samples=min_segment_samples,
+            min_segment_sec=min_segment_sec,
+            min_cycles_per_band=min_cycles_per_band,
+            min_epochs_per_group=min_epochs_per_group,
+            enable_graph_metrics=enable_graph_metrics,
+            enable_aec=enable_aec,
+            enable_aec_raw=enable_aec_raw,
+            enable_aec_z=enable_aec_z,
+            graph_top_prop=graph_top_prop,
+            small_world_n_rand=small_world_n_rand,
+            force_within_epoch_for_ml=force_within_epoch_for_ml,
+            warn_if_no_spatial_transform=warn_if_no_spatial_transform,
+        )
 
 
 ###################################################################
@@ -414,6 +541,49 @@ def _mask_array(arr: np.ndarray, mask: Optional[np.ndarray]) -> np.ndarray:
     return arr
 
 
+def _compute_graph_metrics_for_epochs(
+    con_vals: np.ndarray,
+    pair_i: np.ndarray,
+    pair_j: np.ndarray,
+    n_channels: int,
+    method_label: str,
+    band: str,
+    seg_name: str,
+    conn_cfg: ConnectivityConfig,
+    n_jobs: int,
+    logger: Any,
+) -> pd.DataFrame:
+    """Compute graph metrics for all epochs from connectivity values.
+
+    Common implementation for both phase-based and envelope-based connectivity.
+    """
+    def _graph_row(ep_idx: int) -> Dict[str, float]:
+        adj = np.zeros((n_channels, n_channels), dtype=float)
+        adj[pair_i, pair_j] = con_vals[ep_idx]
+        adj[pair_j, pair_i] = con_vals[ep_idx]
+        return _graph_metrics(adj, method_label, band, seg_name, conn_cfg)
+
+    if logger is not None:
+        logger.info(
+            "Connectivity graph metrics: seg=%s band=%s method=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
+            seg_name,
+            band,
+            method_label,
+            int(con_vals.shape[0]),
+            int(n_channels),
+            str(conn_cfg.small_world_n_rand),
+        )
+
+    if n_jobs == 1:
+        graph_rows = [_graph_row(ep_idx) for ep_idx in range(con_vals.shape[0])]
+    else:
+        from joblib import Parallel, delayed
+        graph_rows = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_graph_row)(ep_idx) for ep_idx in range(con_vals.shape[0])
+        )
+    return pd.DataFrame(graph_rows)
+
+
 def extract_connectivity_features(
     ctx: Any,
     bands: List[str],
@@ -421,14 +591,8 @@ def extract_connectivity_features(
     if not bands:
         return pd.DataFrame(), []
 
-    conn_cfg = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
-    measures_cfg = conn_cfg.get("measures", ["wpli2_debiased", "aec"])
-    if isinstance(measures_cfg, (list, tuple)):
-        measures = [str(m).strip().lower() for m in measures_cfg]
-    else:
-        measures = ["wpli2_debiased", "aec"]
-    
-    _warn_if_phase_connectivity_without_spatial_transform(ctx.config, measures, ctx.logger)
+    conn_cfg = ConnectivityConfig.from_dict(ctx.config)
+    _warn_if_phase_connectivity_without_spatial_transform(ctx.config, conn_cfg.measures, ctx.logger)
 
     precomputed = getattr(ctx, "precomputed", None)
     if precomputed is None:
@@ -477,20 +641,15 @@ def extract_connectivity_features(
     if df is None or df.empty:
         return pd.DataFrame(), []
 
-    conn_cfg = ctx.config.get("feature_engineering.connectivity", {}) if hasattr(ctx.config, "get") else {}
-    granularity = str(conn_cfg.get("granularity", "trial")).strip().lower()
-    if granularity not in {"trial", "condition", "subject"}:
-        granularity = "trial"
+    granularity = conn_cfg.granularity
+    phase_estimator = conn_cfg.phase_estimator
 
-    phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
-    
     # Guardrail: detect CV/machine learning mode and warn/force within_epoch for phase estimator
     # across_epochs is cross-trial by nature and WILL leak test information in CV
     train_mask = getattr(ctx, "train_mask", None)
-    force_within_for_ml = bool(conn_cfg.get("force_within_epoch_for_ml", True))
-    
+
     if train_mask is not None and phase_estimator == "across_epochs":
-        if force_within_for_ml:
+        if conn_cfg.force_within_epoch_for_ml:
             if ctx.logger is not None:
                 ctx.logger.warning(
                     "Connectivity: train_mask detected (CV/machine learning mode) with phase_estimator='across_epochs'. "
@@ -527,7 +686,7 @@ def extract_connectivity_features(
                                 break
                 if cond_col is not None:
                     labels = events[cond_col].astype(str)
-                    min_n = int(conn_cfg.get("min_epochs_per_group", 5))
+                    min_n = conn_cfg.min_epochs_per_group
                     for lab in sorted(labels.unique()):
                         idx = np.where((labels == lab).to_numpy())[0]
                         if idx.size >= min_n:
@@ -547,18 +706,19 @@ def extract_connectivity_features(
         return df, cols
 
     n_epochs = int(df.shape[0])
+    numeric = df.apply(pd.to_numeric, errors="coerce")
 
     if granularity == "subject":
-        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
-        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        means = numeric.mean(axis=0)
+        out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
         return out, list(out.columns)
 
     # condition-level: broadcast within each condition label
     events = getattr(ctx, "aligned_events", None)
     if events is None or getattr(events, "empty", True) or len(events) != n_epochs:
         ctx.logger.warning("Connectivity granularity=condition requested but aligned_events missing/mismatched; falling back to subject-level.")
-        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
-        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        means = numeric.mean(axis=0)
+        out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
         return out, list(out.columns)
 
     cond_col = None
@@ -576,15 +736,14 @@ def extract_connectivity_features(
 
     if cond_col is None:
         ctx.logger.warning("Connectivity granularity=condition requested but no condition column found; falling back to subject-level.")
-        means = df.apply(pd.to_numeric, errors="coerce").mean(axis=0)
-        out = pd.DataFrame(np.tile(means.to_numpy(dtype=float), (n_epochs, 1)), columns=list(means.index))
+        means = numeric.mean(axis=0)
+        out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
         return out, list(out.columns)
 
     labels = events[cond_col].astype(str)
-    numeric = df.apply(pd.to_numeric, errors="coerce")
     out = numeric.copy()
 
-    min_n = int(conn_cfg.get("min_epochs_per_group", 5))
+    min_n = conn_cfg.min_epochs_per_group
     for lab in sorted(labels.unique()):
         mask = (labels == lab).to_numpy()
         n = int(np.sum(mask))
@@ -593,7 +752,7 @@ def extract_connectivity_features(
             grp_mean = numeric.mean(axis=0)
         else:
             grp_mean = numeric.loc[mask].mean(axis=0)
-        out.loc[mask] = np.tile(grp_mean.to_numpy(dtype=float), (n, 1))
+        out.loc[mask] = [grp_mean.values] * n
 
     out.columns = df.columns
     return out, list(out.columns)
@@ -618,51 +777,29 @@ def extract_connectivity_from_precomputed(
     if not bands_use:
         return pd.DataFrame(), []
 
-    conn_cfg = config.get("feature_engineering.connectivity", {})
+    conn_cfg = ConnectivityConfig.from_dict(config)
 
-    output_level = str(conn_cfg.get("output_level", "full")).strip().lower()
-    if output_level not in {"full", "global_only"}:
-        output_level = "full"
-
-    enable_wpli = bool(conn_cfg.get("enable_wpli", True))
-    enable_aec = bool(conn_cfg.get("enable_aec", True))
-    enable_plv = bool(conn_cfg.get("enable_plv", False))
-    enable_pli = bool(conn_cfg.get("enable_pli", False))
-    enable_graph_metrics = bool(conn_cfg.get("enable_graph_metrics", False))
-    
-    # AEC output format: can include "r" (raw correlation) and/or "z" (Fisher-z transform)
-    # Fisher-z is atanh(r) and averages correctly across trials/subjects
-    aec_output_modes = conn_cfg.get("aec_output", ["r"])
-    if isinstance(aec_output_modes, str):
-        aec_output_modes = [aec_output_modes]
-    aec_output_modes = [str(m).strip().lower() for m in aec_output_modes]
-    if not aec_output_modes:
-        aec_output_modes = ["r"]
-    enable_aec_raw = "r" in aec_output_modes
-    enable_aec_z = "z" in aec_output_modes
-
-    # Supported by mne-connectivity (version-dependent); extraction will skip unsupported
-    # methods if spectral_connectivity_time raises.
+    # Resolve phase measures from config
     supported_measures = {"wpli", "wpli2_debiased", "imcoh", "aec", "plv", "pli"}
-    measures_cfg = conn_cfg.get("measures")
-    if isinstance(measures_cfg, (list, tuple)) and measures_cfg:
-        measures = {str(m).strip().lower() for m in measures_cfg}
-        unknown = measures - supported_measures
-        if unknown and logger is not None:
-            logger.warning(
-                "Connectivity: unsupported measures %s; ignoring.",
-                ",".join(sorted(unknown)),
-            )
-        measures = measures & supported_measures
-        enable_wpli = "wpli" in measures
-        enable_wpli2 = "wpli2_debiased" in measures
-        enable_imcoh = "imcoh" in measures
-        enable_aec = "aec" in measures
-        enable_plv = "plv" in measures
-        enable_pli = "pli" in measures
-    else:
-        enable_wpli2 = bool(conn_cfg.get("enable_wpli2_debiased", False))
-        enable_imcoh = bool(conn_cfg.get("enable_imcoh", False))
+    measures_cfg = conn_cfg.measures
+    measures = {str(m).strip().lower() for m in measures_cfg}
+    unknown = measures - supported_measures
+    if unknown and logger is not None:
+        logger.warning(
+            "Connectivity: unsupported measures %s; ignoring.",
+            ",".join(sorted(unknown)),
+        )
+    measures = measures & supported_measures
+    enable_wpli = "wpli" in measures
+    enable_wpli2 = "wpli2_debiased" in measures
+    enable_imcoh = "imcoh" in measures
+    enable_aec = "aec" in measures
+    enable_plv = "plv" in measures
+    enable_pli = "pli" in measures
+
+    enable_aec_raw = conn_cfg.enable_aec_raw
+    enable_aec_z = conn_cfg.enable_aec_z
+
     phase_measures = [
         m
         for m, enabled in (
@@ -681,13 +818,13 @@ def extract_connectivity_from_precomputed(
         return pd.DataFrame(), []
 
     target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
-    
+
     if target_name:
         seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
         masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}
-    
+
     segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
 
     ch_names = list(getattr(precomputed, "ch_names", []))
@@ -716,21 +853,15 @@ def extract_connectivity_from_precomputed(
     pair_names = [f"{ch_names[i]}-{ch_names[j]}" for i, j in zip(pair_i, pair_j)]
     indices = (pair_i.astype(int), pair_j.astype(int))
 
-    n_freqs_per_band = int(conn_cfg.get("n_freqs_per_band", 8))
-    conn_mode = str(conn_cfg.get("mode", "cwt_morlet"))
-    n_cycles = conn_cfg.get("n_cycles", None)
-    try:
-        n_cycles = float(n_cycles) if n_cycles is not None else None
-    except Exception:
-        n_cycles = None
-    decim = int(conn_cfg.get("decim", 1))
-    min_segment_samples = int(conn_cfg.get("min_segment_samples", 50))
-    min_cycles_per_band = float(conn_cfg.get("min_cycles_per_band", 3.0))
-    min_segment_sec = float(conn_cfg.get("min_segment_sec", 1.0))
-    
-    # Phase estimator mode: "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
-    phase_estimator = _normalize_phase_estimator(conn_cfg.get("phase_estimator", "within_epoch"))
-    
+    n_freqs_per_band = conn_cfg.n_freqs_per_band
+    conn_mode = conn_cfg.mode
+    n_cycles = conn_cfg.n_cycles
+    decim = conn_cfg.decim
+    min_segment_samples = conn_cfg.min_segment_samples
+    min_cycles_per_band = conn_cfg.min_cycles_per_band
+    min_segment_sec = conn_cfg.min_segment_sec
+    phase_estimator = conn_cfg.phase_estimator
+
     if phase_estimator == "across_epochs" and logger is not None:
         logger.info(
             "Connectivity: using across_epochs phase estimator (standard wPLI/PLV/PLI definition); "
@@ -809,6 +940,9 @@ def extract_connectivity_from_precomputed(
     use_task_parallel = bool(n_jobs > 1)
     inner_n_jobs = 1 if use_task_parallel else n_jobs
     graph_n_jobs = 1 if use_task_parallel else n_jobs
+
+    output_level = conn_cfg.output_level
+    enable_graph_metrics = conn_cfg.enable_graph_metrics
 
     if logger is not None:
         logger.info(
@@ -947,30 +1081,12 @@ def extract_connectivity_from_precomputed(
         glob_col = f"conn_{seg_name}_{band}_global_{method_label}_mean"
         parts.append(pd.DataFrame({glob_col: np.nanmean(con_vals, axis=1)}))
 
-        if enable_graph_metrics:
-            if logger is not None:
-                logger.info(
-                    "Connectivity graph metrics (phase): seg=%s band=%s method=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
-                    seg_name,
-                    band,
-                    method,
-                    int(n_epochs),
-                    int(n_channels),
-                    str(conn_cfg.get("small_world_n_rand", 100)),
-                )
-            def _graph_row(ep_idx: int) -> Dict[str, float]:
-                adj = np.zeros((n_channels, n_channels), dtype=float)
-                adj[pair_i, pair_j] = con_vals[ep_idx]
-                adj[pair_j, pair_i] = con_vals[ep_idx]
-                return _graph_metrics(adj, method_label, band, seg_name, conn_cfg)
-
-            if graph_n_jobs == 1:
-                graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
-            else:
-                graph_rows = Parallel(n_jobs=graph_n_jobs, backend="loky")(
-                    delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
-                )
-            parts.append(pd.DataFrame(graph_rows))
+        if conn_cfg.enable_graph_metrics:
+            graph_df = _compute_graph_metrics_for_epochs(
+                con_vals, pair_i, pair_j, n_channels, method_label, band, seg_name,
+                conn_cfg, graph_n_jobs, logger
+            )
+            parts.append(graph_df)
 
         df_out = pd.concat(parts, axis=1) if parts else pd.DataFrame()
         if logger is not None:
@@ -979,7 +1095,7 @@ def extract_connectivity_from_precomputed(
 
     def _aec_task(seg_name: str, band: str, analytic_seg: np.ndarray) -> pd.DataFrame:
         t0 = time.perf_counter()
-        aec_mode = str(conn_cfg.get("aec_mode", "orth")).strip().lower()
+        aec_mode = conn_cfg.aec_mode
         orthogonalize = "pairwise"
         if aec_mode in {"none", "raw", "no"}:
             orthogonalize = False
@@ -1060,29 +1176,12 @@ def extract_connectivity_from_precomputed(
             glob_col_z = f"conn_{seg_name}_{band}_global_aec_z_mean"
             parts.append(pd.DataFrame({glob_col_z: np.nanmean(aec_vals_z, axis=1)}))
 
-        if enable_graph_metrics:
-            if logger is not None:
-                logger.info(
-                    "Connectivity graph metrics (aec): seg=%s band=%s (epochs=%d, channels=%d, small_world_n_rand=%s)",
-                    seg_name,
-                    band,
-                    int(n_epochs),
-                    int(n_channels),
-                    str(conn_cfg.get("small_world_n_rand", 100)),
-                )
-            def _graph_row(ep_idx: int) -> Dict[str, float]:
-                adj = np.zeros((n_channels, n_channels), dtype=float)
-                adj[pair_i, pair_j] = aec_vals[ep_idx]
-                adj[pair_j, pair_i] = aec_vals[ep_idx]
-                return _graph_metrics(adj, "aec", band, seg_name, conn_cfg)
-
-            if graph_n_jobs == 1:
-                graph_rows = [_graph_row(ep_idx) for ep_idx in range(n_epochs)]
-            else:
-                graph_rows = Parallel(n_jobs=graph_n_jobs, backend="loky")(
-                    delayed(_graph_row)(ep_idx) for ep_idx in range(n_epochs)
-                )
-            parts.append(pd.DataFrame(graph_rows))
+        if conn_cfg.enable_graph_metrics:
+            graph_df = _compute_graph_metrics_for_epochs(
+                aec_vals, pair_i, pair_j, n_channels, "aec", band, seg_name,
+                conn_cfg, graph_n_jobs, logger
+            )
+            parts.append(graph_df)
 
         return pd.concat(parts, axis=1) if parts else pd.DataFrame()
 

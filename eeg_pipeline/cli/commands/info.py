@@ -183,36 +183,26 @@ def _handle_plotters_mode(output_json: bool) -> None:
 
 
 def _get_available_time_windows(features_dir: Path, config: Any) -> List[str]:
-    """Extract available time windows from extraction config or fallback to static config."""
+    """Extract available time windows by scanning feature files in subfolders."""
     if not features_dir.exists():
         return []
 
-    extraction_config_path = features_dir / EXTRACTION_CONFIG_FILENAME
-    if extraction_config_path.exists():
-        try:
-            extraction_meta = json_module.loads(extraction_config_path.read_text())
-            if extraction_meta.get("merged") and extraction_meta.get("time_ranges"):
-                windows = [w for w in extraction_meta["time_ranges"] if w is not None]
-                if windows:
-                    return windows
-        except (json_module.JSONDecodeError, OSError, KeyError):
-            pass
-
+    windows = set()
     try:
-        suffixed_configs = list(features_dir.glob(EXTRACTION_CONFIG_PATTERN))
-        windows = []
-        for cfg_path in suffixed_configs:
-            stem = cfg_path.stem
-            if stem.startswith("extraction_config_"):
-                window_name = stem.replace("extraction_config_", "")
-                if window_name and window_name not in windows:
-                    windows.append(window_name)
-        if windows:
-            return sorted(windows)
+        # Match pattern: features/{category}/features_{category}_{window}.tsv
+        for fpath in features_dir.glob("*/features_*.tsv"):
+            category = fpath.parent.name
+            stem = fpath.stem
+            prefix = f"features_{category}_"
+            
+            if stem.startswith(prefix):
+                window = stem[len(prefix):]
+                if window:
+                    windows.add(window)
     except OSError:
         pass
 
-    return list(config.get("time_windows", {}).keys())
+    return sorted(windows)
 
 
 def _get_available_event_columns(bids_root: Path, subject_id: str, task: str) -> List[str]:

@@ -99,7 +99,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-consistency", action="store_false", dest="consistency_enabled")
     
     feature_choices = [
-        "power", "connectivity", "directed_connectivity", "source_localization",
+        "power", "connectivity", "directedconnectivity", "sourcelocalization",
         "aperiodic", "erp", "bursts", "itpc", "pac",
         "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
     ]
@@ -184,10 +184,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     residual_group.add_argument("--pain-residual-crossfit-n-splits", type=int, default=None)
     residual_group.add_argument("--pain-residual-crossfit-method", choices=["spline", "poly"], default=None)
     residual_group.add_argument("--pain-residual-crossfit-spline-n-knots", type=int, default=None)
-
-    confounds_group = parser.add_argument_group("Confounds options")
-    confounds_group.add_argument("--confounds-max-covariates", type=int, default=None)
-    confounds_group.add_argument("--confounds-qc-column-patterns", nargs="+", default=None, metavar="REGEX")
 
     regression_group = parser.add_argument_group("Trialwise regression options")
     regression_group.add_argument("--regression-outcome", choices=["rating", "pain_residual", "temperature"], default=None)
@@ -305,7 +301,10 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     temporal_group.add_argument("--no-temporal-split-by-condition", action="store_false", dest="temporal_split_by_condition")
     temporal_group.add_argument("--temporal-condition-column", type=str, default=None, help="events.tsv column to split/filter by (default: event_columns.pain_binary)")
     temporal_group.add_argument("--temporal-condition-values", nargs="+", default=None, metavar="VALUE", help="Subset of values to compute (empty = all unique values)")
-    temporal_group.add_argument("--temporal-filter-value", type=str, default=None, help="If set, compute only for this value of temporal-condition-column")
+    temporal_group.add_argument("--temporal-include-roi-averages", action="store_true", default=None, dest="temporal_include_roi_averages", help="Include ROI-averaged rows in output")
+    temporal_group.add_argument("--no-temporal-include-roi-averages", action="store_false", dest="temporal_include_roi_averages", help="Exclude ROI-averaged rows from output")
+    temporal_group.add_argument("--temporal-include-tf-grid", action="store_true", default=None, dest="temporal_include_tf_grid", help="Include individual frequency (TF grid) rows in output")
+    temporal_group.add_argument("--no-temporal-include-tf-grid", action="store_false", dest="temporal_include_tf_grid", help="Exclude TF grid rows from output")
     # Temporal feature selection
     temporal_group.add_argument("--temporal-feature-power", action="store_true", default=None, help="Enable power temporal correlations")
     temporal_group.add_argument("--no-temporal-feature-power", action="store_false", dest="temporal_feature_power", help="Disable power temporal correlations")
@@ -342,6 +341,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     # Mediation-specific options
     mediation_group = parser.add_argument_group("Mediation analysis options")
     mediation_group.add_argument("--mediation-bootstrap", type=int, default=None, help="Bootstrap iterations for mediation")
+    mediation_group.add_argument("--mediation-permutations", type=int, default=None, help="Permutation iterations for mediation (0=disabled)")
     mediation_group.add_argument("--mediation-min-effect-size", type=float, default=None, help="Minimum mediation effect size")
     mediation_group.add_argument("--mediation-max-mediators", type=int, default=None, help="Maximum mediators to test")
     
@@ -349,6 +349,7 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     moderation_group = parser.add_argument_group("Moderation analysis options")
     moderation_group.add_argument("--moderation-max-features", type=int, default=None, help="Maximum features for moderation")
     moderation_group.add_argument("--moderation-min-samples", type=int, default=None, help="Minimum samples for moderation")
+    moderation_group.add_argument("--moderation-permutations", type=int, default=None, help="Permutation iterations for moderation (0=disabled)")
     
     # Mixed effects-specific options
     mixed_group = parser.add_argument_group("Mixed effects options")
@@ -489,10 +490,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         else:
             tt["extra_event_columns"] = cols
 
-    tt_val = tt.setdefault("validate", {})
-    if getattr(args, "trial_table_high_missing_frac", None) is not None:
-        tt_val["high_missing_frac"] = float(args.trial_table_high_missing_frac)
-
     if getattr(args, "feature_summaries_enabled", None) is not None:
         ba.setdefault("feature_summaries", {})["enabled"] = bool(args.feature_summaries_enabled)
 
@@ -536,17 +533,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         crossfit["method"] = str(args.pain_residual_crossfit_method).strip().lower()
     if getattr(args, "pain_residual_crossfit_spline_n_knots", None) is not None:
         crossfit["spline_n_knots"] = int(args.pain_residual_crossfit_spline_n_knots)
-
-    # Confounds
-    cf = ba.setdefault("confounds", {})
-    if getattr(args, "confounds_max_covariates", None) is not None:
-        cf["max_qc_covariates"] = int(args.confounds_max_covariates)
-    if getattr(args, "confounds_qc_column_patterns", None) is not None:
-        pats = [str(p) for p in (args.confounds_qc_column_patterns or [])]
-        if len(pats) == 1 and pats[0].strip().lower() == "none":
-            cf["qc_column_patterns"] = []
-        else:
-            cf["qc_column_patterns"] = pats
 
     # Regression
     reg = ba.setdefault("regression", {})
@@ -768,8 +754,10 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         temporal_cfg["condition_column"] = str(args.temporal_condition_column).strip()
     if getattr(args, "temporal_condition_values", None) is not None:
         temporal_cfg["condition_values"] = [str(v).strip() for v in (args.temporal_condition_values or [])]
-    if getattr(args, "temporal_filter_value", None) is not None:
-        temporal_cfg["filter_value"] = str(args.temporal_filter_value).strip()
+    if getattr(args, "temporal_include_roi_averages", None) is not None:
+        temporal_cfg["include_roi_averages"] = bool(args.temporal_include_roi_averages)
+    if getattr(args, "temporal_include_tf_grid", None) is not None:
+        temporal_cfg["include_tf_grid"] = bool(args.temporal_include_tf_grid)
     if getattr(args, "temporal_time_resolution_ms", None) is not None:
         temporal_cfg["time_resolution_ms"] = int(args.temporal_time_resolution_ms)
     if getattr(args, "temporal_smooth_window_ms", None) is not None:
@@ -849,6 +837,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
     # Mediation / mixed effects
     if getattr(args, "mediation_bootstrap", None) is not None:
         ba.setdefault("mediation", {})["n_bootstrap"] = int(args.mediation_bootstrap)
+    if getattr(args, "mediation_permutations", None) is not None:
+        ba.setdefault("mediation", {})["n_permutations"] = int(args.mediation_permutations)
     if getattr(args, "mediation_min_effect_size", None) is not None:
         ba.setdefault("mediation", {})["min_effect_size"] = float(args.mediation_min_effect_size)
     if getattr(args, "mediation_max_mediators", None) is not None:
@@ -859,6 +849,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ba.setdefault("moderation", {})["max_features"] = int(args.moderation_max_features)
     if getattr(args, "moderation_min_samples", None) is not None:
         ba.setdefault("moderation", {})["min_samples"] = int(args.moderation_min_samples)
+    if getattr(args, "moderation_permutations", None) is not None:
+        ba.setdefault("moderation", {})["n_permutations"] = int(args.moderation_permutations)
 
     if getattr(args, "mixed_random_effects", None) is not None:
         ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()

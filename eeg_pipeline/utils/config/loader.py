@@ -424,6 +424,16 @@ def get_config_float(config: Any, key: str, default: float) -> float:
     return float(value)
 
 
+def get_config_bool(config: Any, key: str, default: bool) -> bool:
+    value = get_config_value(config, key, default)
+    return bool(value)
+
+
+def get_config_str(config: Any, key: str, default: str) -> str:
+    value = get_config_value(config, key, default)
+    return str(value) if value is not None else default
+
+
 def get_frequency_bands(config: Any) -> Dict[str, List[float]]:
     """Get frequency band definitions (ranges) from config."""
     if config is None:

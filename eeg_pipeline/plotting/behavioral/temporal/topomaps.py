@@ -225,10 +225,16 @@ def _load_global_fdr_for_temporal_correlations(
 ) -> Optional[Dict[Tuple[str, str, float, float, str], bool]]:
     """Load global FDR correction map from temporal correlations TSV file."""
     suffix = _get_correlation_suffix(use_spearman)
-    tsv_path = stats_dir / f"corr_stats_temporal_all{suffix}.tsv"
-
+    
+    # Try new naming convention first
+    tsv_path = stats_dir / "temporal_correlations" / f"temporal_correlations{suffix}.tsv"
+    
+    # Fall back to old naming for backward compatibility
     if not tsv_path.exists():
-        logger.debug(f"TSV file not found for global FDR: {tsv_path}")
+        tsv_path = stats_dir / f"corr_stats_temporal_all{suffix}.tsv"
+    
+    if not tsv_path.exists():
+        logger.debug(f"TSV file not found for global FDR: tried temporal_correlations{suffix}.tsv and corr_stats_temporal_all{suffix}.tsv")
         return None
 
     try:
@@ -265,16 +271,28 @@ def _load_temporal_correlation_data(
     use_spearman: bool,
     logger: logging.Logger,
 ) -> Optional[Dict[str, Any]]:
-    """Load temporal correlation data from NPZ file."""
+    """Load temporal correlation data from NPZ file.
+    
+    Supports both new format (temporal_correlations/temporal_correlations_by_condition*.npz)
+    and legacy format (temporal_correlations_by_pain*.npz).
+    """
     suffix = _get_correlation_suffix(use_spearman)
-    data_path = stats_dir / f"temporal_correlations_by_pain{suffix}.npz"
+    
+    # Try new unified format first (in temporal_correlations subfolder)
+    new_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
+    if new_path.exists():
+        data = np.load(new_path, allow_pickle=True)
+        return dict(data)
+    
+    # Fall back to legacy format
+    legacy_path = stats_dir / f"temporal_correlations_by_pain{suffix}.npz"
+    if legacy_path.exists():
+        logger.info(f"Using legacy format: {legacy_path.name}")
+        data = np.load(legacy_path, allow_pickle=True)
+        return dict(data)
 
-    if not data_path.exists():
-        logger.warning(f"Temporal correlation data not found: {data_path}")
-        return None
-
-    data = np.load(data_path, allow_pickle=True)
-    return dict(data)
+    logger.warning(f"Temporal correlation data not found: checked {new_path} and {legacy_path}")
+    return None
 
 
 def _extract_info_from_data(data: Dict[str, Any], ch_names: List[str], logger: logging.Logger) -> Optional[mne.Info]:
@@ -296,13 +314,12 @@ def _extract_info_from_data(data: Dict[str, Any], ch_names: List[str], logger: l
 
 
 def _validate_temporal_results(
-    result_pain: Dict[str, Any],
-    result_non: Dict[str, Any],
+    condition_results: Dict[str, Dict[str, Any]],
     data_path: Path,
     subject: str,
     logger: logging.Logger,
 ) -> bool:
-    """Validate that results contain required keys."""
+    """Validate that all condition results contain required keys."""
     required_result_keys = [
         "correlations",
         "p_values",
@@ -312,7 +329,9 @@ def _validate_temporal_results(
         "window_starts",
         "window_ends",
     ]
-    for condition_name, result in [("pain", result_pain), ("non_pain", result_non)]:
+    for condition_name, result in condition_results.items():
+        if not isinstance(result, dict):
+            continue
         missing = [k for k in required_result_keys if k not in result]
         if missing:
             logger.error(
@@ -329,13 +348,14 @@ def _validate_temporal_results(
 
 
 def _compute_correlation_vlim(
-    result_pain: Dict[str, Any],
-    result_non: Dict[str, Any],
+    condition_results: Dict[str, Dict[str, Any]],
     band_names: List[str],
 ) -> float:
-    """Compute symmetric vlim for correlation topomaps."""
+    """Compute symmetric vlim for correlation topomaps across all conditions."""
     all_corr_data = []
-    for result in [result_pain, result_non]:
+    for result in condition_results.values():
+        if not isinstance(result, dict) or "correlations" not in result:
+            continue
         for band_idx in range(len(band_names)):
             corr_data = result["correlations"][band_idx]
             all_corr_data.extend([c for c in corr_data.flatten() if np.isfinite(c)])
@@ -578,6 +598,35 @@ def _save_band_topomap(
     plt.close(fig)
 
 
+def _extract_condition_results(
+    data: Dict[str, Any],
+    logger: logging.Logger,
+) -> Dict[str, Dict[str, Any]]:
+    """Extract condition results from NPZ data, handling both new and legacy formats."""
+    condition_results = {}
+    
+    # New format: has condition_names key
+    if "condition_names" in data:
+        condition_names = data["condition_names"]
+        if isinstance(condition_names, np.ndarray):
+            condition_names = condition_names.tolist()
+        for cond_name in condition_names:
+            if cond_name in data:
+                result = data[cond_name]
+                if isinstance(result, np.ndarray) and result.dtype == object:
+                    result = result.item()
+                condition_results[cond_name] = result
+    # Legacy format: hardcoded pain/non_pain keys
+    elif "pain" in data and "non_pain" in data:
+        for key in ["pain", "non_pain"]:
+            result = data[key]
+            if isinstance(result, np.ndarray) and result.dtype == object:
+                result = result.item()
+            condition_results[key] = result
+    
+    return condition_results
+
+
 def plot_temporal_correlation_topomaps_by_pain(
     subject: str,
     task: str,
@@ -587,7 +636,12 @@ def plot_temporal_correlation_topomaps_by_pain(
     logger: logging.Logger,
     use_spearman: bool = True,
 ) -> None:
-    """Plot temporal correlation topomaps by condition (pain vs non-pain)."""
+    """Plot temporal correlation topomaps by condition.
+    
+    Supports user-configurable conditions (not just pain/non-pain).
+    Conditions are determined by the temporal.condition_column and 
+    temporal.condition_values settings in the config.
+    """
     data = _load_temporal_correlation_data(stats_dir, use_spearman, logger)
     if data is None:
         return
@@ -605,9 +659,14 @@ def plot_temporal_correlation_topomaps_by_pain(
     if isinstance(ch_names, np.ndarray):
         ch_names = ch_names.tolist()
 
-    if "pain" not in data or "non_pain" not in data:
-        logger.warning("Condition contrast data not found in file")
+    # Extract condition results (handles both new and legacy formats)
+    condition_results = _extract_condition_results(data, logger)
+    if not condition_results:
+        logger.warning("No condition results found in data file")
         return
+    
+    condition_names = list(condition_results.keys())
+    logger.info(f"Found {len(condition_names)} conditions: {condition_names}")
 
     info = _extract_info_from_data(data, ch_names, logger)
     if info is None:
@@ -617,24 +676,42 @@ def plot_temporal_correlation_topomaps_by_pain(
     font_sizes = get_font_sizes()
     sig_text = get_sig_marker_text(config)
 
-    result_pain = data["pain"].item()
-    result_non = data["non_pain"].item()
-
-    data_path = stats_dir / f"temporal_correlations_by_pain{_get_correlation_suffix(use_spearman)}.npz"
-    if not _validate_temporal_results(result_pain, result_non, data_path, subject, logger):
+    # Determine data path for validation error message
+    suffix = _get_correlation_suffix(use_spearman)
+    new_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
+    legacy_path = stats_dir / f"temporal_correlations_by_pain{suffix}.npz"
+    data_path = new_path if new_path.exists() else legacy_path
+    
+    if not _validate_temporal_results(condition_results, data_path, subject, logger):
         return
 
-    band_names = result_pain["band_names"]
-    band_ranges = result_pain["band_ranges"]
-    window_starts = result_pain["window_starts"]
-    window_ends = result_pain["window_ends"]
+    # Use first condition to get band/window metadata
+    first_result = list(condition_results.values())[0]
+    band_names = first_result["band_names"]
+    band_ranges = first_result["band_ranges"]
+    window_starts = first_result["window_starts"]
+    window_ends = first_result["window_ends"]
     n_windows = len(window_starts)
 
-    vabs_corr = _compute_correlation_vlim(result_pain, result_non, band_names)
+    vabs_corr = _compute_correlation_vlim(condition_results, band_names)
 
     plot_cfg = get_plot_config(config) if config else None
     layout_config = _get_figure_layout_config(plot_cfg)
+    
+    # Get condition labels (use actual condition names if not configured)
     row_labels = _get_condition_labels(config)
+    if row_labels is None or len(row_labels) != len(condition_names):
+        row_labels = condition_names
+
+    # For now, use first two conditions for the two-row layout (backward compatible)
+    # Future: Support arbitrary number of conditions with dynamic layouts
+    if len(condition_results) >= 2:
+        result_row1 = condition_results[condition_names[0]]
+        result_row2 = condition_results[condition_names[1]]
+    else:
+        # Single condition: duplicate for both rows
+        result_row1 = result_row2 = list(condition_results.values())[0]
+        row_labels = [condition_names[0], condition_names[0]]
 
     for band_idx, band_name in enumerate(band_names):
         fig, axes = _plot_single_band_topomaps(
@@ -643,8 +720,8 @@ def plot_temporal_correlation_topomaps_by_pain(
             band_ranges,
             window_starts,
             window_ends,
-            result_pain,
-            result_non,
+            result_row1,
+            result_row2,
             info,
             ch_names,
             row_labels,

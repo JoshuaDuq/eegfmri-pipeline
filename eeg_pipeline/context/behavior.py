@@ -35,8 +35,8 @@ from eeg_pipeline.utils.data.columns import pick_target_column
 _FEATURE_FILE_TO_ATTR = {
     "power": "power_df",
     "connectivity": "connectivity_df",
-    "directed_connectivity": "directed_connectivity_df",
-    "source_localization": "source_localization_df",
+    "directedconnectivity": "directed_connectivity_df",
+    "sourcelocalization": "source_localization_df",
     "aperiodic": "aperiodic_df",
     "erp": "erp_df",
     "itpc": "itpc_df",
@@ -149,6 +149,8 @@ class BehaviorContext:
     _change_scores_added: bool = False
     _combined_features_df: Optional[pd.DataFrame] = None
     _combined_features_signature: Optional[str] = None
+    _trial_table_df: Optional[pd.DataFrame] = None
+    _computation_cache: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def method(self) -> str:
@@ -438,8 +440,8 @@ class BehaviorContext:
         feature_dataframes = {
             "power": self.power_df,
             "connectivity": self.connectivity_df,
-            "directed_connectivity": self.directed_connectivity_df,
-            "source_localization": self.source_localization_df,
+            "directedconnectivity": self.directed_connectivity_df,
+            "sourcelocalization": self.source_localization_df,
             "aperiodic": self.aperiodic_df,
             "erp": self.erp_df,
             "itpc": self.itpc_df,
@@ -473,8 +475,8 @@ class BehaviorContext:
         category_to_attr = {
             "power": "power_df",
             "connectivity": "connectivity_df",
-            "directed_connectivity": "directed_connectivity_df",
-            "source_localization": "source_localization_df",
+            "directedconnectivity": "directed_connectivity_df",
+            "sourcelocalization": "source_localization_df",
             "spectral": "spectral_df",
             "aperiodic": "aperiodic_df",
             "erp": "erp_df",

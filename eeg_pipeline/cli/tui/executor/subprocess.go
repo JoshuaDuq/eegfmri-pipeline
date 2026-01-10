@@ -61,10 +61,10 @@ type DiscoverColumnsResponse struct {
 	File    string              `json:"file,omitempty"`
 }
 
-// DiscoverColumns runs eeg-pipeline discover --json to find available columns and their values
+// DiscoverColumns runs eeg-pipeline info discover --json to find available columns and their values
 func DiscoverColumns(repoRoot string, task string) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"-m", "eeg_pipeline", "discover", "all", "--json"}
+		args := []string{"-m", "eeg_pipeline", "info", "discover", "--json"}
 		if task != "" {
 			args = append(args, "--task", task)
 		}

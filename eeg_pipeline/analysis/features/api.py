@@ -578,10 +578,10 @@ def extract_all_features(
         results.conn_df = conn_df
         results.conn_cols = conn_cols or []
 
-    if "directed_connectivity" in ctx.feature_categories:
+    if "directedconnectivity" in ctx.feature_categories:
         dconn_df, dconn_cols, _ = _extract_feature_with_error_handling(
             ctx,
-            "directed_connectivity",
+            "directedconnectivity",
             extract_directed_connectivity_features,
             expected_n_trials,
             progress,
@@ -591,10 +591,10 @@ def extract_all_features(
         results.dconn_df = dconn_df
         results.dconn_cols = dconn_cols or []
 
-    if "source_localization" in ctx.feature_categories:
+    if "sourcelocalization" in ctx.feature_categories:
         source_df, source_cols, _ = _extract_feature_with_error_handling(
             ctx,
-            "source_localization",
+            "sourcelocalization",
             extract_source_localization_features,
             expected_n_trials,
             progress,
@@ -765,9 +765,67 @@ def extract_all_features(
         results.quality_cols = qual_cols or []
 
     _apply_spatial_filtering_to_results(ctx, results)
+    _add_change_scores_to_results(ctx, results)
 
     progress.finish()
     return results
+
+
+def _add_change_scores_to_results(
+    ctx: FeatureContext,
+    results: FeatureExtractionResult,
+) -> None:
+    """Compute and add change scores (active - baseline) to feature DataFrames.
+    
+    Change scores are computed once at feature extraction time and saved,
+    eliminating redundant computation in downstream pipelines.
+    """
+    from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
+
+    add_change = ctx.config.get("feature_engineering.compute_change_scores", True)
+    if not add_change:
+        return
+
+    feature_dfs = [
+        ("pow_df", "pow_cols"),
+        ("conn_df", "conn_cols"),
+        ("dconn_df", "dconn_cols"),
+        ("source_df", "source_cols"),
+        ("aper_df", "aper_cols"),
+        ("phase_df", "phase_cols"),
+        ("pac_trials_df", None),
+        ("comp_df", "comp_cols"),
+        ("erds_df", "erds_cols"),
+        ("spectral_df", "spectral_cols"),
+        ("ratios_df", "ratios_cols"),
+        ("asymmetry_df", "asymmetry_cols"),
+    ]
+
+    n_added = 0
+    for df_attr, cols_attr in feature_dfs:
+        df = getattr(results, df_attr, None)
+        if df is None or df.empty:
+            continue
+
+        change_df = compute_change_features(df)
+        if change_df.empty:
+            continue
+
+        new_cols = [c for c in change_df.columns if c not in df.columns]
+        if not new_cols:
+            continue
+
+        combined = pd.concat([df, change_df[new_cols]], axis=1)
+        setattr(results, df_attr, combined)
+
+        if cols_attr:
+            existing_cols = getattr(results, cols_attr, []) or []
+            setattr(results, cols_attr, existing_cols + new_cols)
+
+        n_added += len(new_cols)
+
+    if n_added > 0:
+        ctx.logger.info("Added %d change score columns to feature results", n_added)
 
 
 def _extract_precomputed_feature_group(

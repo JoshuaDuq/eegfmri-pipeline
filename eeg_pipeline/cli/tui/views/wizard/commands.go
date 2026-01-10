@@ -40,15 +40,37 @@ func (m Model) isCategorySelected(category string) bool {
 func (m Model) SelectedComputations() []string {
 	var result []string
 
-	for i, sel := range m.computationSelected {
-		if sel && i < len(m.computations) {
-			result = append(result, m.computations[i].Key)
-		}
+	// TUI-only bundle aliases that should NOT be passed to CLI
+	// (they get expanded to their underlying computations)
+	tuiOnlyBundles := map[string]bool{
+		"validation": true, // expands to: consistency, influence
 	}
 
-	for i, sel := range m.postComputationSelected {
-		if sel && i < len(m.postComputations) {
-			result = append(result, m.postComputations[i].Key)
+	for i, sel := range m.computationSelected {
+		if sel && i < len(m.computations) {
+			key := m.computations[i].Key
+
+			// Handle bundled computations
+			switch key {
+			case "pain_residual":
+				// pain_residual is a valid CLI flag, and also includes temperature_models
+				result = append(result, key, "temperature_models")
+			case "validation":
+				// validation is TUI-only; expand to consistency + influence
+				result = append(result, "consistency", "influence")
+			case "regression":
+				// regression is a valid CLI flag
+				result = append(result, key)
+				// Also include models if multi-family is enabled
+				if m.modelsFamilyRobust || m.modelsFamilyQuantile || m.modelsFamilyLogit {
+					result = append(result, "models")
+				}
+			default:
+				// For all other computations, only add if not a TUI-only bundle
+				if !tuiOnlyBundles[key] {
+					result = append(result, key)
+				}
+			}
 		}
 	}
 
@@ -57,22 +79,43 @@ func (m Model) SelectedComputations() []string {
 		result = append(result, "trial_table")
 	}
 
-	sort.Strings(result)
-	return result
-}
-
-// isComputationSelected checks if a specific computation is currently selected
-func (m Model) isComputationSelected(computation string) bool {
-	// Check primary computations
-	for i, sel := range m.computationSelected {
-		if sel && i < len(m.computations) && m.computations[i].Key == computation {
-			return true
+	// Deduplicate
+	seen := make(map[string]bool)
+	unique := make([]string, 0, len(result))
+	for _, r := range result {
+		if !seen[r] {
+			seen[r] = true
+			unique = append(unique, r)
 		}
 	}
-	// Check post computations
-	for i, sel := range m.postComputationSelected {
-		if sel && i < len(m.postComputations) && m.postComputations[i].Key == computation {
-			return true
+
+	sort.Strings(unique)
+	return unique
+}
+
+// isComputationSelected checks if a specific computation is currently selected.
+// Handles bundled computations: 'validation' includes 'consistency' and 'influence';
+// 'pain_residual' includes 'temperature_models'; 'regression' includes 'models' when multi-family enabled.
+func (m Model) isComputationSelected(computation string) bool {
+	for i, sel := range m.computationSelected {
+		if sel && i < len(m.computations) {
+			key := m.computations[i].Key
+			if key == computation {
+				return true
+			}
+			// Handle bundled computations
+			if key == "validation" && (computation == "consistency" || computation == "influence") {
+				return true
+			}
+			if key == "pain_residual" && computation == "temperature_models" {
+				return true
+			}
+			if key == "regression" && computation == "models" {
+				// models is selected if regression is selected and multi-family is enabled
+				if m.modelsFamilyRobust || m.modelsFamilyQuantile || m.modelsFamilyLogit {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -191,25 +234,11 @@ func (m Model) GetApplicableFeatureFiles() []FeatureFile {
 	// Build a set of applicable feature keys based on selected computations
 	applicableKeys := make(map[string]bool)
 
-	// Check primary computations
 	for i, sel := range m.computationSelected {
 		if !sel || i >= len(m.computations) {
 			continue
 		}
 		compKey := m.computations[i].Key
-		if features, ok := computationApplicableFeatures[compKey]; ok {
-			for _, f := range features {
-				applicableKeys[f] = true
-			}
-		}
-	}
-
-	// Check post computations
-	for i, sel := range m.postComputationSelected {
-		if !sel || i >= len(m.postComputations) {
-			continue
-		}
-		compKey := m.postComputations[i].Key
 		if features, ok := computationApplicableFeatures[compKey]; ok {
 			for _, f := range features {
 				applicableKeys[f] = true
@@ -970,7 +999,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// Directed connectivity options (PSI, DTF, PDC)
-	if m.isCategorySelected("directed_connectivity") || m.directedConnEnabled {
+	if m.isCategorySelected("directedconnectivity") || m.directedConnEnabled {
 		directedMeasures := m.selectedDirectedConnectivityMeasures()
 		if len(directedMeasures) > 0 {
 			args = append(args, "--directed-connectivity-measures")
@@ -991,7 +1020,7 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 
 	// Source localization options (LCMV, eLORETA)
-	if m.isCategorySelected("source_localization") || m.sourceLocEnabled {
+	if m.isCategorySelected("sourcelocalization") || m.sourceLocEnabled {
 		methods := []string{"lcmv", "eloreta"}
 		args = append(args, "--source-method", methods[m.sourceLocMethod])
 
@@ -1524,25 +1553,6 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 	}
 
-	// Confounds
-	if m.isComputationSelected("confounds") {
-		if m.confoundsAddAsCovariates {
-			args = append(args, "--confounds-add-as-covariates")
-		}
-		if m.confoundsMaxCovariates != 3 {
-			args = append(args, "--confounds-max-covariates", fmt.Sprintf("%d", m.confoundsMaxCovariates))
-		}
-		defaultPatterns := "^quality_.*_global_,^quality_.*_ch_"
-		pat := strings.TrimSpace(m.confoundsQCColumnPatterns)
-		if pat != "" && pat != defaultPatterns {
-			args = append(args, "--confounds-qc-column-patterns")
-			args = append(args, splitCSVList(pat)...)
-		} else if pat == "" && defaultPatterns != "" {
-			// Explicit clear
-			args = append(args, "--confounds-qc-column-patterns", "none")
-		}
-	}
-
 	// Regression
 	if m.isComputationSelected("regression") {
 		outcomes := []string{"rating", "pain_residual", "temperature"}
@@ -1829,8 +1839,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 			spec := strings.ReplaceAll(m.temporalConditionValues, ",", " ")
 			args = append(args, splitSpaceList(spec)...)
 		}
-		if strings.TrimSpace(m.temporalFilterValue) != "" {
-			args = append(args, "--temporal-filter-value", strings.TrimSpace(m.temporalFilterValue))
+		if !m.temporalIncludeROIAverages {
+			args = append(args, "--no-temporal-include-roi-averages")
+		}
+		if !m.temporalIncludeTFGrid {
+			args = append(args, "--no-temporal-include-tf-grid")
 		}
 		// Temporal feature selection
 		if !m.temporalFeaturePowerEnabled {
@@ -1910,6 +1923,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mediationBootstrap != 1000 {
 			args = append(args, "--mediation-bootstrap", fmt.Sprintf("%d", m.mediationBootstrap))
 		}
+		if m.mediationPermutations > 0 {
+			args = append(args, "--mediation-permutations", fmt.Sprintf("%d", m.mediationPermutations))
+		}
 		if m.mediationMinEffect != 0.05 {
 			args = append(args, "--mediation-min-effect-size", fmt.Sprintf("%.4f", m.mediationMinEffect))
 		}
@@ -1922,6 +1938,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 
 	// Moderation-specific options
 	if m.isComputationSelected("moderation") {
+		if m.moderationPermutations > 0 {
+			args = append(args, "--moderation-permutations", fmt.Sprintf("%d", m.moderationPermutations))
+		}
 		if m.moderationMaxFeaturesEnabled {
 			if m.moderationMaxFeatures != 50 {
 				args = append(args, "--moderation-max-features", fmt.Sprintf("%d", m.moderationMaxFeatures))

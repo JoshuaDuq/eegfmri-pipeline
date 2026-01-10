@@ -39,8 +39,10 @@ MIN_STD_FOR_COHENS_D = 1e-10
 DEFAULT_CI_LEVEL = 0.95
 DEFAULT_FDR_ALPHA = 0.05
 DEFAULT_N_BOOT = 1000
+DEFAULT_N_PERM = 0  # Default: no permutation testing (0 = skip)
 DEFAULT_MIN_SAMPLES_PAIRED = 5
 DEFAULT_MIN_SAMPLES_UNPAIRED = 3
+MIN_PERM_SUCCESSES = 50
 
 FEATURE_TYPE_GROUPS = {
     "power": "power",
@@ -83,6 +85,8 @@ class PairedComparisonResult:
     ci_low: float
     ci_high: float
     test_method: str
+    p_perm: float = np.nan  # Permutation p-value
+    n_permutations: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -104,6 +108,8 @@ class PairedComparisonResult:
             "ci_low": self.ci_low,
             "ci_high": self.ci_high,
             "test_method": self.test_method,
+            "p_perm": self.p_perm,
+            "n_permutations": self.n_permutations,
         }
 
 
@@ -224,6 +230,106 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
     return float(np.mean(diff) / std_diff)
 
 
+def permutation_paired_pvalue(
+    x: np.ndarray,
+    y: np.ndarray,
+    n_perm: int = 1000,
+    rng: Optional[np.random.Generator] = None,
+) -> float:
+    """Compute permutation p-value for paired samples (sign-flip test).
+    
+    For paired samples, we randomly flip the signs of difference scores
+    to create a null distribution under the hypothesis of no difference.
+    
+    Args:
+        x: First paired sample
+        y: Second paired sample
+        n_perm: Number of permutations
+        rng: Random number generator
+    
+    Returns:
+        Two-tailed permutation p-value
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    x = np.asarray(x).ravel()
+    y = np.asarray(y).ravel()
+    
+    if len(x) != len(y):
+        return np.nan
+    
+    valid = np.isfinite(x) & np.isfinite(y)
+    diff = y[valid] - x[valid]
+    n = len(diff)
+    
+    if n < DEFAULT_MIN_SAMPLES_PAIRED:
+        return np.nan
+    
+    observed_stat = np.abs(np.mean(diff))
+    
+    null_stats = np.zeros(n_perm)
+    for i in range(n_perm):
+        signs = rng.choice([-1, 1], size=n)
+        null_stats[i] = np.abs(np.mean(diff * signs))
+    
+    n_extreme = np.sum(null_stats >= observed_stat)
+    p_perm = (n_extreme + 1) / (n_perm + 1)
+    
+    return float(p_perm)
+
+
+def permutation_unpaired_pvalue(
+    group1: np.ndarray,
+    group2: np.ndarray,
+    n_perm: int = 1000,
+    rng: Optional[np.random.Generator] = None,
+) -> float:
+    """Compute permutation p-value for unpaired samples.
+    
+    For unpaired samples, we randomly shuffle group labels to create
+    a null distribution under the hypothesis of no group difference.
+    
+    Args:
+        group1: First group values
+        group2: Second group values
+        n_perm: Number of permutations
+        rng: Random number generator
+    
+    Returns:
+        Two-tailed permutation p-value
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    g1 = np.asarray(group1).ravel()
+    g2 = np.asarray(group2).ravel()
+    
+    g1 = g1[np.isfinite(g1)]
+    g2 = g2[np.isfinite(g2)]
+    
+    if len(g1) < DEFAULT_MIN_SAMPLES_UNPAIRED or len(g2) < DEFAULT_MIN_SAMPLES_UNPAIRED:
+        return np.nan
+    
+    combined = np.concatenate([g1, g2])
+    n1 = len(g1)
+    n_total = len(combined)
+    
+    observed_stat = np.abs(np.mean(g2) - np.mean(g1))
+    
+    null_stats = np.zeros(n_perm)
+    for i in range(n_perm):
+        shuffled = rng.permutation(combined)
+        perm_g1 = shuffled[:n1]
+        perm_g2 = shuffled[n1:]
+        null_stats[i] = np.abs(np.mean(perm_g2) - np.mean(perm_g1))
+    
+    n_extreme = np.sum(null_stats >= observed_stat)
+    p_perm = (n_extreme + 1) / (n_perm + 1)
+    
+    return float(p_perm)
+
+
 ###################################################################
 # Feature Extraction Helpers
 ###################################################################
@@ -304,6 +410,7 @@ def compute_window_comparison(
     roi_channels: Optional[List[str]],
     min_samples: int = DEFAULT_MIN_SAMPLES_PAIRED,
     n_boot: int = DEFAULT_N_BOOT,
+    n_perm: int = DEFAULT_N_PERM,
     rng: Optional[np.random.Generator] = None,
 ) -> Optional[PairedComparisonResult]:
     """Compute paired comparison between two time windows."""
@@ -327,6 +434,13 @@ def compute_window_comparison(
     
     hedges_g_finite = g if np.isfinite(g) else d
     
+    # Compute permutation p-value if requested
+    p_perm = np.nan
+    n_permutations = 0
+    if n_perm > 0:
+        p_perm = permutation_paired_pvalue(v1, v2, n_perm=n_perm, rng=rng)
+        n_permutations = n_perm
+    
     return PairedComparisonResult(
         feature_type=group,
         comparison_type="window",
@@ -346,6 +460,8 @@ def compute_window_comparison(
         ci_low=ci_low,
         ci_high=ci_high,
         test_method="wilcoxon",
+        p_perm=p_perm,
+        n_permutations=n_permutations,
     )
 
 
@@ -362,6 +478,7 @@ def compute_condition_comparison(
     label2: str,
     min_samples: int = DEFAULT_MIN_SAMPLES_UNPAIRED,
     n_boot: int = DEFAULT_N_BOOT,
+    n_perm: int = DEFAULT_N_PERM,
     rng: Optional[np.random.Generator] = None,
 ) -> Optional[PairedComparisonResult]:
     """Compute unpaired comparison between two conditions."""
@@ -385,6 +502,13 @@ def compute_condition_comparison(
     cohens_d_finite = d if np.isfinite(d) else np.nan
     hedges_g_finite = g if np.isfinite(g) else np.nan
     
+    # Compute permutation p-value if requested
+    p_perm = np.nan
+    n_permutations = 0
+    if n_perm > 0:
+        p_perm = permutation_unpaired_pvalue(v1, v2, n_perm=n_perm, rng=rng)
+        n_permutations = n_perm
+    
     return PairedComparisonResult(
         feature_type=group,
         comparison_type="condition",
@@ -404,6 +528,8 @@ def compute_condition_comparison(
         ci_low=ci_low,
         ci_high=ci_high,
         test_method="mannwhitneyu",
+        p_perm=p_perm,
+        n_permutations=n_permutations,
     )
 
 
@@ -455,6 +581,7 @@ def compute_all_paired_comparisons(
     logger: Optional[logging.Logger] = None,
     min_samples: int = DEFAULT_MIN_SAMPLES_PAIRED,
     n_boot: int = DEFAULT_N_BOOT,
+    n_perm: int = DEFAULT_N_PERM,
     fdr_alpha: float = DEFAULT_FDR_ALPHA,
     rng: Optional[np.random.Generator] = None,
 ) -> PairedComparisonSummary:
@@ -473,6 +600,7 @@ def compute_all_paired_comparisons(
         logger: Logger instance
         min_samples: Minimum samples for statistical tests
         n_boot: Number of bootstrap iterations
+        n_perm: Number of permutations for p-values (0 to skip)
         fdr_alpha: FDR significance threshold
         rng: Random number generator
     
@@ -546,6 +674,7 @@ def compute_all_paired_comparisons(
                             roi_channels=roi_channels if roi_name != "all" else None,
                             min_samples=min_samples,
                             n_boot=n_boot,
+                            n_perm=n_perm,
                             rng=rng,
                         )
                         if result is not None:
@@ -569,6 +698,7 @@ def compute_all_paired_comparisons(
                             label2=l2,
                             min_samples=min_samples,
                             n_boot=n_boot,
+                            n_perm=n_perm,
                             rng=rng,
                         )
                         if result is not None:

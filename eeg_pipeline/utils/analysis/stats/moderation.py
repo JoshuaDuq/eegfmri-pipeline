@@ -23,7 +23,7 @@ Johnson-Neyman Interval:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from scipy import stats
@@ -35,6 +35,8 @@ from ._regression_utils import _ols_regression
 MIN_SAMPLE_SIZE_FOR_MODERATION = 15
 DEFAULT_ALPHA = 0.05
 SIMPLE_SLOPE_SD_OFFSET = 1.0
+PARALLEL_THRESHOLD_PERM = 100
+MIN_PERM_SUCCESSES = 100
 
 
 @dataclass
@@ -85,6 +87,10 @@ class ModerationResult:
     w_label: str = "W"
     y_label: str = "Y"
     
+    # Permutation info
+    p_b3_perm: float = np.nan  # Permutation p-value for interaction
+    n_permutations: int = 0
+    
     def is_significant_moderation(self, alpha: float = 0.05) -> bool:
         """Check if the interaction term is significant."""
         return np.isfinite(self.p_b3) and self.p_b3 < alpha
@@ -96,6 +102,7 @@ class ModerationResult:
             "b2_w_effect": self.b2,
             "b3_interaction": self.b3,
             "p_interaction": self.p_b3,
+            "p_interaction_perm": self.p_b3_perm,
             "slope_low_w": self.slope_low_w,
             "slope_mean_w": self.slope_mean_w,
             "slope_high_w": self.slope_high_w,
@@ -103,6 +110,7 @@ class ModerationResult:
             "r_squared_change": self.r_squared_change,
             "jn_interval": (self.jn_low, self.jn_high),
             "jn_type": self.jn_type,
+            "n_permutations": self.n_permutations,
             "n": self.n,
             "significant": self.is_significant_moderation(),
         }
@@ -340,16 +348,64 @@ def _compute_johnson_neyman(
     return result
 
 
-def run_moderation_analysis(
+###################################################################
+# Permutation Testing
+###################################################################
+
+
+def _single_permutation_moderation(
+    perm_seed: int,
     X: np.ndarray,
     W: np.ndarray,
     Y: np.ndarray,
-    x_label: str = "Predictor",
-    w_label: str = "Moderator",
-    y_label: str = "Outcome",
+    center_predictors: bool,
+) -> float:
+    """Single permutation iteration for moderation null distribution.
+    
+    Shuffles Y to break all relationships while preserving the X-W
+    covariance structure.
+    
+    Parameters
+    ----------
+    perm_seed : int
+        Random seed for this permutation iteration
+    X : np.ndarray
+        Predictor variable values
+    W : np.ndarray
+        Moderator variable values
+    Y : np.ndarray
+        Outcome variable values (will be shuffled)
+    center_predictors : bool
+        Whether to center predictors
+        
+    Returns
+    -------
+    float
+        Interaction coefficient (b3) from permuted sample, or np.nan if invalid
+    """
+    rng = np.random.default_rng(perm_seed)
+    shuffle_indices = rng.permutation(len(Y))
+    Y_shuffled = Y[shuffle_indices]
+    
+    result = compute_moderation_effect(X, W, Y_shuffled, center_predictors)
+    return result.b3 if np.isfinite(result.b3) else np.nan
+
+
+def permutation_moderation_pvalue(
+    X: np.ndarray,
+    W: np.ndarray,
+    Y: np.ndarray,
+    observed_b3: float,
+    n_perm: int = 1000,
     center_predictors: bool = True,
-) -> ModerationResult:
-    """Run complete moderation analysis.
+    rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
+) -> float:
+    """Compute permutation p-value for moderation interaction effect.
+    
+    Creates a null distribution by shuffling Y to break the outcome
+    relationships, then computes the proportion of null effects that
+    are as extreme as the observed effect (two-tailed).
     
     Parameters
     ----------
@@ -359,25 +415,135 @@ def run_moderation_analysis(
         Moderator variable
     Y : np.ndarray
         Outcome variable
+    observed_b3 : float
+        Observed interaction coefficient from the original data
+    n_perm : int
+        Number of permutation iterations
+    center_predictors : bool
+        Whether to center predictors
+    rng : np.random.Generator, optional
+        Random number generator for reproducibility
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs minus one)
+        
+    Returns
+    -------
+    float
+        Two-tailed permutation p-value
+    """
+    from typing import Optional
+    from joblib import Parallel, delayed, cpu_count
+    
+    if not np.isfinite(observed_b3) or n_perm <= 0:
+        return np.nan
+    
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    valid_mask = np.isfinite(X) & np.isfinite(W) & np.isfinite(Y)
+    sample_size = np.sum(valid_mask)
+    
+    if sample_size < MIN_SAMPLE_SIZE_FOR_MODERATION:
+        return np.nan
+    
+    X_clean = X[valid_mask]
+    W_clean = W[valid_mask]
+    Y_clean = Y[valid_mask]
+    
+    if n_jobs == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
+    else:
+        n_jobs_actual = n_jobs
+    
+    max_seed_value = 2**31
+    base_seed = int(rng.integers(0, max_seed_value))
+    
+    should_parallelize = n_jobs_actual > 1 and n_perm > PARALLEL_THRESHOLD_PERM
+    
+    if should_parallelize:
+        null_effects = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_single_permutation_moderation)(
+                base_seed + i, X_clean, W_clean, Y_clean, center_predictors
+            )
+            for i in range(n_perm)
+        )
+    else:
+        null_effects = [
+            _single_permutation_moderation(
+                base_seed + i, X_clean, W_clean, Y_clean, center_predictors
+            )
+            for i in range(n_perm)
+        ]
+    
+    valid_null_effects = np.array([e for e in null_effects if np.isfinite(e)])
+    
+    if len(valid_null_effects) < MIN_PERM_SUCCESSES:
+        return np.nan
+    
+    # Two-tailed p-value: count effects as extreme or more extreme than observed
+    n_extreme = np.sum(np.abs(valid_null_effects) >= np.abs(observed_b3))
+    p_perm = (n_extreme + 1) / (len(valid_null_effects) + 1)
+    
+    return float(p_perm)
+
+
+def run_moderation_analysis(
+    X: np.ndarray,
+    W: np.ndarray,
+    Y: np.ndarray,
+    n_perm: int = 0,
+    x_label: str = "Predictor",
+    w_label: str = "Moderator",
+    y_label: str = "Outcome",
+    center_predictors: bool = True,
+    rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
+) -> ModerationResult:
+    """Run complete moderation analysis with optional permutation test.
+    
+    Parameters
+    ----------
+    X : np.ndarray
+        Predictor variable
+    W : np.ndarray
+        Moderator variable
+    Y : np.ndarray
+        Outcome variable
+    n_perm : int
+        Number of permutations for p-value (0 to skip permutation test)
     x_label, w_label, y_label : str
         Labels for variables
     center_predictors : bool
         Whether to mean-center X and W
+    rng : np.random.Generator, optional
+        Random generator for reproducibility
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs)
         
     Returns
     -------
     ModerationResult
-        Complete moderation analysis results
+        Complete moderation analysis results including permutation p-value if requested
     """
     result = compute_moderation_effect(X, W, Y, center_predictors=center_predictors)
     result.x_label = x_label
     result.w_label = w_label
     result.y_label = y_label
+    
+    # Permutation test for interaction effect
+    if n_perm > 0 and np.isfinite(result.b3):
+        result.p_b3_perm = permutation_moderation_pvalue(
+            X, W, Y, result.b3, n_perm=n_perm,
+            center_predictors=center_predictors, rng=rng, n_jobs=n_jobs
+        )
+        result.n_permutations = n_perm
+    
     return result
 
 
 __all__ = [
     "ModerationResult",
     "compute_moderation_effect",
+    "permutation_moderation_pvalue",
     "run_moderation_analysis",
 ]

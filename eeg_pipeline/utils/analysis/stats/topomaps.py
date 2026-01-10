@@ -4,7 +4,6 @@ Power topomap correlations with temperature and cluster correction.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,7 +24,6 @@ from eeg_pipeline.utils.analysis.stats import (
 )
 from eeg_pipeline.utils.config.loader import get_frequency_band_names
 from eeg_pipeline.infra.paths import ensure_dir
-from eeg_pipeline.infra.tsv import write_tsv
 
 
 def _extract_band_channels(
@@ -343,25 +341,13 @@ def _save_results(
 ) -> None:
     """
     Save correlation results and metadata to disk.
+    
+    DEPRECATED: This function is no longer called. ROI-averaged correlations 
+    are now included in the unified temporal_correlations output via 
+    _build_roi_averaged_records() in temporal.py.
     """
-    suffix = "_spearman" if use_spearman else "_pearson"
-    output_file = stats_dir / f"power_topomap_temperature_correlations{suffix}.tsv"
-    write_tsv(results_df, output_file)
-
-    summary = {
-        "subject": subject,
-        "task": task,
-        "method": correlation_method,
-        "n_bands": len(bands),
-        "n_channels": len(set(results_df["channel"])),
-        "n_bh_sig": int(results_df["significant"].sum()),
-        "n_cluster_sig": int(results_df["cluster_significant"].sum()),
-        "bootstrap": bootstrap,
-        "n_perm": n_perm,
-    }
-    metadata_file = stats_dir / f"power_topomap_temperature_meta{suffix}.json"
-    with open(metadata_file, "w") as f:
-        json.dump(summary, f, indent=2)
+    # No-op: file generation removed to consolidate outputs
+    pass
 
 
 def run_power_topomap_correlations(

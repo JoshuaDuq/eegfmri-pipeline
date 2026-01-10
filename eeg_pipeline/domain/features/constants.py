@@ -23,11 +23,11 @@ FEATURE_CATEGORIES = [
     "asymmetry",      # Hemispheric power asymmetry
     # Connectivity & phase
     "connectivity",   # Functional connectivity (wPLI, AEC)
-    "directed_connectivity",  # Directed connectivity (PSI, DTF, PDC)
+    "directedconnectivity",  # Directed connectivity (PSI, DTF, PDC)
     "itpc",           # Inter-trial phase coherence
     "pac",            # Phase-amplitude coupling
     # Source localization
-    "source_localization",  # Source-space ROI features (LCMV, eLORETA)
+    "sourcelocalization",  # Source-space ROI features (LCMV, eLORETA)
     # Exploratory & QC
     "complexity",     # Signal complexity (exploratory)
     "bursts",         # Burst dynamics (beta/gamma)

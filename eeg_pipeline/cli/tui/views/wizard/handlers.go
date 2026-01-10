@@ -28,8 +28,6 @@ func (m *Model) resetCursorsForStep() {
 	m.categoryIndex = 0
 	m.subjectCursor = 0
 	m.computationCursor = 0
-	m.postComputationCursor = 0
-	m.computationListFocus = 0
 	m.bandCursor = 0
 	m.roiCursor = 0
 	m.spatialCursor = 0
@@ -120,13 +118,7 @@ func (m *Model) handleUp() {
 		m.modeIndex = moveCursorInList(m.modeIndex, -1, len(m.modeOptions))
 
 	case types.StepSelectComputations:
-		if m.computationListFocus == 0 {
-			// Primary computations list
-			m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
-		} else {
-			// Post computations list
-			m.postComputationCursor = moveCursorInList(m.postComputationCursor, -1, len(m.postComputations))
-		}
+		m.computationCursor = moveCursorInList(m.computationCursor, -1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
 		m.categoryIndex = moveCursorInList(m.categoryIndex, -1, len(m.categories))
@@ -187,13 +179,7 @@ func (m *Model) handleDown() {
 		m.modeIndex = moveCursorInList(m.modeIndex, 1, len(m.modeOptions))
 
 	case types.StepSelectComputations:
-		if m.computationListFocus == 0 {
-			// Primary computations list
-			m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
-		} else {
-			// Post computations list
-			m.postComputationCursor = moveCursorInList(m.postComputationCursor, 1, len(m.postComputations))
-		}
+		m.computationCursor = moveCursorInList(m.computationCursor, 1, len(m.computations))
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
 		m.categoryIndex = moveCursorInList(m.categoryIndex, 1, len(m.categories))
@@ -246,13 +232,6 @@ func (m *Model) handleDown() {
 
 func (m *Model) handleTab() {
 	switch m.CurrentStep {
-	case types.StepSelectComputations:
-		// Toggle between primary and post computations lists
-		if m.computationListFocus == 0 {
-			m.computationListFocus = 1
-		} else {
-			m.computationListFocus = 0
-		}
 	case types.StepSelectSubjects:
 		if m.Pipeline == types.PipelineML {
 			if m.mlScope == MLCVScopeGroup {
@@ -389,11 +368,9 @@ func (m *Model) validateStep() []string {
 			errors = append(errors, fmt.Sprintf("Select at least %d valid subject(s)", minRequired))
 		}
 	case types.StepSelectComputations:
-		primaryCount := countSelectedItems(m.computationSelected)
-		postCount := countSelectedItems(m.postComputationSelected)
-		totalCount := primaryCount + postCount
+		totalCount := countSelectedItems(m.computationSelected)
 		if totalCount == 0 {
-			errors = append(errors, "Select at least one analysis or post-computation to run")
+			errors = append(errors, "Select at least one analysis to run")
 		}
 	case types.StepSelectFeatureFiles:
 		count := countSelectedStringItems(m.featureFileSelected)
@@ -456,11 +433,7 @@ func (m *Model) validateStep() []string {
 func (m *Model) handleSpace() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
-		if m.computationListFocus == 0 {
-			m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
-		} else {
-			m.postComputationSelected[m.postComputationCursor] = !m.postComputationSelected[m.postComputationCursor]
-		}
+		m.computationSelected[m.computationCursor] = !m.computationSelected[m.computationCursor]
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline category selection or Plotting pipeline category selection
 		if m.CurrentStep == types.StepSelectPlotCategories && m.Pipeline == types.PipelinePlotting {
@@ -560,12 +533,8 @@ func (m *Model) handleSpace() {
 func (m *Model) selectAll() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
-		// Select all in both primary and post computations
 		for i := range m.computations {
 			m.computationSelected[i] = true
-		}
-		for i := range m.postComputations {
-			m.postComputationSelected[i] = true
 		}
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline or Plotting categories selection
@@ -614,9 +583,7 @@ func (m *Model) selectAll() {
 func (m *Model) selectNone() {
 	switch m.CurrentStep {
 	case types.StepSelectComputations:
-		// Clear all in both primary and post computations
 		m.computationSelected = make(map[int]bool)
-		m.postComputationSelected = make(map[int]bool)
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
 		// Features pipeline or Plotting categories selection
 		m.selected = make(map[int]bool)
@@ -749,11 +716,9 @@ func (m *Model) validate() []string {
 	}
 
 	if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		// Validate computations selection (both primary and post)
-		primaryComputationCount := countSelectedItems(m.computationSelected)
-		postComputationCount := countSelectedItems(m.postComputationSelected)
-		totalComputationCount := primaryComputationCount + postComputationCount
-		if totalComputationCount == 0 {
+		// Validate computations selection
+		computationCount := countSelectedItems(m.computationSelected)
+		if computationCount == 0 {
 			errors = append(errors, "No behavior computations selected")
 		}
 
@@ -1890,17 +1855,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 
-	// Confounds
-	case optConfoundsAddAsCovariates:
-		m.confoundsAddAsCovariates = !m.confoundsAddAsCovariates
-		m.useDefaultAdvanced = false
-	case optConfoundsMaxCovariates:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
-	case optConfoundsQCColumnPatterns:
-		m.startTextEdit(textFieldConfoundsQCColumnPatterns)
-		m.useDefaultAdvanced = false
-
 	// Regression
 	case optRegressionOutcome:
 		m.regressionOutcome = (m.regressionOutcome + 1) % 3
@@ -2119,7 +2073,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.correlationsPermutationPrimary = !m.correlationsPermutationPrimary
 		m.useDefaultAdvanced = false
 	case optCorrelationsTargetColumn:
-		if len(m.discoveredColumns) > 0 {
+		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedCorrelationsTargetColumn
 			m.subCursor = 0
 		} else {
@@ -2135,7 +2089,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.temporalSplitByCondition = !m.temporalSplitByCondition
 		m.useDefaultAdvanced = false
 	case optTemporalConditionColumn:
-		if len(m.discoveredColumns) > 0 {
+		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedTemporalConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2154,8 +2108,11 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startTextEdit(textFieldTemporalConditionValues)
 		}
 		m.useDefaultAdvanced = false
-	case optTemporalFilterValue:
-		m.startTextEdit(textFieldTemporalFilterValue)
+	case optTemporalIncludeROIAverages:
+		m.temporalIncludeROIAverages = !m.temporalIncludeROIAverages
+		m.useDefaultAdvanced = false
+	case optTemporalIncludeTFGrid:
+		m.temporalIncludeTFGrid = !m.temporalIncludeTFGrid
 		m.useDefaultAdvanced = false
 	// Temporal feature selection
 	case optTemporalFeaturePower:
@@ -2223,7 +2180,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	case optClusterConditionColumn:
-		if len(m.discoveredColumns) > 0 {
+		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedClusterConditionColumn
 			m.subCursor = 0
 		} else {
@@ -2243,7 +2200,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		}
 		m.useDefaultAdvanced = false
 	// Mediation options
-	case optMediationBootstrap, optMediationMinEffect:
+	case optMediationBootstrap, optMediationMinEffect, optMediationPermutations:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optMediationMaxMediatorsEnabled:
@@ -2263,6 +2220,9 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 			m.startNumberEdit()
 			m.useDefaultAdvanced = false
 		}
+	case optModerationPermutations:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
 	// Mixed effects options
 	case optMixedMaxFeatures:
 		m.startNumberEdit()
@@ -2272,7 +2232,7 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	// Condition options
 	case optConditionCompareColumn:
-		if len(m.discoveredColumns) > 0 {
+		if len(m.availableColumns) > 0 {
 			m.expandedOption = expandedConditionCompareColumn
 			m.subCursor = 0
 		} else {
@@ -3095,12 +3055,6 @@ func (m *Model) commitBehaviorNumber(val float64) {
 			m.painResidualCrossfitSplineKnots = int(val)
 		}
 
-	// Confounds
-	case optConfoundsMaxCovariates:
-		if val >= 0 {
-			m.confoundsMaxCovariates = int(val)
-		}
-
 	// Regression
 	case optRegressionTempSplineKnots:
 		if val >= 4 {
@@ -3221,6 +3175,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 		if val >= 0 {
 			m.mediationBootstrap = int(val)
 		}
+	case optMediationPermutations:
+		if val >= 0 {
+			m.mediationPermutations = int(val)
+		}
 	case optMediationMinEffect:
 		if val >= 0 {
 			m.mediationMinEffect = val
@@ -3232,6 +3190,10 @@ func (m *Model) commitBehaviorNumber(val float64) {
 	case optModerationMaxFeatures:
 		if val >= 1 {
 			m.moderationMaxFeatures = int(val)
+		}
+	case optModerationPermutations:
+		if val >= 0 {
+			m.moderationPermutations = int(val)
 		}
 	case optMixedMaxFeatures:
 		if val >= 1 {

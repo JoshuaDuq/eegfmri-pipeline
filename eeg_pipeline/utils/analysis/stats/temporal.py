@@ -450,7 +450,6 @@ def _determine_condition_values(
     """
     split_by_condition = bool(temporal_cfg.get("split_by_condition", True))
     condition_column = temporal_cfg.get("condition_column", "") or ""
-    filter_value = temporal_cfg.get("filter_value", "") or ""
     requested_values = temporal_cfg.get("condition_values", []) or []
 
     if not condition_column:
@@ -466,20 +465,7 @@ def _determine_condition_values(
             else events[condition_column].to_numpy()
         )
 
-        if filter_value:
-            try:
-                filter_val = (
-                    type(condition_vec[0])(filter_value)
-                    if len(condition_vec) > 0
-                    else filter_value
-                )
-            except (ValueError, TypeError):
-                filter_val = filter_value
-            condition_values = [filter_val]
-            logger.info(
-                f"{analysis_name}: filtering to condition '{condition_column}' == '{filter_val}'"
-            )
-        elif isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
+        if isinstance(requested_values, (list, tuple)) and len(requested_values) > 0:
             exemplar = pd.Series(condition_vec).dropna()
             exemplar_val = exemplar.iloc[0] if len(exemplar) > 0 else None
 
@@ -547,7 +533,7 @@ def _run_tf_correlations_core(
     if tfr is None:
         return
 
-    baseline_applied, baseline_window = apply_baseline_to_tfr(tfr, config, logger)
+    apply_baseline_to_tfr(tfr, config, logger)
     power, times, freqs = tfr.data.mean(axis=1), tfr.times, tfr.freqs
     y_arr = y.to_numpy()
 
@@ -622,7 +608,6 @@ def _run_tf_correlations_core(
             groups=events["run_id"].to_numpy() if "run_id" in events.columns else None,
         )
 
-    p_used = np.where(np.isfinite(c_pvals), c_pvals, pvals) if n_perm > 0 else pvals
     ensure_dir(stats_dir)
 
     sfx = "_spearman" if use_spearman else "_pearson"
@@ -630,51 +615,29 @@ def _run_tf_correlations_core(
     roi_sfx = f"_{roi.lower()}" if roi and roi != "null" else ""
     roi_label = roi or "all"
 
-    np.savez_compressed(
-        stats_dir / f"time_frequency_correlation_data{roi_sfx}{sfx}.npz",
-        correlations=corrs, p_values_raw=pvals, p_values_cluster=c_pvals, p_values=p_used,
-        n_valid=n_valid, bin_data=bin_data, times=times, freqs=freqs, time_bin_edges=time_edges,
-        informative_bins=np.array(info_bins), baseline_applied=baseline_applied,
-        roi_selection=roi_label, use_spearman=use_spearman, cluster_labels=c_labels,
-        cluster_sig_mask=c_sig, cluster_records=c_recs, cluster_perm_max_masses=perm_masses,
-        cluster_forming_threshold=float(c_thresh) if n_perm > 0 else np.nan,
-        cluster_alpha=c_alpha, n_cluster_perm=n_perm, n_trials=len(y_arr),
-        **({"baseline_window": baseline_window} if baseline_window else {}),
+    method = "spearman" if use_spearman else "pearson"
+    
+    # Build TF grid records using the unified helper
+    recs = _build_tf_grid_records(
+        corrs, pvals, n_valid, times, freqs, time_edges, method, roi_label,
+        c_pvals if n_perm > 0 else None,
+        c_labels if n_perm > 0 else None,
+        c_sig if n_perm > 0 else None,
     )
-
-    method_label = format_correlation_method_label("spearman" if use_spearman else "pearson", None)
-    # Save TSV
-    recs = []
-    for freq_idx, freq in enumerate(freqs):
-        for time_idx in range(len(time_edges) - 1):
-            p_raw = pvals[freq_idx, time_idx]
-            p_cluster = c_pvals[freq_idx, time_idx] if n_perm > 0 else np.nan
-            if not (np.isfinite(p_raw) or np.isfinite(p_cluster)):
-                continue
-            recs.append({
-                "roi": roi_label,
-                "freq": float(freq),
-                "time_start": float(time_edges[time_idx]),
-                "time_end": float(time_edges[time_idx + 1]),
-                "r": float(corrs[freq_idx, time_idx]),
-                "beta_std": float(corrs[freq_idx, time_idx]),
-                "beta_kind": "standardized",
-                "p": float(p_raw) if np.isfinite(p_raw) else np.nan,
-                "p_cluster": float(p_cluster) if np.isfinite(p_cluster) else np.nan,
-                "cluster_id": int(c_labels[freq_idx, time_idx]) if n_perm > 0 else 0,
-                "cluster_significant": bool(c_sig[freq_idx, time_idx]) if n_perm > 0 else False,
-                "n": int(n_valid[freq_idx, time_idx]),
-                "method": "spearman" if use_spearman else "pearson",
-                "method_label": method_label,
-            })
+    
+    # Save to unified temporal_correlations folder
+    temporal_dir = stats_dir / "temporal_correlations"
+    ensure_dir(temporal_dir)
     if recs:
-        write_tsv(pd.DataFrame(recs), stats_dir / f"corr_stats_tf_{roi_label.lower()}{sfx}.tsv")
+        tf_df = pd.DataFrame(recs)
+        write_tsv(tf_df, temporal_dir / f"tf_grid_{roi_label.lower()}{sfx}.tsv")
 
     logger.info(f"Saved TF correlations: shape={corrs.shape}, info_bins={len(info_bins)}")
     
     return {
         "n_tests": len(info_bins),
         "n_sig_raw": int((pvals[np.isfinite(pvals)] < 0.05).sum()) if pvals is not None else 0,
+        "records": recs,
     }
 
 
@@ -714,7 +677,11 @@ def _build_temporal_tsv_records(
     ch_names: List[str],
     method: str,
 ) -> List[Dict[str, Any]]:
-    """Build TSV records from temporal correlation results for global FDR."""
+    """Build TSV records from temporal correlation results for global FDR.
+    
+    Includes cluster correction fields when available for compatibility with
+    unified temporal correlations output format.
+    """
     method_label = format_correlation_method_label(method, None)
     records = []
     corrs = res["correlations"]  # shape: (n_bands, n_windows, n_channels)
@@ -723,6 +690,11 @@ def _build_temporal_tsv_records(
     band_names = res["band_names"]
     win_s = res["window_starts"]
     win_e = res["window_ends"]
+    
+    # Cluster correction fields (optional)
+    p_corrected = res.get("p_corrected")
+    cluster_labels = res.get("cluster_labels")
+    cluster_sig = res.get("mask")
 
     n_bands, n_windows, n_channels = corrs.shape
     for band_idx in range(n_bands):
@@ -732,6 +704,18 @@ def _build_temporal_tsv_records(
                 p = pvals[band_idx, window_idx, channel_idx]
                 if not np.isfinite(r) or not np.isfinite(p):
                     continue
+                
+                # Extract cluster correction values if available
+                p_cluster = np.nan
+                cluster_id = 0
+                is_cluster_sig = False
+                if p_corrected is not None:
+                    p_cluster = float(p_corrected[band_idx, window_idx, channel_idx])
+                if cluster_labels is not None:
+                    cluster_id = int(cluster_labels[band_idx, window_idx, channel_idx])
+                if cluster_sig is not None:
+                    is_cluster_sig = bool(cluster_sig[band_idx, window_idx, channel_idx])
+                
                 records.append({
                     "condition": condition,
                     "band": band_names[band_idx],
@@ -743,16 +727,194 @@ def _build_temporal_tsv_records(
                         else f"ch_{channel_idx}"
                     ),
                     "r": float(r),
-                    # Regression analogue: for standardized residualized variables,
-                    # the slope equals the (partial) correlation.
                     "beta_std": float(r),
                     "beta_kind": "standardized",
                     "p": float(p),
+                    "p_cluster": p_cluster if np.isfinite(p_cluster) else np.nan,
+                    "cluster_id": cluster_id,
+                    "cluster_significant": is_cluster_sig,
                     "n": int(n_valid[band_idx, window_idx, channel_idx]),
                     "method": method,
                     "method_label": method_label,
                 })
     return records
+
+
+def _build_roi_averaged_records(
+    res: Dict[str, Any],
+    condition: str,
+    ch_names: List[str],
+    method: str,
+    roi_definitions: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Build ROI-averaged records from temporal correlation results.
+    
+    Creates aggregated records by averaging correlation values across channels
+    within each ROI. Also computes an "all" ROI averaging all channels.
+    """
+    method_label = format_correlation_method_label(method, None)
+    records = []
+    corrs = res["correlations"]  # shape: (n_bands, n_windows, n_channels)
+    pvals = res["p_values"]
+    n_valid = res["n_valid"]
+    band_names = res["band_names"]
+    win_s = res["window_starts"]
+    win_e = res["window_ends"]
+    
+    n_bands, n_windows, n_channels = corrs.shape
+    
+    # Default ROI: all channels
+    if roi_definitions is None:
+        roi_definitions = {}
+    roi_definitions["all"] = ch_names
+    
+    for roi_name, roi_channels in roi_definitions.items():
+        # Map channel names to indices
+        ch_indices = [i for i, ch in enumerate(ch_names) if ch in roi_channels]
+        if not ch_indices:
+            continue
+            
+        for band_idx in range(n_bands):
+            for window_idx in range(n_windows):
+                # Extract values for this ROI
+                roi_corrs = corrs[band_idx, window_idx, ch_indices]
+                roi_pvals = pvals[band_idx, window_idx, ch_indices]
+                roi_n = n_valid[band_idx, window_idx, ch_indices]
+                
+                # Filter to valid values
+                valid_mask = np.isfinite(roi_corrs) & np.isfinite(roi_pvals)
+                if not valid_mask.any():
+                    continue
+                    
+                # Compute ROI average (Fisher z-transform for proper averaging)
+                valid_corrs = roi_corrs[valid_mask]
+                z_values = np.arctanh(np.clip(valid_corrs, -0.9999, 0.9999))
+                z_mean = np.mean(z_values)
+                r_mean = np.tanh(z_mean)
+                
+                # Use minimum n across ROI channels
+                n_mean = int(np.min(roi_n[valid_mask]))
+                
+                # Combine p-values using Fisher's method
+                valid_pvals = roi_pvals[valid_mask]
+                valid_pvals = np.clip(valid_pvals, 1e-300, 1.0)  # Avoid log(0)
+                chi2_stat = -2 * np.sum(np.log(valid_pvals))
+                from scipy.stats import chi2
+                combined_p = 1.0 - chi2.cdf(chi2_stat, df=2 * len(valid_pvals))
+                
+                records.append({
+                    "condition": condition,
+                    "band": band_names[band_idx],
+                    "time_start": float(win_s[window_idx]),
+                    "time_end": float(win_e[window_idx]),
+                    "channel": f"roi_{roi_name}",
+                    "r": float(r_mean),
+                    "beta_std": float(r_mean),
+                    "beta_kind": "standardized",
+                    "p": float(combined_p),
+                    "p_cluster": np.nan,
+                    "cluster_id": 0,
+                    "cluster_significant": False,
+                    "n": n_mean,
+                    "method": method,
+                    "method_label": method_label,
+                    "n_channels": len(ch_indices),
+                })
+    return records
+
+
+def _build_tf_grid_records(
+    corrs: np.ndarray,
+    pvals: np.ndarray,
+    n_valid: np.ndarray,
+    times: np.ndarray,
+    freqs: np.ndarray,
+    time_edges: np.ndarray,
+    method: str,
+    roi_label: str,
+    c_pvals: Optional[np.ndarray] = None,
+    c_labels: Optional[np.ndarray] = None,
+    c_sig: Optional[np.ndarray] = None,
+) -> List[Dict[str, Any]]:
+    """Build TSV records from time-frequency grid correlations.
+    
+    Creates records at individual frequency resolution (not bands) for detailed
+    time-frequency analysis. Used by TF heatmap computation.
+    """
+    method_label = format_correlation_method_label(method, None)
+    records = []
+    
+    for freq_idx, freq in enumerate(freqs):
+        for time_idx in range(len(time_edges) - 1):
+            p_raw = pvals[freq_idx, time_idx]
+            if not np.isfinite(p_raw):
+                continue
+                
+            p_cluster = np.nan
+            cluster_id = 0
+            is_cluster_sig = False
+            if c_pvals is not None and np.isfinite(c_pvals[freq_idx, time_idx]):
+                p_cluster = float(c_pvals[freq_idx, time_idx])
+            if c_labels is not None:
+                cluster_id = int(c_labels[freq_idx, time_idx])
+            if c_sig is not None:
+                is_cluster_sig = bool(c_sig[freq_idx, time_idx])
+                
+            records.append({
+                "condition": "all",
+                "band": f"freq_{freq:.1f}Hz",
+                "freq": float(freq),
+                "time_start": float(time_edges[time_idx]),
+                "time_end": float(time_edges[time_idx + 1]),
+                "channel": f"roi_{roi_label}",
+                "r": float(corrs[freq_idx, time_idx]),
+                "beta_std": float(corrs[freq_idx, time_idx]),
+                "beta_kind": "standardized",
+                "p": float(p_raw),
+                "p_cluster": p_cluster,
+                "cluster_id": cluster_id,
+                "cluster_significant": is_cluster_sig,
+                "n": int(n_valid[freq_idx, time_idx]),
+                "method": method,
+                "method_label": method_label,
+                "feature": "tf_grid",
+            })
+    return records
+
+
+def _save_temporal_topomap_npz(
+    condition_results: Dict[str, Dict[str, Any]],
+    ch_names: List[str],
+    info: Any,
+    out_dir: Path,
+    suffix: str,
+    logger: logging.Logger,
+) -> None:
+    """Save temporal correlation results as NPZ for topomap plotting.
+    
+    Creates a NPZ file with one key per condition, plus metadata for plotting.
+    The file is saved as temporal_correlations_by_condition{suffix}.npz.
+    """
+    if not condition_results:
+        logger.info("No condition results to save for topomap NPZ")
+        return
+    
+    ensure_dir(out_dir)
+    
+    # Build the NPZ payload with condition names as keys
+    npz_payload = {
+        "ch_names": np.array(ch_names, dtype=object),
+        "info": info,
+        "condition_names": np.array(list(condition_results.keys()), dtype=object),
+    }
+    
+    for cond_name, res in condition_results.items():
+        # Store each condition's results as a nested dict
+        npz_payload[cond_name] = res
+    
+    npz_path = out_dir / f"temporal_correlations_by_condition{suffix}.npz"
+    np.savez_compressed(npz_path, **npz_payload)
+    logger.info(f"Saved temporal topomap NPZ: {npz_path.name} ({len(condition_results)} conditions)")
 
 
 def _run_temporal_by_condition_core(
@@ -821,6 +983,15 @@ def _run_temporal_by_condition_core(
     all_tsv_records = []
     ch_names = tfr.ch_names
 
+    # Check if ROI averages should be included
+    include_roi_averages = bool(temporal_cfg.get("include_roi_averages", True))
+    roi_definitions = None
+    if include_roi_averages:
+        roi_definitions = config.get("channel_rois", {}) or {}
+    
+    # Collect per-condition results for NPZ export (topomap plotting)
+    condition_results = {}
+    
     for cond_val in condition_values:
         if cond_val == "all":
             mask = np.ones(n, dtype=bool)
@@ -837,11 +1008,29 @@ def _run_temporal_by_condition_core(
             tfr, y_arr, mask, safe_name, bands, win_s, win_e, fmax, corr_fn, alpha, logger, cov_df, config, n_jobs
         )
         if res:
+            # Store result for NPZ export
+            condition_results[safe_name] = res
+            
+            # Per-channel records
             cond_records = _build_temporal_tsv_records(res, safe_name, ch_names, method)
             for rec in cond_records:
                 rec["feature"] = "power"
             all_tsv_records.extend(cond_records)
             logger.info(f"Computed power temporal for condition '{safe_name}': {len(cond_records)} tests")
+            
+            # ROI-averaged records
+            if include_roi_averages:
+                roi_records = _build_roi_averaged_records(res, safe_name, ch_names, method, roi_definitions)
+                for rec in roi_records:
+                    rec["feature"] = "power_roi"
+                all_tsv_records.extend(roi_records)
+                if roi_records:
+                    logger.info(f"Added {len(roi_records)} ROI-averaged records for condition '{safe_name}'")
+
+    # Save NPZ file for topomap plotting
+    _save_temporal_topomap_npz(
+        condition_results, ch_names, epochs.info, out_dir, sfx, logger
+    )
 
     logger.info("Temporal correlations by condition completed")
     
@@ -855,6 +1044,7 @@ def _run_temporal_by_condition_core(
         "n_sig_raw": n_sig,
         "feature": "power",
         "records": all_tsv_records,
+        "condition_results": condition_results,
     }
 
 
@@ -1043,7 +1233,7 @@ def _run_itpc_temporal_by_condition_core(
     
     Uses user-configurable:
     - condition_column: which events column to split by
-    - filter_value: optionally compute only for a specific value  
+    - condition_values: optionally compute only for specific values
     - time windows: computed from config time_range_ms and resolution
     """
     from eeg_pipeline.utils.analysis.tfr import compute_complex_tfr
@@ -1116,7 +1306,6 @@ def _run_itpc_temporal_by_condition_core(
     ensure_dir(out_dir)
     
     all_tsv_records = []
-    itpc_results = {}
     
     for cond_val in condition_values:
         if cond_val == "all":
@@ -1186,23 +1375,6 @@ def _run_itpc_temporal_by_condition_core(
                     except (ValueError, RuntimeWarning):
                         pass
         
-        res = {
-            "name": safe_name,
-            "feature": "itpc",
-            "correlations": corrs,
-            "p_values": pvals,
-            "n_valid": n_valid,
-            "band_names": band_names,
-            "window_starts": win_s,
-            "window_ends": win_e,
-        }
-        itpc_results[safe_name] = res
-        
-        np.savez_compressed(
-            out_dir / f"temporal_itpc_{safe_name}{sfx}.npz",
-            **res, times=times, ch_names=ch_names,
-        )
-        
         cond_records = []
         for band_idx, band_name in enumerate(band_names):
             for window_idx in range(n_w):
@@ -1229,13 +1401,6 @@ def _run_itpc_temporal_by_condition_core(
         
         all_tsv_records.extend(cond_records)
         logger.info(f"Computed ITPC temporal for condition '{safe_name}': {len(cond_records)} tests")
-    
-    if itpc_results:
-        combined_data = dict(itpc_results)
-        combined_data["times"] = times
-        combined_data["ch_names"] = ch_names
-        np.savez_compressed(out_dir / f"temporal_itpc_combined{sfx}.npz", **combined_data)
-        logger.info(f"Saved ITPC temporal arrays: {len(itpc_results)} conditions")
     
     logger.info("ITPC temporal correlations completed")
     
@@ -1406,8 +1571,7 @@ def _run_erds_temporal_by_condition_core(
     ensure_dir(out_dir)
     
     all_tsv_records = []
-    erds_results = {}
-    
+
     for cond_val in condition_values:
         mask = np.ones(n, dtype=bool) if cond_val == "all" else (condition_vec == cond_val)
         if not np.any(mask):
@@ -1465,24 +1629,6 @@ def _run_erds_temporal_by_condition_core(
                     except (ValueError, RuntimeWarning):
                         pass
         
-        res = {
-            "name": safe_name,
-            "feature": "erds",
-            "correlations": corrs,
-            "p_values": pvals,
-            "n_valid": n_valid,
-            "band_names": band_names,
-            "window_starts": win_s,
-            "window_ends": win_e,
-        }
-        erds_results[safe_name] = res
-        np.savez_compressed(
-            out_dir / f"temporal_erds_{safe_name}{sfx}.npz",
-            **res,
-            times=times,
-            ch_names=ch_names,
-        )
-        
         cond_records = []
         for band_idx, band_name in enumerate(band_names):
             for window_idx in range(n_w):
@@ -1508,9 +1654,6 @@ def _run_erds_temporal_by_condition_core(
                     })
         all_tsv_records.extend(cond_records)
         logger.info(f"Computed ERDS temporal for condition '{safe_name}': {len(cond_records)} tests")
-    
-    if erds_results:
-        np.savez_compressed(out_dir / f"temporal_erds_combined{sfx}.npz", **erds_results, times=times, ch_names=ch_names)
     
     logger.info(f"ERDS temporal correlations: {len(all_tsv_records)} tests")
     return {"n_tests": len(all_tsv_records), "n_sig_raw": sum(1 for r in all_tsv_records if r.get("p", 1.0) < 0.05), "feature": "erds", "records": all_tsv_records}

@@ -32,7 +32,6 @@ Modules:
     - stability: Stability analysis
     - consistency: Consistency checks
     - influence: Influence diagnostics
-    - confounds: Confound analysis
     - splines: Spline fitting
     - temperature_models: Temperature-rating models
     - pain_residual: Pain residual computation

@@ -53,13 +53,22 @@ def _discover_subjects_with_data(
         subject_id = subject_dir.name[4:]
         if allowed_subjects is not None and subject_id not in allowed_subjects:
             continue
-        stats_file = (
+        # Check unified temporal_correlations location first (new format)
+        unified_path = (
+            subject_dir
+            / "eeg"
+            / "stats"
+            / "temporal_correlations"
+            / f"tf_grid{roi_suffix}{method_suffix}.tsv"
+        )
+        # Fall back to legacy location
+        legacy_path = (
             subject_dir
             / "eeg"
             / "stats"
             / f"tf_corr_stats{roi_suffix}{method_suffix}.tsv"
         )
-        if stats_file.exists():
+        if unified_path.exists() or legacy_path.exists():
             subject_ids.append(subject_id)
     return subject_ids
 
@@ -81,14 +90,27 @@ def _load_subject_correlation_data(
     Returns:
         DataFrame with correlation statistics, or None if file doesn't exist
     """
-    stats_path = (
+    # Check unified temporal_correlations location first (new format)
+    unified_path = (
+        config.deriv_root
+        / f"sub-{subject_id}"
+        / "eeg"
+        / "stats"
+        / "temporal_correlations"
+        / f"tf_grid{roi_suffix}{method_suffix}.tsv"
+    )
+    if unified_path.exists():
+        return read_tsv(unified_path)
+    
+    # Fall back to legacy location
+    legacy_path = (
         config.deriv_root
         / f"sub-{subject_id}"
         / "eeg"
         / "stats"
         / f"tf_corr_stats{roi_suffix}{method_suffix}.tsv"
     )
-    return read_tsv(stats_path) if stats_path.exists() else None
+    return read_tsv(legacy_path) if legacy_path.exists() else None
 
 
 def _get_baseline_window(config) -> List[float]:
@@ -283,13 +305,28 @@ def _load_valid_subject_data(
     """
     valid_dataframes = []
     valid_subject_ids = []
-    required_columns = ["correlation", "frequency", "time"]
     
     for subject_id in subject_ids:
         dataframe = _load_subject_correlation_data(
             subject_id, roi_suffix, method_suffix, config
         )
         if dataframe is None or dataframe.empty:
+            continue
+        
+        # Normalize column names for unified format compatibility
+        column_mapping = {}
+        if "r" in dataframe.columns and "correlation" not in dataframe.columns:
+            column_mapping["r"] = "correlation"
+        if "freq" in dataframe.columns and "frequency" not in dataframe.columns:
+            column_mapping["freq"] = "frequency"
+        if "time_start" in dataframe.columns and "time" not in dataframe.columns:
+            column_mapping["time_start"] = "time"
+        if column_mapping:
+            dataframe = dataframe.rename(columns=column_mapping)
+        
+        required_columns = ["correlation", "frequency", "time"]
+        missing = [c for c in required_columns if c not in dataframe.columns]
+        if missing:
             continue
         dataframe_clean = dataframe.dropna(subset=required_columns)
         if dataframe_clean.empty:

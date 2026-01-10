@@ -45,6 +45,7 @@ type Computation struct {
 	Key         string
 	Name        string
 	Description string
+	Group       string // Core, Advanced, DataPrep, Quality
 }
 
 type FeatureCategory struct {
@@ -54,28 +55,46 @@ type FeatureCategory struct {
 }
 
 var behaviorComputations = []Computation{
-	{"trial_table", "Trial Table", "Build canonical per-trial analysis table"},
-	{"correlations", "Correlations", "EEG-rating correlations"},
-	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity analysis"},
-	{"condition", "Condition Comparison", "Compare conditions (e.g., ramp vs active)"},
-	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis"},
-	{"cluster", "Cluster Permutation", "Cluster-based permutation tests"},
-	{"mediation", "Mediation Analysis", "Path analysis and mediation models"},
-	{"moderation", "Moderation Analysis", "Test if features moderate temperature→rating"},
-	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling"},
+	// Data Preparation
+	{"trial_table", "Trial Table", "Build canonical per-trial analysis table", "DataPrep"},
+	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation", "DataPrep"},
+	{"pain_residual", "Pain Residual + Diagnostics", "Compute pain_residual and temperature model diagnostics", "DataPrep"},
+
+	// Core Analyses
+	{"correlations", "Correlations", "EEG-rating correlations with bootstrap CIs", "Core"},
+	{"regression", "Regression", "Feature regression with optional permutation + model sensitivity", "Core"},
+	{"condition", "Condition Comparison", "Compare conditions (e.g., pain vs non-pain)", "Core"},
+	{"temporal", "Temporal Correlations", "Time-resolved correlation analysis", "Core"},
+	{"pain_sensitivity", "Pain Sensitivity", "Individual pain sensitivity (temperature→rating slope)", "Core"},
+	{"cluster", "Cluster Permutation", "Cluster-based permutation tests", "Core"},
+
+	// Advanced/Causal Analyses
+	{"mediation", "Mediation Analysis", "Path analysis: does EEG mediate temperature→rating?", "Advanced"},
+	{"moderation", "Moderation Analysis", "Does EEG moderate the temperature→rating effect?", "Advanced"},
+	{"mixed_effects", "Mixed Effects", "Mixed-effects modeling (group-level)", "Advanced"},
+
+	// Quality & Validation
+	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics", "Quality"},
+	{"validation", "Validation", "Effect consistency + influence diagnostics", "Quality"},
+	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
 
-var behaviorPostComputations = []Computation{
-	{"lag_features", "Lag Features", "Add temporal dynamics (prev_*, delta_*) for habituation analyses"},
-	{"pain_residual", "Pain Residual", "Compute pain_residual = rating - f(temperature)"},
-	{"temperature_models", "Temperature Models", "Model comparison and breakpoint detection on temp→rating"},
-	{"confounds", "Confounds Audit", "Audit QC confounds vs targets"},
-	{"regression", "Trialwise Regression", "Trialwise regression/moderation models"},
-	{"models", "Model Families", "Sensitivity model families"},
-	{"stability", "Stability (Run/Block)", "Within-subject stability diagnostics"},
-	{"consistency", "Consistency Summary", "Effect direction consistency"},
-	{"influence", "Influence Diagnostics", "Cook's distance and leverage"},
-	{"report", "Subject Report", "Single-subject report"},
+var behaviorComputationGroups = map[string]string{
+	"trial_table":      "DataPrep",
+	"lag_features":     "DataPrep",
+	"pain_residual":    "DataPrep",
+	"correlations":     "Core",
+	"regression":       "Core",
+	"condition":        "Core",
+	"temporal":         "Core",
+	"pain_sensitivity": "Core",
+	"cluster":          "Core",
+	"mediation":        "Advanced",
+	"moderation":       "Advanced",
+	"mixed_effects":    "Advanced",
+	"stability":        "Quality",
+	"validation":       "Quality",
+	"report":           "Quality",
 }
 
 type FrequencyBand struct {
@@ -183,8 +202,8 @@ type FeatureFile struct {
 var featureFileOptions = []FeatureFile{
 	{"power", "Power Features", "EEG power spectral features"},
 	{"connectivity", "Connectivity", "Functional connectivity features"},
-	{"directed_connectivity", "Directed Connectivity", "PSI, DTF, PDC (directed)"},
-	{"source_localization", "Source Localization", "LCMV/eLORETA source estimates"},
+	{"directedconnectivity", "Directed Connectivity", "Effective connectivity (PSI, DTF, PDC)"},
+	{"sourcelocalization", "Source Localization", "LCMV/eLORETA source estimates"},
 	{"aperiodic", "Aperiodic (1/f)", "Aperiodic spectral features"},
 	{"itpc", "ITPC", "Inter-trial phase coherence"},
 	{"pac", "PAC", "Phase-amplitude coupling"},
@@ -200,28 +219,27 @@ var featureFileOptions = []FeatureFile{
 // Features not in this list for a given computation won't be shown in the feature selection.
 var computationApplicableFeatures = map[string][]string{
 	// Correlations can use all standard EEG features
-	"correlations": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"correlations": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Pain sensitivity uses the same features as correlations
-	"pain_sensitivity": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"pain_sensitivity": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Condition comparison uses trial-level features
-	"condition": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"condition": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
 	// User selects which to compute in step 3 (feature selection)
 	"temporal": {"power", "itpc", "erds"},
 	// Cluster permutation uses TFR data directly
 	"cluster": {"power"},
 	// Mediation/moderation use correlations features
-	"mediation":     {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"moderation":    {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"mixed_effects": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	// Post computations
-	"confounds":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"regression":  {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"models":      {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"stability":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"consistency": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"influence":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"report":      {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mediation":     {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"moderation":    {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mixed_effects": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	// Quality & Validation analyses
+	"regression":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"stability":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"validation":  {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"consistency": {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"influence":   {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"report":      {"power", "connectivity", "directedconnectivity", "sourcelocalization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 }
 
 type PlotItem struct {
@@ -295,7 +313,6 @@ const (
 	textFieldConditionCompareValues
 	textFieldTemporalConditionColumn
 	textFieldTemporalConditionValues
-	textFieldTemporalFilterValue
 	textFieldTfHeatmapFreqs
 	textFieldRunAdjustmentColumn
 	textFieldPainResidualCrossfitGroupColumn
@@ -449,7 +466,7 @@ var defaultPlotItems = []PlotItem{
 	{ID: "behavior_aperiodic_scatter", Group: "behavior", Name: "Aperiodic Scatter", Description: "Aperiodic vs behavior scatter plots", RequiredFiles: []string{"features_aperiodic*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_connectivity_scatter", Group: "behavior", Name: "Connectivity Scatter", Description: "Connectivity vs behavior scatter plots", RequiredFiles: []string{"features_connectivity*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_itpc_scatter", Group: "behavior", Name: "ITPC Scatter", Description: "ITPC vs behavior scatter plots", RequiredFiles: []string{"features_itpc*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
-	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations_by_pain*.npz"}, RequiresStats: true},
+	{ID: "behavior_temporal_topomaps", Group: "behavior", Name: "Temporal Topomaps", Description: "Temporal correlation topomaps", RequiredFiles: []string{"stats/temporal_correlations/temporal_correlations_by_condition*.npz"}, RequiresStats: true},
 	{ID: "behavior_pain_clusters", Group: "behavior", Name: "Condition Clusters", Description: "Cluster-based temporal contrasts", RequiredFiles: []string{"stats/pain_nonpain_time_clusters_*.tsv"}, RequiresStats: true},
 	{ID: "behavior_dose_response", Group: "behavior", Name: "Dose Response", Description: "Dose-response curves and contrasts", RequiredFiles: []string{"features_power*.tsv", "epochs/*.fif"}, RequiresEpochs: true, RequiresFeatures: true},
 	{ID: "behavior_top_predictors", Group: "behavior", Name: "Top Predictors", Description: "Top predictors summary", RequiredFiles: []string{"stats/correlations*.tsv"}, RequiresStats: true},
@@ -564,13 +581,6 @@ type Model struct {
 	computationSelected map[int]bool
 	computationCursor   int
 	computationOffset   int // Scroll offset for computations list
-
-	// Post computation selection (for behavior - computations requiring others)
-	postComputations        []Computation
-	postComputationSelected map[int]bool
-	postComputationCursor   int
-	postComputationOffset   int // Scroll offset for post computations list
-	computationListFocus    int // 0 = primary computations, 1 = post computations
 
 	// Category selection (for features pipeline)
 	categories    []string
@@ -1027,7 +1037,7 @@ type Model struct {
 	iafRoisSpec       string  // IAF ROIs (comma-separated)
 
 	// Aperiodic advanced options
-	aperiodicModel              int     // 0: fixed, 1: knee
+	aperiodicModel              int     // 0: fixed
 	aperiodicPsdMethod          int     // 0: multitaper, 1: welch
 	aperiodicPsdBandwidth       float64 // PSD bandwidth (0 = use default)
 	aperiodicMaxRms             float64 // Max RMS for aperiodic fit (0 = no limit)
@@ -1071,7 +1081,7 @@ type Model struct {
 	featGroupSourceLocExpanded bool    // UI expansion state
 
 	// PAC advanced options
-	pacSource              int     // 0: precomputed, 1: tfr
+	pacSource              int     // 0: precomputed
 	pacNormalize           bool    // Normalize PAC values
 	pacNSurrogates         int     // Number of surrogates (0=none)
 	pacAllowHarmonicOvrlap bool    // Allow harmonic overlap
@@ -1196,11 +1206,6 @@ type Model struct {
 	painResidualCrossfitMethod      int // 0=spline, 1=poly
 	painResidualCrossfitSplineKnots int
 
-	// Confounds
-	confoundsAddAsCovariates  bool
-	confoundsMaxCovariates    int
-	confoundsQCColumnPatterns string
-
 	// Regression
 	regressionOutcome            int // 0=rating, 1=pain_residual, 2=temperature
 	regressionIncludeTemperature bool
@@ -1281,14 +1286,15 @@ type Model struct {
 	reportTopN int
 
 	// Temporal
-	temporalResolutionMs     int
-	temporalSmoothMs         int
-	temporalTimeMinMs        int
-	temporalTimeMaxMs        int
-	temporalSplitByCondition bool   // If true, compute separate correlations per condition value
-	temporalConditionColumn  string // Column to split by (empty = use event_columns.pain_binary)
-	temporalConditionValues  string // Values to compute (empty = all unique values)
-	temporalFilterValue      string // If set, compute only for this specific value
+	temporalResolutionMs       int
+	temporalSmoothMs           int
+	temporalTimeMinMs          int
+	temporalTimeMaxMs          int
+	temporalSplitByCondition   bool   // If true, compute separate correlations per condition value
+	temporalConditionColumn    string // Column to split by (empty = use event_columns.pain_binary)
+	temporalConditionValues    string // Values to compute (empty = all unique values)
+	temporalIncludeROIAverages bool   // Include ROI-averaged rows in output
+	temporalIncludeTFGrid      bool   // Include individual frequency (TF grid) rows
 	// ITPC-specific parameters
 	temporalITPCBaselineCorrection bool    // Subtract baseline ITPC
 	temporalITPCBaselineMin        float64 // Baseline window start
@@ -1318,9 +1324,11 @@ type Model struct {
 	mediationBootstrap           int  // Bootstrap iterations for mediation
 	mediationMaxMediatorsEnabled bool // Enable max mediators limit
 	mediationMaxMediators        int  // Max mediators to test
+	mediationPermutations        int  // Permutation iterations for mediation (0=disabled)
 	// Moderation-specific
 	moderationMaxFeaturesEnabled bool // Enable max features limit
 	moderationMaxFeatures        int  // Max features for moderation
+	moderationPermutations       int  // Permutation iterations for moderation (0=disabled)
 	// Mixed effects-specific
 	mixedMaxFeatures int // Max features for mixed effects
 	// Condition-specific
@@ -1357,7 +1365,7 @@ type Model struct {
 	tfrNFreqs        int     // Number of frequency bins
 	tfrMinCycles     float64 // Minimum cycles for wavelet
 	tfrNCyclesFactor float64 // Cycles factor
-	tfrDecim         int     // Decimation factor
+	tfrDecim         int     // Decimation for power TFR
 	tfrWorkers       int     // Workers for parallel TFR (-1 = all)
 
 	// System/global settings
@@ -1451,19 +1459,18 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	})
 
 	m := Model{
-		Pipeline:                pipeline,
-		selected:                make(map[int]bool),
-		subjectSelected:         make(map[string]bool),
-		computationSelected:     make(map[int]bool),
-		postComputationSelected: make(map[int]bool),
-		bands:                   append([]FrequencyBand{}, frequencyBands...),
-		bandSelected:            make(map[int]bool),
-		editingBandIdx:          -1,
-		rois:                    append([]ROIDefinition{}, defaultROIs...),
-		roiSelected:             make(map[int]bool),
-		editingROIIdx:           -1,
-		spatialSelected:         make(map[int]bool),
-		helpOverlay:             help,
+		Pipeline:            pipeline,
+		selected:            make(map[int]bool),
+		subjectSelected:     make(map[string]bool),
+		computationSelected: make(map[int]bool),
+		bands:               append([]FrequencyBand{}, frequencyBands...),
+		bandSelected:        make(map[int]bool),
+		editingBandIdx:      -1,
+		rois:                append([]ROIDefinition{}, defaultROIs...),
+		roiSelected:         make(map[int]bool),
+		editingROIIdx:       -1,
+		spatialSelected:     make(map[int]bool),
+		helpOverlay:         help,
 		// Advanced config defaults (shared)
 		useDefaultAdvanced:                false,
 		expandedOption:                    expandedNone,
@@ -1712,10 +1719,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		painResidualCrossfitMethod:          0,
 		painResidualCrossfitSplineKnots:     5,
 
-		confoundsAddAsCovariates:  false,
-		confoundsMaxCovariates:    3,
-		confoundsQCColumnPatterns: "^quality_.*_global_,^quality_.*_ch_",
-
 		regressionOutcome:            0,
 		regressionIncludeTemperature: true,
 		regressionTempControl:        0,
@@ -1783,15 +1786,16 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		correlationsPrimaryUnit:         0,
 		correlationsPermutationPrimary:  false,
 
-		reportTopN:               15,
-		temporalResolutionMs:     50,
-		temporalSmoothMs:         100,
-		temporalTimeMinMs:        -200,
-		temporalTimeMaxMs:        1000,
-		temporalSplitByCondition: true,
-		temporalConditionColumn:  "",
-		temporalConditionValues:  "",
-		temporalFilterValue:      "",
+		reportTopN:                 15,
+		temporalResolutionMs:       50,
+		temporalSmoothMs:           100,
+		temporalTimeMinMs:          -200,
+		temporalTimeMaxMs:          1000,
+		temporalSplitByCondition:   true,
+		temporalConditionColumn:    "",
+		temporalConditionValues:    "",
+		temporalIncludeROIAverages: true,
+		temporalIncludeTFGrid:      true,
 		// Temporal feature selection - duplicate defaults removed (using values from temporalFeature*Enabled fields above)
 		temporalITPCBaselineCorrection: true,
 		temporalITPCBaselineMin:        -0.5,
@@ -1812,9 +1816,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		mediationBootstrap:           1000,
 		mediationMaxMediatorsEnabled: true,
 		mediationMaxMediators:        20,
+		mediationPermutations:        0, // Disabled by default
 		// Moderation defaults
 		moderationMaxFeaturesEnabled: true,
 		moderationMaxFeatures:        50,
+		moderationPermutations:       0, // Disabled by default
 		// Mixed effects defaults
 		mixedMaxFeatures: 50,
 		// Condition defaults
@@ -1905,8 +1911,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 		m.categories = []string{
 			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
-			"connectivity", "directed_connectivity", "itpc", "pac",
-			"complexity", "bursts", "quality", "source_localization",
+			"connectivity", "directedconnectivity", "itpc", "pac",
+			"complexity", "bursts", "quality", "sourcelocalization",
 		}
 		m.categoryDescs = []string{
 			"Band power (log-ratio)",
@@ -1951,37 +1957,34 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"Compute EEG-behavior correlations",
 		}
 		m.computations = behaviorComputations
-		m.postComputations = behaviorPostComputations
 
-		// Default selections for primary computations
-		defaultPrimaryComps := map[string]bool{
+		// Default selections organized by analysis purpose
+		defaultComps := map[string]bool{
+			// Data Preparation
+			"trial_table":   true,
+			"lag_features":  true,
+			"pain_residual": true,
+
+			// Core Analyses
 			"correlations":     true,
-			"pain_sensitivity": true,
+			"regression":       false,
 			"condition":        true,
 			"temporal":         false,
+			"pain_sensitivity": true,
 			"cluster":          false,
-			"mediation":        false,
-			"mixed_effects":    false,
+
+			// Advanced/Causal Analyses
+			"mediation":     false,
+			"moderation":    false,
+			"mixed_effects": false,
+
+			// Quality & Validation
+			"stability":  true,
+			"validation": true,
+			"report":     true,
 		}
 		for i, c := range behaviorComputations {
-			m.computationSelected[i] = defaultPrimaryComps[c.Key]
-		}
-
-		// Default selections for post computations
-		defaultPostComps := map[string]bool{
-			"lag_features":       true,
-			"pain_residual":      true,
-			"temperature_models": true,
-			"confounds":          true,
-			"regression":         false,
-			"models":             false,
-			"stability":          true,
-			"consistency":        true,
-			"influence":          true,
-			"report":             true,
-		}
-		for i, c := range behaviorPostComputations {
-			m.postComputationSelected[i] = defaultPostComps[c.Key]
+			m.computationSelected[i] = defaultComps[c.Key]
 		}
 
 		// Initialize feature file selection (all selected by default)
@@ -2923,7 +2926,7 @@ func (m Model) getExpandedListLength() int {
 	case expandedDirectedConnMeasures:
 		return len(directedConnectivityMeasures)
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
-		return len(m.discoveredColumns)
+		return len(m.availableColumns)
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			return 0
@@ -2951,7 +2954,7 @@ func (m Model) getExpandedListLength() int {
 	case expandedRunAdjustmentColumn:
 		return len(m.availableColumns)
 	case expandedCorrelationsTargetColumn:
-		return len(m.discoveredColumns)
+		return len(m.availableColumns) + 1 // +1 for "(none)" option
 	}
 	return 0
 }
@@ -2972,7 +2975,7 @@ func (m Model) getExpandedListItems() []string {
 		}
 		return items
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
-		return m.discoveredColumns
+		return m.availableColumns
 	case expandedConditionCompareValues:
 		if m.conditionCompareColumn == "" {
 			return nil
@@ -3000,7 +3003,7 @@ func (m Model) getExpandedListItems() []string {
 	case expandedRunAdjustmentColumn:
 		return m.availableColumns
 	case expandedCorrelationsTargetColumn:
-		return m.discoveredColumns
+		return append([]string{"(none)"}, m.availableColumns...)
 	}
 	return nil
 }
@@ -3105,7 +3108,11 @@ func (m *Model) handleExpandedListToggle() {
 		m.subCursor = 0
 
 	case expandedCorrelationsTargetColumn:
-		m.correlationsTargetColumn = selectedItem
+		if selectedItem == "(none)" {
+			m.correlationsTargetColumn = ""
+		} else {
+			m.correlationsTargetColumn = selectedItem
+		}
 		m.expandedOption = expandedNone
 		m.subCursor = 0
 	}
@@ -3158,6 +3165,9 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 	case expandedRunAdjustmentColumn:
 		return m.runAdjustmentColumn == item
 	case expandedCorrelationsTargetColumn:
+		if item == "(none)" {
+			return m.correlationsTargetColumn == ""
+		}
 		return m.correlationsTargetColumn == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
 		expandedConditionCompareWindows, expandedPlotComparisonWindows:
@@ -3284,8 +3294,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.mergeEventTypes
 	case textFieldTrialTableExtraEventColumns:
 		return m.trialTableExtraEventCols
-	case textFieldConfoundsQCColumnPatterns:
-		return m.confoundsQCColumnPatterns
 	case textFieldConditionCompareColumn:
 		return m.conditionCompareColumn
 	case textFieldConditionCompareWindows:
@@ -3296,8 +3304,6 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.temporalConditionColumn
 	case textFieldTemporalConditionValues:
 		return m.temporalConditionValues
-	case textFieldTemporalFilterValue:
-		return m.temporalFilterValue
 	case textFieldTfHeatmapFreqs:
 		return m.tfHeatmapFreqsSpec
 	case textFieldRunAdjustmentColumn:
@@ -3538,9 +3544,7 @@ func (m Model) behaviorSections() []behaviorSection {
 		{Key: "trial_table", Label: "Trial Table", Enabled: m.isComputationSelected("trial_table")},
 		{Key: "correlations", Label: "Correlations", Enabled: m.isComputationSelected("correlations")},
 		{Key: "pain_sensitivity", Label: "Pain Sensitivity", Enabled: m.isComputationSelected("pain_sensitivity")},
-		{Key: "confounds", Label: "Confounds", Enabled: m.isComputationSelected("confounds")},
 		{Key: "regression", Label: "Regression", Enabled: m.isComputationSelected("regression")},
-		{Key: "models", Label: "Models", Enabled: m.isComputationSelected("models")},
 		{Key: "stability", Label: "Stability", Enabled: m.isComputationSelected("stability")},
 		{Key: "consistency", Label: "Consistency", Enabled: m.isComputationSelected("consistency")},
 		{Key: "influence", Label: "Influence", Enabled: m.isComputationSelected("influence")},
@@ -3576,8 +3580,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.mergeEventTypes = value
 	case textFieldTrialTableExtraEventColumns:
 		m.trialTableExtraEventCols = value
-	case textFieldConfoundsQCColumnPatterns:
-		m.confoundsQCColumnPatterns = value
 	case textFieldConditionCompareColumn:
 		m.conditionCompareColumn = strings.TrimSpace(value)
 	case textFieldConditionCompareWindows:
@@ -3588,8 +3590,6 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.temporalConditionColumn = strings.TrimSpace(value)
 	case textFieldTemporalConditionValues:
 		m.temporalConditionValues = strings.TrimSpace(value)
-	case textFieldTemporalFilterValue:
-		m.temporalFilterValue = strings.TrimSpace(value)
 	case textFieldTfHeatmapFreqs:
 		m.tfHeatmapFreqsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldRunAdjustmentColumn:
@@ -3945,9 +3945,11 @@ const (
 	optMediationBootstrap
 	optMediationMaxMediatorsEnabled
 	optMediationMaxMediators
+	optMediationPermutations
 	// Behavior options - Moderation
 	optModerationMaxFeaturesEnabled
 	optModerationMaxFeatures
+	optModerationPermutations
 	// Behavior options - Mixed Effects
 	optMixedMaxFeatures
 	// Behavior options - Condition
@@ -4070,7 +4072,8 @@ const (
 	optTemporalSplitByCondition
 	optTemporalConditionColumn
 	optTemporalConditionValues
-	optTemporalFilterValue
+	optTemporalIncludeROIAverages
+	optTemporalIncludeTFGrid
 	// Temporal feature selection
 	optTemporalFeaturePower
 	optTemporalFeatureITPC
@@ -4368,7 +4371,7 @@ func (m Model) getFeaturesOptions() []optionType {
 		}
 	}
 
-	if m.isCategorySelected("directed_connectivity") {
+	if m.isCategorySelected("directedconnectivity") {
 		options = append(options, optFeatGroupDirectedConnectivity)
 		if m.featGroupDirectedConnExpanded {
 			options = append(options, optDirectedConnMeasures, optDirectedConnOutputLevel, optDirectedConnMvarOrder, optDirectedConnNFreqs, optDirectedConnMinSegSamples)
@@ -4440,7 +4443,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	}
 
 	// Source localization (LCMV, eLORETA)
-	if m.isCategorySelected("source_localization") {
+	if m.isCategorySelected("sourcelocalization") {
 		options = append(options, optFeatGroupSourceLoc)
 		if m.featGroupSourceLocExpanded {
 			options = append(options, optSourceLocMethod, optSourceLocSpacing, optSourceLocParc)
@@ -4905,28 +4908,63 @@ func (m Model) getBehaviorOptions() []optionType {
 	var options []optionType
 	options = append(options, optUseDefaults)
 
-	// General section - always visible
+	// General section - always visible, but contents depend on selected computations
 	options = append(options, optBehaviorGroupGeneral)
 	if m.behaviorGroupGeneralExpanded {
+		// Always show core statistical options
 		options = append(options,
 			optCorrMethod,
 			optRobustCorrelation,
 			optBootstrap,
-			optNPerm,
 			optRNGSeed,
 			optBehaviorNJobs,
-			optControlTemp,
-			optControlOrder,
-			optRunAdjustmentEnabled,
-			optRunAdjustmentColumn,
-			optRunAdjustmentIncludeInCorrelations,
-			optRunAdjustmentMaxDummies,
-			optTrialTableOnlyMode,
 			optFDRAlpha,
-			optComputeChangeScores,
-			optComputeLosoStability,
-			optComputeBayesFactors,
 		)
+
+		// N Permutations - relevant for cluster, temporal, regression, or correlations with permutation enabled
+		needsPermutations := m.isComputationSelected("cluster") ||
+			m.isComputationSelected("temporal") ||
+			m.isComputationSelected("regression") ||
+			m.isComputationSelected("correlations")
+		if needsPermutations {
+			options = append(options, optNPerm)
+		}
+
+		// Covariate controls - relevant for regression, models, influence, correlations, stability
+		needsCovariates := m.isComputationSelected("regression") ||
+			m.isComputationSelected("models") ||
+			m.isComputationSelected("influence") ||
+			m.isComputationSelected("correlations") ||
+			m.isComputationSelected("stability")
+		if needsCovariates {
+			options = append(options, optControlTemp, optControlOrder)
+		}
+
+		// Run adjustment - relevant for trial_table, correlations
+		needsRunAdjustment := m.isComputationSelected("trial_table") ||
+			m.isComputationSelected("correlations")
+		if needsRunAdjustment {
+			options = append(options,
+				optRunAdjustmentEnabled,
+				optRunAdjustmentColumn,
+				optRunAdjustmentIncludeInCorrelations,
+				optRunAdjustmentMaxDummies,
+			)
+		}
+
+		// Trial table only mode - relevant when trial_table is selected
+		if m.isComputationSelected("trial_table") {
+			options = append(options, optTrialTableOnlyMode)
+		}
+
+		// Change scores, LOSO stability, Bayes factors - relevant for correlations
+		if m.isComputationSelected("correlations") {
+			options = append(options,
+				optComputeChangeScores,
+				optComputeLosoStability,
+				optComputeBayesFactors,
+			)
+		}
 	}
 
 	// Trial table section - only show if trial_table computation is selected
@@ -4978,15 +5016,7 @@ func (m Model) getBehaviorOptions() []optionType {
 		}
 	}
 
-	// Confounds section
-	if m.isComputationSelected("confounds") {
-		options = append(options, optBehaviorGroupConfounds)
-		if m.behaviorGroupConfoundsExpanded {
-			options = append(options, optConfoundsAddAsCovariates, optConfoundsMaxCovariates, optConfoundsQCColumnPatterns)
-		}
-	}
-
-	// Regression section
+	// Regression section (includes model sensitivity options)
 	if m.isComputationSelected("regression") {
 		options = append(options, optBehaviorGroupRegression)
 		if m.behaviorGroupRegressionExpanded {
@@ -5011,40 +5041,12 @@ func (m Model) getBehaviorOptions() []optionType {
 				optRegressionPermutations,
 				optRegressionMaxFeatures,
 			)
-		}
-	}
-
-	// Models section
-	if m.isComputationSelected("models") {
-		options = append(options, optBehaviorGroupModels)
-		if m.behaviorGroupModelsExpanded {
+			// Model sensitivity options (now part of regression)
 			options = append(options,
-				optModelsIncludeTemperature,
-				optModelsTempControl,
-			)
-			if m.modelsTempControl == 2 {
-				options = append(options,
-					optModelsTempSplineKnots,
-					optModelsTempSplineQlow,
-					optModelsTempSplineQhigh,
-				)
-			}
-			options = append(options,
-				optModelsIncludeTrialOrder,
-				optModelsIncludePrev,
-				optModelsIncludeRunBlock,
-				optModelsIncludeInteraction,
-				optModelsStandardize,
-				optModelsMaxFeatures,
-				optModelsOutcomeRating,
-				optModelsOutcomePainResidual,
-				optModelsOutcomeTemperature,
-				optModelsOutcomePainBinary,
 				optModelsFamilyOLS,
 				optModelsFamilyRobust,
 				optModelsFamilyQuantile,
 				optModelsFamilyLogit,
-				optModelsBinaryOutcome,
 			)
 		}
 	}
@@ -5138,7 +5140,8 @@ func (m Model) getBehaviorOptions() []optionType {
 				optTemporalSplitByCondition,
 				optTemporalConditionColumn,
 				optTemporalConditionValues,
-				optTemporalFilterValue,
+				optTemporalIncludeROIAverages,
+				optTemporalIncludeTFGrid,
 			)
 			// Show ITPC-specific options when 'itpc' is selected in step 3 (feature selection)
 			if m.featureFileSelected["itpc"] {
@@ -5188,7 +5191,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("mediation") {
 		options = append(options, optBehaviorGroupMediation)
 		if m.behaviorGroupMediationExpanded {
-			options = append(options, optMediationBootstrap, optMediationMinEffect, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
+			options = append(options, optMediationBootstrap, optMediationPermutations, optMediationMinEffect, optMediationMaxMediatorsEnabled, optMediationMaxMediators)
 		}
 	}
 
@@ -5196,7 +5199,7 @@ func (m Model) getBehaviorOptions() []optionType {
 	if m.isComputationSelected("moderation") {
 		options = append(options, optBehaviorGroupModeration)
 		if m.behaviorGroupModerationExpanded {
-			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures)
+			options = append(options, optModerationMaxFeaturesEnabled, optModerationMaxFeatures, optModerationPermutations)
 		}
 	}
 

@@ -72,11 +72,15 @@ class MediationResult:
     ab: float = np.nan         # a × b
     se_ab: float = np.nan      # Sobel SE
     p_ab: float = np.nan       # Sobel test p-value
+    p_ab_perm: float = np.nan  # Permutation p-value for indirect effect
     ci_ab_low: float = np.nan  # Bootstrap CI
     ci_ab_high: float = np.nan
     
     # Effect proportions
     proportion_mediated: float = np.nan  # ab / c
+    
+    # Permutation info
+    n_permutations: int = 0
     
     # Sample info
     n: int = 0
@@ -108,9 +112,11 @@ class MediationResult:
             "path_c_prime_direct": self.c_prime,
             "indirect_effect_ab": self.ab,
             "sobel_p": self.p_ab,
+            "p_ab_perm": self.p_ab_perm,
             "ci_ab_low": self.ci_ab_low,
             "ci_ab_high": self.ci_ab_high,
             "proportion_mediated": self.proportion_mediated,
+            "n_permutations": self.n_permutations,
             "n": self.n,
             "significant": self.is_significant_mediation(),
         }
@@ -379,18 +385,147 @@ def bootstrap_indirect_effect(
     return float(ci_low), float(ci_high), indirect_effects_array
 
 
+def _single_permutation_mediation(
+    perm_seed: int,
+    independent_var: np.ndarray,
+    mediator: np.ndarray,
+    dependent_var: np.ndarray,
+) -> float:
+    """Single permutation iteration for mediation null distribution.
+    
+    Shuffles the mediator to break the M→Y relationship while preserving
+    the X→M relationship structure, creating a null distribution for
+    the indirect effect.
+    
+    Parameters
+    ----------
+    perm_seed : int
+        Random seed for this permutation iteration
+    independent_var : np.ndarray
+        Independent variable values
+    mediator : np.ndarray
+        Mediator variable values (will be shuffled)
+    dependent_var : np.ndarray
+        Dependent variable values
+        
+    Returns
+    -------
+    float
+        Indirect effect (a×b) from permuted sample, or np.nan if invalid
+    """
+    rng = np.random.default_rng(perm_seed)
+    shuffle_indices = rng.permutation(len(mediator))
+    m_shuffled = mediator[shuffle_indices]
+    
+    result = compute_mediation_paths(independent_var, m_shuffled, dependent_var)
+    return result.ab if np.isfinite(result.ab) else np.nan
+
+
+def permutation_indirect_effect(
+    X: np.ndarray,
+    M: np.ndarray,
+    Y: np.ndarray,
+    observed_ab: float,
+    n_perm: int = 1000,
+    rng: Optional[np.random.Generator] = None,
+    n_jobs: int = -1,
+) -> float:
+    """Compute permutation p-value for indirect effect (a×b).
+    
+    Creates a null distribution by shuffling the mediator to break the
+    M→Y relationship, then computes the proportion of null effects that
+    are as extreme as the observed effect (two-tailed).
+    
+    Parameters
+    ----------
+    X : np.ndarray
+        Independent variable
+    M : np.ndarray
+        Mediator variable
+    Y : np.ndarray
+        Dependent variable
+    observed_ab : float
+        Observed indirect effect from the original data
+    n_perm : int
+        Number of permutation iterations
+    rng : np.random.Generator, optional
+        Random number generator for reproducibility
+    n_jobs : int
+        Number of parallel jobs (-1 = all CPUs minus one)
+        
+    Returns
+    -------
+    float
+        Two-tailed permutation p-value
+    """
+    from joblib import Parallel, delayed, cpu_count
+    
+    if not np.isfinite(observed_ab) or n_perm <= 0:
+        return np.nan
+    
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    finite_mask = np.isfinite(X) & np.isfinite(M) & np.isfinite(Y)
+    sample_size = np.sum(finite_mask)
+    
+    if sample_size < MIN_SAMPLE_SIZE:
+        return np.nan
+    
+    independent_var = X[finite_mask]
+    mediator = M[finite_mask]
+    dependent_var = Y[finite_mask]
+    
+    if n_jobs == -1:
+        n_jobs_actual = max(1, cpu_count() - 1)
+    else:
+        n_jobs_actual = n_jobs
+    
+    max_seed_value = 2**31
+    base_seed = int(rng.integers(0, max_seed_value))
+    
+    should_parallelize = n_jobs_actual > 1 and n_perm > PARALLEL_THRESHOLD_BOOTSTRAP
+    
+    if should_parallelize:
+        null_effects = Parallel(n_jobs=n_jobs_actual, backend="loky")(
+            delayed(_single_permutation_mediation)(
+                base_seed + i, independent_var, mediator, dependent_var
+            )
+            for i in range(n_perm)
+        )
+    else:
+        null_effects = [
+            _single_permutation_mediation(
+                base_seed + i, independent_var, mediator, dependent_var
+            )
+            for i in range(n_perm)
+        ]
+    
+    valid_null_effects = np.array([e for e in null_effects if np.isfinite(e)])
+    
+    if len(valid_null_effects) < MIN_BOOTSTRAP_SUCCESSES:
+        return np.nan
+    
+    # Two-tailed p-value: count effects as extreme or more extreme than observed
+    n_extreme = np.sum(np.abs(valid_null_effects) >= np.abs(observed_ab))
+    p_perm = (n_extreme + 1) / (len(valid_null_effects) + 1)
+    
+    return float(p_perm)
+
+
 def run_full_mediation_analysis(
     X: np.ndarray,
     M: np.ndarray,
     Y: np.ndarray,
     n_boot: int = 5000,
+    n_perm: int = 0,
     x_label: str = "Temperature",
     m_label: str = "Power",
     y_label: str = "Pain Rating",
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
 ) -> MediationResult:
-    """Run complete mediation analysis with bootstrap CIs.
+    """Run complete mediation analysis with bootstrap CIs and permutation test.
     
     Parameters
     ----------
@@ -401,7 +536,9 @@ def run_full_mediation_analysis(
     Y : np.ndarray
         Dependent variable (pain rating)
     n_boot : int
-        Number of bootstrap iterations
+        Number of bootstrap iterations for confidence intervals
+    n_perm : int
+        Number of permutations for p-value (0 to skip permutation test)
     x_label, m_label, y_label : str
         Labels for variables
     rng : np.random.Generator, optional
@@ -412,7 +549,7 @@ def run_full_mediation_analysis(
     Returns
     -------
     MediationResult
-        Complete mediation results
+        Complete mediation results including permutation p-value if requested
     """
     # Compute paths
     result = compute_mediation_paths(X, M, Y)
@@ -426,6 +563,13 @@ def run_full_mediation_analysis(
     )
     result.ci_ab_low = ci_low
     result.ci_ab_high = ci_high
+    
+    # Permutation test for indirect effect
+    if n_perm > 0 and np.isfinite(result.ab):
+        result.p_ab_perm = permutation_indirect_effect(
+            X, M, Y, result.ab, n_perm=n_perm, rng=rng, n_jobs=n_jobs
+        )
+        result.n_permutations = n_perm
     
     return result
 
@@ -441,6 +585,7 @@ def _analyze_single_feature_mediation(
     independent_var: np.ndarray,
     dependent_var: np.ndarray,
     n_boot: int,
+    n_perm: int,
     x_label: str,
     y_label: str,
     rng_seed: int,
@@ -459,6 +604,8 @@ def _analyze_single_feature_mediation(
         Dependent variable values
     n_boot : int
         Number of bootstrap iterations
+    n_perm : int
+        Number of permutations for p-value (0 to skip)
     x_label : str
         Label for independent variable
     y_label : str
@@ -487,6 +634,7 @@ def _analyze_single_feature_mediation(
         mediator_values,
         dependent_var,
         n_boot=n_boot,
+        n_perm=n_perm,
         x_label=x_label,
         m_label=feature_name,
         y_label=y_label,
@@ -502,11 +650,13 @@ def analyze_mediation_for_features(
     feature_df: pd.DataFrame,
     Y: np.ndarray,
     n_boot: int = 2000,
+    n_perm: int = 0,
     x_label: str = "Temperature",
     y_label: str = "Pain Rating",
     logger: Optional[logging.Logger] = None,
     rng: Optional[np.random.Generator] = None,
     n_jobs: int = -1,
+    min_effect_size: float = 0.0,
 ) -> List[MediationResult]:
     """Run mediation analysis for multiple neural features.
     
@@ -522,7 +672,9 @@ def analyze_mediation_for_features(
     Y : np.ndarray
         Dependent variable
     n_boot : int
-        Bootstrap iterations per feature
+        Bootstrap iterations per feature for confidence intervals
+    n_perm : int
+        Permutation iterations per feature for p-values (0 to skip)
     x_label : str
         Label for independent variable
     y_label : str
@@ -533,11 +685,14 @@ def analyze_mediation_for_features(
         Random number generator for reproducibility
     n_jobs : int
         Number of parallel jobs (-1 = all CPUs minus one)
+    min_effect_size : float
+        Minimum absolute indirect effect (ab) or proportion mediated to include.
+        Results below this threshold are filtered out. Default 0.0 (no filtering).
         
     Returns
     -------
     List[MediationResult]
-        Results for features with sufficient data for analysis
+        Results for features with sufficient data for analysis and effect size
     """
     from joblib import Parallel, delayed, cpu_count
     
@@ -566,6 +721,7 @@ def analyze_mediation_for_features(
                 X,
                 Y,
                 n_boot,
+                n_perm,
                 x_label,
                 y_label,
                 base_seed + i,
@@ -580,6 +736,7 @@ def analyze_mediation_for_features(
                 X,
                 Y,
                 n_boot,
+                n_perm,
                 x_label,
                 y_label,
                 base_seed + i,
@@ -588,6 +745,16 @@ def analyze_mediation_for_features(
         ]
     
     valid_results = [result for result in raw_results if result is not None]
+    
+    # Filter by minimum effect size if specified
+    if min_effect_size > 0.0:
+        filtered_results = []
+        for result in valid_results:
+            abs_indirect = abs(result.ab) if np.isfinite(result.ab) else 0.0
+            abs_proportion = abs(result.proportion_mediated) if np.isfinite(result.proportion_mediated) else 0.0
+            if abs_indirect >= min_effect_size or abs_proportion >= min_effect_size:
+                filtered_results.append(result)
+        valid_results = filtered_results
     
     significant_count = sum(
         1 for result in valid_results if result.is_significant_mediation()
@@ -613,6 +780,7 @@ __all__ = [
     "MediationResult",
     "compute_mediation_paths",
     "bootstrap_indirect_effect",
+    "permutation_indirect_effect",
     "run_full_mediation_analysis",
     "analyze_mediation_for_features",
 ]

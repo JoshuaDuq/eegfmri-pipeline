@@ -132,7 +132,17 @@ def _apply_peak_rejection(
     peak_rejection_z: float,
     min_fit_points: int,
 ) -> Tuple[np.ndarray, bool]:
-    """Apply robust peak rejection using MAD-based thresholding.
+    """Apply robust iterative peak rejection using MAD-based thresholding.
+    
+    Uses iterative rejection to handle moderate oscillatory peaks that would
+    otherwise bias aperiodic slope estimates. This is critical for pain/arousal
+    studies where alpha/beta peaks can be prominent.
+    
+    Algorithm:
+    1. Compute initial linear fit on all points
+    2. Compute residuals from fit
+    3. Reject points with residuals > threshold (positive deviations = peaks)
+    4. Repeat until convergence or max iterations
     
     Returns:
         Tuple of (keep_mask, peak_rejected_flag)
@@ -141,18 +151,43 @@ def _apply_peak_rejection(
     keep_mask = np.ones(n_values, dtype=bool)
     peak_rejected = False
     
-    mad = stats.median_abs_deviation(values, scale="normal", nan_policy="omit")
-    median = np.median(values) if np.isfinite(values).any() else np.nan
+    if n_values < min_fit_points:
+        return keep_mask, peak_rejected
     
-    has_valid_stats = np.isfinite(mad) and mad > _MIN_MAD_THRESHOLD and np.isfinite(median)
-    if has_valid_stats:
-        threshold = median + peak_rejection_z * mad
-        candidate_keep = values <= threshold
-        n_kept = int(np.sum(candidate_keep))
+    # Iterative peak rejection (max 3 iterations to avoid over-rejection)
+    max_iterations = 3
+    for iteration in range(max_iterations):
+        current_values = values[keep_mask]
+        if current_values.size < min_fit_points:
+            break
         
-        if n_kept >= min_fit_points:
-            keep_mask = candidate_keep
-            peak_rejected = bool(np.any(~candidate_keep))
+        mad = stats.median_abs_deviation(current_values, scale="normal", nan_policy="omit")
+        median = np.nanmedian(current_values)
+        
+        has_valid_stats = np.isfinite(mad) and mad > _MIN_MAD_THRESHOLD and np.isfinite(median)
+        if not has_valid_stats:
+            break
+        
+        # Threshold for peak rejection (positive deviations only = oscillatory peaks)
+        threshold = median + peak_rejection_z * mad
+        
+        # Apply threshold to original values, respecting existing mask
+        new_keep = values <= threshold
+        candidate_mask = keep_mask & new_keep
+        n_kept = int(np.sum(candidate_mask))
+        
+        if n_kept < min_fit_points:
+            break
+        
+        # Check for convergence
+        if np.array_equal(candidate_mask, keep_mask):
+            break
+        
+        n_rejected_this_iter = int(np.sum(keep_mask)) - n_kept
+        if n_rejected_this_iter > 0:
+            peak_rejected = True
+        
+        keep_mask = candidate_mask
     
     return keep_mask, peak_rejected
 
@@ -668,6 +703,76 @@ def _compute_theta_beta_ratio(
     return tbr_matrix
 
 
+def _validate_band_coverage(
+    freqs: np.ndarray,
+    band_name: str,
+    band_range: Tuple[float, float],
+    logger: Any,
+) -> Tuple[bool, float]:
+    """Validate that frequency array covers the band range.
+    
+    Returns:
+        Tuple of (is_valid, coverage_fraction)
+        - is_valid: True if at least some frequencies fall within band
+        - coverage_fraction: Fraction of band range covered by freqs
+    """
+    fmin, fmax = float(freqs.min()), float(freqs.max())
+    band_lo, band_hi = float(band_range[0]), float(band_range[1])
+    
+    # Check if band is completely outside PSD range
+    if band_hi < fmin or band_lo > fmax:
+        logger.warning(
+            "Band '%s' [%.1f-%.1f Hz] is completely outside aperiodic PSD range [%.1f-%.1f Hz]. "
+            "Features for this band will be NaN. Adjust aperiodic.fmin/fmax in config.",
+            band_name, band_lo, band_hi, fmin, fmax
+        )
+        return False, 0.0
+    
+    # Check for partial coverage
+    effective_lo = max(band_lo, fmin)
+    effective_hi = min(band_hi, fmax)
+    band_width = band_hi - band_lo
+    covered_width = effective_hi - effective_lo
+    coverage_fraction = covered_width / band_width if band_width > 0 else 0.0
+    
+    if coverage_fraction < 1.0:
+        logger.warning(
+            "Band '%s' [%.1f-%.1f Hz] is only %.0f%% covered by aperiodic PSD range [%.1f-%.1f Hz]. "
+            "Effective range: [%.1f-%.1f Hz]. Consider adjusting aperiodic.fmin/fmax.",
+            band_name, band_lo, band_hi, coverage_fraction * 100, fmin, fmax,
+            effective_lo, effective_hi
+        )
+    
+    return True, coverage_fraction
+
+
+def _compute_frequency_weights(freqs: np.ndarray) -> np.ndarray:
+    """Compute frequency bin widths for weighted integration.
+    
+    For uniform grids, all weights are equal. For non-uniform grids (log-spaced,
+    adaptive), weights reflect the frequency range each bin represents.
+    
+    Uses trapezoidal rule: each bin's weight is half the distance to neighbors.
+    """
+    n_freqs = len(freqs)
+    if n_freqs <= 1:
+        return np.ones(n_freqs)
+    
+    weights = np.zeros(n_freqs)
+    
+    # First bin: half distance to next
+    weights[0] = (freqs[1] - freqs[0]) / 2.0
+    
+    # Middle bins: half distance to both neighbors
+    for i in range(1, n_freqs - 1):
+        weights[i] = (freqs[i + 1] - freqs[i - 1]) / 2.0
+    
+    # Last bin: half distance to previous
+    weights[-1] = (freqs[-1] - freqs[-2]) / 2.0
+    
+    return weights
+
+
 def _compute_power_corrected_band_power(
     freqs: np.ndarray,
     residuals: np.ndarray,
@@ -675,7 +780,11 @@ def _compute_power_corrected_band_power(
     band_range: Tuple[float, float],
     fit_ok: np.ndarray,
 ) -> np.ndarray:
-    """Compute power-corrected band power from residuals."""
+    """Compute power-corrected band power from residuals.
+    
+    Uses frequency-weighted integration to handle non-uniform frequency grids
+    correctly. For uniform grids, this is equivalent to simple averaging.
+    """
     n_epochs, n_channels, _ = residuals.shape
     pc_matrix = np.full((n_epochs, n_channels), np.nan)
     
@@ -683,10 +792,22 @@ def _compute_power_corrected_band_power(
     if not np.any(band_mask):
         return pc_matrix
     
+    # Compute frequency weights for proper integration
+    all_weights = _compute_frequency_weights(freqs)
+    band_weights = all_weights[band_mask]
+    
+    # Normalize weights to sum to 1 for weighted average
+    weight_sum = band_weights.sum()
+    if weight_sum > 0:
+        band_weights = band_weights / weight_sum
+    else:
+        band_weights = np.ones_like(band_weights) / len(band_weights)
+    
     for channel_idx in range(n_channels):
         res_band = residuals[:, channel_idx, band_mask]
         ratio = np.power(10.0, res_band)
-        pc_matrix[:, channel_idx] = np.mean(ratio, axis=1)
+        # Weighted mean instead of simple mean
+        pc_matrix[:, channel_idx] = np.sum(ratio * band_weights, axis=1)
         pc_matrix[~fit_ok[:, channel_idx], channel_idx] = np.nan
     
     return pc_matrix
@@ -705,18 +826,43 @@ def _build_roi_map(ch_names: List[str], config: Any) -> Dict[str, List[int]]:
     return build_roi_map(ch_names, roi_defs)
 
 
+_DEFAULT_MIN_VALID_CHANNELS_ROI = 2
+_DEFAULT_MIN_VALID_CHANNELS_GLOBAL = 3
+_DEFAULT_MIN_VALID_FRACTION_ROI = 0.5
+
+
 def _aggregate_features_by_spatial_mode(
     metrics: Dict[str, Tuple[str, str, np.ndarray]],
     ch_names: List[str],
     segment_name: str,
     spatial_modes: List[str],
     roi_map: Dict[str, List[int]],
+    min_valid_channels_roi: int = _DEFAULT_MIN_VALID_CHANNELS_ROI,
+    min_valid_channels_global: int = _DEFAULT_MIN_VALID_CHANNELS_GLOBAL,
+    min_valid_fraction_roi: float = _DEFAULT_MIN_VALID_FRACTION_ROI,
 ) -> Dict[str, np.ndarray]:
-    """Aggregate features according to spatial modes (channels, ROI, global)."""
+    """Aggregate features according to spatial modes (channels, ROI, global).
+    
+    Only computes spatial modes that are explicitly requested.
+    Applies minimum valid channel rules to prevent spurious estimates from
+    trials where most channels failed QC.
+    
+    Args:
+        metrics: Dict mapping metric name to (band, stat, matrix) tuples
+        ch_names: List of channel names
+        segment_name: Name of time segment
+        spatial_modes: List of modes to compute ('channels', 'roi', 'global')
+        roi_map: Dict mapping ROI names to channel indices
+        min_valid_channels_roi: Minimum valid channels required per ROI per trial
+        min_valid_channels_global: Minimum valid channels required for global average
+        min_valid_fraction_roi: Minimum fraction of ROI channels that must be valid
+    """
     data_dict: Dict[str, np.ndarray] = {}
     
     for metric_name, (band, stat, matrix) in metrics.items():
-        # Per-channel aggregation
+        n_epochs = matrix.shape[0]
+        
+        # Per-channel aggregation (only if requested)
         if 'channels' in spatial_modes:
             for channel_idx, channel_name in enumerate(ch_names):
                 column_name = NamingSchema.build(
@@ -724,23 +870,41 @@ def _aggregate_features_by_spatial_mode(
                 )
                 data_dict[column_name] = matrix[:, channel_idx]
         
-        # ROI aggregation
+        # ROI aggregation with minimum valid channel rules
         if 'roi' in spatial_modes and roi_map:
             for roi_name, channel_indices in roi_map.items():
-                if channel_indices and len(channel_indices) > 0:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", category=RuntimeWarning)
-                        roi_values = np.nanmean(matrix[:, channel_indices], axis=1)
-                    column_name = NamingSchema.build(
-                        "aperiodic", segment_name, band, "roi", stat, channel=roi_name
-                    )
-                    data_dict[column_name] = roi_values
+                if not channel_indices or len(channel_indices) == 0:
+                    continue
+                
+                roi_matrix = matrix[:, channel_indices]
+                roi_values = np.full(n_epochs, np.nan)
+                
+                for trial_idx in range(n_epochs):
+                    trial_vals = roi_matrix[trial_idx, :]
+                    n_valid = int(np.sum(np.isfinite(trial_vals)))
+                    n_total = len(channel_indices)
+                    valid_fraction = n_valid / n_total if n_total > 0 else 0.0
+                    
+                    # Apply minimum valid channel rules
+                    if n_valid >= min_valid_channels_roi and valid_fraction >= min_valid_fraction_roi:
+                        roi_values[trial_idx] = np.nanmean(trial_vals)
+                
+                column_name = NamingSchema.build(
+                    "aperiodic", segment_name, band, "roi", stat, channel=roi_name
+                )
+                data_dict[column_name] = roi_values
         
-        # Global aggregation
+        # Global aggregation with minimum valid channel rules
         if 'global' in spatial_modes:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=RuntimeWarning)
-                global_values = np.nanmean(matrix, axis=1)
+            global_values = np.full(n_epochs, np.nan)
+            
+            for trial_idx in range(n_epochs):
+                trial_vals = matrix[trial_idx, :]
+                n_valid = int(np.sum(np.isfinite(trial_vals)))
+                
+                if n_valid >= min_valid_channels_global:
+                    global_values[trial_idx] = np.nanmean(trial_vals)
+            
             column_name = NamingSchema.build("aperiodic", segment_name, band, "global", stat)
             data_dict[column_name] = global_values
     
@@ -897,13 +1061,24 @@ def _extract_aperiodic_for_segment(
     metrics["peakfreq"] = ("alpha", "peakfreq", apf_matrix)
     metrics["tbr"] = ("broadband", "tbr", tbr_matrix)
     
-    # Compute power-corrected band power per band
+    # Compute power-corrected band power per band with coverage validation
+    band_coverage_info: Dict[str, float] = {}
     for band_name in bands:
         if band_name not in freq_bands:
             continue
         
         band_range = freq_bands[band_name]
-        pc_matrix = _compute_power_corrected_band_power(freqs, residuals, band_name, band_range, fit_ok)
+        
+        # Validate band coverage before computing features
+        is_valid, coverage = _validate_band_coverage(freqs, band_name, band_range, logger)
+        band_coverage_info[band_name] = coverage
+        
+        if not is_valid:
+            # Band completely outside PSD range - skip with NaN matrix
+            pc_matrix = np.full((n_epochs, n_channels), np.nan)
+        else:
+            pc_matrix = _compute_power_corrected_band_power(freqs, residuals, band_name, band_range, fit_ok)
+        
         metrics[f"{band_name}_powcorr"] = (band_name, "powcorr", pc_matrix)
     
     # Aggregate features by spatial mode
@@ -911,25 +1086,29 @@ def _extract_aperiodic_for_segment(
         metrics, ch_names, segment_name, spatial_modes, roi_map
     )
     
-    # Add QC metadata
+    # Add QC metadata with proper per-trial structure
     data_dict["__qc__"] = {
         "segment": segment_name,
         "freqs": freqs,
         "log_freqs": log_freqs,
+        "psd_fmin": float(freqs.min()) if freqs.size > 0 else np.nan,
+        "psd_fmax": float(freqs.max()) if freqs.size > 0 else np.nan,
         "line_noise_excluded": bool(line_config.exclude),
         "line_noise_bins_removed": int(n_removed),
         "slopes": slopes,
         "offsets": offsets,
         "r2": r2,
         "rms": rms,
+        "fit_ok": fit_ok,
         "min_r2": float(min_r2),
         "max_rms": float(max_rms) if max_rms is not None else None,
         "fit_ok_fraction": float(np.nanmean(fit_ok)) if fit_ok.size else np.nan,
-        "residual_mean": np.nanmean(residuals, axis=2) if residuals.ndim == 3 else None,
+        "n_valid_per_trial": np.sum(fit_ok, axis=1) if fit_ok.ndim == 2 else None,
         "valid_bins": valid_bins,
         "kept_bins": kept_bins,
         "peak_rejected": peak_rej,
         "channel_names": ch_names,
+        "band_coverage": band_coverage_info,
     }
     
     return data_dict

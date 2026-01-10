@@ -1854,7 +1854,10 @@ def plot_spectral_slope_topomap(
     
     plot_cfg = get_plot_config(config)
     
-    slope_cols = [c for c in aperiodic_df.columns if c.startswith("aper_slope_")]
+    # Support both legacy "aper_slope_" and current "aperiodic_*_slope" naming conventions
+    slope_cols = [c for c in aperiodic_df.columns if c.startswith("aper_slope_") or "_slope" in c]
+    # Filter to only slope columns (not offset, r2, etc.)
+    slope_cols = [c for c in slope_cols if "slope" in c.lower() and "offset" not in c.lower()]
     
     if not slope_cols:
         return
@@ -1907,7 +1910,9 @@ def plot_spectral_slope_topomap(
     fig.suptitle(f"Spectral Slope (1/f) Spatial Distribution (sub-{subject})", 
                 fontsize=plot_cfg.font.figure_title, fontweight="bold", y=1.02)
     
-    footer = f"n={len(aperiodic_df)} trials | Steeper slope = more 1/f noise"
+    # Note: Slope is stored as negative (e.g., -1.5 means 1/f^1.5).
+    # More negative = steeper = stronger 1/f component.
+    footer = f"n={len(aperiodic_df)} trials | More negative slope = stronger 1/f (aperiodic) activity"
     fig.text(0.5, 0.01, footer, ha="center", va="bottom", fontsize=plot_cfg.font.small, color="gray")
     
     plt.tight_layout(rect=[0, 0.03, 1, 0.98])

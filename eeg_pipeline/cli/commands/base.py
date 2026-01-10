@@ -35,8 +35,8 @@ def _find_bands_in_columns(
 _FEATURE_AVAILABILITY_CATEGORIES = [
     "power",
     "connectivity",
-    "directed_connectivity",
-    "source_localization",
+    "directedconnectivity",
+    "sourcelocalization",
     "aperiodic",
     "erp",
     "bursts",
@@ -109,8 +109,8 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     category_patterns = {
         "power": ["features_power*.tsv"],
         "connectivity": ["features_connectivity*"],
-        "directed_connectivity": ["features_directed_connectivity*"],
-        "source_localization": ["features_source_localization*"],
+        "directedconnectivity": ["features_directedconnectivity*"],
+        "sourcelocalization": ["features_sourcelocalization*"],
         "aperiodic": ["features_aperiodic*.tsv"],
         "erp": ["features_erp*.tsv"],
         "bursts": ["features_bursts*.tsv"],
@@ -189,8 +189,6 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
             "model_comparison*.tsv",
             "breakpoint_candidates*.tsv",
         ],
-        # confounds_audit/ subfolder
-        "confounds": ["confounds_audit/confounds_audit*.tsv", "confounds_audit/*.metadata.json", "confounds_audit*.tsv"],
         # trialwise_regression/ subfolder
         "regression": ["trialwise_regression/regression_feature_effects*.tsv", "regression_feature_effects*.tsv"],
         # feature_models/ subfolder
@@ -215,6 +213,8 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         "condition": ["condition_effects/condition_effects*.tsv", "condition_effects*.tsv"],
         # temporal_correlations/ subfolder
         "temporal": [
+            "temporal_correlations/temporal_correlations_*.tsv",
+            "temporal_correlations/normalized_results*.tsv",
             "temporal_correlations/corr_stats_temporal_*.tsv",
             "corr_stats_temporal_*.tsv",
             "corr_stats_temporal_combined*.tsv",
@@ -238,7 +238,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                 files = list(stats_dir.rglob(pattern))
                 # Filter out temporal correlation files from regular correlations check
                 if comp == "correlations":
-                    files = [f for f in files if "temporal" not in f.name.lower() and not f.name.startswith("corr_stats_temporal")]
+                    files = [f for f in files if "temporal" not in f.name.lower() and not f.name.startswith("corr_stats_temporal") and not f.name.startswith("temporal_correlations")]
                 if files:
                     found_file = max(files, key=lambda f: f.stat().st_mtime)
                     break

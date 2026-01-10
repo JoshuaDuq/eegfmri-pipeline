@@ -47,7 +47,6 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "lag_features",
     "pain_residual",
     "temperature_models",
-    "confounds",
     "regression",
     "models",
     "stability",
@@ -64,6 +63,11 @@ BEHAVIOR_COMPUTATION_FLAGS = [
     "mixed_effects",
 ]
 
+# Bundled computation aliases for cleaner TUI/CLI
+BEHAVIOR_COMPUTATION_BUNDLES = {
+    "validation": ["consistency", "influence"],
+}
+
 
 def _resolve_behavior_computation_flags(
     requested: Optional[List[str]],
@@ -73,18 +77,27 @@ def _resolve_behavior_computation_flags(
     Normalize requested behavior computations into stage flags.
     
     If requested is None, returns None to indicate no override (use config).
+    Handles bundled aliases like 'validation' -> ['consistency', 'influence'].
     """
     if requested is None:
         return None
     
     flags = {k: False for k in BEHAVIOR_COMPUTATION_FLAGS}
-    normalized = [str(item).lower() for item in requested]
     
-    unknown = [k for k in normalized if k not in BEHAVIOR_COMPUTATION_FLAGS]
+    # Expand bundled aliases
+    expanded = []
+    for item in requested:
+        key = str(item).lower()
+        if key in BEHAVIOR_COMPUTATION_BUNDLES:
+            expanded.extend(BEHAVIOR_COMPUTATION_BUNDLES[key])
+        else:
+            expanded.append(key)
+    
+    unknown = [k for k in expanded if k not in BEHAVIOR_COMPUTATION_FLAGS]
     if unknown and logger:
         logger.warning("Ignoring unrecognized behavior computations: %s", ", ".join(sorted(set(unknown))))
     
-    for key in normalized:
+    for key in expanded:
         if key in flags:
             flags[key] = True
     
@@ -113,6 +126,7 @@ class BehaviorPipelineConfig:
     bootstrap: int = 0
     robust_method: Optional[str] = None
     method_label: str = "spearman"
+    correlation_types: List[str] = field(default_factory=lambda: ["partial_cov_temp"])
     
     # Computation flags
     trial_table_only: bool = True
@@ -120,7 +134,6 @@ class BehaviorPipelineConfig:
     run_lag_features: bool = True
     run_pain_residual: bool = True
     run_temperature_models: bool = True
-    run_confounds: bool = True
     run_regression: bool = False
     run_models: bool = False
     run_stability: bool = True
@@ -137,7 +150,7 @@ class BehaviorPipelineConfig:
     
     # General stats
     fdr_alpha: float = 0.05
-    n_permutations: int = 1000
+    n_permutations: int = 0
     n_jobs: int = -1
     
     # Condition-specific
@@ -188,12 +201,12 @@ class BehaviorPipelineConfig:
             bootstrap=int(get_config_value(config, "behavior_analysis.bootstrap", get_config_value(config, "behavior_analysis.statistics.default_n_bootstrap", 1000))),
             robust_method=robust_method,
             method_label=method_label,
+            correlation_types=get_config_value(config, "behavior_analysis.correlations.types", ["partial_cov_temp"]),
             trial_table_only=bool(get_config_value(config, "behavior_analysis.trial_table_only.enabled", True)),
             run_trial_table=bool(get_config_value(config, "behavior_analysis.trial_table.enabled", True)),
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_pain_residual=bool(get_config_value(config, "behavior_analysis.pain_residual.enabled", True)),
             run_temperature_models=bool(get_config_value(config, "behavior_analysis.temperature_models.enabled", True)),
-            run_confounds=bool(get_config_value(config, "behavior_analysis.confounds.enabled", True)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
             run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),
@@ -212,7 +225,7 @@ class BehaviorPipelineConfig:
                 get_config_value(
                     config,
                     "behavior_analysis.cluster.n_permutations",
-                    get_config_value(config, "behavior_analysis.statistics.n_permutations", 1000),
+                    get_config_value(config, "behavior_analysis.statistics.n_permutations", 0),
                 )
             ),
             n_jobs=int(get_config_value(config, "behavior_analysis.n_jobs", -1)),
@@ -260,9 +273,7 @@ def _count_significant(p_values: Optional[pd.Series], threshold: float = SIGNIFI
 class BehaviorPipelineResults:
     subject: str
     trial_table_path: Optional[str] = None
-    trial_table_validation: Optional[Dict[str, Any]] = None
     report_path: Optional[str] = None
-    confounds: Optional[pd.DataFrame] = None
     regression: Optional[pd.DataFrame] = None
     models: Optional[pd.DataFrame] = None
     stability: Optional[pd.DataFrame] = None
@@ -462,7 +473,6 @@ class BehaviorPipeline(PipelineBase):
             self.pipeline_config.run_lag_features = comp_flags["lag_features"]
             self.pipeline_config.run_pain_residual = comp_flags["pain_residual"]
             self.pipeline_config.run_temperature_models = comp_flags["temperature_models"]
-            self.pipeline_config.run_confounds = comp_flags["confounds"]
             self.pipeline_config.run_regression = comp_flags["regression"]
             self.pipeline_config.run_models = comp_flags["models"]
             self.pipeline_config.run_stability = comp_flags["stability"]
@@ -490,7 +500,6 @@ class BehaviorPipeline(PipelineBase):
                     self.pipeline_config.run_lag_features,
                     self.pipeline_config.run_pain_residual,
                     self.pipeline_config.run_temperature_models,
-                    self.pipeline_config.run_confounds,
                     self.pipeline_config.run_regression,
                     self.pipeline_config.run_models,
                     self.pipeline_config.run_stability,
@@ -533,7 +542,11 @@ class BehaviorPipeline(PipelineBase):
         from eeg_pipeline.infra.paths import deriv_stats_path, ensure_dir
         from eeg_pipeline.infra.logging import get_subject_logger
         from eeg_pipeline.cli.common import ProgressReporter
+        from eeg_pipeline.analysis.behavior.orchestration import _cache
         import time
+        
+        # Clear cache at pipeline entry point to prevent stale data
+        _cache.clear()
         
         task = task or self.config.get("project.task", "thermalactive")
         progress = kwargs.get("progress") or ProgressReporter(enabled=False)
@@ -637,11 +650,6 @@ class BehaviorPipeline(PipelineBase):
         summary = results.to_summary()
         summary_path = ctx.stats_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, default=str))
-        
-        validation_was_run = self.pipeline_config.run_correlations or self.pipeline_config.run_condition_comparison
-        if validation_was_run:
-            from eeg_pipeline.analysis.behavior.orchestration import _write_normalized_results
-            _write_normalized_results(ctx, self.pipeline_config, results)
 
         n_features = summary.get("n_features", 0)
         n_sig_raw = summary.get("n_sig_raw", 0)

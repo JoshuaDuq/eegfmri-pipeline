@@ -782,7 +782,7 @@
       "label": "Temporal Topomaps",
       "description": "Temporal correlation topomaps",
       "required_files": [
-        "stats/temporal_correlations_by_pain*.npz"
+        "stats/temporal_correlations/temporal_correlations_by_condition*.npz"
       ],
       "requires_stats": true
     },

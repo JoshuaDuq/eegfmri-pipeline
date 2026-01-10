@@ -29,10 +29,10 @@ STANDARD_FEATURE_FILES = {
     "asymmetry": "features_asymmetry.tsv",
     # Connectivity & phase
     "connectivity": "features_connectivity.tsv",
-    "directed_connectivity": "features_directed_connectivity.tsv",
-    "source_localization": "features_source_localization.tsv",
+    "directedconnectivity": "features_directedconnectivity.tsv",
+    "sourcelocalization": "features_sourcelocalization.tsv",
     "itpc": "features_itpc.tsv",
-    "pac": "features_pac_trials.tsv",
+    "pac": "features_pac.tsv",
     # Exploratory & QC
     "complexity": "features_complexity.tsv",
     "bursts": "features_bursts.tsv",
@@ -51,8 +51,8 @@ FEATURE_FILE_DISPLAY_NAMES = {
     "asymmetry": "Hemispheric Asymmetry",
     # Connectivity & phase
     "connectivity": "Connectivity Features",
-    "directed_connectivity": "Directed Connectivity (PSI, DTF, PDC)",
-    "source_localization": "Source Localization (LCMV, eLORETA)",
+    "directedconnectivity": "Directed Connectivity (PSI, DTF, PDC)",
+    "sourcelocalization": "Source Localization (LCMV, eLORETA)",
     "itpc": "Inter-Trial Phase Coherence",
     "pac": "Phase-Amplitude Coupling",
     # Exploratory & QC

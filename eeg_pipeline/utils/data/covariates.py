@@ -19,11 +19,17 @@ from ..config.loader import load_config
 ###################################################################
 
 
-TRIAL_COLUMN_CANDIDATES = ["trial", "trial_number", "trial_index", "run", "block"]
+# WARNING: Order matters! Prefer true within-run trial indices over run/block IDs.
+# Using run/block as "trial order" is statistically meaningless (categorical coerced to numeric).
+TRIAL_COLUMN_CANDIDATES = ["trial_index", "trial_number", "trial"]
+
+# These are NOT valid trial order covariates - they are categorical grouping variables
+RUN_BLOCK_COLUMNS = ["run", "block", "run_number", "block_number"]
 
 TEMPERATURE_ALIASES = {"stimulus_temp", "stimulus_temperature", "temp", "temperature"}
 
-TRIAL_ALIASES = {"trial", "trial_number", "trial_index", "run", "block"}
+# Only true within-run trial indices should be used as order covariates
+TRIAL_ALIASES = {"trial", "trial_number", "trial_index"}
 
 
 ###################################################################
@@ -174,6 +180,19 @@ def _resolve_default_covariates(
         )
         covariate_columns.append(trial_column)
         column_name_map[trial_column] = canonical_name
+    else:
+        # Check if user might be accidentally using run/block as trial order
+        run_block_col = _pick_first_column(events_df, RUN_BLOCK_COLUMNS)
+        if run_block_col:
+            import warnings
+            warnings.warn(
+                f"No true trial index column found (tried: {TRIAL_COLUMN_CANDIDATES}). "
+                f"Found '{run_block_col}' but run/block IDs are categorical grouping variables, "
+                f"not valid trial order covariates. Using them as numeric covariates is "
+                f"statistically meaningless. Add a true within-run trial index column.",
+                UserWarning,
+                stacklevel=3,
+            )
 
 
 def _resolve_covariate_columns(

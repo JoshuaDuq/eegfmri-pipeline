@@ -66,11 +66,17 @@ def run_cluster_test_from_context(ctx: "BehaviorContext") -> Optional[Dict[str, 
             ctx.logger.info("Skipping cluster test: feature filter %s excludes 'power'/'spectral'", allowed)
             return None
 
+    from eeg_pipeline.infra.paths import ensure_dir
+    
+    # Create cluster subdirectory for organized output
+    cluster_dir = ctx.stats_dir / "cluster"
+    ensure_dir(cluster_dir)
+
     return _run_cluster_test_core(
         ctx.subject,
         ctx.epochs,
         ctx.aligned_events,
-        ctx.stats_dir,
+        cluster_dir,
         ctx.config,
         ctx.logger,
         ctx.n_perm,

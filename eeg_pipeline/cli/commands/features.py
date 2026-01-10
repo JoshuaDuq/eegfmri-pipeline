@@ -134,9 +134,9 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         conn_cfg["min_segment_sec"] = args.conn_min_segment_sec
 
 
-def _apply_directed_connectivity_overrides(args: argparse.Namespace, config: Any) -> None:
+def _apply_directedconnectivity_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply directed connectivity-related config overrides (PSI, DTF, PDC)."""
-    dconn_cfg = config.setdefault("feature_engineering", {}).setdefault("directed_connectivity", {})
+    dconn_cfg = config.setdefault("feature_engineering", {}).setdefault("directedconnectivity", {})
     
     if _get_arg_value(args, "directed_connectivity_measures") is not None:
         measures = args.directed_connectivity_measures
@@ -153,9 +153,9 @@ def _apply_directed_connectivity_overrides(args: argparse.Namespace, config: Any
         dconn_cfg["min_segment_samples"] = args.directed_conn_min_segment_samples
 
 
-def _apply_source_localization_overrides(args: argparse.Namespace, config: Any) -> None:
+def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply source localization-related config overrides (LCMV, eLORETA)."""
-    src_cfg = config.setdefault("feature_engineering", {}).setdefault("source_localization", {})
+    src_cfg = config.setdefault("feature_engineering", {}).setdefault("sourcelocalization", {})
     
     if _get_arg_value(args, "source_method") is not None:
         src_cfg["method"] = args.source_method
@@ -505,8 +505,8 @@ def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> No
     _apply_frequency_bands_override(args, config)
     _apply_rois_override(args, config)
     _apply_connectivity_overrides(args, config)
-    _apply_directed_connectivity_overrides(args, config)
-    _apply_source_localization_overrides(args, config)
+    _apply_directedconnectivity_overrides(args, config)
+    _apply_sourcelocalization_overrides(args, config)
     _apply_pac_overrides(args, config)
     _apply_aperiodic_overrides(args, config)
     _apply_complexity_overrides(args, config)

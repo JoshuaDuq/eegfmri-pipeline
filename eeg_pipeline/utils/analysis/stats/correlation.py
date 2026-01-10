@@ -1575,6 +1575,254 @@ def correlate_single_feature(
     return r_raw, p_raw, r_pt, p_pt, r_po, p_po, r_pf, p_pf, n_valid
 
 
+###################################################################
+# Vectorized Batch Correlations
+###################################################################
+
+
+def compute_batch_correlations(
+    feature_columns: List[str],
+    feature_df: pd.DataFrame,
+    target_arr: np.ndarray,
+    method: str = "spearman",
+    min_samples: int = 3,
+    logger: Optional[logging.Logger] = None,
+) -> List[Dict[str, Any]]:
+    """Compute correlations for all features using vectorized operations.
+    
+    Much faster than per-feature loops for large feature sets.
+    Computes raw correlations only (no partial correlations or reliability).
+    
+    For partial correlations or reliability, use correlate_single_feature per-feature.
+    """
+    import warnings
+    
+    n_features = len(feature_columns)
+    if n_features == 0:
+        return []
+    
+    if logger:
+        logger.info(f"Correlations: computing {n_features} features (vectorized batch mode)")
+    
+    # Extract data matrix
+    data_matrix = feature_df[feature_columns].to_numpy(dtype=np.float64, na_value=np.nan)
+    target = np.asarray(target_arr, dtype=np.float64).ravel()
+    
+    n_samples = len(target)
+    if data_matrix.shape[0] != n_samples:
+        raise ValueError(f"Feature matrix rows ({data_matrix.shape[0]}) != target length ({n_samples})")
+    
+    # Find valid samples per feature (finite in both feature and target)
+    target_finite = np.isfinite(target)
+    feature_finite = np.isfinite(data_matrix)
+    valid_mask = feature_finite & target_finite[:, np.newaxis]  # (n_samples, n_features)
+    
+    n_valid_per_feature = valid_mask.sum(axis=0)  # (n_features,)
+    
+    # Compute correlations vectorized
+    method_normalized = normalize_correlation_method(method, default="spearman")
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        
+        if method_normalized == "spearman":
+            r_values, p_values = _compute_batch_spearman(
+                data_matrix, target, valid_mask, n_valid_per_feature, min_samples
+            )
+        else:
+            r_values, p_values = _compute_batch_pearson(
+                data_matrix, target, valid_mask, n_valid_per_feature, min_samples
+            )
+    
+    # Build result records
+    results: List[Dict[str, Any]] = []
+    
+    for i, col in enumerate(feature_columns):
+        r = r_values[i]
+        p = p_values[i]
+        n = int(n_valid_per_feature[i])
+        
+        if not np.isfinite(r):
+            continue
+        
+        band = _extract_band_from_column(col)
+        is_change = "_change_" in col
+        effect_interp = interpret_correlation(r)
+        
+        results.append({
+            "feature": col,
+            "band": band,
+            "r_raw": float(r),
+            "p_raw": float(p),
+            "n": n,
+            "r_partial_temp": np.nan,
+            "p_partial_temp": np.nan,
+            "r_partial_order": np.nan,
+            "p_partial_order": np.nan,
+            "r_partial_full": np.nan,
+            "p_partial_full": np.nan,
+            "effect_interpretation": effect_interp,
+            "reliability": np.nan,
+            "is_change_score": is_change,
+            "method": method_normalized,
+            "r_primary": float(r),
+            "p_primary": float(p),
+        })
+    
+    if logger:
+        logger.info(f"Correlations batch complete: {len(results)} valid features")
+    
+    return results
+
+
+def _extract_band_from_column(column_name: str) -> str:
+    """Extract frequency band name from column name."""
+    frequency_bands = ["delta", "theta", "alpha", "beta", "gamma"]
+    column_lower = column_name.lower()
+    for band in frequency_bands:
+        if band in column_lower:
+            return band
+    return "broadband"
+
+
+def _compute_batch_spearman(
+    data_matrix: np.ndarray,
+    target: np.ndarray,
+    valid_mask: np.ndarray,
+    n_valid: np.ndarray,
+    min_samples: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute Spearman correlations for all features vectorized."""
+    n_features = data_matrix.shape[1]
+    r_values = np.full(n_features, np.nan)
+    p_values = np.full(n_features, np.nan)
+    
+    # For Spearman, we need to rank the data
+    # Since each feature may have different valid samples, we process in batches
+    # Group features by their valid mask pattern for efficiency
+    
+    # For now, use a simple vectorized approach that works for most cases
+    # where all samples are valid
+    all_valid = valid_mask.all(axis=0)
+    
+    if all_valid.any():
+        # Fully valid features can be computed together
+        valid_indices = np.where(all_valid)[0]
+        valid_features = data_matrix[:, valid_indices]
+        
+        # Rank the target once
+        target_ranks = stats.rankdata(target)
+        
+        # Rank each feature column
+        feature_ranks = np.apply_along_axis(stats.rankdata, 0, valid_features)
+        
+        # Pearson correlation on ranks = Spearman
+        r_batch, p_batch = _pearson_matrix_vector(feature_ranks, target_ranks)
+        
+        r_values[valid_indices] = r_batch
+        p_values[valid_indices] = p_batch
+    
+    # Handle partially valid features individually (fallback)
+    partial_valid = ~all_valid & (n_valid >= min_samples)
+    if partial_valid.any():
+        partial_indices = np.where(partial_valid)[0]
+        for idx in partial_indices:
+            mask = valid_mask[:, idx]
+            x = data_matrix[mask, idx]
+            y = target[mask]
+            
+            if np.std(x) < _EPSILON_STD or np.std(y) < _EPSILON_STD:
+                continue
+            
+            r, p = stats.spearmanr(x, y)
+            r_values[idx] = r
+            p_values[idx] = p
+    
+    return r_values, p_values
+
+
+def _compute_batch_pearson(
+    data_matrix: np.ndarray,
+    target: np.ndarray,
+    valid_mask: np.ndarray,
+    n_valid: np.ndarray,
+    min_samples: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute Pearson correlations for all features vectorized."""
+    n_features = data_matrix.shape[1]
+    r_values = np.full(n_features, np.nan)
+    p_values = np.full(n_features, np.nan)
+    
+    # Group by valid mask pattern
+    all_valid = valid_mask.all(axis=0)
+    
+    if all_valid.any():
+        valid_indices = np.where(all_valid)[0]
+        valid_features = data_matrix[:, valid_indices]
+        
+        r_batch, p_batch = _pearson_matrix_vector(valid_features, target)
+        
+        r_values[valid_indices] = r_batch
+        p_values[valid_indices] = p_batch
+    
+    # Handle partially valid features individually
+    partial_valid = ~all_valid & (n_valid >= min_samples)
+    if partial_valid.any():
+        partial_indices = np.where(partial_valid)[0]
+        for idx in partial_indices:
+            mask = valid_mask[:, idx]
+            x = data_matrix[mask, idx]
+            y = target[mask]
+            
+            if np.std(x) < _EPSILON_STD or np.std(y) < _EPSILON_STD:
+                continue
+            
+            r, p = stats.pearsonr(x, y)
+            r_values[idx] = r
+            p_values[idx] = p
+    
+    return r_values, p_values
+
+
+def _pearson_matrix_vector(
+    X: np.ndarray,
+    y: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute Pearson correlation between each column of X and vector y.
+    
+    Returns (r_values, p_values) arrays.
+    """
+    n = X.shape[0]
+    
+    # Center the data
+    X_centered = X - X.mean(axis=0)
+    y_centered = y - y.mean()
+    
+    # Compute correlations
+    X_std = X.std(axis=0, ddof=0)
+    y_std = y.std(ddof=0)
+    
+    # Avoid division by zero
+    valid_std = (X_std > _EPSILON_STD) & (y_std > _EPSILON_STD)
+    
+    r_values = np.full(X.shape[1], np.nan)
+    
+    if valid_std.any():
+        # Correlation = cov(X, y) / (std(X) * std(y))
+        cov_xy = (X_centered[:, valid_std] * y_centered[:, np.newaxis]).sum(axis=0) / n
+        r_values[valid_std] = cov_xy / (X_std[valid_std] * y_std)
+    
+    # Compute p-values using t-distribution
+    # t = r * sqrt(n-2) / sqrt(1-r^2)
+    df = n - 2
+    with np.errstate(divide='ignore', invalid='ignore'):
+        t_values = r_values * np.sqrt(df) / np.sqrt(1 - r_values**2)
+    
+    p_values = 2 * stats.t.sf(np.abs(t_values), df)
+    
+    return r_values, p_values
+
+
 def compute_correlation_stats(
     x: pd.Series,
     y: pd.Series,

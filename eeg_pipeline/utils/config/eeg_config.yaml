@@ -38,16 +38,21 @@ numeric:
   percentage_multiplier: &percentage_multiplier 100.0
 
 # 2.4 ROI Regex Patterns
+# NOTE: Laterality labels (Ipsi_L, Contra_R) assume LEFT-SIDE stimulation.
+# If stimulation side varies, either:
+#   1. Flip channel labels per-trial before feature extraction, OR
+#   2. Use hemisphere-neutral ROI names (Left/Right instead of Ipsi/Contra)
+# The current labels are valid ONLY for consistent left-side stimulation.
 rois: &roi_definitions
   Frontal: ["^(Fp1|Fp2|Fpz|AF3|AF4|AF7|AF8|F1|F2|F3|F4|F5|F6|F7|F8)$"]
-  Sensorimotor_Contra_R: ["^(FC2|FC4|FC6|C2|C4|C6|CP2|CP4|CP6)$"]
-  Sensorimotor_Ipsi_L: ["^(FC1|FC3|FC5|C1|C3|C5|CP1|CP3|CP5)$"]
-  Temporal_Contra_R: ["^(FT8|FT10|T8|TP8|TP10)$"]
-  Temporal_Ipsi_L: ["^(FT7|FT9|T7|TP7|TP9)$"]
-  ParOccipital_Contra_R: ["^(P2|P4|P6|P8|PO4|PO8|O2)$"]
-  ParOccipital_Ipsi_L: ["^(P1|P3|P5|P7|PO3|PO7|O1)$"]
+  Sensorimotor_Right: ["^(FC2|FC4|FC6|C2|C4|C6|CP2|CP4|CP6)$"]
+  Sensorimotor_Left: ["^(FC1|FC3|FC5|C1|C3|C5|CP1|CP3|CP5)$"]
+  Temporal_Right: ["^(FT8|FT10|T8|TP8|TP10)$"]
+  Temporal_Left: ["^(FT7|FT9|T7|TP7|TP9)$"]
+  ParOccipital_Right: ["^(P2|P4|P6|P8|PO4|PO8|O2)$"]
+  ParOccipital_Left: ["^(P1|P3|P5|P7|PO3|PO7|O1)$"]
   ParOccipital_Midline: ["^(Pz|POz|Oz)$"]
-  Midline_ACC_MCC: ["^(Fz|Cz|CPz)$"]
+  Midline_FrontalCentral: ["^(Fz|Cz|CPz)$"]
 
 ###################################################################
 # 3. CORE PROCESSING PIPELINE
@@ -128,9 +133,10 @@ feature_engineering:
   spatial_modes: ["roi", "channels", "global"]
   create_combined_features: false
 
-  # Optional spatial transform applied before connectivity/band envelope computations.
-  # "csd"/"laplacian" reduces volume conduction in sensor-space connectivity.
-  spatial_transform: "none"   # "none", "csd", "laplacian"
+  # Spatial transform applied before connectivity/band envelope computations.
+  # CSD/Laplacian is REQUIRED for interpretable sensor-space phase connectivity.
+  # Without it, apparent connectivity changes often track SNR/arousal/muscle, not neural coupling.
+  spatial_transform: "csd"    # "csd" (recommended), "laplacian", or "none" (not recommended for phase measures)
   spatial_transform_params:
     lambda2: 1.0e-5
     stiffness: 4.0
@@ -188,10 +194,10 @@ feature_engineering:
 
   itpc:
     # Leakage-safe modes:
-    # - "global": ITPC computed across ALL trials and broadcast per trial (default, but leaks in CV/machine learning)
-    # - "fold_global": ITPC computed from TRAINING trials only when ctx.train_mask present (leakage-safe)
+    # - "fold_global": ITPC computed from TRAINING trials only when ctx.train_mask present (CV-safe, DEFAULT)
+    # - "global": ITPC computed across ALL trials and broadcast per trial (LEAKS in CV/ML - use only for descriptive analysis)
     # - "loo": Leave-one-out ITPC (unsafe unless allow_unsafe_loo=true and computed in-fold)
-    method: "global"   
+    method: "fold_global"
     allow_unsafe_loo: false
     baseline_correction: "none"  # "none" or "subtract"
 
@@ -199,8 +205,8 @@ feature_engineering:
     model: "fixed"                 # "fixed" or "knee"
     psd_method: "multitaper"       # "multitaper" (recommended) or "welch"
     psd_bandwidth: null
-    fmin: 2.0
-    fmax: 40.0
+    fmin: 1.0                      # Must cover lowest band (delta starts at 1.0 Hz)
+    fmax: 80.0                     # Must cover highest band (gamma ends at 80.0 Hz)
     peak_rejection_z: 3.5
     min_r2: 0.6
     min_fit_points: 5
@@ -366,9 +372,10 @@ behavior_analysis:
       quantile_high: 0.85
       n_candidates: 15
 
-  # Confound auditing: does QC track rating/temperature?
+  # DEPRECATED: Confounds auditing has been removed from the pipeline.
+  # This section is retained for backward compatibility but is ignored.
   confounds:
-    enabled: true
+    enabled: false  # DEPRECATED: always disabled
     qc_column_patterns:
       - "^quality_.*_global_"
       - "^quality_.*_ch_"
@@ -512,7 +519,9 @@ behavior_analysis:
     split_by_condition: true           # If true, compute separate correlations per condition value
     condition_column: ""               # Column to split by (empty = use event_columns.pain_binary)
     condition_values: []               # Specific values to compute for (empty = all unique values in column)
-    filter_value: ""                   # If set, compute only for this specific value (user types in TUI)
+    # Output options for unified temporal correlations file
+    include_roi_averages: true         # Include ROI-averaged rows (replaces power_topomap_correlations)
+    include_tf_grid: true              # Include individual frequency rows (replaces corr_stats_tf_*)
     # Feature selection for temporal correlations
     features:
       power: true                      # Power (spectral power in bands) - default, already implemented

@@ -283,8 +283,8 @@ def load_feature_bundle(
         connectivity_df=_safe_read_table(
             find_connectivity_features_path(deriv_root, subject), logger
         ),
-        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directed_connectivity", logger),
-        source_localization_df=_safe_read_feature_table(features_dir, "features_source_localization", logger),
+        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directedconnectivity", logger),
+        source_localization_df=_safe_read_feature_table(features_dir, "features_sourcelocalization", logger),
         aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger),
         erp_df=_safe_read_feature_table(features_dir, "features_erp", logger),
         pac_df=_safe_read_feature_table(features_dir, "features_pac", logger),
@@ -397,6 +397,10 @@ def _get_folder_for_feature(base_name: str) -> str:
             return "pac"
         if name.startswith("power"):
             return "power"
+        if name == "source_localization" or name == "sourcelocalization":
+            return "sourcelocalization"
+        if name == "directed_connectivity" or name == "directedconnectivity":
+            return "directedconnectivity"
         return name
     
     if base_name == "aperiodic_qc":
@@ -538,7 +542,7 @@ def _dedupe_identical_duplicate_columns(
 
 def _is_aperiodic_qc_complete(aper_qc: Dict[str, Any]) -> bool:
     """Check if aperiodic QC dictionary contains all required fields."""
-    required_fields = ["freqs", "slopes", "offsets", "r2"]
+    required_fields = ["slopes", "offsets", "r2"]
     return all(aper_qc.get(field) is not None for field in required_fields)
 
 
@@ -548,7 +552,24 @@ def _save_aperiodic_qc(
     logger: logging.Logger,
     suffix: Optional[str] = None,
 ) -> None:
-    """Save aperiodic QC data to TSV file."""
+    """Save aperiodic QC data to TSV file with proper per-trial structure.
+    
+    Creates a tidy-format TSV with one row per (trial, channel) combination,
+    containing fit parameters and quality metrics. This replaces the previous
+    mixed-dimension format that was scientifically invalid.
+    
+    Columns:
+        - trial: Trial index (0-based)
+        - channel: Channel name
+        - slope: Aperiodic slope (1/f exponent)
+        - offset: Aperiodic offset (broadband power)
+        - r2: Fit quality (coefficient of determination)
+        - rms: Root mean square error of fit
+        - fit_ok: Whether fit passed QC thresholds
+        - n_valid_bins: Number of frequency bins used in fit
+        - n_kept_bins: Number of bins after peak rejection
+        - peak_rejected: Whether any peaks were rejected
+    """
     if not _is_aperiodic_qc_complete(aper_qc):
         logger.info("Aperiodic QC payload present but incomplete; skipping aperiodic_qc.tsv")
         return
@@ -561,64 +582,83 @@ def _save_aperiodic_qc(
         qc_filename = f"aperiodic_qc_{suffix}.tsv" if suffix else "aperiodic_qc.tsv"
         save_path = qc_dir / qc_filename
 
-        freqs = aper_qc.get("freqs")
-        residual_mean = aper_qc.get("residual_mean")
-        r2 = aper_qc.get("r2")
         slopes = aper_qc.get("slopes")
         offsets = aper_qc.get("offsets")
+        r2 = aper_qc.get("r2")
+        rms = aper_qc.get("rms")
+        fit_ok = aper_qc.get("fit_ok")
+        valid_bins = aper_qc.get("valid_bins")
+        kept_bins = aper_qc.get("kept_bins")
+        peak_rejected = aper_qc.get("peak_rejected")
         channel_names = aper_qc.get("channel_names")
-        run_labels = aper_qc.get("run_labels")
+        
+        # Extract scalar QC metadata
+        psd_fmin = aper_qc.get("psd_fmin", np.nan)
+        psd_fmax = aper_qc.get("psd_fmax", np.nan)
+        min_r2_threshold = aper_qc.get("min_r2", np.nan)
+        band_coverage = aper_qc.get("band_coverage", {})
+
+        # Determine array dimensions
+        if slopes is None or not hasattr(slopes, "shape"):
+            logger.warning("Aperiodic QC: slopes array missing or invalid")
+            return
+        
+        if slopes.ndim == 1:
+            n_trials, n_channels = 1, slopes.shape[0]
+            slopes = slopes.reshape(1, -1)
+            offsets = offsets.reshape(1, -1) if offsets is not None else None
+            r2 = r2.reshape(1, -1) if r2 is not None else None
+            rms = rms.reshape(1, -1) if rms is not None else None
+            fit_ok = fit_ok.reshape(1, -1) if fit_ok is not None else None
+            valid_bins = valid_bins.reshape(1, -1) if valid_bins is not None else None
+            kept_bins = kept_bins.reshape(1, -1) if kept_bins is not None else None
+            peak_rejected = peak_rejected.reshape(1, -1) if peak_rejected is not None else None
+        else:
+            n_trials, n_channels = slopes.shape
 
         rows = []
-
-        if freqs is not None and residual_mean is not None:
-            n_channels = residual_mean.shape[0] if residual_mean.ndim > 1 else 1
+        for trial_idx in range(n_trials):
             for ch_idx in range(n_channels):
                 ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
-                resid = residual_mean[ch_idx] if residual_mean.ndim > 1 else residual_mean
-                for freq_idx, freq in enumerate(freqs):
-                    rows.append({
-                        "frequency": freq,
-                        "channel": ch_name,
-                        "residual_mean": float(resid[freq_idx]) if freq_idx < len(resid) else np.nan
-                    })
-
-        if r2 is not None:
-            n_channels = len(r2) if r2.ndim == 1 else r2.shape[0]
-            for ch_idx in range(n_channels):
-                ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
-                r2_val = r2[ch_idx] if r2.ndim == 1 else (r2[ch_idx, 0] if r2.ndim > 1 else r2)
-                rows.append({
-                    "frequency": np.nan,
+                
+                row = {
+                    "trial": trial_idx,
                     "channel": ch_name,
-                    "residual_mean": np.nan,
-                    "r2": float(r2_val)
-                })
-
-        if slopes is not None and offsets is not None:
-            n_trials = slopes.shape[0] if slopes.ndim > 1 else 1
-            n_channels = slopes.shape[1] if slopes.ndim > 1 else 1
-            for trial_idx in range(n_trials):
-                run_label = run_labels[trial_idx] if run_labels and trial_idx < len(run_labels) else f"trial_{trial_idx}"
-                for ch_idx in range(n_channels):
-                    ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
-                    slope_val = slopes[trial_idx, ch_idx] if slopes.ndim > 1 else slopes
-                    offset_val = offsets[trial_idx, ch_idx] if offsets.ndim > 1 else offsets
-                    rows.append({
-                        "frequency": np.nan,
-                        "channel": ch_name,
-                        "residual_mean": np.nan,
-                        "r2": np.nan,
-                        "trial": run_label,
-                        "slope": float(slope_val),
-                        "offset": float(offset_val)
-                    })
+                    "slope": float(slopes[trial_idx, ch_idx]) if slopes is not None else np.nan,
+                    "offset": float(offsets[trial_idx, ch_idx]) if offsets is not None else np.nan,
+                    "r2": float(r2[trial_idx, ch_idx]) if r2 is not None else np.nan,
+                    "rms": float(rms[trial_idx, ch_idx]) if rms is not None else np.nan,
+                    "fit_ok": bool(fit_ok[trial_idx, ch_idx]) if fit_ok is not None else False,
+                    "n_valid_bins": int(valid_bins[trial_idx, ch_idx]) if valid_bins is not None else 0,
+                    "n_kept_bins": int(kept_bins[trial_idx, ch_idx]) if kept_bins is not None else 0,
+                    "peak_rejected": bool(peak_rejected[trial_idx, ch_idx]) if peak_rejected is not None else False,
+                }
+                rows.append(row)
 
         df = pd.DataFrame(rows)
-
+        
+        # Add metadata as JSON sidecar
+        metadata = {
+            "psd_fmin_hz": float(psd_fmin) if np.isfinite(psd_fmin) else None,
+            "psd_fmax_hz": float(psd_fmax) if np.isfinite(psd_fmax) else None,
+            "min_r2_threshold": float(min_r2_threshold) if np.isfinite(min_r2_threshold) else None,
+            "n_trials": n_trials,
+            "n_channels": n_channels,
+            "band_coverage": {k: float(v) for k, v in band_coverage.items()} if band_coverage else {},
+        }
+        
         write_tsv(df, save_path)
+        
+        # Save metadata sidecar
+        metadata_path = save_path.with_suffix(".json")
+        try:
+            import json
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+        except (OSError, IOError) as meta_exc:
+            logger.debug("Could not save aperiodic QC metadata: %s", meta_exc)
 
-        logger.info("Saved aperiodic QC sidecar to %s", save_path)
+        logger.info("Saved aperiodic QC sidecar to %s (%d trials × %d channels)", save_path, n_trials, n_channels)
     except (OSError, IOError, TypeError, KeyError) as exc:
         logger.warning("Failed to save aperiodic QC TSV: %s", exc)
 
@@ -727,7 +767,7 @@ def save_all_features(
         (erp_df, erp_cols, "features_erp", "ERP/LEP features"),
         (itpc_df, itpc_cols, "features_itpc", "ITPC features (channel x band x segment)"),
         (pac_df, None, "features_pac", "PAC comodulograms"),
-        (pac_trials_df, None, "features_pac_trials", "PAC per-trial values"),
+        (pac_trials_df, None, "features_pac", "PAC per-trial values"),
         (pac_time_df, None, "features_pac_time", "PAC time-resolved values"),
         (comp_df, comp_cols, "features_complexity", "complexity features"),
         (bursts_df, bursts_cols, "features_bursts", "burst features"),
@@ -736,8 +776,8 @@ def save_all_features(
         (ratios_df, ratios_cols, "features_ratios", "power ratio features"),
         (asymmetry_df, asymmetry_cols, "features_asymmetry", "asymmetry features"),
         (quality_df, quality_cols, "features_quality", "quality metrics"),
-        (dconn_df, dconn_cols, "features_directed_connectivity", "directed connectivity features (PSI, DTF, PDC)"),
-        (source_df, source_cols, "features_source_localization", "source localization features (LCMV, eLORETA)"),
+        (dconn_df, dconn_cols, "features_directedconnectivity", "directed connectivity features (PSI, DTF, PDC)"),
+        (source_df, source_cols, "features_sourcelocalization", "source localization features (LCMV, eLORETA)"),
     ]
 
     for df, cols, base_name, description in feature_save_configs:

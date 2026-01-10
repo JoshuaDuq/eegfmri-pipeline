@@ -346,11 +346,25 @@ def generate_manifest(
     qc: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     features = []
+    columns_by_group: Dict[str, List[str]] = {}
+    columns_by_band: Dict[str, List[str]] = {}
+    columns_by_segment: Dict[str, List[str]] = {}
+
     for column_name in feature_columns:
         feature_name = str(column_name)
         parsed = NamingSchema.parse(feature_name)
         feature_entry = _create_feature_entry(feature_name, parsed)
         features.append(feature_entry)
+
+        group = feature_entry.get("group", "unknown")
+        band = feature_entry.get("band", "unknown")
+        segment = feature_entry.get("segment", "unknown")
+
+        columns_by_group.setdefault(group, []).append(feature_name)
+        if band and band != "unknown":
+            columns_by_band.setdefault(band, []).append(feature_name)
+        if segment and segment != "unknown":
+            columns_by_segment.setdefault(segment, []).append(feature_name)
 
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
@@ -358,6 +372,9 @@ def generate_manifest(
         "task": task,
         "n_features": len(features),
         "features": features,
+        "columns_by_group": columns_by_group,
+        "columns_by_band": columns_by_band,
+        "columns_by_segment": columns_by_segment,
         "qc": _make_json_serializable(qc) if qc else None,
         "config": None if config is None else {},
     }

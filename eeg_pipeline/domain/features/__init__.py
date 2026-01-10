@@ -12,8 +12,8 @@ from eeg_pipeline.domain.features.registry import (
 FEATURE_TYPES = (
     "power",
     "connectivity",
-    "directed_connectivity",
-    "source_localization",
+    "directedconnectivity",
+    "sourcelocalization",
     "aperiodic",
     "complexity",
     "itpc",

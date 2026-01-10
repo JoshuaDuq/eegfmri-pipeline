@@ -48,7 +48,6 @@ func (m *Model) ApplyFeaturePreset(presetKey string) {
 
 func (m *Model) ApplyBehaviorPreset(presetKey string) {
 	m.computationSelected = make(map[int]bool)
-	m.postComputationSelected = make(map[int]bool)
 
 	if presetKey == "full" {
 		m.selectAllBehaviorComputations()
@@ -149,32 +148,13 @@ func (m *Model) selectAllBehaviorComputations() {
 	for i := range m.computations {
 		m.computationSelected[i] = true
 	}
-	for i := range m.postComputations {
-		m.postComputationSelected[i] = true
-	}
 }
 
 func (m *Model) selectComputationsByKeys(targetKeys []string) {
-	m.selectPrimaryComputationsByKeys(targetKeys)
-	m.selectPostComputationsByKeys(targetKeys)
-}
-
-func (m *Model) selectPrimaryComputationsByKeys(targetKeys []string) {
 	for i, computation := range m.computations {
 		for _, targetKey := range targetKeys {
 			if computation.Key == targetKey {
 				m.computationSelected[i] = true
-				break
-			}
-		}
-	}
-}
-
-func (m *Model) selectPostComputationsByKeys(targetKeys []string) {
-	for i, computation := range m.postComputations {
-		for _, targetKey := range targetKeys {
-			if computation.Key == targetKey {
-				m.postComputationSelected[i] = true
 				break
 			}
 		}

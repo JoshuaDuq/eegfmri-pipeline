@@ -246,94 +246,54 @@ func (m Model) renderComputationSelection() string {
 	}
 	b.WriteString("\n\n")
 
-	// Calculate responsive layout based on terminal height
-	// Overhead: header(4) + section title(2) + status(2) + footer(2) + spacing(2) = 12
-	layout := styles.CalculateListLayout(m.height, m.computationCursor, len(m.computations), 12)
+	// Group computations by analysis purpose
+	groups := map[string][]Computation{
+		"DataPrep": {},
+		"Core":     {},
+		"Advanced": {},
+		"Quality":  {},
+	}
+	groupNames := map[string]string{
+		"DataPrep": "DATA PREPARATION",
+		"Core":     "CORE ANALYSES",
+		"Advanced": "ADVANCED/CAUSAL ANALYSES",
+		"Quality":  "QUALITY & VALIDATION",
+	}
+	groupOrder := []string{"DataPrep", "Core", "Advanced", "Quality"}
 
-	// Show scroll up indicator
-	if layout.ShowScrollUp {
-		b.WriteString(styles.RenderScrollUpIndicator(layout.StartIdx) + "\n")
+	for _, comp := range m.computations {
+		if comp.Group != "" {
+			groups[comp.Group] = append(groups[comp.Group], comp)
+		}
 	}
 
-	for i := layout.StartIdx; i < layout.EndIdx; i++ {
-		comp := m.computations[i]
-		isSelected := m.computationSelected[i]
-		isFocused := i == m.computationCursor
-
-		checkbox := styles.RenderCheckbox(isSelected, isFocused)
-
-		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
-		if isFocused {
-			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+	// Render each group
+	for _, groupKey := range groupOrder {
+		groupComps := groups[groupKey]
+		if len(groupComps) == 0 {
+			continue
 		}
 
-		b.WriteString(checkbox + nameStyle.Render(comp.Name))
-
-		// Show last computed timestamp if available
-		if m.computationAvailability != nil && m.computationAvailability[comp.Key] {
-			timestamp := m.computationLastModified[comp.Key]
-			relTime := formatRelativeTime(timestamp)
-			if relTime != "" {
-				avail := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  [%s]", relTime))
-				b.WriteString(avail)
-			} else {
-				avail := lipgloss.NewStyle().Foreground(styles.Success).Render("  [DONE]")
-				b.WriteString(avail)
-			}
-		} else {
-			unavail := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  [NO DATA]")
-			b.WriteString(unavail)
-		}
-
-		desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + comp.Description)
-		b.WriteString(desc + "\n")
-	}
-
-	// Show scroll down indicator
-	if layout.ShowScrollDn {
-		remaining := len(m.computations) - layout.EndIdx
-		b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
-	}
-
-	// Post Computations section (only for behavior pipeline)
-	if len(m.postComputations) > 0 {
+		// Group header
 		b.WriteString("\n")
-		b.WriteString(styles.SectionTitleStyle.Render(" POST COMPUTATIONS ") + "\n\n")
+		b.WriteString(styles.SectionTitleStyle.Render(" "+groupNames[groupKey]+" ") + "\n\n")
 
-		postCount := 0
-		for _, sel := range m.postComputationSelected {
-			if sel {
-				postCount++
+		// Render computations in this group
+		for _, comp := range groupComps {
+			// Find index in main list
+			idx := -1
+			for i, c := range m.computations {
+				if c.Key == comp.Key {
+					idx = i
+					break
+				}
 			}
-		}
+			if idx == -1 {
+				continue
+			}
 
-		// Inline validation indicator for post computations
-		var postStatusIndicator string
-		if postCount >= 1 {
-			postStatusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
-		} else {
-			postStatusIndicator = lipgloss.NewStyle().Foreground(styles.TextDim).Render("○ ")
-		}
-
-		b.WriteString(postStatusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-			fmt.Sprintf("%d of %d selected", postCount, len(m.postComputations))))
-		if postCount == 0 {
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render(" — optional"))
-		}
-		b.WriteString("\n\n")
-
-		// Calculate responsive layout for post computations
-		postLayout := styles.CalculateListLayout(m.height/2, m.postComputationCursor, len(m.postComputations), 4)
-
-		// Show scroll up indicator for post computations
-		if postLayout.ShowScrollUp {
-			b.WriteString(styles.RenderScrollUpIndicator(postLayout.StartIdx) + "\n")
-		}
-
-		for i := postLayout.StartIdx; i < postLayout.EndIdx; i++ {
-			comp := m.postComputations[i]
-			isSelected := m.postComputationSelected[i]
-			isFocused := i == m.postComputationCursor
+			isSelected := m.computationSelected[idx]
+			isFocused := idx == m.computationCursor
 
 			checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
@@ -362,12 +322,6 @@ func (m Model) renderComputationSelection() string {
 
 			desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + comp.Description)
 			b.WriteString(desc + "\n")
-		}
-
-		// Show scroll down indicator for post computations
-		if postLayout.ShowScrollDn {
-			remaining := len(m.postComputations) - postLayout.EndIdx
-			b.WriteString(styles.RenderScrollDownIndicator(remaining) + "\n")
 		}
 	}
 
@@ -1691,7 +1645,7 @@ func (m Model) renderReview() string {
 				}
 				configs = append(configs, fmt.Sprintf("conn_win=%.1fs/%.1fs", m.connWindowLen, m.connWindowStep))
 			}
-			if m.isCategorySelected("directed_connectivity") {
+			if m.isCategorySelected("directedconnectivity") {
 				measures := m.selectedDirectedConnectivityMeasures()
 				if len(measures) > 0 {
 					configs = append(configs, fmt.Sprintf("dconn=%s", strings.Join(measures, "+")))
@@ -1718,7 +1672,7 @@ func (m Model) renderReview() string {
 			if m.isCategorySelected("erp") {
 				configs = append(configs, fmt.Sprintf("erp_baseline=%v", m.erpBaselineCorrection))
 			}
-			if m.isCategorySelected("source_localization") {
+			if m.isCategorySelected("sourcelocalization") {
 				methods := []string{"lcmv", "eloreta"}
 				parcs := []string{"aparc", "aparc.a2009s", "HCPMMP1"}
 				configs = append(configs, fmt.Sprintf("source=%s@%s", methods[m.sourceLocMethod], parcs[m.sourceLocParc]))
@@ -3119,25 +3073,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Crossfit Knots", val, "spline knots (>=3)"
 
-		// Confounds
-		case optConfoundsAddAsCovariates:
-			return "Add QC Covariates", m.boolToOnOff(m.confoundsAddAsCovariates), "FDR-selected covariates"
-		case optConfoundsMaxCovariates:
-			val := fmt.Sprintf("%d", m.confoundsMaxCovariates)
-			if m.editingNumber && m.isCurrentlyEditing(optConfoundsMaxCovariates) {
-				val = numberDisplay
-			}
-			return "Max QC Covariates", val, "limit added columns"
-		case optConfoundsQCColumnPatterns:
-			val := m.confoundsQCColumnPatterns
-			if val == "" {
-				val = "(default)"
-			}
-			if m.editingText && m.editingTextField == textFieldConfoundsQCColumnPatterns {
-				val = textDisplay
-			}
-			return "QC Column Patterns", val, "comma-separated regexes"
-
 		// Regression
 		case optRegressionOutcome:
 			v := "rating"
@@ -3394,8 +3329,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.discoveredColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+			if len(m.availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Compare Column", val, hint
 		case optConditionCompareWindows:
@@ -3480,8 +3415,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.discoveredColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+			if len(m.availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Condition Column", val, hint
 		case optTemporalConditionValues:
@@ -3503,15 +3438,10 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				hint = fmt.Sprintf("Space to select · %d values in %s", len(vals), m.temporalConditionColumn)
 			}
 			return "Condition Values", val, hint
-		case optTemporalFilterValue:
-			val := m.temporalFilterValue
-			if val == "" {
-				val = "(all values)"
-			}
-			if m.editingText && m.editingTextField == textFieldTemporalFilterValue {
-				val = textDisplay
-			}
-			return "Filter Value", val, "compute only for this value"
+		case optTemporalIncludeROIAverages:
+			return "Include ROI Averages", m.boolToOnOff(m.temporalIncludeROIAverages), "add ROI-averaged rows to output"
+		case optTemporalIncludeTFGrid:
+			return "Include TF Grid", m.boolToOnOff(m.temporalIncludeTFGrid), "add individual frequency rows"
 
 		// Temporal feature selection
 		case optTemporalFeaturePower:
@@ -3615,8 +3545,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.discoveredColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+			if len(m.availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Custom Target Column", val, hint
 
@@ -3651,8 +3581,8 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = textDisplay
 			}
 			hint := "Space to select"
-			if len(m.discoveredColumns) > 0 {
-				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+			if len(m.availableColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Cluster Column", val, hint
 		case optClusterConditionValues:
@@ -3679,6 +3609,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Mediation Bootstrap", val, "bootstrap iterations"
+		case optMediationPermutations:
+			val := fmt.Sprintf("%d", m.mediationPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optMediationPermutations) {
+				val = numberDisplay
+			}
+			return "Mediation Permutations", val, "0=disabled"
 		case optMediationMinEffect:
 			val := fmt.Sprintf("%.3f", m.mediationMinEffect)
 			if m.editingNumber && m.isCurrentlyEditing(optMediationMinEffect) {
@@ -3709,6 +3645,12 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 				val = numberDisplay
 			}
 			return "Max Features", val, "max features for moderation"
+		case optModerationPermutations:
+			val := fmt.Sprintf("%d", m.moderationPermutations)
+			if m.editingNumber && m.isCurrentlyEditing(optModerationPermutations) {
+				val = numberDisplay
+			}
+			return "Moderation Permutations", val, "0=disabled"
 
 		// Mixed effects
 		case optMixedEffectsType:

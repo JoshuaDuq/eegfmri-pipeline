@@ -3,6 +3,21 @@ Partial Correlation
 ===================
 
 Partial correlation and covariate-adjusted analysis.
+
+WARNING: Temperature Control Limitations
+----------------------------------------
+Linear partial correlation with temperature assumes a linear relationship between
+temperature and the outcome (e.g., pain rating). However, pain ratings vs temperature
+are commonly NONLINEAR and SUBJECT-SPECIFIC (sigmoid, threshold effects, etc.).
+
+For more valid temperature control, consider:
+1. Using `pain_residual.fit_temperature_rating_curve()` to compute subject-specific
+   dose-response residuals (spline-based, handles nonlinearity)
+2. Using spline terms for temperature in regression models
+3. Stratifying analysis by temperature level rather than linear adjustment
+
+The linear partial correlation here is a first-pass approximation that may be
+inadequate for studies where temperature-pain nonlinearity is scientifically relevant.
 """
 
 from __future__ import annotations

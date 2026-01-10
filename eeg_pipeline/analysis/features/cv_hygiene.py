@@ -346,19 +346,10 @@ def compute_feature_scaling_for_fold(
         return {}, {}
 
     train_df = features_df.iloc[train_mask]
-    means = {}
-    stds = {}
-
-    for column in train_df.columns:
-        numeric_series = pd.to_numeric(train_df[column], errors="coerce")
-        column_mean = float(numeric_series.mean())
-        column_std = float(numeric_series.std())
-
-        means[column] = column_mean
-        if column_std == 0 or not np.isfinite(column_std):
-            stds[column] = DEFAULT_STD_WHEN_ZERO
-        else:
-            stds[column] = column_std
+    train_numeric = train_df.apply(pd.to_numeric, errors="coerce")
+    
+    means = train_numeric.mean().to_dict()
+    stds = train_numeric.std().replace(0, DEFAULT_STD_WHEN_ZERO).replace([np.inf, -np.inf], DEFAULT_STD_WHEN_ZERO).to_dict()
 
     _log_debug(
         logger,
@@ -391,12 +382,11 @@ def apply_fold_specific_scaling(
     scaled_df : pd.DataFrame
         Scaled feature DataFrame
     """
-    scaled_df = features_df.copy()
-
-    for column in scaled_df.columns:
-        if column in means and column in stds:
-            numeric_series = pd.to_numeric(scaled_df[column], errors="coerce")
-            scaled_df[column] = (numeric_series - means[column]) / stds[column]
+    scaled_df = features_df.apply(pd.to_numeric, errors="coerce")
+    
+    for column in means:
+        if column in scaled_df.columns:
+            scaled_df[column] = (scaled_df[column] - means[column]) / stds[column]
 
     return scaled_df
 

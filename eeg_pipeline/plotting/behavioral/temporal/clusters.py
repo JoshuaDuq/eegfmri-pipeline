@@ -46,10 +46,21 @@ def _get_alpha_value(config: Any, alpha: Optional[float]) -> float:
 
 
 def _extract_band_name(df: pd.DataFrame, filepath: Path) -> str:
-    """Extract frequency band name from dataframe or filename."""
+    """Extract frequency band name from dataframe or filename.
+    
+    Supports both naming conventions:
+    - pain_nonpain_time_clusters_{band}.tsv (legacy)
+    - cluster_results_{band}.tsv (current)
+    """
     if "band" in df.columns:
         return df["band"].iloc[0]
-    return filepath.stem.replace(CLUSTER_PREFIX, "")
+    # Try legacy prefix first
+    if filepath.stem.startswith(CLUSTER_PREFIX):
+        return filepath.stem.replace(CLUSTER_PREFIX, "")
+    # Try current naming convention
+    if filepath.stem.startswith("cluster_results_"):
+        return filepath.stem.replace("cluster_results_", "")
+    return filepath.stem
 
 
 def _normalize_cluster_dataframe(df: pd.DataFrame, band: str, alpha: float) -> pd.DataFrame:
@@ -75,10 +86,25 @@ def _load_cluster_dataframes(
     alpha: float,
     logger: logging.Logger,
 ) -> pd.DataFrame:
-    """Load and combine all cluster statistics files."""
-    files = sorted(stats_dir.glob(f"{CLUSTER_PREFIX}*.tsv"))
+    """Load and combine all cluster statistics files.
+    
+    Checks both cluster subdirectory and root stats_dir for backward compatibility.
+    """
+    # Check cluster subdirectory first (new location)
+    cluster_dir = stats_dir / "cluster"
+    files = sorted(cluster_dir.glob(f"{CLUSTER_PREFIX}*.tsv")) if cluster_dir.exists() else []
+    
+    # Also check for cluster_results_*.tsv in cluster subdirectory (current naming)
     if not files:
-        _log_if_present(logger, "warning", f"No pain/non-pain cluster stats found in {stats_dir}")
+        files = sorted(cluster_dir.glob("cluster_results_*.tsv")) if cluster_dir.exists() else []
+    
+    # Fall back to legacy location in root stats_dir
+    if not files:
+        files = sorted(stats_dir.glob(f"{CLUSTER_PREFIX}*.tsv"))
+        files.extend(sorted(stats_dir.glob("cluster_results_*.tsv")))
+    
+    if not files:
+        _log_if_present(logger, "warning", f"No cluster stats found in {stats_dir} or {cluster_dir}")
         return pd.DataFrame()
 
     frames = []

@@ -31,6 +31,7 @@ _MIN_FEATURES_FOR_PARALLEL_INFLUENCE = 5
 _MIN_FEATURE_TYPES_FOR_PARALLEL = 2
 _NUMERIC_TOLERANCE = 1e-12
 _SPLIT_HALF_RELIABILITY_SPLITS = 50
+_MIN_FEATURES_FOR_BATCH_CONDITION = 100  # Use vectorized batch for 100+ features
 
 
 def _normalize_n_jobs(n_jobs: int) -> int:
@@ -119,11 +120,41 @@ def parallel_correlate_features(
     compute_reliability: bool,
     rng_seed: int,
     n_jobs: int = -1,
+    logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
-    """Correlate multiple features with target in parallel."""
-    if not _should_use_parallel(n_jobs, len(feature_columns), _MIN_FEATURES_FOR_PARALLEL_CORRELATION):
-        return [
-            _correlate_single_column(
+    """Correlate multiple features with target.
+    
+    Uses vectorized batch computation when partial correlations and reliability
+    are not needed. Falls back to per-feature computation otherwise.
+    """
+    if not feature_columns:
+        return []
+    
+    n_features = len(feature_columns)
+    
+    # Use vectorized batch for simple correlations (no partials, no reliability)
+    needs_partials = temp_arr is not None or order_arr is not None
+    needs_reliability = compute_reliability
+    
+    if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION and not needs_partials and not needs_reliability:
+        from eeg_pipeline.utils.analysis.stats.correlation import compute_batch_correlations
+        return compute_batch_correlations(
+            feature_columns=feature_columns,
+            feature_df=feature_df,
+            target_arr=target_arr,
+            method=method,
+            min_samples=min_samples,
+            logger=logger,
+        )
+    
+    # Fall back to per-feature computation for partial correlations or reliability
+    if logger:
+        logger.info(f"Correlations: {n_features} features (per-feature mode, partials={needs_partials}, reliability={needs_reliability})")
+    
+    if not _should_use_parallel(n_jobs, n_features, _MIN_FEATURES_FOR_PARALLEL_CORRELATION):
+        results = []
+        for col in feature_columns:
+            result = _correlate_single_column(
                 col,
                 feature_df,
                 target_arr,
@@ -134,8 +165,9 @@ def parallel_correlate_features(
                 compute_reliability,
                 rng_seed,
             )
-            for col in feature_columns
-        ]
+            if result is not None:
+                results.append(result)
+        return results
 
     normalized_jobs = _normalize_n_jobs(n_jobs)
     results = Parallel(n_jobs=normalized_jobs, backend="loky")(
@@ -242,11 +274,44 @@ def parallel_condition_effects(
     groups: Optional[np.ndarray] = None,
     n_perm: int = 0,
     base_seed: int = 42,
+    logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
-    """Compute condition effects for multiple features in parallel."""
-    if not _should_use_parallel(n_jobs, len(feature_columns), _MIN_FEATURES_FOR_PARALLEL_CONDITION):
-        return [
-            _compute_single_condition_effect(
+    """Compute condition effects for multiple features.
+    
+    Uses vectorized batch computation for speed when possible.
+    Falls back to per-feature parallel computation for small feature sets.
+    """
+    from eeg_pipeline.utils.analysis.stats.effect_size import compute_batch_condition_effects
+    
+    if not feature_columns:
+        return []
+    
+    n_features = len(feature_columns)
+    
+    # Use vectorized batch computation for large feature sets (much faster)
+    if n_features >= _MIN_FEATURES_FOR_BATCH_CONDITION:
+        return compute_batch_condition_effects(
+            feature_columns=feature_columns,
+            features_df=features_df,
+            pain_mask=pain_mask,
+            nonpain_mask=nonpain_mask,
+            n_perm=n_perm,
+            base_seed=base_seed,
+            groups=groups,
+            logger=logger,
+        )
+    
+    # Fall back to per-feature computation for small feature sets
+    if logger:
+        logger.info(f"Computing condition effects for {n_features} features (per-feature mode)")
+    
+    if not _should_use_parallel(n_jobs, n_features, _MIN_FEATURES_FOR_PARALLEL_CONDITION):
+        results = []
+        log_interval = max(1, n_features // 20)
+        for i, col in enumerate(feature_columns):
+            if logger and i > 0 and i % log_interval == 0:
+                logger.info(f"  Condition effects progress: {i}/{n_features} ({100*i//n_features}%)")
+            result = _compute_single_condition_effect(
                 col,
                 features_df,
                 pain_mask,
@@ -256,8 +321,9 @@ def parallel_condition_effects(
                 n_perm=n_perm,
                 base_seed=base_seed,
             )
-            for col in feature_columns
-        ]
+            if result is not None:
+                results.append(result)
+        return results
 
     normalized_jobs = _normalize_n_jobs(n_jobs)
     results = Parallel(n_jobs=normalized_jobs, backend="loky")(
@@ -278,15 +344,39 @@ def parallel_condition_effects(
 
 
 def _compute_ttest_statistics(
-    pain_values: np.ndarray, nonpain_values: np.ndarray
+    pain_values: np.ndarray,
+    nonpain_values: np.ndarray,
+    paired: bool = False,
 ) -> Tuple[float, float]:
-    """Compute t-test statistics for two groups."""
+    """Compute t-test statistics for two groups.
+    
+    Args:
+        pain_values: Values for pain condition
+        nonpain_values: Values for non-pain condition
+        paired: If True, use paired t-test (for within-subject designs).
+                If False, use independent samples Welch t-test.
+    
+    Note:
+        For within-subject thermal pain paradigms, paired=True is scientifically
+        correct because pain/non-pain conditions are within the same subject.
+        Using unpaired tests inflates Type I error by ignoring subject-level
+        correlation structure.
+    """
     from scipy import stats
 
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            t_stat, p_val = stats.ttest_ind(pain_values, nonpain_values, equal_var=False)
+            if paired:
+                # Paired t-test for within-subject designs
+                # Requires equal-length arrays (matched pairs)
+                if len(pain_values) != len(nonpain_values):
+                    # Fall back to unpaired if lengths don't match
+                    t_stat, p_val = stats.ttest_ind(pain_values, nonpain_values, equal_var=False)
+                else:
+                    t_stat, p_val = stats.ttest_rel(pain_values, nonpain_values)
+            else:
+                t_stat, p_val = stats.ttest_ind(pain_values, nonpain_values, equal_var=False)
             return float(t_stat), float(p_val)
     except RuntimeWarning:
         return np.nan, np.nan
