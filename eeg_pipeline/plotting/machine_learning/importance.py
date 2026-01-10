@@ -490,36 +490,3 @@ def plot_feature_importance_stability_ridge(
     save_fig(fig, save_path, formats=plot_cfg.formats)
     logger.info(f"Saved {model_name} feature importance stability (ridge): {save_path}")
 
-
-def plot_feature_importance_stability(
-    coef_matrix: np.ndarray,
-    feature_names: list[str],
-    model_name: str,
-    save_path: Path,
-    config: Optional[Any] = None,
-    plot_type: str = "violin",
-    top_n_channels: Optional[int] = None,
-) -> None:
-    """
-    Plot feature importance stability across cross-validation folds.
-    
-    Creates violin or ridge plots showing the distribution of feature importance
-    values across folds for each channel/feature.
-    
-    Deprecated: Use plot_feature_importance_stability_violin or
-    plot_feature_importance_stability_ridge instead.
-    """
-    if plot_type == "violin":
-        plot_feature_importance_stability_violin(
-            coef_matrix, feature_names, model_name, save_path, config, top_n_channels
-        )
-    elif plot_type == "ridge":
-        plot_feature_importance_stability_ridge(
-            coef_matrix, feature_names, model_name, save_path, config, top_n_channels
-        )
-    else:
-        logger.warning(f"Unknown plot_type '{plot_type}', using violin plot")
-        plot_feature_importance_stability_violin(
-            coef_matrix, feature_names, model_name, save_path, config, top_n_channels
-        )
-

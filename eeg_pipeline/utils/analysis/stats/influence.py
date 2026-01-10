@@ -40,11 +40,6 @@ _DEFAULT_COOKS_THRESHOLD_DIVISOR = 1
 
 from .base import safe_get_config_value as _get_config_value
 
-# _standardize is now imported from transforms as zscore_array
-
-
-# _build_covariate_design is now imported from _regression_utils
-
 
 def _compute_hat_diagonal(X: np.ndarray) -> Optional[np.ndarray]:
     """Compute diagonal of hat matrix (leverage values)."""

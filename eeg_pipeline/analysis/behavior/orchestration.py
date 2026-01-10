@@ -2625,32 +2625,14 @@ def stage_confounds(ctx: BehaviorContext, config: Any) -> pd.DataFrame:
                 consistent_covars = crossfit_results.get("consistent_covariates", [])
                 if consistent_covars:
                     ctx.partial_covars = list(consistent_covars)
-                    ctx.logger.info("Confounds: crossfit selected %d covariates: %s", 
+                    ctx.logger.info("Confounds: crossfit selected %d covariates: %s",
                                    len(consistent_covars), ", ".join(consistent_covars))
                 else:
                     ctx.logger.info("Confounds: crossfit found no consistent covariates")
-                
+
                 result.metadata["selection_mode"] = "crossfit"
                 result.metadata["covariates_applied"] = consistent_covars
                 result.metadata["crossfit_details"] = crossfit_results
-        
-    else:
-        # Legacy behavior: add_as_covariates_if_significant (deprecated)
-        add_cov = bool(get_config_value(ctx.config, "behavior_analysis.confounds.add_as_covariates_if_significant", False))
-        if add_cov and not result.df.empty:
-            ctx.logger.warning(
-                "Confounds: legacy 'add_as_covariates_if_significant' mode. "
-                "This is a post-selection procedure and may inflate Type I error. "
-                "Consider using selection_mode='prespecified' or 'descriptive'."
-            )
-            alpha = float(get_config_value(ctx.config, "behavior_analysis.statistics.fdr_alpha", 0.05))
-            max_cov = int(get_config_value(ctx.config, "behavior_analysis.confounds.max_qc_covariates", 3))
-            applied = apply_selected_qc_covariates(ctx, df_trials, result.df, alpha, max_cov)
-            result.metadata["selection_mode"] = "legacy_post_selection"
-            result.metadata["covariates_applied"] = applied
-        else:
-            result.metadata["selection_mode"] = "none"
-            result.metadata["covariates_applied"] = []
 
     return result.df
 

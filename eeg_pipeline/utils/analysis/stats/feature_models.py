@@ -39,12 +39,6 @@ _MAX_DUMMY_LEVELS = 20
 _MIN_BINARY_LEVELS = 2
 
 
-# _build_covariate_design is now imported from _regression_utils
-
-
-# OLS fit, HC3 SE, and R² functions are now imported from _regression_utils
-
-
 @dataclass
 class FeatureModelsConfig:
     enabled: bool = False

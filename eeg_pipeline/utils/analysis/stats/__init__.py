@@ -267,7 +267,6 @@ from .meta_analysis import (
     compute_heterogeneity,
     fixed_effects_meta,
     random_effects_meta,
-    leave_one_out_meta,
     bayes_factor_correlation,
     equivalence_test_correlation,
 )
@@ -508,7 +507,6 @@ __all__ = [
     "compute_heterogeneity",
     "fixed_effects_meta",
     "random_effects_meta",
-    "leave_one_out_meta",
     "bayes_factor_correlation",
     "equivalence_test_correlation",
     # Validation

@@ -205,6 +205,8 @@ def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
         pac_cfg["compute_waveform_qc"] = args.pac_compute_waveform_qc
     if _get_arg_value(args, "pac_waveform_offset_ms") is not None:
         pac_cfg["waveform_offset_ms"] = args.pac_waveform_offset_ms
+    if _get_arg_value(args, "pac_random_seed") is not None:
+        pac_cfg["random_seed"] = args.pac_random_seed
 
 
 def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -230,6 +232,10 @@ def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
         aperiodic_cfg["exclude_line_noise"] = args.aperiodic_exclude_line_noise
     if _get_arg_value(args, "aperiodic_line_noise_freq") is not None:
         aperiodic_cfg["line_noise_freqs"] = [args.aperiodic_line_noise_freq]
+    if _get_arg_value(args, "aperiodic_line_noise_width_hz") is not None:
+        aperiodic_cfg["line_noise_width_hz"] = args.aperiodic_line_noise_width_hz
+    if _get_arg_value(args, "aperiodic_line_noise_harmonics") is not None:
+        aperiodic_cfg["line_noise_harmonics"] = args.aperiodic_line_noise_harmonics
 
 
 def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -272,6 +278,8 @@ def _apply_burst_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "feature_engineering.bursts.bands", list(_split_list_tokens(args.burst_bands)))
     if _get_arg_value(args, "burst_min_duration") is not None:
         _apply_config_override(config, "feature_engineering.bursts.min_duration_ms", args.burst_min_duration)
+    if _get_arg_value(args, "burst_min_cycles") is not None:
+        _apply_config_override(config, "feature_engineering.bursts.min_cycles", args.burst_min_cycles)
 
 
 def _apply_power_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -304,6 +312,10 @@ def _apply_spectral_overrides(args: argparse.Namespace, config: Any) -> None:
         spectral_cfg["exclude_line_noise"] = args.spectral_exclude_line_noise
     if _get_arg_value(args, "spectral_line_noise_freq") is not None:
         spectral_cfg["line_noise_freqs"] = [args.spectral_line_noise_freq]
+    if _get_arg_value(args, "spectral_line_noise_width_hz") is not None:
+        spectral_cfg["line_noise_width_hz"] = args.spectral_line_noise_width_hz
+    if _get_arg_value(args, "spectral_line_noise_harmonics") is not None:
+        spectral_cfg["line_noise_harmonics"] = args.spectral_line_noise_harmonics
     if _get_arg_value(args, "spectral_segments") is not None:
         spectral_cfg["segments"] = args.spectral_segments
     if _get_arg_value(args, "spectral_min_segment_sec") is not None:
@@ -946,6 +958,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Minimum burst duration (ms)",
     )
     parser.add_argument(
+        "--burst-min-cycles",
+        type=float,
+        default=None,
+        help="Minimum oscillatory cycles for burst detection",
+    )
+    parser.add_argument(
         "--min-epochs",
         type=int,
         default=None,
@@ -1039,6 +1057,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--spectral-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from spectral computation")
     parser.add_argument("--no-spectral-exclude-line-noise", action="store_false", dest="spectral_exclude_line_noise")
     parser.add_argument("--spectral-line-noise-freq", type=float, default=None, help="Line noise frequency (50 or 60 Hz)")
+    parser.add_argument("--spectral-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude")
+    parser.add_argument("--spectral-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude")
     parser.add_argument("--spectral-segments", nargs="+", default=None, help="Segments for spectral features (e.g., baseline active)")
     parser.add_argument("--spectral-min-segment-sec", type=float, default=None, help="Minimum segment duration for spectral")
     parser.add_argument("--spectral-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at lowest frequency")
@@ -1061,6 +1081,8 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--aperiodic-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from aperiodic fit")
     parser.add_argument("--no-aperiodic-exclude-line-noise", action="store_false", dest="aperiodic_exclude_line_noise")
     parser.add_argument("--aperiodic-line-noise-freq", type=float, default=None, help="Line noise frequency for aperiodic")
+    parser.add_argument("--aperiodic-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude from aperiodic fit")
+    parser.add_argument("--aperiodic-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude from aperiodic fit")
     
     # Connectivity advanced options
     parser.add_argument("--conn-granularity", choices=["trial", "condition", "subject"], default=None, help="Connectivity granularity")
@@ -1083,6 +1105,7 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--pac-compute-waveform-qc", action="store_true", default=None, help="Compute waveform QC for PAC")
     parser.add_argument("--no-pac-compute-waveform-qc", action="store_false", dest="pac_compute_waveform_qc")
     parser.add_argument("--pac-waveform-offset-ms", type=float, default=None, help="Waveform offset in ms for PAC QC")
+    parser.add_argument("--pac-random-seed", type=int, default=None, help="Random seed for PAC surrogate testing")
     
     # Complexity advanced options
     parser.add_argument("--complexity-target-hz", type=float, default=None, help="Target sampling rate for complexity")

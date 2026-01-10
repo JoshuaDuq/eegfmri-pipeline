@@ -343,23 +343,6 @@ def leave_one_out_meta_random(
     return _leave_one_out_analysis(r_array, n_array, random_effects_meta)
 
 
-def leave_one_out_meta(
-    r_values: np.ndarray,
-    n_values: np.ndarray,
-    use_random_effects: bool = True,
-) -> List[Tuple[int, MetaAnalysisResult]]:
-    """
-    Leave-one-out sensitivity analysis.
-    
-    Deprecated: Use leave_one_out_meta_fixed or leave_one_out_meta_random instead.
-    
-    Returns list of (excluded_index, meta_result) tuples.
-    """
-    if use_random_effects:
-        return leave_one_out_meta_random(r_values, n_values)
-    return leave_one_out_meta_fixed(r_values, n_values)
-
-
 def _empty_meta_result() -> MetaAnalysisResult:
     """Return empty meta-analysis result."""
     empty_array = np.array([])

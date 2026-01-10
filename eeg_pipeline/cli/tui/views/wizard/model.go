@@ -955,6 +955,7 @@ type Model struct {
 	burstThresholdMethod     int     // 0: percentile, 1: zscore, 2: mad
 	burstThresholdPercentile float64 // Percentile threshold (for percentile method)
 	burstMinDuration         int     // ms
+	burstMinCycles           float64 // Minimum oscillatory cycles for burst detection
 	burstBandsSpec           string  // e.g. beta,gamma
 
 	// Power configuration
@@ -1000,15 +1001,17 @@ type Model struct {
 	itpcBaselineCorrection int  // 0: none, 1: subtract
 
 	// Spectral advanced options
-	spectralIncludeLogRatios bool    // Include log ratios
-	spectralPsdMethod        int     // 0: multitaper, 1: welch
-	spectralFmin             float64 // Min frequency for spectral
-	spectralFmax             float64 // Max frequency for spectral
-	spectralExcludeLineNoise bool    // Exclude line noise
-	spectralLineNoiseFreq    float64 // Line noise frequency (50 or 60)
-	spectralSegments         int     // 0: baseline only, 1: active only, 2: both
-	spectralMinSegmentSec    float64 // Minimum segment duration
-	spectralMinCyclesAtFmin  float64 // Minimum cycles at lowest frequency
+	spectralIncludeLogRatios   bool    // Include log ratios
+	spectralPsdMethod          int     // 0: multitaper, 1: welch
+	spectralFmin               float64 // Min frequency for spectral
+	spectralFmax               float64 // Max frequency for spectral
+	spectralExcludeLineNoise   bool    // Exclude line noise
+	spectralLineNoiseFreq      float64 // Line noise frequency (50 or 60)
+	spectralLineNoiseWidthHz   float64 // Line noise frequency band width to exclude
+	spectralLineNoiseHarmonics int     // Number of line noise harmonics to exclude
+	spectralSegments           int     // 0: baseline only, 1: active only, 2: both
+	spectralMinSegmentSec      float64 // Minimum segment duration
+	spectralMinCyclesAtFmin    float64 // Minimum cycles at lowest frequency
 
 	// Band envelope options
 	bandEnvelopePadSec    float64 // Padding in seconds
@@ -1023,12 +1026,14 @@ type Model struct {
 	iafRoisSpec       string  // IAF ROIs (comma-separated)
 
 	// Aperiodic advanced options
-	aperiodicModel            int     // 0: fixed, 1: knee
-	aperiodicPsdMethod        int     // 0: multitaper, 1: welch
-	aperiodicPsdBandwidth     float64 // PSD bandwidth (0 = use default)
-	aperiodicMaxRms           float64 // Max RMS for aperiodic fit (0 = no limit)
-	aperiodicExcludeLineNoise bool    // Exclude line noise
-	aperiodicLineNoiseFreq    float64 // Line noise frequency
+	aperiodicModel              int     // 0: fixed, 1: knee
+	aperiodicPsdMethod          int     // 0: multitaper, 1: welch
+	aperiodicPsdBandwidth       float64 // PSD bandwidth (0 = use default)
+	aperiodicMaxRms             float64 // Max RMS for aperiodic fit (0 = no limit)
+	aperiodicExcludeLineNoise   bool    // Exclude line noise
+	aperiodicLineNoiseFreq      float64 // Line noise frequency
+	aperiodicLineNoiseWidthHz   float64 // Line noise frequency band width to exclude
+	aperiodicLineNoiseHarmonics int     // Number of line noise harmonics to exclude
 
 	// Spatial transform options (for volume conduction reduction)
 	spatialTransform          int     // 0: none, 1: csd, 2: laplacian
@@ -1073,6 +1078,7 @@ type Model struct {
 	pacHarmonicToleranceHz float64 // Harmonic tolerance in Hz
 	pacComputeWaveformQC   bool    // Compute waveform QC
 	pacWaveformOffsetMs    float64 // Waveform offset in ms
+	pacRandomSeed          int     // Random seed for PAC surrogate testing
 
 	// Complexity advanced options
 	complexityTargetHz       float64 // Target sampling rate
@@ -1505,6 +1511,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		burstThresholdMethod:     0, // 0: percentile
 		burstThresholdPercentile: 95.0,
 		burstMinDuration:         50,
+		burstMinCycles:           3.0,
 		burstBandsSpec:           "beta,gamma",
 		// Power defaults
 		powerBaselineMode:    0,
@@ -1531,15 +1538,17 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		itpcBaselineCorrection: 0, // 0: none
 
 		// Spectral advanced defaults
-		spectralIncludeLogRatios: true,
-		spectralPsdMethod:        0, // 0: multitaper
-		spectralFmin:             1.0,
-		spectralFmax:             80.0,
-		spectralExcludeLineNoise: true,
-		spectralLineNoiseFreq:    50.0,
-		spectralSegments:         0, // 0: baseline only
-		spectralMinSegmentSec:    2.0,
-		spectralMinCyclesAtFmin:  3.0,
+		spectralIncludeLogRatios:   true,
+		spectralPsdMethod:          0, // 0: multitaper
+		spectralFmin:               1.0,
+		spectralFmax:               80.0,
+		spectralExcludeLineNoise:   true,
+		spectralLineNoiseFreq:      50.0,
+		spectralLineNoiseWidthHz:   1.0,
+		spectralLineNoiseHarmonics: 3,
+		spectralSegments:           0, // 0: baseline only
+		spectralMinSegmentSec:      2.0,
+		spectralMinCyclesAtFmin:    3.0,
 
 		// Band envelope defaults
 		bandEnvelopePadSec:    0.5,
@@ -1554,12 +1563,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		iafRoisSpec:       "ParOccipital_Midline,ParOccipital_Ipsi_L,ParOccipital_Contra_R",
 
 		// Aperiodic advanced defaults
-		aperiodicModel:            0,   // 0: fixed
-		aperiodicPsdMethod:        0,   // 0: multitaper
-		aperiodicPsdBandwidth:     0.0, // 0 = use default
-		aperiodicMaxRms:           0.0, // 0 = no limit
-		aperiodicExcludeLineNoise: true,
-		aperiodicLineNoiseFreq:    50.0,
+		aperiodicModel:              0,   // 0: fixed
+		aperiodicPsdMethod:          0,   // 0: multitaper
+		aperiodicPsdBandwidth:       0.0, // 0 = use default
+		aperiodicMaxRms:             0.0, // 0 = no limit
+		aperiodicExcludeLineNoise:   true,
+		aperiodicLineNoiseFreq:      50.0,
+		aperiodicLineNoiseWidthHz:   1.0,
+		aperiodicLineNoiseHarmonics: 3,
 
 		// Spatial transform defaults
 		spatialTransform:          0,    // 0: none
@@ -3817,18 +3828,23 @@ const (
 	optPACAllowHarmonicOverlap
 	optPACMaxHarmonic
 	optPACHarmonicToleranceHz
+	optPACRandomSeed
 	optAperiodicRange
 	optAperiodicPeakZ
 	optAperiodicMinR2
 	optAperiodicMinPoints
 	optAperiodicPsdBandwidth
 	optAperiodicMaxRms
+	optAperiodicLineNoiseFreq
+	optAperiodicLineNoiseWidthHz
+	optAperiodicLineNoiseHarmonics
 	optPEOrder
 	optPEDelay
 	optBurstThresholdMethod
 	optBurstThresholdPercentile
 	optBurstThreshold
 	optBurstMinDuration
+	optBurstMinCycles
 	optBurstBands
 	optERPBaseline
 	optERPAllowNoBaseline
@@ -3840,6 +3856,9 @@ const (
 	optPowerRequireBaseline
 	optSpectralEdge
 	optSpectralRatioPairs
+	optSpectralLineNoiseFreq
+	optSpectralLineNoiseWidthHz
+	optSpectralLineNoiseHarmonics
 	optAsymmetryChannelPairs
 	optConnOutputLevel
 	optConnGraphMetrics
@@ -4326,13 +4345,13 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupPAC)
 		if m.featGroupPACExpanded {
 			options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs, optPACPairs,
-				optPACSource, optPACNormalize, optPACNSurrogates, optPACAllowHarmonicOverlap, optPACMaxHarmonic, optPACHarmonicToleranceHz)
+				optPACSource, optPACNormalize, optPACNSurrogates, optPACAllowHarmonicOverlap, optPACMaxHarmonic, optPACHarmonicToleranceHz, optPACRandomSeed)
 		}
 	}
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, optFeatGroupAperiodic)
 		if m.featGroupAperiodicExpanded {
-			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms)
+			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics)
 		}
 	}
 	if m.isCategorySelected("complexity") {

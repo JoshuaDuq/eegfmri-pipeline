@@ -44,12 +44,10 @@ _MAX_DUMMY_VARIABLES = 20
 _MIN_FEATURES_FOR_PARALLEL = 10
 
 
-# OLS fit, HC3 SE, and R² functions are now imported from _regression_utils
 # Alias for backward compatibility with existing code
 _hc3_se_for_beta = _hc3_se
 
 
-# _build_covariate_design is now imported from _regression_utils
 # Wrapper to maintain backward compatibility with return_design_df=True
 def _build_covariate_design_with_df(
     df: pd.DataFrame,
@@ -69,7 +67,6 @@ def _build_covariate_design_with_df(
     return X, names, design_df
 
 
-# _build_temperature_covariates is now imported from _regression_utils
 # Wrapper to maintain backward compatibility with config object interface
 def _build_temperature_covariates(
     trial_df: pd.DataFrame,

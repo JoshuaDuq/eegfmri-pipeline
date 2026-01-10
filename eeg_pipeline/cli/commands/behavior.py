@@ -185,8 +185,6 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     residual_group.add_argument("--pain-residual-crossfit-spline-n-knots", type=int, default=None)
 
     confounds_group = parser.add_argument_group("Confounds options")
-    confounds_group.add_argument("--confounds-add-as-covariates", action="store_true", default=None, dest="confounds_add_as_covariates")
-    confounds_group.add_argument("--no-confounds-add-as-covariates", action="store_false", dest="confounds_add_as_covariates")
     confounds_group.add_argument("--confounds-max-covariates", type=int, default=None)
     confounds_group.add_argument("--confounds-qc-column-patterns", nargs="+", default=None, metavar="REGEX")
 
@@ -533,8 +531,6 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
 
     # Confounds
     cf = ba.setdefault("confounds", {})
-    if getattr(args, "confounds_add_as_covariates", None) is not None:
-        cf["add_as_covariates_if_significant"] = bool(args.confounds_add_as_covariates)
     if getattr(args, "confounds_max_covariates", None) is not None:
         cf["max_qc_covariates"] = int(args.confounds_max_covariates)
     if getattr(args, "confounds_qc_column_patterns", None) is not None:
