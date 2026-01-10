@@ -362,6 +362,20 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     condition_group.add_argument("--condition-permutation-primary", action="store_true", default=None, dest="condition_permutation_primary")
     condition_group.add_argument("--no-condition-permutation-primary", action="store_false", dest="condition_permutation_primary")
 
+    output_group = parser.add_argument_group("Output options")
+    output_group.add_argument(
+        "--also-save-csv",
+        action="store_true",
+        default=None,
+        dest="also_save_csv",
+        help="Also save output tables as CSV files (in addition to TSV)",
+    )
+    output_group.add_argument(
+        "--no-also-save-csv",
+        action="store_false",
+        dest="also_save_csv",
+    )
+
     visualize_group = parser.add_argument_group("Visualize mode options")
     plot_group = visualize_group.add_mutually_exclusive_group()
     plot_group.add_argument("--plots", nargs="+", metavar="PLOT")
@@ -844,6 +858,11 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         ba.setdefault("mixed_effects", {})["random_effects"] = str(args.mixed_random_effects).strip().lower()
     if getattr(args, "mixed_max_features", None) is not None:
         ba.setdefault("mixed_effects", {})["max_features"] = int(args.mixed_max_features)
+
+    # Output options
+    out = ba.setdefault("output", {})
+    if getattr(args, "also_save_csv", None) is not None:
+        out["also_save_csv"] = bool(args.also_save_csv)
 
 
 def _build_computation_features(args: argparse.Namespace) -> dict[str, list[str]] | None:

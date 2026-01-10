@@ -94,33 +94,88 @@ def _extract_aperiodic_data(
 def _load_aperiodic_qc(
     subject: str, config: Any, logger: logging.Logger
 ) -> Optional[Dict[str, Any]]:
-    """Load aperiodic QC data from npz file.
-    
+    """Load aperiodic QC data from TSV file.
+
     Args:
         subject: Subject identifier
         config: Configuration object
         logger: Logger instance
-    
+
     Returns:
-        Loaded npz data or None if not found
+        Loaded QC data as dict or None if not found
     """
     try:
         stats_dir = deriv_stats_path(config.deriv_root, subject)
-        qc_path = stats_dir / "aperiodic_qc.npz"
+        qc_path = stats_dir / "aperiodic_qc.tsv"
     except (AttributeError, TypeError):
         qc_path = None
-    
+
     if qc_path is None or not qc_path.exists():
         log_if_present(
             logger, "warning", "Aperiodic QC sidecar not found; skipping QC plots"
         )
         return None
-    
+
     try:
-        return np.load(qc_path, allow_pickle=True)
-    except (OSError, IOError, ValueError) as exc:
+        df = read_table(qc_path)
+        if df.empty:
+            return None
+
+        qc_data: Dict[str, Any] = {}
+
+        residual_rows = df[df["residual_mean"].notna() & df["frequency"].notna()]
+        if not residual_rows.empty:
+            channels = residual_rows["channel"].unique()
+            freqs = residual_rows["frequency"].unique()
+            residual_mean = np.full((len(channels), len(freqs)), np.nan)
+
+            for ch_idx, ch in enumerate(channels):
+                ch_data = residual_rows[residual_rows["channel"] == ch]
+                for freq_idx, freq in enumerate(freqs):
+                    row = ch_data[ch_data["frequency"] == freq]
+                    if not row.empty:
+                        residual_mean[ch_idx, freq_idx] = row["residual_mean"].values[0]
+
+            qc_data["residual_mean"] = residual_mean
+            qc_data["freqs"] = freqs
+
+        r2_rows = df[df["r2"].notna()]
+        if not r2_rows.empty:
+            channels = r2_rows["channel"].unique()
+            r2 = np.full(len(channels), np.nan)
+            for ch_idx, ch in enumerate(channels):
+                ch_data = r2_rows[r2_rows["channel"] == ch]
+                if not ch_data.empty:
+                    r2[ch_idx] = ch_data["r2"].values[0]
+            qc_data["r2"] = r2
+
+        slope_rows = df[df["slope"].notna()]
+        if not slope_rows.empty:
+            trials = slope_rows["trial"].unique()
+            channels = slope_rows["channel"].unique()
+            slopes = np.full((len(trials), len(channels)), np.nan)
+            offsets = np.full((len(trials), len(channels)), np.nan)
+
+            for trial_idx, trial in enumerate(trials):
+                trial_data = slope_rows[slope_rows["trial"] == trial]
+                for ch_idx, ch in enumerate(channels):
+                    ch_data = trial_data[trial_data["channel"] == ch]
+                    if not ch_data.empty:
+                        slopes[trial_idx, ch_idx] = ch_data["slope"].values[0]
+                        offsets[trial_idx, ch_idx] = ch_data["offset"].values[0]
+
+            qc_data["slopes"] = slopes
+            qc_data["offsets"] = offsets
+            qc_data["run_labels"] = trials
+
+        if "channel" in df.columns:
+            qc_data["channel_names"] = df["channel"].unique().tolist()
+
+        return qc_data
+
+    except (OSError, IOError, ValueError, KeyError) as exc:
         log_if_present(
-            logger, "warning", f"Failed to load aperiodic QC npz: {exc}"
+            logger, "warning", f"Failed to load aperiodic QC TSV: {exc}"
         )
         return None
 

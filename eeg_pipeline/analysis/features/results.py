@@ -387,6 +387,12 @@ class FeatureExtractionResult:
     # Quality metrics
     quality_df: Optional[pd.DataFrame] = None
     quality_cols: List[str] = field(default_factory=list)
+    # Directed connectivity features (PSI, DTF, PDC)
+    dconn_df: Optional[pd.DataFrame] = None
+    dconn_cols: List[str] = field(default_factory=list)
+    # Source localization features (LCMV, eLORETA)
+    source_df: Optional[pd.DataFrame] = None
+    source_cols: List[str] = field(default_factory=list)
 
 
 

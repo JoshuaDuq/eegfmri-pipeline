@@ -50,10 +50,10 @@ func calculateScrollWindow(totalLines, offset, effectiveHeight, overhead int) (s
 }
 
 const (
-	defaultLabelWidth      = 22
+	defaultLabelWidth     = 22
 	defaultLabelWidthWide = 30
-	configOverhead         = 10
-	plotConfigOverhead     = 8
+	configOverhead        = 10
+	plotConfigOverhead    = 8
 )
 
 // renderDefaultConfigView renders the default configuration view when useDefaultAdvanced is true
@@ -216,65 +216,6 @@ func (m Model) renderModeSelection() string {
 
 		b.WriteString("\n")
 	}
-
-	return b.String()
-}
-
-func (m Model) renderProjectSetup() string {
-	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" PROJECT SETUP ") + "\n\n")
-
-	labelStyle := lipgloss.NewStyle().Foreground(styles.Text).Width(16)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Primary)
-	dimStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-	selectedStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	fields := []struct {
-		label  string
-		value  string
-		hint   string
-		isPath bool
-	}{
-		{"Task", m.task, "BIDS task label (e.g., pain)", false},
-		{"BIDS Root", m.projectBidsRoot, "Input BIDS dataset path", true},
-		{"Deriv Root", m.projectDerivRoot, "Derivatives output path", true},
-		{"Source Root", m.projectSourceRoot, "Raw source data path (utilities)", true},
-	}
-
-	for i, f := range fields {
-		cursor := "  "
-		if i == m.projectSetupCursor {
-			cursor = selectedStyle.Render("▸ ")
-		}
-
-		value := f.value
-		if value == "" {
-			value = dimStyle.Render("(use global default)")
-		} else {
-			value = valueStyle.Render(value)
-		}
-
-		b.WriteString(cursor + labelStyle.Render(f.label+":") + value + "\n")
-		if i == m.projectSetupCursor {
-			b.WriteString("    " + dimStyle.Render(f.hint) + "\n")
-		}
-	}
-
-	// Use global defaults toggle
-	b.WriteString("\n")
-	toggleCursor := "  "
-	if m.projectSetupCursor == 4 {
-		toggleCursor = selectedStyle.Render("▸ ")
-	}
-	checkbox := "[ ]"
-	if m.useGlobalDefaults {
-		checkbox = lipgloss.NewStyle().Foreground(styles.Success).Render("[✓]")
-	}
-	b.WriteString(toggleCursor + checkbox + " Use global defaults for this run\n")
-
-	// Help hints
-	b.WriteString("\n")
-	b.WriteString(dimStyle.Render("↑/↓ navigate  •  Enter edit  •  Space toggle  •  Esc clear") + "\n")
 
 	return b.String()
 }
@@ -551,16 +492,21 @@ func (m Model) renderBandSelection() string {
 		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
 	}
 
-	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+	b.WriteString("  " + statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
 		fmt.Sprintf("%d of %d selected", count, len(m.bands))))
 	if count == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
 	}
 	b.WriteString("\n\n")
 
+	// Instructions
+	instructionStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	b.WriteString(instructionStyle.Render("  Space: edit • A: add band • D: delete band") + "\n\n")
+
 	for i, band := range m.bands {
 		isSelected := m.bandSelected[i]
 		isFocused := i == m.bandCursor
+		isEditing := m.editingBandIdx == i
 
 		checkbox := styles.RenderCheckbox(isSelected, isFocused)
 
@@ -569,11 +515,118 @@ func (m Model) renderBandSelection() string {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
 		}
 
-		b.WriteString(checkbox + nameStyle.Render(band.Name))
+		// Band name (editable)
+		var nameDisplay string
+		if isEditing && m.editingBandField == 0 {
+			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "▌")
+		} else {
+			nameDisplay = nameStyle.Render(band.Name)
+		}
 
-		desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + band.Description)
-		b.WriteString(desc)
+		// Frequency range display
+		freqStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		if isFocused {
+			freqStyle = lipgloss.NewStyle().Foreground(styles.Secondary)
+		}
 
+		var lowHzDisplay, highHzDisplay string
+		if isEditing && m.editingBandField == 1 {
+			lowHzDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "▌")
+		} else {
+			lowHzDisplay = freqStyle.Render(fmt.Sprintf("%.1f", band.LowHz))
+		}
+		if isEditing && m.editingBandField == 2 {
+			highHzDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.bandEditBuffer + "▌")
+		} else {
+			highHzDisplay = freqStyle.Render(fmt.Sprintf("%.1f", band.HighHz))
+		}
+
+		freqRange := freqStyle.Render(" [") + lowHzDisplay + freqStyle.Render(" - ") + highHzDisplay + freqStyle.Render(" Hz]")
+
+		b.WriteString(checkbox + nameDisplay + freqRange)
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderROISelection() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" REGIONS OF INTEREST") + "\n\n")
+
+	count := 0
+	for _, sel := range m.roiSelected {
+		if sel {
+			count++
+		}
+	}
+
+	// Inline validation indicator
+	var statusIndicator string
+	if count >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString("  " + statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(m.rois))))
+	if count == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
+
+	// Instructions
+	instructionStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	b.WriteString(instructionStyle.Render("  Space: edit • A: add ROI • D: delete ROI") + "\n\n")
+
+	for i, roi := range m.rois {
+		isSelected := m.roiSelected[i]
+		isFocused := i == m.roiCursor
+		isEditing := m.editingROIIdx == i
+
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		if isFocused {
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+		}
+
+		// ROI name (editable)
+		var nameDisplay string
+		if isEditing && m.editingROIField == 0 {
+			nameDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditBuffer + "▌")
+		} else {
+			nameDisplay = nameStyle.Render(roi.Name)
+		}
+
+		// Channels display
+		channelStyle := lipgloss.NewStyle().Foreground(styles.TextDim)
+		if isFocused {
+			channelStyle = lipgloss.NewStyle().Foreground(styles.Secondary)
+		}
+
+		var channelsDisplay string
+		if isEditing && m.editingROIField == 1 {
+			channelsDisplay = lipgloss.NewStyle().Background(styles.Primary).Foreground(styles.BgDark).Render(m.roiEditBuffer + "▌")
+		} else {
+			// Truncate channels if too long
+			channels := roi.Channels
+			if len(channels) > 40 {
+				channels = channels[:37] + "..."
+			}
+			channelsDisplay = channelStyle.Render(channels)
+		}
+
+		channelInfo := channelStyle.Render(" [") + channelsDisplay + channelStyle.Render("]")
+
+		b.WriteString(checkbox + nameDisplay + channelInfo)
 		b.WriteString("\n")
 	}
 
@@ -585,7 +638,7 @@ func (m Model) renderSpatialSelection() string {
 	b.WriteString(styles.SectionTitleStyle.Render(" SPATIAL AGGREGATION ") + "\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Select how to aggregate features spatially.\n\n"))
+		"  Select how to aggregate features spatially.") + "\n\n")
 
 	count := 0
 	for _, sel := range m.spatialSelected {
@@ -593,8 +646,8 @@ func (m Model) renderSpatialSelection() string {
 			count++
 		}
 	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(
-		fmt.Sprintf("  %d of %d selected\n\n", count, len(spatialModes))))
+	b.WriteString("  " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d selected", count, len(spatialModes))) + "\n\n")
 
 	for i, mode := range spatialModes {
 		isSelected := m.spatialSelected[i]
@@ -607,7 +660,7 @@ func (m Model) renderSpatialSelection() string {
 			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
 		}
 
-		b.WriteString(checkbox + nameStyle.Render(mode.Name))
+		b.WriteString(checkbox + nameStyle.Render(mode.Name) + "\n")
 
 		desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + mode.Description)
 		b.WriteString(desc + "\n")
@@ -984,11 +1037,9 @@ func (m Model) renderTimeRange() string {
 	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"  Define time ranges to be computed separately.\n") +
+		"  Define time ranges to be computed separately.") + "\n" +
 		lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  [A] Add range  [D] Delete range  [Space/Enter] Edit range\n") +
-		lipgloss.NewStyle().Foreground(styles.Muted).Render(
-			"  Suggested names: baseline, active, n1, n2, p2 (match your paradigm)\n\n"))
+			"  [A] Add range  [D] Delete range  [Space/Enter] Edit range") + "\n\n")
 
 	nameWidth := 15
 	valWidth := 10
@@ -1060,38 +1111,6 @@ func (m Model) renderTimeRange() string {
 			valWidth, tmaxStyle.Render(tmaxVal),
 		)
 		b.WriteString(row + "\n")
-	}
-
-	hasBaseline := false
-	hasActive := false
-	for _, tr := range m.TimeRanges {
-		if tr.Name == "baseline" {
-			hasBaseline = true
-		}
-		if tr.Name == "active" {
-			hasActive = true
-		}
-	}
-
-	b.WriteString("\n")
-	okStyle := lipgloss.NewStyle().Foreground(styles.Success)
-	warnStyle := lipgloss.NewStyle().Foreground(styles.Warning)
-
-	b.WriteString("  " + styles.SectionTitleStyle.Render("Requirements") + "\n")
-	if hasBaseline {
-		b.WriteString("  " + okStyle.Render("✓") + " baseline - required for normalization\n")
-	} else {
-		b.WriteString("  " + warnStyle.Render("○") + " baseline - " + warnStyle.Render("not defined (required for ERDS, log-ratio)") + "\n")
-	}
-	if hasActive {
-		b.WriteString("  " + okStyle.Render("✓") + " active - primary analysis window\n")
-	} else {
-		b.WriteString("  " + warnStyle.Render("○") + " active - " + warnStyle.Render("not defined (recommended)") + "\n")
-	}
-
-	if !hasBaseline || !hasActive {
-		b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-			"  Tip: Define at least 'baseline' and 'active' for most feature extraction.") + "\n")
 	}
 
 	return b.String()
@@ -1672,6 +1691,12 @@ func (m Model) renderReview() string {
 				}
 				configs = append(configs, fmt.Sprintf("conn_win=%.1fs/%.1fs", m.connWindowLen, m.connWindowStep))
 			}
+			if m.isCategorySelected("directed_connectivity") {
+				measures := m.selectedDirectedConnectivityMeasures()
+				if len(measures) > 0 {
+					configs = append(configs, fmt.Sprintf("dconn=%s", strings.Join(measures, "+")))
+				}
+			}
 			if m.isCategorySelected("pac") {
 				methods := []string{"mvl", "kl", "tort", "ozkurt"}
 				configs = append(configs, fmt.Sprintf("pac=%s@%.0f-%.0f/%.0f-%.0fHz",
@@ -1692,6 +1717,11 @@ func (m Model) renderReview() string {
 			}
 			if m.isCategorySelected("erp") {
 				configs = append(configs, fmt.Sprintf("erp_baseline=%v", m.erpBaselineCorrection))
+			}
+			if m.isCategorySelected("source_localization") {
+				methods := []string{"lcmv", "eloreta"}
+				parcs := []string{"aparc", "aparc.a2009s", "HCPMMP1"}
+				configs = append(configs, fmt.Sprintf("source=%s@%s", methods[m.sourceLocMethod], parcs[m.sourceLocParc]))
 			}
 			configs = append(configs, fmt.Sprintf("min_epochs=%d", m.minEpochsForFeatures))
 
@@ -2047,6 +2077,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if m.expandedOption == expandedConnectivityMeasures {
 		totalLines += len(connectivityMeasures)
 	}
+	if m.expandedOption == expandedDirectedConnMeasures {
+		totalLines += len(directedConnectivityMeasures)
+	}
 
 	effectiveHeight := m.height
 	if effectiveHeight <= 0 {
@@ -2110,6 +2143,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				expandIndicator = ""
 			}
 			// Use distinct styling for section headers
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optFeatGroupDirectedConnectivity:
+			label = "▸ Directed Connectivity"
+			hint = "Space to toggle"
+			if m.featGroupDirectedConnExpanded {
+				label = "▾ Directed Connectivity"
+			}
+			value, expandIndicator = "", ""
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -2328,6 +2373,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			} else {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
+		case optFeatGroupSourceLoc:
+			label = "▸ Source Localization"
+			hint = "Space to toggle"
+			if m.featGroupSourceLocExpanded {
+				label = "▾ Source Localization"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
 
 		// Connectivity settings
 		case optConnectivity:
@@ -2363,6 +2420,72 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "AEC Mode"
 			value = connAecVal
 			hint = "orth/none/sym"
+
+		// Directed Connectivity (PSI, DTF, PDC)
+		case optDirectedConnMeasures:
+			label = "Measures"
+			value = m.selectedDirectedConnectivityDisplay()
+			hint = "Select directed measures"
+			if m.expandedOption != expandedDirectedConnMeasures {
+				expandIndicator = " [+]"
+			} else {
+				expandIndicator = " [-]"
+			}
+		case optDirectedConnOutputLevel:
+			label = "Output Level"
+			outputLevels := []string{"full", "global_only"}
+			value = outputLevels[m.directedConnOutputLevel]
+			hint = "full / global_only"
+		case optDirectedConnMvarOrder:
+			label = "MVAR Order"
+			value = fmt.Sprintf("%d", m.directedConnMvarOrder)
+			hint = "model order for DTF/PDC"
+		case optDirectedConnNFreqs:
+			label = "N Freqs"
+			value = fmt.Sprintf("%d", m.directedConnNFreqs)
+			hint = "frequency bins"
+		case optDirectedConnMinSegSamples:
+			label = "Min Seg Samples"
+			value = fmt.Sprintf("%d", m.directedConnMinSegSamples)
+			hint = "minimum samples per segment"
+
+		// Source Localization (LCMV, eLORETA)
+		case optSourceLocMethod:
+			label = "Method"
+			methods := []string{"LCMV", "eLORETA"}
+			value = methods[m.sourceLocMethod]
+			hint = "beamformer type"
+		case optSourceLocSpacing:
+			label = "Spacing"
+			spacings := []string{"oct5", "oct6", "ico4", "ico5"}
+			value = spacings[m.sourceLocSpacing]
+			hint = "source space resolution"
+		case optSourceLocParc:
+			label = "Parcellation"
+			parcs := []string{"aparc", "aparc.a2009s", "HCPMMP1"}
+			value = parcs[m.sourceLocParc]
+			hint = "cortical atlas"
+		case optSourceLocReg:
+			label = "Regularization"
+			value = fmt.Sprintf("%.3f", m.sourceLocReg)
+			hint = "LCMV regularization"
+		case optSourceLocSnr:
+			label = "SNR"
+			value = fmt.Sprintf("%.1f", m.sourceLocSnr)
+			hint = "eLORETA signal-to-noise"
+		case optSourceLocLoose:
+			label = "Loose"
+			value = fmt.Sprintf("%.2f", m.sourceLocLoose)
+			hint = "eLORETA loose constraint"
+		case optSourceLocDepth:
+			label = "Depth"
+			value = fmt.Sprintf("%.2f", m.sourceLocDepth)
+			hint = "eLORETA depth weighting"
+		case optSourceLocConnMethod:
+			label = "Connectivity"
+			connMethods := []string{"AEC", "wPLI", "PLV"}
+			value = connMethods[m.sourceLocConnMethod]
+			hint = "source-space connectivity"
 
 		// PAC
 		case optPACPhaseRange:
@@ -2594,6 +2717,28 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			subIndent := "      " // 6 spaces for sub-items
 			for j, measure := range connectivityMeasures {
 				isSelected := m.connectivityMeasures[j]
+				isSubFocused := j == m.subCursor
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + measure.Description)
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(measure.Name) + desc + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (directed connectivity measures)
+		if opt == optDirectedConnMeasures && m.expandedOption == expandedDirectedConnMeasures {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, measure := range directedConnectivityMeasures {
+				isSelected := m.directedConnMeasures[j]
 				isSubFocused := j == m.subCursor
 
 				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
@@ -3574,6 +3719,16 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			}
 			return "Max Features", val, "max features to include"
 
+		// Output section
+		case optBehaviorGroupOutput:
+			label := "▸ Output"
+			if m.behaviorGroupOutputExpanded {
+				label = "▾ Output"
+			}
+			return label, "", "Space to toggle"
+		case optAlsoSaveCsv:
+			return "Also Save CSV", m.boolToOnOff(m.alsoSaveCsv), "save tables as both TSV and CSV"
+
 		default:
 			return "", "", ""
 		}
@@ -4511,6 +4666,19 @@ func (m Model) selectedConnectivityDisplay() string {
 	for i, sel := range m.connectivityMeasures {
 		if sel && i < len(connectivityMeasures) {
 			selected = append(selected, connectivityMeasures[i].Key)
+		}
+	}
+	if len(selected) == 0 {
+		return "(none)"
+	}
+	return strings.Join(selected, ", ")
+}
+
+func (m Model) selectedDirectedConnectivityDisplay() string {
+	var selected []string
+	for i, sel := range m.directedConnMeasures {
+		if sel && i < len(directedConnectivityMeasures) {
+			selected = append(selected, directedConnectivityMeasures[i].Key)
 		}
 	}
 	if len(selected) == 0 {

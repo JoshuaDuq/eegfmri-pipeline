@@ -9,7 +9,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from eeg_pipeline.utils.analysis.stats.reliability import compute_icc as _compute_icc_array
+from eeg_pipeline.utils.analysis.stats.reliability import (
+    compute_icc as _compute_icc_array,
+    compute_icc_from_dataframe,
+)
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.base import get_fdr_alpha
 from eeg_pipeline.utils.analysis.stats.mediation import analyze_mediation_for_features
@@ -244,40 +247,8 @@ def fit_mixed_effects_model(
     }
 
 
-def compute_icc(
-    df: pd.DataFrame,
-    value_col: str,
-    group_col: str,
-    icc_type: str = "ICC(1,1)",
-) -> tuple[float, tuple[float, float]]:
-    """Compute Intraclass Correlation Coefficient from DataFrame."""
-    if value_col not in df.columns or group_col not in df.columns:
-        return np.nan, (np.nan, np.nan)
-
-    df_clean = df[[value_col, group_col]].dropna()
-
-    groups = df_clean[group_col].unique()
-    n_groups = len(groups)
-
-    if n_groups < MIN_GROUPS_FOR_ICC:
-        return np.nan, (np.nan, np.nan)
-
-    try:
-        pivot = df_clean.pivot_table(
-            index=group_col,
-            columns=df_clean.groupby(group_col).cumcount(),
-            values=value_col,
-            aggfunc="first"
-        ).dropna()
-
-        n_rows, n_cols = pivot.shape
-        if n_rows < MIN_PIVOT_ROWS_FOR_ICC or n_cols < MIN_PIVOT_COLS_FOR_ICC:
-            return np.nan, (np.nan, np.nan)
-
-        icc, ci_low, ci_high = _compute_icc_array(pivot.values, icc_type=icc_type)
-        return float(icc), (float(ci_low), float(ci_high))
-    except (ValueError, KeyError, IndexError):
-        return np.nan, (np.nan, np.nan)
+# Alias for backward compatibility - delegates to reliability module
+compute_icc = compute_icc_from_dataframe
 
 
 def run_multilevel_correlation_analysis(

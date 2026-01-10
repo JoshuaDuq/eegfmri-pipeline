@@ -60,14 +60,13 @@ def detect_available_bands(features_dir: Union[str, Path]) -> List[str]:
     found_bands: Set[str] = set()
 
     features_path = Path(features_dir)
-    for tsv_file in features_path.glob("features_*.tsv"):
+    for tsv_file in features_path.rglob("features_*.tsv"):
         try:
             with open(tsv_file, "r") as f:
                 header = f.readline().strip()
             columns = header.split("\t")
             found_bands.update(_find_bands_in_columns(columns, bands))
         except Exception:
-            # Intentionally ignore unreadable files and continue scanning others.
             continue
 
     return sorted(found_bands)
@@ -128,10 +127,17 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         found_file = None
         if features_path.exists():
             for pattern in patterns:
-                files = list(features_path.glob(pattern))
-                if files:
-                    found_file = max(files, key=lambda f: f.stat().st_mtime)
-                    break
+                subfolder_path = features_path / category
+                if subfolder_path.exists():
+                    files = list(subfolder_path.glob(pattern))
+                    if files:
+                        found_file = max(files, key=lambda f: f.stat().st_mtime)
+                        break
+                if not found_file:
+                    files = list(features_path.glob(pattern))
+                    if files:
+                        found_file = max(files, key=lambda f: f.stat().st_mtime)
+                        break
         
         if found_file and found_file.exists():
             mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)
@@ -161,37 +167,63 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
         else:
             result["bands"][band] = {"available": False, "last_modified": None}
     
-    # Try to find stats adjacent to features
     stats_dir = features_path.parent / "stats"
     # Patterns are searched via rglob within stats_dir, so they can match nested subfolders.
     # Keep these aligned with outputs produced by eeg_pipeline.analysis.behavior.orchestration.
+    # Subfolder structure: stats/<computation_type>/<filename>.tsv
     computation_patterns = {
-        "trial_table": ["trials*.tsv", "trials*.parquet"],
-        "lag_features": ["trials_with_lags*.tsv", "lag_features*.metadata.json"],
-        "pain_residual": ["trials_with_residual*.tsv", "pain_residual*.metadata.json"],
+        # trial_table/ subfolder
+        "trial_table": ["trial_table/trials*.tsv", "trial_table/trials*.parquet", "trials*.tsv", "trials*.parquet"],
+        # lag_features/ subfolder  
+        "lag_features": ["lag_features/trials_with_lags*.tsv", "lag_features/*.metadata.json", "trials_with_lags*.tsv"],
+        # pain_residual/ subfolder
+        "pain_residual": ["pain_residual/trials_with_residual*.tsv", "pain_residual/*.metadata.json", "trials_with_residual*.tsv"],
+        # temperature_models/ subfolder
         "temperature_models": [
+            "temperature_models/model_comparison*.tsv",
+            "temperature_models/breakpoint*.tsv",
             "model_comparison*.tsv",
             "breakpoint_candidates*.tsv",
-            "temperature_models*.metadata.json",
         ],
-        "confounds": ["confounds_audit*.tsv", "confounds_audit*.metadata.json"],
-        "regression": ["regression_feature_effects*.tsv", "regression_feature_effects*.metadata.json"],
-        "models": ["models_feature_effects*.tsv", "models_feature_effects*.metadata.json"],
-        "stability": ["stability_groupwise*.tsv", "stability_groupwise*.metadata.json"],
-        "consistency": ["consistency_summary*.tsv", "consistency_summary*.metadata.json"],
-        "influence": ["influence_diagnostics*.tsv", "influence_diagnostics*.metadata.json"],
-        "report": ["subject_report*.md", "subject_report*.html", "subject_report*.pdf"],
+        # confounds_audit/ subfolder
+        "confounds": ["confounds_audit/confounds_audit*.tsv", "confounds_audit/*.metadata.json", "confounds_audit*.tsv"],
+        # trialwise_regression/ subfolder
+        "regression": ["trialwise_regression/regression_feature_effects*.tsv", "regression_feature_effects*.tsv"],
+        # feature_models/ subfolder
+        "models": ["feature_models/models_feature_effects*.tsv", "models_feature_effects*.tsv"],
+        # stability_groupwise/ subfolder
+        "stability": ["stability_groupwise/stability_groupwise*.tsv", "stability_groupwise*.tsv"],
+        # consistency_summary/ subfolder
+        "consistency": ["consistency_summary/consistency_summary*.tsv", "consistency_summary*.tsv"],
+        # influence_diagnostics/ subfolder
+        "influence": ["influence_diagnostics/influence_diagnostics*.tsv", "influence_diagnostics*.tsv"],
+        # subject_report/ subfolder
+        "report": ["subject_report/subject_report*.md", "subject_report*.md", "subject_report*.html"],
+        # correlations/ subfolder
         "correlations": [
+            "correlations/correlations*.tsv",
             "correlations*.tsv",
             "*_topomap_*_correlations_*.tsv",
         ],
-        "pain_sensitivity": ["pain_sensitivity*.tsv"],
-        "condition": ["condition_effects*.tsv"],
-        "temporal": ["corr_stats_temporal_*.tsv", "corr_stats_temporal_combined*.tsv", "corr_stats_tf_*.tsv"],
-        "cluster": ["cluster_results_*.tsv", "cluster_*.tsv", "null_distribution_*.json"],
-        "mediation": ["mediation*.tsv"],
-        "moderation": ["moderation_results*.tsv"],
-        "mixed_effects": ["mixed_effects*.tsv", "lme_*.tsv"],
+        # pain_sensitivity/ subfolder
+        "pain_sensitivity": ["pain_sensitivity/pain_sensitivity*.tsv", "pain_sensitivity*.tsv"],
+        # condition_effects/ subfolder
+        "condition": ["condition_effects/condition_effects*.tsv", "condition_effects*.tsv"],
+        # temporal_correlations/ subfolder
+        "temporal": [
+            "temporal_correlations/corr_stats_temporal_*.tsv",
+            "corr_stats_temporal_*.tsv",
+            "corr_stats_temporal_combined*.tsv",
+            "corr_stats_tf_*.tsv",
+        ],
+        # cluster/ subfolder
+        "cluster": ["cluster/cluster_results_*.tsv", "cluster_results_*.tsv", "cluster_*.tsv", "null_distribution_*.json"],
+        # mediation/ subfolder
+        "mediation": ["mediation/mediation*.tsv", "mediation*.tsv"],
+        # moderation/ subfolder
+        "moderation": ["moderation/moderation_results*.tsv", "moderation_results*.tsv"],
+        # mixed_effects/ subfolder
+        "mixed_effects": ["mixed_effects/mixed_effects*.tsv", "mixed_effects*.tsv", "lme_*.tsv"],
     }
     
     for comp, patterns in computation_patterns.items():

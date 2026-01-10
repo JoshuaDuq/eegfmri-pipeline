@@ -48,6 +48,7 @@ class FeatureContext:
     baseline_cols: List[str] = field(default_factory=list)
     results: Dict[str, Any] = field(default_factory=dict)
     _windows: Optional[Any] = None
+    _original_epochs: Optional[mne.Epochs] = None
 
     def __post_init__(self) -> None:
         """Initialize spatial modes and windows."""
@@ -92,28 +93,23 @@ class FeatureContext:
         self._validate_named_window()
 
     def _validate_required_windows(self) -> None:
-        """Validate that baseline and active windows exist."""
+        """Validate that at least one valid time window exists from Step 5 input."""
         fail_on_missing = bool(
             self.config.get("feature_engineering.validation.fail_on_missing_windows", False)
         )
         if not fail_on_missing:
             return
 
-        baseline_exists = (
-            self._windows.baseline_mask is not None
-            and np.any(self._windows.baseline_mask)
-        )
-        active_exists = (
-            self._windows.active_mask is not None
-            and np.any(self._windows.active_mask)
+        # Check for at least one non-empty mask
+        has_valid_window = any(
+            np.any(mask) for name, mask in self._windows.masks.items()
         )
 
-        if not baseline_exists or not active_exists:
+        if not has_valid_window:
             raise ValueError(
-                "Missing required time windows for feature extraction: "
-                f"baseline_exists={baseline_exists}, active_exists={active_exists}. "
-                "Check time_frequency_analysis.baseline_window / active_window "
-                "and epoch time range."
+                "No valid time windows found for feature extraction. "
+                "Please define at least one time range in Step 5 of the TUI "
+                "(e.g., 'baseline', 'active', or a custom segment)."
             )
 
     def _validate_named_window(self) -> None:

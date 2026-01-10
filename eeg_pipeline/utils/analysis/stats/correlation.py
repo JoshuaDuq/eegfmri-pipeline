@@ -26,8 +26,9 @@ from .base import (
     get_min_samples_for_correlation,
 )
 from .fdr import fdr_bh
-from .formatting import _safe_float
+from .base import _safe_float
 from .permutation import compute_permutation_pvalues, compute_temp_permutation_pvalues
+from .reliability import _apply_spearman_brown as _spearman_brown
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 
@@ -290,7 +291,7 @@ def _compute_bootstrap_and_permutation(
     
     if n_bootstrap > 0:
         # Local import to avoid circular dependency
-        from .eeg_stats import compute_bootstrap_ci
+        from .bootstrap import compute_bootstrap_ci
         ci_low, ci_high = compute_bootstrap_ci(
             vals[valid_mask],
             target_arr[valid_mask],
@@ -468,7 +469,7 @@ def compute_pain_sensitivity_index(
 
     design_matrix = np.column_stack([np.ones(len(temps_valid)), temps_valid])
     try:
-        beta = lstsq(design_matrix, ratings_valid, rcond=None)[0]
+        beta = np.linalg.lstsq(design_matrix, ratings_valid, rcond=None)[0]
         predicted = design_matrix @ beta
         psi.loc[valid] = ratings_valid - predicted
     except np.linalg.LinAlgError:
@@ -477,27 +478,7 @@ def compute_pain_sensitivity_index(
     return psi
 
 
-def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
-    """Compute active - baseline change for matching feature pairs."""
-    baseline_cols = [c for c in features_df.columns if "_baseline_" in c]
-
-    change_data: Dict[str, np.ndarray] = {}
-    for bl_col in baseline_cols:
-        pl_col = bl_col.replace("_baseline_", "_active_")
-        if pl_col in features_df.columns:
-            bl_vals = features_df[bl_col].values
-            pl_vals = features_df[pl_col].values
-
-            if bl_vals.ndim != 1 or pl_vals.ndim != 1:
-                continue
-
-            change_col = bl_col.replace("_baseline_", "_change_")
-            change_data[change_col] = pl_vals - bl_vals
-
-    if not change_data:
-        return pd.DataFrame(index=features_df.index)
-
-    return pd.DataFrame(change_data, index=features_df.index)
+# compute_change_features moved to transforms.py (data transformation utility)
 
 
 @dataclass
@@ -736,7 +717,7 @@ def build_temp_record_unified(
         return None
 
     # Local import to avoid circular dependency
-    from .partial import prepare_aligned_data
+    from .transforms import prepare_aligned_data
     x_aligned, temp_aligned, cov_aligned, _, _ = prepare_aligned_data(x, temp, cov_no_temp)
     if len(x_aligned) == 0 or len(temp_aligned) == 0:
         return None
@@ -754,7 +735,7 @@ def build_temp_record_unified(
 
     if getattr(cfg, "bootstrap", 0) > 0:
         # Local import to avoid circular dependency
-        from .eeg_stats import compute_bootstrap_ci
+        from .bootstrap import compute_bootstrap_ci
         method_str = "spearman" if getattr(cfg, "use_spearman", False) else "pearson"
         ci_low, ci_high = compute_bootstrap_ci(
             x_aligned, temp_aligned, cfg.bootstrap, 0.95, method_str, cfg.rng
@@ -799,7 +780,7 @@ def compute_roi_correlation_stats(
     )
 
     # Local import to avoid circular dependency
-    from .eeg_stats import compute_bootstrap_ci
+    from .bootstrap import compute_bootstrap_ci
     method_str = "spearman" if getattr(cfg, "use_spearman", False) else "pearson"
     ci_low, ci_high = compute_bootstrap_ci(
         x_a, y_a, cfg.bootstrap, 0.95, method_str, cfg.rng
@@ -830,41 +811,84 @@ def compute_roi_correlation_stats(
     )
 
 
-def fisher_z(r: float, config: Optional[Any] = None, logger: Optional[Any] = None) -> float:
-    """Fisher z-transform of correlation coefficient.
+def fisher_z(
+    r: Union[float, np.ndarray], 
+    config: Optional[Any] = None, 
+    logger: Optional[Any] = None
+) -> Union[float, np.ndarray]:
+    """Fisher z-transform of correlation coefficient(s).
+    
+    Supports both scalar and array inputs.
     
     Args:
-        r: Correlation coefficient to transform
+        r: Correlation coefficient(s) to transform (scalar or array)
         config: Optional config object for clipping bounds (defaults to config values)
         logger: Optional logger for clipping warnings
     """
     clip_min, clip_max = get_fisher_z_clip_values(config)
-    r_orig = r
-    r = np.clip(r, clip_min, clip_max)
-    if logger and r != r_orig:
-        logger.debug(f"Fisher z: clipped r from {r_orig:.6f} to {r:.6f}")
-    return 0.5 * np.log((1 + r) / (1 - r))
+    r_array = np.asarray(r)
+    r_orig = r_array.copy()
+    r_clipped = np.clip(r_array, clip_min, clip_max)
+    
+    if logger is not None:
+        if np.any(r_clipped != r_orig):
+            logger.debug(
+                f"Fisher z: clipped r values from range [{r_orig.min():.6f}, {r_orig.max():.6f}] "
+                f"to [{r_clipped.min():.6f}, {r_clipped.max():.6f}]"
+            )
+    
+    result = np.arctanh(r_clipped)
+    return result.item() if np.isscalar(r) else result
 
 
-def inverse_fisher_z(z: float) -> float:
-    """Inverse Fisher z-transform."""
-    return (np.exp(2 * z) - 1) / (np.exp(2 * z) + 1)
+def inverse_fisher_z(z: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
+    """Inverse Fisher z-transform.
+    
+    Supports both scalar and array inputs.
+    """
+    z_array = np.asarray(z)
+    result = np.tanh(z_array)
+    return result.item() if np.isscalar(z) else result
 
 
 def fisher_ci(
     r: float,
     n: int,
     config: Optional[Any] = None,
+    ci_level: Optional[float] = None,
 ) -> Tuple[float, float]:
-    """Compute Fisher-based CI for correlation."""
-    ci_level = get_ci_level(config)
+    """Compute Fisher-based CI for correlation.
+    
+    Parameters
+    ----------
+    r : float
+        Correlation coefficient
+    n : int
+        Sample size
+    config : Optional[Any]
+        Configuration object (used if ci_level is None)
+    ci_level : Optional[float]
+        Explicit confidence level (e.g., 0.95 for 95% CI). 
+        If None, uses config or defaults to 0.95.
+        
+    Returns
+    -------
+    Tuple[float, float]
+        (ci_low, ci_high)
+    """
+    if ci_level is None:
+        ci_level = get_ci_level(config)
+    else:
+        ci_level = float(ci_level)
 
     if n < 4 or not np.isfinite(r):
         return np.nan, np.nan
 
+    from .base import get_z_critical_value
+    
     z = fisher_z(r, config)
     se = 1.0 / np.sqrt(n - 3)
-    z_crit = stats.norm.ppf((1 + ci_level) / 2)
+    z_crit = get_z_critical_value(ci_level)
 
     z_lo = z - z_crit * se
     z_hi = z + z_crit * se
@@ -895,8 +919,9 @@ def fisher_aggregate(
     r_mean = inverse_fisher_z(z_mean)
 
     if len(zs) > 1:
+        from .base import get_z_critical_value
         se = np.std(zs, ddof=1) / np.sqrt(len(zs))
-        z_crit = stats.norm.ppf((1 + ci_level) / 2)
+        z_crit = get_z_critical_value(ci_level)
         z_lo = z_mean - z_crit * se
         z_hi = z_mean + z_crit * se
         ci_lo = inverse_fisher_z(z_lo)
@@ -931,15 +956,77 @@ def weighted_fisher_aggregate(
     r_mean = inverse_fisher_z(z_mean)
 
     if len(zs) > 1:
+        from .base import get_z_critical_value
         var_z = np.sum(ws_normalized * (zs - z_mean) ** 2)
         se = np.sqrt(var_z / len(zs))
-        z_crit = stats.norm.ppf((1 + ci_level) / 2)
+        z_crit = get_z_critical_value(ci_level)
         ci_low = inverse_fisher_z(z_mean - z_crit * se)
         ci_high = inverse_fisher_z(z_mean + z_crit * se)
     else:
         ci_low = ci_high = r_mean
 
     return float(r_mean), float(ci_low), float(ci_high), int(np.sum(valid))
+
+
+def fisher_z_transform_mean(r_values: np.ndarray, config: Optional[Any] = None) -> float:
+    """Compute Fisher z-transformed mean of correlations.
+    
+    This is a convenience function that computes the mean correlation
+    using Fisher z-transform. For full statistics including CIs, use
+    fisher_aggregate instead.
+    
+    Parameters
+    ----------
+    r_values : np.ndarray
+        Array of correlation coefficients
+    config : Optional[Any]
+        Configuration object for clipping bounds
+        
+    Returns
+    -------
+    float
+        Fisher-aggregated mean correlation
+    """
+    clip_min, clip_max = get_fisher_z_clip_values(config)
+    r_clipped = np.clip(r_values, clip_min, clip_max)
+    z_scores = np.arctanh(r_clipped)
+    z_mean = np.mean(z_scores)
+    return float(np.tanh(z_mean))
+
+
+def compute_correlation_ci_fisher(
+    z_mean: float,
+    se: float,
+    ci_multiplier: float = 1.96,
+) -> Tuple[float, float]:
+    """Compute confidence interval from Fisher z mean and standard error.
+    
+    This is a general utility for computing CIs when you already have
+    the Fisher z-transformed mean and its standard error.
+    
+    Parameters
+    ----------
+    z_mean : float
+        Fisher z-transformed mean
+    se : float
+        Standard error of the Fisher z mean
+    ci_multiplier : float
+        Multiplier for CI (default 1.96 for 95% CI)
+        
+    Returns
+    -------
+    Tuple[float, float]
+        (ci_low, ci_high) in correlation space
+    """
+    if not np.isfinite(se):
+        return np.nan, np.nan
+    
+    z_low = z_mean - ci_multiplier * se
+    z_high = z_mean + ci_multiplier * se
+    ci_low = float(np.tanh(z_low))
+    ci_high = float(np.tanh(z_high))
+    
+    return ci_low, ci_high
 
 
 def joint_valid_mask(*arrays: Sequence, require_all: bool = True) -> np.ndarray:
@@ -951,77 +1038,6 @@ def joint_valid_mask(*arrays: Sequence, require_all: bool = True) -> np.ndarray:
     if require_all:
         return np.all(np.stack(masks), axis=0)
     return np.any(np.stack(masks), axis=0)
-
-
-def partial_corr_xy_given_Z(
-    x: pd.Series,
-    y: pd.Series,
-    Z: pd.DataFrame,
-    method: str,
-    config: Optional[Any] = None,
-) -> Tuple[float, float, int]:
-    """
-    Partial correlation of x,y controlling for Z.
-    
-    Returns (r_partial, p_value, n).
-    """
-    df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
-    min_required = Z.shape[1] + _MIN_SAMPLES_CORRELATION
-    if len(df) < min_required:
-        return np.nan, np.nan, 0
-
-    design_matrix = df[Z.columns].values
-    design_matrix = np.column_stack([np.ones(len(design_matrix)), design_matrix])
-
-    x_vals = df["x"].values
-    y_vals = df["y"].values
-
-    try:
-        beta_x, *_ = lstsq(design_matrix, x_vals)
-        beta_y, *_ = lstsq(design_matrix, y_vals)
-    except (np.linalg.LinAlgError, ValueError):
-        return np.nan, np.nan, 0
-
-    residuals_x = x_vals - design_matrix @ beta_x
-    residuals_y = y_vals - design_matrix @ beta_y
-
-    r, p = compute_correlation(residuals_x, residuals_y, method)
-    return float(r), float(p), len(df)
-
-
-def compute_partial_corr(
-    x: pd.Series,
-    y: pd.Series,
-    Z: Optional[pd.DataFrame],
-    method: str,
-    *,
-    logger: Optional[logging.Logger] = None,
-    context: str = "",
-    config: Optional[Any] = None,
-) -> Tuple[float, float, int]:
-    """
-    Compute partial correlation, handling edge cases.
-    
-    If Z is None or empty, returns simple correlation.
-    """
-    if Z is None or Z.empty:
-        valid = np.isfinite(x.values) & np.isfinite(y.values)
-        if np.sum(valid) < 3:
-            return np.nan, np.nan, 0
-        r, p = compute_correlation(x.values[valid], y.values[valid], method)
-        return r, p, int(np.sum(valid))
-
-    return partial_corr_xy_given_Z(x, y, Z, method, config)
-
-
-def normalize_series(s: pd.Series, epsilon: Optional[float] = None) -> pd.Series:
-    """Z-score normalize a series."""
-    if epsilon is None:
-        epsilon = _EPSILON_STD
-    std = s.std()
-    if std < epsilon:
-        return pd.Series(np.zeros_like(s.values), index=s.index)
-    return (s - s.mean()) / std
 
 
 def compute_correlation_pvalue(r_values: List[float], config: Optional[Any] = None) -> float:
@@ -1214,6 +1230,9 @@ def _percentage_bend_correlation(
     x_bent = np.clip((x - median_x) / mad_x, -crit_x, crit_x)
     y_bent = np.clip((y - median_y) / mad_y, -crit_y, crit_y)
     
+    if np.std(x_bent) < _EPSILON_STD or np.std(y_bent) < _EPSILON_STD:
+        return np.nan, np.nan
+    
     r, _ = stats.pearsonr(x_bent, y_bent)
     
     t_stat = r * np.sqrt((n - 2) / (1 - r**2 + _EPSILON_CORRELATION))
@@ -1234,6 +1253,8 @@ def _winsorized_correlation(
     k = int(trim * n)
     
     if k < 1:
+        if np.std(x) < _EPSILON_STD or np.std(y) < _EPSILON_STD:
+            return np.nan, np.nan
         return stats.pearsonr(x, y)
     
     def winsorize(arr):
@@ -1243,6 +1264,9 @@ def _winsorized_correlation(
     
     x_winsorized = winsorize(x)
     y_winsorized = winsorize(y)
+    
+    if np.std(x_winsorized) < _EPSILON_STD or np.std(y_winsorized) < _EPSILON_STD:
+        return np.nan, np.nan
     
     r, _ = stats.pearsonr(x_winsorized, y_winsorized)
     
@@ -1436,11 +1460,6 @@ def compute_correlation_reliability(
     return reliability, ci_low, ci_high
 
 
-def _spearman_brown(r: float) -> float:
-    """Spearman-Brown prophecy formula for split-half reliability."""
-    if not np.isfinite(r) or abs(r) >= 1:
-        return np.nan
-    return (2 * r) / (1 + abs(r))
 
 
 def save_correlation_results(
@@ -1534,6 +1553,9 @@ def correlate_single_feature(
     
     r_pt, p_pt, r_po, p_po, r_pf, p_pf = np.nan, np.nan, np.nan, np.nan, np.nan, np.nan
     
+    # Local import to avoid circular dependency
+    from .partial import partial_corr_xy_given_Z
+    
     if temperature is not None:
         temp_df = pd.DataFrame({"temp": temperature[valid]})
         r_pt, p_pt, _ = partial_corr_xy_given_Z(pd.Series(x), pd.Series(y), temp_df, method)
@@ -1551,3 +1573,60 @@ def correlate_single_feature(
         r_pf, p_pf = r_po, p_po
     
     return r_raw, p_raw, r_pt, p_pt, r_po, p_po, r_pf, p_pf, n_valid
+
+
+def compute_correlation_stats(
+    x: pd.Series,
+    y: pd.Series,
+    method_code: str,
+    bootstrap_ci: int,
+    rng: Optional[np.random.Generator],
+    min_samples: int = 3,
+) -> Tuple[float, float, int, Tuple[float, float]]:
+    """Compute correlation with optional bootstrap CI.
+    
+    This is a convenience function that computes correlation statistics
+    including optional bootstrap confidence intervals.
+    
+    Parameters
+    ----------
+    x, y : pd.Series
+        Input series to correlate
+    method_code : str
+        Correlation method ('pearson' or 'spearman')
+    bootstrap_ci : int
+        Number of bootstrap iterations (0 to skip)
+    rng : Optional[np.random.Generator]
+        Random number generator
+    min_samples : int
+        Minimum number of samples required
+        
+    Returns
+    -------
+    Tuple[float, float, int, Tuple[float, float]]
+        (correlation, p_value, n_effective, (ci_low, ci_high))
+    """
+    from .bootstrap import bootstrap_corr_ci
+    
+    valid_mask = np.isfinite(x) & np.isfinite(y)
+    n_effective = int(valid_mask.sum())
+    
+    if n_effective < min_samples:
+        return np.nan, np.nan, n_effective, (np.nan, np.nan)
+    
+    x_valid = x[valid_mask]
+    y_valid = y[valid_mask]
+    correlation, p_value = compute_correlation(x_valid, y_valid, method_code)
+    
+    if bootstrap_ci > 0:
+        confidence_interval = bootstrap_corr_ci(
+            x_valid,
+            y_valid,
+            method_code,
+            n_boot=bootstrap_ci,
+            rng=rng
+        )
+    else:
+        confidence_interval = (np.nan, np.nan)
+    
+    return float(correlation), float(p_value), n_effective, confidence_interval

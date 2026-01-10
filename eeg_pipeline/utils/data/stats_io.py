@@ -1,8 +1,11 @@
 """
-Statistics Loading Utilities
-============================
+Statistics I/O Utilities
+========================
 
-Functions for loading precomputed statistics and scatter data.
+Functions for loading precomputed statistics and scatter data from files.
+This module handles I/O operations for statistics, not statistical computations.
+
+Note: Statistical computation functions are in `eeg_pipeline.utils.analysis.stats`.
 """
 
 from __future__ import annotations
@@ -108,13 +111,15 @@ def load_precomputed_correlations(
 
 def _find_roi_column(dataframe: pd.DataFrame) -> Optional[str]:
     """Find the ROI/channel/feature column name in the dataframe."""
+    from eeg_pipeline.utils.data.manipulation import find_column
     possible_columns = ["roi", "channel", "feature"]
-    return next((col for col in possible_columns if col in dataframe.columns), None)
+    return find_column(dataframe, possible_columns)
 
 
 def _find_band_column(dataframe: pd.DataFrame) -> Optional[str]:
     """Find the band column name in the dataframe."""
-    return "band" if "band" in dataframe.columns else None
+    from eeg_pipeline.utils.data.manipulation import find_column
+    return find_column(dataframe, ["band"])
 
 
 def _extract_stat_value(row: pd.Series, key: str, default: Any = np.nan) -> Any:

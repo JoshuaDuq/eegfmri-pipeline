@@ -73,11 +73,26 @@ def extract_erds_from_precomputed(
 
     # Get ALL segment masks - we compute ERDS for each non-baseline segment
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
+    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    
+    if target_name:
+        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     
     # Filter out baseline - ERDS uses baseline only as reference
     active_segments = {k: v for k, v in segment_masks.items() if k != "baseline" and v is not None and np.any(v)}
     
+    spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
+    roi_map = {}
+    if "roi" in spatial_modes:
+        from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+        from eeg_pipeline.utils.analysis.channels import build_roi_map
+        roi_defs = get_roi_definitions(precomputed.config)
+        if roi_defs:
+            roi_map = build_roi_map(precomputed.ch_names, roi_defs)
+
     if not active_segments:
         if precomputed.logger:
             precomputed.logger.warning("ERDS: No non-baseline segments defined; skipping extraction.")
@@ -248,35 +263,57 @@ def extract_erds_from_precomputed(
                 qc_payload[band]["clamped_channels"].append(int(clamped_channels_for_band))
                 qc_payload[band]["valid_fractions"].append(float(baseline_valid_fraction))
 
-                if baseline_valid_fraction < min_valid_fraction:
-                    record[
-                        NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
-                    ] = np.nan
-                    record[
-                        NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                    ] = np.nan
-                    if use_log_ratio:
+                if "global" in spatial_modes:
+                    if baseline_valid_fraction < min_valid_fraction:
                         record[
-                            NamingSchema.build("erds", segment_label, band, "global", "db_mean")
+                            NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
                         ] = np.nan
                         record[
-                            NamingSchema.build("erds", segment_label, band, "global", "db_std")
+                            NamingSchema.build("erds", segment_label, band, "global", "percent_std")
                         ] = np.nan
-                elif valid_erds:
-                    record[
-                        NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
-                    ] = float(np.mean(valid_erds))
-                    record[
-                        NamingSchema.build("erds", segment_label, band, "global", "percent_std")
-                    ] = float(np.std(valid_erds))
+                    elif valid_erds:
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "percent_mean")
+                        ] = float(np.mean(valid_erds))
+                        record[
+                            NamingSchema.build("erds", segment_label, band, "global", "percent_std")
+                        ] = float(np.std(valid_erds))
 
-                    if use_log_ratio and valid_log:
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "global", "db_mean")
-                        ] = float(np.mean(valid_log))
-                        record[
-                            NamingSchema.build("erds", segment_label, band, "global", "db_std")
-                        ] = float(np.std(valid_log))
+                    if use_log_ratio:
+                        if baseline_valid_fraction < min_valid_fraction or not valid_log:
+                            record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = np.nan
+                            record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = np.nan
+                        else:
+                            record[NamingSchema.build("erds", segment_label, band, "global", "db_mean")] = float(np.mean(valid_log))
+                            record[NamingSchema.build("erds", segment_label, band, "global", "db_std")] = float(np.std(valid_log))
+
+                if "roi" in spatial_modes and roi_map:
+                    for roi_name, roi_indices in roi_map.items():
+                        roi_erds = [all_erds_full[idx] for idx in roi_indices if np.isfinite(all_erds_full[idx])]
+                        if roi_erds:
+                            record[NamingSchema.build("erds", segment_label, band, "roi", "percent_mean", channel=roi_name)] = float(np.mean(roi_erds))
+                        else:
+                            record[NamingSchema.build("erds", segment_label, band, "roi", "percent_mean", channel=roi_name)] = np.nan
+                        
+                        if use_log_ratio:
+                            roi_log = [all_log_full[idx] for idx in roi_indices if np.isfinite(all_log_full[idx])]
+                            if roi_log:
+                                record[NamingSchema.build("erds", segment_label, band, "roi", "db_mean", channel=roi_name)] = float(np.mean(roi_log))
+                            else:
+                                record[NamingSchema.build("erds", segment_label, band, "roi", "db_mean", channel=roi_name)] = np.nan
+
+                if "channels" not in spatial_modes:
+                    # Clean up per-channel entries if not requested
+                    for ch_name in precomputed.ch_names:
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "percent", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "db", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "slope", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "peak_latency", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "onset_latency", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "erd_magnitude", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "erd_duration", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "ers_magnitude", channel=ch_name), None)
+                        record.pop(NamingSchema.build("erds", segment_label, band, "ch", "ers_duration", channel=ch_name), None)
 
     if clamped_baselines > 0 and precomputed.logger:
         precomputed.logger.info(

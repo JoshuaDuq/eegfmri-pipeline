@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import List
 
 import pandas as pd
 import pyarrow as pa
@@ -54,9 +55,24 @@ def write_tsv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
     pa_csv.write_csv(table, path, write_options=write_options)
 
 
+def write_csv(df: pd.DataFrame, path: Path, index: bool = False) -> None:
+    """Write DataFrame to CSV file."""
+    ensure_dir(path.parent)
+    prepared_df = _prepare_dataframe_for_writing(df, index)
+
+    table = pa.Table.from_pandas(prepared_df, preserve_index=False)
+    write_options = pa_csv.WriteOptions(delimiter=",")
+    pa_csv.write_csv(table, path, write_options=write_options)
+
+
 def _is_parquet_file(path: Path) -> bool:
     """Check if path has parquet extension."""
     return path.suffix.lower() == ".parquet"
+
+
+def _is_csv_file(path: Path) -> bool:
+    """Check if path has CSV extension."""
+    return path.suffix.lower() == ".csv"
 
 
 def read_table(path: Path, **kwargs) -> pd.DataFrame:
@@ -67,11 +83,43 @@ def read_table(path: Path, **kwargs) -> pd.DataFrame:
 
 
 def write_table(df: pd.DataFrame, path: Path, index: bool = False, **kwargs) -> None:
-    """Write DataFrame to TSV or parquet file based on extension."""
+    """Write DataFrame to TSV, CSV, or parquet file based on extension."""
     if _is_parquet_file(path):
         write_parquet(df, path, index=index, **kwargs)
+    elif _is_csv_file(path):
+        write_csv(df, path, index=index)
     else:
         write_tsv(df, path, index=index)
+
+
+def write_table_with_formats(
+    df: pd.DataFrame,
+    path: Path,
+    index: bool = False,
+    also_save_csv: bool = False,
+) -> List[Path]:
+    """Write DataFrame to TSV/parquet and optionally also as CSV.
+    
+    Args:
+        df: DataFrame to write
+        path: Primary output path (TSV or parquet)
+        index: Whether to include index
+        also_save_csv: If True, also write a CSV version
+        
+    Returns:
+        List of paths written
+    """
+    paths_written = []
+    
+    write_table(df, path, index=index)
+    paths_written.append(path)
+    
+    if also_save_csv and not _is_csv_file(path):
+        csv_path = path.with_suffix(".csv")
+        write_csv(df, csv_path, index=index)
+        paths_written.append(csv_path)
+    
+    return paths_written
 
 
 __all__ = [
@@ -81,4 +129,7 @@ __all__ = [
     "write_parquet",
     "read_table",
     "write_table",
+    "write_csv",
+    "write_table_with_formats",
 ]
+

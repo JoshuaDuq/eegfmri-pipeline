@@ -100,11 +100,76 @@ func (m Model) SelectedBands() []string {
 	return result
 }
 
+// GetFrequencyBandDefinitions returns custom frequency band definitions in CLI format.
+// Format: "name:low:high" for each band (e.g., "delta:1.0:3.9")
+// Returns empty slice if bands match defaults.
+func (m Model) GetFrequencyBandDefinitions() []string {
+	// Check if bands differ from defaults
+	if len(m.bands) == len(frequencyBands) {
+		allMatch := true
+		for i, band := range m.bands {
+			def := frequencyBands[i]
+			if band.Key != def.Key || band.LowHz != def.LowHz || band.HighHz != def.HighHz {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return nil
+		}
+	}
+
+	var result []string
+	for _, band := range m.bands {
+		result = append(result, fmt.Sprintf("%s:%.1f:%.1f", band.Key, band.LowHz, band.HighHz))
+	}
+	return result
+}
+
 func (m Model) SelectedSpatialModes() []string {
 	var result []string
 	for i, sel := range m.spatialSelected {
 		if sel && i < len(spatialModes) {
 			result = append(result, spatialModes[i].Key)
+		}
+	}
+	return result
+}
+
+// SelectedROIs returns the keys of selected ROIs
+func (m Model) SelectedROIs() []string {
+	var result []string
+	for i, sel := range m.roiSelected {
+		if sel && i < len(m.rois) {
+			result = append(result, m.rois[i].Key)
+		}
+	}
+	return result
+}
+
+// GetROIDefinitions returns custom ROI definitions in CLI format.
+// Format: "name:ch1,ch2,..." for each ROI
+// Returns empty slice if ROIs match defaults.
+func (m Model) GetROIDefinitions() []string {
+	// Check if ROIs differ from defaults
+	if len(m.rois) == len(defaultROIs) {
+		allMatch := true
+		for i, roi := range m.rois {
+			def := defaultROIs[i]
+			if roi.Key != def.Key || roi.Channels != def.Channels {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return nil
+		}
+	}
+
+	var result []string
+	for i, roi := range m.rois {
+		if m.roiSelected[i] {
+			result = append(result, fmt.Sprintf("%s:%s", roi.Key, roi.Channels))
 		}
 	}
 	return result
@@ -194,6 +259,17 @@ func (m Model) selectedConnectivityMeasures() []string {
 	var result []string
 	for i, measure := range connectivityMeasures {
 		if m.connectivityMeasures[i] {
+			result = append(result, measure.Key)
+		}
+	}
+	return result
+}
+
+// selectedDirectedConnectivityMeasures returns the list of selected directed connectivity measures
+func (m Model) selectedDirectedConnectivityMeasures() []string {
+	var result []string
+	for i, measure := range directedConnectivityMeasures {
+		if m.directedConnMeasures[i] {
 			result = append(result, measure.Key)
 		}
 	}
@@ -423,6 +499,20 @@ func (m Model) BuildCommand() string {
 		if len(bands) > 0 && len(bands) < len(m.bands) {
 			parts = append(parts, "--bands")
 			parts = append(parts, bands...)
+		}
+
+		// Pass custom frequency band definitions
+		freqBandDefs := m.GetFrequencyBandDefinitions()
+		if len(freqBandDefs) > 0 {
+			parts = append(parts, "--frequency-bands")
+			parts = append(parts, freqBandDefs...)
+		}
+
+		// Pass custom ROI definitions
+		roiDefs := m.GetROIDefinitions()
+		if len(roiDefs) > 0 {
+			parts = append(parts, "--rois")
+			parts = append(parts, roiDefs...)
 		}
 	}
 
@@ -874,6 +964,64 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		// Force within_epoch for machine learning
 		if !m.connForceWithinEpochML {
 			args = append(args, "--no-conn-force-within-epoch-for-ml")
+		}
+	}
+
+	// Directed connectivity options (PSI, DTF, PDC)
+	if m.isCategorySelected("directed_connectivity") || m.directedConnEnabled {
+		directedMeasures := m.selectedDirectedConnectivityMeasures()
+		if len(directedMeasures) > 0 {
+			args = append(args, "--directed-connectivity-measures")
+			args = append(args, directedMeasures...)
+		}
+		if m.directedConnOutputLevel == 1 {
+			args = append(args, "--directed-conn-output-level", "global_only")
+		}
+		if m.directedConnMvarOrder != 10 {
+			args = append(args, "--directed-conn-mvar-order", fmt.Sprintf("%d", m.directedConnMvarOrder))
+		}
+		if m.directedConnNFreqs != 16 {
+			args = append(args, "--directed-conn-n-freqs", fmt.Sprintf("%d", m.directedConnNFreqs))
+		}
+		if m.directedConnMinSegSamples != 100 {
+			args = append(args, "--directed-conn-min-segment-samples", fmt.Sprintf("%d", m.directedConnMinSegSamples))
+		}
+	}
+
+	// Source localization options (LCMV, eLORETA)
+	if m.isCategorySelected("source_localization") || m.sourceLocEnabled {
+		methods := []string{"lcmv", "eloreta"}
+		args = append(args, "--source-method", methods[m.sourceLocMethod])
+
+		spacings := []string{"oct5", "oct6", "ico4", "ico5"}
+		if m.sourceLocSpacing != 1 { // 1 is oct6 default
+			args = append(args, "--source-spacing", spacings[m.sourceLocSpacing])
+		}
+
+		parcs := []string{"aparc", "aparc.a2009s", "HCPMMP1"}
+		if m.sourceLocParc != 0 {
+			args = append(args, "--source-parc", parcs[m.sourceLocParc])
+		}
+
+		if m.sourceLocMethod == 0 { // LCMV
+			if m.sourceLocReg != 0.05 {
+				args = append(args, "--source-reg", fmt.Sprintf("%.3f", m.sourceLocReg))
+			}
+		} else { // eLORETA
+			if m.sourceLocSnr != 3.0 {
+				args = append(args, "--source-snr", fmt.Sprintf("%.1f", m.sourceLocSnr))
+			}
+			if m.sourceLocLoose != 0.2 {
+				args = append(args, "--source-loose", fmt.Sprintf("%.2f", m.sourceLocLoose))
+			}
+			if m.sourceLocDepth != 0.8 {
+				args = append(args, "--source-depth", fmt.Sprintf("%.2f", m.sourceLocDepth))
+			}
+		}
+
+		connMethods := []string{"aec", "wpli", "plv"}
+		if m.sourceLocConnMethod != 0 {
+			args = append(args, "--source-connectivity-method", connMethods[m.sourceLocConnMethod])
 		}
 	}
 
@@ -1784,6 +1932,11 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		if m.mixedMaxFeatures != 50 {
 			args = append(args, "--mixed-max-features", fmt.Sprintf("%d", m.mixedMaxFeatures))
 		}
+	}
+
+	// Output options
+	if m.alsoSaveCsv {
+		args = append(args, "--also-save-csv")
 	}
 
 	return args

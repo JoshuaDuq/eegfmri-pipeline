@@ -4,7 +4,6 @@ Feature I/O Utilities.
 Consolidated module for loading and saving feature data including:
 - Feature bundle loading (power, connectivity, etc.)
 - Feature saving and export functions
-- Microstate template management
 """
 
 from __future__ import annotations
@@ -43,10 +42,29 @@ def _safe_read_table(
     if not path.exists():
         return None
     try:
+        from eeg_pipeline.infra.tsv import read_table
         return read_table(path)
     except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
         logger.warning("Failed to read %s: %s", path, exc)
         return None
+
+
+def _safe_read_feature_table(
+    features_dir: Path,
+    base_name: str,
+    logger: logging.Logger,
+    extension: str = ".tsv",
+) -> Optional[pd.DataFrame]:
+    """Read feature table, checking subfolder first."""
+    folder = _get_folder_for_feature(base_name)
+    filename = f"{base_name}{extension}"
+    
+    if folder:
+        subfolder_path = features_dir / folder / filename
+        if subfolder_path.exists():
+            return _safe_read_table(subfolder_path, logger)
+            
+    return _safe_read_table(features_dir / filename, logger)
 
 
 def load_subject_features(
@@ -63,7 +81,10 @@ def load_subject_features(
 
     subject_features: Dict[str, pd.DataFrame] = {}
     for subject in subjects:
-        feature_path = deriv_features_path(deriv_root, subject) / "features_power.tsv"
+        features_dir = deriv_features_path(deriv_root, subject)
+        feature_path = features_dir / "power" / "features_power.tsv"
+        if not feature_path.exists():
+            feature_path = features_dir / "features_power.tsv"
         if not feature_path.exists():
             logger.warning("Missing features for sub-%s: %s", subject, feature_path)
             continue
@@ -120,10 +141,20 @@ def _load_features_and_targets(
 ) -> Tuple[Optional[pd.DataFrame], pd.DataFrame, Optional[pd.DataFrame], pd.Series, Any]:
     """Load features and targets for a subject, validating alignment."""
     feats_dir = deriv_features_path(deriv_root, subject)
-    temporal_path = feats_dir / "features_power.tsv"
-    active_path = feats_dir / "features_power_active.tsv"
+    # Try new organized paths first then fallback to root
+    temporal_path = feats_dir / "power" / "features_power.tsv"
+    if not temporal_path.exists():
+        temporal_path = feats_dir / "features_power.tsv"
+        
+    active_path = feats_dir / "power" / "features_power_active.tsv"
+    if not active_path.exists():
+        active_path = feats_dir / "features_power_active.tsv"
+        
     conn_path = find_connectivity_features_path(deriv_root, subject)
-    target_path = feats_dir / "target_vas_ratings.tsv"
+    
+    target_path = feats_dir / "behavior" / "target_vas_ratings.tsv"
+    if not target_path.exists():
+        target_path = feats_dir / "target_vas_ratings.tsv"
 
     power_path = active_path if active_path.exists() else temporal_path
     if not power_path.exists() or not target_path.exists():
@@ -246,28 +277,28 @@ def load_feature_bundle(
     features_dir = deriv_features_path(deriv_root, subject)
 
     bundle = FeatureBundle(
-        power_df=_safe_read_table(features_dir / "features_power.tsv", logger),
+        power_df=_safe_read_feature_table(features_dir, "features_power", logger),
         connectivity_df=_safe_read_table(
             find_connectivity_features_path(deriv_root, subject), logger
         ),
-        aperiodic_df=_safe_read_table(features_dir / "features_aperiodic.tsv", logger),
-        erp_df=_safe_read_table(features_dir / "features_erp.tsv", logger),
-        pac_df=_safe_read_table(features_dir / "features_pac.tsv", logger),
-        pac_trials_df=_safe_read_table(features_dir / "features_pac_trials.tsv", logger),
-        pac_time_df=_safe_read_table(features_dir / "features_pac_time.tsv", logger),
-        itpc_df=_safe_read_table(features_dir / "features_itpc.tsv", logger),
-        complexity_df=_safe_read_table(features_dir / "features_complexity.tsv", logger),
-        bursts_df=_safe_read_table(features_dir / "features_bursts.tsv", logger),
-        quality_df=_safe_read_table(features_dir / "features_quality.tsv", logger),
-        erds_df=_safe_read_table(features_dir / "features_erds.tsv", logger),
-        spectral_df=_safe_read_table(features_dir / "features_spectral.tsv", logger),
-        ratios_df=_safe_read_table(features_dir / "features_ratios.tsv", logger),
-        asymmetry_df=_safe_read_table(features_dir / "features_asymmetry.tsv", logger),
-        temporal_df=_safe_read_table(features_dir / "features_temporal.tsv", logger),
+        aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger),
+        erp_df=_safe_read_feature_table(features_dir, "features_erp", logger),
+        pac_df=_safe_read_feature_table(features_dir, "features_pac", logger),
+        pac_trials_df=_safe_read_feature_table(features_dir, "features_pac_trials", logger),
+        pac_time_df=_safe_read_feature_table(features_dir, "features_pac_time", logger),
+        itpc_df=_safe_read_feature_table(features_dir, "features_itpc", logger),
+        complexity_df=_safe_read_feature_table(features_dir, "features_complexity", logger),
+        bursts_df=_safe_read_feature_table(features_dir, "features_bursts", logger),
+        quality_df=_safe_read_feature_table(features_dir, "features_quality", logger),
+        erds_df=_safe_read_feature_table(features_dir, "features_erds", logger),
+        spectral_df=_safe_read_feature_table(features_dir, "features_spectral", logger),
+        ratios_df=_safe_read_feature_table(features_dir, "features_ratios", logger),
+        asymmetry_df=_safe_read_feature_table(features_dir, "features_asymmetry", logger),
+        temporal_df=_safe_read_feature_table(features_dir, "features_temporal", logger),
     )
 
     if include_targets:
-        targets_df = _safe_read_table(features_dir / "target_vas_ratings.tsv", logger)
+        targets_df = _safe_read_feature_table(features_dir, "target_vas_ratings", logger)
         if targets_df is not None:
             bundle.targets = _extract_targets_from_dataframe(
                 targets_df, config, logger
@@ -346,11 +377,34 @@ def _assign_columns_safely(
     return df
 
 
-def _build_filename(base_name: str, suffix: Optional[str]) -> str:
+def _build_filename(base_name: str, suffix: Optional[str] = None) -> str:
     """Build filename with optional suffix."""
     if suffix:
         return f"{base_name}_{suffix}.tsv"
     return f"{base_name}.tsv"
+
+
+def _get_folder_for_feature(base_name: str) -> str:
+    """Determine subfolder name from base filename."""
+    if base_name.startswith("features_"):
+        name = base_name.replace("features_", "")
+        # Group related features
+        if name.startswith("pac"):
+            return "pac"
+        if name.startswith("power"):
+            return "power"
+        return name
+    
+    if base_name == "aperiodic_qc":
+        return "aperiodic"
+    if base_name == "features":
+        return "metadata"  # Manifest
+    if base_name == "features_subject":
+        return "subject"
+    if base_name == "target_vas_ratings":
+        return "behavior"
+    
+    return ""
 
 
 def _save_feature_dataframe(
@@ -364,10 +418,55 @@ def _save_feature_dataframe(
 ) -> None:
     """Save a feature dataframe with column assignment and logging."""
     df = _assign_columns_safely(df, column_names, feature_type, logger)
+    folder_name = _get_folder_for_feature(base_filename)
     filename = _build_filename(base_filename, suffix)
-    file_path = features_dir / filename
+    file_path = features_dir / folder_name / filename
     logger.info("Saving %s: %s", feature_type, file_path)
     write_tsv(df, file_path)
+
+
+def _save_feature_metadata(
+    df: pd.DataFrame,
+    base_filename: str,
+    features_dir: Path,
+    config: Any,
+    logger: logging.Logger,
+    suffix: Optional[str] = None,
+) -> None:
+    """Save feature-specific metadata to its metadata subfolder."""
+    if df is None or df.empty:
+        return
+
+    try:
+        from eeg_pipeline.domain.features.naming import generate_manifest
+
+        folder_name = _get_folder_for_feature(base_filename)
+        metadata_dir = features_dir / folder_name / "metadata"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+
+        subject_str = (
+            features_dir.parts[-3].replace("sub-", "")
+            if len(features_dir.parts) > 3
+            else "unknown"
+        )
+
+        json_filename = _build_filename(base_filename, suffix).replace(".tsv", ".json")
+        metadata_path = metadata_dir / json_filename
+
+        manifest = generate_manifest(
+            feature_columns=list(df.columns),
+            config=config,
+            subject=subject_str,
+            task=config.get("project.task") if config is not None else None,
+            qc=None,
+        )
+
+        with open(metadata_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+        logger.info("Saved feature metadata: %s", metadata_path)
+    except (OSError, IOError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to generate feature metadata for %s: %s", base_filename, exc)
 
 
 def _dedupe_identical_duplicate_columns(
@@ -445,92 +544,86 @@ def _save_aperiodic_qc(
     logger: logging.Logger,
     suffix: Optional[str] = None,
 ) -> None:
-    """Save aperiodic QC data to npz file."""
+    """Save aperiodic QC data to TSV file."""
     if not _is_aperiodic_qc_complete(aper_qc):
-        logger.info("Aperiodic QC payload present but incomplete; skipping aperiodic_qc.npz")
+        logger.info("Aperiodic QC payload present but incomplete; skipping aperiodic_qc.tsv")
         return
 
     try:
+        folder_name = _get_folder_for_feature("aperiodic_qc")
+        qc_dir = features_dir / folder_name
+        qc_dir.mkdir(parents=True, exist_ok=True)
+
+        qc_filename = f"aperiodic_qc_{suffix}.tsv" if suffix else "aperiodic_qc.tsv"
+        save_path = qc_dir / qc_filename
+
         subject_name = features_dir.parent.parent.name.replace("sub-", "")
         deriv_root = features_dir.parent.parent.parent
         stats_dir = deriv_stats_path(deriv_root, subject_name)
         stats_dir.mkdir(parents=True, exist_ok=True)
-        qc_filename = f"aperiodic_qc_{suffix}.npz" if suffix else "aperiodic_qc.npz"
-        qc_path = stats_dir / qc_filename
-        np.savez_compressed(
-            qc_path,
-            freqs=aper_qc.get("freqs"),
-            residual_mean=aper_qc.get("residual_mean"),
-            r2=aper_qc.get("r2"),
-            slopes=aper_qc.get("slopes"),
-            offsets=aper_qc.get("offsets"),
-            channel_names=aper_qc.get("channel_names"),
-            run_labels=aper_qc.get("run_labels"),
-        )
-        logger.info("Saved aperiodic QC sidecar to %s", qc_path)
+        stats_path = stats_dir / qc_filename
+
+        freqs = aper_qc.get("freqs")
+        residual_mean = aper_qc.get("residual_mean")
+        r2 = aper_qc.get("r2")
+        slopes = aper_qc.get("slopes")
+        offsets = aper_qc.get("offsets")
+        channel_names = aper_qc.get("channel_names")
+        run_labels = aper_qc.get("run_labels")
+
+        rows = []
+
+        if freqs is not None and residual_mean is not None:
+            n_channels = residual_mean.shape[0] if residual_mean.ndim > 1 else 1
+            for ch_idx in range(n_channels):
+                ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
+                resid = residual_mean[ch_idx] if residual_mean.ndim > 1 else residual_mean
+                for freq_idx, freq in enumerate(freqs):
+                    rows.append({
+                        "frequency": freq,
+                        "channel": ch_name,
+                        "residual_mean": float(resid[freq_idx]) if freq_idx < len(resid) else np.nan
+                    })
+
+        if r2 is not None:
+            n_channels = len(r2) if r2.ndim == 1 else r2.shape[0]
+            for ch_idx in range(n_channels):
+                ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
+                r2_val = r2[ch_idx] if r2.ndim == 1 else (r2[ch_idx, 0] if r2.ndim > 1 else r2)
+                rows.append({
+                    "frequency": np.nan,
+                    "channel": ch_name,
+                    "residual_mean": np.nan,
+                    "r2": float(r2_val)
+                })
+
+        if slopes is not None and offsets is not None:
+            n_trials = slopes.shape[0] if slopes.ndim > 1 else 1
+            n_channels = slopes.shape[1] if slopes.ndim > 1 else 1
+            for trial_idx in range(n_trials):
+                run_label = run_labels[trial_idx] if run_labels and trial_idx < len(run_labels) else f"trial_{trial_idx}"
+                for ch_idx in range(n_channels):
+                    ch_name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f"ch_{ch_idx}"
+                    slope_val = slopes[trial_idx, ch_idx] if slopes.ndim > 1 else slopes
+                    offset_val = offsets[trial_idx, ch_idx] if offsets.ndim > 1 else offsets
+                    rows.append({
+                        "frequency": np.nan,
+                        "channel": ch_name,
+                        "residual_mean": np.nan,
+                        "r2": np.nan,
+                        "trial": run_label,
+                        "slope": float(slope_val),
+                        "offset": float(offset_val)
+                    })
+
+        df = pd.DataFrame(rows)
+
+        for target_path in [save_path, stats_path]:
+            write_tsv(df, target_path)
+
+        logger.info("Saved aperiodic QC sidecar to %s and %s", save_path, stats_path)
     except (OSError, IOError, TypeError, KeyError) as exc:
-        logger.warning("Failed to save aperiodic QC npz: %s", exc)
-
-
-def _extract_constant_columns(df: Optional[pd.DataFrame]) -> Dict[str, float]:
-    """Extract columns with constant (non-varying) values from a dataframe."""
-    if df is None or df.empty:
-        return {}
-    numeric = df.apply(pd.to_numeric, errors="coerce")
-    nunique = numeric.nunique(dropna=True)
-    constant_columns: Dict[str, float] = {}
-    for col in numeric.columns:
-        if int(nunique.get(col, 0)) <= 1:
-            series = numeric[col].dropna()
-            constant_columns[str(col)] = float(series.iloc[0]) if series.size else np.nan
-    return constant_columns
-
-
-def _save_subject_level_features(
-    feature_dataframes: List[Optional[pd.DataFrame]],
-    features_dir: Path,
-    config: Any,
-    logger: logging.Logger,
-    suffix: Optional[str] = None,
-) -> None:
-    """Save subject-level constant features to avoid pseudo-replication."""
-    try:
-        save_subject_level = (
-            bool(config.get("feature_engineering.output.save_subject_level_features", True))
-            if hasattr(config, "get")
-            else True
-        )
-    except Exception:
-        save_subject_level = True
-
-    if not save_subject_level or features_dir is None:
-        return
-
-    try:
-        subject_str = (
-            features_dir.parts[-3].replace("sub-", "")
-            if len(features_dir.parts) > 3
-            else "unknown"
-        )
-        task_str = (
-            config.get("project.task")
-            if config is not None and hasattr(config, "get")
-            else None
-        )
-        task_str = str(task_str) if task_str is not None else "unknown"
-
-        subject_row: Dict[str, Any] = {"subject": str(subject_str), "task": task_str}
-        for block_df in feature_dataframes:
-            for key, value in _extract_constant_columns(block_df).items():
-                subject_row.setdefault(key, value)
-
-        if len(subject_row) > 2:
-            subj_filename = _build_filename("features_subject", suffix)
-            subj_path = features_dir / subj_filename
-            logger.info("Saving subject-level (constant) features: %s", subj_path)
-            write_tsv(pd.DataFrame([subject_row]), subj_path)
-    except Exception as exc:
-        logger.warning("Subject-level feature export failed: %s", exc)
+        logger.warning("Failed to save aperiodic QC TSV: %s", exc)
 
 
 def _save_feature_manifest(
@@ -550,8 +643,9 @@ def _save_feature_manifest(
             if len(features_dir.parts) > 3
             else "unknown"
         )
+        folder_name = _get_folder_for_feature("features")
         json_filename = _build_filename("features", suffix).replace(".tsv", ".json")
-        sidecar_path = features_dir / json_filename
+        sidecar_path = features_dir / folder_name / json_filename
         manifest = generate_manifest(
             feature_columns=list(direct_df.columns),
             config=config,
@@ -613,13 +707,18 @@ def save_all_features(
         raise ValueError("features_dir must be provided")
 
     direct_blocks = []
-    if pow_df is not None:
+    if pow_df is not None and not pow_df.empty:
         pow_df = _assign_columns_safely(pow_df, pow_cols, "Power", logger)
+        logger.debug("Adding Power block to direct features: %d columns", len(pow_df.columns))
         direct_blocks.append(pow_df)
 
     if baseline_df is not None and not baseline_df.empty:
-        baseline_df = _assign_columns_safely(baseline_df, baseline_cols, "Baseline", logger)
-        direct_blocks.append(baseline_df)
+        # Only include baseline columns in the specific baseline file.
+        # This keeps the outputs window-specific as requested by the user.
+        if isinstance(suffix, str) and suffix.lower() == "baseline":
+            baseline_df = _assign_columns_safely(baseline_df, baseline_cols, "Baseline", logger)
+            logger.debug("Adding Baseline block to direct features: %d columns", len(baseline_df.columns))
+            direct_blocks.append(baseline_df)
 
 
     feature_save_configs = [
@@ -643,6 +742,9 @@ def save_all_features(
             _save_feature_dataframe(
                 df, base_name, features_dir, logger, cols, description, suffix
             )
+            _save_feature_metadata(
+                df, base_name, features_dir, config, logger, suffix
+            )
 
     if aper_qc:
         _save_aperiodic_qc(aper_qc, features_dir, logger, suffix)
@@ -654,33 +756,32 @@ def save_all_features(
         )
     else:
         direct_df = pd.DataFrame()
-        logger.info("No direct feature blocks to concatenate (connectivity/precomputed-only run)")
 
     if not direct_df.empty:
+        folder_name = _get_folder_for_feature("features_power")
         direct_filename = _build_filename("features_power", suffix)
-        cols_filename = _build_filename("features_power_columns", suffix)
-        direct_path = features_dir / direct_filename
-        cols_path = features_dir / cols_filename
-        direct_cols = list(direct_df.columns)
+        direct_path = features_dir / folder_name / direct_filename
         logger.info("Saving power features: %s", direct_path)
         write_tsv(direct_df, direct_path)
-        write_tsv(pd.Series(direct_cols, name="feature").to_frame(), cols_path)
+        _save_feature_metadata(
+            direct_df, "features_power", features_dir, config, logger, suffix
+        )
 
     if active_df is not None and not active_df.empty:
+        folder_name = _get_folder_for_feature("features_power_active")
         active_filename = _build_filename("features_power_active", suffix)
-        active_cols_filename = _build_filename("features_power_active_columns", suffix)
-        active_path = features_dir / active_filename
-        active_cols_path = features_dir / active_cols_filename
+        active_path = features_dir / folder_name / active_filename
         logger.info("Saving active-averaged EEG features: %s", active_path)
         write_tsv(active_df, active_path)
-        write_tsv(
-            pd.Series(active_cols or [], name="feature").to_frame(), active_cols_path
+        _save_feature_metadata(
+            active_df, "features_power_active", features_dir, config, logger, suffix
         )
 
     if conn_df is not None and not conn_df.empty:
         conn_df = _assign_columns_safely(conn_df, conn_cols, "Connectivity", logger)
+        folder_name = _get_folder_for_feature("features_connectivity")
         conn_filename = _build_filename("features_connectivity", suffix)
-        conn_path = features_dir / conn_filename
+        conn_path = features_dir / folder_name / conn_filename
         logger.info("Saving connectivity features: %s", conn_path)
         start_time = time.perf_counter()
         write_tsv(conn_df, conn_path)
@@ -690,33 +791,14 @@ def save_all_features(
             len(conn_df),
             len(conn_df.columns),
         )
-
-    _save_subject_level_features(
-        [
-            direct_df,
-            conn_df,
-            aper_df,
-            erp_df,
-            itpc_df,
-            pac_trials_df,
-            comp_df,
-            bursts_df,
-            spectral_df,
-            erds_df,
-            ratios_df,
-            asymmetry_df,
-            quality_df,
-        ],
-        features_dir,
-        config,
-        logger,
-        suffix,
-    )
+        _save_feature_metadata(
+            conn_df, "features_connectivity", features_dir, config, logger, suffix
+        )
 
     _save_feature_manifest(direct_df, features_dir, config, feature_qc, logger, suffix)
 
     if y is not None:
-        target_path = features_dir / "target_vas_ratings.tsv"
+        target_path = features_dir / "behavior" / "target_vas_ratings.tsv"
         rating_columns = (
             config.get("event_columns.rating", ["vas_rating"])
             if config is not None and hasattr(config, "get")

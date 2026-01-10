@@ -350,7 +350,11 @@ def _save_merged_features(
         
         merged_df = _merge_dataframes(dfs_to_merge)
         if merged_df is not None:
-            write_tsv(merged_df, features_dir / filename)
+            from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
+            base_name = filename.replace(".tsv", "")
+            folder = _get_folder_for_feature(base_name)
+            save_path = features_dir / folder / filename
+            write_tsv(merged_df, save_path)
             feature_name = filename.replace("features_", "").replace(".tsv", "")
             logger.info(f"Saved merged {feature_name} features: {merged_df.shape[1]} columns")
 
@@ -363,10 +367,11 @@ def _save_extraction_config(
 ) -> None:
     """Save extraction configuration to JSON file."""
     config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
-    config_path = features_dir / config_name
-    with open(config_path, "w") as f:
+    save_path = features_dir / "metadata" / config_name
+    ensure_dir(save_path.parent)
+    with open(save_path, "w") as f:
         json.dump(config, f, indent=2)
-    logger.info(f"Saved extraction config: {config_path}")
+    logger.info(f"Saved extraction config: {save_path}")
 
 
 class FeaturePipeline(PipelineBase):
@@ -427,13 +432,13 @@ class FeaturePipeline(PipelineBase):
         )
         if original_events is not None:
             save_dropped_trials_log(
-                epochs, original_events, features_dir / "dropped_trials.tsv", self.logger
+                epochs, original_events, features_dir / "metadata" / "dropped_trials.tsv", self.logger
             )
 
         save_trial_alignment_manifest(
             aligned_events,
             epochs,
-            features_dir / "trial_alignment.json",
+            features_dir / "metadata" / "trial_alignment.json",
             self.config,
             self.logger,
         )
@@ -478,7 +483,7 @@ class FeaturePipeline(PipelineBase):
                 )
                 tmin, tmax = tmax, tmin
 
-            suffix = name if name and name.lower() != "full" else None
+            suffix = name
             range_info = f"range '{name}'" if name else "default range"
             self.logger.info(f"--- Processing {range_info} ({tmin} to {tmax}s) ---")
 
@@ -553,6 +558,7 @@ class FeaturePipeline(PipelineBase):
                 self.config,
                 critical_features=critical_features,
                 extra_blocks=extra_blocks,
+                requested_categories=ctx.feature_categories,
             )
 
             if retention_stats is None:
@@ -672,7 +678,7 @@ class FeaturePipeline(PipelineBase):
                 target_column_name = rating_columns[0] if rating_columns else "vas_rating"
                 write_tsv(
                     accumulated_y.to_frame(name=target_column_name),
-                    features_dir / "target_vas_ratings.tsv",
+                    features_dir / "behavior" / "target_vas_ratings.tsv",
                 )
                 self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
 

@@ -20,12 +20,12 @@ from eeg_pipeline.domain.features.registry import (
 )
 from eeg_pipeline.utils.analysis.stats.correlation import (
     CorrelationResult,
-    compute_change_features,
     compute_pain_sensitivity_index,
     interpret_correlation,
     interpret_effect_size,
     run_pain_sensitivity_correlations,
 )
+from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
 from eeg_pipeline.utils.analysis.stats.effect_size import (
     compute_condition_effects,
     split_by_condition,

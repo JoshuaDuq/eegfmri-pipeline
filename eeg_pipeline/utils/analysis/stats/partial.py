@@ -13,13 +13,17 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy import stats
+from scipy.linalg import lstsq
 
 from .base import get_statistics_constants
+from .correlation import compute_correlation
+from .base import _safe_float
 
 
 # Constants
 _ILL_CONDITIONED_THRESHOLD = 1e10
 _DEFAULT_COLLINEARITY_THRESHOLD = 0.9
+_MIN_SAMPLES_CORRELATION = 3
 
 
 def check_collinearity(
@@ -140,6 +144,87 @@ def _compute_partial_residuals(
     return x_residuals, y_residuals, n_samples
 
 
+def partial_corr_xy_given_Z(
+    x: pd.Series,
+    y: pd.Series,
+    Z: pd.DataFrame,
+    method: str,
+    config: Optional[Any] = None,
+) -> Tuple[float, float, int]:
+    """
+    Partial correlation of x,y controlling for Z.
+    
+    Returns (r_partial, p_value, n).
+    """
+    df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
+    min_required = Z.shape[1] + _MIN_SAMPLES_CORRELATION
+    if len(df) < min_required:
+        return np.nan, np.nan, 0
+
+    design_matrix = df[Z.columns].values
+    design_matrix = np.column_stack([np.ones(len(design_matrix)), design_matrix])
+
+    x_vals = df["x"].values
+    y_vals = df["y"].values
+
+    try:
+        beta_x, *_ = lstsq(design_matrix, x_vals)
+        beta_y, *_ = lstsq(design_matrix, y_vals)
+    except (np.linalg.LinAlgError, ValueError):
+        return np.nan, np.nan, 0
+
+    residuals_x = x_vals - design_matrix @ beta_x
+    residuals_y = y_vals - design_matrix @ beta_y
+
+    r, p = compute_correlation(residuals_x, residuals_y, method)
+    return float(r), float(p), len(df)
+
+
+def compute_partial_corr(
+    x: pd.Series,
+    y: pd.Series,
+    Z: Optional[pd.DataFrame],
+    method: str,
+    *,
+    logger: Optional[logging.Logger] = None,
+    context: str = "",
+    config: Optional[Any] = None,
+) -> Tuple[float, float, int]:
+    """
+    Compute partial correlation, handling edge cases.
+    
+    If Z is None or empty, returns simple correlation.
+    
+    Parameters
+    ----------
+    x, y : pd.Series
+        Input series
+    Z : Optional[pd.DataFrame]
+        Covariates to control for. If None or empty, computes simple correlation.
+    method : str
+        Correlation method ('pearson' or 'spearman')
+    logger : Optional[logging.Logger]
+        Logger for warnings
+    context : str
+        Context string for logging
+    config : Optional[Any]
+        Configuration object
+        
+    Returns
+    -------
+    Tuple[float, float, int]
+        (r, p_value, n_samples)
+    """
+    if Z is None or Z.empty:
+        valid = np.isfinite(x.values) & np.isfinite(y.values)
+        if np.sum(valid) < 3:
+            return np.nan, np.nan, 0
+        r, p = compute_correlation(x.values[valid], y.values[valid], method)
+        return r, p, int(np.sum(valid))
+
+    return partial_corr_xy_given_Z(x, y, Z, method, config)
+
+
 def partial_residuals_xy_given_Z(
     x: pd.Series,
     y: pd.Series,
@@ -218,8 +303,6 @@ def compute_partial_correlation_with_covariates(
     if n_samples < min_samples:
         return np.nan, np.nan, 0
     
-    # Local import to avoid circular dependency
-    from .correlation import partial_corr_xy_given_Z
     return partial_corr_xy_given_Z(
         aligned_data["x"],
         aligned_data["y"],
@@ -337,54 +420,79 @@ def compute_partial_correlation_for_roi_pair(
     if masked_covariates.empty:
         return np.nan, np.nan, 0
     
-    # Local import to avoid circular dependency
-    from .correlation import partial_corr_xy_given_Z
     return partial_corr_xy_given_Z(x_masked, y_masked, masked_covariates, method)
 
 
-def prepare_aligned_data(
-    x: pd.Series,
-    y: pd.Series,
-    Z: Optional[pd.DataFrame] = None,
-) -> Tuple[pd.Series, pd.Series, Optional[pd.DataFrame], int, int]:
-    """Align x, y, and covariates, removing NaN rows."""
-    x_series = x if isinstance(x, pd.Series) else pd.Series(x)
-    y_series = y if isinstance(y, pd.Series) else pd.Series(y)
+def compute_partial_residuals_stats(
+    x_res: pd.Series,
+    y_res: pd.Series,
+    stats_df: Optional[pd.Series],
+    n_res: int,
+    method_code: str,
+    bootstrap_ci: int,
+    rng: np.random.Generator,
+) -> Tuple[float, float, int, Tuple[float, float]]:
+    """Compute partial correlation statistics from residuals.
     
-    frames = [x_series.rename("__x__"), y_series.rename("__y__")]
-    has_covariates = False
+    Computes correlation statistics from partial residuals, optionally
+    using pre-computed statistics from stats_df if available.
     
-    if Z is not None:
-        if isinstance(Z, pd.DataFrame):
-            has_data = len(Z) > 0 and len(Z.columns) > 0
-            if has_data:
-                frames.append(Z)
-                has_covariates = True
-        else:
-            try:
-                Z_dataframe = pd.DataFrame(Z)
-                has_data = len(Z_dataframe) > 0 and len(Z_dataframe.columns) > 0
-                if has_data:
-                    frames.append(Z_dataframe)
-                    has_covariates = True
-            except (ValueError, TypeError):
-                pass
-
-    combined_data = pd.concat(frames, axis=1)
-    n_total = len(combined_data)
-    clean_data = combined_data.dropna()
-    n_kept = len(clean_data)
-
-    if n_kept == 0:
-        return pd.Series(dtype=float), pd.Series(dtype=float), None, n_total, n_kept
-
-    x_name = x_series.name if x_series.name is not None else "x"
-    y_name = y_series.name if y_series.name is not None else "y"
+    Parameters
+    ----------
+    x_res, y_res : pd.Series
+        Residual series after partialling out covariates
+    stats_df : Optional[pd.Series]
+        Pre-computed statistics (may contain r_partial, p_partial, n_partial)
+    n_res : int
+        Number of residual samples
+    method_code : str
+        Correlation method ('pearson' or 'spearman')
+    bootstrap_ci : int
+        Number of bootstrap iterations (0 to skip)
+    rng : np.random.Generator
+        Random number generator
+        
+    Returns
+    -------
+    Tuple[float, float, int, Tuple[float, float]]
+        (r_residual, p_residual, n_partial, (ci_low, ci_high))
+    """
+    from .bootstrap import bootstrap_corr_ci
     
-    x_clean = clean_data.pop("__x__").rename(x_name)
-    y_clean = clean_data.pop("__y__").rename(y_name)
-    Z_clean = clean_data if has_covariates else None
-
-    return x_clean, y_clean, Z_clean, n_total, n_kept
+    r_residual = np.nan
+    p_residual = np.nan
+    n_partial = n_res
+    
+    if stats_df is not None:
+        r_residual = _safe_float(stats_df.get("r_partial", np.nan))
+        p_residual = _safe_float(stats_df.get("p_partial", np.nan))
+        n_partial = int(stats_df.get("n_partial", n_partial))
+    
+    if not np.isfinite(r_residual):
+        # Always use pearson for residuals (even if method is spearman,
+        # ranked residuals are Pearson-correlated to get Spearman partial)
+        r_residual, p_residual = compute_correlation(
+            x_res,
+            y_res,
+            method="pearson"
+        )
+    
+    if bootstrap_ci > 0:
+        confidence_interval = bootstrap_corr_ci(
+            x_res,
+            y_res,
+            method_code,
+            n_boot=bootstrap_ci,
+            rng=rng
+        )
+    else:
+        confidence_interval = (np.nan, np.nan)
+    
+    return (
+        float(r_residual),
+        float(p_residual),
+        n_partial,
+        confidence_interval
+    )
 
 

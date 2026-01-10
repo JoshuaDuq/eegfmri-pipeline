@@ -374,3 +374,32 @@ def nanmean_with_fraction(data: np.ndarray, mask: np.ndarray) -> Tuple[float, fl
     
     return mean_val, valid_fraction, valid_count, total_count
 
+
+def extract_finite_mask(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Extract mask where both arrays are finite.
+    
+    Returns (y_true_finite, y_pred_finite, mask) where mask indicates
+    positions where both arrays have finite values.
+    
+    Parameters
+    ----------
+    y_true : np.ndarray
+        First array
+    y_pred : np.ndarray
+        Second array
+        
+    Returns
+    -------
+    y_true_finite : np.ndarray
+        Finite values from y_true
+    y_pred_finite : np.ndarray
+        Finite values from y_pred
+    mask : np.ndarray
+        Boolean mask indicating finite positions
+    """
+    mask = np.isfinite(y_true) & np.isfinite(y_pred)
+    return y_true[mask], y_pred[mask], mask
+

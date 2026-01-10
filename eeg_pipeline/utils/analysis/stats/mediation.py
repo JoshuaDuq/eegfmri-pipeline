@@ -34,6 +34,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ._regression_utils import _ols_regression
+
 
 # Constants
 MIN_SAMPLE_SIZE = 10
@@ -151,44 +153,6 @@ def _compute_t_statistic_p_value(
     return p_value if np.isfinite(p_value) else np.nan
 
 
-def _ols_regression(y: np.ndarray, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
-    """Simple OLS regression returning coefficients, standard errors, and residual variance.
-    
-    Parameters
-    ----------
-    y : np.ndarray
-        Dependent variable (n,)
-    X : np.ndarray  
-        Design matrix including intercept (n, p)
-        
-    Returns
-    -------
-    beta : np.ndarray
-        Coefficients (p,)
-    se : np.ndarray
-        Standard errors (p,)
-    sigma_squared : float
-        Residual variance
-    """
-    n, p = X.shape
-    
-    try:
-        XtX_inv = np.linalg.inv(X.T @ X)
-    except np.linalg.LinAlgError:
-        return np.full(p, np.nan), np.full(p, np.nan), np.nan
-    
-    beta = XtX_inv @ X.T @ y
-    residuals = y - X @ beta
-    
-    df = n - p
-    if df <= 0:
-        return beta, np.full(p, np.nan), np.nan
-    
-    sigma_squared = np.sum(residuals**2) / df
-    var_beta = sigma_squared * np.diag(XtX_inv)
-    se = np.sqrt(var_beta)
-    
-    return beta, se, sigma_squared
 
 
 def compute_mediation_paths(
@@ -232,20 +196,20 @@ def compute_mediation_paths(
     
     # Path a: X → M
     design_matrix_x = np.column_stack([np.ones(sample_size), independent_var])
-    coefficients_a, standard_errors_a, _ = _ols_regression(mediator, design_matrix_x)
+    coefficients_a, standard_errors_a, _, _ = _ols_regression(mediator, design_matrix_x)
     result.a = coefficients_a[1]
     result.se_a = standard_errors_a[1]
     result.p_a = _compute_t_statistic_p_value(result.a, result.se_a, sample_size - 2)
     
     # Path c: X → Y (total effect)
-    coefficients_c, standard_errors_c, _ = _ols_regression(dependent_var, design_matrix_x)
+    coefficients_c, standard_errors_c, _, _ = _ols_regression(dependent_var, design_matrix_x)
     result.c = coefficients_c[1]
     result.se_c = standard_errors_c[1]
     result.p_c = _compute_t_statistic_p_value(result.c, result.se_c, sample_size - 2)
     
     # Paths b and c': Y ~ X + M
     design_matrix_xm = np.column_stack([np.ones(sample_size), independent_var, mediator])
-    coefficients_bc, standard_errors_bc, _ = _ols_regression(dependent_var, design_matrix_xm)
+    coefficients_bc, standard_errors_bc, _, _ = _ols_regression(dependent_var, design_matrix_xm)
     
     result.c_prime = coefficients_bc[1]
     result.se_c_prime = standard_errors_bc[1]

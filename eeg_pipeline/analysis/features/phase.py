@@ -677,16 +677,27 @@ def extract_phase_features(
     spatial_modes = list(getattr(ctx, "spatial_modes", ["roi", "global"]))
     roi_map = _build_roi_map_if_needed(spatial_modes, ch_names, config)
     
-    segments = list(get_segment_masks(epochs.times, ctx.windows, config).keys())
+    target_name = getattr(ctx, "name", None)
+    
+    # When a specific time range is targeted (ctx.name is set), the data has 
+    # already been cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segments = [target_name]
+        # Create a mask covering all data since epochs/TFR are pre-cropped
+        segment_masks = {target_name: np.ones_like(times, dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
+        segments = list(segment_masks.keys())
+    
     if not segments:
-        segments = ["full"]
+        logger.warning("ITPC: No valid segments found; returning empty results.")
+        return pd.DataFrame(), []
     
     baseline_correction = _get_baseline_correction_mode(config)
 
     for segment_name in segments:
-        if segment_name == "full":
-            segment_mask = np.ones_like(times, dtype=bool)
-        else:
+        segment_mask = segment_masks.get(segment_name)
+        if segment_mask is None:
             segment_mask = make_mask_for_times(ctx.windows, segment_name, times)
             
         if not np.any(segment_mask):
@@ -854,7 +865,7 @@ def compute_pac_comodulograms(
     config: Any,
     logger: logging.Logger,
     *,
-    segment_name: str = "active",
+    segment_name: str = "full",
     segment_window: Optional[Tuple[float, float]] = None,
     spatial_modes: Optional[List[str]] = None,
 ) -> Tuple[Optional[pd.DataFrame], Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
@@ -1011,7 +1022,16 @@ def extract_itpc_from_precomputed(
         )
         
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
+    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    
+    # When a specific time range is targeted, the precomputed data may have been
+    # cropped to that range. Use all available data with that segment name.
+    if target_name:
+        masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
     if not masks:
         return pd.DataFrame(), []
     
@@ -1114,11 +1134,17 @@ def extract_pac_from_precomputed(
     n_ch = len(ch_names)  # Required for surrogate and waveform QC loops
     n_epochs = precomputed.data.shape[0]
     windows = precomputed.windows
-    segment_name = getattr(windows, "name", "active") or "active"
-    mask = getattr(windows, "active_mask", None)
+    
+    segment_name = getattr(windows, "name", None) or "full"
+    mask = windows.get_mask(segment_name) if windows else None
     
     if mask is None or not np.any(mask):
-        return pd.DataFrame(), []
+        # Fallback to full if no mask found and generic name used
+        if segment_name in {"full", "all"}:
+            mask = np.ones_like(precomputed.times, dtype=bool)
+        else:
+            return pd.DataFrame(), []
+            
     n_times = int(np.sum(mask))
 
     # Pre-calculate sqrt(power) for all bands to get amplitude

@@ -220,9 +220,6 @@ class PlotConfig:
         layout = defaults.get("layout", {})
         return {
             "tight_rect": layout.get("tight_rect", [0, 0.03, 1, 1]),
-            "tight_rect_microstate": layout.get(
-                "tight_rect_microstate", [0, 0.02, 1, 0.96]
-            ),
         }
     
     @staticmethod
@@ -561,14 +558,13 @@ class PlotConfig:
         """Get layout rectangle from stored config.
         
         Args:
-            rect_name: Name of rectangle ("tight_rect" or "tight_rect_microstate")
+            rect_name: Name of rectangle ("tight_rect")
         
         Returns:
             List [left, bottom, right, top]
         """
         default_tight = [0, 0.03, 1, 1]
-        default_microstate = [0, 0.02, 1, 0.96]
-        default_rect = default_tight if rect_name == "tight_rect" else default_microstate
+        default_rect = default_tight
         return self.layout_rects.get(rect_name, default_rect)
     
     def get_gridspec_params(self) -> Dict[str, Any]:

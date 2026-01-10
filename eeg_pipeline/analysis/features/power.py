@@ -328,13 +328,7 @@ def _build_roi_map_if_needed(
     if not roi_definitions:
         return {}
     
-    roi_channel_map = build_roi_map(channel_names, roi_definitions)
-    roi_index_map = {}
-    for roi_name, channel_list in roi_channel_map.items():
-        indices = [channel_names.index(ch) for ch in channel_list if ch in channel_names]
-        if indices:
-            roi_index_map[roi_name] = indices
-    
+    roi_index_map = build_roi_map(channel_names, roi_definitions)
     return roi_index_map
 
 
@@ -428,11 +422,16 @@ def extract_power_features(
     require_baseline = bool(ctx.config.get("feature_engineering.power.require_baseline", True))
     _validate_baseline_requirements(baseline_df, n_epochs, is_tfr_baselined, require_baseline)
     
-    segment_name = getattr(ctx, "name", None) or "full"
-    ctx.logger.info(f"Computing power features for segment: {segment_name}")
+    segment_name = getattr(ctx, "name", None)
+    ctx.logger.info(f"Computing power features for segment: {segment_name or 'unnamed'}")
     
     time_mask = make_mask_for_times(ctx.windows, segment_name, times)
     if not np.any(time_mask):
+        ctx.logger.error(
+            f"Time window '{segment_name}' is undefined or empty. "
+            f"Available windows: {list(ctx.windows.ranges.keys()) if ctx.windows else 'none'}. "
+            "Skipping power feature extraction for this segment."
+        )
         return pd.DataFrame(), []
     
     epsilon_psd = float(ctx.config.get("feature_engineering.constants.epsilon_psd", EPSILON_PSD))

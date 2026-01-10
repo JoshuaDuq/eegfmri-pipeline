@@ -44,6 +44,7 @@ const (
 )
 
 var utilities = []utilityItem{
+	{"Global Setup", "Configure project paths and settings", "G"},
 	{"Merge PsychoPy Data", "Merge PsychoPy data into BIDS events files", "M"},
 	{"Raw to BIDS", "Convert raw EEG data to BIDS format", "R"},
 }

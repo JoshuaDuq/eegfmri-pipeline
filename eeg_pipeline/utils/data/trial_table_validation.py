@@ -15,17 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract a value from a config object (dict-like or object with get method)."""
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        try:
-            return config.get(key, default)
-        except (AttributeError, TypeError):
-            return default
-    return default
+from eeg_pipeline.utils.config.loader import get_config_value
 
 
 @dataclass
@@ -268,7 +258,7 @@ def validate_trial_table(
     default_high_missing_threshold = 0.5
     config_key = "behavior_analysis.trial_table.validate.high_missing_frac"
     high_missing_threshold = float(
-        _get_config_value(config, config_key, default_high_missing_threshold)
+        get_config_value(config, config_key, default_high_missing_threshold)
     )
     
     columns_above_threshold = summary_df["missing_frac"] > high_missing_threshold

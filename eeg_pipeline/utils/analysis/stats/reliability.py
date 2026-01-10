@@ -190,13 +190,66 @@ def compute_icc(
     return icc_clipped, ci_low, ci_high
 
 
-def _compute_correlation(x: np.ndarray, y: np.ndarray, method: str) -> float:
-    """Compute correlation using specified method."""
-    if method == "spearman":
-        r, _ = stats.spearmanr(x, y)
-    else:
-        r, _ = stats.pearsonr(x, y)
-    return r if np.isfinite(r) else np.nan
+def compute_icc_from_dataframe(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    icc_type: str = "ICC(1,1)",
+) -> Tuple[float, Tuple[float, float]]:
+    """Compute Intraclass Correlation Coefficient from DataFrame.
+    
+    This is a convenience wrapper that converts a DataFrame to the array format
+    required by compute_icc.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with value and group columns
+    value_col : str
+        Column name containing values
+    group_col : str
+        Column name containing group identifiers
+    icc_type : str
+        Type of ICC to compute (default: "ICC(1,1)")
+    
+    Returns
+    -------
+    icc : float
+        ICC value
+    ci : Tuple[float, float]
+        (ci_low, ci_high) confidence interval bounds
+    """
+    if value_col not in df.columns or group_col not in df.columns:
+        return np.nan, (np.nan, np.nan)
+
+    df_clean = df[[value_col, group_col]].dropna()
+
+    groups = df_clean[group_col].unique()
+    n_groups = len(groups)
+
+    MIN_GROUPS_FOR_ICC = 2
+    MIN_PIVOT_ROWS_FOR_ICC = 2
+    MIN_PIVOT_COLS_FOR_ICC = 2
+
+    if n_groups < MIN_GROUPS_FOR_ICC:
+        return np.nan, (np.nan, np.nan)
+
+    try:
+        pivot = df_clean.pivot_table(
+            index=group_col,
+            columns=df_clean.groupby(group_col).cumcount(),
+            values=value_col,
+            aggfunc="first"
+        ).dropna()
+
+        n_rows, n_cols = pivot.shape
+        if n_rows < MIN_PIVOT_ROWS_FOR_ICC or n_cols < MIN_PIVOT_COLS_FOR_ICC:
+            return np.nan, (np.nan, np.nan)
+
+        icc, ci_low, ci_high = compute_icc(pivot.values, icc_type=icc_type)
+        return float(icc), (float(ci_low), float(ci_high))
+    except (ValueError, KeyError, IndexError):
+        return np.nan, (np.nan, np.nan)
 
 
 def _apply_spearman_brown(r: float) -> float:
@@ -256,12 +309,14 @@ def compute_split_half_reliability(
         half1_means = data[half1_indices].mean(axis=0)
         half2_means = data[half2_indices].mean(axis=0)
         
+        from .correlation import compute_correlation
         if len(half1_means) == 1:
             half1_values = data[half1_indices, 0]
             half2_values = data[half2_indices, 0]
-            r = _compute_correlation(half1_values, half2_values, method)
+            r, _ = compute_correlation(half1_values, half2_values, method)
         else:
-            r = _compute_correlation(half1_means, half2_means, method)
+            r, _ = compute_correlation(half1_means, half2_means, method)
+        r = r if np.isfinite(r) else np.nan
         
         if np.isfinite(r):
             correlations.append(r)
@@ -366,12 +421,12 @@ def compute_feature_reliability(
 ###################################################################
 
 
-def hierarchical_fdr(
+def hierarchical_fdr_dict(
     p_values: Dict[str, np.ndarray],
     alpha: float = DEFAULT_ALPHA,
     method: str = "bh",
 ) -> Dict[str, Dict[str, Any]]:
-    """Apply hierarchical FDR correction across multiple families.
+    """Apply hierarchical FDR correction across multiple families (dict API).
     
     Two-stage procedure:
     1. Apply FDR within each family
@@ -537,7 +592,7 @@ def compute_hierarchical_fdr_summary(
     if not p_by_group:
         return pd.DataFrame()
     
-    hier_results = hierarchical_fdr(p_by_group, alpha=alpha)
+    hier_results = hierarchical_fdr_dict(p_by_group, alpha=alpha)
     
     # Build summary dataframe
     summary_rows = []
@@ -1003,8 +1058,11 @@ def compute_feature_split_half_reliability(
             feature_a = Xa[:, col]
             feature_b = Xb[:, col]
             
-            r_a = _compute_correlation(feature_a, ya, method)
-            r_b = _compute_correlation(feature_b, yb, method)
+            from .correlation import compute_correlation
+            r_a, _ = compute_correlation(feature_a, ya, method)
+            r_b, _ = compute_correlation(feature_b, yb, method)
+            r_a = r_a if np.isfinite(r_a) else np.nan
+            r_b = r_b if np.isfinite(r_b) else np.nan
             
             correlations_a.append(r_a)
             correlations_b.append(r_b)
@@ -1016,11 +1074,13 @@ def compute_feature_split_half_reliability(
         if not np.any(valid_mask):
             continue
         
-        r_half = _compute_correlation(
+        from .correlation import compute_correlation
+        r_half, _ = compute_correlation(
             correlations_a[valid_mask],
             correlations_b[valid_mask],
             method
         )
+        r_half = r_half if np.isfinite(r_half) else np.nan
         
         if np.isfinite(r_half):
             reliability = _apply_spearman_brown(r_half)
@@ -1084,8 +1144,11 @@ def compute_correlation_split_half_reliability(
         idx1 = indices[:half_size]
         idx2 = indices[half_size:2 * half_size]
         
-        r1 = _compute_correlation(x_valid[idx1], y_valid[idx1], method)
-        r2 = _compute_correlation(x_valid[idx2], y_valid[idx2], method)
+        from .correlation import compute_correlation
+        r1, _ = compute_correlation(x_valid[idx1], y_valid[idx1], method)
+        r2, _ = compute_correlation(x_valid[idx2], y_valid[idx2], method)
+        r1 = r1 if np.isfinite(r1) else np.nan
+        r2 = r2 if np.isfinite(r2) else np.nan
         
         if np.isfinite(r1) and np.isfinite(r2):
             mean_correlation = (r1 + r2) / 2
@@ -1098,11 +1161,8 @@ def compute_correlation_split_half_reliability(
     return float(_apply_spearman_brown(mean_half_correlation))
 
 
-def get_subject_seed(base_seed: int, subject: str) -> int:
-    """Generate a reproducible seed for a subject."""
-    import hashlib
-    digest = hashlib.sha256(f"{base_seed}:{subject}".encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], byteorder="big") % (2**31)
+# Re-export from base for backwards compatibility
+from .base import get_subject_seed
 
 
 ###################################################################
@@ -1142,6 +1202,8 @@ class ReliabilityResult:
 
 def _pearson_with_ci(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]:
     """Compute Pearson correlation with 95% CI via Fisher z-transform."""
+    from .correlation import fisher_ci
+    
     valid_mask = np.isfinite(x) & np.isfinite(y)
     x_clean = x[valid_mask]
     y_clean = y[valid_mask]
@@ -1151,21 +1213,15 @@ def _pearson_with_ci(x: np.ndarray, y: np.ndarray) -> Tuple[float, float, float]
         return np.nan, np.nan, np.nan
     
     r, _ = stats.pearsonr(x_clean, y_clean)
-    z_fisher = np.arctanh(r)
     
-    df_adjustment = 3
-    standard_error = 1.0 / np.sqrt(n - df_adjustment)
-    z_critical_95 = 1.96
-    
-    ci_lower = float(np.tanh(z_fisher - z_critical_95 * standard_error))
-    ci_upper = float(np.tanh(z_fisher + z_critical_95 * standard_error))
+    # Use consolidated fisher_ci function (defaults to 95% CI)
+    ci_lower, ci_upper = fisher_ci(r, n, config=None)
     
     return float(r), ci_lower, ci_upper
 
 
-def _spearman_brown(r: float) -> float:
-    """Apply Spearman-Brown prophecy formula."""
-    return _apply_spearman_brown(r)
+# Alias for backwards compatibility
+_spearman_brown = _apply_spearman_brown
 
 
 def compute_odd_even_reliability(
@@ -1432,6 +1488,7 @@ def filter_reliable_features(
 __all__ = [
     # ICC and reliability
     "compute_icc",
+    "compute_icc_from_dataframe",
     "compute_split_half_reliability",
     "compute_feature_reliability",
     "compute_feature_split_half_reliability",

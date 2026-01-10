@@ -521,12 +521,14 @@ def pick_event_columns(
 def _find_first_matching_column(
     df: pd.DataFrame, candidate_columns: Any
 ) -> Optional[str]:
+    """Find first matching column from candidates.
+    
+    Uses the canonical find_column function from data.manipulation.
+    """
     if not isinstance(candidate_columns, (list, tuple)):
         return None
-    for candidate in candidate_columns:
-        if candidate in df.columns:
-            return candidate
-    return None
+    from eeg_pipeline.utils.data.manipulation import find_column
+    return find_column(df, list(candidate_columns))
 
 
 def resolve_columns(

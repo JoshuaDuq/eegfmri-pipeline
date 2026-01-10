@@ -15,16 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract value from config object, returning default if unavailable."""
-    if config is None:
-        return default
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except (AttributeError, KeyError, TypeError):
-        pass
-    return default
+from .base import safe_get_config_value as _get_config_value
 
 
 def _calculate_rmse(observed: np.ndarray, predicted: np.ndarray) -> float:

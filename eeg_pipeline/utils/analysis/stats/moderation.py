@@ -28,6 +28,8 @@ from typing import Any, Dict, Tuple
 import numpy as np
 from scipy import stats
 
+from ._regression_utils import _ols_regression
+
 
 # Numerical constants
 MIN_SAMPLE_SIZE_FOR_MODERATION = 15
@@ -111,51 +113,6 @@ class ModerationResult:
 ###################################################################
 
 
-def _compute_ols_regression(
-    y: np.ndarray, 
-    design_matrix: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, float, float]:
-    """Compute OLS regression returning coefficients, standard errors, R², and residual variance.
-    
-    Parameters
-    ----------
-    y : np.ndarray
-        Outcome variable
-    design_matrix : np.ndarray
-        Design matrix with intercept and predictors
-        
-    Returns
-    -------
-    Tuple of (coefficients, standard_errors, r_squared, residual_variance)
-    """
-    n_samples, n_predictors = design_matrix.shape
-    
-    try:
-        xtx_inverse = np.linalg.inv(design_matrix.T @ design_matrix)
-    except np.linalg.LinAlgError:
-        nan_array = np.full(n_predictors, np.nan)
-        return nan_array, nan_array, np.nan, np.nan
-    
-    coefficients = xtx_inverse @ design_matrix.T @ y
-    residuals = y - design_matrix @ coefficients
-    
-    degrees_of_freedom = n_samples - n_predictors
-    if degrees_of_freedom <= 0:
-        nan_array = np.full(n_predictors, np.nan)
-        return coefficients, nan_array, np.nan, np.nan
-    
-    sum_squared_residuals = np.sum(residuals**2)
-    y_mean = np.mean(y)
-    sum_squared_total = np.sum((y - y_mean)**2)
-    r_squared = 1 - (sum_squared_residuals / sum_squared_total) if sum_squared_total > 0 else np.nan
-    
-    residual_variance = sum_squared_residuals / degrees_of_freedom
-    coefficient_variance = residual_variance * np.diag(xtx_inverse)
-    standard_errors = np.sqrt(coefficient_variance)
-    
-    return coefficients, standard_errors, r_squared, residual_variance
-
-
 def compute_moderation_effect(
     X: np.ndarray,
     W: np.ndarray,
@@ -211,8 +168,8 @@ def compute_moderation_effect(
         W_centered, 
         interaction_term
     ])
-    coefficients_full, se_full, r2_full, _ = _compute_ols_regression(
-        Y_clean, design_matrix_full
+    coefficients_full, se_full, _, r2_full = _ols_regression(
+        Y_clean, design_matrix_full, compute_r2=True
     )
     
     design_matrix_reduced = np.column_stack([
@@ -220,7 +177,7 @@ def compute_moderation_effect(
         X_centered, 
         W_centered
     ])
-    _, _, r2_reduced, _ = _compute_ols_regression(Y_clean, design_matrix_reduced)
+    _, _, _, r2_reduced = _ols_regression(Y_clean, design_matrix_reduced, compute_r2=True)
     
     result.b0 = coefficients_full[0]
     result.b1 = coefficients_full[1]

@@ -373,19 +373,30 @@ def extract_spectral_features(
     line_width = float(spec_cfg.get("line_noise_width_hz", 1.0))
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     
-    segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
+    # Determine which segments to process
+    target_name = getattr(ctx, "name", None)
+    configured_segments = spec_cfg.get("segments")
     
-    # Restrict to configured segments (default: baseline only for spectral/IAF validity)
-    allowed_segments = spec_cfg.get("segments", ["baseline"])
-    if isinstance(allowed_segments, str):
-        allowed_segments = [allowed_segments]
+    # When a specific time range is targeted (ctx.name is set), the epochs have 
+    # already been cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segments = [target_name]
+        # Create a mask covering all data since epochs are pre-cropped
+        segment_masks = {target_name: np.ones(data.shape[2], dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
+        if configured_segments:
+            if isinstance(configured_segments, str):
+                configured_segments = [configured_segments]
+            segments = [s for s in configured_segments if s in segment_masks]
+        else:
+            segments = list(segment_masks.keys())
     
-    # Filter to allowed segments that exist
-    segments: List[str] = [s for s in allowed_segments if s in segment_masks or s == "full"]
-    
-    # Fallback if no segments defined
     if not segments:
-        segments = ["baseline"] if "baseline" in segment_masks else ["full"]
+        logger.warning("Spectral: No valid segments found; returning empty DataFrame.")
+        return pd.DataFrame(), []
+    
+    from eeg_pipeline.domain.features.naming import NamingSchema
     
     # Segment duration validation parameters
     min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
@@ -394,12 +405,9 @@ def extract_spectral_features(
     records = [dict() for _ in range(n_epochs)]
 
     for segment_name in segments:
-        if segment_name == "full":
-            mask = np.ones(data.shape[2], dtype=bool)
-        else:
-            mask = segment_masks.get(segment_name)
-            if mask is None or not np.any(mask):
-                continue
+        mask = segment_masks.get(segment_name)
+        if mask is None or not np.any(mask):
+            continue
 
         seg_data = data[:, :, mask]
         seg_duration_sec = float(seg_data.shape[2]) / float(sfreq)
@@ -407,7 +415,8 @@ def extract_spectral_features(
         # Validate minimum segment duration
         if seg_duration_sec < min_segment_sec:
             logger.warning(
-                "Spectral: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); skipping.",
+                "Spectral: segment '%s' duration (%.2fs) is shorter than min_segment_sec (%.2fs); "
+                "skipping to ensure reliable spectral estimation.",
                 segment_name, seg_duration_sec, min_segment_sec
             )
             continue
@@ -492,13 +501,13 @@ def extract_spectral_features(
                         bandwidth = compute_spectral_bandwidth(psd, freqs_use, fmin, fmax)
                         entropy = compute_spectral_entropy(psd, freqs_use, fmin, fmax)
 
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_freq"] = peak_freq
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_power"] = peak_power
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_ratio"] = peak_ratio
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_peak_residual"] = peak_residual
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_center_freq"] = center_freq
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_bandwidth"] = bandwidth
-                        record[f"spectral_{segment_name}_{band}_ch_{ch_name}_entropy"] = entropy
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_freq", channel=ch_name)] = peak_freq
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_power", channel=ch_name)] = peak_power
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_ratio", channel=ch_name)] = peak_ratio
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "peak_residual", channel=ch_name)] = peak_residual
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "center_freq", channel=ch_name)] = center_freq
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "bandwidth", channel=ch_name)] = bandwidth
+                        record[NamingSchema.build("spectral", segment_name, band, "ch", "entropy", channel=ch_name)] = entropy
 
                 if "global" in spatial_modes:
                     global_psd = np.nanmean(channel_psd, axis=0)
@@ -509,13 +518,13 @@ def extract_spectral_features(
                     g_bandwidth = compute_spectral_bandwidth(global_psd, freqs_use, fmin, fmax)
                     g_entropy = compute_spectral_entropy(global_psd, freqs_use, fmin, fmax)
 
-                    record[f"spectral_{segment_name}_{band}_global_peak_freq"] = g_peak_freq
-                    record[f"spectral_{segment_name}_{band}_global_peak_power"] = g_peak_power
-                    record[f"spectral_{segment_name}_{band}_global_peak_ratio"] = g_peak_ratio
-                    record[f"spectral_{segment_name}_{band}_global_peak_residual"] = g_peak_residual
-                    record[f"spectral_{segment_name}_{band}_global_center_freq"] = g_center
-                    record[f"spectral_{segment_name}_{band}_global_bandwidth"] = g_bandwidth
-                    record[f"spectral_{segment_name}_{band}_global_entropy"] = g_entropy
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_freq")] = g_peak_freq
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_power")] = g_peak_power
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_ratio")] = g_peak_ratio
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "peak_residual")] = g_peak_residual
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "center_freq")] = g_center
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "bandwidth")] = g_bandwidth
+                    record[NamingSchema.build("spectral", segment_name, band, "global", "entropy")] = g_entropy
 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, roi_indices in roi_map.items():
@@ -529,18 +538,18 @@ def extract_spectral_features(
                         r_bandwidth = compute_spectral_bandwidth(roi_psd, freqs_use, fmin, fmax)
                         r_entropy = compute_spectral_entropy(roi_psd, freqs_use, fmin, fmax)
 
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_freq"] = r_peak_freq
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_power"] = r_peak_power
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_ratio"] = r_peak_ratio
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_peak_residual"] = r_peak_residual
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_center_freq"] = r_center
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_bandwidth"] = r_bandwidth
-                        record[f"spectral_{segment_name}_{band}_roi_{roi_name}_entropy"] = r_entropy
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_freq", channel=roi_name)] = r_peak_freq
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_power", channel=roi_name)] = r_peak_power
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_ratio", channel=roi_name)] = r_peak_ratio
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "peak_residual", channel=roi_name)] = r_peak_residual
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "center_freq", channel=roi_name)] = r_center
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "bandwidth", channel=roi_name)] = r_bandwidth
+                        record[NamingSchema.build("spectral", segment_name, band, "roi", "entropy", channel=roi_name)] = r_entropy
 
             global_psd = np.nanmean(channel_psd, axis=0)
             edge_fmax = float(freqs_use[-1]) if freqs_use.size else (float(sfreq) / 2.0 - 0.5)
             edge_95 = compute_spectral_edge(global_psd, freqs_use, 1.0, edge_fmax, 0.95)
-            record[f"spectral_{segment_name}_broadband_global_edge_freq_95"] = edge_95
+            record[NamingSchema.build("spectral", segment_name, "broadband", "global", "edge_freq_95")] = edge_95
 
             if "roi" in spatial_modes and roi_map:
                 for roi_name, roi_indices in roi_map.items():
@@ -548,7 +557,7 @@ def extract_spectral_features(
                         continue
                     roi_psd = np.nanmean(channel_psd[roi_indices], axis=0)
                     roi_edge = compute_spectral_edge(roi_psd, freqs_use, 1.0, edge_fmax, 0.95)
-                    record[f"spectral_{segment_name}_broadband_roi_{roi_name}_edge_freq_95"] = roi_edge
+                    record[NamingSchema.build("spectral", segment_name, "broadband", "roi", "edge_freq_95", channel=roi_name)] = roi_edge
     
     if not records:
         return pd.DataFrame(), []

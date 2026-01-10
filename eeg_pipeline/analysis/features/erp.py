@@ -370,22 +370,75 @@ def _parse_peak_prominence(
     return peak_prominence
 
 
+def _compute_baseline_mask_for_times(
+    times: np.ndarray,
+    windows: Any,
+) -> Optional[np.ndarray]:
+    """Compute baseline mask relative to the given times array.
+    
+    This handles the case where epochs have been cropped to a specific time range,
+    so we need to recompute the baseline mask against the current times rather than
+    using a pre-computed mask from the original full epoch.
+    """
+    if windows is None:
+        return None
+    
+    baseline_range = getattr(windows, "baseline_range", None)
+    if baseline_range is None:
+        return None
+    
+    try:
+        tmin, tmax = baseline_range
+        if not (np.isfinite(tmin) and np.isfinite(tmax)):
+            return None
+    except (TypeError, ValueError):
+        return None
+    
+    mask = (times >= tmin) & (times <= tmax)
+    return mask if np.any(mask) else None
+
+
 def _apply_baseline_correction(
     data: np.ndarray,
-    baseline_mask: Optional[np.ndarray],
+    times: np.ndarray,
+    windows: Any,
     allow_no_baseline: bool,
     logger: Any,
+    original_epochs: Any = None,
+    picks: Any = None,
 ) -> np.ndarray:
-    if baseline_mask is None or not np.any(baseline_mask):
-        if allow_no_baseline:
-            logger.info("ERP: baseline window missing; proceeding without baseline correction.")
-            return data
-        raise ValueError(
-            "ERP baseline correction requested but baseline window is missing or empty."
-        )
+    """Apply baseline correction using the baseline range from windows.
     
-    baseline = np.nanmean(data[:, :, baseline_mask], axis=2, keepdims=True)
-    return data - baseline
+    If the baseline period is not in the current (cropped) data, uses the
+    original uncropped epochs to compute the baseline mean.
+    """
+    baseline_mask = _compute_baseline_mask_for_times(times, windows)
+    
+    if baseline_mask is not None and np.any(baseline_mask):
+        baseline = np.nanmean(data[:, :, baseline_mask], axis=2, keepdims=True)
+        return data - baseline
+    
+    if original_epochs is not None and windows is not None:
+        original_times = original_epochs.times
+        original_baseline_mask = _compute_baseline_mask_for_times(original_times, windows)
+        
+        if original_baseline_mask is not None and np.any(original_baseline_mask):
+            original_data = original_epochs.get_data(picks=picks)
+            baseline = np.nanmean(
+                original_data[:, :, original_baseline_mask], axis=2, keepdims=True
+            )
+            logger.info(
+                "ERP: Using baseline from original epochs (baseline period not in current window)"
+            )
+            return data - baseline
+    
+    if allow_no_baseline:
+        logger.info("ERP: baseline window missing; proceeding without baseline correction.")
+        return data
+    
+    raise ValueError(
+        "ERP baseline correction requested but baseline window is missing or empty."
+    )
 
 
 def _process_channel_features(
@@ -533,15 +586,25 @@ def extract_erp_features(
     allow_no_baseline = bool(erp_cfg.get("allow_no_baseline", False))
     
     if baseline_correction:
-        baseline_mask = ctx.windows.get_mask("baseline") if ctx.windows is not None else None
-        data = _apply_baseline_correction(data, baseline_mask, allow_no_baseline, ctx.logger)
+        original_epochs = getattr(ctx, "_original_epochs", None)
+        data = _apply_baseline_correction(
+            data, times, ctx.windows, allow_no_baseline, ctx.logger,
+            original_epochs=original_epochs, picks=picks
+        )
 
-    segment_masks = get_segment_masks(times, ctx.windows, ctx.config)
-    component_masks = _build_component_masks(times, erp_cfg)
+    target_name = getattr(ctx, "name", None)
     
-    for name, mask in component_masks.items():
-        if name not in segment_masks:
-            segment_masks[name] = mask
+    # When a specific time range is targeted (ctx.name is set), the epochs have 
+    # already been cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segment_masks = {target_name: np.ones_like(times, dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(times, ctx.windows, ctx.config)
+        component_masks = _build_component_masks(times, erp_cfg)
+        
+        for name, mask in component_masks.items():
+            if name not in segment_masks:
+                segment_masks[name] = mask
     
     if not segment_masks:
         return pd.DataFrame(), []

@@ -128,7 +128,10 @@ def validate_trial_alignment_manifest(
     logger: logging.Logger,
 ) -> None:
     """Validate that trial alignment manifest matches aligned events."""
-    manifest_path = features_dir / "trial_alignment.json"
+    # Check new reorganized path first, fallback to legacy path
+    manifest_path = features_dir / "metadata" / "trial_alignment.json"
+    if not manifest_path.exists():
+        manifest_path = features_dir / "trial_alignment.json"
 
     if not manifest_path.exists():
         raise FileNotFoundError(
@@ -175,13 +178,14 @@ def validate_feature_block_lengths(
     lengths: Dict[str, int],
     logger: logging.Logger,
     critical_features: Optional[List[str]] = None,
+    requested_categories: Optional[List[str]] = None,
 ) -> None:
     """Validate that feature blocks have consistent lengths."""
     if critical_features is None:
         critical_features = _DEFAULT_CRITICAL_FEATURES
 
     unique_lengths = set(lengths.values())
-    nonzero_lengths = {length for length in unique_lengths if length > 0}
+    nonzero_lengths = unique_lengths - {0}
 
     if len(nonzero_lengths) > 1:
         mismatch_pairs = ", ".join(f"{name}={length}" for name, length in lengths.items())
@@ -198,7 +202,6 @@ def validate_feature_block_lengths(
         return
 
     empty_critical = [name for name in empty_blocks if name in critical_features]
-
     if empty_critical:
         error_msg = (
             f"Critical feature blocks are empty while others are not: empty={empty_blocks}, "
@@ -208,6 +211,21 @@ def validate_feature_block_lengths(
         )
         logger.error(error_msg)
         raise ValueError(error_msg)
+
+    # Only warn about empty blocks if they were actually requested
+    if requested_categories is None:
+        return
+
+    requested_categories_set = set(requested_categories)
+    requested_empty = [
+        name
+        for name in empty_blocks
+        if name != "target"
+        and ("power" if name == "baseline" else name.split("_")[0]) in requested_categories_set
+    ]
+
+    if not requested_empty:
+        return
 
     logger.warning(
         f"Some non-critical feature blocks are empty while others are not: empty={empty_blocks}, "
@@ -432,6 +450,7 @@ def align_feature_dataframes(
     initial_trial_count: Optional[int] = None,
     critical_features: Optional[List[str]] = None,
     extra_blocks: Optional[Dict[str, pd.DataFrame]] = None,
+    requested_categories: Optional[List[str]] = None,
 ) -> Tuple[
     pd.DataFrame,
     pd.DataFrame,
@@ -483,7 +502,9 @@ def align_feature_dataframes(
         logger.warning("No features extracted; skipping save")
         return None, None, None, None, None, {}
 
-    validate_feature_block_lengths(before_lengths, logger, critical_features=critical_features)
+    validate_feature_block_lengths(
+        before_lengths, logger, critical_features=critical_features, requested_categories=requested_categories
+    )
 
     if aligned_events is not None and len(aligned_events) > 0:
         validate_trial_alignment_manifest(aligned_events, features_dir, logger)

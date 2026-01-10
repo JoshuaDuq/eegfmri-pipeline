@@ -393,7 +393,8 @@ func (m *Model) GetContext() context.Context {
 }
 
 func (m Model) listenForOutput() tea.Cmd {
-	if m.outputChan == nil || m.doneChan == nil {
+	// Don't listen for more output if cancelled or if channels are nil
+	if m.Status == StatusCancelled || m.outputChan == nil || m.doneChan == nil {
 		return nil
 	}
 
@@ -467,6 +468,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.listenForOutput(), m.listenForDone(), m.startResourceMonitoring(), m.listenForResourceUpdates())
 
 	case messages.StreamOutputMsg:
+		// Don't process or listen for more output if cancelled
+		if m.Status == StatusCancelled {
+			return m, nil
+		}
 		m.processOutputLine(msg.Line)
 		return m, m.listenForOutput()
 
@@ -517,6 +522,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.CPUCoreUsages = msg.CPUCoreUsages
 		m.NumCPUCores = msg.NumCPUCores
 		return m, m.listenForResourceUpdates()
+
+	case executor.FileBrowserResultMsg:
+		if msg.Error != nil {
+			m.addLog(fmt.Sprintf("%s Failed to open results folder: %v", styles.CrossMark, msg.Error))
+		} else {
+			m.addLog(styles.CheckMark + " Opened results folder")
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		// Handle search mode first
@@ -660,7 +673,12 @@ func (m Model) GetOutputPaths() []string {
 		return nil
 	}
 
-	base := filepath.Join(m.RepoRoot, "eeg_pipeline", "data", "derivatives")
+	// Parse --deriv-root from command if present
+	base := m.extractDerivRoot()
+	if base == "" {
+		// Fallback to default location
+		base = filepath.Join(m.RepoRoot, "eeg_pipeline", "data", "derivatives")
+	}
 
 	// Parse pipeline from command
 	cmd := strings.ToLower(m.Command)
@@ -701,13 +719,86 @@ func (m Model) GetOutputPaths() []string {
 	return existingPaths
 }
 
+// extractDerivRoot extracts the --deriv-root argument from the command string
+func (m Model) extractDerivRoot() string {
+	if m.Command == "" {
+		return ""
+	}
+
+	// Pattern to match --deriv-root with optional equals sign
+	// Matches: --deriv-root /path, --deriv-root=/path, --deriv-root "path with spaces"
+	// Handles both quoted and unquoted paths
+	pattern := regexp.MustCompile(`--deriv-root(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))`)
+	matches := pattern.FindStringSubmatch(m.Command)
+	if len(matches) > 1 {
+		var path string
+		// Check which capture group matched (quoted double, quoted single, or unquoted)
+		if matches[1] != "" {
+			path = matches[1] // Double-quoted
+		} else if matches[2] != "" {
+			path = matches[2] // Single-quoted
+		} else {
+			path = matches[3] // Unquoted
+		}
+
+		// Expand user home directory if path starts with ~
+		if strings.HasPrefix(path, "~") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+			}
+		}
+		// Convert to absolute path
+		if !filepath.IsAbs(path) {
+			// If relative, make it relative to repo root
+			path = filepath.Join(m.RepoRoot, path)
+		}
+		return filepath.Clean(path)
+	}
+
+	return ""
+}
+
 // OpenResultsFolder opens the first output path in the system file browser
 func (m Model) OpenResultsFolder() tea.Cmd {
 	paths := m.GetOutputPaths()
 	if len(paths) == 0 {
+		m.addLog(fmt.Sprintf("%s No output paths found", styles.CrossMark))
 		return nil
 	}
-	return executor.OpenInFileBrowserCmd(paths[0])
+
+	targetPath := paths[0]
+
+	// Ensure the path exists and is a directory
+	if info, err := os.Stat(targetPath); err != nil {
+		// Path doesn't exist, try parent directory
+		parent := filepath.Dir(targetPath)
+		if parentInfo, err := os.Stat(parent); err == nil && parentInfo.IsDir() {
+			targetPath = parent
+		} else {
+			m.addLog(fmt.Sprintf("%s Results folder not found: %s", styles.CrossMark, targetPath))
+			return nil
+		}
+	} else if !info.IsDir() {
+		// It's a file, use parent directory
+		targetPath = filepath.Dir(targetPath)
+	}
+
+	// Verify the final path exists and convert to absolute path
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		m.addLog(fmt.Sprintf("%s Cannot resolve path: %s", styles.CrossMark, targetPath))
+		return nil
+	}
+
+	if _, err := os.Stat(absPath); err != nil {
+		m.addLog(fmt.Sprintf("%s Cannot open folder (does not exist): %s", styles.CrossMark, absPath))
+		return nil
+	}
+
+	// Log the path we're trying to open for debugging
+	m.addLog(fmt.Sprintf("Opening results folder: %s", absPath))
+	return executor.OpenInFileBrowserCmd(absPath)
 }
 
 // updateViewportSize recalculates log viewport dimensions based on current state

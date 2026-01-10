@@ -147,14 +147,6 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="tight_layout rect: left bottom right top (default from config)",
     )
     defaults_overrides.add_argument(
-        "--layout-tight-rect-microstate",
-        nargs=4,
-        type=float,
-        default=None,
-        metavar=("LEFT", "BOTTOM", "RIGHT", "TOP"),
-        help="tight_layout rect for microstate plots (default from config)",
-    )
-    defaults_overrides.add_argument(
         "--gridspec-width-ratios",
         nargs="+",
         type=float,
@@ -617,8 +609,6 @@ def _apply_layout_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply layout-related config overrides."""
     if _get_arg_value(args, "layout_tight_rect"):
         _apply_config_override(config, "plotting.defaults.layout.tight_rect", list(args.layout_tight_rect))
-    if _get_arg_value(args, "layout_tight_rect_microstate"):
-        _apply_config_override(config, "plotting.defaults.layout.tight_rect_microstate", list(args.layout_tight_rect_microstate))
     if _get_arg_value(args, "gridspec_width_ratios"):
         _apply_config_override(config, "plotting.defaults.layout.gridspec.width_ratios", list(args.gridspec_width_ratios))
     if _get_arg_value(args, "gridspec_height_ratios"):

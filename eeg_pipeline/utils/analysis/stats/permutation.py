@@ -17,7 +17,7 @@ from scipy import stats
 if TYPE_CHECKING:
     import mne
 
-from .base import get_statistics_constants
+from .base import get_statistics_constants, get_n_permutations
 
 # Constants for numerical stability
 _DESIGN_MATRIX_CONDITION_TOLERANCE = 1e8
@@ -25,22 +25,36 @@ _DESIGN_MATRIX_RANK_TOLERANCE = 1e-10
 _RESIDUAL_VARIANCE_TOLERANCE_FACTOR = 1e-12
 
 
-def _permute_within_groups(
+def permute_within_groups(
     n: int,
     rng: np.random.Generator,
     groups: Optional[np.ndarray] = None,
+    min_group_size: int = 2,
 ) -> np.ndarray:
-    """Permute indices within groups."""
+    """Generate permutation indices, optionally within groups.
+    
+    Raises ValueError if any group has fewer than min_group_size samples.
+    """
     if groups is None:
-        return rng.permutation(n)
-    
-    permuted_indices = []
-    for group_value in np.unique(groups):
-        group_indices = np.where(groups == group_value)[0]
-        permuted_group = rng.permutation(len(group_indices))
-        permuted_indices.extend(group_indices[permuted_group])
-    
-    return np.asarray(permuted_indices, dtype=int)
+        idx = np.arange(n)
+        rng.shuffle(idx)
+        return idx
+
+    unique, counts = np.unique(groups, return_counts=True)
+    small_groups = unique[counts < min_group_size]
+    if len(small_groups) > 0:
+        raise ValueError(
+            f"Groups {small_groups.tolist()} have fewer than {min_group_size} samples. "
+            f"Permutation within groups requires at least {min_group_size} per group."
+        )
+
+    idx = np.arange(n)
+    for g in unique:
+        mask = groups == g
+        sub = idx[mask]
+        rng.shuffle(sub)
+        idx[mask] = sub
+    return idx
 
 
 def _align_groups_to_dataframe(
@@ -158,6 +172,59 @@ def _validate_residual_variance(
     return has_sufficient_variance
 
 
+def perm_pval_simple(
+    x: np.ndarray,
+    y: np.ndarray,
+    method: str = "spearman",
+    n_perm: Optional[int] = None,
+    rng: Optional[np.random.Generator] = None,
+    groups: Optional[np.ndarray] = None,
+    config: Optional[Any] = None,
+) -> float:
+    """
+    Simple permutation p-value for correlation.
+    
+    Returns two-sided p-value.
+    """
+    if n_perm is None:
+        n_perm = get_n_permutations(config)
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Local import to avoid circular dependency
+    from .correlation import compute_correlation
+
+    x_array = np.asarray(x).ravel()
+    y_array = np.asarray(y).ravel()
+    valid = np.isfinite(x_array) & np.isfinite(y_array)
+    x_valid = x_array[valid]
+    y_valid = y_array[valid]
+    groups_valid = groups[valid] if groups is not None else None
+    
+    n_valid = len(x_valid)
+    MIN_SAMPLES_PERMUTATION = 3
+    if n_valid < MIN_SAMPLES_PERMUTATION:
+        return np.nan
+
+    observed_correlation, _ = compute_correlation(x_valid, y_valid, method)
+    if not np.isfinite(observed_correlation):
+        return np.nan
+
+    observed_abs = np.abs(observed_correlation)
+    n_extreme = 0
+    for _ in range(n_perm):
+        perm_indices = permute_within_groups(n_valid, rng, groups_valid)
+        perm_correlation, _ = compute_correlation(
+            x_valid[perm_indices], y_valid, method
+        )
+        if np.isfinite(perm_correlation):
+            perm_abs = np.abs(perm_correlation)
+            if perm_abs >= observed_abs:
+                n_extreme += 1
+
+    return (n_extreme + 1) / (n_perm + 1)
+
+
 def perm_pval_partial_freedman_lane(
     x: pd.Series,
     y: pd.Series,
@@ -212,7 +279,7 @@ def perm_pval_partial_freedman_lane(
     variance_tolerance = _RESIDUAL_VARIANCE_TOLERANCE_FACTOR * max_variance
     
     for _ in range(n_perm):
-        permuted_indices = _permute_within_groups(
+        permuted_indices = permute_within_groups(
             len(y_residuals), rng, groups_array
         )
         y_permuted = y_fitted + y_residuals[permuted_indices]
@@ -299,7 +366,6 @@ def compute_permutation_pvalues(
     groups: Optional[np.ndarray] = None,
 ) -> Tuple[float, float, float]:
     """Compute all permutation p-values for ROI analysis."""
-    from .bootstrap import perm_pval_simple
     
     p_perm = p_partial_perm = p_temp_perm = np.nan
     
@@ -458,7 +524,6 @@ def compute_temp_permutation_pvalues(
     config: Optional[Any] = None,
 ) -> Tuple[float, float]:
     """Compute temperature permutation p-values."""
-    from .bootstrap import perm_pval_simple
     
     p_temp_perm = p_partial_perm = np.nan
     
@@ -544,6 +609,62 @@ def compute_permutation_pvalues_for_roi_pair(
     )
     
     return p_perm, p_partial_perm
+
+
+def permutation_null_distribution(
+    x: np.ndarray,
+    y: np.ndarray,
+    n_perm: int = 1000,
+    method: str = "spearman",
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[np.ndarray, float, float]:
+    """
+    Generate permutation null distribution for correlation.
+    
+    Returns
+    -------
+    null_rs : array
+        Null distribution of correlations
+    observed_r : float
+        Observed correlation
+    p_perm : float
+        Permutation p-value
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    x_array = np.asarray(x).ravel()
+    y_array = np.asarray(y).ravel()
+    
+    is_finite_x = np.isfinite(x_array)
+    is_finite_y = np.isfinite(y_array)
+    valid_mask = is_finite_x & is_finite_y
+    n_valid = valid_mask.sum()
+    
+    # Minimum sample size for valid permutation test
+    MIN_SAMPLE_SIZE = 4
+    if n_valid < MIN_SAMPLE_SIZE:
+        return np.array([]), np.nan, np.nan
+    
+    x_valid = x_array[valid_mask]
+    y_valid = y_array[valid_mask]
+    
+    from .correlation import compute_correlation
+    observed_r, _ = compute_correlation(x_valid, y_valid, method)
+    observed_r = observed_r if np.isfinite(observed_r) else np.nan
+    
+    null_correlations = np.zeros(n_perm)
+    for perm_idx in range(n_perm):
+        y_permuted = rng.permutation(y_valid)
+        r_perm, _ = compute_correlation(x_valid, y_permuted, method)
+        null_correlations[perm_idx] = r_perm if np.isfinite(r_perm) else np.nan
+    
+    abs_observed = np.abs(observed_r)
+    abs_null = np.abs(null_correlations)
+    n_extreme = np.sum(abs_null >= abs_observed)
+    p_perm = (n_extreme + 1) / (n_perm + 1)
+    
+    return null_correlations, float(observed_r), float(p_perm)
 
 
 

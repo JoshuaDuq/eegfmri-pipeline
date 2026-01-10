@@ -24,8 +24,8 @@ from eeg_pipeline.plotting.io.figures import get_band_color
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.effect_size import cohens_d as _cohens_d
 from eeg_pipeline.utils.analysis.stats.bootstrap import (
-    bootstrap_mean_ci as _bootstrap_mean_ci,
-    bootstrap_mean_diff_ci as _bootstrap_mean_diff_ci,
+    bootstrap_mean_ci,
+    bootstrap_mean_diff_ci,
 )
 from eeg_pipeline.utils.analysis.stats.validation import check_normality_shapiro
 from eeg_pipeline.domain.features.naming import NamingSchema
@@ -503,54 +503,8 @@ def safe_wilcoxon(
         return np.nan, 1.0
 
 
-###################################################################
-# BOOTSTRAP CONFIDENCE INTERVALS FOR MEANS
-###################################################################
-
-def bootstrap_mean_ci(
-    data: np.ndarray,
-    n_boot: int = 1000,
-    ci_level: float = 0.95,
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[float, float, float]:
-    """Compute bootstrap confidence interval for the mean.
-    
-    Args:
-        data: 1D array of values
-        n_boot: Number of bootstrap iterations
-        ci_level: Confidence level (default 0.95 for 95% CI)
-        rng: Random number generator
-    
-    Returns:
-        Tuple of (mean, ci_low, ci_high)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    return _bootstrap_mean_ci(data, n_boot=n_boot, ci_level=ci_level, rng=rng)
-
-
-def bootstrap_mean_diff_ci(
-    group1: np.ndarray,
-    group2: np.ndarray,
-    n_boot: int = 1000,
-    ci_level: float = 0.95,
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[float, float, float]:
-    """Compute bootstrap CI for difference in means (group2 - group1).
-    
-    Args:
-        group1: First group values
-        group2: Second group values
-        n_boot: Number of bootstrap iterations
-        ci_level: Confidence level
-        rng: Random number generator
-    
-    Returns:
-        Tuple of (mean_diff, ci_low, ci_high)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    return _bootstrap_mean_diff_ci(group1, group2, n_boot=n_boot, ci_level=ci_level, rng=rng)
+# Bootstrap functions are imported directly from bootstrap.py above
+# No need for redundant wrappers
 
 
 ###################################################################
@@ -684,8 +638,8 @@ def compute_condition_stats(
     result["cohens_d"] = compute_cohens_d(group1_clean, group2_clean)
     result["d_interpretation"] = interpret_cohens_d(result["cohens_d"])
     
-    mean_diff, ci_low, ci_high = _bootstrap_mean_diff_ci(
-        group1_clean, group2_clean, n_boot=n_boot, config=config
+    mean_diff, ci_low, ci_high = bootstrap_mean_diff_ci(
+        group1_clean, group2_clean, n_boot=n_boot, ci_level=0.95, rng=None, config=config
     )
     result["mean_diff"] = mean_diff
     result["ci_low"] = ci_low

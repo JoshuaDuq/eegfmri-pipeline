@@ -404,9 +404,16 @@ _STAGE_SPECS = [
         group=StageRegistry.GROUP_CORRELATIONS,
     ),
     StageSpec(
+        name="correlate_primary_selection",
+        description="Select primary p-value and effect size for FDR",
+        requires=(StageRegistry.RESOURCE_DESIGN, StageRegistry.RESOURCE_PVALUES),
+        produces=("primary_selection",),
+        group=StageRegistry.GROUP_CORRELATIONS,
+    ),
+    StageSpec(
         name="correlate_fdr",
         description="Apply FDR correction",
-        requires=(StageRegistry.RESOURCE_EFFECT_SIZES,),
+        requires=("primary_selection",),
         produces=(StageRegistry.RESOURCE_CORRELATIONS,),
         group=StageRegistry.GROUP_CORRELATIONS,
     ),
@@ -566,6 +573,7 @@ _STAGE_SPECS = [
     ),
 ]
 
+
 for _spec in _STAGE_SPECS:
     StageRegistry.register(_spec)
 
@@ -573,6 +581,67 @@ for _spec in _STAGE_SPECS:
 ###################################################################
 # Stage Runners Registry (Data-Driven Dispatch)
 ###################################################################
+
+
+class _ResultsFromOutputs:
+    """Lightweight results object built from DAG stage outputs for export stage."""
+    
+    def __init__(self, outputs: Dict[str, Any]):
+        # Map stage output keys to result attributes
+        self.correlations = outputs.get("correlate_fdr")
+        self.pain_sensitivity = outputs.get("pain_sensitivity")
+        self.condition_effects = outputs.get("condition_column")
+        self.condition_effects_window = outputs.get("condition_window")
+        self.mediation = outputs.get("mediation")
+        self.moderation = outputs.get("moderation")
+        self.mixed_effects = outputs.get("mixed_effects")
+        self.confounds = outputs.get("confounds")
+        self.regression = outputs.get("regression")
+        self.models = outputs.get("models")
+        self.stability = outputs.get("stability")
+        self.consistency = outputs.get("consistency")
+        self.influence = outputs.get("influence")
+        self.trial_table_path = outputs.get("trial_table")
+        self.report_path = outputs.get("report")
+        self.subject = None
+        self.summary = {}
+    
+    def to_summary(self) -> Dict[str, Any]:
+        """Return summary dict compatible with BehaviorPipelineResults.to_summary()."""
+        summary = {}
+        if self.trial_table_path:
+            summary["trial_table_path"] = str(self.trial_table_path)
+        if self.report_path:
+            summary["report_path"] = str(self.report_path)
+        
+        n_total = 0
+        n_sig_raw = 0
+        n_sig_fdr = 0
+        
+        if self.correlations is not None and hasattr(self.correlations, 'empty') and not self.correlations.empty:
+            n_total = len(self.correlations)
+            if "p_raw" in self.correlations.columns:
+                n_sig_raw = int((self.correlations["p_raw"] < 0.05).sum())
+            if "p_fdr" in self.correlations.columns:
+                n_sig_fdr = int((self.correlations["p_fdr"] < 0.05).sum())
+        
+        summary["n_features"] = n_total
+        summary["n_significant_raw"] = n_sig_raw
+        summary["n_significant_fdr"] = n_sig_fdr
+        
+        return summary
+
+
+def _build_results_from_outputs(outputs: Dict[str, Any]) -> Any:
+    """Build a results-like object from DAG stage outputs.
+    
+    The export stage expects a results object with attributes like correlations,
+    pain_sensitivity, etc. When running via the DAG, we need to construct this
+    from the outputs dictionary.
+    """
+    if not outputs:
+        return None
+    return _ResultsFromOutputs(outputs)
 
 
 def _get_stage_runners() -> Dict[str, callable]:
@@ -622,7 +691,7 @@ def _get_stage_runners() -> Dict[str, callable]:
         "hierarchical_fdr_summary": lambda ctx, config, outputs: stage_hierarchical_fdr_summary(ctx, config),
         "validate": lambda ctx, config, outputs: stage_validate(ctx, config, None),
         "report": lambda ctx, config, outputs: stage_report(ctx, config),
-        "export": lambda ctx, config, outputs: stage_export(ctx, config, None),
+        "export": lambda ctx, config, outputs: stage_export(ctx, config, _build_results_from_outputs(outputs)),
     }
 
 
@@ -931,7 +1000,7 @@ def config_to_stage_names(pipeline_config: Any) -> List[str]:
         stages.append("stability")
     
     if getattr(pipeline_config, "run_correlations", True):
-        stages.extend(["correlate_design", "correlate_effect_sizes", "correlate_pvalues", "correlate_fdr"])
+        stages.extend(["correlate_design", "correlate_effect_sizes", "correlate_pvalues", "correlate_primary_selection", "correlate_fdr"])
     
     if getattr(pipeline_config, "compute_pain_sensitivity", False):
         stages.append("pain_sensitivity")
@@ -1158,6 +1227,25 @@ def _get_stats_subfolder(ctx: BehaviorContext, kind: str) -> Path:
     return path
 
 
+def _write_stats_table(
+    ctx: BehaviorContext,
+    df: pd.DataFrame,
+    path: Path,
+) -> List[Path]:
+    """Write a stats table respecting the also_save_csv context setting.
+    
+    Args:
+        ctx: BehaviorContext with also_save_csv flag
+        df: DataFrame to write
+        path: Primary output path (TSV)
+        
+    Returns:
+        List of paths written (TSV and optionally CSV)
+    """
+    from eeg_pipeline.infra.tsv import write_table_with_formats
+    return write_table_with_formats(df, path, also_save_csv=ctx.also_save_csv)
+
+
 def _find_stats_path(ctx: BehaviorContext, filename: str) -> Optional[Path]:
     """Helper to find a file in stats_dir or its subfolders."""
     kind = _infer_output_kind(filename)
@@ -1274,7 +1362,7 @@ def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame]) -> Optiona
     if not _is_dataframe_valid(df):
         return df
     
-    from eeg_pipeline.utils.analysis.stats.correlation import compute_change_features
+    from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
     
     change_df = compute_change_features(df)
     if not _is_dataframe_valid(change_df):
@@ -1698,6 +1786,10 @@ def stage_correlate_fdr(
     corr_df = pd.DataFrame(records) if records else pd.DataFrame()
     if corr_df.empty:
         return corr_df
+
+    if "p_primary" not in corr_df.columns:
+        ctx.logger.error("Missing 'p_primary' column. Ensure 'correlate_primary_selection' stage runs before 'correlate_fdr'.")
+        raise KeyError("p_primary")
 
     fdr_alpha = float(getattr(config, "fdr_alpha", 0.05))
     hierarchical_fdr = bool(get_config_value(ctx.config, "behavior_analysis.statistics.hierarchical_fdr", True))
@@ -3154,10 +3246,10 @@ def _write_normalized_results(
     feature_files = ctx.selected_feature_files or ctx.feature_categories or []
     feature_suffix = "_" + "_".join(sorted(feature_files)) if feature_files else ""
     
-    path = ctx.stats_dir / f"normalized_results{feature_suffix}.tsv"
-    from eeg_pipeline.infra.tsv import write_tsv
-    write_tsv(df, path)
-    return path
+    out_dir = _get_stats_subfolder(ctx, "normalized")
+    path = out_dir / f"normalized_results{feature_suffix}.tsv"
+    paths = _write_stats_table(ctx, df, path)
+    return paths[0] if paths else path
 
 
 def _summarize_covariates_qc(ctx: BehaviorContext) -> Dict[str, Any]:
@@ -3339,7 +3431,7 @@ def stage_condition_column(
         return pd.DataFrame()
 
     suffix = _feature_suffix_from_context(ctx)
-    out_dir = _get_stats_subfolder(ctx, "condition")
+    out_dir = _get_stats_subfolder(ctx, "condition_effects")
 
     try:
         pain_mask, nonpain_mask, n_pain, n_nonpain = split_by_condition(df_trials, ctx.config, ctx.logger)
@@ -3367,17 +3459,23 @@ def stage_condition_column(
             if run_col and run_col in df_trials.columns:
                 groups = pd.to_numeric(df_trials[run_col], errors="ignore").to_numpy()
 
-        column_df = compute_condition_effects(
-            features,
-            pain_mask,
-            nonpain_mask,
-            min_samples=0,
-            fdr_alpha=config.fdr_alpha,
-            logger=ctx.logger,
-            n_jobs=config.n_jobs,
-            config=ctx.config,
-            groups=groups,
-        )
+        # Suppress numpy RuntimeWarnings during condition effects computation
+        # These occur when computing stats on features with insufficient variance
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            
+            column_df = compute_condition_effects(
+                features,
+                pain_mask,
+                nonpain_mask,
+                min_samples=0,
+                fdr_alpha=config.fdr_alpha,
+                logger=ctx.logger,
+                n_jobs=config.n_jobs,
+                config=ctx.config,
+                groups=groups,
+            )
 
         if column_df is not None and not column_df.empty:
             column_df = column_df.copy()
@@ -3445,7 +3543,7 @@ def stage_condition_window(
         return pd.DataFrame()
 
     suffix = _feature_suffix_from_context(ctx)
-    out_dir = _get_stats_subfolder(ctx, "condition")
+    out_dir = _get_stats_subfolder(ctx, "condition_effects")
 
     ctx.logger.info(f"Running window comparison: {compare_windows}")
     window_df = _run_window_comparison(
@@ -3553,78 +3651,83 @@ def _run_window_comparison(
 
     ctx.logger.info(f"Window comparison: found {len(common_bases)} feature pairs for {window1} vs {window2}")
 
-    for base_name in common_bases:
-        col1 = window1_features[base_name]
-        col2 = window2_features[base_name]
+    # Suppress numpy RuntimeWarnings during window comparisons
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
         
-        v1 = pd.to_numeric(df_trials[col1], errors="coerce").values
-        v2 = pd.to_numeric(df_trials[col2], errors="coerce").values
-        
-        valid_mask = np.isfinite(v1) & np.isfinite(v2)
-        n_valid = int(valid_mask.sum())
-        
-        v1_valid = v1[valid_mask]
-        v2_valid = v2[valid_mask]
-        
-        # Paired Wilcoxon signed-rank test
-        try:
-            stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
-        except Exception:
-            continue
-
-        # Optional run-level Wilcoxon on per-run means (more conservative unit-of-analysis).
-        stat_run = np.nan
-        p_val_run = np.nan
-        n_runs = np.nan
-        if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
+        for base_name in common_bases:
+            col1 = window1_features[base_name]
+            col2 = window2_features[base_name]
+            
+            v1 = pd.to_numeric(df_trials[col1], errors="coerce").values
+            v2 = pd.to_numeric(df_trials[col2], errors="coerce").values
+            
+            valid_mask = np.isfinite(v1) & np.isfinite(v2)
+            n_valid = int(valid_mask.sum())
+            
+            v1_valid = v1[valid_mask]
+            v2_valid = v2[valid_mask]
+            
+            # Paired Wilcoxon signed-rank test
             try:
-                df_run = pd.DataFrame(
-                    {
-                        "run": df_trials[run_col],
-                        "v1": pd.to_numeric(df_trials[col1], errors="coerce"),
-                        "v2": pd.to_numeric(df_trials[col2], errors="coerce"),
-                    }
-                ).dropna()
-                run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
-                n_runs = int(len(run_means))
-                if n_runs >= 2:
-                    stat_run, p_val_run = sp_stats.wilcoxon(run_means["v1"].to_numpy(), run_means["v2"].to_numpy())
+                stat, p_val = sp_stats.wilcoxon(v1_valid, v2_valid)
             except Exception:
-                stat_run = np.nan
-                p_val_run = np.nan
-                n_runs = np.nan
-        
-        # Effect sizes
-        diff = v2_valid - v1_valid
-        mean_diff = float(np.nanmean(diff))
-        pooled_std = float(np.sqrt((np.nanvar(v1_valid) + np.nanvar(v2_valid)) / 2))
-        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
-        
-        # Hedge's g correction
-        n = len(v1_valid)
-        hedges_correction = 1 - (3 / (4 * n - 1)) if n > 1 else 1.0
-        hedges_g = cohens_d * hedges_correction
-        
-        records.append({
-            "feature": base_name,
-            "feature_type": _infer_feature_type(col1, ctx.config),
-            "comparison_type": "window",
-            "window1": window1,
-            "window2": window2,
-            "n_pairs": n_valid,
-            "n_runs": n_runs,
-            "mean_window1": float(np.nanmean(v1_valid)),
-            "mean_window2": float(np.nanmean(v2_valid)),
-            "std_window1": float(np.nanstd(v1_valid, ddof=1)),
-            "std_window2": float(np.nanstd(v2_valid, ddof=1)),
-            "mean_diff": mean_diff,
-            "statistic": float(stat),
-            "p_value": float(p_val),
-            "statistic_run": float(stat_run) if np.isfinite(stat_run) else np.nan,
-            "p_value_run": float(p_val_run) if np.isfinite(p_val_run) else np.nan,
-            "cohens_d": cohens_d,
-            "hedges_g": hedges_g,
-        })
+                continue
+
+            # Optional run-level Wilcoxon on per-run means (more conservative unit-of-analysis).
+            stat_run = np.nan
+            p_val_run = np.nan
+            n_runs = np.nan
+            if use_run_unit and run_adjust_enabled and run_col in df_trials.columns:
+                try:
+                    df_run = pd.DataFrame(
+                        {
+                            "run": df_trials[run_col],
+                            "v1": pd.to_numeric(df_trials[col1], errors="coerce"),
+                            "v2": pd.to_numeric(df_trials[col2], errors="coerce"),
+                        }
+                    ).dropna()
+                    run_means = df_run.groupby("run", dropna=True)[["v1", "v2"]].mean(numeric_only=True)
+                    n_runs = int(len(run_means))
+                    if n_runs >= 2:
+                        stat_run, p_val_run = sp_stats.wilcoxon(run_means["v1"].to_numpy(), run_means["v2"].to_numpy())
+                except Exception:
+                    stat_run = np.nan
+                    p_val_run = np.nan
+                    n_runs = np.nan
+            
+            # Effect sizes
+            diff = v2_valid - v1_valid
+            mean_diff = float(np.nanmean(diff))
+            pooled_std = float(np.sqrt((np.nanvar(v1_valid) + np.nanvar(v2_valid)) / 2))
+            cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+            
+            # Hedge's g correction
+            n = len(v1_valid)
+            hedges_correction = 1 - (3 / (4 * n - 1)) if n > 1 else 1.0
+            hedges_g = cohens_d * hedges_correction
+            
+            records.append({
+                "feature": base_name,
+                "feature_type": _infer_feature_type(col1, ctx.config),
+                "comparison_type": "window",
+                "window1": window1,
+                "window2": window2,
+                "n_pairs": n_valid,
+                "n_runs": n_runs,
+                "mean_window1": float(np.nanmean(v1_valid)),
+                "mean_window2": float(np.nanmean(v2_valid)),
+                "std_window1": float(np.nanstd(v1_valid, ddof=1)),
+                "std_window2": float(np.nanstd(v2_valid, ddof=1)),
+                "mean_diff": mean_diff,
+                "statistic": float(stat),
+                "p_value": float(p_val),
+                "statistic_run": float(stat_run) if np.isfinite(stat_run) else np.nan,
+                "p_value_run": float(p_val_run) if np.isfinite(p_val_run) else np.nan,
+                "cohens_d": cohens_d,
+                "hedges_g": hedges_g,
+            })
 
     if not records:
         ctx.logger.info("Window comparison: no valid feature pairs with sufficient samples")
@@ -4531,7 +4634,8 @@ def stage_hierarchical_fdr_summary(ctx: BehaviorContext, config: Any) -> pd.Data
             include_glob=patterns,
         )
         if not hier_summary.empty:
-            hier_path = ctx.stats_dir / "hierarchical_fdr_summary.tsv"
+            hier_dir = _get_stats_subfolder(ctx, "fdr")
+            hier_path = hier_dir / "hierarchical_fdr_summary.tsv"
             hier_summary.to_csv(hier_path, sep="\t", index=False)
             ctx.logger.info(f"Hierarchical FDR summary saved to {hier_path}")
             
@@ -4772,6 +4876,18 @@ def stage_report(ctx: BehaviorContext, pipeline_config: Any) -> Optional[Path]:
         ctx.logger.warning("Failed to write subject report: %s", exc)
         return None
 
+
+def _is_valid_df(obj: Any) -> bool:
+    """Check if obj is a valid non-empty DataFrame (not a failed stage result dict)."""
+    if obj is None:
+        return False
+    if isinstance(obj, dict):
+        return False
+    if not hasattr(obj, 'empty'):
+        return False
+    return not obj.empty
+
+
 def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> List[Path]:
     from eeg_pipeline.infra.paths import ensure_dir
     from eeg_pipeline.infra.tsv import write_tsv
@@ -4786,85 +4902,98 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
     feature_files = ctx.selected_feature_files or ctx.feature_categories or []
     feature_suffix = "_" + "_".join(sorted(feature_files)) if feature_files else ""
 
-    if getattr(results, "correlations", None) is not None:
+    # Use _is_valid_df to safely check results before accessing .empty
+    # (Failed stages return dicts instead of DataFrames)
+    corr = getattr(results, "correlations", None)
+    if _is_valid_df(corr):
         results.correlations = _ensure_method_columns(
             results.correlations, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "pain_sensitivity", None) is not None:
+    
+    pain_sens = getattr(results, "pain_sensitivity", None)
+    if _is_valid_df(pain_sens):
         results.pain_sensitivity = _ensure_method_columns(
             results.pain_sensitivity, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "condition_effects", None) is not None:
+    
+    cond_eff = getattr(results, "condition_effects", None)
+    if _is_valid_df(cond_eff):
         results.condition_effects = _ensure_method_columns(
             results.condition_effects, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "mediation", None) is not None:
+    
+    med = getattr(results, "mediation", None)
+    if _is_valid_df(med):
         results.mediation = _ensure_method_columns(
             results.mediation, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "mixed_effects", None) is not None:
+    
+    mixed = getattr(results, "mixed_effects", None)
+    if _is_valid_df(mixed):
         results.mixed_effects = _ensure_method_columns(
             results.mixed_effects, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "confounds", None) is not None:
+    
+    conf = getattr(results, "confounds", None)
+    if _is_valid_df(conf):
         results.confounds = _ensure_method_columns(
             results.confounds, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "regression", None) is not None:
+    
+    reg = getattr(results, "regression", None)
+    if _is_valid_df(reg):
         results.regression = _ensure_method_columns(
             results.regression, pipeline_config.method, robust_method, method_label
         )
-    if getattr(results, "models", None) is not None:
+    
+    mod = getattr(results, "models", None)
+    if _is_valid_df(mod):
         results.models = _ensure_method_columns(
             results.models, pipeline_config.method, robust_method, method_label
         )
 
-    if getattr(results, "correlations", None) is not None and not results.correlations.empty:
+    # Write results using _is_valid_df for safe checks
+    if _is_valid_df(getattr(results, "correlations", None)):
         out_dir = _get_stats_subfolder(ctx, "correlations")
         path = out_dir / f"correlations{feature_suffix}{method_suffix}.tsv"
-        write_tsv(results.correlations, path)
-        saved.append(path)
+        saved.extend(_write_stats_table(ctx, results.correlations, path))
 
-    if getattr(results, "pain_sensitivity", None) is not None and not results.pain_sensitivity.empty:
+    if _is_valid_df(getattr(results, "pain_sensitivity", None)):
         out_dir = _get_stats_subfolder(ctx, "pain_sensitivity")
         path = out_dir / f"pain_sensitivity{feature_suffix}{method_suffix}.tsv"
-        write_tsv(results.pain_sensitivity, path)
-        saved.append(path)
+        saved.extend(_write_stats_table(ctx, results.pain_sensitivity, path))
 
-    if getattr(results, "condition_effects", None) is not None and not results.condition_effects.empty:
+    if _is_valid_df(getattr(results, "condition_effects", None)):
         out_dir = _get_stats_subfolder(ctx, "condition_effects")
         path = out_dir / f"condition_effects{feature_suffix}.tsv"
-        write_tsv(results.condition_effects, path)
-        saved.append(path)
+        saved.extend(_write_stats_table(ctx, results.condition_effects, path))
 
-    if getattr(results, "mediation", None) is not None and not results.mediation.empty:
+    if _is_valid_df(getattr(results, "mediation", None)):
         out_dir = _get_stats_subfolder(ctx, "mediation")
         path = out_dir / f"mediation{feature_suffix}.tsv"
-        write_tsv(results.mediation, path)
-        saved.append(path)
+        saved.extend(_write_stats_table(ctx, results.mediation, path))
 
-    if getattr(results, "mixed_effects", None) is not None and not results.mixed_effects.empty:
+    if _is_valid_df(getattr(results, "mixed_effects", None)):
         out_dir = _get_stats_subfolder(ctx, "mixed_effects")
         path = out_dir / f"mixed_effects{feature_suffix}.tsv"
-        write_tsv(results.mixed_effects, path)
-        saved.append(path)
+        saved.extend(_write_stats_table(ctx, results.mixed_effects, path))
 
     # NOTE: confounds, regression, and models are already written by their respective stages.
     # We only ensure method columns are updated in-memory (done above) for consistency.
     # The files already exist in confounds_audit/, trialwise_regression/, and feature_models/ folders.
-    if getattr(results, "confounds", None) is not None and not results.confounds.empty:
+    if _is_valid_df(getattr(results, "confounds", None)):
         out_dir = _get_stats_subfolder(ctx, "confounds_audit")
         path = out_dir / f"confounds_audit{feature_suffix}{method_suffix}.tsv"
         if path.exists():
             saved.append(path)
 
-    if getattr(results, "regression", None) is not None and not results.regression.empty:
+    if _is_valid_df(getattr(results, "regression", None)):
         out_dir = _get_stats_subfolder(ctx, "trialwise_regression")
         path = out_dir / f"regression_feature_effects{feature_suffix}{method_suffix}.tsv"
         if path.exists():
             saved.append(path)
 
-    if getattr(results, "models", None) is not None and not results.models.empty:
+    if _is_valid_df(getattr(results, "models", None)):
         out_dir = _get_stats_subfolder(ctx, "feature_models")
         path = out_dir / f"models_feature_effects{feature_suffix}{method_suffix}.tsv"
         if path.exists():
@@ -4874,9 +5003,12 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
     if normalized_path is not None:
         saved.append(normalized_path)
 
-    summary = results.to_summary()
-    (ctx.stats_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    saved.append(ctx.stats_dir / "summary.json")
+    if results is None:
+        ctx.logger.warning("Export stage: results is None, skipping summary generation")
+    else:
+        summary = results.to_summary()
+        (ctx.stats_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+        saved.append(ctx.stats_dir / "summary.json")
 
     ctx.logger.info(f"Saved {len(saved)} output files")
     return saved
@@ -4884,7 +5016,7 @@ def stage_export(ctx: BehaviorContext, pipeline_config: Any, results: Any) -> Li
 
 def _infer_output_kind(name: str) -> str:
     if name.startswith("corr_stats_"):
-        return "correlation_stats"
+        return "correlations"
     if name.startswith("correlations"):
         return "correlations"
     if name.startswith("pain_sensitivity"):
@@ -4893,6 +5025,8 @@ def _infer_output_kind(name: str) -> str:
         return "condition_effects"
     if name.startswith("mediation"):
         return "mediation"
+    if name.startswith("moderation"):
+        return "moderation"
     if name.startswith("mixed_effects"):
         return "mixed_effects"
     if name.startswith("confounds_audit"):
@@ -4928,7 +5062,7 @@ def _infer_output_kind(name: str) -> str:
     if name.startswith("influence_diagnostics"):
         return "influence_diagnostics"
     if name.startswith("normalized_results"):
-        return "normalized_results"
+        return "normalized"
     if name.startswith("feature_screening"):
         return "feature_screening"
     if name.startswith("paired_comparisons"):
@@ -4944,7 +5078,7 @@ def _infer_output_kind(name: str) -> str:
     if name.startswith("temporal_correlations"):
         return "temporal_correlations"
     if name.startswith("hierarchical_fdr_summary"):
-        return "hierarchical_fdr_summary"
+        return "fdr"
     return "unknown"
 
 

@@ -340,9 +340,14 @@ def extract_burst_features(
         ctx.logger.warning("Bursts: baseline window missing; skipping extraction.")
         return pd.DataFrame(), []
 
-    segment_masks = get_segment_masks(
-        precomputed.times, precomputed.windows, precomputed.config
-    )
+    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    
+    if target_name:
+        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(
+            precomputed.times, precomputed.windows, precomputed.config
+        )
     segment_names = [name for name in segment_masks.keys() if name != "baseline"]
     
     if not segment_names:

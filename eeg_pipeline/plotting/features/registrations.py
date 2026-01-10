@@ -948,8 +948,7 @@ def itpc_suite(ctx: FeaturePlotContext, saved_files):
 
 @VisualizationRegistry.register("pac")
 def pac_summary(ctx: FeaturePlotContext, saved_files):
-    pac_source = ctx.pac_df if ctx.pac_df is not None else ctx.pac_trials_df
-    if pac_source is None:
+    if ctx.pac_df is None:
         return
 
     safe_plot(
@@ -959,7 +958,7 @@ def pac_summary(ctx: FeaturePlotContext, saved_files):
         "pac",
         None,
         plot_pac_summary,
-        pac_df=pac_source,
+        pac_df=ctx.pac_df,
         subject=ctx.subject,
         save_dir=ctx.subdir("pac"),
         logger=ctx.logger,
@@ -971,8 +970,6 @@ def pac_summary(ctx: FeaturePlotContext, saved_files):
 def pac_suite(ctx: FeaturePlotContext, saved_files):
     pac_dir = ctx.subdir("pac")
     pac_long = ctx.pac_df
-    if pac_long is None and ctx.pac_trials_df is not None:
-        pac_long = convert_pac_wide_to_long(ctx.pac_trials_df, logger=ctx.logger, config=ctx.config)
     if pac_long is not None:
         safe_plot(
             ctx,
@@ -997,22 +994,6 @@ def pac_suite(ctx: FeaturePlotContext, saved_files):
             None,
             plot_pac_time_ribbons,
             ctx.pac_time_df,
-            ctx.subject,
-            pac_dir,
-            ctx.logger,
-            ctx.config,
-        )
-
-    if ctx.pac_trials_df is not None and ctx.aligned_events is not None:
-        safe_plot(
-            ctx,
-            saved_files,
-            "pac_by_condition",
-            "pac",
-            None,
-            plot_pac_by_condition,
-            ctx.pac_trials_df,
-            ctx.aligned_events,
             ctx.subject,
             pac_dir,
             ctx.logger,

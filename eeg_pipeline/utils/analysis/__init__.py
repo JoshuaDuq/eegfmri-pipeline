@@ -40,6 +40,7 @@ from .arrays import (
     robust_zscore,
     clip_outliers,
     validate_array,
+    extract_finite_mask,
 )
 
 __all__ = [
@@ -76,4 +77,5 @@ __all__ = [
     "robust_zscore",
     "clip_outliers",
     "validate_array",
+    "extract_finite_mask",
 ]

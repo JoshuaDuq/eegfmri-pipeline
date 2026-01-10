@@ -288,13 +288,17 @@ class TimeWindowSpec:
         self._build_all_windows()
         
     def _build_all_windows(self):
-        """Construct windows based on explicit user input or configuration."""
-        explicit_by_name = self._parse_explicit_windows()
+        """Construct windows based ONLY on explicit user input from Step 5.
         
-        if self.name:
-            self._build_named_window_set(explicit_by_name)
-        else:
-            self._build_default_window_set(explicit_by_name)
+        No hardcoded window names or config fallbacks - all windows must
+        be explicitly defined by the user in the TUI.
+        """
+        explicit_by_name = {k.lower(): v for k, v in self._parse_explicit_windows().items()}
+        
+        if explicit_by_name:
+            self._build_from_explicit_windows(explicit_by_name)
+        elif self.name:
+            self._add_empty_window(self.name, reason="no_explicit_windows_defined")
     
     def _parse_explicit_windows(self) -> Dict[str, Tuple[float, float]]:
         """Parse explicit windows from user input into name -> (start, end) mapping."""
@@ -316,90 +320,39 @@ class TimeWindowSpec:
         
         return explicit_by_name
     
-    def _build_named_window_set(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Build windows for a named/targeted iteration."""
-        self._add_baseline_window(explicit_by_name)
-        self._add_targeted_window(explicit_by_name)
-        self._add_remaining_explicit_windows(explicit_by_name)
-    
-    def _build_default_window_set(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Build default window set (baseline, active, custom)."""
-        self._add_baseline_window(explicit_by_name)
-        self._add_active_window(explicit_by_name)
-        self._add_custom_windows()
-        self._add_remaining_explicit_windows(explicit_by_name)
-    
-    def _add_baseline_window(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Add baseline window from explicit input or config."""
-        if "baseline" in explicit_by_name:
-            start, end = explicit_by_name["baseline"]
-            self._add_window("baseline", float(start), float(end))
-            return
+    def _build_from_explicit_windows(self, explicit_by_name: Dict[str, Tuple[float, float]]):
+        """Build windows from user-defined explicit windows only.
         
-        baseline_def = self._get_config_window("baseline_window")
-        if baseline_def is not None:
-            self._add_window("baseline", float(baseline_def[0]), float(baseline_def[1]))
-    
-    def _add_active_window(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Add active window from explicit input or config."""
-        if "active" in explicit_by_name:
-            start, end = explicit_by_name["active"]
-            self._add_window("active", float(start), float(end))
-            return
-        
-        active_def = self._get_config_window("active_window")
-        if active_def is not None:
-            self._add_window("active", float(active_def[0]), float(active_def[1]))
-    
-    def _add_targeted_window(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Add the targeted/named window for this iteration."""
-        if self.name in explicit_by_name:
-            start, end = explicit_by_name[self.name]
-            self._add_window(self.name, float(start), float(end))
-            return
-        
-        window_def = self._find_named_window_in_config(self.name)
-        if window_def is not None:
-            self._add_window(self.name, float(window_def[0]), float(window_def[1]))
-            return
-        
-        name_lower = str(self.name).strip().lower()
-        if name_lower in {"full", "all"}:
-            self._add_window(self.name, self.times[0], self.times[-1])
-        else:
-            self._add_empty_window(self.name, reason="missing_named_window")
-    
-    def _add_custom_windows(self):
-        """Add custom windows from config."""
-        feat_cfg = self.config.get("feature_engineering.windows", {}) if self.config else {}
-        custom = feat_cfg.get("custom_windows", [])
-        
-        if not isinstance(custom, list):
-            return
-        
-        for win in custom:
-            if not isinstance(win, dict):
-                continue
-            if "name" not in win or "start" not in win or "end" not in win:
-                continue
+        When self.name is set, ONLY build that specific window to ensure
+        output files contain only data for their designated time window.
+        However, always store baseline metadata for ERP baseline correction.
+        """
+        if self.name:
+            # Only build the targeted window when name is specified
+            name_key = str(self.name).strip().lower()
+            if name_key in explicit_by_name:
+                start, end = explicit_by_name[name_key]
+                self._add_window(self.name, float(start), float(end))
+            else:
+                self._add_empty_window(self.name, reason="window_not_in_user_input")
             
-            try:
-                self._add_window(
-                    win["name"],
-                    float(win["start"]),
-                    float(win["end"]),
-                )
-            except (ValueError, TypeError):
-                continue
-    
-    def _add_remaining_explicit_windows(self, explicit_by_name: Dict[str, Tuple[float, float]]):
-        """Add any explicit windows not yet processed."""
+            # Always store baseline range for ERP baseline correction
+            if "baseline" in explicit_by_name and name_key != "baseline":
+                bl_start, bl_end = explicit_by_name["baseline"]
+                self._add_window("baseline", float(bl_start), float(bl_end))
+            
+            return  # Don't build other windows when targeting a specific one
+        
+        # Only build all windows when no specific target is set
         for win_name, (start, end) in explicit_by_name.items():
-            if win_name == self.name:
-                continue
             if win_name in self.masks:
                 continue
             self._add_window(win_name, float(start), float(end))
+    
+    def _add_full_epoch_window(self):
+        """Add a full-epoch window when no explicit windows are defined."""
+        if self.times is not None and len(self.times) > 0:
+            self._add_window("full", self.times[0], self.times[-1])
     
     def _get_config_window(self, key: str) -> Optional[Tuple[float, float]]:
         """Get window definition from config for given key."""
@@ -464,10 +417,17 @@ class TimeWindowSpec:
             )
         
         if not is_valid:
-            self.logger.warning(
-                f"Window '{full_name}' is empty! req=[{start:.2f}, {end:.2f}]"
-            )
-            self.errors.append(full_name)
+            is_targeted_window = self.name and full_name.lower() == self.name.lower()
+            if is_targeted_window:
+                self.logger.warning(
+                    f"Window '{full_name}' is empty! req=[{start:.2f}, {end:.2f}]"
+                )
+                self.errors.append(full_name)
+            else:
+                self.logger.debug(
+                    f"Window '{full_name}' outside current range (expected): "
+                    f"req=[{start:.2f}, {end:.2f}], available=[{time_min_available:.2f}, {time_max_available:.2f}]"
+                )
         
         self.masks[full_name] = mask
         self.metadata[full_name] = WindowMetadata(
@@ -521,7 +481,14 @@ class TimeWindowSpec:
         
     def get_mask(self, name: str) -> np.ndarray:
         """Get mask by name, returns empty mask if not found."""
-        return self.masks.get(name, np.zeros_like(self.times, dtype=bool))
+        mask = self.masks.get(name)
+        if mask is not None:
+            return mask
+        key = str(name).strip().lower()
+        mask = self.masks.get(key)
+        if mask is not None:
+            return mask
+        return np.zeros_like(self.times, dtype=bool)
         
     def get_sliding_windows(self, length: float, step: float) -> List[Tuple[str, np.ndarray]]:
         """Generate sliding windows within the active window."""
@@ -671,26 +638,29 @@ def get_segment_masks(
     if windows is None:
         return {}
 
-    masks = dict(windows.masks)
+    all_masks = dict(windows.masks)
     
-    if windows.baseline_mask is not None and "baseline" not in masks:
-        if np.any(windows.baseline_mask):
-            masks["baseline"] = windows.baseline_mask
-
-    if windows.active_mask is not None:
-        active_name = getattr(windows, "name", "active") or "active"
-        if active_name not in masks and np.any(windows.active_mask):
-            masks[active_name] = windows.active_mask
-
-    if windows.name:
+    target_name = getattr(windows, "name", None)
+    if target_name:
         targeted = {}
-        if "baseline" in masks:
-            targeted["baseline"] = masks["baseline"]
-        if windows.name in masks:
-            targeted[windows.name] = masks[windows.name]
+        if target_name in all_masks:
+            targeted[target_name] = all_masks[target_name]
+        elif target_name.lower() in all_masks:
+             targeted[target_name] = all_masks[target_name.lower()]
+             
+        if not targeted:
+            # Fallback for case-insensitive lookup
+            for name, mask in all_masks.items():
+                if name.lower() == target_name.lower():
+                    targeted[target_name] = mask
+                    break
+                    
         return targeted
-
-    return masks
+    
+    # If no specific target, return all masks. 
+    # NOTE: Decisions about whether to include 'baseline' in iteration 
+    # should be made by the feature extractors themselves.
+    return all_masks
 
 
 def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.ndarray:
@@ -699,22 +669,10 @@ def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.nd
     Use this when downstream computations have a different time axis than the
     one used to build `spec` (e.g., decimated TFR time points).
     """
-    if spec is None:
-        raise ValueError("spec is required")
-    if times is None:
-        raise ValueError("times is required")
+    if spec is None or times is None:
+        return np.zeros_like(times, dtype=bool)
 
-    spec_times = getattr(spec, "times", None)
-    if spec_times is not None:
-        can_reuse_mask = (
-            len(times) == len(spec_times)
-            and hasattr(spec, "get_mask")
-        )
-        if can_reuse_mask:
-            mask = spec.get_mask(window_name)
-            if mask is not None and mask.shape == times.shape:
-                return mask
-
+    # Try exact match first
     window_range = _get_window_range_from_spec(spec, window_name)
     if window_range is not None:
         start, end = window_range
@@ -725,30 +683,24 @@ def make_mask_for_times(spec: Any, window_name: str, times: np.ndarray) -> np.nd
 
 
 def _get_window_range_from_spec(spec: Any, window_name: str) -> Optional[Tuple[float, float]]:
-    """Extract window range from spec, trying TimeWindows then TimeWindowSpec."""
-    key = str(window_name).lower()
+    """Extract window range from spec, strictly by name."""
+    key = str(window_name).strip().lower()
     
     ranges = getattr(spec, "ranges", None)
     if isinstance(ranges, dict):
-        window_range = ranges.get(key) or ranges.get(window_name)
-        if window_range is not None:
-            return window_range
+        if window_name in ranges:
+            return ranges[window_name]
+        if key in ranges:
+            return ranges[key]
         
-        baseline_aliases = {"baseline", "pre", "prestim"}
-        active_aliases = {"active", "stim", "task"}
-        
-        if key in baseline_aliases:
-            window_range = getattr(spec, "baseline_range", None)
-            if window_range is not None:
-                return window_range
-        
-        if key in active_aliases:
-            window_range = getattr(spec, "active_range", None)
-            if window_range is not None:
-                return window_range
+        # Internal field fallbacks (only if name matches exactly)
+        if key == "baseline":
+            return getattr(spec, "baseline_range", None)
+        if key == "active":
+            return getattr(spec, "active_range", None)
 
     metadata = getattr(spec, "metadata", {})
-    meta = metadata.get(window_name)
+    meta = metadata.get(window_name) or metadata.get(key)
     if meta is not None:
         start = float(getattr(meta, "start", np.nan))
         end = float(getattr(meta, "end", np.nan))

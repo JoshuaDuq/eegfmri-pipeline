@@ -18,9 +18,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from .base import get_config_value, ensure_config
-
-from eeg_pipeline.utils.config.loader import get_constants
+from .base import get_config_value, ensure_config, filter_finite_values
 
 
 ###################################################################
@@ -48,17 +46,11 @@ EFFECTIVELY_INFINITE_SAMPLE_SIZE = 999999
 ###################################################################
 
 
-def _clean_finite_data(data: np.ndarray) -> np.ndarray:
-    """Extract finite values from array, flattened to 1D."""
-    data_flat = np.asarray(data).ravel()
-    return data_flat[np.isfinite(data_flat)]
-
-
 def _clean_finite_groups(*groups: np.ndarray) -> list[np.ndarray]:
     """Clean and filter groups, keeping only those with sufficient samples."""
     clean_groups = []
     for group in groups:
-        cleaned = _clean_finite_data(group)
+        cleaned = filter_finite_values(group, flatten=True)
         if len(cleaned) >= MIN_SAMPLES_FOR_VARIANCE_TEST:
             clean_groups.append(cleaned)
     return clean_groups
@@ -187,7 +179,7 @@ def check_normality_shapiro(
     
     Appropriate for n < 5000. For larger samples, use check_normality_dagostino.
     """
-    cleaned_data = _clean_finite_data(data)
+    cleaned_data = filter_finite_values(data, flatten=True)
     
     if len(cleaned_data) < MIN_SAMPLES_FOR_SHAPIRO:
         return AssumptionCheckResult(
@@ -235,7 +227,7 @@ def check_normality_dagostino(
     
     Better for larger samples (n > 20).
     """
-    cleaned_data = _clean_finite_data(data)
+    cleaned_data = filter_finite_values(data, flatten=True)
     
     if len(cleaned_data) < MIN_SAMPLES_FOR_DAGOSTINO:
         return AssumptionCheckResult(
@@ -278,7 +270,7 @@ def compute_qq_data(
     
     Returns (theoretical_quantiles, sample_quantiles, slope, intercept).
     """
-    cleaned_data = _clean_finite_data(data)
+    cleaned_data = filter_finite_values(data, flatten=True)
     sample_quantiles = np.sort(cleaned_data)
     
     sample_size = len(sample_quantiles)
@@ -418,7 +410,7 @@ def validate_permutation_distribution(
     - Null distribution symmetry (for two-tailed tests)
     - No extreme outliers suggesting computational issues
     """
-    cleaned_null = _clean_finite_data(null_distribution)
+    cleaned_null = filter_finite_values(null_distribution, flatten=True)
     
     warnings = []
     passed = True
@@ -498,7 +490,7 @@ def check_randomization_balance(
     tolerance : float
         Acceptable deviation from expected ratio
     """
-    cleaned_assignments = _clean_finite_data(group_assignments)
+    cleaned_assignments = filter_finite_values(group_assignments, flatten=True)
     
     observed_ratio = np.mean(cleaned_assignments)
     deviation = abs(observed_ratio - expected_ratio)
@@ -630,7 +622,7 @@ def validate_fwer_control(
     alpha : float
         Family-wise error rate
     """
-    p_flat = _clean_finite_data(p_values)
+    p_flat = filter_finite_values(p_values, flatten=True)
     n_tests = len(p_flat)
     
     if method == "bonferroni":
@@ -729,8 +721,8 @@ def validate_behavioral_contrast(
     """
     report = ValidationReport()
     
-    cleaned_group1 = _clean_finite_data(group1)
-    cleaned_group2 = _clean_finite_data(group2)
+    cleaned_group1 = filter_finite_values(group1, flatten=True)
+    cleaned_group2 = filter_finite_values(group2, flatten=True)
     
     # Sample size check
     if (len(cleaned_group1) < MIN_SAMPLES_FOR_GROUP_COMPARISON or 
@@ -795,60 +787,6 @@ def validate_behavioral_contrast(
 ###################################################################
 
 
-def validate_pain_binary_values(
-    values: pd.Series,
-    column_name: str,
-    logger: Optional[logging.Logger] = None,
-) -> Tuple[np.ndarray, int]:
-    """Validate pain binary column contains only 0/1 values."""
-    logger = logger or logging.getLogger(__name__)
-
-    numeric_vals = pd.to_numeric(values, errors="coerce")
-    n_total = len(values)
-    n_nan = int(numeric_vals.isna().sum())
-    n_invalid = int(((numeric_vals != 0) & (numeric_vals != 1) & numeric_vals.notna()).sum())
-
-    if n_nan > 0 or n_invalid > 0:
-        error_msg = (
-            f"Invalid pain binary values in '{column_name}': "
-            f"{n_nan} NaN/missing, {n_invalid} non-binary out of {n_total}."
-        )
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-
-    validated = numeric_vals.fillna(0).astype(int).values
-    return validated, n_nan + n_invalid
-
-
-def validate_temperature_values(
-    values: pd.Series,
-    column_name: str,
-    min_temp: Optional[float] = None,
-    max_temp: Optional[float] = None,
-    logger: Optional[logging.Logger] = None,
-    config: Optional[Any] = None,
-) -> Tuple[np.ndarray, int]:
-    """Validate temperature values are within expected range."""
-    logger = logger or logging.getLogger(__name__)
-
-    if min_temp is None or max_temp is None:
-        config = ensure_config(config)
-        io_constants = get_constants("io", config)
-        min_temp = min_temp or float(io_constants.get("temperature_min", 35.0))
-        max_temp = max_temp or float(io_constants.get("temperature_max", 50.0))
-
-    numeric_vals = pd.to_numeric(values, errors="coerce")
-    n_nan = int(numeric_vals.isna().sum())
-    n_out_of_range = int(((numeric_vals < min_temp) | (numeric_vals > max_temp)).sum())
-
-    if n_nan > 0:
-        logger.warning(f"{column_name}: {n_nan} NaN values")
-    if n_out_of_range > 0:
-        logger.warning(f"{column_name}: {n_out_of_range} values outside [{min_temp}, {max_temp}]")
-
-    return numeric_vals.values, n_nan + n_out_of_range
-
-
 def validate_baseline_window_pre_stimulus(
     baseline_window: Union[Tuple[float, float], List[float], float],
     baseline_end: Optional[float] = None,
@@ -901,35 +839,4 @@ def validate_baseline_window_pre_stimulus(
         return baseline_end_value <= STIMULUS_ONSET
     
     raise ValueError(f"Invalid baseline_window type: {type(baseline_window)}")
-
-
-def check_pyriemann() -> bool:
-    """Check if pyriemann package is available."""
-    try:
-        import pyriemann  # type: ignore[reportMissingImports]
-        return True
-    except ImportError:
-        return False
-
-
-def extract_finite_mask(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Extract mask where both arrays are finite."""
-    mask = np.isfinite(y_true) & np.isfinite(y_pred)
-    return y_true[mask], y_pred[mask], mask
-
-
-def extract_pain_masks(pain_vals: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
-    """Extract boolean masks for pain and non-pain trials."""
-    pain_arr = np.asarray(pain_vals)
-    pain_mask = pain_arr == 1
-    nonpain_mask = pain_arr == 0
-    return pain_mask, nonpain_mask
-
-
-def extract_duration_data(durations: pd.Series, mask: np.ndarray) -> np.ndarray:
-    """Extract duration data for masked trials."""
-    return durations.values[mask]
 

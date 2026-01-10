@@ -278,11 +278,9 @@ class PSDData:
 class TimeWindows:
     """Pre-computed time window masks for feature extraction."""
 
-    # Required fields (no defaults)
-    baseline_mask: np.ndarray
-    active_mask: np.ndarray
-
     # Fields with defaults
+    baseline_mask: Optional[np.ndarray] = None
+    active_mask: Optional[np.ndarray] = None
     baseline_range: Tuple[float, float] = (np.nan, np.nan)
     active_range: Tuple[float, float] = (np.nan, np.nan)
 
@@ -314,27 +312,21 @@ class TimeWindows:
         return np.zeros_like(reference, dtype=bool)
 
     def get_mask(self, name: str) -> np.ndarray:
-        """Retrieve a boolean mask by semantic name."""
+        """Retrieve a boolean mask by name."""
         raw_key = str(name)
         key = raw_key.lower()
 
-        baseline_aliases = {"baseline", "pre", "prestim"}
-        if key in baseline_aliases:
-            return self.baseline_mask
-
-        active_aliases = {"active", "stim", "task"}
-        if key in active_aliases:
-            return self.active_mask
-
+        # 1. Exact match in masks dict (user-defined names)
         if raw_key in self.masks:
             return self.masks[raw_key]
         if key in self.masks:
             return self.masks[key]
 
-        if key == "ramp":
-            ramp_mask = self._compute_ramp_mask()
-            if ramp_mask is not None:
-                return ramp_mask
+        # 2. Match against primary baseline/active fields for internal compatibility
+        if key == "baseline" and self.baseline_mask is not None:
+            return self.baseline_mask
+        if key == "active" and self.active_mask is not None:
+            return self.active_mask
 
         return self._empty_mask()
 

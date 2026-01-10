@@ -20,14 +20,17 @@ from .correlation import fisher_z, inverse_fisher_z
 _MIN_SAMPLES_FOR_STATISTICS = 2
 
 
-def _get_z_critical_value(ci_level: float) -> float:
-    """Compute z-critical value for given confidence interval level."""
-    return float(stats.norm.ppf((1 + ci_level) / 2))
+###################################################################
+# Internal Helpers
+###################################################################
 
 
-def _filter_finite_values(values: np.ndarray) -> np.ndarray:
-    """Extract finite values from array."""
-    return values[np.isfinite(values)]
+# Import consolidated z-critical value function from base
+from .base import get_z_critical_value as _get_z_critical_value
+
+
+# Import consolidated finite value filtering from base
+from .base import filter_finite_values as _filter_finite_values
 
 
 def _compute_mean_confidence_interval(
@@ -36,6 +39,13 @@ def _compute_mean_confidence_interval(
 ) -> Tuple[float, float, float]:
     """Compute mean and confidence interval bounds from values.
     
+    Parameters
+    ----------
+    values : np.ndarray
+        Array of numeric values
+    z_critical : float
+        Z-critical value for confidence interval
+        
     Returns
     -------
     Tuple[float, float, float]
@@ -50,6 +60,11 @@ def _compute_mean_confidence_interval(
     ci_upper = mean + margin_of_error
     
     return mean, ci_lower, ci_upper
+
+
+###################################################################
+# Channel Statistics
+###################################################################
 
 
 def compute_group_channel_statistics(
@@ -113,11 +128,17 @@ def compute_channel_confidence_interval(
     if len(valid_z_scores) < _MIN_SAMPLES_FOR_STATISTICS:
         return np.nan, np.nan
     
-    z_mean, ci_lower, ci_upper = _compute_mean_confidence_interval(
-        valid_z_scores, _get_z_critical_value(ci_level)
+    z_critical = _get_z_critical_value(ci_level)
+    _, ci_lower, ci_upper = _compute_mean_confidence_interval(
+        valid_z_scores, z_critical
     )
     
     return ci_lower, ci_upper
+
+
+###################################################################
+# Data Pooling
+###################################################################
 
 
 def pool_data_by_strategy(
@@ -148,10 +169,10 @@ def pool_data_by_strategy(
     """
     if strategy == "concatenate":
         return _pool_by_concatenation(x_lists, y_lists)
-    elif strategy == "mean":
+    if strategy == "mean":
         return _pool_by_mean(x_lists, y_lists)
-    else:
-        raise ValueError(f"Unknown pooling strategy: {strategy}")
+    
+    raise ValueError(f"Unknown pooling strategy: {strategy}")
 
 
 def _pool_by_concatenation(
@@ -172,6 +193,11 @@ def _pool_by_mean(
     x_means = [np.nanmean(x) for x in x_lists if len(x) > 0]
     y_means = [np.nanmean(y) for y in y_lists if len(y) > 0]
     return np.array(x_means), np.array(y_means)
+
+
+###################################################################
+# Band Statistics
+###################################################################
 
 
 def compute_band_summary_statistics(
@@ -258,22 +284,21 @@ def compute_fisher_transformed_mean(
     edge_df : pd.DataFrame
         DataFrame where each column is an edge and rows are subjects
     config : Optional[Any]
-        Configuration object (passed to fisher_z)
+        Configuration object (passed to fisher_z_transform_mean)
         
     Returns
     -------
     pd.Series
         Series of Fisher-aggregated mean correlations per edge
     """
+    from .correlation import fisher_z_transform_mean
+    
     def _fisher_mean_per_edge(values: pd.Series) -> float:
         """Compute Fisher-transformed mean for a single edge."""
         valid_values = _filter_finite_values(values.values)
         if len(valid_values) == 0:
             return np.nan
-        
-        z_transformed = [fisher_z(v, config) for v in valid_values]
-        z_mean = np.mean(z_transformed)
-        return inverse_fisher_z(z_mean)
+        return fisher_z_transform_mean(valid_values, config)
     
     return edge_df.apply(_fisher_mean_per_edge)
 
@@ -333,6 +358,11 @@ def compute_group_band_statistics(
         sample_sizes.append(sample_size)
     
     return band_names, means, ci_lowers, ci_uppers, sample_sizes
+
+
+###################################################################
+# Error Bar Conversion
+###################################################################
 
 
 def compute_error_bars_from_ci_dicts(
@@ -403,6 +433,11 @@ def compute_error_bars_from_arrays(
     return np.array([lower_errors, upper_errors])
 
 
+###################################################################
+# Domain-Specific Helpers
+###################################################################
+
+
 def count_trials_by_condition(
     events_df: pd.DataFrame,
     pain_col: str = "pain_binary",
@@ -457,8 +492,9 @@ def compute_duration_p_value(
     valid_nonpain = _filter_finite_values(nonpain_data)
     valid_pain = _filter_finite_values(pain_data)
     
-    if (len(valid_nonpain) < _MIN_SAMPLES_FOR_STATISTICS or
-            len(valid_pain) < _MIN_SAMPLES_FOR_STATISTICS):
+    if len(valid_nonpain) < _MIN_SAMPLES_FOR_STATISTICS:
+        return np.nan
+    if len(valid_pain) < _MIN_SAMPLES_FOR_STATISTICS:
         return np.nan
     
     _, p_value = stats.mannwhitneyu(

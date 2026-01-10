@@ -24,6 +24,9 @@ from scipy import stats
 from eeg_pipeline.domain.features.naming import NamingSchema
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 from eeg_pipeline.utils.analysis.stats.effect_size import cohens_d, hedges_g
+from eeg_pipeline.utils.analysis.stats.bootstrap import (
+    bootstrap_mean_diff_ci,
+)
 from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 
 
@@ -33,7 +36,6 @@ from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
 
 
 MIN_STD_FOR_COHENS_D = 1e-10
-MIN_SAMPLES_FOR_BOOTSTRAP = 3
 DEFAULT_CI_LEVEL = 0.95
 DEFAULT_FDR_ALPHA = 0.05
 DEFAULT_N_BOOT = 1000
@@ -52,7 +54,6 @@ FEATURE_TYPE_GROUPS = {
     "pac": "pac",
     "complexity": "comp",
     "bursts": "bursts",
-    "microstates": "micro",
 }
 
 
@@ -223,53 +224,6 @@ def compute_paired_cohens_d(before: np.ndarray, after: np.ndarray) -> float:
     return float(np.mean(diff) / std_diff)
 
 
-def bootstrap_mean_diff_ci(
-    x: np.ndarray,
-    y: np.ndarray,
-    n_boot: int = DEFAULT_N_BOOT,
-    ci_level: float = DEFAULT_CI_LEVEL,
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[float, float]:
-    """Compute bootstrap confidence interval for mean difference.
-    
-    Args:
-        x: First sample
-        y: Second sample
-        n_boot: Number of bootstrap iterations
-        ci_level: Confidence level (default 0.95)
-        rng: Random number generator
-    
-    Returns:
-        Tuple of (ci_low, ci_high)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    
-    x = np.asarray(x).ravel()
-    y = np.asarray(y).ravel()
-    
-    valid = np.isfinite(x) & np.isfinite(y)
-    x = x[valid]
-    y = y[valid]
-    
-    if len(x) < MIN_SAMPLES_FOR_BOOTSTRAP:
-        return np.nan, np.nan
-    
-    diff = y - x
-    n = len(diff)
-    
-    boot_means = np.empty(n_boot)
-    for i in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        boot_means[i] = np.mean(diff[idx])
-    
-    alpha = 1 - ci_level
-    ci_low = np.percentile(boot_means, 100 * alpha / 2)
-    ci_high = np.percentile(boot_means, 100 * (1 - alpha / 2))
-    
-    return float(ci_low), float(ci_high)
-
-
 ###################################################################
 # Feature Extraction Helpers
 ###################################################################
@@ -335,50 +289,6 @@ def collect_segment_data(
     return df[cols].apply(pd.to_numeric, errors="coerce").mean(axis=1)
 
 
-def bootstrap_unpaired_mean_diff_ci(
-    group1: np.ndarray,
-    group2: np.ndarray,
-    n_boot: int = DEFAULT_N_BOOT,
-    ci_level: float = DEFAULT_CI_LEVEL,
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[float, float]:
-    """Compute bootstrap confidence interval for mean difference of unpaired samples.
-    
-    Args:
-        group1: First group values
-        group2: Second group values
-        n_boot: Number of bootstrap iterations
-        ci_level: Confidence level (default 0.95)
-        rng: Random number generator
-    
-    Returns:
-        Tuple of (ci_low, ci_high)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    
-    g1 = np.asarray(group1).ravel()
-    g2 = np.asarray(group2).ravel()
-    
-    g1 = g1[np.isfinite(g1)]
-    g2 = g2[np.isfinite(g2)]
-    
-    if len(g1) < MIN_SAMPLES_FOR_BOOTSTRAP or len(g2) < MIN_SAMPLES_FOR_BOOTSTRAP:
-        return np.nan, np.nan
-    
-    boot_diffs = np.empty(n_boot)
-    for i in range(n_boot):
-        idx1 = rng.integers(0, len(g1), size=len(g1))
-        idx2 = rng.integers(0, len(g2), size=len(g2))
-        boot_diffs[i] = np.mean(g2[idx2]) - np.mean(g1[idx1])
-    
-    alpha = 1 - ci_level
-    ci_low = np.percentile(boot_diffs, 100 * alpha / 2)
-    ci_high = np.percentile(boot_diffs, 100 * (1 - alpha / 2))
-    
-    return float(ci_low), float(ci_high)
-
-
 ###################################################################
 # Paired Comparison Computation
 ###################################################################
@@ -413,7 +323,7 @@ def compute_window_comparison(
     stat, p = safe_wilcoxon(v1, v2, min_n=min_samples)
     d = compute_paired_cohens_d(v1, v2)
     g = hedges_g(v1, v2)
-    ci_low, ci_high = bootstrap_mean_diff_ci(v1, v2, n_boot=n_boot, rng=rng)
+    _, ci_low, ci_high = bootstrap_mean_diff_ci(v1, v2, n_boot=n_boot, rng=rng, config=None)
     
     hedges_g_finite = g if np.isfinite(g) else d
     
@@ -470,9 +380,7 @@ def compute_condition_comparison(
     d = cohens_d(v2, v1, pooled=True)
     g = hedges_g(v2, v1)
     
-    ci_low, ci_high = bootstrap_unpaired_mean_diff_ci(
-        v1, v2, n_boot=n_boot, rng=rng
-    )
+    _, ci_low, ci_high = bootstrap_mean_diff_ci(v1, v2, n_boot=n_boot, rng=rng, config=None)
     
     cohens_d_finite = d if np.isfinite(d) else np.nan
     hedges_g_finite = g if np.isfinite(g) else np.nan

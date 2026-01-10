@@ -59,6 +59,11 @@ type ClipboardResultMsg struct {
 
 // OpenInFileBrowser opens a path in the system file browser
 func OpenInFileBrowser(path string) error {
+	// Verify path exists before trying to open
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("path does not exist: %s: %w", path, err)
+	}
+
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -72,7 +77,17 @@ func OpenInFileBrowser(path string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return cmd.Start()
+	// Start the command and detach it (don't wait for completion)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start file browser: %w", err)
+	}
+
+	// Detach the process so it doesn't become a zombie
+	go func() {
+		_ = cmd.Wait()
+	}()
+
+	return nil
 }
 
 // OpenInFileBrowserCmd returns a tea.Cmd that opens a path in file browser

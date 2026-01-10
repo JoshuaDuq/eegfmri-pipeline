@@ -15,7 +15,7 @@ from .feature_io import (
 from .behavior import load_behavior_plot_features, load_behavior_stats_files, load_stats_file_with_fallbacks
 from .machine_learning import load_active_matrix, load_epoch_windows, load_epochs_with_targets
 from .tfr_alignment import compute_aligned_data_length, extract_pain_vector_array
-from .stats import (
+from .stats_io import (
     load_precomputed_correlations,
     get_precomputed_stats_for_roi_band,
     load_subject_scatter_data,
@@ -38,6 +38,8 @@ from .manipulation import (
     build_active_features,
     flatten_lower_triangles,
     prepare_topomap_correlation_data,
+    extract_pain_masks,
+    extract_duration_data,
 )
 from .preprocessing import (
     find_brainvision_vhdrs,
@@ -70,6 +72,8 @@ __all__ = [
     "reorder_pivot",
     "flatten_lower_triangles",
     "prepare_topomap_correlation_data",
+    "extract_pain_masks",
+    "extract_duration_data",
     "load_stats_file_with_fallbacks",
     "load_epochs_with_targets",
     "load_active_matrix",

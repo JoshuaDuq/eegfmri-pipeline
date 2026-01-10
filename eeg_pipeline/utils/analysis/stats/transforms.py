@@ -1,17 +1,17 @@
 """
-Core Statistics Utilities
-=========================
+Data Transforms and Utilities
+=============================
 
 Consolidated module containing:
 - Data transformation (centering, z-scoring, pooling)
 - Regression utilities (linear residuals, binned statistics)
-- Aperiodic fitting (1/f component extraction)
+- Aperiodic fitting (1/f component extraction, residual computation)
 - Coupling statistics (inter-band, group power)
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -26,6 +26,30 @@ from scipy import stats
 def center_series(series: pd.Series) -> pd.Series:
     """Center series by subtracting mean."""
     return series - series.mean()
+
+
+def zscore_array(x: np.ndarray) -> np.ndarray:
+    """Z-score normalize numpy array.
+    
+    Standardizes array to zero mean and unit variance.
+    Returns NaN-filled array if variance is zero or invalid.
+    
+    Parameters
+    ----------
+    x : np.ndarray
+        Input array
+        
+    Returns
+    -------
+    np.ndarray
+        Z-scored array (NaN if variance is zero or invalid)
+    """
+    x = np.asarray(x, dtype=float)
+    mu = np.nanmean(x)
+    sd = np.nanstd(x, ddof=1)
+    if not np.isfinite(sd) or sd <= 0:
+        return np.full_like(x, np.nan)
+    return (x - mu) / sd
 
 
 def zscore_series(series: pd.Series) -> pd.Series:
@@ -152,7 +176,11 @@ def compute_linear_residuals(
     x_data: pd.Series,
     y_data: pd.Series,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute linear regression residuals."""
+    """Compute linear regression residuals for plotting/visualization.
+    
+    Uses consolidated regression utilities internally for consistency.
+    Returns fitted values, residuals, and valid x values for plotting.
+    """
     x_numeric = pd.to_numeric(x_data, errors="coerce")
     y_numeric = pd.to_numeric(y_data, errors="coerce")
     valid_mask = x_numeric.notna() & y_numeric.notna()
@@ -160,11 +188,19 @@ def compute_linear_residuals(
     x_valid = x_numeric[valid_mask].to_numpy(dtype=float)
     y_valid = y_numeric[valid_mask].to_numpy(dtype=float)
     
-    regression_result = stats.linregress(x_valid, y_valid)
-    slope = regression_result.slope
-    intercept = regression_result.intercept
+    if len(x_valid) < 2:
+        return np.array([]), np.array([]), np.array([])
     
-    fitted_values = intercept + slope * x_valid
+    # Use consolidated regression utilities for consistency
+    from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit
+    
+    design_matrix = np.column_stack([np.ones(len(x_valid)), x_valid])
+    beta = _ols_fit(design_matrix, y_valid)
+    
+    if beta is None:
+        return np.array([]), np.array([]), np.array([])
+    
+    fitted_values = design_matrix @ beta
     residuals = y_valid - fitted_values
     
     return fitted_values, residuals, x_valid
@@ -313,148 +349,165 @@ def fit_aperiodic_to_all_epochs(
     return offsets, slopes
 
 
-###################################################################
-# Coupling Statistics
-###################################################################
-
-
-def compute_consensus_labels(
-    labels_all_trials: List[np.ndarray],
-    n_timepoints: int,
+def compute_residuals(
+    log_freqs: np.ndarray,
+    log_psd: np.ndarray,
+    offsets: np.ndarray,
+    slopes: np.ndarray,
 ) -> np.ndarray:
-    """Compute consensus microstate labels across trials."""
-    consensus_labels = np.zeros(n_timepoints, dtype=int)
-    n_trials = len(labels_all_trials)
-    
-    for timepoint_idx in range(n_timepoints):
-        trial_labels_at_timepoint = [
-            labels_all_trials[trial_idx][timepoint_idx]
-            for trial_idx in range(n_trials)
-        ]
-        label_counts = np.bincount(trial_labels_at_timepoint)
-        consensus_labels[timepoint_idx] = np.argmax(label_counts)
-    
-    return consensus_labels
+    """Compute residuals from an aperiodic fit.
 
-
-def compute_inter_band_coupling_matrix(
-    tfr_avg,
-    band_names: List[str],
-    features_freq_bands: Dict[str, Tuple[float, float]],
-    extract_band_channel_means_func,
-) -> np.ndarray:
-    """Compute inter-band coupling matrix."""
-    from .band_stats import compute_band_spatial_correlation
+    Supports vector (freq,) inputs as well as epoch/channel grids such as
+    (epochs, channels, freqs) by broadcasting the offsets/slopes over the
+    frequency axis.
     
-    n_bands = len(band_names)
-    coupling_matrix = np.zeros((n_bands, n_bands))
-    
-    for band_1_idx, band_1_name in enumerate(band_names):
-        fmin_1, fmax_1 = features_freq_bands[band_1_name]
-        freq_mask_1 = (tfr_avg.freqs >= fmin_1) & (tfr_avg.freqs <= fmax_1)
+    Parameters
+    ----------
+    log_freqs : np.ndarray
+        Log-transformed frequencies
+    log_psd : np.ndarray
+        Log-transformed PSD values
+    offsets : np.ndarray
+        Aperiodic offset values
+    slopes : np.ndarray
+        Aperiodic slope values
         
-        if not freq_mask_1.any():
-            continue
-        
-        coupling_matrix[band_1_idx, band_1_idx] = 1.0
-        band_1_channels = extract_band_channel_means_func(tfr_avg, freq_mask_1)
-        
-        for band_2_idx in range(band_1_idx + 1, n_bands):
-            band_2_name = band_names[band_2_idx]
-            fmin_2, fmax_2 = features_freq_bands[band_2_name]
-            freq_mask_2 = (tfr_avg.freqs >= fmin_2) & (tfr_avg.freqs <= fmax_2)
-            
-            if not freq_mask_2.any():
-                continue
-            
-            band_2_channels = extract_band_channel_means_func(
-                tfr_avg, freq_mask_2
-            )
-            correlation = compute_band_spatial_correlation(
-                band_1_channels, band_2_channels
-            )
-            coupling_matrix[band_1_idx, band_2_idx] = correlation
-            coupling_matrix[band_2_idx, band_1_idx] = correlation
+    Returns
+    -------
+    np.ndarray
+        Residuals after subtracting aperiodic component
+    """
+    log_freqs_array = np.asarray(log_freqs)
+    log_psd_array = np.asarray(log_psd)
+    offsets_array = np.asarray(offsets)
+    slopes_array = np.asarray(slopes)
+
+    n_frequencies_psd = log_psd_array.shape[-1]
+    n_frequencies_freqs = log_freqs_array.shape[-1]
     
-    return coupling_matrix
-
-
-def _extract_channel_power_values(
-    dataframe: pd.DataFrame,
-    band_name: str,
-    channels: List[str],
-) -> List[float]:
-    """Extract power values for all channels from dataframe."""
-    power_values = []
-    for channel in channels:
-        column_name = f"pow_{band_name}_{channel}"
-        if column_name in dataframe.columns:
-            numeric_values = pd.to_numeric(
-                dataframe[column_name], errors="coerce"
-            )
-            mean_value = float(numeric_values.mean())
-            power_values.append(mean_value)
-        else:
-            power_values.append(np.nan)
-    return power_values
-
-
-def _compute_band_statistics(
-    subject_power_arrays: np.ndarray,
-    band_name: str,
-    channels: List[str],
-) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-    """Compute mean, std, and n_subjects for each channel in a band."""
-    mean_per_channel = np.nanmean(subject_power_arrays, axis=0)
-    n_subjects_per_channel = np.sum(
-        np.isfinite(subject_power_arrays), axis=0
-    )
-    std_per_channel = np.nanstd(subject_power_arrays, axis=0, ddof=1)
-    
-    statistics = []
-    for channel_idx, channel_name in enumerate(channels):
-        mean_value = mean_per_channel[channel_idx]
-        std_value = std_per_channel[channel_idx]
-        n_subjects = n_subjects_per_channel[channel_idx]
-        
-        statistics.append({
-            "band": band_name,
-            "channel": channel_name,
-            "mean": float(mean_value) if np.isfinite(mean_value) else np.nan,
-            "std": float(std_value) if np.isfinite(std_value) else np.nan,
-            "n_subjects": int(n_subjects),
-        })
-    
-    return mean_per_channel, statistics
-
-
-def compute_group_channel_power_statistics(
-    subj_pow: Dict[str, pd.DataFrame],
-    bands: List[str],
-    all_channels: List[str],
-) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
-    """Compute group channel power statistics."""
-    heatmap_rows, stats_rows = [], []
-    
-    for band in bands:
-        band_name = str(band)
-        subject_means = []
-        
-        for dataframe in subj_pow.values():
-            channel_values = _extract_channel_power_values(
-                dataframe, band_name, all_channels
-            )
-            subject_means.append(channel_values)
-        
-        subject_arrays = np.asarray(subject_means, dtype=float)
-        mean_per_channel, band_statistics = _compute_band_statistics(
-            subject_arrays, band_name, all_channels
+    if n_frequencies_psd != n_frequencies_freqs:
+        raise ValueError(
+            f"log_psd last dimension ({n_frequencies_psd}) does not match "
+            f"log_freqs length ({n_frequencies_freqs})."
         )
-        
-        heatmap_rows.append(mean_per_channel)
-        stats_rows.extend(band_statistics)
+
+    predicted_psd = offsets_array[..., None] + slopes_array[..., None] * log_freqs_array
+    residuals = log_psd_array - predicted_psd
+    return residuals
+
+
+###################################################################
+# Feature Transformation
+###################################################################
+
+
+def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute active - baseline change for matching feature pairs.
     
-    return heatmap_rows, stats_rows
+    This is a data transformation utility that computes difference scores
+    between matching baseline and active feature columns.
+    
+    Parameters
+    ----------
+    features_df : pd.DataFrame
+        DataFrame with feature columns containing "_baseline_" and "_active_" suffixes
+        
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with "_change_" columns containing active - baseline differences
+    """
+    baseline_cols = [c for c in features_df.columns if "_baseline_" in c]
+
+    change_data: Dict[str, np.ndarray] = {}
+    for bl_col in baseline_cols:
+        pl_col = bl_col.replace("_baseline_", "_active_")
+        if pl_col in features_df.columns:
+            bl_vals = features_df[bl_col].values
+            pl_vals = features_df[pl_col].values
+
+            if bl_vals.ndim != 1 or pl_vals.ndim != 1:
+                continue
+
+            change_col = bl_col.replace("_baseline_", "_change_")
+            change_data[change_col] = pl_vals - bl_vals
+
+    if not change_data:
+        return pd.DataFrame(index=features_df.index)
+
+    return pd.DataFrame(change_data, index=features_df.index)
+
+
+###################################################################
+# Data Alignment Utilities
+###################################################################
+
+
+def prepare_aligned_data(
+    x: pd.Series,
+    y: pd.Series,
+    Z: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.Series, pd.Series, Optional[pd.DataFrame], int, int]:
+    """Align x, y, and covariates, removing NaN rows.
+    
+    General utility for aligning multiple series/dataframes and removing
+    rows with missing values. Used by correlation and partial correlation
+    functions.
+    
+    Parameters
+    ----------
+    x : pd.Series
+        First input series
+    y : pd.Series
+        Second input series
+    Z : Optional[pd.DataFrame]
+        Optional covariates dataframe
+        
+    Returns
+    -------
+    Tuple[pd.Series, pd.Series, Optional[pd.DataFrame], int, int]
+        (x_clean, y_clean, Z_clean, n_total, n_kept)
+    """
+    x_series = x if isinstance(x, pd.Series) else pd.Series(x)
+    y_series = y if isinstance(y, pd.Series) else pd.Series(y)
+    
+    frames = [x_series.rename("__x__"), y_series.rename("__y__")]
+    has_covariates = False
+    
+    if Z is not None:
+        if isinstance(Z, pd.DataFrame):
+            has_data = len(Z) > 0 and len(Z.columns) > 0
+            if has_data:
+                frames.append(Z)
+                has_covariates = True
+        else:
+            try:
+                Z_dataframe = pd.DataFrame(Z)
+                has_data = len(Z_dataframe) > 0 and len(Z_dataframe.columns) > 0
+                if has_data:
+                    frames.append(Z_dataframe)
+                    has_covariates = True
+            except (ValueError, TypeError):
+                pass
+
+    combined_data = pd.concat(frames, axis=1)
+    n_total = len(combined_data)
+    clean_data = combined_data.dropna()
+    n_kept = len(clean_data)
+
+    if n_kept == 0:
+        return pd.Series(dtype=float), pd.Series(dtype=float), None, n_total, n_kept
+
+    x_name = x_series.name if x_series.name is not None else "x"
+    y_name = y_series.name if y_series.name is not None else "y"
+    
+    x_clean = clean_data.pop("__x__").rename(x_name)
+    y_clean = clean_data.pop("__y__").rename(y_name)
+    Z_clean = clean_data if has_covariates else None
+
+    return x_clean, y_clean, Z_clean, n_total, n_kept
+
+
 
 
 __all__ = [
@@ -465,6 +518,9 @@ __all__ = [
     "prepare_data_for_plotting",
     "prepare_data_without_validation",
     "prepare_group_data",
+    "prepare_aligned_data",
+    # Feature Transformation
+    "compute_change_features",
     # Regression
     "compute_linear_residuals",
     "fit_linear_regression",
@@ -472,8 +528,5 @@ __all__ = [
     # Aperiodic
     "fit_aperiodic",
     "fit_aperiodic_to_all_epochs",
-    # Coupling
-    "compute_consensus_labels",
-    "compute_inter_band_coupling_matrix",
-    "compute_group_channel_power_statistics",
+    "compute_residuals",
 ]

@@ -126,6 +126,15 @@ _LAZY_IMPORTS = {
     # Connectivity
     "extract_connectivity_features": "connectivity",
     "extract_connectivity_from_precomputed": "connectivity",
+    
+    # Directed Connectivity
+    "extract_directed_connectivity_features": "directed_connectivity",
+    "extract_directed_connectivity_from_precomputed": "directed_connectivity",
+
+    # Source Localization
+    "extract_source_localization_features": "source_localization",
+    "extract_source_connectivity_features": "source_localization",
+    "extract_source_localization_from_precomputed": "source_localization",
 
     # Power
     "extract_power_features": "power",
@@ -133,7 +142,6 @@ _LAZY_IMPORTS = {
 
     # Aperiodic
     "extract_aperiodic_features": "aperiodic",
-    "extract_aperiodic_features_from_epochs": "aperiodic",
 
     # Phase / PAC / ITPC
     "extract_phase_features": "phase",

@@ -18,6 +18,12 @@ import numpy as np
 import pandas as pd
 
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_influence_features
+from eeg_pipeline.utils.analysis.stats._regression_utils import (
+    _ols_fit as _fit_ols,
+    _build_covariate_design,
+    _build_temperature_covariates as _build_temp_cov_shared,
+)
+from eeg_pipeline.utils.analysis.stats.transforms import zscore_array as _standardize
 
 
 # Constants
@@ -32,76 +38,12 @@ _MIN_FEATURES_FOR_PARALLEL = 5
 _DEFAULT_COOKS_THRESHOLD_DIVISOR = 1
 
 
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Safely extract a value from a config object."""
-    if not hasattr(config, "get"):
-        return default
-    try:
-        return config.get(key, default)
-    except (AttributeError, KeyError, TypeError):
-        return default
+from .base import safe_get_config_value as _get_config_value
+
+# _standardize is now imported from transforms as zscore_array
 
 
-def _standardize(x: np.ndarray) -> np.ndarray:
-    """Standardize array to zero mean and unit variance."""
-    x = np.asarray(x, dtype=float)
-    mean = np.nanmean(x)
-    std = np.nanstd(x, ddof=1)
-    if not np.isfinite(std) or std <= 0:
-        return np.full_like(x, np.nan)
-    return (x - mean) / std
-
-
-def _build_covariate_design(
-    df: pd.DataFrame,
-    covariate_cols: List[str],
-    *,
-    add_intercept: bool = True,
-    max_dummies: int = _MAX_DUMMY_LEVELS,
-) -> Tuple[np.ndarray, List[str]]:
-    """Build design matrix from covariate columns with intercept and dummy encoding."""
-    design_parts = []
-    design_names: List[str] = []
-    
-    if add_intercept:
-        intercept = pd.Series(1.0, index=df.index, name="intercept")
-        design_parts.append(intercept)
-        design_names.append("intercept")
-
-    for col in covariate_cols:
-        series = df[col]
-        is_categorical = series.dtype == object or str(series.dtype).startswith("category")
-        
-        if is_categorical:
-            n_levels = int(pd.Series(series).nunique(dropna=True))
-            if n_levels <= 1 or n_levels > max_dummies:
-                continue
-            dummies = pd.get_dummies(series.astype("category"), prefix=str(col), drop_first=True)
-            for dummy_col in dummies.columns:
-                numeric_dummy = pd.to_numeric(dummies[dummy_col], errors="coerce").fillna(0.0)
-                design_parts.append(numeric_dummy)
-                design_names.append(str(dummy_col))
-        else:
-            numeric_series = pd.to_numeric(series, errors="coerce")
-            design_parts.append(numeric_series)
-            design_names.append(str(col))
-
-    if design_parts:
-        design_df = pd.concat(design_parts, axis=1)
-    else:
-        design_df = pd.DataFrame(index=df.index)
-    
-    design_matrix = design_df.to_numpy(dtype=float)
-    return design_matrix, design_names
-
-
-def _fit_ols(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
-    """Fit OLS regression and return coefficients."""
-    try:
-        coefficients = np.linalg.lstsq(X, y, rcond=None)[0]
-        return coefficients
-    except np.linalg.LinAlgError:
-        return None
+# _build_covariate_design is now imported from _regression_utils
 
 
 def _compute_hat_diagonal(X: np.ndarray) -> Optional[np.ndarray]:
@@ -473,54 +415,26 @@ def _process_single_influence_feature(
     }
 
 
+# _add_temperature_covariates is now imported from _regression_utils
+# Wrapper to maintain backward compatibility with existing interface
 def _add_temperature_covariates(
     trial_df: pd.DataFrame,
     outcome: str,
     temperature_control_type: str,
     config: Optional[Any],
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Add temperature control covariates based on configuration."""
-    covariates: List[str] = []
-    temperature_design_df = None
-    temperature_metadata: Dict[str, Any] = {"temperature_control_requested": temperature_control_type}
+    """Add temperature control covariates based on configuration.
     
-    if outcome == "temperature":
-        return covariates, temperature_design_df, temperature_metadata
-    
-    rating_hat_controls = ("rating_hat", "rating_hat_from_temp", "nonlinear")
-    spline_controls = ("spline", "rcs", "restricted_cubic")
-    
-    if temperature_control_type in rating_hat_controls and "rating_hat_from_temp" in trial_df.columns:
-        covariates.append("rating_hat_from_temp")
-        temperature_metadata.update({
-            "temperature_control_used": "rating_hat",
-            "temperature_control_column": "rating_hat_from_temp",
-        })
-    elif temperature_control_type in spline_controls and "temperature" in trial_df.columns:
-        from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
-
-        temperature_design_df, spline_columns, spline_metadata = build_temperature_rcs_design(
-            trial_df["temperature"],
-            config=config,
-            key_prefix="behavior_analysis.influence.temperature_spline",
-            name_prefix="temperature_rcs",
-        )
-        for col in spline_columns:
-            if col not in covariates:
-                covariates.append(col)
-        temperature_metadata.update({
-            "temperature_control_used": "spline",
-            "temperature_control_column": "temperature",
-            "temperature_spline": spline_metadata,
-        })
-    elif "temperature" in trial_df.columns:
-        covariates.append("temperature")
-        temperature_metadata.update({
-            "temperature_control_used": "linear",
-            "temperature_control_column": "temperature",
-        })
-    
-    return covariates, temperature_design_df, temperature_metadata
+    Wrapper around consolidated _build_temperature_covariates.
+    """
+    return _build_temp_cov_shared(
+        trial_df=trial_df,
+        outcome=outcome,
+        temperature_control=temperature_control_type,
+        include_temperature=True,
+        config=config,
+        key_prefix="behavior_analysis.influence.temperature_spline",
+    )
 
 
 def _add_trial_order_covariate(trial_df: pd.DataFrame) -> Optional[str]:

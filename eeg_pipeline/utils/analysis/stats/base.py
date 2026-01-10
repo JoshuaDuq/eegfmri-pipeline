@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
+from scipy import stats
 
 from eeg_pipeline.utils.config.loader import (
     ensure_config,
@@ -93,6 +94,50 @@ def get_ci_level(config: Optional[Any] = None) -> float:
     return float(get_config_value(config, "statistics.ci_level", 0.95))
 
 
+def get_z_critical_value(ci_level: float) -> float:
+    """Compute z-critical value for given confidence interval level.
+    
+    Consolidated utility function for computing z-critical values used
+    throughout the statistics modules.
+    
+    Parameters
+    ----------
+    ci_level : float
+        Confidence level (e.g., 0.95 for 95% CI)
+        
+    Returns
+    -------
+    float
+        Z-critical value for two-tailed test
+    """
+    return float(stats.norm.ppf((1 + ci_level) / 2))
+
+
+def filter_finite_values(values: np.ndarray, flatten: bool = False) -> np.ndarray:
+    """Extract finite values from array.
+    
+    Consolidated utility for filtering finite values used throughout
+    the statistics modules.
+    
+    Parameters
+    ----------
+    values : np.ndarray
+        Input array
+    flatten : bool
+        If True, flatten array before filtering (default: False)
+        
+    Returns
+    -------
+    np.ndarray
+        Array containing only finite values
+    """
+    if flatten:
+        values = np.asarray(values).ravel()
+    else:
+        values = np.asarray(values)
+    return values[np.isfinite(values)]
+
+
 def get_n_permutations(config: Optional[Any] = None) -> int:
     """Get number of permutations from config."""
     return int(get_config_value(config, "statistics.n_permutations", 1000))
@@ -123,7 +168,7 @@ def get_min_samples_for_correlation(config: Optional[Any] = None) -> int:
     return int(get_config_value(config, "statistics.constants.min_samples_for_correlation", 5))
 
 
-def get_subject_seed(subject: str, base_seed: Optional[int] = None, config: Optional[Any] = None) -> int:
+def get_subject_seed(base_seed: int, subject: str) -> int:
     """Generate reproducible seed from subject ID.
     
     Useful for ensuring bootstrap/permutation results are reproducible
@@ -131,22 +176,74 @@ def get_subject_seed(subject: str, base_seed: Optional[int] = None, config: Opti
     
     Parameters
     ----------
+    base_seed : int
+        Base random seed.
     subject : str
         Subject identifier
-    base_seed : int, optional
-        Base random seed. If None, uses project.random_state from config.
-    config : Any, optional
-        Configuration object
         
     Returns
     -------
     int
         Subject-specific seed
     """
-    if base_seed is None:
-        base_seed = int(get_config_value(config, "project.random_state", 42))
+    import hashlib
+    digest = hashlib.sha256(f"{base_seed}:{subject}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big") % (2**31)
+
+
+def safe_get_config_value(config: Any, key: str, default: Any) -> Any:
+    """Safely get a value from config object, returning default if unavailable.
     
-    max_int31 = 2**31
-    subject_hash = hash(subject) % max_int31
-    return (subject_hash + base_seed) % max_int31
+    This is a convenience wrapper around get_config_value that handles
+    cases where config might be None or not have the expected structure.
+    
+    Parameters
+    ----------
+    config : Any
+        Configuration object (dict-like or object with get method)
+    key : str
+        Configuration key to retrieve
+    default : Any
+        Default value if key is not found
+        
+    Returns
+    -------
+    Any
+        Configuration value or default
+    """
+    if config is None:
+        return default
+    try:
+        if hasattr(config, "get"):
+            return config.get(key, default)
+    except (AttributeError, KeyError, TypeError):
+        pass
+    # Fallback to get_config_value from loader if available
+    try:
+        return get_config_value(config, key, default)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any) -> float:
+    """Safely convert value to float, returning NaN on failure.
+    
+    Consolidated utility for safely converting values to float used throughout
+    the statistics modules. Handles None, non-numeric types, and infinite values.
+    
+    Parameters
+    ----------
+    value : Any
+        Value to convert to float
+        
+    Returns
+    -------
+    float
+        Converted float value, or NaN if conversion fails or value is infinite
+    """
+    try:
+        f = float(value)
+        return f if np.isfinite(f) else float("nan")
+    except (TypeError, ValueError):
+        return float("nan")
 

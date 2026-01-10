@@ -94,6 +94,59 @@ def get_tfr_decim(config, mode: str = "power") -> int:
 ###################################################################
 
 
+def filter_freqs_for_signal_length(
+    freqs: np.ndarray,
+    n_cycles: np.ndarray,
+    sfreq: float,
+    n_samples: int,
+    logger: Optional[logging.Logger] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Filter frequencies whose wavelets would be longer than the signal.
+    
+    Morlet wavelet length is approximately: n_cycles / freq * sfreq * 2
+    (the factor of 2 accounts for the full wavelet extent).
+    
+    Parameters
+    ----------
+    freqs : np.ndarray
+        Frequency array
+    n_cycles : np.ndarray
+        Number of cycles per frequency
+    sfreq : float
+        Sampling frequency
+    n_samples : int
+        Number of samples in the signal
+    logger : Optional[logging.Logger]
+        Logger for warnings
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Filtered (freqs, n_cycles) arrays
+    """
+    wavelet_lengths = (n_cycles / freqs) * sfreq * 2
+    valid_mask = wavelet_lengths < n_samples
+    
+    if not np.all(valid_mask):
+        n_excluded = np.sum(~valid_mask)
+        excluded_freqs = freqs[~valid_mask]
+        if logger:
+            logger.warning(
+                f"Excluding {n_excluded} low frequencies (< {excluded_freqs.max():.2f} Hz) "
+                f"whose wavelets exceed signal length ({n_samples} samples). "
+                f"Consider using longer time windows for low-frequency analysis."
+            )
+        
+        if not np.any(valid_mask):
+            raise ValueError(
+                f"All frequencies excluded: signal too short ({n_samples} samples) "
+                f"for wavelet analysis. Minimum frequency {freqs.min():.2f} Hz requires "
+                f"~{int(wavelet_lengths.min())} samples."
+            )
+    
+    return freqs[valid_mask], n_cycles[valid_mask]
+
+
 def compute_tfr_morlet(
     epochs: mne.Epochs,
     config,
@@ -138,6 +191,12 @@ def compute_tfr_morlet(
         decim = get_tfr_decim(config, mode="power")
     
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
+    
+    n_samples = len(epochs.times)
+    sfreq = epochs.info["sfreq"]
+    freqs, n_cycles = filter_freqs_for_signal_length(
+        freqs, n_cycles, sfreq, n_samples, logger
+    )
     
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
@@ -201,9 +260,16 @@ def compute_complex_tfr(
     
     decim_phase = get_tfr_decim(config, mode="phase")
     n_cycles = compute_adaptive_n_cycles(freqs, cycles_factor=n_cycles_factor, config=config)
+    
+    n_samples = len(epochs.times)
+    sfreq = epochs.info["sfreq"]
+    freqs, n_cycles = filter_freqs_for_signal_length(
+        freqs, n_cycles, sfreq, n_samples, logger
+    )
+    
     workers = resolve_tfr_workers(workers_default=int(config.get("time_frequency_analysis.tfr.workers", -1)))
     
-    logger.info("Computing complex TFR for phase-based metrics (decim=%d)...", decim_phase)
+    logger.info("Computing complex TFR for phase-based metrics (decim=%d, %d freqs)...", decim_phase, len(freqs))
     return epochs.compute_tfr(
         method="morlet",
         freqs=freqs,
@@ -350,7 +416,20 @@ def compute_tfr_for_subject(
         tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
     min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
-    b_start_time, b_end_time, b_idxs = validate_baseline_indices(times, tfr_baseline, min_samples=min_baseline_samples)
+    
+    b_start, b_end = tfr_baseline
+    b_start = float(times.min()) if b_start is None else float(b_start)
+    b_end = 0.0 if b_end is None else float(b_end)
+    
+    baseline_mask = (times >= b_start) & (times < b_end)
+    b_idxs = np.where(baseline_mask)[0]
+    
+    if len(b_idxs) < min_baseline_samples:
+        logger.info(
+            f"Baseline window [{b_start:.3f}, {b_end:.3f}] outside current time range "
+            f"[{times.min():.3f}, {times.max():.3f}]; skipping baseline power extraction."
+        )
+        return tfr, pd.DataFrame(), [], b_start, b_end
 
     power_bands = get_frequency_bands(config)
 
@@ -359,13 +438,13 @@ def compute_tfr_for_subject(
         raise ValueError(f"TFR already baseline-corrected (comment: '{tfr_comment}')")
 
     logger.info("Extracting baseline power features (raw power)...")
+    logger.info("Cropping TFR to range [%.3f, %.3f]", times.min(), times.max())
     
-    # Use indices for extraction
     baseline_df, baseline_cols = _extract_baseline_power_features(
         tfr, power_bands, (b_idxs[0], b_idxs[-1] + 1), logger
     )
 
-    return tfr, baseline_df, baseline_cols, b_start_time, b_end_time
+    return tfr, baseline_df, baseline_cols, b_start, b_end
 
 
 def normalize_power_with_baseline(

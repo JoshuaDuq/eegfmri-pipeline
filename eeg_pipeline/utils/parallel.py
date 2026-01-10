@@ -365,55 +365,59 @@ def _compute_single_condition_effect(
     from eeg_pipeline.utils.analysis.stats import hedges_g
     from eeg_pipeline.utils.analysis.stats.correlation import interpret_effect_size
 
-    values = pd.to_numeric(features_df[col], errors="coerce").values
+    # Suppress numpy RuntimeWarnings (empty slices, invalid divides in variance)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        
+        values = pd.to_numeric(features_df[col], errors="coerce").values
 
-    pain_values = values[pain_mask]
-    nonpain_values = values[nonpain_mask]
+        pain_values = values[pain_mask]
+        nonpain_values = values[nonpain_mask]
 
-    pain_valid = pain_values[np.isfinite(pain_values)]
-    nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
+        pain_valid = pain_values[np.isfinite(pain_values)]
+        nonpain_valid = nonpain_values[np.isfinite(nonpain_values)]
 
-    mean_pain = float(np.mean(pain_valid))
-    mean_nonpain = float(np.mean(nonpain_valid))
-    std_pain = float(np.std(pain_valid, ddof=1))
-    std_nonpain = float(np.std(nonpain_valid, ddof=1))
+        mean_pain = float(np.mean(pain_valid))
+        mean_nonpain = float(np.mean(nonpain_valid))
+        std_pain = float(np.std(pain_valid, ddof=1))
+        std_nonpain = float(np.std(nonpain_valid, ddof=1))
 
-    hedges_g_value = hedges_g(pain_valid, nonpain_valid)
+        hedges_g_value = hedges_g(pain_valid, nonpain_valid)
 
-    has_zero_variance = std_pain < _NUMERIC_TOLERANCE and std_nonpain < _NUMERIC_TOLERANCE
-    has_zero_mean_difference = abs(mean_pain - mean_nonpain) < _NUMERIC_TOLERANCE
+        has_zero_variance = std_pain < _NUMERIC_TOLERANCE and std_nonpain < _NUMERIC_TOLERANCE
+        has_zero_mean_difference = abs(mean_pain - mean_nonpain) < _NUMERIC_TOLERANCE
 
-    if has_zero_variance and has_zero_mean_difference:
-        t_statistic = 0.0
-        p_value = 1.0
-        hedges_g_value = 0.0
-    else:
-        t_statistic, p_value = _compute_ttest_statistics(pain_valid, nonpain_valid)
+        if has_zero_variance and has_zero_mean_difference:
+            t_statistic = 0.0
+            p_value = 1.0
+            hedges_g_value = 0.0
+        else:
+            t_statistic, p_value = _compute_ttest_statistics(pain_valid, nonpain_valid)
 
-    p_permutation = np.nan
-    if n_perm > 0:
-        finite_mask = np.isfinite(values) & (pain_mask | nonpain_mask)
-        finite_values = values[finite_mask].astype(float, copy=False)
-        finite_labels = pain_mask[finite_mask].astype(bool, copy=False)
+        p_permutation = np.nan
+        if n_perm > 0:
+            finite_mask = np.isfinite(values) & (pain_mask | nonpain_mask)
+            finite_values = values[finite_mask].astype(float, copy=False)
+            finite_labels = pain_mask[finite_mask].astype(bool, copy=False)
 
-        has_sufficient_data = finite_values.size >= 4
-        has_both_conditions = finite_labels.any() and (~finite_labels).any()
+            has_sufficient_data = finite_values.size >= 4
+            has_both_conditions = finite_labels.any() and (~finite_labels).any()
 
-        if has_sufficient_data and has_both_conditions:
-            observed_statistic = float(
-                np.abs(np.nanmean(finite_values[finite_labels]) - np.nanmean(finite_values[~finite_labels]))
-            )
+            if has_sufficient_data and has_both_conditions:
+                observed_statistic = float(
+                    np.abs(np.nanmean(finite_values[finite_labels]) - np.nanmean(finite_values[~finite_labels]))
+                )
 
-            rng_seed = _generate_column_seed(col, base_seed)
-            rng = np.random.default_rng(rng_seed)
+                rng_seed = _generate_column_seed(col, base_seed)
+                rng = np.random.default_rng(rng_seed)
 
-            valid_groups = _extract_valid_groups(groups, values, finite_mask)
+                valid_groups = _extract_valid_groups(groups, values, finite_mask)
 
-            p_permutation = _compute_permutation_p_value(
-                finite_values, finite_labels, observed_statistic, n_perm, valid_groups, rng
-            )
+                p_permutation = _compute_permutation_p_value(
+                    finite_values, finite_labels, observed_statistic, n_perm, valid_groups, rng
+                )
 
-    effect_interpretation = interpret_effect_size(hedges_g_value) if np.isfinite(hedges_g_value) else "unknown"
+        effect_interpretation = interpret_effect_size(hedges_g_value) if np.isfinite(hedges_g_value) else "unknown"
 
     return {
         "feature": col,

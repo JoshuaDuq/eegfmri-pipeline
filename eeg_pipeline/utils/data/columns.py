@@ -25,8 +25,12 @@ def _extract_column_names_from_config(config: Any) -> Dict[str, List[str]]:
 
 
 def _find_column_in_dataframe(df: pd.DataFrame, column_names: List[str]) -> Optional[str]:
-    """Find first matching column name from list in dataframe."""
-    return next((col for col in column_names if col in df.columns), None)
+    """Find first matching column name from list in dataframe.
+    
+    This function uses find_column from data.manipulation as the canonical implementation.
+    """
+    from eeg_pipeline.utils.data.manipulation import find_column
+    return find_column(df, column_names)
 
 
 def find_column_in_events(events_df: pd.DataFrame, column_names: List[str]) -> Optional[str]:

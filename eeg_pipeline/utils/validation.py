@@ -31,6 +31,8 @@ import numpy as np
 import pandas as pd
 import mne
 
+from eeg_pipeline.utils.config.loader import get_config_value
+
 
 ###################################################################
 # Constants
@@ -103,13 +105,6 @@ def _get_logger(logger: Optional[logging.Logger]) -> logging.Logger:
     return logger if logger is not None else logging.getLogger(__name__)
 
 
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract value from config object with fallback."""
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    return default
-
-
 def _check_nan_inf_in_data(data: np.ndarray) -> tuple[int, float]:
     """Count NaN/Inf values and return count and fraction."""
     nan_count = int(np.sum(~np.isfinite(data)))
@@ -171,7 +166,7 @@ def _validate_epochs_data_quality(
                     f"Data contains {nan_count} NaN/Inf values ({nan_fraction:.2%})"
                 )
 
-        max_uv = _get_config_value(
+        max_uv = get_config_value(
             config, "validation.max_amplitude_uv", DEFAULT_MAX_AMPLITUDE_UV
         )
         extreme_fraction = _check_extreme_amplitudes(data, max_uv)
@@ -235,19 +230,19 @@ def validate_epochs(
     n_channels = len(epochs.ch_names)
     sfreq = epochs.info["sfreq"]
 
-    min_epochs = _get_config_value(config, "validation.min_epochs", DEFAULT_MIN_EPOCHS)
+    min_epochs = get_config_value(config, "validation.min_epochs", DEFAULT_MIN_EPOCHS)
     epoch_issue = _validate_epoch_count(n_epochs, min_epochs)
     if epoch_issue:
         issues.append(epoch_issue)
 
-    expected_sfreq = _get_config_value(
+    expected_sfreq = get_config_value(
         config, "preprocessing.resample_freq", DEFAULT_SAMPLING_FREQ
     )
     sfreq_warning = _validate_sampling_rate(sfreq, expected_sfreq)
     if sfreq_warning:
         warnings.append(sfreq_warning)
 
-    min_channels = _get_config_value(
+    min_channels = get_config_value(
         config, "validation.min_channels", DEFAULT_MIN_CHANNELS
     )
     channel_issue = _validate_channel_count(n_channels, min_channels)
@@ -690,7 +685,7 @@ def _get_percent_threshold(
 
     if config and hasattr(config, "get"):
         return float(
-            _get_config_value(
+            get_config_value(
                 config, "io.constants.percent_threshold", DEFAULT_PERCENT_THRESHOLD
             )
         )
@@ -845,3 +840,74 @@ def validate_predictor_file(
             )
             return False
     return True
+
+
+###################################################################
+# Data Value Validation
+###################################################################
+
+
+def validate_pain_binary_values(
+    values: pd.Series,
+    column_name: str,
+    logger: Optional[logging.Logger] = None,
+) -> tuple[np.ndarray, int]:
+    """Validate pain binary column contains only 0/1 values."""
+    logger = logger or logging.getLogger(__name__)
+
+    numeric_vals = pd.to_numeric(values, errors="coerce")
+    n_total = len(values)
+    n_nan = int(numeric_vals.isna().sum())
+    n_invalid = int(((numeric_vals != 0) & (numeric_vals != 1) & numeric_vals.notna()).sum())
+
+    if n_nan > 0 or n_invalid > 0:
+        error_msg = (
+            f"Invalid pain binary values in '{column_name}': "
+            f"{n_nan} NaN/missing, {n_invalid} non-binary out of {n_total}."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    validated = numeric_vals.fillna(0).astype(int).values
+    return validated, n_nan + n_invalid
+
+
+def validate_temperature_values(
+    values: pd.Series,
+    column_name: str,
+    min_temp: Optional[float] = None,
+    max_temp: Optional[float] = None,
+    logger: Optional[logging.Logger] = None,
+    config: Optional[Any] = None,
+) -> tuple[np.ndarray, int]:
+    """Validate temperature values are within expected range."""
+    from eeg_pipeline.utils.config.loader import get_constants
+    from eeg_pipeline.utils.analysis.stats.base import ensure_config
+
+    logger = logger or logging.getLogger(__name__)
+
+    if min_temp is None or max_temp is None:
+        config = ensure_config(config)
+        io_constants = get_constants("io", config)
+        min_temp = min_temp or float(io_constants.get("temperature_min", 35.0))
+        max_temp = max_temp or float(io_constants.get("temperature_max", 50.0))
+
+    numeric_vals = pd.to_numeric(values, errors="coerce")
+    n_nan = int(numeric_vals.isna().sum())
+    n_out_of_range = int(((numeric_vals < min_temp) | (numeric_vals > max_temp)).sum())
+
+    if n_nan > 0:
+        logger.warning(f"{column_name}: {n_nan} NaN values")
+    if n_out_of_range > 0:
+        logger.warning(f"{column_name}: {n_out_of_range} values outside [{min_temp}, {max_temp}]")
+
+    return numeric_vals.values, n_nan + n_out_of_range
+
+
+def check_pyriemann() -> bool:
+    """Check if pyriemann package is available."""
+    try:
+        import pyriemann  # type: ignore[reportMissingImports]
+        return True
+    except ImportError:
+        return False

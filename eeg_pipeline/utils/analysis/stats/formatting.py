@@ -155,10 +155,9 @@ def _format_confidence_interval_text(
     """Format confidence interval text, computing Fisher Z CI if needed."""
     if ci_low is None or ci_high is None:
         if np.isfinite(r) and n > 3:
+            from .correlation import fisher_ci
             ci_level = get_ci_level(config)
-            ci_low, ci_high = _compute_fisher_z_ci(
-                r, n, ci_level=ci_level, config=config
-            )
+            ci_low, ci_high = fisher_ci(r, n, config=config, ci_level=ci_level)
 
     if ci_low is None or ci_high is None:
         return ""
@@ -206,36 +205,6 @@ def _format_stats_tag(stats_tag: Optional[str]) -> str:
     return ""
 
 
-def _compute_fisher_z_ci(
-    r: float,
-    n: int,
-    *,
-    ci_level: float = 0.95,
-    config: Optional[Any] = None,
-) -> tuple[float, float]:
-    """Compute Fisher Z-transformed confidence interval for correlation.
-
-    Uses the Fisher transformation: z = arctanh(r)
-    SE(z) = 1 / sqrt(n - 3)
-    """
-    if n <= 3 or not np.isfinite(r):
-        return np.nan, np.nan
-
-    clip_min, clip_max = get_fisher_z_clip_values(config)
-    r_clipped = np.clip(r, clip_min, clip_max)
-
-    z = np.arctanh(r_clipped)
-    se_z = 1.0 / np.sqrt(n - 3)
-
-    alpha = 1 - ci_level
-    z_crit = scipy_stats.norm.ppf(1 - alpha / 2)
-
-    z_low = z - z_crit * se_z
-    z_high = z + z_crit * se_z
-
-    ci_low = float(np.tanh(z_low))
-    ci_high = float(np.tanh(z_high))
-    return ci_low, ci_high
 
 
 def _compute_bf10_correlation(r: float, n: int) -> float:
@@ -330,10 +299,5 @@ def _interpret_bayes_factor(bf10: float) -> str:
         return "very strong H₀"
 
 
-def _safe_float(value: Any) -> float:
-    """Safely convert value to float, returning NaN on failure."""
-    try:
-        f = float(value)
-        return f if np.isfinite(f) else float("nan")
-    except (TypeError, ValueError):
-        return float("nan")
+# _safe_float moved to base.py for better organization
+# Re-exported here for backward compatibility

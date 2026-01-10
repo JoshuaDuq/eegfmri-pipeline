@@ -5,28 +5,39 @@ Statistics Utilities
 Statistical utilities for EEG analysis.
 
 Modules:
-    - base: Constants and config helpers
+    - base: Constants, config helpers, and core utilities
     - fdr: FDR correction
-    - cluster: Cluster permutation tests (1D)
-    - cluster_2d: Cluster permutation tests (2D time-frequency)
+    - cluster: Cluster permutation tests (1D and 2D)
     - correlation: Correlation and partial correlation
     - bootstrap: Bootstrap and permutation tests
     - effect_size: Effect size metrics
     - validation: Data validation
     - formatting: Statistical formatting
     - aggregation: Group statistics
-    - eeg_stats: EEG-specific statistics
-    - transform: Data transformation
-    - aperiodic: Aperiodic fitting
-    - regression: Linear regression
+    - transforms: Data transformation and aperiodic fitting
     - visualization: Visualization statistics
     - roi: ROI statistics
-    - band_stats: Band statistics
-    - coupling: Inter-band coupling
+    - band: Band statistics and inter-band coupling
     - permutation: Permutation tests
     - partial: Partial correlation
     - diagnostics: Regression and model diagnostics
-    - group: Group correlation statistics
+    - meta_analysis: Meta-analysis utilities
+    - mediation: Mediation analysis
+    - moderation: Moderation analysis
+    - reliability: Reliability and ICC
+    - paired_comparisons: Paired comparison tests
+    - feature_models: Feature-level regression models
+    - trialwise_regression: Trial-wise regression
+    - temporal: Temporal correlation analysis
+    - stability: Stability analysis
+    - consistency: Consistency checks
+    - influence: Influence diagnostics
+    - confounds: Confound analysis
+    - splines: Spline fitting
+    - temperature_models: Temperature-rating models
+    - pain_residual: Pain residual computation
+    - mixed_effects: Mixed effects models
+    - topomaps: Topographic map statistics
 """
 
 from .base import (
@@ -34,10 +45,13 @@ from .base import (
     get_statistics_constants,
     get_fdr_alpha,
     get_ci_level,
+    get_z_critical_value,
     get_n_permutations,
     get_n_bootstrap,
     get_config_value,
     ensure_config,
+    safe_get_config_value,
+    _safe_float,
 )
 
 from .fdr import (
@@ -67,12 +81,10 @@ from .cluster import (
     resolve_cluster_n_jobs,
     cluster_test_two_sample,
     cluster_test_epochs,
-)
-
-from .cluster_2d import (
+    # 2D cluster correction (merged from cluster_2d)
     compute_cluster_masses_2d,
     compute_permutation_max_masses,
-    compute_cluster_pvalues,
+    compute_cluster_pvalues_2d as compute_cluster_pvalues,
     compute_cluster_correction_2d,
     compute_cluster_masses_1d,
     compute_topomap_permutation_masses,
@@ -87,23 +99,24 @@ from .correlation import (
     fisher_ci,
     fisher_aggregate,
     weighted_fisher_aggregate,
+    fisher_z_transform_mean,
+    compute_correlation_ci_fisher,
     joint_valid_mask,
-    partial_corr_xy_given_Z,
-    compute_partial_corr,
-    normalize_series,
     compute_correlation_pvalue,
     # New robust/Bayesian statistics
     compute_bayes_factor_correlation,
     compute_robust_correlation,
     compute_loso_correlation_stability,
     compute_correlation_reliability,
+    # Correlation statistics helpers
+    compute_correlation_stats,
 )
 
 from .bootstrap import (
-    permute_within_groups,
-    perm_pval_simple,
     bootstrap_corr_ci,
     bootstrap_ci_bca,
+    bootstrap_mean_diff_ci,
+    ensure_bootstrap_ci,
 )
 
 from .effect_size import (
@@ -115,17 +128,21 @@ from .effect_size import (
     r_to_d,
     d_to_r,
     compute_effect_sizes,
+    compute_cohens_d_with_bootstrap_ci,
 )
 
 from .validation import (
+    validate_baseline_window_pre_stimulus,
+)
+
+from eeg_pipeline.utils.validation import (
     validate_pain_binary_values,
     validate_temperature_values,
-    validate_baseline_window_pre_stimulus,
     check_pyriemann,
-    extract_finite_mask,
-    extract_pain_masks,
-    extract_duration_data,
 )
+
+from eeg_pipeline.utils.analysis.arrays import extract_finite_mask
+from eeg_pipeline.utils.data.manipulation import extract_pain_masks, extract_duration_data
 
 from .formatting import (
     format_p_value,
@@ -133,8 +150,6 @@ from .formatting import (
     format_cluster_ann,
     format_fdr_ann,
     format_correlation_stats_text,
-    _safe_float,
-    _compute_fisher_z_ci,
     _compute_bf10_correlation,
     _interpret_bayes_factor,
 )
@@ -153,26 +168,23 @@ from .aggregation import (
     compute_duration_p_value,
 )
 
-from .eeg_stats import (
-    align_epochs_to_pivot_chs,
-    compute_correlation_for_metric_state,
-    compute_residuals,
-    compute_robust_correlation,
-    compute_bootstrap_ci,
-)
+from .cluster import align_epochs_to_pivot_chs
+from .bootstrap import compute_bootstrap_ci
 
-from .core import (
+from .transforms import (
     center_series,
     zscore_series,
     apply_pooling_strategy,
     prepare_data_for_plotting,
     prepare_data_without_validation,
     prepare_group_data,
+    prepare_aligned_data,
     fit_aperiodic,
     fit_aperiodic_to_all_epochs,
     compute_linear_residuals,
     fit_linear_regression,
     compute_binned_statistics,
+    compute_residuals,
 )
 
 from .visualization import (
@@ -190,28 +202,23 @@ from .roi import (
     compute_coverage_statistics,
 )
 
-from .band_stats import (
+from .band import (
     compute_band_spatial_correlation,
     compute_band_pair_correlation,
     compute_subject_band_correlation_matrix,
     compute_group_band_correlation_matrix,
-    fisher_z_transform_mean,
     compute_band_statistics_array,
     compute_inter_band_correlation_statistics,
-    compute_correlation_ci_fisher,
     compute_band_correlations,
     compute_connectivity_correlations,
-    compute_correlation_stats,
-    compute_partial_residuals_stats,
-)
-
-from .core import (
-    compute_consensus_labels,
     compute_inter_band_coupling_matrix,
     compute_group_channel_power_statistics,
 )
 
+
 from .permutation import (
+    permute_within_groups,
+    perm_pval_simple,
     perm_pval_partial_freedman_lane,
     compute_perm_and_partial_perm,
     compute_permutation_pvalue_partial,
@@ -219,16 +226,19 @@ from .permutation import (
     compute_permutation_pvalues_with_cov_temp,
     compute_temp_permutation_pvalues,
     compute_permutation_pvalues_for_roi_pair,
+    permutation_null_distribution,
 )
 
 from .partial import (
+    partial_corr_xy_given_Z,
     partial_residuals_xy_given_Z,
     compute_partial_residuals,
+    compute_partial_corr,
     compute_partial_correlation_with_covariates,
     compute_partial_correlations,
     compute_partial_correlations_with_cov_temp,
     compute_partial_correlation_for_roi_pair,
-    prepare_aligned_data,
+    compute_partial_residuals_stats,
 )
 
 
@@ -244,7 +254,6 @@ from .paired_comparisons import (
     safe_wilcoxon,
     safe_mannwhitneyu,
     compute_paired_cohens_d,
-    bootstrap_mean_diff_ci,
     compute_window_comparison,
     compute_condition_comparison,
     compute_all_paired_comparisons,
@@ -254,25 +263,34 @@ from .paired_comparisons import (
 
 from .meta_analysis import (
     MetaAnalysisResult,
-    fisher_z as meta_fisher_z,
-    inverse_fisher_z as meta_inverse_fisher_z,
     correlation_se,
     compute_heterogeneity,
     fixed_effects_meta,
     random_effects_meta,
     leave_one_out_meta,
-    permutation_null_distribution,
-    bootstrap_correlation_ci,
-    ensure_bootstrap_ci,
     bayes_factor_correlation,
     equivalence_test_correlation,
+)
+
+from .mediation import (
+    MediationResult,
+    compute_mediation_paths,
+    bootstrap_indirect_effect,
+    run_full_mediation_analysis,
+    analyze_mediation_for_features,
+)
+
+from .moderation import (
+    ModerationResult,
+    compute_moderation_effect,
+    run_moderation_analysis,
 )
 
 from .reliability import (
     compute_icc,
     compute_split_half_reliability,
     compute_feature_reliability,
-    hierarchical_fdr,
+    hierarchical_fdr_dict,
     compute_hierarchical_fdr_summary,
     cross_validated_prediction,
     compute_calibration_curve,
@@ -322,10 +340,12 @@ __all__ = [
     "get_statistics_constants",
     "get_fdr_alpha",
     "get_ci_level",
+    "get_z_critical_value",
     "get_n_permutations",
     "get_n_bootstrap",
     "get_config_value",
     "ensure_config",
+    "safe_get_config_value",
     # FDR
     "fdr_bh",
     "fdr_bh_reject",
@@ -368,21 +388,23 @@ __all__ = [
     "fisher_ci",
     "fisher_aggregate",
     "weighted_fisher_aggregate",
+    "fisher_z_transform_mean",
+    "compute_correlation_ci_fisher",
     "joint_valid_mask",
-    "partial_corr_xy_given_Z",
     "compute_partial_corr",
-    "normalize_series",
     "compute_correlation_pvalue",
     # Robust/Bayesian statistics
     "compute_bayes_factor_correlation",
     "compute_robust_correlation",
     "compute_loso_correlation_stability",
     "compute_correlation_reliability",
+    # Correlation statistics helpers
+    "compute_correlation_stats",
     # Bootstrap
-    "permute_within_groups",
-    "perm_pval_simple",
     "bootstrap_corr_ci",
     "bootstrap_ci_bca",
+    "bootstrap_mean_diff_ci",
+    "ensure_bootstrap_ci",
     # Effect Size
     "cohens_d",
     "hedges_g",
@@ -392,6 +414,7 @@ __all__ = [
     "r_to_d",
     "d_to_r",
     "compute_effect_sizes",
+    "compute_cohens_d_with_bootstrap_ci",
     # Validation
     "validate_pain_binary_values",
     "validate_temperature_values",
@@ -424,7 +447,6 @@ __all__ = [
     "compute_correlation_for_metric_state",
     "prepare_aligned_data",
     "compute_residuals",
-    "compute_robust_correlation",
     "compute_bootstrap_ci",
     # Transform
     "center_series",
@@ -456,43 +478,37 @@ __all__ = [
     "compute_band_pair_correlation",
     "compute_subject_band_correlation_matrix",
     "compute_group_band_correlation_matrix",
-    "fisher_z_transform_mean",
     "compute_band_statistics_array",
     "compute_inter_band_correlation_statistics",
-    "compute_correlation_ci_fisher",
     "compute_band_correlations",
     "compute_connectivity_correlations",
-    "compute_correlation_stats",
-    "compute_partial_residuals_stats",
-    # Coupling
-    "compute_consensus_labels",
     "compute_inter_band_coupling_matrix",
     "compute_group_channel_power_statistics",
     # Permutation
+    "permute_within_groups",
+    "perm_pval_simple",
     "perm_pval_partial_freedman_lane",
     "compute_perm_and_partial_perm",
     "compute_permutation_pvalue_partial",
     "compute_permutation_pvalues",
     "compute_temp_permutation_pvalues",
     "compute_permutation_pvalues_for_roi_pair",
+    "permutation_null_distribution",
     # Partial
+    "partial_corr_xy_given_Z",
     "partial_residuals_xy_given_Z",
     "compute_partial_residuals",
     "compute_partial_correlation_with_covariates",
     "compute_partial_correlations",
     "compute_partial_correlation_for_roi_pair",
+    "compute_partial_residuals_stats",
     # Meta-analysis
     "MetaAnalysisResult",
-    "meta_fisher_z",
-    "meta_inverse_fisher_z",
     "correlation_se",
     "compute_heterogeneity",
     "fixed_effects_meta",
     "random_effects_meta",
     "leave_one_out_meta",
-    "permutation_null_distribution",
-    "bootstrap_correlation_ci",
-    "ensure_bootstrap_ci",
     "bayes_factor_correlation",
     "equivalence_test_correlation",
     # Validation
@@ -531,7 +547,7 @@ __all__ = [
     "compute_icc",
     "compute_split_half_reliability",
     "compute_feature_reliability",
-    "hierarchical_fdr",
+    "hierarchical_fdr_dict",
     "compute_hierarchical_fdr_summary",
     "cross_validated_prediction",
     "compute_calibration_curve",
@@ -544,10 +560,19 @@ __all__ = [
     "safe_wilcoxon",
     "safe_mannwhitneyu",
     "compute_paired_cohens_d",
-    "bootstrap_mean_diff_ci",
     "compute_window_comparison",
     "compute_condition_comparison",
     "compute_all_paired_comparisons",
     "save_paired_comparisons",
     "load_paired_comparisons",
+    # Mediation
+    "MediationResult",
+    "compute_mediation_paths",
+    "bootstrap_indirect_effect",
+    "run_full_mediation_analysis",
+    "analyze_mediation_for_features",
+    # Moderation
+    "ModerationResult",
+    "compute_moderation_effect",
+    "run_moderation_analysis",
 ]

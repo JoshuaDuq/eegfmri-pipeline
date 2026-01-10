@@ -31,6 +31,7 @@ MANDATORY_TIME_WINDOWS: List[str] = [
 FEATURE_CATEGORIES: List[str] = [
     "power",
     "connectivity",
+    "directed_connectivity",
     "aperiodic",
     "erp",
     "complexity",
@@ -47,6 +48,7 @@ FEATURE_CATEGORIES: List[str] = [
 FEATURE_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
     "power": "Band power features (theta, alpha, beta, gamma)",
     "connectivity": "Phase connectivity metrics",
+    "directed_connectivity": "Directed connectivity metrics (PSI, DTF, PDC)",
     "aperiodic": "1/f spectral slope parameters",
     "erp": "ERP/LEP time-domain features",
     "complexity": "Signal complexity measures",

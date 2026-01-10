@@ -100,7 +100,10 @@ def _load_aperiodic_features(
     deriv_root: Path, subject: str, logger: Any
 ) -> Optional[pd.DataFrame]:
     """Load aperiodic features table for the subject."""
-    aperiodic_path = deriv_features_path(deriv_root, subject) / "features_aperiodic.tsv"
+    features_dir = deriv_features_path(deriv_root, subject)
+    aperiodic_path = features_dir / "aperiodic" / "features_aperiodic.tsv"
+    if not aperiodic_path.exists():
+        aperiodic_path = features_dir / "features_aperiodic.tsv"
     if not aperiodic_path.exists():
         logger.warning("Aperiodic features not found at %s", aperiodic_path)
         return None

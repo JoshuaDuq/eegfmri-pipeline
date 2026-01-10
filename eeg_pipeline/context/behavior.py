@@ -113,6 +113,7 @@ class BehaviorContext:
     selected_feature_files: Optional[List[str]] = None  # Specific files to load (e.g., ["power", "aperiodic"])
     selected_bands: Optional[List[str]] = None  # Specific bands to include (e.g., ["alpha", "beta"])
     computation_features: Optional[Dict[str, List[str]]] = None  # Per-computation feature category filters
+    also_save_csv: bool = False  # Also save output tables as CSV files
     
     epochs: Any = None
     epochs_info: Any = None
@@ -285,9 +286,10 @@ class BehaviorContext:
     ) -> None:
         """Load a single feature file and assign to context attribute."""
         from eeg_pipeline.infra.tsv import read_table
+        from eeg_pipeline.utils.data.feature_discovery import _find_feature_file_path
 
         filename = standard_files[key]
-        path = features_dir / filename
+        path = _find_feature_file_path(features_dir, key, filename)
 
         if not path.exists():
             self.logger.warning("Feature file not found: %s", path)
@@ -535,7 +537,11 @@ class BehaviorContext:
         import json
 
         features_dir = deriv_features_path(self.deriv_root, self.subject)
-        manifest_path = features_dir / _TRIAL_ALIGNMENT_MANIFEST
+        
+        # Check new reorganized path first, fallback to legacy path
+        manifest_path = features_dir / "metadata" / _TRIAL_ALIGNMENT_MANIFEST
+        if not manifest_path.exists():
+            manifest_path = features_dir / _TRIAL_ALIGNMENT_MANIFEST
 
         if not manifest_path.exists():
             raise FileNotFoundError(

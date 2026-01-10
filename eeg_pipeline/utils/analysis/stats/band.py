@@ -17,8 +17,7 @@ from scipy import stats
 from eeg_pipeline.utils.config.loader import get_fisher_z_clip_values
 
 from .base import get_statistics_constants
-from .bootstrap import bootstrap_corr_ci
-from .correlation import compute_correlation
+from .correlation import compute_correlation, fisher_z_transform_mean, compute_correlation_ci_fisher
 
 
 def compute_band_spatial_correlation(
@@ -75,15 +74,6 @@ def compute_subject_band_correlation_matrix(
             correlation_matrix[j, i] = correlation
     
     return correlation_matrix
-
-
-def fisher_z_transform_mean(r_values: np.ndarray, config: Optional[Any] = None) -> float:
-    """Compute Fisher z-transformed mean of correlations."""
-    clip_min, clip_max = get_fisher_z_clip_values(config)
-    r_clipped = np.clip(r_values, clip_min, clip_max)
-    z_scores = np.arctanh(r_clipped)
-    z_mean = np.mean(z_scores)
-    return float(np.tanh(z_mean))
 
 
 def compute_group_band_correlation_matrix(
@@ -191,23 +181,6 @@ def compute_inter_band_correlation_statistics(
     return results
 
 
-def compute_correlation_ci_fisher(
-    z_mean: float,
-    se: float,
-    ci_multiplier: float = 1.96,
-) -> Tuple[float, float]:
-    """Compute CI from Fisher z mean and SE."""
-    if not np.isfinite(se):
-        return np.nan, np.nan
-    
-    z_low = z_mean - ci_multiplier * se
-    z_high = z_mean + ci_multiplier * se
-    ci_low = float(np.tanh(z_low))
-    ci_high = float(np.tanh(z_high))
-    
-    return ci_low, ci_high
-
-
 def compute_band_correlations(
     pow_df: pd.DataFrame,
     y: pd.Series,
@@ -253,13 +226,21 @@ def compute_band_correlations(
     p_values = []
     
     for col in band_columns:
-        valid_data = pd.concat([pow_df[col], y], axis=1).dropna()
+        x_values = pow_df[col].to_numpy()
+        y_values = y.to_numpy()
         
-        if len(valid_data) >= min_samples:
-            correlation, p_value = stats.spearmanr(
-                valid_data.iloc[:, 0],
-                valid_data.iloc[:, 1]
-            )
+        # Use centralized correlation function
+        valid_mask = np.isfinite(x_values) & np.isfinite(y_values)
+        x_valid = x_values[valid_mask]
+        y_valid = y_values[valid_mask]
+        
+        if len(x_valid) >= min_samples:
+            correlation, _ = compute_correlation(x_valid, y_valid, method="spearman")
+            # Compute p-value using scipy for compatibility
+            if np.isfinite(correlation) and len(x_valid) >= 3:
+                _, p_value = stats.spearmanr(x_valid, y_valid)
+            else:
+                p_value = 1.0
         else:
             correlation = np.nan
             p_value = 1.0
@@ -287,17 +268,27 @@ def compute_connectivity_correlations(
     epsilon_std = 1e-12
     
     for col in measure_cols:
-        valid_mask = ~(conn_df[col].isna() | y.isna())
-        if valid_mask.sum() < min_samples:
+        x_values = conn_df[col].to_numpy()
+        y_values = y.to_numpy()
+        
+        valid_mask = np.isfinite(x_values) & np.isfinite(y_values)
+        x_valid = x_values[valid_mask]
+        y_valid = y_values[valid_mask]
+        
+        if len(x_valid) < min_samples:
             continue
         
-        x_values = conn_df[col][valid_mask].to_numpy()
-        y_values = y[valid_mask].to_numpy()
-        
-        if np.std(x_values) < epsilon_std or np.std(y_values) < epsilon_std:
+        if np.std(x_valid) < epsilon_std or np.std(y_valid) < epsilon_std:
             continue
         
-        correlation, p_value = stats.spearmanr(x_values, y_values)
+        # Use centralized correlation function
+        correlation, _ = compute_correlation(x_valid, y_valid, method="spearman")
+        
+        # Compute p-value using scipy for compatibility
+        if np.isfinite(correlation) and len(x_valid) >= 3:
+            _, p_value = stats.spearmanr(x_valid, y_valid)
+        else:
+            p_value = 1.0
         
         is_significant = abs(correlation) > min_correlation and p_value < max_pvalue
         if is_significant:
@@ -308,89 +299,120 @@ def compute_connectivity_correlations(
     return correlations, connections
 
 
-def compute_correlation_stats(
-    x: pd.Series,
-    y: pd.Series,
-    method_code: str,
-    bootstrap_ci: int,
-    rng: Optional[np.random.Generator],
-    min_samples: int = 3,
-) -> Tuple[float, float, int, Tuple[float, float]]:
-    """Compute correlation with optional bootstrap CI."""
-    valid_mask = np.isfinite(x) & np.isfinite(y)
-    n_effective = int(valid_mask.sum())
+def compute_inter_band_coupling_matrix(
+    tfr_avg,
+    band_names: List[str],
+    features_freq_bands: Dict[str, Tuple[float, float]],
+    extract_band_channel_means_func,
+) -> np.ndarray:
+    """Compute inter-band coupling matrix."""
+    n_bands = len(band_names)
+    coupling_matrix = np.zeros((n_bands, n_bands))
     
-    if n_effective < min_samples:
-        return np.nan, np.nan, n_effective, (np.nan, np.nan)
+    for band_1_idx, band_1_name in enumerate(band_names):
+        fmin_1, fmax_1 = features_freq_bands[band_1_name]
+        freq_mask_1 = (tfr_avg.freqs >= fmin_1) & (tfr_avg.freqs <= fmax_1)
+        
+        if not freq_mask_1.any():
+            continue
+        
+        coupling_matrix[band_1_idx, band_1_idx] = 1.0
+        band_1_channels = extract_band_channel_means_func(tfr_avg, freq_mask_1)
+        
+        for band_2_idx in range(band_1_idx + 1, n_bands):
+            band_2_name = band_names[band_2_idx]
+            fmin_2, fmax_2 = features_freq_bands[band_2_name]
+            freq_mask_2 = (tfr_avg.freqs >= fmin_2) & (tfr_avg.freqs <= fmax_2)
+            
+            if not freq_mask_2.any():
+                continue
+            
+            band_2_channels = extract_band_channel_means_func(
+                tfr_avg, freq_mask_2
+            )
+            correlation = compute_band_spatial_correlation(
+                band_1_channels, band_2_channels
+            )
+            coupling_matrix[band_1_idx, band_2_idx] = correlation
+            coupling_matrix[band_2_idx, band_1_idx] = correlation
     
-    x_valid = x[valid_mask]
-    y_valid = y[valid_mask]
-    correlation, p_value = compute_correlation(x_valid, y_valid, method_code)
-    
-    if bootstrap_ci > 0:
-        confidence_interval = bootstrap_corr_ci(
-            x_valid,
-            y_valid,
-            method_code,
-            n_boot=bootstrap_ci,
-            rng=rng
-        )
-    else:
-        confidence_interval = (np.nan, np.nan)
-    
-    return float(correlation), float(p_value), n_effective, confidence_interval
+    return coupling_matrix
 
 
-def _safe_float(value: Any) -> float:
-    """Convert value to float, handling None and NaN."""
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return np.nan
-    return float(value)
+def _extract_channel_power_values(
+    dataframe: pd.DataFrame,
+    band_name: str,
+    channels: List[str],
+) -> List[float]:
+    """Extract power values for all channels from dataframe."""
+    power_values = []
+    for channel in channels:
+        column_name = f"pow_{band_name}_{channel}"
+        if column_name in dataframe.columns:
+            numeric_values = pd.to_numeric(
+                dataframe[column_name], errors="coerce"
+            )
+            mean_value = float(numeric_values.mean())
+            power_values.append(mean_value)
+        else:
+            power_values.append(np.nan)
+    return power_values
 
 
-def compute_partial_residuals_stats(
-    x_res: pd.Series,
-    y_res: pd.Series,
-    stats_df: Optional[pd.Series],
-    n_res: int,
-    method_code: str,
-    bootstrap_ci: int,
-    rng: np.random.Generator,
-) -> Tuple[float, float, int, Tuple[float, float]]:
-    """Compute partial correlation statistics from residuals."""
-    r_residual = np.nan
-    p_residual = np.nan
-    n_partial = n_res
-    
-    if stats_df is not None:
-        r_residual = _safe_float(stats_df.get("r_partial", np.nan))
-        p_residual = _safe_float(stats_df.get("p_partial", np.nan))
-        n_partial = int(stats_df.get("n_partial", n_partial))
-    
-    if not np.isfinite(r_residual):
-        # Always use pearson for residuals (even if method is spearman,
-        # ranked residuals are Pearson-correlated to get Spearman partial)
-        r_residual, p_residual = compute_correlation(
-            x_res,
-            y_res,
-            method="pearson"
-        )
-    
-    if bootstrap_ci > 0:
-        confidence_interval = bootstrap_corr_ci(
-            x_res,
-            y_res,
-            method_code,
-            n_boot=bootstrap_ci,
-            rng=rng
-        )
-    else:
-        confidence_interval = (np.nan, np.nan)
-    
-    return (
-        float(r_residual),
-        float(p_residual),
-        n_partial,
-        confidence_interval
+def _compute_band_statistics(
+    subject_power_arrays: np.ndarray,
+    band_name: str,
+    channels: List[str],
+) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+    """Compute mean, std, and n_subjects for each channel in a band."""
+    mean_per_channel = np.nanmean(subject_power_arrays, axis=0)
+    n_subjects_per_channel = np.sum(
+        np.isfinite(subject_power_arrays), axis=0
     )
+    std_per_channel = np.nanstd(subject_power_arrays, axis=0, ddof=1)
+    
+    statistics = []
+    for channel_idx, channel_name in enumerate(channels):
+        mean_value = mean_per_channel[channel_idx]
+        std_value = std_per_channel[channel_idx]
+        n_subjects = n_subjects_per_channel[channel_idx]
+        
+        statistics.append({
+            "band": band_name,
+            "channel": channel_name,
+            "mean": float(mean_value) if np.isfinite(mean_value) else np.nan,
+            "std": float(std_value) if np.isfinite(std_value) else np.nan,
+            "n_subjects": int(n_subjects),
+        })
+    
+    return mean_per_channel, statistics
+
+
+def compute_group_channel_power_statistics(
+    subj_pow: Dict[str, pd.DataFrame],
+    bands: List[str],
+    all_channels: List[str],
+) -> Tuple[List[np.ndarray], List[Dict[str, Any]]]:
+    """Compute group channel power statistics."""
+    heatmap_rows, stats_rows = [], []
+    
+    for band in bands:
+        band_name = str(band)
+        subject_means = []
+        
+        for dataframe in subj_pow.values():
+            channel_values = _extract_channel_power_values(
+                dataframe, band_name, all_channels
+            )
+            subject_means.append(channel_values)
+        
+        subject_arrays = np.asarray(subject_means, dtype=float)
+        mean_per_channel, band_statistics = _compute_band_statistics(
+            subject_arrays, band_name, all_channels
+        )
+        
+        heatmap_rows.append(mean_per_channel)
+        stats_rows.extend(band_statistics)
+    
+    return heatmap_rows, stats_rows
 

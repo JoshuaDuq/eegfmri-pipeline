@@ -39,23 +39,31 @@ def validate_window_masks(
         return False
 
     if require_baseline:
-        baseline_mask = getattr(windows, "baseline_mask", None)
+        baseline_mask = windows.get_mask("baseline")
         if baseline_mask is None or not np.any(baseline_mask):
             if logger:
                 logger.warning(
-                    "Baseline window is empty; configured/used range: %s. Skipping feature extraction.",
-                    getattr(windows, "baseline_range", None),
+                    "Baseline window is missing or empty. This may affect features "
+                    "requiring baseline normalization."
                 )
             return False
 
     if require_active:
-        active_mask = getattr(windows, "active_mask", None)
-        if active_mask is None or not np.any(active_mask):
+        # Check if a targeted window is set and exists
+        target_name = getattr(windows, "name", None)
+        if target_name and target_name in windows.masks:
+            mask = windows.get_mask(target_name)
+            if mask is not None and np.any(mask):
+                return True
+        
+        # Otherwise check if there's at least one non-baseline mask
+        has_active = any(
+            name.lower() != "baseline" and np.any(mask) 
+            for name, mask in windows.masks.items()
+        )
+        if not has_active:
             if logger:
-                logger.warning(
-                    "Active window is empty; configured/used range: %s. Skipping feature extraction.",
-                    getattr(windows, "active_range", None),
-                )
+                logger.warning("No active/task windows found; skipping feature extraction.")
             return False
 
     return True
@@ -85,9 +93,16 @@ def extract_band_ratios_from_precomputed(
     if not pairs:
         return pd.DataFrame(), []
 
-    # Get ALL segment masks from windows
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, config)
+    
+    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    
+    # When a specific time range is targeted, the precomputed data may have been
+    # cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(precomputed.times, precomputed.windows, config)
     
     if not segment_masks:
         return pd.DataFrame(), []
@@ -263,9 +278,16 @@ def extract_asymmetry_from_precomputed(
     if not valid_pairs:
         return pd.DataFrame(), []
 
-    # Get ALL segment masks from windows
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
+    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    
+    # When a specific time range is targeted, the precomputed data may have been
+    # cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
     
     if not segment_masks:
         return pd.DataFrame(), []

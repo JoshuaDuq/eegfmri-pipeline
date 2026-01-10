@@ -317,3 +317,42 @@ def prepare_topomap_correlation_data(
             topomap_mask[info_channel_idx] = bool(significant_mask[band_channel_idx])
 
     return topomap_data, topomap_mask
+
+
+def extract_pain_masks(pain_vals: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract boolean masks for pain and non-pain trials.
+    
+    Parameters
+    ----------
+    pain_vals : pd.Series
+        Series containing pain binary values (0 or 1)
+        
+    Returns
+    -------
+    pain_mask : np.ndarray
+        Boolean mask where pain_vals == 1
+    nonpain_mask : np.ndarray
+        Boolean mask where pain_vals == 0
+    """
+    pain_arr = np.asarray(pain_vals)
+    pain_mask = pain_arr == 1
+    nonpain_mask = pain_arr == 0
+    return pain_mask, nonpain_mask
+
+
+def extract_duration_data(durations: pd.Series, mask: np.ndarray) -> np.ndarray:
+    """Extract duration data for masked trials.
+    
+    Parameters
+    ----------
+    durations : pd.Series
+        Series containing duration values
+    mask : np.ndarray
+        Boolean mask to apply
+        
+    Returns
+    -------
+    np.ndarray
+        Duration values for masked trials
+    """
+    return durations.values[mask]

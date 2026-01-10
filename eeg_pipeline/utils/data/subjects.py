@@ -102,12 +102,12 @@ def _collect_subjects_from_features(deriv_root: Path) -> List[str]:
 
 
 def _has_feature_files(directory: Path) -> bool:
-    """Check if directory contains feature files."""
+    """Check if directory contains feature files (including in subdirectories)."""
     if not directory.is_dir():
         return False
     return any(
         f.suffix in {".tsv", ".parquet"} and f.name.startswith("features_")
-        for f in directory.iterdir()
+        for f in directory.rglob("features_*")
     )
 
 

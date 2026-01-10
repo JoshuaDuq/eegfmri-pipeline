@@ -18,16 +18,7 @@ import numpy as np
 import pandas as pd
 
 
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract configuration value with safe fallback."""
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        try:
-            return config.get(key, default)
-        except (AttributeError, KeyError, TypeError):
-            return default
-    return default
+from .base import safe_get_config_value as _get_config_value
 
 
 def _prepare_data(

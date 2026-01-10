@@ -287,7 +287,7 @@ def _add_bootstrap_ci(
     rng: np.random.Generator,
 ) -> None:
     """Add bootstrap confidence intervals to record."""
-    from eeg_pipeline.utils.analysis.stats.eeg_stats import compute_bootstrap_ci
+    from eeg_pipeline.utils.analysis.stats.bootstrap import compute_bootstrap_ci
     
     valid_mask = np.isfinite(col_values) & np.isfinite(targets)
     ci_low, ci_high = compute_bootstrap_ci(
@@ -941,8 +941,10 @@ class FeatureBehaviorCorrelator:
         apply_fdr: bool = True,
         method_label: Optional[str] = None,
     ) -> List[Path]:
-        """Save correlation results to TSV files."""
-        self.stats_dir.mkdir(parents=True, exist_ok=True)
+        """Save correlation results to TSV files in correlations subfolder."""
+        from eeg_pipeline.infra.paths import ensure_dir
+        corr_dir = self.stats_dir / "correlations"
+        ensure_dir(corr_dir)
         saved_files = []
         method_suffix = f"_{method_label}" if method_label else ""
 
@@ -956,7 +958,7 @@ class FeatureBehaviorCorrelator:
             if "target" not in df.columns:
                 df["target"] = target_name
 
-            path = self.stats_dir / f"corr_stats_{name}_vs_{target_name}{method_suffix}.tsv"
+            path = corr_dir / f"corr_stats_{name}_vs_{target_name}{method_suffix}.tsv"
             save_correlation_results(df, path)
             saved_files.append(path)
 
@@ -1104,7 +1106,10 @@ class FeatureBehaviorCorrelator:
                 df["p_fdr"] = fdr_bh(all_p_values, alpha=corr_config.fdr_alpha, config=self.config)
         target_suffix = "rating" if "rating" in target_name.lower() else "temp"
         method_suffix = f"_{method_label}" if method_label else ""
-        output_path = self.stats_dir / f"corr_stats_pow_roi_vs_{target_suffix}{method_suffix}.tsv"
+        from eeg_pipeline.infra.paths import ensure_dir
+        corr_dir = self.stats_dir / "correlations"
+        ensure_dir(corr_dir)
+        output_path = corr_dir / f"corr_stats_pow_roi_vs_{target_suffix}{method_suffix}.tsv"
         write_tsv(df, output_path)
         self.logger.info(f"Saved ROI correlations: {output_path.name} ({len(df)} rows)")
         return df
@@ -1167,16 +1172,19 @@ class FeatureBehaviorCorrelator:
                 )
 
         method_suffix = f"_{method_label}" if method_label else ""
+        from eeg_pipeline.infra.paths import ensure_dir
+        corr_dir = self.stats_dir / "correlations"
+        ensure_dir(corr_dir)
         combined_rating_df = pd.DataFrame(rating_records) if rating_records else pd.DataFrame()
         if not combined_rating_df.empty:
             _apply_fdr_to_dataframe(combined_rating_df, corr_config, self.config)
-            combined_path = self.stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
+            combined_path = corr_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv"
             save_correlation_results(combined_rating_df, combined_path)
 
         combined_temperature_df = pd.DataFrame(temperature_records) if temperature_records else pd.DataFrame()
         if not combined_temperature_df.empty:
             _apply_fdr_to_dataframe(combined_temperature_df, corr_config, self.config)
-            combined_path = self.stats_dir / f"corr_stats_all_features_vs_temperature{method_suffix}.tsv"
+            combined_path = corr_dir / f"corr_stats_all_features_vs_temperature{method_suffix}.tsv"
             save_correlation_results(combined_temperature_df, combined_path)
 
         significance_alpha = float(get_config_value(self.config, "statistics.sig_alpha", 0.05))

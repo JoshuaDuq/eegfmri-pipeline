@@ -22,14 +22,7 @@ _MIN_TRIALS_FOR_ANALYSIS = 10
 _MIN_VARIANCE_THRESHOLD = 1e-12
 
 
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract configuration value with safe fallback."""
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except (AttributeError, KeyError, TypeError):
-        pass
-    return default
+from .base import safe_get_config_value as _get_config_value
 
 
 def _try_import_partial_correlation() -> Tuple[bool, Optional[Any]]:

@@ -17,9 +17,17 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.utils.analysis.stats.base import safe_get_config_value as _get
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.analysis.stats.transforms import zscore_array as _zscore
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features
-
+from eeg_pipeline.utils.analysis.stats._regression_utils import (
+    _ols_fit,
+    _hc3_se,
+    _r2,
+    _build_covariate_design,
+    _build_temperature_covariates as _build_temp_cov_shared,
+)
 
 # Constants
 _NUMERICAL_TOLERANCE = 1e-12
@@ -31,96 +39,10 @@ _MAX_DUMMY_LEVELS = 20
 _MIN_BINARY_LEVELS = 2
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
-    """Safely get a value from config, returning default if unavailable."""
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except (AttributeError, KeyError, TypeError):
-        pass
-    return default
+# _build_covariate_design is now imported from _regression_utils
 
 
-def _zscore(x: np.ndarray) -> np.ndarray:
-    x = np.asarray(x, dtype=float)
-    mu = np.nanmean(x)
-    sd = np.nanstd(x, ddof=1)
-    if not np.isfinite(sd) or sd <= 0:
-        return np.full_like(x, np.nan)
-    return (x - mu) / sd
-
-
-def _build_covariate_design(
-    df: pd.DataFrame,
-    covariate_cols: List[str],
-    *,
-    add_intercept: bool = True,
-    max_dummies: int = _MAX_DUMMY_LEVELS,
-) -> Tuple[np.ndarray, List[str]]:
-    use = df[covariate_cols].copy() if covariate_cols else pd.DataFrame(index=df.index)
-    parts = []
-    names: List[str] = []
-    if add_intercept:
-        parts.append(pd.Series(1.0, index=df.index, name="intercept"))
-        names.append("intercept")
-
-    for col in covariate_cols:
-        s = use[col]
-        if s.dtype == object or str(s.dtype).startswith("category"):
-            n_levels = int(pd.Series(s).nunique(dropna=True))
-            if n_levels <= 1 or n_levels > max_dummies:
-                continue
-            dummies = pd.get_dummies(s.astype("category"), prefix=str(col), drop_first=True)
-            for c in dummies.columns:
-                parts.append(pd.to_numeric(dummies[c], errors="coerce").fillna(0.0))
-                names.append(str(c))
-        else:
-            parts.append(pd.to_numeric(s, errors="coerce"))
-            names.append(str(col))
-
-    design_df = pd.concat(parts, axis=1) if parts else pd.DataFrame(index=df.index)
-    X = design_df.to_numpy(dtype=float)
-    return X, names
-
-
-def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
-    try:
-        beta = np.linalg.lstsq(X, y, rcond=None)[0]
-    except np.linalg.LinAlgError:
-        return None
-    return beta
-
-
-def _hc3_se(X: np.ndarray, y: np.ndarray, beta: np.ndarray) -> np.ndarray:
-    """Compute HC3 heteroscedasticity-consistent standard errors."""
-    n, p = X.shape
-    residuals = y - X @ beta
-    try:
-        XtX_inv = np.linalg.inv(X.T @ X)
-    except np.linalg.LinAlgError:
-        return np.full(p, np.nan)
-    
-    leverage = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
-    leverage_complement = 1.0 - leverage
-    is_valid = np.isfinite(leverage_complement) & (np.abs(leverage_complement) > _NUMERICAL_TOLERANCE)
-    leverage_complement = np.where(is_valid, leverage_complement, np.nan)
-    
-    weights = (residuals**2) / (leverage_complement**2)
-    weights = np.where(np.isfinite(weights), weights, 0.0)
-    
-    middle_matrix = X.T @ (X * weights[:, None])
-    covariance = XtX_inv @ middle_matrix @ XtX_inv
-    return np.sqrt(np.diag(covariance))
-
-
-def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
-    y = np.asarray(y, dtype=float)
-    y_hat = np.asarray(y_hat, dtype=float)
-    ss_res = float(np.sum((y - y_hat) ** 2))
-    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-    if ss_tot <= 0:
-        return np.nan
-    return 1.0 - ss_res / ss_tot
+# OLS fit, HC3 SE, and R² functions are now imported from _regression_utils
 
 
 @dataclass
@@ -592,6 +514,8 @@ def _select_valid_features(
     return candidates, meta
 
 
+# _build_temperature_covariates is now imported from _regression_utils
+# Wrapper to maintain backward compatibility with existing interface
 def _build_temperature_covariates(
     trial_df: pd.DataFrame,
     outcome_name: str,
@@ -599,63 +523,18 @@ def _build_temperature_covariates(
     include_temperature: bool,
     config: Any,
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
-    """Build temperature-related covariates based on control strategy."""
-    covariates: List[str] = []
-    temp_design_df = None
-    temp_meta: Dict[str, Any] = {"temperature_control_requested": temperature_control}
+    """Build temperature-related covariates based on control strategy.
     
-    if not include_temperature or outcome_name == "temperature":
-        return covariates, temp_design_df, temp_meta
-    
-    temp_control_lower = str(temperature_control or "linear").strip().lower()
-    
-    if temp_control_lower in ("rating_hat", "rating_hat_from_temp", "nonlinear"):
-        if "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            temp_meta.update({
-                "temperature_control_used": "rating_hat",
-                "temperature_control_column": "rating_hat_from_temp"
-            })
-        elif "temperature" in trial_df.columns:
-            covariates.append("temperature")
-            temp_meta.update({
-                "temperature_control_used": "linear",
-                "temperature_control_fallback": "temperature"
-            })
-    
-    elif temp_control_lower in ("spline", "rcs", "restricted_cubic"):
-        if "temperature" in trial_df.columns:
-            from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
-            
-            temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
-                trial_df["temperature"],
-                config=config,
-                key_prefix="behavior_analysis.models.temperature_spline",
-                name_prefix="temperature_rcs",
-            )
-            for col in spline_cols:
-                if col not in covariates:
-                    covariates.append(col)
-            temp_meta.update({
-                "temperature_control_used": "spline",
-                "temperature_control_column": "temperature",
-                "temperature_spline": spline_meta
-            })
-        elif "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            temp_meta.update({
-                "temperature_control_used": "rating_hat_fallback",
-                "temperature_control_column": "rating_hat_from_temp"
-            })
-    
-    elif "temperature" in trial_df.columns:
-        covariates.append("temperature")
-        temp_meta.update({
-            "temperature_control_used": "linear",
-            "temperature_control_column": "temperature"
-        })
-    
-    return covariates, temp_design_df, temp_meta
+    Wrapper around consolidated _build_temperature_covariates.
+    """
+    return _build_temp_cov_shared(
+        trial_df=trial_df,
+        outcome=outcome_name,
+        temperature_control=temperature_control,
+        include_temperature=include_temperature,
+        config=config,
+        key_prefix="behavior_analysis.models.temperature_spline",
+    )
 
 
 def _build_additional_covariates(

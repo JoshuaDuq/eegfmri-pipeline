@@ -63,16 +63,14 @@ class MetaAnalysisResult:
         }
 
 
-def fisher_z(r: np.ndarray) -> np.ndarray:
-    """Fisher z-transform correlation coefficients."""
-    r_array = np.asarray(r)
-    r_clipped = np.clip(r_array, _MIN_CORRELATION, _MAX_CORRELATION)
-    return np.arctanh(r_clipped)
+# Import unified Fisher z functions from correlation module
+from .correlation import fisher_z, inverse_fisher_z
 
+# Import ensure_bootstrap_ci from bootstrap module to avoid duplication
+from .bootstrap import ensure_bootstrap_ci
 
-def inverse_fisher_z(z: np.ndarray) -> np.ndarray:
-    """Inverse Fisher z-transform."""
-    return np.tanh(np.asarray(z))
+# Re-export for backward compatibility (aliases for array-focused usage)
+# The functions in correlation.py now handle both scalars and arrays
 
 
 def correlation_se(n: np.ndarray) -> np.ndarray:
@@ -130,8 +128,8 @@ def _compute_confidence_interval(
     ci_level: float,
 ) -> Tuple[float, float]:
     """Compute confidence interval for pooled z-value."""
-    alpha = 1 - ci_level
-    z_critical = stats.norm.ppf(1 - alpha / 2)
+    from .base import get_z_critical_value
+    z_critical = get_z_critical_value(ci_level)
     z_lower = z_pooled - z_critical * se_pooled
     z_upper = z_pooled + z_critical * se_pooled
     ci_low = inverse_fisher_z(z_lower)
@@ -386,194 +384,8 @@ def _empty_meta_result() -> MetaAnalysisResult:
     )
 
 
-def _compute_correlation(
-    x: np.ndarray,
-    y: np.ndarray,
-    method: str,
-) -> float:
-    """Compute correlation using specified method."""
-    if method == "pearson":
-        correlation, _ = stats.pearsonr(x, y)
-    else:
-        correlation, _ = stats.spearmanr(x, y)
-    return correlation
-
-
-def permutation_null_distribution(
-    x: np.ndarray,
-    y: np.ndarray,
-    n_perm: int = 1000,
-    method: str = "spearman",
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[np.ndarray, float, float]:
-    """
-    Generate permutation null distribution for correlation.
-    
-    Returns
-    -------
-    null_rs : array
-        Null distribution of correlations
-    observed_r : float
-        Observed correlation
-    p_perm : float
-        Permutation p-value
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    
-    x_array = np.asarray(x).ravel()
-    y_array = np.asarray(y).ravel()
-    
-    is_finite_x = np.isfinite(x_array)
-    is_finite_y = np.isfinite(y_array)
-    valid_mask = is_finite_x & is_finite_y
-    n_valid = valid_mask.sum()
-    
-    if n_valid < _MIN_SAMPLE_SIZE:
-        return np.array([]), np.nan, np.nan
-    
-    x_valid = x_array[valid_mask]
-    y_valid = y_array[valid_mask]
-    
-    observed_r = _compute_correlation(x_valid, y_valid, method)
-    
-    null_correlations = np.zeros(n_perm)
-    for perm_idx in range(n_perm):
-        y_permuted = rng.permutation(y_valid)
-        null_correlations[perm_idx] = _compute_correlation(
-            x_valid, y_permuted, method
-        )
-    
-    abs_observed = np.abs(observed_r)
-    abs_null = np.abs(null_correlations)
-    n_extreme = np.sum(abs_null >= abs_observed)
-    p_perm = (n_extreme + 1) / (n_perm + 1)
-    
-    return null_correlations, float(observed_r), float(p_perm)
-
-
-def bootstrap_correlation_ci(
-    x: np.ndarray,
-    y: np.ndarray,
-    n_boot: int = 2000,
-    ci_level: float = 0.95,
-    method: str = "spearman",
-    rng: Optional[np.random.Generator] = None,
-) -> Tuple[float, float, float, np.ndarray]:
-    """
-    Bootstrap confidence interval for correlation.
-    
-    Returns
-    -------
-    r_obs : float
-        Observed correlation
-    ci_low : float
-        Lower CI bound
-    ci_high : float
-        Upper CI bound
-    boot_rs : array
-        Bootstrap distribution
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-    
-    x_array = np.asarray(x).ravel()
-    y_array = np.asarray(y).ravel()
-    
-    is_finite_x = np.isfinite(x_array)
-    is_finite_y = np.isfinite(y_array)
-    valid_mask = is_finite_x & is_finite_y
-    n_valid = valid_mask.sum()
-    
-    if n_valid < _MIN_SAMPLE_SIZE:
-        return np.nan, np.nan, np.nan, np.array([])
-    
-    x_valid = x_array[valid_mask]
-    y_valid = y_array[valid_mask]
-    
-    r_observed = _compute_correlation(x_valid, y_valid, method)
-    
-    bootstrap_correlations = np.zeros(n_boot)
-    for boot_idx in range(n_boot):
-        bootstrap_indices = rng.integers(0, n_valid, size=n_valid)
-        bootstrap_correlations[boot_idx] = _compute_correlation(
-            x_valid[bootstrap_indices], y_valid[bootstrap_indices], method
-        )
-    
-    finite_bootstrap = bootstrap_correlations[np.isfinite(bootstrap_correlations)]
-    min_bootstrap_samples = 10
-    if len(finite_bootstrap) < min_bootstrap_samples:
-        return float(r_observed), np.nan, np.nan, finite_bootstrap
-    
-    alpha = 1 - ci_level
-    lower_percentile = 100 * alpha / 2
-    upper_percentile = 100 * (1 - alpha / 2)
-    ci_low = np.percentile(finite_bootstrap, lower_percentile)
-    ci_high = np.percentile(finite_bootstrap, upper_percentile)
-    
-    return float(r_observed), float(ci_low), float(ci_high), finite_bootstrap
-
-
-def _compute_fisher_confidence_interval(
-    r: float,
-    n: int,
-) -> Tuple[float, float]:
-    """Compute Fisher z-based confidence interval for correlation."""
-    if pd.isna(r) or pd.isna(n) or n < _MIN_SAMPLE_SIZE:
-        return np.nan, np.nan
-    
-    r_clipped = np.clip(r, _MIN_CORRELATION, _MAX_CORRELATION)
-    z = np.arctanh(r_clipped)
-    se = 1.0 / np.sqrt(n - 3)
-    z_critical = _DEFAULT_Z_CRITICAL
-    z_lower = z - z_critical * se
-    z_upper = z + z_critical * se
-    ci_low = np.tanh(z_lower)
-    ci_high = np.tanh(z_upper)
-    return ci_low, ci_high
-
-
-def ensure_bootstrap_ci(
-    stats_df: pd.DataFrame,
-    x_data: Optional[np.ndarray] = None,
-    y_data: Optional[np.ndarray] = None,
-    n_boot: int = 2000,
-    method: str = "spearman",
-    config: Optional[Any] = None,
-) -> pd.DataFrame:
-    """
-    Ensure bootstrap CIs exist in stats dataframe, computing if missing.
-    
-    If ci_low/ci_high columns are missing or contain NaN, computes bootstrap CIs.
-    """
-    if stats_df is None or stats_df.empty:
-        return stats_df
-    
-    df = stats_df.copy()
-    
-    has_ci_columns = "ci_low" in df.columns and "ci_high" in df.columns
-    if has_ci_columns:
-        missing_ci_mask = df["ci_low"].isna() | df["ci_high"].isna()
-        if not missing_ci_mask.any():
-            return df
-    
-    if "r" in df.columns and "n" in df.columns:
-        if "ci_low" not in df.columns:
-            df["ci_low"] = np.nan
-        if "ci_high" not in df.columns:
-            df["ci_high"] = np.nan
-        
-        for idx in df.index:
-            row = df.loc[idx]
-            has_missing_ci = pd.isna(row["ci_low"]) or pd.isna(row["ci_high"])
-            if has_missing_ci:
-                ci_low, ci_high = _compute_fisher_confidence_interval(
-                    row.get("r"), row.get("n")
-                )
-                df.loc[idx, "ci_low"] = ci_low
-                df.loc[idx, "ci_high"] = ci_high
-    
-    return df
+# Import ensure_bootstrap_ci from bootstrap module to avoid duplication
+from .bootstrap import ensure_bootstrap_ci
 
 
 def bayes_factor_correlation(

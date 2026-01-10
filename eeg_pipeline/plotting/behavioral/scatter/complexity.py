@@ -140,7 +140,10 @@ def _load_complexity_features(
     deriv_root: Path, subject: str, feature_file: str, logger: Any
 ) -> Optional[pd.DataFrame]:
     """Load complexity features table for the subject."""
-    comp_path = deriv_features_path(deriv_root, subject) / feature_file
+    features_dir = deriv_features_path(deriv_root, subject)
+    comp_path = features_dir / "complexity" / feature_file
+    if not comp_path.exists():
+        comp_path = features_dir / feature_file
     if not comp_path.exists():
         logger.warning("Complexity features not found at %s", comp_path)
         return None

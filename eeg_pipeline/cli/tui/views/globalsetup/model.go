@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -24,8 +23,6 @@ const (
 	sectionProject sectionKey = iota
 	sectionPaths
 	sectionEvents
-	sectionBands
-	sectionROIs
 	sectionReview
 )
 
@@ -41,8 +38,6 @@ const (
 	fieldEventTemp
 	fieldEventRating
 	fieldEventPain
-	fieldBandEdit
-	fieldRoiEdit
 )
 
 type sectionDef struct {
@@ -101,11 +96,6 @@ type Model struct {
 	eventRating string
 	eventPain   string
 
-	bands      []BandEntry
-	rois       []RoiEntry
-	bandCursor int
-	roiCursor  int
-
 	isLoading     bool
 	isSaving      bool
 	statusMessage string
@@ -129,8 +119,6 @@ func DefaultConfigKeys() []string {
 		"event_columns.temperature",
 		"event_columns.rating",
 		"event_columns.pain_binary",
-		"time_frequency_analysis.bands",
-		"time_frequency_analysis.rois",
 	}
 }
 
@@ -143,8 +131,6 @@ func New(repoRoot string) Model {
 			{sectionProject, "Project", "Task, random seed, and subject filter"},
 			{sectionPaths, "Paths", "BIDS and data roots"},
 			{sectionEvents, "Events", "Behavior columns"},
-			{sectionBands, "Bands", "Frequency bands"},
-			{sectionROIs, "ROIs", "Region definitions"},
 			{sectionReview, "Review", "Current configuration"},
 		},
 		isLoading: true,
@@ -199,12 +185,6 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	}
 	if v, ok := values["event_columns.pain_binary"]; ok {
 		m.eventPain = strings.Join(toStringList(v), ", ")
-	}
-	if v, ok := values["time_frequency_analysis.bands"]; ok {
-		m.bands = parseBands(v)
-	}
-	if v, ok := values["time_frequency_analysis.rois"]; ok {
-		m.rois = parseRois(v)
 	}
 }
 
@@ -306,10 +286,6 @@ func (m Model) View() string {
 	// Build main content
 	var mainContent strings.Builder
 	switch m.sections[m.sectionIndex].key {
-	case sectionBands:
-		mainContent.WriteString(m.renderBands())
-	case sectionROIs:
-		mainContent.WriteString(m.renderRois())
 	case sectionReview:
 		mainContent.WriteString(m.renderReview())
 	default:
@@ -417,84 +393,6 @@ func (m Model) renderFields() string {
 	return b.String()
 }
 
-func (m Model) renderBands() string {
-	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" FREQUENCY BANDS ") + "\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"Define band name and range. Use A to add, D to delete.") + "\n\n")
-
-	if len(m.bands) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("No bands defined. Press A to add.") + "\n")
-		return b.String()
-	}
-
-	for i, band := range m.bands {
-		isFocused := i == m.bandCursor
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
-		}
-		name := lipgloss.NewStyle().Foreground(styles.Text).Render(band.Name)
-		if isFocused {
-			name = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(band.Name)
-		}
-		rangeText := fmt.Sprintf("%s Hz", formatRange(band.Low, band.High))
-		b.WriteString(cursor + name + "  " + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(rangeText) + "\n")
-	}
-	return b.String()
-}
-
-func (m Model) renderRois() string {
-	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" ROIS ") + "\n\n")
-
-	helpText := "ROI name with regex list. Use A to add, D to delete."
-	if m.editingText && m.editingField == fieldRoiEdit {
-		helpText = "Editing ROI: name=pattern1 ; pattern2. Press Enter to save, Esc to cancel."
-	}
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(helpText) + "\n\n")
-
-	if len(m.rois) == 0 && !m.editingText {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("No ROIs defined. Press A to add.") + "\n")
-		return b.String()
-	}
-
-	// Show editing input if currently editing
-	if m.editingText && m.editingField == fieldRoiEdit {
-		cursor := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
-		editPrompt := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Editing: ")
-		editText := m.textBuffer + "█"
-		b.WriteString(cursor + editPrompt + lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Render(editText) + "\n\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  Format: ROI_name=pattern1 ; pattern2 ; pattern3") + "\n")
-		return b.String()
-	}
-
-	// Show ROI list
-	for i, roi := range m.rois {
-		isFocused := i == m.roiCursor
-		cursor := "  "
-		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
-		}
-		name := roi.Name
-		if name == "" {
-			name = "(unnamed)"
-		}
-		if isFocused {
-			name = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(name)
-		} else {
-			name = lipgloss.NewStyle().Foreground(styles.Text).Render(name)
-		}
-		patterns := strings.Join(roi.Patterns, " ; ")
-		if patterns == "" {
-			patterns = "(none)"
-		}
-		b.WriteString(cursor + name + "\n")
-		b.WriteString("    " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(patterns) + "\n")
-	}
-	return b.String()
-}
-
 func (m Model) renderReview() string {
 	var b strings.Builder
 	b.WriteString(styles.SectionTitleStyle.Render(" REVIEW CONFIG ") + "\n\n")
@@ -530,26 +428,12 @@ func (m Model) renderReview() string {
 	if m.sourceRoot != "" {
 		b.WriteString("Source Root: " + m.sourceRoot + "\n")
 	}
-
-	b.WriteString("\n")
-	b.WriteString("Bands: " + fmt.Sprintf("%d", len(m.bands)) + "\n")
-	b.WriteString("ROIs: " + fmt.Sprintf("%d", len(m.rois)) + "\n")
 	return b.String()
 }
 
 func (m *Model) moveCursor(delta int) {
 	section := m.sections[m.sectionIndex].key
 	switch section {
-	case sectionBands:
-		if len(m.bands) == 0 {
-			return
-		}
-		m.bandCursor = (m.bandCursor + delta + len(m.bands)) % len(m.bands)
-	case sectionROIs:
-		if len(m.rois) == 0 {
-			return
-		}
-		m.roiCursor = (m.roiCursor + delta + len(m.rois)) % len(m.rois)
 	case sectionReview:
 		return
 	default:
@@ -573,10 +457,6 @@ func (m *Model) resetSectionState() {
 func (m *Model) activateSelection() (tea.Model, tea.Cmd) {
 	section := m.sections[m.sectionIndex].key
 	switch section {
-	case sectionBands:
-		return m.editBand()
-	case sectionROIs:
-		return m.editRoi()
 	case sectionReview:
 		return m, nil
 	default:
@@ -591,50 +471,16 @@ func (m *Model) activateSelection() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) addEntry() (tea.Model, tea.Cmd) {
-	switch m.sections[m.sectionIndex].key {
-	case sectionBands:
-		m.bands = append(m.bands, BandEntry{Name: "new_band", Low: 1.0, High: 4.0})
-		m.bandCursor = len(m.bands) - 1
-		model, cmd := m.editBand()
-		return model, tea.Batch(cmd, m.saveOverridesBatch())
-	case sectionROIs:
-		m.rois = append(m.rois, RoiEntry{Name: "NewROI", Patterns: []string{}})
-		m.roiCursor = len(m.rois) - 1
-		model, cmd := m.editRoi()
-		return model, tea.Batch(cmd, m.saveOverridesBatch())
-	}
 	return m, nil
 }
 
 func (m *Model) deleteEntry() (tea.Model, tea.Cmd) {
-	switch m.sections[m.sectionIndex].key {
-	case sectionBands:
-		if len(m.bands) == 0 {
-			return m, nil
-		}
-		idx := m.bandCursor
-		m.bands = append(m.bands[:idx], m.bands[idx+1:]...)
-		if m.bandCursor >= len(m.bands) {
-			m.bandCursor = len(m.bands) - 1
-		}
-		return m, m.saveOverridesBatch()
-	case sectionROIs:
-		if len(m.rois) == 0 {
-			return m, nil
-		}
-		idx := m.roiCursor
-		m.rois = append(m.rois[:idx], m.rois[idx+1:]...)
-		if m.roiCursor >= len(m.rois) {
-			m.roiCursor = len(m.rois) - 1
-		}
-		return m, m.saveOverridesBatch()
-	}
 	return m, nil
 }
 
 func (m *Model) browseCurrentPath() (tea.Model, tea.Cmd) {
 	section := m.sections[m.sectionIndex].key
-	if section == sectionReview || section == sectionBands || section == sectionROIs {
+	if section == sectionReview {
 		return m, nil
 	}
 
@@ -791,70 +637,11 @@ func (m *Model) startTextEdit(key fieldKey) {
 }
 
 func (m *Model) commitTextEdit() tea.Cmd {
-	switch m.editingField {
-	case fieldBandEdit:
-		m.applyBandEdit(m.textBuffer)
-	case fieldRoiEdit:
-		m.applyRoiEdit(m.textBuffer)
-	default:
-		m.setFieldValue(m.editingField, m.textBuffer)
-	}
+	m.setFieldValue(m.editingField, m.textBuffer)
 	m.editingText = false
 	m.textBuffer = ""
 	m.editingField = 0
 	return m.saveOverridesBatch()
-}
-
-func (m *Model) editBand() (tea.Model, tea.Cmd) {
-	if len(m.bands) == 0 {
-		return m, nil
-	}
-	band := m.bands[m.bandCursor]
-	m.editingText = true
-	m.editingField = fieldBandEdit
-	m.textBuffer = fmt.Sprintf("%s=%.2f-%.2f", band.Name, band.Low, band.High)
-	return m, nil
-}
-
-func (m *Model) editRoi() (tea.Model, tea.Cmd) {
-	if len(m.rois) == 0 {
-		return m, nil
-	}
-	roi := m.rois[m.roiCursor]
-	patterns := strings.Join(roi.Patterns, " ; ")
-	m.editingText = true
-	m.editingField = fieldRoiEdit
-	m.textBuffer = fmt.Sprintf("%s=%s", roi.Name, patterns)
-	return m, nil
-}
-
-func (m *Model) applyBandEdit(value string) {
-	value = strings.TrimSpace(value)
-	if value == "" || len(m.bands) == 0 {
-		return
-	}
-
-	name, low, high, ok := parseBandLine(value)
-	if !ok {
-		m.statusMessage = "Invalid band format. Use name=low-high"
-		m.statusIsError = true
-		return
-	}
-	m.bands[m.bandCursor] = BandEntry{Name: name, Low: low, High: high}
-}
-
-func (m *Model) applyRoiEdit(value string) {
-	value = strings.TrimSpace(value)
-	if value == "" || len(m.rois) == 0 {
-		return
-	}
-	name, patterns := parseRoiLine(value)
-	if name == "" {
-		m.statusMessage = "Invalid ROI format. Use name=regex1 ; regex2"
-		m.statusIsError = true
-		return
-	}
-	m.rois[m.roiCursor] = RoiEntry{Name: name, Patterns: patterns}
 }
 
 func (m *Model) saveOverridesBatch() tea.Cmd {
@@ -946,84 +733,11 @@ func (m *Model) buildOverrides() map[string]interface{} {
 		overrides["event_columns"] = eventCols
 	}
 
-	tfr := map[string]interface{}{}
-	if len(m.bands) > 0 {
-		bands := map[string]interface{}{}
-		for _, band := range m.bands {
-			bands[band.Name] = []float64{band.Low, band.High}
-		}
-		tfr["bands"] = bands
-	}
-	if len(m.rois) > 0 {
-		rois := map[string]interface{}{}
-		for _, roi := range m.rois {
-			if roi.Name == "" {
-				continue
-			}
-			rois[roi.Name] = roi.Patterns
-		}
-		tfr["rois"] = rois
-	}
-	if len(tfr) > 0 {
-		overrides["time_frequency_analysis"] = tfr
-	}
-
 	return overrides
 }
 
 func (m *Model) validate() error {
-	for _, band := range m.bands {
-		if band.Name == "" || band.Low >= band.High {
-			return fmt.Errorf("band ranges must be valid (low < high)")
-		}
-	}
-	for _, roi := range m.rois {
-		if roi.Name == "" {
-			return fmt.Errorf("ROI names cannot be empty")
-		}
-	}
 	return nil
-}
-
-func parseBandLine(value string) (string, float64, float64, bool) {
-	if strings.Contains(value, "=") {
-		parts := strings.SplitN(value, "=", 2)
-		name := strings.TrimSpace(parts[0])
-		rangePart := strings.TrimSpace(parts[1])
-		if name == "" || rangePart == "" {
-			return "", 0, 0, false
-		}
-		if strings.Contains(rangePart, "-") {
-			rparts := strings.SplitN(rangePart, "-", 2)
-			low, err1 := strconv.ParseFloat(strings.TrimSpace(rparts[0]), 64)
-			high, err2 := strconv.ParseFloat(strings.TrimSpace(rparts[1]), 64)
-			if err1 == nil && err2 == nil {
-				return name, low, high, true
-			}
-		}
-	}
-	return "", 0, 0, false
-}
-
-func parseRoiLine(value string) (string, []string) {
-	parts := strings.SplitN(value, "=", 2)
-	if len(parts) < 2 {
-		return "", nil
-	}
-	name := strings.TrimSpace(parts[0])
-	if name == "" {
-		return "", nil
-	}
-	patterns := splitList(parts[1])
-	return name, patterns
-}
-
-func formatFloat(value float64) string {
-	return strconv.FormatFloat(value, 'f', -1, 64)
-}
-
-func formatRange(low, high float64) string {
-	return fmt.Sprintf("%s-%s", formatFloat(low), formatFloat(high))
 }
 
 func splitList(value string) []string {
@@ -1052,20 +766,6 @@ func toString(value interface{}, fallback string) string {
 	}
 }
 
-func toFloat(value interface{}, fallback float64) float64 {
-	switch v := value.(type) {
-	case float64:
-		return v
-	case int:
-		return float64(v)
-	case string:
-		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
-			return parsed
-		}
-	}
-	return fallback
-}
-
 func toStringList(value interface{}) []string {
 	switch v := value.(type) {
 	case []string:
@@ -1083,43 +783,6 @@ func toStringList(value interface{}) []string {
 		return splitList(v)
 	}
 	return []string{}
-}
-
-func parseBands(value interface{}) []BandEntry {
-	raw, ok := value.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	var bands []BandEntry
-	for name, entry := range raw {
-		switch v := entry.(type) {
-		case []interface{}:
-			if len(v) >= 2 {
-				low := toFloat(v[0], 0)
-				high := toFloat(v[1], 0)
-				bands = append(bands, BandEntry{Name: name, Low: low, High: high})
-			}
-		}
-	}
-	sort.Slice(bands, func(i, j int) bool {
-		return bands[i].Name < bands[j].Name
-	})
-	return bands
-}
-
-func parseRois(value interface{}) []RoiEntry {
-	raw, ok := value.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	var rois []RoiEntry
-	for name, entry := range raw {
-		rois = append(rois, RoiEntry{Name: name, Patterns: toStringList(entry)})
-	}
-	sort.Slice(rois, func(i, j int) bool {
-		return rois[i].Name < rois[j].Name
-	})
-	return rois
 }
 
 func pathExists(path string) bool {

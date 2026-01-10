@@ -339,7 +339,7 @@ def _compute_correlations_for_condition(
     if not valid.any():
         return None
 
-    from eeg_pipeline.utils.analysis.stats.cluster_2d import (
+    from eeg_pipeline.utils.analysis.stats.cluster import (
         compute_cluster_correction_2d, compute_cluster_masses_2d
     )
 

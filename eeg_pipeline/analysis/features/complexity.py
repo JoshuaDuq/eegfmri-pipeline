@@ -322,7 +322,15 @@ def extract_complexity_from_precomputed(
 
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
-    segments = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    target_name = getattr(precomputed.windows, "name", None)
+    
+    # When a specific time range is targeted, the precomputed data may have been
+    # cropped to that range. Use all available data with that segment name.
+    if target_name:
+        segments = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    else:
+        segments = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+    
     params = _extract_params(precomputed.config)
     spatial_modes = getattr(precomputed, "spatial_modes", None) or ["roi", "global"]
     roi_map = _prepare_spatial_configuration(precomputed, spatial_modes)

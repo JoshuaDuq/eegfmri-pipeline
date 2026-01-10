@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	narrowWidthThreshold    = 100
+	narrowWidthThreshold   = 100
 	shortHeightThreshold   = 25
 	minMainContentHeight   = 10
 	headerSpacingLines     = 3
@@ -83,8 +83,6 @@ func (m Model) renderStepContent(isNarrow bool) string {
 	switch m.CurrentStep {
 	case types.StepSelectMode:
 		return m.renderModeSelection()
-	case types.StepProjectSetup:
-		return m.renderProjectSetup()
 	case types.StepSelectComputations:
 		return m.renderComputationSelection()
 	case types.StepConfigureOptions, types.StepSelectPlotCategories:
@@ -100,6 +98,8 @@ func (m Model) renderStepContent(isNarrow bool) string {
 		return m.renderPlotConfig()
 	case types.StepSelectBands:
 		return m.renderBandSelection()
+	case types.StepSelectROIs:
+		return m.renderROISelection()
 	case types.StepSelectFeatureFiles:
 		return m.renderFeatureFileSelection()
 	case types.StepSelectSpatial:
@@ -376,7 +376,7 @@ func (m Model) getStepHints() []string {
 		return m.getComputationSelectionHints()
 	case types.StepConfigureOptions:
 		return m.getFeatureOptionsHints()
-	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectSpatial,
+	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectROIs, types.StepSelectSpatial,
 		types.StepSelectFeatureFiles, types.StepSelectPlots, types.StepSelectFeaturePlotters:
 		return m.getStandardSelectionHints()
 	case types.StepPlotConfig:

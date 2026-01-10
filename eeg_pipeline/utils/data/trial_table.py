@@ -237,11 +237,6 @@ def add_lag_and_delta_features(
     return result_df.reset_index(drop=True), meta
 
 
-def _get_config_value_safe(config: Any, key: str, default: Any = None) -> Any:
-    """Safely get config value, returning default if config lacks get method."""
-    if hasattr(config, "get"):
-        return config.get(key, default)
-    return default
 
 
 def add_pain_residual(
@@ -254,8 +249,10 @@ def add_pain_residual(
     out_resid_col: str = "pain_residual",
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """Add a flexible temperature→rating fit and define pain_residual = rating - f(temp)."""
+    from eeg_pipeline.utils.config.loader import get_config_value
+    
     enabled = bool(
-        _get_config_value_safe(config, "behavior_analysis.pain_residual.enabled", True)
+        get_config_value(config, "behavior_analysis.pain_residual.enabled", True)
     )
     meta: Dict[str, Any] = {"enabled": enabled}
     if not enabled:
@@ -281,13 +278,11 @@ def add_pain_residual(
     result[out_pred_col] = prediction
     result[out_resid_col] = residual
     crossfit_enabled = bool(
-        _get_config_value_safe(
+        get_config_value(
             config, "behavior_analysis.pain_residual.crossfit.enabled", False
         )
     )
     if crossfit_enabled:
-        from eeg_pipeline.utils.config.loader import get_config_value
-
         default_group_col = get_config_value(
             config, "behavior_analysis.run_adjustment.column", "run_id"
         )

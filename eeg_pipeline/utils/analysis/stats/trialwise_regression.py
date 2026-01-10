@@ -22,8 +22,18 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.utils.analysis.stats.base import safe_get_config_value as _get
+from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
+from eeg_pipeline.utils.analysis.stats.transforms import zscore_array as _zscore
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_regression_features
+from eeg_pipeline.utils.analysis.stats._regression_utils import (
+    _ols_fit,
+    _hc3_se,
+    _r2,
+    _build_covariate_design,
+    _build_temperature_covariates as _build_temp_cov_shared,
+)
 
 
 # Constants
@@ -34,191 +44,33 @@ _MAX_DUMMY_VARIABLES = 20
 _MIN_FEATURES_FOR_PARALLEL = 10
 
 
-def _get(config: Any, key: str, default: Any) -> Any:
-    """Safely get a value from a config object.
-    
-    Parameters
-    ----------
-    config : Any
-        Configuration object (dict-like or object with get method)
-    key : str
-        Configuration key to retrieve
-    default : Any
-        Default value if key is not found
-        
-    Returns
-    -------
-    Any
-        Configuration value or default
-    """
-    try:
-        if hasattr(config, "get"):
-            return config.get(key, default)
-    except Exception:
-        pass
-    return default
+# OLS fit, HC3 SE, and R² functions are now imported from _regression_utils
+# Alias for backward compatibility with existing code
+_hc3_se_for_beta = _hc3_se
 
 
-def _zscore(x: np.ndarray) -> np.ndarray:
-    """Standardize array to zero mean and unit variance.
-    
-    Parameters
-    ----------
-    x : np.ndarray
-        Input array
-        
-    Returns
-    -------
-    np.ndarray
-        Z-scored array (NaN if variance is zero or invalid)
-    """
-    x = np.asarray(x, dtype=float)
-    mu = np.nanmean(x)
-    sd = np.nanstd(x, ddof=1)
-    if not np.isfinite(sd) or sd <= 0:
-        return np.full_like(x, np.nan)
-    return (x - mu) / sd
-
-
-def _permute_within_groups(
-    n: int,
-    rng: np.random.Generator,
-    groups: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """Permute indices within groups to preserve group structure.
-    
-    Parameters
-    ----------
-    n : int
-        Total number of elements
-    rng : np.random.Generator
-        Random number generator
-    groups : Optional[np.ndarray]
-        Group labels for each element (None for ungrouped permutation)
-        
-    Returns
-    -------
-    np.ndarray
-        Permuted indices
-    """
-    if groups is None:
-        return rng.permutation(n)
-    groups = np.asarray(groups)
-    perm: List[int] = []
-    for g in np.unique(groups):
-        idx = np.where(groups == g)[0]
-        perm.extend(idx[rng.permutation(len(idx))])
-    return np.asarray(perm, dtype=int)
-
-
-def _hc3_se_for_beta(X: np.ndarray, y: np.ndarray, beta: np.ndarray) -> np.ndarray:
-    """Return HC3 SEs for OLS coefficients."""
-    n, p = X.shape
-    resid = y - X @ beta
-    try:
-        XtX_inv = np.linalg.inv(X.T @ X)
-    except np.linalg.LinAlgError:
-        return np.full(p, np.nan)
-
-    # hat diag: h_i = x_i^T (X'X)^-1 x_i
-    h = np.einsum("ij,jk,ik->i", X, XtX_inv, X)
-    denom = (1.0 - h)
-    denom = np.where(
-        np.isfinite(denom) & (np.abs(denom) > _MIN_DENOMINATOR_THRESHOLD),
-        denom,
-        np.nan,
-    )
-    w = (resid**2) / (denom**2)
-    w = np.where(np.isfinite(w), w, 0.0)
-
-    middle = X.T @ (X * w[:, None])
-    cov = XtX_inv @ middle @ XtX_inv
-    se = np.sqrt(np.diag(cov))
-    return se
-
-
-def _ols_fit(X: np.ndarray, y: np.ndarray) -> Optional[np.ndarray]:
-    """Fit OLS regression coefficients.
-    
-    Parameters
-    ----------
-    X : np.ndarray
-        Design matrix (n_samples, n_features)
-    y : np.ndarray
-        Target vector (n_samples,)
-        
-    Returns
-    -------
-    Optional[np.ndarray]
-        Coefficient vector or None if fit fails
-    """
-    try:
-        beta = np.linalg.lstsq(X, y, rcond=None)[0]
-    except np.linalg.LinAlgError:
-        return None
-    return beta
-
-
-def _r2(y: np.ndarray, y_hat: np.ndarray) -> float:
-    """Calculate R-squared coefficient of determination.
-    
-    Parameters
-    ----------
-    y : np.ndarray
-        Observed values
-    y_hat : np.ndarray
-        Predicted values
-        
-    Returns
-    -------
-    float
-        R-squared value (NaN if total sum of squares is zero)
-    """
-    y = np.asarray(y, dtype=float)
-    y_hat = np.asarray(y_hat, dtype=float)
-    ss_res = float(np.sum((y - y_hat) ** 2))
-    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-    if ss_tot <= 0:
-        return np.nan
-    return 1.0 - ss_res / ss_tot
-
-
-def _build_covariate_design(
+# _build_covariate_design is now imported from _regression_utils
+# Wrapper to maintain backward compatibility with return_design_df=True
+def _build_covariate_design_with_df(
     df: pd.DataFrame,
     covariate_cols: List[str],
     *,
     add_intercept: bool = True,
     max_dummies: int = _MAX_DUMMY_VARIABLES,
 ) -> Tuple[np.ndarray, List[str], pd.DataFrame]:
-    """Build numeric covariate design matrix with categorical dummies when appropriate."""
-    use = df[covariate_cols].copy() if covariate_cols else pd.DataFrame(index=df.index)
-    expanded_cols: List[str] = []
-
-    parts = []
-    if add_intercept:
-        parts.append(pd.Series(1.0, index=df.index, name="intercept"))
-        expanded_cols.append("intercept")
-
-    for col in covariate_cols:
-        s = use[col]
-        if s.dtype == object or str(s.dtype).startswith("category"):
-            # Bound dummy explosion.
-            n_levels = int(pd.Series(s).nunique(dropna=True))
-            if n_levels <= 1 or n_levels > max_dummies:
-                continue
-            dummies = pd.get_dummies(s.astype("category"), prefix=str(col), drop_first=True)
-            for c in dummies.columns:
-                parts.append(pd.to_numeric(dummies[c], errors="coerce").fillna(0.0))
-                expanded_cols.append(str(c))
-        else:
-            parts.append(pd.to_numeric(s, errors="coerce"))
-            expanded_cols.append(str(col))
-
-    design_df = pd.concat(parts, axis=1) if parts else pd.DataFrame(index=df.index)
-    X = design_df.to_numpy(dtype=float)
-    return X, expanded_cols, design_df
+    """Build covariate design matrix and return design DataFrame.
+    
+    Wrapper around consolidated _build_covariate_design that always returns
+    the design DataFrame for backward compatibility.
+    """
+    X, names, design_df = _build_covariate_design(
+        df, covariate_cols, add_intercept=add_intercept, max_dummies=max_dummies, return_design_df=True
+    )
+    return X, names, design_df
 
 
+# _build_temperature_covariates is now imported from _regression_utils
+# Wrapper to maintain backward compatibility with config object interface
 def _build_temperature_covariates(
     trial_df: pd.DataFrame,
     outcome: str,
@@ -227,57 +79,21 @@ def _build_temperature_covariates(
 ) -> Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]:
     """Build temperature-related covariates based on configuration.
     
+    Wrapper around consolidated _build_temperature_covariates that uses config object.
+    
     Returns
     -------
     Tuple[List[str], Optional[pd.DataFrame], Dict[str, Any]]
         Covariate column names, optional spline design DataFrame, metadata
     """
-    covariates: List[str] = []
-    temp_design_df: Optional[pd.DataFrame] = None
-    meta: Dict[str, Any] = {}
-    
-    if not cfg.include_temperature or outcome == "temperature":
-        return covariates, temp_design_df, meta
-    
-    temp_ctrl = str(cfg.temperature_control or "linear").strip().lower()
-    
-    if temp_ctrl in ("rating_hat", "rating_hat_from_temp", "nonlinear") and outcome not in ("pain_residual",):
-        if "rating_hat_from_temp" in trial_df.columns:
-            covariates.append("rating_hat_from_temp")
-            meta["temperature_control_used"] = "rating_hat"
-            meta["temperature_control_column"] = "rating_hat_from_temp"
-        elif "temperature" in trial_df.columns:
-            covariates.append("temperature")
-            meta["temperature_control_used"] = "linear"
-            meta["temperature_control_fallback"] = "temperature"
-    elif temp_ctrl in ("spline", "rcs", "restricted_cubic"):
-        if "temperature" in trial_df.columns:
-            from eeg_pipeline.utils.analysis.stats.splines import build_temperature_rcs_design
-
-            temp_design_df, spline_cols, spline_meta = build_temperature_rcs_design(
-                trial_df["temperature"],
-                config=config,
-                key_prefix="behavior_analysis.regression.temperature_spline",
-                name_prefix="temperature_rcs",
-            )
-            for c in spline_cols:
-                if c not in covariates:
-                    covariates.append(c)
-            meta["temperature_control_used"] = (
-                "spline" if spline_meta.get("status") in ("ok", "ok_linear_only") else "linear"
-            )
-            meta["temperature_spline"] = spline_meta
-            meta["temperature_control_column"] = "temperature"
-        elif "rating_hat_from_temp" in trial_df.columns and outcome not in ("pain_residual",):
-            covariates.append("rating_hat_from_temp")
-            meta["temperature_control_used"] = "rating_hat_fallback"
-            meta["temperature_control_column"] = "rating_hat_from_temp"
-    elif "temperature" in trial_df.columns:
-        covariates.append("temperature")
-        meta["temperature_control_used"] = "linear"
-        meta["temperature_control_column"] = "temperature"
-    
-    return covariates, temp_design_df, meta
+    return _build_temp_cov_shared(
+        trial_df=trial_df,
+        outcome=outcome,
+        temperature_control=cfg.temperature_control or "linear",
+        include_temperature=cfg.include_temperature,
+        config=config,
+        key_prefix="behavior_analysis.regression.temperature_spline",
+    )
 
 
 def _build_trial_order_covariates(
@@ -404,7 +220,7 @@ def _fit_reduced_model(
         - valid_mask: boolean mask for valid rows
         - Xz_names: column names for design matrix
     """
-    Xz, Xz_names, _ = _build_covariate_design(base, covariates, add_intercept=True)
+    Xz, Xz_names, _ = _build_covariate_design_with_df(base, covariates, add_intercept=True)
     y = pd.to_numeric(base[outcome], errors="coerce").to_numpy(dtype=float)
     
     valid_mask = np.isfinite(y) & np.all(np.isfinite(Xz), axis=1)
@@ -505,7 +321,7 @@ def _compute_permutation_pvalues(
     has_interaction = "feature_x_temperature" in names
     
     for _ in range(n_permutations):
-        perm_idx = _permute_within_groups(len(resid_z), rng, groups_v)
+        perm_idx = permute_within_groups(len(resid_z), rng, groups_v)
         y_perm = y_hat_z + resid_z[perm_idx]
         y_perm_f = y_perm[valid_feat]
         beta_p = _ols_fit(X, y_perm_f)
@@ -639,7 +455,7 @@ def _process_single_regression_feature(
     r2_full = _r2(y_f, y_hat)
     delta_r2 = r2_full - r2_reduced if np.isfinite(r2_full) and np.isfinite(r2_reduced) else np.nan
 
-    se = _hc3_se_for_beta(X, y_f, beta)
+    se = _hc3_se(X, y_f, beta, min_denominator=_MIN_DENOMINATOR_THRESHOLD)
     n_params = X.shape[1]
     dof = max(int(len(y_f) - n_params), 1)
     t_stats = beta / (se + _MIN_SE_THRESHOLD)

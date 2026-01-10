@@ -231,13 +231,6 @@ def _classify_power_subtype(column_lower: str) -> str:
     return "direct"
 
 
-def _classify_microstate_subtype(column_lower: str) -> str:
-    """Classify microstate feature subtype."""
-    if "transition" in column_lower:
-        return "transition"
-    if column_lower.startswith("ms_"):
-        return "state"
-    return "summary"
 
 
 def _classify_pac_subtype(column_lower: str) -> str:
@@ -285,7 +278,6 @@ def _classify_subtype(
     type_classifiers = {
         "connectivity": lambda: _classify_connectivity_subtype(column, column_lower),
         "power": lambda: _classify_power_subtype(column_lower),
-        "microstate": lambda: _classify_microstate_subtype(column_lower),
         "pac": lambda: _classify_pac_subtype(column_lower),
     }
 
@@ -373,16 +365,6 @@ def _create_pattern_metadata(
             "roi",
             "asymmetry",
             {**base_meta, "band": groups[0], "pair": groups[1], "identifier": groups[1]},
-        ),
-        "ms_transition": lambda: (
-            "microstate",
-            "transition",
-            {
-                **base_meta,
-                "from_state": groups[0],
-                "to_state": groups[1],
-                "identifier": f"{groups[0]}->{groups[1]}",
-            },
         ),
         "itpc": lambda: (
             "itpc",
@@ -476,14 +458,6 @@ def _create_pattern_metadata(
     if handler:
         return handler()
 
-    if pattern_type.startswith("ms_"):
-        subtype = pattern_type.replace("ms_", "")
-        return (
-            "microstate",
-            subtype,
-            {**base_meta, "state": groups[0], "identifier": groups[0]},
-        )
-
     identifier = groups[0] if groups else column
     return pattern_type, "unknown", {**base_meta, "identifier": identifier}
 
@@ -557,7 +531,6 @@ def _parse_feature_metadata(column: str, feature_type: str) -> Dict[str, Any]:
         "power": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
         "connectivity": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
         "graph": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
-        "microstate": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
         "itpc": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
         "pac": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
         "spectral": lambda: _extract_band_and_identifier(parts, _FREQUENCY_BANDS),
@@ -580,7 +553,6 @@ def _parse_feature_metadata(column: str, feature_type: str) -> Dict[str, Any]:
 
 _SCHEMA_GROUP_TO_FEATURE_TYPE = {
     "conn": "connectivity",
-    "microstates": "microstate",
     "asymmetry": "roi",
     "comp": "complexity",
     "qual": "quality",

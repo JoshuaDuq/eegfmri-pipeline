@@ -116,6 +116,34 @@ def _count_columns_and_rows(path: Path) -> tuple[int, int]:
     return 0, 0
 
 
+def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path:
+    """
+    Find the feature file path, checking subfolder first then root.
+    
+    Features can be stored in two locations:
+    - Subfolder: features/{key}/{filename} (new structure)
+    - Root: features/{filename} (legacy structure)
+    
+    Parameters
+    ----------
+    features_dir : Path
+        Root features directory
+    key : str
+        Feature key (e.g., 'power', 'connectivity')
+    filename : str
+        Feature filename (e.g., 'features_power.tsv')
+        
+    Returns
+    -------
+    Path
+        Path to the feature file (subfolder if exists, otherwise root)
+    """
+    subfolder_path = features_dir / key / filename
+    if subfolder_path.exists():
+        return subfolder_path
+    return features_dir / filename
+
+
 def discover_feature_files(
     subject: str,
     deriv_root: Path,
@@ -123,6 +151,9 @@ def discover_feature_files(
 ) -> dict[str, FeatureFileInfo]:
     """
     Discover available feature files for a subject.
+    
+    Searches for feature files in both subfolder structure (features/{key}/)
+    and root features directory for backwards compatibility.
     
     Parameters
     ----------
@@ -147,7 +178,7 @@ def discover_feature_files(
     result: dict[str, FeatureFileInfo] = {}
     
     for key, filename in STANDARD_FEATURE_FILES.items():
-        file_path = features_dir / filename
+        file_path = _find_feature_file_path(features_dir, key, filename)
         file_exists = file_path.exists()
         
         if not file_exists and not include_empty:

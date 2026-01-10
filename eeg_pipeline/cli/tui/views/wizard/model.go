@@ -23,16 +23,15 @@ import (
 
 const (
 	// Time range editing states
-	noRangeEditing = -1
-	fieldName      = 0
-	fieldTmin      = 1
-	fieldTmax      = 2
+	noRangeEditing     = -1
+	fieldName          = 0
+	fieldTmin          = 1
+	fieldTmax          = 2
 	numTimeRangeFields = 3
 
 	// Scroll offset calculation
-	minVisibleLines = 8
+	minVisibleLines       = 8
 	defaultTerminalHeight = 40
-
 
 	// Minimum buffer length for single character input
 	singleCharLength = 1
@@ -83,6 +82,8 @@ type FrequencyBand struct {
 	Key         string
 	Name        string
 	Description string
+	LowHz       float64
+	HighHz      float64
 }
 
 type behaviorSection struct {
@@ -92,11 +93,29 @@ type behaviorSection struct {
 }
 
 var frequencyBands = []FrequencyBand{
-	{"delta", "Delta", "Delta band"},
-	{"theta", "Theta", "Theta band"},
-	{"alpha", "Alpha", "Alpha band"},
-	{"beta", "Beta", "Beta band"},
-	{"gamma", "Gamma", "Gamma band"},
+	{"delta", "Delta", "Delta band", 1.0, 3.9},
+	{"theta", "Theta", "Theta band", 4.0, 7.9},
+	{"alpha", "Alpha", "Alpha band", 8.0, 12.9},
+	{"beta", "Beta", "Beta band", 13.0, 30.0},
+	{"gamma", "Gamma", "Gamma band", 30.1, 80.0},
+}
+
+type ROIDefinition struct {
+	Key      string
+	Name     string
+	Channels string
+}
+
+var defaultROIs = []ROIDefinition{
+	{"Frontal", "Frontal", "Fp1,Fp2,Fpz,AF3,AF4,AF7,AF8,F1,F2,F3,F4,F5,F6,F7,F8"},
+	{"Sensorimotor_Contra_R", "Sensorimotor Contra R", "FC2,FC4,FC6,C2,C4,C6,CP2,CP4,CP6"},
+	{"Sensorimotor_Ipsi_L", "Sensorimotor Ipsi L", "FC1,FC3,FC5,C1,C3,C5,CP1,CP3,CP5"},
+	{"Temporal_Contra_R", "Temporal Contra R", "FT8,FT10,T8,TP8,TP10"},
+	{"Temporal_Ipsi_L", "Temporal Ipsi L", "FT7,FT9,T7,TP7,TP9"},
+	{"ParOccipital_Contra_R", "ParOccipital Contra R", "P2,P4,P6,P8,PO4,PO8,O2"},
+	{"ParOccipital_Ipsi_L", "ParOccipital Ipsi L", "P1,P3,P5,P7,PO3,PO7,O1"},
+	{"ParOccipital_Midline", "ParOccipital Midline", "Pz,POz,Oz"},
+	{"Midline_ACC_MCC", "Midline ACC/MCC", "Fz,Cz,CPz"},
 }
 
 type SpatialMode struct {
@@ -125,6 +144,19 @@ var connectivityMeasures = []ConnectivityMeasure{
 	{"pli", "PLI", "Phase lag index"},
 }
 
+// Directed connectivity measures for features pipeline
+type DirectedConnectivityMeasure struct {
+	Key         string
+	Name        string
+	Description string
+}
+
+var directedConnectivityMeasures = []DirectedConnectivityMeasure{
+	{"psi", "PSI", "Phase Slope Index (direction of information flow)"},
+	{"dtf", "DTF", "Directed Transfer Function (MVAR-based causality)"},
+	{"pdc", "PDC", "Partial Directed Coherence (direct causal influence)"},
+}
+
 type MLCVScope int
 
 const (
@@ -151,6 +183,8 @@ type FeatureFile struct {
 var featureFileOptions = []FeatureFile{
 	{"power", "Power Features", "EEG power spectral features"},
 	{"connectivity", "Connectivity", "Functional connectivity features"},
+	{"directed_connectivity", "Directed Connectivity", "PSI, DTF, PDC (directed)"},
+	{"source_localization", "Source Localization", "LCMV/eLORETA source estimates"},
 	{"aperiodic", "Aperiodic (1/f)", "Aperiodic spectral features"},
 	{"itpc", "ITPC", "Inter-trial phase coherence"},
 	{"pac", "PAC", "Phase-amplitude coupling"},
@@ -166,28 +200,28 @@ var featureFileOptions = []FeatureFile{
 // Features not in this list for a given computation won't be shown in the feature selection.
 var computationApplicableFeatures = map[string][]string{
 	// Correlations can use all standard EEG features
-	"correlations": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"correlations": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Pain sensitivity uses the same features as correlations
-	"pain_sensitivity": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"pain_sensitivity": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Condition comparison uses trial-level features
-	"condition": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"condition": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Temporal: power, itpc, erds are the temporal-specific features computed from epochs
 	// User selects which to compute in step 3 (feature selection)
 	"temporal": {"power", "itpc", "erds"},
 	// Cluster permutation uses TFR data directly
 	"cluster": {"power"},
 	// Mediation/moderation use correlations features
-	"mediation":     {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"moderation":    {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"mixed_effects": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mediation":     {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"moderation":    {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"mixed_effects": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 	// Post computations
-	"confounds":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"regression":  {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"models":      {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"stability":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"consistency": {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"influence":   {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
-	"report":      {"power", "connectivity", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"confounds":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"regression":  {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"models":      {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"stability":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"consistency": {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"influence":   {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
+	"report":      {"power", "connectivity", "directed_connectivity", "source_localization", "aperiodic", "itpc", "pac", "complexity", "ratios", "asymmetry", "erds", "spectral"},
 }
 
 type PlotItem struct {
@@ -267,6 +301,10 @@ const (
 	textFieldPainResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
+	// Frequency band editing text fields
+	textFieldBandName
+	textFieldBandLowHz
+	textFieldBandHighHz
 	// Features advanced config text fields
 	textFieldPACPairs
 	textFieldBurstBands
@@ -515,13 +553,6 @@ type Model struct {
 	derivRoot  string
 	sourceRoot string
 
-	// Project setup step (per-run overrides)
-	projectBidsRoot    string // Override for this run
-	projectDerivRoot   string // Override for this run
-	projectSourceRoot  string // Override for this run
-	projectSetupCursor int    // Which field is selected
-	useGlobalDefaults  bool   // If true, use global config values
-
 	// Mode selection
 	modeOptions      []string
 	modeDescriptions []string
@@ -550,6 +581,21 @@ type Model struct {
 	bands        []FrequencyBand
 	bandSelected map[int]bool
 	bandCursor   int
+
+	// Band editing state
+	editingBandIdx   int    // Which band is being edited (-1 for none)
+	editingBandField int    // 0: name, 1: lowHz, 2: highHz
+	bandEditBuffer   string // Buffer for the value being typed
+
+	// ROI selection (for features pipeline)
+	rois        []ROIDefinition
+	roiSelected map[int]bool
+	roiCursor   int
+
+	// ROI editing state
+	editingROIIdx   int    // Which ROI is being edited (-1 for none)
+	editingROIField int    // 0: name, 1: channels
+	roiEditBuffer   string // Buffer for the value being typed
 
 	// Spatial mode selection (for features pipeline)
 	spatialSelected map[int]bool
@@ -997,6 +1043,27 @@ type Model struct {
 	connPhaseEstimator         int     // 0: within_epoch, 1: across_epochs
 	connMinSegmentSec          float64 // Minimum segment duration
 
+	// Directed connectivity options (PSI, DTF, PDC)
+	directedConnMeasures          map[int]bool // Selected directed connectivity measures
+	directedConnEnabled           bool         // Enable directed connectivity extraction
+	directedConnOutputLevel       int          // 0: full, 1: global_only
+	directedConnMvarOrder         int          // MVAR model order for DTF/PDC
+	directedConnNFreqs            int          // Number of frequency bins
+	directedConnMinSegSamples     int          // Minimum segment samples
+	featGroupDirectedConnExpanded bool         // UI expansion state
+
+	// Source localization options (LCMV, eLORETA)
+	sourceLocEnabled           bool    // Enable source localization
+	sourceLocMethod            int     // 0: lcmv, 1: eloreta
+	sourceLocSpacing           int     // 0: oct5, 1: oct6, 2: ico4, 3: ico5
+	sourceLocParc              int     // 0: aparc, 1: aparc.a2009s, 2: HCPMMP1
+	sourceLocReg               float64 // LCMV regularization
+	sourceLocSnr               float64 // eLORETA SNR
+	sourceLocLoose             float64 // eLORETA loose constraint
+	sourceLocDepth             float64 // eLORETA depth weighting
+	sourceLocConnMethod        int     // 0: aec, 1: wpli, 2: plv
+	featGroupSourceLocExpanded bool    // UI expansion state
+
 	// PAC advanced options
 	pacSource              int     // 0: precomputed, 1: tfr
 	pacNormalize           bool    // Normalize PAC values
@@ -1070,6 +1137,9 @@ type Model struct {
 	runAdjustmentIncludeInCorrelations bool
 	runAdjustmentMaxDummies            int
 
+	// Output options
+	alsoSaveCsv bool // Also save output tables as CSV files
+
 	// Behavior advanced config section expansion (collapsed by default for compact UI)
 	behaviorGroupGeneralExpanded      bool
 	behaviorGroupTrialTableExpanded   bool
@@ -1088,6 +1158,7 @@ type Model struct {
 	behaviorGroupMediationExpanded    bool
 	behaviorGroupModerationExpanded   bool
 	behaviorGroupMixedEffectsExpanded bool
+	behaviorGroupOutputExpanded       bool
 
 	// Trial table / pain residual config (subject-level)
 	trialTableFormat          int // 0=parquet, 1=tsv
@@ -1377,13 +1448,17 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		subjectSelected:         make(map[string]bool),
 		computationSelected:     make(map[int]bool),
 		postComputationSelected: make(map[int]bool),
-		bands:                   frequencyBands,
+		bands:                   append([]FrequencyBand{}, frequencyBands...),
 		bandSelected:            make(map[int]bool),
+		editingBandIdx:          -1,
+		rois:                    append([]ROIDefinition{}, defaultROIs...),
+		roiSelected:             make(map[int]bool),
+		editingROIIdx:           -1,
 		spatialSelected:         make(map[int]bool),
 		helpOverlay:             help,
 		// Advanced config defaults (shared)
-		useDefaultAdvanced: true,
-		expandedOption:     expandedNone,
+		useDefaultAdvanced:                false,
+		expandedOption:                    expandedNone,
 		connectivityMeasures:              make(map[int]bool),
 		featGroupConnectivityExpanded:     false,
 		featGroupPACExpanded:              false,
@@ -1498,6 +1573,27 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWarnNoSpatialTransform: true,
 		connPhaseEstimator:         0, // 0: within_epoch
 		connMinSegmentSec:          1.0,
+
+		// Directed connectivity defaults
+		directedConnMeasures:          make(map[int]bool),
+		directedConnEnabled:           false, // Disabled by default (opt-in)
+		directedConnOutputLevel:       0,     // 0: full
+		directedConnMvarOrder:         10,    // MVAR model order
+		directedConnNFreqs:            16,    // Number of frequency bins
+		directedConnMinSegSamples:     100,   // Minimum segment samples
+		featGroupDirectedConnExpanded: false,
+
+		// Source localization defaults
+		sourceLocEnabled:           false, // Disabled by default (opt-in, requires fsaverage)
+		sourceLocMethod:            0,     // 0: lcmv
+		sourceLocSpacing:           1,     // 1: oct6 (default)
+		sourceLocParc:              0,     // 0: aparc (Desikan-Killiany)
+		sourceLocReg:               0.05,  // LCMV regularization
+		sourceLocSnr:               3.0,   // eLORETA SNR
+		sourceLocLoose:             0.2,   // eLORETA loose constraint
+		sourceLocDepth:             0.8,   // eLORETA depth weighting
+		sourceLocConnMethod:        0,     // 0: aec
+		featGroupSourceLocExpanded: false,
 
 		// PAC advanced defaults
 		pacSource:              0, // 0: precomputed
@@ -1785,10 +1881,7 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 	}
 
 	// Time ranges
-	m.TimeRanges = []types.TimeRange{
-		{Name: "baseline", Tmin: "", Tmax: ""},
-		{Name: "active", Tmin: "", Tmax: ""},
-	}
+	m.TimeRanges = []types.TimeRange{}
 	m.editingRangeIdx = noRangeEditing
 
 	switch pipeline {
@@ -1799,8 +1892,8 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 		m.categories = []string{
 			"power", "spectral", "aperiodic", "erp", "erds", "ratios", "asymmetry",
-			"connectivity", "itpc", "pac",
-			"complexity", "bursts", "quality",
+			"connectivity", "directed_connectivity", "itpc", "pac",
+			"complexity", "bursts", "quality", "source_localization",
 		}
 		m.categoryDescs = []string{
 			"Band power (log-ratio)",
@@ -1811,16 +1904,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			"Band power ratios",
 			"Hemispheric asymmetry",
 			"Functional connectivity",
+			"Directed connectivity (PSI, DTF, PDC)",
 			"Inter-trial phase coh.",
 			"Phase-amplitude coupling",
 			"Signal complexity",
 			"Oscillatory burst dynamics",
 			"Trial quality metrics",
+			"Source localization (LCMV, eLORETA)",
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepConfigureOptions, // Category selection
 			types.StepSelectBands,
+			types.StepSelectROIs,
 			types.StepSelectSpatial,
 			types.StepTimeRange,
 			types.StepAdvancedConfig,
@@ -1828,6 +1924,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 		for i := range frequencyBands {
 			m.bandSelected[i] = true
+		}
+		for i := range defaultROIs {
+			m.roiSelected[i] = true
 		}
 		// Default spatial modes: roi and global
 		m.spatialSelected[0] = true // roi
@@ -2098,10 +2197,88 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				// Accept digits, decimal point, and minus sign
 				char := msg.String()
-				isValidNumericChar := len(char) == singleCharLength && 
+				isValidNumericChar := len(char) == singleCharLength &&
 					(char >= "0" && char <= "9" || char == "." || char == "-")
 				if isValidNumericChar {
 					m.numberBuffer += char
+				}
+			}
+			return m, nil
+		}
+
+		// Handle band editing mode
+		isEditingBand := m.editingBandIdx >= 0 && m.editingBandIdx < len(m.bands)
+		if isEditingBand {
+			switch msg.String() {
+			case "esc":
+				m.editingBandIdx = -1
+				m.bandEditBuffer = ""
+			case "enter":
+				m.commitBandEdit()
+				// Move to next field or exit
+				if m.editingBandField < 2 {
+					m.editingBandField++
+					m.initBandEditBuffer()
+				} else {
+					m.editingBandIdx = -1
+					m.bandEditBuffer = ""
+				}
+			case "tab":
+				m.commitBandEdit()
+				m.editingBandField = (m.editingBandField + 1) % 3
+				m.initBandEditBuffer()
+			case "backspace":
+				if len(m.bandEditBuffer) > 0 {
+					m.bandEditBuffer = m.bandEditBuffer[:len(m.bandEditBuffer)-1]
+				}
+			default:
+				char := msg.String()
+				if len(char) == singleCharLength {
+					if m.editingBandField == 0 {
+						// Name field: accept alphanumeric
+						m.bandEditBuffer += char
+					} else {
+						// Frequency fields: accept digits and decimal
+						isNumericChar := (char >= "0" && char <= "9") || char == "."
+						if isNumericChar {
+							m.bandEditBuffer += char
+						}
+					}
+				}
+			}
+			return m, nil
+		}
+
+		// Handle ROI editing mode
+		isEditingROI := m.editingROIIdx >= 0 && m.editingROIIdx < len(m.rois)
+		if isEditingROI {
+			switch msg.String() {
+			case "esc":
+				m.editingROIIdx = -1
+				m.roiEditBuffer = ""
+			case "enter":
+				m.commitROIEdit()
+				// Move to next field or exit
+				if m.editingROIField < 1 {
+					m.editingROIField++
+					m.initROIEditBuffer()
+				} else {
+					m.editingROIIdx = -1
+					m.roiEditBuffer = ""
+				}
+			case "tab":
+				m.commitROIEdit()
+				m.editingROIField = (m.editingROIField + 1) % 2
+				m.initROIEditBuffer()
+			case "backspace":
+				if len(m.roiEditBuffer) > 0 {
+					m.roiEditBuffer = m.roiEditBuffer[:len(m.roiEditBuffer)-1]
+				}
+			default:
+				char := msg.String()
+				if len(char) == singleCharLength {
+					// Accept alphanumeric and comma for channels
+					m.roiEditBuffer += char
 				}
 			}
 			return m, nil
@@ -2130,7 +2307,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isNameField := m.editingField == fieldName
 				isTminField := m.editingField == fieldTmin
 				isTmaxField := m.editingField == fieldTmax
-				
+
 				if isNameField && len(ref.Name) > 0 {
 					ref.Name = ref.Name[:len(ref.Name)-1]
 				} else if isTminField && len(ref.Tmin) > 0 {
@@ -2178,7 +2355,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			m.handleRight()
 		case " ":
-			m.handleSpace()
+			// Space to edit bands or ROIs, or handle default space behavior
+			if m.CurrentStep == types.StepSelectBands {
+				m.startBandEdit()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.startROIEdit()
+			} else {
+				m.handleSpace()
+			}
 		case "enter":
 			return m.handleEnter()
 		case "tab":
@@ -2192,6 +2376,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeRangeCursor = len(m.TimeRanges) - 1
 				m.editingRangeIdx = m.timeRangeCursor
 				m.editingField = fieldName
+			} else if m.CurrentStep == types.StepSelectBands {
+				m.addNewBand()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.addNewROI()
 			} else {
 				m.selectAll()
 			}
@@ -2208,48 +2396,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.timeRangeCursor < 0 {
 					m.timeRangeCursor = 0
 				}
+			} else if m.CurrentStep == types.StepSelectBands {
+				m.removeBand()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.removeROI()
 			}
 		case "n":
 			m.selectNone()
 
-		case "Q":
-			// Quick preset
-			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
-				m.ApplyFeaturePreset("quick")
-			} else if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
-				m.ApplyBehaviorPreset("quick")
+		case "e", "E":
+			// Edit band frequencies or ROI channels
+			if m.CurrentStep == types.StepSelectBands {
+				m.startBandEdit()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.startROIEdit()
 			}
 
-		case "F":
-			// Full preset
-			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
-				m.ApplyFeaturePreset("full")
-			} else if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
-				m.ApplyBehaviorPreset("full")
+		case "+", "=":
+			// Legacy support - map to add
+			if m.CurrentStep == types.StepSelectBands {
+				m.addNewBand()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.addNewROI()
 			}
 
-		case "C":
-			// Connectivity preset (features only)
-			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
-				m.ApplyFeaturePreset("connectivity")
-			}
-
-		case "S":
-			// Spectral preset (features only)
-			if m.CurrentStep == types.StepConfigureOptions && m.Pipeline == types.PipelineFeatures {
-				m.ApplyFeaturePreset("spectral")
-			}
-
-		case "R":
-			// Regression preset (behavior only)
-			if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
-				m.ApplyBehaviorPreset("regression")
-			}
-
-		case "T":
-			// Temporal preset (behavior only)
-			if m.CurrentStep == types.StepSelectComputations && m.Pipeline == types.PipelineBehavior {
-				m.ApplyBehaviorPreset("temporal")
+		case "-", "_":
+			// Legacy support - map to delete
+			if m.CurrentStep == types.StepSelectBands {
+				m.removeBand()
+			} else if m.CurrentStep == types.StepSelectROIs {
+				m.removeROI()
 			}
 
 		case "f5", "ctrl+r":
@@ -2369,7 +2545,7 @@ func (m *Model) UpdateAdvancedOffset() {
 		m.advancedOffset = 0
 		return
 	}
-	
+
 	m.advancedOffset = calculateScrollOffset(
 		cursorLine,
 		m.advancedOffset,
@@ -2507,7 +2683,7 @@ func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLine
 	if totalLines <= 0 {
 		return 0
 	}
-	
+
 	// Clamp cursor to valid range
 	if cursorLine < 0 {
 		cursorLine = 0
@@ -2515,25 +2691,25 @@ func calculateScrollOffset(cursorLine, currentOffset, totalLines, maxVisibleLine
 	if cursorLine >= totalLines {
 		cursorLine = totalLines - 1
 	}
-	
+
 	// Adjust offset to keep cursor visible
 	if cursorLine < currentOffset {
 		currentOffset = cursorLine
 	} else if cursorLine >= currentOffset+maxVisibleLines {
 		currentOffset = cursorLine - maxVisibleLines + 1
 	}
-	
+
 	// Ensure offset is non-negative
 	if currentOffset < 0 {
 		currentOffset = 0
 	}
-	
+
 	// Ensure offset doesn't exceed maximum
 	maxOffset := totalLines - maxVisibleLines
 	if maxOffset > 0 && currentOffset > maxOffset {
 		currentOffset = maxOffset
 	}
-	
+
 	return currentOffset
 }
 
@@ -2559,12 +2735,12 @@ func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int)
 			continue
 		}
 		total++
-		
+
 		hasEpochs := !plot.RequiresEpochs || s.HasEpochs
 		hasFeatures := !plot.RequiresFeatures || s.HasFeatures
 		hasStats := !plot.RequiresStats || s.HasStats
 		isAvailable := hasEpochs && hasFeatures && hasStats
-		
+
 		if !hasEpochs {
 			missing["epochs"]++
 		}
@@ -2574,7 +2750,7 @@ func (m Model) plotAvailabilitySummary(plot PlotItem) (int, int, map[string]int)
 		if !hasStats {
 			missing["stats"]++
 		}
-		
+
 		if isAvailable {
 			available++
 		}
@@ -2732,6 +2908,8 @@ func (m Model) getExpandedListLength() int {
 	switch m.expandedOption {
 	case expandedConnectivityMeasures:
 		return len(connectivityMeasures)
+	case expandedDirectedConnMeasures:
+		return len(directedConnectivityMeasures)
 	case expandedConditionCompareColumn, expandedTemporalConditionColumn, expandedClusterConditionColumn:
 		return len(m.discoveredColumns)
 	case expandedConditionCompareValues:
@@ -2768,6 +2946,12 @@ func (m Model) getExpandedListItems() []string {
 	case expandedConnectivityMeasures:
 		items := make([]string, len(connectivityMeasures))
 		for i, measure := range connectivityMeasures {
+			items[i] = measure.Key
+		}
+		return items
+	case expandedDirectedConnMeasures:
+		items := make([]string, len(directedConnectivityMeasures))
+		for i, measure := range directedConnectivityMeasures {
 			items[i] = measure.Key
 		}
 		return items
@@ -2849,6 +3033,9 @@ func (m *Model) handleExpandedListToggle() {
 	switch m.expandedOption {
 	case expandedConnectivityMeasures:
 		m.connectivityMeasures[m.subCursor] = !m.connectivityMeasures[m.subCursor]
+
+	case expandedDirectedConnMeasures:
+		m.directedConnMeasures[m.subCursor] = !m.directedConnMeasures[m.subCursor]
 
 	case expandedConditionCompareColumn:
 		m.conditionCompareColumn = selectedItem
@@ -3264,8 +3451,26 @@ func parseConfigBands(value interface{}) []FrequencyBand {
 		if !ok || len(entry) < 2 {
 			continue
 		}
-		low, okLow := entry[0].(float64)
-		high, okHigh := entry[1].(float64)
+		var low, high float64
+		var okLow, okHigh bool
+
+		// Try to parse as float64 first
+		if f, ok := entry[0].(float64); ok {
+			low = f
+			okLow = true
+		} else if i, ok := entry[0].(int); ok {
+			low = float64(i)
+			okLow = true
+		}
+
+		if f, ok := entry[1].(float64); ok {
+			high = f
+			okHigh = true
+		} else if i, ok := entry[1].(int); ok {
+			high = float64(i)
+			okHigh = true
+		}
+
 		if !okLow || !okHigh {
 			continue
 		}
@@ -3273,6 +3478,8 @@ func parseConfigBands(value interface{}) []FrequencyBand {
 			Key:         name,
 			Name:        titleCase(name),
 			Description: fmt.Sprintf("%.1f-%.1f Hz", low, high),
+			LowHz:       low,
+			HighHz:      high,
 		})
 	}
 	return bands
@@ -3565,6 +3772,7 @@ const (
 	optUseDefaults optionType = iota
 	// Features section headers (expand/collapse)
 	optFeatGroupConnectivity
+	optFeatGroupDirectedConnectivity
 	optFeatGroupPAC
 	optFeatGroupAperiodic
 	optFeatGroupComplexity
@@ -3578,6 +3786,7 @@ const (
 	optFeatGroupStorage
 	optFeatGroupExecution
 	optFeatGroupValidation
+	optFeatGroupSourceLoc
 	// Behavior section headers (expand/collapse)
 	optBehaviorGroupGeneral
 	optBehaviorGroupTrialTable
@@ -3638,11 +3847,26 @@ const (
 	optConnWindowLen
 	optConnWindowStep
 	optConnAECMode
+	// Directed connectivity options (PSI, DTF, PDC)
+	optDirectedConnMeasures
+	optDirectedConnOutputLevel
+	optDirectedConnMvarOrder
+	optDirectedConnNFreqs
+	optDirectedConnMinSegSamples
 	// Spatial transform options
 	optSpatialTransform
 	optSpatialTransformLambda2
 	optSpatialTransformStiffness
 	optMinEpochs
+	// Source localization options (LCMV, eLORETA)
+	optSourceLocMethod
+	optSourceLocSpacing
+	optSourceLocParc
+	optSourceLocReg
+	optSourceLocSnr
+	optSourceLocLoose
+	optSourceLocDepth
+	optSourceLocConnMethod
 
 	optFailOnMissingWindows
 	optFailOnMissingNamedWindow
@@ -3815,6 +4039,9 @@ const (
 	// Behavior options - Mixed effects / mediation
 	optMixedEffectsType
 	optMediationMinEffect
+	// Behavior options - Output
+	optBehaviorGroupOutput
+	optAlsoSaveCsv
 	// Plotting options
 	optPlotPNG
 	optPlotSVG
@@ -4073,6 +4300,7 @@ const (
 	expandedPlotComparisonColumn    = 8
 	expandedPlotComparisonValues    = 9
 	expandedPlotComparisonWindows   = 10
+	expandedDirectedConnMeasures    = 11
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -4084,6 +4312,13 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupConnectivity)
 		if m.featGroupConnectivityExpanded {
 			options = append(options, optConnectivity, optConnOutputLevel, optConnGraphMetrics, optConnGraphProp, optConnWindowLen, optConnWindowStep, optConnAECMode)
+		}
+	}
+
+	if m.isCategorySelected("directed_connectivity") {
+		options = append(options, optFeatGroupDirectedConnectivity)
+		if m.featGroupDirectedConnExpanded {
+			options = append(options, optDirectedConnMeasures, optDirectedConnOutputLevel, optDirectedConnMvarOrder, optDirectedConnNFreqs, optDirectedConnMinSegSamples)
 		}
 	}
 
@@ -4148,6 +4383,21 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupSpatialTransform)
 		if m.featGroupSpatialTransformExpanded {
 			options = append(options, optSpatialTransform, optSpatialTransformLambda2, optSpatialTransformStiffness)
+		}
+	}
+
+	// Source localization (LCMV, eLORETA)
+	if m.isCategorySelected("source_localization") {
+		options = append(options, optFeatGroupSourceLoc)
+		if m.featGroupSourceLocExpanded {
+			options = append(options, optSourceLocMethod, optSourceLocSpacing, optSourceLocParc)
+			// Show method-specific options based on selected method
+			if m.sourceLocMethod == 0 { // LCMV
+				options = append(options, optSourceLocReg)
+			} else { // eLORETA
+				options = append(options, optSourceLocSnr, optSourceLocLoose, optSourceLocDepth)
+			}
+			options = append(options, optSourceLocConnMethod)
 		}
 	}
 
@@ -4902,6 +5152,12 @@ func (m Model) getBehaviorOptions() []optionType {
 		if m.behaviorGroupMixedEffectsExpanded {
 			options = append(options, optMixedEffectsType, optMixedMaxFeatures)
 		}
+	}
+
+	// Output section - always visible
+	options = append(options, optBehaviorGroupOutput)
+	if m.behaviorGroupOutputExpanded {
+		options = append(options, optAlsoSaveCsv)
 	}
 
 	return options

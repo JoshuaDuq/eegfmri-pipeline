@@ -35,7 +35,6 @@ from eeg_pipeline.analysis.features.phase import (
 )
 from eeg_pipeline.analysis.features.aperiodic import (
     extract_aperiodic_features,
-    extract_aperiodic_features_from_epochs,
 )
 from eeg_pipeline.analysis.features.complexity import extract_complexity_from_precomputed
 from eeg_pipeline.analysis.features.erp import extract_erp_features
@@ -43,6 +42,15 @@ from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.analysis.features.connectivity import (
     extract_connectivity_features,
     extract_connectivity_from_precomputed,
+)
+from eeg_pipeline.analysis.features.directed_connectivity import (
+    extract_directed_connectivity_features,
+    extract_directed_connectivity_from_precomputed,
+)
+from eeg_pipeline.analysis.features.source_localization import (
+    extract_source_localization_features,
+    extract_source_connectivity_features,
+    extract_source_localization_from_precomputed,
 )
 from eeg_pipeline.analysis.features.power import extract_power_features
 from eeg_pipeline.analysis.features.preparation import precompute_data
@@ -82,6 +90,7 @@ def _prepare_precomputed_data(
     """Prepare or compute precomputed intermediate data for feature extraction."""
     precompute_categories = {
         "connectivity",
+        "directed_connectivity",
         "erds",
         "ratios",
         "asymmetry",
@@ -339,16 +348,17 @@ def _extract_pac_features(
     frequencies = np.logspace(np.log10(freq_min), np.log10(freq_max), n_freqs)
 
     segment_window = None
-    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "active"
+    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
+    segment_range = None
+    
     if ctx.windows is not None:
         if ctx.name and ctx.windows.ranges.get(ctx.name) is not None:
             segment_range = ctx.windows.ranges.get(ctx.name)
-        else:
-            segment_range = ctx.windows.ranges.get("active")
-            if segment_range is None and ctx.windows.active_range is not None:
-                active_range = ctx.windows.active_range
-                if np.isfinite(active_range[0]) and np.isfinite(active_range[1]):
-                    segment_range = active_range
+        elif hasattr(ctx.windows, "active_range") and ctx.windows.active_range is not None:
+            active_range = ctx.windows.active_range
+            if np.isfinite(active_range[0]) and np.isfinite(active_range[1]):
+                segment_range = active_range
+
         if segment_range is not None:
             segment_window = (float(segment_range[0]), float(segment_range[1]))
 
@@ -496,13 +506,18 @@ def extract_all_features(
         ctx.logger.info(f"Spatial aggregation modes: {', '.join(ctx.spatial_modes)}")
 
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
+    # Store original epochs for baseline correction before cropping
+    ctx._original_epochs = ctx.epochs
     working_epochs = _prepare_working_epochs(ctx, tmin, tmax)
     expected_n_trials = len(working_epochs)
+    # Update ctx.epochs with cropped version so extractors see correct time range
+    ctx.epochs = working_epochs
 
     precomputed_data = _prepare_precomputed_data(ctx, working_epochs, power_bands, tmin, tmax)
     if precomputed_data is not None:
         precomputed_data = _align_precomputed_windows(ctx, precomputed_data)
         precomputed_data.spatial_modes = list(ctx.spatial_modes) if ctx.spatial_modes else None
+        ctx.set_precomputed(precomputed_data)
 
     validation = validate_epochs(working_epochs, ctx.config, logger=ctx.logger)
     if not validation.valid:
@@ -562,6 +577,32 @@ def extract_all_features(
         )
         results.conn_df = conn_df
         results.conn_cols = conn_cols or []
+
+    if "directed_connectivity" in ctx.feature_categories:
+        dconn_df, dconn_cols, _ = _extract_feature_with_error_handling(
+            ctx,
+            "directed_connectivity",
+            extract_directed_connectivity_features,
+            expected_n_trials,
+            progress,
+            ctx,
+            power_bands,
+        )
+        results.dconn_df = dconn_df
+        results.dconn_cols = dconn_cols or []
+
+    if "source_localization" in ctx.feature_categories:
+        source_df, source_cols, _ = _extract_feature_with_error_handling(
+            ctx,
+            "source_localization",
+            extract_source_localization_features,
+            expected_n_trials,
+            progress,
+            ctx,
+            power_bands,
+        )
+        results.source_df = source_df
+        results.source_cols = source_cols or []
 
     if "aperiodic" in ctx.feature_categories:
         aper_df, aper_cols, qc_payload = _extract_feature_with_error_handling(
@@ -815,23 +856,9 @@ def extract_precomputed_features(
 
     if "aperiodic" in feature_groups:
         logger.info("Extracting aperiodic features...")
-        baseline_window = getattr(precomputed.windows, "baseline_range", None)
-        if baseline_window is None or np.isnan(baseline_window).any():
-            baseline_window = get_config_value(
-                config, "time_frequency_analysis.baseline_window", [-3.0, -0.5]
-            )
-            baseline_window = tuple(baseline_window)
-
         try:
-            df, cols, qc = extract_aperiodic_features_from_epochs(
-                epochs,
-                baseline_window,
-                bands,
-                config,
-                logger,
-                events_df=events_df,
-                frequency_bands_override=getattr(precomputed, "frequency_bands", None),
-            )
+            from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_features
+            df, cols, qc = extract_aperiodic_features(ctx, bands)
             if not df.empty:
                 result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")
                 result.qc["aperiodic"] = qc
@@ -852,6 +879,22 @@ def extract_precomputed_features(
         except Exception as exc:
             logger.error(f"Failed to extract connectivity features: {exc}")
             result.qc["connectivity"] = {"skipped_reason": f"error: {exc}"}
+
+    if "directed_connectivity" in feature_groups:
+        logger.info("Extracting directed connectivity features (PSI, DTF, PDC)...")
+        try:
+            dconn_df, dconn_cols = extract_directed_connectivity_from_precomputed(
+                precomputed, config=config, logger=logger
+            )
+            if not dconn_df.empty:
+                result.features["directed_connectivity"] = FeatureSet(
+                    dconn_df, dconn_cols, "directed_connectivity"
+                )
+            else:
+                result.qc["directed_connectivity"] = {"skipped_reason": "empty_result"}
+        except Exception as exc:
+            logger.error(f"Failed to extract directed connectivity features: {exc}")
+            result.qc["directed_connectivity"] = {"skipped_reason": f"error: {exc}"}
 
     if "ratios" in feature_groups:
         _extract_precomputed_feature_group(

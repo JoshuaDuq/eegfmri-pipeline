@@ -14,6 +14,7 @@ import pandas as pd
 from scipy import stats
 
 from .base import get_statistics_constants
+from .base import _safe_float
 
 
 def extract_roi_statistics(
@@ -100,19 +101,11 @@ def update_stats_from_dataframe(
     if stats_df is None:
         return r_val, p_val, n_eff, ci_val
 
-    def safe_float(value: Optional[float]) -> float:
-        """Convert value to float, handling None and NaN."""
-        if value is None:
-            return np.nan
-        if isinstance(value, float) and np.isnan(value):
-            return np.nan
-        return float(value)
-
-    r = safe_float(stats_df.get("r", r_val))
-    p = safe_float(stats_df.get("p", p_val))
+    r = _safe_float(stats_df.get("r", r_val))
+    p = _safe_float(stats_df.get("p", p_val))
     n = int(stats_df.get("n", n_eff))
-    ci_low = safe_float(stats_df.get("r_ci_low", ci_val[0]))
-    ci_high = safe_float(stats_df.get("r_ci_high", ci_val[1]))
+    ci_low = _safe_float(stats_df.get("r_ci_low", ci_val[0]))
+    ci_high = _safe_float(stats_df.get("r_ci_high", ci_val[1]))
 
     return r, p, n, (ci_low, ci_high)
 

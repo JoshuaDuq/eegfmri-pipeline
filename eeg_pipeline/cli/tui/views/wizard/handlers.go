@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	projectSetupFieldCount = 4
-	minSubjectsRequired    = 1
-	minSubjectsForGroupCV  = 2
-	timeRangeFieldCount    = 3
+	minSubjectsRequired   = 1
+	minSubjectsForGroupCV = 2
+	timeRangeFieldCount   = 3
 )
 
 ///////////////////////////////////////////////////////////////////
@@ -32,6 +31,7 @@ func (m *Model) resetCursorsForStep() {
 	m.postComputationCursor = 0
 	m.computationListFocus = 0
 	m.bandCursor = 0
+	m.roiCursor = 0
 	m.spatialCursor = 0
 	m.featureFileCursor = 0
 	m.advancedCursor = 0
@@ -97,8 +97,8 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 			// For combine, only Subjects and Execute are needed
 			return step != types.StepReviewExecute && step != types.StepSelectSubjects && step != types.StepSelectMode
 		case styles.ModeVisualize:
-			// For visualize, skip bands, spatial, time, and advanced config
-			return step == types.StepSelectBands || step == types.StepSelectSpatial || step == types.StepTimeRange || step == types.StepAdvancedConfig
+			// For visualize, skip bands, ROIs, spatial, time, and advanced config
+			return step == types.StepSelectBands || step == types.StepSelectROIs || step == types.StepSelectSpatial || step == types.StepTimeRange || step == types.StepAdvancedConfig
 		}
 	case types.PipelineBehavior:
 		mode := m.modeOptions[m.modeIndex]
@@ -119,13 +119,6 @@ func (m *Model) handleUp() {
 	case types.StepSelectMode:
 		m.modeIndex = moveCursorInList(m.modeIndex, -1, len(m.modeOptions))
 
-	case types.StepProjectSetup:
-		if m.projectSetupCursor > 0 {
-			m.projectSetupCursor--
-		} else {
-			m.projectSetupCursor = projectSetupFieldCount
-		}
-
 	case types.StepSelectComputations:
 		if m.computationListFocus == 0 {
 			// Primary computations list
@@ -143,6 +136,8 @@ func (m *Model) handleUp() {
 		}
 	case types.StepSelectBands:
 		m.bandCursor = moveCursorInList(m.bandCursor, -1, len(m.bands))
+	case types.StepSelectROIs:
+		m.roiCursor = moveCursorInList(m.roiCursor, -1, len(m.rois))
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
 		if len(applicable) > 0 {
@@ -191,13 +186,6 @@ func (m *Model) handleDown() {
 	case types.StepSelectMode:
 		m.modeIndex = moveCursorInList(m.modeIndex, 1, len(m.modeOptions))
 
-	case types.StepProjectSetup:
-		if m.projectSetupCursor < projectSetupFieldCount {
-			m.projectSetupCursor++
-		} else {
-			m.projectSetupCursor = 0
-		}
-
 	case types.StepSelectComputations:
 		if m.computationListFocus == 0 {
 			// Primary computations list
@@ -213,6 +201,8 @@ func (m *Model) handleDown() {
 		m.subjectCursor = moveCursorInList(m.subjectCursor, 1, len(m.subjects))
 	case types.StepSelectBands:
 		m.bandCursor = moveCursorInList(m.bandCursor, 1, len(m.bands))
+	case types.StepSelectROIs:
+		m.roiCursor = moveCursorInList(m.roiCursor, 1, len(m.rois))
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
 		m.featureFileCursor = moveCursorInList(m.featureFileCursor, 1, len(applicable))
@@ -486,6 +476,8 @@ func (m *Model) handleSpace() {
 		}
 	case types.StepSelectBands:
 		m.bandSelected[m.bandCursor] = !m.bandSelected[m.bandCursor]
+	case types.StepSelectROIs:
+		m.roiSelected[m.roiCursor] = !m.roiSelected[m.roiCursor]
 	case types.StepSelectFeatureFiles:
 		applicable := m.GetApplicableFeatureFiles()
 		if m.featureFileCursor < len(applicable) {
@@ -594,6 +586,10 @@ func (m *Model) selectAll() {
 		for i := range m.bands {
 			m.bandSelected[i] = true
 		}
+	case types.StepSelectROIs:
+		for i := range m.rois {
+			m.roiSelected[i] = true
+		}
 	case types.StepSelectSpatial:
 		for i := range spatialModes {
 			m.spatialSelected[i] = true
@@ -634,6 +630,8 @@ func (m *Model) selectNone() {
 		m.updateFeatureAvailability()
 	case types.StepSelectBands:
 		m.bandSelected = make(map[int]bool)
+	case types.StepSelectROIs:
+		m.roiSelected = make(map[int]bool)
 	case types.StepSelectSpatial:
 		m.spatialSelected = make(map[int]bool)
 	case types.StepSelectFeatureFiles:
@@ -812,6 +810,8 @@ func (m *Model) validateTimeRanges() []string {
 	}
 
 	hasBaseline := names["baseline"]
+	hasActive := names["active"]
+
 	baselineRequiredCategories := []string{"erds", "erp", "bursts"}
 	needsBaseline := false
 	for i, cat := range m.categories {
@@ -828,8 +828,35 @@ func (m *Model) validateTimeRanges() []string {
 			break
 		}
 	}
+
+	powerNeedsBaseline := m.isCategorySelected("power") && m.powerRequireBaseline
+	if powerNeedsBaseline && !hasBaseline {
+		errors = append(errors, "Time range 'baseline' is required for power normalization (power.require_baseline=true)")
+	}
+
 	if needsBaseline && !hasBaseline {
 		errors = append(errors, "Time range 'baseline' is required for baseline-normalized features (ERDS, ERP, bursts)")
+	}
+
+	if m.isCategorySelected("power") && !hasActive {
+		for _, tr := range m.TimeRanges {
+			if tr.Name != "baseline" && tr.Tmin != "" && tr.Tmax != "" {
+				hasActive = true
+				break
+			}
+		}
+		if !hasActive {
+			errors = append(errors, "At least one non-baseline time range with valid times is required for power extraction")
+		}
+	}
+
+	for _, tr := range m.TimeRanges {
+		if tr.Name == "" {
+			continue
+		}
+		if tr.Tmin == "" || tr.Tmax == "" {
+			errors = append(errors, fmt.Sprintf("Time range '%s' has missing tmin or tmax values", tr.Name))
+		}
 	}
 
 	return errors
@@ -957,6 +984,13 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 			m.subCursor = 0
 		}
 		m.useDefaultAdvanced = false
+	case optFeatGroupDirectedConnectivity:
+		m.featGroupDirectedConnExpanded = !m.featGroupDirectedConnExpanded
+		if !m.featGroupDirectedConnExpanded && m.expandedOption == expandedDirectedConnMeasures {
+			m.expandedOption = expandedNone
+			m.subCursor = 0
+		}
+		m.useDefaultAdvanced = false
 	case optFeatGroupPAC:
 		m.featGroupPACExpanded = !m.featGroupPACExpanded
 		m.useDefaultAdvanced = false
@@ -995,9 +1029,53 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optFeatGroupValidation:
 		m.featGroupValidationExpanded = !m.featGroupValidationExpanded
 		m.useDefaultAdvanced = false
+	case optFeatGroupSourceLoc:
+		m.featGroupSourceLocExpanded = !m.featGroupSourceLocExpanded
+		m.useDefaultAdvanced = false
 	case optConnectivity:
 		m.expandedOption = expandedConnectivityMeasures
 		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optDirectedConnMeasures:
+		m.expandedOption = expandedDirectedConnMeasures
+		m.subCursor = 0
+		m.useDefaultAdvanced = false
+	case optDirectedConnOutputLevel:
+		m.directedConnOutputLevel = (m.directedConnOutputLevel + 1) % 2 // 0: full, 1: global_only
+		m.useDefaultAdvanced = false
+	case optDirectedConnMvarOrder:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optDirectedConnNFreqs:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optDirectedConnMinSegSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Source localization options
+	case optSourceLocMethod:
+		m.sourceLocMethod = (m.sourceLocMethod + 1) % 2 // 0: lcmv, 1: eloreta
+		m.useDefaultAdvanced = false
+	case optSourceLocSpacing:
+		m.sourceLocSpacing = (m.sourceLocSpacing + 1) % 4 // 0: oct5, 1: oct6, 2: ico4, 3: ico5
+		m.useDefaultAdvanced = false
+	case optSourceLocParc:
+		m.sourceLocParc = (m.sourceLocParc + 1) % 3 // 0: aparc, 1: aparc.a2009s, 2: HCPMMP1
+		m.useDefaultAdvanced = false
+	case optSourceLocReg:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocSnr:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocLoose:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocDepth:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocConnMethod:
+		m.sourceLocConnMethod = (m.sourceLocConnMethod + 1) % 3 // 0: aec, 1: wpli, 2: plv
 		m.useDefaultAdvanced = false
 	case optPACPhaseRange:
 		// Cycle through common phase ranges: theta(4-8) -> delta(2-4) -> alpha(8-13) -> theta
@@ -2220,6 +2298,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 	case optConditionFailFast:
 		m.conditionFailFast = !m.conditionFailFast
 		m.useDefaultAdvanced = false
+
+	// Output section
+	case optBehaviorGroupOutput:
+		m.behaviorGroupOutputExpanded = !m.behaviorGroupOutputExpanded
+		m.useDefaultAdvanced = false
+	case optAlsoSaveCsv:
+		m.alsoSaveCsv = !m.alsoSaveCsv
+		m.useDefaultAdvanced = false
 	}
 
 	// Clamp cursor to valid range after list might have shrunk (e.g., section collapsed)
@@ -3342,4 +3428,189 @@ func (m Model) SelectedPlotCategoryKeys() []string {
 		}
 	}
 	return keys
+}
+
+// initBandEditBuffer initializes the edit buffer with the current field value
+func (m *Model) initBandEditBuffer() {
+	if m.editingBandIdx < 0 || m.editingBandIdx >= len(m.bands) {
+		return
+	}
+	band := m.bands[m.editingBandIdx]
+	switch m.editingBandField {
+	case 0:
+		m.bandEditBuffer = band.Name
+	case 1:
+		m.bandEditBuffer = fmt.Sprintf("%.1f", band.LowHz)
+	case 2:
+		m.bandEditBuffer = fmt.Sprintf("%.1f", band.HighHz)
+	}
+}
+
+// commitBandEdit commits the current edit buffer to the band field
+func (m *Model) commitBandEdit() {
+	if m.editingBandIdx < 0 || m.editingBandIdx >= len(m.bands) {
+		return
+	}
+	switch m.editingBandField {
+	case 0:
+		// Name field
+		if m.bandEditBuffer != "" {
+			m.bands[m.editingBandIdx].Name = m.bandEditBuffer
+			m.bands[m.editingBandIdx].Key = strings.ToLower(m.bandEditBuffer)
+		}
+	case 1:
+		// LowHz field
+		if val, err := strconv.ParseFloat(m.bandEditBuffer, 64); err == nil && val >= 0 {
+			m.bands[m.editingBandIdx].LowHz = val
+		}
+	case 2:
+		// HighHz field
+		if val, err := strconv.ParseFloat(m.bandEditBuffer, 64); err == nil && val >= 0 {
+			m.bands[m.editingBandIdx].HighHz = val
+		}
+	}
+}
+
+// startBandEdit starts editing the current band's frequencies
+func (m *Model) startBandEdit() {
+	if m.bandCursor >= 0 && m.bandCursor < len(m.bands) {
+		m.editingBandIdx = m.bandCursor
+		m.editingBandField = 1 // Start with LowHz
+		m.initBandEditBuffer()
+	}
+}
+
+// addNewBand adds a new custom frequency band
+func (m *Model) addNewBand() {
+	newKey := fmt.Sprintf("custom%d", len(m.bands)+1)
+	newBand := FrequencyBand{
+		Key:         newKey,
+		Name:        strings.Title(newKey),
+		Description: "Custom frequency band",
+		LowHz:       1.0,
+		HighHz:      10.0,
+	}
+	m.bands = append(m.bands, newBand)
+	m.bandCursor = len(m.bands) - 1
+	m.editingBandIdx = m.bandCursor
+	m.editingBandField = 0 // Start with name
+	m.initBandEditBuffer()
+}
+
+// removeBand removes the currently selected band
+func (m *Model) removeBand() {
+	if len(m.bands) <= 1 {
+		return // Keep at least one band
+	}
+	if m.bandCursor >= 0 && m.bandCursor < len(m.bands) {
+		// Remove from bands slice
+		m.bands = append(m.bands[:m.bandCursor], m.bands[m.bandCursor+1:]...)
+		// Update selection map
+		delete(m.bandSelected, m.bandCursor)
+		// Shift selection indices
+		newSelected := make(map[int]bool)
+		for i, sel := range m.bandSelected {
+			if i > m.bandCursor {
+				newSelected[i-1] = sel
+			} else {
+				newSelected[i] = sel
+			}
+		}
+		m.bandSelected = newSelected
+		// Adjust cursor
+		if m.bandCursor >= len(m.bands) {
+			m.bandCursor = len(m.bands) - 1
+		}
+		if m.bandCursor < 0 {
+			m.bandCursor = 0
+		}
+	}
+}
+
+// initROIEditBuffer initializes the edit buffer with the current ROI field value
+func (m *Model) initROIEditBuffer() {
+	if m.editingROIIdx < 0 || m.editingROIIdx >= len(m.rois) {
+		return
+	}
+	roi := m.rois[m.editingROIIdx]
+	switch m.editingROIField {
+	case 0:
+		m.roiEditBuffer = roi.Name
+	case 1:
+		m.roiEditBuffer = roi.Channels
+	}
+}
+
+// commitROIEdit commits the current edit buffer to the ROI field
+func (m *Model) commitROIEdit() {
+	if m.editingROIIdx < 0 || m.editingROIIdx >= len(m.rois) {
+		return
+	}
+	switch m.editingROIField {
+	case 0:
+		// Name field
+		if m.roiEditBuffer != "" {
+			m.rois[m.editingROIIdx].Name = m.roiEditBuffer
+			m.rois[m.editingROIIdx].Key = strings.ReplaceAll(m.roiEditBuffer, " ", "_")
+		}
+	case 1:
+		// Channels field
+		if m.roiEditBuffer != "" {
+			m.rois[m.editingROIIdx].Channels = m.roiEditBuffer
+		}
+	}
+}
+
+// startROIEdit starts editing the current ROI's channels
+func (m *Model) startROIEdit() {
+	if m.roiCursor >= 0 && m.roiCursor < len(m.rois) {
+		m.editingROIIdx = m.roiCursor
+		m.editingROIField = 1 // Start with channels
+		m.initROIEditBuffer()
+	}
+}
+
+// addNewROI adds a new custom ROI
+func (m *Model) addNewROI() {
+	newKey := fmt.Sprintf("Custom_%d", len(m.rois)+1)
+	newROI := ROIDefinition{
+		Key:      newKey,
+		Name:     fmt.Sprintf("Custom %d", len(m.rois)+1),
+		Channels: "Cz,Pz",
+	}
+	m.rois = append(m.rois, newROI)
+	m.roiCursor = len(m.rois) - 1
+	m.editingROIIdx = m.roiCursor
+	m.editingROIField = 0 // Start with name
+	m.initROIEditBuffer()
+}
+
+// removeROI removes the currently selected ROI
+func (m *Model) removeROI() {
+	if len(m.rois) <= 1 {
+		return // Keep at least one ROI
+	}
+	if m.roiCursor >= 0 && m.roiCursor < len(m.rois) {
+		// Remove from rois slice
+		m.rois = append(m.rois[:m.roiCursor], m.rois[m.roiCursor+1:]...)
+		// Update selection map
+		delete(m.roiSelected, m.roiCursor)
+		// Shift selection indices
+		newSelected := make(map[int]bool)
+		for i, sel := range m.roiSelected {
+			if i > m.roiCursor {
+				newSelected[i-1] = sel
+			} else {
+				newSelected[i] = sel
+			}
+		}
+		m.roiSelected = newSelected
+		// Adjust cursor
+		if m.roiCursor >= len(m.rois) {
+			m.roiCursor = len(m.rois) - 1
+		}
+		if m.roiCursor < 0 {
+			m.roiCursor = 0
+		}
+	}
 }

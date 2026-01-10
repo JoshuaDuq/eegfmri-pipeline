@@ -89,11 +89,11 @@ type WizardStep int
 
 const (
 	StepSelectMode WizardStep = iota
-	StepProjectSetup
 	StepSelectComputations
 	StepSelectFeatureFiles
 	StepConfigureOptions
 	StepSelectBands
+	StepSelectROIs
 	StepSelectSpatial
 	StepTimeRange
 	StepAdvancedConfig
@@ -109,11 +109,11 @@ const (
 // wizardStepNames maps wizard steps to their display names
 var wizardStepNames = [wizardStepCount]string{
 	StepSelectMode:            "Select Mode",
-	StepProjectSetup:          "Project Setup",
 	StepSelectComputations:    "Select Computations",
 	StepSelectFeatureFiles:    "Select Feature Files",
 	StepConfigureOptions:      "Configure Options",
 	StepSelectBands:           "Select Bands",
+	StepSelectROIs:            "Select ROIs",
 	StepSelectSpatial:         "Select Spatial",
 	StepTimeRange:             "Time Range",
 	StepAdvancedConfig:        "Advanced Config",

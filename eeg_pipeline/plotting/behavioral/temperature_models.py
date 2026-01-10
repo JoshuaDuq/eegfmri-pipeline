@@ -44,9 +44,14 @@ def _find_trials_file(stats_dir: Path) -> Optional[Path]:
 def _find_column_in_dataframe(
     df: pd.DataFrame, config: Any, config_key: str, default_candidates: List[str]
 ) -> Optional[str]:
+    """Find column from config candidates or default candidates.
+    
+    Uses the canonical find_column function from data.manipulation.
+    """
+    from eeg_pipeline.utils.data.manipulation import find_column
     config_candidates = list(config.get(config_key, []) or [])
     all_candidates = config_candidates + default_candidates
-    return next((col for col in all_candidates if col in df.columns), None)
+    return find_column(df, all_candidates)
 
 
 def _load_metadata_value(metadata_path: Optional[Path], key: str) -> Optional[Any]:

@@ -1,8 +1,8 @@
 """
-Bootstrap and Permutation Statistics
-=====================================
+Bootstrap Statistics
+===================
 
-Bootstrap confidence intervals and permutation tests.
+Bootstrap confidence intervals for correlations and means.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 from .base import get_n_bootstrap, get_n_permutations, get_ci_level
-from .correlation import compute_correlation
 
 # Minimum sample sizes for valid statistics
 MIN_SAMPLES_PERMUTATION = 3
@@ -70,98 +70,21 @@ def _compute_percentile_bounds(
     return lower_percentile, upper_percentile
 
 
-def permute_within_groups(
-    n: int,
+def _bootstrap_corr_ci_impl(
+    x_valid: np.ndarray,
+    y_valid: np.ndarray,
+    method: str,
+    n_boot: int,
+    ci_level: float,
     rng: np.random.Generator,
-    groups: Optional[np.ndarray] = None,
-    min_group_size: int = 2,
-) -> np.ndarray:
-    """Generate permutation indices, optionally within groups.
-    
-    Raises ValueError if any group has fewer than min_group_size samples.
-    """
-    if groups is None:
-        idx = np.arange(n)
-        rng.shuffle(idx)
-        return idx
-
-    unique, counts = np.unique(groups, return_counts=True)
-    small_groups = unique[counts < min_group_size]
-    if len(small_groups) > 0:
-        raise ValueError(
-            f"Groups {small_groups.tolist()} have fewer than {min_group_size} samples. "
-            f"Permutation within groups requires at least {min_group_size} per group."
-        )
-
-    idx = np.arange(n)
-    for g in unique:
-        mask = groups == g
-        sub = idx[mask]
-        rng.shuffle(sub)
-        idx[mask] = sub
-    return idx
-
-
-def perm_pval_simple(
-    x: np.ndarray,
-    y: np.ndarray,
-    method: str = "spearman",
-    n_perm: Optional[int] = None,
-    rng: Optional[np.random.Generator] = None,
-    groups: Optional[np.ndarray] = None,
-    config: Optional[Any] = None,
-) -> float:
-    """
-    Simple permutation p-value for correlation.
-    
-    Returns two-sided p-value.
-    """
-    if n_perm is None:
-        n_perm = get_n_permutations(config)
-    if rng is None:
-        rng = np.random.default_rng()
-
-    x_valid, y_valid, groups_valid = _filter_finite_pairs(x, y, groups)
-    n_valid = len(x_valid)
-    if n_valid < MIN_SAMPLES_PERMUTATION:
-        return np.nan
-
-    observed_correlation, _ = compute_correlation(x_valid, y_valid, method)
-    if not np.isfinite(observed_correlation):
-        return np.nan
-
-    observed_abs = np.abs(observed_correlation)
-    n_extreme = 0
-    for _ in range(n_perm):
-        perm_indices = permute_within_groups(n_valid, rng, groups_valid)
-        perm_correlation, _ = compute_correlation(
-            x_valid[perm_indices], y_valid, method
-        )
-        if np.isfinite(perm_correlation):
-            perm_abs = np.abs(perm_correlation)
-            if perm_abs >= observed_abs:
-                n_extreme += 1
-
-    return (n_extreme + 1) / (n_perm + 1)
-
-
-def bootstrap_corr_ci(
-    x: np.ndarray,
-    y: np.ndarray,
-    method: str = "spearman",
-    n_boot: Optional[int] = None,
-    rng: Optional[np.random.Generator] = None,
-    config: Optional[Any] = None,
 ) -> Tuple[float, float]:
-    """
-    Bootstrap CI for correlation using percentile method.
+    """Internal implementation of bootstrap CI for correlation.
     
     Returns (ci_low, ci_high).
     """
-    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
-    ci_level = get_ci_level(config)
-
-    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    # Local import to avoid circular dependency
+    from .correlation import compute_correlation
+    
     n_valid = len(x_valid)
     if n_valid < MIN_SAMPLES_BOOTSTRAP_CORR:
         return np.nan, np.nan
@@ -184,6 +107,25 @@ def bootstrap_corr_ci(
     ci_high = np.percentile(bootstrap_correlations, upper_percentile)
 
     return float(ci_low), float(ci_high)
+
+
+def bootstrap_corr_ci(
+    x: np.ndarray,
+    y: np.ndarray,
+    method: str = "spearman",
+    n_boot: Optional[int] = None,
+    rng: Optional[np.random.Generator] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float]:
+    """
+    Bootstrap CI for correlation using percentile method.
+    
+    Returns (ci_low, ci_high).
+    """
+    n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
+    ci_level = get_ci_level(config)
+    x_valid, y_valid, _ = _filter_finite_pairs(x, y)
+    return _bootstrap_corr_ci_impl(x_valid, y_valid, method, n_boot, ci_level, rng)
 
 
 def bootstrap_mean_ci(
@@ -279,6 +221,9 @@ def _compute_acceleration_factor(
     Returns None if insufficient jackknife replicates, otherwise returns
     acceleration factor (may be 0.0 if denominator is too small).
     """
+    # Local import to avoid circular dependency
+    from .correlation import compute_correlation
+    
     n_valid = len(x_valid)
     jackknife_correlations = []
     for i in range(n_valid):
@@ -330,6 +275,9 @@ def bootstrap_ci_bca(
     n_boot, rng = _get_bootstrap_config(n_boot, rng, config)
     ci_level = get_ci_level(config)
 
+    # Local import to avoid circular dependency
+    from .correlation import compute_correlation
+    
     x_valid, y_valid, _ = _filter_finite_pairs(x, y)
     n_valid = len(x_valid)
     if n_valid < MIN_SAMPLES_BCA:
@@ -377,4 +325,92 @@ def bootstrap_ci_bca(
     ci_high = np.percentile(bootstrap_correlations, 100 * upper_percentile)
 
     return float(ci_low), float(ci_high)
+
+
+def compute_bootstrap_ci(
+    x: np.ndarray,
+    y: np.ndarray,
+    n_bootstrap: int = 1000,
+    ci_level: float = 0.95,
+    method: str = "spearman",
+    rng: Optional[np.random.Generator] = None,
+    config: Optional[Any] = None,
+) -> Tuple[float, float]:
+    """Compute bootstrap confidence interval for correlation.
+    
+    This is a convenience wrapper around bootstrap_corr_ci that uses explicit
+    parameters instead of config object. Kept for backward compatibility.
+    
+    Parameters
+    ----------
+    x, y : np.ndarray
+        Input arrays
+    n_bootstrap : int
+        Number of bootstrap iterations
+    ci_level : float
+        Confidence level (e.g., 0.95 for 95% CI)
+    method : str
+        Correlation method ('pearson' or 'spearman')
+    rng : np.random.Generator, optional
+        Random number generator
+    config : Optional[Any]
+        Configuration object (unused, kept for compatibility)
+        
+    Returns
+    -------
+    Tuple[float, float]
+        Lower and upper CI bounds
+    """
+    return bootstrap_corr_ci(x, y, method=method, n_boot=n_bootstrap, rng=rng, config=config)
+
+
+def ensure_bootstrap_ci(
+    stats_df: pd.DataFrame,
+    x_data: Optional[np.ndarray] = None,
+    y_data: Optional[np.ndarray] = None,
+    n_boot: int = 2000,
+    method: str = "spearman",
+    config: Optional[Any] = None,
+) -> pd.DataFrame:
+    """
+    Ensure bootstrap CIs exist in stats dataframe, computing if missing.
+    
+    If ci_low/ci_high columns are missing or contain NaN, computes bootstrap CIs.
+    """
+    import pandas as pd
+    
+    if stats_df is None or stats_df.empty:
+        return stats_df
+    
+    df = stats_df.copy()
+    
+    has_ci_columns = "ci_low" in df.columns and "ci_high" in df.columns
+    if has_ci_columns:
+        missing_ci_mask = df["ci_low"].isna() | df["ci_high"].isna()
+        if not missing_ci_mask.any():
+            return df
+    
+    if "r" in df.columns and "n" in df.columns:
+        if "ci_low" not in df.columns:
+            df["ci_low"] = np.nan
+        if "ci_high" not in df.columns:
+            df["ci_high"] = np.nan
+        
+        from .correlation import fisher_ci
+        
+        for idx in df.index:
+            row = df.loc[idx]
+            has_missing_ci = pd.isna(row["ci_low"]) or pd.isna(row["ci_high"])
+            if has_missing_ci:
+                r_val = row.get("r")
+                n_val = row.get("n")
+                # Use fisher_ci directly (checks n < 4 internally)
+                if pd.notna(r_val) and pd.notna(n_val):
+                    ci_low, ci_high = fisher_ci(r_val, n_val, config=None)
+                else:
+                    ci_low, ci_high = np.nan, np.nan
+                df.loc[idx, "ci_low"] = ci_low
+                df.loc[idx, "ci_high"] = ci_high
+    
+    return df
 

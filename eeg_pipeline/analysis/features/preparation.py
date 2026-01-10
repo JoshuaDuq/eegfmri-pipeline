@@ -216,19 +216,25 @@ def _compute_time_windows(
             )
         
         qc_dict = {
-            "baseline_samples": int(np.sum(windows.baseline_mask)),
-            "active_samples": int(np.sum(windows.active_mask)),
-            "baseline_range": getattr(windows, "baseline_range", (np.nan, np.nan)),
-            "active_range": getattr(windows, "active_range", (np.nan, np.nan)),
+            "window_names": list(windows.masks.keys()),
             "clamped": getattr(windows, "clamped", False),
             "errors": list(getattr(windows, "errors", [])),
         }
         
+        # Add sample counts for each window to QC
+        for name, mask in windows.masks.items():
+            qc_dict[f"{name}_samples"] = int(np.sum(mask))
+            if name in windows.ranges:
+                qc_dict[f"{name}_range"] = windows.ranges[name]
+
         if logger and windows:
+            # Determine suitable descriptive names for logging
+            target_name = getattr(windows, "name", None)
+            available = ", ".join(windows.masks.keys())
             logger.info(
-                "Using time windows baseline=%s, active=%s (clamped=%s)",
-                getattr(windows, "baseline_range", None),
-                getattr(windows, "active_range", None),
+                "Computed time windows (target=%s). Available windows: %s (clamped=%s)",
+                target_name or "none",
+                available,
                 getattr(windows, "clamped", False),
             )
         
@@ -559,9 +565,15 @@ def _compute_psd_with_qc(
     psd_input = data
     window_type = "full"
     
+    # Try to use targeted window if provided, else baseline
     if baseline_mask is not None and isinstance(baseline_mask, np.ndarray) and np.any(baseline_mask):
         psd_input = data[:, :, baseline_mask]
-        window_type = "baseline"
+        
+        # Identify the name for tagging purposes
+        if hasattr(config, "get") and config.get("name"):
+            window_type = config.get("name")
+        else:
+            window_type = "baseline"
     
     psd_data = compute_psd(psd_input, sfreq, config=config, logger=logger)
     

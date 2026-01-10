@@ -972,8 +972,15 @@ def extract_aperiodic_features(
         "min_segment_sec": min_segment_sec,
     }
     
+    target_name = getattr(ctx, "name", None)
+    
+    # When a specific time range is targeted (ctx.name is set), the epochs have 
+    # already been cropped to that range. Use all available data with that segment name.
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
-    segments = get_segment_masks(times, ctx.windows, config)
+    if target_name:
+        segments = {target_name: np.ones_like(times, dtype=bool)}
+    else:
+        segments = get_segment_masks(times, ctx.windows, config)
     
     for seg_name, mask in segments.items():
         if mask is None or np.sum(mask) < min_samples:
@@ -1011,9 +1018,11 @@ def extract_aperiodic_features(
     
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
     qc_payload["segments_computed"] = segments_done
-    active_qc = qc_payload.get("segments", {}).get("active")
-    baseline_qc = qc_payload.get("segments", {}).get("baseline")
-    chosen = active_qc or baseline_qc
+    
+    # Pick first available segment for shared QC fields
+    chosen_name = segments_done[0] if segments_done else None
+    chosen = qc_payload.get("segments", {}).get(chosen_name) if chosen_name else None
+    
     if chosen:
         qc_payload["freqs"] = chosen.get("freqs")
         qc_payload["residual_mean"] = chosen.get("residual_mean")
@@ -1025,91 +1034,4 @@ def extract_aperiodic_features(
     return df, list(df.columns), qc_payload
 
 
-def extract_aperiodic_features_from_epochs(
-    epochs: mne.Epochs,
-    baseline_window: Tuple[float, float],
-    bands: List[str],
-    config: Any,
-    logger: Any,
-    *,
-    events_df: Optional[pd.DataFrame] = None,
-    frequency_bands_override: Optional[Dict[str, List[float]]] = None,
-) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
-    """Extract aperiodic features directly from epochs."""
-    picks, ch_names = pick_eeg_channels(epochs)
-    if len(picks) == 0:
-        logger.warning("Aperiodic: No EEG channels available; skipping extraction.")
-        return pd.DataFrame(), [], {}
-    
-    times = epochs.times
-    sfreq = float(epochs.info["sfreq"])
-    min_samples = int(sfreq)
-    
-    def _clamp_window(window: Tuple[float, float]) -> Optional[Tuple[float, float]]:
-        """Clamp window to valid time range."""
-        if times.size == 0:
-            return None
-        start, end = float(window[0]), float(window[1])
-        start = max(start, float(times[0]))
-        end = min(end, float(times[-1]))
-        if end <= start:
-            return None
-        return (start, end)
-    
-    baseline = _clamp_window(baseline_window)
-    if baseline is None:
-        return pd.DataFrame(), [], {"skipped_reason": "invalid_baseline_window"}
-    
-    from eeg_pipeline.utils.config.loader import get_config_value
-    
-    ramp_end = float(get_config_value(config, "feature_engineering.features.ramp_end", 3.0))
-    active_window = get_config_value(config, "time_frequency_analysis.active_window", [3.0, 10.5])
-    active = _clamp_window((float(active_window[0]), float(active_window[1])))
-    ramp = _clamp_window((0.0, ramp_end))
-    
-    all_data: Dict[str, np.ndarray] = {}
-    segments_done: List[str] = []
-    
-    baseline_data = _extract_aperiodic_for_segment(
-        epochs, picks, ch_names, "baseline",
-        baseline[0], baseline[1], bands, config, logger,
-        frequency_bands_override=frequency_bands_override,
-    )
-    if baseline_data:
-        all_data.update(baseline_data)
-        segments_done.append("baseline")
-    
-    if ramp is not None:
-        ramp_mask = (times >= ramp[0]) & (times <= ramp[1])
-        if int(np.sum(ramp_mask)) >= min_samples:
-            ramp_data = _extract_aperiodic_for_segment(
-                epochs, picks, ch_names, "ramp",
-                ramp[0], ramp[1], bands, config, logger,
-                frequency_bands_override=frequency_bands_override,
-            )
-            if ramp_data:
-                all_data.update(ramp_data)
-                segments_done.append("ramp")
-    
-    if active is not None:
-        active_mask = (times >= active[0]) & (times <= active[1])
-        if int(np.sum(active_mask)) >= min_samples:
-            active_data = _extract_aperiodic_for_segment(
-                epochs, picks, ch_names, "active",
-                active[0], active[1], bands, config, logger,
-                frequency_bands_override=frequency_bands_override,
-            )
-            if active_data:
-                all_data.update(active_data)
-                segments_done.append("active")
-    
-    if not all_data:
-        return pd.DataFrame(), [], {"skipped_reason": "empty_result"}
-    
-    df = pd.DataFrame(all_data)
-    qc_payload = {
-        "segments_computed": sorted(set(segments_done)),
-        "baseline_window": (float(baseline[0]), float(baseline[1])),
-        "active_window": (float(active[0]), float(active[1])) if active is not None else None,
-    }
-    return df, list(df.columns), qc_payload
+

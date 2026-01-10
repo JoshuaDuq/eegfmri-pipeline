@@ -134,6 +134,47 @@ def _apply_connectivity_overrides(args: argparse.Namespace, config: Any) -> None
         conn_cfg["min_segment_sec"] = args.conn_min_segment_sec
 
 
+def _apply_directed_connectivity_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply directed connectivity-related config overrides (PSI, DTF, PDC)."""
+    dconn_cfg = config.setdefault("feature_engineering", {}).setdefault("directed_connectivity", {})
+    
+    if _get_arg_value(args, "directed_connectivity_measures") is not None:
+        measures = args.directed_connectivity_measures
+        dconn_cfg["enable_psi"] = "psi" in measures
+        dconn_cfg["enable_dtf"] = "dtf" in measures
+        dconn_cfg["enable_pdc"] = "pdc" in measures
+    if _get_arg_value(args, "directed_conn_output_level") is not None:
+        dconn_cfg["output_level"] = args.directed_conn_output_level
+    if _get_arg_value(args, "directed_conn_mvar_order") is not None:
+        dconn_cfg["mvar_order"] = args.directed_conn_mvar_order
+    if _get_arg_value(args, "directed_conn_n_freqs") is not None:
+        dconn_cfg["n_freqs"] = args.directed_conn_n_freqs
+    if _get_arg_value(args, "directed_conn_min_segment_samples") is not None:
+        dconn_cfg["min_segment_samples"] = args.directed_conn_min_segment_samples
+
+
+def _apply_source_localization_overrides(args: argparse.Namespace, config: Any) -> None:
+    """Apply source localization-related config overrides (LCMV, eLORETA)."""
+    src_cfg = config.setdefault("feature_engineering", {}).setdefault("source_localization", {})
+    
+    if _get_arg_value(args, "source_method") is not None:
+        src_cfg["method"] = args.source_method
+    if _get_arg_value(args, "source_spacing") is not None:
+        src_cfg["spacing"] = args.source_spacing
+    if _get_arg_value(args, "source_reg") is not None:
+        src_cfg["reg"] = args.source_reg
+    if _get_arg_value(args, "source_snr") is not None:
+        src_cfg["snr"] = args.source_snr
+    if _get_arg_value(args, "source_loose") is not None:
+        src_cfg["loose"] = args.source_loose
+    if _get_arg_value(args, "source_depth") is not None:
+        src_cfg["depth"] = args.source_depth
+    if _get_arg_value(args, "source_parc") is not None:
+        src_cfg["parcellation"] = args.source_parc
+    if _get_arg_value(args, "source_connectivity_method") is not None:
+        src_cfg["connectivity_method"] = args.source_connectivity_method
+
+
 def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply PAC/CFC-related config overrides."""
     if _get_arg_value(args, "pac_phase_range") is not None:
@@ -398,9 +439,62 @@ def _apply_spatial_transform_overrides(args: argparse.Namespace, config: Any) ->
         config.setdefault("feature_engineering", {}).setdefault("spatial_transform_params", {})["stiffness"] = args.spatial_transform_stiffness
 
 
+def _parse_frequency_band_definitions(band_defs: List[str]) -> dict:
+    """Parse frequency band definitions from CLI format 'name:low:high'."""
+    bands = {}
+    for band_def in band_defs:
+        parts = band_def.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid frequency band definition '{band_def}'; expected 'name:low:high'")
+        name = parts[0].strip().lower()
+        try:
+            low = float(parts[1].strip())
+            high = float(parts[2].strip())
+        except ValueError:
+            raise ValueError(f"Invalid frequency values in '{band_def}'; expected numeric low:high")
+        if low >= high:
+            raise ValueError(f"Invalid frequency range in '{band_def}'; low must be < high")
+        bands[name] = [low, high]
+    return bands
+
+
+def _parse_roi_definitions(roi_defs: List[str]) -> dict:
+    """Parse ROI definitions from CLI format 'name:ch1,ch2,...'."""
+    rois = {}
+    for roi_def in roi_defs:
+        if ":" not in roi_def:
+            raise ValueError(f"Invalid ROI definition '{roi_def}'; expected 'name:ch1,ch2,...'")
+        name, channels_str = roi_def.split(":", 1)
+        name = name.strip()
+        channels = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
+        if not channels:
+            raise ValueError(f"Invalid ROI definition '{roi_def}'; no channels specified")
+        rois[name] = [f"^({'|'.join(channels)})$"]
+    return rois
+
+
+def _apply_frequency_bands_override(args: argparse.Namespace, config: Any) -> None:
+    """Apply custom frequency band definitions to config."""
+    if _get_arg_value(args, "frequency_bands") is not None:
+        custom_bands = _parse_frequency_band_definitions(args.frequency_bands)
+        config["frequency_bands"] = custom_bands
+        config.setdefault("time_frequency_analysis", {})["bands"] = custom_bands
+
+
+def _apply_rois_override(args: argparse.Namespace, config: Any) -> None:
+    """Apply custom ROI definitions to config."""
+    if _get_arg_value(args, "rois") is not None:
+        custom_rois = _parse_roi_definitions(args.rois)
+        config.setdefault("time_frequency_analysis", {})["rois"] = custom_rois
+
+
 def _apply_feature_config_overrides(args: argparse.Namespace, config: Any) -> None:
     """Apply all feature-specific config overrides from CLI arguments."""
+    _apply_frequency_bands_override(args, config)
+    _apply_rois_override(args, config)
     _apply_connectivity_overrides(args, config)
+    _apply_directed_connectivity_overrides(args, config)
+    _apply_source_localization_overrides(args, config)
     _apply_pac_overrides(args, config)
     _apply_aperiodic_overrides(args, config)
     _apply_complexity_overrides(args, config)
@@ -443,9 +537,22 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument(
         "--bands",
         nargs="+",
-        choices=FREQUENCY_BANDS,
         default=None,
         help="Frequency bands to compute (default: all)",
+    )
+    parser.add_argument(
+        "--frequency-bands",
+        nargs="+",
+        default=None,
+        metavar="BAND_DEF",
+        help="Custom frequency band definitions in format 'name:low:high' (e.g., delta:1.0:3.9 theta:4.0:7.9)",
+    )
+    parser.add_argument(
+        "--rois",
+        nargs="+",
+        default=None,
+        metavar="ROI_DEF",
+        help="Custom ROI definitions in format 'name:ch1,ch2,...' (e.g., 'Frontal:Fp1,Fp2,F3,F4')",
     )
     parser.add_argument(
         "--spatial",
@@ -454,6 +561,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         default=None,
         metavar="MODE",
         help="Spatial aggregation modes: roi, channels, global (default: roi, global)",
+    )
+    parser.add_argument(
+        "--spatial-transform",
+        choices=["none", "csd", "laplacian"],
+        default=None,
+        help="Spatial transform to reduce volume conduction: none, csd, laplacian",
     )
     parser.add_argument(
         "--tmin",
@@ -487,6 +600,85 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         choices=["wpli", "aec", "plv", "pli"],
         default=None,
         help="Connectivity measures to compute",
+    )
+    parser.add_argument(
+        "--directed-connectivity-measures",
+        nargs="+",
+        choices=["psi", "dtf", "pdc"],
+        default=None,
+        help="Directed connectivity measures: psi (Phase Slope Index), dtf (Directed Transfer Function), pdc (Partial Directed Coherence)",
+    )
+    parser.add_argument(
+        "--directed-conn-output-level",
+        choices=["full", "global_only"],
+        default=None,
+        help="Directed connectivity output level: full (all channel pairs) or global_only (mean only)",
+    )
+    parser.add_argument(
+        "--directed-conn-mvar-order",
+        type=int,
+        default=None,
+        help="MVAR model order for DTF/PDC computation (default: 10)",
+    )
+    parser.add_argument(
+        "--directed-conn-n-freqs",
+        type=int,
+        default=None,
+        help="Number of frequency bins for directed connectivity (default: 16)",
+    )
+    parser.add_argument(
+        "--directed-conn-min-segment-samples",
+        type=int,
+        default=None,
+        help="Minimum segment samples for directed connectivity (default: 100)",
+    )
+    parser.add_argument(
+        "--source-method",
+        choices=["lcmv", "eloreta"],
+        default=None,
+        help="Source localization method: lcmv (beamformer) or eloreta (inverse)",
+    )
+    parser.add_argument(
+        "--source-spacing",
+        choices=["oct5", "oct6", "ico4", "ico5"],
+        default=None,
+        help="Source space spacing (default: oct6)",
+    )
+    parser.add_argument(
+        "--source-reg",
+        type=float,
+        default=None,
+        help="LCMV regularization parameter (default: 0.05)",
+    )
+    parser.add_argument(
+        "--source-snr",
+        type=float,
+        default=None,
+        help="eLORETA assumed SNR for regularization (default: 3.0)",
+    )
+    parser.add_argument(
+        "--source-loose",
+        type=float,
+        default=None,
+        help="eLORETA loose orientation constraint 0-1 (default: 0.2)",
+    )
+    parser.add_argument(
+        "--source-depth",
+        type=float,
+        default=None,
+        help="eLORETA depth weighting 0-1 (default: 0.8)",
+    )
+    parser.add_argument(
+        "--source-parc",
+        choices=["aparc", "aparc.a2009s", "HCPMMP1"],
+        default=None,
+        help="Brain parcellation for ROI extraction (default: aparc)",
+    )
+    parser.add_argument(
+        "--source-connectivity-method",
+        choices=["aec", "wpli", "plv"],
+        default=None,
+        help="Connectivity method for source-space analysis (default: aec)",
     )
     parser.add_argument(
         "--pac-phase-range",

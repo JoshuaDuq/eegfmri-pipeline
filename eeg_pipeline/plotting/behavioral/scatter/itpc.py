@@ -115,7 +115,10 @@ def plot_itpc_roi_scatter(
     if data is None:
         return {"significant": [], "all": []}
 
-    itpc_path = deriv_features_path(deriv_root, subject) / "features_itpc.tsv"
+    features_dir = deriv_features_path(deriv_root, subject)
+    itpc_path = features_dir / "itpc" / "features_itpc.tsv"
+    if not itpc_path.exists():
+        itpc_path = features_dir / "features_itpc.tsv"
     itpc_df = read_table(itpc_path) if itpc_path.exists() else None
     if itpc_df is None or itpc_df.empty:
         logger.warning("ITPC features not found at %s", itpc_path)

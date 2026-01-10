@@ -18,7 +18,7 @@ from eeg_pipeline.utils.data.columns import get_pain_column_from_config
 from eeg_pipeline.utils.analysis.stats.base import get_config_value, get_epsilon_std
 from eeg_pipeline.utils.analysis.stats.correlation import fisher_z
 from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
-from eeg_pipeline.utils.analysis.stats.validation import validate_pain_binary_values
+from eeg_pipeline.utils.validation import validate_pain_binary_values
 from eeg_pipeline.utils.parallel import get_n_jobs, parallel_condition_effects
 
 
@@ -244,6 +244,66 @@ def compute_effect_sizes(
     return results
 
 
+def compute_cohens_d_with_bootstrap_ci(
+    group_a_data: np.ndarray,
+    group_b_data: np.ndarray,
+    random_seed: int,
+    n_bootstrap: int = 1000,
+) -> Tuple[float, float, float]:
+    """Compute Cohen's d with bootstrap confidence intervals.
+
+    Args:
+        group_a_data: Data for group A (1D array)
+        group_b_data: Data for group B (1D array)
+        random_seed: Random seed for reproducibility
+        n_bootstrap: Number of bootstrap samples
+
+    Returns:
+        Tuple of (cohens_d, ci_low, ci_high)
+    """
+    n_group_a = len(group_a_data)
+    n_group_b = len(group_b_data)
+
+    mean_diff = group_a_data.mean() - group_b_data.mean()
+    pooled_std = np.sqrt(
+        ((n_group_a - 1) * group_a_data.std() ** 2 + (n_group_b - 1) * group_b_data.std() ** 2)
+        / (n_group_a + n_group_b - 2)
+    )
+    cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+
+    rng = np.random.default_rng(random_seed)
+    boot_indices_a = rng.integers(0, n_group_a, size=(n_bootstrap, n_group_a))
+    boot_indices_b = rng.integers(0, n_group_b, size=(n_bootstrap, n_group_b))
+
+    boot_samples_a = group_a_data[boot_indices_a]
+    boot_samples_b = group_b_data[boot_indices_b]
+
+    boot_means_a = boot_samples_a.mean(axis=1)
+    boot_means_b = boot_samples_b.mean(axis=1)
+    boot_vars_a = boot_samples_a.var(axis=1, ddof=1)
+    boot_vars_b = boot_samples_b.var(axis=1, ddof=1)
+
+    boot_pooled_std = np.sqrt(
+        ((n_group_a - 1) * boot_vars_a + (n_group_b - 1) * boot_vars_b)
+        / (n_group_a + n_group_b - 2)
+    )
+    boot_ds = np.where(
+        boot_pooled_std > 0,
+        (boot_means_a - boot_means_b) / boot_pooled_std,
+        np.nan,
+    )
+    boot_ds_valid = boot_ds[np.isfinite(boot_ds)]
+
+    ci_low = (
+        np.percentile(boot_ds_valid, 2.5) if len(boot_ds_valid) > 0 else np.nan
+    )
+    ci_high = (
+        np.percentile(boot_ds_valid, 97.5) if len(boot_ds_valid) > 0 else np.nan
+    )
+
+    return float(cohens_d), float(ci_low), float(ci_high)
+
+
 ###################################################################
 # Condition Effects (Pain vs Non-Pain)
 ###################################################################
@@ -416,6 +476,8 @@ def compute_condition_effects(
     groups: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Compute effect sizes for pain vs non-pain comparison."""
+    import warnings
+    
     n_jobs_actual = get_n_jobs(config, n_jobs)
 
     if logger:
@@ -449,17 +511,21 @@ def compute_condition_effects(
     )
 
     feature_columns = list(features_df.columns)
-    records = parallel_condition_effects(
-        feature_columns=feature_columns,
-        features_df=features_df,
-        pain_mask=pain_mask,
-        nonpain_mask=nonpain_mask,
-        min_samples=min_samples,
-        n_jobs=n_jobs_actual,
-        groups=groups,
-        n_perm=n_perm if perm_enabled else 0,
-        base_seed=base_seed,
-    )
+    
+    # Suppress numpy RuntimeWarnings (empty slices, low variance)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        records = parallel_condition_effects(
+            feature_columns=feature_columns,
+            features_df=features_df,
+            pain_mask=pain_mask,
+            nonpain_mask=nonpain_mask,
+            min_samples=min_samples,
+            n_jobs=n_jobs_actual,
+            groups=groups,
+            n_perm=n_perm if perm_enabled else 0,
+            base_seed=base_seed,
+        )
 
     if not records:
         return pd.DataFrame()

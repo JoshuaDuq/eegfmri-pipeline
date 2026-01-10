@@ -19,6 +19,7 @@ from eeg_pipeline.utils.analysis.stats.validation import (
     check_normality_dagostino,
     check_normality_shapiro,
 )
+from eeg_pipeline.utils.analysis.stats._regression_utils import _ols_fit, _r2
 
 
 _MIN_SAMPLE_SIZE_FOR_REGRESSION = 2
@@ -37,6 +38,8 @@ def _compute_r_squared(
 ) -> float:
     """Compute R-squared from design matrix and response.
     
+    Uses consolidated regression utilities for consistency.
+    
     Parameters
     ----------
     design_matrix : np.ndarray
@@ -49,16 +52,16 @@ def _compute_r_squared(
     float
         R-squared value, clipped to [0, 0.9999]
     """
-    beta = np.linalg.lstsq(design_matrix, response, rcond=None)[0]
-    predicted = design_matrix @ beta
-    
-    sum_squared_residuals = np.sum((response - predicted) ** 2)
-    sum_squared_total = np.sum((response - np.mean(response)) ** 2)
-    
-    if sum_squared_total < _MIN_VARIANCE_THRESHOLD:
+    beta = _ols_fit(design_matrix, response)
+    if beta is None:
         return 0.0
     
-    r_squared = 1.0 - (sum_squared_residuals / sum_squared_total)
+    predicted = design_matrix @ beta
+    r_squared = _r2(response, predicted)
+    
+    if not np.isfinite(r_squared):
+        return 0.0
+    
     return np.clip(r_squared, 0.0, _MAX_R_SQUARED_FOR_VIF)
 
 

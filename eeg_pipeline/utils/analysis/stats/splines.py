@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from .base import safe_get_config_value as _get_config_value
+
 
 # Constants
 MIN_KNOTS_FOR_NONLINEAR = 4
@@ -25,18 +27,6 @@ QUANTILE_HIGH_DEFAULT = 0.95
 QUANTILE_LOW_BOUND = 0.49
 QUANTILE_HIGH_BOUND = 0.51
 NUMERICAL_TOLERANCE = 1e-12
-
-
-def _get_config_value(config: Any, key: str, default: Any) -> Any:
-    """Extract value from config object, returning default if unavailable."""
-    if config is None:
-        return default
-    if hasattr(config, "get"):
-        try:
-            return config.get(key, default)
-        except (AttributeError, KeyError, TypeError):
-            return default
-    return default
 
 
 def truncated_power_cube(x: np.ndarray) -> np.ndarray:

@@ -313,10 +313,20 @@ def extract_quality_features(
     config = getattr(ctx, "config", None)
     
     results = {}
-    segments = ["baseline", "active"]
+    target_name = getattr(ctx, "name", None)
     
-    for segment in segments:
-        mask = ctx.windows.get_mask(segment)
+    # When a specific time range is targeted (ctx.name is set), the epochs have 
+    # already been cropped to that range. Use all available data with that segment name.
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    if target_name:
+        masks = {target_name: np.ones(full_data.shape[2], dtype=bool)}
+    else:
+        masks = get_segment_masks(epochs.times, ctx.windows, config)
+    
+    if not masks:
+        return pd.DataFrame(), []
+
+    for segment, mask in masks.items():
         if not np.any(mask):
             continue
         
