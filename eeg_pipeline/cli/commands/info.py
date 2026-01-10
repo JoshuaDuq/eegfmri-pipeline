@@ -21,6 +21,7 @@ MODE_FEATURES = "features"
 MODE_CONFIG = "config"
 MODE_VERSION = "version"
 MODE_PLOTTERS = "plotters"
+MODE_DISCOVER = "discover"
 
 SOURCE_BIDS = "bids"
 SOURCE_EPOCHS = "epochs"
@@ -49,8 +50,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS],
-        help="What to show: subjects, features for a subject, config summary, or version",
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER],
+        help="What to show: subjects, features for a subject, config summary, version, or discover columns",
     )
     parser.add_argument(
         "target",
@@ -82,6 +83,25 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
         default=None,
         help="Config keys to fetch (config mode only)",
     )
+
+    discover_group = parser.add_argument_group("Discover options (mode: discover)")
+    discover_group.add_argument(
+        "--discover-source",
+        choices=["events", "trial-table", "all"],
+        default="all",
+        help="Where to discover columns from (default: all)",
+    )
+    discover_group.add_argument(
+        "--subject",
+        default=None,
+        help="Specific subject to scan (default: auto-detect from first available)",
+    )
+    discover_group.add_argument(
+        "--column",
+        default=None,
+        help="Get values for a specific column only",
+    )
+
     return parser
 
 
@@ -438,6 +458,112 @@ def _handle_version_mode(output_json: bool) -> None:
         print(f"eeg-pipeline version: {version}")
 
 
+def _print_discovery_report(result: dict) -> None:
+    """Pretty-print discovery results to stdout."""
+    print("=" * 50)
+    print("       COLUMN DISCOVERY REPORT")
+    print("=" * 50)
+    print()
+
+    if not result["columns"]:
+        print("  No columns discovered.")
+        print("  Make sure you have events files in your BIDS directory")
+        print("  or have run behavior compute to create trial tables.")
+        return
+
+    print(f"  Source: {result.get('source', 'unknown')}")
+    if result.get("file"):
+        print(f"  File: {result['file']}")
+    print()
+
+    print("  AVAILABLE COLUMNS")
+    print("  " + "-" * 30)
+    for col in result["columns"]:
+        has_values = col in result["values"]
+        val_indicator = (
+            f" ({len(result['values'][col])} values)" if has_values else ""
+        )
+        print(f"    • {col}{val_indicator}")
+    print()
+
+    if result["values"]:
+        print("  COLUMN VALUES")
+        print("  " + "-" * 30)
+        for col, vals in sorted(result["values"].items()):
+            if len(vals) <= 10:
+                vals_str = ", ".join(str(v) for v in vals)
+            else:
+                vals_str = (
+                    ", ".join(str(v) for v in vals[:8])
+                    + f", ... (+{len(vals) - 8} more)"
+                )
+            print(f"    {col}: {vals_str}")
+    print()
+
+
+def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Handle discover mode: discover available columns and values from data files."""
+    from eeg_pipeline.cli.commands.base import (
+        discover_event_columns,
+        discover_trial_table_columns,
+    )
+    from eeg_pipeline.infra.paths import resolve_deriv_root
+
+    task = resolve_task(args.task, config)
+    bids_root = Path(config.bids_root) if hasattr(config, "bids_root") else None
+    deriv_root = resolve_deriv_root(config=config)
+
+    result = {
+        "columns": [],
+        "values": {},
+        "source": None,
+        "sources_checked": [],
+    }
+
+    subject = args.subject
+    if not subject and subjects:
+        subject = subjects[0]
+
+    if args.discover_source in ["events", "all"] and bids_root:
+        events_data = discover_event_columns(bids_root, task=task, subject=subject)
+        if events_data["columns"]:
+            result["sources_checked"].append("events")
+            if not result["columns"]:
+                result["columns"] = events_data["columns"]
+                result["values"] = events_data["values"]
+                result["source"] = events_data["source"]
+                result["file"] = events_data.get("file")
+            else:
+                for col, vals in events_data["values"].items():
+                    if col not in result["values"]:
+                        result["values"][col] = vals
+
+    if args.discover_source in ["trial-table", "all"]:
+        trial_data = discover_trial_table_columns(deriv_root, subject=subject)
+        if trial_data["columns"]:
+            result["sources_checked"].append("trial_table")
+            if not result["columns"] or args.discover_source == "trial-table":
+                result["columns"] = trial_data["columns"]
+                result["values"] = trial_data["values"]
+                result["source"] = trial_data["source"]
+                result["file"] = trial_data.get("file")
+            else:
+                for col, vals in trial_data["values"].items():
+                    if col not in result["values"]:
+                        result["values"][col] = vals
+
+    if args.column:
+        if args.column in result["values"]:
+            result["values"] = {args.column: result["values"][args.column]}
+        else:
+            result["values"] = {}
+
+    if args.output_json:
+        _print_json_output(result)
+    else:
+        _print_discovery_report(result)
+
+
 def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the info command."""
     from eeg_pipeline.infra.paths import resolve_deriv_root
@@ -448,6 +574,8 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
 
     if args.mode == MODE_PLOTTERS:
         _handle_plotters_mode(args.output_json)
+    elif args.mode == MODE_DISCOVER:
+        _handle_discover_mode(args, subjects, config)
     elif args.mode == MODE_SUBJECTS:
         _handle_subjects_mode(args, deriv_root, task, config, logger)
     elif args.mode == MODE_FEATURES:

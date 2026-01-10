@@ -78,7 +78,7 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         description="Plotting pipeline: select and render visualization suites",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("mode", choices=["visualize"], help="Pipeline mode (visualize)")
+    parser.add_argument("mode", choices=["visualize", "tfr"], help="Pipeline mode (visualize or tfr)")
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
@@ -404,6 +404,44 @@ def setup_plotting(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     )
 
     add_path_args(parser)
+
+    tfr_group = parser.add_argument_group("TFR visualization options (mode: tfr)")
+    tfr_group.add_argument(
+        "--tfr-roi",
+        action="store_true",
+        help="ROI-only visualization",
+    )
+    tfr_group.add_argument(
+        "--tfr-topomaps-only",
+        action="store_true",
+        help="Topomaps only",
+    )
+    tfr_group.add_argument(
+        "--bands",
+        nargs="+",
+        choices=["delta", "theta", "alpha", "beta", "gamma"],
+        default=None,
+        help="Frequency bands to visualize (default: all)",
+    )
+    tfr_group.add_argument(
+        "--tmin",
+        type=float,
+        default=None,
+        help="Start time in seconds",
+    )
+    tfr_group.add_argument(
+        "--tmax",
+        type=float,
+        default=None,
+        help="End time in seconds",
+    )
+    tfr_group.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Number of parallel jobs (default: from config)",
+    )
+
     return parser
 
 
@@ -1195,6 +1233,10 @@ def _render_plots_without_per_plot_config(
 
 def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the plotting command."""
+    from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
+
+    if args.mode == "tfr":
+        return _run_tfr_mode(args, subjects, config)
 
     if getattr(args, "bids_root", None):
         config.setdefault("paths", {})["bids_root"] = args.bids_root
@@ -1247,6 +1289,52 @@ def run_plotting(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         selected_feature_plotters=selected_feature_plotters,
         progress=progress,
     )
+    progress.complete(success=True)
+
+
+def _update_tfr_config(
+    config: Any,
+    bands: Optional[List[str]] = None,
+    tmin: Optional[float] = None,
+    tmax: Optional[float] = None,
+) -> None:
+    """Update config with TFR analysis parameters."""
+    tfr_section = config.setdefault("time_frequency_analysis", {})
+    if bands is not None:
+        tfr_section["selected_bands"] = bands
+    if tmin is not None:
+        tfr_section["tmin"] = tmin
+    if tmax is not None:
+        tfr_section["tmax"] = tmax
+
+
+def _validate_time_range(tmin: Optional[float], tmax: Optional[float]) -> None:
+    """Validate that time range is logically consistent."""
+    if tmin is not None and tmax is not None and tmin >= tmax:
+        raise ValueError(f"tmin ({tmin}) must be less than tmax ({tmax})")
+
+
+def _run_tfr_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
+    """Execute TFR visualization mode."""
+    from eeg_pipeline.plotting.orchestration.tfr import visualize_tfr_for_subjects
+
+    _validate_time_range(args.tmin, args.tmax)
+    _update_tfr_config(config, args.bands, args.tmin, args.tmax)
+
+    progress = create_progress_reporter(args)
+    progress.start("tfr_visualize", subjects)
+    progress.step("Rendering TFR plots", current=1, total=2)
+
+    visualize_tfr_for_subjects(
+        subjects=subjects,
+        task=args.task,
+        tfr_roi_only=args.tfr_roi,
+        tfr_topomaps_only=args.tfr_topomaps_only,
+        n_jobs=args.n_jobs,
+        config=config,
+    )
+
+    progress.step("Finalizing", current=2, total=2)
     progress.complete(success=True)
 
 

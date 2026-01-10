@@ -2949,19 +2949,11 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldRunAdjustmentColumn {
 				val = textDisplay
 			}
-			hint := "run identifier column"
+			hint := "Space to select"
 			if !m.runAdjustmentEnabled {
-				hint = hint + " (enable Run Adjustment)"
+				hint = "run identifier column (enable Run Adjustment)"
 			} else if len(m.availableColumns) > 0 {
-				max := 4
-				if len(m.availableColumns) < max {
-					max = len(m.availableColumns)
-				}
-				suffix := ""
-				if len(m.availableColumns) > max {
-					suffix = fmt.Sprintf(" (+%d)", len(m.availableColumns)-max)
-				}
-				hint = fmt.Sprintf("%s · available: %s%s", hint, strings.Join(m.availableColumns[:max], " "), suffix)
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.availableColumns))
 			}
 			return "Run Column", val, hint
 		case optRunAdjustmentIncludeInCorrelations:
@@ -3614,6 +3606,19 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			return "Primary Unit", v, "trial | run_mean"
 		case optCorrelationsPermutationPrimary:
 			return "Permutation p-primary", m.boolToOnOff(m.correlationsPermutationPrimary), "within-run/block when available"
+		case optCorrelationsTargetColumn:
+			val := m.correlationsTargetColumn
+			if strings.TrimSpace(val) == "" {
+				val = "(not set)"
+			}
+			if m.editingText && m.editingTextField == textFieldCorrelationsTargetColumn {
+				val = textDisplay
+			}
+			hint := "Space to select"
+			if len(m.discoveredColumns) > 0 {
+				hint = fmt.Sprintf("Space to select · %d columns available", len(m.discoveredColumns))
+			}
+			return "Custom Target Column", val, hint
 
 		// Cluster
 		case optClusterThreshold:

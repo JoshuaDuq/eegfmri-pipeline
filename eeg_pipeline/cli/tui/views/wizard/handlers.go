@@ -103,8 +103,8 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 	case types.PipelineBehavior:
 		mode := m.modeOptions[m.modeIndex]
 		if mode == styles.ModeVisualize {
-			// For visualize, skip computations selection, features selection, bands, and advanced config
-			return step == types.StepSelectComputations || step == types.StepSelectFeatureFiles || step == types.StepSelectBands || step == types.StepAdvancedConfig
+			// For visualize, skip computations selection, features selection, and advanced config
+			return step == types.StepSelectComputations || step == types.StepSelectFeatureFiles || step == types.StepAdvancedConfig
 		}
 	case types.PipelinePlotting:
 		if step == types.StepSelectFeaturePlotters && len(m.selectedFeaturePlotterCategories()) == 0 {
@@ -1795,7 +1795,12 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.runAdjustmentEnabled = !m.runAdjustmentEnabled
 		m.useDefaultAdvanced = false
 	case optRunAdjustmentColumn:
-		m.startTextEdit(textFieldRunAdjustmentColumn)
+		if len(m.availableColumns) > 0 {
+			m.expandedOption = expandedRunAdjustmentColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldRunAdjustmentColumn)
+		}
 		m.useDefaultAdvanced = false
 	case optRunAdjustmentIncludeInCorrelations:
 		m.runAdjustmentIncludeInCorrelations = !m.runAdjustmentIncludeInCorrelations
@@ -2112,6 +2117,14 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optCorrelationsPermutationPrimary:
 		m.correlationsPermutationPrimary = !m.correlationsPermutationPrimary
+		m.useDefaultAdvanced = false
+	case optCorrelationsTargetColumn:
+		if len(m.discoveredColumns) > 0 {
+			m.expandedOption = expandedCorrelationsTargetColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldCorrelationsTargetColumn)
+		}
 		m.useDefaultAdvanced = false
 
 	// Temporal

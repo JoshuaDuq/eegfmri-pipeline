@@ -485,7 +485,7 @@ def _compute_bands_parallel(
     try:
         from joblib import Parallel, delayed
         
-        results = Parallel(n_jobs=n_jobs, prefer="processes")(
+        results = Parallel(n_jobs=n_jobs, prefer="threads")(
             delayed(_compute_single_band)(
                 data,
                 sfreq,

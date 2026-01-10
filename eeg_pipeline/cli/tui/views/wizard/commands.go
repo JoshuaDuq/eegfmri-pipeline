@@ -494,14 +494,16 @@ func (m Model) BuildCommand() string {
 		}
 	}
 
-	if (m.Pipeline == types.PipelineFeatures || m.Pipeline == types.PipelineBehavior) && m.modeOptions[m.modeIndex] == styles.ModeCompute {
+	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		bands := m.SelectedBands()
 		if len(bands) > 0 && len(bands) < len(m.bands) {
 			parts = append(parts, "--bands")
 			parts = append(parts, bands...)
 		}
+	}
 
-		// Pass custom frequency band definitions
+	// Pass custom frequency band definitions and ROIs (features pipeline only)
+	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
 		freqBandDefs := m.GetFrequencyBandDefinitions()
 		if len(freqBandDefs) > 0 {
 			parts = append(parts, "--frequency-bands")
@@ -1762,6 +1764,9 @@ func (m Model) buildBehaviorAdvancedArgs() []string {
 		}
 		if m.correlationsUseCrossfitResidual {
 			args = append(args, "--correlations-use-crossfit-pain-residual")
+		}
+		if strings.TrimSpace(m.correlationsTargetColumn) != "" {
+			args = append(args, "--correlations-target-column", m.correlationsTargetColumn)
 		}
 	}
 

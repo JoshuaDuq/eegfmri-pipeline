@@ -200,6 +200,8 @@ class FeatureBundle:
 
     power_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
+    directed_connectivity_df: Optional[pd.DataFrame] = None
+    source_localization_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
     erp_df: Optional[pd.DataFrame] = None
     pac_df: Optional[pd.DataFrame] = None
@@ -281,6 +283,8 @@ def load_feature_bundle(
         connectivity_df=_safe_read_table(
             find_connectivity_features_path(deriv_root, subject), logger
         ),
+        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directed_connectivity", logger),
+        source_localization_df=_safe_read_feature_table(features_dir, "features_source_localization", logger),
         aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger),
         erp_df=_safe_read_feature_table(features_dir, "features_erp", logger),
         pac_df=_safe_read_feature_table(features_dir, "features_pac", logger),
@@ -557,12 +561,6 @@ def _save_aperiodic_qc(
         qc_filename = f"aperiodic_qc_{suffix}.tsv" if suffix else "aperiodic_qc.tsv"
         save_path = qc_dir / qc_filename
 
-        subject_name = features_dir.parent.parent.name.replace("sub-", "")
-        deriv_root = features_dir.parent.parent.parent
-        stats_dir = deriv_stats_path(deriv_root, subject_name)
-        stats_dir.mkdir(parents=True, exist_ok=True)
-        stats_path = stats_dir / qc_filename
-
         freqs = aper_qc.get("freqs")
         residual_mean = aper_qc.get("residual_mean")
         r2 = aper_qc.get("r2")
@@ -618,10 +616,9 @@ def _save_aperiodic_qc(
 
         df = pd.DataFrame(rows)
 
-        for target_path in [save_path, stats_path]:
-            write_tsv(df, target_path)
+        write_tsv(df, save_path)
 
-        logger.info("Saved aperiodic QC sidecar to %s and %s", save_path, stats_path)
+        logger.info("Saved aperiodic QC sidecar to %s", save_path)
     except (OSError, IOError, TypeError, KeyError) as exc:
         logger.warning("Failed to save aperiodic QC TSV: %s", exc)
 
@@ -697,6 +694,10 @@ def save_all_features(
     asymmetry_cols: Optional[List[str]] = None,
     quality_df: Optional[pd.DataFrame] = None,
     quality_cols: Optional[List[str]] = None,
+    dconn_df: Optional[pd.DataFrame] = None,
+    dconn_cols: Optional[List[str]] = None,
+    source_df: Optional[pd.DataFrame] = None,
+    source_cols: Optional[List[str]] = None,
     feature_qc: Optional[Dict[str, Any]] = None,
     suffix: Optional[str] = None,
 ) -> pd.DataFrame:
@@ -735,6 +736,8 @@ def save_all_features(
         (ratios_df, ratios_cols, "features_ratios", "power ratio features"),
         (asymmetry_df, asymmetry_cols, "features_asymmetry", "asymmetry features"),
         (quality_df, quality_cols, "features_quality", "quality metrics"),
+        (dconn_df, dconn_cols, "features_directed_connectivity", "directed connectivity features (PSI, DTF, PDC)"),
+        (source_df, source_cols, "features_source_localization", "source localization features (LCMV, eLORETA)"),
     ]
 
     for df, cols, base_name, description in feature_save_configs:

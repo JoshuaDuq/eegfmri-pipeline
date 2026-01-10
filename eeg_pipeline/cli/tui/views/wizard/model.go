@@ -301,6 +301,7 @@ const (
 	textFieldPainResidualCrossfitGroupColumn
 	textFieldClusterConditionColumn
 	textFieldClusterConditionValues
+	textFieldCorrelationsTargetColumn
 	// Frequency band editing text fields
 	textFieldBandName
 	textFieldBandLowHz
@@ -1272,6 +1273,7 @@ type Model struct {
 	correlationsUseCrossfitResidual bool
 	correlationsPrimaryUnit         int // 0=trial, 1=run_mean
 	correlationsPermutationPrimary  bool
+	correlationsTargetColumn        string // Custom target column from events (dropdown)
 
 	// Pain sensitivity
 
@@ -1982,20 +1984,19 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			m.postComputationSelected[i] = defaultPostComps[c.Key]
 		}
 
-		// Initialize feature file selection
+		// Initialize feature file selection (all selected by default)
 		m.featureFiles = featureFileOptions
 		m.featureFileSelected = make(map[string]bool)
+		for _, file := range featureFileOptions {
+			m.featureFileSelected[file.Key] = true
+		}
 
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepSelectComputations,
 			types.StepSelectFeatureFiles,
-			types.StepSelectBands,
 			types.StepAdvancedConfig,
 			types.StepReviewExecute,
-		}
-		for i := range frequencyBands {
-			m.bandSelected[i] = true
 		}
 
 	case types.PipelineML:
@@ -2947,6 +2948,10 @@ func (m Model) getExpandedListLength() int {
 		return len(m.GetDiscoveredColumnValues(m.plotComparisonColumn))
 	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
 		return len(m.availableWindows)
+	case expandedRunAdjustmentColumn:
+		return len(m.availableColumns)
+	case expandedCorrelationsTargetColumn:
+		return len(m.discoveredColumns)
 	}
 	return 0
 }
@@ -2992,6 +2997,10 @@ func (m Model) getExpandedListItems() []string {
 		return m.GetDiscoveredColumnValues(m.plotComparisonColumn)
 	case expandedConditionCompareWindows, expandedPlotComparisonWindows:
 		return m.availableWindows
+	case expandedRunAdjustmentColumn:
+		return m.availableColumns
+	case expandedCorrelationsTargetColumn:
+		return m.discoveredColumns
 	}
 	return nil
 }
@@ -3089,6 +3098,16 @@ func (m *Model) handleExpandedListToggle() {
 
 	case expandedPlotComparisonWindows:
 		m.toggleSpaceValue(selectedItem, &m.plotComparisonWindowsSpec)
+
+	case expandedRunAdjustmentColumn:
+		m.runAdjustmentColumn = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedCorrelationsTargetColumn:
+		m.correlationsTargetColumn = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
 	}
 
 	m.useDefaultAdvanced = false
@@ -3117,6 +3136,10 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optPlotComparisonValues
 	case expandedPlotComparisonWindows:
 		return opt == optPlotComparisonWindows
+	case expandedRunAdjustmentColumn:
+		return opt == optRunAdjustmentColumn
+	case expandedCorrelationsTargetColumn:
+		return opt == optCorrelationsTargetColumn
 	}
 	return false
 }
@@ -3132,6 +3155,10 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 		return m.clusterConditionColumn == item
 	case expandedPlotComparisonColumn:
 		return m.plotComparisonColumn == item
+	case expandedRunAdjustmentColumn:
+		return m.runAdjustmentColumn == item
+	case expandedCorrelationsTargetColumn:
+		return m.correlationsTargetColumn == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
 		expandedConditionCompareWindows, expandedPlotComparisonWindows:
 		return m.isColumnValueSelected(item)
@@ -3285,6 +3312,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.clusterConditionColumn
 	case textFieldClusterConditionValues:
 		return m.clusterConditionValues
+	case textFieldCorrelationsTargetColumn:
+		return m.correlationsTargetColumn
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -3575,6 +3604,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.clusterConditionColumn = strings.TrimSpace(value)
 	case textFieldClusterConditionValues:
 		m.clusterConditionValues = strings.TrimSpace(value)
+	case textFieldCorrelationsTargetColumn:
+		m.correlationsTargetColumn = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -4030,6 +4061,7 @@ const (
 	optCorrelationsUseCrossfitPainResidual
 	optCorrelationsPrimaryUnit
 	optCorrelationsPermutationPrimary
+	optCorrelationsTargetColumn
 	// Behavior options - Pain sensitivity / temporal
 	optTemporalResolutionMs
 	optTemporalTimeMinMs
@@ -4307,19 +4339,21 @@ const (
 )
 
 const (
-	expandedNone                    = -1
-	expandedConnectivityMeasures    = 0
-	expandedConditionCompareColumn  = 1
-	expandedConditionCompareValues  = 2
-	expandedConditionCompareWindows = 3
-	expandedTemporalConditionColumn = 4
-	expandedTemporalConditionValues = 5
-	expandedClusterConditionColumn  = 6
-	expandedClusterConditionValues  = 7
-	expandedPlotComparisonColumn    = 8
-	expandedPlotComparisonValues    = 9
-	expandedPlotComparisonWindows   = 10
-	expandedDirectedConnMeasures    = 11
+	expandedNone                     = -1
+	expandedConnectivityMeasures     = 0
+	expandedConditionCompareColumn   = 1
+	expandedConditionCompareValues   = 2
+	expandedConditionCompareWindows  = 3
+	expandedTemporalConditionColumn  = 4
+	expandedTemporalConditionValues  = 5
+	expandedClusterConditionColumn   = 6
+	expandedClusterConditionValues   = 7
+	expandedPlotComparisonColumn     = 8
+	expandedPlotComparisonValues     = 9
+	expandedPlotComparisonWindows    = 10
+	expandedDirectedConnMeasures     = 11
+	expandedRunAdjustmentColumn      = 12
+	expandedCorrelationsTargetColumn = 13
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -4935,6 +4969,7 @@ func (m Model) getBehaviorOptions() []optionType {
 				optCorrelationsTargetRating,
 				optCorrelationsTargetTemperature,
 				optCorrelationsTargetPainResidual,
+				optCorrelationsTargetColumn,
 				optCorrelationsPreferPainResidual,
 				optCorrelationsPrimaryUnit,
 				optCorrelationsPermutationPrimary,

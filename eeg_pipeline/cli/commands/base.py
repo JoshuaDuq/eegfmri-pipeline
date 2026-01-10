@@ -35,6 +35,8 @@ def _find_bands_in_columns(
 _FEATURE_AVAILABILITY_CATEGORIES = [
     "power",
     "connectivity",
+    "directed_connectivity",
+    "source_localization",
     "aperiodic",
     "erp",
     "bursts",
@@ -107,6 +109,8 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
     category_patterns = {
         "power": ["features_power*.tsv"],
         "connectivity": ["features_connectivity*"],
+        "directed_connectivity": ["features_directed_connectivity*"],
+        "source_localization": ["features_source_localization*"],
         "aperiodic": ["features_aperiodic*.tsv"],
         "erp": ["features_erp*.tsv"],
         "bursts": ["features_bursts*.tsv"],

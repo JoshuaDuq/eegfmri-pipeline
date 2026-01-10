@@ -21,12 +21,15 @@ from eeg_pipeline.analysis.features.results import (
     combine_feature_groups,
 )
 from eeg_pipeline.analysis.features.precomputed.erds import extract_erds_from_precomputed
-from eeg_pipeline.analysis.features.precomputed.spectral import extract_power_from_precomputed
 from eeg_pipeline.analysis.features.precomputed.extras import (
     extract_band_ratios_from_precomputed,
     extract_asymmetry_from_precomputed,
 )
-from eeg_pipeline.analysis.features.spectral import extract_spectral_features
+from eeg_pipeline.analysis.features.spectral import (
+    extract_spectral_features,
+    extract_power_features,
+    extract_power_from_precomputed,
+)
 from eeg_pipeline.analysis.features.phase import (
     compute_pac_comodulograms,
     extract_itpc_from_precomputed,
@@ -42,8 +45,6 @@ from eeg_pipeline.analysis.features.bursts import extract_burst_features
 from eeg_pipeline.analysis.features.connectivity import (
     extract_connectivity_features,
     extract_connectivity_from_precomputed,
-)
-from eeg_pipeline.analysis.features.directed_connectivity import (
     extract_directed_connectivity_features,
     extract_directed_connectivity_from_precomputed,
 )
@@ -52,7 +53,6 @@ from eeg_pipeline.analysis.features.source_localization import (
     extract_source_connectivity_features,
     extract_source_localization_from_precomputed,
 )
-from eeg_pipeline.analysis.features.power import extract_power_features
 from eeg_pipeline.analysis.features.preparation import precompute_data
 from eeg_pipeline.analysis.features.quality import (
     compute_trial_quality_metrics,

@@ -35,6 +35,8 @@ from eeg_pipeline.utils.data.columns import pick_target_column
 _FEATURE_FILE_TO_ATTR = {
     "power": "power_df",
     "connectivity": "connectivity_df",
+    "directed_connectivity": "directed_connectivity_df",
+    "source_localization": "source_localization_df",
     "aperiodic": "aperiodic_df",
     "erp": "erp_df",
     "itpc": "itpc_df",
@@ -120,6 +122,8 @@ class BehaviorContext:
     aligned_events: Optional[pd.DataFrame] = None
     power_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
+    directed_connectivity_df: Optional[pd.DataFrame] = None
+    source_localization_df: Optional[pd.DataFrame] = None
     aperiodic_df: Optional[pd.DataFrame] = None
     erp_df: Optional[pd.DataFrame] = None
     complexity_df: Optional[pd.DataFrame] = None
@@ -402,6 +406,8 @@ class BehaviorContext:
 
         self.power_df = bundle.power_df
         self.connectivity_df = bundle.connectivity_df
+        self.directed_connectivity_df = bundle.directed_connectivity_df
+        self.source_localization_df = bundle.source_localization_df
         self.pac_df = bundle.pac_trials_df
         self.aperiodic_df = bundle.aperiodic_df
         self.erp_df = bundle.erp_df
@@ -432,6 +438,8 @@ class BehaviorContext:
         feature_dataframes = {
             "power": self.power_df,
             "connectivity": self.connectivity_df,
+            "directed_connectivity": self.directed_connectivity_df,
+            "source_localization": self.source_localization_df,
             "aperiodic": self.aperiodic_df,
             "erp": self.erp_df,
             "itpc": self.itpc_df,
@@ -465,6 +473,8 @@ class BehaviorContext:
         category_to_attr = {
             "power": "power_df",
             "connectivity": "connectivity_df",
+            "directed_connectivity": "directed_connectivity_df",
+            "source_localization": "source_localization_df",
             "spectral": "spectral_df",
             "aperiodic": "aperiodic_df",
             "erp": "erp_df",

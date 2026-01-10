@@ -19,6 +19,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from eeg_pipeline.utils.config.loader import get_frequency_bands
+
 if TYPE_CHECKING:
     import mne
 
@@ -326,6 +328,7 @@ def _compute_eloreta_source_estimates(
 def _extract_roi_timecourses(
     stcs: List[Any],
     labels: List[Any],
+    src: Any,
     mode: str = "mean_flip",
 ) -> np.ndarray:
     """
@@ -337,6 +340,8 @@ def _extract_roi_timecourses(
         Source estimates
     labels : list of mne.Label
         ROI labels
+    src : mne.SourceSpaces
+        Source space used for the forward model
     mode : str
         Extraction mode: 'mean', 'mean_flip', 'pca_flip', 'max'
         
@@ -356,10 +361,13 @@ def _extract_roi_timecourses(
     for epoch_idx, stc in enumerate(stcs):
         for roi_idx, label in enumerate(labels):
             try:
-                tc = stc.extract_label_time_course(
-                    label,
-                    stcs[0].subject,
+                tc = mne.extract_label_time_course(
+                    stc,
+                    labels=[label],
+                    src=src,
                     mode=mode,
+                    allow_empty=True,
+                    verbose=False,
                 )
                 roi_data[epoch_idx, roi_idx, :] = tc.squeeze()
             except Exception:
@@ -516,7 +524,7 @@ def extract_source_localization_features(
         return pd.DataFrame(), []
     
     sfreq = epochs.info["sfreq"]
-    freq_bands = ctx.freq_bands if hasattr(ctx, "freq_bands") else {}
+    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     
     if logger:
         logger.info(f"Extracting source-localized features using {method.upper()}")
@@ -551,7 +559,9 @@ def extract_source_localization_features(
     else:
         raise ValueError(f"Unknown source localization method: {method}")
     
-    roi_data = _extract_roi_timecourses(stcs, labels, mode="mean_flip")
+    roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+    
+    segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
     
     records = [{} for _ in range(n_epochs)]
     feature_cols = []
@@ -566,14 +576,14 @@ def extract_source_localization_features(
         
         for roi_idx, roi_name in enumerate(label_names):
             safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{method}_{band}_{safe_name}_power"
+            col_name = f"src_{segment_label}_{method}_{band}_{safe_name}_power"
             feature_cols.append(col_name)
             
             for epoch_idx in range(n_epochs):
                 records[epoch_idx][col_name] = power[epoch_idx, roi_idx]
         
         global_power = np.nanmean(power, axis=1)
-        col_name = f"src_{method}_{band}_global_power"
+        col_name = f"src_{segment_label}_{method}_{band}_global_power"
         feature_cols.append(col_name)
         for epoch_idx in range(n_epochs):
             records[epoch_idx][col_name] = global_power[epoch_idx]
@@ -583,7 +593,7 @@ def extract_source_localization_features(
         
         for roi_idx, roi_name in enumerate(label_names):
             safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{method}_{band}_{safe_name}_envelope"
+            col_name = f"src_{segment_label}_{method}_{band}_{safe_name}_envelope"
             feature_cols.append(col_name)
             
             for epoch_idx in range(n_epochs):
@@ -643,7 +653,7 @@ def extract_source_connectivity_features(
         return pd.DataFrame(), []
     
     sfreq = epochs.info["sfreq"]
-    freq_bands = ctx.freq_bands if hasattr(ctx, "freq_bands") else {}
+    freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     
     if logger:
         logger.info(f"Extracting source-space {connectivity_method.upper()} connectivity")
@@ -684,7 +694,7 @@ def extract_source_connectivity_features(
         else:
             stcs, _ = _compute_eloreta_source_estimates(epochs_band, fwd, logger=None)
         
-        roi_data = _extract_roi_timecourses(stcs, labels, mode="mean_flip")
+        roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
         
         if connectivity_method.lower() == "aec":
             for epoch_idx in range(n_epochs):
@@ -795,16 +805,16 @@ def extract_source_localization_from_precomputed(
             self.epochs = precomputed.epochs
             self.config = getattr(precomputed, "config", {})
             self.logger = logger
-            self.freq_bands = {}
+            self.frequency_bands = {}
             if hasattr(precomputed, "band_data") and precomputed.band_data:
                 for band_name, band_info in precomputed.band_data.items():
                     if hasattr(band_info, "fmin") and hasattr(band_info, "fmax"):
-                        self.freq_bands[band_name] = (band_info.fmin, band_info.fmax)
+                        self.frequency_bands[band_name] = (band_info.fmin, band_info.fmax)
     
     ctx = MockContext(precomputed)
     
     if bands is None:
-        bands = list(ctx.freq_bands.keys())
+        bands = list(ctx.frequency_bands.keys())
     
     return extract_source_localization_features(
         ctx,

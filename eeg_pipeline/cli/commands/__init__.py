@@ -29,7 +29,6 @@ class Command:
 
 from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
 from eeg_pipeline.cli.commands.features import setup_features, run_features
-from eeg_pipeline.cli.commands.tfr import setup_tfr, run_tfr
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
 from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
@@ -37,8 +36,6 @@ from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
 from eeg_pipeline.cli.commands.info import setup_info, run_info
 from eeg_pipeline.cli.commands.stats import setup_stats, run_stats
 from eeg_pipeline.cli.commands.validate import setup_validate, run_validate
-from eeg_pipeline.cli.commands.clean import setup_clean, run_clean
-from eeg_pipeline.cli.commands.discover import setup_discover, run_discover
 
 from eeg_pipeline.cli.commands.base import (
     detect_available_bands,
@@ -66,13 +63,6 @@ COMMANDS: List[Command] = [
         run=run_features,
     ),
     Command(
-        name="tfr",
-        help="TFR visualization: generate time-frequency representations",
-        description="TFR pipeline: visualize time-frequency representations",
-        setup=setup_tfr,
-        run=run_tfr,
-    ),
-    Command(
         name="ml",
         help="Machine learning: run LOSO regression and time-generalization",
         description="Run machine learning pipeline (LOSO regression + time-generalization)",
@@ -95,16 +85,16 @@ COMMANDS: List[Command] = [
     ),
     Command(
         name="utilities",
-        help="Utilities: raw-to-bids conversion or merge behavior",
-        description="Utilities pipeline: convert raw EEG to BIDS or merge behavioral data",
+        help="Utilities: raw-to-bids conversion, merge behavior, clean up disk space",
+        description="Utilities pipeline: convert raw EEG to BIDS, merge behavioral data, or clean up disk space",
         setup=setup_utilities,
         run=run_utilities,
         requires_subjects=True,
     ),
     Command(
         name="info",
-        help="Discovery and status: list subjects, features, config",
-        description="Show information about subjects, features, and configuration",
+        help="Discovery and status: list subjects, features, config, discover columns",
+        description="Show information about subjects, features, configuration, and discover available columns",
         setup=setup_info,
         run=run_info,
         requires_subjects=False,
@@ -123,22 +113,6 @@ COMMANDS: List[Command] = [
         description="Check data files for integrity and consistency issues",
         setup=setup_validate,
         run=run_validate,
-        requires_subjects=False,
-    ),
-    Command(
-        name="clean",
-        help="Clean up disk space: remove plots, cache, old files",
-        description="Remove generated files to free disk space",
-        setup=setup_clean,
-        run=run_clean,
-        requires_subjects=False,
-    ),
-    Command(
-        name="discover",
-        help="Discover available columns and values from data files",
-        description="Scan events files or trial tables to find available columns",
-        setup=setup_discover,
-        run=run_discover,
         requires_subjects=False,
     ),
 ]

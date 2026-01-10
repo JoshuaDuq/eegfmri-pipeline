@@ -99,7 +99,8 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     compute_group.add_argument("--no-consistency", action="store_false", dest="consistency_enabled")
     
     feature_choices = [
-        "power", "connectivity", "aperiodic", "erp", "bursts", "itpc", "pac",
+        "power", "connectivity", "directed_connectivity", "source_localization",
+        "aperiodic", "erp", "bursts", "itpc", "pac",
         "complexity", "quality", "erds", "spectral", "ratios", "asymmetry",
     ]
     compute_group.add_argument(
@@ -284,6 +285,13 @@ def setup_behavior(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Use within-run/block permutation p-values for p_primary when available",
     )
     correlations_group.add_argument("--no-correlations-permutation-primary", action="store_false", dest="correlations_permutation_primary")
+    correlations_group.add_argument(
+        "--correlations-target-column",
+        type=str,
+        default=None,
+        dest="correlations_target_column",
+        help="Custom target column name from events (e.g., 'vas_rating', 'pain_intensity')",
+    )
 
     report_group = parser.add_argument_group("Report options")
     report_group.add_argument("--report-top-n", type=int, default=None, help="Top N rows per analysis table in subject_report*.md")
@@ -720,6 +728,8 @@ def _configure_behavior_compute_mode(args: argparse.Namespace, config: Any) -> N
         corr = ba.setdefault("correlations", {})
         corr["p_primary_mode"] = "perm_if_available" if enabled else "asymptotic"
         corr.setdefault("permutation", {})["enabled"] = enabled
+    if getattr(args, "correlations_target_column", None) is not None:
+        ba.setdefault("correlations", {})["target_column"] = str(args.correlations_target_column).strip()
 
     # Report
     if getattr(args, "report_top_n", None) is not None:

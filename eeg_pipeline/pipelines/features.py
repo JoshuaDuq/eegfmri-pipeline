@@ -74,6 +74,8 @@ _FEATURE_ACCUMULATOR_KEYS = [
     "power",
     "baseline",
     "connectivity",
+    "directed_connectivity",
+    "source_localization",
     "aperiodic",
     "erp",
     "itpc",
@@ -189,6 +191,10 @@ def _unpack_feature_results(features: FeatureExtractionResult) -> Dict[str, Any]
         "baseline_cols": features.baseline_cols,
         "conn_df": features.conn_df,
         "conn_cols": features.conn_cols,
+        "dconn_df": features.dconn_df,
+        "dconn_cols": features.dconn_cols,
+        "source_df": features.source_df,
+        "source_cols": features.source_cols,
         "aper_df": features.aper_df,
         "aper_cols": features.aper_cols,
         "erp_df": features.erp_df,
@@ -231,6 +237,8 @@ def _build_extra_blocks(unpacked: Dict[str, Any], features: FeatureExtractionRes
         "erp": unpacked["erp_df"],
         "bursts": unpacked["bursts_df"],
         "erds": unpacked["erds_df"],
+        "dconn": unpacked["dconn_df"],
+        "source": unpacked["source_df"],
         "ratios": features.ratios_df,
         "asymmetry": features.asymmetry_df,
         "quality": features.quality_df,
@@ -258,6 +266,8 @@ def _update_from_aligned_extra(
     unpacked["erp_df"] = extra_aligned.get("erp", unpacked["erp_df"])
     unpacked["bursts_df"] = extra_aligned.get("bursts", unpacked["bursts_df"])
     unpacked["erds_df"] = extra_aligned.get("erds", unpacked["erds_df"])
+    unpacked["dconn_df"] = extra_aligned.get("dconn", unpacked["dconn_df"])
+    unpacked["source_df"] = extra_aligned.get("source", unpacked["source_df"])
     features.ratios_df = extra_aligned.get("ratios", features.ratios_df)
     features.asymmetry_df = extra_aligned.get("asymmetry", features.asymmetry_df)
     features.quality_df = extra_aligned.get("quality", features.quality_df)
@@ -287,6 +297,8 @@ def _accumulate_features(
         "power": aligned.get("pow_df_aligned"),
         "baseline": aligned.get("baseline_df_aligned"),
         "connectivity": aligned.get("conn_df_aligned"),
+        "directed_connectivity": unpacked["dconn_df"],
+        "source_localization": unpacked["source_df"],
         "aperiodic": aligned.get("aper_df_aligned"),
         "erp": unpacked["erp_df"],
         "itpc": unpacked["itpc_df"],
@@ -329,6 +341,8 @@ def _save_merged_features(
     feature_file_mapping = {
         "power": ("features_power.tsv", ["power", "baseline"]),
         "connectivity": ("features_connectivity.tsv", ["connectivity"]),
+        "directed_connectivity": ("features_directed_connectivity.tsv", ["directed_connectivity"]),
+        "source_localization": ("features_source_localization.tsv", ["source_localization"]),
         "aperiodic": ("features_aperiodic.tsv", ["aperiodic"]),
         "erp": ("features_erp.tsv", ["erp"]),
         "itpc": ("features_itpc.tsv", ["itpc"]),
@@ -612,6 +626,10 @@ class FeaturePipeline(PipelineBase):
                 asymmetry_cols=features.asymmetry_cols,
                 quality_df=features.quality_df,
                 quality_cols=features.quality_cols,
+                dconn_df=unpacked["dconn_df"],
+                dconn_cols=unpacked["dconn_cols"],
+                source_df=unpacked["source_df"],
+                source_cols=unpacked["source_cols"],
                 feature_qc=feature_qc or None,
                 suffix=suffix,
             )
@@ -632,6 +650,16 @@ class FeaturePipeline(PipelineBase):
             n_conn = (
                 conn_df_aligned.shape[1]
                 if conn_df_aligned is not None and not conn_df_aligned.empty
+                else 0
+            )
+            n_dconn = (
+                unpacked["dconn_df"].shape[1]
+                if unpacked["dconn_df"] is not None and not unpacked["dconn_df"].empty
+                else 0
+            )
+            n_source = (
+                unpacked["source_df"].shape[1]
+                if unpacked["source_df"] is not None and not unpacked["source_df"].empty
                 else 0
             )
             n_aper = (
@@ -663,8 +691,8 @@ class FeaturePipeline(PipelineBase):
 
             self.logger.info(
                 f"Done {range_info}: sub-{subject}, trials={n_trials}, "
-                f"power={n_pow}, conn={n_conn}, aper={n_aper}, "
-                f"spectral={n_spectral}, total={n_total}"
+                f"power={n_pow}, conn={n_conn}, dconn={n_dconn}, source={n_source}, "
+                f"aper={n_aper}, spectral={n_spectral}, total={n_total}"
             )
 
         if len(time_ranges) > 1:

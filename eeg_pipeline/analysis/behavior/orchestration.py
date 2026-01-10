@@ -1170,6 +1170,8 @@ def run_behavior_stages(
 FEATURE_COLUMN_PREFIXES = (
     "power_",
     "connectivity_",
+    "directed_connectivity_",
+    "source_localization_",
     "aperiodic_",
     "erp_",
     "itpc_",
@@ -1187,6 +1189,8 @@ FEATURE_COLUMN_PREFIXES = (
 CATEGORY_PREFIX_MAP = {
     "power": "power_",
     "connectivity": "connectivity_",
+    "directed_connectivity": "directed_connectivity_",
+    "source_localization": "source_localization_",
     "aperiodic": "aperiodic_",
     "erp": "erp_",
     "itpc": "itpc_",
@@ -1382,6 +1386,8 @@ def add_change_scores(ctx: BehaviorContext) -> None:
 
     ctx.power_df = _augment_dataframe_with_change_scores(ctx.power_df)
     ctx.connectivity_df = _augment_dataframe_with_change_scores(ctx.connectivity_df)
+    ctx.directed_connectivity_df = _augment_dataframe_with_change_scores(ctx.directed_connectivity_df)
+    ctx.source_localization_df = _augment_dataframe_with_change_scores(ctx.source_localization_df)
     ctx.aperiodic_df = _augment_dataframe_with_change_scores(ctx.aperiodic_df)
     ctx.itpc_df = _augment_dataframe_with_change_scores(ctx.itpc_df)
     ctx.pac_df = _augment_dataframe_with_change_scores(ctx.pac_df)
