@@ -54,9 +54,10 @@ def _safe_read_feature_table(
     base_name: str,
     logger: logging.Logger,
     extension: str = ".tsv",
+    config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
     """Read feature table, checking subfolder first."""
-    folder = _get_folder_for_feature(base_name)
+    folder = _get_folder_for_feature(base_name, config)
     filename = f"{base_name}{extension}"
     
     if folder:
@@ -279,30 +280,30 @@ def load_feature_bundle(
     features_dir = deriv_features_path(deriv_root, subject)
 
     bundle = FeatureBundle(
-        power_df=_safe_read_feature_table(features_dir, "features_power", logger),
+        power_df=_safe_read_feature_table(features_dir, "features_power", logger, config=config),
         connectivity_df=_safe_read_table(
             find_connectivity_features_path(deriv_root, subject), logger
         ),
-        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directedconnectivity", logger),
-        source_localization_df=_safe_read_feature_table(features_dir, "features_sourcelocalization", logger),
-        aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger),
-        erp_df=_safe_read_feature_table(features_dir, "features_erp", logger),
-        pac_df=_safe_read_feature_table(features_dir, "features_pac", logger),
-        pac_trials_df=_safe_read_feature_table(features_dir, "features_pac_trials", logger),
-        pac_time_df=_safe_read_feature_table(features_dir, "features_pac_time", logger),
-        itpc_df=_safe_read_feature_table(features_dir, "features_itpc", logger),
-        complexity_df=_safe_read_feature_table(features_dir, "features_complexity", logger),
-        bursts_df=_safe_read_feature_table(features_dir, "features_bursts", logger),
-        quality_df=_safe_read_feature_table(features_dir, "features_quality", logger),
-        erds_df=_safe_read_feature_table(features_dir, "features_erds", logger),
-        spectral_df=_safe_read_feature_table(features_dir, "features_spectral", logger),
-        ratios_df=_safe_read_feature_table(features_dir, "features_ratios", logger),
-        asymmetry_df=_safe_read_feature_table(features_dir, "features_asymmetry", logger),
-        temporal_df=_safe_read_feature_table(features_dir, "features_temporal", logger),
+        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directedconnectivity", logger, config=config),
+        source_localization_df=_safe_read_feature_table(features_dir, "features_sourcelocalization", logger, config=config),
+        aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger, config=config),
+        erp_df=_safe_read_feature_table(features_dir, "features_erp", logger, config=config),
+        pac_df=_safe_read_feature_table(features_dir, "features_pac", logger, config=config),
+        pac_trials_df=_safe_read_feature_table(features_dir, "features_pac_trials", logger, config=config),
+        pac_time_df=_safe_read_feature_table(features_dir, "features_pac_time", logger, config=config),
+        itpc_df=_safe_read_feature_table(features_dir, "features_itpc", logger, config=config),
+        complexity_df=_safe_read_feature_table(features_dir, "features_complexity", logger, config=config),
+        bursts_df=_safe_read_feature_table(features_dir, "features_bursts", logger, config=config),
+        quality_df=_safe_read_feature_table(features_dir, "features_quality", logger, config=config),
+        erds_df=_safe_read_feature_table(features_dir, "features_erds", logger, config=config),
+        spectral_df=_safe_read_feature_table(features_dir, "features_spectral", logger, config=config),
+        ratios_df=_safe_read_feature_table(features_dir, "features_ratios", logger, config=config),
+        asymmetry_df=_safe_read_feature_table(features_dir, "features_asymmetry", logger, config=config),
+        temporal_df=_safe_read_feature_table(features_dir, "features_temporal", logger, config=config),
     )
 
     if include_targets:
-        targets_df = _safe_read_feature_table(features_dir, "target_vas_ratings", logger)
+        targets_df = _safe_read_feature_table(features_dir, "target_vas_ratings", logger, config=config)
         if targets_df is not None:
             bundle.targets = _extract_targets_from_dataframe(
                 targets_df, config, logger
@@ -388,7 +389,7 @@ def _build_filename(base_name: str, suffix: Optional[str] = None) -> str:
     return f"{base_name}.tsv"
 
 
-def _get_folder_for_feature(base_name: str) -> str:
+def _get_folder_for_feature(base_name: str, config: Optional[Any] = None) -> str:
     """Determine subfolder name from base filename."""
     if base_name.startswith("features_"):
         name = base_name.replace("features_", "")
@@ -398,6 +399,15 @@ def _get_folder_for_feature(base_name: str) -> str:
         if name.startswith("power"):
             return "power"
         if name == "source_localization" or name == "sourcelocalization":
+            # For source localization, classify by fMRI-informed vs EEG-only mode if config provided
+            if config is not None:
+                from eeg_pipeline.analysis.features.source_localization import _cfg_get
+                src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+                if isinstance(src_cfg, dict):
+                    mode = str(src_cfg.get("mode", "eeg_only")).strip().lower()
+                    if mode == "fmri_informed":
+                        return "sourcelocalization/fmri_informed"
+                    return "sourcelocalization/eeg_only"
             return "sourcelocalization"
         if name == "directed_connectivity" or name == "directedconnectivity":
             return "directedconnectivity"
@@ -423,12 +433,17 @@ def _save_feature_dataframe(
     column_names: Optional[List[str]] = None,
     feature_type: str = "Feature",
     suffix: Optional[str] = None,
+    config: Optional[Any] = None,
 ) -> None:
     """Save a feature dataframe with column assignment and logging."""
     df = _assign_columns_safely(df, column_names, feature_type, logger)
-    folder_name = _get_folder_for_feature(base_filename)
+    folder_name = _get_folder_for_feature(base_filename, config)
     filename = _build_filename(base_filename, suffix)
     file_path = features_dir / folder_name / filename
+    
+    # Ensure nested subdirectories exist
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
     logger.info("Saving %s: %s", feature_type, file_path)
     write_tsv(df, file_path)
 
@@ -448,7 +463,7 @@ def _save_feature_metadata(
     try:
         from eeg_pipeline.domain.features.naming import generate_manifest
 
-        folder_name = _get_folder_for_feature(base_filename)
+        folder_name = _get_folder_for_feature(base_filename, config)
         metadata_dir = features_dir / folder_name / "metadata"
         metadata_dir.mkdir(parents=True, exist_ok=True)
 
@@ -680,7 +695,7 @@ def _save_feature_manifest(
             if len(features_dir.parts) > 3
             else "unknown"
         )
-        folder_name = _get_folder_for_feature("features")
+        folder_name = _get_folder_for_feature("features", config)
         json_filename = _build_filename("features", suffix).replace(".tsv", ".json")
         sidecar_path = features_dir / folder_name / json_filename
         manifest = generate_manifest(
@@ -783,7 +798,7 @@ def save_all_features(
     for df, cols, base_name, description in feature_save_configs:
         if df is not None and not df.empty:
             _save_feature_dataframe(
-                df, base_name, features_dir, logger, cols, description, suffix
+                df, base_name, features_dir, logger, cols, description, suffix, config=config
             )
             _save_feature_metadata(
                 df, base_name, features_dir, config, logger, suffix

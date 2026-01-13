@@ -394,7 +394,9 @@ def _compute_baseline_mask_for_times(
     except (TypeError, ValueError):
         return None
     
-    mask = (times >= tmin) & (times <= tmax)
+    # Use a half-open interval [tmin, tmax) to avoid including t=0 exactly when
+    # users specify baseline_end=0.0 (common in ERP practice).
+    mask = (times >= tmin) & (times < tmax)
     return mask if np.any(mask) else None
 
 
@@ -592,14 +594,23 @@ def extract_erp_features(
             original_epochs=original_epochs, picks=picks
         )
 
+    windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     
-    # When a specific time range is targeted (ctx.name is set), the epochs have 
-    # already been cropped to that range. Use all available data with that segment name.
-    if target_name:
-        segment_masks = {target_name: np.ones_like(times, dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segment_masks = {target_name: mask}
+        else:
+            if ctx.logger:
+                ctx.logger.warning(
+                    "ERP: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            segment_masks = {target_name: np.ones_like(times, dtype=bool)}
     else:
-        segment_masks = get_segment_masks(times, ctx.windows, ctx.config)
+        segment_masks = get_segment_masks(times, windows, ctx.config)
         component_masks = _build_component_masks(times, erp_cfg)
         
         for name, mask in component_masks.items():

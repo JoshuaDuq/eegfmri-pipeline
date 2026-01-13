@@ -120,6 +120,7 @@ type PlottersLoadedMsg struct {
 type ConfigSummary struct {
 	Task               string `json:"task"`
 	BidsRoot           string `json:"bids_root"`
+	BidsFmriRoot       string `json:"bids_fmri_root"`
 	DerivRoot          string `json:"deriv_root"`
 	SourceRoot         string `json:"source_root"`
 	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
@@ -209,4 +210,20 @@ type ResourceUpdateMsg struct {
 	MemoryUsage   float64
 	CPUCoreUsages []float64 // Per-core CPU usage percentages
 	NumCPUCores   int       // Total number of CPU cores
+}
+
+// FmriConditionsDiscoveredMsg contains discovered fMRI trial_type conditions
+type FmriConditionsDiscoveredMsg struct {
+	Conditions []string
+	Subject    string
+	Task       string
+	Error      error
+}
+
+// FmriColumnsDiscoveredMsg contains discovered fMRI event columns and values
+type FmriColumnsDiscoveredMsg struct {
+	Columns []string
+	Values  map[string][]string
+	Source  string
+	Error   error
 }

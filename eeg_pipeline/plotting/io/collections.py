@@ -169,8 +169,7 @@ def collect_significant_plots(
         raise TypeError("all_results must be a list")
 
     config = config or _get_default_config()
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger = get_subject_logger("behavior_analysis", subject)
 
     plot_config = get_plot_config(config)
     behavioral_config = plot_config.get_behavioral_config()

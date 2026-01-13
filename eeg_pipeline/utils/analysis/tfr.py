@@ -42,6 +42,18 @@ def _get_tfr_constants(config=None):
     return get_constants("time_frequency_analysis", config)
 
 
+def _get_min_baseline_samples(config) -> int:
+    """Get minimum baseline samples, supporting both config key names.
+    
+    Prefers min_baseline_samples (config standard), falls back to 
+    min_samples_for_baseline_validation for compatibility.
+    """
+    val = get_config_value(config, "time_frequency_analysis.constants.min_baseline_samples", None)
+    if val is None:
+        val = get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 10)
+    return int(val)
+
+
 ###################################################################
 # Configuration Helpers
 ###################################################################
@@ -84,9 +96,9 @@ def get_tfr_decim(config, mode: str = "power") -> int:
     tfr_config = config.get("time_frequency_analysis.tfr", {})
     
     if mode == "phase":
-        return int(tfr_config.get("decim_phase", tfr_config.get("decim", 1)))
+        return int(tfr_config.get("decim_phase", 1))
     else:
-        return int(tfr_config.get("decim_power", tfr_config.get("decim", 4)))
+        return int(tfr_config.get("decim_power", 4))
 
 
 ###################################################################
@@ -415,7 +427,7 @@ def compute_tfr_for_subject(
     else:
         tfr_baseline_raw = tuple(tfr_analysis.get("baseline_window", [-2.0, 0.0]))
     tfr_baseline = validate_baseline_window_pre_stimulus(tfr_baseline_raw, logger=logger)
-    min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+    min_baseline_samples = _get_min_baseline_samples(config)
     
     b_start, b_end = tfr_baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
@@ -994,7 +1006,7 @@ def read_tfr_average_with_logratio(
 ) -> Optional["mne.time_frequency.AverageTFR"]:
     if min_baseline_samples is None:
         config = ensure_config(config)
-        min_baseline_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+        min_baseline_samples = _get_min_baseline_samples(config)
     logger = _get_logger(logger)
     
     tfr_obj = _load_tfr_from_path(tfr_path, logger)
@@ -1249,7 +1261,7 @@ def validate_baseline_window(
 ) -> Tuple[float, float, np.ndarray]:
     if min_samples is None:
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+        min_samples = _get_min_baseline_samples(config)
     
     b_start, b_end = baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
@@ -1344,9 +1356,9 @@ def apply_baseline_to_tfr(
         "time_frequency_analysis.baseline_window", [-5.0, -0.01]
     )
     min_samples_roi = config.get("behavior_analysis.statistics.min_samples_roi", 20)
-    min_baseline_samples = int(
-        get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", min_samples_roi)
-    )
+    min_baseline_samples = _get_min_baseline_samples(config)
+    if min_baseline_samples < min_samples_roi:
+        min_baseline_samples = min_samples_roi
     
     try:
         b_start, b_end, _ = validate_baseline_window(
@@ -1375,7 +1387,7 @@ def validate_baseline_indices(
 ) -> Tuple[float, float, np.ndarray]:
     if min_samples is None:
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+        min_samples = _get_min_baseline_samples(config)
     b_start, b_end = baseline
     b_start = float(times.min()) if b_start is None else float(b_start)
     b_end = 0.0 if b_end is None else float(b_end)
@@ -1526,7 +1538,7 @@ def apply_baseline_safe(
     times = np.asarray(tfr_obj.times)
     
     if min_samples is None:
-        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+        min_samples = _get_min_baseline_samples(config)
     
     baseline_start = float(times.min()) if baseline[0] is None else float(baseline[0])
     baseline_end = 0.0 if baseline[1] is None else float(baseline[1])
@@ -1611,7 +1623,7 @@ def log_baseline_qc(
 ):
     if min_samples is None:
         config = ensure_config(config)
-        min_samples = int(get_config_value(config, "time_frequency_analysis.constants.min_samples_for_baseline_validation", 5))
+        min_samples = _get_min_baseline_samples(config)
     logger = _get_logger(logger)
     constants = _get_tfr_constants(config)
 

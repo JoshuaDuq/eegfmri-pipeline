@@ -31,6 +31,7 @@ from eeg_pipeline.cli.commands.behavior import setup_behavior, run_behavior
 from eeg_pipeline.cli.commands.features import setup_features, run_features
 from eeg_pipeline.cli.commands.machine_learning import setup_ml, run_ml
 from eeg_pipeline.cli.commands.preprocessing import setup_preprocessing, run_preprocessing
+from fmri_pipeline.cli.commands.fmri import setup_fmri, run_fmri
 from eeg_pipeline.cli.commands.utilities import setup_utilities, run_utilities
 from eeg_pipeline.cli.commands.plotting import setup_plotting, run_plotting
 from eeg_pipeline.cli.commands.info import setup_info, run_info
@@ -82,6 +83,14 @@ COMMANDS: List[Command] = [
         description="Run preprocessing: detect bad channels, fit ICA, create epochs",
         setup=setup_preprocessing,
         run=run_preprocessing,
+    ),
+    Command(
+        name="fmri",
+        help="fMRI preprocessing: fMRIPrep-style (containerized)",
+        description="Run fMRIPrep-style preprocessing for a BIDS fMRI dataset",
+        setup=setup_fmri,
+        run=run_fmri,
+        requires_subjects=False,
     ),
     Command(
         name="utilities",

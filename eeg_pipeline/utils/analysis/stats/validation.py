@@ -791,6 +791,8 @@ def validate_baseline_window_pre_stimulus(
     baseline_window: Union[Tuple[float, float], List[float], float],
     baseline_end: Optional[float] = None,
     logger: Optional[logging.Logger] = None,
+    *,
+    strict: bool = False,
 ) -> Union[bool, Tuple[float, float]]:
     """Check baseline window ends before stimulus onset.
     
@@ -803,39 +805,54 @@ def validate_baseline_window_pre_stimulus(
         this parameter is ignored and baseline_end is extracted from the tuple.
     logger : Logger, optional
         Logger for warnings.
+    strict : bool, optional
+        If True, raise ValueError when baseline extends past stimulus onset (t=0).
+        If False (default), only log a warning. For scientifically valid baseline
+        normalization, strict=True is recommended.
         
     Returns
     -------
     bool or tuple
         If baseline_window is a tuple/list, returns the validated tuple (tmin, baseline_end).
         If baseline_window is a float, returns True if valid, False otherwise.
+        
+    Raises
+    ------
+    ValueError
+        If strict=True and baseline extends past stimulus onset.
     """
     STIMULUS_ONSET = 0.0
     
-    def _log_warning_if_invalid(baseline_end_value: float) -> None:
-        """Log warning if baseline extends past stimulus."""
-        if baseline_end_value > STIMULUS_ONSET and logger:
-            logger.warning(
-                f"Baseline extends past stimulus: baseline_end={baseline_end_value}"
+    def _handle_invalid_baseline(baseline_end_value: float) -> None:
+        """Handle baseline that extends past stimulus."""
+        if baseline_end_value > STIMULUS_ONSET:
+            msg = (
+                f"Baseline window extends past stimulus onset: baseline_end={baseline_end_value:.3f}s > 0. "
+                "This contaminates baseline with stimulus-evoked activity, invalidating "
+                "baseline normalization. Adjust baseline_window to end at or before t=0."
             )
+            if strict:
+                raise ValueError(msg)
+            elif logger:
+                logger.warning(msg)
     
     # Handle tuple/list input (new calling convention)
     if isinstance(baseline_window, (tuple, list)) and len(baseline_window) >= 2:
         tmin = float(baseline_window[0])
         baseline_end_value = float(baseline_window[1])
-        _log_warning_if_invalid(baseline_end_value)
+        _handle_invalid_baseline(baseline_end_value)
         return (tmin, baseline_end_value)
     
     # Handle old calling convention (two separate arguments)
     if baseline_end is not None:
         baseline_end_value = float(baseline_end)
-        _log_warning_if_invalid(baseline_end_value)
+        _handle_invalid_baseline(baseline_end_value)
         return baseline_end_value <= STIMULUS_ONSET
     
     # Handle single float input (treat as baseline_end)
     if isinstance(baseline_window, (int, float)):
         baseline_end_value = float(baseline_window)
-        _log_warning_if_invalid(baseline_end_value)
+        _handle_invalid_baseline(baseline_end_value)
         return baseline_end_value <= STIMULUS_ONSET
     
     raise ValueError(f"Invalid baseline_window type: {type(baseline_window)}")

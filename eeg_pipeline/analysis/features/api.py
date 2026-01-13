@@ -88,6 +88,7 @@ def _prepare_precomputed_data(
     tmax: Optional[float],
 ) -> Optional[PrecomputedData]:
     """Prepare or compute precomputed intermediate data for feature extraction."""
+    # Categories that use precomputed band data (ensures IAF-adjusted bands apply consistently)
     precompute_categories = {
         "connectivity",
         "directed_connectivity",
@@ -96,6 +97,8 @@ def _prepare_precomputed_data(
         "asymmetry",
         "complexity",
         "bursts",
+        "spectral",  # Added: ensures IAF-adjusted bands apply to spectral features
+        "aperiodic",  # Added: ensures IAF-adjusted bands apply to aperiodic features
     }
     baseline_dependent_categories = {"erds", "bursts"}
 

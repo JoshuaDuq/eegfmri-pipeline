@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/eeg-pipeline/tui/components"
+	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/messages"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
@@ -135,6 +136,61 @@ var defaultROIs = []ROIDefinition{
 	{"ParOccipital_Ipsi_L", "ParOccipital Ipsi L", "P1,P3,P5,P7,PO3,PO7,O1"},
 	{"ParOccipital_Midline", "ParOccipital Midline", "Pz,POz,Oz"},
 	{"Midline_ACC_MCC", "Midline ACC/MCC", "Fz,Cz,CPz"},
+}
+
+// PreprocessingStage represents a preprocessing stage
+type PreprocessingStage struct {
+	Key         string
+	Name        string
+	Description string
+}
+
+var preprocessingStages = []PreprocessingStage{
+	{"bad_channels", "Bad Channels", "Detect and mark bad channels"},
+	{"filtering", "Filtering", "Apply frequency filters"},
+	{"ica", "ICA", "Independent component analysis"},
+	{"epochs", "Epochs", "Create epoched data"},
+}
+
+// FilteringOptions represents filtering configuration
+type FilteringOptions struct {
+	ResampleFreq *float64 // Hz, nil means use config default
+	HighPassFreq *float64 // Hz (l_freq)
+	LowPassFreq  *float64 // Hz (h_freq)
+	NotchFreq    *int     // Hz
+	LineFreq     *int     // Hz (50 or 60)
+}
+
+// ICAOptions represents ICA configuration
+type ICAOptions struct {
+	Method               *string  // fastica, infomax, picard
+	Components           *float64 // int or variance fraction
+	ProbabilityThreshold *float64 // 0-1
+	LabelsToKeep         *string  // comma-separated labels
+	UseICALabel          *bool    // true/false
+	KeepMNEBIDS          *bool    // keep MNE-BIDS flagged bads
+}
+
+// EpochOptions represents epoch configuration
+type EpochOptions struct {
+	Tmin     *float64    // epoch start time (s)
+	Tmax     *float64    // epoch end time (s)
+	Baseline *[2]float64 // [start, end] in seconds, nil means no baseline
+	Reject   *float64    // peak-to-peak amplitude threshold (µV)
+}
+
+// PreprocessingAdvancedOptions represents advanced preprocessing configuration
+type PreprocessingAdvancedOptions struct {
+	UsePyPREP            *bool // use PyPREP for bad channel detection
+	RANSAC               *bool // use RANSAC
+	Repeats              *int  // number of bad channel detection iterations
+	AverageReref         *bool // average re-reference before detection
+	ConsiderPreviousBads *bool // keep previously marked bad channels
+	OverwriteChannelsTSV *bool // overwrite channels.tsv file
+	DeleteBreaks         *bool // delete breaks in data
+	BreaksMinLength      *int  // minimum break duration (s)
+	TStartAfterPrevious  *int  // time after previous event (s)
+	TStopBeforeNext      *int  // time before next event (s)
 }
 
 type SpatialMode struct {
@@ -298,16 +354,29 @@ const (
 	textFieldNone textField = iota
 	textFieldTask
 	textFieldBidsRoot
+	textFieldBidsFmriRoot
 	textFieldDerivRoot
 	textFieldSourceRoot
+	// fMRI preprocessing text fields
+	textFieldFmriFmriprepImage
+	textFieldFmriFmriprepOutputDir
+	textFieldFmriFmriprepWorkDir
+	textFieldFmriFreesurferLicenseFile
+	textFieldFmriFreesurferSubjectsDir
+	textFieldFmriOutputSpaces
+	textFieldFmriIgnore
+	textFieldFmriBidsFilterFile
+	textFieldFmriExtraArgs
+	textFieldFmriSkullStripTemplate
+	textFieldFmriTaskId
 	textFieldRawMontage
 	textFieldPrepMontage
+	textFieldPrepFileExtension
 	textFieldRawEventPrefixes
 	textFieldMergeEventPrefixes
 	textFieldMergeEventTypes
 	// Behavior advanced config text fields
 	textFieldTrialTableExtraEventColumns
-	textFieldConfoundsQCColumnPatterns
 	textFieldConditionCompareColumn
 	textFieldConditionCompareWindows
 	textFieldConditionCompareValues
@@ -329,6 +398,24 @@ const (
 	textFieldSpectralRatioPairs
 	textFieldAsymmetryChannelPairs
 	textFieldERPComponents
+	// ITPC condition-based text fields
+	textFieldItpcConditionColumn
+	textFieldItpcConditionValues
+	// Source localization advanced config text fields
+	textFieldSourceLocSubject
+	textFieldSourceLocTrans
+	textFieldSourceLocBem
+	textFieldSourceLocFmriStatsMap
+	// fMRI contrast builder text fields
+	textFieldSourceLocFmriCondAColumn
+	textFieldSourceLocFmriCondAValue
+	textFieldSourceLocFmriCondBColumn
+	textFieldSourceLocFmriCondBValue
+	textFieldSourceLocFmriContrastFormula
+	textFieldSourceLocFmriContrastName
+	textFieldSourceLocFmriRunsToInclude
+	textFieldSourceLocFmriWindowAName
+	textFieldSourceLocFmriWindowBName
 	textFieldPainResidualSplineDfCandidates
 	textFieldPainResidualModelComparePolyDegrees
 	// Plotting advanced config text fields
@@ -566,10 +653,12 @@ type Model struct {
 	stepIndex   int
 
 	// Project setup (received from global config)
-	task       string
-	bidsRoot   string
-	derivRoot  string
-	sourceRoot string
+	task         string
+	bidsRoot     string
+	bidsFmriRoot string
+	derivRoot    string
+	sourceRoot   string
+	repoRoot     string // Project repository root for running Python commands
 
 	// Mode selection
 	modeOptions      []string
@@ -587,6 +676,11 @@ type Model struct {
 	categoryDescs []string
 	categoryIndex int
 	selected      map[int]bool
+
+	// Preprocessing stage selection (for preprocessing pipeline)
+	prepStages        []PreprocessingStage
+	prepStageSelected map[int]bool
+	prepStageCursor   int
 
 	// Band selection (for features and behavior pipeline)
 	bands        []FrequencyBand
@@ -651,6 +745,58 @@ type Model struct {
 	plotSavefigDpiIndex int
 	plotSharedColorbar  bool
 	plotConfigCursor    int
+
+	// fMRI preprocessing (fMRIPrep-style) configuration
+	fmriEngineIndex           int    // 0: docker, 1: apptainer
+	fmriFmriprepImage         string // Docker image or Apptainer URI/path
+	fmriFmriprepOutputDir     string // Host path; default: deriv_root
+	fmriFmriprepWorkDir       string // Host path; default: deriv_root/work/fmriprep
+	fmriFreesurferLicenseFile string // Host path to license.txt
+	fmriFreesurferSubjectsDir string // Host path (optional)
+	fmriOutputSpacesSpec      string // Space-separated (e.g., "T1w MNI152NLin2009cAsym")
+	fmriIgnoreSpec            string // Space-separated (e.g., "fieldmaps slicetiming")
+	fmriBidsFilterFile        string // Host path to BIDS filter JSON (optional)
+	fmriExtraArgs             string // Passed to fMRIPrep via shlex splitting
+	fmriUseAroma              bool
+	fmriSkipBidsValidation    bool
+	fmriStopOnFirstCrash      bool
+	fmriCleanWorkdir          bool
+	fmriSkipReconstruction    bool // fMRIPrep: --fs-no-reconall
+	fmriMemMb                 int
+	// Additional fMRIPrep options
+	fmriNThreads            int     // --nthreads (max threads across all processes)
+	fmriOmpNThreads         int     // --omp-nthreads (max threads per process)
+	fmriLowMem              bool    // --low-mem (reduce memory usage)
+	fmriLongitudinal        bool    // --longitudinal (unbiased structural template)
+	fmriCiftiOutputIndex    int     // 0: disabled, 1: 91k, 2: 170k
+	fmriSkullStripTemplate  string  // --skull-strip-template (default: OASIS30ANTs)
+	fmriSkullStripFixedSeed bool    // --skull-strip-fixed-seed (reproducibility)
+	fmriRandomSeed          int     // --random-seed (run-to-run replicability)
+	fmriDummyScans          int     // --dummy-scans (non-steady state volumes)
+	fmriBold2T1wInitIndex   int     // 0: register (default), 1: header
+	fmriBold2T1wDof         int     // --bold2t1w-dof (degrees of freedom, default: 6)
+	fmriSliceTimeRef        float64 // --slice-time-ref (0=start, 0.5=middle, 1=end)
+	fmriFdSpikeThreshold    float64 // --fd-spike-threshold (default: 0.5)
+	fmriDvarsSpikeThreshold float64 // --dvars-spike-threshold (default: 1.5)
+	fmriMeOutputEchos       bool    // --me-output-echos (multi-echo: output each echo)
+	fmriMedialSurfaceNan    bool    // --medial-surface-nan (fill medial with NaN)
+	fmriNoMsm               bool    // --no-msm (disable MSM-Sulc alignment)
+	fmriLevelIndex          int     // 0: full (default), 1: resampling, 2: minimal
+	fmriTaskId              string  // --task-id (process only specific task)
+
+	// fMRI UI group expansion states (for collapsible sections)
+	fmriGroupRuntimeExpanded       bool
+	fmriGroupOutputExpanded        bool
+	fmriGroupPerformanceExpanded   bool
+	fmriGroupAnatomicalExpanded    bool
+	fmriGroupBoldExpanded          bool
+	fmriGroupQcExpanded            bool
+	fmriGroupDenoisingExpanded     bool
+	fmriGroupSurfaceExpanded       bool
+	fmriGroupMultiechoExpanded     bool
+	fmriGroupReproExpanded         bool
+	fmriGroupValidationExpanded    bool
+	fmriGroupAdvancedExpanded      bool
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -912,7 +1058,12 @@ type Model struct {
 	textBuffer       string
 	editingTextField textField
 	editingPlotID    string
-	editingPlotField plotItemConfigField
+
+	// File browsing mode for path selection
+	browsingField            string  // Field being browsed (e.g., "sourceLocTrans", "sourceLocBem", "sourceLocFmriStatsMap")
+	pendingFileCmd           tea.Cmd // Pending file picker command to execute
+	pendingFmriConditionsCmd tea.Cmd // Pending fMRI conditions discovery command
+	editingPlotField         plotItemConfigField
 
 	// Features pipeline advanced config
 	connectivityMeasures map[int]bool // Selected connectivity measures
@@ -1001,15 +1152,21 @@ type Model struct {
 	connAECMode      int // 0: orth, 1: none, 2: sym
 
 	// Scientific validity options (new)
-	itpcMethod             int     // 0: global, 1: fold_global, 2: loo
+	itpcMethod             int     // 0: global, 1: fold_global, 2: loo, 3: condition
 	aperiodicMinSegmentSec float64 // Minimum segment duration for aperiodic fits
 	connAECOutput          int     // 0: r only, 1: z only, 2: both r and z
 	connForceWithinEpochML bool    // Force within_epoch for CV/machine learning
 	ratioSource            int     // 0: raw, 1: powcorr (aperiodic-adjusted)
 
+	// Spectral validity options
+	aperiodicSubtractEvoked bool // Subtract evoked response for induced spectra
+
 	// ITPC additional options
-	itpcAllowUnsafeLoo     bool // Allow unsafe LOO ITPC
-	itpcBaselineCorrection int  // 0: none, 1: subtract
+	itpcAllowUnsafeLoo        bool   // Allow unsafe LOO ITPC
+	itpcBaselineCorrection    int    // 0: none, 1: subtract
+	itpcConditionColumn       string // Column for condition-based ITPC (avoids pseudo-replication)
+	itpcConditionValues       string // Values to compute ITPC for (space-separated)
+	itpcMinTrialsPerCondition int    // Minimum trials per condition for reliable ITPC
 
 	// Spectral advanced options
 	spectralIncludeLogRatios   bool    // Include log ratios
@@ -1070,6 +1227,7 @@ type Model struct {
 
 	// Source localization options (LCMV, eLORETA)
 	sourceLocEnabled           bool    // Enable source localization
+	sourceLocMode              int     // 0: EEG-only (template), 1: fMRI-informed (subject-specific)
 	sourceLocMethod            int     // 0: lcmv, 1: eloreta
 	sourceLocSpacing           int     // 0: oct5, 1: oct6, 2: ico4, 3: ico5
 	sourceLocParc              int     // 0: aparc, 1: aparc.a2009s, 2: HCPMMP1
@@ -1078,7 +1236,62 @@ type Model struct {
 	sourceLocLoose             float64 // eLORETA loose constraint
 	sourceLocDepth             float64 // eLORETA depth weighting
 	sourceLocConnMethod        int     // 0: aec, 1: wpli, 2: plv
-	featGroupSourceLocExpanded bool    // UI expansion state
+	sourceLocSubject           string  // FreeSurfer subject name (e.g., sub-0001)
+	sourceLocTrans             string  // EEG↔MRI transform .fif
+	sourceLocBem               string  // BEM solution .fif
+	sourceLocMindistMm         float64 // MNE mindist (mm)
+	sourceLocFmriEnabled       bool    // Enable fMRI-informed source localization
+	sourceLocFmriStatsMap      string  // Path to fMRI stats map NIfTI
+	sourceLocFmriThreshold     float64 // Threshold (e.g., z>=3.1)
+	sourceLocFmriTail          int     // 0: pos, 1: abs
+	sourceLocFmriMinClusterVox int     // Minimum cluster size (voxels)
+	sourceLocFmriMaxClusters   int     // Max clusters retained
+	sourceLocFmriMaxVoxPerClus int     // Max voxels sampled per cluster
+	sourceLocFmriMaxTotalVox   int     // Max total voxels across clusters
+	sourceLocFmriRandomSeed    int     // Random seed for voxel subsampling
+
+	// BEM/Trans generation options (Docker-based)
+	sourceLocCreateTrans       bool // Auto-create coregistration transform via Docker
+	sourceLocCreateBemModel    bool // Auto-create BEM model via Docker
+	sourceLocCreateBemSolution bool // Auto-create BEM solution via Docker
+
+	// fMRI GLM contrast builder (for fMRI-informed mode)
+	sourceLocFmriContrastEnabled   bool     // Build contrast from BOLD data (vs. load pre-computed)
+	sourceLocFmriContrastType      int      // 0: t-test, 1: paired t-test, 2: F-test, 3: custom formula
+	sourceLocFmriCondAColumn       string   // Condition A column (e.g., "trial_type", "pain_binary")
+	sourceLocFmriCondAValue        string   // Condition A value (e.g., "temp49p3", "1")
+	sourceLocFmriCondBColumn       string   // Condition B column
+	sourceLocFmriCondBValue        string   // Condition B value
+	sourceLocFmriConditions        []string // Discovered conditions from fMRI events files (for backward compat)
+	sourceLocFmriCondIdx1          int      // Index into discovered conditions for Condition A
+	sourceLocFmriCondIdx2          int      // Index into discovered conditions for Condition B
+	sourceLocFmriContrastFormula   string   // Custom formula (e.g., "pain_high - pain_low")
+	sourceLocFmriContrastName      string   // Contrast name (e.g., "pain_vs_baseline")
+	sourceLocFmriRunsToInclude     string   // Comma-separated runs (e.g., "1,2,3")
+	sourceLocFmriAutoDetectRuns    bool     // Auto-detect available BOLD runs
+	sourceLocFmriHrfModel          int      // 0: SPM, 1: FLOBS, 2: FIR
+	sourceLocFmriDriftModel        int      // 0: none, 1: cosine, 2: polynomial
+	sourceLocFmriHighPassHz        float64  // High-pass cutoff (Hz)
+	sourceLocFmriLowPassHz         float64  // Low-pass cutoff (Hz)
+	sourceLocFmriClusterCorrection bool     // Enable cluster-level FWE correction
+	sourceLocFmriClusterPThreshold float64  // Cluster-forming p-threshold
+	sourceLocFmriOutputType        int      // 0: z-score, 1: t-stat, 2: cope, 3: beta
+	sourceLocFmriResampleToFS      bool     // Auto-resample to FreeSurfer space
+
+	// fMRI-specific time windows (independent of EEG feature extraction windows)
+	sourceLocFmriWindowAName string  // Name for window A (e.g., "plateau")
+	sourceLocFmriWindowATmin float64 // Start time for window A (seconds)
+	sourceLocFmriWindowATmax float64 // End time for window A (seconds)
+	sourceLocFmriWindowBName string  // Name for window B (e.g., "baseline")
+	sourceLocFmriWindowBTmin float64 // Start time for window B (seconds)
+	sourceLocFmriWindowBTmax float64 // End time for window B (seconds)
+
+	// Source localization UI expansion states
+	featGroupSourceLocExpanded         bool // UI expansion state for source localization
+	featGroupSourceLocFmriExpanded     bool // UI expansion state for fMRI constraint
+	featGroupSourceLocContrastExpanded bool // UI expansion state for contrast builder
+	featGroupSourceLocGLMExpanded      bool // UI expansion state for GLM config
+	featGroupITPCExpanded              bool // UI expansion state for ITPC options
 
 	// PAC advanced options
 	pacSource              int     // 0: precomputed
@@ -1162,7 +1375,6 @@ type Model struct {
 	behaviorGroupTrialTableExpanded   bool
 	behaviorGroupCorrelationsExpanded bool
 	behaviorGroupPainSensExpanded     bool
-	behaviorGroupConfoundsExpanded    bool
 	behaviorGroupRegressionExpanded   bool
 	behaviorGroupModelsExpanded       bool
 	behaviorGroupStabilityExpanded    bool
@@ -1347,6 +1559,12 @@ type Model struct {
 	selectedValueCursors    map[string]int      // Cursor for value selection per column
 	expandedColumnSelection string              // Currently expanded column for value selection
 
+	// fMRI column discovery (separate from EEG events - for fMRI contrast builder)
+	fmriDiscoveredColumns      []string            // Available columns from fMRI events files
+	fmriDiscoveredColumnValues map[string][]string // Values for each fMRI column
+	fmriColumnDiscoveryDone    bool                // Whether fMRI discovery has been completed
+	fmriColumnDiscoveryError   string              // Error message if fMRI discovery failed
+
 	// Machine Learning pipeline advanced config
 	mlNPerm     int  // Permutations for significance test
 	innerSplits int  // CV inner splits
@@ -1377,24 +1595,46 @@ type Model struct {
 	icaLabelsToKeep string // Comma-separated ICA labels (e.g., "brain,other")
 
 	// Preprocessing pipeline advanced config
-	prepUsePyprep           bool
-	prepUseIcalabel         bool
-	prepNJobs               int
-	prepMontage             string // EEG montage (e.g., easycap-M1)
-	prepResample            int
-	prepLFreq               float64
-	prepHFreq               float64
-	prepNotch               int
-	prepICAMethod           int // 0: fastica, 1: infomax, 2: picard
-	prepICAComp             float64
-	prepProbThresh          float64
+	prepUsePyprep   bool
+	prepUseIcalabel bool
+	prepNJobs       int
+	prepMontage     string // EEG montage (e.g., easycap-M1)
+	prepResample    int
+	prepLFreq       float64
+	prepHFreq       float64
+	prepNotch       int
+	prepLineFreq    int // Line frequency (50 or 60 Hz)
+	// PyPREP advanced options
+	prepRansac               bool   // Use RANSAC for bad channel detection
+	prepRepeats              int    // Number of detection iterations
+	prepAverageReref         bool   // Average re-reference before detection
+	prepFileExtension        string // File extension (e.g., .vhdr)
+	prepConsiderPreviousBads bool   // Keep previously marked bad channels
+	prepOverwriteChansTsv    bool   // Overwrite channels.tsv file
+	prepDeleteBreaks         bool   // Delete breaks in data
+	prepBreaksMinLength      int    // Minimum break duration (seconds)
+	prepTStartAfterPrevious  int    // Time after previous event (seconds)
+	prepTStopBeforeNext      int    // Time before next event (seconds)
+	// ICA options
+	prepICAMethod       int // 0: fastica, 1: infomax, 2: picard
+	prepICAComp         float64
+	prepProbThresh      float64
+	prepKeepMnebidsBads bool // Keep MNE-BIDS flagged bad ICAs
+	// Epoching options
 	prepEpochsTmin          float64
 	prepEpochsTmax          float64
-	prepLineFreq            int     // Line frequency (50 or 60 Hz)
 	prepEpochsBaselineStart float64 // Epoch baseline start (seconds)
 	prepEpochsBaselineEnd   float64 // Epoch baseline end (seconds)
 	prepEpochsNoBaseline    bool    // Disable baseline correction
 	prepEpochsReject        float64 // Peak-to-peak rejection threshold (µV)
+
+	// Preprocessing UI group expansion states (for collapsible sections)
+	prepGroupStagesExpanded    bool
+	prepGroupGeneralExpanded   bool
+	prepGroupFilteringExpanded bool
+	prepGroupPyprepExpanded    bool
+	prepGroupICAExpanded       bool
+	prepGroupEpochingExpanded  bool
 
 	// Utilities (raw-to-bids/merge) advanced config
 	rawMontage           string
@@ -1536,11 +1776,14 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		connWindowStep:   0.5,
 		connAECMode:      0,
 		// Scientific validity defaults (new)
-		itpcMethod:             0,    // 0: global (default)
-		aperiodicMinSegmentSec: 2.0,  // 2.0s minimum for stable fits
-		connAECOutput:          0,    // 0: r only (raw)
-		connForceWithinEpochML: true, // Force within_epoch for CV-safety
-		ratioSource:            0,    // 0: raw (default)
+		itpcMethod:                0,    // 0: global (default)
+		itpcConditionColumn:       "",   // Empty = not using condition-based ITPC
+		itpcConditionValues:       "",   // Empty = all unique values
+		itpcMinTrialsPerCondition: 10,   // Minimum trials per condition
+		aperiodicMinSegmentSec:    2.0,  // 2.0s minimum for stable fits
+		connAECOutput:             0,    // 0: r only (raw)
+		connForceWithinEpochML:    true, // Force within_epoch for CV-safety
+		ratioSource:               0,    // 0: raw (default)
 
 		// ITPC additional defaults
 		itpcAllowUnsafeLoo:     false,
@@ -1613,7 +1856,52 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocLoose:             0.2,   // eLORETA loose constraint
 		sourceLocDepth:             0.8,   // eLORETA depth weighting
 		sourceLocConnMethod:        0,     // 0: aec
-		featGroupSourceLocExpanded: false,
+		sourceLocSubject:           "",
+		sourceLocTrans:             "",
+		sourceLocBem:               "",
+		sourceLocMindistMm:         5.0,
+		sourceLocFmriEnabled:       false,
+		sourceLocFmriStatsMap:      "",
+		sourceLocFmriThreshold:     3.1,
+		sourceLocFmriTail:          0, // 0: pos
+		sourceLocFmriMinClusterVox: 50,
+		sourceLocFmriMaxClusters:   20,
+		sourceLocFmriMaxVoxPerClus: 2000,
+		sourceLocFmriMaxTotalVox:   20000,
+		sourceLocFmriRandomSeed:    0,
+
+		// fMRI GLM contrast builder defaults
+		sourceLocFmriContrastEnabled:   false,
+		sourceLocFmriContrastType:      0, // 0: t-test
+		sourceLocFmriCondAColumn:       "trial_type",
+		sourceLocFmriCondAValue:        "",
+		sourceLocFmriCondBColumn:       "trial_type",
+		sourceLocFmriCondBValue:        "",
+		sourceLocFmriContrastFormula:   "",
+		sourceLocFmriContrastName:      "pain_vs_baseline",
+		sourceLocFmriRunsToInclude:     "",
+		sourceLocFmriAutoDetectRuns:    true,
+		sourceLocFmriHrfModel:          0,     // 0: SPM
+		sourceLocFmriDriftModel:        1,     // 1: cosine
+		sourceLocFmriHighPassHz:        0.008, // 128s period
+		sourceLocFmriLowPassHz:         0.1,
+		sourceLocFmriClusterCorrection: true,
+		sourceLocFmriClusterPThreshold: 0.001,
+		sourceLocFmriOutputType:        0, // 0: z-score
+		sourceLocFmriResampleToFS:      true,
+		sourceLocFmriWindowAName:       "plateau",
+		sourceLocFmriWindowATmin:       5.0,
+		sourceLocFmriWindowATmax:       10.0,
+		sourceLocFmriWindowBName:       "baseline",
+		sourceLocFmriWindowBTmin:       -2.0,
+		sourceLocFmriWindowBTmax:       0.0,
+
+		// Source localization UI expansion states
+		featGroupSourceLocExpanded:         false,
+		featGroupSourceLocFmriExpanded:     false,
+		featGroupSourceLocContrastExpanded: false,
+		featGroupSourceLocGLMExpanded:      false,
+		featGroupITPCExpanded:              false,
 
 		// PAC advanced defaults
 		pacSource:              0, // 0: precomputed
@@ -1848,7 +2136,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		tfrNFreqs:        40,
 		tfrMinCycles:     3.0,
 		tfrNCyclesFactor: 2.0,
-		tfrDecim:         4,
 		tfrWorkers:       -1,
 		// System defaults
 		systemNJobs:      -1,
@@ -1868,24 +2155,46 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		plotSavefigDpiIndex: 2,
 
 		// Preprocessing defaults
-		prepUsePyprep:           true,
-		prepUseIcalabel:         true,
-		prepNJobs:               1,
-		prepMontage:             "easycap-M1",
-		prepResample:            500,
-		prepLFreq:               0.1,
-		prepHFreq:               100.0,
-		prepNotch:               60,
-		prepICAMethod:           0,
-		prepICAComp:             0.99,
-		prepProbThresh:          0.8,
+		prepUsePyprep:   true,
+		prepUseIcalabel: true,
+		prepNJobs:       1,
+		prepMontage:     "easycap-M1",
+		prepResample:    500,
+		prepLFreq:       0.1,
+		prepHFreq:       100.0,
+		prepNotch:       60,
+		prepLineFreq:    60,
+		// PyPREP advanced defaults
+		prepRansac:               false,
+		prepRepeats:              3,
+		prepAverageReref:         false,
+		prepFileExtension:        ".vhdr",
+		prepConsiderPreviousBads: false,
+		prepOverwriteChansTsv:    true,
+		prepDeleteBreaks:         false,
+		prepBreaksMinLength:      20,
+		prepTStartAfterPrevious:  2,
+		prepTStopBeforeNext:      2,
+		// ICA defaults
+		prepICAMethod:       0,
+		prepICAComp:         0.99,
+		prepProbThresh:      0.8,
+		prepKeepMnebidsBads: false,
+		// Epoching defaults
 		prepEpochsTmin:          -5.0,
 		prepEpochsTmax:          12.0,
-		prepLineFreq:            60,
 		prepEpochsBaselineStart: 0,
 		prepEpochsBaselineEnd:   0,
 		prepEpochsNoBaseline:    false,
 		prepEpochsReject:        0,
+
+		// Preprocessing group expansion defaults (all collapsed for compact view)
+		prepGroupStagesExpanded:    false,
+		prepGroupGeneralExpanded:   true, // General is expanded by default (most common options)
+		prepGroupFilteringExpanded: false,
+		prepGroupPyprepExpanded:    false,
+		prepGroupICAExpanded:       false,
+		prepGroupEpochingExpanded:  false,
 
 		// Utilities defaults
 		rawMontage:           "easycap-M1",
@@ -2016,12 +2325,16 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		}
 
 	case types.PipelinePreprocessing:
-		m.modeOptions = []string{"full", "bad-channels", "ica", "epochs"}
+		m.modeOptions = []string{"full", "partial"}
 		m.modeDescriptions = []string{
-			"Full preprocessing pipeline",
-			"Bad channel detection only",
-			"ICA fitting and labeling",
-			"Epoch creation only",
+			"Run all preprocessing stages",
+			"Select specific preprocessing stages",
+		}
+		m.prepStages = preprocessingStages
+		m.prepStageSelected = make(map[int]bool)
+		// Default: select all stages
+		for i := range preprocessingStages {
+			m.prepStageSelected[i] = true
 		}
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
@@ -2029,6 +2342,69 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepAdvancedConfig,
 			types.StepReviewExecute,
 		}
+
+	case types.PipelineFmri:
+		m.modeOptions = []string{"preprocess"}
+		m.modeDescriptions = []string{
+			"Run fMRIPrep-style preprocessing (containerized)",
+		}
+		m.steps = []types.WizardStep{
+			types.StepSelectSubjects,
+			types.StepAdvancedConfig,
+			types.StepReviewExecute,
+		}
+
+		// Defaults mirror fmri_pipeline/utils/config/fmri_config.yaml (fmri_preprocessing.*)
+		m.fmriEngineIndex = 0 // docker
+		m.fmriFmriprepImage = "nipreps/fmriprep:23.2.1"
+		m.fmriFmriprepOutputDir = ""
+		m.fmriFmriprepWorkDir = ""
+		m.fmriFreesurferLicenseFile = ""
+		m.fmriFreesurferSubjectsDir = ""
+		m.fmriOutputSpacesSpec = "MNI152NLin2009cAsym T1w"
+		m.fmriIgnoreSpec = ""
+		m.fmriBidsFilterFile = ""
+		m.fmriExtraArgs = ""
+		m.fmriUseAroma = false
+		m.fmriSkipBidsValidation = false
+		m.fmriStopOnFirstCrash = false
+		m.fmriCleanWorkdir = true
+		m.fmriSkipReconstruction = false
+		m.fmriMemMb = 0 // 0 = fMRIPrep default
+		// Additional fMRIPrep options defaults
+		m.fmriNThreads = 0            // 0 = fMRIPrep default (all available)
+		m.fmriOmpNThreads = 0         // 0 = fMRIPrep default
+		m.fmriLowMem = false          // standard memory usage
+		m.fmriLongitudinal = false    // single-session processing
+		m.fmriCiftiOutputIndex = 0    // disabled
+		m.fmriSkullStripTemplate = "" // default: OASIS30ANTs
+		m.fmriSkullStripFixedSeed = false
+		m.fmriRandomSeed = 0         // 0 = non-deterministic
+		m.fmriDummyScans = 0         // 0 = auto-detect from metadata
+		m.fmriBold2T1wInitIndex = 0  // register (default)
+		m.fmriBold2T1wDof = 6        // 6 DOF rigid-body (default)
+		m.fmriSliceTimeRef = 0.5     // middle of acquisition (default)
+		m.fmriFdSpikeThreshold = 0.5 // mm (default)
+		m.fmriDvarsSpikeThreshold = 1.5
+		m.fmriMeOutputEchos = false
+		m.fmriMedialSurfaceNan = false
+		m.fmriNoMsm = false
+		m.fmriLevelIndex = 0 // full (default)
+		m.fmriTaskId = ""    // all tasks
+
+		// fMRI group expansion defaults (collapsed for compact view, Runtime expanded by default)
+		m.fmriGroupRuntimeExpanded = true
+		m.fmriGroupOutputExpanded = false
+		m.fmriGroupPerformanceExpanded = false
+		m.fmriGroupAnatomicalExpanded = false
+		m.fmriGroupBoldExpanded = false
+		m.fmriGroupQcExpanded = false
+		m.fmriGroupDenoisingExpanded = false
+		m.fmriGroupSurfaceExpanded = false
+		m.fmriGroupMultiechoExpanded = false
+		m.fmriGroupReproExpanded = false
+		m.fmriGroupValidationExpanded = false
+		m.fmriGroupAdvancedExpanded = false
 
 	case types.PipelineMergePsychoPyData:
 		m.modeOptions = []string{"merge-behavior"}
@@ -2092,6 +2468,9 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.CurrentStep = m.steps[0]
 	}
 
+	// Set repository root for running Python commands
+	m.repoRoot = repoRoot
+
 	return m
 }
 
@@ -2117,6 +2496,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ticker++
 		m.TickToast()
 		return m, m.tick()
+
+	case executor.PickFileMsg:
+		// Handle file picker result
+		if msg.Error == nil && msg.Path != "" {
+			switch msg.Field {
+			case "sourceLocTrans":
+				m.sourceLocTrans = msg.Path
+			case "sourceLocBem":
+				m.sourceLocBem = msg.Path
+			case "sourceLocFmriStatsMap":
+				m.sourceLocFmriStatsMap = msg.Path
+			}
+		}
+		m.browsingField = ""
+		return m, nil
+
+	case messages.FmriConditionsDiscoveredMsg:
+		// Handle discovered fMRI conditions
+		if msg.Error == nil && len(msg.Conditions) > 0 {
+			m.sourceLocFmriConditions = msg.Conditions
+			// Reset indices if out of bounds
+			if m.sourceLocFmriCondIdx1 >= len(msg.Conditions) {
+				m.sourceLocFmriCondIdx1 = 0
+			}
+			if m.sourceLocFmriCondIdx2 >= len(msg.Conditions) {
+				m.sourceLocFmriCondIdx2 = 0
+			}
+			// Set condition strings from indices
+			if len(msg.Conditions) > 0 {
+				m.sourceLocFmriCondAValue = msg.Conditions[m.sourceLocFmriCondIdx1]
+				if len(msg.Conditions) > 1 && m.sourceLocFmriCondIdx2 < len(msg.Conditions) {
+					m.sourceLocFmriCondBValue = msg.Conditions[m.sourceLocFmriCondIdx2]
+				}
+			}
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.showHelp {
@@ -2377,6 +2792,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.startROIEdit()
 			} else {
 				m.handleSpace()
+				// Check for pending file picker command (set by file path options)
+				if m.pendingFileCmd != nil {
+					cmd := m.pendingFileCmd
+					m.pendingFileCmd = nil
+					return m, cmd
+				}
+				// Check for pending fMRI conditions discovery command
+				if m.pendingFmriConditionsCmd != nil {
+					cmd := m.pendingFmriConditionsCmd
+					m.pendingFmriConditionsCmd = nil
+					return m, cmd
+				}
 			}
 		case "enter":
 			return m.handleEnter()
@@ -2549,6 +2976,16 @@ func (m *Model) UpdateAdvancedOffset() {
 	case types.PipelinePlotting:
 		rows := m.getPlottingAdvancedRows()
 		totalLines = len(rows)
+		cursorLine = m.advancedCursor
+
+	case types.PipelinePreprocessing:
+		options := m.getPreprocessingOptions()
+		totalLines = len(options)
+		cursorLine = m.advancedCursor
+
+	case types.PipelineFmri:
+		options := m.getFmriPreprocessingOptions()
+		totalLines = len(options)
 		cursorLine = m.advancedCursor
 
 	default:
@@ -2918,6 +3355,31 @@ func (m Model) GetDiscoveredColumnValues(column string) []string {
 	return m.discoveredColumnValues[column]
 }
 
+// SetFmriDiscoveredColumns sets the columns and values discovered from fMRI events files
+func (m *Model) SetFmriDiscoveredColumns(columns []string, values map[string][]string, source string) {
+	m.fmriDiscoveredColumns = columns
+	m.fmriDiscoveredColumnValues = values
+	m.fmriColumnDiscoveryDone = true
+	m.fmriColumnDiscoveryError = ""
+}
+
+// SetFmriColumnsDiscoveryError sets the error from fMRI column discovery
+func (m *Model) SetFmriColumnsDiscoveryError(err error) {
+	if err == nil {
+		return
+	}
+	m.fmriColumnDiscoveryError = err.Error()
+	m.fmriColumnDiscoveryDone = true
+}
+
+// GetFmriDiscoveredColumnValues returns the unique values for an fMRI column
+func (m Model) GetFmriDiscoveredColumnValues(column string) []string {
+	if m.fmriDiscoveredColumnValues == nil {
+		return nil
+	}
+	return m.fmriDiscoveredColumnValues[column]
+}
+
 // getExpandedListLength returns the length of the currently expanded list
 func (m Model) getExpandedListLength() int {
 	switch m.expandedOption {
@@ -2955,6 +3417,19 @@ func (m Model) getExpandedListLength() int {
 		return len(m.availableColumns)
 	case expandedCorrelationsTargetColumn:
 		return len(m.availableColumns) + 1 // +1 for "(none)" option
+	case expandedItpcConditionColumn:
+		return len(m.availableColumns)
+	case expandedFmriCondAColumn, expandedFmriCondBColumn:
+		return len(m.fmriDiscoveredColumns)
+	case expandedFmriCondAValue:
+		return len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn))
+	case expandedFmriCondBValue:
+		return len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
+	case expandedItpcConditionValues:
+		if m.itpcConditionColumn == "" {
+			return 0
+		}
+		return len(m.GetDiscoveredColumnValues(m.itpcConditionColumn))
 	}
 	return 0
 }
@@ -3004,6 +3479,19 @@ func (m Model) getExpandedListItems() []string {
 		return m.availableColumns
 	case expandedCorrelationsTargetColumn:
 		return append([]string{"(none)"}, m.availableColumns...)
+	case expandedItpcConditionColumn:
+		return m.availableColumns
+	case expandedFmriCondAColumn, expandedFmriCondBColumn:
+		return m.fmriDiscoveredColumns
+	case expandedFmriCondAValue:
+		return m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn)
+	case expandedFmriCondBValue:
+		return m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn)
+	case expandedItpcConditionValues:
+		if m.itpcConditionColumn == "" {
+			return nil
+		}
+		return m.GetDiscoveredColumnValues(m.itpcConditionColumn)
 	}
 	return nil
 }
@@ -3024,6 +3512,8 @@ func (m Model) isColumnValueSelected(value string) bool {
 		selectedValues = m.conditionCompareWindows
 	case expandedPlotComparisonWindows:
 		selectedValues = m.plotComparisonWindowsSpec
+	case expandedItpcConditionValues:
+		selectedValues = m.itpcConditionValues
 	default:
 		return false
 	}
@@ -3115,6 +3605,32 @@ func (m *Model) handleExpandedListToggle() {
 		}
 		m.expandedOption = expandedNone
 		m.subCursor = 0
+
+	case expandedItpcConditionColumn:
+		m.itpcConditionColumn = selectedItem
+		m.itpcConditionValues = "" // Reset values when column changes
+		m.expandedOption = expandedNone
+	case expandedFmriCondAColumn:
+		m.sourceLocFmriCondAColumn = selectedItem
+		m.sourceLocFmriCondAValue = "" // Reset value when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+	case expandedFmriCondAValue:
+		m.sourceLocFmriCondAValue = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+	case expandedFmriCondBColumn:
+		m.sourceLocFmriCondBColumn = selectedItem
+		m.sourceLocFmriCondBValue = "" // Reset value when column changes
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+	case expandedFmriCondBValue:
+		m.sourceLocFmriCondBValue = selectedItem
+		m.expandedOption = expandedNone
+		m.subCursor = 0
+
+	case expandedItpcConditionValues:
+		m.toggleColumnValue(selectedItem, &m.itpcConditionValues)
 	}
 
 	m.useDefaultAdvanced = false
@@ -3147,6 +3663,18 @@ func (m Model) shouldRenderExpandedListAfterOption(opt optionType) bool {
 		return opt == optRunAdjustmentColumn
 	case expandedCorrelationsTargetColumn:
 		return opt == optCorrelationsTargetColumn
+	case expandedItpcConditionColumn:
+		return opt == optItpcConditionColumn
+	case expandedFmriCondAColumn:
+		return opt == optSourceLocFmriCondAColumn
+	case expandedFmriCondAValue:
+		return opt == optSourceLocFmriCondAValue
+	case expandedFmriCondBColumn:
+		return opt == optSourceLocFmriCondBColumn
+	case expandedFmriCondBValue:
+		return opt == optSourceLocFmriCondBValue
+	case expandedItpcConditionValues:
+		return opt == optItpcConditionValues
 	}
 	return false
 }
@@ -3169,8 +3697,18 @@ func (m Model) isExpandedItemSelected(_ int, item string) bool {
 			return m.correlationsTargetColumn == ""
 		}
 		return m.correlationsTargetColumn == item
+	case expandedItpcConditionColumn:
+		return m.itpcConditionColumn == item
+	case expandedFmriCondAColumn:
+		return m.sourceLocFmriCondAColumn == item
+	case expandedFmriCondAValue:
+		return m.sourceLocFmriCondAValue == item
+	case expandedFmriCondBColumn:
+		return m.sourceLocFmriCondBColumn == item
+	case expandedFmriCondBValue:
+		return m.sourceLocFmriCondBValue == item
 	case expandedConditionCompareValues, expandedTemporalConditionValues, expandedClusterConditionValues, expandedPlotComparisonValues,
-		expandedConditionCompareWindows, expandedPlotComparisonWindows:
+		expandedConditionCompareWindows, expandedPlotComparisonWindows, expandedItpcConditionValues:
 		return m.isColumnValueSelected(item)
 	}
 	return false
@@ -3237,6 +3775,9 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if m.bidsRoot == "" && summary.BidsRoot != "" {
 		m.bidsRoot = summary.BidsRoot
 	}
+	if m.bidsFmriRoot == "" && summary.BidsFmriRoot != "" {
+		m.bidsFmriRoot = summary.BidsFmriRoot
+	}
 	if m.derivRoot == "" && summary.DerivRoot != "" {
 		m.derivRoot = summary.DerivRoot
 	}
@@ -3246,6 +3787,10 @@ func (m *Model) SetConfigSummary(summary messages.ConfigSummary) {
 	if summary.PreprocessingNJobs > 0 {
 		m.prepNJobs = summary.PreprocessingNJobs
 	}
+}
+
+func (m *Model) SetRepoRoot(repoRoot string) {
+	m.repoRoot = repoRoot
 }
 
 func (m *Model) startTextEdit(field textField) {
@@ -3278,14 +3823,40 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.task
 	case textFieldBidsRoot:
 		return m.bidsRoot
+	case textFieldBidsFmriRoot:
+		return m.bidsFmriRoot
 	case textFieldDerivRoot:
 		return m.derivRoot
 	case textFieldSourceRoot:
 		return m.sourceRoot
+	case textFieldFmriFmriprepImage:
+		return m.fmriFmriprepImage
+	case textFieldFmriFmriprepOutputDir:
+		return m.fmriFmriprepOutputDir
+	case textFieldFmriFmriprepWorkDir:
+		return m.fmriFmriprepWorkDir
+	case textFieldFmriFreesurferLicenseFile:
+		return m.fmriFreesurferLicenseFile
+	case textFieldFmriFreesurferSubjectsDir:
+		return m.fmriFreesurferSubjectsDir
+	case textFieldFmriOutputSpaces:
+		return m.fmriOutputSpacesSpec
+	case textFieldFmriIgnore:
+		return m.fmriIgnoreSpec
+	case textFieldFmriBidsFilterFile:
+		return m.fmriBidsFilterFile
+	case textFieldFmriExtraArgs:
+		return m.fmriExtraArgs
+	case textFieldFmriSkullStripTemplate:
+		return m.fmriSkullStripTemplate
+	case textFieldFmriTaskId:
+		return m.fmriTaskId
 	case textFieldRawMontage:
 		return m.rawMontage
 	case textFieldPrepMontage:
 		return m.prepMontage
+	case textFieldPrepFileExtension:
+		return m.prepFileExtension
 	case textFieldRawEventPrefixes:
 		return m.rawEventPrefixes
 	case textFieldMergeEventPrefixes:
@@ -3320,6 +3891,10 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.clusterConditionValues
 	case textFieldCorrelationsTargetColumn:
 		return m.correlationsTargetColumn
+	case textFieldItpcConditionColumn:
+		return m.itpcConditionColumn
+	case textFieldItpcConditionValues:
+		return m.itpcConditionValues
 	case textFieldPACPairs:
 		return m.pacPairsSpec
 	case textFieldBurstBands:
@@ -3330,6 +3905,32 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.asymmetryChannelPairsSpec
 	case textFieldERPComponents:
 		return m.erpComponentsSpec
+	case textFieldSourceLocSubject:
+		return m.sourceLocSubject
+	case textFieldSourceLocTrans:
+		return m.sourceLocTrans
+	case textFieldSourceLocBem:
+		return m.sourceLocBem
+	case textFieldSourceLocFmriStatsMap:
+		return m.sourceLocFmriStatsMap
+	case textFieldSourceLocFmriCondAColumn:
+		return m.sourceLocFmriCondAColumn
+	case textFieldSourceLocFmriCondAValue:
+		return m.sourceLocFmriCondAValue
+	case textFieldSourceLocFmriCondBColumn:
+		return m.sourceLocFmriCondBColumn
+	case textFieldSourceLocFmriCondBValue:
+		return m.sourceLocFmriCondBValue
+	case textFieldSourceLocFmriContrastFormula:
+		return m.sourceLocFmriContrastFormula
+	case textFieldSourceLocFmriContrastName:
+		return m.sourceLocFmriContrastName
+	case textFieldSourceLocFmriRunsToInclude:
+		return m.sourceLocFmriRunsToInclude
+	case textFieldSourceLocFmriWindowAName:
+		return m.sourceLocFmriWindowAName
+	case textFieldSourceLocFmriWindowBName:
+		return m.sourceLocFmriWindowBName
 	case textFieldPlotBboxInches:
 		return m.plotBboxInches
 	case textFieldPlotFontFamily:
@@ -3463,21 +4064,155 @@ func (m Model) getPlotItemTextFieldValue(plotID string, field plotItemConfigFiel
 }
 
 func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
-	raw, ok := values["time_frequency_analysis.bands"]
-	if !ok {
-		return
+	asString := func(v interface{}) (string, bool) {
+		s, ok := v.(string)
+		if !ok {
+			return "", false
+		}
+		return strings.TrimSpace(s), true
 	}
-	bands := parseConfigBands(raw)
-	if len(bands) == 0 {
-		return
+	asBool := func(v interface{}) (bool, bool) {
+		b, ok := v.(bool)
+		return b, ok
+	}
+	asInt := func(v interface{}) (int, bool) {
+		switch n := v.(type) {
+		case float64:
+			return int(n), true
+		case int:
+			return n, true
+		default:
+			return 0, false
+		}
+	}
+	asStringList := func(v interface{}) ([]string, bool) {
+		raw, ok := v.([]interface{})
+		if !ok {
+			return nil, false
+		}
+		var out []string
+		for _, item := range raw {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out, true
 	}
 
-	m.bands = bands
-	m.bandSelected = make(map[int]bool)
-	for i := range m.bands {
-		m.bandSelected[i] = true
+	if rawBands, ok := values["time_frequency_analysis.bands"]; ok {
+		bands := parseConfigBands(rawBands)
+		if len(bands) > 0 {
+			m.bands = bands
+			m.bandSelected = make(map[int]bool)
+			for i := range m.bands {
+				m.bandSelected[i] = true
+			}
+			m.bandCursor = 0
+		}
 	}
-	m.bandCursor = 0
+
+	// fMRI preprocessing defaults (used by the fMRI pipeline wizard)
+	if v, ok := values["paths.bids_fmri_root"]; ok {
+		if s, ok := asString(v); ok && s != "" {
+			m.bidsFmriRoot = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.engine"]; ok {
+		if s, ok := asString(v); ok {
+			if s == "apptainer" {
+				m.fmriEngineIndex = 1
+			} else if s == "docker" {
+				m.fmriEngineIndex = 0
+			}
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.image"]; ok {
+		if s, ok := asString(v); ok && s != "" {
+			m.fmriFmriprepImage = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.output_dir"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriFmriprepOutputDir = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.work_dir"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriFmriprepWorkDir = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.fs_license_file"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriFreesurferLicenseFile = s
+		}
+	}
+	if v, ok := values["paths.freesurfer_license"]; ok {
+		if strings.TrimSpace(m.fmriFreesurferLicenseFile) == "" {
+			if s, ok := asString(v); ok {
+				m.fmriFreesurferLicenseFile = s
+			}
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.fs_subjects_dir"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriFreesurferSubjectsDir = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.output_spaces"]; ok {
+		if list, ok := asStringList(v); ok && len(list) > 0 {
+			m.fmriOutputSpacesSpec = strings.Join(list, " ")
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.ignore"]; ok {
+		if list, ok := asStringList(v); ok && len(list) > 0 {
+			m.fmriIgnoreSpec = strings.Join(list, " ")
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.bids_filter_file"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriBidsFilterFile = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.extra_args"]; ok {
+		if s, ok := asString(v); ok {
+			m.fmriExtraArgs = s
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.use_aroma"]; ok {
+		if b, ok := asBool(v); ok {
+			m.fmriUseAroma = b
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.skip_bids_validation"]; ok {
+		if b, ok := asBool(v); ok {
+			m.fmriSkipBidsValidation = b
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.stop_on_first_crash"]; ok {
+		if b, ok := asBool(v); ok {
+			m.fmriStopOnFirstCrash = b
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.clean_workdir"]; ok {
+		if b, ok := asBool(v); ok {
+			m.fmriCleanWorkdir = b
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.fs_no_reconall"]; ok {
+		if b, ok := asBool(v); ok {
+			m.fmriSkipReconstruction = b
+		}
+	}
+	if v, ok := values["fmri_preprocessing.fmriprep.mem_mb"]; ok {
+		if n, ok := asInt(v); ok {
+			m.fmriMemMb = n
+		}
+	}
 }
 
 func parseConfigBands(value interface{}) []FrequencyBand {
@@ -3564,14 +4299,40 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.task = value
 	case textFieldBidsRoot:
 		m.bidsRoot = value
+	case textFieldBidsFmriRoot:
+		m.bidsFmriRoot = value
 	case textFieldDerivRoot:
 		m.derivRoot = value
 	case textFieldSourceRoot:
 		m.sourceRoot = value
+	case textFieldFmriFmriprepImage:
+		m.fmriFmriprepImage = value
+	case textFieldFmriFmriprepOutputDir:
+		m.fmriFmriprepOutputDir = value
+	case textFieldFmriFmriprepWorkDir:
+		m.fmriFmriprepWorkDir = value
+	case textFieldFmriFreesurferLicenseFile:
+		m.fmriFreesurferLicenseFile = value
+	case textFieldFmriFreesurferSubjectsDir:
+		m.fmriFreesurferSubjectsDir = value
+	case textFieldFmriOutputSpaces:
+		m.fmriOutputSpacesSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriIgnore:
+		m.fmriIgnoreSpec = strings.Join(strings.Fields(value), " ")
+	case textFieldFmriBidsFilterFile:
+		m.fmriBidsFilterFile = value
+	case textFieldFmriExtraArgs:
+		m.fmriExtraArgs = value
+	case textFieldFmriSkullStripTemplate:
+		m.fmriSkullStripTemplate = strings.TrimSpace(value)
+	case textFieldFmriTaskId:
+		m.fmriTaskId = strings.TrimSpace(value)
 	case textFieldRawMontage:
 		m.rawMontage = value
 	case textFieldPrepMontage:
 		m.prepMontage = value
+	case textFieldPrepFileExtension:
+		m.prepFileExtension = strings.TrimSpace(value)
 	case textFieldRawEventPrefixes:
 		m.rawEventPrefixes = value
 	case textFieldMergeEventPrefixes:
@@ -3606,6 +4367,10 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.clusterConditionValues = strings.TrimSpace(value)
 	case textFieldCorrelationsTargetColumn:
 		m.correlationsTargetColumn = strings.TrimSpace(value)
+	case textFieldItpcConditionColumn:
+		m.itpcConditionColumn = strings.TrimSpace(value)
+	case textFieldItpcConditionValues:
+		m.itpcConditionValues = strings.TrimSpace(value)
 	case textFieldPACPairs:
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
@@ -3616,6 +4381,32 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.asymmetryChannelPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldERPComponents:
 		m.erpComponentsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldSourceLocSubject:
+		m.sourceLocSubject = value
+	case textFieldSourceLocTrans:
+		m.sourceLocTrans = value
+	case textFieldSourceLocBem:
+		m.sourceLocBem = value
+	case textFieldSourceLocFmriStatsMap:
+		m.sourceLocFmriStatsMap = value
+	case textFieldSourceLocFmriCondAColumn:
+		m.sourceLocFmriCondAColumn = value
+	case textFieldSourceLocFmriCondAValue:
+		m.sourceLocFmriCondAValue = value
+	case textFieldSourceLocFmriCondBColumn:
+		m.sourceLocFmriCondBColumn = value
+	case textFieldSourceLocFmriCondBValue:
+		m.sourceLocFmriCondBValue = value
+	case textFieldSourceLocFmriContrastFormula:
+		m.sourceLocFmriContrastFormula = value
+	case textFieldSourceLocFmriContrastName:
+		m.sourceLocFmriContrastName = value
+	case textFieldSourceLocFmriRunsToInclude:
+		m.sourceLocFmriRunsToInclude = value
+	case textFieldSourceLocFmriWindowAName:
+		m.sourceLocFmriWindowAName = value
+	case textFieldSourceLocFmriWindowBName:
+		m.sourceLocFmriWindowBName = value
 	case textFieldPlotBboxInches:
 		m.plotBboxInches = value
 	case textFieldPlotFontFamily:
@@ -3829,12 +4620,12 @@ const (
 	optFeatGroupExecution
 	optFeatGroupValidation
 	optFeatGroupSourceLoc
+	optFeatGroupITPC
 	// Behavior section headers (expand/collapse)
 	optBehaviorGroupGeneral
 	optBehaviorGroupTrialTable
 	optBehaviorGroupCorrelations
 	optBehaviorGroupPainSens
-	optBehaviorGroupConfounds
 	optBehaviorGroupRegression
 	optBehaviorGroupModels
 	optBehaviorGroupStability
@@ -3890,6 +4681,7 @@ const (
 	optSpectralLineNoiseFreq
 	optSpectralLineNoiseWidthHz
 	optSpectralLineNoiseHarmonics
+	optAperiodicSubtractEvoked
 	optAsymmetryChannelPairs
 	optConnOutputLevel
 	optConnGraphMetrics
@@ -3909,6 +4701,7 @@ const (
 	optSpatialTransformStiffness
 	optMinEpochs
 	// Source localization options (LCMV, eLORETA)
+	optSourceLocMode
 	optSourceLocMethod
 	optSourceLocSpacing
 	optSourceLocParc
@@ -3917,6 +4710,53 @@ const (
 	optSourceLocLoose
 	optSourceLocDepth
 	optSourceLocConnMethod
+	optSourceLocSubject
+	optSourceLocTrans
+	optSourceLocBem
+	optSourceLocMindistMm
+	optSourceLocFmriEnabled
+	optSourceLocFmriStatsMap
+	optSourceLocFmriThreshold
+	optSourceLocFmriTail
+	optSourceLocFmriMinClusterVox
+	optSourceLocFmriMaxClusters
+	optSourceLocFmriMaxVoxPerClus
+	optSourceLocFmriMaxTotalVox
+	optSourceLocFmriRandomSeed
+	// BEM/Trans generation options (Docker-based)
+	optSourceLocCreateTrans
+	optSourceLocCreateBemModel
+	optSourceLocCreateBemSolution
+	// fMRI GLM contrast builder options
+	optSourceLocFmriContrastEnabled
+	optSourceLocFmriContrastType
+	optSourceLocFmriCondAColumn
+	optSourceLocFmriCondAValue
+	optSourceLocFmriCondBColumn
+	optSourceLocFmriCondBValue
+	optSourceLocFmriContrastFormula
+	optSourceLocFmriContrastName
+	optSourceLocFmriRunsToInclude
+	optSourceLocFmriAutoDetectRuns
+	optSourceLocFmriHrfModel
+	optSourceLocFmriDriftModel
+	optSourceLocFmriHighPassHz
+	optSourceLocFmriLowPassHz
+	optSourceLocFmriClusterCorrection
+	optSourceLocFmriClusterPThreshold
+	optSourceLocFmriOutputType
+	optSourceLocFmriResampleToFS
+	optSourceLocFmriWindowAName
+	optSourceLocFmriWindowATmin
+	optSourceLocFmriWindowATmax
+	optSourceLocFmriWindowBName
+	optSourceLocFmriWindowBTmin
+	optSourceLocFmriWindowBTmax
+	// ITPC options (condition-based)
+	optItpcMethod
+	optItpcConditionColumn
+	optItpcConditionValues
+	optItpcMinTrialsPerCondition
 
 	optFailOnMissingWindows
 	optFailOnMissingNamedWindow
@@ -3990,10 +4830,6 @@ const (
 	optComputeChangeScores
 	optComputeBayesFactors
 	optComputeLosoStability
-	// Behavior options - Confounds
-	optConfoundsAddAsCovariates
-	optConfoundsMaxCovariates
-	optConfoundsQCColumnPatterns
 	// Behavior options - Regression
 	optRegressionOutcome
 	optRegressionIncludeTemperature
@@ -4108,7 +4944,18 @@ const (
 	optMLInnerSplits
 	optMLOuterJobs
 	optMLSkipTimeGen
+	// Preprocessing group headers (collapsible sections)
+	optPrepGroupStages
+	optPrepGroupGeneral
+	optPrepGroupFiltering
+	optPrepGroupPyprep
+	optPrepGroupICA
+	optPrepGroupEpoching
 	// Preprocessing options
+	optPrepStageBadChannels
+	optPrepStageFiltering
+	optPrepStageICA
+	optPrepStageEpoching
 	optPrepUsePyprep
 	optPrepUseIcalabel
 	optPrepNJobs
@@ -4117,12 +4964,27 @@ const (
 	optPrepLFreq
 	optPrepHFreq
 	optPrepNotch
+	optPrepLineFreq
+	// PyPREP advanced options
+	optPrepRansac
+	optPrepRepeats
+	optPrepAverageReref
+	optPrepFileExtension
+	optPrepConsiderPreviousBads
+	optPrepOverwriteChansTsv
+	optPrepDeleteBreaks
+	optPrepBreaksMinLength
+	optPrepTStartAfterPrevious
+	optPrepTStopBeforeNext
+	// ICA options
 	optPrepICAMethod
 	optPrepICAComp
 	optPrepProbThresh
+	optPrepKeepMnebidsBads
+	optIcaLabelsToKeep
+	// Epoching options
 	optPrepEpochsTmin
 	optPrepEpochsTmax
-	optPrepLineFreq
 	optPrepEpochsBaseline
 	optPrepEpochsNoBaseline
 	optPrepEpochsReject
@@ -4326,15 +5188,62 @@ const (
 	optTfrNFreqs
 	optTfrMinCycles
 	optTfrNCyclesFactor
-	optTfrDecim
 	optTfrWorkers
 	// Machine Learning model hyperparameters
 	optElasticNetAlphaGrid
 	optElasticNetL1RatioGrid
 	optRfNEstimators
 	optRfMaxDepthGrid
-	// ICA labels to keep
-	optIcaLabelsToKeep
+	// fMRI preprocessing group headers (collapsible sections)
+	optFmriGroupRuntime
+	optFmriGroupOutput
+	optFmriGroupPerformance
+	optFmriGroupAnatomical
+	optFmriGroupBold
+	optFmriGroupQc
+	optFmriGroupDenoising
+	optFmriGroupSurface
+	optFmriGroupMultiecho
+	optFmriGroupRepro
+	optFmriGroupValidation
+	optFmriGroupAdvanced
+	// fMRI preprocessing (fMRIPrep-style)
+	optFmriEngine
+	optFmriFmriprepImage
+	optFmriFmriprepOutputDir
+	optFmriFmriprepWorkDir
+	optFmriFreesurferLicenseFile
+	optFmriFreesurferSubjectsDir
+	optFmriOutputSpaces
+	optFmriIgnore
+	optFmriBidsFilterFile
+	optFmriUseAroma
+	optFmriSkipBidsValidation
+	optFmriStopOnFirstCrash
+	optFmriCleanWorkdir
+	optFmriSkipReconstruction
+	optFmriMemMb
+	optFmriExtraArgs
+	// Additional fMRIPrep options
+	optFmriNThreads
+	optFmriOmpNThreads
+	optFmriLowMem
+	optFmriLongitudinal
+	optFmriCiftiOutput
+	optFmriSkullStripTemplate
+	optFmriSkullStripFixedSeed
+	optFmriRandomSeed
+	optFmriDummyScans
+	optFmriBold2T1wInit
+	optFmriBold2T1wDof
+	optFmriSliceTimeRef
+	optFmriFdSpikeThreshold
+	optFmriDvarsSpikeThreshold
+	optFmriMeOutputEchos
+	optFmriMedialSurfaceNan
+	optFmriNoMsm
+	optFmriLevel
+	optFmriTaskId
 	// System/global settings
 	optSystemNJobs
 	optSystemStrictMode
@@ -4357,6 +5266,12 @@ const (
 	expandedDirectedConnMeasures     = 11
 	expandedRunAdjustmentColumn      = 12
 	expandedCorrelationsTargetColumn = 13
+	expandedItpcConditionColumn      = 14
+	expandedItpcConditionValues      = 15
+	expandedFmriCondAColumn          = 16
+	expandedFmriCondAValue           = 17
+	expandedFmriCondBColumn          = 18
+	expandedFmriCondBValue           = 19
 )
 
 // getFeaturesOptions returns the active advanced options for the features pipeline
@@ -4388,7 +5303,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, optFeatGroupAperiodic)
 		if m.featGroupAperiodicExpanded {
-			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics)
+			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics, optAperiodicSubtractEvoked)
 		}
 	}
 	if m.isCategorySelected("complexity") {
@@ -4446,6 +5361,8 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("sourcelocalization") {
 		options = append(options, optFeatGroupSourceLoc)
 		if m.featGroupSourceLocExpanded {
+			// Mode selection: EEG-only vs fMRI-informed
+			options = append(options, optSourceLocMode)
 			options = append(options, optSourceLocMethod, optSourceLocSpacing, optSourceLocParc)
 			// Show method-specific options based on selected method
 			if m.sourceLocMethod == 0 { // LCMV
@@ -4454,13 +5371,80 @@ func (m Model) getFeaturesOptions() []optionType {
 				options = append(options, optSourceLocSnr, optSourceLocLoose, optSourceLocDepth)
 			}
 			options = append(options, optSourceLocConnMethod)
+
+			// fMRI-informed mode (mode == 1) requires additional paths
+			if m.sourceLocMode == 1 {
+				// BEM/Trans generation options (Docker-based)
+				// Note: FS License is configured in global paths, subject is from step 1
+				options = append(options, optSourceLocCreateTrans, optSourceLocCreateBemModel, optSourceLocCreateBemSolution)
+				// If not auto-creating, user must provide paths
+				if !m.sourceLocCreateTrans {
+					options = append(options, optSourceLocTrans)
+				}
+				if !m.sourceLocCreateBemSolution {
+					options = append(options, optSourceLocBem)
+				}
+				options = append(options, optSourceLocMindistMm)
+				options = append(options, optSourceLocFmriEnabled)
+				if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+					options = append(options,
+						optSourceLocFmriStatsMap,
+						optSourceLocFmriThreshold,
+						optSourceLocFmriTail,
+						optSourceLocFmriMinClusterVox,
+						optSourceLocFmriMaxClusters,
+						optSourceLocFmriMaxVoxPerClus,
+						optSourceLocFmriMaxTotalVox,
+						optSourceLocFmriRandomSeed,
+					)
+					// fMRI contrast builder options (when building from BOLD)
+					options = append(options, optSourceLocFmriContrastEnabled)
+					if m.sourceLocFmriContrastEnabled {
+						options = append(options, optSourceLocFmriContrastType)
+						// Show condition fields based on contrast type
+						if m.sourceLocFmriContrastType == 3 { // custom formula
+							options = append(options, optSourceLocFmriContrastFormula)
+						} else {
+							options = append(options, optSourceLocFmriCondAColumn, optSourceLocFmriCondAValue)
+							options = append(options, optSourceLocFmriCondBColumn, optSourceLocFmriCondBValue)
+						}
+						options = append(options, optSourceLocFmriContrastName)
+						options = append(options, optSourceLocFmriAutoDetectRuns)
+						if !m.sourceLocFmriAutoDetectRuns {
+							options = append(options, optSourceLocFmriRunsToInclude)
+						}
+						options = append(options, optSourceLocFmriHrfModel, optSourceLocFmriDriftModel)
+						options = append(options, optSourceLocFmriHighPassHz, optSourceLocFmriLowPassHz)
+						options = append(options, optSourceLocFmriClusterCorrection)
+						if m.sourceLocFmriClusterCorrection {
+							options = append(options, optSourceLocFmriClusterPThreshold)
+						}
+						options = append(options, optSourceLocFmriOutputType, optSourceLocFmriResampleToFS)
+						// fMRI-specific time windows
+						options = append(options, optSourceLocFmriWindowAName, optSourceLocFmriWindowATmin, optSourceLocFmriWindowATmax)
+						options = append(options, optSourceLocFmriWindowBName, optSourceLocFmriWindowBTmin, optSourceLocFmriWindowBTmax)
+					}
+				}
+			}
+		}
+	}
+
+	// ITPC options (condition-based ITPC for avoiding pseudo-replication)
+	if m.isCategorySelected("itpc") {
+		options = append(options, optFeatGroupITPC)
+		if m.featGroupITPCExpanded {
+			options = append(options, optItpcMethod)
+			// Show condition-based options only when method is "condition" (method index 3)
+			if m.itpcMethod == 3 {
+				options = append(options, optItpcConditionColumn, optItpcConditionValues, optItpcMinTrialsPerCondition)
+			}
 		}
 	}
 
 	// TFR settings (always available for features that use time-frequency)
 	options = append(options, optFeatGroupTFR)
 	if m.featGroupTFRExpanded {
-		options = append(options, optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrDecim, optTfrWorkers)
+		options = append(options, optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers)
 	}
 
 	options = append(options, optFeatGroupStorage)
@@ -4481,21 +5465,172 @@ func (m Model) getFeaturesOptions() []optionType {
 	return options
 }
 
-// getPreprocessingOptions returns advanced options for preprocessing
+// getPreprocessingOptions returns advanced options for preprocessing with collapsible groups
 func (m Model) getPreprocessingOptions() []optionType {
-	mode := m.modeOptions[m.modeIndex]
+	isFull := m.modeIndex == 0 || m.modeOptions[m.modeIndex] == "full"
 	options := []optionType{optUseDefaults}
 
-	if mode == "full" || mode == "bad-channels" {
-		options = append(options, optPrepUsePyprep, optPrepNJobs, optPrepMontage, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq)
+	// Stage Selection group (only show if not in full mode)
+	if !isFull {
+		options = append(options, optPrepGroupStages)
+		if m.prepGroupStagesExpanded {
+			options = append(options,
+				optPrepStageBadChannels,
+				optPrepStageFiltering,
+				optPrepStageICA,
+				optPrepStageEpoching,
+			)
+		}
 	}
 
-	if mode == "full" || mode == "ica" {
-		options = append(options, optPrepICAMethod, optPrepICAComp, optPrepUseIcalabel, optPrepProbThresh, optIcaLabelsToKeep)
+	// General Settings group (montage, jobs, etc.)
+	options = append(options, optPrepGroupGeneral)
+	if m.prepGroupGeneralExpanded {
+		options = append(options,
+			optPrepMontage,
+			optPrepNJobs,
+			optPrepUsePyprep,
+			optPrepUseIcalabel,
+		)
 	}
 
-	if mode == "full" || mode == "epochs" {
-		options = append(options, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsNoBaseline, optPrepEpochsBaseline, optPrepEpochsReject)
+	// Filtering group
+	if isFull || m.prepStageSelected[1] {
+		options = append(options, optPrepGroupFiltering)
+		if m.prepGroupFilteringExpanded {
+			options = append(options,
+				optPrepResample,
+				optPrepLFreq,
+				optPrepHFreq,
+				optPrepNotch,
+				optPrepLineFreq,
+			)
+		}
+	}
+
+	// PyPREP Advanced group (part of bad channel detection if enabled)
+	if (isFull || m.prepStageSelected[0]) && m.prepUsePyprep {
+		options = append(options, optPrepGroupPyprep)
+		if m.prepGroupPyprepExpanded {
+			options = append(options,
+				optPrepRansac,
+				optPrepRepeats,
+				optPrepAverageReref,
+				optPrepFileExtension,
+				optPrepConsiderPreviousBads,
+				optPrepOverwriteChansTsv,
+				optPrepDeleteBreaks,
+				optPrepBreaksMinLength,
+				optPrepTStartAfterPrevious,
+				optPrepTStopBeforeNext,
+			)
+		}
+	}
+
+	// ICA group
+	if isFull || m.prepStageSelected[2] {
+		options = append(options, optPrepGroupICA)
+		if m.prepGroupICAExpanded {
+			options = append(options,
+				optPrepICAMethod,
+				optPrepICAComp,
+				optPrepProbThresh,
+				optPrepKeepMnebidsBads,
+				optIcaLabelsToKeep,
+			)
+		}
+	}
+
+	// Epoching group
+	if isFull || m.prepStageSelected[3] {
+		options = append(options, optPrepGroupEpoching)
+		if m.prepGroupEpochingExpanded {
+			options = append(options,
+				optPrepEpochsTmin,
+				optPrepEpochsTmax,
+				optPrepEpochsNoBaseline,
+				optPrepEpochsBaseline,
+				optPrepEpochsReject,
+			)
+		}
+	}
+
+	return options
+}
+
+func (m Model) getFmriPreprocessingOptions() []optionType {
+	options := []optionType{optUseDefaults}
+
+	// Runtime group
+	options = append(options, optFmriGroupRuntime)
+	if m.fmriGroupRuntimeExpanded {
+		options = append(options, optFmriEngine, optFmriFmriprepImage)
+	}
+
+	// Output group
+	options = append(options, optFmriGroupOutput)
+	if m.fmriGroupOutputExpanded {
+		options = append(options, optFmriOutputSpaces, optFmriIgnore, optFmriLevel, optFmriCiftiOutput, optFmriTaskId)
+	}
+
+	// Performance group
+	options = append(options, optFmriGroupPerformance)
+	if m.fmriGroupPerformanceExpanded {
+		options = append(options, optFmriNThreads, optFmriOmpNThreads, optFmriMemMb, optFmriLowMem)
+	}
+
+	// Anatomical group
+	options = append(options, optFmriGroupAnatomical)
+	if m.fmriGroupAnatomicalExpanded {
+		options = append(options, optFmriSkipReconstruction, optFmriLongitudinal, optFmriSkullStripTemplate, optFmriSkullStripFixedSeed)
+	}
+
+	// BOLD processing group
+	options = append(options, optFmriGroupBold)
+	if m.fmriGroupBoldExpanded {
+		options = append(options, optFmriBold2T1wInit, optFmriBold2T1wDof, optFmriSliceTimeRef, optFmriDummyScans)
+	}
+
+	// Quality control group
+	options = append(options, optFmriGroupQc)
+	if m.fmriGroupQcExpanded {
+		options = append(options, optFmriFdSpikeThreshold, optFmriDvarsSpikeThreshold)
+	}
+
+	// Denoising group
+	options = append(options, optFmriGroupDenoising)
+	if m.fmriGroupDenoisingExpanded {
+		options = append(options, optFmriUseAroma)
+	}
+
+	// Surface group
+	options = append(options, optFmriGroupSurface)
+	if m.fmriGroupSurfaceExpanded {
+		options = append(options, optFmriMedialSurfaceNan, optFmriNoMsm)
+	}
+
+	// Multi-echo group
+	options = append(options, optFmriGroupMultiecho)
+	if m.fmriGroupMultiechoExpanded {
+		options = append(options, optFmriMeOutputEchos)
+	}
+
+	// Reproducibility group
+	options = append(options, optFmriGroupRepro)
+	if m.fmriGroupReproExpanded {
+		options = append(options, optFmriRandomSeed)
+	}
+
+	// Validation group
+	options = append(options, optFmriGroupValidation)
+	if m.fmriGroupValidationExpanded {
+		options = append(options, optFmriSkipBidsValidation, optFmriStopOnFirstCrash, optFmriCleanWorkdir)
+	}
+
+	// Advanced group
+	options = append(options, optFmriGroupAdvanced)
+	if m.fmriGroupAdvancedExpanded {
+		options = append(options, optFmriExtraArgs)
 	}
 
 	return options
@@ -5281,6 +6416,8 @@ func (m Model) isCurrentlyEditing(opt optionType) bool {
 		options = m.getPreprocessingOptions()
 	case types.PipelineRawToBIDS:
 		options = m.getRawToBidsOptions()
+	case types.PipelineFmri:
+		options = m.getFmriPreprocessingOptions()
 	default:
 		return false
 	}

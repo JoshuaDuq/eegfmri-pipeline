@@ -1,0 +1,203 @@
+# fMRI Pipeline Configuration
+# ===========================
+# Settings for fMRI preprocessing, contrast building, and BEM generation
+
+paths:
+  # FreeSurfer license file (required for fMRIPrep and BEM generation)
+  # Get a free license at: https://surfer.nmr.mgh.harvard.edu/registration.html
+  freesurfer_license: "eeg_pipeline/licenses/license_freesurfer.txt"
+  
+  # fMRI BIDS root directory (raw fMRI data)
+  bids_fmri_root: null
+  
+  # FreeSurfer SUBJECTS_DIR (structural MRI surfaces)
+  freesurfer_dir: null
+
+
+###################################################################
+# fMRI Preprocessing (fMRIPrep)
+###################################################################
+
+fmri_preprocessing:
+  engine: "docker"              # "docker" or "apptainer"
+  fmriprep:
+    image: "nipreps/fmriprep:23.2.1"
+    output_dir: null            # Default: <deriv_root>/preprocessed
+    work_dir: null              # Default: <deriv_root>/work/fmriprep
+    fs_license_file: null       # Default: paths.freesurfer_license
+    fs_subjects_dir: null       # Optional: FreeSurfer SUBJECTS_DIR
+    
+    # Output spaces (standard and subject-specific)
+    output_spaces:
+      - "MNI152NLin2009cAsym"
+      - "T1w"
+    
+    # Optional: ignore specific modalities (e.g., fieldmaps, slicetiming)
+    ignore: []
+    
+    # Optional: BIDS filter file (JSON)
+    bids_filter_file: null
+    
+    # Processing level: "full" (default), "resampling", "minimal"
+    level: "full"
+    
+    # CIFTI output: null (disabled), "91k", or "170k"
+    cifti_output: null
+    
+    # Process only specific task (null = all tasks)
+    task_id: null
+    
+    # Performance options
+    nthreads: 0                 # Max threads across all processes (0 = auto)
+    omp_nthreads: 0             # Max threads per process (0 = auto)
+    mem_mb: 0                   # Memory limit in MB (0 = auto)
+    low_mem: false              # Reduce memory usage
+    
+    # Anatomical options
+    fs_no_reconall: false       # Disable FreeSurfer recon-all
+    longitudinal: false         # Unbiased structural template (increases runtime)
+    skull_strip_template: "OASIS30ANTs"  # Template for brain extraction
+    skull_strip_fixed_seed: false  # Fixed seed for reproducibility
+    
+    # BOLD processing options
+    bold2t1w_init: "register"   # "register" or "header"
+    bold2t1w_dof: 6             # Degrees of freedom for BOLD→T1w registration
+    slice_time_ref: 0.5         # Slice timing reference (0=start, 0.5=middle, 1=end)
+    dummy_scans: 0              # Non-steady state volumes (0 = auto-detect)
+    
+    # Quality control thresholds
+    fd_spike_threshold: 0.5     # Framewise displacement threshold (mm)
+    dvars_spike_threshold: 1.5  # Standardized DVARS threshold
+    
+    # Denoising
+    use_aroma: false            # ICA-AROMA denoising
+    
+    # Surface options
+    medial_surface_nan: false   # Fill medial surface with NaN
+    no_msm: false               # Disable MSM-Sulc alignment to fsLR
+    
+    # Multi-echo options
+    me_output_echos: false      # Output each echo separately
+    
+    # Reproducibility
+    random_seed: 0              # Run-to-run replicability (0 = non-deterministic)
+    
+    # Validation options
+    skip_bids_validation: false
+    stop_on_first_crash: false
+    clean_workdir: true
+    
+    # Additional fMRIPrep arguments (parsed with shlex)
+    extra_args: null
+
+
+###################################################################
+# BEM/Trans Generation (for EEG source localization)
+###################################################################
+
+# These settings are used by the EEG pipeline when fMRI-informed source
+# localization is enabled. They control automatic generation of:
+# - BEM model (scalp/skull/brain conductive boundaries)
+# - BEM solution (forward model matrix)
+# - Coregistration transform (EEG ↔ MRI alignment)
+
+bem_generation:
+  # NOTE: A valid EEG↔MRI transform requires digitization/coregistration.
+  # Auto-generating an identity transform is not scientifically valid.
+  create_trans: false         # Provide trans manually (recommended)
+  allow_identity_trans: false # Set true only for debugging (not anatomy)
+  create_model: true          # Auto-create BEM model (watershed surfaces)
+  create_solution: true       # Auto-create BEM solution matrix
+  docker_image: "freesurfer-mne:7.4.1"
+  ico: 4                       # ICO downsampling (4 = 5120 triangles per surface)
+  conductivity: [0.3, 0.006, 0.3]  # Conductivity for [scalp, skull, brain]
+
+
+###################################################################
+# fMRI Contrast Builder (for fMRI-informed EEG source localization)
+###################################################################
+
+# These settings control the building of fMRI statistical maps from BOLD data.
+# The resulting maps are used to constrain EEG source localization.
+
+fmri_contrast:
+  enabled: false
+  
+  # Input source for BOLD data
+  input_source: "fmriprep"     # "fmriprep" (recommended) or "bids_raw"
+  fmriprep_space: "T1w"        # fMRIPrep output space
+  require_fmriprep: true       # Fail if preproc BOLD is missing
+  
+  # Contrast type and conditions
+  type: "t-test"               # "t-test" | "paired-t-test" | "f-test" | "custom"
+  
+  # Condition A: column and value to select trials
+  condition_a:
+    column: "pain_binary"       # Column name in events.tsv
+    value: 1                    # Value to filter for (e.g., "temp49p3", "1")
+  
+  # Condition B: column and value for comparison (optional)
+  condition_b:
+    column: "pain_binary"
+    value: 0
+  
+  # Custom formula (optional, overrides condition_a/b)
+  formula: null                # e.g., "condition_a - condition_b"
+  
+  # Contrast output
+  name: "pain_vs_nonpain"      # Output contrast name
+  runs: null                   # List of run numbers (null = auto-detect)
+  
+  # GLM settings
+  hrf_model: "spm"             # "spm" | "flobs" | "fir"
+  drift_model: "cosine"        # "none" | "cosine" | "polynomial"
+  high_pass_hz: 0.008          # High-pass filter (128s period)
+  low_pass_hz: 0.1             # Low-pass filter
+  
+  # Cluster correction (heuristic, not FWE-corrected)
+  cluster_correction: true
+  cluster_p_threshold: 0.001   # Cluster-forming voxelwise p-threshold
+  
+  # Output format
+  output_type: "z-score"       # "z-score" | "t-stat" | "cope" | "beta"
+  resample_to_freesurfer: true # Auto-resample to FreeSurfer subject space
+
+
+###################################################################
+# fMRI Constraint Settings (for EEG source localization)
+###################################################################
+
+# These settings control how fMRI maps constrain EEG source localization
+
+fmri_constraint:
+  enabled: false
+  
+  # Path to pre-computed fMRI stats map (optional, overrides contrast builder)
+  stats_map_path: null         # NIfTI path in FreeSurfer MRI space
+  
+  # Thresholding
+  threshold: 2.0               # Lowered from 3.1; sub-0000 max z=2.498
+  tail: "pos"                  # "pos" or "abs"
+  thresholding:
+    mode: "z"                  # "z" (hard threshold) or "fdr" (Benjamini–Hochberg)
+    fdr_q: 0.05
+    stat_type: "z"
+  
+  # Cluster filtering
+  cluster_min_voxels: 10       # Minimum cluster size in voxels
+  max_clusters: 20             # Keep top-N clusters by peak/size
+  max_voxels_per_cluster: 2000 # Subsample voxels per cluster (0 = no limit)
+  max_total_voxels: 20000      # Subsample total voxels (0 = no limit)
+  random_seed: 0               # 0 = nondeterministic
+  
+  # fMRI-specific time windows (independent of EEG feature extraction windows)
+  # When enabled, source localization uses these windows instead of main pipeline windows
+  time_windows:
+    window_a:
+      name: "plateau"
+      tmin: 3.0
+      tmax: 10.45
+    window_b:
+      name: "plateau"
+      tmin: 3.0
+      tmax: 10.45

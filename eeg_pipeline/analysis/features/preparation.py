@@ -149,8 +149,21 @@ def _apply_spatial_transform(
         return epochs
 
 
-def _get_spatial_transform_type(config: Any) -> str:
-    """Extract and validate spatial transform type from config."""
+def _get_spatial_transform_type(config: Any, feature_family: Optional[str] = None) -> str:
+    """Extract and validate spatial transform type from config.
+    
+    If feature_family is provided, looks up per-family transform first.
+    Falls back to global spatial_transform for backward compatibility.
+    """
+    # Per-family transform takes precedence
+    if feature_family:
+        per_family = config.get("feature_engineering.spatial_transform_per_family", {})
+        if isinstance(per_family, dict) and feature_family in per_family:
+            transform = str(per_family[feature_family]).strip().lower()
+            if transform in {"none", "csd", "laplacian"}:
+                return transform
+    
+    # Fallback to global setting (backward compatibility)
     transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
     if transform not in {"none", "csd", "laplacian"}:
         return "none"
@@ -303,6 +316,11 @@ def _estimate_individual_alpha_frequency(
     roi_map = build_roi_map(ch_names, roi_definitions) if roi_definitions else {}
     
     roi_indices = _get_roi_channel_indices(roi_names, roi_map)
+
+    if roi_names and not roi_indices:
+        allow_fallback = bool(iaf_config.get("allow_all_channels_fallback", False))
+        if not allow_fallback:
+            return None
     
     baseline_data = _extract_baseline_data(data, baseline_mask)
     
@@ -613,6 +631,7 @@ def precompute_data(
     compute_psd_data: bool = True,
     windows_spec: Any = None,
     frequency_bands_override: Any = None,
+    feature_family: Optional[str] = None,
 ) -> PrecomputedData:
     """
     Precompute all intermediate data needed by feature extraction modules.
@@ -637,6 +656,9 @@ def precompute_data(
         Time window specification
     frequency_bands_override : Any, optional
         Override frequency band definitions
+    feature_family : str, optional
+        Feature family name (e.g., 'connectivity', 'power') for per-family
+        spatial transform selection. If None, uses global setting.
         
     Returns
     -------
@@ -657,7 +679,7 @@ def precompute_data(
             logger.warning("No EEG channels available")
         return _create_empty_precomputed_data(epochs, config, logger)
     
-    transform_type = _get_spatial_transform_type(config)
+    transform_type = _get_spatial_transform_type(config, feature_family)
     epochs_picked = epochs.copy().pick(picks)
     epochs_transformed = _apply_spatial_transform(
         epochs_picked,
@@ -665,6 +687,13 @@ def precompute_data(
         config,
         logger,
     )
+    
+    if logger and feature_family:
+        logger.debug(
+            "Precomputing data for family='%s' with spatial_transform='%s'",
+            feature_family,
+            transform_type,
+        )
     
     data = epochs_transformed.get_data()
     times = epochs_transformed.times

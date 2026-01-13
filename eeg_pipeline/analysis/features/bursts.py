@@ -120,13 +120,19 @@ def _parse_burst_config(
     if threshold_method not in valid_methods:
         threshold_method = "percentile"
 
+    threshold_reference = str(burst_config.get("threshold_reference", "subject")).strip().lower()
+    if threshold_reference not in {"trial", "subject", "condition"}:
+        threshold_reference = "subject"
+
     return {
         "bands": burst_config.get("bands") or default_bands,
         "threshold_method": threshold_method,
+        "threshold_reference": threshold_reference,
         "threshold_z": float(burst_config.get("threshold_z", 2.0)),
         "threshold_percentile": float(burst_config.get("threshold_percentile", 95.0)),
         "min_duration_ms": float(burst_config.get("min_duration_ms", 50.0)),
         "min_cycles": float(burst_config.get("min_cycles", 3.0)),
+        "min_trials_per_condition": int(burst_config.get("min_trials_per_condition", 10)),
     }
 
 
@@ -160,6 +166,90 @@ def _compute_thresholds_percentile(
     """Compute thresholds using percentile method."""
     clipped_percentile = float(np.clip(threshold_percentile, _MIN_PERCENTILE, _MAX_PERCENTILE))
     return np.nanpercentile(baseline_envelope, q=clipped_percentile, axis=2)
+
+def _compute_thresholds_subject(
+    baseline_envelope: np.ndarray,
+    method: str,
+    threshold_z: float,
+    threshold_percentile: float,
+) -> np.ndarray:
+    """Compute burst thresholds per channel using all baseline samples across epochs."""
+    if method == "zscore":
+        mean = np.nanmean(baseline_envelope, axis=(0, 2))
+        std = np.nanstd(baseline_envelope, axis=(0, 2))
+        thr = mean + (threshold_z * std)
+        return np.broadcast_to(thr[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1]))
+
+    if method == "mad":
+        median = np.nanmedian(baseline_envelope, axis=(0, 2))
+        mad = np.nanmedian(np.abs(baseline_envelope - median[None, :, None]), axis=(0, 2))
+        thr = median + (threshold_z * _MAD_TO_STD_SCALE * mad)
+        return np.broadcast_to(thr[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1]))
+
+    clipped_percentile = float(np.clip(threshold_percentile, _MIN_PERCENTILE, _MAX_PERCENTILE))
+    thr = np.nanpercentile(baseline_envelope, q=clipped_percentile, axis=(0, 2))
+    return np.broadcast_to(thr[None, :], (baseline_envelope.shape[0], baseline_envelope.shape[1]))
+
+
+def _extract_condition_labels(ctx: Any, n_epochs: int) -> Optional[np.ndarray]:
+    labels = getattr(ctx, "condition", None)
+    if labels is not None:
+        labels = np.asarray(labels)
+        return labels if labels.shape[0] == n_epochs else None
+
+    aligned = getattr(ctx, "aligned_events", None)
+    if isinstance(aligned, pd.DataFrame) and "condition" in aligned.columns:
+        labels = aligned["condition"].to_numpy()
+        return labels if labels.shape[0] == n_epochs else None
+
+    return None
+
+
+def _compute_thresholds_condition(
+    baseline_envelope: np.ndarray,
+    condition_labels: np.ndarray,
+    *,
+    method: str,
+    threshold_z: float,
+    threshold_percentile: float,
+    min_trials_per_condition: int,
+) -> np.ndarray:
+    """Compute burst thresholds per channel within each condition group."""
+    n_epochs, n_channels, _ = baseline_envelope.shape
+    out = np.full((n_epochs, n_channels), np.nan)
+
+    for cond in np.unique(condition_labels):
+        mask = condition_labels == cond
+        n = int(np.sum(mask))
+        if n < int(min_trials_per_condition):
+            continue
+        out[mask] = _compute_thresholds_subject(
+            baseline_envelope[mask],
+            method=method,
+            threshold_z=threshold_z,
+            threshold_percentile=threshold_percentile,
+        )
+
+    # Fill any missing conditions with subject-level thresholds.
+    if not np.isfinite(out).any():
+        return _compute_thresholds_subject(
+            baseline_envelope,
+            method=method,
+            threshold_z=threshold_z,
+            threshold_percentile=threshold_percentile,
+        )
+
+    missing = ~np.isfinite(out).any(axis=1)
+    if np.any(missing):
+        subj = _compute_thresholds_subject(
+            baseline_envelope,
+            method=method,
+            threshold_z=threshold_z,
+            threshold_percentile=threshold_percentile,
+        )
+        out[missing] = subj[missing]
+
+    return out
 
 
 def _compute_burst_thresholds(
@@ -340,14 +430,23 @@ def extract_burst_features(
         ctx.logger.warning("Bursts: baseline window missing; skipping extraction.")
         return pd.DataFrame(), []
 
-    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
     
-    if target_name:
-        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segment_masks = {target_name: mask}
+        else:
+            if ctx.logger:
+                ctx.logger.warning(
+                    "Bursts: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        segment_masks = get_segment_masks(
-            precomputed.times, precomputed.windows, precomputed.config
-        )
+        segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     segment_names = [name for name in segment_masks.keys() if name != "baseline"]
     
     if not segment_names:
@@ -366,12 +465,40 @@ def extract_burst_features(
         envelope = precomputed.band_data[band].envelope
         baseline_envelope = envelope[:, :, baseline_mask]
 
-        thresholds = _compute_burst_thresholds(
-            baseline_envelope,
-            burst_config["threshold_method"],
-            burst_config["threshold_z"],
-            burst_config["threshold_percentile"],
-        )
+        method = str(burst_config["threshold_method"])
+        ref = str(burst_config.get("threshold_reference", "subject"))
+        if ref == "trial":
+            thresholds = _compute_burst_thresholds(
+                baseline_envelope,
+                method,
+                burst_config["threshold_z"],
+                burst_config["threshold_percentile"],
+            )
+        elif ref == "condition":
+            condition_labels = _extract_condition_labels(ctx, n_epochs)
+            if condition_labels is None:
+                thresholds = _compute_thresholds_subject(
+                    baseline_envelope,
+                    method=method,
+                    threshold_z=burst_config["threshold_z"],
+                    threshold_percentile=burst_config["threshold_percentile"],
+                )
+            else:
+                thresholds = _compute_thresholds_condition(
+                    baseline_envelope,
+                    condition_labels,
+                    method=method,
+                    threshold_z=burst_config["threshold_z"],
+                    threshold_percentile=burst_config["threshold_percentile"],
+                    min_trials_per_condition=burst_config.get("min_trials_per_condition", 10),
+                )
+        else:
+            thresholds = _compute_thresholds_subject(
+                baseline_envelope,
+                method=method,
+                threshold_z=burst_config["threshold_z"],
+                threshold_percentile=burst_config["threshold_percentile"],
+            )
 
         min_samples = _compute_min_samples(
             burst_config["min_duration_ms"],

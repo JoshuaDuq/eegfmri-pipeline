@@ -173,6 +173,109 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         src_cfg["parcellation"] = args.source_parc
     if _get_arg_value(args, "source_connectivity_method") is not None:
         src_cfg["connectivity_method"] = args.source_connectivity_method
+    if _get_arg_value(args, "source_subject") is not None:
+        src_cfg["subject"] = args.source_subject
+    if _get_arg_value(args, "source_subjects_dir") is not None:
+        src_cfg["subjects_dir"] = args.source_subjects_dir
+    if _get_arg_value(args, "source_trans") is not None:
+        src_cfg["trans"] = args.source_trans
+    if _get_arg_value(args, "source_bem") is not None:
+        src_cfg["bem"] = args.source_bem
+    if _get_arg_value(args, "source_mindist_mm") is not None:
+        src_cfg["mindist_mm"] = args.source_mindist_mm
+
+    # BEM/Trans generation options (Docker-based)
+    # Note: FS License path is in global config (paths.freesurfer_license)
+    # Default: eeg_pipeline/licenses/license_freesurfer.txt
+    bem_cfg = src_cfg.setdefault("bem_generation", {})
+    if _get_arg_value(args, "source_create_trans") is not None:
+        bem_cfg["create_trans"] = args.source_create_trans
+    if _get_arg_value(args, "source_create_bem_model") is not None:
+        bem_cfg["create_model"] = args.source_create_bem_model
+    if _get_arg_value(args, "source_create_bem_solution") is not None:
+        bem_cfg["create_solution"] = args.source_create_bem_solution
+
+    fmri_cfg = src_cfg.setdefault("fmri", {})
+    if _get_arg_value(args, "source_fmri_enabled") is not None:
+        fmri_cfg["enabled"] = args.source_fmri_enabled
+    if _get_arg_value(args, "source_fmri_stats_map") is not None:
+        fmri_cfg["stats_map_path"] = args.source_fmri_stats_map
+    if _get_arg_value(args, "source_fmri_threshold") is not None:
+        fmri_cfg["threshold"] = args.source_fmri_threshold
+    if _get_arg_value(args, "source_fmri_tail") is not None:
+        fmri_cfg["tail"] = args.source_fmri_tail
+    if _get_arg_value(args, "source_fmri_cluster_min_voxels") is not None:
+        fmri_cfg["cluster_min_voxels"] = args.source_fmri_cluster_min_voxels
+    if _get_arg_value(args, "source_fmri_max_clusters") is not None:
+        fmri_cfg["max_clusters"] = args.source_fmri_max_clusters
+    if _get_arg_value(args, "source_fmri_max_voxels_per_cluster") is not None:
+        fmri_cfg["max_voxels_per_cluster"] = args.source_fmri_max_voxels_per_cluster
+    if _get_arg_value(args, "source_fmri_max_total_voxels") is not None:
+        fmri_cfg["max_total_voxels"] = args.source_fmri_max_total_voxels
+    if _get_arg_value(args, "source_fmri_random_seed") is not None:
+        fmri_cfg["random_seed"] = args.source_fmri_random_seed
+    # fMRI-specific time windows config
+    time_windows_cfg = fmri_cfg.setdefault("time_windows", {})
+    window_a_cfg = time_windows_cfg.setdefault("window_a", {})
+    window_b_cfg = time_windows_cfg.setdefault("window_b", {})
+    if _get_arg_value(args, "source_fmri_window_a_name") is not None:
+        window_a_cfg["name"] = args.source_fmri_window_a_name
+    if _get_arg_value(args, "source_fmri_window_a_tmin") is not None:
+        window_a_cfg["tmin"] = args.source_fmri_window_a_tmin
+    if _get_arg_value(args, "source_fmri_window_a_tmax") is not None:
+        window_a_cfg["tmax"] = args.source_fmri_window_a_tmax
+    if _get_arg_value(args, "source_fmri_window_b_name") is not None:
+        window_b_cfg["name"] = args.source_fmri_window_b_name
+    if _get_arg_value(args, "source_fmri_window_b_tmin") is not None:
+        window_b_cfg["tmin"] = args.source_fmri_window_b_tmin
+    if _get_arg_value(args, "source_fmri_window_b_tmax") is not None:
+        window_b_cfg["tmax"] = args.source_fmri_window_b_tmax
+
+    # fMRI contrast builder config
+    contrast_cfg = fmri_cfg.setdefault("contrast", {})
+    if _get_arg_value(args, "source_fmri_contrast_enabled") is not None:
+        contrast_cfg["enabled"] = args.source_fmri_contrast_enabled
+    if _get_arg_value(args, "source_fmri_contrast_type") is not None:
+        contrast_cfg["type"] = args.source_fmri_contrast_type
+    # Condition A: column and value
+    cond_a_cfg = contrast_cfg.setdefault("condition_a", {})
+    if _get_arg_value(args, "source_fmri_cond_a_column") is not None:
+        cond_a_cfg["column"] = args.source_fmri_cond_a_column
+    if _get_arg_value(args, "source_fmri_cond_a_value") is not None:
+        cond_a_cfg["value"] = args.source_fmri_cond_a_value
+    # Condition B: column and value
+    cond_b_cfg = contrast_cfg.setdefault("condition_b", {})
+    if _get_arg_value(args, "source_fmri_cond_b_column") is not None:
+        cond_b_cfg["column"] = args.source_fmri_cond_b_column
+    if _get_arg_value(args, "source_fmri_cond_b_value") is not None:
+        cond_b_cfg["value"] = args.source_fmri_cond_b_value
+    # Legacy support for old condition1/condition2 args
+    if _get_arg_value(args, "source_fmri_contrast_cond1") is not None:
+        cond_a_cfg["value"] = args.source_fmri_contrast_cond1
+    if _get_arg_value(args, "source_fmri_contrast_cond2") is not None:
+        cond_b_cfg["value"] = args.source_fmri_contrast_cond2
+    if _get_arg_value(args, "source_fmri_contrast_formula") is not None:
+        contrast_cfg["formula"] = args.source_fmri_contrast_formula
+    if _get_arg_value(args, "source_fmri_contrast_name") is not None:
+        contrast_cfg["name"] = args.source_fmri_contrast_name
+    if _get_arg_value(args, "source_fmri_runs") is not None:
+        contrast_cfg["runs"] = [int(r.strip()) for r in args.source_fmri_runs.split(",") if r.strip()]
+    if _get_arg_value(args, "source_fmri_hrf_model") is not None:
+        contrast_cfg["hrf_model"] = args.source_fmri_hrf_model
+    if _get_arg_value(args, "source_fmri_drift_model") is not None:
+        contrast_cfg["drift_model"] = args.source_fmri_drift_model
+    if _get_arg_value(args, "source_fmri_high_pass") is not None:
+        contrast_cfg["high_pass_hz"] = args.source_fmri_high_pass
+    if _get_arg_value(args, "source_fmri_low_pass") is not None:
+        contrast_cfg["low_pass_hz"] = args.source_fmri_low_pass
+    if _get_arg_value(args, "source_fmri_cluster_correction") is not None:
+        contrast_cfg["cluster_correction"] = args.source_fmri_cluster_correction
+    if _get_arg_value(args, "source_fmri_cluster_p_threshold") is not None:
+        contrast_cfg["cluster_p_threshold"] = args.source_fmri_cluster_p_threshold
+    if _get_arg_value(args, "source_fmri_output_type") is not None:
+        contrast_cfg["output_type"] = args.source_fmri_output_type
+    if _get_arg_value(args, "source_fmri_resample_to_fs") is not None:
+        contrast_cfg["resample_to_freesurfer"] = args.source_fmri_resample_to_fs
 
 
 def _apply_pac_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -222,6 +325,10 @@ def _apply_aperiodic_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "feature_engineering.aperiodic.min_fit_points", args.aperiodic_min_points)
     if _get_arg_value(args, "aperiodic_min_segment_sec") is not None:
         _apply_config_override(config, "feature_engineering.aperiodic.min_segment_sec", args.aperiodic_min_segment_sec)
+    
+    # Scientific validity: induced spectra option
+    if _get_arg_value(args, "aperiodic_subtract_evoked") is not None:
+        _apply_config_override(config, "feature_engineering.aperiodic.subtract_evoked", args.aperiodic_subtract_evoked)
     
     aperiodic_cfg = config.setdefault("feature_engineering", {}).setdefault("aperiodic", {})
     if _get_arg_value(args, "aperiodic_model") is not None:
@@ -363,6 +470,12 @@ def _apply_itpc_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "feature_engineering.itpc.allow_unsafe_loo", args.itpc_allow_unsafe_loo)
     if _get_arg_value(args, "itpc_baseline_correction") is not None:
         _apply_config_override(config, "feature_engineering.itpc.baseline_correction", args.itpc_baseline_correction)
+    if _get_arg_value(args, "itpc_condition_column") is not None:
+        _apply_config_override(config, "feature_engineering.itpc.condition_column", args.itpc_condition_column)
+    if _get_arg_value(args, "itpc_condition_values") is not None:
+        _apply_config_override(config, "feature_engineering.itpc.condition_values", args.itpc_condition_values)
+    if _get_arg_value(args, "itpc_min_trials_per_condition") is not None:
+        _apply_config_override(config, "feature_engineering.itpc.min_trials_per_condition", args.itpc_min_trials_per_condition)
 
 
 def _apply_band_envelope_overrides(args: argparse.Namespace, config: Any) -> None:
@@ -693,6 +806,269 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Connectivity method for source-space analysis (default: aec)",
     )
     parser.add_argument(
+        "--source-subject",
+        default=None,
+        help="FreeSurfer subject name to use for source localization (e.g., sub-0001). If unset, defaults to sub-{subject}.",
+    )
+    parser.add_argument(
+        "--source-subjects-dir",
+        default=None,
+        help="FreeSurfer SUBJECTS_DIR path for subject-specific source localization.",
+    )
+    parser.add_argument(
+        "--source-trans",
+        default=None,
+        help="EEG↔MRI coregistration transform .fif (required for subject-specific/fMRI-constrained source localization).",
+    )
+    parser.add_argument(
+        "--source-bem",
+        default=None,
+        help="BEM solution .fif (e.g., *-bem-sol.fif) (required for subject-specific/fMRI-constrained source localization).",
+    )
+    parser.add_argument(
+        "--source-mindist-mm",
+        type=float,
+        default=None,
+        help="Minimum distance from sources to inner skull (mm) (default: 5.0).",
+    )
+
+    # BEM/Trans generation options (Docker-based)
+    # Note: FS License path is in global config (paths.freesurfer_license)
+    # Default: eeg_pipeline/licenses/license_freesurfer.txt
+    parser.add_argument(
+        "--source-create-trans",
+        action="store_true",
+        default=None,
+        dest="source_create_trans",
+        help="Auto-create coregistration transform via Docker (requires Docker; FS license from global config).",
+    )
+    parser.add_argument(
+        "--source-create-bem-model",
+        action="store_true",
+        default=None,
+        dest="source_create_bem_model",
+        help="Auto-create BEM model via Docker (requires Docker; FS license from global config).",
+    )
+    parser.add_argument(
+        "--source-create-bem-solution",
+        action="store_true",
+        default=None,
+        dest="source_create_bem_solution",
+        help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).",
+    )
+
+    # Optional fMRI-informed source localization (advanced)
+    parser.add_argument(
+        "--source-fmri",
+        action="store_true",
+        default=None,
+        dest="source_fmri_enabled",
+        help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).",
+    )
+    parser.add_argument(
+        "--no-source-fmri",
+        action="store_false",
+        dest="source_fmri_enabled",
+        help="Disable fMRI-informed source localization (overrides config).",
+    )
+    parser.add_argument(
+        "--source-fmri-stats-map",
+        default=None,
+        help="Path to an fMRI statistical map NIfTI in the same MRI space as the FreeSurfer subject (typically resampled to orig.mgz space).",
+    )
+    parser.add_argument(
+        "--source-fmri-threshold",
+        type=float,
+        default=None,
+        help="Threshold applied to fMRI stats map (default: 3.1).",
+    )
+    parser.add_argument(
+        "--source-fmri-tail",
+        choices=["pos", "abs"],
+        default=None,
+        help="Threshold tail: pos (positive only) or abs (absolute value) (default: pos).",
+    )
+    parser.add_argument(
+        "--source-fmri-cluster-min-voxels",
+        type=int,
+        default=None,
+        help="Minimum cluster size in voxels after thresholding (default: 50).",
+    )
+    parser.add_argument(
+        "--source-fmri-max-clusters",
+        type=int,
+        default=None,
+        help="Maximum number of clusters kept from fMRI map (default: 20).",
+    )
+    parser.add_argument(
+        "--source-fmri-max-voxels-per-cluster",
+        type=int,
+        default=None,
+        help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).",
+    )
+    parser.add_argument(
+        "--source-fmri-max-total-voxels",
+        type=int,
+        default=None,
+        help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).",
+    )
+    parser.add_argument(
+        "--source-fmri-random-seed",
+        type=int,
+        default=None,
+        help="Random seed for voxel subsampling (default: 0 -> nondeterministic).",
+    )
+    # fMRI-specific time windows (independent of EEG feature extraction windows)
+    parser.add_argument(
+        "--source-fmri-window-a-name",
+        default=None,
+        help="Name for window A (e.g., 'plateau').",
+    )
+    parser.add_argument(
+        "--source-fmri-window-a-tmin",
+        type=float,
+        default=None,
+        help="Start time for window A in seconds.",
+    )
+    parser.add_argument(
+        "--source-fmri-window-a-tmax",
+        type=float,
+        default=None,
+        help="End time for window A in seconds.",
+    )
+    parser.add_argument(
+        "--source-fmri-window-b-name",
+        default=None,
+        help="Name for window B (e.g., 'baseline').",
+    )
+    parser.add_argument(
+        "--source-fmri-window-b-tmin",
+        type=float,
+        default=None,
+        help="Start time for window B in seconds.",
+    )
+    parser.add_argument(
+        "--source-fmri-window-b-tmax",
+        type=float,
+        default=None,
+        help="End time for window B in seconds.",
+    )
+    # fMRI contrast builder arguments
+    parser.add_argument(
+        "--source-fmri-contrast-enabled",
+        action="store_true",
+        default=None,
+        dest="source_fmri_contrast_enabled",
+        help="Enable building fMRI contrast from BOLD data (vs. loading pre-computed stats map).",
+    )
+    parser.add_argument(
+        "--source-fmri-cond-a-column",
+        default=None,
+        help="Column for condition A in events.tsv (e.g., 'trial_type', 'pain_binary').",
+    )
+    parser.add_argument(
+        "--source-fmri-cond-a-value",
+        default=None,
+        help="Value for condition A (e.g., 'temp49p3', '1').",
+    )
+    parser.add_argument(
+        "--source-fmri-cond-b-column",
+        default=None,
+        help="Column for condition B in events.tsv.",
+    )
+    parser.add_argument(
+        "--source-fmri-cond-b-value",
+        default=None,
+        help="Value for condition B.",
+    )
+    parser.add_argument(
+        "--source-fmri-contrast-type",
+        choices=["t-test", "paired-t-test", "f-test", "custom"],
+        default=None,
+        help="Type of statistical contrast to compute.",
+    )
+    parser.add_argument(
+        "--source-fmri-contrast-cond1",
+        default=None,
+        help="First condition name for contrast (e.g., 'pain_high').",
+    )
+    parser.add_argument(
+        "--source-fmri-contrast-cond2",
+        default=None,
+        help="Second condition name for contrast (e.g., 'pain_low').",
+    )
+    parser.add_argument(
+        "--source-fmri-contrast-formula",
+        default=None,
+        help="Custom contrast formula (e.g., 'pain_high - pain_low').",
+    )
+    parser.add_argument(
+        "--source-fmri-contrast-name",
+        default=None,
+        help="Name for the contrast output (default: 'pain_vs_baseline').",
+    )
+    parser.add_argument(
+        "--source-fmri-runs",
+        default=None,
+        help="Comma-separated run numbers to include (e.g., '1,2,3').",
+    )
+    parser.add_argument(
+        "--source-fmri-hrf-model",
+        choices=["spm", "flobs", "fir"],
+        default=None,
+        help="HRF model for GLM (default: spm).",
+    )
+    parser.add_argument(
+        "--source-fmri-drift-model",
+        choices=["none", "cosine", "polynomial"],
+        default=None,
+        help="Drift model for GLM (default: cosine).",
+    )
+    parser.add_argument(
+        "--source-fmri-high-pass",
+        type=float,
+        default=None,
+        help="High-pass filter cutoff in Hz (default: 0.008).",
+    )
+    parser.add_argument(
+        "--source-fmri-low-pass",
+        type=float,
+        default=None,
+        help="Low-pass filter cutoff in Hz (default: 0.1).",
+    )
+    parser.add_argument(
+        "--source-fmri-cluster-correction",
+        action="store_true",
+        default=None,
+        dest="source_fmri_cluster_correction",
+        help="Enable cluster-level FWE correction.",
+    )
+    parser.add_argument(
+        "--source-fmri-cluster-p-threshold",
+        type=float,
+        default=None,
+        help="Cluster-forming p-threshold (default: 0.001).",
+    )
+    parser.add_argument(
+        "--source-fmri-output-type",
+        choices=["z-score", "t-stat", "cope", "beta"],
+        default=None,
+        help="Output statistical map type (default: z-score).",
+    )
+    parser.add_argument(
+        "--source-fmri-resample-to-fs",
+        action="store_true",
+        default=None,
+        dest="source_fmri_resample_to_fs",
+        help="Auto-resample stats map to FreeSurfer subject space.",
+    )
+    parser.add_argument(
+        "--no-source-fmri-resample-to-fs",
+        action="store_false",
+        dest="source_fmri_resample_to_fs",
+        help="Do not auto-resample stats map to FreeSurfer subject space.",
+    )
+    parser.add_argument(
         "--pac-phase-range",
         nargs=2,
         type=float,
@@ -909,6 +1285,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
         help="Minimum fit points for aperiodic",
     )
     parser.add_argument(
+        "--aperiodic-subtract-evoked",
+        action="store_true",
+        default=None,
+        help="Subtract evoked response for induced spectra (recommended for pain paradigms)",
+    )
+    parser.add_argument(
         "--conn-graph-prop",
         type=float,
         default=None,
@@ -1047,6 +1429,9 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--itpc-allow-unsafe-loo", action="store_true", default=None, help="Allow unsafe LOO ITPC computation")
     parser.add_argument("--no-itpc-allow-unsafe-loo", action="store_false", dest="itpc_allow_unsafe_loo")
     parser.add_argument("--itpc-baseline-correction", choices=["none", "subtract"], default=None, help="ITPC baseline correction mode")
+    parser.add_argument("--itpc-condition-column", default=None, help="Column for condition-based ITPC (avoids pseudo-replication)")
+    parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Specific condition values to compute ITPC for (space-separated)")
+    parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
     
     # Spectral advanced options
     parser.add_argument("--spectral-include-log-ratios", action="store_true", default=None, help="Include log ratios in spectral features")
@@ -1168,6 +1553,8 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
         config.setdefault("paths", {})["bids_root"] = args.bids_root
     if getattr(args, "deriv_root", None):
         config.setdefault("paths", {})["deriv_root"] = args.deriv_root
+    if getattr(args, "freesurfer_dir", None):
+        config.setdefault("paths", {})["freesurfer_dir"] = args.freesurfer_dir
     
     if args.mode == "compute":
         _apply_feature_config_overrides(args, config)

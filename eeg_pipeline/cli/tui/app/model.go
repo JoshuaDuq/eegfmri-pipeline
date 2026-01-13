@@ -41,7 +41,7 @@ const (
 )
 
 const (
-	maxPipelineIndex = 5 // Maximum valid pipeline index (0-4 for 5 pipelines)
+	maxPipelineIndex = 5 // Maximum valid pipeline index (0-5 for 6 pipelines)
 	maxNavDepth      = 3 // Maximum depth to search for repo root
 )
 
@@ -231,6 +231,9 @@ func (m Model) handleGlobalMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case messages.ColumnsDiscoveredMsg:
 		m.handleColumnsDiscovered(msg)
+		return m, nil
+	case messages.FmriColumnsDiscoveredMsg:
+		m.handleFmriColumnsDiscovered(msg)
 		return m, nil
 	case cloud.SyncCompleteMsg:
 		return m.handleCloudSyncComplete(msg)
@@ -468,6 +471,14 @@ func (m *Model) handleColumnsDiscovered(msg messages.ColumnsDiscoveredMsg) {
 	m.wizard.SetDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
 }
 
+func (m *Model) handleFmriColumnsDiscovered(msg messages.FmriColumnsDiscoveredMsg) {
+	if msg.Error != nil {
+		m.wizard.SetFmriColumnsDiscoveryError(msg.Error)
+		return
+	}
+	m.wizard.SetFmriDiscoveredColumns(msg.Columns, msg.Values, msg.Source)
+}
+
 func (m Model) handleCloudSyncComplete(msg cloud.SyncCompleteMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
 		m.execution.AddOutput("Sync failed: " + msg.Error.Error())
@@ -651,12 +662,39 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	m.pushState(StatePipelineWizard)
 	m.mainMenu.SelectedPipeline = -1
 
+	configKeys := []string{"time_frequency_analysis.bands"}
+	if m.selectedPipeline == types.PipelineFmri {
+		configKeys = append(configKeys,
+			"fmri_preprocessing.engine",
+			"fmri_preprocessing.fmriprep.image",
+			"fmri_preprocessing.fmriprep.output_dir",
+			"fmri_preprocessing.fmriprep.work_dir",
+			"fmri_preprocessing.fmriprep.fs_license_file",
+			"fmri_preprocessing.fmriprep.fs_subjects_dir",
+			"fmri_preprocessing.fmriprep.output_spaces",
+			"fmri_preprocessing.fmriprep.ignore",
+			"fmri_preprocessing.fmriprep.bids_filter_file",
+			"fmri_preprocessing.fmriprep.use_aroma",
+			"fmri_preprocessing.fmriprep.skip_bids_validation",
+			"fmri_preprocessing.fmriprep.stop_on_first_crash",
+			"fmri_preprocessing.fmriprep.clean_workdir",
+			"fmri_preprocessing.fmriprep.fs_no_reconall",
+			"fmri_preprocessing.fmriprep.nthreads",
+			"fmri_preprocessing.fmriprep.omp_nthreads",
+			"fmri_preprocessing.fmriprep.mem_mb",
+			"fmri_preprocessing.fmriprep.extra_args",
+			"paths.freesurfer_license",
+			"paths.bids_fmri_root",
+		)
+	}
+
 	return m, tea.Batch(
 		executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
 		executor.LoadPlotters(m.repoRoot),
 		executor.LoadConfigSummary(m.repoRoot),
-		executor.LoadConfigKeys(m.repoRoot, []string{"time_frequency_analysis.bands"}),
+		executor.LoadConfigKeys(m.repoRoot, configKeys),
 		executor.DiscoverColumns(m.repoRoot, m.task),
+		executor.DiscoverFmriColumns(m.repoRoot, m.task),
 	)
 }
 

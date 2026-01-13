@@ -9,6 +9,7 @@ const (
 	PipelineBehavior
 	PipelineML
 	PipelinePlotting
+	PipelineFmri
 	PipelineMergePsychoPyData
 	PipelineRawToBIDS
 	pipelineCount // Sentinel for bounds checking
@@ -28,6 +29,7 @@ var pipelineNames = [pipelineCount]string{
 	PipelineBehavior:          "Behavior",
 	PipelineML:                "Machine Learning",
 	PipelinePlotting:          "Plotting",
+	PipelineFmri:              "fMRI",
 	PipelineMergePsychoPyData: "Merge PsychoPy Data",
 	PipelineRawToBIDS:         "Raw to BIDS",
 }
@@ -39,6 +41,7 @@ var pipelineCommands = [pipelineCount]string{
 	PipelineBehavior:          "behavior",
 	PipelineML:                "ml",
 	PipelinePlotting:          "plotting",
+	PipelineFmri:              "fmri",
 	PipelineMergePsychoPyData: "utilities",
 	PipelineRawToBIDS:         "utilities",
 }
@@ -50,6 +53,7 @@ var pipelineDescriptions = [pipelineCount]string{
 	PipelineBehavior:          "EEG-behavior analysis",
 	PipelineML:                "Machine learning: LOSO regression & time generalization",
 	PipelinePlotting:          "Generate curated visualization suites",
+	PipelineFmri:              "Preprocess fMRI (fMRIPrep-style)",
 	PipelineMergePsychoPyData: "Merge PsychoPy data into BIDS events files",
 	PipelineRawToBIDS:         "Convert raw BrainVision data to BIDS",
 }
@@ -102,27 +106,35 @@ const (
 	StepSelectPlotCategories
 	StepPlotConfig
 	StepSelectSubjects
+	StepSelectPreprocessingStages
+	StepPreprocessingFiltering
+	StepPreprocessingICA
+	StepPreprocessingEpochs
 	StepReviewExecute
 	wizardStepCount // Sentinel for bounds checking
 )
 
 // wizardStepNames maps wizard steps to their display names
 var wizardStepNames = [wizardStepCount]string{
-	StepSelectMode:            "Select Mode",
-	StepSelectComputations:    "Select Computations",
-	StepSelectFeatureFiles:    "Select Feature Files",
-	StepConfigureOptions:      "Configure Options",
-	StepSelectBands:           "Select Bands",
-	StepSelectROIs:            "Select ROIs",
-	StepSelectSpatial:         "Select Spatial",
-	StepTimeRange:             "Time Range",
-	StepAdvancedConfig:        "Advanced Config",
-	StepSelectPlots:           "Select Plots",
-	StepSelectFeaturePlotters: "Select Feature Plotters",
-	StepSelectPlotCategories:  "Select Plot Categories",
-	StepPlotConfig:            "Plot Config",
-	StepSelectSubjects:        "Select Subjects",
-	StepReviewExecute:         "Review & Execute",
+	StepSelectMode:                "Select Mode",
+	StepSelectComputations:        "Select Computations",
+	StepSelectFeatureFiles:        "Select Feature Files",
+	StepConfigureOptions:          "Configure Options",
+	StepSelectBands:               "Select Bands",
+	StepSelectROIs:                "Select ROIs",
+	StepSelectSpatial:             "Select Spatial",
+	StepTimeRange:                 "Time Range",
+	StepAdvancedConfig:            "Advanced Config",
+	StepSelectPlots:               "Select Plots",
+	StepSelectFeaturePlotters:     "Select Feature Plotters",
+	StepSelectPlotCategories:      "Select Plot Categories",
+	StepPlotConfig:                "Plot Config",
+	StepSelectSubjects:            "Subjects",
+	StepSelectPreprocessingStages: "Stages",
+	StepPreprocessingFiltering:    "Filtering",
+	StepPreprocessingICA:          "ICA",
+	StepPreprocessingEpochs:       "Epochs",
+	StepReviewExecute:             "Review",
 }
 
 // String returns the display name for the wizard step
@@ -167,7 +179,7 @@ func (p Pipeline) RequiresEpochs() bool {
 	switch p {
 	case PipelineFeatures:
 		return true
-	case PipelinePreprocessing, PipelineRawToBIDS, PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData:
+	case PipelinePreprocessing, PipelineRawToBIDS, PipelineBehavior, PipelineML, PipelinePlotting, PipelineMergePsychoPyData, PipelineFmri:
 		return false
 	default:
 		return false
@@ -209,6 +221,8 @@ func (p Pipeline) GetDataSource() string {
 		return "features"
 	case PipelinePlotting:
 		return "all"
+	case PipelineFmri:
+		return "bids_fmri"
 	default:
 		return "epochs"
 	}

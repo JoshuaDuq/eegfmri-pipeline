@@ -53,7 +53,6 @@ def _discover_subjects_with_data(
         subject_id = subject_dir.name[4:]
         if allowed_subjects is not None and subject_id not in allowed_subjects:
             continue
-        # Check unified temporal_correlations location first (new format)
         unified_path = (
             subject_dir
             / "eeg"
@@ -61,14 +60,7 @@ def _discover_subjects_with_data(
             / "temporal_correlations"
             / f"tf_grid{roi_suffix}{method_suffix}.tsv"
         )
-        # Fall back to legacy location
-        legacy_path = (
-            subject_dir
-            / "eeg"
-            / "stats"
-            / f"tf_corr_stats{roi_suffix}{method_suffix}.tsv"
-        )
-        if unified_path.exists() or legacy_path.exists():
+        if unified_path.exists():
             subject_ids.append(subject_id)
     return subject_ids
 
@@ -90,7 +82,6 @@ def _load_subject_correlation_data(
     Returns:
         DataFrame with correlation statistics, or None if file doesn't exist
     """
-    # Check unified temporal_correlations location first (new format)
     unified_path = (
         config.deriv_root
         / f"sub-{subject_id}"
@@ -99,18 +90,7 @@ def _load_subject_correlation_data(
         / "temporal_correlations"
         / f"tf_grid{roi_suffix}{method_suffix}.tsv"
     )
-    if unified_path.exists():
-        return read_tsv(unified_path)
-    
-    # Fall back to legacy location
-    legacy_path = (
-        config.deriv_root
-        / f"sub-{subject_id}"
-        / "eeg"
-        / "stats"
-        / f"tf_corr_stats{roi_suffix}{method_suffix}.tsv"
-    )
-    return read_tsv(legacy_path) if legacy_path.exists() else None
+    return read_tsv(unified_path) if unified_path.exists() else None
 
 
 def _get_baseline_window(config) -> List[float]:

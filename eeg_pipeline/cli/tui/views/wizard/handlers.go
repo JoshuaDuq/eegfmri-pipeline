@@ -5,11 +5,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/eeg-pipeline/tui/executor"
 	"github.com/eeg-pipeline/tui/styles"
 	"github.com/eeg-pipeline/tui/types"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// browseForFile opens a file picker dialog for the specified field
+func (m *Model) browseForFile(prompt, field string, fileTypeDesc, extensions string) tea.Cmd {
+	return executor.PickFile(prompt, field, fileTypeDesc, extensions)
+}
 
 const (
 	minSubjectsRequired   = 1
@@ -152,6 +158,10 @@ func (m *Model) handleUp() {
 		} else if len(m.TimeRanges) > 0 {
 			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, -1, len(m.TimeRanges))
 		}
+	case types.StepSelectPreprocessingStages:
+		m.prepStageCursor = moveCursorInList(m.prepStageCursor, -1, len(m.prepStages))
+	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
+		m.advancedCursor = moveCursorInList(m.advancedCursor, -1, 5)
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
@@ -209,6 +219,10 @@ func (m *Model) handleDown() {
 		} else if len(m.TimeRanges) > 0 {
 			m.timeRangeCursor = moveCursorInList(m.timeRangeCursor, 1, len(m.TimeRanges))
 		}
+	case types.StepSelectPreprocessingStages:
+		m.prepStageCursor = moveCursorInList(m.prepStageCursor, 1, len(m.prepStages))
+	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
+		m.advancedCursor = moveCursorInList(m.advancedCursor, 1, 5)
 	case types.StepAdvancedConfig:
 		// Check if an expandable option is open
 		if m.expandedOption >= 0 {
@@ -419,6 +433,11 @@ func (m *Model) validateStep() []string {
 		if count == 0 {
 			errors = append(errors, "Select at least one spatial mode")
 		}
+	case types.StepSelectPreprocessingStages:
+		count := countSelectedItems(m.prepStageSelected)
+		if count == 0 {
+			errors = append(errors, "Select at least one preprocessing stage")
+		}
 	case types.StepTimeRange:
 		errors = m.validateTimeRanges()
 	case types.StepPlotConfig:
@@ -512,6 +531,10 @@ func (m *Model) handleSpace() {
 
 	case types.StepSelectSpatial:
 		m.spatialSelected[m.spatialCursor] = !m.spatialSelected[m.spatialCursor]
+	case types.StepSelectPreprocessingStages:
+		if m.prepStageCursor < len(m.prepStages) {
+			m.prepStageSelected[m.prepStageCursor] = !m.prepStageSelected[m.prepStageCursor]
+		}
 	case types.StepTimeRange:
 		if m.editingRangeIdx >= 0 {
 			// Commit and move to next field, or exit if at end
@@ -563,6 +586,10 @@ func (m *Model) selectAll() {
 		for i := range spatialModes {
 			m.spatialSelected[i] = true
 		}
+	case types.StepSelectPreprocessingStages:
+		for i := range m.prepStages {
+			m.prepStageSelected[i] = true
+		}
 	case types.StepSelectFeatureFiles:
 		for _, f := range m.featureFiles {
 			m.featureFileSelected[f.Key] = true
@@ -601,6 +628,8 @@ func (m *Model) selectNone() {
 		m.roiSelected = make(map[int]bool)
 	case types.StepSelectSpatial:
 		m.spatialSelected = make(map[int]bool)
+	case types.StepSelectPreprocessingStages:
+		m.prepStageSelected = make(map[int]bool)
 	case types.StepSelectFeatureFiles:
 		m.featureFileSelected = make(map[string]bool)
 	case types.StepSelectPlots:
@@ -877,6 +906,8 @@ func (m *Model) getAdvancedOptionCount() int {
 		return len(m.getMLOptions())
 	case types.PipelinePreprocessing:
 		return len(m.getPreprocessingOptions())
+	case types.PipelineFmri:
+		return len(m.getFmriPreprocessingOptions())
 	case types.PipelineRawToBIDS:
 		return len(m.getRawToBidsOptions())
 	case types.PipelineMergePsychoPyData:
@@ -917,6 +948,8 @@ func (m *Model) toggleAdvancedOption() {
 		m.toggleMLAdvancedOption()
 	case types.PipelinePreprocessing:
 		m.togglePreprocessingAdvancedOption()
+	case types.PipelineFmri:
+		m.toggleFmriAdvancedOption()
 	case types.PipelineRawToBIDS:
 		m.toggleRawToBidsAdvancedOption()
 	case types.PipelineMergePsychoPyData:
@@ -1018,6 +1051,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	// Source localization options
+	case optSourceLocMode:
+		m.sourceLocMode = (m.sourceLocMode + 1) % 2 // 0: EEG-only, 1: fMRI-informed
+		m.useDefaultAdvanced = false
 	case optSourceLocMethod:
 		m.sourceLocMethod = (m.sourceLocMethod + 1) % 2 // 0: lcmv, 1: eloreta
 		m.useDefaultAdvanced = false
@@ -1041,6 +1077,201 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optSourceLocConnMethod:
 		m.sourceLocConnMethod = (m.sourceLocConnMethod + 1) % 3 // 0: aec, 1: wpli, 2: plv
+		m.useDefaultAdvanced = false
+	case optSourceLocSubject:
+		m.startTextEdit(textFieldSourceLocSubject)
+		m.useDefaultAdvanced = false
+	case optSourceLocTrans:
+		// Open file picker for trans file
+		m.browsingField = "sourceLocTrans"
+		m.pendingFileCmd = m.browseForFile("Select coregistration transform file", "sourceLocTrans", "FIF files", "fif")
+		m.useDefaultAdvanced = false
+	case optSourceLocBem:
+		// Open file picker for BEM solution file
+		m.browsingField = "sourceLocBem"
+		m.pendingFileCmd = m.browseForFile("Select BEM solution file", "sourceLocBem", "FIF files", "fif")
+		m.useDefaultAdvanced = false
+	case optSourceLocMindistMm:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriEnabled:
+		m.sourceLocFmriEnabled = !m.sourceLocFmriEnabled
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriStatsMap:
+		// Open file picker for fMRI stats map NIfTI file
+		m.browsingField = "sourceLocFmriStatsMap"
+		m.pendingFileCmd = m.browseForFile("Select fMRI statistical map", "sourceLocFmriStatsMap", "NIfTI files", "nii,nii.gz")
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriTail:
+		m.sourceLocFmriTail = (m.sourceLocFmriTail + 1) % 2 // 0: pos, 1: abs
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriMinClusterVox:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriMaxClusters:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriMaxVoxPerClus:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriMaxTotalVox:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// BEM/Trans generation options (Docker-based)
+	case optSourceLocCreateTrans:
+		m.sourceLocCreateTrans = !m.sourceLocCreateTrans
+		m.useDefaultAdvanced = false
+	case optSourceLocCreateBemModel:
+		m.sourceLocCreateBemModel = !m.sourceLocCreateBemModel
+		m.useDefaultAdvanced = false
+	case optSourceLocCreateBemSolution:
+		m.sourceLocCreateBemSolution = !m.sourceLocCreateBemSolution
+		m.useDefaultAdvanced = false
+	// fMRI contrast builder options
+	case optSourceLocFmriContrastEnabled:
+		m.sourceLocFmriContrastEnabled = !m.sourceLocFmriContrastEnabled
+		// Trigger condition discovery when enabling contrast builder
+		if m.sourceLocFmriContrastEnabled && len(m.sourceLocFmriConditions) == 0 {
+			subject := ""
+			for _, s := range m.subjects {
+				if m.subjectSelected[s.ID] {
+					subject = s.ID
+					break
+				}
+			}
+			m.pendingFmriConditionsCmd = executor.DiscoverFmriConditions(m.repoRoot, subject, m.task)
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriContrastType:
+		m.sourceLocFmriContrastType = (m.sourceLocFmriContrastType + 1) % 4 // 0: t-test, 1: paired, 2: F-test, 3: custom
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriCondAColumn:
+		// Show dropdown with fMRI-specific discovered columns
+		if len(m.fmriDiscoveredColumns) > 0 {
+			m.expandedOption = expandedFmriCondAColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldSourceLocFmriCondAColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriCondAValue:
+		// Show dropdown with values from selected fMRI column
+		colVals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn)
+		if len(colVals) > 0 {
+			m.expandedOption = expandedFmriCondAValue
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldSourceLocFmriCondAValue)
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriCondBColumn:
+		// Show dropdown with fMRI-specific discovered columns
+		if len(m.fmriDiscoveredColumns) > 0 {
+			m.expandedOption = expandedFmriCondBColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldSourceLocFmriCondBColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriCondBValue:
+		// Show dropdown with values from selected fMRI column
+		colVals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn)
+		if len(colVals) > 0 {
+			m.expandedOption = expandedFmriCondBValue
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldSourceLocFmriCondBValue)
+		}
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriContrastFormula:
+		m.startTextEdit(textFieldSourceLocFmriContrastFormula)
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriContrastName:
+		m.startTextEdit(textFieldSourceLocFmriContrastName)
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriRunsToInclude:
+		m.startTextEdit(textFieldSourceLocFmriRunsToInclude)
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriAutoDetectRuns:
+		m.sourceLocFmriAutoDetectRuns = !m.sourceLocFmriAutoDetectRuns
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriHrfModel:
+		m.sourceLocFmriHrfModel = (m.sourceLocFmriHrfModel + 1) % 3 // 0: SPM, 1: FLOBS, 2: FIR
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriDriftModel:
+		m.sourceLocFmriDriftModel = (m.sourceLocFmriDriftModel + 1) % 3 // 0: none, 1: cosine, 2: polynomial
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriHighPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriLowPassHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriClusterCorrection:
+		m.sourceLocFmriClusterCorrection = !m.sourceLocFmriClusterCorrection
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriClusterPThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriOutputType:
+		m.sourceLocFmriOutputType = (m.sourceLocFmriOutputType + 1) % 4 // 0: z-score, 1: t-stat, 2: cope, 3: beta
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriResampleToFS:
+		m.sourceLocFmriResampleToFS = !m.sourceLocFmriResampleToFS
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowAName:
+		m.startTextEdit(textFieldSourceLocFmriWindowAName)
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowATmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowATmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowBName:
+		m.startTextEdit(textFieldSourceLocFmriWindowBName)
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowBTmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriWindowBTmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// ITPC options
+	case optFeatGroupITPC:
+		m.featGroupITPCExpanded = !m.featGroupITPCExpanded
+		m.useDefaultAdvanced = false
+	case optItpcMethod:
+		m.itpcMethod = (m.itpcMethod + 1) % 4 // 0: global, 1: fold_global, 2: loo, 3: condition
+		m.useDefaultAdvanced = false
+	case optItpcConditionColumn:
+		if len(m.availableColumns) > 0 {
+			m.expandedOption = expandedItpcConditionColumn
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldItpcConditionColumn)
+		}
+		m.useDefaultAdvanced = false
+	case optItpcConditionValues:
+		if m.itpcConditionColumn == "" {
+			m.ShowToast("Select a condition column first", "warning")
+			return
+		}
+		if vals := m.GetDiscoveredColumnValues(m.itpcConditionColumn); len(vals) > 0 {
+			m.expandedOption = expandedItpcConditionValues
+			m.subCursor = 0
+		} else {
+			m.startTextEdit(textFieldItpcConditionValues)
+		}
+		m.useDefaultAdvanced = false
+	case optItpcMinTrialsPerCondition:
+		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPACPhaseRange:
 		// Cycle through common phase ranges: theta(4-8) -> delta(2-4) -> alpha(8-13) -> theta
@@ -1185,6 +1416,9 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optSpectralRatioPairs:
 		m.startTextEdit(textFieldSpectralRatioPairs)
 		m.useDefaultAdvanced = false
+	case optAperiodicSubtractEvoked:
+		m.aperiodicSubtractEvoked = !m.aperiodicSubtractEvoked
+		m.useDefaultAdvanced = false
 	case optAsymmetryChannelPairs:
 		m.startTextEdit(textFieldAsymmetryChannelPairs)
 		m.useDefaultAdvanced = false
@@ -1207,7 +1441,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	// TFR section
 	case optFeatGroupTFR:
 		m.featGroupTFRExpanded = !m.featGroupTFRExpanded
-	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrDecim, optTfrWorkers:
+	case optTfrFreqMin, optTfrFreqMax, optTfrNFreqs, optTfrMinCycles, optTfrNCyclesFactor, optTfrWorkers:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	}
@@ -1688,9 +1922,6 @@ func (m *Model) toggleBehaviorAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupCorrelations:
 		m.behaviorGroupCorrelationsExpanded = !m.behaviorGroupCorrelationsExpanded
-		m.useDefaultAdvanced = false
-	case optBehaviorGroupConfounds:
-		m.behaviorGroupConfoundsExpanded = !m.behaviorGroupConfoundsExpanded
 		m.useDefaultAdvanced = false
 	case optBehaviorGroupRegression:
 		m.behaviorGroupRegressionExpanded = !m.behaviorGroupRegressionExpanded
@@ -2326,6 +2557,32 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	switch opt {
 	case optUseDefaults:
 		m.useDefaultAdvanced = !m.useDefaultAdvanced
+	// Group expansion toggles
+	case optPrepGroupStages:
+		m.prepGroupStagesExpanded = !m.prepGroupStagesExpanded
+	case optPrepGroupGeneral:
+		m.prepGroupGeneralExpanded = !m.prepGroupGeneralExpanded
+	case optPrepGroupFiltering:
+		m.prepGroupFilteringExpanded = !m.prepGroupFilteringExpanded
+	case optPrepGroupPyprep:
+		m.prepGroupPyprepExpanded = !m.prepGroupPyprepExpanded
+	case optPrepGroupICA:
+		m.prepGroupICAExpanded = !m.prepGroupICAExpanded
+	case optPrepGroupEpoching:
+		m.prepGroupEpochingExpanded = !m.prepGroupEpochingExpanded
+	// Stage toggles
+	case optPrepStageBadChannels:
+		m.prepStageSelected[0] = !m.prepStageSelected[0]
+		m.useDefaultAdvanced = false
+	case optPrepStageFiltering:
+		m.prepStageSelected[1] = !m.prepStageSelected[1]
+		m.useDefaultAdvanced = false
+	case optPrepStageICA:
+		m.prepStageSelected[2] = !m.prepStageSelected[2]
+		m.useDefaultAdvanced = false
+	case optPrepStageEpoching:
+		m.prepStageSelected[3] = !m.prepStageSelected[3]
+		m.useDefaultAdvanced = false
 	case optPrepUsePyprep:
 		m.prepUsePyprep = !m.prepUsePyprep
 		m.useDefaultAdvanced = false
@@ -2338,8 +2595,32 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
+	case optPrepRansac:
+		m.prepRansac = !m.prepRansac
+		m.useDefaultAdvanced = false
+	case optPrepRepeats, optPrepBreaksMinLength, optPrepTStartAfterPrevious, optPrepTStopBeforeNext:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepAverageReref:
+		m.prepAverageReref = !m.prepAverageReref
+		m.useDefaultAdvanced = false
+	case optPrepFileExtension:
+		m.startTextEdit(textFieldPrepFileExtension)
+		m.useDefaultAdvanced = false
+	case optPrepConsiderPreviousBads:
+		m.prepConsiderPreviousBads = !m.prepConsiderPreviousBads
+		m.useDefaultAdvanced = false
+	case optPrepOverwriteChansTsv:
+		m.prepOverwriteChansTsv = !m.prepOverwriteChansTsv
+		m.useDefaultAdvanced = false
+	case optPrepDeleteBreaks:
+		m.prepDeleteBreaks = !m.prepDeleteBreaks
+		m.useDefaultAdvanced = false
 	case optPrepICAMethod:
 		m.prepICAMethod = (m.prepICAMethod + 1) % 3
+		m.useDefaultAdvanced = false
+	case optPrepKeepMnebidsBads:
+		m.prepKeepMnebidsBads = !m.prepKeepMnebidsBads
 		m.useDefaultAdvanced = false
 	case optIcaLabelsToKeep:
 		m.startTextEdit(textFieldIcaLabelsToKeep)
@@ -2348,6 +2629,173 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.prepEpochsNoBaseline = !m.prepEpochsNoBaseline
 		m.useDefaultAdvanced = false
 	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getPreprocessingOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
+}
+
+func (m *Model) toggleFmriAdvancedOption() {
+	options := m.getFmriPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optUseDefaults:
+		m.useDefaultAdvanced = !m.useDefaultAdvanced
+
+	// Group expansion toggles
+	case optFmriGroupRuntime:
+		m.fmriGroupRuntimeExpanded = !m.fmriGroupRuntimeExpanded
+	case optFmriGroupOutput:
+		m.fmriGroupOutputExpanded = !m.fmriGroupOutputExpanded
+	case optFmriGroupPerformance:
+		m.fmriGroupPerformanceExpanded = !m.fmriGroupPerformanceExpanded
+	case optFmriGroupAnatomical:
+		m.fmriGroupAnatomicalExpanded = !m.fmriGroupAnatomicalExpanded
+	case optFmriGroupBold:
+		m.fmriGroupBoldExpanded = !m.fmriGroupBoldExpanded
+	case optFmriGroupQc:
+		m.fmriGroupQcExpanded = !m.fmriGroupQcExpanded
+	case optFmriGroupDenoising:
+		m.fmriGroupDenoisingExpanded = !m.fmriGroupDenoisingExpanded
+	case optFmriGroupSurface:
+		m.fmriGroupSurfaceExpanded = !m.fmriGroupSurfaceExpanded
+	case optFmriGroupMultiecho:
+		m.fmriGroupMultiechoExpanded = !m.fmriGroupMultiechoExpanded
+	case optFmriGroupRepro:
+		m.fmriGroupReproExpanded = !m.fmriGroupReproExpanded
+	case optFmriGroupValidation:
+		m.fmriGroupValidationExpanded = !m.fmriGroupValidationExpanded
+	case optFmriGroupAdvanced:
+		m.fmriGroupAdvancedExpanded = !m.fmriGroupAdvancedExpanded
+
+	// Runtime
+	case optFmriEngine:
+		m.fmriEngineIndex = (m.fmriEngineIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriFmriprepImage:
+		m.startTextEdit(textFieldFmriFmriprepImage)
+		m.useDefaultAdvanced = false
+
+	// Output
+	case optFmriOutputSpaces:
+		m.startTextEdit(textFieldFmriOutputSpaces)
+		m.useDefaultAdvanced = false
+	case optFmriIgnore:
+		m.startTextEdit(textFieldFmriIgnore)
+		m.useDefaultAdvanced = false
+	case optFmriLevel:
+		m.fmriLevelIndex = (m.fmriLevelIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriCiftiOutput:
+		m.fmriCiftiOutputIndex = (m.fmriCiftiOutputIndex + 1) % 3
+		m.useDefaultAdvanced = false
+	case optFmriTaskId:
+		m.startTextEdit(textFieldFmriTaskId)
+		m.useDefaultAdvanced = false
+
+	// Performance
+	case optFmriNThreads:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriOmpNThreads:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriMemMb:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriLowMem:
+		m.fmriLowMem = !m.fmriLowMem
+		m.useDefaultAdvanced = false
+
+	// Anatomical
+	case optFmriSkipReconstruction:
+		m.fmriSkipReconstruction = !m.fmriSkipReconstruction
+		m.useDefaultAdvanced = false
+	case optFmriLongitudinal:
+		m.fmriLongitudinal = !m.fmriLongitudinal
+		m.useDefaultAdvanced = false
+	case optFmriSkullStripTemplate:
+		m.startTextEdit(textFieldFmriSkullStripTemplate)
+		m.useDefaultAdvanced = false
+	case optFmriSkullStripFixedSeed:
+		m.fmriSkullStripFixedSeed = !m.fmriSkullStripFixedSeed
+		m.useDefaultAdvanced = false
+
+	// BOLD processing
+	case optFmriBold2T1wInit:
+		m.fmriBold2T1wInitIndex = (m.fmriBold2T1wInitIndex + 1) % 2
+		m.useDefaultAdvanced = false
+	case optFmriBold2T1wDof:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriSliceTimeRef:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriDummyScans:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Quality control
+	case optFmriFdSpikeThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optFmriDvarsSpikeThreshold:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Denoising
+	case optFmriUseAroma:
+		m.fmriUseAroma = !m.fmriUseAroma
+		m.useDefaultAdvanced = false
+
+	// Surface
+	case optFmriMedialSurfaceNan:
+		m.fmriMedialSurfaceNan = !m.fmriMedialSurfaceNan
+		m.useDefaultAdvanced = false
+	case optFmriNoMsm:
+		m.fmriNoMsm = !m.fmriNoMsm
+		m.useDefaultAdvanced = false
+
+	// Multi-echo
+	case optFmriMeOutputEchos:
+		m.fmriMeOutputEchos = !m.fmriMeOutputEchos
+		m.useDefaultAdvanced = false
+
+	// Reproducibility
+	case optFmriRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+
+	// Validation
+	case optFmriSkipBidsValidation:
+		m.fmriSkipBidsValidation = !m.fmriSkipBidsValidation
+		m.useDefaultAdvanced = false
+	case optFmriStopOnFirstCrash:
+		m.fmriStopOnFirstCrash = !m.fmriStopOnFirstCrash
+		m.useDefaultAdvanced = false
+	case optFmriCleanWorkdir:
+		m.fmriCleanWorkdir = !m.fmriCleanWorkdir
+		m.useDefaultAdvanced = false
+
+	// Advanced
+	case optFmriExtraArgs:
+		m.startTextEdit(textFieldFmriExtraArgs)
+		m.useDefaultAdvanced = false
+	}
+
+	// Clamp cursor after expand/collapse changes
+	options = m.getFmriPreprocessingOptions()
+	if len(options) > 0 {
+		m.advancedCursor = clampCursor(m.advancedCursor, len(options)-1)
+	}
+	m.UpdateAdvancedOffset()
 }
 
 func (m *Model) toggleRawToBidsAdvancedOption() {
@@ -2429,6 +2877,8 @@ func (m *Model) commitNumberInput() {
 		m.commitMLNumber(val)
 	case types.PipelinePreprocessing:
 		m.commitPreprocessingNumber(val)
+	case types.PipelineFmri:
+		m.commitFmriNumber(val)
 	case types.PipelineRawToBIDS:
 		m.commitRawToBidsNumber(val)
 	}
@@ -2954,6 +3404,76 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+	// Source localization numeric options
+	case optSourceLocReg:
+		if val >= 0 {
+			m.sourceLocReg = val
+		}
+	case optSourceLocSnr:
+		if val > 0 {
+			m.sourceLocSnr = val
+		}
+	case optSourceLocLoose:
+		if val >= 0 && val <= 1 {
+			m.sourceLocLoose = val
+		}
+	case optSourceLocDepth:
+		if val >= 0 && val <= 1 {
+			m.sourceLocDepth = val
+		}
+	case optSourceLocMindistMm:
+		if val >= 0 {
+			m.sourceLocMindistMm = val
+		}
+	case optSourceLocFmriThreshold:
+		if val > 0 {
+			m.sourceLocFmriThreshold = val
+		}
+	case optSourceLocFmriMinClusterVox:
+		if val >= 0 {
+			m.sourceLocFmriMinClusterVox = int(val)
+		}
+	case optSourceLocFmriMaxClusters:
+		if val >= 1 {
+			m.sourceLocFmriMaxClusters = int(val)
+		}
+	case optSourceLocFmriMaxVoxPerClus:
+		if val >= 0 {
+			m.sourceLocFmriMaxVoxPerClus = int(val)
+		}
+	case optSourceLocFmriMaxTotalVox:
+		if val >= 0 {
+			m.sourceLocFmriMaxTotalVox = int(val)
+		}
+	case optSourceLocFmriRandomSeed:
+		if val >= 0 {
+			m.sourceLocFmriRandomSeed = int(val)
+		}
+	case optSourceLocFmriHighPassHz:
+		if val >= 0 {
+			m.sourceLocFmriHighPassHz = val
+		}
+	case optSourceLocFmriLowPassHz:
+		if val > 0 {
+			m.sourceLocFmriLowPassHz = val
+		}
+	case optSourceLocFmriClusterPThreshold:
+		if val >= 0 && val <= 1 {
+			m.sourceLocFmriClusterPThreshold = val
+		}
+	case optSourceLocFmriWindowATmin:
+		m.sourceLocFmriWindowATmin = val
+	case optSourceLocFmriWindowATmax:
+		m.sourceLocFmriWindowATmax = val
+	case optSourceLocFmriWindowBTmin:
+		m.sourceLocFmriWindowBTmin = val
+	case optSourceLocFmriWindowBTmax:
+		m.sourceLocFmriWindowBTmax = val
+	// ITPC options
+	case optItpcMinTrialsPerCondition:
+		if val >= 1 {
+			m.itpcMinTrialsPerCondition = int(val)
+		}
 	// Spatial transform options
 	case optSpatialTransformLambda2:
 		if val > 0 {
@@ -2983,10 +3503,6 @@ func (m *Model) commitFeaturesNumber(val float64) {
 	case optTfrNCyclesFactor:
 		if val >= 0.5 {
 			m.tfrNCyclesFactor = val
-		}
-	case optTfrDecim:
-		if val >= 1 {
-			m.tfrDecim = int(val)
 		}
 	case optTfrWorkers:
 		m.tfrWorkers = int(val)
@@ -3283,6 +3799,53 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 	case optPrepEpochsReject:
 		if val >= 0 {
 			m.prepEpochsReject = val
+		}
+	}
+}
+
+func (m *Model) commitFmriNumber(val float64) {
+	options := m.getFmriPreprocessingOptions()
+	if m.advancedCursor < 0 || m.advancedCursor >= len(options) {
+		return
+	}
+
+	opt := options[m.advancedCursor]
+	switch opt {
+	case optFmriNThreads:
+		if val >= 0 {
+			m.fmriNThreads = int(val)
+		}
+	case optFmriOmpNThreads:
+		if val >= 0 {
+			m.fmriOmpNThreads = int(val)
+		}
+	case optFmriMemMb:
+		if val >= 0 {
+			m.fmriMemMb = int(val)
+		}
+	case optFmriBold2T1wDof:
+		if val >= 0 {
+			m.fmriBold2T1wDof = int(val)
+		}
+	case optFmriSliceTimeRef:
+		if val >= 0 && val <= 1 {
+			m.fmriSliceTimeRef = val
+		}
+	case optFmriDummyScans:
+		if val >= 0 {
+			m.fmriDummyScans = int(val)
+		}
+	case optFmriFdSpikeThreshold:
+		if val >= 0 {
+			m.fmriFdSpikeThreshold = val
+		}
+	case optFmriDvarsSpikeThreshold:
+		if val >= 0 {
+			m.fmriDvarsSpikeThreshold = val
+		}
+	case optFmriRandomSeed:
+		if val >= 0 {
+			m.fmriRandomSeed = int(val)
 		}
 	}
 }

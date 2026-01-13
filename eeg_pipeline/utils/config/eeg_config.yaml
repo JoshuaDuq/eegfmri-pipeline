@@ -8,8 +8,33 @@ project:
 
 paths:
   bids_root: "../../data/bids_output"  # BIDS-formatted raw data directory
+  bids_fmri_root: "../../data/fMRI_data"  # BIDS-formatted fMRI data directory (for contrast builder)
   deriv_root: "../../data/derivatives"  # Processed derivatives output directory
   source_data: "../../data/source_data"  # Raw source data directory
+  freesurfer_dir: "../../data/derivatives/freesurfer"  # FreeSurfer SUBJECTS_DIR (contains subject directories)
+  freesurfer_license: "eeg_pipeline/licenses/license_freesurfer.txt"  # Path to FreeSurfer license.txt
+
+###################################################################
+# 1b. fMRI PREPROCESSING (fMRIPrep-style)
+###################################################################
+fmri_preprocessing:
+  engine: "docker"  # "docker" or "apptainer"
+  fmriprep:
+    image: "nipreps/fmriprep:23.2.1"  # Docker image tag or apptainer URI/path
+    output_dir: null  # BIDS derivatives root (null = paths.deriv_root)
+    work_dir: null  # Scratch/work directory (null = <deriv_root>/work/fmriprep)
+    fs_license_file: "eeg_pipeline/licenses/license_freesurfer.txt"  # FreeSurfer license.txt (null = paths.freesurfer_license)
+    fs_subjects_dir: null  # Optional FreeSurfer SUBJECTS_DIR
+    output_spaces: ["MNI152NLin2009cAsym", "T1w"]
+    ignore: []  # e.g., ["fieldmaps", "slicetiming"]
+    bids_filter_file: null  # Optional BIDS filter JSON (path)
+    use_aroma: false
+    skip_bids_validation: false
+    clean_workdir: true
+    stop_on_first_crash: false
+    fs_no_reconall: false
+    mem_mb: 0  # 0 = fMRIPrep default
+    extra_args: ""  # Parsed with shlex and appended verbatim to fMRIPrep CLI
 
 ###################################################################
 # 2. DEFINITIONS & ANCHORS
@@ -106,7 +131,6 @@ time_frequency_analysis:
     n_cycles_factor: 2.0         # n_cycles = freq / n_cycles_factor
     decim_power: 4               # Decimation for power TFR (can be aggressive)
     decim_phase: 1               # Decimation for phase/complex TFR (preserve time structure)
-    decim: 4                     # Legacy fallback (deprecated, use decim_power/decim_phase)
     workers: -1
   rois: *roi_definitions
   
@@ -133,10 +157,23 @@ feature_engineering:
   spatial_modes: ["roi", "channels", "global"]
   create_combined_features: false
 
-  # Spatial transform applied before connectivity/band envelope computations.
-  # CSD/Laplacian is REQUIRED for interpretable sensor-space phase connectivity.
-  # Without it, apparent connectivity changes often track SNR/arousal/muscle, not neural coupling.
-  spatial_transform: "csd"    # "csd" (recommended), "laplacian", or "none" (not recommended for phase measures)
+  # Per-family spatial transforms: CSD is excellent for phase connectivity but changes
+  # the meaning/units/topography of amplitude-derived features. Configure separately.
+  # Options: "csd" (recommended for phase), "laplacian", or "none"
+  spatial_transform_per_family:
+    connectivity: "csd"      # Phase-based connectivity REQUIRES CSD for valid results
+    itpc: "csd"              # Phase coherence also benefits from CSD
+    pac: "csd"               # PAC phase component benefits from CSD
+    power: "none"            # Amplitude features - CSD changes interpretation
+    aperiodic: "none"        # Slope/offset - CSD changes spectral shape
+    bursts: "none"           # Envelope-based - CSD changes amplitude
+    erds: "none"             # Baseline-normalized power - CSD changes baseline
+    complexity: "none"       # Nonlinear dynamics - CSD changes signal properties
+    ratios: "none"           # Band ratios - CSD changes band power
+    asymmetry: "none"        # Hemispheric asymmetry - CSD changes topography
+    spectral: "none"         # Peak frequency etc - CSD changes spectral shape
+    erp: "none"              # ERP waveforms - CSD changes amplitude/topography
+    quality: "none"          # Quality metrics - should match raw data
   spatial_transform_params:
     lambda2: 1.0e-5
     stiffness: 4.0
@@ -166,12 +203,13 @@ feature_engineering:
       - [delta, alpha]     
       - [delta, theta]      
     include_log_ratios: true
-    ratio_source: "raw"              # "raw" (absolute power) or "powcorr" (aperiodic-adjusted, reduces confounding)
+    # NOTE: Band ratios use Hilbert envelope² (time-domain bandpass power).
+    # For aperiodic-adjusted ratios, use *_powcorr outputs from aperiodic module.
     psd_method: "multitaper"         # "multitaper" (recommended) or "welch"
     fmin: 1.0
     fmax: 80.0
     exclude_line_noise: true
-    line_noise_freqs: [50.0]         # set to [60.0] where appropriate
+    line_noise_freqs: [60.0]         # Must match preprocessing.line_freq
     line_noise_width_hz: 1.0
     line_noise_harmonics: 3
     segments: ["baseline"]           # Restrict spectral/IAF to baseline by default; add "active" if needed
@@ -190,16 +228,52 @@ feature_engineering:
     alpha_width_hz: 2.0
     iaf_search_range_hz: [7.0, 13.0]
     iaf_min_prominence: 0.05
-    iaf_rois: ["ParOccipital_Midline", "ParOccipital_Ipsi_L", "ParOccipital_Contra_R"]
+    # Use existing ROI names from `rois:` above. If these ROIs are missing, IAF
+    # estimation returns null unless allow_all_channels_fallback=true.
+    iaf_rois: ["ParOccipital_Midline", "ParOccipital_Left", "ParOccipital_Right"]
+    allow_all_channels_fallback: false
 
   itpc:
     # Leakage-safe modes:
     # - "fold_global": ITPC computed from TRAINING trials only when ctx.train_mask present (CV-safe, DEFAULT)
     # - "global": ITPC computed across ALL trials and broadcast per trial (LEAKS in CV/ML - use only for descriptive analysis)
+    # - "condition": ITPC computed per condition group (avoids pseudo-replication for condition-level analyses)
     # - "loo": Leave-one-out ITPC (unsafe unless allow_unsafe_loo=true and computed in-fold)
     method: "fold_global"
     allow_unsafe_loo: false
     baseline_correction: "none"  # "none" or "subtract"
+    # Condition-based ITPC settings (used when method="condition")
+    # ITPC is fundamentally cross-trial; broadcasting it per trial creates pseudo-replication.
+    # For condition-level analyses, compute ITPC within each condition group.
+    condition_column: null        # Column name in events for condition grouping (e.g., "condition", "stimulus_type")
+    min_trials_per_condition: 10  # Minimum trials per condition for reliable ITPC
+    min_segment_sec: 1.0          # Minimum segment duration for ITPC (sec)
+    min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
+
+  ratios:
+    min_segment_sec: 1.0          # Minimum segment duration for band ratios (sec)
+    min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
+    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
+
+  asymmetry:
+    min_segment_sec: 1.0          # Minimum segment duration for asymmetry (sec)
+    min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
+    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
+
+  bursts:
+    min_segment_sec: 2.0          # Minimum segment duration for burst detection (sec)
+    min_cycles_at_fmin: 5.0       # Require more cycles for reliable burst detection
+    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
+
+  complexity:
+    min_segment_sec: 2.0          # Minimum segment duration for complexity metrics (sec)
+    min_samples: 100              # Minimum samples for reliable LZC/PE computation
+    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
+
+  erds:
+    min_segment_sec: 1.0          # Minimum segment duration for ERDS (sec)
+    min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
+    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
 
   aperiodic:
     model: "fixed"                 # "fixed" or "knee"
@@ -213,7 +287,7 @@ feature_engineering:
     max_rms: null
     min_segment_sec: 2.0           # Minimum segment duration for stable slope/offset estimation (sec)
     exclude_line_noise: true       # Exclude line-noise bins before fitting
-    line_noise_freqs: [50.0]       # [60.0] for North America
+    line_noise_freqs: [60.0]       # Must match preprocessing.line_freq
     line_noise_width_hz: 1.0
     line_noise_harmonics: 3
 
@@ -232,6 +306,37 @@ feature_engineering:
     phase_estimator: "within_epoch"  # "within_epoch" (per-trial) or "across_epochs" (group-level, broadcast)
     force_within_epoch_for_ml: true  # Force within_epoch when train_mask detected (prevents CV leakage)
     min_segment_sec: 1.0             # Minimum segment duration for connectivity (sec)
+
+  # Source localization (MNE-Python): cortical ROI power/envelope/connectivity from source estimates.
+  #
+  # Defaults use the FreeSurfer fsaverage template. For subject-specific (or fMRI-informed) localization,
+  # you MUST provide:
+  #   - subjects_dir: FreeSurfer SUBJECTS_DIR (folder containing the subject directory)
+  #   - subject: FreeSurfer subject name (e.g., "sub-0001")
+  #   - trans: EEG↔MRI transform file (*.fif) from MNE coregistration
+  #   - bem: BEM solution file (*-bem-sol.fif)
+  #
+  # fMRI-informed mode does NOT use raw BOLD time-series directly. It requires an fMRI statistical map
+  # (t/z/cope/contrast map) already computed by an fMRI GLM and resampled into the SAME MRI space as the
+  # FreeSurfer subject (typically `mri/orig.mgz` space).
+  #
+  # NOTE: fMRI-specific settings (BEM generation, contrast builder, fMRI constraints) are now in
+  # fmri_pipeline/utils/config/fmri_config.yaml
+  sourcelocalization:
+    mode: "fmri_informed"               # "eeg_only" (template-based) or "fmri_informed" (subject-specific)
+    method: "lcmv"                 # "lcmv" or "eloreta"
+    spacing: "oct6"                # "oct5" | "oct6" | "ico4" | "ico5"
+    parcellation: "aparc"          # "aparc" | "aparc.a2009s" | "HCPMMP1"
+    connectivity_method: "aec"     # "aec" | "wpli" | "plv"
+    mindist_mm: 5.0
+    reg: 0.05                      # LCMV regularization
+    snr: 3.0                       # eLORETA SNR
+    loose: 0.2                     # eLORETA loose orientation (0..1)
+    depth: 0.8                     # eLORETA depth weighting (0..1)
+    subjects_dir: null             # e.g., "../../data/freesurfer"
+    subject: null                  # e.g., "sub-0001"
+    trans: null                    # e.g., "../../data/derivatives/coreg/sub-0001-trans.fif"
+    bem: null                      # e.g., "../../data/derivatives/bem/sub-0001-bem-sol.fif"
 
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
@@ -279,8 +384,10 @@ feature_engineering:
   bursts:
     bands: ["beta", "gamma"]
     threshold_method: "percentile"   # "percentile", "zscore", "mad"
+    threshold_reference: "subject"   # "subject" (recommended), "trial" (legacy), or "condition"
     threshold_percentile: 95.0
     threshold_z: 2.0                # used for zscore/mad methods
+    min_trials_per_condition: 10     # used when threshold_reference="condition"
     min_duration_ms: 50
     min_cycles: 3.0
 
@@ -372,16 +479,7 @@ behavior_analysis:
       quantile_high: 0.85
       n_candidates: 15
 
-  # DEPRECATED: Confounds auditing has been removed from the pipeline.
-  # This section is retained for backward compatibility but is ignored.
-  confounds:
-    enabled: false  # DEPRECATED: always disabled
-    qc_column_patterns:
-      - "^quality_.*_global_"
-      - "^quality_.*_ch_"
-    add_as_covariates_if_significant: false
-    max_qc_covariates: 3
-
+  
   # Trialwise regression/moderation (complements correlations)
   regression:
     enabled: false
@@ -833,15 +931,11 @@ plotting:
       pac_pairs: ["theta_beta", "theta_gamma", "alpha_beta", "alpha_gamma"]
 
 ###################################################################
-# 7. SYSTEM & LOGGING
+# 7. SYSTEM
 ###################################################################
 system:
   n_jobs: -1
   strict_mode: true
-
-logging:
-  log_file_name: "eeg_pipeline.log"
-  level: "INFO"
 
 io:
   constants:

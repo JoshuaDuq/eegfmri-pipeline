@@ -37,12 +37,14 @@ def _get_itpc_method(config: Any) -> str:
                 WARNING: Creates cross-trial dependence; can leak in CV/machine learning.
     - 'fold_global': Compute ITPC from training trials only (requires ctx.train_mask),
                      broadcast to all trials. This is leakage-safe for CV/machine learning.
+    - 'condition': Compute ITPC per condition group (avoids pseudo-replication for
+                   condition-level analyses). Requires condition_column in config.
     - 'loo': Leave-one-out ITPC (per-trial). Requires train_mask and explicit opt-in.
     """
-    method = str(config.get("feature_engineering.itpc.method", "global")).strip().lower()
-    if method not in {"loo", "global", "fold_global"}:
+    method = str(config.get("feature_engineering.itpc.method", "fold_global")).strip().lower()
+    if method not in {"loo", "global", "fold_global", "condition"}:
         raise ValueError(
-            "Invalid ITPC method. Supported values are 'loo', 'global', and 'fold_global'. "
+            "Invalid ITPC method. Supported values are 'loo', 'global', 'fold_global', and 'condition'. "
             f"Got: {method!r}"
         )
     if method == "loo" and not bool(config.get("feature_engineering.itpc.allow_unsafe_loo", False)):
@@ -53,6 +55,56 @@ def _get_itpc_method(config: Any) -> str:
             "within CV folds and pass an explicit training mask."
         )
     return method
+
+
+def _compute_condition_itpc(
+    complex_vectors: np.ndarray,
+    condition_labels: np.ndarray,
+    min_trials_per_condition: int = 10,
+    logger: Optional[logging.Logger] = None,
+) -> np.ndarray:
+    """Compute ITPC per condition group to avoid pseudo-replication.
+    
+    Instead of broadcasting a single global ITPC to all trials (which creates
+    pseudo-replication), compute ITPC within each condition group and assign
+    the condition-specific ITPC to trials in that condition.
+    
+    Args:
+        complex_vectors: (n_epochs, n_channels, n_times) complex phase vectors
+        condition_labels: (n_epochs,) condition labels for each trial
+        min_trials_per_condition: Minimum trials per condition for reliable ITPC
+        logger: Optional logger
+        
+    Returns:
+        itpc_per_trial: (n_epochs, n_channels) ITPC values per trial
+    """
+    n_epochs, n_ch, n_times = complex_vectors.shape
+    itpc_per_trial = np.full((n_epochs, n_ch), np.nan, dtype=np.float32)
+    
+    unique_conditions = np.unique(condition_labels)
+    
+    for cond in unique_conditions:
+        cond_mask = condition_labels == cond
+        n_cond_trials = np.sum(cond_mask)
+        
+        if n_cond_trials < min_trials_per_condition:
+            if logger:
+                logger.warning(
+                    "ITPC(condition): Condition '%s' has only %d trials (min=%d); "
+                    "ITPC will be NaN for these trials.",
+                    cond, n_cond_trials, min_trials_per_condition,
+                )
+            continue
+        
+        # Compute ITPC for this condition group
+        cond_complex = complex_vectors[cond_mask]  # (n_cond, n_ch, n_times)
+        cond_itpc_map = np.abs(np.mean(cond_complex, axis=0))  # (n_ch, n_times)
+        cond_itpc_ch = np.nanmean(cond_itpc_map, axis=1)  # (n_ch,)
+        
+        # Assign condition-specific ITPC to all trials in this condition
+        itpc_per_trial[cond_mask] = cond_itpc_ch[np.newaxis, :]
+    
+    return itpc_per_trial
 
 
 def _compute_peak_distance(
@@ -677,16 +729,23 @@ def extract_phase_features(
     spatial_modes = list(getattr(ctx, "spatial_modes", ["roi", "global"]))
     roi_map = _build_roi_map_if_needed(spatial_modes, ch_names, config)
     
+    windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     
-    # When a specific time range is targeted (ctx.name is set), the data has 
-    # already been cropped to that range. Use all available data with that segment name.
-    if target_name:
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segment_masks = {target_name: mask}
+        else:
+            logger.warning(
+                "ITPC: targeted window '%s' has no valid mask; using full epoch.",
+                target_name,
+            )
+            segment_masks = {target_name: np.ones_like(times, dtype=bool)}
         segments = [target_name]
-        # Create a mask covering all data since epochs/TFR are pre-cropped
-        segment_masks = {target_name: np.ones_like(times, dtype=bool)}
     else:
-        segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
+        segment_masks = get_segment_masks(epochs.times, windows, config)
         segments = list(segment_masks.keys())
     
     if not segments:
@@ -1004,6 +1063,11 @@ def extract_itpc_from_precomputed(
     """Compute ITPC-style metrics directly from precomputed band phases.
     
     ITPC = | (1/N) * sum( exp(i*phase) ) |
+    
+    Supports multiple computation modes:
+    - 'global': Compute across all trials, broadcast to each (pseudo-replication warning)
+    - 'fold_global': Compute from training trials only (CV-safe)
+    - 'condition': Compute per condition group (avoids pseudo-replication)
     """
     logger = getattr(precomputed, "logger", None)
     is_valid, err_msg = validate_precomputed(precomputed, require_windows=True, require_bands=True)
@@ -1020,17 +1084,55 @@ def extract_itpc_from_precomputed(
             "fold-specific training masks to avoid leakage. Use ITPC(method='global') "
             "or compute LOO-ITPC within your CV loop."
         )
+    
+    # Get condition-based ITPC settings
+    itpc_cfg = cfg.get("feature_engineering.itpc", {}) if hasattr(cfg, "get") else {}
+    condition_column = itpc_cfg.get("condition_column", None)
+    min_trials_per_condition = int(itpc_cfg.get("min_trials_per_condition", 10))
+    
+    # Get condition labels if using condition-based ITPC
+    condition_labels = None
+    if itpc_method == "condition":
+        if condition_column is None:
+            if logger:
+                logger.warning(
+                    "ITPC(method='condition') requires condition_column to be set. "
+                    "Falling back to 'global' method (pseudo-replication warning)."
+                )
+            itpc_method = "global"
+        else:
+            # Try to get condition labels from precomputed metadata
+            metadata = getattr(precomputed, "metadata", None)
+            if metadata is not None and condition_column in metadata.columns:
+                condition_labels = metadata[condition_column].values
+            else:
+                if logger:
+                    logger.warning(
+                        "ITPC(method='condition'): Column '%s' not found in metadata. "
+                        "Falling back to 'global' method.",
+                        condition_column,
+                    )
+                itpc_method = "global"
         
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
-    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
     
-    # When a specific time range is targeted, the precomputed data may have been
-    # cropped to that range. Use all available data with that segment name.
-    if target_name:
-        masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            masks = {target_name: mask}
+        else:
+            if logger:
+                logger.warning(
+                    "ITPC: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+        masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     
     if not masks:
         return pd.DataFrame(), []
@@ -1067,13 +1169,29 @@ def extract_itpc_from_precomputed(
                 continue
             
             segment_complex = complex_vectors[:, :, mask]
-            itpc_map = np.abs(np.mean(segment_complex, axis=0))  # (ch, time)
-            itpc_ch = np.nanmean(itpc_map, axis=1)  # (ch,)
             
-            if baseline_itpc_ch is not None and seg_name != "baseline":
-                itpc_ch = itpc_ch - baseline_itpc_ch
+            # Compute ITPC based on method
+            if itpc_method == "condition" and condition_labels is not None:
+                # Condition-based ITPC: compute per condition group (avoids pseudo-replication)
+                itpc_seg = _compute_condition_itpc(
+                    segment_complex,
+                    condition_labels,
+                    min_trials_per_condition=min_trials_per_condition,
+                    logger=logger,
+                )
+                # Apply baseline correction per-trial if needed
+                if baseline_itpc_ch is not None and seg_name != "baseline":
+                    itpc_seg = itpc_seg - baseline_itpc_ch[np.newaxis, :]
+            else:
+                # Global ITPC: compute across all trials, broadcast to each
+                # WARNING: This creates pseudo-replication for trial-level analyses
+                itpc_map = np.abs(np.mean(segment_complex, axis=0))  # (ch, time)
+                itpc_ch = np.nanmean(itpc_map, axis=1)  # (ch,)
+                
+                if baseline_itpc_ch is not None and seg_name != "baseline":
+                    itpc_ch = itpc_ch - baseline_itpc_ch
 
-            itpc_seg = _broadcast_per_trial(itpc_ch, n_epochs)  # (epochs, ch)
+                itpc_seg = _broadcast_per_trial(itpc_ch, n_epochs)  # (epochs, ch)
             
             spatial_results = _aggregate_spatial_features(
                 itpc_seg, "itpc", seg_name, band, "val",

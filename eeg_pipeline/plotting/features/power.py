@@ -1854,8 +1854,8 @@ def plot_spectral_slope_topomap(
     
     plot_cfg = get_plot_config(config)
     
-    # Support both legacy "aper_slope_" and current "aperiodic_*_slope" naming conventions
-    slope_cols = [c for c in aperiodic_df.columns if c.startswith("aper_slope_") or "_slope" in c]
+    # Use current aperiodic_*_slope naming convention
+    slope_cols = [c for c in aperiodic_df.columns if c.startswith("aperiodic_") and "_slope" in c]
     # Filter to only slope columns (not offset, r2, etc.)
     slope_cols = [c for c in slope_cols if "slope" in c.lower() and "offset" not in c.lower()]
     

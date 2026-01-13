@@ -17,6 +17,7 @@ from mne.time_frequency import psd_array_welch
 from scipy.signal import hilbert
 
 from eeg_pipeline.types import BandData, PSDData
+from mne.time_frequency import psd_array_multitaper
 
 
 # Filter design constants
@@ -376,6 +377,221 @@ def compute_psd(
         return None
     
     return PSDData(freqs=freqs, psd=psd_all)
+
+
+def compute_psd_bandpower(
+    data: np.ndarray,
+    sfreq: float,
+    band_ranges: dict[str, tuple[float, float]],
+    *,
+    psd_method: str = "multitaper",
+    fmin: float = 1.0,
+    fmax: float = 80.0,
+    bandwidth: float = 2.0,
+    normalize_by_bandwidth: bool = True,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[dict[str, np.ndarray]]:
+    """
+    Compute PSD-integrated band power (scientifically valid for ratios/asymmetry).
+    
+    This is the correct approach for band power ratios and asymmetry metrics.
+    Unlike Hilbert envelope², PSD integration:
+    - Properly accounts for 1/f spectral slope
+    - Is bandwidth-normalized (power per Hz)
+    - Has well-defined statistical properties
+    - Is comparable across bands of different widths
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input data with shape (n_epochs, n_channels, n_times)
+    sfreq : float
+        Sampling frequency in Hz
+    band_ranges : dict
+        Dictionary mapping band names to (fmin, fmax) tuples
+    psd_method : str
+        PSD method: 'multitaper' (recommended) or 'welch'
+    fmin : float
+        Minimum frequency for PSD computation
+    fmax : float
+        Maximum frequency for PSD computation
+    bandwidth : float
+        Frequency smoothing bandwidth for multitaper (Hz)
+    normalize_by_bandwidth : bool
+        If True, return power per Hz (recommended for ratios).
+        If False, return total integrated power in band.
+    logger : Optional[logging.Logger]
+        Logger for warnings
+    
+    Returns
+    -------
+    Optional[dict[str, np.ndarray]]
+        Dictionary mapping band names to power arrays (n_epochs, n_channels).
+        Returns None on failure.
+    """
+    if data.ndim != 3:
+        if logger:
+            logger.error(f"Expected 3D data, got {data.ndim}D")
+        return None
+    
+    if sfreq <= 0:
+        if logger:
+            logger.error(f"Invalid sampling frequency: {sfreq}")
+        return None
+    
+    n_epochs, n_channels, n_times = data.shape
+    
+    if n_times < 64:
+        if logger:
+            logger.warning(
+                "PSD bandpower skipped: only %d samples (< 64 minimum).",
+                n_times,
+            )
+        return None
+    
+    nyquist = sfreq / 2.0
+    fmax = min(fmax, nyquist - 0.5)
+    
+    try:
+        if psd_method == "multitaper":
+            psds, freqs = psd_array_multitaper(
+                data,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                bandwidth=bandwidth,
+                adaptive=True,
+                normalization="full",
+                verbose=False,
+            )
+        else:
+            n_per_seg = min(int(sfreq * 2.0), n_times)
+            n_overlap = n_per_seg // 2
+            psds, freqs = psd_array_welch(
+                data,
+                sfreq=sfreq,
+                fmin=fmin,
+                fmax=fmax,
+                n_fft=max(256, n_per_seg),
+                n_per_seg=n_per_seg,
+                n_overlap=n_overlap,
+                verbose=False,
+            )
+    except Exception as exc:
+        if logger:
+            logger.error("PSD computation failed: %s", exc)
+        return None
+    
+    freqs = np.asarray(freqs, dtype=float)
+    psds = np.asarray(psds, dtype=float)
+    
+    # Compute frequency bin widths for integration
+    if len(freqs) > 1:
+        df = np.gradient(freqs)
+    else:
+        df = np.ones_like(freqs)
+    
+    band_power: dict[str, np.ndarray] = {}
+    
+    for band_name, (band_fmin, band_fmax) in band_ranges.items():
+        band_mask = (freqs >= band_fmin) & (freqs <= band_fmax)
+        
+        if not np.any(band_mask):
+            if logger:
+                logger.warning(
+                    "Band '%s' [%.1f-%.1f Hz] outside PSD range [%.1f-%.1f Hz]; skipping.",
+                    band_name, band_fmin, band_fmax, freqs.min(), freqs.max()
+                )
+            band_power[band_name] = np.full((n_epochs, n_channels), np.nan)
+            continue
+        
+        # Integrate PSD over band: sum(PSD * df)
+        psd_band = psds[..., band_mask]
+        df_band = df[band_mask]
+        
+        # Weighted integration (handles non-uniform frequency spacing)
+        integrated_power = np.sum(psd_band * df_band, axis=-1)
+        
+        if normalize_by_bandwidth:
+            # Power per Hz (comparable across bands of different widths)
+            bandwidth_hz = band_fmax - band_fmin
+            if bandwidth_hz > 0:
+                integrated_power = integrated_power / bandwidth_hz
+        
+        band_power[band_name] = integrated_power
+    
+    return band_power
+
+
+def subtract_evoked(
+    data: np.ndarray,
+    condition_labels: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Subtract evoked (phase-locked) response to isolate induced activity.
+    
+    For spectral analysis of event-related data (e.g., pain paradigms), the
+    evoked response (ERP) can contaminate power/spectral estimates, especially
+    at low frequencies. Subtracting the evoked response isolates "induced"
+    oscillatory activity that is time-locked but not phase-locked to the stimulus.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Input data with shape (n_epochs, n_channels, n_times)
+    condition_labels : Optional[np.ndarray]
+        If provided, subtract condition-specific evoked responses. Array of
+        length n_epochs with condition labels. If None, subtract grand average
+        across all epochs.
+    
+    Returns
+    -------
+    np.ndarray
+        Induced data with same shape as input (data - evoked)
+    
+    Notes
+    -----
+    This is the standard approach for computing "induced" power in EEG/MEG:
+    - Total power = Evoked power + Induced power
+    - Induced = Total - Evoked
+    
+    For pain paradigms, induced power better reflects ongoing oscillatory
+    changes related to pain processing, while evoked power reflects the
+    transient sensory response.
+    
+    References
+    ----------
+    Tallon-Baudry & Bertrand (1999). Oscillatory gamma activity in humans
+    and its role in object representation. Trends in Cognitive Sciences.
+    """
+    if data.ndim != 3:
+        raise ValueError(f"Expected 3D data (epochs, channels, times), got {data.ndim}D")
+    
+    n_epochs, n_channels, n_times = data.shape
+    induced = data.copy()
+    
+    if condition_labels is None:
+        # Subtract grand average evoked response
+        evoked = np.nanmean(data, axis=0, keepdims=True)
+        induced = data - evoked
+    else:
+        # Subtract condition-specific evoked responses
+        condition_labels = np.asarray(condition_labels)
+        if len(condition_labels) != n_epochs:
+            raise ValueError(
+                f"condition_labels length ({len(condition_labels)}) must match "
+                f"n_epochs ({n_epochs})"
+            )
+        
+        unique_conditions = np.unique(condition_labels[~np.isnan(condition_labels.astype(float))])
+        
+        for condition in unique_conditions:
+            mask = condition_labels == condition
+            if np.sum(mask) > 1:
+                condition_evoked = np.nanmean(data[mask], axis=0, keepdims=True)
+                induced[mask] = data[mask] - condition_evoked
+    
+    return induced
 
 
 def bandpass_filter_epochs(

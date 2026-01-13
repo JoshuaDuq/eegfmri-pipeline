@@ -1787,6 +1787,51 @@ func (m Model) renderReview() string {
 					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
 			}
 		}
+	} else if m.Pipeline == types.PipelineFmri {
+		if m.bidsFmriRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS fMRI Root:") + valueStyle.Render(m.bidsFmriRoot) + "\n")
+		}
+		if m.derivRoot != "" {
+			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Deriv Root:") + valueStyle.Render(m.derivRoot) + "\n")
+		}
+
+		if !m.useDefaultAdvanced {
+			var opts []string
+
+			engine := "docker"
+			if m.fmriEngineIndex%2 == 1 {
+				engine = "apptainer"
+			}
+			if engine != "docker" {
+				opts = append(opts, "engine="+engine)
+			}
+			if strings.TrimSpace(m.fmriFmriprepImage) != "" && m.fmriFmriprepImage != "nipreps/fmriprep:23.2.1" {
+				opts = append(opts, "image="+m.fmriFmriprepImage)
+			}
+			if strings.TrimSpace(m.fmriOutputSpacesSpec) != "" && strings.TrimSpace(m.fmriOutputSpacesSpec) != "MNI152NLin2009cAsym T1w" {
+				opts = append(opts, "spaces="+m.fmriOutputSpacesSpec)
+			}
+			if m.fmriUseAroma {
+				opts = append(opts, "aroma")
+			}
+			if m.fmriSkipBidsValidation {
+				opts = append(opts, "skip-validation")
+			}
+			if m.fmriStopOnFirstCrash {
+				opts = append(opts, "stop-on-crash")
+			}
+			if m.fmriSkipReconstruction {
+				opts = append(opts, "no-reconall")
+			}
+			if m.fmriMemMb > 0 {
+				opts = append(opts, fmt.Sprintf("mem=%dMB", m.fmriMemMb))
+			}
+
+			if len(opts) > 0 {
+				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
+					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
+			}
+		}
 	} else if m.Pipeline == types.PipelineRawToBIDS {
 		if m.sourceRoot != "" {
 			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Source Root:") + valueStyle.Render(m.sourceRoot) + "\n")
@@ -1891,6 +1936,8 @@ func (m Model) renderAdvancedConfig() string {
 		return m.renderMLAdvancedConfig()
 	case types.PipelinePreprocessing:
 		return m.renderPreprocessingAdvancedConfig()
+	case types.PipelineFmri:
+		return m.renderFmriAdvancedConfig()
 	case types.PipelineRawToBIDS:
 		return m.renderRawToBidsAdvancedConfig()
 	case types.PipelineMergePsychoPyData:
@@ -2033,6 +2080,18 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	}
 	if m.expandedOption == expandedDirectedConnMeasures {
 		totalLines += len(directedConnectivityMeasures)
+	}
+	if m.expandedOption == expandedFmriCondAColumn {
+		totalLines += len(m.fmriDiscoveredColumns)
+	}
+	if m.expandedOption == expandedFmriCondAValue {
+		totalLines += len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn))
+	}
+	if m.expandedOption == expandedFmriCondBColumn {
+		totalLines += len(m.fmriDiscoveredColumns)
+	}
+	if m.expandedOption == expandedFmriCondBValue {
+		totalLines += len(m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn))
 	}
 
 	effectiveHeight := m.height
@@ -2279,10 +2338,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "  Cycles Factor"
 			value = fmt.Sprintf("%.1f", m.tfrNCyclesFactor)
 			hint = "cycles per Hz"
-		case optTfrDecim:
-			label = "  Decimation"
-			value = fmt.Sprintf("%d", m.tfrDecim)
-			hint = "temporal downsample"
 		case optTfrWorkers:
 			label = "  Workers"
 			value = fmt.Sprintf("%d", m.tfrWorkers)
@@ -2404,6 +2459,11 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			hint = "minimum samples per segment"
 
 		// Source Localization (LCMV, eLORETA)
+		case optSourceLocMode:
+			label = "Mode"
+			modes := []string{"EEG-only (template)", "fMRI-informed"}
+			value = modes[m.sourceLocMode]
+			hint = "template or subject-specific"
 		case optSourceLocMethod:
 			label = "Method"
 			methods := []string{"LCMV", "eLORETA"}
@@ -2422,24 +2482,478 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optSourceLocReg:
 			label = "Regularization"
 			value = fmt.Sprintf("%.3f", m.sourceLocReg)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocReg) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "LCMV regularization"
 		case optSourceLocSnr:
 			label = "SNR"
 			value = fmt.Sprintf("%.1f", m.sourceLocSnr)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocSnr) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "eLORETA signal-to-noise"
 		case optSourceLocLoose:
 			label = "Loose"
 			value = fmt.Sprintf("%.2f", m.sourceLocLoose)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocLoose) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "eLORETA loose constraint"
 		case optSourceLocDepth:
 			label = "Depth"
 			value = fmt.Sprintf("%.2f", m.sourceLocDepth)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocDepth) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "eLORETA depth weighting"
 		case optSourceLocConnMethod:
 			label = "Connectivity"
 			connMethods := []string{"AEC", "wPLI", "PLV"}
 			value = connMethods[m.sourceLocConnMethod]
 			hint = "source-space connectivity"
+		case optSourceLocSubject:
+			label = "FS Subject"
+			if strings.TrimSpace(m.sourceLocSubject) == "" {
+				value = "(auto)"
+			} else {
+				value = m.sourceLocSubject
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocSubject {
+				value = m.textBuffer + "█"
+			}
+			hint = "FreeSurfer subject name"
+		case optSourceLocTrans:
+			label = "Coreg trans"
+			if strings.TrimSpace(m.sourceLocTrans) == "" {
+				value = "(unset)"
+			} else {
+				value = m.sourceLocTrans
+			}
+			hint = "EEG↔MRI transform .fif"
+		case optSourceLocBem:
+			label = "BEM sol"
+			if strings.TrimSpace(m.sourceLocBem) == "" {
+				value = "(unset)"
+			} else {
+				value = m.sourceLocBem
+			}
+			hint = "BEM solution .fif"
+		case optSourceLocMindistMm:
+			label = "Mindist (mm)"
+			value = fmt.Sprintf("%.1f", m.sourceLocMindistMm)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocMindistMm) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "min distance to inner skull"
+		case optSourceLocFmriEnabled:
+			label = "fMRI Prior"
+			if m.sourceLocFmriEnabled {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "restrict volume sources using fMRI"
+		case optSourceLocFmriStatsMap:
+			label = "fMRI Stats Map"
+			if strings.TrimSpace(m.sourceLocFmriStatsMap) == "" {
+				value = "(unset)"
+			} else {
+				value = m.sourceLocFmriStatsMap
+			}
+			hint = "NIfTI map in FS MRI space"
+		case optSourceLocFmriThreshold:
+			label = "fMRI Threshold"
+			value = fmt.Sprintf("%.2f", m.sourceLocFmriThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriThreshold) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "e.g., z>=3.10"
+		case optSourceLocFmriTail:
+			label = "fMRI Tail"
+			tails := []string{"pos", "abs"}
+			value = tails[m.sourceLocFmriTail]
+			hint = "pos or abs"
+		case optSourceLocFmriMinClusterVox:
+			label = "fMRI Min Voxels"
+			value = fmt.Sprintf("%d", m.sourceLocFmriMinClusterVox)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriMinClusterVox) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "min cluster size"
+		case optSourceLocFmriMaxClusters:
+			label = "fMRI Max Clusters"
+			value = fmt.Sprintf("%d", m.sourceLocFmriMaxClusters)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriMaxClusters) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "limit ROI clusters"
+		case optSourceLocFmriMaxVoxPerClus:
+			label = "fMRI Max Vox/Cluster"
+			value = fmt.Sprintf("%d", m.sourceLocFmriMaxVoxPerClus)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriMaxVoxPerClus) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "subsample per cluster"
+		case optSourceLocFmriMaxTotalVox:
+			label = "fMRI Max Total Vox"
+			value = fmt.Sprintf("%d", m.sourceLocFmriMaxTotalVox)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriMaxTotalVox) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "subsample total"
+		case optSourceLocFmriRandomSeed:
+			label = "fMRI Random Seed"
+			value = fmt.Sprintf("%d", m.sourceLocFmriRandomSeed)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriRandomSeed) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "0 = nondeterministic"
+
+		// BEM/Trans generation options (Docker-based)
+		case optSourceLocCreateTrans:
+			label = "Create Trans"
+			if m.sourceLocCreateTrans {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "auto-generate via Docker (requires Docker)"
+		case optSourceLocCreateBemModel:
+			label = "Create BEM Model"
+			if m.sourceLocCreateBemModel {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "auto-generate via Docker (requires Docker)"
+		case optSourceLocCreateBemSolution:
+			label = "Create BEM Solution"
+			if m.sourceLocCreateBemSolution {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "auto-generate via Docker (requires Docker)"
+
+		// fMRI GLM Contrast Builder options
+		case optSourceLocFmriContrastEnabled:
+			label = "Build Contrast"
+			if m.sourceLocFmriContrastEnabled {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "build from BOLD vs. load pre-computed"
+		case optSourceLocFmriContrastType:
+			label = "Contrast Type"
+			contrastTypes := []string{"t-test", "paired t-test", "F-test", "custom formula"}
+			value = contrastTypes[m.sourceLocFmriContrastType]
+			hint = "statistical test type"
+		case optSourceLocFmriCondAColumn:
+			label = "Cond A Column"
+			val := m.sourceLocFmriCondAColumn
+			if val == "" {
+				val = "(select column)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriCondAColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if len(m.fmriDiscoveredColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.fmriDiscoveredColumns))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriCondAColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optSourceLocFmriCondAValue:
+			label = "Cond A Value"
+			if m.sourceLocFmriCondAColumn == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				val := m.sourceLocFmriCondAValue
+				if val == "" {
+					val = "(select value)"
+				}
+				if m.editingText && m.editingTextField == textFieldSourceLocFmriCondAValue {
+					val = m.textBuffer + "█"
+				}
+				value = val
+				expandIndicatorHint := ""
+				if vals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.sourceLocFmriCondAColumn)
+				}
+				hint = "Space to select" + expandIndicatorHint
+				if m.expandedOption == expandedFmriCondAValue {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optSourceLocFmriCondBColumn:
+			label = "Cond B Column"
+			val := m.sourceLocFmriCondBColumn
+			if val == "" {
+				val = "(select column)"
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriCondBColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if len(m.fmriDiscoveredColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.fmriDiscoveredColumns))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedFmriCondBColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optSourceLocFmriCondBValue:
+			label = "Cond B Value"
+			if m.sourceLocFmriCondBColumn == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				val := m.sourceLocFmriCondBValue
+				if val == "" {
+					val = "(select value)"
+				}
+				if m.editingText && m.editingTextField == textFieldSourceLocFmriCondBValue {
+					val = m.textBuffer + "█"
+				}
+				value = val
+				expandIndicatorHint := ""
+				if vals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.sourceLocFmriCondBColumn)
+				}
+				hint = "Space to select" + expandIndicatorHint
+				if m.expandedOption == expandedFmriCondBValue {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optSourceLocFmriContrastFormula:
+			label = "Formula"
+			if strings.TrimSpace(m.sourceLocFmriContrastFormula) == "" {
+				value = "(e.g., pain_high - pain_low)"
+			} else {
+				value = m.sourceLocFmriContrastFormula
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriContrastFormula {
+				value = m.textBuffer + "█"
+			}
+			hint = "custom contrast formula"
+		case optSourceLocFmriContrastName:
+			label = "Contrast Name"
+			if strings.TrimSpace(m.sourceLocFmriContrastName) == "" {
+				value = "pain_vs_baseline"
+			} else {
+				value = m.sourceLocFmriContrastName
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriContrastName {
+				value = m.textBuffer + "█"
+			}
+			hint = "output name for contrast"
+		case optSourceLocFmriRunsToInclude:
+			label = "Runs"
+			if strings.TrimSpace(m.sourceLocFmriRunsToInclude) == "" {
+				value = "(auto-detect)"
+			} else {
+				value = m.sourceLocFmriRunsToInclude
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriRunsToInclude {
+				value = m.textBuffer + "█"
+			}
+			hint = "comma-separated run numbers"
+		case optSourceLocFmriAutoDetectRuns:
+			label = "Auto-detect Runs"
+			if m.sourceLocFmriAutoDetectRuns {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "scan BIDS for BOLD runs"
+		case optSourceLocFmriHrfModel:
+			label = "HRF Model"
+			hrfModels := []string{"SPM", "FLOBS", "FIR"}
+			value = hrfModels[m.sourceLocFmriHrfModel]
+			hint = "hemodynamic response function"
+		case optSourceLocFmriDriftModel:
+			label = "Drift Model"
+			driftModels := []string{"none", "cosine", "polynomial"}
+			value = driftModels[m.sourceLocFmriDriftModel]
+			hint = "low-frequency drift removal"
+		case optSourceLocFmriHighPassHz:
+			label = "High-pass (Hz)"
+			value = fmt.Sprintf("%.4f", m.sourceLocFmriHighPassHz)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriHighPassHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "e.g., 0.008 = 128s period"
+		case optSourceLocFmriLowPassHz:
+			label = "Low-pass (Hz)"
+			value = fmt.Sprintf("%.2f", m.sourceLocFmriLowPassHz)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriLowPassHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "temporal smoothing cutoff"
+		case optSourceLocFmriClusterCorrection:
+			label = "Cluster Correction"
+			if m.sourceLocFmriClusterCorrection {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "cluster-level FWE correction"
+		case optSourceLocFmriClusterPThreshold:
+			label = "Cluster p-threshold"
+			value = fmt.Sprintf("%.4f", m.sourceLocFmriClusterPThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriClusterPThreshold) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "cluster-forming threshold"
+		case optSourceLocFmriOutputType:
+			label = "Output Type"
+			outputTypes := []string{"z-score", "t-stat", "cope", "beta"}
+			value = outputTypes[m.sourceLocFmriOutputType]
+			hint = "statistical map type"
+		case optSourceLocFmriResampleToFS:
+			label = "Resample to FS"
+			if m.sourceLocFmriResampleToFS {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "auto-resample to FreeSurfer space"
+		case optSourceLocFmriWindowAName:
+			label = "Window A Name"
+			if m.sourceLocFmriWindowAName == "" {
+				value = "(not set)"
+			} else {
+				value = m.sourceLocFmriWindowAName
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowAName {
+				value = m.textBuffer + "█"
+			}
+			hint = "e.g., plateau"
+		case optSourceLocFmriWindowATmin:
+			label = "Window A Tmin"
+			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowATmin)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowATmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "start time in seconds"
+		case optSourceLocFmriWindowATmax:
+			label = "Window A Tmax"
+			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowATmax)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowATmax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "end time in seconds"
+		case optSourceLocFmriWindowBName:
+			label = "Window B Name"
+			if m.sourceLocFmriWindowBName == "" {
+				value = "(not set)"
+			} else {
+				value = m.sourceLocFmriWindowBName
+			}
+			if m.editingText && m.editingTextField == textFieldSourceLocFmriWindowBName {
+				value = m.textBuffer + "█"
+			}
+			hint = "e.g., baseline (optional)"
+		case optSourceLocFmriWindowBTmin:
+			label = "Window B Tmin"
+			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowBTmin)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowBTmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "start time in seconds"
+		case optSourceLocFmriWindowBTmax:
+			label = "Window B Tmax"
+			value = fmt.Sprintf("%.2f s", m.sourceLocFmriWindowBTmax)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriWindowBTmax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "end time in seconds"
+
+		// ITPC options
+		case optFeatGroupITPC:
+			label = "▸ ITPC"
+			hint = "Space to toggle"
+			if m.featGroupITPCExpanded {
+				label = "▾ ITPC"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optItpcMethod:
+			label = "ITPC Method"
+			itpcMethods := []string{"global", "fold_global", "loo", "condition"}
+			value = itpcMethods[m.itpcMethod]
+			hint = "global/fold_global/loo/condition"
+		case optItpcConditionColumn:
+			label = "Condition Column"
+			val := m.itpcConditionColumn
+			if val == "" {
+				val = "(select column)"
+			}
+			if m.editingText && m.editingTextField == textFieldItpcConditionColumn {
+				val = m.textBuffer + "█"
+			}
+			value = val
+			expandIndicatorHint := ""
+			if len(m.availableColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
+			}
+			hint = "Space to select" + expandIndicatorHint
+			if m.expandedOption == expandedItpcConditionColumn {
+				expandIndicator = " [-]"
+			} else {
+				expandIndicator = " [+]"
+			}
+		case optItpcConditionValues:
+			label = "Condition Values"
+			if m.itpcConditionColumn == "" {
+				value = "(select column first)"
+				hint = "requires column selection"
+			} else {
+				val := m.itpcConditionValues
+				if val == "" {
+					val = "(select values)"
+				}
+				if m.editingText && m.editingTextField == textFieldItpcConditionValues {
+					val = m.textBuffer + "█"
+				}
+				value = val
+				expandIndicatorHint := ""
+				if vals := m.GetDiscoveredColumnValues(m.itpcConditionColumn); len(vals) > 0 {
+					expandIndicatorHint = fmt.Sprintf(" · %d values in %s", len(vals), m.itpcConditionColumn)
+				}
+				hint = "Space to select" + expandIndicatorHint
+				if m.expandedOption == expandedItpcConditionValues {
+					expandIndicator = " [-]"
+				} else {
+					expandIndicator = " [+]"
+				}
+			}
+		case optItpcMinTrialsPerCondition:
+			label = "Min Trials/Condition"
+			value = fmt.Sprintf("%d", m.itpcMinTrialsPerCondition)
+			if m.editingNumber && m.isCurrentlyEditing(optItpcMinTrialsPerCondition) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum trials per condition"
 
 		// PAC
 		case optPACPhaseRange:
@@ -2634,6 +3148,10 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Ratio pairs"
 			value = spectralRatioPairsVal
 			hint = "e.g. theta:beta,alpha:beta"
+		case optAperiodicSubtractEvoked:
+			label = "Induced spectra"
+			value = m.boolToOnOff(m.aperiodicSubtractEvoked)
+			hint = "subtract evoked for pain"
 		case optAsymmetryChannelPairs:
 			label = "Channel pairs"
 			value = asymPairsVal
@@ -2709,6 +3227,92 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				lineIdx++
 			}
 		}
+
+		// Expanded items (fMRI condition A column)
+		if opt == optSourceLocFmriCondAColumn && m.expandedOption == expandedFmriCondAColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, col := range m.fmriDiscoveredColumns {
+				isSubFocused := j == m.subCursor
+				isSelected := m.sourceLocFmriCondAColumn == col
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(col) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI condition A value)
+		if opt == optSourceLocFmriCondAValue && m.expandedOption == expandedFmriCondAValue {
+			subIndent := "      " // 6 spaces for sub-items
+			vals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondAColumn)
+			for j, v := range vals {
+				isSubFocused := j == m.subCursor
+				isSelected := m.sourceLocFmriCondAValue == v
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI condition B column)
+		if opt == optSourceLocFmriCondBColumn && m.expandedOption == expandedFmriCondBColumn {
+			subIndent := "      " // 6 spaces for sub-items
+			for j, col := range m.fmriDiscoveredColumns {
+				isSubFocused := j == m.subCursor
+				isSelected := m.sourceLocFmriCondBColumn == col
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(col) + "\n")
+				}
+				lineIdx++
+			}
+		}
+
+		// Expanded items (fMRI condition B value)
+		if opt == optSourceLocFmriCondBValue && m.expandedOption == expandedFmriCondBValue {
+			subIndent := "      " // 6 spaces for sub-items
+			vals := m.GetFmriDiscoveredColumnValues(m.sourceLocFmriCondBColumn)
+			for j, v := range vals {
+				isSubFocused := j == m.subCursor
+				isSelected := m.sourceLocFmriCondBValue == v
+
+				checkbox := styles.RenderCheckbox(isSelected, isSubFocused)
+
+				nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+				if isSubFocused {
+					nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+				}
+
+				if lineIdx >= startLine && lineIdx < endLine {
+					b.WriteString(subIndent + checkbox + nameStyle.Render(v) + "\n")
+				}
+				lineIdx++
+			}
+		}
 	}
 
 	// Show scroll indicator for items below
@@ -2776,12 +3380,6 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			label := "▸ Correlations"
 			if m.behaviorGroupCorrelationsExpanded {
 				label = "▾ Correlations"
-			}
-			return label, "", "Space to toggle"
-		case optBehaviorGroupConfounds:
-			label := "▸ Confounds"
-			if m.behaviorGroupConfoundsExpanded {
-				label = "▾ Confounds"
 			}
 			return label, "", "Space to toggle"
 		case optBehaviorGroupRegression:
@@ -3724,6 +4322,7 @@ func (m Model) renderBehaviorAdvancedConfig() string {
 			labelStyle = labelStyle.Faint(true)
 			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
 		} else if m.editingNumber && isFocused {
+			// Highlight the editing field
 			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 		}
 
@@ -3873,25 +4472,40 @@ func (m Model) renderMLAdvancedConfig() string {
 
 func (m Model) renderPreprocessingAdvancedConfig() string {
 	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" ADVANCED CONFIGURATION ") + "\n\n")
 
-	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+
+	if m.useDefaultAdvanced {
+		return m.renderDefaultConfigView("preprocessing")
+	}
+
 	if m.editingNumber {
-		b.WriteString(infoStyle.Render("  Type a number, then press Enter to confirm or Esc to cancel.") + "\n\n")
+		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
 	} else {
-		b.WriteString(infoStyle.Render("  Customize preprocessing controls.") + "\n")
-		b.WriteString(infoStyle.Render("  Press Space to toggle/edit, Enter to proceed.") + "\n\n")
+		b.WriteString(infoStyle.Render("Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
 	}
 
 	labelWidth := defaultLabelWidth
 	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-	groupStyle := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Underline(true)
 
 	// Build values for display
 	nJobsVal := fmt.Sprintf("%d", m.prepNJobs)
 	montageVal := m.prepMontage
 	if m.editingText && m.editingTextField == textFieldPrepMontage {
 		montageVal = m.textBuffer + "█"
+	}
+	fileExtVal := m.prepFileExtension
+	if m.editingText && m.editingTextField == textFieldPrepFileExtension {
+		fileExtVal = m.textBuffer + "█"
+	}
+	icaLabelsVal := m.icaLabelsToKeep
+	if m.editingText && m.editingTextField == textFieldIcaLabelsToKeep {
+		icaLabelsVal = m.textBuffer + "█"
+	}
+	if strings.TrimSpace(icaLabelsVal) == "" {
+		icaLabelsVal = "(default)"
 	}
 	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
 	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
@@ -3903,6 +4517,11 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	probThreshVal := fmt.Sprintf("%.1f", m.prepProbThresh)
 	tminVal := fmt.Sprintf("%.1f s", m.prepEpochsTmin)
 	tmaxVal := fmt.Sprintf("%.1f s", m.prepEpochsTmax)
+	repeatsVal := fmt.Sprintf("%d", m.prepRepeats)
+	breaksMinLenVal := fmt.Sprintf("%d s", m.prepBreaksMinLength)
+	tStartPrevVal := fmt.Sprintf("%d s", m.prepTStartAfterPrevious)
+	tStopNextVal := fmt.Sprintf("%d s", m.prepTStopBeforeNext)
+
 	var baselineVal string
 	if m.prepEpochsNoBaseline {
 		baselineVal = "N/A"
@@ -3918,7 +4537,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		rejectVal = fmt.Sprintf("%.0f µV", m.prepEpochsReject)
 	}
 
-	// Input overrides
+	// Input overrides for number editing
 	if m.editingNumber {
 		buffer := m.numberBuffer + "█"
 		switch {
@@ -3946,49 +4565,41 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			baselineVal = buffer
 		case m.isCurrentlyEditing(optPrepEpochsReject):
 			rejectVal = buffer
+		case m.isCurrentlyEditing(optPrepRepeats):
+			repeatsVal = buffer
+		case m.isCurrentlyEditing(optPrepBreaksMinLength):
+			breaksMinLenVal = buffer
+		case m.isCurrentlyEditing(optPrepTStartAfterPrevious):
+			tStartPrevVal = buffer
+		case m.isCurrentlyEditing(optPrepTStopBeforeNext):
+			tStopNextVal = buffer
 		}
 	}
 
-	options := []struct {
-		label string
-		value string
-		hint  string
-		group string
-	}{
-		{"Use Defaults", m.boolToOnOff(m.useDefaultAdvanced), "Skip customization", ""},
+	options := m.getPreprocessingOptions()
 
-		{"Use PyPREP", m.boolToOnOff(m.prepUsePyprep), "Bad channel detection", "Preprocessing Controls"},
-		{"Use ICA Label", m.boolToOnOff(m.prepUseIcalabel), "mne-icalabel classification", ""},
-		{"N Jobs", nJobsVal, "Parallel jobs for bad channels", ""},
-		{"Montage", montageVal, "EEG montage (e.g., easycap-M1)", ""},
+	// Scrolling support
+	totalLines := len(options)
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = defaultTerminalHeight
+	}
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
 
-		{"Resample", resampleVal, "Resampling frequency", "Filtering"},
-		{"L-Freq", lFreqVal, "High-pass filter", ""},
-		{"H-Freq", hFreqVal, "Low-pass filter", ""},
-		{"Notch", notchVal, "Line noise filter", ""},
-		{"Line Freq", lineFreqVal, "EEG line frequency (50/60)", ""},
-
-		{"ICA Method", icaMethodVal, "Algorithm (fastica/infomax/picard)", "ICA Fitting"},
-		{"ICA Components", icaCompVal, "Components or variance fraction", ""},
-		{"Prob. Threshold", probThreshVal, "Label classification threshold", ""},
-		{"Labels to Keep", m.icaLabelsToKeep, "comma-sep: brain,other,eye...", ""},
-
-		{"Epochs Tmin", tminVal, "Start of epoch", "Epoching"},
-		{"Epochs Tmax", tmaxVal, "End of epoch", ""},
-		{"No Baseline", m.boolToOnOff(m.prepEpochsNoBaseline), "Disable baseline correction", ""},
-		{"Baseline Window", baselineVal, "Baseline start to end (s)", ""},
-		{"Reject (µV)", rejectVal, "Peak-to-peak threshold", ""},
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")
 	}
 
 	for i, opt := range options {
-		if opt.group != "" {
-			b.WriteString("\n " + groupStyle.Render(opt.group) + "\n")
+		if i < startLine || i >= endLine {
+			continue
 		}
 
 		isFocused := i == m.advancedCursor
 		cursor := "  "
 		if isFocused {
-			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
 		}
 
 		var labelStyle, valueStyle lipgloss.Style
@@ -3997,16 +4608,754 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		} else {
 			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
 		}
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
 
-		if m.useDefaultAdvanced && i > 0 {
-			labelStyle = labelStyle.Faint(true)
-			valueStyle = lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
-		} else {
-			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		label := ""
+		value := ""
+		hint := ""
+
+		switch opt {
+		case optUseDefaults:
+			label = "Configuration"
+			if m.useDefaultAdvanced {
+				value = "Using Defaults"
+				hint = "Space to customize"
+			} else {
+				value = "Custom"
+				hint = "Space to use defaults"
+			}
+
+		// Group headers with chevron indicators
+		case optPrepGroupStages:
+			if m.prepGroupStagesExpanded {
+				label = "▾ Stages"
+			} else {
+				label = "▸ Stages"
+			}
+			hint = "Select stages to run"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optPrepGroupGeneral:
+			if m.prepGroupGeneralExpanded {
+				label = "▾ General"
+			} else {
+				label = "▸ General"
+			}
+			hint = "Montage, jobs, detection"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optPrepGroupFiltering:
+			if m.prepGroupFilteringExpanded {
+				label = "▾ Filtering"
+			} else {
+				label = "▸ Filtering"
+			}
+			hint = "Resample, bandpass, notch"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optPrepGroupPyprep:
+			if m.prepGroupPyprepExpanded {
+				label = "▾ PyPREP"
+			} else {
+				label = "▸ PyPREP"
+			}
+			hint = "Bad channel detection settings"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optPrepGroupICA:
+			if m.prepGroupICAExpanded {
+				label = "▾ ICA"
+			} else {
+				label = "▸ ICA"
+			}
+			hint = "Component analysis settings"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optPrepGroupEpoching:
+			if m.prepGroupEpochingExpanded {
+				label = "▾ Epoching"
+			} else {
+				label = "▸ Epoching"
+			}
+			hint = "Epoch extraction settings"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		// Stage toggles (indented under Stages group)
+		case optPrepStageBadChannels:
+			label = "  Bad Channels"
+			value = m.boolToOnOff(m.prepStageSelected[0])
+			hint = "Detect bad channels"
+		case optPrepStageFiltering:
+			label = "  Filtering"
+			value = m.boolToOnOff(m.prepStageSelected[1])
+			hint = "Apply filters"
+		case optPrepStageICA:
+			label = "  ICA"
+			value = m.boolToOnOff(m.prepStageSelected[2])
+			hint = "Run ICA cleaning"
+		case optPrepStageEpoching:
+			label = "  Epoching"
+			value = m.boolToOnOff(m.prepStageSelected[3])
+			hint = "Create epochs"
+
+		// General settings (indented)
+		case optPrepMontage:
+			label = "  Montage"
+			value = montageVal
+			hint = "e.g., easycap-M1"
+		case optPrepNJobs:
+			label = "  N Jobs"
+			value = nJobsVal
+			hint = "Parallel workers"
+		case optPrepUsePyprep:
+			label = "  Use PyPREP"
+			value = m.boolToOnOff(m.prepUsePyprep)
+			hint = "Bad channel detection"
+		case optPrepUseIcalabel:
+			label = "  Use ICA-Label"
+			value = m.boolToOnOff(m.prepUseIcalabel)
+			hint = "Auto-classify ICs"
+
+		// Filtering settings (indented)
+		case optPrepResample:
+			label = "  Resample"
+			value = resampleVal
+			hint = "Target Hz"
+		case optPrepLFreq:
+			label = "  High-Pass"
+			value = lFreqVal
+			hint = "Low cutoff (Hz)"
+		case optPrepHFreq:
+			label = "  Low-Pass"
+			value = hFreqVal
+			hint = "High cutoff (Hz)"
+		case optPrepNotch:
+			label = "  Notch"
+			value = notchVal
+			hint = "Line noise filter"
+		case optPrepLineFreq:
+			label = "  Line Freq"
+			value = lineFreqVal
+			hint = "50 or 60 Hz"
+
+		// PyPREP settings (indented)
+		case optPrepRansac:
+			label = "  RANSAC"
+			value = m.boolToOnOff(m.prepRansac)
+			hint = "Robust detection"
+		case optPrepRepeats:
+			label = "  Repeats"
+			value = repeatsVal
+			hint = "Detection iterations"
+		case optPrepAverageReref:
+			label = "  Avg Reref"
+			value = m.boolToOnOff(m.prepAverageReref)
+			hint = "Rereference first"
+		case optPrepFileExtension:
+			label = "  File Ext"
+			value = fileExtVal
+			hint = "e.g., .vhdr"
+		case optPrepConsiderPreviousBads:
+			label = "  Keep Bads"
+			value = m.boolToOnOff(m.prepConsiderPreviousBads)
+			hint = "Keep prev marked"
+		case optPrepOverwriteChansTsv:
+			label = "  Overwrite TSV"
+			value = m.boolToOnOff(m.prepOverwriteChansTsv)
+			hint = "Update channels.tsv"
+		case optPrepDeleteBreaks:
+			label = "  Del Breaks"
+			value = m.boolToOnOff(m.prepDeleteBreaks)
+			hint = "Remove data breaks"
+		case optPrepBreaksMinLength:
+			label = "  Break Len"
+			value = breaksMinLenVal
+			hint = "Min break duration"
+		case optPrepTStartAfterPrevious:
+			label = "  T Start"
+			value = tStartPrevVal
+			hint = "After prev event"
+		case optPrepTStopBeforeNext:
+			label = "  T Stop"
+			value = tStopNextVal
+			hint = "Before next event"
+
+		// ICA settings (indented)
+		case optPrepICAMethod:
+			label = "  Method"
+			value = icaMethodVal
+			hint = "fastica/infomax/picard"
+		case optPrepICAComp:
+			label = "  Components"
+			value = icaCompVal
+			hint = "Variance fraction"
+		case optPrepProbThresh:
+			label = "  Prob Thresh"
+			value = probThreshVal
+			hint = "Label threshold"
+		case optPrepKeepMnebidsBads:
+			label = "  Keep BIDS"
+			value = m.boolToOnOff(m.prepKeepMnebidsBads)
+			hint = "Keep flagged ICs"
+		case optIcaLabelsToKeep:
+			label = "  Labels Keep"
+			value = icaLabelsVal
+			hint = "brain,other,..."
+
+		// Epoching settings (indented)
+		case optPrepEpochsTmin:
+			label = "  Tmin"
+			value = tminVal
+			hint = "Epoch start"
+		case optPrepEpochsTmax:
+			label = "  Tmax"
+			value = tmaxVal
+			hint = "Epoch end"
+		case optPrepEpochsNoBaseline:
+			label = "  No Baseline"
+			value = m.boolToOnOff(m.prepEpochsNoBaseline)
+			hint = "Skip baseline"
+		case optPrepEpochsBaseline:
+			label = "  Baseline"
+			value = baselineVal
+			hint = "Window (s)"
+		case optPrepEpochsReject:
+			label = "  Reject (µV)"
+			value = rejectVal
+			hint = "Peak-to-peak"
 		}
 
-		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
-		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+		if hint != "" {
+			b.WriteString("  " + hintStyle.Render(hint))
+		}
+		b.WriteString("\n")
+	}
+
+	if showScrollIndicators && endLine < totalLines {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more below", totalLines-endLine)) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderFmriAdvancedConfig() string {
+	var b strings.Builder
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+
+	if m.useDefaultAdvanced {
+		return m.renderDefaultConfigView("fMRI preprocessing")
+	}
+
+	if m.editingNumber {
+		b.WriteString(infoStyle.Render("Type a number, press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else if m.editingText {
+		b.WriteString(infoStyle.Render("Type text, press Enter to confirm or Esc to cancel.") + "\n\n")
+	} else {
+		b.WriteString(infoStyle.Render("Space to expand/toggle · ↑↓ navigate · Enter proceed") + "\n\n")
+	}
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	// Build values for display
+	engineVal := []string{"docker", "apptainer"}[m.fmriEngineIndex%2]
+
+	imageVal := strings.TrimSpace(m.fmriFmriprepImage)
+	if m.editingText && m.editingTextField == textFieldFmriFmriprepImage {
+		imageVal = m.textBuffer + "█"
+	}
+	if imageVal == "" {
+		imageVal = "(from config)"
+	}
+
+	spacesVal := strings.TrimSpace(m.fmriOutputSpacesSpec)
+	if m.editingText && m.editingTextField == textFieldFmriOutputSpaces {
+		spacesVal = m.textBuffer + "█"
+	}
+	if spacesVal == "" {
+		spacesVal = "(default)"
+	}
+
+	ignoreVal := strings.TrimSpace(m.fmriIgnoreSpec)
+	if m.editingText && m.editingTextField == textFieldFmriIgnore {
+		ignoreVal = m.textBuffer + "█"
+	}
+	if ignoreVal == "" {
+		ignoreVal = "(none)"
+	}
+
+	levelOptions := []string{"full", "resampling", "minimal"}
+	levelVal := levelOptions[m.fmriLevelIndex%3]
+
+	ciftiOptions := []string{"disabled", "91k", "170k"}
+	ciftiVal := ciftiOptions[m.fmriCiftiOutputIndex%3]
+
+	taskIdVal := strings.TrimSpace(m.fmriTaskId)
+	if m.editingText && m.editingTextField == textFieldFmriTaskId {
+		taskIdVal = m.textBuffer + "█"
+	}
+	if taskIdVal == "" {
+		taskIdVal = "(all tasks)"
+	}
+
+	nthreadsVal := fmt.Sprintf("%d", m.fmriNThreads)
+	if m.fmriNThreads == 0 {
+		nthreadsVal = "(auto)"
+	}
+	ompNthreadsVal := fmt.Sprintf("%d", m.fmriOmpNThreads)
+	if m.fmriOmpNThreads == 0 {
+		ompNthreadsVal = "(auto)"
+	}
+	memVal := fmt.Sprintf("%d", m.fmriMemMb)
+	if m.fmriMemMb == 0 {
+		memVal = "(auto)"
+	}
+
+	skullStripTemplateVal := strings.TrimSpace(m.fmriSkullStripTemplate)
+	if m.editingText && m.editingTextField == textFieldFmriSkullStripTemplate {
+		skullStripTemplateVal = m.textBuffer + "█"
+	}
+	if skullStripTemplateVal == "" {
+		skullStripTemplateVal = "OASIS30ANTs"
+	}
+
+	bold2t1wInitOptions := []string{"register", "header"}
+	bold2t1wInitVal := bold2t1wInitOptions[m.fmriBold2T1wInitIndex%2]
+
+	bold2t1wDofVal := fmt.Sprintf("%d", m.fmriBold2T1wDof)
+	sliceTimeRefVal := fmt.Sprintf("%.2f", m.fmriSliceTimeRef)
+	dummyScansVal := fmt.Sprintf("%d", m.fmriDummyScans)
+	if m.fmriDummyScans == 0 {
+		dummyScansVal = "(auto)"
+	}
+
+	fdSpikeVal := fmt.Sprintf("%.2f", m.fmriFdSpikeThreshold)
+	dvarsSpikeVal := fmt.Sprintf("%.2f", m.fmriDvarsSpikeThreshold)
+
+	randomSeedVal := fmt.Sprintf("%d", m.fmriRandomSeed)
+	if m.fmriRandomSeed == 0 {
+		randomSeedVal = "(random)"
+	}
+
+	extraArgsVal := strings.TrimSpace(m.fmriExtraArgs)
+	if m.editingText && m.editingTextField == textFieldFmriExtraArgs {
+		extraArgsVal = m.textBuffer + "█"
+	}
+	if extraArgsVal == "" {
+		extraArgsVal = "(none)"
+	}
+
+	// Handle number editing
+	if m.editingNumber {
+		buffer := m.numberBuffer + "█"
+		switch {
+		case m.isCurrentlyEditing(optFmriNThreads):
+			nthreadsVal = buffer
+		case m.isCurrentlyEditing(optFmriOmpNThreads):
+			ompNthreadsVal = buffer
+		case m.isCurrentlyEditing(optFmriMemMb):
+			memVal = buffer
+		case m.isCurrentlyEditing(optFmriBold2T1wDof):
+			bold2t1wDofVal = buffer
+		case m.isCurrentlyEditing(optFmriSliceTimeRef):
+			sliceTimeRefVal = buffer
+		case m.isCurrentlyEditing(optFmriDummyScans):
+			dummyScansVal = buffer
+		case m.isCurrentlyEditing(optFmriFdSpikeThreshold):
+			fdSpikeVal = buffer
+		case m.isCurrentlyEditing(optFmriDvarsSpikeThreshold):
+			dvarsSpikeVal = buffer
+		case m.isCurrentlyEditing(optFmriRandomSeed):
+			randomSeedVal = buffer
+		}
+	}
+
+	options := m.getFmriPreprocessingOptions()
+
+	// Scrolling support
+	totalLines := len(options)
+	effectiveHeight := m.height
+	if effectiveHeight <= 0 {
+		effectiveHeight = defaultTerminalHeight
+	}
+	startLine, endLine, showScrollIndicators := calculateScrollWindow(
+		totalLines, m.advancedOffset, effectiveHeight, configOverhead)
+
+	if showScrollIndicators && startLine > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↑ %d more above", startLine)) + "\n")
+	}
+
+	for i, opt := range options {
+		if i < startLine || i >= endLine {
+			continue
+		}
+
+		isFocused := i == m.advancedCursor
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▸ ")
+		}
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+		valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+
+		label := ""
+		value := ""
+		hint := ""
+
+		switch opt {
+		case optUseDefaults:
+			label = "Configuration"
+			if m.useDefaultAdvanced {
+				value = "Using Defaults"
+				hint = "Space to customize"
+			} else {
+				value = "Custom"
+				hint = "Space to use defaults"
+			}
+
+		// Group headers with chevron indicators
+		case optFmriGroupRuntime:
+			if m.fmriGroupRuntimeExpanded {
+				label = "▾ Runtime"
+			} else {
+				label = "▸ Runtime"
+			}
+			hint = "Container settings"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupOutput:
+			if m.fmriGroupOutputExpanded {
+				label = "▾ Output"
+			} else {
+				label = "▸ Output"
+			}
+			hint = "Output spaces, formats"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupPerformance:
+			if m.fmriGroupPerformanceExpanded {
+				label = "▾ Performance"
+			} else {
+				label = "▸ Performance"
+			}
+			hint = "Threads, memory"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupAnatomical:
+			if m.fmriGroupAnatomicalExpanded {
+				label = "▾ Anatomical"
+			} else {
+				label = "▸ Anatomical"
+			}
+			hint = "FreeSurfer, skull-strip"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupBold:
+			if m.fmriGroupBoldExpanded {
+				label = "▾ BOLD Processing"
+			} else {
+				label = "▸ BOLD Processing"
+			}
+			hint = "Registration, timing"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupQc:
+			if m.fmriGroupQcExpanded {
+				label = "▾ Quality Control"
+			} else {
+				label = "▸ Quality Control"
+			}
+			hint = "Motion thresholds"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupDenoising:
+			if m.fmriGroupDenoisingExpanded {
+				label = "▾ Denoising"
+			} else {
+				label = "▸ Denoising"
+			}
+			hint = "ICA-AROMA"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupSurface:
+			if m.fmriGroupSurfaceExpanded {
+				label = "▾ Surface"
+			} else {
+				label = "▸ Surface"
+			}
+			hint = "Cortical surface options"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupMultiecho:
+			if m.fmriGroupMultiechoExpanded {
+				label = "▾ Multi-Echo"
+			} else {
+				label = "▸ Multi-Echo"
+			}
+			hint = "Multi-echo BOLD"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupRepro:
+			if m.fmriGroupReproExpanded {
+				label = "▾ Reproducibility"
+			} else {
+				label = "▸ Reproducibility"
+			}
+			hint = "Random seeds"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupValidation:
+			if m.fmriGroupValidationExpanded {
+				label = "▾ Validation"
+			} else {
+				label = "▸ Validation"
+			}
+			hint = "BIDS validation, errors"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		case optFmriGroupAdvanced:
+			if m.fmriGroupAdvancedExpanded {
+				label = "▾ Advanced"
+			} else {
+				label = "▸ Advanced"
+			}
+			hint = "Extra CLI arguments"
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+
+		// Runtime options (indented)
+		case optFmriEngine:
+			label = "  Engine"
+			value = engineVal
+			hint = "docker/apptainer"
+		case optFmriFmriprepImage:
+			label = "  Image"
+			value = imageVal
+			hint = "Container image"
+
+		// Output options (indented)
+		case optFmriOutputSpaces:
+			label = "  Output Spaces"
+			value = spacesVal
+			hint = "e.g., T1w MNI152..."
+		case optFmriIgnore:
+			label = "  Ignore"
+			value = ignoreVal
+			hint = "fieldmaps, slicetiming"
+		case optFmriLevel:
+			label = "  Level"
+			value = levelVal
+			hint = "full/resampling/minimal"
+		case optFmriCiftiOutput:
+			label = "  CIFTI Output"
+			value = ciftiVal
+			hint = "91k/170k grayordinates"
+		case optFmriTaskId:
+			label = "  Task ID"
+			value = taskIdVal
+			hint = "Specific task only"
+
+		// Performance options (indented)
+		case optFmriNThreads:
+			label = "  N Threads"
+			value = nthreadsVal
+			hint = "Max threads (0=auto)"
+		case optFmriOmpNThreads:
+			label = "  OMP Threads"
+			value = ompNthreadsVal
+			hint = "Per process (0=auto)"
+		case optFmriMemMb:
+			label = "  Mem (MB)"
+			value = memVal
+			hint = "Memory limit"
+		case optFmriLowMem:
+			label = "  Low Memory"
+			value = m.boolToOnOff(m.fmriLowMem)
+			hint = "Reduce memory usage"
+
+		// Anatomical options (indented)
+		case optFmriSkipReconstruction:
+			label = "  Skip Recon-All"
+			value = m.boolToOnOff(m.fmriSkipReconstruction)
+			hint = "No FreeSurfer"
+		case optFmriLongitudinal:
+			label = "  Longitudinal"
+			value = m.boolToOnOff(m.fmriLongitudinal)
+			hint = "Unbiased template"
+		case optFmriSkullStripTemplate:
+			label = "  Skull Strip Tpl"
+			value = skullStripTemplateVal
+			hint = "Brain extraction"
+		case optFmriSkullStripFixedSeed:
+			label = "  Fixed Seed"
+			value = m.boolToOnOff(m.fmriSkullStripFixedSeed)
+			hint = "Reproducible strip"
+
+		// BOLD options (indented)
+		case optFmriBold2T1wInit:
+			label = "  BOLD→T1w Init"
+			value = bold2t1wInitVal
+			hint = "register/header"
+		case optFmriBold2T1wDof:
+			label = "  BOLD→T1w DOF"
+			value = bold2t1wDofVal
+			hint = "Degrees freedom"
+		case optFmriSliceTimeRef:
+			label = "  Slice Time Ref"
+			value = sliceTimeRefVal
+			hint = "0=start, 0.5=mid, 1=end"
+		case optFmriDummyScans:
+			label = "  Dummy Scans"
+			value = dummyScansVal
+			hint = "Non-steady vols"
+
+		// QC options (indented)
+		case optFmriFdSpikeThreshold:
+			label = "  FD Threshold"
+			value = fdSpikeVal
+			hint = "mm"
+		case optFmriDvarsSpikeThreshold:
+			label = "  DVARS Threshold"
+			value = dvarsSpikeVal
+			hint = "Standardized"
+
+		// Denoising options (indented)
+		case optFmriUseAroma:
+			label = "  Use AROMA"
+			value = m.boolToOnOff(m.fmriUseAroma)
+			hint = "ICA-AROMA"
+
+		// Surface options (indented)
+		case optFmriMedialSurfaceNan:
+			label = "  Medial NaN"
+			value = m.boolToOnOff(m.fmriMedialSurfaceNan)
+			hint = "Fill medial wall"
+		case optFmriNoMsm:
+			label = "  No MSM"
+			value = m.boolToOnOff(m.fmriNoMsm)
+			hint = "Disable MSM-Sulc"
+
+		// Multi-echo options (indented)
+		case optFmriMeOutputEchos:
+			label = "  Output Echos"
+			value = m.boolToOnOff(m.fmriMeOutputEchos)
+			hint = "Each echo separate"
+
+		// Reproducibility options (indented)
+		case optFmriRandomSeed:
+			label = "  Random Seed"
+			value = randomSeedVal
+			hint = "0=non-deterministic"
+
+		// Validation options (indented)
+		case optFmriSkipBidsValidation:
+			label = "  Skip Validation"
+			value = m.boolToOnOff(m.fmriSkipBidsValidation)
+			hint = "Skip bids-validator"
+		case optFmriStopOnFirstCrash:
+			label = "  Stop on Crash"
+			value = m.boolToOnOff(m.fmriStopOnFirstCrash)
+			hint = "Abort on error"
+		case optFmriCleanWorkdir:
+			label = "  Clean Workdir"
+			value = m.boolToOnOff(m.fmriCleanWorkdir)
+			hint = "Remove on success"
+
+		// Advanced options (indented)
+		case optFmriExtraArgs:
+			label = "  Extra Args"
+			value = extraArgsVal
+			hint = "Raw CLI args"
+		}
+
+		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
+		if hint != "" {
+			b.WriteString("  " + hintStyle.Render(hint))
+		}
+		b.WriteString("\n")
+	}
+
+	if showScrollIndicators && endLine < totalLines {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Render(fmt.Sprintf("  ↓ %d more below", totalLines-endLine)) + "\n")
 	}
 
 	return b.String()
@@ -4619,6 +5968,315 @@ func (m Model) selectedConnectivityDisplay() string {
 		return "(none)"
 	}
 	return strings.Join(selected, ", ")
+}
+
+///////////////////////////////////////////////////////////////////
+// Preprocessing Step Rendering
+///////////////////////////////////////////////////////////////////
+
+func (m Model) renderPreprocessingStageSelection() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" PREPROCESSING STAGES") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render("Select which preprocessing stages to run.") + "\n")
+	b.WriteString(infoStyle.Render("Press Space to toggle, A to select all, N to select none.") + "\n\n")
+
+	// Count selected stages
+	selectedCount := 0
+	for i := range m.prepStages {
+		if m.prepStageSelected[i] {
+			selectedCount++
+		}
+	}
+
+	// Inline validation indicator
+	var statusIndicator string
+	if selectedCount >= 1 {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark + " ")
+	} else {
+		statusIndicator = lipgloss.NewStyle().Foreground(styles.Warning).Render(styles.WarningMark + " ")
+	}
+
+	b.WriteString(statusIndicator + lipgloss.NewStyle().Foreground(styles.TextDim).Render(
+		fmt.Sprintf("%d of %d stages selected", selectedCount, len(m.prepStages))))
+	if selectedCount == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Faint(true).Render(" — select at least 1"))
+	}
+	b.WriteString("\n\n")
+
+	for i, stage := range m.prepStages {
+		isSelected := m.prepStageSelected[i]
+		isFocused := i == m.prepStageCursor
+
+		checkbox := styles.RenderCheckbox(isSelected, isFocused)
+
+		nameStyle := lipgloss.NewStyle().Foreground(styles.Text).PaddingLeft(1)
+		if isFocused {
+			nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).PaddingLeft(1)
+		}
+
+		b.WriteString(checkbox + nameStyle.Render(stage.Name))
+
+		if len(stage.Description) > 0 {
+			desc := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true).Render("  " + stage.Description)
+			b.WriteString(desc)
+		}
+
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderPreprocessingFiltering() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" FILTERING OPTIONS") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render("Configure frequency filtering and resampling.") + "\n")
+	b.WriteString(infoStyle.Render("Press Enter to edit a value, Esc to cancel editing.") + "\n\n")
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	// Build display values
+	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
+	if m.editingNumber && m.advancedCursor == 0 {
+		resampleVal = m.numberBuffer + "█"
+	}
+
+	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
+	if m.editingNumber && m.advancedCursor == 1 {
+		lFreqVal = m.numberBuffer + "█"
+	}
+
+	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
+	if m.editingNumber && m.advancedCursor == 2 {
+		hFreqVal = m.numberBuffer + "█"
+	}
+
+	notchVal := fmt.Sprintf("%d Hz", m.prepNotch)
+	if m.editingNumber && m.advancedCursor == 3 {
+		notchVal = m.numberBuffer + "█"
+	}
+
+	lineFreqVal := fmt.Sprintf("%d Hz", m.prepLineFreq)
+	if m.editingNumber && m.advancedCursor == 4 {
+		lineFreqVal = m.numberBuffer + "█"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Resample Freq", resampleVal, "Target sampling rate (0=disable)"},
+		{"High-Pass Freq", lFreqVal, "Low frequency cutoff (Hz)"},
+		{"Low-Pass Freq", hFreqVal, "High frequency cutoff (Hz)"},
+		{"Notch Freq", notchVal, "Line noise notch filter (0=disable)"},
+		{"Line Freq", lineFreqVal, "Power line frequency (50 or 60 Hz)"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.editingNumber && isFocused {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderPreprocessingICA() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" ICA OPTIONS") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render("Configure independent component analysis.") + "\n")
+	b.WriteString(infoStyle.Render("Press Space to toggle, Enter to edit values.") + "\n\n")
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	// Build display values
+	methods := []string{"fastica", "infomax", "picard"}
+	methodVal := methods[m.prepICAMethod]
+
+	compVal := fmt.Sprintf("%.2f", m.prepICAComp)
+	if m.editingNumber && m.advancedCursor == 1 {
+		compVal = m.numberBuffer + "█"
+	}
+
+	probThreshVal := fmt.Sprintf("%.2f", m.prepProbThresh)
+	if m.editingNumber && m.advancedCursor == 2 {
+		probThreshVal = m.numberBuffer + "█"
+	}
+
+	labelsVal := m.icaLabelsToKeep
+	if labelsVal == "" {
+		labelsVal = "(default)"
+	}
+	if m.editingText && m.editingTextField == textFieldIcaLabelsToKeep {
+		labelsVal = m.textBuffer + "█"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Use ICALabel", m.boolToOnOff(m.prepUseIcalabel), "Auto-label components"},
+		{"ICA Method", methodVal, "fastica, infomax, or picard"},
+		{"Components", compVal, "Number or variance fraction"},
+		{"Prob Threshold", probThreshVal, "Label probability threshold"},
+		{"Labels to Keep", labelsVal, "Comma-separated (e.g., brain,other)"},
+		{"Keep MNE-BIDS Bads", m.boolToOnOff(m.prepKeepMnebidsBads), "Keep MNE-BIDS flagged components"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if (m.editingNumber || m.editingText) && isFocused {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
+}
+
+func (m Model) renderPreprocessingEpochs() string {
+	var b strings.Builder
+
+	accent := m.renderAnimatedAccent()
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(styles.Primary).
+		MarginLeft(1)
+	b.WriteString(accent + titleStyle.Render(" EPOCH OPTIONS") + "\n\n")
+
+	infoStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).PaddingLeft(2)
+	b.WriteString(infoStyle.Render("Configure epoch creation.") + "\n")
+	b.WriteString(infoStyle.Render("Press Space to toggle, Enter to edit values.") + "\n\n")
+
+	labelWidth := defaultLabelWidth
+	hintStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Faint(true)
+
+	// Build display values
+	tminVal := fmt.Sprintf("%.1f s", m.prepEpochsTmin)
+	if m.editingNumber && m.advancedCursor == 0 {
+		tminVal = m.numberBuffer + "█"
+	}
+
+	tmaxVal := fmt.Sprintf("%.1f s", m.prepEpochsTmax)
+	if m.editingNumber && m.advancedCursor == 1 {
+		tmaxVal = m.numberBuffer + "█"
+	}
+
+	baselineVal := "(none)"
+	if !m.prepEpochsNoBaseline {
+		baselineVal = fmt.Sprintf("[%.1f, %.1f] s", m.prepEpochsBaselineStart, m.prepEpochsBaselineEnd)
+	}
+
+	rejectVal := fmt.Sprintf("%.0f µV", m.prepEpochsReject)
+	if m.editingNumber && m.advancedCursor == 3 {
+		rejectVal = m.numberBuffer + "█"
+	}
+	if m.prepEpochsReject == 0 {
+		rejectVal = "(disabled)"
+	}
+
+	options := []struct {
+		label string
+		value string
+		hint  string
+	}{
+		{"Tmin", tminVal, "Epoch start time (seconds)"},
+		{"Tmax", tmaxVal, "Epoch end time (seconds)"},
+		{"Baseline Correction", m.boolToOnOff(!m.prepEpochsNoBaseline), "Apply baseline correction"},
+		{"Baseline Window", baselineVal, "Baseline time window"},
+		{"Reject Threshold", rejectVal, "Peak-to-peak amplitude (µV, 0=disable)"},
+	}
+
+	for i, opt := range options {
+		isFocused := i == m.advancedCursor
+
+		var labelStyle, valueStyle lipgloss.Style
+		if isFocused {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+		} else {
+			labelStyle = lipgloss.NewStyle().Foreground(styles.Text).Width(labelWidth)
+		}
+
+		if m.editingNumber && isFocused {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		} else {
+			valueStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
+		}
+
+		cursor := "  "
+		if isFocused {
+			cursor = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("> ")
+		}
+
+		b.WriteString(cursor + labelStyle.Render(opt.label+":") + " " + valueStyle.Render(opt.value))
+		b.WriteString("  " + hintStyle.Render(opt.hint) + "\n")
+	}
+
+	return b.String()
 }
 
 func (m Model) selectedDirectedConnectivityDisplay() string {

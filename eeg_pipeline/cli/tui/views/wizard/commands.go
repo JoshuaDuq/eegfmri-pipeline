@@ -283,6 +283,17 @@ func (m Model) SelectedPlotFormats() []string {
 	return result
 }
 
+func (m Model) SelectedPreprocessingStages() []string {
+	var result []string
+	for i, sel := range m.prepStageSelected {
+		if sel && i < len(m.prepStages) {
+			result = append(result, m.prepStages[i].Key)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
 // selectedConnectivityMeasures returns the list of selected connectivity measures
 func (m Model) selectedConnectivityMeasures() []string {
 	var result []string
@@ -430,7 +441,8 @@ func (m Model) BuildCommand() string {
 		m.Pipeline == types.PipelineFeatures ||
 		m.Pipeline == types.PipelineBehavior ||
 		m.Pipeline == types.PipelinePlotting ||
-		m.Pipeline == types.PipelineML
+		m.Pipeline == types.PipelineML ||
+		m.Pipeline == types.PipelineFmri
 
 	hasValidModeIndex := len(m.modeOptions) > m.modeIndex
 	if needsMode && hasValidModeIndex {
@@ -509,6 +521,20 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, "--feature-files")
 			parts = append(parts, featureFiles...)
 		}
+	} else if m.Pipeline == types.PipelinePreprocessing {
+		// Handle preprocessing mode and stage selection
+		mode := m.modeOptions[m.modeIndex]
+		if mode == "partial" {
+			// Add selected stages as mode arguments
+			stages := m.SelectedPreprocessingStages()
+			if len(stages) > 0 {
+				parts = append(parts, stages...)
+			} else {
+				// Fall back to "full" if no stages selected
+				parts[len(parts)-1] = "full"
+			}
+		}
+		// For "full" mode, no additional arguments needed
 	} else if m.Pipeline == types.PipelineMergePsychoPyData || m.Pipeline == types.PipelineRawToBIDS {
 		mode := "merge-behavior"
 		if m.Pipeline == types.PipelineRawToBIDS {
@@ -551,11 +577,18 @@ func (m Model) BuildCommand() string {
 		m.Pipeline == types.PipelineFeatures ||
 		m.Pipeline == types.PipelineBehavior ||
 		m.Pipeline == types.PipelineML ||
-		m.Pipeline == types.PipelinePlotting
+		m.Pipeline == types.PipelinePlotting ||
+		m.Pipeline == types.PipelineFmri
 
 	if needsPaths {
-		if m.bidsRoot != "" {
-			parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
+		if m.Pipeline == types.PipelineFmri {
+			if m.bidsFmriRoot != "" {
+				parts = append(parts, "--bids-fmri-root", expandUserPath(m.bidsFmriRoot))
+			}
+		} else {
+			if m.bidsRoot != "" {
+				parts = append(parts, "--bids-root", expandUserPath(m.bidsRoot))
+			}
 		}
 		if m.derivRoot != "" {
 			parts = append(parts, "--deriv-root", expandUserPath(m.derivRoot))
@@ -598,6 +631,8 @@ func (m Model) BuildCommand() string {
 			parts = append(parts, m.buildMLAdvancedArgs()...)
 		case types.PipelinePreprocessing:
 			parts = append(parts, m.buildPreprocessingAdvancedArgs()...)
+		case types.PipelineFmri:
+			parts = append(parts, m.buildFmriAdvancedArgs()...)
 		case types.PipelineRawToBIDS:
 			parts = append(parts, m.buildRawToBidsAdvancedArgs()...)
 		case types.PipelineMergePsychoPyData:
@@ -961,13 +996,33 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.aperiodicMinSegmentSec != 2.0 {
 			args = append(args, "--aperiodic-min-segment-sec", fmt.Sprintf("%.1f", m.aperiodicMinSegmentSec))
 		}
+		// Scientific validity: induced spectra (subtract evoked)
+		if m.aperiodicSubtractEvoked {
+			args = append(args, "--aperiodic-subtract-evoked")
+		}
 	}
 
 	// ITPC options (scientific validity)
 	if m.isCategorySelected("itpc") {
-		itpcMethods := []string{"global", "fold_global", "loo"}
+		itpcMethods := []string{"global", "fold_global", "loo", "condition"}
 		if m.itpcMethod >= 0 && m.itpcMethod < len(itpcMethods) && m.itpcMethod != 0 {
 			args = append(args, "--itpc-method", itpcMethods[m.itpcMethod])
+		}
+		// Condition-based ITPC settings (avoids pseudo-replication)
+		if m.itpcMethod == 3 && strings.TrimSpace(m.itpcConditionColumn) != "" {
+			args = append(args, "--itpc-condition-column", strings.TrimSpace(m.itpcConditionColumn))
+			// Add condition values if specified
+			if strings.TrimSpace(m.itpcConditionValues) != "" {
+				spec := strings.ReplaceAll(m.itpcConditionValues, ",", " ")
+				vals := strings.Fields(spec)
+				if len(vals) > 0 {
+					args = append(args, "--itpc-condition-values")
+					args = append(args, vals...)
+				}
+			}
+		}
+		if m.itpcMinTrialsPerCondition > 0 && m.itpcMinTrialsPerCondition != 10 {
+			args = append(args, "--itpc-min-trials-per-condition", fmt.Sprintf("%d", m.itpcMinTrialsPerCondition))
 		}
 	}
 
@@ -1053,6 +1108,136 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		connMethods := []string{"aec", "wpli", "plv"}
 		if m.sourceLocConnMethod != 0 {
 			args = append(args, "--source-connectivity-method", connMethods[m.sourceLocConnMethod])
+		}
+
+		// fMRI-informed mode (mode == 1) requires additional paths
+		if m.sourceLocMode == 1 {
+			if strings.TrimSpace(m.sourceLocSubject) != "" {
+				args = append(args, "--source-subject", strings.TrimSpace(m.sourceLocSubject))
+			}
+			// BEM/Trans generation options (Docker-based)
+			// Note: FS License is now in global config (paths.freesurfer_license)
+			if m.sourceLocCreateTrans {
+				args = append(args, "--source-create-trans")
+			}
+			if m.sourceLocCreateBemModel {
+				args = append(args, "--source-create-bem-model")
+			}
+			if m.sourceLocCreateBemSolution {
+				args = append(args, "--source-create-bem-solution")
+			}
+			// If not auto-creating, user must provide paths
+			if !m.sourceLocCreateTrans && strings.TrimSpace(m.sourceLocTrans) != "" {
+				args = append(args, "--source-trans", expandUserPath(strings.TrimSpace(m.sourceLocTrans)))
+			}
+			if !m.sourceLocCreateBemSolution && strings.TrimSpace(m.sourceLocBem) != "" {
+				args = append(args, "--source-bem", expandUserPath(strings.TrimSpace(m.sourceLocBem)))
+			}
+			if m.sourceLocMindistMm != 5.0 {
+				args = append(args, "--source-mindist-mm", fmt.Sprintf("%.1f", m.sourceLocMindistMm))
+			}
+
+			// Optional fMRI-informed constraint (advanced)
+			fmriEnabled := m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != ""
+			if fmriEnabled {
+				args = append(args, "--source-fmri")
+				if strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+					args = append(args, "--source-fmri-stats-map", expandUserPath(strings.TrimSpace(m.sourceLocFmriStatsMap)))
+				}
+				if m.sourceLocFmriThreshold != 3.1 {
+					args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
+				}
+				if m.sourceLocFmriTail == 1 {
+					args = append(args, "--source-fmri-tail", "abs")
+				}
+				if m.sourceLocFmriMinClusterVox != 50 {
+					args = append(args, "--source-fmri-cluster-min-voxels", fmt.Sprintf("%d", m.sourceLocFmriMinClusterVox))
+				}
+				if m.sourceLocFmriMaxClusters != 20 {
+					args = append(args, "--source-fmri-max-clusters", fmt.Sprintf("%d", m.sourceLocFmriMaxClusters))
+				}
+				if m.sourceLocFmriMaxVoxPerClus != 2000 {
+					args = append(args, "--source-fmri-max-voxels-per-cluster", fmt.Sprintf("%d", m.sourceLocFmriMaxVoxPerClus))
+				}
+				if m.sourceLocFmriMaxTotalVox != 20000 {
+					args = append(args, "--source-fmri-max-total-voxels", fmt.Sprintf("%d", m.sourceLocFmriMaxTotalVox))
+				}
+				if m.sourceLocFmriRandomSeed != 0 {
+					args = append(args, "--source-fmri-random-seed", fmt.Sprintf("%d", m.sourceLocFmriRandomSeed))
+				}
+
+				// fMRI-specific time windows
+				if strings.TrimSpace(m.sourceLocFmriWindowAName) != "" {
+					args = append(args, "--source-fmri-window-a-name", strings.TrimSpace(m.sourceLocFmriWindowAName))
+					args = append(args, "--source-fmri-window-a-tmin", fmt.Sprintf("%.3f", m.sourceLocFmriWindowATmin))
+					args = append(args, "--source-fmri-window-a-tmax", fmt.Sprintf("%.3f", m.sourceLocFmriWindowATmax))
+				}
+				if strings.TrimSpace(m.sourceLocFmriWindowBName) != "" {
+					args = append(args, "--source-fmri-window-b-name", strings.TrimSpace(m.sourceLocFmriWindowBName))
+					args = append(args, "--source-fmri-window-b-tmin", fmt.Sprintf("%.3f", m.sourceLocFmriWindowBTmin))
+					args = append(args, "--source-fmri-window-b-tmax", fmt.Sprintf("%.3f", m.sourceLocFmriWindowBTmax))
+				}
+
+				// fMRI contrast builder options
+				if m.sourceLocFmriContrastEnabled {
+					args = append(args, "--source-fmri-contrast-enabled")
+					contrastTypes := []string{"t-test", "paired-t-test", "f-test", "custom"}
+					args = append(args, "--source-fmri-contrast-type", contrastTypes[m.sourceLocFmriContrastType])
+					if m.sourceLocFmriContrastType == 3 { // custom formula
+						if strings.TrimSpace(m.sourceLocFmriContrastFormula) != "" {
+							args = append(args, "--source-fmri-contrast-formula", strings.TrimSpace(m.sourceLocFmriContrastFormula))
+						}
+					} else {
+						// Condition A: column and value
+						if strings.TrimSpace(m.sourceLocFmriCondAColumn) != "" {
+							args = append(args, "--source-fmri-cond-a-column", strings.TrimSpace(m.sourceLocFmriCondAColumn))
+						}
+						if strings.TrimSpace(m.sourceLocFmriCondAValue) != "" {
+							args = append(args, "--source-fmri-cond-a-value", strings.TrimSpace(m.sourceLocFmriCondAValue))
+						}
+						// Condition B: column and value
+						if strings.TrimSpace(m.sourceLocFmriCondBColumn) != "" {
+							args = append(args, "--source-fmri-cond-b-column", strings.TrimSpace(m.sourceLocFmriCondBColumn))
+						}
+						if strings.TrimSpace(m.sourceLocFmriCondBValue) != "" {
+							args = append(args, "--source-fmri-cond-b-value", strings.TrimSpace(m.sourceLocFmriCondBValue))
+						}
+					}
+					if strings.TrimSpace(m.sourceLocFmriContrastName) != "" && m.sourceLocFmriContrastName != "pain_vs_baseline" {
+						args = append(args, "--source-fmri-contrast-name", strings.TrimSpace(m.sourceLocFmriContrastName))
+					}
+					if !m.sourceLocFmriAutoDetectRuns && strings.TrimSpace(m.sourceLocFmriRunsToInclude) != "" {
+						args = append(args, "--source-fmri-runs", strings.TrimSpace(m.sourceLocFmriRunsToInclude))
+					}
+					hrfModels := []string{"spm", "flobs", "fir"}
+					if m.sourceLocFmriHrfModel != 0 {
+						args = append(args, "--source-fmri-hrf-model", hrfModels[m.sourceLocFmriHrfModel])
+					}
+					driftModels := []string{"none", "cosine", "polynomial"}
+					if m.sourceLocFmriDriftModel != 1 { // cosine is default
+						args = append(args, "--source-fmri-drift-model", driftModels[m.sourceLocFmriDriftModel])
+					}
+					if m.sourceLocFmriHighPassHz != 0.008 {
+						args = append(args, "--source-fmri-high-pass", fmt.Sprintf("%.4f", m.sourceLocFmriHighPassHz))
+					}
+					if m.sourceLocFmriLowPassHz != 0.1 {
+						args = append(args, "--source-fmri-low-pass", fmt.Sprintf("%.2f", m.sourceLocFmriLowPassHz))
+					}
+					if m.sourceLocFmriClusterCorrection {
+						args = append(args, "--source-fmri-cluster-correction")
+						if m.sourceLocFmriClusterPThreshold != 0.001 {
+							args = append(args, "--source-fmri-cluster-p-threshold", fmt.Sprintf("%.4f", m.sourceLocFmriClusterPThreshold))
+						}
+					}
+					outputTypes := []string{"z-score", "t-stat", "cope", "beta"}
+					if m.sourceLocFmriOutputType != 0 {
+						args = append(args, "--source-fmri-output-type", outputTypes[m.sourceLocFmriOutputType])
+					}
+					if !m.sourceLocFmriResampleToFS {
+						args = append(args, "--no-source-fmri-resample-to-fs")
+					}
+				}
+			}
 		}
 	}
 
@@ -1160,9 +1345,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 	}
 	if m.tfrNCyclesFactor != 2.0 {
 		args = append(args, "--tfr-n-cycles-factor", fmt.Sprintf("%.1f", m.tfrNCyclesFactor))
-	}
-	if m.tfrDecim != 4 {
-		args = append(args, "--tfr-decim", fmt.Sprintf("%d", m.tfrDecim))
 	}
 	if m.tfrWorkers != -1 {
 		args = append(args, "--tfr-workers", fmt.Sprintf("%d", m.tfrWorkers))
@@ -2196,6 +2378,41 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 		args = append(args, "--ica-labels-to-keep")
 		args = append(args, splitCSVList(m.icaLabelsToKeep)...)
 	}
+	if m.prepKeepMnebidsBads {
+		args = append(args, "--keep-mnebids-bads")
+	}
+
+	// PyPREP advanced options
+	if m.prepRansac {
+		args = append(args, "--ransac")
+	}
+	if m.prepRepeats != 3 {
+		args = append(args, "--repeats", fmt.Sprintf("%d", m.prepRepeats))
+	}
+	if m.prepAverageReref {
+		args = append(args, "--average-reref")
+	}
+	if strings.TrimSpace(m.prepFileExtension) != "" && m.prepFileExtension != ".vhdr" {
+		args = append(args, "--file-extension", m.prepFileExtension)
+	}
+	if m.prepConsiderPreviousBads {
+		args = append(args, "--consider-previous-bads")
+	}
+	if !m.prepOverwriteChansTsv {
+		args = append(args, "--no-overwrite-channels-tsv")
+	}
+	if m.prepDeleteBreaks {
+		args = append(args, "--delete-breaks")
+	}
+	if m.prepBreaksMinLength != 20 {
+		args = append(args, "--breaks-min-length", fmt.Sprintf("%d", m.prepBreaksMinLength))
+	}
+	if m.prepTStartAfterPrevious != 2 {
+		args = append(args, "--t-start-after-previous", fmt.Sprintf("%d", m.prepTStartAfterPrevious))
+	}
+	if m.prepTStopBeforeNext != 2 {
+		args = append(args, "--t-stop-before-next", fmt.Sprintf("%d", m.prepTStopBeforeNext))
+	}
 
 	// Epoching
 	if m.prepEpochsTmin != -5.0 {
@@ -2214,6 +2431,129 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 
 	return args
+}
+
+func (m Model) buildFmriAdvancedArgs() []string {
+	ab := newArgBuilder()
+
+	// Runtime
+	engine := "docker"
+	if m.fmriEngineIndex%2 == 1 {
+		engine = "apptainer"
+	}
+	ab.args = append(ab.args, "--engine", engine)
+	ab.addIfNonEmpty("--fmriprep-image", m.fmriFmriprepImage)
+	ab.addIfNonEmpty("--fmriprep-output-dir", expandUserPath(m.fmriFmriprepOutputDir))
+	ab.addIfNonEmpty("--fmriprep-work-dir", expandUserPath(m.fmriFmriprepWorkDir))
+	ab.addIfNonEmpty("--fs-license-file", expandUserPath(m.fmriFreesurferLicenseFile))
+	ab.addIfNonEmpty("--fs-subjects-dir", expandUserPath(m.fmriFreesurferSubjectsDir))
+
+	// Output
+	ab.addSpaceListFlag("--output-spaces", m.fmriOutputSpacesSpec)
+	ab.addSpaceListFlag("--ignore", m.fmriIgnoreSpec)
+	ab.addIfNonEmpty("--bids-filter-file", expandUserPath(m.fmriBidsFilterFile))
+
+	levelOptions := []string{"full", "resampling", "minimal"}
+	if m.fmriLevelIndex > 0 {
+		ab.args = append(ab.args, "--level", levelOptions[m.fmriLevelIndex%3])
+	}
+
+	ciftiOptions := []string{"", "91k", "170k"}
+	if m.fmriCiftiOutputIndex > 0 {
+		ab.args = append(ab.args, "--cifti-output", ciftiOptions[m.fmriCiftiOutputIndex%3])
+	}
+
+	ab.addIfNonEmpty("--task-id", m.fmriTaskId)
+
+	// Performance
+	if m.fmriNThreads > 0 {
+		ab.args = append(ab.args, "--nthreads", fmt.Sprintf("%d", m.fmriNThreads))
+	}
+	if m.fmriOmpNThreads > 0 {
+		ab.args = append(ab.args, "--omp-nthreads", fmt.Sprintf("%d", m.fmriOmpNThreads))
+	}
+	if m.fmriMemMb > 0 {
+		ab.args = append(ab.args, "--mem-mb", fmt.Sprintf("%d", m.fmriMemMb))
+	}
+	if m.fmriLowMem {
+		ab.args = append(ab.args, "--low-mem")
+	}
+
+	// Anatomical
+	if m.fmriSkipReconstruction {
+		ab.args = append(ab.args, "--fs-no-reconall")
+	}
+	if m.fmriLongitudinal {
+		ab.args = append(ab.args, "--longitudinal")
+	}
+	if strings.TrimSpace(m.fmriSkullStripTemplate) != "" && m.fmriSkullStripTemplate != "OASIS30ANTs" {
+		ab.args = append(ab.args, "--skull-strip-template", m.fmriSkullStripTemplate)
+	}
+	if m.fmriSkullStripFixedSeed {
+		ab.args = append(ab.args, "--skull-strip-fixed-seed")
+	}
+
+	// BOLD processing
+	bold2t1wInitOptions := []string{"register", "header"}
+	if m.fmriBold2T1wInitIndex == 1 {
+		ab.args = append(ab.args, "--bold2t1w-init", bold2t1wInitOptions[1])
+	}
+	if m.fmriBold2T1wDof != 6 {
+		ab.args = append(ab.args, "--bold2t1w-dof", fmt.Sprintf("%d", m.fmriBold2T1wDof))
+	}
+	if m.fmriSliceTimeRef != 0.5 {
+		ab.args = append(ab.args, "--slice-time-ref", fmt.Sprintf("%.2f", m.fmriSliceTimeRef))
+	}
+	if m.fmriDummyScans > 0 {
+		ab.args = append(ab.args, "--dummy-scans", fmt.Sprintf("%d", m.fmriDummyScans))
+	}
+
+	// Quality control
+	if m.fmriFdSpikeThreshold != 0.5 {
+		ab.args = append(ab.args, "--fd-spike-threshold", fmt.Sprintf("%.2f", m.fmriFdSpikeThreshold))
+	}
+	if m.fmriDvarsSpikeThreshold != 1.5 {
+		ab.args = append(ab.args, "--dvars-spike-threshold", fmt.Sprintf("%.2f", m.fmriDvarsSpikeThreshold))
+	}
+
+	// Denoising
+	if m.fmriUseAroma {
+		ab.args = append(ab.args, "--use-aroma")
+	}
+
+	// Surface
+	if m.fmriMedialSurfaceNan {
+		ab.args = append(ab.args, "--medial-surface-nan")
+	}
+	if m.fmriNoMsm {
+		ab.args = append(ab.args, "--no-msm")
+	}
+
+	// Multi-echo
+	if m.fmriMeOutputEchos {
+		ab.args = append(ab.args, "--me-output-echos")
+	}
+
+	// Reproducibility
+	if m.fmriRandomSeed > 0 {
+		ab.args = append(ab.args, "--random-seed", fmt.Sprintf("%d", m.fmriRandomSeed))
+	}
+
+	// Validation
+	if m.fmriSkipBidsValidation {
+		ab.args = append(ab.args, "--skip-bids-validation")
+	}
+	if m.fmriStopOnFirstCrash {
+		ab.args = append(ab.args, "--stop-on-first-crash")
+	}
+	if !m.fmriCleanWorkdir {
+		ab.args = append(ab.args, "--no-clean-workdir")
+	}
+
+	// Advanced
+	ab.addIfNonEmpty("--fmriprep-extra-args", m.fmriExtraArgs)
+
+	return ab.build()
 }
 
 // buildRawToBidsAdvancedArgs returns CLI args for raw-to-bids advanced options

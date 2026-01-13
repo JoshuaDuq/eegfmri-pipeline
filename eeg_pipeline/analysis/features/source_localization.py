@@ -13,6 +13,8 @@ for anatomically-defined ROIs.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -24,6 +26,189 @@ from eeg_pipeline.utils.config.loader import get_frequency_bands
 if TYPE_CHECKING:
     import mne
 
+
+def _cfg_get(config: Any, key: str, default: Any) -> Any:
+    if config is None:
+        return default
+    if hasattr(config, "get"):
+        return config.get(key, default)
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return default
+
+
+def _as_path(value: Any) -> Optional[Path]:
+    if value is None:
+        return None
+    try:
+        return Path(str(value)).expanduser()
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True)
+class FMRITimeWindow:
+    """fMRI-specific time window definition."""
+    name: str
+    tmin: float
+    tmax: float
+
+
+@dataclass(frozen=True)
+class FMRIConstraintConfig:
+    enabled: bool
+    stats_map_path: Optional[Path]
+    threshold: float
+    tail: str  # "pos" or "abs"
+    threshold_mode: str  # "z" or "fdr"
+    fdr_q: float
+    stat_type: str  # "z" (supported), others treated as "z" with warning
+    cluster_min_voxels: int
+    max_clusters: int
+    max_voxels_per_cluster: int
+    max_total_voxels: int
+    random_seed: int
+    # fMRI-specific time windows (independent of EEG feature extraction windows)
+    window_a: Optional[FMRITimeWindow] = None
+    window_b: Optional[FMRITimeWindow] = None
+
+
+def _load_fmri_constraint_config(
+    config: Any,
+    bids_fmri_root: Optional[Path] = None,
+    bids_derivatives: Optional[Path] = None,
+    freesurfer_subjects_dir: Optional[Path] = None,
+    subject: Optional[str] = None,
+    task: str = "pain",
+) -> FMRIConstraintConfig:
+    """
+    Load fMRI constraint configuration, building stats map if needed.
+
+    If contrast.enabled is True and no stats_map_path exists, the contrast
+    builder will be invoked to generate the stats map from BOLD data.
+    """
+    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    fmri_cfg = {}
+    if isinstance(src_cfg, dict):
+        fmri_cfg = src_cfg.get("fmri", {}) or {}
+    elif hasattr(config, "get"):
+        fmri_cfg = config.get("feature_engineering.sourcelocalization.fmri", {}) or {}
+
+    enabled = bool(fmri_cfg.get("enabled", False))
+    stats_map_path = _as_path(fmri_cfg.get("stats_map_path") or fmri_cfg.get("stats_map"))
+
+    contrast_cfg = fmri_cfg.get("contrast", {}) or {}
+    contrast_enabled = bool(contrast_cfg.get("enabled", False))
+
+    if (enabled or contrast_enabled) and stats_map_path is None and contrast_enabled:
+        # Try to build contrast from BOLD data
+        missing_paths = []
+        if bids_fmri_root is None:
+            missing_paths.append("bids_fmri_root (paths.bids_fmri_root or --bids-root)")
+        if bids_derivatives is None:
+            missing_paths.append("bids_derivatives (paths.deriv_root or --deriv-root)")
+        if freesurfer_subjects_dir is None:
+            missing_paths.append("freesurfer_subjects_dir (feature_engineering.sourcelocalization.subjects_dir or --source-subjects-dir)")
+        if not subject:
+            missing_paths.append("subject")
+
+        if missing_paths:
+            logging.getLogger(__name__).warning(
+                "Cannot build fMRI contrast: missing paths: %s. "
+                "Provide these paths or set --source-fmri-stats-map directly.",
+                ", ".join(missing_paths)
+            )
+        else:
+            try:
+                from fmri_pipeline.analysis.contrast_builder import ensure_fmri_stats_map
+                built_path = ensure_fmri_stats_map(
+                    config=config,
+                    bids_fmri_root=bids_fmri_root,
+                    bids_derivatives=bids_derivatives,
+                    freesurfer_subjects_dir=freesurfer_subjects_dir,
+                    subject=subject,
+                    task=task,
+                )
+                if built_path is not None:
+                    stats_map_path = built_path
+                    enabled = True
+            except Exception as e:
+                logging.getLogger(__name__).warning("Failed to build fMRI contrast: %s", e)
+
+    try:
+        threshold = float(fmri_cfg.get("threshold", 3.1))
+    except Exception:
+        threshold = 3.1
+
+    tail = str(fmri_cfg.get("tail", "pos")).strip().lower()
+    if tail not in {"pos", "abs"}:
+        tail = "pos"
+
+    thresholding_cfg = fmri_cfg.get("thresholding", {}) or {}
+    threshold_mode = str(thresholding_cfg.get("mode", fmri_cfg.get("threshold_mode", "z"))).strip().lower()
+    if threshold_mode not in {"z", "fdr"}:
+        threshold_mode = "z"
+
+    try:
+        fdr_q = float(thresholding_cfg.get("fdr_q", 0.05))
+    except Exception:
+        fdr_q = 0.05
+    if not np.isfinite(fdr_q) or fdr_q <= 0 or fdr_q >= 1:
+        fdr_q = 0.05
+
+    stat_type = str(thresholding_cfg.get("stat_type", "z")).strip().lower()
+    if stat_type not in {"z"}:
+        stat_type = "z"
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(fmri_cfg.get(key, default))
+        except Exception:
+            return default
+
+    # Parse fMRI-specific time windows
+    time_windows_cfg = fmri_cfg.get("time_windows", {}) or {}
+    window_a = None
+    window_b = None
+    
+    window_a_cfg = time_windows_cfg.get("window_a", {}) or {}
+    if window_a_cfg.get("name"):
+        try:
+            window_a = FMRITimeWindow(
+                name=str(window_a_cfg.get("name", "")).strip(),
+                tmin=float(window_a_cfg.get("tmin", 0.0)),
+                tmax=float(window_a_cfg.get("tmax", 0.0)),
+            )
+        except (ValueError, TypeError):
+            pass
+    
+    window_b_cfg = time_windows_cfg.get("window_b", {}) or {}
+    if window_b_cfg.get("name"):
+        try:
+            window_b = FMRITimeWindow(
+                name=str(window_b_cfg.get("name", "")).strip(),
+                tmin=float(window_b_cfg.get("tmin", 0.0)),
+                tmax=float(window_b_cfg.get("tmax", 0.0)),
+            )
+        except (ValueError, TypeError):
+            pass
+
+    return FMRIConstraintConfig(
+        enabled=enabled or (stats_map_path is not None),
+        stats_map_path=stats_map_path,
+        threshold=threshold,
+        tail=tail,
+        threshold_mode=threshold_mode,
+        fdr_q=fdr_q,
+        stat_type=stat_type,
+        cluster_min_voxels=_int("cluster_min_voxels", 50),
+        max_clusters=_int("max_clusters", 20),
+        max_voxels_per_cluster=_int("max_voxels_per_cluster", 2000),
+        max_total_voxels=_int("max_total_voxels", 20000),
+        random_seed=_int("random_seed", 0),
+        window_a=window_a,
+        window_b=window_b,
+    )
 
 ###################################################################
 # Forward Model Setup
@@ -59,9 +244,10 @@ def _setup_forward_model(
     if logger:
         logger.info(f"Setting up forward model using {subject} template")
     
+    fs_dir = None
     if subjects_dir is None:
-        fs_dir = fetch_fsaverage(verbose=False)
-        subjects_dir = str(fs_dir).replace("/fsaverage", "")
+        fs_dir = Path(fetch_fsaverage(verbose=False))
+        subjects_dir = str(fs_dir.parent)
     
     src = mne.setup_source_space(
         subject,
@@ -71,12 +257,15 @@ def _setup_forward_model(
         verbose=False,
     )
     
-    bem_path = mne.datasets.fetch_fsaverage(verbose=False)
-    bem = f"{bem_path}/bem/fsaverage-5120-5120-5120-bem-sol.fif"
+    if fs_dir is None:
+        fs_dir = Path(fetch_fsaverage(verbose=False))
+    bem = str(fs_dir / "bem" / "fsaverage-5120-5120-5120-bem-sol.fif")
+    trans_path = fs_dir / "bem" / "fsaverage-trans.fif"
+    trans = str(trans_path) if trans_path.exists() else "fsaverage"
     
     fwd = mne.make_forward_solution(
         info,
-        trans="fsaverage",
+        trans=trans,
         src=src,
         bem=bem,
         eeg=True,
@@ -168,6 +357,280 @@ def _setup_volume_source_space(
         logger.info(f"Volume source space: {fwd['nsource']} sources")
     
     return fwd, src, roi_indices
+
+
+def _setup_surface_forward_model_configured(
+    info: Any,
+    *,
+    subject: str,
+    subjects_dir: str,
+    spacing: str,
+    trans: str,
+    bem: str,
+    mindist_mm: float,
+    logger: Optional[logging.Logger],
+) -> Tuple[Any, Any]:
+    import mne
+
+    src = mne.setup_source_space(
+        subject,
+        spacing=spacing,
+        subjects_dir=subjects_dir,
+        add_dist=False,
+        verbose=False,
+    )
+    fwd = mne.make_forward_solution(
+        info,
+        trans=trans,
+        src=src,
+        bem=bem,
+        eeg=True,
+        mindist=float(mindist_mm),
+        verbose=False,
+    )
+    if logger:
+        logger.info("Surface forward model: %d sources", int(fwd["nsource"]))
+    return fwd, src
+
+
+def _setup_volume_source_space_configured(
+    info: Any,
+    *,
+    subject: str,
+    subjects_dir: str,
+    trans: str,
+    bem: str,
+    roi_coords_m: Dict[str, np.ndarray],
+    mindist_mm: float,
+    logger: Optional[logging.Logger],
+) -> Tuple[Any, Any, Dict[str, List[int]]]:
+    import mne
+
+    all_coords_m: List[np.ndarray] = []
+    roi_indices: Dict[str, List[int]] = {}
+    idx = 0
+    for roi_name, coords_m in roi_coords_m.items():
+        coords_m = np.atleast_2d(np.asarray(coords_m, dtype=float))
+        roi_indices[roi_name] = list(range(idx, idx + int(coords_m.shape[0])))
+        all_coords_m.append(coords_m)
+        idx += int(coords_m.shape[0])
+
+    rr = np.vstack(all_coords_m) if all_coords_m else np.zeros((0, 3), dtype=float)
+    pos = {
+        "rr": rr,
+        "nn": np.tile([0.0, 0.0, 1.0], (int(rr.shape[0]), 1)),
+    }
+
+    src = mne.setup_volume_source_space(
+        subject,
+        pos=pos,
+        subjects_dir=subjects_dir,
+        verbose=False,
+    )
+
+    fwd = mne.make_forward_solution(
+        info,
+        trans=trans,
+        src=src,
+        bem=bem,
+        eeg=True,
+        mindist=float(mindist_mm),
+        verbose=False,
+    )
+
+    if logger:
+        logger.info("Volume forward model (fMRI constrained): %d sources", int(fwd["nsource"]))
+
+    return fwd, src, roi_indices
+
+
+def _fmri_roi_coords_from_stats_map(
+    stats_map_path: Path,
+    cfg: FMRIConstraintConfig,
+    logger: Optional[logging.Logger],
+) -> Dict[str, np.ndarray]:
+    """
+    Convert a thresholded fMRI statistical map into discrete volume-source coordinates.
+
+    IMPORTANT: For accurate EEG↔MRI alignment, `stats_map_path` must be in the SAME MRI
+    space as your FreeSurfer subject (typically produced by resampling into `orig.mgz`
+    or `T1.mgz` space and then converting to NIfTI).
+    """
+    try:
+        import nibabel as nib
+    except Exception as exc:
+        raise ImportError(
+            "fMRI-constrained source localization requires nibabel. "
+            "Install nibabel (e.g., `pip install nibabel`) and retry."
+        ) from exc
+
+    from scipy.ndimage import generate_binary_structure, label as cc_label
+
+    img = nib.load(str(stats_map_path))
+    data = np.asarray(img.get_fdata(dtype=np.float32))
+    affine = np.asarray(img.affine, dtype=float)
+
+    if data.ndim == 4:
+        data = data[..., 0]
+    if data.ndim != 3:
+        raise ValueError(f"Expected 3D NIfTI fMRI map, got shape={data.shape}.")
+
+    thr = float(cfg.threshold)
+    if not np.isfinite(thr) or thr <= 0:
+        thr = 3.1
+
+    finite = np.isfinite(data)
+    if str(cfg.threshold_mode).lower() == "fdr":
+        q = float(cfg.fdr_q)
+        if not (np.isfinite(q) and 0 < q < 1):
+            q = 0.05
+
+        # FDR is implemented for z-maps (or maps treated as z).
+        # If a user provides non-z maps, they should convert externally.
+        zvals = data[finite].astype(float, copy=False)
+        if cfg.tail == "abs":
+            pvals = 2.0 * (1.0 - stats.norm.cdf(np.abs(zvals)))
+        else:
+            pvals = 1.0 - stats.norm.cdf(zvals)
+        pvals = np.clip(pvals, 0.0, 1.0)
+
+        order = np.argsort(pvals)
+        ranked = pvals[order]
+        n = int(ranked.size)
+        if n < 1:
+            raise ValueError("No finite voxels found in fMRI stats map.")
+
+        bh_thresh = (q * (np.arange(1, n + 1, dtype=float) / float(n)))
+        below = ranked <= bh_thresh
+        if not np.any(below):
+            mask = np.zeros_like(data, dtype=bool)
+        else:
+            k = int(np.max(np.where(below)[0]))
+            cutoff = float(ranked[k])
+            keep = pvals <= cutoff
+            mask = np.zeros_like(data, dtype=bool)
+            mask[finite] = keep
+    else:
+        if cfg.tail == "abs":
+            mask = finite & (np.abs(data) >= thr)
+        else:
+            mask = finite & (data >= thr)
+
+    if not np.any(mask):
+        # Log statistics about the contrast map to diagnose the issue
+        finite_data = data[finite]
+        if len(finite_data) > 0:
+            logger.warning(
+                f"fMRI stats map threshold produced empty mask (threshold={thr}, tail={cfg.tail}, mode={cfg.threshold_mode}). "
+                f"Stats: min={np.nanmin(finite_data):.3f}, max={np.nanmax(finite_data):.3f}, "
+                f"mean={np.nanmean(finite_data):.3f}, 95th percentile={np.nanpercentile(finite_data, 95):.3f}"
+            )
+        raise ValueError(
+            f"fMRI stats map threshold produced empty mask (threshold={thr}, tail={cfg.tail}, mode={cfg.threshold_mode}). "
+            "Consider lowering the threshold (mode='z') or increasing fdr_q (mode='fdr')."
+        )
+
+    structure = generate_binary_structure(3, 1)  # 6-connectivity
+    labeled, n_clusters = cc_label(mask.astype(np.uint8), structure=structure)
+    if n_clusters < 1:
+        raise ValueError("No connected components found in fMRI-thresholded mask.")
+
+    clusters: List[Tuple[int, int, float]] = []
+    for cluster_id in range(1, int(n_clusters) + 1):
+        vox = np.argwhere(labeled == cluster_id)
+        if vox.size == 0:
+            continue
+        n_vox = int(vox.shape[0])
+        if n_vox < int(cfg.cluster_min_voxels):
+            continue
+        peak_val = float(np.nanmax(np.abs(data[labeled == cluster_id])))
+        clusters.append((cluster_id, n_vox, peak_val))
+
+    if not clusters:
+        raise ValueError(
+            f"All clusters were smaller than cluster_min_voxels={cfg.cluster_min_voxels}."
+        )
+
+    clusters.sort(key=lambda t: (t[2], t[1]), reverse=True)
+    clusters = clusters[: max(1, int(cfg.max_clusters))]
+
+    rng = np.random.default_rng(None if int(cfg.random_seed) == 0 else int(cfg.random_seed))
+
+    roi_coords_m: Dict[str, np.ndarray] = {}
+    total_selected = 0
+    for out_idx, (cluster_id, _, peak_val) in enumerate(clusters, start=1):
+        vox = np.argwhere(labeled == cluster_id)
+        if vox.size == 0:
+            continue
+
+        if int(cfg.max_voxels_per_cluster) > 0 and int(vox.shape[0]) > int(cfg.max_voxels_per_cluster):
+            pick = rng.choice(int(vox.shape[0]), size=int(cfg.max_voxels_per_cluster), replace=False)
+            vox = vox[pick]
+
+        if int(cfg.max_total_voxels) > 0:
+            remaining = int(cfg.max_total_voxels) - total_selected
+            if remaining <= 0:
+                break
+            if int(vox.shape[0]) > remaining:
+                pick = rng.choice(int(vox.shape[0]), size=int(remaining), replace=False)
+                vox = vox[pick]
+
+        coords_mm = nib.affines.apply_affine(affine, vox)
+        coords_m = np.asarray(coords_mm, dtype=float) / 1000.0
+        roi_name = f"fmri_c{out_idx:02d}_peak{peak_val:.2f}".replace(".", "p")
+        roi_coords_m[roi_name] = coords_m
+        total_selected += int(coords_m.shape[0])
+
+    if logger:
+        logger.info(
+            "fMRI constraint: %d clusters, %d voxels (map=%s)",
+            len(roi_coords_m),
+            total_selected,
+            str(stats_map_path),
+        )
+
+    if not roi_coords_m:
+        raise ValueError("fMRI constraint produced no ROI coordinates after subsampling.")
+
+    return roi_coords_m
+
+
+def _extract_roi_timecourses_from_vertex_indices(
+    stcs: List[Any],
+    roi_indices: Dict[str, List[int]],
+) -> Tuple[np.ndarray, List[str]]:
+    """Extract ROI timecourses from STCs using explicit vertex mapping to handle pruned sources."""
+    n_epochs = len(stcs)
+    if n_epochs == 0:
+        return np.zeros((0, 0, 0)), []
+    
+    roi_names = list(roi_indices.keys())
+    n_rois = len(roi_names)
+    n_times = int(stcs[0].data.shape[1])
+    
+    # stcs[0].vertices is a list (one per source space). For volume, usually [vertno]
+    stc_verts = stcs[0].vertices[0]
+    # Create mapping: original_vertex_index -> row_index_in_stc_data
+    vert_to_idx = {v: i for i, v in enumerate(stc_verts)}
+    
+    out = np.full((n_epochs, n_rois, n_times), np.nan, dtype=float)
+    for epoch_idx, stc in enumerate(stcs):
+        data = np.asarray(stc.data, dtype=float)
+        for roi_idx, roi_name in enumerate(roi_names):
+            # Get original indices for this ROI
+            orig_idxs = roi_indices.get(roi_name, [])
+            if not orig_idxs:
+                continue
+            
+            # Find which of these indices survived in the STC
+            row_idxs = [vert_to_idx[v] for v in orig_idxs if v in vert_to_idx]
+            if not row_idxs:
+                continue
+                
+            block = data[row_idxs, :]
+            out[epoch_idx, roi_idx, :] = np.nanmean(block, axis=0)
+            
+    return out, roi_names
 
 
 ###################################################################
@@ -517,49 +980,199 @@ def extract_source_localization_features(
     epochs = ctx.epochs
     config = ctx.config
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
-    
+
+    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    if not isinstance(src_cfg, dict):
+        src_cfg = {}
+
+    method_use = str(src_cfg.get("method", method)).strip().lower()
+    if method_use not in {"lcmv", "eloreta"}:
+        method_use = "lcmv"
+
+    spacing = str(src_cfg.get("spacing", "oct6")).strip()
+    if spacing not in {"oct5", "oct6", "ico4", "ico5"}:
+        spacing = "oct6"
+
+    parcellation = str(src_cfg.get("parcellation", src_cfg.get("parc", "aparc"))).strip()
+    if parcellation not in {"aparc", "aparc.a2009s", "HCPMMP1"}:
+        parcellation = "aparc"
+
+    # FreeSurfer subjects dir: check source config first, then global paths
+    subjects_dir_path = _as_path(src_cfg.get("subjects_dir"))
+    if subjects_dir_path is None:
+        subjects_dir_path = _as_path(_cfg_get(config, "paths.freesurfer_dir", None))
+    # Get subject name, handling string "None" as a special case
+    subject_from_cfg = src_cfg.get("subject")
+    if subject_from_cfg is None or str(subject_from_cfg).strip().lower() in ("none", ""):
+        subject = f"sub-{getattr(ctx, 'subject', '')}".strip() or "fsaverage"
+    else:
+        subject = str(subject_from_cfg).strip()
+    trans_path = _as_path(src_cfg.get("trans"))
+    bem_path = _as_path(src_cfg.get("bem"))
+
+    def _float(key: str, default: float) -> float:
+        try:
+            return float(src_cfg.get(key, default))
+        except Exception:
+            return default
+
+    mindist_mm = _float("mindist_mm", 5.0)
+    lcmv_reg = _float("reg", 0.05)
+    eloreta_snr = _float("snr", 3.0)
+    eloreta_loose = _float("loose", 0.2)
+    eloreta_depth = _float("depth", 0.8)
+
+    # Get BIDS paths for potential contrast building (use dot-notation config keys)
+    bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_fmri_root", None))
+    bids_derivatives = _as_path(_cfg_get(config, "paths.deriv_root", None))
+    # Fallback: if fMRI root not set, try using bids_root as fMRI root (common case)
+    if bids_fmri_root is None:
+        bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_root", None))
+    ctx_subject = getattr(ctx, "subject", None) or subject.replace("sub-", "")
+
+    # Derive fMRI task from EEG task: thermalactive -> pain, thermalpain -> pain
+    eeg_task = str(_cfg_get(config, "project.task", "pain"))
+    fmri_task = eeg_task.replace("thermal", "").replace("active", "")
+    if not fmri_task:
+        fmri_task = "pain"
+
+    fmri_cfg = _load_fmri_constraint_config(
+        config,
+        bids_fmri_root=bids_fmri_root,
+        bids_derivatives=bids_derivatives,
+        freesurfer_subjects_dir=subjects_dir_path,
+        subject=ctx_subject,
+        task=fmri_task,
+    )
+
     n_epochs = len(epochs)
     if n_epochs < 2:
         logger.warning("Source localization requires at least 2 epochs")
         return pd.DataFrame(), []
-    
+
     sfreq = epochs.info["sfreq"]
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
-    
+
     if logger:
-        logger.info(f"Extracting source-localized features using {method.upper()}")
-    
-    fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
-    
-    labels = mne.read_labels_from_annot(
-        "fsaverage",
-        parc="aparc",
-        subjects_dir=None,
-        verbose=False,
-    )
-    
-    labels = [l for l in labels if "unknown" not in l.name.lower()]
-    
-    if roi_labels is not None:
-        labels = [l for l in labels if any(r in l.name for r in roi_labels)]
-    
-    if not labels:
-        logger.warning("No ROI labels found for source localization")
-        return pd.DataFrame(), []
-    
-    label_names = [l.name for l in labels]
-    
-    if logger:
-        logger.info(f"Using {len(labels)} ROI labels")
-    
-    if method.lower() == "lcmv":
-        stcs, _ = _compute_lcmv_source_estimates(epochs, fwd, logger=logger)
-    elif method.lower() in ("eloreta", "eloreta"):
-        stcs, _ = _compute_eloreta_source_estimates(epochs, fwd, logger=logger)
+        logger.info(f"Extracting source-localized features using {method_use.upper()}")
+
+    # --- Optional: fMRI-constrained volume source space ---
+    if fmri_cfg.enabled:
+        if subjects_dir_path is None:
+            raise ValueError(
+                "fMRI-constrained source localization requires feature_engineering.sourcelocalization.subjects_dir "
+                "(FreeSurfer SUBJECTS_DIR). Set via --source-subjects-dir or in config."
+            )
+
+        # Auto-generate BEM/trans files if configured
+        from fmri_pipeline.analysis.bem_generation import ensure_bem_and_trans_files
+        trans_path, _, bem_path = ensure_bem_and_trans_files(
+            subject=subject,
+            subjects_dir=subjects_dir_path,
+            config=config,
+            logger_instance=logger,
+        )
+        # Update paths after potential auto-generation
+        if trans_path is not None:
+            src_cfg["trans"] = str(trans_path)
+        if bem_path is not None:
+            src_cfg["bem"] = str(bem_path)
+
+        if fmri_cfg.stats_map_path is None:
+            raise ValueError(
+                "fMRI constraint enabled but no stats map path provided. "
+                "Set feature_engineering.sourcelocalization.fmri.stats_map_path or enable contrast builder."
+            )
+        if trans_path is None:
+            raise ValueError(
+                "fMRI-constrained source localization requires feature_engineering.sourcelocalization.trans "
+                "(EEG↔MRI transform .fif). Set path or enable --source-create-trans to auto-generate."
+            )
+        if bem_path is None:
+            raise ValueError(
+                "fMRI-constrained source localization requires feature_engineering.sourcelocalization.bem "
+                "(*-bem-sol.fif). Set path or enable --source-create-bem-model and --source-create-bem-solution to auto-generate."
+            )
+        if not fmri_cfg.stats_map_path.exists():
+            raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
+
+        roi_coords_m = _fmri_roi_coords_from_stats_map(fmri_cfg.stats_map_path, fmri_cfg, logger)
+        fwd, src, roi_indices = _setup_volume_source_space_configured(
+            epochs.info,
+            subject=subject,
+            subjects_dir=str(subjects_dir_path),
+            trans=str(trans_path),
+            bem=str(bem_path),
+            roi_coords_m=roi_coords_m,
+            mindist_mm=mindist_mm,
+            logger=logger,
+        )
+        if method_use == "lcmv":
+            stcs, _ = _compute_lcmv_source_estimates(epochs, fwd, reg=lcmv_reg, logger=logger)
+        else:
+            stcs, _ = _compute_eloreta_source_estimates(
+                epochs,
+                fwd,
+                loose=eloreta_loose,
+                depth=eloreta_depth,
+                snr=eloreta_snr,
+                logger=logger,
+            )
+        roi_data, label_names = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
+        if roi_data.size == 0 or not label_names:
+            logger.warning("fMRI-constrained source localization produced no ROI time courses.")
+            return pd.DataFrame(), []
     else:
-        raise ValueError(f"Unknown source localization method: {method}")
-    
-    roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+        # --- Surface source space (fsaverage fallback, or subject-specific if configured) ---
+        if subjects_dir_path is not None and trans_path is not None and bem_path is not None:
+            fwd, src = _setup_surface_forward_model_configured(
+                epochs.info,
+                subject=subject,
+                subjects_dir=str(subjects_dir_path),
+                spacing=spacing,
+                trans=str(trans_path),
+                bem=str(bem_path),
+                mindist_mm=mindist_mm,
+                logger=logger,
+            )
+            labels = mne.read_labels_from_annot(
+                subject,
+                parc=parcellation,
+                subjects_dir=str(subjects_dir_path),
+                verbose=False,
+            )
+        else:
+            fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
+            labels = mne.read_labels_from_annot(
+                "fsaverage",
+                parc="aparc",
+                subjects_dir=None,
+                verbose=False,
+            )
+
+        labels = [l for l in labels if "unknown" not in l.name.lower()]
+        if roi_labels is not None:
+            labels = [l for l in labels if any(r in l.name for r in roi_labels)]
+        if not labels:
+            logger.warning("No ROI labels found for source localization")
+            return pd.DataFrame(), []
+        label_names = [l.name for l in labels]
+        if logger:
+            logger.info(f"Using {len(labels)} ROI labels")
+
+        if method_use == "lcmv":
+            stcs, _ = _compute_lcmv_source_estimates(epochs, fwd, reg=lcmv_reg, logger=logger)
+        else:
+            stcs, _ = _compute_eloreta_source_estimates(
+                epochs,
+                fwd,
+                loose=eloreta_loose,
+                depth=eloreta_depth,
+                snr=eloreta_snr,
+                logger=logger,
+            )
+
+        roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
     
     segment_label = ctx.name or getattr(ctx.windows, "name", None) or "full"
     
@@ -576,14 +1189,14 @@ def extract_source_localization_features(
         
         for roi_idx, roi_name in enumerate(label_names):
             safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{segment_label}_{method}_{band}_{safe_name}_power"
+            col_name = f"src_{segment_label}_{method_use}_{band}_{safe_name}_power"
             feature_cols.append(col_name)
             
             for epoch_idx in range(n_epochs):
                 records[epoch_idx][col_name] = power[epoch_idx, roi_idx]
         
         global_power = np.nanmean(power, axis=1)
-        col_name = f"src_{segment_label}_{method}_{band}_global_power"
+        col_name = f"src_{segment_label}_{method_use}_{band}_global_power"
         feature_cols.append(col_name)
         for epoch_idx in range(n_epochs):
             records[epoch_idx][col_name] = global_power[epoch_idx]
@@ -593,7 +1206,7 @@ def extract_source_localization_features(
         
         for roi_idx, roi_name in enumerate(label_names):
             safe_name = roi_name.replace("-", "_").replace(" ", "_")
-            col_name = f"src_{segment_label}_{method}_{band}_{safe_name}_envelope"
+            col_name = f"src_{segment_label}_{method_use}_{band}_{safe_name}_envelope"
             feature_cols.append(col_name)
             
             for epoch_idx in range(n_epochs):
@@ -645,8 +1258,73 @@ def extract_source_connectivity_features(
     from mne_connectivity import spectral_connectivity_epochs, envelope_correlation
     
     epochs = ctx.epochs
+    config = getattr(ctx, "config", None)
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
     
+    src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
+    if not isinstance(src_cfg, dict):
+        src_cfg = {}
+
+    method_use = str(src_cfg.get("method", method)).strip().lower()
+    if method_use not in {"lcmv", "eloreta"}:
+        method_use = "lcmv"
+
+    spacing = str(src_cfg.get("spacing", "oct6")).strip()
+    if spacing not in {"oct5", "oct6", "ico4", "ico5"}:
+        spacing = "oct6"
+
+    parcellation = str(src_cfg.get("parcellation", src_cfg.get("parc", "aparc"))).strip()
+    if parcellation not in {"aparc", "aparc.a2009s", "HCPMMP1"}:
+        parcellation = "aparc"
+
+    # FreeSurfer subjects dir: check source config first, then global paths
+    subjects_dir_path = _as_path(src_cfg.get("subjects_dir"))
+    if subjects_dir_path is None:
+        subjects_dir_path = _as_path(_cfg_get(config, "paths.freesurfer_dir", None))
+    # Get subject name, handling string "None" as a special case
+    subject_from_cfg = src_cfg.get("subject")
+    if subject_from_cfg is None or str(subject_from_cfg).strip().lower() in ("none", ""):
+        subject = f"sub-{getattr(ctx, 'subject', '')}".strip() or "fsaverage"
+    else:
+        subject = str(subject_from_cfg).strip()
+    trans_path = _as_path(src_cfg.get("trans"))
+    bem_path = _as_path(src_cfg.get("bem"))
+
+    def _float(key: str, default: float) -> float:
+        try:
+            return float(src_cfg.get(key, default))
+        except Exception:
+            return default
+
+    mindist_mm = _float("mindist_mm", 5.0)
+    lcmv_reg = _float("reg", 0.05)
+    eloreta_snr = _float("snr", 3.0)
+    eloreta_loose = _float("loose", 0.2)
+    eloreta_depth = _float("depth", 0.8)
+
+    # Get BIDS paths for potential contrast building (use dot-notation config keys)
+    bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_fmri_root", None))
+    bids_derivatives = _as_path(_cfg_get(config, "paths.deriv_root", None))
+    # Fallback: if fMRI root not set, try using bids_root as fMRI root (common case)
+    if bids_fmri_root is None:
+        bids_fmri_root = _as_path(_cfg_get(config, "paths.bids_root", None))
+    ctx_subject = getattr(ctx, "subject", None) or subject.replace("sub-", "")
+
+    # Derive fMRI task from EEG task: thermalactive -> pain, thermalpain -> pain
+    eeg_task = str(_cfg_get(config, "project.task", "pain"))
+    fmri_task = eeg_task.replace("thermal", "").replace("active", "")
+    if not fmri_task:
+        fmri_task = "pain"
+
+    fmri_cfg = _load_fmri_constraint_config(
+        config,
+        bids_fmri_root=bids_fmri_root,
+        bids_derivatives=bids_derivatives,
+        freesurfer_subjects_dir=subjects_dir_path,
+        subject=ctx_subject,
+        task=fmri_task,
+    )
+
     n_epochs = len(epochs)
     if n_epochs < 2:
         logger.warning("Source connectivity requires at least 2 epochs")
@@ -657,26 +1335,82 @@ def extract_source_connectivity_features(
     
     if logger:
         logger.info(f"Extracting source-space {connectivity_method.upper()} connectivity")
-    
-    fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
-    
-    labels = mne.read_labels_from_annot(
-        "fsaverage",
-        parc="aparc",
-        subjects_dir=None,
-        verbose=False,
-    )
-    labels = [l for l in labels if "unknown" not in l.name.lower()]
-    
-    if roi_labels is not None:
-        labels = [l for l in labels if any(r in l.name for r in roi_labels)]
-    
-    if len(labels) < 2:
+
+    if fmri_cfg.enabled:
+        if fmri_cfg.stats_map_path is None:
+            raise ValueError(
+                "fMRI constraint enabled but no stats map path provided. "
+                "Set feature_engineering.sourcelocalization.fmri.stats_map_path or enable contrast builder."
+            )
+        if subjects_dir_path is None:
+            raise ValueError(
+                "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.subjects_dir "
+                "(FreeSurfer SUBJECTS_DIR)."
+            )
+        if trans_path is None:
+            raise ValueError(
+                "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.trans "
+                "(EEG↔MRI transform .fif)."
+            )
+        if bem_path is None:
+            raise ValueError(
+                "fMRI-constrained source connectivity requires feature_engineering.sourcelocalization.bem "
+                "(*-bem-sol.fif)."
+            )
+        if not fmri_cfg.stats_map_path.exists():
+            raise FileNotFoundError(f"Missing fMRI stats map: {fmri_cfg.stats_map_path}")
+
+        roi_coords_m = _fmri_roi_coords_from_stats_map(fmri_cfg.stats_map_path, fmri_cfg, logger)
+        fwd, src, roi_indices = _setup_volume_source_space_configured(
+            epochs.info,
+            subject=subject,
+            subjects_dir=str(subjects_dir_path),
+            trans=str(trans_path),
+            bem=str(bem_path),
+            roi_coords_m=roi_coords_m,
+            mindist_mm=mindist_mm,
+            logger=logger,
+        )
+        labels = None
+        label_names = list(roi_indices.keys())
+    else:
+        if subjects_dir_path is not None and trans_path is not None and bem_path is not None:
+            fwd, src = _setup_surface_forward_model_configured(
+                epochs.info,
+                subject=subject,
+                subjects_dir=str(subjects_dir_path),
+                spacing=spacing,
+                trans=str(trans_path),
+                bem=str(bem_path),
+                mindist_mm=mindist_mm,
+                logger=logger,
+            )
+            labels = mne.read_labels_from_annot(
+                subject,
+                parc=parcellation,
+                subjects_dir=str(subjects_dir_path),
+                verbose=False,
+            )
+        else:
+            fwd, src, _ = _setup_forward_model(epochs.info, logger=logger)
+            labels = mne.read_labels_from_annot(
+                "fsaverage",
+                parc="aparc",
+                subjects_dir=None,
+                verbose=False,
+            )
+        labels = [l for l in labels if "unknown" not in l.name.lower()]
+        if roi_labels is not None:
+            labels = [l for l in labels if any(r in l.name for r in roi_labels)]
+        if len(labels) < 2:
+            logger.warning("Need at least 2 ROIs for connectivity")
+            return pd.DataFrame(), []
+        label_names = [l.name for l in labels]
+
+    n_rois = len(label_names)
+    if n_rois < 2:
         logger.warning("Need at least 2 ROIs for connectivity")
         return pd.DataFrame(), []
-    
-    label_names = [l.name for l in labels]
-    n_rois = len(labels)
     
     records = [{} for _ in range(n_epochs)]
     feature_cols = []
@@ -689,12 +1423,22 @@ def extract_source_connectivity_features(
         
         epochs_band = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
         
-        if method.lower() == "lcmv":
-            stcs, _ = _compute_lcmv_source_estimates(epochs_band, fwd, logger=None)
+        if method_use == "lcmv":
+            stcs, _ = _compute_lcmv_source_estimates(epochs_band, fwd, reg=lcmv_reg, logger=None)
         else:
-            stcs, _ = _compute_eloreta_source_estimates(epochs_band, fwd, logger=None)
-        
-        roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
+            stcs, _ = _compute_eloreta_source_estimates(
+                epochs_band,
+                fwd,
+                loose=eloreta_loose,
+                depth=eloreta_depth,
+                snr=eloreta_snr,
+                logger=None,
+            )
+
+        if fmri_cfg.enabled:
+            roi_data, _ = _extract_roi_timecourses_from_vertex_indices(stcs, roi_indices)
+        else:
+            roi_data = _extract_roi_timecourses(stcs, labels, src, mode="mean_flip")
         
         if connectivity_method.lower() == "aec":
             for epoch_idx in range(n_epochs):
@@ -713,7 +1457,7 @@ def extract_source_connectivity_features(
                 triu_idx = np.triu_indices(n_rois, k=1)
                 mean_conn = np.nanmean(con_matrix[triu_idx])
                 
-                col_name = f"src_{method}_{band}_aec_global"
+                col_name = f"src_{method_use}_{band}_aec_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
                 records[epoch_idx][col_name] = mean_conn
@@ -721,7 +1465,7 @@ def extract_source_connectivity_features(
         elif connectivity_method.lower() in ("wpli", "plv"):
             try:
                 con = spectral_connectivity_epochs(
-                    stcs,
+                    roi_data,
                     method=connectivity_method.lower(),
                     mode="multitaper",
                     sfreq=sfreq,
@@ -742,14 +1486,14 @@ def extract_source_connectivity_features(
                     
                     mean_conn = np.nanmean(epoch_con)
                     
-                    col_name = f"src_{method}_{band}_{connectivity_method}_global"
+                    col_name = f"src_{method_use}_{band}_{connectivity_method}_global"
                     if col_name not in feature_cols:
                         feature_cols.append(col_name)
                     records[epoch_idx][col_name] = mean_conn
                     
             except Exception as e:
                 logger.warning(f"Source connectivity failed for {band}: {e}")
-                col_name = f"src_{method}_{band}_{connectivity_method}_global"
+                col_name = f"src_{method_use}_{band}_{connectivity_method}_global"
                 if col_name not in feature_cols:
                     feature_cols.append(col_name)
                 for epoch_idx in range(n_epochs):

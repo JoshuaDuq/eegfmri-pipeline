@@ -33,8 +33,10 @@ const (
 	fieldRandomState
 	fieldSubjectList
 	fieldBidsRoot
+	fieldBidsFmriRoot
 	fieldDerivRoot
 	fieldSourceRoot
+	fieldFreesurferDir
 	fieldEventTemp
 	fieldEventRating
 	fieldEventPain
@@ -85,12 +87,14 @@ type Model struct {
 	width  int
 	height int
 
-	task        string
-	randomState string
-	subjectList string
-	bidsRoot    string
-	derivRoot   string
-	sourceRoot  string
+	task          string
+	randomState   string
+	subjectList   string
+	bidsRoot      string
+	bidsFmriRoot  string
+	derivRoot     string
+	sourceRoot    string
+	freesurferDir string
 
 	eventTemp   string
 	eventRating string
@@ -114,8 +118,10 @@ func DefaultConfigKeys() []string {
 		"project.random_state",
 		"project.subject_list",
 		"paths.bids_root",
+		"paths.bids_fmri_root",
 		"paths.deriv_root",
 		"paths.source_data",
+		"paths.freesurfer_dir",
 		"event_columns.temperature",
 		"event_columns.rating",
 		"event_columns.pain_binary",
@@ -171,11 +177,17 @@ func (m *Model) SetConfigValues(values map[string]interface{}) {
 	if v, ok := values["paths.bids_root"]; ok {
 		m.bidsRoot = toString(v, m.bidsRoot)
 	}
+	if v, ok := values["paths.bids_fmri_root"]; ok {
+		m.bidsFmriRoot = toString(v, m.bidsFmriRoot)
+	}
 	if v, ok := values["paths.deriv_root"]; ok {
 		m.derivRoot = toString(v, m.derivRoot)
 	}
 	if v, ok := values["paths.source_data"]; ok {
 		m.sourceRoot = toString(v, m.sourceRoot)
+	}
+	if v, ok := values["paths.freesurfer_dir"]; ok {
+		m.freesurferDir = toString(v, m.freesurferDir)
 	}
 	if v, ok := values["event_columns.temperature"]; ok {
 		m.eventTemp = strings.Join(toStringList(v), ", ")
@@ -506,6 +518,8 @@ func (m Model) browseForPath(field fieldKey) tea.Cmd {
 		switch field {
 		case fieldBidsRoot:
 			prompt = "Select BIDS root folder"
+		case fieldBidsFmriRoot:
+			prompt = "Select BIDS fMRI data folder"
 		case fieldDerivRoot:
 			prompt = "Select derivatives root folder"
 		case fieldSourceRoot:
@@ -532,8 +546,10 @@ func (m Model) sectionFields(section sectionKey) []fieldDef {
 	case sectionPaths:
 		return []fieldDef{
 			{fieldBidsRoot, "BIDS Root", "Input BIDS dataset", true},
+			{fieldBidsFmriRoot, "BIDS fMRI Root", "fMRI data for contrast builder", true},
 			{fieldDerivRoot, "Deriv Root", "Derivatives output", true},
 			{fieldSourceRoot, "Source Root", "Raw source data", true},
+			{fieldFreesurferDir, "FreeSurfer Dir", "FreeSurfer SUBJECTS_DIR", true},
 		}
 	case sectionEvents:
 		return []fieldDef{
@@ -556,10 +572,14 @@ func (m Model) fieldValue(key fieldKey) string {
 		return m.subjectList
 	case fieldBidsRoot:
 		return m.bidsRoot
+	case fieldBidsFmriRoot:
+		return m.bidsFmriRoot
 	case fieldDerivRoot:
 		return m.derivRoot
 	case fieldSourceRoot:
 		return m.sourceRoot
+	case fieldFreesurferDir:
+		return m.freesurferDir
 	case fieldEventTemp:
 		return m.eventTemp
 	case fieldEventRating:
@@ -582,10 +602,14 @@ func (m *Model) setFieldValue(key fieldKey, value string) {
 		m.subjectList = value
 	case fieldBidsRoot:
 		m.bidsRoot = value
+	case fieldBidsFmriRoot:
+		m.bidsFmriRoot = value
 	case fieldDerivRoot:
 		m.derivRoot = value
 	case fieldSourceRoot:
 		m.sourceRoot = value
+	case fieldFreesurferDir:
+		m.freesurferDir = value
 	case fieldEventTemp:
 		m.eventTemp = value
 	case fieldEventRating:
@@ -709,11 +733,17 @@ func (m *Model) buildOverrides() map[string]interface{} {
 	if strings.TrimSpace(m.bidsRoot) != "" {
 		paths["bids_root"] = m.bidsRoot
 	}
+	if strings.TrimSpace(m.bidsFmriRoot) != "" {
+		paths["bids_fmri_root"] = m.bidsFmriRoot
+	}
 	if strings.TrimSpace(m.derivRoot) != "" {
 		paths["deriv_root"] = m.derivRoot
 	}
 	if strings.TrimSpace(m.sourceRoot) != "" {
 		paths["source_data"] = m.sourceRoot
+	}
+	if strings.TrimSpace(m.freesurferDir) != "" {
+		paths["freesurfer_dir"] = m.freesurferDir
 	}
 	if len(paths) > 0 {
 		overrides["paths"] = paths

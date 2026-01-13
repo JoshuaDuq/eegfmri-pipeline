@@ -47,13 +47,7 @@ def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
     sub = f"sub-{subject}" if not subject.startswith("sub-") else subject
     base = deriv_root / sub / "eeg" / "features"
     
-    # Check new reorganized path first
     json_path = base / "metadata" / "trial_alignment.json"
-    if json_path.exists():
-        return json_path
-        
-    # Fallback to legacy path
-    json_path = base / "trial_alignment.json"
     if json_path.exists():
         return json_path
         

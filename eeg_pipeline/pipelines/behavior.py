@@ -555,11 +555,7 @@ class BehaviorPipeline(PipelineBase):
         stats_dir = deriv_stats_path(self.deriv_root, subject)
         ensure_dir(stats_dir)
         
-        logger = get_subject_logger(
-            "behavior_analysis", subject,
-            self.config.get("logging.log_file_name", "behavior_analysis.log"),
-            config=self.config
-        )
+        logger = get_subject_logger("behavior_analysis", subject)
         
         logger.info(f"{'='*60}")
         logger.info(f"Behavior Pipeline: sub-{subject}")

@@ -271,27 +271,15 @@ def _load_temporal_correlation_data(
     use_spearman: bool,
     logger: logging.Logger,
 ) -> Optional[Dict[str, Any]]:
-    """Load temporal correlation data from NPZ file.
-    
-    Supports both new format (temporal_correlations/temporal_correlations_by_condition*.npz)
-    and legacy format (temporal_correlations_by_pain*.npz).
-    """
+    """Load temporal correlation data from NPZ file."""
     suffix = _get_correlation_suffix(use_spearman)
     
-    # Try new unified format first (in temporal_correlations subfolder)
-    new_path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
-    if new_path.exists():
-        data = np.load(new_path, allow_pickle=True)
-        return dict(data)
-    
-    # Fall back to legacy format
-    legacy_path = stats_dir / f"temporal_correlations_by_pain{suffix}.npz"
-    if legacy_path.exists():
-        logger.info(f"Using legacy format: {legacy_path.name}")
-        data = np.load(legacy_path, allow_pickle=True)
+    path = stats_dir / "temporal_correlations" / f"temporal_correlations_by_condition{suffix}.npz"
+    if path.exists():
+        data = np.load(path, allow_pickle=True)
         return dict(data)
 
-    logger.warning(f"Temporal correlation data not found: checked {new_path} and {legacy_path}")
+    logger.warning(f"Temporal correlation data not found: {path}")
     return None
 
 
@@ -616,13 +604,6 @@ def _extract_condition_results(
                 if isinstance(result, np.ndarray) and result.dtype == object:
                     result = result.item()
                 condition_results[cond_name] = result
-    # Legacy format: hardcoded pain/non_pain keys
-    elif "pain" in data and "non_pain" in data:
-        for key in ["pain", "non_pain"]:
-            result = data[key]
-            if isinstance(result, np.ndarray) and result.dtype == object:
-                result = result.item()
-            condition_results[key] = result
     
     return condition_results
 

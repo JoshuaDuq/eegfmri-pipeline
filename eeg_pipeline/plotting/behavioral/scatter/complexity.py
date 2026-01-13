@@ -217,8 +217,7 @@ def plot_complexity_roi_scatter(
             "config is required for behavioral complexity ROI scatter plotting"
         )
 
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger = get_subject_logger("behavior_analysis", subject)
     logger.info(f"Starting complexity ROI scatter plotting for sub-{subject}")
 
     behavioral_config = get_plot_config(config).get_behavioral_config()

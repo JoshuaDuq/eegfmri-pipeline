@@ -210,8 +210,7 @@ def plot_psychometrics(subject: str, deriv_root: Path, task: str, config) -> Non
     if config is None:
         raise ValueError("config is required for psychometrics plotting")
 
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger = get_subject_logger("behavior_analysis", subject)
     plot_config = get_plot_config(config)
     behavioral_config = plot_config.get_behavioral_config()
 

@@ -22,8 +22,11 @@ MODE_CONFIG = "config"
 MODE_VERSION = "version"
 MODE_PLOTTERS = "plotters"
 MODE_DISCOVER = "discover"
+MODE_FMRI_CONDITIONS = "fmri-conditions"
+MODE_FMRI_COLUMNS = "fmri-columns"
 
 SOURCE_BIDS = "bids"
+SOURCE_BIDS_FMRI = "bids_fmri"
 SOURCE_EPOCHS = "epochs"
 SOURCE_FEATURES = "features"
 SOURCE_SOURCE_DATA = "source_data"
@@ -50,8 +53,8 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "mode",
-        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER],
-        help="What to show: subjects, features for a subject, config summary, version, or discover columns",
+        choices=[MODE_SUBJECTS, MODE_FEATURES, MODE_CONFIG, MODE_VERSION, MODE_PLOTTERS, MODE_DISCOVER, MODE_FMRI_CONDITIONS, MODE_FMRI_COLUMNS],
+        help="What to show: subjects, features, config, version, discover columns, fmri-conditions, or fmri-columns",
     )
     parser.add_argument(
         "target",
@@ -67,7 +70,7 @@ def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParse
     )
     parser.add_argument(
         "--source",
-        choices=[SOURCE_BIDS, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
+        choices=[SOURCE_BIDS, SOURCE_BIDS_FMRI, SOURCE_EPOCHS, SOURCE_FEATURES, SOURCE_SOURCE_DATA, SOURCE_ALL],
         default=SOURCE_EPOCHS,
         help="Discovery source for subjects (default: epochs)",
     )
@@ -132,6 +135,8 @@ def _map_source_to_discovery_sources(source: str) -> List[str]:
             DISCOVERY_SOURCE_SOURCE_DATA,
         ]
     if source == SOURCE_BIDS:
+        return [DISCOVERY_SOURCE_BIDS]
+    if source == SOURCE_BIDS_FMRI:
         return [DISCOVERY_SOURCE_BIDS]
     if source == SOURCE_FEATURES:
         return [DISCOVERY_SOURCE_FEATURES]
@@ -329,9 +334,16 @@ def _handle_subjects_mode(
     sources = _map_source_to_discovery_sources(args.source)
     policy = _get_discovery_policy(args.source)
 
+    bids_root_override = None
+    if args.source == SOURCE_BIDS_FMRI:
+        bids_fmri_root = config.get("paths.bids_fmri_root")
+        if bids_fmri_root:
+            bids_root_override = Path(str(bids_fmri_root))
+
     discovered = get_available_subjects(
         config=config,
         deriv_root=deriv_root,
+        bids_root=bids_root_override,
         task=task,
         discovery_sources=sources,
         subject_discovery_policy=policy,
@@ -423,6 +435,7 @@ def _handle_config_mode(args: argparse.Namespace, config: Any, deriv_root: Path,
     else:
         summary = {
             "bids_root": str(config.bids_root) if hasattr(config, "bids_root") else None,
+            "bids_fmri_root": config.get("paths.bids_fmri_root"),
             "deriv_root": str(deriv_root),
             "source_root": config.get("paths.source_data"),
             "task": task,
@@ -491,6 +504,81 @@ def _print_discovery_report(result: dict) -> None:
     print()
 
 
+def _handle_fmri_conditions_mode(args: argparse.Namespace, config: Any) -> None:
+    """Handle fmri-conditions mode: discover available trial_type conditions from fMRI events files."""
+    from eeg_pipeline.analysis.features.fmri_contrast_builder import discover_available_conditions
+
+    task = resolve_task(args.task, config)
+    
+    # Get fMRI root from config
+    fmri_root = config.get("paths.bids_fmri_root")
+    if not fmri_root:
+        # Fallback to default location
+        fmri_root = config.get("paths.bids_root", "").replace("bids_output", "fMRI_data")
+    
+    fmri_root = Path(fmri_root)
+    if not fmri_root.is_absolute():
+        # Make relative to project root
+        from eeg_pipeline.utils.config.loader import get_project_root
+        fmri_root = get_project_root() / fmri_root
+
+    subject = args.subject
+    if not subject:
+        # Auto-detect first available subject
+        if fmri_root.exists():
+            for sub_dir in sorted(fmri_root.glob("sub-*")):
+                if sub_dir.is_dir():
+                    subject = sub_dir.name.replace("sub-", "")
+                    break
+
+    if not subject:
+        result = {
+            "conditions": [],
+            "subject": None,
+            "task": task,
+            "error": "No subject specified and none found in fMRI directory",
+        }
+        if args.output_json:
+            _print_json_output(result)
+        else:
+            print("Error: No subject specified and none found in fMRI directory")
+        return
+
+    # Map task name (thermalactive -> pain for fMRI)
+    fmri_task = task.replace("thermal", "pain").replace("active", "")
+    if not fmri_task:
+        fmri_task = "pain"
+
+    try:
+        conditions = discover_available_conditions(fmri_root, subject, fmri_task)
+    except Exception as e:
+        conditions = []
+        error_msg = str(e)
+    else:
+        error_msg = None
+
+    result = {
+        "conditions": conditions,
+        "subject": subject,
+        "task": fmri_task,
+    }
+    if error_msg:
+        result["error"] = error_msg
+
+    if args.output_json:
+        _print_json_output(result)
+    else:
+        if conditions:
+            print(f"Available fMRI conditions for sub-{subject}, task-{fmri_task}:")
+            for cond in conditions:
+                print(f"  - {cond}")
+            print(f"\nTotal: {len(conditions)} conditions")
+        else:
+            print(f"No conditions found for sub-{subject}, task-{fmri_task}")
+            if error_msg:
+                print(f"Error: {error_msg}")
+
+
 def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Handle discover mode: discover available columns and values from data files."""
     from eeg_pipeline.cli.commands.base import (
@@ -554,6 +642,46 @@ def _handle_discover_mode(args: argparse.Namespace, subjects: List[str], config:
         _print_discovery_report(result)
 
 
+def _handle_fmri_columns_mode(args: argparse.Namespace, config: Any) -> None:
+    """Handle fmri-columns mode: discover columns from fMRI events files."""
+    from eeg_pipeline.cli.commands.base import discover_fmri_event_columns
+
+    task = resolve_task(args.task, config)
+
+    fmri_root = config.get("paths.bids_fmri_root")
+    if not fmri_root:
+        fmri_root = config.get("paths.bids_root", "").replace("bids_output", "fMRI_data")
+
+    fmri_root = Path(fmri_root)
+    if not fmri_root.is_absolute():
+        from eeg_pipeline.utils.config.loader import get_project_root
+        fmri_root = get_project_root() / fmri_root
+
+    fmri_task = task.replace("thermal", "pain").replace("active", "")
+    if not fmri_task:
+        fmri_task = "pain"
+
+    subject = args.subject
+    if not subject and fmri_root.exists():
+        for sub_dir in sorted(fmri_root.glob("sub-*")):
+            if sub_dir.is_dir():
+                subject = sub_dir.name.replace("sub-", "")
+                break
+
+    result = discover_fmri_event_columns(fmri_root, task=fmri_task, subject=subject)
+
+    if args.column:
+        if args.column in result["values"]:
+            result["values"] = {args.column: result["values"][args.column]}
+        else:
+            result["values"] = {}
+
+    if args.output_json:
+        _print_json_output(result)
+    else:
+        _print_discovery_report(result)
+
+
 def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the info command."""
     from eeg_pipeline.infra.paths import resolve_deriv_root
@@ -564,6 +692,10 @@ def run_info(args: argparse.Namespace, subjects: List[str], config: Any) -> None
 
     if args.mode == MODE_PLOTTERS:
         _handle_plotters_mode(args.output_json)
+    elif args.mode == MODE_FMRI_CONDITIONS:
+        _handle_fmri_conditions_mode(args, config)
+    elif args.mode == MODE_FMRI_COLUMNS:
+        _handle_fmri_columns_mode(args, config)
     elif args.mode == MODE_DISCOVER:
         _handle_discover_mode(args, subjects, config)
     elif args.mode == MODE_SUBJECTS:

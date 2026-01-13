@@ -74,12 +74,22 @@ def extract_erds_from_precomputed(
     # Get ALL segment masks - we compute ERDS for each non-baseline segment
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
-    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    target_name = getattr(windows, "name", None) if windows else None
     
-    if target_name:
-        segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segment_masks = {target_name: mask}
+        else:
+            if precomputed.logger:
+                precomputed.logger.warning(
+                    "ERDS: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        segment_masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+        segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     
     # Filter out baseline - ERDS uses baseline only as reference
     active_segments = {k: v for k, v in segment_masks.items() if k != "baseline" and v is not None and np.any(v)}

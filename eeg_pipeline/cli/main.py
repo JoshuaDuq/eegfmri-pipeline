@@ -101,6 +101,8 @@ def update_config_from_args(config: dict[str, Any], args: argparse.Namespace) ->
     
     if getattr(args, "bids_root", None):
         paths["bids_root"] = args.bids_root
+    if getattr(args, "bids_fmri_root", None):
+        paths["bids_fmri_root"] = args.bids_fmri_root
     if getattr(args, "source_root", None):
         paths["source_data"] = args.source_root
     if getattr(args, "deriv_root", None):

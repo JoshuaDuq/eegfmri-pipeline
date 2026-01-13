@@ -115,15 +115,15 @@ def compute_roi_tfrs(
             if config else -1
         )
         workers = resolve_tfr_workers(workers_default=workers_default)
-        decim = (
-            config.get("time_frequency_analysis.tfr.decim", 4) if config else 4
+        decim_power = (
+            config.get("time_frequency_analysis.tfr.decim_power", 4) if config else 4
         )
         
         power = roi_epochs.compute_tfr(
             method="morlet",
             freqs=freqs,
             n_cycles=n_cycles,
-            decim=decim,
+            decim=decim_power,
             picks="eeg",
             use_fft=True,
             return_itc=False,

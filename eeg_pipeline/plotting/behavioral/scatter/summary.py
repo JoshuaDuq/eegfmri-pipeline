@@ -165,35 +165,12 @@ def _find_unified_correlation_file(
     return None
 
 
-def _find_legacy_correlation_file(
-    stats_dir: Path, method_label: Optional[str], target_rating: str
-) -> Optional[pd.DataFrame]:
-    """Search for legacy correlation stats files."""
-    method_suffix = f"_{method_label}" if method_label else ""
-    legacy_candidates = [
-        stats_dir / f"corr_stats_all_features_vs_rating{method_suffix}.tsv",
-        stats_dir / "corr_stats_all_features_vs_rating.tsv",
-    ]
-    
-    for path in legacy_candidates:
-        df = _try_read_tsv(path)
-        if df is None:
-            continue
-        
-        if "target" not in df.columns:
-            df = df.copy()
-            df["target"] = target_rating
-        return df
-    
-    return None
-
-
 def _load_correlation_stats(
     stats_dir: Path,
     logger: logging.Logger,
     config: Optional[Any] = None,
 ) -> Optional[pd.DataFrame]:
-    """Load correlation statistics from TSV files, preferring unified format."""
+    """Load correlation statistics from TSV files."""
     plot_cfg = get_plot_config(config) if config is not None else None
     behavioral_config = _get_behavioral_config(plot_cfg)
     target_rating = behavioral_config.get("target_rating", "rating")
@@ -203,23 +180,14 @@ def _load_correlation_stats(
     if df is not None:
         return df
     
-    df = _find_legacy_correlation_file(stats_dir, method_label, target_rating)
-    if df is not None:
-        return df
-    
     method_suffix = f"_{method_label}" if method_label else ""
     unified_patterns = (
         [f"correlations*{method_suffix}.tsv"] if method_label else []
     ) + ["correlations*.tsv"]
-    legacy_patterns = [
-        f"corr_stats_all_features_vs_rating{method_suffix}.tsv",
-        "corr_stats_all_features_vs_rating.tsv",
-    ]
-    all_patterns = unified_patterns + legacy_patterns
     
     logger.warning(
         "No correlation stats found. Expected one of: %s",
-        ", ".join(all_patterns),
+        ", ".join(unified_patterns),
     )
     return None
 
@@ -520,8 +488,7 @@ def plot_top_behavioral_predictors(
         else float(config.get("behavior_analysis.statistics.fdr_alpha", 0.05))
     )
     top_n = top_n or int(config.get("behavior_analysis.predictors.top_n", 20))
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger = get_subject_logger("behavior_analysis", subject)
     logger.info(f"Creating top {top_n} behavioral predictors plot for sub-{subject}")
 
     if plots_dir is None:

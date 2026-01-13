@@ -44,6 +44,7 @@ type SubjectsResponse struct {
 type ConfigSummaryResponse struct {
 	Task               string `json:"task"`
 	BidsRoot           string `json:"bids_root"`
+	BidsFmriRoot       string `json:"bids_fmri_root"`
 	DerivRoot          string `json:"deriv_root"`
 	SourceRoot         string `json:"source_root"`
 	PreprocessingNJobs int    `json:"preprocessing_n_jobs"`
@@ -59,6 +60,98 @@ type DiscoverColumnsResponse struct {
 	Values  map[string][]string `json:"values"`
 	Source  string              `json:"source"`
 	File    string              `json:"file,omitempty"`
+}
+
+// DiscoverFmriConditionsResponse from eeg-pipeline info fmri-conditions --json
+type DiscoverFmriConditionsResponse struct {
+	Conditions []string `json:"conditions"`
+	Subject    string   `json:"subject"`
+	Task       string   `json:"task"`
+	Error      string   `json:"error,omitempty"`
+}
+
+// DiscoverFmriConditions runs a Python command to discover available fMRI trial_type conditions
+func DiscoverFmriConditions(repoRoot string, subject string, task string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline.cli.main", "info", "fmri-conditions", "--json"}
+		if subject != "" {
+			args = append(args, "--subject", subject)
+		}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.FmriConditionsDiscoveredMsg{
+				Conditions: nil,
+				Subject:    subject,
+				Task:       task,
+				Error:      err,
+			}
+		}
+
+		var response DiscoverFmriConditionsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.FmriConditionsDiscoveredMsg{
+				Conditions: nil,
+				Subject:    subject,
+				Task:       task,
+				Error:      err,
+			}
+		}
+
+		if response.Error != "" {
+			return messages.FmriConditionsDiscoveredMsg{
+				Conditions: nil,
+				Subject:    subject,
+				Task:       task,
+				Error:      fmt.Errorf("%s", response.Error),
+			}
+		}
+
+		return messages.FmriConditionsDiscoveredMsg{
+			Conditions: response.Conditions,
+			Subject:    response.Subject,
+			Task:       response.Task,
+			Error:      nil,
+		}
+	}
+}
+
+// DiscoverFmriColumns runs eeg-pipeline info fmri-columns --json to find fMRI event columns
+func DiscoverFmriColumns(repoRoot string, task string) tea.Cmd {
+	return func() tea.Msg {
+		args := []string{"-m", "eeg_pipeline", "info", "fmri-columns", "--json"}
+		if task != "" {
+			args = append(args, "--task", task)
+		}
+
+		output, err := runPythonJSONCommand(repoRoot, args)
+		if err != nil {
+			return messages.FmriColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
+			}
+		}
+
+		var response DiscoverColumnsResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			return messages.FmriColumnsDiscoveredMsg{
+				Columns: nil,
+				Values:  nil,
+				Error:   err,
+			}
+		}
+
+		return messages.FmriColumnsDiscoveredMsg{
+			Columns: response.Columns,
+			Values:  response.Values,
+			Source:  response.Source,
+			Error:   nil,
+		}
+	}
 }
 
 // DiscoverColumns runs eeg-pipeline info discover --json to find available columns and their values
@@ -181,6 +274,7 @@ func LoadConfigSummary(repoRoot string) tea.Cmd {
 			Summary: messages.ConfigSummary{
 				Task:               response.Task,
 				BidsRoot:           response.BidsRoot,
+				BidsFmriRoot:       response.BidsFmriRoot,
 				DerivRoot:          response.DerivRoot,
 				SourceRoot:         response.SourceRoot,
 				PreprocessingNJobs: response.PreprocessingNJobs,

@@ -332,6 +332,7 @@ def _merge_dataframes(dfs: List[pd.DataFrame]) -> Optional[pd.DataFrame]:
 def _save_merged_features(
     accumulated: Dict[str, List[pd.DataFrame]],
     features_dir: Path,
+    config: Any,
     logger: Any,
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
@@ -362,7 +363,7 @@ def _save_merged_features(
         if merged_df is not None:
             from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
             base_name = filename.replace(".tsv", "")
-            folder = _get_folder_for_feature(base_name)
+            folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
             write_tsv(merged_df, save_path)
             feature_name = filename.replace("features_", "").replace(".tsv", "")
@@ -695,7 +696,7 @@ class FeaturePipeline(PipelineBase):
             self.logger.info(
                 "Merging features from all time ranges into consolidated default files..."
             )
-            _save_merged_features(accumulated_features, features_dir, self.logger)
+            _save_merged_features(accumulated_features, features_dir, self.config, self.logger)
 
             if accumulated_y is not None:
                 rating_columns = self.config.get("event_columns.rating", ["vas_rating"])

@@ -233,11 +233,6 @@ class PipelineBase(ABC):
         """Run group-level analysis. Optional."""
         pass
 
-    def get_subject_logger(self, subject: str, filename: Optional[str] = None) -> logging.Logger:
+    def get_subject_logger(self, subject: str) -> logging.Logger:
         """Get a subject-specific logger."""
-        return get_subject_logger(
-            self.name,
-            subject,
-            filename or f"{self.name}.log",
-            config=self.config,
-        )
+        return get_subject_logger(self.name, subject)

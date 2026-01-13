@@ -185,3 +185,103 @@ func GetHomeDir() string {
 	}
 	return home
 }
+
+// PickFileMsg is the message type for file picker results
+type PickFileMsg struct {
+	Path  string
+	Error error
+	Field string
+}
+
+// PickFile opens a file picker dialog and returns the selected path
+// fileTypes is a list of file type descriptions and extensions (e.g., "NIfTI files", "nii,nii.gz")
+func PickFile(prompt string, field string, fileTypes ...string) tea.Cmd {
+	return func() tea.Msg {
+		var path string
+		var err error
+
+		switch runtime.GOOS {
+		case "darwin":
+			// Build AppleScript for file selection
+			script := fmt.Sprintf(`POSIX path of (choose file with prompt "%s"`, prompt)
+			if len(fileTypes) >= 2 {
+				// Add file type filter
+				extensions := strings.Split(fileTypes[1], ",")
+				var extList []string
+				for _, ext := range extensions {
+					ext = strings.TrimSpace(ext)
+					if ext != "" {
+						extList = append(extList, fmt.Sprintf(`"%s"`, ext))
+					}
+				}
+				if len(extList) > 0 {
+					script += fmt.Sprintf(` of type {%s}`, strings.Join(extList, ", "))
+				}
+			}
+			script += ")"
+			cmd := exec.Command("osascript", "-e", script)
+			path, err = runCommandOutputTrimmed(cmd)
+
+		case "linux":
+			// Try zenity first, then kdialog
+			if _, lookErr := exec.LookPath("zenity"); lookErr == nil {
+				args := []string{"--file-selection", "--title", prompt}
+				if len(fileTypes) >= 2 {
+					extensions := strings.Split(fileTypes[1], ",")
+					for _, ext := range extensions {
+						ext = strings.TrimSpace(ext)
+						if ext != "" {
+							args = append(args, "--file-filter", fmt.Sprintf("*.%s", ext))
+						}
+					}
+				}
+				cmd := exec.Command("zenity", args...)
+				path, err = runCommandOutputTrimmed(cmd)
+			} else if _, lookErr := exec.LookPath("kdialog"); lookErr == nil {
+				args := []string{"--getopenfilename", ".", "--title", prompt}
+				cmd := exec.Command("kdialog", args...)
+				path, err = runCommandOutputTrimmed(cmd)
+			} else {
+				err = fmt.Errorf("no file picker available (install zenity or kdialog), please type path manually")
+			}
+
+		case "windows":
+			// PowerShell file browser dialog
+			filter := "All files (*.*)|*.*"
+			if len(fileTypes) >= 2 {
+				extensions := strings.Split(fileTypes[1], ",")
+				var filterParts []string
+				for _, ext := range extensions {
+					ext = strings.TrimSpace(ext)
+					if ext != "" {
+						filterParts = append(filterParts, fmt.Sprintf("*.%s", ext))
+					}
+				}
+				if len(filterParts) > 0 {
+					typeName := "Files"
+					if len(fileTypes) >= 1 {
+						typeName = fileTypes[0]
+					}
+					filter = fmt.Sprintf("%s (%s)|%s", typeName, strings.Join(filterParts, ";"), strings.Join(filterParts, ";"))
+				}
+			}
+			psScript := fmt.Sprintf(`
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = "%s"
+$dialog.Filter = "%s"
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output $dialog.FileName
+}
+`, prompt, filter)
+			cmd := exec.Command("powershell", "-Command", psScript)
+			path, err = runCommandOutputTrimmed(cmd)
+
+		default:
+			err = fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+		}
+
+		return PickFileMsg{Path: path, Error: err, Field: field}
+	}
+}

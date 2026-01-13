@@ -322,14 +322,24 @@ def extract_complexity_from_precomputed(
 
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
-    target_name = getattr(precomputed.windows, "name", None)
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
+    logger = getattr(precomputed, "logger", None)
     
-    # When a specific time range is targeted, the precomputed data may have been
-    # cropped to that range. Use all available data with that segment name.
-    if target_name:
-        segments = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segments = {target_name: mask}
+        else:
+            if logger:
+                logger.warning(
+                    "Complexity: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            segments = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        segments = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+        segments = get_segment_masks(precomputed.times, windows, precomputed.config)
     
     params = _extract_params(precomputed.config)
     spatial_modes = getattr(precomputed, "spatial_modes", None) or ["roi", "global"]

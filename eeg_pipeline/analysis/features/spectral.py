@@ -1,5 +1,4 @@
-"""
-Spectral Feature Extraction
+"""Spectral Feature Extraction
 ============================
 
 Consolidated module for all spectral power and descriptor features:
@@ -9,6 +8,44 @@ Consolidated module for all spectral power and descriptor features:
 
 This module consolidates power.py, spectral.py, and precomputed/spectral.py
 to eliminate duplicated spatial aggregation logic and provide a unified interface.
+
+Power Construct Types
+---------------------
+This pipeline uses two distinct "power" constructs. Understanding their differences
+is critical for scientific interpretation:
+
+1. **Wavelet Power (Morlet TFR)** - `extract_power_features`
+   - Source: Time-frequency representation via Morlet wavelets
+   - Units: Power (amplitude²) at each time-frequency point
+   - Use case: Time-resolved power changes, baseline normalization
+   - Pros: Excellent time-frequency resolution trade-off
+   - Cons: Computationally expensive, requires baseline period
+
+2. **PSD-Integrated Band Power** - `compute_psd_bandpower` (utils/analysis/spectral.py)
+   - Source: Multitaper or Welch PSD, integrated over frequency band
+   - Units: Power per Hz (µV²/Hz), bandwidth-normalized
+   - Use case: Band ratios, asymmetry indices, cross-band comparisons
+   - Pros: Statistically well-defined, comparable across bands
+   - Cons: No time resolution within segment
+
+3. **Hilbert Envelope²** - `BandData.power` (for time-resolved envelope only)
+   - Source: Bandpass filter + Hilbert transform
+   - Units: Instantaneous power (amplitude²)
+   - Use case: Time-resolved amplitude envelope, PAC phase extraction
+   - WARNING: NOT used for band ratios or cross-band comparisons!
+
+Recommendations
+---------------
+- For **band ratios** (theta/beta, alpha/beta): PSD-integrated power (used automatically)
+- For **asymmetry indices**: PSD-integrated power (used automatically)
+- For **baseline-normalized power**: Wavelet (TFR) power
+- For **time-resolved envelope**: Hilbert (but not for ratios!)
+- For **aperiodic-adjusted power**: `*_powcorr` from aperiodic module
+
+Configuration Options
+---------------------
+- `feature_engineering.aperiodic.subtract_evoked`: False (default) or True
+  - Set True for induced spectra in pain paradigms (subtracts evoked ERP)
 """
 
 from __future__ import annotations
@@ -192,10 +229,18 @@ def _normalize_power(
     
     Returns:
         Tuple of (normalized_values, statistic_name).
+        
+    Notes:
+        Uses symmetric epsilon strategy: both numerator and denominator are
+        floored to epsilon_psd. This prevents:
+        - Division by zero when baseline is exactly 0
+        - Unstable/infinite values when baseline is tiny but positive
+        - Asymmetric bias from flooring only one side
     """
     if is_tfr_baselined:
         return raw_power, "baselined"
     
+    # Apply symmetric epsilon floor to both numerator and denominator
     power_floor = np.maximum(raw_power, epsilon_psd)
     baseline_array = baseline_arrays.get(band)
     
@@ -208,9 +253,14 @@ def _normalize_power(
         normalized = np.log10(power_floor)
         return normalized, "log10raw"
     
-    baseline_denominator = baseline_array.copy()
-    baseline_denominator[baseline_denominator <= 0] = np.nan
-    normalized = np.log10(power_floor / baseline_denominator)
+    # Symmetric epsilon: floor baseline to same epsilon as numerator
+    # This ensures log-ratio is bounded and numerically stable
+    baseline_floor = np.maximum(baseline_array, epsilon_psd)
+    
+    # Mark non-finite baseline values as NaN (propagates to output)
+    baseline_floor = np.where(np.isfinite(baseline_array), baseline_floor, np.nan)
+    
+    normalized = np.log10(power_floor / baseline_floor)
     return normalized, "logratio"
 
 
@@ -547,7 +597,19 @@ def extract_power_from_precomputed(
         return pd.DataFrame(), [], {}
 
     epsilon = float(get_feature_constant(precomputed.config, "EPSILON_STD", 1e-12))
-    min_valid_fraction = float(get_feature_constant(precomputed.config, "MIN_VALID_FRACTION", 0.5))
+    # Separate thresholds for different validity checks:
+    # - min_valid_fraction_samples: fraction of baseline timepoints that must be valid per channel
+    # - min_valid_fraction_channels: fraction of channels that must be valid for global/ROI aggregation
+    min_valid_fraction_samples = float(get_feature_constant(
+        precomputed.config, "MIN_VALID_FRACTION_SAMPLES", 0.5
+    ))
+    min_valid_fraction_channels = float(get_feature_constant(
+        precomputed.config, "MIN_VALID_FRACTION_CHANNELS", 0.5
+    ))
+    # Minimum absolute number of valid channels for global features
+    min_valid_channels_global = int(get_feature_constant(
+        precomputed.config, "MIN_VALID_CHANNELS_GLOBAL", 3
+    ))
     windows = precomputed.windows
 
     # Determine which segments to process
@@ -581,7 +643,9 @@ def extract_power_from_precomputed(
 
     qc_payload: Dict[str, Any] = {
         "baseline_valid_fractions": [[] for _ in range(n_epochs)],
-        "min_valid_fraction": min_valid_fraction,
+        "min_valid_fraction_samples": min_valid_fraction_samples,
+        "min_valid_fraction_channels": min_valid_fraction_channels,
+        "min_valid_channels_global": min_valid_channels_global,
     }
 
     for seg_label, active_mask in segments_to_process:
@@ -606,7 +670,7 @@ def extract_power_from_precomputed(
                     active_power, _, _, _ = nanmean_with_fraction(power[ch_idx], active_mask)
                     baseline_valid = (
                         baseline_power > epsilon
-                        and baseline_frac >= min_valid_fraction
+                        and baseline_frac >= min_valid_fraction_samples
                         and baseline_total > 0
                     )
                     if baseline_valid:
@@ -655,7 +719,14 @@ def extract_power_from_precomputed(
                 qc_payload["baseline_valid_fractions"][ep_idx].append(float(baseline_valid_fraction))
 
                 if "global" in spatial_modes:
-                    if baseline_valid_fraction < min_valid_fraction:
+                    valid_powers = [p for p in all_power_full if np.isfinite(p)]
+                    n_valid = len(valid_powers)
+                    # Require both fraction AND absolute minimum of valid channels
+                    channels_valid = (
+                        baseline_valid_fraction >= min_valid_fraction_channels
+                        and n_valid >= min_valid_channels_global
+                    )
+                    if not channels_valid or not valid_powers:
                         record[
                             NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
                         ] = np.nan
@@ -663,21 +734,12 @@ def extract_power_from_precomputed(
                             NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
                         ] = np.nan
                     else:
-                        valid_powers = [p for p in all_power_full if np.isfinite(p)]
-                        if valid_powers:
-                            record[
-                                NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
-                            ] = float(np.mean(valid_powers))
-                            record[
-                                NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
-                            ] = float(np.std(valid_powers))
-                        else:
-                            record[
-                                NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
-                            ] = np.nan
-                            record[
-                                NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
-                            ] = np.nan
+                        record[
+                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_mean")
+                        ] = float(np.mean(valid_powers))
+                        record[
+                            NamingSchema.build("spectral", seg_label, band, "global", "logratio_std")
+                        ] = float(np.std(valid_powers))
                 
                 if "roi" in spatial_modes and roi_map:
                     for roi_name, roi_indices in roi_map.items():
@@ -713,16 +775,82 @@ def extract_power_from_precomputed(
 ###################################################################
 
 
+def _robust_aperiodic_fit(
+    log_f: np.ndarray,
+    log_p: np.ndarray,
+    fit_mask: np.ndarray,
+    peak_rejection_z: float = 2.5,
+    max_iterations: int = 3,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Fit aperiodic model with iterative residual-based peak rejection.
+    
+    This avoids bias from oscillatory peaks (e.g., alpha) that would otherwise
+    pull the 1/f fit upward in specific frequency ranges.
+    
+    Returns:
+        Tuple of (slope, intercept) or (None, None) if fit fails
+    """
+    from scipy import stats
+    
+    keep_mask = fit_mask.copy()
+    min_fit_points = 5
+    min_mad = 1e-12
+    
+    if np.sum(keep_mask) < min_fit_points:
+        return None, None
+    
+    slope, intercept = None, None
+    
+    for iteration in range(max_iterations):
+        kept_indices = np.flatnonzero(keep_mask)
+        if len(kept_indices) < min_fit_points:
+            break
+        
+        try:
+            slope, intercept = np.polyfit(log_f[kept_indices], log_p[kept_indices], 1)
+        except (np.linalg.LinAlgError, ValueError):
+            return None, None
+        
+        # Compute residuals
+        predicted = intercept + slope * log_f
+        residuals = log_p - predicted
+        
+        # Only reject positive residuals (peaks above 1/f)
+        positive_residuals = np.where(residuals > 0, residuals, 0.0)
+        kept_positive = positive_residuals[keep_mask]
+        
+        if len(kept_positive) == 0 or np.all(kept_positive == 0):
+            break
+        
+        # MAD-based threshold for robust outlier detection
+        mad = stats.median_abs_deviation(kept_positive[kept_positive > 0], scale="normal", nan_policy="omit")
+        if not np.isfinite(mad) or mad < min_mad:
+            break
+        
+        threshold = peak_rejection_z * mad
+        new_keep = keep_mask & (residuals <= threshold)
+        
+        if np.sum(new_keep) < min_fit_points:
+            break
+        
+        if np.array_equal(new_keep, keep_mask):
+            break
+        
+        keep_mask = new_keep
+    
+    return slope, intercept
+
+
 def remove_aperiodic_component(
     psd: np.ndarray,
     freqs: np.ndarray,
     fit_range: Tuple[float, float] = (2.0, 40.0),
+    robust: bool = True,
 ) -> np.ndarray:
-    """
-    Remove 1/f aperiodic component from PSD using robust linear fit in log-log space.
+    """Remove 1/f aperiodic component from PSD using robust linear fit in log-log space.
     
-    This addresses the scientific validity concern that raw PSD peak detection
-    is biased by 1/f changes (common in pain/arousal/alertness states).
+    Uses iterative residual-based peak rejection to avoid bias from oscillatory
+    peaks (e.g., alpha) that would otherwise distort the 1/f fit.
     
     Parameters
     ----------
@@ -732,6 +860,9 @@ def remove_aperiodic_component(
         Frequency values
     fit_range : tuple
         Frequency range for fitting 1/f model (Hz)
+    robust : bool
+        If True, use iterative peak rejection (recommended). If False, use
+        simple polyfit (legacy behavior, may be biased by peaks).
         
     Returns
     -------
@@ -749,7 +880,14 @@ def remove_aperiodic_component(
         return psd.copy()
     
     try:
-        slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+        if robust:
+            slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
+            if slope is None or intercept is None:
+                # Fall back to simple fit
+                slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+        else:
+            slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+        
         aperiodic_fit = intercept + slope * log_f
         residual = log_p - aperiodic_fit
         return 10 ** residual
@@ -763,9 +901,14 @@ def compute_peak_frequency(
     fmin: float,
     fmax: float,
     aperiodic_adjusted: bool = True,
+    smoothing_hz: float = 1.0,
+    min_prominence: float = 0.1,
 ) -> Tuple[float, float, float, float]:
-    """
-    Compute peak frequency and peak power within a frequency range.
+    """Compute peak frequency and peak power within a frequency range.
+    
+    Uses smoothing and prominence criteria to stabilize peak detection,
+    especially important for short segments / low SNR where argmax is
+    dominated by estimation noise.
     
     Parameters
     ----------
@@ -778,23 +921,27 @@ def compute_peak_frequency(
     fmax : float
         Maximum frequency
     aperiodic_adjusted : bool
-        If True, remove 1/f component before peak detection to avoid
-        bias from aperiodic power changes (default: True)
+        If True, remove 1/f component before peak detection (default: True)
+    smoothing_hz : float
+        Smoothing window width in Hz (default: 1.0). Set to 0 to disable.
+    min_prominence : float
+        Minimum prominence (in log10 units) for a valid peak. If no peak
+        exceeds this threshold, returns center-of-gravity instead of argmax.
     
     Returns
     -------
     peak_freq : float
-        Frequency of maximum power (on aperiodic-adjusted spectrum if enabled)
+        Frequency of maximum power (or center-of-gravity if no prominent peak)
     peak_power : float
         Power at peak frequency (from original PSD)
     peak_ratio : float
-        Ratio of raw power to aperiodic fit at peak frequency (oscillatory 
-        prominence relative to 1/f background). Values > 1 indicate a peak
-        above the aperiodic floor.
+        Ratio of raw power to aperiodic fit at peak frequency
     peak_residual : float
-        Log10(power) - log10(aperiodic_fit) at peak frequency. Positive values
-        indicate oscillatory power above the aperiodic background.
+        Log10(power) - log10(aperiodic_fit) at peak frequency
     """
+    from scipy.signal import find_peaks
+    from scipy.ndimage import uniform_filter1d
+    
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
         return np.nan, np.nan, np.nan, np.nan
@@ -805,33 +952,74 @@ def compute_peak_frequency(
     if len(psd_band) == 0 or np.all(np.isnan(psd_band)):
         return np.nan, np.nan, np.nan, np.nan
     
-    # Always compute aperiodic fit for prominence metrics
+    # Compute robust aperiodic fit for prominence metrics
     log_f = np.log10(np.maximum(freqs, 1e-6))
     log_p = np.log10(np.maximum(psd, 1e-20))
     
-    fit_range = (2.0, 40.0)  # Standard fit range
-    fit_mask = (freqs >= fit_range[0]) & (freqs <= fit_range[1]) & np.isfinite(log_p)
+    # Fit range covers both low frequencies (for 1/f anchor) and the analysis band
+    fit_fmin = min(2.0, fmin)
+    fit_fmax = max(40.0, fmax)
+    fit_mask = (freqs >= fit_fmin) & (freqs <= fit_fmax) & np.isfinite(log_p)
     
     aperiodic_fit = None
     if np.sum(fit_mask) >= 5:
         try:
-            slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
-            aperiodic_fit = 10 ** (intercept + slope * log_f)  # Linear in log-log space
+            slope, intercept = _robust_aperiodic_fit(log_f, log_p, fit_mask)
+            if slope is None or intercept is None:
+                slope, intercept = np.polyfit(log_f[fit_mask], log_p[fit_mask], 1)
+            aperiodic_fit = 10 ** (intercept + slope * log_f)
         except (np.linalg.LinAlgError, ValueError):
             pass
     
     if aperiodic_adjusted and aperiodic_fit is not None:
-        residual = log_p - (np.log10(aperiodic_fit))
+        residual = log_p - np.log10(aperiodic_fit)
         psd_for_peak = (10 ** residual)[mask]
+        residual_band = residual[mask]
     else:
         psd_for_peak = psd_band
+        residual_band = np.log10(np.maximum(psd_band, 1e-20))
     
     if np.all(np.isnan(psd_for_peak)):
         psd_for_peak = psd_band
+        residual_band = np.log10(np.maximum(psd_band, 1e-20))
     
+    # Apply smoothing to reduce noise sensitivity
+    if smoothing_hz > 0 and len(freqs_band) > 3:
+        df = np.median(np.diff(freqs_band))
+        if df > 0:
+            window_samples = max(1, int(smoothing_hz / df))
+            if window_samples > 1:
+                psd_for_peak = uniform_filter1d(psd_for_peak, size=window_samples, mode='nearest')
+                residual_band = uniform_filter1d(residual_band, size=window_samples, mode='nearest')
+    
+    # Find peaks with prominence criterion
     peak_idx = np.nanargmax(psd_for_peak)
-    peak_freq = float(freqs_band[peak_idx])
-    peak_power = float(psd_band[peak_idx])
+    max_residual = residual_band[peak_idx]
+    
+    # Check if peak is prominent enough above noise floor
+    # If not, use center-of-gravity (more stable for weak/absent peaks)
+    use_cog = False
+    if min_prominence > 0:
+        # Prominence: how much the peak stands out from surrounding values
+        baseline = np.nanmedian(residual_band)
+        prominence = max_residual - baseline
+        if prominence < min_prominence:
+            use_cog = True
+    
+    if use_cog:
+        # Center-of-gravity: weighted average frequency (more stable)
+        weights = np.maximum(psd_for_peak, 0)
+        if np.sum(weights) > 0:
+            peak_freq = float(np.average(freqs_band, weights=weights))
+            # Find closest frequency bin for power lookup
+            closest_idx = np.argmin(np.abs(freqs_band - peak_freq))
+            peak_power = float(psd_band[closest_idx])
+        else:
+            peak_freq = float(freqs_band[peak_idx])
+            peak_power = float(psd_band[peak_idx])
+    else:
+        peak_freq = float(freqs_band[peak_idx])
+        peak_power = float(psd_band[peak_idx])
     
     # Compute peak prominence metrics
     peak_ratio = np.nan
@@ -997,7 +1185,7 @@ def compute_spectral_entropy(
 def extract_spectral_features(
     ctx: Any,
     bands: List[str],
-) -> Tuple[pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
     """
     Extract spectral descriptor features including IAF (Individual Alpha Frequency).
     
@@ -1008,9 +1196,32 @@ def extract_spectral_features(
     - Spectral bandwidth
     - Spectral entropy (normalized)
     - Spectral edge frequency (broadband, 95%)
+    
+    Returns
+    -------
+    Tuple[pd.DataFrame, List[str], Dict[str, Any]]
+        (features_df, column_names, qc_dict)
+        
+    QC Outputs
+    ----------
+    The qc_dict contains:
+    - segment_durations: Dict mapping segment names to duration in seconds
+    - frequency_resolution: Effective frequency resolution in Hz
+    - peak_prominence_pass_rate: Fraction of peaks meeting prominence threshold
+    - psd_method: PSD method used ('multitaper' or 'welch')
+    - n_epochs: Number of epochs processed
+    - n_channels: Number of channels
+    
+    Scientific Notes
+    ----------------
+    Trial-level peak frequency features (including IAF) can be unstable for short
+    segments. For pain paradigms with short stimulus-locked windows, consider:
+    1. Using longer time windows (>2s recommended)
+    2. Computing IAF from resting-state data as a subject trait
+    3. Using center-of-gravity instead of argmax for noisy peaks
     """
     if not bands:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], {}
     
     epochs = ctx.epochs
     config = ctx.config
@@ -1019,7 +1230,7 @@ def extract_spectral_features(
     picks, ch_names = pick_eeg_channels(epochs)
     if len(picks) == 0:
         logger.warning("Spectral: No EEG channels available; skipping.")
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], {}
     
     freq_bands = getattr(ctx, "frequency_bands", None) or get_frequency_bands(config)
     spatial_modes = getattr(ctx, "spatial_modes", ["roi", "global"])
@@ -1053,17 +1264,24 @@ def extract_spectral_features(
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     
     # Determine which segments to process
+    windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     configured_segments = spec_cfg.get("segments")
     
-    # When a specific time range is targeted (ctx.name is set), the epochs have 
-    # already been cropped to that range. Use all available data with that segment name.
-    if target_name:
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segment_masks = {target_name: mask}
+        else:
+            logger.warning(
+                "Spectral: targeted window '%s' has no valid mask; using full epoch.",
+                target_name,
+            )
+            segment_masks = {target_name: np.ones(data.shape[2], dtype=bool)}
         segments = [target_name]
-        # Create a mask covering all data since epochs are pre-cropped
-        segment_masks = {target_name: np.ones(data.shape[2], dtype=bool)}
     else:
-        segment_masks = get_segment_masks(epochs.times, ctx.windows, config)
+        segment_masks = get_segment_masks(epochs.times, windows, config)
         if configured_segments:
             if isinstance(configured_segments, str):
                 configured_segments = [configured_segments]
@@ -1073,13 +1291,23 @@ def extract_spectral_features(
     
     if not segments:
         logger.warning("Spectral: No valid segments found; returning empty DataFrame.")
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], {}
     
     # Segment duration validation parameters
     min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
     min_cycles_at_fmin = float(spec_cfg.get("min_cycles_at_fmin", 3.0))
 
     records = [dict() for _ in range(n_epochs)]
+    
+    # QC tracking
+    qc_payload: Dict[str, Any] = {
+        "psd_method": psd_method,
+        "n_epochs": n_epochs,
+        "n_channels": n_channels,
+        "segment_durations": {},
+        "frequency_resolution": {},
+        "segments_skipped": [],
+    }
 
     for segment_name in segments:
         mask = segment_masks.get(segment_name)
@@ -1096,7 +1324,15 @@ def extract_spectral_features(
                 "skipping to ensure reliable spectral estimation.",
                 segment_name, seg_duration_sec, min_segment_sec
             )
+            qc_payload["segments_skipped"].append({
+                "segment": segment_name,
+                "reason": "duration_too_short",
+                "duration_sec": seg_duration_sec,
+                "min_required_sec": min_segment_sec,
+            })
             continue
+        
+        qc_payload["segment_durations"][segment_name] = seg_duration_sec
         
         if seg_data.shape[2] < 2:
             continue
@@ -1104,6 +1340,7 @@ def extract_spectral_features(
         try:
             import mne
             if psd_method == "multitaper":
+                # Multitaper: preferred for short segments (lower variance)
                 psds, freqs = mne.time_frequency.psd_array_multitaper(
                     seg_data,
                     sfreq=float(sfreq),
@@ -1114,15 +1351,19 @@ def extract_spectral_features(
                     verbose=False,
                 )
             else:
+                # Welch: use 50% overlap for variance reduction (NOT n_overlap=0)
+                # n_overlap=0 inflates variance and makes peak/entropy features noisy
                 n_times = int(seg_data.shape[2])
                 n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+                n_overlap = n_per_seg // 2  # 50% overlap for variance reduction
                 psds, freqs = mne.time_frequency.psd_array_welch(
                     seg_data,
                     sfreq=float(sfreq),
                     fmin=fmin_psd,
                     fmax=fmax_psd,
-                    n_fft=min(n_times, max(64, n_per_seg)),
-                    n_overlap=0,
+                    n_fft=min(n_times, max(256, n_per_seg)),
+                    n_per_seg=n_per_seg,
+                    n_overlap=n_overlap,
                     verbose=False,
                 )
         except Exception as exc:
@@ -1133,6 +1374,11 @@ def extract_spectral_features(
         psds = np.asarray(psds, dtype=float)
         if psds.ndim != 3:
             continue
+        
+        # Compute effective frequency resolution
+        if len(freqs) > 1:
+            freq_resolution = float(np.median(np.diff(freqs)))
+            qc_payload["frequency_resolution"][segment_name] = freq_resolution
 
         freq_keep_mask = np.ones_like(freqs, dtype=bool)
         if exclude_line and freqs.size > 0 and line_width > 0 and n_harm > 0:
@@ -1237,14 +1483,14 @@ def extract_spectral_features(
                     record[NamingSchema.build("spectral", segment_name, "broadband", "roi", "edge_freq_95", channel=roi_name)] = roi_edge
     
     if not records:
-        return pd.DataFrame(), []
+        return pd.DataFrame(), [], qc_payload
     
     df = pd.DataFrame(records)
     cols = list(df.columns)
     
     logger.info(f"Extracted {len(cols)} spectral features for {n_epochs} epochs")
     
-    return df, cols
+    return df, cols, qc_payload
 
 
 ###################################################################

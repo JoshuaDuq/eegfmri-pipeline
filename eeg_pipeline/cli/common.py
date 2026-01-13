@@ -60,6 +60,12 @@ def add_path_args(parser: argparse.ArgumentParser) -> None:
         help="Override BIDS root path (default from config)",
     )
     path_group.add_argument(
+        "--bids-fmri-root",
+        type=str,
+        default=None,
+        help="Override BIDS fMRI root path (default from config)",
+    )
+    path_group.add_argument(
         "--deriv-root",
         type=str,
         default=None,
@@ -143,4 +149,3 @@ def output_result(args: argparse.Namespace, data: Any, text_formatter: Optional[
         output_formatted_text(data, text_formatter)
     else:
         output_text(data)
-

@@ -29,6 +29,7 @@ var pipelines = []pipelineItem{
 	{"Behavior", "EEG-behavior analysis", "3"},
 	{"Machine Learning", "LOSO regression & classification", "4"},
 	{"Plotting", "Curate and export visualization suites", "5"},
+	{"fMRI", "Preprocess fMRI (fMRIPrep-style)", "6"},
 }
 
 type utilityItem struct {
@@ -80,7 +81,7 @@ func New() Model {
 	help := components.NewHelpOverlay("Keyboard Shortcuts", 50)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
-		{Key: "1-5", Description: "Quick select pipeline"},
+		{Key: "1-6", Description: "Quick select pipeline"},
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Select pipeline"},
@@ -154,7 +155,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleTab()
 		case "enter", " ":
 			return m.handleEnter()
-		case "1", "2", "3", "4", "5":
+		case "1", "2", "3", "4", "5", "6":
 			idx := int(msg.String()[0] - '1')
 			if idx >= 0 && idx < len(pipelines) {
 				m.inUtilities = false

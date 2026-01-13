@@ -817,12 +817,23 @@ def extract_connectivity_from_precomputed(
             logger.warning("Connectivity: no supported measures selected; skipping extraction.")
         return pd.DataFrame(), []
 
-    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
 
-    if target_name:
-        seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            seg_mask_map = {target_name: mask}
+        else:
+            if logger is not None:
+                logger.warning(
+                    "Connectivity: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+        masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}
 
     segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]
@@ -1850,12 +1861,23 @@ def extract_directed_connectivity_from_precomputed(
     
     freq_bands = getattr(precomputed, "frequency_bands", None) or get_frequency_bands(config)
     
-    target_name = getattr(precomputed.windows, "name", None) if precomputed.windows else None
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
     
-    if target_name:
-        seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+    # Always derive mask from windows - never use np.ones() blindly
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            seg_mask_map = {target_name: mask}
+        else:
+            if logger is not None:
+                logger.warning(
+                    "Directed connectivity: targeted window '%s' has no valid mask; using full epoch.",
+                    target_name,
+                )
+            seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
     else:
-        masks = get_segment_masks(precomputed.times, precomputed.windows, precomputed.config)
+        masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}
     
     segments_use = segments if segments is not None else sorted(seg_mask_map.keys()) or ["full"]

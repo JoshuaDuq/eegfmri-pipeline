@@ -5,7 +5,6 @@ import logging
 import os
 import platform
 import subprocess
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,8 +27,6 @@ from eeg_pipeline.utils.analysis.stats.fdr import fdr_bh
 logger = get_logger(__name__)
 
 _BEST_PARAMS_LOGGED: set = set()
-_handler_lock = threading.Lock()
-_FILE_LOG_HANDLER: Optional[logging.Handler] = None
 
 
 ###################################################################
@@ -118,43 +115,6 @@ def create_run_manifest(
     manifest_path = results_dir / "run_manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-
-
-def setup_file_logging(
-    results_dir: Path,
-    run_id: Optional[str] = None,
-    logger_name: str = "decode_pain",
-) -> Path:
-    """Configure file logging for the specified logger."""
-    global _FILE_LOG_HANDLER
-
-    logger_instance = get_logger(logger_name)
-
-    with _handler_lock:
-        log_dir = results_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        run_suffix = f"_{run_id}" if run_id else ""
-        log_path = log_dir / f"{logger_name}_{timestamp}{run_suffix}.log"
-
-        if _FILE_LOG_HANDLER is not None:
-            logger_instance.removeHandler(_FILE_LOG_HANDLER)
-            _FILE_LOG_HANDLER.close()
-
-        for handler in logger_instance.handlers:
-            if isinstance(handler, logging.FileHandler):
-                if handler.baseFilename == str(log_path):
-                    return log_path
-
-        file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        file_handler.setFormatter(formatter)
-        logger_instance.addHandler(file_handler)
-        _FILE_LOG_HANDLER = file_handler
-
-        return log_path
 
 
 ###################################################################
@@ -532,7 +492,6 @@ def aggregate_group_feature_topomaps(
 
 __all__ = [
     "create_run_manifest",
-    "setup_file_logging",
     "prepare_best_params_path",
     "read_best_params_jsonl",
     "read_best_params_jsonl_combined",

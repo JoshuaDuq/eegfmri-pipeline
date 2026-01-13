@@ -27,7 +27,6 @@ from pipeline.config import update_config, get_config_keyval, get_specific_confi
 from pipeline.preprocess import run_bads_detection, synchronize_bad_channels_across_runs
 from pipeline.ica import run_ica_label
 from pipeline.stats import collect_preprocessing_stats
-from pipeline.features import compute_features
 from pipeline.tfr import custom_tfr
 from mne_bids_pipeline._logging import logger
 
@@ -107,19 +106,10 @@ def run_pipeline_task(task, config_file):
         task=task,
     )
     
-    compute_features_flag = get_config_keyval(config_file, "compute_features") or get_config_keyval(config_file, "compute_rest_features")
-    if compute_features_flag:
-        features_config = get_specific_config(config_file, "features")
-        if "mne_bids_root" in features_config:
-            features_config["bids_path"] = features_config.pop("mne_bids_root")
-        if "specificsubs" in features_config:
-            features_config["subjects"] = features_config.pop("specificsubs")
-        compute_features(**features_config)
-    
     if get_config_keyval(config_file, "custom_tfr"):
         custom_tfr(**get_specific_config(config_file, "custom_tfr"))
     
-    logger.info(f"✅ Pipeline completed successfully for task: {task}.")
+    logger.info(f"✅ Preprocessing completed for task: {task}. Run 'eeg-pipeline features' for feature extraction.")
 
 
 def run_all_tasks(config_file):

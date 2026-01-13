@@ -128,10 +128,7 @@ def validate_trial_alignment_manifest(
     logger: logging.Logger,
 ) -> None:
     """Validate that trial alignment manifest matches aligned events."""
-    # Check new reorganized path first, fallback to legacy path
     manifest_path = features_dir / "metadata" / "trial_alignment.json"
-    if not manifest_path.exists():
-        manifest_path = features_dir / "trial_alignment.json"
 
     if not manifest_path.exists():
         raise FileNotFoundError(

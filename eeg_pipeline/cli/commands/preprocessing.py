@@ -104,9 +104,82 @@ def setup_preprocessing(subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="ICA component labels to keep (e.g., brain other)",
     )
     prep_group.add_argument(
+        "--keep-mnebids-bads",
+        action="store_true",
+        default=False,
+        help="Keep MNE-BIDS flagged bad ICA components",
+    )
+    prep_group.add_argument(
         "--line-freq",
         type=int,
         help="Line frequency for EEG data (Hz), typically 50 or 60",
+    )
+    # PyPREP advanced options
+    prep_group.add_argument(
+        "--ransac",
+        action="store_true",
+        default=False,
+        help="Use RANSAC for bad channel detection",
+    )
+    prep_group.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="Number of bad channel detection iterations",
+    )
+    prep_group.add_argument(
+        "--average-reref",
+        action="store_true",
+        default=False,
+        help="Average re-reference before bad channel detection",
+    )
+    prep_group.add_argument(
+        "--file-extension",
+        type=str,
+        default=".vhdr",
+        help="File extension for EEG data",
+    )
+    prep_group.add_argument(
+        "--consider-previous-bads",
+        action="store_true",
+        default=False,
+        help="Keep previously marked bad channels",
+    )
+    prep_group.add_argument(
+        "--overwrite-channels-tsv",
+        action="store_true",
+        default=True,
+        help="Overwrite channels.tsv file with detected bad channels",
+    )
+    prep_group.add_argument(
+        "--no-overwrite-channels-tsv",
+        dest="overwrite_channels_tsv",
+        action="store_false",
+        help="Do not overwrite channels.tsv file",
+    )
+    prep_group.add_argument(
+        "--delete-breaks",
+        action="store_true",
+        default=False,
+        help="Delete breaks in data during bad channel detection",
+    )
+    prep_group.add_argument(
+        "--breaks-min-length",
+        type=int,
+        default=20,
+        help="Minimum break duration in seconds",
+    )
+    prep_group.add_argument(
+        "--t-start-after-previous",
+        type=int,
+        default=2,
+        help="Time after previous event in seconds",
+    )
+    prep_group.add_argument(
+        "--t-stop-before-next",
+        type=int,
+        default=2,
+        help="Time before next event in seconds",
     )
     prep_group.add_argument(
         "--tmin",

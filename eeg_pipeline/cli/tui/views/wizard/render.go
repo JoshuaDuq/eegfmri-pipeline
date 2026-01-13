@@ -110,6 +110,14 @@ func (m Model) renderStepContent(isNarrow bool) string {
 		return m.renderAdvancedConfig()
 	case types.StepSelectSubjects:
 		return m.renderSubjectSelection()
+	case types.StepSelectPreprocessingStages:
+		return m.renderPreprocessingStageSelection()
+	case types.StepPreprocessingFiltering:
+		return m.renderPreprocessingFiltering()
+	case types.StepPreprocessingICA:
+		return m.renderPreprocessingICA()
+	case types.StepPreprocessingEpochs:
+		return m.renderPreprocessingEpochs()
 	case types.StepReviewExecute:
 		return m.renderReview()
 	default:
@@ -141,20 +149,24 @@ func (m Model) renderWithHelpOverlay() string {
 ///////////////////////////////////////////////////////////////////
 
 var stepDisplayNames = map[types.WizardStep]string{
-	types.StepSelectMode:            "Mode",
-	types.StepSelectComputations:    "Analyses",
-	types.StepSelectFeatureFiles:    "Files",
-	types.StepConfigureOptions:      "Features",
-	types.StepSelectBands:           "Bands",
-	types.StepSelectSpatial:         "Spatial",
-	types.StepTimeRange:             "Time",
-	types.StepAdvancedConfig:        "Advanced",
-	types.StepSelectPlots:           "Plots",
-	types.StepSelectFeaturePlotters: "Feature Plots",
-	types.StepSelectPlotCategories:  "Categories",
-	types.StepPlotConfig:            "Output",
-	types.StepSelectSubjects:        "Subjects",
-	types.StepReviewExecute:         "Review",
+	types.StepSelectMode:                "Mode",
+	types.StepSelectComputations:        "Analyses",
+	types.StepSelectFeatureFiles:        "Files",
+	types.StepConfigureOptions:          "Features",
+	types.StepSelectBands:               "Bands",
+	types.StepSelectSpatial:             "Spatial",
+	types.StepTimeRange:                 "Time",
+	types.StepAdvancedConfig:            "Advanced",
+	types.StepSelectPlots:               "Plots",
+	types.StepSelectFeaturePlotters:     "Feature Plots",
+	types.StepSelectPlotCategories:      "Categories",
+	types.StepPlotConfig:                "Output",
+	types.StepSelectSubjects:            "Subjects",
+	types.StepSelectPreprocessingStages: "Stages",
+	types.StepPreprocessingFiltering:    "Filtering",
+	types.StepPreprocessingICA:          "ICA",
+	types.StepPreprocessingEpochs:       "Epochs",
+	types.StepReviewExecute:             "Review",
 }
 
 func (m Model) renderHeader() string {
@@ -377,8 +389,11 @@ func (m Model) getStepHints() []string {
 	case types.StepConfigureOptions:
 		return m.getFeatureOptionsHints()
 	case types.StepSelectPlotCategories, types.StepSelectBands, types.StepSelectROIs, types.StepSelectSpatial,
-		types.StepSelectFeatureFiles, types.StepSelectPlots, types.StepSelectFeaturePlotters:
+		types.StepSelectFeatureFiles, types.StepSelectPlots, types.StepSelectFeaturePlotters,
+		types.StepSelectPreprocessingStages:
 		return m.getStandardSelectionHints()
+	case types.StepPreprocessingFiltering, types.StepPreprocessingICA, types.StepPreprocessingEpochs:
+		return m.getPreprocessingConfigHints()
 	case types.StepPlotConfig:
 		return m.getPlotConfigHints()
 	case types.StepTimeRange:
@@ -485,6 +500,22 @@ func (m Model) getAdvancedConfigHints() []string {
 		styles.RenderKeyHint("Space", "Toggle/Expand"),
 		styles.RenderKeyHint("↑/↓", "Navigate"),
 		styles.RenderKeyHint("Enter", "Next"),
+		styles.RenderKeyHint("Esc", "Back"),
+	}
+}
+
+func (m Model) getPreprocessingConfigHints() []string {
+	if m.editingNumber || m.editingText {
+		return []string{
+			styles.RenderKeyHint("Type", "Enter Value"),
+			styles.RenderKeyHint("Enter", "Confirm"),
+			styles.RenderKeyHint("Esc", "Cancel"),
+		}
+	}
+	return []string{
+		styles.RenderKeyHint("↑/↓", "Navigate"),
+		styles.RenderKeyHint("Enter", "Edit"),
+		styles.RenderKeyHint("Space", "Toggle"),
 		styles.RenderKeyHint("Esc", "Back"),
 	}
 }

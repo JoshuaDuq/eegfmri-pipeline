@@ -368,8 +368,7 @@ def plot_power_roi_scatter(
     if config is None:
         raise ValueError("config is required for behavioral power ROI scatter plotting")
 
-    log_name = config.get("output.log_file_name", "behavior_analysis.log")
-    logger = get_subject_logger("behavior_analysis", subject, log_name, config=config)
+    logger = get_subject_logger("behavior_analysis", subject)
     logger.info(f"Starting ROI power scatter plotting for sub-{subject}")
 
     plot_cfg = get_plot_config(config)

@@ -52,6 +52,12 @@ def _looks_like_path_string(value: str) -> bool:
     if len(value) >= 2 and value[1] == ":":
         return True
     if any(sep in value for sep in ("/", "\\")):
+        # Exclude Docker image names (e.g., nipreps/fmriprep:23.2.1)
+        # Docker images have a colon after the last slash (tag separator)
+        if ":" in value:
+            last_slash_idx = max(value.rfind("/"), value.rfind("\\"))
+            if last_slash_idx < value.rfind(":"):
+                return False
         return True
     return False
 
