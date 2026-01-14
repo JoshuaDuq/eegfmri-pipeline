@@ -320,6 +320,7 @@ def compute_batch_condition_effects(
     n_perm: int = 0,
     base_seed: int = 42,
     groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
     logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
     """Vectorized batch computation of condition effects.
@@ -377,7 +378,14 @@ def compute_batch_condition_effects(
         if logger:
             logger.info(f"Computing {n_perm} permutations for {n_features} features...")
         p_perm_values = _compute_batch_permutation_pvalues(
-            data_matrix, pain_mask, nonpain_mask, n_perm, base_seed, groups, logger
+            data_matrix,
+            pain_mask,
+            nonpain_mask,
+            n_perm,
+            base_seed,
+            groups,
+            scheme=scheme,
+            logger=logger,
         )
     
     # Build result records
@@ -484,6 +492,8 @@ def _compute_batch_permutation_pvalues(
     n_perm: int,
     base_seed: int,
     groups: Optional[np.ndarray],
+    *,
+    scheme: str,
     logger: Optional[logging.Logger],
 ) -> np.ndarray:
     """Compute permutation p-values for all features using vectorized operations.
@@ -520,18 +530,22 @@ def _compute_batch_permutation_pvalues(
     
     rng = np.random.default_rng(base_seed)
     log_interval = max(1, n_perm // 10)
+    scheme = str(scheme or "shuffle").strip().lower()
     
     for perm_i in range(n_perm):
         if logger and perm_i > 0 and perm_i % log_interval == 0:
             logger.debug(f"  Permutation {perm_i}/{n_perm}")
         
-        # Permute labels
-        if groups is None:
-            perm_labels = valid_labels[rng.permutation(n_valid)]
-        else:
-            # Block-aware permutation (within groups)
-            valid_groups = groups[valid_indices] if groups is not None else None
-            perm_labels = _permute_within_groups(valid_labels, valid_groups, rng)
+        from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
+        valid_groups = groups[valid_indices] if groups is not None else None
+        perm_indices = permute_within_groups(
+            n_valid,
+            rng,
+            valid_groups,
+            scheme=scheme,
+        )
+        perm_labels = valid_labels[perm_indices]
         
         # Compute permuted statistic
         with warnings.catch_warnings():
@@ -548,24 +562,6 @@ def _compute_batch_permutation_pvalues(
     p_values = n_exceeded / (n_perm + 1)
     
     return p_values
-
-
-def _permute_within_groups(
-    labels: np.ndarray,
-    groups: Optional[np.ndarray],
-    rng: np.random.Generator,
-) -> np.ndarray:
-    """Permute labels within groups (block-aware shuffling)."""
-    if groups is None:
-        return labels[rng.permutation(len(labels))]
-    
-    permuted = labels.copy()
-    for group_id in np.unique(groups):
-        group_idx = np.where(groups == group_id)[0]
-        if len(group_idx) > 1:
-            permuted[group_idx] = labels[group_idx][rng.permutation(len(group_idx))]
-    
-    return permuted
 
 
 def _get_condition_column(
@@ -770,6 +766,9 @@ def compute_condition_effects(
             config, "behavior_analysis.condition.p_primary_mode", "asymptotic"
         )
     ).strip().lower()
+    scheme = str(
+        get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")
+    ).strip().lower()
     base_seed = int(
         get_config_value(config, "behavior_analysis.statistics.base_seed", 42)
     )
@@ -789,6 +788,7 @@ def compute_condition_effects(
             groups=groups,
             n_perm=n_perm if perm_enabled else 0,
             base_seed=base_seed,
+            scheme=scheme,
             logger=logger,
         )
 

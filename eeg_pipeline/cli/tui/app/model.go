@@ -689,6 +689,7 @@ func (m Model) handlePipelineSelected() (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(
+		func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 		executor.LoadSubjects(m.repoRoot, m.task, m.selectedPipeline),
 		executor.LoadPlotters(m.repoRoot),
 		executor.LoadConfigSummary(m.repoRoot),

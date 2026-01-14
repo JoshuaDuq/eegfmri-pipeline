@@ -268,6 +268,8 @@ class TimeWindowSpec:
         logger: Optional[logging.Logger] = None,
         name: Optional[str] = None,
         explicit_windows: Optional[List[Dict[str, Any]]] = None,
+        tmin: Optional[float] = None,
+        tmax: Optional[float] = None,
     ):
         if times is None or len(times) == 0:
             raise ValueError("times must be a non-empty array")
@@ -280,6 +282,8 @@ class TimeWindowSpec:
         self.logger = logger or logging.getLogger(__name__)
         self.name = name
         self.explicit_windows = explicit_windows
+        self.tmin = tmin
+        self.tmax = tmax
         
         self.masks: Dict[str, np.ndarray] = {}
         self.metadata: Dict[str, WindowMetadata] = {}
@@ -288,17 +292,43 @@ class TimeWindowSpec:
         self._build_all_windows()
         
     def _build_all_windows(self):
-        """Construct windows based ONLY on explicit user input from Step 5.
+        """Construct windows from explicit user input or tmin/tmax fallback.
         
-        No hardcoded window names or config fallbacks - all windows must
-        be explicitly defined by the user in the TUI.
+        Priority:
+        1. Explicit windows from TUI (Step 5)
+        2. Auto-generated window from tmin/tmax CLI arguments
+        3. Full epoch window if nothing else is specified
         """
         explicit_by_name = {k.lower(): v for k, v in self._parse_explicit_windows().items()}
         
         if explicit_by_name:
             self._build_from_explicit_windows(explicit_by_name)
+        elif self.tmin is not None or self.tmax is not None:
+            self._build_from_tmin_tmax()
         elif self.name:
             self._add_empty_window(self.name, reason="no_explicit_windows_defined")
+    
+    def _build_from_tmin_tmax(self):
+        """Auto-generate a window from CLI tmin/tmax when no explicit windows defined.
+        
+        This prevents silent zero-masking when users specify tmin/tmax without
+        explicit window definitions.
+        """
+        t_start = self.tmin if self.tmin is not None else float(self.times[0])
+        t_end = self.tmax if self.tmax is not None else float(self.times[-1])
+        
+        window_name = self.name if self.name else "analysis"
+        
+        self.logger.info(
+            f"Auto-generating window '{window_name}' from tmin/tmax: [{t_start:.3f}, {t_end:.3f}]"
+        )
+        self._add_window(window_name, t_start, t_end)
+        
+        if t_start > 0:
+            baseline_end = min(0.0, t_start)
+            baseline_start = self.times[0]
+            if baseline_start < baseline_end:
+                self._add_window("baseline", float(baseline_start), baseline_end)
     
     def _parse_explicit_windows(self) -> Dict[str, Tuple[float, float]]:
         """Parse explicit windows from user input into name -> (start, end) mapping."""

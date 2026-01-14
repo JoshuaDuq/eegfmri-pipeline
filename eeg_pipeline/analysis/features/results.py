@@ -288,11 +288,12 @@ class ExtractionResult:
         qc_data = self.qc if self.qc else None
         
         return generate_manifest(
-            feature_columns, 
-            config=config, 
-            subject=subject, 
-            task=task, 
-            qc=qc_data
+            feature_columns,
+            config=config,
+            subject=subject,
+            task=task,
+            qc=qc_data,
+            df_attrs=dict(getattr(feature_dataframe, "attrs", {}) or {}),
         )
 
     def save_with_manifest(

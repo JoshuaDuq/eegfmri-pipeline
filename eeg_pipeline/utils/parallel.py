@@ -274,6 +274,7 @@ def parallel_condition_effects(
     groups: Optional[np.ndarray] = None,
     n_perm: int = 0,
     base_seed: int = 42,
+    scheme: str = "shuffle",
     logger: Optional[logging.Logger] = None,
 ) -> List[Dict[str, Any]]:
     """Compute condition effects for multiple features.
@@ -298,6 +299,7 @@ def parallel_condition_effects(
             n_perm=n_perm,
             base_seed=base_seed,
             groups=groups,
+            scheme=scheme,
             logger=logger,
         )
     
@@ -320,6 +322,7 @@ def parallel_condition_effects(
                 groups=groups,
                 n_perm=n_perm,
                 base_seed=base_seed,
+                scheme=scheme,
             )
             if result is not None:
                 results.append(result)
@@ -336,6 +339,7 @@ def parallel_condition_effects(
             groups=groups,
             n_perm=n_perm,
             base_seed=base_seed,
+            scheme=scheme,
         )
         for col in feature_columns
     )
@@ -410,36 +414,6 @@ def _extract_valid_groups(
         return None
 
 
-def _compute_permutation_p_value(
-    values: np.ndarray,
-    labels: np.ndarray,
-    observed_statistic: float,
-    num_permutations: int,
-    groups: Optional[np.ndarray],
-    rng: np.random.Generator,
-) -> float:
-    """Compute permutation-based p-value with optional block-aware shuffling."""
-    num_exceeded = 1
-    denominator = num_permutations + 1
-
-    for _ in range(num_permutations):
-        if groups is None:
-            permuted_labels = labels[rng.permutation(len(labels))]
-        else:
-            permuted_labels = labels.copy()
-            for group_id in np.unique(groups):
-                group_indices = np.where(groups == group_id)[0]
-                if group_indices.size <= 1:
-                    continue
-                permuted_labels[group_indices] = labels[group_indices][rng.permutation(group_indices.size)]
-
-        permuted_statistic = float(np.abs(np.nanmean(values[permuted_labels]) - np.nanmean(values[~permuted_labels])))
-        if permuted_statistic >= observed_statistic - _NUMERIC_TOLERANCE:
-            num_exceeded += 1
-
-    return float(num_exceeded / denominator)
-
-
 def _compute_single_condition_effect(
     col: str,
     features_df: pd.DataFrame,
@@ -450,6 +424,7 @@ def _compute_single_condition_effect(
     groups: Optional[np.ndarray] = None,
     n_perm: int = 0,
     base_seed: int = 42,
+    scheme: str = "shuffle",
 ) -> Optional[Dict[str, Any]]:
     """Compute condition effect for a single feature."""
     from eeg_pipeline.utils.analysis.stats import hedges_g
@@ -494,17 +469,19 @@ def _compute_single_condition_effect(
             has_both_conditions = finite_labels.any() and (~finite_labels).any()
 
             if has_sufficient_data and has_both_conditions:
-                observed_statistic = float(
-                    np.abs(np.nanmean(finite_values[finite_labels]) - np.nanmean(finite_values[~finite_labels]))
-                )
-
                 rng_seed = _generate_column_seed(col, base_seed)
                 rng = np.random.default_rng(rng_seed)
 
                 valid_groups = _extract_valid_groups(groups, values, finite_mask)
 
-                p_permutation = _compute_permutation_p_value(
-                    finite_values, finite_labels, observed_statistic, n_perm, valid_groups, rng
+                from eeg_pipeline.utils.analysis.stats.permutation import perm_pval_mean_difference
+                p_permutation = perm_pval_mean_difference(
+                    finite_values,
+                    finite_labels,
+                    n_perm=int(n_perm),
+                    rng=rng,
+                    groups=valid_groups,
+                    scheme=str(scheme or "shuffle").strip().lower(),
                 )
 
         effect_interpretation = interpret_effect_size(hedges_g_value) if np.isfinite(hedges_g_value) else "unknown"
@@ -676,9 +653,6 @@ __all__ = [
     "parallel_stability_features",
     "parallel_influence_features",
 ]
-
-
-
 
 
 

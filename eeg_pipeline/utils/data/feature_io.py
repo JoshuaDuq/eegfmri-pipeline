@@ -8,7 +8,7 @@ Consolidated module for loading and saving feature data including:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
@@ -199,6 +199,9 @@ def _load_features_and_targets(
 class FeatureBundle:
     """Unified container for all feature tables loaded for a subject."""
 
+    manifests: Dict[str, Any] = field(default_factory=dict)
+    paths: Dict[str, Path] = field(default_factory=dict)
+
     power_df: Optional[pd.DataFrame] = None
     connectivity_df: Optional[pd.DataFrame] = None
     directed_connectivity_df: Optional[pd.DataFrame] = None
@@ -218,6 +221,50 @@ class FeatureBundle:
     asymmetry_df: Optional[pd.DataFrame] = None
     temporal_df: Optional[pd.DataFrame] = None
     targets: Optional[pd.Series] = None
+
+
+def _load_feature_metadata_sidecar(
+    table_path: Optional[Path],
+    logger: logging.Logger,
+) -> Optional[Dict[str, Any]]:
+    if table_path is None:
+        return None
+    try:
+        meta_path = table_path.parent / "metadata" / f"{table_path.stem}.json"
+        if not meta_path.exists():
+            return None
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, IOError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to read feature metadata sidecar for %s: %s", table_path, exc)
+        return None
+
+
+def _safe_read_feature_table_with_path(
+    features_dir: Path,
+    base_name: str,
+    logger: logging.Logger,
+    extension: str = ".tsv",
+    config: Optional[Any] = None,
+) -> Tuple[Optional[pd.DataFrame], Optional[Path]]:
+    """Read feature table and return the DataFrame and resolved path if found."""
+    folder = _get_folder_for_feature(base_name, config)
+    filename = f"{base_name}{extension}"
+
+    candidates: List[Path] = []
+    if folder:
+        candidates.append(features_dir / folder / filename)
+    candidates.append(features_dir / filename)
+
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            return read_table(candidate), candidate
+        except (FileNotFoundError, pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
+            logger.warning("Failed to read %s: %s", candidate, exc)
+            return None, candidate
+
+    return None, None
 
     @property
     def n_trials(self) -> int:
@@ -279,35 +326,53 @@ def load_feature_bundle(
 
     features_dir = deriv_features_path(deriv_root, subject)
 
-    bundle = FeatureBundle(
-        power_df=_safe_read_feature_table(features_dir, "features_power", logger, config=config),
-        connectivity_df=_safe_read_table(
-            find_connectivity_features_path(deriv_root, subject), logger
-        ),
-        directed_connectivity_df=_safe_read_feature_table(features_dir, "features_directedconnectivity", logger, config=config),
-        source_localization_df=_safe_read_feature_table(features_dir, "features_sourcelocalization", logger, config=config),
-        aperiodic_df=_safe_read_feature_table(features_dir, "features_aperiodic", logger, config=config),
-        erp_df=_safe_read_feature_table(features_dir, "features_erp", logger, config=config),
-        pac_df=_safe_read_feature_table(features_dir, "features_pac", logger, config=config),
-        pac_trials_df=_safe_read_feature_table(features_dir, "features_pac_trials", logger, config=config),
-        pac_time_df=_safe_read_feature_table(features_dir, "features_pac_time", logger, config=config),
-        itpc_df=_safe_read_feature_table(features_dir, "features_itpc", logger, config=config),
-        complexity_df=_safe_read_feature_table(features_dir, "features_complexity", logger, config=config),
-        bursts_df=_safe_read_feature_table(features_dir, "features_bursts", logger, config=config),
-        quality_df=_safe_read_feature_table(features_dir, "features_quality", logger, config=config),
-        erds_df=_safe_read_feature_table(features_dir, "features_erds", logger, config=config),
-        spectral_df=_safe_read_feature_table(features_dir, "features_spectral", logger, config=config),
-        ratios_df=_safe_read_feature_table(features_dir, "features_ratios", logger, config=config),
-        asymmetry_df=_safe_read_feature_table(features_dir, "features_asymmetry", logger, config=config),
-        temporal_df=_safe_read_feature_table(features_dir, "features_temporal", logger, config=config),
-    )
+    bundle = FeatureBundle()
+
+    def _load(base_name: str, key: str) -> Optional[pd.DataFrame]:
+        df, path = _safe_read_feature_table_with_path(
+            features_dir, base_name, logger, config=config
+        )
+        if path is not None:
+            bundle.paths[key] = path
+            meta = _load_feature_metadata_sidecar(path, logger)
+            if meta is not None:
+                bundle.manifests[key] = meta
+        return df
+
+    bundle.power_df = _load("features_power", "power")
+
+    conn_path = find_connectivity_features_path(deriv_root, subject)
+    bundle.paths["connectivity"] = conn_path
+    bundle.connectivity_df = _safe_read_table(conn_path, logger)
+    conn_meta = _load_feature_metadata_sidecar(conn_path, logger)
+    if conn_meta is not None:
+        bundle.manifests["connectivity"] = conn_meta
+
+    bundle.directed_connectivity_df = _load("features_directedconnectivity", "directedconnectivity")
+    bundle.source_localization_df = _load("features_sourcelocalization", "sourcelocalization")
+    bundle.aperiodic_df = _load("features_aperiodic", "aperiodic")
+    bundle.erp_df = _load("features_erp", "erp")
+    bundle.pac_df = _load("features_pac", "pac")
+    bundle.pac_trials_df = _load("features_pac_trials", "pac_trials")
+    bundle.pac_time_df = _load("features_pac_time", "pac_time")
+    bundle.itpc_df = _load("features_itpc", "itpc")
+    bundle.complexity_df = _load("features_complexity", "complexity")
+    bundle.bursts_df = _load("features_bursts", "bursts")
+    bundle.quality_df = _load("features_quality", "quality")
+    bundle.erds_df = _load("features_erds", "erds")
+    bundle.spectral_df = _load("features_spectral", "spectral")
+    bundle.ratios_df = _load("features_ratios", "ratios")
+    bundle.asymmetry_df = _load("features_asymmetry", "asymmetry")
+    bundle.temporal_df = _load("features_temporal", "temporal")
 
     if include_targets:
-        targets_df = _safe_read_feature_table(features_dir, "target_vas_ratings", logger, config=config)
+        targets_df, targets_path = _safe_read_feature_table_with_path(
+            features_dir, "target_vas_ratings", logger, config=config
+        )
+        if targets_path is not None:
+            bundle.paths["targets"] = targets_path
         if targets_df is not None:
-            bundle.targets = _extract_targets_from_dataframe(
-                targets_df, config, logger
-            )
+            bundle.targets = _extract_targets_from_dataframe(targets_df, config, logger)
 
     return bundle
 
@@ -482,6 +547,7 @@ def _save_feature_metadata(
             subject=subject_str,
             task=config.get("project.task") if config is not None else None,
             qc=None,
+            df_attrs=dict(getattr(df, "attrs", {}) or {}),
         )
 
         with open(metadata_path, "w") as f:
@@ -704,6 +770,7 @@ def _save_feature_manifest(
             subject=subject_str,
             task=config.get("project.task") if config is not None else None,
             qc=feature_qc,
+            df_attrs=dict(getattr(direct_df, "attrs", {}) or {}),
         )
         with open(sidecar_path, "w") as f:
             json.dump(manifest, f, indent=2)

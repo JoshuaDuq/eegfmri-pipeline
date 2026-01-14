@@ -209,11 +209,40 @@ def _compute_time_windows(
     """
     Compute time windows for feature extraction.
     
+    IMPORTANT: Always rebuilds windows for the provided time axis to ensure
+    mask lengths match the data. Passing a TimeWindows built on a different
+    time axis (e.g., uncropped epochs) will cause shape mismatches.
+    
     Returns (windows, qc_dict). windows is None on failure.
     """
     try:
         if isinstance(windows_spec, TimeWindows):
-            windows = windows_spec
+            # Check if windows were built on a different time axis
+            spec_times = getattr(windows_spec, "times", None)
+            if spec_times is not None and len(spec_times) != len(times):
+                logger.info(
+                    "Rebuilding TimeWindows for cropped time axis "
+                    "(original: %d samples, cropped: %d samples)",
+                    len(spec_times), len(times)
+                )
+                # Extract window ranges and rebuild for new time axis
+                ranges = getattr(windows_spec, "ranges", {})
+                explicit_windows = [
+                    {"name": name, "tmin": rng[0], "tmax": rng[1]}
+                    for name, rng in ranges.items()
+                    if isinstance(rng, (list, tuple)) and len(rng) >= 2
+                ]
+                windows_spec = TimeWindowSpec(
+                    times=times,
+                    config=config,
+                    sampling_rate=sfreq,
+                    logger=logger,
+                    name=getattr(windows_spec, "name", None),
+                    explicit_windows=explicit_windows if explicit_windows else None,
+                )
+                windows = time_windows_from_spec(windows_spec, logger=logger, strict=True)
+            else:
+                windows = windows_spec
         else:
             if windows_spec is None:
                 windows_spec = TimeWindowSpec(
@@ -289,13 +318,13 @@ def _estimate_individual_alpha_frequency(
     ch_names: List[str],
     baseline_mask: Optional[np.ndarray],
     config: Any,
+    logger: Any = None,
 ) -> Optional[float]:
     """
     Estimate individual alpha frequency (IAF) from baseline PSD.
     
     Returns IAF in Hz, or None if estimation fails.
     """
-    from scipy.signal import find_peaks
     from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
     from eeg_pipeline.utils.analysis.channels import build_roi_map
     
@@ -322,20 +351,59 @@ def _estimate_individual_alpha_frequency(
         if not allow_fallback:
             return None
     
-    baseline_data = _extract_baseline_data(data, baseline_mask)
+    allow_full_fallback = bool(iaf_config.get("allow_full_fallback", False))
+    baseline_data = _extract_baseline_data(
+        data,
+        baseline_mask,
+        logger=logger,
+        allow_full_fallback=allow_full_fallback,
+    )
+    if baseline_data is None:
+        return None
+
+    n_times = int(baseline_data.shape[-1])
+    if n_times < 2:
+        return None
+
+    try:
+        min_baseline_sec = float(iaf_config.get("iaf_min_baseline_sec", 0.0))
+    except Exception:
+        min_baseline_sec = 0.0
+    try:
+        min_cycles_at_fmin = float(iaf_config.get("iaf_min_cycles_at_fmin", 5.0))
+    except Exception:
+        min_cycles_at_fmin = 5.0
+
+    required_by_cycles = int(np.ceil((min_cycles_at_fmin / max(alpha_fmin, 1e-6)) * sfreq))
+    required_by_sec = int(np.ceil(max(min_baseline_sec, 0.0) * sfreq))
+    required_samples = max(required_by_cycles, required_by_sec, 2)
+    if n_times < required_samples:
+        if logger:
+            logger.warning(
+                "IAF estimation skipped: baseline too short (n_times=%d, required=%d). "
+                "Adjust feature_engineering.bands.iaf_min_cycles_at_fmin / iaf_min_baseline_sec or baseline window.",
+                n_times,
+                required_samples,
+            )
+        return None
     
     psd_fmin = max(MIN_FREQ_FOR_PSD, alpha_fmin - DEFAULT_PSD_FMIN_OFFSET)
     psd_fmax = min(MAX_FREQ_FOR_PSD, sfreq / 2.0 - DEFAULT_PSD_FMAX_OFFSET)
     
-    psds, freqs = mne.time_frequency.psd_array_multitaper(
-        baseline_data,
-        sfreq=sfreq,
-        fmin=psd_fmin,
-        fmax=psd_fmax,
-        adaptive=True,
-        normalization="full",
-        verbose=False,
-    )
+    try:
+        psds, freqs = mne.time_frequency.psd_array_multitaper(
+            baseline_data,
+            sfreq=sfreq,
+            fmin=psd_fmin,
+            fmax=psd_fmax,
+            adaptive=True,
+            normalization="full",
+            verbose=False,
+        )
+    except Exception as exc:
+        if logger:
+            logger.warning("IAF PSD estimation failed: %s", exc)
+        return None
     psds = np.asarray(psds, dtype=float)
     freqs = np.asarray(freqs, dtype=float)
     
@@ -365,11 +433,49 @@ def _get_roi_channel_indices(roi_names: List[str], roi_map: dict) -> List[int]:
     return unique_indices
 
 
-def _extract_baseline_data(data: np.ndarray, baseline_mask: Optional[np.ndarray]) -> np.ndarray:
-    """Extract baseline data using mask, or return full data if mask unavailable."""
+def _extract_baseline_data(
+    data: np.ndarray,
+    baseline_mask: Optional[np.ndarray],
+    logger: Any = None,
+    allow_full_fallback: bool = False,
+) -> Optional[np.ndarray]:
+    """Extract baseline data using mask.
+    
+    Parameters
+    ----------
+    data : np.ndarray
+        Data array with shape (n_epochs, n_channels, n_times)
+    baseline_mask : Optional[np.ndarray]
+        Boolean mask for baseline time points
+    logger : Any
+        Logger for warnings
+    allow_full_fallback : bool
+        If True, return full data when baseline_mask is empty (risky for pain paradigms).
+        If False, return None and log a warning.
+    
+    Returns
+    -------
+    Optional[np.ndarray]
+        Baseline data or None if baseline unavailable and fallback disabled.
+    """
     if baseline_mask is not None and np.any(baseline_mask):
         return data[:, :, baseline_mask]
-    return data
+    
+    if allow_full_fallback:
+        if logger:
+            logger.warning(
+                "Baseline mask is empty; using full segment for baseline estimation. "
+                "This is scientifically risky in pain paradigms where evoked/induced "
+                "changes can shift apparent alpha peak."
+            )
+        return data
+    
+    if logger:
+        logger.warning(
+            "Baseline mask is empty; skipping baseline-dependent computation. "
+            "Set allow_full_fallback=True to use full segment (not recommended)."
+        )
+    return None
 
 
 def _remove_one_over_f_trend(freqs: np.ndarray, psd: np.ndarray) -> np.ndarray:
@@ -816,6 +922,7 @@ def _determine_frequency_bands(
             ch_names,
             baseline_mask,
             config,
+            logger=logger,
         )
         
         if iaf is not None:

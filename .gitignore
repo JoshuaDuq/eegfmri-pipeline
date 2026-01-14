@@ -25,7 +25,7 @@ wheels/
 venv/
 env/
 ENV/
-.venv311/
+eeg_pipeline/.venv311/
 .env
 
 ### Testing and Cache ###

@@ -274,20 +274,32 @@ def compute_band_data(
 
 def _parse_psd_config(config: Any, n_times: int, sfreq: float) -> dict[str, Any]:
     """Extract PSD computation parameters from config with defaults."""
-    psd_cfg = {}
-    if config is not None:
-        feature_eng = config.get("feature_engineering", {})
-        psd_cfg = feature_eng.get("psd", {})
+    psd_cfg: dict[str, Any] = {}
+    if config is not None and hasattr(config, "get"):
+        psd_cfg = config.get("feature_engineering.psd", {}) or {}
+        if not psd_cfg:
+            # Backward/parallel config path used by other spectral feature extractors
+            psd_cfg = config.get("feature_engineering.spectral", {}) or {}
     
     nyquist_freq = sfreq / 2.0
     default_fmax = min(DEFAULT_PSD_FMAX_HZ, nyquist_freq - DEFAULT_PSD_FMAX_OFFSET_HZ)
     default_n_fft = min(n_times, int(DEFAULT_PSD_FFT_MULTIPLIER * sfreq))
+    default_n_overlap = max(0, default_n_fft // 2)
     
+    n_fft = int(psd_cfg.get("n_fft", default_n_fft))
+    n_fft = max(2, min(n_fft, n_times))
+    n_overlap_raw = psd_cfg.get("n_overlap", None)
+    if n_overlap_raw is None:
+        n_overlap = default_n_overlap if n_fft == default_n_fft else max(0, n_fft // 2)
+    else:
+        n_overlap = int(n_overlap_raw)
+    n_overlap = max(0, min(n_overlap, n_fft - 1))
+
     return {
         "fmin": float(psd_cfg.get("fmin", DEFAULT_PSD_FMIN_HZ)),
         "fmax": float(psd_cfg.get("fmax", default_fmax)),
-        "n_fft": int(psd_cfg.get("n_fft", default_n_fft)),
-        "n_overlap": int(psd_cfg.get("n_overlap", 0)),
+        "n_fft": n_fft,
+        "n_overlap": n_overlap,
         "window": psd_cfg.get("window", "hann"),
         "n_jobs": int(psd_cfg.get("n_jobs", 1)),
     }
@@ -389,6 +401,10 @@ def compute_psd_bandpower(
     fmax: float = 80.0,
     bandwidth: float = 2.0,
     normalize_by_bandwidth: bool = True,
+    exclude_line_noise: bool = False,
+    line_freqs: Optional[list[float]] = None,
+    line_width: Optional[float] = None,
+    n_harmonics: Optional[int] = None,
     logger: Optional[logging.Logger] = None,
 ) -> Optional[dict[str, np.ndarray]]:
     """
@@ -420,6 +436,14 @@ def compute_psd_bandpower(
     normalize_by_bandwidth : bool
         If True, return power per Hz (recommended for ratios).
         If False, return total integrated power in band.
+    exclude_line_noise : bool
+        If True, exclude line noise frequencies and harmonics from band integration.
+    line_freqs : Optional[list[float]]
+        Line noise frequencies (e.g., [50.0] or [60.0]). Required if exclude_line_noise=True.
+    line_width : Optional[float]
+        Width (Hz) around each line frequency to exclude. Default 1.0 Hz.
+    n_harmonics : Optional[int]
+        Number of harmonics to exclude. Default 3.
     logger : Optional[logging.Logger]
         Logger for warnings
     
@@ -491,10 +515,27 @@ def compute_psd_bandpower(
     else:
         df = np.ones_like(freqs)
     
+    # Build line-noise exclusion mask if requested
+    line_noise_mask = np.zeros(len(freqs), dtype=bool)
+    if exclude_line_noise and line_freqs:
+        width = line_width if line_width is not None else 1.0
+        n_harm = n_harmonics if n_harmonics is not None else 3
+        for base_freq in line_freqs:
+            for harmonic in range(1, n_harm + 1):
+                center = base_freq * harmonic
+                line_noise_mask |= (freqs >= center - width / 2) & (freqs <= center + width / 2)
+        if logger and np.any(line_noise_mask):
+            n_excluded = np.sum(line_noise_mask)
+            logger.debug("Excluding %d frequency bins for line noise", n_excluded)
+    
     band_power: dict[str, np.ndarray] = {}
     
     for band_name, (band_fmin, band_fmax) in band_ranges.items():
         band_mask = (freqs >= band_fmin) & (freqs <= band_fmax)
+        
+        # Exclude line noise bins from band integration
+        if exclude_line_noise:
+            band_mask = band_mask & ~line_noise_mask
         
         if not np.any(band_mask):
             if logger:
@@ -514,9 +555,10 @@ def compute_psd_bandpower(
         
         if normalize_by_bandwidth:
             # Power per Hz (comparable across bands of different widths)
-            bandwidth_hz = band_fmax - band_fmin
-            if bandwidth_hz > 0:
-                integrated_power = integrated_power / bandwidth_hz
+            # Use actual integrated bandwidth (excluding line noise gaps)
+            actual_bandwidth = np.sum(df_band)
+            if actual_bandwidth > 0:
+                integrated_power = integrated_power / actual_bandwidth
         
         band_power[band_name] = integrated_power
     
@@ -526,6 +568,9 @@ def compute_psd_bandpower(
 def subtract_evoked(
     data: np.ndarray,
     condition_labels: Optional[np.ndarray] = None,
+    *,
+    train_mask: Optional[np.ndarray] = None,
+    min_trials_per_condition: int = 2,
 ) -> np.ndarray:
     """
     Subtract evoked (phase-locked) response to isolate induced activity.
@@ -570,26 +615,69 @@ def subtract_evoked(
     n_epochs, n_channels, n_times = data.shape
     induced = data.copy()
     
+    if train_mask is not None:
+        train_mask = np.asarray(train_mask, dtype=bool).ravel()
+        if train_mask.size != n_epochs:
+            raise ValueError(
+                f"train_mask length ({train_mask.size}) must match n_epochs ({n_epochs})"
+            )
+        if int(np.sum(train_mask)) == 0:
+            train_mask = None
+
+    ref_mask = train_mask if train_mask is not None else np.ones(n_epochs, dtype=bool)
+    ref_data = data[ref_mask]
+
+    # Always compute a grand evoked fallback from the reference set (train-only if provided)
+    grand_evoked = np.nanmean(ref_data, axis=0, keepdims=True) if ref_data.size else np.nanmean(data, axis=0, keepdims=True)
+
     if condition_labels is None:
-        # Subtract grand average evoked response
-        evoked = np.nanmean(data, axis=0, keepdims=True)
-        induced = data - evoked
+        induced = data - grand_evoked
     else:
-        # Subtract condition-specific evoked responses
         condition_labels = np.asarray(condition_labels)
         if len(condition_labels) != n_epochs:
             raise ValueError(
                 f"condition_labels length ({len(condition_labels)}) must match "
                 f"n_epochs ({n_epochs})"
             )
-        
-        unique_conditions = np.unique(condition_labels[~np.isnan(condition_labels.astype(float))])
-        
+
+        if min_trials_per_condition < 1:
+            min_trials_per_condition = 1
+
+        if condition_labels.dtype.kind in {"f", "i", "u"}:
+            valid_labels = np.isfinite(condition_labels.astype(float))
+        else:
+            valid_labels = np.array(
+                [
+                    (lbl is not None)
+                    and not (
+                        isinstance(lbl, (float, np.floating)) and np.isnan(lbl)
+                    )
+                    and not (
+                        isinstance(lbl, (np.floating,)) and np.isnan(float(lbl))
+                    )
+                    for lbl in condition_labels
+                ],
+                dtype=bool,
+            )
+
+        unique_conditions = np.unique(condition_labels[valid_labels])
+
         for condition in unique_conditions:
-            mask = condition_labels == condition
-            if np.sum(mask) > 1:
-                condition_evoked = np.nanmean(data[mask], axis=0, keepdims=True)
-                induced[mask] = data[mask] - condition_evoked
+            cond_mask_all = condition_labels == condition
+            cond_mask_ref = cond_mask_all & ref_mask
+            n_ref = int(np.sum(cond_mask_ref))
+
+            if n_ref >= min_trials_per_condition:
+                condition_evoked = np.nanmean(data[cond_mask_ref], axis=0, keepdims=True)
+            else:
+                condition_evoked = grand_evoked
+
+            induced[cond_mask_all] = data[cond_mask_all] - condition_evoked
+
+        # For missing/invalid condition labels, fall back to grand evoked subtraction
+        missing_mask = ~valid_labels
+        if np.any(missing_mask):
+            induced[missing_mask] = data[missing_mask] - grand_evoked
     
     return induced
 

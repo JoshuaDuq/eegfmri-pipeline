@@ -225,15 +225,28 @@ class PreprocessingPipeline(PipelineBase):
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
         self.logger.info(f"Running PyPREP bad channel detection for {subject_count} subjects")
         
+        pyprep_cfg = self.config.get("pyprep", {})
         run_bads_detection(
             bids_path=str(self.bids_root),
-            pipeline_path=str(self.deriv_root),
+            pipeline_path=str(self.deriv_root / "preprocessed"),
             task=task,
             subjects=normalized_subjects,
             n_jobs=n_jobs,
             montage=self.config.get("eeg.montage", "easycap-M1"),
             l_pass=self.config.get("preprocessing.h_freq", 100),
             notch=self.config.get("preprocessing.notch_freq"),
+            ransac=pyprep_cfg.get("ransac", False),
+            repeats=pyprep_cfg.get("repeats", 3),
+            average_reref=pyprep_cfg.get("average_reref", False),
+            file_extension=pyprep_cfg.get("file_extension", ".vhdr"),
+            consider_previous_bads=pyprep_cfg.get("consider_previous_bads", False),
+            overwrite_chans_tsv=pyprep_cfg.get("overwrite_chans_tsv", True),
+            delete_breaks=pyprep_cfg.get("delete_breaks", False),
+            breaks_min_length=pyprep_cfg.get("breaks_min_length", 20),
+            t_start_after_previous=pyprep_cfg.get("t_start_after_previous", 2),
+            t_stop_before_next=pyprep_cfg.get("t_stop_before_next", 2),
+            rename_anot_dict=pyprep_cfg.get("rename_anot_dict"),
+            custom_bad_dict=pyprep_cfg.get("custom_bad_dict"),
         )
         
         synchronize_bad_channels_across_runs(
@@ -266,10 +279,9 @@ class PreprocessingPipeline(PipelineBase):
         use_icalabel: bool = True,
     ) -> None:
         """Run ICA fitting via MNE-BIDS pipeline."""
-        config_file = self._get_or_create_config(subjects, task)
         steps = self._get_ica_fitting_steps(use_icalabel)
         
-        self._run_mne_bids_pipeline(config_file, steps)
+        self._run_mne_bids_pipeline(steps, subjects=subjects)
         
         self.logger.info("ICA fitting complete")
     
@@ -285,12 +297,14 @@ class PreprocessingPipeline(PipelineBase):
         subject_count = len(subjects) if isinstance(normalized_subjects, list) else "all"
         self.logger.info(f"Running ICA labeling for {subject_count} subjects")
         
+        icalabel_cfg = self.config.get("icalabel", {})
         run_ica_label(
-            pipeline_path=str(self.deriv_root),
+            pipeline_path=str(self.deriv_root / "preprocessed"),
             task=task,
             subjects=normalized_subjects,
-            prob_threshold=self.config.get("ica.probability_threshold", 0.8),
-            labels_to_keep=self.config.get("ica.labels_to_keep", ["brain", "other"]),
+            prob_threshold=icalabel_cfg.get("prob_threshold", self.config.get("ica.probability_threshold", 0.8)),
+            labels_to_keep=icalabel_cfg.get("labels_to_keep", self.config.get("ica.labels_to_keep", ["brain", "other"])),
+            keep_mnebids_bads=icalabel_cfg.get("keep_mnebids_bads", False),
         )
         
         self.logger.info("ICA labeling complete")
@@ -301,11 +315,9 @@ class PreprocessingPipeline(PipelineBase):
         task: str,
     ) -> None:
         """Create epochs and apply ICA via MNE-BIDS pipeline."""
-        config_file = self._get_or_create_config(subjects, task)
-        
         steps = "preprocessing/_07_make_epochs,preprocessing/_08a_apply_ica,preprocessing/_09_ptp_reject"
         
-        self._run_mne_bids_pipeline(config_file, steps)
+        self._run_mne_bids_pipeline(steps, subjects=subjects)
         
         self.logger.info("Epoch creation complete")
     
@@ -317,99 +329,265 @@ class PreprocessingPipeline(PipelineBase):
         
         collect_preprocessing_stats(
             bids_path=str(self.bids_root),
-            pipeline_path=str(self.deriv_root),
+            pipeline_path=str(self.deriv_root / "preprocessed"),
             task=task,
         )
         
         self.logger.info("Statistics collection complete")
     
-    def _run_mne_bids_pipeline(self, config_file: str, steps: str) -> None:
-        """Run MNE-BIDS pipeline with specified steps."""
-        python_code = (
-            "from mne_bids_pipeline._main import main; "
-            "import sys; "
-            f"sys.argv = ['mne_bids_pipeline', '--config={config_file}', '--steps={steps}']; "
-            "main()"
-        )
+    def _run_mne_bids_pipeline(self, steps: str, subjects: List[str] = None, **kwargs) -> None:
+        """Run MNE-BIDS pipeline with a generated config file.
         
-        cmd = [sys.executable, "-c", python_code]
+        mne_bids_pipeline 1.9.0 requires settings in a Python config file,
+        not CLI arguments. This generates a temporary config and passes it
+        via --config.
         
-        self.logger.info(f"Running MNE-BIDS pipeline: {steps}")
+        Args:
+            steps: MNE-BIDS pipeline steps to run
+            subjects: List of subject IDs to process (without 'sub-' prefix)
+        """
+        import tempfile
         
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
+        config_content = self._generate_mne_bids_config(steps, subjects=subjects)
         
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix="_mne_bids_config.py",
+            delete=False,
+        ) as f:
+            f.write(config_content)
+            config_path = f.name
         
-        if result.stdout:
-            self.logger.debug(f"MNE-BIDS stdout: {result.stdout}")
-        if result.stderr:
-            self.logger.warning(f"MNE-BIDS stderr: {result.stderr}")
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            raise RuntimeError(f"MNE-BIDS pipeline failed: {error_msg}")
-    
-    def _get_or_create_config(self, subjects: List[str], task: str) -> str:
-        """Get or create MNE-BIDS pipeline config file."""
-        config_dir = self.deriv_root / "logs"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_file = config_dir / f"preprocessing_config_{task}.py"
-        
-        if not config_file.exists():
-            config_content = self._generate_config(subjects, task)
-            config_file.write_text(config_content)
+        try:
+            args = [
+                f"--config={config_path}",
+                f"--steps={steps}",
+            ]
             
-        return str(config_file)
+            self.logger.info(f"Running MNE-BIDS pipeline: {steps}")
+            
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            
+            # mne_bids_pipeline 1.9.0 lacks __main__.py, invoke _main.main() directly
+            invoke_script = (
+                "import sys; "
+                "sys.argv = ['mne_bids_pipeline'] + sys.argv[1:]; "
+                "from mne_bids_pipeline._main import main; "
+                "main()"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", invoke_script] + args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+            )
+            
+            if result.stdout:
+                self.logger.debug(f"MNE-BIDS stdout: {result.stdout}")
+            if result.stderr:
+                self.logger.warning(f"MNE-BIDS stderr: {result.stderr}")
+            
+            if result.returncode != 0:
+                error_msg = result.stderr or result.stdout or "Unknown error"
+                raise RuntimeError(f"MNE-BIDS pipeline failed: {error_msg}")
+        finally:
+            Path(config_path).unlink(missing_ok=True)
     
-    def _generate_config(self, subjects: List[str], task: str) -> str:
-        """Generate MNE-BIDS pipeline configuration."""
-        normalized_subjects = self._normalize_subjects(subjects)
-        subjects_repr = repr(normalized_subjects) if isinstance(normalized_subjects, list) else '"all"'
+    def _generate_mne_bids_config(self, steps: str, subjects: List[str] = None) -> str:
+        """Generate Python config file content for mne_bids_pipeline.
         
-        low_freq = self.config.get("preprocessing.l_freq", 0.1)
-        high_freq = self.config.get("preprocessing.h_freq", 100)
-        notch_freq = self.config.get("preprocessing.notch_freq", 60)
-        ica_method = self.config.get("ica.method", "fastica")
+        Args:
+            steps: MNE-BIDS pipeline steps to run
+            subjects: List of subject IDs to process (without 'sub-' prefix)
+        """
+        lines = [
+            '"""Auto-generated MNE-BIDS pipeline config."""',
+            "",
+            f'bids_root = "{self.bids_root}"',
+            f'deriv_root = "{self.deriv_root / "preprocessed"}"',
+            "",
+        ]
+        
+        # Subject filter (critical to avoid processing all subjects)
+        if subjects:
+            lines.append(f'subjects = {subjects}')
+            lines.append("")
+        
+        # Channel types
+        ch_types = self.config.get("eeg.ch_types", "eeg")
+        if ch_types:
+            lines.append(f'ch_types = ["{ch_types}"]')
+        
+        # EEG reference
+        eeg_reference = self.config.get("eeg.reference", "average")
+        if eeg_reference:
+            lines.append(f'eeg_reference = "{eeg_reference}"')
+        
+        # EOG channels
+        eog_channels = self.config.get("eeg.eog_channels")
+        if eog_channels:
+            if isinstance(eog_channels, list):
+                lines.append(f'eog_channels = {eog_channels}')
+            else:
+                lines.append(f'eog_channels = ["{eog_channels}"]')
+        
+        # Random state
+        random_state = self.config.get("preprocessing.random_state", 42)
+        if random_state is not None:
+            lines.append(f'random_state = {random_state}')
+        
+        # Task is rest
+        task_is_rest = self.config.get("preprocessing.task_is_rest", False)
+        lines.append(f'task_is_rest = {task_is_rest}')
+        
+        lines.append("")
+        lines.append("# Filtering")
+        
+        # Filtering configs
+        l_freq = self.config.get("preprocessing.l_freq", 0.1)
+        if l_freq is not None:
+            lines.append(f'l_freq = {l_freq}')
+        
+        h_freq = self.config.get("preprocessing.h_freq", 100)
+        if h_freq is not None:
+            lines.append(f'h_freq = {h_freq}')
+        
+        notch_freq = self.config.get("preprocessing.notch_freq")
+        if notch_freq is not None:
+            lines.append(f'notch_freq = {notch_freq}')
+        
+        # Resampling
+        resample_sfreq = self.config.get("preprocessing.resample_freq")
+        if resample_sfreq is not None:
+            lines.append(f'raw_resample_sfreq = {resample_sfreq}')
+        
+        # Find breaks
+        find_breaks = self.config.get("preprocessing.find_breaks", False)
+        lines.append(f'find_breaks = {find_breaks}')
+        
+        lines.append("")
+        lines.append("# ICA")
+        
+        # Spatial filter
+        spatial_filter = self.config.get("ica.spatial_filter", "ica")
+        if spatial_filter:
+            lines.append(f'spatial_filter = "{spatial_filter}"')
+        
+        # ICA algorithm
+        ica_algorithm = self.config.get("ica.algorithm", "extended_infomax")
+        if ica_algorithm:
+            lines.append(f'ica_algorithm = "{ica_algorithm}"')
+        
+        # ICA n_components
         ica_n_components = self.config.get("ica.n_components", 0.99)
-        epochs_tmin = self.config.get("epochs.tmin", -3.0)
-        epochs_tmax = self.config.get("epochs.tmax", 12.0)
-        baseline = self.config.get("epochs.baseline", None)
-        reject = self.config.get("epochs.reject", None)
+        if ica_n_components is not None:
+            lines.append(f'ica_n_components = {ica_n_components}')
         
-        return f'''"""
-MNE-BIDS Pipeline Configuration
-Auto-generated by PreprocessingPipeline
-"""
+        # ICA l_freq
+        ica_l_freq = self.config.get("ica.l_freq", 1.0)
+        if ica_l_freq is not None:
+            lines.append(f'ica_l_freq = {ica_l_freq}')
+        
+        # ICA reject
+        ica_reject = self.config.get("ica.reject")
+        if ica_reject is not None:
+            lines.append(f'ica_reject = {ica_reject}')
+        
+        lines.append("")
+        lines.append("# Epochs")
+        
+        # Conditions (required for non-resting-state)
+        conditions = self.config.get("epochs.conditions")
+        if conditions:
+            lines.append(f'conditions = {conditions}')
+        else:
+            # Auto-detect conditions from BIDS events files
+            detected = self._detect_conditions_from_bids()
+            if detected:
+                lines.append(f'conditions = {detected}')
+            else:
+                # Fallback: use None but mne_bids_pipeline may reject this
+                self.logger.warning(
+                    "No conditions found in config or BIDS events. "
+                    "mne_bids_pipeline may fail for non-resting-state data."
+                )
+        
+        # Epoch time window
+        epochs_tmin = self.config.get("epochs.tmin", -3.0)
+        if epochs_tmin is not None:
+            lines.append(f'epochs_tmin = {epochs_tmin}')
+        
+        epochs_tmax = self.config.get("epochs.tmax", 12.0)
+        if epochs_tmax is not None:
+            lines.append(f'epochs_tmax = {epochs_tmax}')
+        
+        # Baseline
+        baseline = self.config.get("epochs.baseline")
+        if baseline is not None:
+            lines.append(f'baseline = {baseline}')
+        else:
+            lines.append('baseline = None')
+        
+        # Reject
+        reject = self.config.get("epochs.reject")
+        if reject is not None:
+            lines.append(f'reject = {reject}')
+        
+        # Source estimation
+        run_source_estimation = self.config.get("preprocessing.run_source_estimation", False)
+        lines.append(f'run_source_estimation = {run_source_estimation}')
+        
+        lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _detect_conditions_from_bids(self) -> list | None:
+        """Detect unique condition names from BIDS events files.
+        
+        Reads trial_type column from first available events TSV and returns
+        unique values as a list suitable for mne_bids_pipeline conditions.
+        
+        Returns:
+            List of unique trial_type values, or None if detection fails.
+        """
+        import glob
+        
+        events_pattern = str(self.bids_root / "sub-*" / "eeg" / "*_events.tsv")
+        events_files = glob.glob(events_pattern)
+        
+        if not events_files:
+            self.logger.debug(f"No events files found matching: {events_pattern}")
+            return None
+        
+        try:
+            with open(events_files[0], "r") as f:
+                header = f.readline().strip().split("\t")
+                if "trial_type" not in header:
+                    self.logger.debug("No 'trial_type' column in events file")
+                    return None
+                
+                trial_type_idx = header.index("trial_type")
+                conditions = set()
+                
+                for line in f:
+                    parts = line.strip().split("\t")
+                    if len(parts) > trial_type_idx:
+                        trial_type = parts[trial_type_idx].strip()
+                        if trial_type and trial_type != "n/a":
+                            conditions.add(trial_type)
+                
+                if conditions:
+                    result = sorted(conditions)
+                    self.logger.info(f"Auto-detected conditions from BIDS: {result}")
+                    return result
+                    
+        except Exception as e:
+            self.logger.debug(f"Failed to detect conditions: {e}")
+        
+        return None
 
-bids_root = r"{self.bids_root}"
-deriv_root = r"{self.deriv_root}"
-
-task = "{task}"
-subjects = {subjects_repr}
-
-ch_types = ["eeg"]
-eeg_reference = "average"
-
-l_freq = {low_freq}
-h_freq = {high_freq}
-notch_freq = {notch_freq}
-
-ica_method = "{ica_method}"
-ica_n_components = {ica_n_components}
-
-epochs_tmin = {epochs_tmin}
-epochs_tmax = {epochs_tmax}
-baseline = {baseline}
-
-reject = {reject}
-'''
 
 __all__ = ["PreprocessingPipeline"]

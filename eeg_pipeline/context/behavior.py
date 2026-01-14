@@ -10,6 +10,8 @@ which provides a higher-level interface with the same functionality.
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -151,6 +153,8 @@ class BehaviorContext:
     _combined_features_signature: Optional[str] = None
     _trial_table_df: Optional[pd.DataFrame] = None
     _computation_cache: Dict[str, Any] = field(default_factory=dict)
+    feature_manifests: Dict[str, Any] = field(default_factory=dict)
+    feature_paths: Dict[str, Path] = field(default_factory=dict)
 
     @property
     def method(self) -> str:
@@ -311,6 +315,15 @@ class BehaviorContext:
 
         try:
             df = read_table(path)
+            self.feature_paths[key] = path
+            try:
+                meta_path = path.parent / "metadata" / f"{path.stem}.json"
+                if meta_path.exists():
+                    self.feature_manifests[key] = json.loads(
+                        meta_path.read_text(encoding="utf-8")
+                    )
+            except (OSError, IOError, json.JSONDecodeError) as exc:
+                self.logger.warning("Failed to load feature metadata for %s: %s", path, exc)
             current_df = getattr(self, attr_name)
             if current_df is None:
                 setattr(self, attr_name, df)
@@ -406,11 +419,23 @@ class BehaviorContext:
             config=self.config,
         )
 
+        self.feature_manifests = dict(getattr(bundle, "manifests", {}) or {})
+        self.feature_paths = dict(getattr(bundle, "paths", {}) or {})
+
         self.power_df = bundle.power_df
         self.connectivity_df = bundle.connectivity_df
         self.directed_connectivity_df = bundle.directed_connectivity_df
         self.source_localization_df = bundle.source_localization_df
-        self.pac_df = bundle.pac_trials_df
+        # Prefer trial-level PAC if available, otherwise fall back to any PAC table.
+        # Keep the canonical key name "pac" for downstream prefixing.
+        if bundle.pac_trials_df is not None and not bundle.pac_trials_df.empty:
+            self.pac_df = bundle.pac_trials_df
+            if "pac_trials" in self.feature_manifests and "pac" not in self.feature_manifests:
+                self.feature_manifests["pac"] = self.feature_manifests["pac_trials"]
+            if "pac_trials" in self.feature_paths and "pac" not in self.feature_paths:
+                self.feature_paths["pac"] = self.feature_paths["pac_trials"]
+        else:
+            self.pac_df = bundle.pac_df
         self.aperiodic_df = bundle.aperiodic_df
         self.erp_df = bundle.erp_df
         self.itpc_df = bundle.itpc_df

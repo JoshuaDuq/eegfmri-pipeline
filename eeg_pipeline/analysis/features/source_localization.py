@@ -58,6 +58,8 @@ class FMRITimeWindow:
 class FMRIConstraintConfig:
     enabled: bool
     stats_map_path: Optional[Path]
+    provenance: str  # "independent" | "same_dataset" | "unknown"
+    require_provenance: bool
     threshold: float
     tail: str  # "pos" or "abs"
     threshold_mode: str  # "z" or "fdr"
@@ -96,6 +98,10 @@ def _load_fmri_constraint_config(
 
     enabled = bool(fmri_cfg.get("enabled", False))
     stats_map_path = _as_path(fmri_cfg.get("stats_map_path") or fmri_cfg.get("stats_map"))
+    provenance = str(fmri_cfg.get("provenance", "unknown")).strip().lower()
+    if provenance not in {"independent", "same_dataset", "unknown"}:
+        provenance = "unknown"
+    require_provenance = bool(fmri_cfg.get("require_provenance", True))
 
     contrast_cfg = fmri_cfg.get("contrast", {}) or {}
     contrast_enabled = bool(contrast_cfg.get("enabled", False))
@@ -196,6 +202,8 @@ def _load_fmri_constraint_config(
     return FMRIConstraintConfig(
         enabled=enabled or (stats_map_path is not None),
         stats_map_path=stats_map_path,
+        provenance=provenance,
+        require_provenance=require_provenance,
         threshold=threshold,
         tail=tail,
         threshold_mode=threshold_mode,
@@ -639,8 +647,10 @@ def _extract_roi_timecourses_from_vertex_indices(
 
 
 def _compute_lcmv_source_estimates(
-    epochs: "mne.Epochs",
+    epochs_apply: "mne.Epochs",
     fwd: Any,
+    *,
+    epochs_fit: Optional["mne.Epochs"] = None,
     data_cov: Optional[Any] = None,
     noise_cov: Optional[Any] = None,
     reg: float = 0.05,
@@ -681,16 +691,17 @@ def _compute_lcmv_source_estimates(
     if logger:
         logger.info("Computing LCMV beamformer source estimates")
     
+    epochs_for_cov = epochs_fit if epochs_fit is not None else epochs_apply
     if data_cov is None:
         data_cov = mne.compute_covariance(
-            epochs,
+            epochs_for_cov,
             method="empirical",
             keep_sample_mean=False,
             verbose=False,
         )
     
     filters = make_lcmv(
-        epochs.info,
+        epochs_apply.info,
         fwd,
         data_cov,
         reg=reg,
@@ -701,7 +712,7 @@ def _compute_lcmv_source_estimates(
         verbose=False,
     )
     
-    stcs = apply_lcmv_epochs(epochs, filters, verbose=False)
+    stcs = apply_lcmv_epochs(epochs_apply, filters, verbose=False)
     
     if logger:
         logger.info(f"LCMV: {len(stcs)} epochs, {stcs[0].data.shape[0]} sources")
@@ -980,6 +991,13 @@ def extract_source_localization_features(
     epochs = ctx.epochs
     config = ctx.config
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
+    analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
+    train_mask = getattr(ctx, "train_mask", None)
+    epochs_fit = None
+    if analysis_mode == "trial_ml_safe" and train_mask is not None:
+        train_mask = np.asarray(train_mask, dtype=bool).ravel()
+        if train_mask.size == len(epochs) and np.any(train_mask):
+            epochs_fit = epochs[train_mask]
 
     src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
     if not isinstance(src_cfg, dict):
@@ -1044,6 +1062,19 @@ def extract_source_localization_features(
         subject=ctx_subject,
         task=fmri_task,
     )
+
+    if fmri_cfg.enabled:
+        if fmri_cfg.require_provenance and fmri_cfg.provenance == "unknown":
+            raise ValueError(
+                "Source localization: fMRI constraint enabled but fmri.provenance is unknown. "
+                "Set feature_engineering.sourcelocalization.fmri.provenance to "
+                "'independent' (recommended) or 'same_dataset' (circularity risk)."
+            )
+        if fmri_cfg.provenance == "same_dataset":
+            logger.warning(
+                "Source localization: fMRI constraint provenance is 'same_dataset'. "
+                "This can create circularity/double-dipping if you test EEG features against the same labels/conditions."
+            )
 
     n_epochs = len(epochs)
     if n_epochs < 2:
@@ -1108,7 +1139,13 @@ def extract_source_localization_features(
             logger=logger,
         )
         if method_use == "lcmv":
-            stcs, _ = _compute_lcmv_source_estimates(epochs, fwd, reg=lcmv_reg, logger=logger)
+            stcs, _ = _compute_lcmv_source_estimates(
+                epochs,
+                fwd,
+                epochs_fit=epochs_fit,
+                reg=lcmv_reg,
+                logger=logger,
+            )
         else:
             stcs, _ = _compute_eloreta_source_estimates(
                 epochs,
@@ -1161,7 +1198,13 @@ def extract_source_localization_features(
             logger.info(f"Using {len(labels)} ROI labels")
 
         if method_use == "lcmv":
-            stcs, _ = _compute_lcmv_source_estimates(epochs, fwd, reg=lcmv_reg, logger=logger)
+            stcs, _ = _compute_lcmv_source_estimates(
+                epochs,
+                fwd,
+                epochs_fit=epochs_fit,
+                reg=lcmv_reg,
+                logger=logger,
+            )
         else:
             stcs, _ = _compute_eloreta_source_estimates(
                 epochs,
@@ -1214,6 +1257,10 @@ def extract_source_localization_features(
     
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
+    features_df.attrs["method"] = str(method_use)
+    features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
+    features_df.attrs["fmri_provenance"] = str(getattr(fmri_cfg, "provenance", "unknown"))
+    features_df.attrs["train_mask_used_for_covariance"] = bool(epochs_fit is not None and method_use == "lcmv")
     
     if logger:
         logger.info(f"Source localization: {len(feature_cols)} features extracted")
@@ -1260,7 +1307,12 @@ def extract_source_connectivity_features(
     epochs = ctx.epochs
     config = getattr(ctx, "config", None)
     logger = getattr(ctx, "logger", None) or logging.getLogger(__name__)
-    
+    analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
+    train_mask = getattr(ctx, "train_mask", None)
+    train_mask = np.asarray(train_mask, dtype=bool).ravel() if train_mask is not None else None
+    if train_mask is not None and train_mask.size != len(epochs):
+        train_mask = None
+
     src_cfg = _cfg_get(config, "feature_engineering.sourcelocalization", {}) or {}
     if not isinstance(src_cfg, dict):
         src_cfg = {}
@@ -1324,6 +1376,19 @@ def extract_source_connectivity_features(
         subject=ctx_subject,
         task=fmri_task,
     )
+
+    if fmri_cfg.enabled:
+        if fmri_cfg.require_provenance and fmri_cfg.provenance == "unknown":
+            raise ValueError(
+                "Source connectivity: fMRI constraint enabled but fmri.provenance is unknown. "
+                "Set feature_engineering.sourcelocalization.fmri.provenance to "
+                "'independent' (recommended) or 'same_dataset' (circularity risk)."
+            )
+        if fmri_cfg.provenance == "same_dataset":
+            logger.warning(
+                "Source connectivity: fMRI constraint provenance is 'same_dataset'. "
+                "This can create circularity/double-dipping if you test EEG features against the same labels/conditions."
+            )
 
     n_epochs = len(epochs)
     if n_epochs < 2:
@@ -1424,7 +1489,16 @@ def extract_source_connectivity_features(
         epochs_band = epochs.copy().filter(fmin, fmax, n_jobs=n_jobs, verbose=False)
         
         if method_use == "lcmv":
-            stcs, _ = _compute_lcmv_source_estimates(epochs_band, fwd, reg=lcmv_reg, logger=None)
+            epochs_fit = None
+            if analysis_mode == "trial_ml_safe" and train_mask is not None and np.any(train_mask):
+                epochs_fit = epochs_band[train_mask]
+            stcs, _ = _compute_lcmv_source_estimates(
+                epochs_band,
+                fwd,
+                epochs_fit=epochs_fit,
+                reg=lcmv_reg,
+                logger=None,
+            )
         else:
             stcs, _ = _compute_eloreta_source_estimates(
                 epochs_band,
@@ -1501,6 +1575,17 @@ def extract_source_connectivity_features(
     
     features_df = pd.DataFrame(records)
     feature_cols = list(features_df.columns)
+
+    features_df.attrs["method"] = str(method_use)
+    features_df.attrs["connectivity_method"] = str(connectivity_method).lower()
+    features_df.attrs["fmri_constraint_enabled"] = bool(fmri_cfg.enabled)
+    features_df.attrs["fmri_provenance"] = str(getattr(fmri_cfg, "provenance", "unknown"))
+    features_df.attrs["train_mask_used_for_covariance"] = bool(
+        method_use == "lcmv"
+        and analysis_mode == "trial_ml_safe"
+        and train_mask is not None
+        and np.any(train_mask)
+    )
     
     if logger:
         logger.info(f"Source connectivity: {len(feature_cols)} features extracted")

@@ -548,6 +548,10 @@ def extract_power_features(
         return pd.DataFrame(), []
         
     features_df = pd.DataFrame(output_features)
+    features_df.attrs["evoked_subtracted"] = bool(getattr(ctx, "power_evoked_subtracted", False))
+    features_df.attrs["evoked_subtracted_conditionwise"] = bool(
+        getattr(ctx, "power_evoked_subtracted_conditionwise", False)
+    )
     return features_df, list(features_df.columns)
 
 
@@ -1267,6 +1271,11 @@ def extract_spectral_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     configured_segments = spec_cfg.get("segments")
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1274,11 +1283,18 @@ def extract_spectral_features(
         if mask is not None and np.any(mask):
             segment_masks = {target_name: mask}
         else:
-            logger.warning(
-                "Spectral: targeted window '%s' has no valid mask; using full epoch.",
-                target_name,
-            )
-            segment_masks = {target_name: np.ones(data.shape[2], dtype=bool)}
+            if allow_full_epoch_fallback:
+                logger.warning(
+                    "Spectral: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                    target_name,
+                )
+                segment_masks = {target_name: np.ones(data.shape[2], dtype=bool)}
+            else:
+                logger.error(
+                    "Spectral: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                    target_name,
+                )
+                return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
         segments = [target_name]
     else:
         segment_masks = get_segment_masks(epochs.times, windows, config)

@@ -1,0 +1,19 @@
+FROM freesurfer/freesurfer:7.4.1
+
+# Miniconda (prefer pinning to a specific version instead of "latest")
+ADD https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh /tmp/miniconda.sh
+RUN bash /tmp/miniconda.sh -b -p /opt/miniconda && rm -f /tmp/miniconda.sh
+
+# Pin Python 3.11 and install MNE
+RUN /opt/miniconda/bin/conda install -y -c conda-forge "python=3.11" mne && \
+    /opt/miniconda/bin/conda clean -a -y
+
+# Set environment variables
+ENV PATH="/opt/miniconda/bin:/usr/local/freesurfer/bin:${PATH}"
+ENV FREESURFER_HOME=/usr/local/freesurfer
+ENV SUBJECTS_DIR=/subjects
+
+# Source FreeSurfer setup in login shell
+RUN echo 'source $FREESURFER_HOME/SetUpFreeSurfer.sh' >> /root/.bashrc
+
+WORKDIR /subjects

@@ -111,8 +111,12 @@ def _compute_psd(
     """Compute power spectral density using specified method."""
     method = _get_psd_method(config)
     fmin, fmax = _get_frequency_range(config, sfreq)
-    n_times = data.shape[1]
-    n_fft = min(n_times, int(config.get("n_fft", DEFAULT_N_FFT)))
+    n_times = int(data.shape[1])
+    default_n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+    n_per_seg = int(config.get("n_per_seg", default_n_per_seg))
+    n_per_seg = max(2, min(n_per_seg, n_times))
+    n_fft = int(config.get("n_fft", max(DEFAULT_N_FFT, n_per_seg)))
+    n_fft = max(2, min(n_fft, n_times))
     
     if method == "multitaper":
         psds, freqs = mne.time_frequency.psd_array_multitaper(
@@ -125,12 +129,16 @@ def _compute_psd(
             verbose=False,
         )
     else:
+        n_overlap = config.get("n_overlap", n_per_seg // 2)
+        n_overlap = max(0, min(int(n_overlap), n_per_seg - 1))
         psds, freqs = mne.time_frequency.psd_array_welch(
             data,
             sfreq=float(sfreq),
             fmin=fmin,
             fmax=fmax,
             n_fft=n_fft,
+            n_per_seg=n_per_seg,
+            n_overlap=n_overlap,
             verbose=False,
         )
     
@@ -318,6 +326,11 @@ def extract_quality_features(
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     logger = getattr(ctx, "logger", None)
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if config is not None and hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -326,11 +339,20 @@ def extract_quality_features(
             masks = {target_name: mask}
         else:
             if logger:
-                logger.warning(
-                    "Quality: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            masks = {target_name: np.ones(full_data.shape[2], dtype=bool)}
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Quality: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Quality: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                masks = {target_name: np.ones(full_data.shape[2], dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         masks = get_segment_masks(epochs.times, windows, config)
     

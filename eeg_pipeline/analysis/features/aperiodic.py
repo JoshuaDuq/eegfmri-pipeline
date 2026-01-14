@@ -639,6 +639,7 @@ def _compute_psd(
     *,
     subtract_evoked: bool = False,
     condition_labels: Optional[np.ndarray] = None,
+    train_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Compute power spectral density with fallback handling.
     
@@ -657,7 +658,7 @@ def _compute_psd(
     
     if subtract_evoked:
         from eeg_pipeline.utils.analysis.spectral import subtract_evoked as _subtract_evoked
-        data = _subtract_evoked(data, condition_labels)
+        data = _subtract_evoked(data, condition_labels, train_mask=train_mask)
         logger.info(
             "Aperiodic: Computing induced spectra (evoked subtracted) for %s",
             segment_name
@@ -1025,6 +1026,8 @@ def _extract_aperiodic_for_segment(
     spatial_modes: Optional[List[str]] = None,
     frequency_bands_override: Optional[Dict[str, List[float]]] = None,
     condition_labels: Optional[np.ndarray] = None,
+    train_mask: Optional[np.ndarray] = None,
+    analysis_mode: Optional[str] = None,
 ) -> Dict[str, np.ndarray]:
     """Extract aperiodic and spectral features for a single segment.
     
@@ -1058,12 +1061,27 @@ def _extract_aperiodic_for_segment(
     aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
     subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
     
+    if subtract_evoked:
+        if str(analysis_mode or "").strip().lower() == "trial_ml_safe" and train_mask is None:
+            logger.warning(
+                "Aperiodic subtract_evoked=True in trial_ml_safe mode without train_mask. "
+                "Evoked subtraction uses cross-trial averages which can leak in CV. "
+                "Disabling subtract_evoked for safety. Provide train_mask or use group_stats mode."
+            )
+            subtract_evoked = False
+        elif train_mask is not None:
+            logger.info(
+                "Aperiodic: subtract_evoked will use training trials only (%d trials) for evoked estimate.",
+                int(np.sum(train_mask))
+            )
+    
     # Compute PSD (with optional evoked subtraction for induced spectra)
     psds, freqs = _compute_psd(
         epochs, picks, start_t, end_t, fmin, fmax,
         psd_method, psd_kwargs, logger, segment_name,
         subtract_evoked=subtract_evoked,
         condition_labels=condition_labels,
+        train_mask=train_mask,
     )
     
     # Apply line noise exclusion to PSD data (if configured)
@@ -1276,6 +1294,11 @@ def extract_aperiodic_features(
     
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1283,11 +1306,19 @@ def extract_aperiodic_features(
         if mask is not None and np.any(mask):
             segments = {target_name: mask}
         else:
-            logger.warning(
-                "Aperiodic: targeted window '%s' has no valid mask; using full epoch.",
-                target_name,
-            )
-            segments = {target_name: np.ones_like(times, dtype=bool)}
+            if allow_full_epoch_fallback:
+                logger.warning(
+                    "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                    target_name,
+                )
+                segments = {target_name: np.ones_like(times, dtype=bool)}
+            else:
+                logger.error(
+                    "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                    target_name,
+                )
+                qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
+                return pd.DataFrame(), [], qc_payload
     else:
         segments = get_segment_masks(times, windows, config)
     
@@ -1313,6 +1344,9 @@ def extract_aperiodic_features(
             t_seg[0], t_seg[-1], bands, config, logger,
             spatial_modes=spatial_modes,
             frequency_bands_override=freq_bands_override,
+            condition_labels=getattr(ctx, "condition_labels", None),
+            train_mask=getattr(ctx, "train_mask", None),
+            analysis_mode=getattr(ctx, "analysis_mode", None),
         )
         qc_payload["segments"][seg_name] = seg_data.get("__qc__")
         seg_data.pop("__qc__", None)
@@ -1343,4 +1377,245 @@ def extract_aperiodic_features(
     return df, list(df.columns), qc_payload
 
 
+def extract_aperiodic_from_precomputed(
+    precomputed: Any,
+    bands: List[str],
+) -> Tuple[pd.DataFrame, List[str], Dict[str, Any]]:
+    """Extract aperiodic features from PrecomputedData.
+    
+    This is a wrapper for use in extract_precomputed_features() where no
+    FeatureContext is available.
 
+    Important: aperiodic parameters (slope/offset) are *segment-specific*.
+    This function therefore recomputes PSD per segment (baseline/active/etc.)
+    from ``precomputed.data`` rather than reusing a single global PSD array.
+    """
+    logger = getattr(precomputed, "logger", None)
+    config = getattr(precomputed, "config", None)
+    
+    if config is None:
+        if logger:
+            logger.warning("Aperiodic: No config in precomputed data; skipping.")
+        return pd.DataFrame(), [], {}
+    
+    n_epochs = precomputed.data.shape[0]
+    ch_names = list(precomputed.ch_names)
+    sfreq = precomputed.sfreq
+    times = precomputed.times
+    data_all = np.asarray(precomputed.data, dtype=float)
+    
+    aperiodic_cfg = config.get("feature_engineering.aperiodic", {}) if hasattr(config, "get") else {}
+    min_segment_sec = float(aperiodic_cfg.get("min_segment_sec", _DEFAULT_MIN_SEGMENT_SEC))
+    peak_rejection_z = float(aperiodic_cfg.get("peak_rejection_z", _DEFAULT_PEAK_REJECTION_Z))
+    min_fit_points = int(aperiodic_cfg.get("min_fit_points", _DEFAULT_MIN_FIT_POINTS))
+    model = str(aperiodic_cfg.get("model", "fixed")).strip().lower()
+    subtract_evoked = bool(aperiodic_cfg.get("subtract_evoked", False))
+    
+    fit_params = _validate_fit_parameters(peak_rejection_z, min_fit_points, model)
+    psd_method, psd_kwargs, fmin, fmax = _parse_psd_config(config)
+    line_noise_cfg = _parse_line_noise_config(config)
+    
+    all_data: Dict[str, Any] = {}
+    qc_payload: Dict[str, Any] = {
+        "segments": {},
+        "channel_names": ch_names,
+        "min_segment_sec": min_segment_sec,
+        "psd_method": psd_method,
+        "psd_fmin": float(fmin),
+        "psd_fmax": float(fmax),
+        "subtract_evoked": bool(subtract_evoked),
+    }
+    
+    from eeg_pipeline.utils.analysis.windowing import get_segment_masks
+    
+    windows = precomputed.windows
+    target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
+    
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segments = {target_name: mask}
+        else:
+            if logger:
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Aperiodic: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Aperiodic: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segments = {target_name: np.ones(len(times), dtype=bool)}
+            else:
+                qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
+                return pd.DataFrame(), [], qc_payload
+    else:
+        segments = get_segment_masks(times, windows, config)
+    
+    if not segments:
+        if logger:
+            logger.warning("Aperiodic: No segments defined; skipping.")
+        return pd.DataFrame(), [], {}
+    
+    spatial_modes = getattr(precomputed, "spatial_modes", ["roi", "global"])
+    n_jobs = get_n_jobs(config, "aperiodic")
+    condition_labels = getattr(precomputed, "condition_labels", None)
+    
+    for seg_name, seg_mask in segments.items():
+        if seg_mask is None or not np.any(seg_mask):
+            continue
+        
+        seg_duration_sec = np.sum(seg_mask) / sfreq
+        if seg_duration_sec < min_segment_sec:
+            if logger:
+                logger.info(
+                    "Aperiodic: segment '%s' too short (%.2fs < %.2fs); skipping.",
+                    seg_name, seg_duration_sec, min_segment_sec,
+                )
+            continue
+
+        seg_data = data_all[:, :, seg_mask]
+        if subtract_evoked:
+            from eeg_pipeline.utils.analysis.spectral import subtract_evoked as _subtract_evoked
+            seg_data = _subtract_evoked(seg_data, condition_labels)
+            if logger:
+                logger.info(
+                    "Aperiodic: Computing induced spectra (evoked subtracted) for %s",
+                    seg_name,
+                )
+
+        # Compute PSD per segment
+        try:
+            if psd_method == "multitaper":
+                from mne.time_frequency import psd_array_multitaper
+                psds, freqs = psd_array_multitaper(
+                    seg_data,
+                    sfreq=float(sfreq),
+                    fmin=float(fmin),
+                    fmax=float(fmax),
+                    adaptive=psd_kwargs.get("adaptive", True),
+                    normalization=psd_kwargs.get("normalization", "full"),
+                    bandwidth=psd_kwargs.get("bandwidth"),
+                    verbose=False,
+                )
+            else:
+                from mne.time_frequency import psd_array_welch
+                n_times = int(seg_data.shape[-1])
+                n_per_seg = min(int(float(sfreq) * 2.0), n_times)
+                n_overlap = n_per_seg // 2
+                psds, freqs = psd_array_welch(
+                    seg_data,
+                    sfreq=float(sfreq),
+                    fmin=float(fmin),
+                    fmax=float(fmax),
+                    n_fft=max(256, n_per_seg),
+                    n_per_seg=n_per_seg,
+                    n_overlap=n_overlap,
+                    verbose=False,
+                )
+        except Exception as exc:
+            if logger:
+                logger.warning("Aperiodic: PSD computation failed for %s (%s); skipping.", seg_name, exc)
+            continue
+
+        psds = _validate_psd_data(psds)
+        freqs = _validate_frequencies(freqs)
+
+        n_removed = 0
+        if line_noise_cfg.exclude and freqs.size > 0:
+            line_noise_mask_psd = _build_line_noise_mask(freqs, line_noise_cfg)
+            n_removed = int(np.sum(~line_noise_mask_psd))
+            if n_removed > 0 and np.any(line_noise_mask_psd):
+                freqs = freqs[line_noise_mask_psd]
+                psds = psds[..., line_noise_mask_psd]
+
+        log_freqs = np.log10(np.maximum(freqs, 1e-10))
+        log_psd = np.log10(np.maximum(psds, _MIN_POWER_LOG10))
+
+        line_noise_mask = None
+        if line_noise_cfg.exclude and freqs.size > 0:
+            line_noise_mask = _build_line_noise_mask(freqs, line_noise_cfg)
+        
+        offsets, slopes, valid_bins, kept_bins, peak_rejected, fit_masks, qc = _fit_aperiodic_with_qc(
+            log_freqs, log_psd, fit_params, logger,
+            n_jobs=n_jobs, line_noise_mask=line_noise_mask
+        )
+        
+        _aggregate_aperiodic_features(
+            all_data, n_epochs, seg_name, ch_names,
+            slopes, offsets, spatial_modes, config
+        )
+        
+        qc_payload["segments"][seg_name] = {
+            "n_epochs": n_epochs,
+            "duration_sec": seg_duration_sec,
+            "mean_slope": float(np.nanmean(slopes)),
+            "mean_offset": float(np.nanmean(offsets)),
+            "line_noise_bins_removed": int(n_removed),
+        }
+    
+    if not all_data:
+        if logger:
+            logger.warning("Aperiodic: No valid segments; returning empty result.")
+        return pd.DataFrame(), [], {}
+    
+    df = pd.DataFrame(all_data)
+    return df, list(df.columns), qc_payload
+
+
+def _aggregate_aperiodic_features(
+    data_dict: Dict[str, Any],
+    n_epochs: int,
+    seg_name: str,
+    ch_names: List[str],
+    slopes: np.ndarray,
+    offsets: np.ndarray,
+    spatial_modes: List[str],
+    config: Any,
+) -> None:
+    """Aggregate aperiodic features by spatial mode."""
+    from eeg_pipeline.utils.analysis.spatial import get_roi_definitions
+    from eeg_pipeline.utils.analysis.channels import build_roi_map
+    
+    if "channels" in spatial_modes:
+        for ch_idx, ch_name in enumerate(ch_names):
+            col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "ch", "value", channel=ch_name)
+            col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "ch", "value", channel=ch_name)
+            data_dict[col_slope] = slopes[:, ch_idx]
+            data_dict[col_offset] = offsets[:, ch_idx]
+    
+    if "global" in spatial_modes:
+        valid_per_epoch = np.sum(np.isfinite(slopes), axis=1)
+        global_slope = np.where(valid_per_epoch >= 3, np.nanmean(slopes, axis=1), np.nan)
+        global_offset = np.where(valid_per_epoch >= 3, np.nanmean(offsets, axis=1), np.nan)
+        
+        col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "global", "mean")
+        col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "global", "mean")
+        data_dict[col_slope] = global_slope
+        data_dict[col_offset] = global_offset
+    
+    if "roi" in spatial_modes:
+        roi_defs = get_roi_definitions(config)
+        if roi_defs:
+            roi_map = build_roi_map(ch_names, roi_defs)
+            for roi_name, idxs in roi_map.items():
+                if len(idxs) >= 2:
+                    roi_slopes = slopes[:, idxs]
+                    roi_offsets = offsets[:, idxs]
+                    valid_per_epoch = np.sum(np.isfinite(roi_slopes), axis=1)
+                    
+                    roi_slope_mean = np.where(valid_per_epoch >= 2, np.nanmean(roi_slopes, axis=1), np.nan)
+                    roi_offset_mean = np.where(valid_per_epoch >= 2, np.nanmean(roi_offsets, axis=1), np.nan)
+                    
+                    col_slope = NamingSchema.build("aperiodic", seg_name, "slope", "roi", "mean", channel=roi_name)
+                    col_offset = NamingSchema.build("aperiodic", seg_name, "offset", "roi", "mean", channel=roi_name)
+                    data_dict[col_slope] = roi_slope_mean
+                    data_dict[col_offset] = roi_offset_mean

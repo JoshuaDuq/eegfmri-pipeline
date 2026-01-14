@@ -169,18 +169,30 @@ def partial_corr_xy_given_Z(
     """
     Partial correlation of x,y controlling for Z.
     
+    For Spearman partial correlation, rank-transforms all variables before
+    residualization (the standard approach). For Pearson, uses raw values.
+    
     Returns (r_partial, p_value, n).
     """
+    from scipy.stats import rankdata
+    
     df = pd.concat([x.rename("x"), y.rename("y"), Z], axis=1).dropna()
     min_required = Z.shape[1] + _MIN_SAMPLES_CORRELATION
     if len(df) < min_required:
         return np.nan, np.nan, 0
 
-    design_matrix = df[Z.columns].values
-    design_matrix = np.column_stack([np.ones(len(design_matrix)), design_matrix])
-
     x_vals = df["x"].values
     y_vals = df["y"].values
+    z_vals = df[Z.columns].values
+    
+    # For Spearman partial correlation, rank-transform ALL variables first
+    # This is the correct approach (residualize on ranks, not raw values)
+    if method.lower() == "spearman":
+        x_vals = rankdata(x_vals)
+        y_vals = rankdata(y_vals)
+        z_vals = np.column_stack([rankdata(z_vals[:, i]) for i in range(z_vals.shape[1])])
+    
+    design_matrix = np.column_stack([np.ones(len(x_vals)), z_vals])
 
     try:
         beta_x, *_ = lstsq(design_matrix, x_vals)
@@ -191,7 +203,10 @@ def partial_corr_xy_given_Z(
     residuals_x = x_vals - design_matrix @ beta_x
     residuals_y = y_vals - design_matrix @ beta_y
 
-    r, p = compute_correlation(residuals_x, residuals_y, method)
+    # For Spearman, we already rank-transformed, so use Pearson on residuals
+    # For Pearson, use Pearson on residuals
+    corr_method = "pearson" if method.lower() == "spearman" else method
+    r, p = compute_correlation(residuals_x, residuals_y, corr_method)
     return float(r), float(p), len(df)
 
 

@@ -30,8 +30,27 @@ _MILLISECONDS_PER_SECOND = 1000.0
 _MIN_EPOCHS_FOR_ERP = 2
 
 
-def _infer_peak_mode(window_name: str) -> str:
-    name = str(window_name).strip().lower()
+def _infer_peak_mode(
+    window_name: str,
+    *,
+    peak_mode_by_segment: Optional[Dict[str, str]] = None,
+) -> str:
+    name_raw = str(window_name).strip()
+    name = name_raw.lower()
+
+    if peak_mode_by_segment:
+        direct = peak_mode_by_segment.get(name_raw)
+        if direct is None:
+            direct = peak_mode_by_segment.get(name)
+        if direct is not None:
+            mode = str(direct).strip().lower()
+            if mode in {"neg", "pos", "abs"}:
+                return mode
+            if mode in {"n", "negative"}:
+                return "neg"
+            if mode in {"p", "positive"}:
+                return "pos"
+
     if name.startswith("n"):
         return "neg"
     if name.startswith("p"):
@@ -596,6 +615,11 @@ def extract_erp_features(
 
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
+    allow_full_epoch_fallback = bool(
+        ctx.config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(ctx.config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -604,11 +628,20 @@ def extract_erp_features(
             segment_masks = {target_name: mask}
         else:
             if ctx.logger:
-                ctx.logger.warning(
-                    "ERP: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            segment_masks = {target_name: np.ones_like(times, dtype=bool)}
+                if allow_full_epoch_fallback:
+                    ctx.logger.warning(
+                        "ERP: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    ctx.logger.error(
+                        "ERP: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segment_masks = {target_name: np.ones_like(times, dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         segment_masks = get_segment_masks(times, windows, ctx.config)
         component_masks = _build_component_masks(times, erp_cfg)
@@ -642,7 +675,7 @@ def extract_erp_features(
         
         seg_times = times[mask]
         seg_data = data[:, :, mask]
-        peak_mode = _infer_peak_mode(seg_name)
+        peak_mode = _infer_peak_mode(seg_name, peak_mode_by_segment=erp_cfg.get("peak_mode_by_segment"))
 
         if "channels" in spatial_modes:
             peak_vals, peak_times = _process_channel_features(

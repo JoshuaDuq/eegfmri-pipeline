@@ -163,6 +163,11 @@ def extract_band_ratios_from_precomputed(
     logger = getattr(precomputed, "logger", None)
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     # If data is pre-cropped, the mask will naturally be all-True
@@ -171,13 +176,21 @@ def extract_band_ratios_from_precomputed(
         if mask is not None and np.any(mask):
             segment_masks = {target_name: mask}
         else:
-            # Fallback: use all available data but warn
             if logger:
-                logger.warning(
-                    "Band ratios: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Band ratios: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Band ratios: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         segment_masks = get_segment_masks(precomputed.times, windows, config)
     
@@ -370,6 +383,11 @@ def extract_asymmetry_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -378,11 +396,20 @@ def extract_asymmetry_from_precomputed(
             segment_masks = {target_name: mask}
         else:
             if logger:
-                logger.warning(
-                    "Asymmetry: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Asymmetry: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Asymmetry: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         segment_masks = get_segment_masks(precomputed.times, windows, config)
     

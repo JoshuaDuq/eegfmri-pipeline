@@ -179,15 +179,15 @@ func (m Model) getExpectedOutputPaths() []string {
 	base := "derivatives/"
 	switch m.Pipeline {
 	case types.PipelinePreprocessing:
-		return []string{base + "preprocessed/", base + "epochs/"}
+		return []string{base + "preprocessed/sub-XX/eeg/"}
 	case types.PipelineFeatures:
-		return []string{base + "features/"}
+		return []string{base + "sub-XX/eeg/features/"}
 	case types.PipelineBehavior:
-		return []string{base + "behavior/", base + "stats/"}
+		return []string{base + "sub-XX/eeg/stats/", base + "group/stats/"}
 	case types.PipelineML:
 		return []string{base + "machine_learning/"}
 	case types.PipelinePlotting:
-		return []string{base + "plots/"}
+		return []string{base + "sub-XX/eeg/plots/"}
 	default:
 		return []string{base}
 	}
@@ -1774,8 +1774,8 @@ func (m Model) renderReview() string {
 			if m.prepLFreq != 0.1 || m.prepHFreq != 100.0 {
 				opts = append(opts, fmt.Sprintf("filter=%.1f-%.1fHz", m.prepLFreq, m.prepHFreq))
 			}
-			if m.prepICAMethod != 0 {
-				method := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+			if m.prepICAAlgorithm != 0 {
+				method := []string{"fastica", "infomax", "picard"}[m.prepICAAlgorithm]
 				opts = append(opts, fmt.Sprintf("ica=%s", method))
 			}
 			if m.prepEpochsTmin != -5.0 || m.prepEpochsTmax != 12.0 {
@@ -2554,18 +2554,35 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = "off"
 			}
 			hint = "restrict volume sources using fMRI"
-		case optSourceLocFmriStatsMap:
-			label = "fMRI Stats Map"
-			if strings.TrimSpace(m.sourceLocFmriStatsMap) == "" {
-				value = "(unset)"
-			} else {
-				value = m.sourceLocFmriStatsMap
-			}
-			hint = "NIfTI map in FS MRI space"
-		case optSourceLocFmriThreshold:
-			label = "fMRI Threshold"
-			value = fmt.Sprintf("%.2f", m.sourceLocFmriThreshold)
-			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriThreshold) {
+			case optSourceLocFmriStatsMap:
+				label = "fMRI Stats Map"
+				if strings.TrimSpace(m.sourceLocFmriStatsMap) == "" {
+					value = "(unset)"
+				} else {
+					value = m.sourceLocFmriStatsMap
+				}
+				hint = "NIfTI map in FS MRI space"
+			case optSourceLocFmriProvenance:
+				label = "fMRI Provenance"
+				prov := []string{"independent", "same_dataset"}
+				if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(prov) {
+					value = prov[m.sourceLocFmriProvenance]
+				} else {
+					value = "independent"
+				}
+				hint = "independent (recommended) vs same_dataset"
+			case optSourceLocFmriRequireProvenance:
+				label = "Require provenance"
+				if m.sourceLocFmriRequireProv {
+					value = "on"
+				} else {
+					value = "off"
+				}
+				hint = "error if provenance unknown"
+			case optSourceLocFmriThreshold:
+				label = "fMRI Threshold"
+				value = fmt.Sprintf("%.2f", m.sourceLocFmriThreshold)
+				if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriThreshold) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "e.g., z>=3.10"
@@ -3042,18 +3059,49 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = aperiodicMaxRmsVal
 			hint = "fit quality limit (0=no limit)"
 
-		// Complexity
-		case optPEOrder:
-			label = "PE Order"
-			value = peOrderVal
-			hint = "symbol length (3-7)"
-		case optPEDelay:
-			label = "PE Delay"
-			value = peDelayVal
-			hint = "sample lag"
+			// Complexity
+			case optPEOrder:
+				label = "PE Order"
+				value = peOrderVal
+				hint = "symbol length (3-7)"
+			case optPEDelay:
+				label = "PE Delay"
+				value = peDelayVal
+				hint = "sample lag"
+			case optComplexitySignalBasis:
+				label = "Signal basis"
+				bases := []string{"filtered", "envelope"}
+				if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
+					value = bases[m.complexitySignalBasis]
+				} else {
+					value = "filtered"
+				}
+				hint = "filtered or envelope"
+			case optComplexityMinSegmentSec:
+				label = "Min segment (s)"
+				value = fmt.Sprintf("%.2f", m.complexityMinSegmentSec)
+				if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSegmentSec) {
+					value = m.numberBuffer + "█"
+				}
+				hint = "skip short segments"
+			case optComplexityMinSamples:
+				label = "Min samples"
+				value = fmt.Sprintf("%d", m.complexityMinSamples)
+				if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSamples) {
+					value = m.numberBuffer + "█"
+				}
+				hint = "skip low-sample segments"
+			case optComplexityZscore:
+				label = "Z-score"
+				if m.complexityZscore {
+					value = "on"
+				} else {
+					value = "off"
+				}
+				hint = "normalize per-channel"
 
-		// Bursts
-		case optBurstThresholdMethod:
+			// Bursts
+			case optBurstThresholdMethod:
 			methods := []string{"percentile", "zscore", "mad"}
 			methodVal := "percentile"
 			if m.burstThresholdMethod >= 0 && m.burstThresholdMethod < len(methods) {
@@ -4496,9 +4544,31 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	if m.editingText && m.editingTextField == textFieldPrepMontage {
 		montageVal = m.textBuffer + "█"
 	}
+	chTypesVal := m.prepChTypes
+	if m.editingText && m.editingTextField == textFieldPrepChTypes {
+		chTypesVal = m.textBuffer + "█"
+	}
+	eegRefVal := m.prepEegReference
+	if m.editingText && m.editingTextField == textFieldPrepEegReference {
+		eegRefVal = m.textBuffer + "█"
+	}
 	fileExtVal := m.prepFileExtension
 	if m.editingText && m.editingTextField == textFieldPrepFileExtension {
 		fileExtVal = m.textBuffer + "█"
+	}
+	renameAnotDictVal := m.prepRenameAnotDict
+	if m.editingText && m.editingTextField == textFieldPrepRenameAnotDict {
+		renameAnotDictVal = m.textBuffer + "█"
+	}
+	if strings.TrimSpace(renameAnotDictVal) == "" {
+		renameAnotDictVal = "(none)"
+	}
+	customBadDictVal := m.prepCustomBadDict
+	if m.editingText && m.editingTextField == textFieldPrepCustomBadDict {
+		customBadDictVal = m.textBuffer + "█"
+	}
+	if strings.TrimSpace(customBadDictVal) == "" {
+		customBadDictVal = "(none)"
 	}
 	icaLabelsVal := m.icaLabelsToKeep
 	if m.editingText && m.editingTextField == textFieldIcaLabelsToKeep {
@@ -4512,7 +4582,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
 	notchVal := fmt.Sprintf("%d Hz", m.prepNotch)
 	lineFreqVal := fmt.Sprintf("%d Hz", m.prepLineFreq)
-	icaMethodVal := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+	_ = []string{"fastica", "infomax", "picard"}[0] // legacy, now using prepICAAlgorithm with extended_infomax
 	icaCompVal := fmt.Sprintf("%.2f", m.prepICAComp)
 	probThreshVal := fmt.Sprintf("%.1f", m.prepProbThresh)
 	tminVal := fmt.Sprintf("%.1f s", m.prepEpochsTmin)
@@ -4632,7 +4702,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ Stages"
 			}
-			hint = "Select stages to run"
+			hint = "Choose preprocessing steps"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4645,7 +4715,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ General"
 			}
-			hint = "Montage, jobs, detection"
+			hint = "Montage, parallel jobs, random seed"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4658,7 +4728,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ Filtering"
 			}
-			hint = "Resample, bandpass, notch"
+			hint = "Resampling, bandpass, notch filters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4671,7 +4741,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ PyPREP"
 			}
-			hint = "Bad channel detection settings"
+			hint = "Bad channel detection parameters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4684,7 +4754,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ ICA"
 			}
-			hint = "Component analysis settings"
+			hint = "ICA algorithm and parameters"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4697,7 +4767,7 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			} else {
 				label = "▸ Epoching"
 			}
-			hint = "Epoch extraction settings"
+			hint = "Epoch timing and rejection criteria"
 			if isFocused {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
 			} else {
@@ -4708,145 +4778,215 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 		case optPrepStageBadChannels:
 			label = "  Bad Channels"
 			value = m.boolToOnOff(m.prepStageSelected[0])
-			hint = "Detect bad channels"
+			hint = "Automatically detect noisy channels"
 		case optPrepStageFiltering:
 			label = "  Filtering"
 			value = m.boolToOnOff(m.prepStageSelected[1])
-			hint = "Apply filters"
+			hint = "Apply frequency filters to data"
 		case optPrepStageICA:
 			label = "  ICA"
 			value = m.boolToOnOff(m.prepStageSelected[2])
-			hint = "Run ICA cleaning"
+			hint = "Remove artifacts via ICA decomposition"
 		case optPrepStageEpoching:
 			label = "  Epoching"
 			value = m.boolToOnOff(m.prepStageSelected[3])
-			hint = "Create epochs"
+			hint = "Extract time-locked epochs from events"
 
 		// General settings (indented)
 		case optPrepMontage:
 			label = "  Montage"
 			value = montageVal
-			hint = "e.g., easycap-M1"
+			hint = "EEG electrode layout (e.g., easycap-M1)"
+		case optPrepChTypes:
+			label = "  Ch Types"
+			value = chTypesVal
+			hint = "Channel types to process (e.g., eeg)"
+		case optPrepEegReference:
+			label = "  Reference"
+			value = eegRefVal
+			hint = "Re-referencing scheme (e.g., average)"
+		case optPrepEogChannels:
+			label = "  EOG Chans"
+			value = m.prepEogChannels
+			if strings.TrimSpace(value) == "" {
+				value = "(none)"
+			}
+			hint = "Eye movement channels (e.g., Fp1,Fp2)"
+		case optPrepRandomState:
+			label = "  Random Seed"
+			value = fmt.Sprintf("%d", m.prepRandomState)
+			hint = "Random seed for reproducible results"
+		case optPrepTaskIsRest:
+			label = "  Resting State"
+			value = m.boolToOnOff(m.prepTaskIsRest)
+			hint = "Data is resting-state (no events)"
 		case optPrepNJobs:
 			label = "  N Jobs"
 			value = nJobsVal
-			hint = "Parallel workers"
+			hint = "Number of parallel processes to use"
 		case optPrepUsePyprep:
 			label = "  Use PyPREP"
 			value = m.boolToOnOff(m.prepUsePyprep)
-			hint = "Bad channel detection"
+			hint = "Enable PyPREP for bad channel detection"
 		case optPrepUseIcalabel:
 			label = "  Use ICA-Label"
 			value = m.boolToOnOff(m.prepUseIcalabel)
-			hint = "Auto-classify ICs"
+			hint = "Auto-classify ICA components as brain/artifact"
 
 		// Filtering settings (indented)
 		case optPrepResample:
 			label = "  Resample"
 			value = resampleVal
-			hint = "Target Hz"
+			hint = "Downsample to this sampling rate"
 		case optPrepLFreq:
 			label = "  High-Pass"
 			value = lFreqVal
-			hint = "Low cutoff (Hz)"
+			hint = "High-pass filter cutoff frequency"
 		case optPrepHFreq:
 			label = "  Low-Pass"
 			value = hFreqVal
-			hint = "High cutoff (Hz)"
+			hint = "Low-pass filter cutoff frequency"
 		case optPrepNotch:
 			label = "  Notch"
 			value = notchVal
-			hint = "Line noise filter"
+			hint = "Remove line noise at this frequency"
 		case optPrepLineFreq:
 			label = "  Line Freq"
 			value = lineFreqVal
-			hint = "50 or 60 Hz"
+			hint = "Power line frequency (50 or 60 Hz)"
+		case optPrepZaplineFline:
+			label = "  Zapline"
+			value = fmt.Sprintf("%.1f Hz", m.prepZaplineFline)
+			hint = "Zapline: remove power line harmonics"
+		case optPrepFindBreaks:
+			label = "  Find Breaks"
+			value = m.boolToOnOff(m.prepFindBreaks)
+			hint = "Identify gaps in continuous recording"
 
 		// PyPREP settings (indented)
 		case optPrepRansac:
 			label = "  RANSAC"
 			value = m.boolToOnOff(m.prepRansac)
-			hint = "Robust detection"
+			hint = "RANSAC: robust bad channel detection"
 		case optPrepRepeats:
 			label = "  Repeats"
 			value = repeatsVal
-			hint = "Detection iterations"
+			hint = "Number of detection iterations to run"
 		case optPrepAverageReref:
 			label = "  Avg Reref"
 			value = m.boolToOnOff(m.prepAverageReref)
-			hint = "Rereference first"
+			hint = "Average reference before detection"
 		case optPrepFileExtension:
 			label = "  File Ext"
 			value = fileExtVal
-			hint = "e.g., .vhdr"
+			hint = "Raw data file extension (e.g., .vhdr)"
 		case optPrepConsiderPreviousBads:
 			label = "  Keep Bads"
 			value = m.boolToOnOff(m.prepConsiderPreviousBads)
-			hint = "Keep prev marked"
+			hint = "Keep channels marked bad in previous runs"
 		case optPrepOverwriteChansTsv:
 			label = "  Overwrite TSV"
 			value = m.boolToOnOff(m.prepOverwriteChansTsv)
-			hint = "Update channels.tsv"
+			hint = "Update channels.tsv with detected bads"
 		case optPrepDeleteBreaks:
 			label = "  Del Breaks"
 			value = m.boolToOnOff(m.prepDeleteBreaks)
-			hint = "Remove data breaks"
+			hint = "Remove break periods from data"
 		case optPrepBreaksMinLength:
 			label = "  Break Len"
 			value = breaksMinLenVal
-			hint = "Min break duration"
+			hint = "Minimum duration to qualify as break"
 		case optPrepTStartAfterPrevious:
 			label = "  T Start"
 			value = tStartPrevVal
-			hint = "After prev event"
+			hint = "Seconds after previous event to include"
 		case optPrepTStopBeforeNext:
 			label = "  T Stop"
 			value = tStopNextVal
-			hint = "Before next event"
+			hint = "Seconds before next event to include"
+		case optPrepRenameAnotDict:
+			label = "  Rename Anot"
+			value = renameAnotDictVal
+			hint = "JSON: rename annotations (old:new)"
+		case optPrepCustomBadDict:
+			label = "  Custom Bads"
+			value = customBadDictVal
+			hint = "JSON: custom bad channels per task/subject"
 
 		// ICA settings (indented)
-		case optPrepICAMethod:
-			label = "  Method"
-			value = icaMethodVal
-			hint = "fastica/infomax/picard"
+		case optPrepSpatialFilter:
+			spatialFilterVal := []string{"ica", "ssp"}[m.prepSpatialFilter]
+			label = "  Spatial Filter"
+			value = spatialFilterVal
+			hint = "Spatial filter: ICA or SSP"
+		case optPrepICAAlgorithm:
+			icaAlgVal := []string{"extended_infomax", "fastica", "infomax", "picard"}[m.prepICAAlgorithm]
+			label = "  Algorithm"
+			value = icaAlgVal
+			hint = "ICA decomposition algorithm"
 		case optPrepICAComp:
 			label = "  Components"
 			value = icaCompVal
-			hint = "Variance fraction"
+			hint = "Components: number (int) or variance (0-1)"
+		case optPrepICALFreq:
+			label = "  ICA High-Pass"
+			value = fmt.Sprintf("%.1f Hz", m.prepICALFreq)
+			hint = "High-pass filter for ICA preprocessing"
+		case optPrepICARejThresh:
+			label = "  ICA Reject"
+			value = fmt.Sprintf("%.0f µV", m.prepICARejThresh)
+			hint = "Peak-to-peak threshold for ICA epochs (µV)"
 		case optPrepProbThresh:
 			label = "  Prob Thresh"
 			value = probThreshVal
-			hint = "Label threshold"
+			hint = "Minimum probability for IC label acceptance"
 		case optPrepKeepMnebidsBads:
 			label = "  Keep BIDS"
 			value = m.boolToOnOff(m.prepKeepMnebidsBads)
-			hint = "Keep flagged ICs"
+			hint = "Keep ICs flagged as bad in MNE-BIDS"
 		case optIcaLabelsToKeep:
 			label = "  Labels Keep"
 			value = icaLabelsVal
-			hint = "brain,other,..."
+			hint = "Comma-separated IC labels to keep (e.g., brain,other)"
 
 		// Epoching settings (indented)
+		case optPrepConditions:
+			condVal := m.prepConditions
+			if strings.TrimSpace(condVal) == "" {
+				condVal = "(default)"
+			}
+			label = "  Conditions"
+			value = condVal
+			hint = "Event types/triggers to epoch"
 		case optPrepEpochsTmin:
 			label = "  Tmin"
 			value = tminVal
-			hint = "Epoch start"
+			hint = "Epoch start time relative to event (s)"
 		case optPrepEpochsTmax:
 			label = "  Tmax"
 			value = tmaxVal
-			hint = "Epoch end"
+			hint = "Epoch end time relative to event (s)"
 		case optPrepEpochsNoBaseline:
 			label = "  No Baseline"
 			value = m.boolToOnOff(m.prepEpochsNoBaseline)
-			hint = "Skip baseline"
+			hint = "Disable baseline correction"
 		case optPrepEpochsBaseline:
 			label = "  Baseline"
 			value = baselineVal
-			hint = "Window (s)"
+			hint = "Baseline correction window (start, end) seconds"
 		case optPrepEpochsReject:
 			label = "  Reject (µV)"
 			value = rejectVal
-			hint = "Peak-to-peak"
+			hint = "Reject epochs exceeding this amplitude (µV)"
+		case optPrepRejectMethod:
+			rejectMethods := []string{"none", "autoreject_local", "autoreject_global"}
+			label = "  Reject Method"
+			value = rejectMethods[m.prepRejectMethod]
+			hint = "Algorithm: none, autoreject_local, autoreject_global"
+		case optPrepRunSourceEstimation:
+			label = "  Source Est"
+			value = m.boolToOnOff(m.prepRunSourceEstimation)
+			hint = "Run source localization after preprocessing"
 		}
 
 		b.WriteString(cursor + labelStyle.Render(label+":") + " " + valueStyle.Render(value))
@@ -6137,7 +6277,7 @@ func (m Model) renderPreprocessingICA() string {
 
 	// Build display values
 	methods := []string{"fastica", "infomax", "picard"}
-	methodVal := methods[m.prepICAMethod]
+	methodVal := methods[m.prepICAAlgorithm]
 
 	compVal := fmt.Sprintf("%.2f", m.prepICAComp)
 	if m.editingNumber && m.advancedCursor == 1 {

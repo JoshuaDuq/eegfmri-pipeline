@@ -248,6 +248,7 @@ def _compute_correlations_for_condition(
     tfr, y: np.ndarray, mask: np.ndarray, name: str, bands: Dict, win_s: np.ndarray, win_e: np.ndarray,
     fmax: float, corr_fn, alpha: float, logger, cov_df: Optional[pd.DataFrame] = None,
     config: Optional[Any] = None, n_jobs: int = 1,
+    groups: Optional[np.ndarray] = None,
 ) -> Optional[Dict[str, Any]]:
     """Compute channel/band/window correlations for a single condition."""
     if mask is None:
@@ -255,6 +256,16 @@ def _compute_correlations_for_condition(
 
     idx = np.where(mask)[0] if mask.dtype == bool else mask
     tfr_c, y_c = tfr[idx], y[mask]
+    groups_c = None
+    if groups is not None:
+        try:
+            groups_arr = np.asarray(groups)
+            if groups_arr.shape[0] == y.shape[0]:
+                groups_c = groups_arr[mask]
+            else:
+                groups_c = groups_arr
+        except Exception:
+            groups_c = None
     use_spearman = corr_fn == spearmanr
     method = "spearman" if use_spearman else "pearson"
     cov_vals = cov_df.iloc[idx].apply(pd.to_numeric, errors="coerce").to_numpy() if cov_df is not None and not cov_df.empty else None
@@ -353,6 +364,19 @@ def _compute_correlations_for_condition(
     c_alpha = float(cluster_cfg.get("alpha", alpha))
     n_cluster_perm = int(cluster_cfg.get("n_permutations", 0))
     cluster_forming_threshold = cluster_cfg.get("cluster_forming_threshold", cluster_cfg.get("forming_threshold"))
+    # Cluster engine derives thresholds in t-stat space; if a user config provides
+    # a very small value (often a p-value like 0.05), ignore it and derive instead.
+    try:
+        if cluster_forming_threshold is not None and float(cluster_forming_threshold) < 1.0:
+            if logger:
+                logger.warning(
+                    "%s: cluster_forming_threshold=%.4g looks like a p-value/r threshold; deriving threshold by permutation instead.",
+                    name,
+                    float(cluster_forming_threshold),
+                )
+            cluster_forming_threshold = None
+    except Exception:
+        cluster_forming_threshold = None
     seed = int(get_config_value(config, "project.random_state", 42)) if config is not None else 42
     cluster_rng = np.random.default_rng(seed)
 
@@ -373,12 +397,43 @@ def _compute_correlations_for_condition(
         if not band_info_bins:
             continue
 
-        labels, pvals_corr, sig_mask, records, perm_max, c_thresh = (
-            compute_cluster_correction_2d(
-                correlations=band_corrs,
-                p_values=band_pvals,
-                bin_data=band_data,
-                informative_bins=band_info_bins,
+        # Convert observed r -> t for cluster-forming and mass computation.
+        n_cov = int(cov_vals.shape[1]) if cov_vals is not None else 0
+        band_stat = np.full_like(band_corrs, np.nan, dtype=float)
+        for window_idx, channel_idx in band_info_bins:
+            r_val = band_corrs[window_idx, channel_idx]
+            n_obs = int(n_valid[band_idx, window_idx, channel_idx])
+            dof = n_obs - n_cov - 2
+            if np.isfinite(r_val) and dof > 0 and abs(r_val) < 1:
+                denom = max(MIN_DENOMINATOR_THRESHOLD, 1.0 - float(r_val) ** 2)
+                band_stat[window_idx, channel_idx] = float(r_val) * np.sqrt(float(dof) / denom)
+
+        # IMPORTANT validity fix:
+        # The band grid is (window_idx x channel_idx). There is no scientifically valid
+        # adjacency defined across channel index here, so cluster correction must NOT
+        # cluster across channels. We instead perform time-only clustering separately
+        # for each channel by reshaping (n_windows,) -> (n_windows, 1).
+
+        band_record: Dict[str, Any] = {"band": band_name, "channels": []}
+        band_perm_record: Dict[str, Any] = {"band": band_name, "channels": []}
+        band_thresh_record: Dict[str, Any] = {"band": band_name, "channels": []}
+        band_mass_record: Dict[str, Any] = {"band": band_name, "channels": []}
+
+        n_ch = int(band_stat.shape[1])
+        for channel_idx in range(n_ch):
+            ch_bins = [(w_idx, 0) for (w_idx, c_idx) in band_info_bins if c_idx == channel_idx]
+            if not ch_bins:
+                continue
+
+            ch_stat = band_stat[:, channel_idx][:, None]  # (n_windows, 1)
+            ch_pvals = band_pvals[:, channel_idx][:, None]
+            ch_data = band_data[:, channel_idx, :][:, None, :]  # (n_windows, 1, n_trials)
+
+            labels, pvals_corr, sig_mask, records, perm_max, c_thresh = compute_cluster_correction_2d(
+                correlations=ch_stat,
+                p_values=ch_pvals,
+                bin_data=ch_data,
+                informative_bins=ch_bins,
                 y_array=y_c,
                 cluster_alpha=c_alpha,
                 n_cluster_perm=n_cluster_perm,
@@ -387,28 +442,39 @@ def _compute_correlations_for_condition(
                 use_spearman=use_spearman,
                 cluster_rng=cluster_rng,
                 covariates_matrix=cov_vals,
-                groups=None,
+                groups=groups_c,
                 cluster_forming_threshold=cluster_forming_threshold,
             )
-        )
 
-        cluster_labels[band_idx] = labels
-        p_corrected[band_idx] = pvals_corr
-        cluster_sig[band_idx] = sig_mask
-        cluster_records.append({"band": band_name, "clusters": records})
-        cluster_perm_max.append({"band": band_name, "perm_max_masses": perm_max})
-        cluster_thresholds.append(
-            {"band": band_name, "cluster_forming_threshold": float(c_thresh)}
-        )
+            cluster_labels[band_idx, :, channel_idx] = labels[:, 0]
+            p_corrected[band_idx, :, channel_idx] = pvals_corr[:, 0]
+            cluster_sig[band_idx, :, channel_idx] = sig_mask[:, 0]
 
-        _, masses = compute_cluster_masses_2d(
-            band_corrs,
-            band_pvals,
-            cluster_alpha=c_alpha,
-            cluster_forming_threshold=cluster_forming_threshold,
-            config=config,
-        )
-        cluster_masses.append({"band": band_name, "masses": masses})
+            band_record["channels"].append(
+                {"channel_idx": int(channel_idx), "clusters": records}
+            )
+            band_perm_record["channels"].append(
+                {"channel_idx": int(channel_idx), "perm_max_masses": perm_max}
+            )
+            band_thresh_record["channels"].append(
+                {"channel_idx": int(channel_idx), "cluster_forming_threshold": float(c_thresh)}
+            )
+
+            _, masses = compute_cluster_masses_2d(
+                ch_stat,
+                ch_pvals,
+                cluster_alpha=c_alpha,
+                cluster_forming_threshold=float(c_thresh),
+                config=config,
+            )
+            band_mass_record["channels"].append(
+                {"channel_idx": int(channel_idx), "masses": masses}
+            )
+
+        cluster_records.append(band_record)
+        cluster_perm_max.append(band_perm_record)
+        cluster_thresholds.append(band_thresh_record)
+        cluster_masses.append(band_mass_record)
 
     return {
         "name": name,
@@ -600,12 +666,18 @@ def _run_tf_correlations_core(
         np.nan,
     )
     if n_perm > 0:
+        run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+        groups = None
+        if run_col and events is not None and run_col in events.columns:
+            groups = events[run_col].to_numpy()
+        elif events is not None and "run_id" in events.columns:
+            groups = events["run_id"].to_numpy()
         c_labels, c_pvals, c_sig, c_recs, perm_masses, c_thresh = compute_cluster_correction_2d(
             correlations=cluster_stat, p_values=pvals, bin_data=bin_data,
             informative_bins=info_bins, y_array=y_arr, cluster_alpha=c_alpha,
             n_cluster_perm=n_perm, alpha=c_alpha, min_valid_points=min_pts,
             use_spearman=use_spearman, cluster_rng=rng, covariates_matrix=cov_mat,
-            groups=events["run_id"].to_numpy() if "run_id" in events.columns else None,
+            groups=groups,
         )
 
     ensure_dir(stats_dir)
@@ -991,6 +1063,11 @@ def _run_temporal_by_condition_core(
     
     # Collect per-condition results for NPZ export (topomap plotting)
     condition_results = {}
+
+    run_col = str(get_config_value(config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
+    groups_all = None
+    if run_col and run_col in events.columns:
+        groups_all = events[run_col].to_numpy()[:n] if len(events) >= n else events[run_col].to_numpy()
     
     for cond_val in condition_values:
         if cond_val == "all":
@@ -1004,8 +1081,10 @@ def _run_temporal_by_condition_core(
         
         safe_name = str(cond_val).replace(" ", "_").replace("/", "_")
         n_jobs = int(get_config_value(config, "behavior_analysis.n_jobs", -1))
+        groups_cond = groups_all[mask] if groups_all is not None else None
         res = _compute_correlations_for_condition(
-            tfr, y_arr, mask, safe_name, bands, win_s, win_e, fmax, corr_fn, alpha, logger, cov_df, config, n_jobs
+            tfr, y_arr, mask, safe_name, bands, win_s, win_e, fmax, corr_fn, alpha, logger,
+            cov_df, config, n_jobs, groups=groups_cond,
         )
         if res:
             # Store result for NPZ export

@@ -183,6 +183,12 @@ feature_engineering:
 
   power:
     require_baseline: true
+    # For event-related pain paradigms, subtracting the evoked (ERP) component is often
+    # scientifically preferable when interpreting oscillatory power changes as "induced".
+    # In trial_ml_safe mode, provide ctx.train_mask to avoid CV leakage; otherwise this
+    # is automatically disabled for safety.
+    subtract_evoked: true
+    min_trials_per_condition: 2
   
   constants:
     epsilon_std: *epsilon_std
@@ -228,6 +234,9 @@ feature_engineering:
     alpha_width_hz: 2.0
     iaf_search_range_hz: [7.0, 13.0]
     iaf_min_prominence: 0.05
+    iaf_min_cycles_at_fmin: 5.0     # Require this many cycles at iaf_search_range_hz[0] for stable PSD/peak detection
+    iaf_min_baseline_sec: 0.0       # Additional absolute minimum baseline duration (sec); 0 disables
+    allow_full_fallback: false      # If true and baseline is missing, use full segment (not recommended for pain paradigms)
     # Use existing ROI names from `rois:` above. If these ROIs are missing, IAF
     # estimation returns null unless allow_all_channels_fallback=true.
     iaf_rois: ["ParOccipital_Midline", "ParOccipital_Left", "ParOccipital_Right"]
@@ -257,21 +266,6 @@ feature_engineering:
 
   asymmetry:
     min_segment_sec: 1.0          # Minimum segment duration for asymmetry (sec)
-    min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
-    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
-
-  bursts:
-    min_segment_sec: 2.0          # Minimum segment duration for burst detection (sec)
-    min_cycles_at_fmin: 5.0       # Require more cycles for reliable burst detection
-    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
-
-  complexity:
-    min_segment_sec: 2.0          # Minimum segment duration for complexity metrics (sec)
-    min_samples: 100              # Minimum samples for reliable LZC/PE computation
-    skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
-
-  erds:
-    min_segment_sec: 1.0          # Minimum segment duration for ERDS (sec)
     min_cycles_at_fmin: 3.0       # Require at least this many cycles at lowest freq in band
     skip_invalid_segments: true   # Skip segments that don't meet validity criteria (vs NaN)
 
@@ -320,8 +314,6 @@ feature_engineering:
   # (t/z/cope/contrast map) already computed by an fMRI GLM and resampled into the SAME MRI space as the
   # FreeSurfer subject (typically `mri/orig.mgz` space).
   #
-  # NOTE: fMRI-specific settings (BEM generation, contrast builder, fMRI constraints) are now in
-  # fmri_pipeline/utils/config/fmri_config.yaml
   sourcelocalization:
     mode: "fmri_informed"               # "eeg_only" (template-based) or "fmri_informed" (subject-specific)
     method: "lcmv"                 # "lcmv" or "eloreta"
@@ -337,6 +329,40 @@ feature_engineering:
     subject: null                  # e.g., "sub-0001"
     trans: null                    # e.g., "../../data/derivatives/coreg/sub-0001-trans.fif"
     bem: null                      # e.g., "../../data/derivatives/bem/sub-0001-bem-sol.fif"
+    fmri:
+      enabled: false
+      stats_map_path: null         # NIfTI statistical map in the subject's FreeSurfer MRI space (e.g., orig.mgz space)
+      provenance: "independent"    # "independent" (recommended) or "same_dataset" (circularity risk)
+      require_provenance: true     # If true, error when provenance is unknown
+      threshold: 3.1
+      tail: "pos"                  # "pos" or "abs"
+      threshold_mode: "z"          # "z" or "fdr"
+      fdr_q: 0.05
+      stat_type: "z"
+      cluster_min_voxels: 50
+      max_clusters: 20
+      max_voxels_per_cluster: 2000
+      max_total_voxels: 20000
+      random_seed: 0
+      time_windows:
+        window_a: {name: "plateau", tmin: 5.0, tmax: 10.0}
+        window_b: {name: "baseline", tmin: -2.0, tmax: 0.0}
+      contrast:
+        enabled: false
+        type: "t-test"             # "t-test" | "paired-t-test" | "f-test" | "custom"
+        cond_a: {column: "trial_type", value: ""}
+        cond_b: {column: "trial_type", value: ""}
+        formula: ""
+        name: "pain_vs_baseline"
+        runs: []                   # explicit runs (empty = auto-detect)
+        hrf_model: "spm"           # "spm" | "flobs" | "fir"
+        drift_model: "cosine"      # "none" | "cosine" | "polynomial"
+        high_pass_hz: 0.008
+        low_pass_hz: 0.1
+        cluster_correction: true
+        cluster_p_threshold: 0.001
+        output_type: "z-score"     # "z-score" | "t-stat" | "cope" | "beta"
+        resample_to_freesurfer: true
 
   pac:
     source: "precomputed"        # "precomputed" (Hilbert PAC, recommended) or "tfr" (wavelet PAC, prone to spurious coupling)
@@ -355,11 +381,15 @@ feature_engineering:
     waveform_offset_ms: 5.0
 
   complexity:
+    # Complexity can be computed on either the band-passed signal ("filtered") or its envelope.
+    # "filtered" is more interpretable as oscillatory complexity; "envelope" targets amplitude dynamics.
+    signal_basis: "filtered"         # "filtered" | "envelope"
     pe_order: 3
     pe_delay: 1
-    target_hz: 100.0
-    target_n_samples: 500
     zscore: true
+    min_segment_sec: 2.0             # Minimum segment duration (sec)
+    min_samples: 200                 # Minimum samples for stable LZC/PE
+    skip_invalid_segments: true
 
   output:
     save_subject_level_features: true
@@ -384,10 +414,12 @@ feature_engineering:
   bursts:
     bands: ["beta", "gamma"]
     threshold_method: "percentile"   # "percentile", "zscore", "mad"
-    threshold_reference: "subject"   # "subject" (recommended), "trial" (legacy), or "condition"
+    threshold_reference: "trial"     # "trial" (trialwise-valid), "subject" (cross-trial), or "condition" (cross-trial within condition)
     threshold_percentile: 95.0
     threshold_z: 2.0                # used for zscore/mad methods
     min_trials_per_condition: 10     # used when threshold_reference="condition"
+    min_segment_sec: 2.0             # Minimum segment duration (sec) before attempting bursts
+    skip_invalid_segments: true
     min_duration_ms: 50
     min_cycles: 3.0
 
@@ -562,6 +594,10 @@ behavior_analysis:
   
   # Permutation testing configuration
   permutation:
+    # Permutation scheme for trialwise inference.
+    # - "circular_shift": preserves within-run autocorrelation (recommended for pain paradigms)
+    # - "shuffle": simple exchangeability within groups (faster, less realistic)
+    scheme: "circular_shift"
     # Group column preference for within-group permutation
     # Order matters: first available column is used
     # Default: block → run → session (more conservative for within-subject tests)
@@ -573,6 +609,14 @@ behavior_analysis:
     n_permutations: 1000
     compute_reliability: false
     default_n_bootstrap: 1000
+    hierarchical_fdr: true
+    # If false, trial-level tests require permutation or aggregation.
+    # Set true only if you explicitly accept i.i.d. trial assumptions.
+    allow_iid_trials: false
+
+  # Feature validity gates (prevents pseudo-replication)
+  features:
+    exclude_non_trialwise_features: true  # Drop broadcast/cross-trial features when primary_unit="trial"
   
   # Correlations computation
   correlations:
@@ -584,10 +628,10 @@ behavior_analysis:
     prefer_pain_residual: true
     use_crossfit_pain_residual: false
     primary_unit: "trial"            # "trial" | "run_mean"
-    p_primary_mode: "asymptotic"     # "asymptotic" | "perm_if_available"
+    p_primary_mode: "perm_if_available"  # "asymptotic" | "perm_if_available"
     permutation:
-      enabled: false
-      n_permutations: 0
+      enabled: true
+      n_permutations: 1000
   
   # Pain sensitivity computation
   pain_sensitivity:
@@ -600,12 +644,13 @@ behavior_analysis:
     effect_size_threshold: 0.5  # Minimum Cohen's d to report
     compare_column: ""          # Column to split by (empty = use event_columns.pain_binary)
     compare_values: []           # Values in column to compare (empty = all unique values, e.g., [0, 1] or ["pain", "nonpain"])
-    p_primary_mode: "asymptotic"   # "asymptotic" | "perm_if_available"
+    primary_unit: "run_mean"       # "trial" | "run_mean" (run_mean avoids pseudo-replication)
+    p_primary_mode: "perm_if_available"   # "asymptotic" | "perm_if_available"
     permutation:
-      enabled: false
-      n_permutations: 0
+      enabled: true
+      n_permutations: 1000
     window_comparison:
-      primary_unit: "trial"        # "trial" | "run_mean"
+      primary_unit: "run_mean"     # "trial" | "run_mean"
   
   # Temporal correlations computation  
   temporal:

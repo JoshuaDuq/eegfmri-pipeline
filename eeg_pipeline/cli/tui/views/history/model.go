@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	historyDirName           = ".eeg-pipeline"
 	historyFileName          = "history.json"
 	historyMaxEntries        = 50
 	maxVisibleHistoryRecords = 10
@@ -72,7 +71,7 @@ type Model struct {
 ///////////////////////////////////////////////////////////////////
 
 func New(repoRoot string) Model {
-	historyPath := filepath.Join(repoRoot, historyDirName, historyFileName)
+	historyPath := filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
 	return Model{
 		historyPath: historyPath,
 		loading:     true,
@@ -127,7 +126,7 @@ func saveHistory(path string, records []ExecutionRecord) error {
 
 // AddRecord adds a new execution record to history
 func AddRecord(repoRoot string, record ExecutionRecord) error {
-	historyPath := filepath.Join(repoRoot, historyDirName, historyFileName)
+	historyPath := filepath.Join(repoRoot, "eeg_pipeline", "cli", "tui", ".cache", historyFileName)
 
 	records, _ := loadHistory(historyPath)
 	records = append(records, record)

@@ -1139,14 +1139,21 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 			// Optional fMRI-informed constraint (advanced)
 			fmriEnabled := m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != ""
-			if fmriEnabled {
-				args = append(args, "--source-fmri")
-				if strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
-					args = append(args, "--source-fmri-stats-map", expandUserPath(strings.TrimSpace(m.sourceLocFmriStatsMap)))
-				}
-				if m.sourceLocFmriThreshold != 3.1 {
-					args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
-				}
+				if fmriEnabled {
+					args = append(args, "--source-fmri")
+					if strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+						args = append(args, "--source-fmri-stats-map", expandUserPath(strings.TrimSpace(m.sourceLocFmriStatsMap)))
+					}
+					provenances := []string{"independent", "same_dataset"}
+					if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(provenances) && m.sourceLocFmriProvenance != 0 {
+						args = append(args, "--source-fmri-provenance", provenances[m.sourceLocFmriProvenance])
+					}
+					if !m.sourceLocFmriRequireProv {
+						args = append(args, "--no-source-fmri-require-provenance")
+					}
+					if m.sourceLocFmriThreshold != 3.1 {
+						args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
+					}
 				if m.sourceLocFmriTail == 1 {
 					args = append(args, "--source-fmri-tail", "abs")
 				}
@@ -1495,18 +1502,26 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-	// Complexity advanced options
-	if m.isCategorySelected("complexity") {
-		if m.complexityTargetHz != 100.0 {
-			args = append(args, "--complexity-target-hz", fmt.Sprintf("%.1f", m.complexityTargetHz))
+		// Complexity advanced options
+		if m.isCategorySelected("complexity") {
+			bases := []string{"filtered", "envelope"}
+			basis := "filtered"
+			if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
+				basis = bases[m.complexitySignalBasis]
+			}
+			if basis != "filtered" {
+				args = append(args, "--complexity-signal-basis", basis)
+			}
+			if m.complexityMinSegmentSec != 2.0 {
+				args = append(args, "--complexity-min-segment-sec", fmt.Sprintf("%.2f", m.complexityMinSegmentSec))
+			}
+			if m.complexityMinSamples != 200 {
+				args = append(args, "--complexity-min-samples", fmt.Sprintf("%d", m.complexityMinSamples))
+			}
+			if !m.complexityZscore {
+				args = append(args, "--no-complexity-zscore")
+			}
 		}
-		if m.complexityTargetNSamples != 500 {
-			args = append(args, "--complexity-target-n-samples", fmt.Sprintf("%d", m.complexityTargetNSamples))
-		}
-		if !m.complexityZscore {
-			args = append(args, "--no-complexity-zscore")
-		}
-	}
 
 	// Quality options
 	if m.isCategorySelected("quality") {
@@ -2345,12 +2360,30 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if strings.TrimSpace(m.prepMontage) != "" && m.prepMontage != "easycap-M1" {
 		args = append(args, "--montage", m.prepMontage)
 	}
+	if strings.TrimSpace(m.prepChTypes) != "" && m.prepChTypes != "eeg" {
+		args = append(args, "--ch-types", m.prepChTypes)
+	}
+	if strings.TrimSpace(m.prepEegReference) != "" && m.prepEegReference != "average" {
+		args = append(args, "--eeg-reference", m.prepEegReference)
+	}
+	if strings.TrimSpace(m.prepEogChannels) != "" && m.prepEogChannels != "Fp1,Fp2" {
+		args = append(args, "--eog-channels", m.prepEogChannels)
+	}
+	if m.prepRandomState != 42 {
+		args = append(args, "--random-state", fmt.Sprintf("%d", m.prepRandomState))
+	}
+	if m.prepTaskIsRest {
+		args = append(args, "--task-is-rest")
+	}
+	if m.prepNJobs != -1 {
+		args = append(args, "--n-jobs", fmt.Sprintf("%d", m.prepNJobs))
+	}
 
 	// Filtering
 	if m.prepResample != 500 {
 		args = append(args, "--resample", fmt.Sprintf("%d", m.prepResample))
 	}
-	if m.prepLFreq != 0.1 {
+	if m.prepLFreq != 1.0 {
 		args = append(args, "--l-freq", fmt.Sprintf("%.1f", m.prepLFreq))
 	}
 	if m.prepHFreq != 100.0 {
@@ -2362,16 +2395,32 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	if m.prepLineFreq != 0 && m.prepLineFreq != 60 {
 		args = append(args, "--line-freq", fmt.Sprintf("%d", m.prepLineFreq))
 	}
+	if m.prepZaplineFline != 60.0 {
+		args = append(args, "--zapline-fline", fmt.Sprintf("%.1f", m.prepZaplineFline))
+	}
+	if m.prepFindBreaks {
+		args = append(args, "--find-breaks")
+	}
 
 	// ICA
-	if m.prepICAMethod != 0 {
-		icaMethodVal := []string{"fastica", "infomax", "picard"}[m.prepICAMethod]
+	if m.prepSpatialFilter != 0 {
+		spatialFilterVal := []string{"ica", "ssp"}[m.prepSpatialFilter]
+		args = append(args, "--spatial-filter", spatialFilterVal)
+	}
+	if m.prepICAAlgorithm != 0 {
+		icaMethodVal := []string{"extended_infomax", "fastica", "infomax", "picard"}[m.prepICAAlgorithm]
 		args = append(args, "--ica-method", icaMethodVal)
 	}
 	if m.prepICAComp != 0.99 {
 		args = append(args, "--ica-components", fmt.Sprintf("%.2f", m.prepICAComp))
 	}
-	if m.prepProbThresh != 0.8 {
+	if m.prepICALFreq != 1.0 {
+		args = append(args, "--ica-l-freq", fmt.Sprintf("%.1f", m.prepICALFreq))
+	}
+	if m.prepICARejThresh != 500.0 {
+		args = append(args, "--ica-reject", fmt.Sprintf("%.0f", m.prepICARejThresh))
+	}
+	if m.prepProbThresh != 0.7 {
 		args = append(args, "--prob-threshold", fmt.Sprintf("%.1f", m.prepProbThresh))
 	}
 	if strings.TrimSpace(m.icaLabelsToKeep) != "" && m.icaLabelsToKeep != "brain,other" {
@@ -2415,10 +2464,13 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 
 	// Epoching
+	if strings.TrimSpace(m.prepConditions) != "" {
+		args = append(args, "--conditions", m.prepConditions)
+	}
 	if m.prepEpochsTmin != -5.0 {
 		args = append(args, "--tmin", fmt.Sprintf("%.1f", m.prepEpochsTmin))
 	}
-	if m.prepEpochsTmax != 12.0 {
+	if m.prepEpochsTmax != 10.5 {
 		args = append(args, "--tmax", fmt.Sprintf("%.1f", m.prepEpochsTmax))
 	}
 	if m.prepEpochsNoBaseline {
@@ -2428,6 +2480,13 @@ func (m Model) buildPreprocessingAdvancedArgs() []string {
 	}
 	if m.prepEpochsReject > 0 {
 		args = append(args, "--reject", fmt.Sprintf("%.0f", m.prepEpochsReject))
+	}
+	if m.prepRejectMethod != 1 {
+		rejectMethodVal := []string{"none", "autoreject_local", "autoreject_global"}[m.prepRejectMethod]
+		args = append(args, "--reject-method", rejectMethodVal)
+	}
+	if m.prepRunSourceEstimation {
+		args = append(args, "--run-source-estimation")
 	}
 
 	return args

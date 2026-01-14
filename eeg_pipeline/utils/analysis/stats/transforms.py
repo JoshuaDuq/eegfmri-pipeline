@@ -401,40 +401,116 @@ def compute_residuals(
 ###################################################################
 
 
-def compute_change_features(features_df: pd.DataFrame) -> pd.DataFrame:
-    """Compute active - baseline change for matching feature pairs.
-    
-    This is a data transformation utility that computes difference scores
-    between matching baseline and active feature columns.
+def compute_change_features(
+    features_df: pd.DataFrame,
+    window_pairs: Optional[List[Tuple[str, str]]] = None,
+    transform: str = "difference",
+    config: Optional[Any] = None,
+) -> pd.DataFrame:
+    """Compute change scores between matching feature pairs across time windows.
     
     Parameters
     ----------
     features_df : pd.DataFrame
-        DataFrame with feature columns containing "_baseline_" and "_active_" suffixes
+        DataFrame with feature columns containing window name segments
+    window_pairs : Optional[List[Tuple[str, str]]]
+        List of (reference_window, target_window) pairs. If None, uses config or
+        defaults to [("baseline", "active")].
+    transform : str
+        Transform type: "difference" (target - ref), "percent" ((target - ref) / ref * 100),
+        or "log_ratio" (log10(target / ref)).
+    config : Optional[Any]
+        Config object to read window_pairs and transform from if not provided.
         
     Returns
     -------
     pd.DataFrame
-        DataFrame with "_change_" columns containing active - baseline differences
+        DataFrame with change columns for each window pair
     """
-    baseline_cols = [c for c in features_df.columns if "_baseline_" in c]
+    # Get window pairs from config if not provided
+    if window_pairs is None and config is not None:
+        cfg_pairs = config.get("feature_engineering.change_scores.window_pairs", None)
+        if cfg_pairs and isinstance(cfg_pairs, list):
+            window_pairs = [(str(p[0]), str(p[1])) for p in cfg_pairs if len(p) >= 2]
+        cfg_transform = config.get("feature_engineering.change_scores.transform", None)
+        if cfg_transform:
+            transform = str(cfg_transform).strip().lower()
+    
+    # Default to baseline/active if nothing specified
+    if not window_pairs:
+        window_pairs = [("baseline", "active")]
+    
+    transform = transform.lower()
+    if transform not in {"difference", "percent", "log_ratio"}:
+        transform = "difference"
+    
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
+    suffix = "change" if transform == "difference" else "pct_change" if transform == "percent" else "log_ratio"
+
+    # Build a lookup of parsed feature columns so pairing never relies on substring replacement.
+    # Key ignores segment so we can match baseline vs active cleanly.
+    by_segment: Dict[Tuple[str, str, str, str, str, str], str] = {}
+    for col in features_df.columns:
+        col_str = str(col)
+        parsed = NamingSchema.parse(col_str)
+        if not parsed.get("valid"):
+            continue
+        key = (
+            str(parsed.get("group") or "").strip().lower(),
+            str(parsed.get("segment") or "").strip().lower(),
+            str(parsed.get("band") or "").strip().lower(),
+            str(parsed.get("scope") or "").strip().lower(),
+            str(parsed.get("identifier") or "").strip(),
+            str(parsed.get("stat") or "").strip().lower(),
+        )
+        by_segment[key] = col_str
 
     change_data: Dict[str, np.ndarray] = {}
-    for bl_col in baseline_cols:
-        pl_col = bl_col.replace("_baseline_", "_active_")
-        if pl_col in features_df.columns:
-            bl_vals = features_df[bl_col].values
-            pl_vals = features_df[pl_col].values
+    for ref_window, target_window in window_pairs:
+        ref_seg = str(ref_window).strip().lower()
+        tgt_seg = str(target_window).strip().lower()
 
-            if bl_vals.ndim != 1 or pl_vals.ndim != 1:
+        # Find all columns in the reference segment.
+        ref_keys = [k for k in by_segment.keys() if k[1] == ref_seg]
+        for group, _seg, band, scope, identifier, stat in ref_keys:
+            ref_col = by_segment[(group, ref_seg, band, scope, identifier, stat)]
+            target_col = by_segment.get((group, tgt_seg, band, scope, identifier, stat))
+            if target_col is None:
                 continue
 
-            change_col = bl_col.replace("_baseline_", "_change_")
-            change_data[change_col] = pl_vals - bl_vals
+            ref_vals = pd.to_numeric(features_df[ref_col], errors="coerce").to_numpy(dtype=float)
+            target_vals = pd.to_numeric(features_df[target_col], errors="coerce").to_numpy(dtype=float)
 
+            if transform == "difference":
+                change_vals = target_vals - ref_vals
+            elif transform == "percent":
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    change_vals = np.where(
+                        np.abs(ref_vals) > 1e-10,
+                        (target_vals - ref_vals) / ref_vals * 100,
+                        np.nan,
+                    )
+            else:  # log_ratio
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    change_vals = np.where(
+                        (ref_vals > 0) & (target_vals > 0),
+                        np.log10(target_vals / ref_vals),
+                        np.nan,
+                    )
+
+            build_kwargs: Dict[str, Any] = {}
+            if scope in {"ch", "roi"}:
+                build_kwargs["channel"] = identifier
+            elif scope == "chpair":
+                build_kwargs["channel_pair"] = identifier
+
+            change_col = NamingSchema.build(group, suffix, band, scope, stat, **build_kwargs)
+            change_data[change_col] = change_vals
+    
     if not change_data:
         return pd.DataFrame(index=features_df.index)
-
+    
     return pd.DataFrame(change_data, index=features_df.index)
 
 

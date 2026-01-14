@@ -353,21 +353,49 @@ def _save_merged_features(
         "asymmetry": ("features_asymmetry.tsv", ["asymmetry"]),
         "quality": ("features_quality.tsv", ["quality"]),
     }
-    
+
     for filename, keys in feature_file_mapping.values():
         dfs_to_merge = []
         for key in keys:
             dfs_to_merge.extend(accumulated.get(key, []))
-        
+
         merged_df = _merge_dataframes(dfs_to_merge)
         if merged_df is not None:
             from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
+            from eeg_pipeline.domain.features.naming import generate_manifest
+
             base_name = filename.replace(".tsv", "")
             folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
             write_tsv(merged_df, save_path)
+            try:
+                subject_str = (
+                    features_dir.parts[-3].replace("sub-", "")
+                    if len(features_dir.parts) > 3
+                    else "unknown"
+                )
+                metadata_dir = save_path.parent / "metadata"
+                ensure_dir(metadata_dir)
+                meta_path = metadata_dir / filename.replace(".tsv", ".json")
+                manifest = generate_manifest(
+                    feature_columns=list(merged_df.columns),
+                    config=config,
+                    subject=subject_str,
+                    task=config.get("project.task") if config is not None else None,
+                    qc=None,
+                    df_attrs=dict(getattr(merged_df, "attrs", {}) or {}),
+                )
+                meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            except Exception as exc:
+                logger.warning(
+                    "Failed to write merged feature metadata for %s: %s", save_path, exc
+                )
             feature_name = filename.replace("features_", "").replace(".tsv", "")
-            logger.info(f"Saved merged {feature_name} features: {merged_df.shape[1]} columns")
+            logger.info(
+                "Saved merged %s features: %d columns",
+                feature_name,
+                int(merged_df.shape[1]),
+            )
 
 
 def _save_extraction_config(
@@ -479,6 +507,19 @@ class FeaturePipeline(PipelineBase):
             self.config,
             self.logger,
         )
+        if precomputed_full is not None:
+            if len(aligned_events) == int(precomputed_full.data.shape[0]):
+                precomputed_full.metadata = aligned_events.reset_index(drop=True).copy()
+                if "condition" in aligned_events.columns:
+                    precomputed_full.condition_labels = aligned_events["condition"].to_numpy()
+                elif "trial_type" in aligned_events.columns:
+                    precomputed_full.condition_labels = aligned_events["trial_type"].to_numpy()
+            else:
+                self.logger.warning(
+                    "Precomputed intermediates: aligned_events length (%d) != n_epochs (%d); skipping metadata.",
+                    len(aligned_events),
+                    int(precomputed_full.data.shape[0]),
+                )
 
         accumulated_features = _create_feature_accumulator()
         accumulated_y = None

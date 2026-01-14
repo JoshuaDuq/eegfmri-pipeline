@@ -209,23 +209,76 @@ def _compute_tfr_for_features(
     tmin: Optional[float],
     tmax: Optional[float],
 ) -> tuple[Any, Optional[pd.DataFrame], List[str], Optional[float], Optional[float]]:
-    """Compute TFR and baseline data for feature extraction."""
+    """Compute TFR and baseline data for feature extraction.
+    
+    IMPORTANT: Uses original (uncropped) epochs for TFR computation to ensure
+    baseline windows are available. Cropping happens AFTER baseline extraction.
+    """
     tfr_complex = None
     tfr_power = None
+    
+    # Use original epochs for TFR to preserve baseline window
+    epochs_for_tfr = getattr(ctx, "_original_epochs", None) or ctx.epochs
+    epochs_for_power_tfr = epochs_for_tfr
+
+    # Optional evoked subtraction for induced power features (pain paradigms)
+    power_cfg = ctx.config.get("feature_engineering.power", {}) if hasattr(ctx.config, "get") else {}
+    want_induced_power = bool(power_cfg.get("subtract_evoked", False))
+    ctx.power_evoked_subtracted = False
+    ctx.power_evoked_subtracted_conditionwise = False
+    if want_induced_power:
+        analysis_mode = str(getattr(ctx, "analysis_mode", "") or "").strip().lower()
+        train_mask = getattr(ctx, "train_mask", None)
+        if analysis_mode == "trial_ml_safe" and train_mask is None:
+            ctx.logger.warning(
+                "Power: subtract_evoked=True in trial_ml_safe mode without train_mask; disabling to avoid CV leakage."
+            )
+        else:
+            from eeg_pipeline.utils.analysis.spectral import subtract_evoked
+
+            condition_labels = None
+            if isinstance(ctx.aligned_events, pd.DataFrame):
+                for candidate in ("condition", "trial_type"):
+                    if candidate in ctx.aligned_events.columns:
+                        condition_labels = ctx.aligned_events[candidate].to_numpy()
+                        break
+
+            induced_epochs = epochs_for_tfr.copy()
+            data = induced_epochs.get_data()
+            induced = subtract_evoked(
+                data,
+                condition_labels=condition_labels,
+                train_mask=train_mask,
+                min_trials_per_condition=int(power_cfg.get("min_trials_per_condition", 2)),
+            )
+            induced_epochs._data = induced
+            epochs_for_power_tfr = induced_epochs
+            ctx.power_evoked_subtracted = True
+            ctx.power_evoked_subtracted_conditionwise = condition_labels is not None
 
     needs_complex = any(category in ctx.feature_categories for category in ["itpc", "pac"])
     if needs_complex:
-        tfr_complex = compute_complex_tfr(ctx.epochs, ctx.config, ctx.logger)
+        tfr_complex = compute_complex_tfr(epochs_for_tfr, ctx.config, ctx.logger)
         if tfr_complex is not None:
             ctx.tfr_complex = tfr_complex
-            ctx.logger.info("Deriving power TFR from complex TFR...")
-            tfr_power = tfr_complex.copy()
-            tfr_power.data = np.abs(tfr_complex.data) ** 2
-            tfr_power.comment = "derived_from_complex"
+            if not ctx.power_evoked_subtracted:
+                ctx.logger.info("Deriving power TFR from complex TFR...")
+                tfr_power = tfr_complex.copy()
+                tfr_power.data = np.abs(tfr_complex.data) ** 2
+                tfr_power.comment = "derived_from_complex"
 
-    if tfr_power is None and ctx.tfr is not None:
+    if tfr_power is None and ctx.tfr is not None and not ctx.power_evoked_subtracted:
         ctx.logger.info("Using pre-computed TFR from context")
         tfr_power = ctx.tfr
+
+    # If induced power is requested, compute power TFR directly on evoked-subtracted epochs.
+    if tfr_power is None and ctx.power_evoked_subtracted:
+        from eeg_pipeline.utils.analysis.tfr import compute_tfr_morlet
+
+        ctx.logger.info("Computing induced power TFR (evoked subtracted)...")
+        tfr_power = compute_tfr_morlet(epochs_for_power_tfr, ctx.config, logger=ctx.logger)
+        if tfr_power is not None:
+            tfr_power.comment = "evoked_subtracted"
 
     baseline_override = None
     if ctx.windows is not None:
@@ -233,8 +286,9 @@ def _compute_tfr_for_features(
         if np.isfinite(baseline_start) and np.isfinite(baseline_end):
             baseline_override = (float(baseline_start), float(baseline_end))
 
+    # Compute TFR on full epochs to ensure baseline is available
     tfr, baseline_df, baseline_cols, baseline_start, baseline_end = compute_tfr_for_subject(
-        ctx.epochs,
+        epochs_for_power_tfr,
         ctx.aligned_events,
         ctx.subject,
         ctx.task,
@@ -899,11 +953,20 @@ def extract_precomputed_features(
 
     result = ExtractionResult(precomputed=precomputed)
 
-    if events_df is not None and len(events_df) == precomputed.data.shape[0]:
-        if "condition" in events_df.columns:
-            result.condition = events_df["condition"].to_numpy()
-        elif "trial_type" in events_df.columns:
-            result.condition = events_df["trial_type"].to_numpy()
+    if events_df is not None:
+        if len(events_df) != precomputed.data.shape[0]:
+            logger.warning(
+                "Precomputed: events_df length (%d) != n_epochs (%d); skipping metadata/condition labels.",
+                len(events_df),
+                precomputed.data.shape[0],
+            )
+        else:
+            precomputed.metadata = events_df.reset_index(drop=True).copy()
+            if "condition" in events_df.columns:
+                result.condition = events_df["condition"].to_numpy()
+            elif "trial_type" in events_df.columns:
+                result.condition = events_df["trial_type"].to_numpy()
+            precomputed.condition_labels = result.condition
 
     if "erds" in feature_groups:
         _extract_precomputed_feature_group(
@@ -918,8 +981,8 @@ def extract_precomputed_features(
     if "aperiodic" in feature_groups:
         logger.info("Extracting aperiodic features...")
         try:
-            from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_features
-            df, cols, qc = extract_aperiodic_features(ctx, bands)
+            from eeg_pipeline.analysis.features.aperiodic import extract_aperiodic_from_precomputed
+            df, cols, qc = extract_aperiodic_from_precomputed(precomputed, bands)
             if not df.empty:
                 result.features["aperiodic"] = FeatureSet(df, cols, "aperiodic")
                 result.qc["aperiodic"] = qc

@@ -75,6 +75,11 @@ def extract_erds_from_precomputed(
     from eeg_pipeline.utils.analysis.windowing import get_segment_masks
     
     target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -83,11 +88,20 @@ def extract_erds_from_precomputed(
             segment_masks = {target_name: mask}
         else:
             if precomputed.logger:
-                precomputed.logger.warning(
-                    "ERDS: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+                if allow_full_epoch_fallback:
+                    precomputed.logger.warning(
+                        "ERDS: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    precomputed.logger.error(
+                        "ERDS: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segment_masks = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
     else:
         segment_masks = get_segment_masks(precomputed.times, windows, precomputed.config)
     
@@ -135,15 +149,19 @@ def extract_erds_from_precomputed(
                         power[ch_idx], windows.baseline_mask
                     )
                     baseline_std = float(np.nanstd(power[ch_idx, windows.baseline_mask]))
-                    baseline_ref = (
-                        baseline_power if baseline_power >= min_baseline_power else min_baseline_power
-                    )
-                    if baseline_power < min_baseline_power:
+                    
+                    # Flag low-SNR channels as invalid instead of clamping
+                    # Clamping would produce artificially huge ERD/ERS ratios
+                    baseline_too_low = baseline_power < min_baseline_power
+                    if baseline_too_low:
                         clamped_baselines += 1
                         clamped_channels_for_band += 1
+                    
+                    baseline_ref = baseline_power
 
                     baseline_valid = (
-                        baseline_ref > epsilon
+                        not baseline_too_low
+                        and baseline_ref > epsilon
                         and baseline_frac >= min_valid_fraction
                         and baseline_total > 0
                     )

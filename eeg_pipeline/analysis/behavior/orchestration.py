@@ -78,6 +78,7 @@ class _ResultCache:
                 filtered = _filter_feature_cols_by_band(filtered, ctx)
             if computation_name:
                 filtered = _filter_feature_cols_for_computation(filtered, computation_name, ctx)
+            filtered = _filter_feature_cols_by_provenance(filtered, ctx, computation_name)
             self._filtered_feature_cols[cache_key] = filtered
 
         return self._filtered_feature_cols[cache_key]
@@ -1202,8 +1203,8 @@ def run_behavior_stages(
 FEATURE_COLUMN_PREFIXES = (
     "power_",
     "connectivity_",
-    "directed_connectivity_",
-    "source_localization_",
+    "directedconnectivity_",
+    "sourcelocalization_",
     "aperiodic_",
     "erp_",
     "itpc_",
@@ -1510,7 +1511,7 @@ def _has_precomputed_change_scores(df: Optional[pd.DataFrame]) -> bool:
     return any("_change_" in str(c) for c in df.columns)
 
 
-def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame], config: Any) -> Optional[pd.DataFrame]:
     """Add change score columns to a feature DataFrame if not already present.
     
     Skips computation if change scores were pre-computed in the feature pipeline.
@@ -1523,7 +1524,7 @@ def _augment_dataframe_with_change_scores(df: Optional[pd.DataFrame]) -> Optiona
     
     from eeg_pipeline.utils.analysis.stats.transforms import compute_change_features
     
-    change_df = compute_change_features(df)
+    change_df = compute_change_features(df, config=config)
     if not _is_dataframe_valid(change_df):
         return df
     
@@ -1549,14 +1550,14 @@ def add_change_scores(ctx: BehaviorContext) -> None:
     if n_precomputed > 0:
         ctx.logger.info("Using %d pre-computed change score tables from feature pipeline", n_precomputed)
 
-    ctx.power_df = _augment_dataframe_with_change_scores(ctx.power_df)
-    ctx.connectivity_df = _augment_dataframe_with_change_scores(ctx.connectivity_df)
-    ctx.directed_connectivity_df = _augment_dataframe_with_change_scores(ctx.directed_connectivity_df)
-    ctx.source_localization_df = _augment_dataframe_with_change_scores(ctx.source_localization_df)
-    ctx.aperiodic_df = _augment_dataframe_with_change_scores(ctx.aperiodic_df)
-    ctx.itpc_df = _augment_dataframe_with_change_scores(ctx.itpc_df)
-    ctx.pac_df = _augment_dataframe_with_change_scores(ctx.pac_df)
-    ctx.complexity_df = _augment_dataframe_with_change_scores(ctx.complexity_df)
+    ctx.power_df = _augment_dataframe_with_change_scores(ctx.power_df, ctx.config)
+    ctx.connectivity_df = _augment_dataframe_with_change_scores(ctx.connectivity_df, ctx.config)
+    ctx.directed_connectivity_df = _augment_dataframe_with_change_scores(ctx.directed_connectivity_df, ctx.config)
+    ctx.source_localization_df = _augment_dataframe_with_change_scores(ctx.source_localization_df, ctx.config)
+    ctx.aperiodic_df = _augment_dataframe_with_change_scores(ctx.aperiodic_df, ctx.config)
+    ctx.itpc_df = _augment_dataframe_with_change_scores(ctx.itpc_df, ctx.config)
+    ctx.pac_df = _augment_dataframe_with_change_scores(ctx.pac_df, ctx.config)
+    ctx.complexity_df = _augment_dataframe_with_change_scores(ctx.complexity_df, ctx.config)
     ctx._change_scores_added = True
 
 
@@ -1603,6 +1604,19 @@ def stage_correlate_design(ctx: BehaviorContext, config: Any) -> Optional[Correl
     else:
         ctx.logger.warning("Correlations design: trial table missing; skipping.")
         return None
+
+    primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.correlations.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
+    if primary_unit in {"trial", "trialwise"} and not perm_enabled and not allow_iid_trials:
+        raise ValueError(
+            "Trial-level correlations require a valid non-i.i.d inference method. "
+            "Enable permutation testing (behavior_analysis.correlations.permutation.enabled=true) "
+            "or use run-level aggregation (behavior_analysis.correlations.primary_unit=run_mean). "
+            "Set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
 
     feature_cols = _get_feature_columns(df_trials, ctx, "correlations")
     
@@ -1717,6 +1731,20 @@ def stage_correlate_effect_sizes(
     want_partial_temp = "partial_temp" in correlation_types
     want_partial_cov_temp = "partial_cov_temp" in correlation_types
     want_run_mean = "run_mean" in correlation_types
+
+    # Robust correlations are currently only defined for the raw (bivariate) statistic.
+    # Partial correlations rely on linear residualization and would no longer be robust
+    # unless explicitly re-derived and validated for each robust method.
+    if robust_method not in (None, "", False):
+        if want_partial_cov or want_partial_temp or want_partial_cov_temp:
+            ctx.logger.info(
+                "Correlations: robust_method=%s disables partial correlations; using raw only.",
+                robust_method,
+            )
+        want_raw = True
+        want_partial_cov = False
+        want_partial_temp = False
+        want_partial_cov_temp = False
 
     records: List[Dict[str, Any]] = []
     for target in design.targets:
@@ -1839,16 +1867,59 @@ def stage_correlate_pvalues(
     robust_method = getattr(config, "robust_method", None)
     perm_enabled = get_config_bool(ctx.config, "behavior_analysis.correlations.permutation.enabled", False)
     n_perm = get_config_int(ctx.config, "behavior_analysis.correlations.permutation.n_permutations", ctx.n_perm or 0)
+    perm_scheme = str(get_config_value(ctx.config, "behavior_analysis.permutation.scheme", "shuffle") or "shuffle").strip().lower()
 
-    perm_ok = (
+    def _robust_permutation_pvalue(
+        x_vec: np.ndarray,
+        y_vec: np.ndarray,
+        *,
+        robust_method: str,
+        n_perm: int,
+        rng: np.random.Generator,
+        groups: Optional[np.ndarray],
+    ) -> float:
+        from eeg_pipeline.utils.analysis.stats.correlation import compute_robust_correlation
+        from eeg_pipeline.utils.analysis.stats.permutation import permute_within_groups
+
+        valid = np.isfinite(x_vec) & np.isfinite(y_vec)
+        if valid.sum() < 4:
+            return np.nan
+
+        x_v = x_vec[valid]
+        y_v = y_vec[valid]
+        groups_v = np.asarray(groups)[valid] if groups is not None else None
+
+        r_obs, _ = compute_robust_correlation(x_v, y_v, method=robust_method)
+        if not np.isfinite(r_obs):
+            return np.nan
+
+        extreme = 0
+        for _ in range(int(n_perm)):
+            perm_idx = permute_within_groups(len(y_v), rng, groups_v, scheme=perm_scheme)
+            y_perm = y_v[perm_idx]
+            r_perm, _ = compute_robust_correlation(x_v, y_perm, method=robust_method)
+            if np.isfinite(r_perm) and abs(r_perm) >= abs(r_obs):
+                extreme += 1
+
+        # Add-one smoothing for an exact, non-zero p-value
+        return float((extreme + 1) / (int(n_perm) + 1))
+
+    perm_ok_standard = (
         perm_enabled
         and n_perm > 0
-        and robust_method in (None, "", False)
+        and (robust_method in (None, "", False))
         and isinstance(method, str)
         and method.strip().lower() in {"spearman", "pearson"}
     )
+    perm_ok_robust = (
+        perm_enabled
+        and n_perm > 0
+        and (robust_method not in (None, "", False))
+        and isinstance(robust_method, str)
+        and robust_method.strip().lower() in {"percentage_bend", "winsorized", "shepherd"}
+    )
 
-    if not perm_ok:
+    if not (perm_ok_standard or perm_ok_robust):
         if perm_enabled and robust_method not in (None, "", False):
             ctx.logger.debug("Correlations pvalues: permutation disabled for robust_method=%s", robust_method)
         for rec in records:
@@ -1882,27 +1953,44 @@ def stage_correlate_pvalues(
 
         x = pd.to_numeric(design.df_trials[feat], errors="coerce")
         y = pd.to_numeric(design.df_trials[target], errors="coerce")
-        temp_for_partial = design.temperature_series if (design.temperature_series is not None and target != "temperature") else None
 
-        p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
-            x_aligned=pd.Series(x.to_numpy(dtype=float), index=design.df_trials.index),
-            y_aligned=pd.Series(y.to_numpy(dtype=float), index=design.df_trials.index),
-            covariates_df=design.cov_df,
-            temp_series=temp_for_partial,
-            method=method.strip().lower(),
-            n_perm=n_perm,
-            n_eff=int(n),
-            rng=rng,
-            config=ctx.config,
-            groups=design.groups_for_perm,
-        )
-        rec.update({
-            "n_permutations": int(n_perm),
-            "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
-            "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
-            "p_perm_partial_temp": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
-            "p_perm_partial_cov_temp": float(p_perm_cov_temp) if np.isfinite(p_perm_cov_temp) else np.nan,
-        })
+        if perm_ok_robust:
+            p_perm_raw = _robust_permutation_pvalue(
+                x.to_numpy(dtype=float),
+                y.to_numpy(dtype=float),
+                robust_method=str(robust_method).strip().lower(),
+                n_perm=int(n_perm),
+                rng=rng,
+                groups=design.groups_for_perm,
+            )
+            rec.update({
+                "n_permutations": int(n_perm),
+                "p_perm_raw": float(p_perm_raw) if np.isfinite(p_perm_raw) else np.nan,
+                "p_perm_partial_cov": np.nan,
+                "p_perm_partial_temp": np.nan,
+                "p_perm_partial_cov_temp": np.nan,
+            })
+        else:
+            temp_for_partial = design.temperature_series if (design.temperature_series is not None and target != "temperature") else None
+            p_perm, p_perm_cov, p_perm_temp, p_perm_cov_temp = compute_permutation_pvalues_with_cov_temp(
+                x_aligned=pd.Series(x.to_numpy(dtype=float), index=design.df_trials.index),
+                y_aligned=pd.Series(y.to_numpy(dtype=float), index=design.df_trials.index),
+                covariates_df=design.cov_df,
+                temp_series=temp_for_partial,
+                method=method.strip().lower(),
+                n_perm=n_perm,
+                n_eff=int(n),
+                rng=rng,
+                config=ctx.config,
+                groups=design.groups_for_perm,
+            )
+            rec.update({
+                "n_permutations": int(n_perm),
+                "p_perm_raw": float(p_perm) if np.isfinite(p_perm) else np.nan,
+                "p_perm_partial_cov": float(p_perm_cov) if np.isfinite(p_perm_cov) else np.nan,
+                "p_perm_partial_temp": float(p_perm_temp) if np.isfinite(p_perm_temp) else np.nan,
+                "p_perm_partial_cov_temp": float(p_perm_cov_temp) if np.isfinite(p_perm_cov_temp) else np.nan,
+            })
         n_computed += 1
 
     ctx.logger.info("Correlations pvalues: computed %d permutation tests (n_perm=%d)", n_computed, n_perm)
@@ -1934,7 +2022,13 @@ def stage_correlate_primary_selection(
         r_primary = rec["r_raw"]
         src = "raw"
 
-        if use_run_unit and pd.notna(rec.get("p_run_mean", np.nan)):
+        robust_method = rec.get("robust_method", None)
+        if robust_method not in (None, "", False):
+            p_kind = "p_raw"
+            p_primary = rec.get("p_raw", np.nan)
+            r_primary = rec.get("r_raw", np.nan)
+            src = "raw_robust"
+        elif use_run_unit and pd.notna(rec.get("p_run_mean", np.nan)):
             p_kind = "p_run_mean"
             p_primary = rec.get("p_run_mean", np.nan)
             r_primary = rec.get("r_run_mean", np.nan)
@@ -1971,6 +2065,13 @@ def stage_correlate_primary_selection(
                     p_kind = perm_key
                     p_primary = rec.get(perm_key, np.nan)
                     src = f"{src}_perm"
+
+            # If the selected primary statistic is unavailable, fall back to raw.
+            if not (pd.notna(p_primary) and np.isfinite(float(p_primary))):
+                p_kind = "p_raw"
+                p_primary = rec.get("p_raw", np.nan)
+                r_primary = rec.get("r_raw", np.nan)
+                src = "raw_fallback"
 
         rec["p_kind_primary"] = p_kind
         rec["p_primary"] = p_primary
@@ -2311,6 +2412,106 @@ def _filter_feature_cols_for_computation(
         )
         
     return filtered
+
+
+def _primary_unit_for_computation(ctx: BehaviorContext, computation_name: Optional[str]) -> str:
+    mapping = {
+        "correlations": "behavior_analysis.correlations.primary_unit",
+        "regression": "behavior_analysis.regression.primary_unit",
+        "condition": "behavior_analysis.condition.primary_unit",
+        "pain_sensitivity": "behavior_analysis.pain_sensitivity.primary_unit",
+        "condition_window_comparison": "behavior_analysis.condition.window_comparison.primary_unit",
+    }
+    key = mapping.get(str(computation_name or "").strip().lower(), None)
+    if key is None:
+        key = "behavior_analysis.primary_unit"
+    primary_unit = str(get_config_value(ctx.config, key, "trial") or "trial").strip().lower()
+    return primary_unit
+
+
+def _filter_feature_cols_by_provenance(
+    feature_cols: List[str],
+    ctx: BehaviorContext,
+    computation_name: Optional[str] = None,
+) -> List[str]:
+    """Exclude non-i.i.d./broadcast features when performing trial-wise analyses."""
+    if not feature_cols:
+        return feature_cols
+
+    primary_unit = _primary_unit_for_computation(ctx, computation_name)
+    is_trial_unit = primary_unit in {"trial", "trial_level", "trialwise"}
+    if not is_trial_unit:
+        return feature_cols
+
+    enabled = bool(
+        get_config_value(
+            ctx.config,
+            "behavior_analysis.features.exclude_non_trialwise_features",
+            True,
+        )
+    )
+    if not enabled:
+        return feature_cols
+
+    from eeg_pipeline.domain.features.naming import infer_feature_provenance
+
+    manifests = getattr(ctx, "feature_manifests", {}) or {}
+    dropped: List[str] = []
+    kept: List[str] = []
+
+    prefixes = sorted(FEATURE_COLUMN_PREFIXES, key=len, reverse=True)
+
+    for col in feature_cols:
+        col_str = str(col)
+        matched_prefix = next((p for p in prefixes if col_str.startswith(p)), None)
+        if matched_prefix is None:
+            kept.append(col_str)
+            continue
+
+        table_key = matched_prefix.rstrip("_")
+        raw_name = col_str[len(matched_prefix) :]
+
+        manifest = manifests.get(table_key) or {}
+        prov_cols = (manifest.get("provenance") or {}).get("columns") or {}
+
+        # Some feature tables already use the same prefix as the table key
+        # (e.g., itpc_*). In those cases, the manifest uses the full column name.
+        props = prov_cols.get(raw_name)
+        if props is None:
+            props = prov_cols.get(col_str)
+
+        if props is None:
+            inferred = infer_feature_provenance(
+                feature_columns=[raw_name],
+                config=ctx.config,
+                df_attrs={},
+            )
+            props = (inferred.get("columns") or {}).get(raw_name, {})
+            if not props:
+                inferred = infer_feature_provenance(
+                    feature_columns=[col_str],
+                    config=ctx.config,
+                    df_attrs={},
+                )
+                props = (inferred.get("columns") or {}).get(col_str, {})
+
+        trialwise_valid = bool(props.get("trialwise_valid", True))
+        broadcasted = bool(props.get("broadcasted", False))
+        if (not trialwise_valid) or broadcasted:
+            dropped.append(col_str)
+        else:
+            kept.append(col_str)
+
+    if dropped and ctx.logger is not None:
+        ctx.logger.warning(
+            "%s: excluded %d/%d non-trialwise (broadcast/cross-trial) features because primary_unit='trial'. Examples=%s",
+            computation_name or "analysis",
+            len(dropped),
+            len(feature_cols),
+            ",".join(dropped[:5]),
+        )
+
+    return kept
 
 
 @dataclass
@@ -3105,6 +3306,15 @@ def stage_condition_column(
     primary_unit = str(get_config_value(
         ctx.config, "behavior_analysis.condition.primary_unit", "trial"
     )).strip().lower()
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    perm_enabled = get_config_bool(ctx.config, "behavior_analysis.condition.permutation.enabled", False)
+    if primary_unit in {"trial", "trialwise"} and not perm_enabled and not allow_iid_trials:
+        raise ValueError(
+            "Trial-level condition comparisons require a valid non-i.i.d inference method. "
+            "Enable permutation testing (behavior_analysis.condition.permutation.enabled=true) "
+            "or use run-level aggregation (behavior_analysis.condition.primary_unit=run_mean). "
+            "Set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
     run_unit_values = {"run", "run_mean", "runmean", "run_level"}
     use_run_unit = primary_unit in run_unit_values
     run_col = str(get_config_value(
@@ -3229,36 +3439,36 @@ def _compute_pairwise_effect_sizes(
     v1: np.ndarray,
     v2: np.ndarray,
 ) -> Tuple[float, float, float, float, float]:
-    """Compute pairwise effect sizes (Cohen's d and Hedge's g).
+    """Compute paired (within-subject) effect sizes (Cohen's dz and Hedge's gz).
 
     Returns:
-        (mean_diff, pooled_std, cohens_d, hedges_g, hedges_correction)
+        (mean_diff, std_diff, cohens_d, hedges_g, hedges_correction)
     """
     diff = v2 - v1
     mean_diff = float(np.nanmean(diff))
-    pooled_std = float(np.sqrt((np.nanvar(v1) + np.nanvar(v2)) / 2))
-    cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+    std_diff = float(np.nanstd(diff, ddof=1))
+    cohens_d = mean_diff / std_diff if np.isfinite(std_diff) and std_diff > 0 else np.nan
 
     # Hedge's g correction
-    n = len(v1)
+    n = int(np.sum(np.isfinite(v1) & np.isfinite(v2)))
     hedges_correction = 1 - (3 / (4 * n - 1)) if n > 1 else 1.0
-    hedges_g = cohens_d * hedges_correction
+    hedges_g = cohens_d * hedges_correction if np.isfinite(cohens_d) else np.nan
 
-    return mean_diff, pooled_std, cohens_d, hedges_g, hedges_correction
+    return mean_diff, std_diff, cohens_d, hedges_g, hedges_correction
 
 
 def _compute_batch_pairwise_effect_sizes(
     v1_matrix: np.ndarray,
     v2_matrix: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute pairwise effect sizes for multiple feature pairs vectorized.
+    """Compute paired effect sizes for multiple feature pairs vectorized.
     
     Args:
         v1_matrix: shape (n_samples, n_features) - window 1 values
         v2_matrix: shape (n_samples, n_features) - window 2 values
     
     Returns:
-        (mean_diff, pooled_std, cohens_d, hedges_g) - all shape (n_features,)
+        (mean_diff, std_diff, cohens_d, hedges_g) - all shape (n_features,)
     """
     import warnings
     with warnings.catch_warnings():
@@ -3266,20 +3476,17 @@ def _compute_batch_pairwise_effect_sizes(
         
         diff = v2_matrix - v1_matrix
         mean_diff = np.nanmean(diff, axis=0)
+        std_diff = np.nanstd(diff, axis=0, ddof=1)
         
-        var1 = np.nanvar(v1_matrix, axis=0)
-        var2 = np.nanvar(v2_matrix, axis=0)
-        pooled_std = np.sqrt((var1 + var2) / 2)
-        
-        # Cohen's d
-        cohens_d = np.where(pooled_std > 1e-12, mean_diff / pooled_std, 0.0)
+        # Cohen's dz (paired)
+        cohens_d = np.where(std_diff > 1e-12, mean_diff / std_diff, np.nan)
         
         # Hedge's g correction
         n = np.sum(np.isfinite(v1_matrix) & np.isfinite(v2_matrix), axis=0)
         hedges_correction = np.where(n > 1, 1 - (3 / (4 * n - 1)), 1.0)
         hedges_g = cohens_d * hedges_correction
     
-    return mean_diff, pooled_std, cohens_d, hedges_g
+    return mean_diff, std_diff, cohens_d, hedges_g
 
 
 def stage_condition_window(
@@ -3407,22 +3614,61 @@ def _run_window_comparison(
 
     run_col = str(get_config_value(ctx.config, "behavior_analysis.run_adjustment.column", "run_id") or "run_id").strip()
     run_adjust_enabled = get_config_bool(ctx.config, "behavior_analysis.run_adjustment.enabled", False)
-    use_run_unit = str(
-        get_config_value(ctx.config, "behavior_analysis.condition.window_comparison.primary_unit", "trial")
-    ).strip().lower() in {"run", "run_mean", "runmean", "run_level"}
+    wc_primary_unit = str(
+        get_config_value(ctx.config, "behavior_analysis.condition.window_comparison.primary_unit", "trial") or "trial"
+    ).strip().lower()
+    allow_iid_trials = get_config_bool(ctx.config, "behavior_analysis.statistics.allow_iid_trials", False)
+    if wc_primary_unit in {"trial", "trialwise"} and not allow_iid_trials:
+        raise ValueError(
+            "Trial-level window comparisons assume i.i.d trials. "
+            "Use run-level aggregation (behavior_analysis.condition.window_comparison.primary_unit=run_mean) "
+            "or set behavior_analysis.statistics.allow_iid_trials=true to override (not recommended)."
+        )
+    use_run_unit = wc_primary_unit in {"run", "run_mean", "runmean", "run_level"}
 
-    # Parse feature columns to find window-specific features
-    window1_features = {}
-    window2_features = {}
-    
+    from eeg_pipeline.domain.features.naming import NamingSchema
+
+    # Parse NamingSchema to find window-specific features.
+    # This avoids substring collisions when window names appear elsewhere in feature identifiers.
+    window1_features: Dict[Tuple[str, str, str, str, str], str] = {}
+    window2_features: Dict[Tuple[str, str, str, str, str], str] = {}
+
+    prefixes = sorted(FEATURE_COLUMN_PREFIXES, key=len, reverse=True)
+    w1 = str(window1).strip().lower()
+    w2 = str(window2).strip().lower()
+
+    n_unparseable = 0
     for col in feature_cols:
-        col_lower = str(col).lower()
-        if f"_{window1.lower()}_" in col_lower or col_lower.endswith(f"_{window1.lower()}"):
-            base_name = col_lower.replace(f"_{window1.lower()}", "").replace(f"{window1.lower()}_", "")
-            window1_features[base_name] = col
-        elif f"_{window2.lower()}_" in col_lower or col_lower.endswith(f"_{window2.lower()}"):
-            base_name = col_lower.replace(f"_{window2.lower()}", "").replace(f"{window2.lower()}_", "")
-            window2_features[base_name] = col
+        col_str = str(col)
+        matched_prefix = next((p for p in prefixes if col_str.startswith(p)), None)
+        raw_name = col_str[len(matched_prefix) :] if matched_prefix else col_str
+
+        parsed = NamingSchema.parse(raw_name)
+        if not parsed.get("valid"):
+            n_unparseable += 1
+            continue
+
+        seg = str(parsed.get("segment") or "").strip().lower()
+        if seg not in {w1, w2}:
+            continue
+
+        key = (
+            str(parsed.get("group") or ""),
+            str(parsed.get("band") or ""),
+            str(parsed.get("scope") or ""),
+            str(parsed.get("identifier") or ""),
+            str(parsed.get("stat") or ""),
+        )
+        if seg == w1:
+            window1_features[key] = col_str
+        else:
+            window2_features[key] = col_str
+
+    if n_unparseable and ctx.logger is not None:
+        ctx.logger.debug(
+            "Window comparison: skipped %d unparseable feature columns (NamingSchema invalid).",
+            int(n_unparseable),
+        )
 
     # Find matching pairs
     common_bases = sorted(set(window1_features.keys()) & set(window2_features.keys()))
@@ -3458,7 +3704,7 @@ def _run_window_comparison(
         std_v2 = np.nanstd(v2_matrix, axis=0, ddof=1)
         
         # Compute effect sizes vectorized
-        mean_diff, pooled_std, cohens_d, hedges_g = _compute_batch_pairwise_effect_sizes(v1_matrix, v2_matrix)
+        mean_diff, std_diff, cohens_d, hedges_g = _compute_batch_pairwise_effect_sizes(v1_matrix, v2_matrix)
     
         # Wilcoxon tests must be done per-pair (no vectorized scipy version)
         # Warnings are suppressed for degenerate cases (e.g., zero variance)
@@ -3466,6 +3712,7 @@ def _run_window_comparison(
         
         for i, base_name in enumerate(common_bases):
             col1 = cols1[i]
+            col2 = cols2[i]
             n_valid = int(n_valid_per_pair[i])
             
             if n_valid < max(min_samples, 2):
@@ -3498,9 +3745,14 @@ def _run_window_comparison(
                 except (ValueError, TypeError, sp_stats.Error, KeyError):
                     pass
 
+            col1_prefix = next((p for p in prefixes if str(col1).startswith(p)), "")
+            col1_raw = str(col1)[len(col1_prefix) :] if col1_prefix else str(col1)
+
             records.append({
-                "feature": base_name,
-                "feature_type": _cache.get_feature_type(col1, ctx.config),
+                "feature": "::".join(str(x) for x in base_name),
+                "feature_col_window1": col1,
+                "feature_col_window2": col2,
+                "feature_type": _cache.get_feature_type(col1_raw, ctx.config),
                 "analysis_kind": "condition_window",
                 "comparison_type": "window",
                 "window1": window1,
@@ -3512,6 +3764,7 @@ def _run_window_comparison(
                 "std_window1": float(std_v1[i]),
                 "std_window2": float(std_v2[i]),
                 "mean_diff": float(mean_diff[i]),
+                "std_diff": float(std_diff[i]) if np.isfinite(std_diff[i]) else np.nan,
                 "statistic": float(stat),
                 "p_raw": float(p_val),
                 "statistic_run": float(stat_run) if np.isfinite(stat_run) else np.nan,
@@ -3661,6 +3914,7 @@ def stage_temporal_stats(
                 reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
                 df_temporal["p_fdr"] = p_corrected
                 df_temporal["sig_fdr"] = reject
+                df_temporal["p_primary"] = df_temporal["p_fdr"]
                 n_sig = int(reject.sum())
                 ctx.logger.info(f"Temporal FDR: {n_sig}/{len(p_vals)} significant at alpha={fdr_alpha}")
                 
@@ -3668,22 +3922,34 @@ def stage_temporal_stats(
                 reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="bonferroni")
                 df_temporal["p_bonferroni"] = p_corrected
                 df_temporal["sig_bonferroni"] = reject
+                df_temporal["p_primary"] = df_temporal["p_bonferroni"]
                 n_sig = int(reject.sum())
                 ctx.logger.info(f"Temporal Bonferroni: {n_sig}/{len(p_vals)} significant at alpha={fdr_alpha}")
                 
             elif correction_method == "cluster":
-                ctx.logger.warning(
-                    "Temporal: cluster correction requested but requires spatial/temporal adjacency info. "
-                    "Falling back to FDR correction."
-                )
-                reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
-                df_temporal["p_fdr"] = p_corrected
-                df_temporal["sig_fdr"] = reject
-                df_temporal["correction_note"] = "fdr_fallback_from_cluster"
+                if "p_cluster" in df_temporal.columns:
+                    p_cluster_vals = pd.to_numeric(df_temporal["p_cluster"], errors="coerce").fillna(1.0).to_numpy()
+                    df_temporal["p_primary"] = p_cluster_vals
+                    if "cluster_significant" in df_temporal.columns:
+                        df_temporal["sig_cluster"] = df_temporal["cluster_significant"].fillna(False).astype(bool)
+                    else:
+                        df_temporal["sig_cluster"] = p_cluster_vals < fdr_alpha
+                    n_sig = int(df_temporal["sig_cluster"].sum())
+                    ctx.logger.info(f"Temporal cluster: {n_sig}/{len(p_cluster_vals)} significant at alpha={fdr_alpha}")
+                else:
+                    ctx.logger.warning(
+                        "Temporal: cluster correction requested but no p_cluster column present; falling back to FDR."
+                    )
+                    reject, p_corrected, _, _ = multipletests(p_vals, alpha=fdr_alpha, method="fdr_bh")
+                    df_temporal["p_fdr"] = p_corrected
+                    df_temporal["sig_fdr"] = reject
+                    df_temporal["p_primary"] = df_temporal["p_fdr"]
+                    df_temporal["correction_note"] = "fdr_fallback_from_cluster_missing_p_cluster"
                 
             elif correction_method == "none":
                 ctx.logger.warning("Temporal: no multiple comparison correction applied (use with caution)")
                 df_temporal["sig_raw"] = p_vals < fdr_alpha
+                df_temporal["p_primary"] = df_temporal["p_raw"]
             
             df_temporal["correction_method"] = correction_method
         
@@ -3710,7 +3976,7 @@ def stage_temporal_stats(
                 "n": row.get("n", np.nan),
                 "r": row.get("r", np.nan),
                 "p_raw": row.get("p_raw", row.get("p", np.nan)),
-                "p_primary": row.get("p_raw", row.get("p", np.nan)),
+                "p_primary": row.get("p_primary", row.get("p_raw", row.get("p", np.nan))),
                 "p_fdr": row.get("p_fdr", np.nan),
                 "notes": f"band={row.get('band', '')}, time={row.get('time_start', '')}–{row.get('time_end', '')}s, condition={row.get('condition', '')}",
             })

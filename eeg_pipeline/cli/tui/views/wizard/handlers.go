@@ -1102,6 +1102,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.browsingField = "sourceLocFmriStatsMap"
 		m.pendingFileCmd = m.browseForFile("Select fMRI statistical map", "sourceLocFmriStatsMap", "NIfTI files", "nii,nii.gz")
 		m.useDefaultAdvanced = false
+	case optSourceLocFmriProvenance:
+		m.sourceLocFmriProvenance = (m.sourceLocFmriProvenance + 1) % 2 // 0: independent, 1: same_dataset
+		m.useDefaultAdvanced = false
+	case optSourceLocFmriRequireProvenance:
+		m.sourceLocFmriRequireProv = !m.sourceLocFmriRequireProv
+		m.useDefaultAdvanced = false
 	case optSourceLocFmriThreshold:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
@@ -1333,15 +1339,27 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optPEOrder:
-		m.complexityPEOrder++
-		if m.complexityPEOrder > 7 {
-			m.complexityPEOrder = 3
-		}
-		m.useDefaultAdvanced = false
-	case optPEDelay:
-		m.startNumberEdit()
-		m.useDefaultAdvanced = false
+		case optPEOrder:
+			m.complexityPEOrder++
+			if m.complexityPEOrder > 7 {
+				m.complexityPEOrder = 3
+			}
+			m.useDefaultAdvanced = false
+		case optPEDelay:
+			m.startNumberEdit()
+			m.useDefaultAdvanced = false
+		case optComplexitySignalBasis:
+			m.complexitySignalBasis++
+			if m.complexitySignalBasis > 1 {
+				m.complexitySignalBasis = 0
+			}
+			m.useDefaultAdvanced = false
+		case optComplexityMinSegmentSec, optComplexityMinSamples:
+			m.startNumberEdit()
+			m.useDefaultAdvanced = false
+		case optComplexityZscore:
+			m.complexityZscore = !m.complexityZscore
+			m.useDefaultAdvanced = false
 	case optERPBaseline:
 		m.erpBaselineCorrection = !m.erpBaselineCorrection
 		m.useDefaultAdvanced = false
@@ -2592,8 +2610,26 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepMontage:
 		m.startTextEdit(textFieldPrepMontage)
 		m.useDefaultAdvanced = false
-	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepICAComp, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
+	case optPrepChTypes:
+		m.startTextEdit(textFieldPrepChTypes)
+		m.useDefaultAdvanced = false
+	case optPrepEegReference:
+		m.startTextEdit(textFieldPrepEegReference)
+		m.useDefaultAdvanced = false
+	case optPrepEogChannels:
+		m.startTextEdit(textFieldPrepEogChannels)
+		m.useDefaultAdvanced = false
+	case optPrepRandomState:
 		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepTaskIsRest:
+		m.prepTaskIsRest = !m.prepTaskIsRest
+		m.useDefaultAdvanced = false
+	case optPrepNJobs, optPrepResample, optPrepLFreq, optPrepHFreq, optPrepNotch, optPrepLineFreq, optPrepZaplineFline, optPrepICAComp, optPrepICALFreq, optPrepICARejThresh, optPrepProbThresh, optPrepEpochsTmin, optPrepEpochsTmax, optPrepEpochsBaseline, optPrepEpochsReject:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPrepFindBreaks:
+		m.prepFindBreaks = !m.prepFindBreaks
 		m.useDefaultAdvanced = false
 	case optPrepRansac:
 		m.prepRansac = !m.prepRansac
@@ -2616,8 +2652,17 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 	case optPrepDeleteBreaks:
 		m.prepDeleteBreaks = !m.prepDeleteBreaks
 		m.useDefaultAdvanced = false
-	case optPrepICAMethod:
-		m.prepICAMethod = (m.prepICAMethod + 1) % 3
+	case optPrepRenameAnotDict:
+		m.startTextEdit(textFieldPrepRenameAnotDict)
+		m.useDefaultAdvanced = false
+	case optPrepCustomBadDict:
+		m.startTextEdit(textFieldPrepCustomBadDict)
+		m.useDefaultAdvanced = false
+	case optPrepSpatialFilter:
+		m.prepSpatialFilter = (m.prepSpatialFilter + 1) % 2
+		m.useDefaultAdvanced = false
+	case optPrepICAAlgorithm:
+		m.prepICAAlgorithm = (m.prepICAAlgorithm + 1) % 4
 		m.useDefaultAdvanced = false
 	case optPrepKeepMnebidsBads:
 		m.prepKeepMnebidsBads = !m.prepKeepMnebidsBads
@@ -2627,6 +2672,15 @@ func (m *Model) togglePreprocessingAdvancedOption() {
 		m.useDefaultAdvanced = false
 	case optPrepEpochsNoBaseline:
 		m.prepEpochsNoBaseline = !m.prepEpochsNoBaseline
+		m.useDefaultAdvanced = false
+	case optPrepConditions:
+		m.startTextEdit(textFieldPrepConditions)
+		m.useDefaultAdvanced = false
+	case optPrepRejectMethod:
+		m.prepRejectMethod = (m.prepRejectMethod + 1) % 3
+		m.useDefaultAdvanced = false
+	case optPrepRunSourceEstimation:
+		m.prepRunSourceEstimation = !m.prepRunSourceEstimation
 		m.useDefaultAdvanced = false
 	}
 
@@ -3378,6 +3432,14 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.pacHarmonicToleranceHz = val
 	case optPEDelay:
 		m.complexityPEDelay = int(val)
+	case optComplexityMinSegmentSec:
+		if val > 0 {
+			m.complexityMinSegmentSec = val
+		}
+	case optComplexityMinSamples:
+		if val >= 0 {
+			m.complexityMinSamples = int(val)
+		}
 	case optBurstThresholdPercentile:
 		if val >= 0 && val <= 100 {
 			m.burstThresholdPercentile = val
@@ -3404,6 +3466,7 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.connWindowLen = val
 	case optConnWindowStep:
 		m.connWindowStep = val
+
 	// Source localization numeric options
 	case optSourceLocReg:
 		if val >= 0 {
@@ -3425,6 +3488,7 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.sourceLocMindistMm = val
 		}
+
 	case optSourceLocFmriThreshold:
 		if val > 0 {
 			m.sourceLocFmriThreshold = val
@@ -3760,7 +3824,7 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 	opt := options[m.advancedCursor]
 	switch opt {
 	case optPrepNJobs:
-		if val >= 1 {
+		if val >= -1 {
 			m.prepNJobs = int(val)
 		}
 	case optPrepResample:
@@ -3776,16 +3840,44 @@ func (m *Model) commitPreprocessingNumber(val float64) {
 			m.prepNotch = int(val)
 		}
 	case optPrepLineFreq:
-		if val == 50 || val == 60 {
+		if val > 0 {
 			m.prepLineFreq = int(val)
+		}
+	case optPrepZaplineFline:
+		if val > 0 {
+			m.prepZaplineFline = val
 		}
 	case optPrepICAComp:
 		if val > 0 {
 			m.prepICAComp = val
 		}
+	case optPrepICALFreq:
+		if val > 0 {
+			m.prepICALFreq = val
+		}
+	case optPrepICARejThresh:
+		if val >= 0 {
+			m.prepICARejThresh = val
+		}
 	case optPrepProbThresh:
 		if val >= 0 && val <= 1 {
 			m.prepProbThresh = val
+		}
+	case optPrepRepeats:
+		if val >= 1 {
+			m.prepRepeats = int(val)
+		}
+	case optPrepBreaksMinLength:
+		if val > 0 {
+			m.prepBreaksMinLength = int(val)
+		}
+	case optPrepTStartAfterPrevious:
+		if val >= 0 {
+			m.prepTStartAfterPrevious = int(val)
+		}
+	case optPrepTStopBeforeNext:
+		if val >= 0 {
+			m.prepTStopBeforeNext = int(val)
 		}
 	case optPrepEpochsTmin:
 		m.prepEpochsTmin = val

@@ -134,6 +134,7 @@ class BehaviorPipelineConfig:
     run_lag_features: bool = True
     run_pain_residual: bool = True
     run_temperature_models: bool = True
+    run_feature_qc: bool = False
     run_regression: bool = False
     run_models: bool = False
     run_stability: bool = True
@@ -207,6 +208,7 @@ class BehaviorPipelineConfig:
             run_lag_features=bool(get_config_value(config, "behavior_analysis.lag_features.enabled", True)),
             run_pain_residual=bool(get_config_value(config, "behavior_analysis.pain_residual.enabled", True)),
             run_temperature_models=bool(get_config_value(config, "behavior_analysis.temperature_models.enabled", True)),
+            run_feature_qc=bool(get_config_value(config, "behavior_analysis.feature_qc.enabled", False)),
             run_regression=bool(get_config_value(config, "behavior_analysis.regression.enabled", False)),
             run_models=bool(get_config_value(config, "behavior_analysis.models.enabled", False)),
             run_stability=bool(get_config_value(config, "behavior_analysis.stability.enabled", True)),

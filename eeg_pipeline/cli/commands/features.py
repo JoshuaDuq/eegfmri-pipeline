@@ -200,6 +200,10 @@ def _apply_sourcelocalization_overrides(args: argparse.Namespace, config: Any) -
         fmri_cfg["enabled"] = args.source_fmri_enabled
     if _get_arg_value(args, "source_fmri_stats_map") is not None:
         fmri_cfg["stats_map_path"] = args.source_fmri_stats_map
+    if _get_arg_value(args, "source_fmri_provenance") is not None:
+        fmri_cfg["provenance"] = args.source_fmri_provenance
+    if _get_arg_value(args, "source_fmri_require_provenance") is not None:
+        fmri_cfg["require_provenance"] = bool(args.source_fmri_require_provenance)
     if _get_arg_value(args, "source_fmri_threshold") is not None:
         fmri_cfg["threshold"] = args.source_fmri_threshold
     if _get_arg_value(args, "source_fmri_tail") is not None:
@@ -353,10 +357,12 @@ def _apply_complexity_overrides(args: argparse.Namespace, config: Any) -> None:
         _apply_config_override(config, "feature_engineering.complexity.pe_delay", args.pe_delay)
     
     complexity_cfg = config.setdefault("feature_engineering", {}).setdefault("complexity", {})
-    if _get_arg_value(args, "complexity_target_hz") is not None:
-        complexity_cfg["target_hz"] = args.complexity_target_hz
-    if _get_arg_value(args, "complexity_target_n_samples") is not None:
-        complexity_cfg["target_n_samples"] = args.complexity_target_n_samples
+    if _get_arg_value(args, "complexity_signal_basis") is not None:
+        complexity_cfg["signal_basis"] = args.complexity_signal_basis
+    if _get_arg_value(args, "complexity_min_segment_sec") is not None:
+        complexity_cfg["min_segment_sec"] = args.complexity_min_segment_sec
+    if _get_arg_value(args, "complexity_min_samples") is not None:
+        complexity_cfg["min_samples"] = args.complexity_min_samples
     if _get_arg_value(args, "complexity_zscore") is not None:
         complexity_cfg["zscore"] = args.complexity_zscore
 
@@ -651,789 +657,166 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     add_common_subject_args(parser)
     add_task_arg(parser)
     add_output_format_args(parser)
-    parser.add_argument(
-        "--categories",
-        nargs="+",
-        choices=FEATURE_CATEGORY_CHOICES,
-        default=None,
-        metavar="CATEGORY",
-        help="Feature categories to process (some are compute-only or visualize-only)",
-    )
-    parser.add_argument(
-        "--bands",
-        nargs="+",
-        default=None,
-        help="Frequency bands to compute (default: all)",
-    )
-    parser.add_argument(
-        "--frequency-bands",
-        nargs="+",
-        default=None,
-        metavar="BAND_DEF",
-        help="Custom frequency band definitions in format 'name:low:high' (e.g., delta:1.0:3.9 theta:4.0:7.9)",
-    )
-    parser.add_argument(
-        "--rois",
-        nargs="+",
-        default=None,
-        metavar="ROI_DEF",
-        help="Custom ROI definitions in format 'name:ch1,ch2,...' (e.g., 'Frontal:Fp1,Fp2,F3,F4')",
-    )
-    parser.add_argument(
-        "--spatial",
-        nargs="+",
-        choices=SPATIAL_MODES,
-        default=None,
-        metavar="MODE",
-        help="Spatial aggregation modes: roi, channels, global (default: roi, global)",
-    )
-    parser.add_argument(
-        "--spatial-transform",
-        choices=["none", "csd", "laplacian"],
-        default=None,
-        help="Spatial transform to reduce volume conduction: none, csd, laplacian",
-    )
-    parser.add_argument(
-        "--tmin",
-        type=float,
-        default=None,
-        help="Start time in seconds for feature extraction window",
-    )
-    parser.add_argument(
-        "--tmax",
-        type=float,
-        default=None,
-        help="End time in seconds for feature extraction window",
-    )
-    parser.add_argument(
-        "--time-range",
-        nargs=3,
-        action="append",
-        metavar=("NAME", "TMIN", "TMAX"),
-        help="Define a named time range (e.g. baseline 0 1). Can be specified multiple times.",
-    )
-    parser.add_argument(
-        "--aggregation-method",
-        choices=["mean", "median"],
-        default="mean",
-        help="Aggregation method for spatial modes (default: mean)",
-    )
 
-    parser.add_argument(
-        "--connectivity-measures",
-        nargs="+",
-        choices=["wpli", "aec", "plv", "pli"],
-        default=None,
-        help="Connectivity measures to compute",
-    )
-    parser.add_argument(
-        "--directed-connectivity-measures",
-        nargs="+",
-        choices=["psi", "dtf", "pdc"],
-        default=None,
-        help="Directed connectivity measures: psi (Phase Slope Index), dtf (Directed Transfer Function), pdc (Partial Directed Coherence)",
-    )
-    parser.add_argument(
-        "--directed-conn-output-level",
-        choices=["full", "global_only"],
-        default=None,
-        help="Directed connectivity output level: full (all channel pairs) or global_only (mean only)",
-    )
-    parser.add_argument(
-        "--directed-conn-mvar-order",
-        type=int,
-        default=None,
-        help="MVAR model order for DTF/PDC computation (default: 10)",
-    )
-    parser.add_argument(
-        "--directed-conn-n-freqs",
-        type=int,
-        default=None,
-        help="Number of frequency bins for directed connectivity (default: 16)",
-    )
-    parser.add_argument(
-        "--directed-conn-min-segment-samples",
-        type=int,
-        default=None,
-        help="Minimum segment samples for directed connectivity (default: 100)",
-    )
-    parser.add_argument(
-        "--source-method",
-        choices=["lcmv", "eloreta"],
-        default=None,
-        help="Source localization method: lcmv (beamformer) or eloreta (inverse)",
-    )
-    parser.add_argument(
-        "--source-spacing",
-        choices=["oct5", "oct6", "ico4", "ico5"],
-        default=None,
-        help="Source space spacing (default: oct6)",
-    )
-    parser.add_argument(
-        "--source-reg",
-        type=float,
-        default=None,
-        help="LCMV regularization parameter (default: 0.05)",
-    )
-    parser.add_argument(
-        "--source-snr",
-        type=float,
-        default=None,
-        help="eLORETA assumed SNR for regularization (default: 3.0)",
-    )
-    parser.add_argument(
-        "--source-loose",
-        type=float,
-        default=None,
-        help="eLORETA loose orientation constraint 0-1 (default: 0.2)",
-    )
-    parser.add_argument(
-        "--source-depth",
-        type=float,
-        default=None,
-        help="eLORETA depth weighting 0-1 (default: 0.8)",
-    )
-    parser.add_argument(
-        "--source-parc",
-        choices=["aparc", "aparc.a2009s", "HCPMMP1"],
-        default=None,
-        help="Brain parcellation for ROI extraction (default: aparc)",
-    )
-    parser.add_argument(
-        "--source-connectivity-method",
-        choices=["aec", "wpli", "plv"],
-        default=None,
-        help="Connectivity method for source-space analysis (default: aec)",
-    )
-    parser.add_argument(
-        "--source-subject",
-        default=None,
-        help="FreeSurfer subject name to use for source localization (e.g., sub-0001). If unset, defaults to sub-{subject}.",
-    )
-    parser.add_argument(
-        "--source-subjects-dir",
-        default=None,
-        help="FreeSurfer SUBJECTS_DIR path for subject-specific source localization.",
-    )
-    parser.add_argument(
-        "--source-trans",
-        default=None,
-        help="EEG↔MRI coregistration transform .fif (required for subject-specific/fMRI-constrained source localization).",
-    )
-    parser.add_argument(
-        "--source-bem",
-        default=None,
-        help="BEM solution .fif (e.g., *-bem-sol.fif) (required for subject-specific/fMRI-constrained source localization).",
-    )
-    parser.add_argument(
-        "--source-mindist-mm",
-        type=float,
-        default=None,
-        help="Minimum distance from sources to inner skull (mm) (default: 5.0).",
-    )
+    # Core arguments
+    parser.add_argument("--categories", nargs="+", choices=FEATURE_CATEGORY_CHOICES, default=None, metavar="CATEGORY", help="Feature categories to process (some are compute-only or visualize-only)")
+    parser.add_argument("--bands", nargs="+", default=None, help="Frequency bands to compute (default: all)")
+    parser.add_argument("--frequency-bands", nargs="+", default=None, metavar="BAND_DEF", help="Custom frequency band definitions in format 'name:low:high' (e.g., delta:1.0:3.9 theta:4.0:7.9)")
+    parser.add_argument("--rois", nargs="+", default=None, metavar="ROI_DEF", help="Custom ROI definitions in format 'name:ch1,ch2,...' (e.g., 'Frontal:Fp1,Fp2,F3,F4')")
+    parser.add_argument("--spatial", nargs="+", choices=SPATIAL_MODES, default=None, metavar="MODE", help="Spatial aggregation modes: roi, channels, global (default: roi, global)")
+    parser.add_argument("--spatial-transform", choices=["none", "csd", "laplacian"], default=None, help="Spatial transform to reduce volume conduction: none, csd, laplacian")
+    parser.add_argument("--spatial-transform-lambda2", type=float, default=None, help="Lambda2 regularization for CSD/Laplacian (default: 1e-5)")
+    parser.add_argument("--spatial-transform-stiffness", type=float, default=None, help="Stiffness for CSD/Laplacian (default: 4.0)")
+    parser.add_argument("--tmin", type=float, default=None, help="Start time in seconds for feature extraction window")
+    parser.add_argument("--tmax", type=float, default=None, help="End time in seconds for feature extraction window")
+    parser.add_argument("--time-range", nargs=3, action="append", metavar=("NAME", "TMIN", "TMAX"), help="Define a named time range (e.g. baseline 0 1). Can be specified multiple times.")
+    parser.add_argument("--aggregation-method", choices=["mean", "median"], default="mean", help="Aggregation method for spatial modes (default: mean)")
 
-    # BEM/Trans generation options (Docker-based)
-    # Note: FS License path is in global config (paths.freesurfer_license)
-    # Default: eeg_pipeline/licenses/license_freesurfer.txt
-    parser.add_argument(
-        "--source-create-trans",
-        action="store_true",
-        default=None,
-        dest="source_create_trans",
-        help="Auto-create coregistration transform via Docker (requires Docker; FS license from global config).",
-    )
-    parser.add_argument(
-        "--source-create-bem-model",
-        action="store_true",
-        default=None,
-        dest="source_create_bem_model",
-        help="Auto-create BEM model via Docker (requires Docker; FS license from global config).",
-    )
-    parser.add_argument(
-        "--source-create-bem-solution",
-        action="store_true",
-        default=None,
-        dest="source_create_bem_solution",
-        help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).",
-    )
+    # Connectivity
+    parser.add_argument("--connectivity-measures", nargs="+", choices=["wpli", "aec", "plv", "pli"], default=None, help="Connectivity measures to compute")
+    parser.add_argument("--conn-output-level", choices=["full", "global_only"], default=None, help="Connectivity output level")
+    parser.add_argument("--conn-graph-metrics", action="store_true", default=None, help="Enable graph metrics for connectivity")
+    parser.add_argument("--no-conn-graph-metrics", action="store_false", dest="conn_graph_metrics", help="Disable graph metrics for connectivity")
+    parser.add_argument("--conn-aec-mode", choices=["orth", "sym", "none"], default=None, help="AEC orthogonalization mode")
+    parser.add_argument("--conn-graph-prop", type=float, default=None, help="Proportion of top edges to keep for graph metrics")
+    parser.add_argument("--conn-window-len", type=float, default=None, help="Sliding window length (s) for connectivity")
+    parser.add_argument("--conn-window-step", type=float, default=None, help="Sliding window step (s) for connectivity")
+    parser.add_argument("--aec-output", nargs="+", choices=["r", "z"], default=None, help="AEC output format: r (raw), z (Fisher-z transform), or both")
+    parser.add_argument("--conn-force-within-epoch-for-ml", action="store_true", default=None, help="Force within_epoch phase estimator when train_mask detected (CV-safe)")
+    parser.add_argument("--no-conn-force-within-epoch-for-ml", action="store_false", dest="conn_force_within_epoch_for_ml", help="Allow across_epochs phase estimator even in CV/machine learning mode")
+    parser.add_argument("--conn-granularity", choices=["trial", "condition", "subject"], default=None, help="Connectivity granularity")
+    parser.add_argument("--conn-min-epochs-per-group", type=int, default=None, help="Min epochs per group for connectivity")
+    parser.add_argument("--conn-min-cycles-per-band", type=float, default=None, help="Min cycles per band for connectivity")
+    parser.add_argument("--conn-warn-no-spatial-transform", action="store_true", default=None, help="Warn if no spatial transform for phase connectivity")
+    parser.add_argument("--no-conn-warn-no-spatial-transform", action="store_false", dest="conn_warn_no_spatial_transform")
+    parser.add_argument("--conn-phase-estimator", choices=["within_epoch", "across_epochs"], default=None, help="Phase estimator mode")
+    parser.add_argument("--conn-min-segment-sec", type=float, default=None, help="Min segment duration for connectivity")
 
-    # Optional fMRI-informed source localization (advanced)
-    parser.add_argument(
-        "--source-fmri",
-        action="store_true",
-        default=None,
-        dest="source_fmri_enabled",
-        help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).",
-    )
-    parser.add_argument(
-        "--no-source-fmri",
-        action="store_false",
-        dest="source_fmri_enabled",
-        help="Disable fMRI-informed source localization (overrides config).",
-    )
-    parser.add_argument(
-        "--source-fmri-stats-map",
-        default=None,
-        help="Path to an fMRI statistical map NIfTI in the same MRI space as the FreeSurfer subject (typically resampled to orig.mgz space).",
-    )
-    parser.add_argument(
-        "--source-fmri-threshold",
-        type=float,
-        default=None,
-        help="Threshold applied to fMRI stats map (default: 3.1).",
-    )
-    parser.add_argument(
-        "--source-fmri-tail",
-        choices=["pos", "abs"],
-        default=None,
-        help="Threshold tail: pos (positive only) or abs (absolute value) (default: pos).",
-    )
-    parser.add_argument(
-        "--source-fmri-cluster-min-voxels",
-        type=int,
-        default=None,
-        help="Minimum cluster size in voxels after thresholding (default: 50).",
-    )
-    parser.add_argument(
-        "--source-fmri-max-clusters",
-        type=int,
-        default=None,
-        help="Maximum number of clusters kept from fMRI map (default: 20).",
-    )
-    parser.add_argument(
-        "--source-fmri-max-voxels-per-cluster",
-        type=int,
-        default=None,
-        help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).",
-    )
-    parser.add_argument(
-        "--source-fmri-max-total-voxels",
-        type=int,
-        default=None,
-        help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).",
-    )
-    parser.add_argument(
-        "--source-fmri-random-seed",
-        type=int,
-        default=None,
-        help="Random seed for voxel subsampling (default: 0 -> nondeterministic).",
-    )
-    # fMRI-specific time windows (independent of EEG feature extraction windows)
-    parser.add_argument(
-        "--source-fmri-window-a-name",
-        default=None,
-        help="Name for window A (e.g., 'plateau').",
-    )
-    parser.add_argument(
-        "--source-fmri-window-a-tmin",
-        type=float,
-        default=None,
-        help="Start time for window A in seconds.",
-    )
-    parser.add_argument(
-        "--source-fmri-window-a-tmax",
-        type=float,
-        default=None,
-        help="End time for window A in seconds.",
-    )
-    parser.add_argument(
-        "--source-fmri-window-b-name",
-        default=None,
-        help="Name for window B (e.g., 'baseline').",
-    )
-    parser.add_argument(
-        "--source-fmri-window-b-tmin",
-        type=float,
-        default=None,
-        help="Start time for window B in seconds.",
-    )
-    parser.add_argument(
-        "--source-fmri-window-b-tmax",
-        type=float,
-        default=None,
-        help="End time for window B in seconds.",
-    )
-    # fMRI contrast builder arguments
-    parser.add_argument(
-        "--source-fmri-contrast-enabled",
-        action="store_true",
-        default=None,
-        dest="source_fmri_contrast_enabled",
-        help="Enable building fMRI contrast from BOLD data (vs. loading pre-computed stats map).",
-    )
-    parser.add_argument(
-        "--source-fmri-cond-a-column",
-        default=None,
-        help="Column for condition A in events.tsv (e.g., 'trial_type', 'pain_binary').",
-    )
-    parser.add_argument(
-        "--source-fmri-cond-a-value",
-        default=None,
-        help="Value for condition A (e.g., 'temp49p3', '1').",
-    )
-    parser.add_argument(
-        "--source-fmri-cond-b-column",
-        default=None,
-        help="Column for condition B in events.tsv.",
-    )
-    parser.add_argument(
-        "--source-fmri-cond-b-value",
-        default=None,
-        help="Value for condition B.",
-    )
-    parser.add_argument(
-        "--source-fmri-contrast-type",
-        choices=["t-test", "paired-t-test", "f-test", "custom"],
-        default=None,
-        help="Type of statistical contrast to compute.",
-    )
-    parser.add_argument(
-        "--source-fmri-contrast-cond1",
-        default=None,
-        help="First condition name for contrast (e.g., 'pain_high').",
-    )
-    parser.add_argument(
-        "--source-fmri-contrast-cond2",
-        default=None,
-        help="Second condition name for contrast (e.g., 'pain_low').",
-    )
-    parser.add_argument(
-        "--source-fmri-contrast-formula",
-        default=None,
-        help="Custom contrast formula (e.g., 'pain_high - pain_low').",
-    )
-    parser.add_argument(
-        "--source-fmri-contrast-name",
-        default=None,
-        help="Name for the contrast output (default: 'pain_vs_baseline').",
-    )
-    parser.add_argument(
-        "--source-fmri-runs",
-        default=None,
-        help="Comma-separated run numbers to include (e.g., '1,2,3').",
-    )
-    parser.add_argument(
-        "--source-fmri-hrf-model",
-        choices=["spm", "flobs", "fir"],
-        default=None,
-        help="HRF model for GLM (default: spm).",
-    )
-    parser.add_argument(
-        "--source-fmri-drift-model",
-        choices=["none", "cosine", "polynomial"],
-        default=None,
-        help="Drift model for GLM (default: cosine).",
-    )
-    parser.add_argument(
-        "--source-fmri-high-pass",
-        type=float,
-        default=None,
-        help="High-pass filter cutoff in Hz (default: 0.008).",
-    )
-    parser.add_argument(
-        "--source-fmri-low-pass",
-        type=float,
-        default=None,
-        help="Low-pass filter cutoff in Hz (default: 0.1).",
-    )
-    parser.add_argument(
-        "--source-fmri-cluster-correction",
-        action="store_true",
-        default=None,
-        dest="source_fmri_cluster_correction",
-        help="Enable cluster-level FWE correction.",
-    )
-    parser.add_argument(
-        "--source-fmri-cluster-p-threshold",
-        type=float,
-        default=None,
-        help="Cluster-forming p-threshold (default: 0.001).",
-    )
-    parser.add_argument(
-        "--source-fmri-output-type",
-        choices=["z-score", "t-stat", "cope", "beta"],
-        default=None,
-        help="Output statistical map type (default: z-score).",
-    )
-    parser.add_argument(
-        "--source-fmri-resample-to-fs",
-        action="store_true",
-        default=None,
-        dest="source_fmri_resample_to_fs",
-        help="Auto-resample stats map to FreeSurfer subject space.",
-    )
-    parser.add_argument(
-        "--no-source-fmri-resample-to-fs",
-        action="store_false",
-        dest="source_fmri_resample_to_fs",
-        help="Do not auto-resample stats map to FreeSurfer subject space.",
-    )
-    parser.add_argument(
-        "--pac-phase-range",
-        nargs=2,
-        type=float,
-        default=None,
-        metavar=("MIN", "MAX"),
-        help="Phase frequency range for PAC/CFC (Hz)",
-    )
-    parser.add_argument(
-        "--pac-amp-range",
-        nargs=2,
-        type=float,
-        default=None,
-        metavar=("MIN", "MAX"),
-        help="Amplitude frequency range for PAC/CFC (Hz)",
-    )
-    parser.add_argument(
-        "--aperiodic-range",
-        nargs=2,
-        type=float,
-        default=None,
-        metavar=("MIN", "MAX"),
-        help="Frequency range for aperiodic fit (Hz)",
-    )
-    parser.add_argument(
-        "--pe-order",
-        type=int,
-        default=None,
-        help="Permutation entropy order (3-7, default: from config)",
-    )
-    parser.add_argument(
-        "--erp-baseline",
-        action="store_true",
-        default=None,
-        help="Enable baseline correction for ERP",
-    )
-    parser.add_argument(
-        "--no-erp-baseline",
-        action="store_false",
-        dest="erp_baseline",
-        help="Disable baseline correction for ERP",
-    )
-    parser.add_argument(
-        "--erp-allow-no-baseline",
-        action="store_true",
-        default=None,
-        help="Allow ERP extraction when baseline window is missing",
-    )
-    parser.add_argument(
-        "--no-erp-allow-no-baseline",
-        action="store_false",
-        dest="erp_allow_no_baseline",
-        help="Require baseline window when ERP baseline correction is enabled",
-    )
-    parser.add_argument(
-        "--erp-components",
-        nargs="+",
-        default=None,
-        metavar="COMP",
-        help="ERP component windows, e.g. n1=0.10-0.20 n2=0.20-0.35 p2=0.35-0.50",
-    )
-    parser.add_argument(
-        "--erp-lowpass-hz",
-        type=float,
-        default=None,
-        help="Low-pass filter frequency (Hz) for ERP peak detection (default: 30.0)",
-    )
-    parser.add_argument(
-        "--burst-threshold",
-        type=float,
-        default=None,
-        help="Z-score threshold for burst detection (used with zscore/mad methods)",
-    )
-    parser.add_argument(
-        "--burst-threshold-method",
-        choices=["percentile", "zscore", "mad"],
-        default=None,
-        help="Burst threshold method: percentile, zscore, or mad (default: percentile)",
-    )
-    parser.add_argument(
-        "--burst-threshold-percentile",
-        type=float,
-        default=None,
-        help="Percentile threshold for burst detection (0-100, default: 95.0)",
-    )
-    parser.add_argument(
-        "--burst-bands",
-        nargs="+",
-        default=None,
-        metavar="BAND",
-        help="Burst bands to compute, e.g. beta gamma",
-    )
+    # Directed connectivity
+    parser.add_argument("--directed-connectivity-measures", nargs="+", choices=["psi", "dtf", "pdc"], default=None, help="Directed connectivity measures: psi (Phase Slope Index), dtf (Directed Transfer Function), pdc (Partial Directed Coherence)")
+    parser.add_argument("--directed-conn-output-level", choices=["full", "global_only"], default=None, help="Directed connectivity output level: full (all channel pairs) or global_only (mean only)")
+    parser.add_argument("--directed-conn-mvar-order", type=int, default=None, help="MVAR model order for DTF/PDC computation (default: 10)")
+    parser.add_argument("--directed-conn-n-freqs", type=int, default=None, help="Number of frequency bins for directed connectivity (default: 16)")
+    parser.add_argument("--directed-conn-min-segment-samples", type=int, default=None, help="Minimum segment samples for directed connectivity (default: 100)")
 
-    parser.add_argument(
-        "--power-baseline-mode",
-        choices=["logratio", "mean", "ratio", "zscore", "zlogratio"],
-        default=None,
-        help="Baseline normalization mode for power",
-    )
-    parser.add_argument(
-        "--power-require-baseline",
-        action="store_true",
-        default=None,
-        help="Require baseline for power normalization",
-    )
-    parser.add_argument(
-        "--no-power-require-baseline",
-        action="store_false",
-        dest="power_require_baseline",
-        help="Allow raw log power without baseline",
-    )
-    parser.add_argument(
-        "--spectral-edge-percentile",
-        type=float,
-        default=None,
-        help="Percentile for spectral edge frequency (0-1)",
-    )
-    parser.add_argument(
-        "--ratio-pairs",
-        nargs="+",
-        default=None,
-        metavar="PAIR",
-        help="Band power ratio pairs, e.g. theta:beta theta:alpha alpha:beta",
-    )
-    parser.add_argument(
-        "--asymmetry-channel-pairs",
-        nargs="+",
-        default=None,
-        metavar="PAIR",
-        help="Channel pairs for asymmetry, e.g. F3:F4 C3:C4",
-    )
+    # Source localization
+    parser.add_argument("--source-method", choices=["lcmv", "eloreta"], default=None, help="Source localization method: lcmv (beamformer) or eloreta (inverse)")
+    parser.add_argument("--source-spacing", choices=["oct5", "oct6", "ico4", "ico5"], default=None, help="Source space spacing (default: oct6)")
+    parser.add_argument("--source-reg", type=float, default=None, help="LCMV regularization parameter (default: 0.05)")
+    parser.add_argument("--source-snr", type=float, default=None, help="eLORETA assumed SNR for regularization (default: 3.0)")
+    parser.add_argument("--source-loose", type=float, default=None, help="eLORETA loose orientation constraint 0-1 (default: 0.2)")
+    parser.add_argument("--source-depth", type=float, default=None, help="eLORETA depth weighting 0-1 (default: 0.8)")
+    parser.add_argument("--source-parc", choices=["aparc", "aparc.a2009s", "HCPMMP1"], default=None, help="Brain parcellation for ROI extraction (default: aparc)")
+    parser.add_argument("--source-connectivity-method", choices=["aec", "wpli", "plv"], default=None, help="Connectivity method for source-space analysis (default: aec)")
+    parser.add_argument("--source-subject", default=None, help="FreeSurfer subject name to use for source localization (e.g., sub-0001). If unset, defaults to sub-{subject}.")
+    parser.add_argument("--source-subjects-dir", default=None, help="FreeSurfer SUBJECTS_DIR path for subject-specific source localization.")
+    parser.add_argument("--source-trans", default=None, help="EEG↔MRI coregistration transform .fif (required for subject-specific/fMRI-constrained source localization).")
+    parser.add_argument("--source-bem", default=None, help="BEM solution .fif (e.g., *-bem-sol.fif) (required for subject-specific/fMRI-constrained source localization).")
+    parser.add_argument("--source-mindist-mm", type=float, default=None, help="Minimum distance from sources to inner skull (mm) (default: 5.0).")
+    parser.add_argument("--source-create-trans", action="store_true", default=None, dest="source_create_trans", help="Auto-create coregistration transform via Docker (requires Docker; FS license from global config).")
+    parser.add_argument("--source-create-bem-model", action="store_true", default=None, dest="source_create_bem_model", help="Auto-create BEM model via Docker (requires Docker; FS license from global config).")
+    parser.add_argument("--source-create-bem-solution", action="store_true", default=None, dest="source_create_bem_solution", help="Auto-create BEM solution via Docker (requires Docker; FS license from global config).")
 
-    parser.add_argument(
-        "--conn-output-level",
-        choices=["full", "global_only"],
-        default=None,
-        help="Connectivity output level",
-    )
-    parser.add_argument(
-        "--conn-graph-metrics",
-        action="store_true",
-        default=None,
-        help="Enable graph metrics for connectivity",
-    )
-    parser.add_argument(
-        "--no-conn-graph-metrics",
-        action="store_false",
-        dest="conn_graph_metrics",
-        help="Disable graph metrics for connectivity",
-    )
-    parser.add_argument(
-        "--conn-aec-mode",
-        choices=["orth", "sym", "none"],
-        default=None,
-        help="AEC orthogonalization mode",
-    )
-    parser.add_argument(
-        "--tfr-freq-min",
-        type=float,
-        default=None,
-        help="Minimum frequency for TFR (Hz)",
-    )
-    parser.add_argument(
-        "--tfr-freq-max",
-        type=float,
-        default=None,
-        help="Maximum frequency for TFR (Hz)",
-    )
-    parser.add_argument(
-        "--tfr-n-freqs",
-        type=int,
-        default=None,
-        help="Number of frequencies for TFR",
-    )
-    parser.add_argument(
-        "--tfr-min-cycles",
-        type=float,
-        default=None,
-        help="Minimum number of cycles for Morlet wavelets",
-    )
-    parser.add_argument(
-        "--tfr-n-cycles-factor",
-        type=float,
-        default=None,
-        help="Cycles factor (freq/factor) for Morlet wavelets",
-    )
-    parser.add_argument(
-        "--tfr-decim",
-        type=int,
-        default=None,
-        help="Decimation factor for TFR",
-    )
-    parser.add_argument(
-        "--tfr-workers",
-        type=int,
-        default=None,
-        help="Number of parallel workers for TFR computation",
-    )
-    parser.add_argument(
-        "--aperiodic-peak-z",
-        type=float,
-        default=None,
-        help="Peak rejection Z-threshold for aperiodic fit",
-    )
-    parser.add_argument(
-        "--aperiodic-min-r2",
-        type=float,
-        default=None,
-        help="Minimum R2 for aperiodic fit",
-    )
-    parser.add_argument(
-        "--aperiodic-min-points",
-        type=int,
-        default=None,
-        help="Minimum fit points for aperiodic",
-    )
-    parser.add_argument(
-        "--aperiodic-subtract-evoked",
-        action="store_true",
-        default=None,
-        help="Subtract evoked response for induced spectra (recommended for pain paradigms)",
-    )
-    parser.add_argument(
-        "--conn-graph-prop",
-        type=float,
-        default=None,
-        help="Proportion of top edges to keep for graph metrics",
-    )
-    parser.add_argument(
-        "--conn-window-len",
-        type=float,
-        default=None,
-        help="Sliding window length (s) for connectivity",
-    )
-    parser.add_argument(
-        "--conn-window-step",
-        type=float,
-        default=None,
-        help="Sliding window step (s) for connectivity",
-    )
-    parser.add_argument(
-        "--pac-method",
-        choices=["mvl", "kl", "tort", "ozkurt"],
-        default=None,
-        help="PAC estimation method",
-    )
-    parser.add_argument(
-        "--pac-min-epochs",
-        type=int,
-        default=None,
-        help="Minimum epochs for PAC computation",
-    )
-    parser.add_argument(
-        "--pac-pairs",
-        nargs="+",
-        default=None,
-        metavar="PAIR",
-        help="PAC band pairs, e.g. theta:gamma alpha:gamma (uses time_frequency_analysis.bands)",
-    )
-    parser.add_argument(
-        "--pe-delay",
-        type=int,
-        default=None,
-        help="Permutation entropy delay",
-    )
-    parser.add_argument(
-        "--burst-min-duration",
-        type=int,
-        default=None,
-        help="Minimum burst duration (ms)",
-    )
-    parser.add_argument(
-        "--burst-min-cycles",
-        type=float,
-        default=None,
-        help="Minimum oscillatory cycles for burst detection",
-    )
-    parser.add_argument(
-        "--min-epochs",
-        type=int,
-        default=None,
-        help="Minimum epochs required for features",
-    )
-    parser.add_argument(
-        "--fail-on-missing-windows",
-        action="store_true",
-        default=None,
-        help="Fail if baseline/active windows are missing",
-    )
-    parser.add_argument(
-        "--no-fail-on-missing-windows",
-        action="store_false",
-        dest="fail_on_missing_windows",
-        help="Do not fail if baseline/active windows are missing",
-    )
-    parser.add_argument(
-        "--fail-on-missing-named-window",
-        action="store_true",
-        default=None,
-        help="Fail if a named time window is missing",
-    )
-    parser.add_argument(
-        "--no-fail-on-missing-named-window",
-        action="store_false",
-        dest="fail_on_missing_named_window",
-        help="Do not fail if a named time window is missing",
-    )
-    parser.add_argument(
-        "--save-subject-level-features",
-        action="store_true",
-        default=None,
-        help="Save subject-level features for constant values",
-    )
-    parser.add_argument(
-        "--no-save-subject-level-features",
-        action="store_false",
-        dest="save_subject_level_features",
-        help="Do not save subject-level features",
-    )
-    parser.add_argument(
-        "--itpc-method",
-        choices=["global", "fold_global", "loo"],
-        default=None,
-        help="ITPC computation method: global (all trials), fold_global (training only, CV-safe), loo (leave-one-out)",
-    )
-    parser.add_argument(
-        "--aperiodic-min-segment-sec",
-        type=float,
-        default=None,
-        help="Minimum segment duration (seconds) for stable aperiodic fits (default: 2.0)",
-    )
-    parser.add_argument(
-        "--aec-output",
-        nargs="+",
-        choices=["r", "z"],
-        default=None,
-        help="AEC output format: r (raw), z (Fisher-z transform), or both",
-    )
-    parser.add_argument(
-        "--ratio-source",
-        choices=["raw", "powcorr"],
-        default=None,
-        help="Power source for band ratios: raw (absolute) or powcorr (aperiodic-adjusted)",
-    )
-    parser.add_argument(
-        "--conn-force-within-epoch-for-ml",
-        action="store_true",
-        default=None,
-        help="Force within_epoch phase estimator when train_mask detected (CV-safe)",
-    )
-    parser.add_argument(
-        "--no-conn-force-within-epoch-for-ml",
-        action="store_false",
-        dest="conn_force_within_epoch_for_ml",
-        help="Allow across_epochs phase estimator even in CV/machine learning mode",
-    )
-    
-    # ITPC additional options
-    parser.add_argument("--itpc-allow-unsafe-loo", action="store_true", default=None, help="Allow unsafe LOO ITPC computation")
-    parser.add_argument("--no-itpc-allow-unsafe-loo", action="store_false", dest="itpc_allow_unsafe_loo")
-    parser.add_argument("--itpc-baseline-correction", choices=["none", "subtract"], default=None, help="ITPC baseline correction mode")
-    parser.add_argument("--itpc-condition-column", default=None, help="Column for condition-based ITPC (avoids pseudo-replication)")
-    parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Specific condition values to compute ITPC for (space-separated)")
-    parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
-    
-    # Spectral advanced options
+    # fMRI-informed source localization
+    parser.add_argument("--source-fmri", action="store_true", default=None, dest="source_fmri_enabled", help="Enable fMRI-informed source localization (requires --source-subjects-dir/--source-trans/--source-bem and a stats map).")
+    parser.add_argument("--no-source-fmri", action="store_false", dest="source_fmri_enabled", help="Disable fMRI-informed source localization (overrides config).")
+    parser.add_argument("--source-fmri-stats-map", default=None, help="Path to an fMRI statistical map NIfTI in the same MRI space as the FreeSurfer subject (typically resampled to orig.mgz space).")
+    parser.add_argument("--source-fmri-provenance", choices=["independent", "same_dataset"], default=None, help="Provenance of the fMRI constraint relative to EEG labels: independent (recommended) or same_dataset (circularity risk).")
+    parser.add_argument("--source-fmri-require-provenance", action="store_true", default=None, dest="source_fmri_require_provenance", help="Require explicit fMRI provenance when using fMRI constraints.")
+    parser.add_argument("--no-source-fmri-require-provenance", action="store_false", dest="source_fmri_require_provenance", help="Allow unknown fMRI provenance (not recommended).")
+    parser.add_argument("--source-fmri-threshold", type=float, default=None, help="Threshold applied to fMRI stats map (default: 3.1).")
+    parser.add_argument("--source-fmri-tail", choices=["pos", "abs"], default=None, help="Threshold tail: pos (positive only) or abs (absolute value) (default: pos).")
+    parser.add_argument("--source-fmri-cluster-min-voxels", type=int, default=None, help="Minimum cluster size in voxels after thresholding (default: 50).")
+    parser.add_argument("--source-fmri-max-clusters", type=int, default=None, help="Maximum number of clusters kept from fMRI map (default: 20).")
+    parser.add_argument("--source-fmri-max-voxels-per-cluster", type=int, default=None, help="Maximum voxels sampled per cluster (default: 2000; set 0 for no limit).")
+    parser.add_argument("--source-fmri-max-total-voxels", type=int, default=None, help="Maximum total voxels across all clusters (default: 20000; set 0 for no limit).")
+    parser.add_argument("--source-fmri-random-seed", type=int, default=None, help="Random seed for voxel subsampling (default: 0 -> nondeterministic).")
+    parser.add_argument("--source-fmri-window-a-name", default=None, help="Name for window A (e.g., 'plateau').")
+    parser.add_argument("--source-fmri-window-a-tmin", type=float, default=None, help="Start time for window A in seconds.")
+    parser.add_argument("--source-fmri-window-a-tmax", type=float, default=None, help="End time for window A in seconds.")
+    parser.add_argument("--source-fmri-window-b-name", default=None, help="Name for window B (e.g., 'baseline').")
+    parser.add_argument("--source-fmri-window-b-tmin", type=float, default=None, help="Start time for window B in seconds.")
+    parser.add_argument("--source-fmri-window-b-tmax", type=float, default=None, help="End time for window B in seconds.")
+    parser.add_argument("--source-fmri-contrast-enabled", action="store_true", default=None, dest="source_fmri_contrast_enabled", help="Enable building fMRI contrast from BOLD data (vs. loading pre-computed stats map).")
+    parser.add_argument("--source-fmri-cond-a-column", default=None, help="Column for condition A in events.tsv (e.g., 'trial_type', 'pain_binary').")
+    parser.add_argument("--source-fmri-cond-a-value", default=None, help="Value for condition A (e.g., 'temp49p3', '1').")
+    parser.add_argument("--source-fmri-cond-b-column", default=None, help="Column for condition B in events.tsv.")
+    parser.add_argument("--source-fmri-cond-b-value", default=None, help="Value for condition B.")
+    parser.add_argument("--source-fmri-contrast-type", choices=["t-test", "paired-t-test", "f-test", "custom"], default=None, help="Type of statistical contrast to compute.")
+    parser.add_argument("--source-fmri-contrast-cond1", default=None, help="First condition name for contrast (e.g., 'pain_high').")
+    parser.add_argument("--source-fmri-contrast-cond2", default=None, help="Second condition name for contrast (e.g., 'pain_low').")
+    parser.add_argument("--source-fmri-contrast-formula", default=None, help="Custom contrast formula (e.g., 'pain_high - pain_low').")
+    parser.add_argument("--source-fmri-contrast-name", default=None, help="Name for the contrast output (default: 'pain_vs_baseline').")
+    parser.add_argument("--source-fmri-runs", default=None, help="Comma-separated run numbers to include (e.g., '1,2,3').")
+    parser.add_argument("--source-fmri-hrf-model", choices=["spm", "flobs", "fir"], default=None, help="HRF model for GLM (default: spm).")
+    parser.add_argument("--source-fmri-drift-model", choices=["none", "cosine", "polynomial"], default=None, help="Drift model for GLM (default: cosine).")
+    parser.add_argument("--source-fmri-high-pass", type=float, default=None, help="High-pass filter cutoff in Hz (default: 0.008).")
+    parser.add_argument("--source-fmri-low-pass", type=float, default=None, help="Low-pass filter cutoff in Hz (default: 0.1).")
+    parser.add_argument("--source-fmri-cluster-correction", action="store_true", default=None, dest="source_fmri_cluster_correction", help="Enable cluster-level FWE correction.")
+    parser.add_argument("--source-fmri-cluster-p-threshold", type=float, default=None, help="Cluster-forming p-threshold (default: 0.001).")
+    parser.add_argument("--source-fmri-output-type", choices=["z-score", "t-stat", "cope", "beta"], default=None, help="Output statistical map type (default: z-score).")
+    parser.add_argument("--source-fmri-resample-to-fs", action="store_true", default=None, dest="source_fmri_resample_to_fs", help="Auto-resample stats map to FreeSurfer subject space.")
+    parser.add_argument("--no-source-fmri-resample-to-fs", action="store_false", dest="source_fmri_resample_to_fs", help="Do not auto-resample stats map to FreeSurfer subject space.")
+
+    # PAC
+    parser.add_argument("--pac-phase-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Phase frequency range for PAC/CFC (Hz)")
+    parser.add_argument("--pac-amp-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Amplitude frequency range for PAC/CFC (Hz)")
+    parser.add_argument("--pac-method", choices=["mvl", "kl", "tort", "ozkurt"], default=None, help="PAC estimation method")
+    parser.add_argument("--pac-min-epochs", type=int, default=None, help="Minimum epochs for PAC computation")
+    parser.add_argument("--pac-pairs", nargs="+", default=None, metavar="PAIR", help="PAC band pairs, e.g. theta:gamma alpha:gamma (uses time_frequency_analysis.bands)")
+    parser.add_argument("--pac-source", choices=["precomputed", "tfr"], default=None, help="PAC source: precomputed (Hilbert) or tfr (wavelet)")
+    parser.add_argument("--pac-normalize", action="store_true", default=None, help="Normalize PAC values")
+    parser.add_argument("--no-pac-normalize", action="store_false", dest="pac_normalize")
+    parser.add_argument("--pac-n-surrogates", type=int, default=None, help="Number of surrogates for PAC (0=none)")
+    parser.add_argument("--pac-allow-harmonic-overlap", action="store_true", default=None, help="Allow harmonic overlap in PAC")
+    parser.add_argument("--no-pac-allow-harmonic-overlap", action="store_false", dest="pac_allow_harmonic_overlap")
+    parser.add_argument("--pac-max-harmonic", type=int, default=None, help="Max harmonic to check for overlap")
+    parser.add_argument("--pac-harmonic-tolerance-hz", type=float, default=None, help="Harmonic tolerance in Hz")
+    parser.add_argument("--pac-compute-waveform-qc", action="store_true", default=None, help="Compute waveform QC for PAC")
+    parser.add_argument("--no-pac-compute-waveform-qc", action="store_false", dest="pac_compute_waveform_qc")
+    parser.add_argument("--pac-waveform-offset-ms", type=float, default=None, help="Waveform offset in ms for PAC QC")
+    parser.add_argument("--pac-random-seed", type=int, default=None, help="Random seed for PAC surrogate testing")
+
+    # Aperiodic
+    parser.add_argument("--aperiodic-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Frequency range for aperiodic fit (Hz)")
+    parser.add_argument("--aperiodic-peak-z", type=float, default=None, help="Peak rejection Z-threshold for aperiodic fit")
+    parser.add_argument("--aperiodic-min-r2", type=float, default=None, help="Minimum R2 for aperiodic fit")
+    parser.add_argument("--aperiodic-min-points", type=int, default=None, help="Minimum fit points for aperiodic")
+    parser.add_argument("--aperiodic-subtract-evoked", action="store_true", default=None, help="Subtract evoked response for induced spectra (recommended for pain paradigms)")
+    parser.add_argument("--aperiodic-min-segment-sec", type=float, default=None, help="Minimum segment duration (seconds) for stable aperiodic fits (default: 2.0)")
+    parser.add_argument("--aperiodic-model", choices=["fixed", "knee"], default=None, help="Aperiodic model type")
+    parser.add_argument("--aperiodic-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for aperiodic")
+    parser.add_argument("--aperiodic-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from aperiodic fit")
+    parser.add_argument("--no-aperiodic-exclude-line-noise", action="store_false", dest="aperiodic_exclude_line_noise")
+    parser.add_argument("--aperiodic-line-noise-freq", type=float, default=None, help="Line noise frequency for aperiodic")
+    parser.add_argument("--aperiodic-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude from aperiodic fit")
+    parser.add_argument("--aperiodic-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude from aperiodic fit")
+
+    # ERP
+    parser.add_argument("--erp-baseline", action="store_true", default=None, help="Enable baseline correction for ERP")
+    parser.add_argument("--no-erp-baseline", action="store_false", dest="erp_baseline", help="Disable baseline correction for ERP")
+    parser.add_argument("--erp-allow-no-baseline", action="store_true", default=None, help="Allow ERP extraction when baseline window is missing")
+    parser.add_argument("--no-erp-allow-no-baseline", action="store_false", dest="erp_allow_no_baseline", help="Require baseline window when ERP baseline correction is enabled")
+    parser.add_argument("--erp-components", nargs="+", default=None, metavar="COMP", help="ERP component windows, e.g. n1=0.10-0.20 n2=0.20-0.35 p2=0.35-0.50")
+    parser.add_argument("--erp-lowpass-hz", type=float, default=None, help="Low-pass filter frequency (Hz) for ERP peak detection (default: 30.0)")
+
+    # Burst
+    parser.add_argument("--burst-threshold", type=float, default=None, help="Z-score threshold for burst detection (used with zscore/mad methods)")
+    parser.add_argument("--burst-threshold-method", choices=["percentile", "zscore", "mad"], default=None, help="Burst threshold method: percentile, zscore, or mad (default: percentile)")
+    parser.add_argument("--burst-threshold-percentile", type=float, default=None, help="Percentile threshold for burst detection (0-100, default: 95.0)")
+    parser.add_argument("--burst-bands", nargs="+", default=None, metavar="BAND", help="Burst bands to compute, e.g. beta gamma")
+    parser.add_argument("--burst-min-duration", type=int, default=None, help="Minimum burst duration (ms)")
+    parser.add_argument("--burst-min-cycles", type=float, default=None, help="Minimum oscillatory cycles for burst detection")
+
+    # Power
+    parser.add_argument("--power-baseline-mode", choices=["logratio", "mean", "ratio", "zscore", "zlogratio"], default=None, help="Baseline normalization mode for power")
+    parser.add_argument("--power-require-baseline", action="store_true", default=None, help="Require baseline for power normalization")
+    parser.add_argument("--no-power-require-baseline", action="store_false", dest="power_require_baseline", help="Allow raw log power without baseline")
+
+    # Spectral
+    parser.add_argument("--spectral-edge-percentile", type=float, default=None, help="Percentile for spectral edge frequency (0-1)")
+    parser.add_argument("--ratio-pairs", nargs="+", default=None, metavar="PAIR", help="Band power ratio pairs, e.g. theta:beta theta:alpha alpha:beta")
+    parser.add_argument("--ratio-source", choices=["raw", "powcorr"], default=None, help="Power source for band ratios: raw (absolute) or powcorr (aperiodic-adjusted)")
     parser.add_argument("--spectral-include-log-ratios", action="store_true", default=None, help="Include log ratios in spectral features")
     parser.add_argument("--no-spectral-include-log-ratios", action="store_false", dest="spectral_include_log_ratios")
     parser.add_argument("--spectral-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for spectral features")
@@ -1447,58 +830,53 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--spectral-segments", nargs="+", default=None, help="Segments for spectral features (e.g., baseline active)")
     parser.add_argument("--spectral-min-segment-sec", type=float, default=None, help="Minimum segment duration for spectral")
     parser.add_argument("--spectral-min-cycles-at-fmin", type=float, default=None, help="Minimum cycles at lowest frequency")
-    
-    # Band envelope options
+
+    # Asymmetry
+    parser.add_argument("--asymmetry-channel-pairs", nargs="+", default=None, metavar="PAIR", help="Channel pairs for asymmetry, e.g. F3:F4 C3:C4")
+
+    # TFR
+    parser.add_argument("--tfr-freq-min", type=float, default=None, help="Minimum frequency for TFR (Hz)")
+    parser.add_argument("--tfr-freq-max", type=float, default=None, help="Maximum frequency for TFR (Hz)")
+    parser.add_argument("--tfr-n-freqs", type=int, default=None, help="Number of frequencies for TFR")
+    parser.add_argument("--tfr-min-cycles", type=float, default=None, help="Minimum number of cycles for Morlet wavelets")
+    parser.add_argument("--tfr-n-cycles-factor", type=float, default=None, help="Cycles factor (freq/factor) for Morlet wavelets")
+    parser.add_argument("--tfr-decim", type=int, default=None, help="Decimation factor for TFR")
+    parser.add_argument("--tfr-workers", type=int, default=None, help="Number of parallel workers for TFR computation")
+    parser.add_argument("--tfr-max-cycles", type=float, default=None, help="Maximum cycles for Morlet wavelets")
+    parser.add_argument("--tfr-decim-power", type=int, default=None, help="Decimation factor for power TFR")
+    parser.add_argument("--tfr-decim-phase", type=int, default=None, help="Decimation factor for phase TFR")
+
+    # ITPC
+    parser.add_argument("--itpc-method", choices=["global", "fold_global", "loo"], default=None, help="ITPC computation method: global (all trials), fold_global (training only, CV-safe), loo (leave-one-out)")
+    parser.add_argument("--itpc-allow-unsafe-loo", action="store_true", default=None, help="Allow unsafe LOO ITPC computation")
+    parser.add_argument("--no-itpc-allow-unsafe-loo", action="store_false", dest="itpc_allow_unsafe_loo")
+    parser.add_argument("--itpc-baseline-correction", choices=["none", "subtract"], default=None, help="ITPC baseline correction mode")
+    parser.add_argument("--itpc-condition-column", default=None, help="Column for condition-based ITPC (avoids pseudo-replication)")
+    parser.add_argument("--itpc-condition-values", nargs="+", default=None, help="Specific condition values to compute ITPC for (space-separated)")
+    parser.add_argument("--itpc-min-trials-per-condition", type=int, default=None, help="Minimum trials per condition for reliable ITPC (default: 10)")
+
+    # Band envelope
     parser.add_argument("--band-envelope-pad-sec", type=float, default=None, help="Padding in seconds for band envelope")
     parser.add_argument("--band-envelope-pad-cycles", type=float, default=None, help="Padding in cycles for band envelope")
-    
-    # IAF options
+
+    # IAF
     parser.add_argument("--iaf-enabled", action="store_true", default=None, help="Enable individualized alpha frequency")
     parser.add_argument("--no-iaf-enabled", action="store_false", dest="iaf_enabled")
     parser.add_argument("--iaf-alpha-width-hz", type=float, default=None, help="IAF alpha band width in Hz")
     parser.add_argument("--iaf-search-range", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="IAF search range in Hz")
     parser.add_argument("--iaf-min-prominence", type=float, default=None, help="IAF minimum peak prominence")
     parser.add_argument("--iaf-rois", nargs="+", default=None, help="ROIs for IAF detection")
-    
-    # Aperiodic advanced options
-    parser.add_argument("--aperiodic-model", choices=["fixed", "knee"], default=None, help="Aperiodic model type")
-    parser.add_argument("--aperiodic-psd-method", choices=["multitaper", "welch"], default=None, help="PSD method for aperiodic")
-    parser.add_argument("--aperiodic-exclude-line-noise", action="store_true", default=None, help="Exclude line noise from aperiodic fit")
-    parser.add_argument("--no-aperiodic-exclude-line-noise", action="store_false", dest="aperiodic_exclude_line_noise")
-    parser.add_argument("--aperiodic-line-noise-freq", type=float, default=None, help="Line noise frequency for aperiodic")
-    parser.add_argument("--aperiodic-line-noise-width-hz", type=float, default=None, help="Line noise frequency band width to exclude from aperiodic fit")
-    parser.add_argument("--aperiodic-line-noise-harmonics", type=int, default=None, help="Number of line noise harmonics to exclude from aperiodic fit")
-    
-    # Connectivity advanced options
-    parser.add_argument("--conn-granularity", choices=["trial", "condition", "subject"], default=None, help="Connectivity granularity")
-    parser.add_argument("--conn-min-epochs-per-group", type=int, default=None, help="Min epochs per group for connectivity")
-    parser.add_argument("--conn-min-cycles-per-band", type=float, default=None, help="Min cycles per band for connectivity")
-    parser.add_argument("--conn-warn-no-spatial-transform", action="store_true", default=None, help="Warn if no spatial transform for phase connectivity")
-    parser.add_argument("--no-conn-warn-no-spatial-transform", action="store_false", dest="conn_warn_no_spatial_transform")
-    parser.add_argument("--conn-phase-estimator", choices=["within_epoch", "across_epochs"], default=None, help="Phase estimator mode")
-    parser.add_argument("--conn-min-segment-sec", type=float, default=None, help="Min segment duration for connectivity")
-    
-    # PAC advanced options
-    parser.add_argument("--pac-source", choices=["precomputed", "tfr"], default=None, help="PAC source: precomputed (Hilbert) or tfr (wavelet)")
-    parser.add_argument("--pac-normalize", action="store_true", default=None, help="Normalize PAC values")
-    parser.add_argument("--no-pac-normalize", action="store_false", dest="pac_normalize")
-    parser.add_argument("--pac-n-surrogates", type=int, default=None, help="Number of surrogates for PAC (0=none)")
-    parser.add_argument("--pac-allow-harmonic-overlap", action="store_true", default=None, help="Allow harmonic overlap in PAC")
-    parser.add_argument("--no-pac-allow-harmonic-overlap", action="store_false", dest="pac_allow_harmonic_overlap")
-    parser.add_argument("--pac-max-harmonic", type=int, default=None, help="Max harmonic to check for overlap")
-    parser.add_argument("--pac-harmonic-tolerance-hz", type=float, default=None, help="Harmonic tolerance in Hz")
-    parser.add_argument("--pac-compute-waveform-qc", action="store_true", default=None, help="Compute waveform QC for PAC")
-    parser.add_argument("--no-pac-compute-waveform-qc", action="store_false", dest="pac_compute_waveform_qc")
-    parser.add_argument("--pac-waveform-offset-ms", type=float, default=None, help="Waveform offset in ms for PAC QC")
-    parser.add_argument("--pac-random-seed", type=int, default=None, help="Random seed for PAC surrogate testing")
-    
-    # Complexity advanced options
-    parser.add_argument("--complexity-target-hz", type=float, default=None, help="Target sampling rate for complexity")
-    parser.add_argument("--complexity-target-n-samples", type=int, default=None, help="Target number of samples for complexity")
+
+    # Complexity
+    parser.add_argument("--pe-order", type=int, default=None, help="Permutation entropy order (3-7, default: from config)")
+    parser.add_argument("--pe-delay", type=int, default=None, help="Permutation entropy delay")
+    parser.add_argument("--complexity-signal-basis", choices=["filtered", "envelope"], default=None, help="Complexity signal basis")
+    parser.add_argument("--complexity-min-segment-sec", type=float, default=None, help="Minimum segment duration for complexity (sec)")
+    parser.add_argument("--complexity-min-samples", type=int, default=None, help="Minimum samples for complexity")
     parser.add_argument("--complexity-zscore", action="store_true", default=None, help="Apply z-score normalization for complexity")
     parser.add_argument("--no-complexity-zscore", action="store_false", dest="complexity_zscore")
-    
-    # Quality options
+
+    # Quality
     parser.add_argument("--quality-psd-method", choices=["welch", "multitaper"], default=None, help="PSD method for quality metrics")
     parser.add_argument("--quality-fmin", type=float, default=None, help="Min frequency for quality metrics")
     parser.add_argument("--quality-fmax", type=float, default=None, help="Max frequency for quality metrics")
@@ -1508,35 +886,26 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
     parser.add_argument("--quality-snr-signal-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Signal band for SNR computation")
     parser.add_argument("--quality-snr-noise-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Noise band for SNR computation")
     parser.add_argument("--quality-muscle-band", nargs=2, type=float, default=None, metavar=("MIN", "MAX"), help="Muscle band for artifact detection")
-    
-    # ERDS options
+
+    # ERDS
     parser.add_argument("--erds-use-log-ratio", action="store_true", default=None, help="Use dB (log ratio) instead of percent for ERDS")
     parser.add_argument("--no-erds-use-log-ratio", action="store_false", dest="erds_use_log_ratio")
     parser.add_argument("--erds-min-baseline-power", type=float, default=None, help="Min baseline power for ERDS")
     parser.add_argument("--erds-min-active-power", type=float, default=None, help="Min active power for ERDS")
     parser.add_argument("--erds-min-segment-sec", type=float, default=None, help="Min segment duration for ERDS")
     parser.add_argument("--erds-bands", nargs="+", default=None, help="Bands for ERDS computation (e.g., alpha beta)")
-    
-    # TFR advanced options
-    parser.add_argument("--tfr-max-cycles", type=float, default=None, help="Maximum cycles for Morlet wavelets")
-    parser.add_argument("--tfr-decim-power", type=int, default=None, help="Decimation factor for power TFR")
-    parser.add_argument("--tfr-decim-phase", type=int, default=None, help="Decimation factor for phase TFR")
-    
-    parser.add_argument(
-        "--spatial-transform-lambda2",
-        type=float,
-        default=None,
-        help="Lambda2 regularization for CSD/Laplacian (default: 1e-5)",
-    )
-    parser.add_argument(
-        "--spatial-transform-stiffness",
-        type=float,
-        default=None,
-        help="Stiffness for CSD/Laplacian (default: 4.0)",
-    )
-    
+
+    # Validation and output
+    parser.add_argument("--min-epochs", type=int, default=None, help="Minimum epochs required for features")
+    parser.add_argument("--fail-on-missing-windows", action="store_true", default=None, help="Fail if baseline/active windows are missing")
+    parser.add_argument("--no-fail-on-missing-windows", action="store_false", dest="fail_on_missing_windows", help="Do not fail if baseline/active windows are missing")
+    parser.add_argument("--fail-on-missing-named-window", action="store_true", default=None, help="Fail if a named time window is missing")
+    parser.add_argument("--no-fail-on-missing-named-window", action="store_false", dest="fail_on_missing_named_window", help="Do not fail if a named time window is missing")
+    parser.add_argument("--save-subject-level-features", action="store_true", default=None, help="Save subject-level features for constant values")
+    parser.add_argument("--no-save-subject-level-features", action="store_false", dest="save_subject_level_features", help="Do not save subject-level features")
+
     add_path_args(parser)
-    
+
     return parser
 
 

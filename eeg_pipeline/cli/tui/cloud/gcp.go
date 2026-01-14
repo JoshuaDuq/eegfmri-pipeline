@@ -286,7 +286,7 @@ func buildCodeSyncArgs(repoRoot, remotePath string) []string {
 		"--exclude", "*.pyc",
 		"--exclude", ".venv",
 		"--exclude", "venv",
-		"--exclude", ".venv311",
+		"--exclude", "eeg_pipeline/.venv311",
 		"--exclude", "eeg_pipeline/data",
 		"--exclude", ".DS_Store",
 		repoRoot + "/", remotePath,

@@ -703,6 +703,10 @@ def extract_connectivity_features(
         )
 
     if granularity == "trial":
+        try:
+            df.attrs["feature_granularity"] = "trial"
+        except Exception:
+            pass
         return df, cols
 
     n_epochs = int(df.shape[0])
@@ -711,6 +715,18 @@ def extract_connectivity_features(
     if granularity == "subject":
         means = numeric.mean(axis=0)
         out = pd.DataFrame([means.values] * n_epochs, columns=means.index)
+        # Mark as broadcast feature to prevent pseudo-replication in downstream stats
+        out.attrs["feature_granularity"] = "subject"
+        out.attrs["broadcast_warning"] = (
+            "These features are subject-level means broadcast to all trials. "
+            "Do NOT use as i.i.d. trial observations in correlations/regressions. "
+            "Use primary_unit='subject' or aggregate to run/condition means first."
+        )
+        ctx.logger.info(
+            "Connectivity features computed at subject-level and broadcast to %d trials. "
+            "Mark as non-i.i.d. for downstream analysis.",
+            n_epochs,
+        )
         return out, list(out.columns)
 
     # condition-level: broadcast within each condition label
@@ -755,6 +771,16 @@ def extract_connectivity_features(
         out.loc[mask] = [grp_mean.values] * n
 
     out.columns = df.columns
+    # Mark as broadcast feature to prevent pseudo-replication
+    out.attrs["feature_granularity"] = "condition"
+    out.attrs["broadcast_warning"] = (
+        "These features are condition-level means broadcast to all trials within condition. "
+        "Do NOT use as i.i.d. trial observations. Use primary_unit='condition' or aggregate first."
+    )
+    ctx.logger.info(
+        "Connectivity features computed at condition-level and broadcast within groups. "
+        "Mark as non-i.i.d. for downstream analysis."
+    )
     return out, list(out.columns)
 
 
@@ -819,6 +845,11 @@ def extract_connectivity_from_precomputed(
 
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
 
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -827,11 +858,20 @@ def extract_connectivity_from_precomputed(
             seg_mask_map = {target_name: mask}
         else:
             if logger is not None:
-                logger.warning(
-                    "Connectivity: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Connectivity: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Connectivity: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}
@@ -1863,6 +1903,11 @@ def extract_directed_connectivity_from_precomputed(
     
     windows = precomputed.windows
     target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        config.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(config, "get")
+        else False
+    )
     
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
@@ -1871,11 +1916,20 @@ def extract_directed_connectivity_from_precomputed(
             seg_mask_map = {target_name: mask}
         else:
             if logger is not None:
-                logger.warning(
-                    "Directed connectivity: targeted window '%s' has no valid mask; using full epoch.",
-                    target_name,
-                )
-            seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Directed connectivity: targeted window '%s' has no valid mask; using full epoch (allow_full_epoch_fallback=True).",
+                        target_name,
+                    )
+                else:
+                    logger.error(
+                        "Directed connectivity: targeted window '%s' has no valid mask; skipping (allow_full_epoch_fallback=False).",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                seg_mask_map = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), []
     else:
         masks = get_segment_masks(precomputed.times, windows, precomputed.config)
         seg_mask_map = {k: v for k, v in masks.items() if v is not None}

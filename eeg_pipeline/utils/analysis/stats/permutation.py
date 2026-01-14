@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     import mne
 
 from .base import get_statistics_constants, get_n_permutations
+from eeg_pipeline.utils.config.loader import get_config_value
 
 # Constants for numerical stability
 _DESIGN_MATRIX_CONDITION_TOLERANCE = 1e8
@@ -30,13 +31,24 @@ def permute_within_groups(
     rng: np.random.Generator,
     groups: Optional[np.ndarray] = None,
     min_group_size: int = 2,
+    *,
+    scheme: str = "shuffle",
 ) -> np.ndarray:
     """Generate permutation indices, optionally within groups.
     
     Raises ValueError if any group has fewer than min_group_size samples.
     """
+    scheme = str(scheme or "shuffle").strip().lower()
+    if scheme not in {"shuffle", "circular_shift"}:
+        scheme = "shuffle"
+
     if groups is None:
         idx = np.arange(n)
+        if scheme == "circular_shift":
+            if n <= 1:
+                return idx
+            shift = int(rng.integers(0, n))
+            return np.roll(idx, shift)
         rng.shuffle(idx)
         return idx
 
@@ -52,7 +64,13 @@ def permute_within_groups(
     for g in unique:
         mask = groups == g
         sub = idx[mask]
-        rng.shuffle(sub)
+        if scheme == "circular_shift":
+            if sub.size <= 1:
+                continue
+            shift = int(rng.integers(0, sub.size))
+            sub = np.roll(sub, shift)
+        else:
+            rng.shuffle(sub)
         idx[mask] = sub
     return idx
 
@@ -87,15 +105,9 @@ def _subset_groups_after_dropna(
         return None
     
     groups_subset = groups_series.reindex(df_index)
-    valid_groups = groups_subset.dropna()
-    
-    if len(valid_groups) == len(df_index):
-        return valid_groups.to_numpy()
-    
-    if len(valid_groups) > 0:
+    if groups_subset.isna().any():
         return None
-    
-    return None
+    return groups_subset.to_numpy()
 
 
 def _prepare_ranked_data(
@@ -180,6 +192,8 @@ def perm_pval_simple(
     rng: Optional[np.random.Generator] = None,
     groups: Optional[np.ndarray] = None,
     config: Optional[Any] = None,
+    *,
+    scheme: str = "shuffle",
 ) -> float:
     """
     Simple permutation p-value for correlation.
@@ -213,7 +227,12 @@ def perm_pval_simple(
     observed_abs = np.abs(observed_correlation)
     n_extreme = 0
     for _ in range(n_perm):
-        perm_indices = permute_within_groups(n_valid, rng, groups_valid)
+        perm_indices = permute_within_groups(
+            n_valid,
+            rng,
+            groups_valid,
+            scheme=scheme,
+        )
         perm_correlation, _ = compute_correlation(
             x_valid[perm_indices], y_valid, method
         )
@@ -235,6 +254,7 @@ def perm_pval_partial_freedman_lane(
     *,
     groups: Optional[np.ndarray] = None,
     config: Optional[Any] = None,
+    scheme: str = "shuffle",
 ) -> float:
     """Freedman-Lane permutation test for partial correlation.
     
@@ -280,7 +300,10 @@ def perm_pval_partial_freedman_lane(
     
     for _ in range(n_perm):
         permuted_indices = permute_within_groups(
-            len(y_residuals), rng, groups_array
+            len(y_residuals),
+            rng,
+            groups_array,
+            scheme=scheme,
         )
         y_permuted = y_fitted + y_residuals[permuted_indices]
         
@@ -317,18 +340,36 @@ def compute_perm_and_partial_perm(
     *,
     groups: Optional[np.ndarray] = None,
     config: Optional[Any] = None,
+    scheme: str = "shuffle",
 ) -> Tuple[float, float]:
     """Compute permutation p-values for simple and partial correlation."""
-    from .bootstrap import perm_pval_simple
-    
     p_perm = p_partial_perm = np.nan
     if n_perm is None or n_perm <= 0:
         return p_perm, p_partial_perm
     
-    p_perm = perm_pval_simple(x, y, method, n_perm, rng, groups=groups, config=config)
+    p_perm = perm_pval_simple(
+        x,
+        y,
+        method,
+        n_perm,
+        rng,
+        groups=groups,
+        config=config,
+        scheme=scheme,
+    )
     
     if covariates_df is not None and not covariates_df.empty:
-        p_partial_perm = perm_pval_partial_freedman_lane(x, y, covariates_df, method, n_perm, rng, groups=groups, config=config)
+        p_partial_perm = perm_pval_partial_freedman_lane(
+            x,
+            y,
+            covariates_df,
+            method,
+            n_perm,
+            rng,
+            groups=groups,
+            config=config,
+            scheme=scheme,
+        )
     
     return p_perm, p_partial_perm
 
@@ -346,7 +387,19 @@ def compute_permutation_pvalue_partial(
     groups: Optional[np.ndarray] = None,
 ) -> float:
     """Compute permutation p-value for partial correlation."""
-    return perm_pval_partial_freedman_lane(x_aligned, y_aligned, covariates_df, method, n_perm, rng, groups=groups, config=config)
+    return perm_pval_partial_freedman_lane(
+        x_aligned,
+        y_aligned,
+        covariates_df,
+        method,
+        n_perm,
+        rng,
+        groups=groups,
+        config=config,
+        scheme=str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+        if config is not None
+        else "shuffle",
+    )
 
 
 def compute_permutation_pvalues(
@@ -376,7 +429,21 @@ def compute_permutation_pvalues(
     if n_perm is None or n_perm <= 0 or n_eff < min_samples:
         return p_perm, p_partial_perm, p_temp_perm
 
-    p_perm = perm_pval_simple(x_aligned, y_aligned, method, n_perm, rng, groups=groups, config=config)
+    scheme = (
+        str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+        if config is not None
+        else "shuffle"
+    )
+    p_perm = perm_pval_simple(
+        x_aligned,
+        y_aligned,
+        method,
+        n_perm,
+        rng,
+        groups=groups,
+        config=config,
+        scheme=scheme,
+    )
 
     if covariates_df is not None and not covariates_df.empty:
         p_partial_perm = perm_pval_partial_freedman_lane(
@@ -388,6 +455,7 @@ def compute_permutation_pvalues(
             rng,
             groups=groups,
             config=config,
+            scheme=scheme,
         )
 
     if temp_series is not None and not temp_series.empty:
@@ -401,6 +469,7 @@ def compute_permutation_pvalues(
             rng,
             groups=groups,
             config=config,
+            scheme=scheme,
         )
 
     return p_perm, p_partial_perm, p_temp_perm
@@ -457,9 +526,52 @@ def _compute_combined_covariates_temp_pvalue(
             rng,
             groups=groups,
             config=config,
+            scheme=str(get_config_value(config, "behavior_analysis.permutation.scheme", "shuffle")).strip().lower()
+            if config is not None
+            else "shuffle",
         )
     except (ValueError, np.linalg.LinAlgError):
         return np.nan
+
+
+def perm_pval_mean_difference(
+    values: np.ndarray,
+    labels: np.ndarray,
+    *,
+    n_perm: int,
+    rng: np.random.Generator,
+    groups: Optional[np.ndarray] = None,
+    scheme: str = "shuffle",
+    min_samples_per_condition: int = 2,
+) -> float:
+    """Permutation p-value for absolute difference in means between two boolean groups."""
+    values = np.asarray(values, dtype=float).ravel()
+    labels = np.asarray(labels, dtype=bool).ravel()
+    if values.size != labels.size:
+        raise ValueError("values and labels must have same length")
+
+    finite = np.isfinite(values)
+    values = values[finite]
+    labels = labels[finite]
+    groups_use = groups[finite] if groups is not None else None
+
+    if values.size < 4:
+        return np.nan
+    if int(labels.sum()) < int(min_samples_per_condition) or int((~labels).sum()) < int(min_samples_per_condition):
+        return np.nan
+
+    observed = float(np.abs(np.nanmean(values[labels]) - np.nanmean(values[~labels])))
+    if not np.isfinite(observed):
+        return np.nan
+
+    exceed = 1
+    for _ in range(int(n_perm)):
+        idx = permute_within_groups(values.size, rng, groups_use, scheme=scheme)
+        perm_labels = labels[idx]
+        perm_stat = float(np.abs(np.nanmean(values[perm_labels]) - np.nanmean(values[~perm_labels])))
+        if np.isfinite(perm_stat) and perm_stat >= observed:
+            exceed += 1
+    return float(exceed / (int(n_perm) + 1))
 
 
 def compute_permutation_pvalues_with_cov_temp(
@@ -665,7 +777,5 @@ def permutation_null_distribution(
     p_perm = (n_extreme + 1) / (n_perm + 1)
     
     return null_correlations, float(observed_r), float(p_perm)
-
-
 
 

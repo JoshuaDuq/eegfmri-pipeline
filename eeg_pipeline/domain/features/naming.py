@@ -344,7 +344,9 @@ def generate_manifest(
     subject: Optional[str] = None,
     task: Optional[str] = None,
     qc: Optional[Dict[str, Any]] = None,
+    df_attrs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    df_attrs = dict(df_attrs or {})
     features = []
     columns_by_group: Dict[str, List[str]] = {}
     columns_by_band: Dict[str, List[str]] = {}
@@ -366,6 +368,12 @@ def generate_manifest(
         if segment and segment != "unknown":
             columns_by_segment.setdefault(segment, []).append(feature_name)
 
+    provenance = infer_feature_provenance(
+        feature_columns=feature_columns,
+        config=config,
+        df_attrs=df_attrs,
+    )
+
     return {
         "created_at": datetime.utcnow().isoformat() + "Z",
         "subject": subject,
@@ -375,9 +383,123 @@ def generate_manifest(
         "columns_by_group": columns_by_group,
         "columns_by_band": columns_by_band,
         "columns_by_segment": columns_by_segment,
+        "provenance": provenance,
         "qc": _make_json_serializable(qc) if qc else None,
         "config": None if config is None else {},
     }
+
+
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    if config is None:
+        return default
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            return getter(key, default)
+        except TypeError:
+            try:
+                return getter(key)
+            except Exception:
+                return default
+        except Exception:
+            return default
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return default
+
+
+def infer_feature_provenance(
+    *,
+    feature_columns: List[str],
+    config: Any = None,
+    df_attrs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Infer per-column statistical validity properties for downstream analyses."""
+    df_attrs = dict(df_attrs or {})
+
+    analysis_mode = str(_config_get(config, "feature_engineering.analysis_mode", "group_stats") or "group_stats").strip().lower()
+    itpc_method = str(_config_get(config, "feature_engineering.itpc.method", "fold_global") or "fold_global").strip().lower()
+    conn_granularity_cfg = str(_config_get(config, "feature_engineering.connectivity.granularity", "trial") or "trial").strip().lower()
+    conn_phase_estimator_cfg = str(_config_get(config, "feature_engineering.connectivity.phase_estimator", "within_epoch") or "within_epoch").strip().lower()
+
+    conn_granularity = str(df_attrs.get("feature_granularity") or conn_granularity_cfg).strip().lower()
+    broadcast_warning = df_attrs.get("broadcast_warning")
+
+    def group_props(group: str) -> Dict[str, Any]:
+        group = str(group or "unknown").strip().lower()
+        if group == "itpc":
+            if itpc_method == "condition":
+                return {
+                    "analysis_unit": "condition",
+                    "broadcasted": True,
+                    "cross_trial_dependence": True,
+                    "trialwise_valid": False,
+                    "reason": "ITPC is computed across trials within condition and broadcast to each trial.",
+                }
+            if itpc_method in {"fold_global", "global"}:
+                return {
+                    "analysis_unit": "subject",
+                    "broadcasted": True,
+                    "cross_trial_dependence": True,
+                    "trialwise_valid": False,
+                    "reason": f"ITPC(method='{itpc_method}') is computed across trials and broadcast to each trial.",
+                }
+            if itpc_method == "loo":
+                return {
+                    "analysis_unit": "trial",
+                    "broadcasted": False,
+                    "cross_trial_dependence": True,
+                    "trialwise_valid": False,
+                    "reason": "ITPC(method='loo') uses other trials to compute each trial's value (non-i.i.d.).",
+                }
+            return {
+                "analysis_unit": "unknown",
+                "broadcasted": False,
+                "cross_trial_dependence": True,
+                "trialwise_valid": False,
+                "reason": f"Unknown ITPC method '{itpc_method}'.",
+            }
+
+        if group in {"conn", "dconn"}:
+            broadcasted = conn_granularity in {"subject", "condition"} or conn_phase_estimator_cfg == "across_epochs"
+            analysis_unit = conn_granularity if conn_granularity in {"trial", "condition", "subject"} else "trial"
+            trialwise_valid = not broadcasted
+            reason = "Connectivity is computed within-epoch per trial." if trialwise_valid else "Connectivity is aggregated across epochs and broadcast."
+            return {
+                "analysis_unit": analysis_unit,
+                "broadcasted": bool(broadcasted),
+                "cross_trial_dependence": bool(broadcasted),
+                "trialwise_valid": bool(trialwise_valid),
+                "reason": reason,
+            }
+
+        return {
+            "analysis_unit": "trial",
+            "broadcasted": False,
+            "cross_trial_dependence": False,
+            "trialwise_valid": True,
+            "reason": "Computed per trial (assumed i.i.d.).",
+        }
+
+    columns: Dict[str, Any] = {}
+    for name in feature_columns:
+        parsed = NamingSchema.parse(str(name))
+        group = parsed.get("group") if parsed.get("valid") else "unknown"
+        columns[str(name)] = group_props(str(group))
+
+    out: Dict[str, Any] = {
+        "analysis_mode": analysis_mode,
+        "methods": {
+            "itpc_method": itpc_method,
+            "connectivity_granularity": conn_granularity,
+            "connectivity_phase_estimator": conn_phase_estimator_cfg,
+        },
+        "file_attrs": _make_json_serializable(df_attrs) if df_attrs else {},
+        "columns": columns,
+    }
+    if broadcast_warning:
+        out["warnings"] = [str(broadcast_warning)]
+    return out
 
 
 def save_manifest(manifest: Dict[str, Any], path: Path) -> Path:
@@ -408,7 +530,12 @@ def save_features_organized(
         column for column in df.columns if column not in metadata_columns
     ]
     manifest = generate_manifest(
-        feature_columns, config=config, subject=subject, task=task, qc=qc
+        feature_columns,
+        config=config,
+        subject=subject,
+        task=task,
+        qc=qc,
+        df_attrs=dict(getattr(df, "attrs", {}) or {}),
     )
     manifest_path = subject_dir / f"{base_filename}_features_manifest.json"
     save_manifest(manifest, manifest_path)

@@ -7,6 +7,9 @@ import json as json_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import mne
+import pandas as pd
+
 from eeg_pipeline.cli.common import add_task_arg, resolve_task
 
 _MAX_SUBJECTS_TO_VALIDATE = 10
@@ -78,8 +81,6 @@ def _validate_tsv_schema(
     path: Path, *, required: List[str], any_of: Optional[List[str]] = None
 ) -> Optional[str]:
     """Validate TSV file has required columns and optionally one of any_of columns."""
-    import pandas as pd
-
     try:
         df = pd.read_csv(path, sep="\t", nrows=5)
     except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError) as exc:
@@ -128,8 +129,6 @@ def _validate_epochs(
     passed: List[str],
 ) -> None:
     """Validate epoch files for subjects."""
-    import mne
-
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]
 
     for subject in subjects_to_check:
@@ -173,8 +172,6 @@ def _validate_features(
     passed: List[str],
 ) -> None:
     """Validate feature files for subjects."""
-    import pandas as pd
-
     from eeg_pipeline.infra.paths import deriv_features_path
 
     subjects_to_check = subjects[:_MAX_SUBJECTS_TO_VALIDATE]

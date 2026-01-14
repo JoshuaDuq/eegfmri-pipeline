@@ -18,9 +18,26 @@ from eeg_pipeline.domain.features.constants import FEATURE_CATEGORIES
 _DEFAULT_SPATIAL_MODES = ["roi", "global"]
 
 
+ANALYSIS_MODE_TRIAL_ML_SAFE = "trial_ml_safe"
+ANALYSIS_MODE_GROUP_STATS = "group_stats"
+VALID_ANALYSIS_MODES = {ANALYSIS_MODE_TRIAL_ML_SAFE, ANALYSIS_MODE_GROUP_STATS}
+
+CROSS_TRIAL_FEATURES = {"itpc", "connectivity", "bursts", "aperiodic_evoked"}
+
+
 @dataclass
 class FeatureContext:
-    """Context for feature extraction pipeline."""
+    """Context for feature extraction pipeline.
+    
+    Attributes
+    ----------
+    analysis_mode : str
+        Controls cross-trial feature computation:
+        - "trial_ml_safe": Forbid cross-trial features unless train_mask is provided.
+          Use this for ML/CV pipelines to prevent data leakage.
+        - "group_stats": Allow cross-trial estimates, output one row per subject/condition.
+          Use this for group-level statistical analysis.
+    """
     subject: str
     task: str
     config: Any
@@ -40,6 +57,7 @@ class FeatureContext:
     aggregation_method: str = "mean"
     explicit_windows: Optional[List[Dict[str, Any]]] = None
     train_mask: Optional[np.ndarray] = None
+    analysis_mode: str = ANALYSIS_MODE_GROUP_STATS
     precomputed: Optional[PrecomputedData] = None
     _precomputed_ready: bool = False
     tfr: Optional[Any] = None
@@ -52,10 +70,42 @@ class FeatureContext:
 
     def __post_init__(self) -> None:
         """Initialize spatial modes and windows."""
+        self._resolve_analysis_mode()
         self._resolve_spatial_modes()
         self._initialize_windows()
         self._validate_windows()
 
+    def _resolve_analysis_mode(self) -> None:
+        """Resolve and validate analysis mode from config or explicit setting."""
+        if self.analysis_mode not in VALID_ANALYSIS_MODES:
+            config_mode = self.config.get("feature_engineering.analysis_mode")
+            if config_mode and str(config_mode).strip().lower() in VALID_ANALYSIS_MODES:
+                self.analysis_mode = str(config_mode).strip().lower()
+            else:
+                self.analysis_mode = ANALYSIS_MODE_GROUP_STATS
+        
+        self._validate_analysis_mode()
+    
+    def _validate_analysis_mode(self) -> None:
+        """Validate analysis mode constraints for cross-trial features."""
+        if self.analysis_mode != ANALYSIS_MODE_TRIAL_ML_SAFE:
+            return
+        
+        cross_trial_requested = set(self.feature_categories) & CROSS_TRIAL_FEATURES
+        if not cross_trial_requested:
+            return
+        
+        if self.train_mask is None:
+            self.logger.warning(
+                "analysis_mode='trial_ml_safe' but train_mask is None. "
+                "Cross-trial features (%s) will be skipped to prevent CV leakage. "
+                "Provide train_mask or use analysis_mode='group_stats'.",
+                ", ".join(sorted(cross_trial_requested)),
+            )
+            self.feature_categories = [
+                cat for cat in self.feature_categories if cat not in CROSS_TRIAL_FEATURES
+            ]
+    
     def _resolve_spatial_modes(self) -> None:
         """Resolve spatial modes from config if using default."""
         if self.spatial_modes == _DEFAULT_SPATIAL_MODES:
@@ -79,6 +129,8 @@ class FeatureContext:
                 logger=self.logger,
                 name=self.name,
                 explicit_windows=self.explicit_windows,
+                tmin=self.tmin,
+                tmax=self.tmax,
             )
             self._windows = time_windows_from_spec(
                 spec, logger=self.logger, strict=False

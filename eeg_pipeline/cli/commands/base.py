@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Collection, Iterable, List, Optional, Set, Union
 
+import pandas as pd
+
 from eeg_pipeline.pipelines.constants import (
     BEHAVIOR_COMPUTATIONS,
     BEHAVIOR_VISUALIZE_CATEGORIES,
@@ -278,8 +280,6 @@ def discover_event_columns(
             "file": "path/to/file"
         }
     """
-    import pandas as pd
-    
     bids_root = Path(bids_root)
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
@@ -343,8 +343,6 @@ def discover_trial_table_columns(
     
     This provides more detailed columns after behavior compute has run.
     """
-    import pandas as pd
-    
     deriv_root = Path(deriv_root)
     result = {"columns": [], "values": {}, "source": None, "file": None}
     
@@ -419,8 +417,6 @@ def discover_fmri_event_columns(
             "file": "path/to/file"
         }
     """
-    import pandas as pd
-    
     fmri_root = Path(fmri_root)
     result = {"columns": [], "values": {}, "source": "fmri_events", "file": None}
     

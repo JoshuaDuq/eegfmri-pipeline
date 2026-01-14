@@ -10,7 +10,7 @@ import (
 // It looks for virtual environments in the project root.
 func GetPythonCommand(repoRoot string) string {
 	// 1. Check for .venv311 (user's specific venv)
-	venvPath := filepath.Join(repoRoot, ".venv311")
+	venvPath := filepath.Join(repoRoot, "eeg_pipeline", ".venv311")
 	if pythonPath := getVenvPython(venvPath); pythonPath != "" {
 		return pythonPath
 	}

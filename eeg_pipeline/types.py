@@ -389,6 +389,11 @@ class PrecomputedData:
     
     # Time windows
     windows: Optional[TimeWindows] = None
+
+    # Trial metadata (aligned to epochs axis)
+    metadata: Optional[pd.DataFrame] = None
+    condition_labels: Optional[np.ndarray] = None
+    train_mask: Optional[np.ndarray] = None
     
     # Band-filtered data (computed on demand)
     band_data: Dict[str, BandData] = field(default_factory=dict)
@@ -442,6 +447,10 @@ class PrecomputedData:
             sfreq=self.sfreq,
             ch_names=self.ch_names,
             picks=self.picks,
+            windows=None,
+            metadata=self.metadata,
+            condition_labels=self.condition_labels,
+            train_mask=self.train_mask,
             config=self.config,
             logger=self.logger,
             spatial_modes=self.spatial_modes,

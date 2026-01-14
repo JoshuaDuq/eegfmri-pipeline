@@ -371,7 +371,13 @@ const (
 	textFieldFmriTaskId
 	textFieldRawMontage
 	textFieldPrepMontage
+	textFieldPrepChTypes
+	textFieldPrepEegReference
+	textFieldPrepEogChannels
+	textFieldPrepConditions
 	textFieldPrepFileExtension
+	textFieldPrepRenameAnotDict
+	textFieldPrepCustomBadDict
 	textFieldRawEventPrefixes
 	textFieldMergeEventPrefixes
 	textFieldMergeEventTypes
@@ -785,18 +791,18 @@ type Model struct {
 	fmriTaskId              string  // --task-id (process only specific task)
 
 	// fMRI UI group expansion states (for collapsible sections)
-	fmriGroupRuntimeExpanded       bool
-	fmriGroupOutputExpanded        bool
-	fmriGroupPerformanceExpanded   bool
-	fmriGroupAnatomicalExpanded    bool
-	fmriGroupBoldExpanded          bool
-	fmriGroupQcExpanded            bool
-	fmriGroupDenoisingExpanded     bool
-	fmriGroupSurfaceExpanded       bool
-	fmriGroupMultiechoExpanded     bool
-	fmriGroupReproExpanded         bool
-	fmriGroupValidationExpanded    bool
-	fmriGroupAdvancedExpanded      bool
+	fmriGroupRuntimeExpanded     bool
+	fmriGroupOutputExpanded      bool
+	fmriGroupPerformanceExpanded bool
+	fmriGroupAnatomicalExpanded  bool
+	fmriGroupBoldExpanded        bool
+	fmriGroupQcExpanded          bool
+	fmriGroupDenoisingExpanded   bool
+	fmriGroupSurfaceExpanded     bool
+	fmriGroupMultiechoExpanded   bool
+	fmriGroupReproExpanded       bool
+	fmriGroupValidationExpanded  bool
+	fmriGroupAdvancedExpanded    bool
 
 	// Plotting advanced configuration (wizard overrides for `eeg-pipeline plotting visualize`)
 	plotGroupDefaultsExpanded    bool
@@ -1242,6 +1248,8 @@ type Model struct {
 	sourceLocMindistMm         float64 // MNE mindist (mm)
 	sourceLocFmriEnabled       bool    // Enable fMRI-informed source localization
 	sourceLocFmriStatsMap      string  // Path to fMRI stats map NIfTI
+	sourceLocFmriProvenance    int     // 0: independent, 1: same_dataset
+	sourceLocFmriRequireProv   bool    // Require explicit provenance
 	sourceLocFmriThreshold     float64 // Threshold (e.g., z>=3.1)
 	sourceLocFmriTail          int     // 0: pos, 1: abs
 	sourceLocFmriMinClusterVox int     // Minimum cluster size (voxels)
@@ -1305,9 +1313,10 @@ type Model struct {
 	pacRandomSeed          int     // Random seed for PAC surrogate testing
 
 	// Complexity advanced options
-	complexityTargetHz       float64 // Target sampling rate
-	complexityTargetNSamples int     // Target number of samples
-	complexityZscore         bool    // Apply z-score normalization
+	complexitySignalBasis  int     // 0: filtered, 1: envelope
+	complexityMinSegmentSec float64 // Minimum segment duration (sec)
+	complexityMinSamples    int     // Minimum samples per segment
+	complexityZscore        bool    // Apply z-score normalization
 
 	// Quality feature options
 	qualityPsdMethod        int     // 0: welch, 1: multitaper
@@ -1595,15 +1604,22 @@ type Model struct {
 	icaLabelsToKeep string // Comma-separated ICA labels (e.g., "brain,other")
 
 	// Preprocessing pipeline advanced config
-	prepUsePyprep   bool
-	prepUseIcalabel bool
-	prepNJobs       int
-	prepMontage     string // EEG montage (e.g., easycap-M1)
-	prepResample    int
-	prepLFreq       float64
-	prepHFreq       float64
-	prepNotch       int
-	prepLineFreq    int // Line frequency (50 or 60 Hz)
+	prepUsePyprep    bool
+	prepUseIcalabel  bool
+	prepNJobs        int
+	prepMontage      string // EEG montage (e.g., easycap-M1)
+	prepResample     int
+	prepLFreq        float64
+	prepHFreq        float64
+	prepNotch        int
+	prepLineFreq     int     // Line frequency (50 or 60 Hz)
+	prepChTypes      string  // Channel types (e.g., "eeg")
+	prepEegReference string  // EEG reference (e.g., "average")
+	prepEogChannels  string  // EOG channels (e.g., "Fp1,Fp2")
+	prepRandomState  int     // Random seed for reproducibility
+	prepTaskIsRest   bool    // Whether task is resting-state
+	prepZaplineFline float64 // Zapline filtering frequency (Hz)
+	prepFindBreaks   bool    // Find breaks in data
 	// PyPREP advanced options
 	prepRansac               bool   // Use RANSAC for bad channel detection
 	prepRepeats              int    // Number of detection iterations
@@ -1615,18 +1631,26 @@ type Model struct {
 	prepBreaksMinLength      int    // Minimum break duration (seconds)
 	prepTStartAfterPrevious  int    // Time after previous event (seconds)
 	prepTStopBeforeNext      int    // Time before next event (seconds)
+	prepRenameAnotDict       string // Dictionary to rename annotations (config-only)
+	prepCustomBadDict        string // Dictionary of custom bad channels (config-only)
 	// ICA options
-	prepICAMethod       int // 0: fastica, 1: infomax, 2: picard
-	prepICAComp         float64
-	prepProbThresh      float64
-	prepKeepMnebidsBads bool // Keep MNE-BIDS flagged bad ICAs
+	prepSpatialFilter   int     // 0: ica, 1: ssp
+	prepICAAlgorithm    int     // 0: extended_infomax, 1: fastica, 2: infomax, 3: picard
+	prepICAComp         float64 // ICA components (variance fraction)
+	prepICALFreq        float64 // ICA high-pass filter frequency
+	prepICARejThresh    float64 // ICA rejection threshold (µV)
+	prepProbThresh      float64 // ICA label probability threshold
+	prepKeepMnebidsBads bool    // Keep MNE-BIDS flagged bad ICAs
 	// Epoching options
+	prepConditions          string // Epoching conditions (comma-separated)
 	prepEpochsTmin          float64
 	prepEpochsTmax          float64
 	prepEpochsBaselineStart float64 // Epoch baseline start (seconds)
 	prepEpochsBaselineEnd   float64 // Epoch baseline end (seconds)
 	prepEpochsNoBaseline    bool    // Disable baseline correction
 	prepEpochsReject        float64 // Peak-to-peak rejection threshold (µV)
+	prepRejectMethod        int     // 0: none, 1: autoreject_local, 2: autoreject_global
+	prepRunSourceEstimation bool    // Run source estimation
 
 	// Preprocessing UI group expansion states (for collapsible sections)
 	prepGroupStagesExpanded    bool
@@ -1859,13 +1883,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocSubject:           "",
 		sourceLocTrans:             "",
 		sourceLocBem:               "",
-		sourceLocMindistMm:         5.0,
-		sourceLocFmriEnabled:       false,
-		sourceLocFmriStatsMap:      "",
-		sourceLocFmriThreshold:     3.1,
-		sourceLocFmriTail:          0, // 0: pos
-		sourceLocFmriMinClusterVox: 50,
-		sourceLocFmriMaxClusters:   20,
+			sourceLocMindistMm:         5.0,
+			sourceLocFmriEnabled:       false,
+			sourceLocFmriStatsMap:      "",
+			sourceLocFmriProvenance:    0,
+			sourceLocFmriRequireProv:   true,
+			sourceLocFmriThreshold:     3.1,
+			sourceLocFmriTail:          0, // 0: pos
+			sourceLocFmriMinClusterVox: 50,
+			sourceLocFmriMaxClusters:   20,
 		sourceLocFmriMaxVoxPerClus: 2000,
 		sourceLocFmriMaxTotalVox:   20000,
 		sourceLocFmriRandomSeed:    0,
@@ -1913,10 +1939,11 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		pacComputeWaveformQC:   false,
 		pacWaveformOffsetMs:    5.0,
 
-		// Complexity advanced defaults
-		complexityTargetHz:       100.0,
-		complexityTargetNSamples: 500,
-		complexityZscore:         true,
+			// Complexity advanced defaults
+			complexitySignalBasis:  0,
+			complexityMinSegmentSec: 2.0,
+			complexityMinSamples:    200,
+			complexityZscore:        true,
 
 		// Quality defaults
 		qualityPsdMethod:        0, // 0: welch
@@ -2155,15 +2182,22 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		plotSavefigDpiIndex: 2,
 
 		// Preprocessing defaults
-		prepUsePyprep:   true,
-		prepUseIcalabel: true,
-		prepNJobs:       1,
-		prepMontage:     "easycap-M1",
-		prepResample:    500,
-		prepLFreq:       0.1,
-		prepHFreq:       100.0,
-		prepNotch:       60,
-		prepLineFreq:    60,
+		prepUsePyprep:    true,
+		prepUseIcalabel:  true,
+		prepNJobs:        -1,
+		prepMontage:      "easycap-M1",
+		prepResample:     500,
+		prepLFreq:        1.0,
+		prepHFreq:        100.0,
+		prepNotch:        60,
+		prepLineFreq:     60,
+		prepChTypes:      "eeg",
+		prepEegReference: "average",
+		prepEogChannels:  "Fp1,Fp2",
+		prepRandomState:  42,
+		prepTaskIsRest:   false,
+		prepZaplineFline: 60.0,
+		prepFindBreaks:   false,
 		// PyPREP advanced defaults
 		prepRansac:               false,
 		prepRepeats:              3,
@@ -2173,20 +2207,28 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		prepOverwriteChansTsv:    true,
 		prepDeleteBreaks:         false,
 		prepBreaksMinLength:      20,
-		prepTStartAfterPrevious:  2,
+		prepTStartAfterPrevious:  10,
 		prepTStopBeforeNext:      2,
+		prepRenameAnotDict:       "",
+		prepCustomBadDict:        "",
 		// ICA defaults
-		prepICAMethod:       0,
+		prepSpatialFilter:   0,
+		prepICAAlgorithm:    0,
 		prepICAComp:         0.99,
-		prepProbThresh:      0.8,
+		prepICALFreq:        1.0,
+		prepICARejThresh:    500.0,
+		prepProbThresh:      0.7,
 		prepKeepMnebidsBads: false,
 		// Epoching defaults
+		prepConditions:          "",
 		prepEpochsTmin:          -5.0,
-		prepEpochsTmax:          12.0,
+		prepEpochsTmax:          10.5,
 		prepEpochsBaselineStart: 0,
 		prepEpochsBaselineEnd:   0,
-		prepEpochsNoBaseline:    false,
+		prepEpochsNoBaseline:    true,
 		prepEpochsReject:        0,
+		prepRejectMethod:        1,
+		prepRunSourceEstimation: false,
 
 		// Preprocessing group expansion defaults (all collapsed for compact view)
 		prepGroupStagesExpanded:    false,
@@ -3855,8 +3897,20 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.rawMontage
 	case textFieldPrepMontage:
 		return m.prepMontage
+	case textFieldPrepChTypes:
+		return m.prepChTypes
+	case textFieldPrepEegReference:
+		return m.prepEegReference
+	case textFieldPrepEogChannels:
+		return m.prepEogChannels
+	case textFieldPrepConditions:
+		return m.prepConditions
 	case textFieldPrepFileExtension:
 		return m.prepFileExtension
+	case textFieldPrepRenameAnotDict:
+		return m.prepRenameAnotDict
+	case textFieldPrepCustomBadDict:
+		return m.prepCustomBadDict
 	case textFieldRawEventPrefixes:
 		return m.rawEventPrefixes
 	case textFieldMergeEventPrefixes:
@@ -4331,8 +4385,20 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.rawMontage = value
 	case textFieldPrepMontage:
 		m.prepMontage = value
+	case textFieldPrepChTypes:
+		m.prepChTypes = value
+	case textFieldPrepEegReference:
+		m.prepEegReference = value
+	case textFieldPrepEogChannels:
+		m.prepEogChannels = value
+	case textFieldPrepConditions:
+		m.prepConditions = value
 	case textFieldPrepFileExtension:
 		m.prepFileExtension = strings.TrimSpace(value)
+	case textFieldPrepRenameAnotDict:
+		m.prepRenameAnotDict = value
+	case textFieldPrepCustomBadDict:
+		m.prepCustomBadDict = value
 	case textFieldRawEventPrefixes:
 		m.rawEventPrefixes = value
 	case textFieldMergeEventPrefixes:
@@ -4662,6 +4728,10 @@ const (
 	optAperiodicLineNoiseHarmonics
 	optPEOrder
 	optPEDelay
+	optComplexitySignalBasis
+	optComplexityMinSegmentSec
+	optComplexityMinSamples
+	optComplexityZscore
 	optBurstThresholdMethod
 	optBurstThresholdPercentile
 	optBurstThreshold
@@ -4716,6 +4786,8 @@ const (
 	optSourceLocMindistMm
 	optSourceLocFmriEnabled
 	optSourceLocFmriStatsMap
+	optSourceLocFmriProvenance
+	optSourceLocFmriRequireProvenance
 	optSourceLocFmriThreshold
 	optSourceLocFmriTail
 	optSourceLocFmriMinClusterVox
@@ -4965,6 +5037,13 @@ const (
 	optPrepHFreq
 	optPrepNotch
 	optPrepLineFreq
+	optPrepChTypes
+	optPrepEegReference
+	optPrepEogChannels
+	optPrepRandomState
+	optPrepTaskIsRest
+	optPrepZaplineFline
+	optPrepFindBreaks
 	// PyPREP advanced options
 	optPrepRansac
 	optPrepRepeats
@@ -4976,13 +5055,21 @@ const (
 	optPrepBreaksMinLength
 	optPrepTStartAfterPrevious
 	optPrepTStopBeforeNext
+	optPrepRenameAnotDict
+	optPrepCustomBadDict
 	// ICA options
-	optPrepICAMethod
+	optPrepSpatialFilter
+	optPrepICAAlgorithm
 	optPrepICAComp
+	optPrepICALFreq
+	optPrepICARejThresh
 	optPrepProbThresh
 	optPrepKeepMnebidsBads
 	optIcaLabelsToKeep
 	// Epoching options
+	optPrepConditions
+	optPrepRejectMethod
+	optPrepRunSourceEstimation
 	optPrepEpochsTmin
 	optPrepEpochsTmax
 	optPrepEpochsBaseline
@@ -5309,7 +5396,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("complexity") {
 		options = append(options, optFeatGroupComplexity)
 		if m.featGroupComplexityExpanded {
-			options = append(options, optPEOrder, optPEDelay)
+			options = append(options, optPEOrder, optPEDelay, optComplexitySignalBasis, optComplexityMinSegmentSec, optComplexityMinSamples, optComplexityZscore)
 		}
 	}
 	if m.isCategorySelected("erp") {
@@ -5386,12 +5473,14 @@ func (m Model) getFeaturesOptions() []optionType {
 				}
 				options = append(options, optSourceLocMindistMm)
 				options = append(options, optSourceLocFmriEnabled)
-				if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
-					options = append(options,
-						optSourceLocFmriStatsMap,
-						optSourceLocFmriThreshold,
-						optSourceLocFmriTail,
-						optSourceLocFmriMinClusterVox,
+					if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+						options = append(options,
+							optSourceLocFmriStatsMap,
+							optSourceLocFmriProvenance,
+							optSourceLocFmriRequireProvenance,
+							optSourceLocFmriThreshold,
+							optSourceLocFmriTail,
+							optSourceLocFmriMinClusterVox,
 						optSourceLocFmriMaxClusters,
 						optSourceLocFmriMaxVoxPerClus,
 						optSourceLocFmriMaxTotalVox,
@@ -5488,6 +5577,11 @@ func (m Model) getPreprocessingOptions() []optionType {
 	if m.prepGroupGeneralExpanded {
 		options = append(options,
 			optPrepMontage,
+			optPrepChTypes,
+			optPrepEegReference,
+			optPrepEogChannels,
+			optPrepRandomState,
+			optPrepTaskIsRest,
 			optPrepNJobs,
 			optPrepUsePyprep,
 			optPrepUseIcalabel,
@@ -5504,6 +5598,8 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepHFreq,
 				optPrepNotch,
 				optPrepLineFreq,
+				optPrepZaplineFline,
+				optPrepFindBreaks,
 			)
 		}
 	}
@@ -5523,6 +5619,8 @@ func (m Model) getPreprocessingOptions() []optionType {
 				optPrepBreaksMinLength,
 				optPrepTStartAfterPrevious,
 				optPrepTStopBeforeNext,
+				optPrepRenameAnotDict,
+				optPrepCustomBadDict,
 			)
 		}
 	}
@@ -5532,8 +5630,11 @@ func (m Model) getPreprocessingOptions() []optionType {
 		options = append(options, optPrepGroupICA)
 		if m.prepGroupICAExpanded {
 			options = append(options,
-				optPrepICAMethod,
+				optPrepSpatialFilter,
+				optPrepICAAlgorithm,
 				optPrepICAComp,
+				optPrepICALFreq,
+				optPrepICARejThresh,
 				optPrepProbThresh,
 				optPrepKeepMnebidsBads,
 				optIcaLabelsToKeep,
@@ -5546,11 +5647,14 @@ func (m Model) getPreprocessingOptions() []optionType {
 		options = append(options, optPrepGroupEpoching)
 		if m.prepGroupEpochingExpanded {
 			options = append(options,
+				optPrepConditions,
 				optPrepEpochsTmin,
 				optPrepEpochsTmax,
 				optPrepEpochsNoBaseline,
 				optPrepEpochsBaseline,
 				optPrepEpochsReject,
+				optPrepRejectMethod,
+				optPrepRunSourceEstimation,
 			)
 		}
 	}
