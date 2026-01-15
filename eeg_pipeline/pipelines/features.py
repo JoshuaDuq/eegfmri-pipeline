@@ -731,6 +731,11 @@ class FeaturePipeline(PipelineBase):
                 and not unpacked["spectral_df"].empty
                 else 0
             )
+            n_comp = (
+                unpacked["comp_df"].shape[1]
+                if unpacked["comp_df"] is not None and not unpacked["comp_df"].empty
+                else 0
+            )
             n_total = combined_df.shape[1] if combined_df is not None else 0
 
             extraction_config = {
@@ -751,7 +756,7 @@ class FeaturePipeline(PipelineBase):
             self.logger.info(
                 f"Done {range_info}: sub-{subject}, trials={n_trials}, "
                 f"power={n_pow}, conn={n_conn}, dconn={n_dconn}, source={n_source}, "
-                f"aper={n_aper}, spectral={n_spectral}, total={n_total}"
+                f"aper={n_aper}, spectral={n_spectral}, comp={n_comp}, total={n_total}"
             )
 
         if len(time_ranges) > 1:

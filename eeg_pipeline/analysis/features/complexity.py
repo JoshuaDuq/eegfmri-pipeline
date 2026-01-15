@@ -113,11 +113,21 @@ def _compute_epoch_complexity(
     if duration_sec < params.min_segment_sec or n_samples < params.min_samples:
         return record
 
+    if not precomputed.band_data:
+        return record
+
     for band, band_data in precomputed.band_data.items():
         basis_data = _pick_basis_array(band_data, params.signal_basis)
         if basis_data.ndim != 3:
             continue
-        trace_matrix = basis_data[ep_idx, :, segment_mask]  # (channels, times)
+        
+        if len(segment_mask) != basis_data.shape[2]:
+            continue
+        
+        # Extract epoch data first, then apply mask (avoids NumPy advanced indexing quirk)
+        epoch_data = basis_data[ep_idx]  # (channels, times)
+        trace_matrix = epoch_data[:, segment_mask]  # (channels, masked_times)
+        
         if trace_matrix.shape[1] < params.min_samples:
             continue
 
@@ -194,11 +204,42 @@ def extract_complexity_from_precomputed(
         return pd.DataFrame(), []
 
     cfg = getattr(precomputed, "config", None) or {}
+    logger = getattr(precomputed, "logger", None)
     params = _extract_params(cfg)
 
     windows = precomputed.windows
-    segments = get_segment_masks(precomputed.times, windows, cfg)
-    segments = {k: v for k, v in segments.items() if v is not None and np.any(v)}
+    target_name = getattr(windows, "name", None) if windows else None
+    allow_full_epoch_fallback = bool(
+        cfg.get("feature_engineering.windows.allow_full_epoch_fallback", False)
+        if hasattr(cfg, "get")
+        else False
+    )
+
+    # Get segment masks with proper targeted window handling
+    if target_name and windows is not None:
+        mask = windows.get_mask(target_name)
+        if mask is not None and np.any(mask):
+            segments = {target_name: mask}
+        else:
+            if logger:
+                if allow_full_epoch_fallback:
+                    logger.warning(
+                        "Complexity: targeted window '%s' has no valid mask; using full epoch.",
+                        target_name,
+                    )
+                else:
+                    logger.warning(
+                        "Complexity: targeted window '%s' has no valid mask; skipping.",
+                        target_name,
+                    )
+            if allow_full_epoch_fallback:
+                segments = {target_name: np.ones(len(precomputed.times), dtype=bool)}
+            else:
+                return pd.DataFrame(), []
+    else:
+        segments = get_segment_masks(precomputed.times, windows, cfg)
+        segments = {k: v for k, v in segments.items() if v is not None and np.any(v)}
+
     if not segments:
         return pd.DataFrame(), []
 
@@ -215,6 +256,20 @@ def extract_complexity_from_precomputed(
         if segment_name == "baseline":
             continue
 
+        # Validate mask length matches data
+        n_times = precomputed.data.shape[2]
+        if len(segment_mask) != n_times:
+            if logger:
+                logger.warning(
+                    "Complexity: segment '%s' mask length (%d) != data times (%d); skipping.",
+                    segment_name, len(segment_mask), n_times,
+                )
+            continue
+
+        n_masked = int(np.sum(segment_mask))
+        if n_masked < params.min_samples:
+            continue
+
         per_epoch = Parallel(n_jobs=n_jobs)(
             delayed(_compute_epoch_complexity)(
                 ep_idx,
@@ -227,6 +282,7 @@ def extract_complexity_from_precomputed(
             )
             for ep_idx in range(n_epochs)
         )
+
         for i, rec in enumerate(per_epoch):
             records[i].update(rec)
 
