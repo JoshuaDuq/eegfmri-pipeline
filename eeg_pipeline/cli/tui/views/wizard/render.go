@@ -105,7 +105,7 @@ func (m Model) renderMainContent(isNarrow, isShort bool) string {
 	}
 
 	content := m.renderStepContent(isNarrow)
-	if len(m.validationErrors) > 0 && m.CurrentStep != types.StepReviewExecute && !isShort {
+	if len(m.validationErrors) > 0 && !isShort {
 		content += "\n" + m.renderValidationErrors()
 	}
 	return content
@@ -150,8 +150,6 @@ func (m Model) renderStepContent(isNarrow bool) string {
 		return m.renderPreprocessingICA()
 	case types.StepPreprocessingEpochs:
 		return m.renderPreprocessingEpochs()
-	case types.StepReviewExecute:
-		return m.renderReview()
 	default:
 		return ""
 	}
@@ -188,7 +186,6 @@ var stepDisplayNames = map[types.WizardStep]string{
 	types.StepPreprocessingFiltering:    "Filtering",
 	types.StepPreprocessingICA:          "ICA",
 	types.StepPreprocessingEpochs:       "Epochs",
-	types.StepReviewExecute:             "Review",
 }
 
 func (m Model) renderHeader(width int) string {
@@ -372,10 +369,6 @@ func (m Model) getStepHints() []string {
 			return []string{
 				styles.RenderKeyHint("Space", "Toggle"),
 				styles.RenderKeyHint("A/N", "All/None"),
-				styles.RenderKeyHint("Q", "Quick"),
-				styles.RenderKeyHint("F", "Full"),
-				styles.RenderKeyHint("C", "Connect"),
-				styles.RenderKeyHint("S", "Spectral"),
 				styles.RenderKeyHint("Enter", "Next"),
 			}
 		}
@@ -441,17 +434,6 @@ func (m Model) getStepHints() []string {
 			styles.RenderKeyHint("/", "Filter"),
 			styles.RenderKeyHint("F5", "Refresh"),
 			styles.RenderKeyHint("Enter", "Next"),
-		}
-	case types.StepReviewExecute:
-		if len(m.validationErrors) > 0 {
-			return []string{
-				lipgloss.NewStyle().Foreground(styles.Error).Render("⚠ Fix errors to continue"),
-				styles.RenderKeyHint("Esc", "Back"),
-			}
-		}
-		return []string{
-			styles.RenderKeyHint("Enter", "EXECUTE"),
-			styles.RenderKeyHint("Esc", "Back"),
 		}
 	default:
 		return []string{}

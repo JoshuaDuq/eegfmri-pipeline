@@ -194,11 +194,17 @@ def _warn_if_phase_connectivity_without_spatial_transform(
         return
     
     conn_cfg = config.get("feature_engineering.connectivity", {}) if hasattr(config, "get") else {}
+    if not isinstance(conn_cfg, dict):
+        conn_cfg = {}
     warn_enabled = bool(conn_cfg.get("warn_if_no_spatial_transform", True))
     if not warn_enabled:
         return
     
-    spatial_transform = str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+    spatial_transform = (
+        str(config.get("feature_engineering.spatial_transform", "none")).strip().lower()
+        if hasattr(config, "get")
+        else "none"
+    )
     if spatial_transform in {"csd", "laplacian"}:
         return
     
@@ -484,13 +490,21 @@ def _graph_metrics(
     measure: str,
     band: str,
     segment_name: str,
-    conn_cfg: Dict[str, Any],
+    conn_cfg: Any,
 ) -> Dict[str, float]:
     adj = np.asarray(adj, dtype=float)
     adj[~np.isfinite(adj)] = 0.0
     np.fill_diagonal(adj, 0.0)
 
-    top_prop = conn_cfg.get("graph_top_prop", 0.1)
+    if isinstance(conn_cfg, ConnectivityConfig):
+        top_prop = conn_cfg.graph_top_prop
+        small_world_n_rand = conn_cfg.small_world_n_rand
+    elif isinstance(conn_cfg, dict):
+        top_prop = conn_cfg.get("graph_top_prop", 0.1)
+        small_world_n_rand = conn_cfg.get("small_world_n_rand", 100)
+    else:
+        top_prop = 0.1
+        small_world_n_rand = 100
     try:
         top_prop = float(top_prop)
     except (ValueError, TypeError):
@@ -498,7 +512,6 @@ def _graph_metrics(
     if not np.isfinite(top_prop) or top_prop <= 0 or top_prop > 1:
         top_prop = 0.1
 
-    small_world_n_rand = conn_cfg.get("small_world_n_rand", 100)
     try:
         small_world_n_rand = int(small_world_n_rand)
     except (ValueError, TypeError):

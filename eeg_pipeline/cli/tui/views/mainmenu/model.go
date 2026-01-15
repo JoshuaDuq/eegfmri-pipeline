@@ -20,16 +20,21 @@ import (
 type pipelineItem struct {
 	name        string
 	description string
-	shortcut    string
+	pipelineIdx int // index into types.Pipeline
 }
 
-var pipelines = []pipelineItem{
-	{"Preprocessing", "Bad channels, ICA, epochs", "1"},
-	{"Features", "Extract EEG feature sets", "2"},
-	{"Behavior", "EEG-behavior analysis", "3"},
-	{"Machine Learning", "LOSO regression & classification", "4"},
-	{"Plotting", "Curate and export visualization suites", "5"},
-	{"fMRI", "Preprocess fMRI (fMRIPrep-style)", "6"},
+// Preprocessing pipelines (EEG and fMRI preprocessing)
+var preprocessingPipelines = []pipelineItem{
+	{"EEG Preprocessing", "Bad channels, ICA, epochs", 0},
+	{"fMRI Preprocessing", "Preprocess fMRI (fMRIPrep-style)", 5},
+}
+
+// Analysis pipelines
+var analysisPipelines = []pipelineItem{
+	{"Features", "Extract EEG feature sets", 1},
+	{"Behavior", "EEG-behavior analysis", 2},
+	{"Machine Learning", "LOSO regression & classification", 3},
+	{"Plotting", "Curate and export visualization suites", 4},
 }
 
 type utilityItem struct {
@@ -51,13 +56,24 @@ var utilities = []utilityItem{
 }
 
 ///////////////////////////////////////////////////////////////////
+// Section Constants
+///////////////////////////////////////////////////////////////////
+
+const (
+	SectionPreprocessing = iota
+	SectionAnalysis
+	SectionUtilities
+)
+
+///////////////////////////////////////////////////////////////////
 // Model
 ///////////////////////////////////////////////////////////////////
 
 type Model struct {
-	pipelineCursor   int
-	utilityCursor    int
-	inUtilities      bool // true when browsing utilities section
+	currentSection   int // SectionPreprocessing, SectionAnalysis, or SectionUtilities
+	prepCursor       int // cursor within preprocessing section
+	analysisCursor   int // cursor within analysis section
+	utilityCursor    int // cursor within utilities section
 	SelectedPipeline int
 	SelectedUtility  int // -1 means none selected
 	width            int
@@ -81,11 +97,9 @@ func New() Model {
 	help := components.NewHelpOverlay("Keyboard Shortcuts", 50)
 	help.AddSection("Navigation", []components.HelpItem{
 		{Key: "↑/↓ or j/k", Description: "Move cursor"},
-		{Key: "1-6", Description: "Quick select pipeline"},
 	})
 	help.AddSection("Actions", []components.HelpItem{
 		{Key: "Enter", Description: "Select pipeline"},
-		{Key: "G", Description: "Open Global Setup"},
 		{Key: "?", Description: "Toggle help"},
 	})
 	help.AddSection("General", []components.HelpItem{
@@ -94,7 +108,10 @@ func New() Model {
 	})
 
 	return Model{
-		pipelineCursor:   0,
+		currentSection:   SectionPreprocessing,
+		prepCursor:       0,
+		analysisCursor:   0,
+		utilityCursor:    0,
 		SelectedPipeline: -1,
 		SelectedUtility:  -1,
 		Task:             "thermalactive",
@@ -104,9 +121,20 @@ func New() Model {
 
 // SetCursor sets the pipeline cursor position (for restoring last selected pipeline)
 func (m *Model) SetCursor(idx int) {
-	if idx >= 0 && idx < len(pipelines) {
-		m.pipelineCursor = idx
-		m.inUtilities = false
+	// Find which section this pipeline belongs to
+	for i, p := range preprocessingPipelines {
+		if p.pipelineIdx == idx {
+			m.currentSection = SectionPreprocessing
+			m.prepCursor = i
+			return
+		}
+	}
+	for i, p := range analysisPipelines {
+		if p.pipelineIdx == idx {
+			m.currentSection = SectionAnalysis
+			m.analysisCursor = i
+			return
+		}
 	}
 }
 
@@ -151,32 +179,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleUp()
 		case "down", "j":
 			m.handleDown()
-		case "tab":
-			m.handleTab()
 		case "enter", " ":
 			return m.handleEnter()
-		case "1", "2", "3", "4", "5", "6":
-			idx := int(msg.String()[0] - '1')
-			if idx >= 0 && idx < len(pipelines) {
-				m.inUtilities = false
-				m.pipelineCursor = idx
-				m.SelectedPipeline = idx
-			}
-		case "m", "M":
-			// Quick select Merge PsychoPy Data utility
-			m.inUtilities = true
-			m.utilityCursor = UtilityMergePsychopy
-			m.SelectedUtility = UtilityMergePsychopy
-		case "r", "R":
-			// Quick select Raw to BIDS utility
-			m.inUtilities = true
-			m.utilityCursor = UtilityRawToBids
-			m.SelectedUtility = UtilityRawToBids
-		case "g", "G":
-			// Quick select Global Setup
-			m.inUtilities = true
-			m.utilityCursor = UtilityGlobalSetup
-			m.SelectedUtility = UtilityGlobalSetup
 		}
 
 	case tea.WindowSizeMsg:
@@ -210,44 +214,74 @@ func animatedCursor(selected bool, ticker int) string {
 }
 
 func (m *Model) handleUp() {
-	if m.inUtilities {
+	switch m.currentSection {
+	case SectionPreprocessing:
+		if m.prepCursor > 0 {
+			m.prepCursor--
+		} else {
+			// Move to bottom of previous section (Utilities)
+			m.currentSection = SectionUtilities
+			m.utilityCursor = len(utilities) - 1
+		}
+	case SectionAnalysis:
+		if m.analysisCursor > 0 {
+			m.analysisCursor--
+		} else {
+			// Move to bottom of previous section (Preprocessing)
+			m.currentSection = SectionPreprocessing
+			m.prepCursor = len(preprocessingPipelines) - 1
+		}
+	case SectionUtilities:
 		if m.utilityCursor > 0 {
 			m.utilityCursor--
 		} else {
-			m.utilityCursor = len(utilities) - 1
-		}
-	} else {
-		if m.pipelineCursor > 0 {
-			m.pipelineCursor--
-		} else {
-			m.pipelineCursor = len(pipelines) - 1
+			// Move to bottom of previous section (Analysis)
+			m.currentSection = SectionAnalysis
+			m.analysisCursor = len(analysisPipelines) - 1
 		}
 	}
 }
 
 func (m *Model) handleDown() {
-	if m.inUtilities {
+	switch m.currentSection {
+	case SectionPreprocessing:
+		if m.prepCursor < len(preprocessingPipelines)-1 {
+			m.prepCursor++
+		} else {
+			// Move to top of next section (Analysis)
+			m.currentSection = SectionAnalysis
+			m.analysisCursor = 0
+		}
+	case SectionAnalysis:
+		if m.analysisCursor < len(analysisPipelines)-1 {
+			m.analysisCursor++
+		} else {
+			// Move to top of next section (Utilities)
+			m.currentSection = SectionUtilities
+			m.utilityCursor = 0
+		}
+	case SectionUtilities:
 		if m.utilityCursor < len(utilities)-1 {
 			m.utilityCursor++
 		} else {
-			m.utilityCursor = 0
-		}
-	} else {
-		if m.pipelineCursor < len(pipelines)-1 {
-			m.pipelineCursor++
-		} else {
-			m.pipelineCursor = 0
+			// Move to top of next section (Preprocessing - wrap around)
+			m.currentSection = SectionPreprocessing
+			m.prepCursor = 0
 		}
 	}
 }
 
-func (m *Model) handleTab() {
-	m.inUtilities = !m.inUtilities
-}
-
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.inUtilities {
-		// Map utility items to pipeline types for wizard launching
+	switch m.currentSection {
+	case SectionPreprocessing:
+		if m.prepCursor >= 0 && m.prepCursor < len(preprocessingPipelines) {
+			m.SelectedPipeline = preprocessingPipelines[m.prepCursor].pipelineIdx
+		}
+	case SectionAnalysis:
+		if m.analysisCursor >= 0 && m.analysisCursor < len(analysisPipelines) {
+			m.SelectedPipeline = analysisPipelines[m.analysisCursor].pipelineIdx
+		}
+	case SectionUtilities:
 		switch m.utilityCursor {
 		case UtilityGlobalSetup:
 			m.SelectedUtility = UtilityGlobalSetup
@@ -257,8 +291,6 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 		case UtilityRawToBids:
 			m.SelectedPipeline = int(types.PipelineRawToBIDS)
 		}
-	} else {
-		m.SelectedPipeline = m.pipelineCursor
 	}
 	return m, nil
 }
@@ -287,11 +319,12 @@ func (m Model) View() string {
 		mainHeight = 10
 	}
 
-	// Main Content - Dual Column Layout
-	pipelinesCol := m.renderPipelinesColumn()
+	// Main Content - Three Section Layout
+	prepCol := m.renderPreprocessingColumn()
+	analysisCol := m.renderAnalysisColumn()
 	utilitiesCol := m.renderUtilitiesColumn()
 
-	leftContent := pipelinesCol + "\n" + utilitiesCol
+	leftContent := prepCol + "\n" + analysisCol + "\n" + utilitiesCol
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
 		styles.CardStyle.Width(m.width-10).Render(leftContent),
@@ -330,10 +363,11 @@ func (m Model) renderBaseView() string {
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n\n")
 
-	pipelinesCol := m.renderPipelinesColumn()
+	prepCol := m.renderPreprocessingColumn()
+	analysisCol := m.renderAnalysisColumn()
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		styles.CardStyle.Width(m.width-10).Render(pipelinesCol),
+		styles.CardStyle.Width(m.width-10).Render(prepCol+"\n"+analysisCol),
 	)
 	b.WriteString(content)
 	return b.String()
@@ -399,23 +433,46 @@ func (m Model) renderHeader() string {
 	return header + "\n" + line
 }
 
-func (m Model) renderPipelinesColumn() string {
+func (m Model) renderPreprocessingColumn() string {
 	var lines []string
 
 	// Section header with icon
 	headerIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("▸ ")
-	if m.inUtilities {
+	if m.currentSection != SectionPreprocessing {
 		headerIcon = lipgloss.NewStyle().Foreground(styles.Muted).Render("  ")
 	}
 	header := lipgloss.JoinHorizontal(lipgloss.Left,
 		headerIcon,
-		styles.SectionTitleStyle.Render(" PIPELINES "),
+		styles.SectionTitleStyle.Render(" PREPROCESSING "),
 	)
 	lines = append(lines, header)
 	lines = append(lines, "")
 
-	for i, p := range pipelines {
-		isSelected := !m.inUtilities && i == m.pipelineCursor
+	for i, p := range preprocessingPipelines {
+		isSelected := m.currentSection == SectionPreprocessing && i == m.prepCursor
+		lines = append(lines, m.renderPipelineItem(p, isSelected))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderAnalysisColumn() string {
+	var lines []string
+
+	// Section header with icon
+	headerIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("▸ ")
+	if m.currentSection != SectionAnalysis {
+		headerIcon = lipgloss.NewStyle().Foreground(styles.Muted).Render("  ")
+	}
+	header := lipgloss.JoinHorizontal(lipgloss.Left,
+		headerIcon,
+		styles.SectionTitleStyle.Render(" ANALYSIS "),
+	)
+	lines = append(lines, header)
+	lines = append(lines, "")
+
+	for i, p := range analysisPipelines {
+		isSelected := m.currentSection == SectionAnalysis && i == m.analysisCursor
 		lines = append(lines, m.renderPipelineItem(p, isSelected))
 	}
 
@@ -427,7 +484,7 @@ func (m Model) renderUtilitiesColumn() string {
 
 	// Section header with icon
 	headerIcon := lipgloss.NewStyle().Foreground(styles.Accent).Render("▸ ")
-	if !m.inUtilities {
+	if m.currentSection != SectionUtilities {
 		headerIcon = lipgloss.NewStyle().Foreground(styles.Muted).Render("  ")
 	}
 	header := lipgloss.JoinHorizontal(lipgloss.Left,
@@ -438,7 +495,7 @@ func (m Model) renderUtilitiesColumn() string {
 	lines = append(lines, "")
 
 	for i, u := range utilities {
-		isSelected := m.inUtilities && i == m.utilityCursor
+		isSelected := m.currentSection == SectionUtilities && i == m.utilityCursor
 		lines = append(lines, m.renderUtilityItem(u, isSelected))
 	}
 
@@ -451,17 +508,14 @@ func (m Model) renderUtilityItem(u utilityItem, selected bool) string {
 	// Selection indicator
 	cursor := animatedCursor(selected, m.ticker)
 
-	// Shortcut badge
-	shortcutStyle := lipgloss.NewStyle().Foreground(styles.Muted).Render("[" + u.shortcut + "]")
-
 	// Name with styling
 	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 	}
 
-	// First line: cursor + shortcut + name
-	item.WriteString(fmt.Sprintf("%s%s %s\n", cursor, shortcutStyle, nameStyle.Render(u.name)))
+	// First line: cursor + name
+	item.WriteString(fmt.Sprintf("%s%s\n", cursor, nameStyle.Render(u.name)))
 
 	// Second line: description (indented)
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
@@ -476,19 +530,14 @@ func (m Model) renderPipelineItem(p pipelineItem, selected bool) string {
 	// Selection indicator with animation
 	cursor := animatedCursor(selected, m.ticker)
 
-	// Shortcut badge
-	shortcutStyle := lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Render("[" + p.shortcut + "]")
-
 	// Name with styling
 	nameStyle := lipgloss.NewStyle().Foreground(styles.Text)
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true)
 	}
 
-	// First line: cursor + shortcut + name
-	item.WriteString(fmt.Sprintf("%s%s %s\n", cursor, shortcutStyle, nameStyle.Render(p.name)))
+	// First line: cursor + name
+	item.WriteString(fmt.Sprintf("%s%s\n", cursor, nameStyle.Render(p.name)))
 
 	// Second line: description (indented)
 	descStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
@@ -500,7 +549,6 @@ func (m Model) renderPipelineItem(p pipelineItem, selected bool) string {
 func (m Model) renderFooter() string {
 	hints := []string{
 		styles.RenderKeyHint("↑↓", "Navigate"),
-		styles.RenderKeyHint("1-5", "Pipeline"),
 		styles.RenderKeyHint("D", "Dashboard"),
 		styles.RenderKeyHint("H", "History"),
 		styles.RenderKeyHint("Enter", "Select"),

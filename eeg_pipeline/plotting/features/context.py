@@ -119,28 +119,29 @@ class FeaturePlotContext:
             self.logger.info("Loaded %d trials", self.n_trials)
 
     def _load_extraction_configs(self) -> None:
-        """Load extraction configuration files and extract window ranges."""
+        """Load extraction configuration files and extract window ranges.
+        
+        Searches for configs in per-category metadata folders: 
+        features/{category}/metadata/extraction_config*.json
+        """
         self.window_ranges = {}
         self.time_range_suffixes = []
         
         ExtractionConfig = Tuple[str, Optional[str], Optional[float], Optional[float]]
         configs: List[ExtractionConfig] = []
-
-        for path in sorted(self.features_dir.glob("extraction_config*.json")):
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                self.logger.warning("Failed to read extraction config %s: %s", path, exc)
+        
+        # Search per-category metadata folders (new location)
+        for category_dir in sorted(self.features_dir.iterdir()):
+            if not category_dir.is_dir() or category_dir.name == "metadata":
                 continue
-
-            stem = path.stem
-            suffix = None
-            if stem != "extraction_config":
-                suffix = stem.replace("extraction_config_", "", 1)
-            name = payload.get("name") or suffix
-            tmin = payload.get("tmin")
-            tmax = payload.get("tmax")
-            configs.append((suffix, name, tmin, tmax))
+            metadata_dir = category_dir / "metadata"
+            if metadata_dir.is_dir():
+                for path in sorted(metadata_dir.glob("extraction_config*.json")):
+                    config_entry = self._parse_extraction_config(path)
+                    if config_entry:
+                        configs.append(config_entry)
+        
+        # (Legacy fallback removed)
 
         name_to_suffix: Dict[str, Optional[str]] = {}
         for suffix, name, tmin, tmax in configs:
@@ -177,6 +178,27 @@ class FeaturePlotContext:
                 for name, rng in self.window_ranges.items()
             )
             self.logger.info("Detected extracted windows: %s", formatted)
+    
+    def _parse_extraction_config(self, path: Path) -> Optional[Tuple[Optional[str], Optional[str], Optional[float], Optional[float]]]:
+        """Parse an extraction config JSON file.
+        
+        Returns:
+            (suffix, name, tmin, tmax) tuple or None if parsing fails
+        """
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning("Failed to read extraction config %s: %s", path, exc)
+            return None
+
+        stem = path.stem
+        suffix = None
+        if stem != "extraction_config":
+            suffix = stem.replace("extraction_config_", "", 1)
+        name = payload.get("name") or suffix
+        tmin = payload.get("tmin")
+        tmax = payload.get("tmax")
+        return (suffix, name, tmin, tmax)
 
     def _apply_window_overrides(self) -> None:
         """Apply window range overrides to config if available."""

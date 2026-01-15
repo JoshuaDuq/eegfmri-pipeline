@@ -1139,21 +1139,21 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 
 			// Optional fMRI-informed constraint (advanced)
 			fmriEnabled := m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != ""
-				if fmriEnabled {
-					args = append(args, "--source-fmri")
-					if strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
-						args = append(args, "--source-fmri-stats-map", expandUserPath(strings.TrimSpace(m.sourceLocFmriStatsMap)))
-					}
-					provenances := []string{"independent", "same_dataset"}
-					if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(provenances) && m.sourceLocFmriProvenance != 0 {
-						args = append(args, "--source-fmri-provenance", provenances[m.sourceLocFmriProvenance])
-					}
-					if !m.sourceLocFmriRequireProv {
-						args = append(args, "--no-source-fmri-require-provenance")
-					}
-					if m.sourceLocFmriThreshold != 3.1 {
-						args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
-					}
+			if fmriEnabled {
+				args = append(args, "--source-fmri")
+				if strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+					args = append(args, "--source-fmri-stats-map", expandUserPath(strings.TrimSpace(m.sourceLocFmriStatsMap)))
+				}
+				provenances := []string{"independent", "same_dataset"}
+				if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(provenances) && m.sourceLocFmriProvenance != 0 {
+					args = append(args, "--source-fmri-provenance", provenances[m.sourceLocFmriProvenance])
+				}
+				if !m.sourceLocFmriRequireProv {
+					args = append(args, "--no-source-fmri-require-provenance")
+				}
+				if m.sourceLocFmriThreshold != 3.1 {
+					args = append(args, "--source-fmri-threshold", fmt.Sprintf("%.2f", m.sourceLocFmriThreshold))
+				}
 				if m.sourceLocFmriTail == 1 {
 					args = append(args, "--source-fmri-tail", "abs")
 				}
@@ -1396,11 +1396,6 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		if m.spectralLineNoiseFreq != 50.0 {
 			args = append(args, "--spectral-line-noise-freq", fmt.Sprintf("%.0f", m.spectralLineNoiseFreq))
 		}
-		segments := []string{"baseline", "active", "baseline active"}
-		if m.spectralSegments != 0 && m.spectralSegments < len(segments) {
-			args = append(args, "--spectral-segments")
-			args = append(args, splitSpaceList(segments[m.spectralSegments])...)
-		}
 		if m.spectralMinSegmentSec != 2.0 {
 			args = append(args, "--spectral-min-segment-sec", fmt.Sprintf("%.1f", m.spectralMinSegmentSec))
 		}
@@ -1502,26 +1497,71 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 	}
 
-		// Complexity advanced options
-		if m.isCategorySelected("complexity") {
-			bases := []string{"filtered", "envelope"}
-			basis := "filtered"
-			if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
-				basis = bases[m.complexitySignalBasis]
-			}
-			if basis != "filtered" {
-				args = append(args, "--complexity-signal-basis", basis)
-			}
-			if m.complexityMinSegmentSec != 2.0 {
-				args = append(args, "--complexity-min-segment-sec", fmt.Sprintf("%.2f", m.complexityMinSegmentSec))
-			}
-			if m.complexityMinSamples != 200 {
-				args = append(args, "--complexity-min-samples", fmt.Sprintf("%d", m.complexityMinSamples))
-			}
-			if !m.complexityZscore {
-				args = append(args, "--no-complexity-zscore")
-			}
+	// Complexity advanced options
+	if m.isCategorySelected("complexity") {
+		bases := []string{"filtered", "envelope"}
+		basis := "filtered"
+		if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
+			basis = bases[m.complexitySignalBasis]
 		}
+		if basis != "filtered" {
+			args = append(args, "--complexity-signal-basis", basis)
+		}
+		if m.complexityMinSegmentSec != 2.0 {
+			args = append(args, "--complexity-min-segment-sec", fmt.Sprintf("%.2f", m.complexityMinSegmentSec))
+		}
+		if m.complexityMinSamples != 200 {
+			args = append(args, "--complexity-min-samples", fmt.Sprintf("%d", m.complexityMinSamples))
+		}
+		if !m.complexityZscore {
+			args = append(args, "--no-complexity-zscore")
+		}
+	}
+
+	// Spectral advanced options
+	if m.isCategorySelected("spectral") {
+		if m.spectralPsdMethod != 0 {
+			args = append(args, "--spectral-psd-method", "welch")
+		}
+		if m.spectralFmin != 1.0 {
+			args = append(args, "--spectral-fmin", fmt.Sprintf("%.1f", m.spectralFmin))
+		}
+		if m.spectralFmax != 100.0 {
+			args = append(args, "--spectral-fmax", fmt.Sprintf("%.1f", m.spectralFmax))
+		}
+		if m.spectralMinSegmentSec != 0.5 {
+			args = append(args, "--spectral-min-segment-sec", fmt.Sprintf("%.2f", m.spectralMinSegmentSec))
+		}
+		if m.spectralMinCyclesAtFmin != 3.0 {
+			args = append(args, "--spectral-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.spectralMinCyclesAtFmin))
+		}
+	}
+
+	// Ratios advanced options
+	if m.isCategorySelected("ratios") {
+		if m.ratiosMinSegmentSec != 0.5 {
+			args = append(args, "--ratios-min-segment-sec", fmt.Sprintf("%.2f", m.ratiosMinSegmentSec))
+		}
+		if m.ratiosMinCyclesAtFmin != 3.0 {
+			args = append(args, "--ratios-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.ratiosMinCyclesAtFmin))
+		}
+		if !m.ratiosSkipInvalidSegments {
+			args = append(args, "--no-ratios-skip-invalid-segments")
+		}
+	}
+
+	// Asymmetry advanced options
+	if m.isCategorySelected("asymmetry") {
+		if m.asymmetryMinSegmentSec != 0.5 {
+			args = append(args, "--asymmetry-min-segment-sec", fmt.Sprintf("%.2f", m.asymmetryMinSegmentSec))
+		}
+		if m.asymmetryMinCyclesAtFmin != 3.0 {
+			args = append(args, "--asymmetry-min-cycles-at-fmin", fmt.Sprintf("%.1f", m.asymmetryMinCyclesAtFmin))
+		}
+		if !m.asymmetrySkipInvalidSegments {
+			args = append(args, "--no-asymmetry-skip-invalid-segments")
+		}
+	}
 
 	// Quality options
 	if m.isCategorySelected("quality") {
@@ -1539,6 +1579,15 @@ func (m Model) buildFeaturesAdvancedArgs() []string {
 		}
 		if !m.qualityExcludeLineNoise {
 			args = append(args, "--no-quality-exclude-line-noise")
+		}
+		if m.qualityLineNoiseFreq != 60.0 {
+			args = append(args, "--quality-line-noise-freq", fmt.Sprintf("%.0f", m.qualityLineNoiseFreq))
+		}
+		if m.qualityLineNoiseWidthHz != 2.0 {
+			args = append(args, "--quality-line-noise-width-hz", fmt.Sprintf("%.1f", m.qualityLineNoiseWidthHz))
+		}
+		if m.qualityLineNoiseHarmonics != 3 {
+			args = append(args, "--quality-line-noise-harmonics", fmt.Sprintf("%d", m.qualityLineNoiseHarmonics))
 		}
 		if m.qualitySnrSignalBandMin != 1.0 || m.qualitySnrSignalBandMax != 30.0 {
 			args = append(args, "--quality-snr-signal-band", fmt.Sprintf("%.1f", m.qualitySnrSignalBandMin), fmt.Sprintf("%.1f", m.qualitySnrSignalBandMax))

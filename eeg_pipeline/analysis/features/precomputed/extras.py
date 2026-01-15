@@ -83,7 +83,9 @@ def _compute_psd_band_power_for_segment(
     """Compute PSD-integrated band power for a data segment.
     
     Uses centralized PSD settings from config (method, fmin/fmax, line-noise exclusion).
-    Returns dict mapping band names to (n_channels,) arrays of power per Hz.
+    Returns dict mapping band names to power arrays:
+    - (n_channels,) if data is 2D (channels, times)
+    - (n_epochs, n_channels) if data is 3D (epochs, channels, times)
     """
     from eeg_pipeline.utils.analysis.spectral import compute_psd_bandpower
     
@@ -95,6 +97,8 @@ def _compute_psd_band_power_for_segment(
     
     fmin_psd = float(spec_cfg.get("fmin", 1.0))
     fmax_psd = float(spec_cfg.get("fmax", min(80.0, sfreq / 2.0 - 0.5)))
+
+    multitaper_adaptive = bool(spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False)))
     
     # Line noise exclusion
     exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
@@ -120,6 +124,7 @@ def _compute_psd_band_power_for_segment(
         fmin=fmin_psd,
         fmax=fmax_psd,
         normalize_by_bandwidth=True,
+        adaptive=multitaper_adaptive,
         exclude_line_noise=exclude_line,
         line_freqs=line_freqs if exclude_line else None,
         line_width=line_width if exclude_line else None,
@@ -130,8 +135,10 @@ def _compute_psd_band_power_for_segment(
     if result is None:
         return None
     
-    # Squeeze out epoch dimension
-    return {band: arr[0] for band, arr in result.items()}
+    # Squeeze out epoch dimension for single-epoch 2D input
+    if data.ndim == 2:
+        return {band: arr[0] for band, arr in result.items()}
+    return result
 
 
 def extract_band_ratios_from_precomputed(
@@ -220,64 +227,92 @@ def extract_band_ratios_from_precomputed(
     n_epochs = precomputed.data.shape[0]
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+
+    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
+    min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
+    min_segment_samples = max(0, int(round(min_segment_sec * float(sfreq))))
+    warned_short: set[str] = set()
     
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
             continue
+
+        seg_n = int(np.sum(seg_mask))
+        if min_segment_samples > 0 and seg_n < min_segment_samples:
+            if logger and seg_label not in warned_short:
+                logger.warning(
+                    "Band ratios: segment '%s' is too short for PSD ratios (%.3fs, %d samples < %d); skipping.",
+                    seg_label,
+                    float(seg_n) / float(sfreq),
+                    seg_n,
+                    min_segment_samples,
+                )
+                warned_short.add(seg_label)
+            continue
         
-        for ep_idx in range(n_epochs):
-            rec = records[ep_idx]
-            
-            # PSD-integrated band power (scientifically valid)
-            seg_data = precomputed.data[ep_idx, :, seg_mask]
-            band_power_ch = _compute_psd_band_power_for_segment(
-                seg_data, sfreq, band_ranges, config, logger
-            )
-            if band_power_ch is None:
+        seg_data_all = precomputed.data[:, :, seg_mask]  # (epochs, ch, time)
+        band_power = _compute_psd_band_power_for_segment(
+            seg_data_all, sfreq, band_ranges, config, logger
+        )
+        if band_power is None:
+            continue
+
+        for num, den in pairs:
+            if num not in band_power or den not in band_power:
                 continue
 
-            for num, den in pairs:
-                if num not in band_power_ch or den not in band_power_ch:
-                    continue
-                    
-                p_num = band_power_ch[num]
-                p_den = band_power_ch[den]
-                
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    r_ch = p_num / p_den
-                    r_ch[p_den <= eps] = np.nan
+            p_num = band_power[num]  # (epochs, ch)
+            p_den = band_power[den]  # (epochs, ch)
 
-                if include_log:
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        log_r_ch = np.log(p_num + eps) - np.log(p_den + eps)
-                        log_r_ch[(p_num <= eps) | (p_den <= eps)] = np.nan
-                
-                pair_label = f"{num}_{den}"
-                
-                if 'channels' in spatial_modes:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r_all = p_num / p_den
+                r_all[p_den <= eps] = np.nan
+
+            log_r_all = None
+            if include_log:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    log_r_all = np.log(p_num + eps) - np.log(p_den + eps)
+                    log_r_all[(p_num <= eps) | (p_den <= eps)] = np.nan
+
+            pair_label = f"{num}_{den}"
+
+            for ep_idx in range(n_epochs):
+                rec = records[ep_idx]
+                r_ch = r_all[ep_idx]
+                log_r_ch = log_r_all[ep_idx] if log_r_all is not None else None
+
+                if "channels" in spatial_modes:
                     for c, ch in enumerate(precomputed.ch_names):
-                        col = NamingSchema.build("ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch)
+                        col = NamingSchema.build(
+                            "ratios", seg_label, pair_label, "ch", "power_ratio", channel=ch
+                        )
                         rec[col] = float(r_ch[c])
-                        if include_log:
-                            col_log = NamingSchema.build("ratios", seg_label, pair_label, "ch", "log_ratio", channel=ch)
+                        if include_log and log_r_ch is not None:
+                            col_log = NamingSchema.build(
+                                "ratios", seg_label, pair_label, "ch", "log_ratio", channel=ch
+                            )
                             rec[col_log] = float(log_r_ch[c])
-                
-                if 'roi' in spatial_modes and roi_map:
+
+                if "roi" in spatial_modes and roi_map:
                     for roi_name, idxs in roi_map.items():
                         if idxs:
                             val = np.nanmean(r_ch[idxs])
-                            col = NamingSchema.build("ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name)
+                            col = NamingSchema.build(
+                                "ratios", seg_label, pair_label, "roi", "power_ratio", channel=roi_name
+                            )
                             rec[col] = float(val)
-                            if include_log:
+                            if include_log and log_r_ch is not None:
                                 val_log = np.nanmean(log_r_ch[idxs])
-                                col_log = NamingSchema.build("ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name)
+                                col_log = NamingSchema.build(
+                                    "ratios", seg_label, pair_label, "roi", "log_ratio", channel=roi_name
+                                )
                                 rec[col_log] = float(val_log)
-                
-                if 'global' in spatial_modes:
+
+                if "global" in spatial_modes:
                     val = np.nanmean(r_ch)
                     col = NamingSchema.build("ratios", seg_label, pair_label, "global", "power_ratio")
                     rec[col] = float(val)
-                    if include_log:
+                    if include_log and log_r_ch is not None:
                         val_log = np.nanmean(log_r_ch)
                         col_log = NamingSchema.build("ratios", seg_label, pair_label, "global", "log_ratio")
                         rec[col_log] = float(val_log)
@@ -423,30 +458,44 @@ def extract_asymmetry_from_precomputed(
     n_epochs = precomputed.data.shape[0]
     sfreq = precomputed.sfreq
     records: List[Dict[str, float]] = [dict() for _ in range(n_epochs)]
+
+    spec_cfg = config.get("feature_engineering.spectral", {}) if hasattr(config, "get") else {}
+    min_segment_sec = float(spec_cfg.get("min_segment_sec", 2.0))
+    min_segment_samples = max(0, int(round(min_segment_sec * float(sfreq))))
+    warned_short: set[str] = set()
     
     for seg_label, seg_mask in segment_masks.items():
         if seg_mask is None or not np.any(seg_mask):
             continue
+
+        seg_n = int(np.sum(seg_mask))
+        if min_segment_samples > 0 and seg_n < min_segment_samples:
+            if logger and seg_label not in warned_short:
+                logger.warning(
+                    "Asymmetry: segment '%s' is too short for PSD asymmetry (%.3fs, %d samples < %d); skipping.",
+                    seg_label,
+                    float(seg_n) / float(sfreq),
+                    seg_n,
+                    min_segment_samples,
+                )
+                warned_short.add(seg_label)
+            continue
         
-        # Compute band power for all epochs in this segment
-        seg_band_powers: List[Dict[str, np.ndarray]] = []
-        
-        for ep_idx in range(n_epochs):
-            seg_data = precomputed.data[ep_idx, :, seg_mask]
-            band_power = _compute_psd_band_power_for_segment(
-                seg_data, sfreq, band_ranges, config, logger
-            )
-            if band_power is None:
-                band_power = {b: np.full(len(precomputed.ch_names), np.nan) for b in band_ranges}
-            
-            seg_band_powers.append(band_power)
+        seg_data_all = precomputed.data[:, :, seg_mask]
+        band_power_all = _compute_psd_band_power_for_segment(
+            seg_data_all, sfreq, band_ranges, config, logger
+        )
+        if band_power_all is None:
+            band_power_all = {
+                b: np.full((n_epochs, len(precomputed.ch_names)), np.nan) for b in band_ranges
+            }
         
         # Process asymmetry (parallelizable)
         if n_jobs != 1:
             seg_records = Parallel(n_jobs=n_jobs)(
                 delayed(_process_asymmetry_epoch)(
                     ep_idx,
-                    seg_band_powers[ep_idx],
+                    {band: arr[ep_idx] for band, arr in band_power_all.items()},
                     valid_pairs,
                     seg_label,
                 )
@@ -454,7 +503,12 @@ def extract_asymmetry_from_precomputed(
             )
         else:
             seg_records = [
-                _process_asymmetry_epoch(ep_idx, seg_band_powers[ep_idx], valid_pairs, seg_label)
+                _process_asymmetry_epoch(
+                    ep_idx,
+                    {band: arr[ep_idx] for band, arr in band_power_all.items()},
+                    valid_pairs,
+                    seg_label,
+                )
                 for ep_idx in range(n_epochs)
             ]
         

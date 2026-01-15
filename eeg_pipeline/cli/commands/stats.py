@@ -68,8 +68,12 @@ def format_size(size_bytes: int) -> str:
     return f"{remaining_bytes:.1f} TB"
 
 
-def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set[str], set[str], set[str]]:
-    """Collect subjects from BIDS, epochs, and features."""
+def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
+    """Collect subjects from BIDS, epochs, features, and preprocessing directories.
+    
+    Returns:
+        Tuple of (bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects)
+    """
     try:
         bids_root = config.bids_root if hasattr(config, "bids_root") else config.get("paths.bids_root")
         if bids_root:
@@ -83,7 +87,33 @@ def _collect_all_subjects(deriv_root: Path, task: str, config: Any) -> tuple[set
         _collect_subjects_from_derivatives_epochs(deriv_root, task, config)
     )
     features_subjects = set(_collect_subjects_from_features(deriv_root))
-    return bids_subjects, epochs_subjects, features_subjects
+    
+    # Collect EEG preprocessing subjects (preprocessed directory)
+    eeg_prep_subjects = set()
+    eeg_prep_dir = deriv_root / "preprocessed"
+    if eeg_prep_dir.exists():
+        for subj_dir in eeg_prep_dir.glob("sub-*"):
+            if subj_dir.is_dir():
+                eeg_dir = subj_dir / "eeg"
+                if eeg_dir.exists():
+                    # Check for ICA files as indicator of preprocessing
+                    if list(eeg_dir.glob("*ica.fif")) or list(eeg_dir.glob("*_components.tsv")):
+                        subj_id = subj_dir.name.replace("sub-", "")
+                        eeg_prep_subjects.add(subj_id)
+    
+    # Collect fMRI preprocessing subjects (fMRIPrep output)
+    fmri_prep_subjects = set()
+    fmriprep_dir = deriv_root / "fmriprep"
+    if fmriprep_dir.exists():
+        for subj_dir in fmriprep_dir.glob("sub-*"):
+            if subj_dir.is_dir():
+                # Check for preproc bold files as indicator of fMRI preprocessing
+                func_dir = subj_dir / "func"
+                if func_dir.exists() and list(func_dir.glob("*preproc_bold*")):
+                    subj_id = subj_dir.name.replace("sub-", "")
+                    fmri_prep_subjects.add(subj_id)
+    
+    return bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects
 
 
 
@@ -179,12 +209,16 @@ def _handle_summary_mode(
     bids_subjects: set[str],
     epochs_subjects: set[str],
     features_subjects: set[str],
+    eeg_prep_subjects: set[str],
+    fmri_prep_subjects: set[str],
 ) -> None:
     """Handle summary statistics mode."""
     n_bids = len(bids_subjects)
     n_epochs = len(epochs_subjects)
     n_features = len(features_subjects)
-    all_subjects = bids_subjects | epochs_subjects | features_subjects
+    n_eeg_prep = len(eeg_prep_subjects)
+    n_fmri_prep = len(fmri_prep_subjects)
+    all_subjects = bids_subjects | epochs_subjects | features_subjects | eeg_prep_subjects | fmri_prep_subjects
     n_total = len(all_subjects)
 
     category_counts = _count_feature_categories(features_subjects, deriv_root)
@@ -192,13 +226,21 @@ def _handle_summary_mode(
     if n_total > 0:
         pct_epochs = (n_epochs / n_total) * 100
         pct_features = (n_features / n_total) * 100
+        pct_eeg_prep = (n_eeg_prep / n_total) * 100
+        pct_fmri_prep = (n_fmri_prep / n_total) * 100
     else:
         pct_epochs = 0.0
         pct_features = 0.0
+        pct_eeg_prep = 0.0
+        pct_fmri_prep = 0.0
 
     stats = {
         "total_subjects": n_total,
         "bids_subjects": n_bids,
+        "eeg_prep_subjects": n_eeg_prep,
+        "eeg_prep_pct": round(pct_eeg_prep, PERCENTAGE_PRECISION),
+        "fmri_prep_subjects": n_fmri_prep,
+        "fmri_prep_pct": round(pct_fmri_prep, PERCENTAGE_PRECISION),
         "epochs_subjects": n_epochs,
         "features_subjects": n_features,
         "epochs_pct": round(pct_epochs, PERCENTAGE_PRECISION),
@@ -470,7 +512,7 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
     task = resolve_task(args.task, config)
     deriv_root = resolve_deriv_root(config=config)
 
-    bids_subjects, epochs_subjects, features_subjects = _collect_all_subjects(
+    bids_subjects, epochs_subjects, features_subjects, eeg_prep_subjects, fmri_prep_subjects = _collect_all_subjects(
         deriv_root, task, config
     )
 
@@ -482,6 +524,8 @@ def run_stats(args: argparse.Namespace, subjects: List[str], config: Any) -> Non
             bids_subjects,
             epochs_subjects,
             features_subjects,
+            eeg_prep_subjects,
+            fmri_prep_subjects,
         )
     elif args.mode == "subjects":
         _handle_subjects_mode(

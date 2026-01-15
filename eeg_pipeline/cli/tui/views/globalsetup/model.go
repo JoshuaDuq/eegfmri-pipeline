@@ -23,7 +23,6 @@ const (
 	sectionProject sectionKey = iota
 	sectionPaths
 	sectionEvents
-	sectionReview
 )
 
 type fieldKey int
@@ -137,7 +136,6 @@ func New(repoRoot string) Model {
 			{sectionProject, "Project", "Task, random seed, and subject filter"},
 			{sectionPaths, "Paths", "BIDS and data roots"},
 			{sectionEvents, "Events", "Behavior columns"},
-			{sectionReview, "Review", "Current configuration"},
 		},
 		isLoading: true,
 	}
@@ -297,12 +295,7 @@ func (m Model) View() string {
 
 	// Build main content
 	var mainContent strings.Builder
-	switch m.sections[m.sectionIndex].key {
-	case sectionReview:
-		mainContent.WriteString(m.renderReview())
-	default:
-		mainContent.WriteString(m.renderFields())
-	}
+	mainContent.WriteString(m.renderFields())
 
 	if m.isLoading {
 		mainContent.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render("  Searching for paths and configuration..."))
@@ -405,56 +398,13 @@ func (m Model) renderFields() string {
 	return b.String()
 }
 
-func (m Model) renderReview() string {
-	var b strings.Builder
-	b.WriteString(styles.SectionTitleStyle.Render(" REVIEW CONFIG ") + "\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(
-		"Configuration is automatically saved. Use R to reset to defaults.") + "\n\n")
-
-	highlight := lipgloss.NewStyle().Foreground(styles.Accent).Bold(true)
-
-	task := m.task
-	if task == "" {
-		task = "(default)"
-	}
-	b.WriteString("Task: " + highlight.Render(task) + "\n")
-
-	randomState := m.randomState
-	if randomState == "" {
-		randomState = "(default: 42)"
-	}
-	b.WriteString("Random State: " + highlight.Render(randomState) + "\n")
-
-	subjectList := m.subjectList
-	if subjectList == "" {
-		subjectList = "(all subjects)"
-	}
-	b.WriteString("Subject List: " + highlight.Render(subjectList) + "\n")
-
-	if m.bidsRoot != "" {
-		b.WriteString("BIDS Root: " + m.bidsRoot + "\n")
-	}
-	if m.derivRoot != "" {
-		b.WriteString("Deriv Root: " + m.derivRoot + "\n")
-	}
-	if m.sourceRoot != "" {
-		b.WriteString("Source Root: " + m.sourceRoot + "\n")
-	}
-	return b.String()
-}
-
 func (m *Model) moveCursor(delta int) {
 	section := m.sections[m.sectionIndex].key
-	switch section {
-	case sectionReview:
+	fields := m.sectionFields(section)
+	if len(fields) == 0 {
 		return
-	default:
-		fields := m.sectionFields(section)
-		if len(fields) == 0 {
-			return
-		}
-		m.fieldCursor = (m.fieldCursor + delta + len(fields)) % len(fields)
 	}
+	m.fieldCursor = (m.fieldCursor + delta + len(fields)) % len(fields)
 }
 
 func (m *Model) resetSectionState() {
@@ -468,18 +418,13 @@ func (m *Model) resetSectionState() {
 
 func (m *Model) activateSelection() (tea.Model, tea.Cmd) {
 	section := m.sections[m.sectionIndex].key
-	switch section {
-	case sectionReview:
-		return m, nil
-	default:
-		fields := m.sectionFields(section)
-		if m.fieldCursor < 0 || m.fieldCursor >= len(fields) {
-			return m, nil
-		}
-		field := fields[m.fieldCursor]
-		m.startTextEdit(field.key)
+	fields := m.sectionFields(section)
+	if m.fieldCursor < 0 || m.fieldCursor >= len(fields) {
 		return m, nil
 	}
+	field := fields[m.fieldCursor]
+	m.startTextEdit(field.key)
+	return m, nil
 }
 
 func (m *Model) addEntry() (tea.Model, tea.Cmd) {
@@ -492,10 +437,6 @@ func (m *Model) deleteEntry() (tea.Model, tea.Cmd) {
 
 func (m *Model) browseCurrentPath() (tea.Model, tea.Cmd) {
 	section := m.sections[m.sectionIndex].key
-	if section == sectionReview {
-		return m, nil
-	}
-
 	fields := m.sectionFields(section)
 	if m.fieldCursor < 0 || m.fieldCursor >= len(fields) {
 		return m, nil

@@ -480,8 +480,6 @@ def _get_folder_for_feature(base_name: str, config: Optional[Any] = None) -> str
     
     if base_name == "aperiodic_qc":
         return "aperiodic"
-    if base_name == "features":
-        return "metadata"  # Manifest
     if base_name == "features_subject":
         return "subject"
     if base_name == "target_vas_ratings":
@@ -744,40 +742,6 @@ def _save_aperiodic_qc(
         logger.warning("Failed to save aperiodic QC TSV: %s", exc)
 
 
-def _save_feature_manifest(
-    direct_df: pd.DataFrame,
-    features_dir: Path,
-    config: Any,
-    feature_qc: Optional[Dict[str, Any]],
-    logger: logging.Logger,
-    suffix: Optional[str] = None,
-) -> None:
-    """Save feature metadata manifest as JSON sidecar."""
-    from eeg_pipeline.domain.features.naming import generate_manifest
-
-    try:
-        subject_str = (
-            features_dir.parts[-3].replace("sub-", "")
-            if len(features_dir.parts) > 3
-            else "unknown"
-        )
-        folder_name = _get_folder_for_feature("features", config)
-        json_filename = _build_filename("features", suffix).replace(".tsv", ".json")
-        sidecar_path = features_dir / folder_name / json_filename
-        manifest = generate_manifest(
-            feature_columns=list(direct_df.columns),
-            config=config,
-            subject=subject_str,
-            task=config.get("project.task") if config is not None else None,
-            qc=feature_qc,
-            df_attrs=dict(getattr(direct_df, "attrs", {}) or {}),
-        )
-        with open(sidecar_path, "w") as f:
-            json.dump(manifest, f, indent=2)
-        logger.info("Saved feature metadata sidecar: %s", sidecar_path)
-    except (OSError, IOError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        logger.warning("Failed to generate feature sidecar: %s", exc)
-
 
 def save_all_features(
     pow_df: pd.DataFrame,
@@ -920,7 +884,6 @@ def save_all_features(
             conn_df, "features_connectivity", features_dir, config, logger, suffix
         )
 
-    _save_feature_manifest(direct_df, features_dir, config, feature_qc, logger, suffix)
 
     if y is not None:
         target_path = features_dir / "behavior" / "target_vas_ratings.tsv"

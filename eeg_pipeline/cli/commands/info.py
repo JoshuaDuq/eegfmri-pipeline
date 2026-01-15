@@ -42,6 +42,9 @@ EXTRACTION_CONFIG_PATTERN = "extraction_config_*.json"
 FEATURES_FILE_PATTERN = "features_*.tsv"
 STATS_FILE_PATTERNS = ("*.tsv", "*.npz", "*.csv", "*.json")
 
+# Patterns to detect EEG preprocessing (ICA files from MNE-BIDS pipeline)
+PREPROCESSING_EEG_PATTERNS = ("*ica.fif", "*_components.tsv")
+
 
 def setup_info(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
     """Configure the info command parser."""
@@ -276,6 +279,7 @@ def _build_subject_status_json(
         subj_id = _extract_subject_id(result["subject"])
         available_bands = []
         has_stats = False
+        has_preprocessing = False
 
         if result["features"] or result["epochs"]:
             features_dir = deriv_features_path(deriv_root, subj_id)
@@ -284,6 +288,14 @@ def _build_subject_status_json(
                 available_bands = detect_available_bands(features_dir)
         else:
             feature_availability = _empty_feature_availability()
+
+        # Check for EEG preprocessing (ICA files in preprocessed directory)
+        eeg_prep_dir = deriv_root / "preprocessed" / f"sub-{subj_id}" / "eeg"
+        if eeg_prep_dir.exists():
+            for pattern in PREPROCESSING_EEG_PATTERNS:
+                if any(eeg_prep_dir.glob(pattern)):
+                    has_preprocessing = True
+                    break
 
         stats_dir = deriv_stats_path(deriv_root, subj_id)
         if stats_dir.exists():
@@ -301,6 +313,7 @@ def _build_subject_status_json(
         json_results.append({
             "id": subj_id,
             "has_epochs": result["epochs"],
+            "has_preprocessing": has_preprocessing,
             "has_features": result["features"],
             "has_stats": has_stats,
             "epoch_metadata": metadata,
@@ -398,7 +411,8 @@ def _handle_features_mode(
         print(f"No features directory found for sub-{subject_id}")
         return
 
-    feature_files = sorted(features_dir.glob(FEATURES_FILE_PATTERN))
+    # Only look in subfolders for new organized structure
+    feature_files = sorted(features_dir.glob("*/" + FEATURES_FILE_PATTERN))
     results = []
 
     for fpath in feature_files:

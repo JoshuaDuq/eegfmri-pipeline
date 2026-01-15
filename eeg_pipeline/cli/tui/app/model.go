@@ -280,21 +280,26 @@ func (m Model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleCtrlC() tea.Cmd {
+	// Don't allow quit during active execution
 	if m.state == StateExecution && !m.execution.IsDone() {
-		return nil // Let execution handle it
+		return nil
 	}
 	return tea.Quit
 }
 
 func (m Model) handleQuit() tea.Cmd {
-	if m.state == StateMainMenu || m.state == StateEnvSelect {
-		return tea.Quit
+	// Don't allow quit during active execution
+	if m.state == StateExecution && !m.execution.IsDone() {
+		return nil
 	}
-	return nil
+
+	// Allow quit from any other state
+	return tea.Quit
 }
 
 func (m *Model) handleEnter() tea.Cmd {
 	if m.state == StateExecution && m.execution.IsDone() {
+		// History already recorded in handleExecutionUpdate when execution completed
 		m.state = StateMainMenu
 		return nil
 	}
@@ -388,6 +393,7 @@ func (m *Model) convertSubjects(sourceSubjects []messages.SubjectInfo) []types.S
 		subjects[i] = types.SubjectStatus{
 			ID:                  s.ID,
 			HasEpochs:           s.HasEpochs,
+			HasPreprocessing:    s.HasPreprocessing,
 			HasFeatures:         s.HasFeatures,
 			HasStats:            s.HasStats,
 			AvailableBands:      s.AvailableBands,
@@ -743,10 +749,17 @@ func (m Model) handleGlobalSetupUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleExecutionUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	wasDone := m.execution.IsDone()
 	var newExec tea.Model
 	var cmd tea.Cmd
 	newExec, cmd = m.execution.Update(msg)
 	m.execution = newExec.(execution.Model)
+
+	// Record to history when execution completes (transitions from running to done)
+	if !wasDone && m.execution.IsDone() {
+		m.recordExecutionToHistory()
+	}
+
 	return m, cmd
 }
 
@@ -763,15 +776,7 @@ func (m Model) handleHistoryUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	newHist, cmd = m.historyMdl.Update(msg)
 	m.historyMdl = newHist.(history.Model)
-
-	if !m.historyMdl.Done || m.historyMdl.SelectedCommand == "" {
-		return m, cmd
-	}
-
-	command := m.historyMdl.SelectedCommand
-	m.historyMdl.Done = false
-	m.historyMdl.SelectedCommand = ""
-	return m.startExecution(command)
+	return m, cmd
 }
 
 func (m Model) handleQuickActionsOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -880,7 +885,8 @@ func (m Model) handleEscape() (tea.Model, tea.Cmd) {
 		return m, nil
 	case StateExecution:
 		if m.execution.IsDone() {
-			// Record execution to history before returning
+			// History already recorded in handleExecutionUpdate when execution completed
+			// But record here too in case user presses Escape before Update processes completion
 			m.recordExecutionToHistory()
 			return m.popState()
 		}
@@ -901,16 +907,27 @@ func (m *Model) recordExecutionToHistory() {
 	pipeline, mode := m.extractCommandParts(m.execCommand)
 	success := m.execution.Status == execution.StatusSuccess
 	exitCode := m.getExitCode(success)
+
+	// Use execution model's StartTime if available (when command actually started),
+	// otherwise fall back to execStartTime (when execution view was created)
+	startTime := m.execStartTime
+	if !m.execution.StartTime.IsZero() {
+		startTime = m.execution.StartTime
+	}
+
 	endTime := time.Now()
+	if !m.execution.EndTime.IsZero() {
+		endTime = m.execution.EndTime
+	}
 
 	record := history.ExecutionRecord{
 		ID:        endTime.Format("20060102150405"),
 		Command:   m.execCommand,
 		Pipeline:  pipeline,
 		Mode:      mode,
-		StartTime: m.execStartTime,
+		StartTime: startTime,
 		EndTime:   endTime,
-		Duration:  time.Since(m.execStartTime).Seconds(),
+		Duration:  endTime.Sub(startTime).Seconds(),
 		ExitCode:  exitCode,
 		Success:   success,
 	}
@@ -919,6 +936,9 @@ func (m *Model) recordExecutionToHistory() {
 		// History record cannot be saved - continue without it
 		return
 	}
+
+	// Clear command to prevent duplicate recording
+	m.execCommand = ""
 }
 
 func (m *Model) extractCommandParts(command string) (pipeline, mode string) {
@@ -1019,4 +1039,14 @@ func (m Model) renderResults() string {
 	return styles.BrandStyle.Render("Results") + "\n\n" +
 		lipgloss.NewStyle().Foreground(styles.Success).Render(styles.CheckMark+" Pipeline completed") + "\n\n" +
 		styles.HelpStyle.Render("[Enter] Return to menu")
+}
+
+// IsCloudMode returns true if the user selected cloud environment
+func (m Model) IsCloudMode() bool {
+	return m.environment == environment.EnvGoogleCloud
+}
+
+// GetCloudConfig returns the cloud configuration
+func (m Model) GetCloudConfig() cloud.Config {
+	return m.cloudConfig
 }

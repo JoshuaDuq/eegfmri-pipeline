@@ -57,10 +57,6 @@ type Model struct {
 	loading     bool
 	loadError   error
 
-	// Selection for re-run
-	SelectedCommand string
-	Done            bool
-
 	width  int
 	height int
 	ticker int
@@ -191,11 +187,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			if m.cursor < len(m.records)-1 {
 				m.cursor++
-			}
-		case "enter":
-			if len(m.records) > 0 && m.cursor < len(m.records) {
-				m.SelectedCommand = m.records[m.cursor].Command
-				m.Done = true
 			}
 		case "d":
 			// Delete selected record
@@ -383,7 +374,6 @@ func formatTimeAgo(t time.Time) string {
 func (m Model) renderFooter() string {
 	hints := []string{
 		styles.RenderKeyHint("↑↓", "Navigate"),
-		styles.RenderKeyHint("Enter", "Re-run"),
 		styles.RenderKeyHint("D", "Delete"),
 		styles.RenderKeyHint("C", "Clear All"),
 		styles.RenderKeyHint("Esc", "Back"),

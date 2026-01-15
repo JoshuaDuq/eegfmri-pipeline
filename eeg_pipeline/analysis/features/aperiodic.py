@@ -675,7 +675,7 @@ def _compute_psd(
                 sfreq=sfreq,
                 fmin=fmin,
                 fmax=fmax,
-                adaptive=psd_kwargs.get("adaptive", True),
+                adaptive=bool(psd_kwargs.get("adaptive", False)),
                 normalization=psd_kwargs.get("normalization", "full"),
                 bandwidth=psd_kwargs.get("bandwidth"),
                 verbose=False,
@@ -728,7 +728,10 @@ def _parse_psd_config(config: Any) -> Tuple[str, Dict[str, Any], float, float]:
         if bandwidth is not None and np.isfinite(bandwidth) and bandwidth > 0:
             psd_kwargs["bandwidth"] = float(bandwidth)
         
-        psd_kwargs.setdefault("adaptive", True)
+        psd_kwargs.setdefault(
+            "adaptive",
+            bool(aperiodic_cfg.get("multitaper_adaptive", aperiodic_cfg.get("psd_adaptive", False))),
+        )
         psd_kwargs.setdefault("normalization", "full")
     
     return psd_method, psd_kwargs, fmin, fmax
@@ -1300,10 +1303,25 @@ def extract_aperiodic_features(
         else False
     )
     
+    # CRITICAL: Rebuild masks for the current (potentially cropped) time axis
+    # This prevents shape mismatches when epochs have been cropped after windows were built
+    current_times = epochs.times
+    
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
+        # Rebuild mask for the current time axis using window ranges
+        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
+        if window_range is not None and len(window_range) >= 2:
+            tmin, tmax = float(window_range[0]), float(window_range[1])
+            mask = (current_times >= tmin) & (current_times < tmax)
+        else:
+            mask = windows.get_mask(target_name)
+            # Validate mask length matches data
+            if mask is not None and len(mask) != len(times):
+                # Mask was built for different time axis; rebuild not possible
+                mask = None
+        
+        if mask is not None and len(mask) == len(times) and np.any(mask):
             segments = {target_name: mask}
         else:
             if allow_full_epoch_fallback:
@@ -1320,7 +1338,15 @@ def extract_aperiodic_features(
                 qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
                 return pd.DataFrame(), [], qc_payload
     else:
-        segments = get_segment_masks(times, windows, config)
+        # Rebuild all segment masks for the current time axis
+        segments = {}
+        if windows is not None and hasattr(windows, 'ranges'):
+            for seg_name, seg_range in windows.ranges.items():
+                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                    mask = (current_times >= tmin) & (current_times < tmax)
+                    if np.any(mask):
+                        segments[seg_name] = mask
     
     for seg_name, mask in segments.items():
         if mask is None or np.sum(mask) < min_samples:
@@ -1362,17 +1388,32 @@ def extract_aperiodic_features(
     segments_done = sorted([k for k, v in qc_payload.get("segments", {}).items() if v])
     qc_payload["segments_computed"] = segments_done
     
-    # Pick first available segment for shared QC fields
-    chosen_name = segments_done[0] if segments_done else None
-    chosen = qc_payload.get("segments", {}).get(chosen_name) if chosen_name else None
+    # Pick first available segment with complete QC for shared QC fields
+    chosen_name = None
+    chosen = None
+    for seg_name in segments_done:
+        seg_qc = qc_payload.get("segments", {}).get(seg_name)
+        if seg_qc and isinstance(seg_qc, dict):
+            # Check if this segment has the required QC fields
+            if all(seg_qc.get(field) is not None for field in ["slopes", "offsets", "r2"]):
+                chosen_name = seg_name
+                chosen = seg_qc
+                break
     
     if chosen:
         qc_payload["freqs"] = chosen.get("freqs")
         qc_payload["residual_mean"] = chosen.get("residual_mean")
         qc_payload["r2"] = chosen.get("r2")
+        qc_payload["rms"] = chosen.get("rms")
         qc_payload["slopes"] = chosen.get("slopes")
         qc_payload["offsets"] = chosen.get("offsets")
+        qc_payload["fit_ok"] = chosen.get("fit_ok")
+        qc_payload["valid_bins"] = chosen.get("valid_bins")
+        qc_payload["kept_bins"] = chosen.get("kept_bins")
+        qc_payload["peak_rejected"] = chosen.get("peak_rejected")
         qc_payload["channel_names"] = chosen.get("channel_names")
+        qc_payload["psd_fmin"] = chosen.get("psd_fmin")
+        qc_payload["psd_fmax"] = chosen.get("psd_fmax")
     
     return df, list(df.columns), qc_payload
 
@@ -1436,9 +1477,21 @@ def extract_aperiodic_from_precomputed(
         else False
     )
     
+    # CRITICAL: Rebuild masks for the current time axis
+    # This prevents shape mismatches when epochs have been cropped after windows were built
     if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
+        # Rebuild mask for the current time axis using window ranges
+        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
+        if window_range is not None and len(window_range) >= 2:
+            tmin, tmax = float(window_range[0]), float(window_range[1])
+            mask = (times >= tmin) & (times < tmax)
+        else:
+            mask = windows.get_mask(target_name)
+            # Validate mask length matches data
+            if mask is not None and len(mask) != len(times):
+                mask = None
+        
+        if mask is not None and len(mask) == len(times) and np.any(mask):
             segments = {target_name: mask}
         else:
             if logger:
@@ -1458,7 +1511,15 @@ def extract_aperiodic_from_precomputed(
                 qc_payload["error"] = f"invalid_target_window_mask:{target_name}"
                 return pd.DataFrame(), [], qc_payload
     else:
-        segments = get_segment_masks(times, windows, config)
+        # Rebuild all segment masks for the current time axis
+        segments = {}
+        if windows is not None and hasattr(windows, 'ranges'):
+            for seg_name, seg_range in windows.ranges.items():
+                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                    mask = (times >= tmin) & (times < tmax)
+                    if np.any(mask):
+                        segments[seg_name] = mask
     
     if not segments:
         if logger:

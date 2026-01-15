@@ -80,6 +80,7 @@ type FeatureAvailability struct {
 type SubjectInfo struct {
 	ID                  string               `json:"id"`
 	HasEpochs           bool                 `json:"has_epochs"`
+	HasPreprocessing    bool                 `json:"has_preprocessing"`
 	HasFeatures         bool                 `json:"has_features"`
 	HasStats            bool                 `json:"has_stats"`
 	AvailableBands      []string             `json:"available_bands,omitempty"`

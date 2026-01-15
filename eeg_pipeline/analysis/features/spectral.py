@@ -1257,6 +1257,7 @@ def extract_spectral_features(
 
     fmin_psd = float(spec_cfg.get("fmin", 1.0))
     fmax_psd = float(spec_cfg.get("fmax", min(80.0, float(sfreq) / 2.0 - 0.5)))
+    multitaper_adaptive = bool(spec_cfg.get("multitaper_adaptive", spec_cfg.get("psd_adaptive", False)))
 
     exclude_line = bool(spec_cfg.get("exclude_line_noise", True))
     line_freqs = spec_cfg.get("line_noise_freqs", [50.0])
@@ -1268,6 +1269,7 @@ def extract_spectral_features(
     n_harm = int(spec_cfg.get("line_noise_harmonics", 3))
     
     # Determine which segments to process
+    # CRITICAL: Use epochs.times (cropped) for mask building, not ctx.windows (original)
     windows = ctx.windows
     target_name = getattr(ctx, "name", None)
     configured_segments = spec_cfg.get("segments")
@@ -1277,10 +1279,25 @@ def extract_spectral_features(
         else False
     )
     
+    # Rebuild masks for the current (potentially cropped) time axis
+    # This prevents shape mismatches when epochs have been cropped after windows were built
+    current_times = epochs.times
+    
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
-        mask = windows.get_mask(target_name)
-        if mask is not None and np.any(mask):
+        # Rebuild mask for the current time axis using window ranges
+        window_range = windows.ranges.get(target_name) if hasattr(windows, 'ranges') else None
+        if window_range is not None and len(window_range) >= 2:
+            tmin, tmax = float(window_range[0]), float(window_range[1])
+            mask = (current_times >= tmin) & (current_times < tmax)
+        else:
+            mask = windows.get_mask(target_name)
+            # Validate mask length matches data
+            if mask is not None and len(mask) != data.shape[2]:
+                # Mask was built for different time axis; rebuild
+                mask = None
+        
+        if mask is not None and mask.size == data.shape[2] and np.any(mask):
             segment_masks = {target_name: mask}
         else:
             if allow_full_epoch_fallback:
@@ -1297,7 +1314,16 @@ def extract_spectral_features(
                 return pd.DataFrame(), [], {"error": f"invalid_target_window_mask:{target_name}"}
         segments = [target_name]
     else:
-        segment_masks = get_segment_masks(epochs.times, windows, config)
+        # Rebuild all segment masks for the current time axis
+        segment_masks = {}
+        if windows is not None and hasattr(windows, 'ranges'):
+            for seg_name, seg_range in windows.ranges.items():
+                if isinstance(seg_range, (list, tuple)) and len(seg_range) >= 2:
+                    tmin, tmax = float(seg_range[0]), float(seg_range[1])
+                    mask = (current_times >= tmin) & (current_times < tmax)
+                    if np.any(mask):
+                        segment_masks[seg_name] = mask
+        
         if configured_segments:
             if isinstance(configured_segments, str):
                 configured_segments = [configured_segments]
@@ -1362,7 +1388,7 @@ def extract_spectral_features(
                     sfreq=float(sfreq),
                     fmin=fmin_psd,
                     fmax=fmax_psd,
-                    adaptive=True,
+                    adaptive=multitaper_adaptive,
                     normalization="full",
                     verbose=False,
                 )

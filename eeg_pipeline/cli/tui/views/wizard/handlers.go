@@ -98,8 +98,8 @@ func (m *Model) shouldSkipStep(step types.WizardStep) bool {
 		mode := m.modeOptions[m.modeIndex]
 		switch mode {
 		case "combine":
-			// For combine, only Subjects and Execute are needed
-			return step != types.StepReviewExecute && step != types.StepSelectSubjects && step != types.StepSelectMode
+			// For combine, only Subjects are needed
+			return step != types.StepSelectSubjects && step != types.StepSelectMode
 		case styles.ModeVisualize:
 			// For visualize, skip bands, ROIs, spatial, time, and advanced config
 			return step == types.StepSelectBands || step == types.StepSelectROIs || step == types.StepSelectSpatial || step == types.StepTimeRange || step == types.StepAdvancedConfig
@@ -286,14 +286,6 @@ func (m *Model) handleRight() {
 }
 
 func (m Model) handleEnter() (tea.Model, tea.Cmd) {
-	if m.CurrentStep == types.StepReviewExecute {
-		if len(m.validationErrors) > 0 {
-			return m, nil
-		}
-		m.ConfirmingExecute = true
-		return m, nil
-	}
-
 	// Per-step validation
 	errors := m.validateStep()
 	if len(errors) > 0 {
@@ -315,10 +307,17 @@ func (m Model) handleEnter() (tea.Model, tea.Cmd) {
 			m.CurrentStep = m.steps[m.stepIndex]
 		}
 
-		m.resetCursorsForStep()
+		// Update feature availability when arriving on features page
+		if m.CurrentStep == types.StepConfigureOptions {
+			m.updateFeatureAvailability()
+		}
 
-		if m.CurrentStep == types.StepReviewExecute {
-			m.validationErrors = m.validate()
+		m.resetCursorsForStep()
+	} else {
+		// On the last step, trigger execution confirmation
+		m.validationErrors = m.validate()
+		if len(m.validationErrors) == 0 {
+			m.ConfirmingExecute = true
 		}
 	}
 	return m, tea.ClearScreen
@@ -660,10 +659,6 @@ func (m *Model) GoBack() bool {
 	}
 
 	if m.stepIndex > 0 {
-		if m.CurrentStep == types.StepReviewExecute {
-			m.validationErrors = nil
-		}
-
 		// Clear subject filter when leaving subject step
 		if m.CurrentStep == types.StepSelectSubjects {
 			m.subjectFilter = ""
@@ -1016,6 +1011,107 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optFeatGroupAsymmetry:
 		m.featGroupAsymmetryExpanded = !m.featGroupAsymmetryExpanded
 		m.useDefaultAdvanced = false
+	case optFeatGroupQuality:
+		m.featGroupQualityExpanded = !m.featGroupQualityExpanded
+		m.useDefaultAdvanced = false
+	case optFeatGroupERDS:
+		m.featGroupERDSExpanded = !m.featGroupERDSExpanded
+		m.useDefaultAdvanced = false
+	// Asymmetry advanced options
+	case optAsymmetryMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAsymmetryMinCyclesAtFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAsymmetrySkipInvalidSegments:
+		m.asymmetrySkipInvalidSegments = !m.asymmetrySkipInvalidSegments
+		m.useDefaultAdvanced = false
+	// Ratios advanced options
+	case optRatiosMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optRatiosMinCyclesAtFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optRatiosSkipInvalidSegments:
+		m.ratiosSkipInvalidSegments = !m.ratiosSkipInvalidSegments
+		m.useDefaultAdvanced = false
+	// Spectral advanced options
+	case optSpectralPsdMethod:
+		m.spectralPsdMethod = (m.spectralPsdMethod + 1) % 2 // 0: multitaper, 1: welch
+		m.useDefaultAdvanced = false
+	case optSpectralFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSpectralFmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSpectralMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optSpectralMinCyclesAtFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// Quality advanced options
+	case optQualityPsdMethod:
+		m.qualityPsdMethod = (m.qualityPsdMethod + 1) % 2 // 0: welch, 1: multitaper
+		m.useDefaultAdvanced = false
+	case optQualityFmin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityFmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityNFft:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityExcludeLineNoise:
+		m.qualityExcludeLineNoise = !m.qualityExcludeLineNoise
+		m.useDefaultAdvanced = false
+	case optQualityLineNoiseFreq:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityLineNoiseWidthHz:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityLineNoiseHarmonics:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualitySnrSignalBandMin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualitySnrSignalBandMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualitySnrNoiseBandMin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualitySnrNoiseBandMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityMuscleBandMin:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optQualityMuscleBandMax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	// ERDS advanced options
+	case optERDSUseLogRatio:
+		m.erdsUseLogRatio = !m.erdsUseLogRatio
+		m.useDefaultAdvanced = false
+	case optERDSMinBaselinePower:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSMinActivePower:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSMinSegmentSec:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optERDSBands:
+		m.startTextEdit(textFieldERDSBands)
+		m.useDefaultAdvanced = false
 	case optFeatGroupStorage:
 		m.featGroupStorageExpanded = !m.featGroupStorageExpanded
 	case optSaveSubjectLevelFeatures:
@@ -1326,40 +1422,36 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 	case optPACHarmonicToleranceHz:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-	case optAperiodicRange:
-		// Cycle through common aperiodic ranges: standard(2-40) -> narrow(3-30) -> broad(1-50) -> standard
-		if m.aperiodicFmin == 2.0 && m.aperiodicFmax == 40.0 {
-			m.aperiodicFmin, m.aperiodicFmax = 3.0, 30.0 // narrow
-		} else if m.aperiodicFmin == 3.0 && m.aperiodicFmax == 30.0 {
-			m.aperiodicFmin, m.aperiodicFmax = 1.0, 50.0 // broad
-		} else {
-			m.aperiodicFmin, m.aperiodicFmax = 2.0, 40.0 // standard
-		}
-		m.useDefaultAdvanced = false
-	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms:
+	case optPACRandomSeed:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
-		case optPEOrder:
-			m.complexityPEOrder++
-			if m.complexityPEOrder > 7 {
-				m.complexityPEOrder = 3
-			}
-			m.useDefaultAdvanced = false
-		case optPEDelay:
-			m.startNumberEdit()
-			m.useDefaultAdvanced = false
-		case optComplexitySignalBasis:
-			m.complexitySignalBasis++
-			if m.complexitySignalBasis > 1 {
-				m.complexitySignalBasis = 0
-			}
-			m.useDefaultAdvanced = false
-		case optComplexityMinSegmentSec, optComplexityMinSamples:
-			m.startNumberEdit()
-			m.useDefaultAdvanced = false
-		case optComplexityZscore:
-			m.complexityZscore = !m.complexityZscore
-			m.useDefaultAdvanced = false
+	case optAperiodicFmin, optAperiodicFmax:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPEOrder:
+		m.complexityPEOrder++
+		if m.complexityPEOrder > 7 {
+			m.complexityPEOrder = 3
+		}
+		m.useDefaultAdvanced = false
+	case optPEDelay:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optComplexitySignalBasis:
+		m.complexitySignalBasis++
+		if m.complexitySignalBasis > 1 {
+			m.complexitySignalBasis = 0
+		}
+		m.useDefaultAdvanced = false
+	case optComplexityMinSegmentSec, optComplexityMinSamples:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optComplexityZscore:
+		m.complexityZscore = !m.complexityZscore
+		m.useDefaultAdvanced = false
 	case optERPBaseline:
 		m.erpBaselineCorrection = !m.erpBaselineCorrection
 		m.useDefaultAdvanced = false
@@ -3408,6 +3500,14 @@ func (m *Model) commitFeaturesNumber(val float64) {
 
 	opt := options[m.advancedCursor]
 	switch opt {
+	case optAperiodicFmin:
+		if val > 0 && val < m.aperiodicFmax {
+			m.aperiodicFmin = val
+		}
+	case optAperiodicFmax:
+		if val > 0 && val > m.aperiodicFmin {
+			m.aperiodicFmax = val
+		}
 	case optAperiodicPeakZ:
 		m.aperiodicPeakZ = val
 	case optAperiodicMinR2:
@@ -3422,6 +3522,18 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		if val >= 0 {
 			m.aperiodicMaxRms = val
 		}
+	case optAperiodicLineNoiseFreq:
+		if val > 0 {
+			m.aperiodicLineNoiseFreq = val
+		}
+	case optAperiodicLineNoiseWidthHz:
+		if val > 0 {
+			m.aperiodicLineNoiseWidthHz = val
+		}
+	case optAperiodicLineNoiseHarmonics:
+		if val >= 0 {
+			m.aperiodicLineNoiseHarmonics = int(val)
+		}
 	case optPACMinEpochs:
 		m.pacMinEpochs = int(val)
 	case optPACNSurrogates:
@@ -3430,6 +3542,8 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.pacMaxHarmonic = int(val)
 	case optPACHarmonicToleranceHz:
 		m.pacHarmonicToleranceHz = val
+	case optPACRandomSeed:
+		m.pacRandomSeed = int(val)
 	case optPEDelay:
 		m.complexityPEDelay = int(val)
 	case optComplexityMinSegmentSec:
@@ -3570,6 +3684,103 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		}
 	case optTfrWorkers:
 		m.tfrWorkers = int(val)
+	// Asymmetry options
+	case optAsymmetryMinSegmentSec:
+		if val >= 0 {
+			m.asymmetryMinSegmentSec = val
+		}
+	case optAsymmetryMinCyclesAtFmin:
+		if val >= 0 {
+			m.asymmetryMinCyclesAtFmin = val
+		}
+	// Ratios options
+	case optRatiosMinSegmentSec:
+		if val >= 0 {
+			m.ratiosMinSegmentSec = val
+		}
+	case optRatiosMinCyclesAtFmin:
+		if val >= 0 {
+			m.ratiosMinCyclesAtFmin = val
+		}
+	// Spectral options
+	case optSpectralFmin:
+		if val >= 0 {
+			m.spectralFmin = val
+		}
+	case optSpectralFmax:
+		if val > 0 {
+			m.spectralFmax = val
+		}
+	case optSpectralMinSegmentSec:
+		if val >= 0 {
+			m.spectralMinSegmentSec = val
+		}
+	case optSpectralMinCyclesAtFmin:
+		if val >= 0 {
+			m.spectralMinCyclesAtFmin = val
+		}
+	// Quality options
+	case optQualityFmin:
+		if val >= 0 {
+			m.qualityFmin = val
+		}
+	case optQualityFmax:
+		if val > 0 {
+			m.qualityFmax = val
+		}
+	case optQualityNFft:
+		if val >= 1 {
+			m.qualityNfft = int(val)
+		}
+	case optQualityLineNoiseFreq:
+		if val > 0 {
+			m.qualityLineNoiseFreq = val
+		}
+	case optQualityLineNoiseWidthHz:
+		if val >= 0 {
+			m.qualityLineNoiseWidthHz = val
+		}
+	case optQualityLineNoiseHarmonics:
+		if val >= 0 {
+			m.qualityLineNoiseHarmonics = int(val)
+		}
+	case optQualitySnrSignalBandMin:
+		if val >= 0 {
+			m.qualitySnrSignalBandMin = val
+		}
+	case optQualitySnrSignalBandMax:
+		if val > 0 {
+			m.qualitySnrSignalBandMax = val
+		}
+	case optQualitySnrNoiseBandMin:
+		if val >= 0 {
+			m.qualitySnrNoiseBandMin = val
+		}
+	case optQualitySnrNoiseBandMax:
+		if val > 0 {
+			m.qualitySnrNoiseBandMax = val
+		}
+	case optQualityMuscleBandMin:
+		if val >= 0 {
+			m.qualityMuscleBandMin = val
+		}
+	case optQualityMuscleBandMax:
+		if val > 0 {
+			m.qualityMuscleBandMax = val
+		}
+	// ERDS options
+	case optERDSMinBaselinePower:
+		if val > 0 {
+			m.erdsMinBaselinePower = val
+		}
+	case optERDSMinActivePower:
+		if val > 0 {
+			m.erdsMinActivePower = val
+		}
+	case optERDSMinSegmentSec:
+		if val >= 0 {
+			m.erdsMinSegmentSec = val
+		}
 	}
 }
 

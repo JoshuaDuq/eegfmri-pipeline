@@ -342,9 +342,10 @@ class BehaviorContext:
             self.logger.warning("Failed to load %s: %s", key, e)
 
     def _load_targets_from_file(self, features_dir: Path) -> None:
-        """Load targets from target_vas_ratings.tsv file."""
-        targets_path = features_dir / _TARGETS_FILENAME
+        """Load targets from behavior/target_vas_ratings.tsv file."""
+        targets_path = features_dir / "behavior" / _TARGETS_FILENAME
         if not targets_path.exists():
+            # (Legacy fallback removed)
             return
 
         targets_df = read_tsv(targets_path)
@@ -575,10 +576,9 @@ class BehaviorContext:
 
         features_dir = deriv_features_path(self.deriv_root, self.subject)
         
-        # Check new reorganized path first, fallback to legacy path
+        # Use reorganized metadata path
         manifest_path = features_dir / "metadata" / _TRIAL_ALIGNMENT_MANIFEST
-        if not manifest_path.exists():
-            manifest_path = features_dir / _TRIAL_ALIGNMENT_MANIFEST
+        # (Legacy fallback removed)
 
         if not manifest_path.exists():
             raise FileNotFoundError(

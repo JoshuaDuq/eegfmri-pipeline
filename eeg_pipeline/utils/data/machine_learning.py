@@ -47,11 +47,7 @@ def _get_trial_alignment_manifest_path(deriv_root: Path, subject: str) -> Path:
     sub = f"sub-{subject}" if not subject.startswith("sub-") else subject
     base = deriv_root / sub / "eeg" / "features"
     
-    json_path = base / "metadata" / "trial_alignment.json"
-    if json_path.exists():
-        return json_path
-        
-    return base / "trial_alignment.tsv"
+    return base / "metadata" / "trial_alignment.json"
 
 
 def _load_trial_alignment_manifest(
@@ -129,12 +125,7 @@ def load_ml_data(
     
     # Try new organized paths first
     X_path = feat_dir / "power" / "features_power.tsv"
-    if not X_path.exists():
-        X_path = feat_dir / "features_power.tsv"
-        
     y_path = feat_dir / "behavior" / "target_vas_ratings.tsv"
-    if not y_path.exists():
-        y_path = feat_dir / "target_vas_ratings.tsv"
         
     manifest_path = _get_trial_alignment_manifest_path(deriv_root, subject)
 
@@ -711,17 +702,7 @@ def load_kept_indices(
 
     base_dir = deriv_root / subject_label / "eeg" / "features"
     # Check new metadata home first, then quality (temporary home), then root
-    paths_to_check = [
-        base_dir / "metadata" / "dropped_trials.tsv",
-        base_dir / "quality" / "dropped_trials.tsv",
-        base_dir / "dropped_trials.tsv",
-    ]
-    
-    dropped_path = None
-    for p in paths_to_check:
-        if p.exists():
-            dropped_path = p
-            break
+    dropped_path = base_dir / "metadata" / "dropped_trials.tsv"
         
     if dropped_path is None:
         return None

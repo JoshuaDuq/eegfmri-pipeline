@@ -80,24 +80,6 @@ var behaviorComputations = []Computation{
 	{"report", "Subject Report", "Single-subject summary report", "Quality"},
 }
 
-var behaviorComputationGroups = map[string]string{
-	"trial_table":      "DataPrep",
-	"lag_features":     "DataPrep",
-	"pain_residual":    "DataPrep",
-	"correlations":     "Core",
-	"regression":       "Core",
-	"condition":        "Core",
-	"temporal":         "Core",
-	"pain_sensitivity": "Core",
-	"cluster":          "Core",
-	"mediation":        "Advanced",
-	"moderation":       "Advanced",
-	"mixed_effects":    "Advanced",
-	"stability":        "Quality",
-	"validation":       "Quality",
-	"report":           "Quality",
-}
-
 type FrequencyBand struct {
 	Key         string
 	Name        string
@@ -404,6 +386,7 @@ const (
 	textFieldSpectralRatioPairs
 	textFieldAsymmetryChannelPairs
 	textFieldERPComponents
+	textFieldERDSBands
 	// ITPC condition-based text fields
 	textFieldItpcConditionColumn
 	textFieldItpcConditionValues
@@ -1147,7 +1130,21 @@ type Model struct {
 	saveSubjectLevelFeatures bool
 
 	// Asymmetry
-	asymmetryChannelPairsSpec string // e.g. F3:F4,C3:C4
+	asymmetryChannelPairsSpec    string  // e.g. F3:F4,C3:C4
+	asymmetryMinSegmentSec       float64 // Minimum segment duration
+	asymmetryMinCyclesAtFmin     float64 // Minimum cycles at lowest frequency
+	asymmetrySkipInvalidSegments bool    // Skip invalid segments
+
+	// Ratios
+	ratiosMinSegmentSec       float64 // Minimum segment duration
+	ratiosMinCyclesAtFmin     float64 // Minimum cycles at lowest frequency
+	ratiosSkipInvalidSegments bool    // Skip invalid segments
+
+	// Quality group expanded state
+	featGroupQualityExpanded bool
+
+	// ERDS group expanded state
+	featGroupERDSExpanded bool
 
 	// Connectivity configuration
 	connOutputLevel  int // 0: full, 1: global_only
@@ -1183,7 +1180,6 @@ type Model struct {
 	spectralLineNoiseFreq      float64 // Line noise frequency (50 or 60)
 	spectralLineNoiseWidthHz   float64 // Line noise frequency band width to exclude
 	spectralLineNoiseHarmonics int     // Number of line noise harmonics to exclude
-	spectralSegments           int     // 0: baseline only, 1: active only, 2: both
 	spectralMinSegmentSec      float64 // Minimum segment duration
 	spectralMinCyclesAtFmin    float64 // Minimum cycles at lowest frequency
 
@@ -1313,23 +1309,26 @@ type Model struct {
 	pacRandomSeed          int     // Random seed for PAC surrogate testing
 
 	// Complexity advanced options
-	complexitySignalBasis  int     // 0: filtered, 1: envelope
+	complexitySignalBasis   int     // 0: filtered, 1: envelope
 	complexityMinSegmentSec float64 // Minimum segment duration (sec)
 	complexityMinSamples    int     // Minimum samples per segment
 	complexityZscore        bool    // Apply z-score normalization
 
 	// Quality feature options
-	qualityPsdMethod        int     // 0: welch, 1: multitaper
-	qualityFmin             float64 // Min frequency
-	qualityFmax             float64 // Max frequency
-	qualityNfft             int     // FFT size
-	qualityExcludeLineNoise bool    // Exclude line noise
-	qualitySnrSignalBandMin float64 // SNR signal band min
-	qualitySnrSignalBandMax float64 // SNR signal band max
-	qualitySnrNoiseBandMin  float64 // SNR noise band min
-	qualitySnrNoiseBandMax  float64 // SNR noise band max
-	qualityMuscleBandMin    float64 // Muscle band min
-	qualityMuscleBandMax    float64 // Muscle band max
+	qualityPsdMethod          int     // 0: welch, 1: multitaper
+	qualityFmin               float64 // Min frequency
+	qualityFmax               float64 // Max frequency
+	qualityNfft               int     // FFT size
+	qualityExcludeLineNoise   bool    // Exclude line noise
+	qualityLineNoiseFreq      float64 // Line noise frequency (50 or 60)
+	qualityLineNoiseWidthHz   float64 // Line noise width
+	qualityLineNoiseHarmonics int     // Line noise harmonics
+	qualitySnrSignalBandMin   float64 // SNR signal band min
+	qualitySnrSignalBandMax   float64 // SNR signal band max
+	qualitySnrNoiseBandMin    float64 // SNR noise band min
+	qualitySnrNoiseBandMax    float64 // SNR noise band max
+	qualityMuscleBandMin      float64 // Muscle band min
+	qualityMuscleBandMax      float64 // Muscle band max
 
 	// ERDS advanced options
 	erdsUseLogRatio      bool    // Use dB instead of percent
@@ -1706,10 +1705,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		{Key: "/", Description: "Filter subjects"},
 	})
 	help.AddSection("Presets", []components.HelpItem{
-		{Key: "Q", Description: "Quick preset"},
-		{Key: "F", Description: "Full preset"},
-		{Key: "C", Description: "Connectivity (features)"},
-		{Key: "S", Description: "Spectral (features)"},
 		{Key: "R", Description: "Regression (behavior)"},
 		{Key: "T", Description: "Temporal (behavior)"},
 	})
@@ -1822,7 +1817,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		spectralLineNoiseFreq:      50.0,
 		spectralLineNoiseWidthHz:   1.0,
 		spectralLineNoiseHarmonics: 3,
-		spectralSegments:           0, // 0: baseline only
 		spectralMinSegmentSec:      2.0,
 		spectralMinCyclesAtFmin:    3.0,
 
@@ -1883,15 +1877,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		sourceLocSubject:           "",
 		sourceLocTrans:             "",
 		sourceLocBem:               "",
-			sourceLocMindistMm:         5.0,
-			sourceLocFmriEnabled:       false,
-			sourceLocFmriStatsMap:      "",
-			sourceLocFmriProvenance:    0,
-			sourceLocFmriRequireProv:   true,
-			sourceLocFmriThreshold:     3.1,
-			sourceLocFmriTail:          0, // 0: pos
-			sourceLocFmriMinClusterVox: 50,
-			sourceLocFmriMaxClusters:   20,
+		sourceLocMindistMm:         5.0,
+		sourceLocFmriEnabled:       false,
+		sourceLocFmriStatsMap:      "",
+		sourceLocFmriProvenance:    0,
+		sourceLocFmriRequireProv:   true,
+		sourceLocFmriThreshold:     3.1,
+		sourceLocFmriTail:          0, // 0: pos
+		sourceLocFmriMinClusterVox: 50,
+		sourceLocFmriMaxClusters:   20,
 		sourceLocFmriMaxVoxPerClus: 2000,
 		sourceLocFmriMaxTotalVox:   20000,
 		sourceLocFmriRandomSeed:    0,
@@ -1936,14 +1930,15 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		pacAllowHarmonicOvrlap: false,
 		pacMaxHarmonic:         6,
 		pacHarmonicToleranceHz: 1.0,
+		pacRandomSeed:          0,
 		pacComputeWaveformQC:   false,
 		pacWaveformOffsetMs:    5.0,
 
-			// Complexity advanced defaults
-			complexitySignalBasis:  0,
-			complexityMinSegmentSec: 2.0,
-			complexityMinSamples:    200,
-			complexityZscore:        true,
+		// Complexity advanced defaults
+		complexitySignalBasis:   0,
+		complexityMinSegmentSec: 2.0,
+		complexityMinSamples:    200,
+		complexityZscore:        true,
 
 		// Quality defaults
 		qualityPsdMethod:        0, // 0: welch
@@ -1983,10 +1978,25 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		// Validation & Generic
 		minEpochsForFeatures: 10,
 
-		failOnMissingWindows:      false,
-		failOnMissingNamedWindow:  true,
-		saveSubjectLevelFeatures:  true,
-		asymmetryChannelPairsSpec: "",
+		failOnMissingWindows:     false,
+		failOnMissingNamedWindow: true,
+		saveSubjectLevelFeatures: true,
+
+		// Asymmetry defaults
+		asymmetryChannelPairsSpec:    "",
+		asymmetryMinSegmentSec:       0.5,
+		asymmetryMinCyclesAtFmin:     3.0,
+		asymmetrySkipInvalidSegments: true,
+
+		// Ratios defaults
+		ratiosMinSegmentSec:       0.5,
+		ratiosMinCyclesAtFmin:     3.0,
+		ratiosSkipInvalidSegments: true,
+
+		// Quality line noise defaults
+		qualityLineNoiseFreq:      60.0,
+		qualityLineNoiseWidthHz:   2.0,
+		qualityLineNoiseHarmonics: 3,
 		// Behavior defaults
 		correlationMethod:     "spearman",
 		robustCorrelation:     0,
@@ -2290,7 +2300,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectSpatial,
 			types.StepTimeRange,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 		for i := range frequencyBands {
 			m.bandSelected[i] = true
@@ -2350,7 +2359,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectComputations,
 			types.StepSelectFeatureFiles,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 	case types.PipelineML:
@@ -2363,7 +2371,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 	case types.PipelinePreprocessing:
@@ -2382,7 +2389,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectSubjects,
 			types.StepSelectMode,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 	case types.PipelineFmri:
@@ -2393,7 +2399,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 		// Defaults mirror fmri_pipeline/utils/config/fmri_config.yaml (fmri_preprocessing.*)
@@ -2454,7 +2459,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 	case types.PipelineRawToBIDS:
@@ -2463,7 +2467,6 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 		m.steps = []types.WizardStep{
 			types.StepSelectSubjects,
 			types.StepAdvancedConfig,
-			types.StepReviewExecute,
 		}
 
 	case types.PipelinePlotting:
@@ -2497,13 +2500,12 @@ func New(pipeline types.Pipeline, repoRoot string) Model {
 			types.StepSelectFeaturePlotters,
 			types.StepAdvancedConfig,
 			types.StepPlotConfig,
-			types.StepReviewExecute, // Review & Execute should be the last step
 		}
 
 	default:
 		m.modeOptions = []string{styles.ModeCompute}
 		m.modeDescriptions = []string{"Run computation"}
-		m.steps = []types.WizardStep{types.StepSelectSubjects, types.StepReviewExecute}
+		m.steps = []types.WizardStep{types.StepSelectSubjects}
 	}
 
 	if len(m.steps) > 0 {
@@ -2828,11 +2830,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleRight()
 		case " ":
 			// Space to edit bands or ROIs, or handle default space behavior
-			if m.CurrentStep == types.StepSelectBands {
+			switch m.CurrentStep {
+			case types.StepSelectBands:
 				m.startBandEdit()
-			} else if m.CurrentStep == types.StepSelectROIs {
+			case types.StepSelectROIs:
 				m.startROIEdit()
-			} else {
+			default:
 				m.handleSpace()
 				// Check for pending file picker command (set by file path options)
 				if m.pendingFileCmd != nil {
@@ -2860,12 +2863,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timeRangeCursor = len(m.TimeRanges) - 1
 				m.editingRangeIdx = m.timeRangeCursor
 				m.editingField = fieldName
-			} else if m.CurrentStep == types.StepSelectBands {
-				m.addNewBand()
-			} else if m.CurrentStep == types.StepSelectROIs {
-				m.addNewROI()
 			} else {
-				m.selectAll()
+				switch m.CurrentStep {
+				case types.StepSelectBands:
+					m.addNewBand()
+				case types.StepSelectROIs:
+					m.addNewROI()
+				default:
+					m.selectAll()
+				}
 			}
 		case "d", "x":
 			isTimeRangeStep := m.CurrentStep == types.StepTimeRange
@@ -2880,35 +2886,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.timeRangeCursor < 0 {
 					m.timeRangeCursor = 0
 				}
-			} else if m.CurrentStep == types.StepSelectBands {
-				m.removeBand()
-			} else if m.CurrentStep == types.StepSelectROIs {
-				m.removeROI()
+			} else {
+				switch m.CurrentStep {
+				case types.StepSelectBands:
+					m.removeBand()
+				case types.StepSelectROIs:
+					m.removeROI()
+				}
 			}
 		case "n":
 			m.selectNone()
 
 		case "e", "E":
 			// Edit band frequencies or ROI channels
-			if m.CurrentStep == types.StepSelectBands {
+			switch m.CurrentStep {
+			case types.StepSelectBands:
 				m.startBandEdit()
-			} else if m.CurrentStep == types.StepSelectROIs {
+			case types.StepSelectROIs:
 				m.startROIEdit()
 			}
 
 		case "+", "=":
 			// Legacy support - map to add
-			if m.CurrentStep == types.StepSelectBands {
+			switch m.CurrentStep {
+			case types.StepSelectBands:
 				m.addNewBand()
-			} else if m.CurrentStep == types.StepSelectROIs {
+			case types.StepSelectROIs:
 				m.addNewROI()
 			}
 
 		case "-", "_":
 			// Legacy support - map to delete
-			if m.CurrentStep == types.StepSelectBands {
+			switch m.CurrentStep {
+			case types.StepSelectBands:
 				m.removeBand()
-			} else if m.CurrentStep == types.StepSelectROIs {
+			case types.StepSelectROIs:
 				m.removeROI()
 			}
 
@@ -3953,6 +3965,8 @@ func (m Model) getTextFieldValue(field textField) string {
 		return m.pacPairsSpec
 	case textFieldBurstBands:
 		return m.burstBandsSpec
+	case textFieldERDSBands:
+		return m.erdsBandsSpec
 	case textFieldSpectralRatioPairs:
 		return m.spectralRatioPairsSpec
 	case textFieldAsymmetryChannelPairs:
@@ -4178,9 +4192,10 @@ func (m *Model) ApplyConfigKeys(values map[string]interface{}) {
 	}
 	if v, ok := values["fmri_preprocessing.engine"]; ok {
 		if s, ok := asString(v); ok {
-			if s == "apptainer" {
+			switch s {
+			case "apptainer":
 				m.fmriEngineIndex = 1
-			} else if s == "docker" {
+			case "docker":
 				m.fmriEngineIndex = 0
 			}
 		}
@@ -4441,6 +4456,8 @@ func (m *Model) setTextFieldValue(field textField, value string) {
 		m.pacPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldBurstBands:
 		m.burstBandsSpec = strings.Join(strings.Fields(value), "")
+	case textFieldERDSBands:
+		m.erdsBandsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldSpectralRatioPairs:
 		m.spectralRatioPairsSpec = strings.Join(strings.Fields(value), "")
 	case textFieldAsymmetryChannelPairs:
@@ -4681,6 +4698,8 @@ const (
 	optFeatGroupERP
 	optFeatGroupRatios
 	optFeatGroupAsymmetry
+	optFeatGroupQuality
+	optFeatGroupERDS
 	optFeatGroupSpatialTransform
 	optFeatGroupStorage
 	optFeatGroupExecution
@@ -4717,7 +4736,8 @@ const (
 	optPACMaxHarmonic
 	optPACHarmonicToleranceHz
 	optPACRandomSeed
-	optAperiodicRange
+	optAperiodicFmin
+	optAperiodicFmax
 	optAperiodicPeakZ
 	optAperiodicMinR2
 	optAperiodicMinPoints
@@ -4751,8 +4771,41 @@ const (
 	optSpectralLineNoiseFreq
 	optSpectralLineNoiseWidthHz
 	optSpectralLineNoiseHarmonics
+	optSpectralPsdMethod
+	optSpectralFmin
+	optSpectralFmax
+	optSpectralMinSegmentSec
+	optSpectralMinCyclesAtFmin
 	optAperiodicSubtractEvoked
 	optAsymmetryChannelPairs
+	optAsymmetryMinSegmentSec
+	optAsymmetryMinCyclesAtFmin
+	optAsymmetrySkipInvalidSegments
+	// Ratios options
+	optRatiosMinSegmentSec
+	optRatiosMinCyclesAtFmin
+	optRatiosSkipInvalidSegments
+	// Quality options
+	optQualityPsdMethod
+	optQualityFmin
+	optQualityFmax
+	optQualityNFft
+	optQualityExcludeLineNoise
+	optQualityLineNoiseFreq
+	optQualityLineNoiseWidthHz
+	optQualityLineNoiseHarmonics
+	optQualitySnrSignalBandMin
+	optQualitySnrSignalBandMax
+	optQualitySnrNoiseBandMin
+	optQualitySnrNoiseBandMax
+	optQualityMuscleBandMin
+	optQualityMuscleBandMax
+	// ERDS options
+	optERDSUseLogRatio
+	optERDSMinBaselinePower
+	optERDSMinActivePower
+	optERDSMinSegmentSec
+	optERDSBands
 	optConnOutputLevel
 	optConnGraphMetrics
 	optConnGraphProp
@@ -5390,7 +5443,7 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("aperiodic") {
 		options = append(options, optFeatGroupAperiodic)
 		if m.featGroupAperiodicExpanded {
-			options = append(options, optAperiodicRange, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics, optAperiodicSubtractEvoked)
+			options = append(options, optAperiodicFmin, optAperiodicFmax, optAperiodicPeakZ, optAperiodicMinR2, optAperiodicMinPoints, optAperiodicPsdBandwidth, optAperiodicMaxRms, optAperiodicLineNoiseFreq, optAperiodicLineNoiseWidthHz, optAperiodicLineNoiseHarmonics, optAperiodicSubtractEvoked)
 		}
 	}
 	if m.isCategorySelected("complexity") {
@@ -5420,19 +5473,35 @@ func (m Model) getFeaturesOptions() []optionType {
 	if m.isCategorySelected("spectral") {
 		options = append(options, optFeatGroupSpectral)
 		if m.featGroupSpectralExpanded {
-			options = append(options, optSpectralEdge)
+			options = append(options, optSpectralEdge, optSpectralPsdMethod, optSpectralFmin, optSpectralFmax,
+				optSpectralMinSegmentSec, optSpectralMinCyclesAtFmin)
 		}
 	}
 	if m.isCategorySelected("ratios") {
 		options = append(options, optFeatGroupRatios)
 		if m.featGroupRatiosExpanded {
-			options = append(options, optSpectralRatioPairs)
+			options = append(options, optSpectralRatioPairs, optRatiosMinSegmentSec, optRatiosMinCyclesAtFmin, optRatiosSkipInvalidSegments)
 		}
 	}
 	if m.isCategorySelected("asymmetry") {
 		options = append(options, optFeatGroupAsymmetry)
 		if m.featGroupAsymmetryExpanded {
-			options = append(options, optAsymmetryChannelPairs)
+			options = append(options, optAsymmetryChannelPairs, optAsymmetryMinSegmentSec, optAsymmetryMinCyclesAtFmin, optAsymmetrySkipInvalidSegments)
+		}
+	}
+	if m.isCategorySelected("quality") {
+		options = append(options, optFeatGroupQuality)
+		if m.featGroupQualityExpanded {
+			options = append(options, optQualityPsdMethod, optQualityFmin, optQualityFmax, optQualityNFft,
+				optQualityExcludeLineNoise, optQualityLineNoiseFreq, optQualityLineNoiseWidthHz, optQualityLineNoiseHarmonics,
+				optQualitySnrSignalBandMin, optQualitySnrSignalBandMax, optQualitySnrNoiseBandMin, optQualitySnrNoiseBandMax,
+				optQualityMuscleBandMin, optQualityMuscleBandMax)
+		}
+	}
+	if m.isCategorySelected("erds") {
+		options = append(options, optFeatGroupERDS)
+		if m.featGroupERDSExpanded {
+			options = append(options, optERDSUseLogRatio, optERDSMinBaselinePower, optERDSMinActivePower, optERDSMinSegmentSec, optERDSBands)
 		}
 	}
 
@@ -5473,14 +5542,14 @@ func (m Model) getFeaturesOptions() []optionType {
 				}
 				options = append(options, optSourceLocMindistMm)
 				options = append(options, optSourceLocFmriEnabled)
-					if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
-						options = append(options,
-							optSourceLocFmriStatsMap,
-							optSourceLocFmriProvenance,
-							optSourceLocFmriRequireProvenance,
-							optSourceLocFmriThreshold,
-							optSourceLocFmriTail,
-							optSourceLocFmriMinClusterVox,
+				if m.sourceLocFmriEnabled || strings.TrimSpace(m.sourceLocFmriStatsMap) != "" {
+					options = append(options,
+						optSourceLocFmriStatsMap,
+						optSourceLocFmriProvenance,
+						optSourceLocFmriRequireProvenance,
+						optSourceLocFmriThreshold,
+						optSourceLocFmriTail,
+						optSourceLocFmriMinClusterVox,
 						optSourceLocFmriMaxClusters,
 						optSourceLocFmriMaxVoxPerClus,
 						optSourceLocFmriMaxTotalVox,

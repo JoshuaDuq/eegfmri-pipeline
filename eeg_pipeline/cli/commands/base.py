@@ -64,7 +64,8 @@ def detect_available_bands(features_dir: Union[str, Path]) -> List[str]:
     found_bands: Set[str] = set()
 
     features_path = Path(features_dir)
-    for tsv_file in features_path.rglob("features_*.tsv"):
+    # Only look in subfolders for new organized structure
+    for tsv_file in features_path.glob("*/features_*.tsv"):
         try:
             with open(tsv_file, "r") as f:
                 header = f.readline().strip()
@@ -140,11 +141,7 @@ def detect_feature_availability(features_dir: Union[str, Path]) -> dict:
                     if files:
                         found_file = max(files, key=lambda f: f.stat().st_mtime)
                         break
-                if not found_file:
-                    files = list(features_path.glob(pattern))
-                    if files:
-                        found_file = max(files, key=lambda f: f.stat().st_mtime)
-                        break
+                # Legacy fallback removed
         
         if found_file and found_file.exists():
             mtime_utc = datetime.utcfromtimestamp(found_file.stat().st_mtime)

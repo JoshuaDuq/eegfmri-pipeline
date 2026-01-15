@@ -911,8 +911,12 @@ def setup_features(subparsers: argparse._SubParsersAction) -> argparse.ArgumentP
 
 def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> None:
     """Execute the features command."""
+    import sys
     from eeg_pipeline.pipelines.features import FeaturePipeline
     from eeg_pipeline.plotting.orchestration.features import visualize_features_for_subjects
+    
+    # Capture CLI command for reproducibility (stored in extraction config)
+    cli_command = " ".join(sys.argv)
     
     categories = getattr(args, "categories", None)
     progress = create_progress_reporter(args)
@@ -949,6 +953,7 @@ def run_features(args: argparse.Namespace, subjects: List[str], config: Any) -> 
             time_ranges=time_ranges or None,
             aggregation_method=getattr(args, "aggregation_method", "mean"),
             progress=progress,
+            cli_command=cli_command,
         )
     elif args.mode == "visualize":
         visualize_features_for_subjects(

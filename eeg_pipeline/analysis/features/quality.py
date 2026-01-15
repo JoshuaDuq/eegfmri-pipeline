@@ -119,12 +119,13 @@ def _compute_psd(
     n_fft = max(2, min(n_fft, n_times))
     
     if method == "multitaper":
+        multitaper_adaptive = bool(config.get("multitaper_adaptive", False))
         psds, freqs = mne.time_frequency.psd_array_multitaper(
             data,
             sfreq=float(sfreq),
             fmin=fmin,
             fmax=fmax,
-            adaptive=True,
+            adaptive=multitaper_adaptive,
             normalization="full",
             verbose=False,
         )
@@ -290,7 +291,9 @@ def _store_metric_values(
                 results[column_name] = [np.nan] * n_epochs
             results[column_name][epoch_idx] = channel_values[channel_idx]
         
-        global_value = np.nanmean(channel_values)
+        global_value = np.nan
+        if np.isfinite(channel_values).any():
+            global_value = float(np.nanmean(channel_values))
         global_column = NamingSchema.build(
             "quality", segment, "broadband", "global", metric_name
         )

@@ -86,20 +86,30 @@ type (
 	}
 )
 
-// CheckVMStatus checks if the GCP VM is running
+// CheckVMStatus checks if the GCP VM is running using gcloud API
 func CheckVMStatus(cfg Config) tea.Cmd {
 	return func() tea.Msg {
-		remoteTarget := cfg.getRemoteTarget()
-		timeoutOption := fmt.Sprintf("ConnectTimeout=%d", sshConnectTimeoutSeconds)
-		cmd := exec.Command("ssh", "-o", timeoutOption, remoteTarget, "hostname")
-		
+		if err := validateGCPConfig(cfg); err != nil {
+			return VMStatusMsg{Running: false, Error: err}
+		}
+
+		// Use gcloud to get the actual VM status from GCP API
+		cmd := exec.Command("gcloud", "compute", "instances", "describe",
+			cfg.GCPInstance,
+			"--zone", cfg.GCPZone,
+			"--project", cfg.GCPProject,
+			"--format", "value(status)",
+		)
+
 		output, err := cmd.Output()
 		if err != nil {
 			return VMStatusMsg{Running: false, Error: err}
 		}
 
-		hostname := strings.TrimSpace(string(output))
-		return VMStatusMsg{Running: true, IP: hostname}
+		status := strings.TrimSpace(string(output))
+		isRunning := status == "RUNNING"
+
+		return VMStatusMsg{Running: isRunning, IP: cfg.GCPInstance}
 	}
 }
 
@@ -134,6 +144,38 @@ func StopVM(cfg Config) tea.Cmd {
 
 		return VMStatusMsg{Running: false}
 	}
+}
+
+// StopVMSync stops the GCP instance synchronously (for use in cleanup/exit)
+func StopVMSync(cfg Config) error {
+	if err := validateGCPConfig(cfg); err != nil {
+		return err
+	}
+
+	cmd := buildGCPStopCommand(cfg)
+	return cmd.Run()
+}
+
+// IsVMRunning checks if the VM is currently running (synchronous)
+func IsVMRunning(cfg Config) bool {
+	if err := validateGCPConfig(cfg); err != nil {
+		return false
+	}
+
+	cmd := exec.Command("gcloud", "compute", "instances", "describe",
+		cfg.GCPInstance,
+		"--zone", cfg.GCPZone,
+		"--project", cfg.GCPProject,
+		"--format", "value(status)",
+	)
+
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	status := strings.TrimSpace(string(output))
+	return status == "RUNNING"
 }
 
 // SyncToRemote syncs code and data to the remote VM
@@ -191,7 +233,7 @@ func PullDerivatives(ctx context.Context, cfg Config, localDataDir string) tea.C
 
 		rsyncArgs := buildPullRsyncArgs(remotePath, localPath)
 		cmd := exec.CommandContext(ctx, "rsync", rsyncArgs...)
-		
+
 		if err := cmd.Run(); err != nil {
 			return PullCompleteMsg{Error: err, Duration: time.Since(startTime)}
 		}

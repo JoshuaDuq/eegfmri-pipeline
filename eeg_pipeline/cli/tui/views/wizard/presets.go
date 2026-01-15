@@ -28,22 +28,7 @@ func (m *Model) TickToast() {
 }
 
 func (m *Model) ApplyFeaturePreset(presetKey string) {
-	m.selected = make(map[int]bool)
-
-	if presetKey == "full" {
-		m.selectAllCategories()
-		m.notifyPresetApplied("Full Analysis")
-		return
-	}
-
-	categoriesToSelect := m.getFeaturePresetCategories(presetKey)
-	if categoriesToSelect == nil {
-		return
-	}
-
-	m.selectCategoriesByNames(categoriesToSelect)
-	presetName := m.getFeaturePresetName(presetKey)
-	m.notifyPresetApplied(presetName)
+	// Feature presets have been removed
 }
 
 func (m *Model) ApplyBehaviorPreset(presetKey string) {
@@ -96,21 +81,6 @@ func (m Model) GetFilteredSubjectCount() (filtered, total, valid int) {
 	return filtered, total, valid
 }
 
-func (m *Model) getFeaturePresetCategories(presetKey string) []string {
-	switch presetKey {
-	case "quick":
-		return []string{"power", "aperiodic", "complexity"}
-	case "connectivity":
-		return []string{"power", "connectivity", "pac"}
-	case "spectral":
-		return []string{"power", "spectral", "aperiodic", "ratios"}
-	case "full":
-		return []string{}
-	default:
-		return nil
-	}
-}
-
 func (m *Model) getBehaviorPresetComputations(presetKey string) []string {
 	switch presetKey {
 	case "quick":
@@ -123,24 +93,6 @@ func (m *Model) getBehaviorPresetComputations(presetKey string) []string {
 		return []string{}
 	default:
 		return nil
-	}
-}
-
-func (m *Model) selectAllCategories() {
-	for i := range m.categories {
-		m.selected[i] = true
-	}
-}
-
-func (m *Model) selectCategoriesByNames(targetNames []string) {
-	for i, category := range m.categories {
-		categoryLower := strings.ToLower(category)
-		for _, targetName := range targetNames {
-			if categoryLower == targetName {
-				m.selected[i] = true
-				break
-			}
-		}
 	}
 }
 
@@ -159,15 +111,6 @@ func (m *Model) selectComputationsByKeys(targetKeys []string) {
 			}
 		}
 	}
-}
-
-func (m *Model) getFeaturePresetName(presetKey string) string {
-	presetNames := map[string]string{
-		"quick":        "Quick Run",
-		"connectivity": "Connectivity Focus",
-		"spectral":     "Spectral Focus",
-	}
-	return presetNames[presetKey]
 }
 
 func (m *Model) getBehaviorPresetName(presetKey string) string {

@@ -140,12 +140,9 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     Returns
     -------
     Path
-        Path to the feature file (subfolder if exists, otherwise root)
+        Path to the feature file in its subfolder
     """
-    subfolder_path = features_dir / key / filename
-    if subfolder_path.exists():
-        return subfolder_path
-    return features_dir / filename
+    return features_dir / key / filename
 
 
 def discover_feature_files(

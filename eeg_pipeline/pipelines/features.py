@@ -403,14 +403,34 @@ def _save_extraction_config(
     features_dir: Path,
     suffix: Optional[str],
     logger: Any,
+    feature_categories: Optional[List[str]] = None,
 ) -> None:
-    """Save extraction configuration to JSON file."""
+    """Save extraction configuration to JSON file in each feature category's metadata folder.
+    
+    Instead of a centralized metadata folder, save config to each category's own metadata folder
+    so users can see exactly what config was used for each specific computation.
+    """
+    from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
+    
     config_name = f"extraction_config_{suffix}.json" if suffix else "extraction_config.json"
-    save_path = features_dir / "metadata" / config_name
-    ensure_dir(save_path.parent)
-    with open(save_path, "w") as f:
-        json.dump(config, f, indent=2)
-    logger.info(f"Saved extraction config: {save_path}")
+    
+    # Get list of feature categories to save config for
+    categories = feature_categories or config.get("feature_categories", [])
+    
+    # Save config to each category's metadata folder
+    saved_to = []
+    for category in categories:
+        folder = _get_folder_for_feature(f"features_{category}")
+        if folder:
+            category_metadata_dir = features_dir / folder / "metadata"
+            ensure_dir(category_metadata_dir)
+            save_path = category_metadata_dir / config_name
+            with open(save_path, "w") as f:
+                json.dump(config, f, indent=2)
+            saved_to.append(str(save_path))
+    
+    if saved_to:
+        logger.info(f"Saved extraction config to {len(saved_to)} feature category folders")
 
 
 class FeaturePipeline(PipelineBase):
@@ -714,6 +734,7 @@ class FeaturePipeline(PipelineBase):
             n_total = combined_df.shape[1] if combined_df is not None else 0
 
             extraction_config = {
+                "cli_command": kwargs.get("cli_command"),
                 "name": name,
                 "spatial_modes": ctx.spatial_modes,
                 "aggregation_method": ctx.aggregation_method,
@@ -725,7 +746,7 @@ class FeaturePipeline(PipelineBase):
                 "subject": subject,
                 "task": task,
             }
-            _save_extraction_config(extraction_config, features_dir, suffix, self.logger)
+            _save_extraction_config(extraction_config, features_dir, suffix, self.logger, feature_categories)
 
             self.logger.info(
                 f"Done {range_info}: sub-{subject}, trials={n_trials}, "
@@ -749,6 +770,7 @@ class FeaturePipeline(PipelineBase):
                 self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
 
             merged_extraction_config = {
+                "cli_command": kwargs.get("cli_command"),
                 "merged": True,
                 "time_ranges": [tr.get("name") for tr in time_ranges],
                 "spatial_modes": kwargs.get("spatial_modes")
@@ -760,7 +782,7 @@ class FeaturePipeline(PipelineBase):
                 "task": task,
             }
             _save_extraction_config(
-                merged_extraction_config, features_dir, None, self.logger
+                merged_extraction_config, features_dir, None, self.logger, feature_categories
             )
             self.logger.info("Saved merged extraction config")
 

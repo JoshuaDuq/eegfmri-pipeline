@@ -61,9 +61,20 @@ const (
 	ProgressStaleWarningMs = 30000
 
 	// Resource monitoring interval (in seconds)
-	// Lower values = more frequent updates but slightly more overhead
-	// 1-2 seconds is a good balance for live updates
 	ResourceMonitorIntervalSec = 1
+
+	// Execution view layout constants (lines reserved for each section)
+	ExecHeaderLines            = 2
+	ExecInfoPanelLines         = 6
+	ExecProgressSectionLines   = 8
+	ExecLogTitleLines          = 2
+	ExecViewportBorderLines    = 2
+	ExecFooterLines            = 4
+	ExecBaseReservedLines      = ExecHeaderLines + ExecInfoPanelLines + ExecProgressSectionLines + ExecLogTitleLines + ExecViewportBorderLines + ExecFooterLines
+	ExecMetricsDashboardLines  = 8
+	ExecCompletionSummaryLines = 14
+	ExecCopyModeBannerLines    = 1
+	ExecSearchInputLines       = 1
 )
 
 ///////////////////////////////////////////////////////////////////

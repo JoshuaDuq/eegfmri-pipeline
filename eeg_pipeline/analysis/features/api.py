@@ -565,10 +565,56 @@ def extract_all_features(
     power_bands = ctx.bands if ctx.bands else get_frequency_band_names(ctx.config)
     # Store original epochs for baseline correction before cropping
     ctx._original_epochs = ctx.epochs
+    windows_full = ctx.windows
     working_epochs = _prepare_working_epochs(ctx, tmin, tmax)
     expected_n_trials = len(working_epochs)
     # Update ctx.epochs with cropped version so extractors see correct time range
     ctx.epochs = working_epochs
+
+    # Rebase masks onto the cropped time axis while preserving the original (requested) ranges.
+    # This prevents mask/time-length mismatches (e.g., ERP/quality) while still allowing
+    # baseline-dependent computations to reference the original baseline range.
+    if windows_full is not None and getattr(windows_full, "ranges", None) is not None:
+        from eeg_pipeline.types import TimeWindows
+
+        ranges_full = dict(getattr(windows_full, "ranges", {}) or {})
+        working_times = getattr(working_epochs, "times", None)
+        new_times = np.asarray(working_times if working_times is not None else [], dtype=float)
+        new_masks = {}
+        for win_name, rng in ranges_full.items():
+            try:
+                start, end = float(rng[0]), float(rng[1])
+            except Exception:
+                new_masks[win_name] = np.zeros_like(new_times, dtype=bool)
+                continue
+            if not (np.isfinite(start) and np.isfinite(end) and end > start):
+                new_masks[win_name] = np.zeros_like(new_times, dtype=bool)
+                continue
+            new_masks[win_name] = (new_times >= start) & (new_times < end)
+
+        # Preserve user-facing ranges even if out-of-range for the cropped times.
+        baseline_range = ranges_full.get("baseline", (np.nan, np.nan))
+        active_key = None
+        if ctx.name and ctx.name in new_masks:
+            active_key = ctx.name
+        elif "active" in new_masks:
+            active_key = "active"
+        active_range = ranges_full.get(active_key, (np.nan, np.nan)) if active_key else (np.nan, np.nan)
+
+        empty_mask = np.zeros_like(new_times, dtype=bool)
+        ctx._windows = TimeWindows(
+            baseline_mask=new_masks.get("baseline", empty_mask),
+            active_mask=new_masks.get(active_key, empty_mask) if active_key else empty_mask,
+            baseline_range=baseline_range,
+            active_range=active_range,
+            masks=new_masks,
+            ranges=ranges_full,
+            clamped=getattr(windows_full, "clamped", False),
+            valid=getattr(windows_full, "valid", True),
+            errors=list(getattr(windows_full, "errors", []) or []),
+            times=new_times,
+            name=ctx.name,
+        )
 
     precomputed_data = _prepare_precomputed_data(ctx, working_epochs, power_bands, tmin, tmax)
     if precomputed_data is not None:

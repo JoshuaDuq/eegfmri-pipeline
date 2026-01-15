@@ -134,7 +134,7 @@ var wizardStepNames = [wizardStepCount]string{
 	StepPreprocessingFiltering:    "Filtering",
 	StepPreprocessingICA:          "ICA",
 	StepPreprocessingEpochs:       "Epochs",
-	StepReviewExecute:             "Review",
+	StepReviewExecute:             "", // Deprecated - no longer used
 }
 
 // String returns the display name for the wizard step
@@ -167,6 +167,7 @@ type FeatureAvailability struct {
 type SubjectStatus struct {
 	ID                  string
 	HasEpochs           bool
+	HasPreprocessing    bool
 	HasFeatures         bool
 	HasStats            bool
 	AvailableBands      []string

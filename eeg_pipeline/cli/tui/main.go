@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/eeg-pipeline/tui/app"
+	"github.com/eeg-pipeline/tui/cloud"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -15,7 +16,7 @@ const (
 	ansiDisableMouseButton   = "\033[?1002l"
 	ansiDisableMouseTracking = "\033[?1003l"
 	ansiDisableSGRMouse      = "\033[?1006l"
-	ansiExitAlternateScreen   = "\033[?1049l"
+	ansiExitAlternateScreen  = "\033[?1049l"
 )
 
 func disableMouseTracking() {
@@ -51,19 +52,49 @@ func handlePanic() {
 	}
 }
 
+func stopVMIfNeeded(finalModel tea.Model) {
+	model, ok := finalModel.(app.Model)
+	if !ok {
+		return
+	}
+
+	if !model.IsCloudMode() {
+		return
+	}
+
+	cfg := model.GetCloudConfig()
+	if !cloud.IsVMRunning(cfg) {
+		return
+	}
+
+	fmt.Println("\n☁️  Stopping Cloud VM... (this may take a moment)")
+	if err := cloud.StopVMSync(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Warning: failed to stop VM: %v\n", err)
+	} else {
+		fmt.Println("✓  Cloud VM stopped successfully.")
+	}
+}
+
 func main() {
 	defer handlePanic()
 
+	appModel := app.New()
 	program := tea.NewProgram(
-		app.New(),
+		appModel,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
 
-	defer resetTerminal()
+	finalModel, err := program.Run()
 
-	if _, err := program.Run(); err != nil {
+	// Reset terminal FIRST so messages are visible
+	resetTerminal()
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Stop VM on exit if using cloud environment
+	stopVMIfNeeded(finalModel)
 }

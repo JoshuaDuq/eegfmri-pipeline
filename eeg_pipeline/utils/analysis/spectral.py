@@ -400,6 +400,7 @@ def compute_psd_bandpower(
     fmin: float = 1.0,
     fmax: float = 80.0,
     bandwidth: float = 2.0,
+    adaptive: bool = False,
     normalize_by_bandwidth: bool = True,
     exclude_line_noise: bool = False,
     line_freqs: Optional[list[float]] = None,
@@ -467,10 +468,16 @@ def compute_psd_bandpower(
     
     if n_times < 64:
         if logger:
-            logger.warning(
-                "PSD bandpower skipped: only %d samples (< 64 minimum).",
-                n_times,
-            )
+            warned = getattr(logger, "_psd_bandpower_short_warned", None)
+            if not isinstance(warned, set):
+                warned = set()
+            if int(n_times) not in warned:
+                logger.warning(
+                    "PSD bandpower skipped: only %d samples (< 64 minimum).",
+                    n_times,
+                )
+                warned.add(int(n_times))
+                setattr(logger, "_psd_bandpower_short_warned", warned)
         return None
     
     nyquist = sfreq / 2.0
@@ -484,7 +491,7 @@ def compute_psd_bandpower(
                 fmin=fmin,
                 fmax=fmax,
                 bandwidth=bandwidth,
-                adaptive=True,
+                adaptive=bool(adaptive),
                 normalization="full",
                 verbose=False,
             )

@@ -448,13 +448,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case messages.TickMsg:
 		m.ticker++
-		if m.Status == StatusPending || m.Status == StatusRunning {
+		// Only continue ticking while running
+		if m.Status == StatusRunning {
+			return m, m.tick()
+		}
+		if m.Status == StatusPending {
 			m.Status = StatusRunning
 			if m.StartTime.IsZero() {
 				m.StartTime = time.Now()
 			}
 			return m, m.tick()
 		}
+		// Done states: no more ticking needed
 		return m, nil
 
 	case CommandStartedMsg:
@@ -486,16 +491,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case messages.CommandDoneMsg:
-		// Stop resource monitoring first (signal the goroutine to exit)
-		if m.stopResourceChan != nil {
-			close(m.stopResourceChan)
-			m.stopResourceChan = nil
-		}
-		// Then close resource update channel
-		if m.resourceUpdateChan != nil {
-			close(m.resourceUpdateChan)
-			m.resourceUpdateChan = nil
-		}
+		m.stopResourceMonitoringSafe()
 		m.EndTime = time.Now()
 		m.ExitCode = msg.ExitCode
 		m.Progress = 1.0
@@ -512,7 +508,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.addLog(fmt.Sprintf("%s Failed with exit code %d", styles.CrossMark, msg.ExitCode))
 			}
 		}
-		// Recalculate viewport size to accommodate completion summary
 		m.updateViewportSize()
 		return m, nil
 
@@ -538,6 +533,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.searchMode = false
 				m.searchQuery = ""
+				m.updateViewportSize()
 				m.updateLogViewport()
 			case "enter":
 				m.searchMode = false
@@ -550,6 +546,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				if len(msg.String()) == 1 {
 					m.searchQuery += msg.String()
+					m.updateViewportSize()
 					m.updateLogViewport()
 				}
 			}
@@ -563,6 +560,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Exit copy mode, re-enable mouse
 				m.copyMode = false
 				m.copyModeNotice = ""
+				m.updateViewportSize()
 				return m, tea.EnableMouseCellMotion
 			case "c":
 				// Copy while in copy mode
@@ -577,35 +575,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Enter search mode
 			m.searchMode = true
 			m.searchQuery = ""
+			m.updateViewportSize()
 			return m, nil
 		case "m":
 			// Toggle copy mode - disable mouse to allow text selection
 			m.copyMode = true
 			m.copyModeNotice = "COPY MODE: Select text with mouse, then Cmd+C to copy. Press M or Esc to exit."
+			m.updateViewportSize()
 			return m, tea.DisableMouse
 		case "ctrl+c":
 			if m.IsDone() {
 				return m, m.copyLogToClipboard()
 			}
-			// Stop resource monitoring first (signal the goroutine to exit)
-			if m.stopResourceChan != nil {
-				close(m.stopResourceChan)
-				m.stopResourceChan = nil
-			}
-			// Then close resource update channel
-			if m.resourceUpdateChan != nil {
-				close(m.resourceUpdateChan)
-				m.resourceUpdateChan = nil
-			}
+			m.stopResourceMonitoringSafe()
 			m.Status = StatusCancelled
 			m.EndTime = time.Now()
 			if m.cancel != nil {
 				m.cancel()
 			}
 			if m.cmd != nil && m.cmd.Process != nil {
-				// Kill the whole process group
 				syscall.Kill(-m.cmd.Process.Pid, syscall.SIGKILL)
 			}
+			m.updateViewportSize()
 			return m, nil
 		case "c":
 			return m, m.copyLogToClipboard()
@@ -803,12 +794,24 @@ func (m Model) OpenResultsFolder() tea.Cmd {
 
 // updateViewportSize recalculates log viewport dimensions based on current state
 func (m *Model) updateViewportSize() {
-	// Base height calculation - reserve space for header, info panel, progress, footer
-	reservedHeight := 20
+	reservedHeight := styles.ExecBaseReservedLines
 
-	// When done, the completion summary takes extra vertical space (~12 lines with padding)
+	// Metrics dashboard visible when terminal is tall enough and execution is active
+	showMetrics := m.height >= 30 && m.Status != StatusPending && m.Status != StatusCancelled
+	if showMetrics {
+		reservedHeight += styles.ExecMetricsDashboardLines
+	}
+
+	if m.copyMode {
+		reservedHeight += styles.ExecCopyModeBannerLines
+	}
+
+	if m.searchMode || m.searchQuery != "" {
+		reservedHeight += styles.ExecSearchInputLines
+	}
+
 	if m.IsDone() {
-		reservedHeight += 12
+		reservedHeight += styles.ExecCompletionSummaryLines
 	}
 
 	logHeight := m.height - reservedHeight
@@ -1190,21 +1193,21 @@ func (m Model) View() string {
 
 	// Header
 	b.WriteString(m.renderHeader())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	// Info Panel
 	b.WriteString(m.renderInfoPanel())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
-	// Show completion summary if done
 	if m.IsDone() {
+		// Show completion summary instead of progress section when done
 		b.WriteString(m.renderCompletionSummary())
 		b.WriteString("\n")
+	} else {
+		// Progress Section (only while running)
+		b.WriteString(m.renderProgressSection())
+		b.WriteString("\n")
 	}
-
-	// Progress Section
-	b.WriteString(m.renderProgressSection())
-	b.WriteString("\n")
 
 	// Log Section
 	b.WriteString(m.renderLogSection())
@@ -1221,21 +1224,18 @@ func (m Model) View() string {
 func (m Model) renderCompletionSummary() string {
 	var b strings.Builder
 
-	// Determine status style and animation
 	var icon, statusText string
 	var statusColor lipgloss.Color
 	var borderColor lipgloss.Color
 
 	switch m.Status {
 	case StatusSuccess:
-		successFrames := []string{"✓", "✓", "★", "✓"}
-		icon = successFrames[m.ticker%len(successFrames)]
+		icon = styles.CheckMark
 		statusText = "COMPLETED SUCCESSFULLY"
 		statusColor = styles.Success
 		borderColor = styles.Success
 	case StatusFailed:
-		failFrames := []string{"✗", "✗", "⚠", "✗"}
-		icon = failFrames[m.ticker%len(failFrames)]
+		icon = styles.CrossMark
 		statusText = "EXECUTION FAILED"
 		statusColor = styles.Error
 		borderColor = styles.Error
@@ -1424,13 +1424,9 @@ func (m Model) renderHeader() string {
 }
 
 // renderInfoPanel renders high‑level execution metadata such as
-// command, elapsed time, current subject and failure counts.
+// elapsed time, current subject and failure counts.
 func (m Model) renderInfoPanel() string {
 	info := strings.Builder{}
-
-	cmdLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Command:")
-	cmdValue := lipgloss.NewStyle().Foreground(styles.Accent).Italic(true).Render(m.Command)
-	info.WriteString(cmdLabel + cmdValue + "\n")
 
 	if m.StartTime.Unix() > 0 {
 		duration := m.getDuration()
@@ -1523,7 +1519,7 @@ func (m Model) renderProgressSection() string {
 		iconStyle = lipgloss.NewStyle().Foreground(styles.Accent)
 	}
 
-	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.SectionTitleStyle.Render(" PROGRESS ") + "\n\n")
+	b.WriteString(iconStyle.Render(progressIcon) + " " + styles.SectionTitleStyle.Render(" PROGRESS ") + "\n")
 
 	// Overall progress with animated gradient bar
 	progressLabel := lipgloss.NewStyle().Foreground(styles.TextDim).Width(10).Render("Overall")
@@ -1762,7 +1758,7 @@ func (m Model) renderLogSection() string {
 			Background(styles.Accent).
 			Padding(0, 2).
 			Render("COPY MODE: Select text with mouse, then Cmd+C. Press M or Esc to exit.")
-		b.WriteString(copyBanner + "\n\n")
+		b.WriteString(copyBanner + "\n")
 	}
 
 	// Search mode input
@@ -1787,7 +1783,7 @@ func (m Model) renderLogSection() string {
 			searchInput += matchInfo
 		}
 
-		b.WriteString(searchInput + "\n\n")
+		b.WriteString(searchInput + "\n")
 	}
 
 	logHeader := styles.SectionTitleStyle.Render(" LOG ")
@@ -2294,6 +2290,22 @@ func getPerCoreUsageMacOS(numCores int) []float64 {
 ///////////////////////////////////////////////////////////////////
 // Public Methods
 ///////////////////////////////////////////////////////////////////
+
+// stopResourceMonitoringSafe safely stops resource monitoring goroutine and closes channels
+func (m *Model) stopResourceMonitoringSafe() {
+	if m.stopResourceChan != nil {
+		select {
+		case <-m.stopResourceChan:
+			// Already closed
+		default:
+			close(m.stopResourceChan)
+		}
+		m.stopResourceChan = nil
+	}
+	// Note: resourceUpdateChan is closed by the monitoring goroutine when it exits
+	// We just nil our reference to avoid sending to it
+	m.resourceUpdateChan = nil
+}
 
 // IsDone reports whether the execution has reached a terminal
 // state (success, failure or user cancellation).

@@ -101,13 +101,6 @@ func (m Model) renderConfirmation() string {
 			" " +
 			lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(fmt.Sprintf("%d", selectedCount))
 		content.WriteString(subjectInfo + "\n")
-
-		// Estimated time (rough heuristic)
-		estMins := m.estimateExecutionTime(selectedCount)
-		timeInfo := lipgloss.NewStyle().Foreground(styles.Text).Render("Est. time:") +
-			" " +
-			lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render(fmt.Sprintf("~%d min", estMins))
-		content.WriteString(timeInfo + "\n")
 	}
 
 	// Show output paths
@@ -153,25 +146,6 @@ func (m Model) renderConfirmation() string {
 		Padding(1, 2)
 
 	return boxStyle.Render(content.String())
-}
-
-// estimateExecutionTime returns rough estimate in minutes based on pipeline and subject count
-func (m Model) estimateExecutionTime(subjectCount int) int {
-	// Rough estimates per subject (in minutes)
-	perSubject := 1
-	switch m.Pipeline {
-	case types.PipelinePreprocessing:
-		perSubject = 5
-	case types.PipelineFeatures:
-		perSubject = 3
-	case types.PipelineBehavior:
-		perSubject = 1
-	case types.PipelineML:
-		perSubject = 2
-	case types.PipelinePlotting:
-		perSubject = 1
-	}
-	return perSubject * subjectCount
 }
 
 // getExpectedOutputPaths returns the expected output directories for the current pipeline
@@ -1506,6 +1480,11 @@ func (m Model) renderSubjectSelection() string {
 		} else {
 			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
 		}
+		if s.HasPreprocessing {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("P"))
+		} else {
+			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Muted).Render("·"))
+		}
 		if s.HasFeatures {
 			statusBadges = append(statusBadges, lipgloss.NewStyle().Foreground(styles.Success).Render("F"))
 		} else {
@@ -1544,378 +1523,7 @@ func (m Model) renderSubjectSelection() string {
 	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).
-		Render("  Legend: [E]=Epochs [F]=Features [S]=Stats"))
-
-	return b.String()
-}
-
-func (m Model) renderReview() string {
-	var b strings.Builder
-
-	readyIcon := styles.WarningMark
-	headerColor := styles.Warning
-	if len(m.validationErrors) == 0 {
-		readyIcon = styles.CheckMark
-		headerColor = styles.Success
-	}
-
-	headerStyle := lipgloss.NewStyle().
-		Foreground(headerColor).
-		Bold(true)
-	b.WriteString(headerStyle.Render(readyIcon+" ") + styles.SectionTitleStyle.Render(" CONFIGURATION REVIEW ") + "\n\n")
-
-	card := strings.Builder{}
-
-	labelStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Width(styles.SummaryLabelWidth)
-	valueStyle := lipgloss.NewStyle().Foreground(styles.Text)
-	iconStyle := lipgloss.NewStyle().Foreground(styles.Accent)
-
-	card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Pipeline:") +
-		lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render(m.Pipeline.String()) + "\n")
-
-	modeIcon := "▸"
-	if m.modeOptions[m.modeIndex] == styles.ModeVisualize {
-		modeIcon = "▹"
-	}
-	card.WriteString(iconStyle.Render(modeIcon+" ") + labelStyle.Render("Mode:") +
-		valueStyle.Render(m.modeOptions[m.modeIndex]) + "\n")
-
-	if m.Pipeline == types.PipelineML {
-		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("CV Scope:") +
-			valueStyle.Render(m.mlScope.CLIValue()) + "\n")
-	}
-
-	subjCount := 0
-	validCount := 0
-	for subjID, sel := range m.subjectSelected {
-		if sel {
-			subjCount++
-			for _, s := range m.subjects {
-				if s.ID == subjID {
-					if valid, _ := m.Pipeline.ValidateSubject(s); valid {
-						validCount++
-					}
-					break
-				}
-			}
-		}
-	}
-
-	var subjectBadge string
-	if validCount == subjCount {
-		subjectBadge = lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("%d subjects", subjCount))
-	} else {
-		subjectBadge = lipgloss.NewStyle().Foreground(styles.Warning).Render(
-			fmt.Sprintf("%d selected (%d valid)", subjCount, validCount))
-	}
-	card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Subjects:") + subjectBadge + "\n")
-
-	taskLabel := m.task
-	if taskLabel == "" {
-		taskLabel = "default"
-	}
-	card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Task:") + valueStyle.Render(taskLabel) + "\n")
-
-	if m.Pipeline == types.PipelineFeatures && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		cats := m.SelectedCategories()
-		var chips string
-		for i, cat := range cats {
-			chips += lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(styles.Accent).
-				Padding(0, 1).
-				Render(cat)
-			if i < len(cats)-1 {
-				chips += " "
-			}
-		}
-		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Features:") + "\n")
-		card.WriteString("     " + chips + "\n")
-
-		// Show advanced config summary if not using defaults
-		if !m.useDefaultAdvanced {
-			configStyle := lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true)
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") + "\n")
-
-			var configs []string
-			if m.isCategorySelected("connectivity") {
-				measures := m.selectedConnectivityMeasures()
-				if len(measures) > 0 {
-					configs = append(configs, fmt.Sprintf("conn=%s", strings.Join(measures, "+")))
-				}
-				configs = append(configs, fmt.Sprintf("conn_win=%.1fs/%.1fs", m.connWindowLen, m.connWindowStep))
-			}
-			if m.isCategorySelected("directedconnectivity") {
-				measures := m.selectedDirectedConnectivityMeasures()
-				if len(measures) > 0 {
-					configs = append(configs, fmt.Sprintf("dconn=%s", strings.Join(measures, "+")))
-				}
-			}
-			if m.isCategorySelected("pac") {
-				methods := []string{"mvl", "kl", "tort", "ozkurt"}
-				configs = append(configs, fmt.Sprintf("pac=%s@%.0f-%.0f/%.0f-%.0fHz",
-					methods[m.pacMethod], m.pacPhaseMin, m.pacPhaseMax, m.pacAmpMin, m.pacAmpMax))
-			}
-			if m.isCategorySelected("aperiodic") {
-				configs = append(configs, fmt.Sprintf("aper=%.0f-%.0fHz(z=%.1f)", m.aperiodicFmin, m.aperiodicFmax, m.aperiodicPeakZ))
-			}
-			if m.isCategorySelected("complexity") {
-				configs = append(configs, fmt.Sprintf("PE=%d(d=%d)", m.complexityPEOrder, m.complexityPEDelay))
-			}
-			if m.isCategorySelected("bursts") {
-				configs = append(configs, fmt.Sprintf("bursts=%.1fz/%dms", m.burstThresholdZ, m.burstMinDuration))
-			}
-			if m.isCategorySelected("power") {
-				modes := []string{"logratio", "mean", "ratio", "zscore", "zlogratio"}
-				configs = append(configs, fmt.Sprintf("power=%s", modes[m.powerBaselineMode]))
-			}
-			if m.isCategorySelected("erp") {
-				configs = append(configs, fmt.Sprintf("erp_baseline=%v", m.erpBaselineCorrection))
-			}
-			if m.isCategorySelected("sourcelocalization") {
-				methods := []string{"lcmv", "eloreta"}
-				parcs := []string{"aparc", "aparc.a2009s", "HCPMMP1"}
-				configs = append(configs, fmt.Sprintf("source=%s@%s", methods[m.sourceLocMethod], parcs[m.sourceLocParc]))
-			}
-			configs = append(configs, fmt.Sprintf("min_epochs=%d", m.minEpochsForFeatures))
-
-			if len(configs) > 0 {
-				card.WriteString("     " + configStyle.Render(strings.Join(configs, " | ")) + "\n")
-			}
-		}
-	} else if m.Pipeline == types.PipelineBehavior && m.modeOptions[m.modeIndex] == styles.ModeCompute {
-		// Show computations
-		comps := m.SelectedComputations()
-		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Analyses:") + valueStyle.Render(strings.Join(comps, ", ")) + "\n")
-
-		// Show selected feature files
-		featureFiles := m.SelectedFeatureFiles()
-		if len(featureFiles) > 0 {
-			var chips string
-			for i, file := range featureFiles {
-				chips += lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#000000")).
-					Background(styles.Accent).
-					Padding(0, 1).
-					Render(file)
-				if i < len(featureFiles)-1 {
-					chips += " "
-				}
-			}
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Features:") + "\n")
-			card.WriteString("     " + chips + "\n")
-		}
-	} else if m.Pipeline == types.PipelinePlotting {
-		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Plots:") + "\n")
-		grouped := make(map[string][]string)
-		for i, plot := range m.plotItems {
-			if !m.plotSelected[i] || !m.IsPlotCategorySelected(plot.Group) {
-				continue
-			}
-			grouped[plot.Group] = append(grouped[plot.Group], plot.Name)
-		}
-		var groupOrder []string
-		for _, plot := range m.plotItems {
-			if _, ok := grouped[plot.Group]; ok {
-				found := false
-				for _, g := range groupOrder {
-					if g == plot.Group {
-						found = true
-						break
-					}
-				}
-				if !found {
-					groupOrder = append(groupOrder, plot.Group)
-				}
-			}
-		}
-		for _, group := range groupOrder {
-			names := grouped[group]
-			if len(names) == 0 {
-				continue
-			}
-			card.WriteString("     " + lipgloss.NewStyle().Foreground(styles.TextDim).Render(strings.ToUpper(group)+": ") +
-				valueStyle.Render(strings.Join(names, ", ")) + "\n")
-		}
-
-		formats := m.SelectedPlotFormats()
-		dpi := "default"
-		if m.plotDpiIndex >= 0 && m.plotDpiIndex < len(m.plotDpiOptions) {
-			dpi = fmt.Sprintf("%d", m.plotDpiOptions[m.plotDpiIndex])
-		}
-		savefigDpi := "default"
-		if m.plotSavefigDpiIndex >= 0 && m.plotSavefigDpiIndex < len(m.plotDpiOptions) {
-			savefigDpi = fmt.Sprintf("%d", m.plotDpiOptions[m.plotSavefigDpiIndex])
-		}
-		card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Output:") +
-			valueStyle.Render(fmt.Sprintf("%s | dpi=%s | savefig=%s", strings.Join(formats, ", "), dpi, savefigDpi)) + "\n")
-	} else if m.Pipeline == types.PipelinePreprocessing {
-		if m.bidsRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
-		}
-		if m.derivRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Deriv Root:") + valueStyle.Render(m.derivRoot) + "\n")
-		}
-
-		if !m.useDefaultAdvanced {
-			var opts []string
-			if !m.prepUsePyprep {
-				opts = append(opts, "pyprep=off")
-			}
-			if !m.prepUseIcalabel {
-				opts = append(opts, "icalabel=off")
-			}
-			if m.prepNJobs != 1 {
-				opts = append(opts, fmt.Sprintf("n_jobs=%d", m.prepNJobs))
-			}
-			if m.prepResample != 500 {
-				opts = append(opts, fmt.Sprintf("resample=%dHz", m.prepResample))
-			}
-			if m.prepLFreq != 0.1 || m.prepHFreq != 100.0 {
-				opts = append(opts, fmt.Sprintf("filter=%.1f-%.1fHz", m.prepLFreq, m.prepHFreq))
-			}
-			if m.prepICAAlgorithm != 0 {
-				method := []string{"fastica", "infomax", "picard"}[m.prepICAAlgorithm]
-				opts = append(opts, fmt.Sprintf("ica=%s", method))
-			}
-			if m.prepEpochsTmin != -5.0 || m.prepEpochsTmax != 12.0 {
-				opts = append(opts, fmt.Sprintf("epochs=%.1f/%.1fs", m.prepEpochsTmin, m.prepEpochsTmax))
-			}
-
-			if len(opts) > 0 {
-				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
-					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
-			}
-		}
-	} else if m.Pipeline == types.PipelineFmri {
-		if m.bidsFmriRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS fMRI Root:") + valueStyle.Render(m.bidsFmriRoot) + "\n")
-		}
-		if m.derivRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Deriv Root:") + valueStyle.Render(m.derivRoot) + "\n")
-		}
-
-		if !m.useDefaultAdvanced {
-			var opts []string
-
-			engine := "docker"
-			if m.fmriEngineIndex%2 == 1 {
-				engine = "apptainer"
-			}
-			if engine != "docker" {
-				opts = append(opts, "engine="+engine)
-			}
-			if strings.TrimSpace(m.fmriFmriprepImage) != "" && m.fmriFmriprepImage != "nipreps/fmriprep:23.2.1" {
-				opts = append(opts, "image="+m.fmriFmriprepImage)
-			}
-			if strings.TrimSpace(m.fmriOutputSpacesSpec) != "" && strings.TrimSpace(m.fmriOutputSpacesSpec) != "MNI152NLin2009cAsym T1w" {
-				opts = append(opts, "spaces="+m.fmriOutputSpacesSpec)
-			}
-			if m.fmriUseAroma {
-				opts = append(opts, "aroma")
-			}
-			if m.fmriSkipBidsValidation {
-				opts = append(opts, "skip-validation")
-			}
-			if m.fmriStopOnFirstCrash {
-				opts = append(opts, "stop-on-crash")
-			}
-			if m.fmriSkipReconstruction {
-				opts = append(opts, "no-reconall")
-			}
-			if m.fmriMemMb > 0 {
-				opts = append(opts, fmt.Sprintf("mem=%dMB", m.fmriMemMb))
-			}
-
-			if len(opts) > 0 {
-				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
-					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
-			}
-		}
-	} else if m.Pipeline == types.PipelineRawToBIDS {
-		if m.sourceRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Source Root:") + valueStyle.Render(m.sourceRoot) + "\n")
-		}
-		if m.bidsRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
-		}
-		if !m.useDefaultAdvanced {
-			var opts []string
-			if m.rawMontage != "" {
-				opts = append(opts, fmt.Sprintf("montage=%s", m.rawMontage))
-			}
-			if m.rawLineFreq != 60 {
-				opts = append(opts, fmt.Sprintf("line=%dHz", m.rawLineFreq))
-			}
-			if m.rawOverwrite {
-				opts = append(opts, "overwrite")
-			}
-			if m.rawZeroBaseOnsets {
-				opts = append(opts, "zero-base")
-			}
-			if m.rawTrimToFirstVolume {
-				opts = append(opts, "trim")
-			}
-			if m.rawEventPrefixes != "" {
-				opts = append(opts, fmt.Sprintf("prefixes=%s", m.rawEventPrefixes))
-			}
-			if m.rawKeepAnnotations {
-				opts = append(opts, "keep-annotations")
-			}
-			if len(opts) > 0 {
-				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
-					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
-			}
-		}
-	} else if m.Pipeline == types.PipelineMergePsychoPyData {
-		if m.sourceRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Source Root:") + valueStyle.Render(m.sourceRoot) + "\n")
-		}
-		if m.bidsRoot != "" {
-			card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("BIDS Root:") + valueStyle.Render(m.bidsRoot) + "\n")
-		}
-		if !m.useDefaultAdvanced {
-			var opts []string
-			if m.mergeEventPrefixes != "" {
-				opts = append(opts, fmt.Sprintf("prefixes=%s", m.mergeEventPrefixes))
-			}
-			if m.mergeEventTypes != "" {
-				opts = append(opts, fmt.Sprintf("types=%s", m.mergeEventTypes))
-			}
-			if len(opts) > 0 {
-				card.WriteString(iconStyle.Render("▸ ") + labelStyle.Render("Config:") +
-					valueStyle.Render(strings.Join(opts, ", ")) + "\n")
-			}
-		}
-	}
-
-	b.WriteString(styles.CardStyle.Width(m.width-10).Render(card.String()) + "\n\n")
-
-	if len(m.validationErrors) > 0 {
-		errPanel := strings.Builder{}
-		errHeader := lipgloss.NewStyle().
-			Foreground(styles.Error).
-			Bold(true).
-			Render("⚠ VALIDATION ERRORS")
-		errPanel.WriteString(errHeader + "\n\n")
-
-		for _, err := range m.validationErrors {
-			errPanel.WriteString(lipgloss.NewStyle().Foreground(styles.Error).Render("  "+styles.CrossMark+" "+err) + "\n")
-		}
-		errPanel.WriteString("\n")
-		errPanel.WriteString(lipgloss.NewStyle().Foreground(styles.TextDim).Italic(true).Render("  Press Esc to go back and fix issues"))
-
-		b.WriteString(styles.ErrorPanelStyle.Width(m.width-10).Render(errPanel.String()) + "\n\n")
-	} else {
-		readyMsg := lipgloss.NewStyle().
-			Foreground(styles.Success).
-			Bold(true).
-			Render("✓ Ready to execute")
-		hintMsg := lipgloss.NewStyle().
-			Foreground(styles.TextDim).
-			Render(" — Press Enter to continue")
-		b.WriteString("  " + readyMsg + hintMsg + "\n\n")
-	}
+		Render("  Legend: [E]=Epochs [P]=Preprocessed [F]=Features [S]=Stats"))
 
 	return b.String()
 }
@@ -2017,7 +1625,6 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 	if strings.TrimSpace(asymPairsVal) == "" {
 		asymPairsVal = "(default)"
 	}
-	aperiodicRangeVal := fmt.Sprintf("%.1f-%.1f Hz", m.aperiodicFmin, m.aperiodicFmax)
 	aperiodicPeakZVal := fmt.Sprintf("%.1f", m.aperiodicPeakZ)
 	aperiodicR2Val := fmt.Sprintf("%.2f", m.aperiodicMinR2)
 	aperiodicPointsVal := fmt.Sprintf("%d", m.aperiodicMinPoints)
@@ -2554,35 +2161,35 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = "off"
 			}
 			hint = "restrict volume sources using fMRI"
-			case optSourceLocFmriStatsMap:
-				label = "fMRI Stats Map"
-				if strings.TrimSpace(m.sourceLocFmriStatsMap) == "" {
-					value = "(unset)"
-				} else {
-					value = m.sourceLocFmriStatsMap
-				}
-				hint = "NIfTI map in FS MRI space"
-			case optSourceLocFmriProvenance:
-				label = "fMRI Provenance"
-				prov := []string{"independent", "same_dataset"}
-				if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(prov) {
-					value = prov[m.sourceLocFmriProvenance]
-				} else {
-					value = "independent"
-				}
-				hint = "independent (recommended) vs same_dataset"
-			case optSourceLocFmriRequireProvenance:
-				label = "Require provenance"
-				if m.sourceLocFmriRequireProv {
-					value = "on"
-				} else {
-					value = "off"
-				}
-				hint = "error if provenance unknown"
-			case optSourceLocFmriThreshold:
-				label = "fMRI Threshold"
-				value = fmt.Sprintf("%.2f", m.sourceLocFmriThreshold)
-				if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriThreshold) {
+		case optSourceLocFmriStatsMap:
+			label = "fMRI Stats Map"
+			if strings.TrimSpace(m.sourceLocFmriStatsMap) == "" {
+				value = "(unset)"
+			} else {
+				value = m.sourceLocFmriStatsMap
+			}
+			hint = "NIfTI map in FS MRI space"
+		case optSourceLocFmriProvenance:
+			label = "fMRI Provenance"
+			prov := []string{"independent", "same_dataset"}
+			if m.sourceLocFmriProvenance >= 0 && m.sourceLocFmriProvenance < len(prov) {
+				value = prov[m.sourceLocFmriProvenance]
+			} else {
+				value = "independent"
+			}
+			hint = "independent (recommended) vs same_dataset"
+		case optSourceLocFmriRequireProvenance:
+			label = "Require provenance"
+			if m.sourceLocFmriRequireProv {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "error if provenance unknown"
+		case optSourceLocFmriThreshold:
+			label = "fMRI Threshold"
+			value = fmt.Sprintf("%.2f", m.sourceLocFmriThreshold)
+			if m.editingNumber && m.isCurrentlyEditing(optSourceLocFmriThreshold) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "e.g., z>=3.10"
@@ -3018,12 +2625,31 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Harmonic Tol Hz"
 			value = fmt.Sprintf("%.1f", m.pacHarmonicToleranceHz)
 			hint = "tolerance for overlap check"
+		case optPACRandomSeed:
+			label = "Random Seed"
+			value = fmt.Sprintf("%d", m.pacRandomSeed)
+			if m.editingNumber && m.isCurrentlyEditing(optPACRandomSeed) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "seed for surrogate testing"
 
 		// Aperiodic
-		case optAperiodicRange:
-			label = "Fit range"
-			value = aperiodicRangeVal
-			hint = "frequencies to fit"
+		case optAperiodicFmin:
+			aperiodicFminVal := fmt.Sprintf("%.1f", m.aperiodicFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicFmin) {
+				aperiodicFminVal = m.numberBuffer + "█"
+			}
+			label = "Fit range (min)"
+			value = aperiodicFminVal
+			hint = "minimum frequency (Hz)"
+		case optAperiodicFmax:
+			aperiodicFmaxVal := fmt.Sprintf("%.1f", m.aperiodicFmax)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicFmax) {
+				aperiodicFmaxVal = m.numberBuffer + "█"
+			}
+			label = "Fit range (max)"
+			value = aperiodicFmaxVal
+			hint = "maximum frequency (Hz)"
 		case optAperiodicPeakZ:
 			label = "Peak Z-thresh"
 			value = aperiodicPeakZVal
@@ -3058,50 +2684,71 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Max RMS"
 			value = aperiodicMaxRmsVal
 			hint = "fit quality limit (0=no limit)"
+		case optAperiodicLineNoiseFreq:
+			label = "Line noise freq"
+			value = fmt.Sprintf("%.0f", m.aperiodicLineNoiseFreq)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicLineNoiseFreq) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz (50 or 60)"
+		case optAperiodicLineNoiseWidthHz:
+			label = "Line noise width"
+			value = fmt.Sprintf("%.1f", m.aperiodicLineNoiseWidthHz)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicLineNoiseWidthHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "Hz bandwidth to exclude"
+		case optAperiodicLineNoiseHarmonics:
+			label = "Line noise harmonics"
+			value = fmt.Sprintf("%d", m.aperiodicLineNoiseHarmonics)
+			if m.editingNumber && m.isCurrentlyEditing(optAperiodicLineNoiseHarmonics) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of harmonics"
 
-			// Complexity
-			case optPEOrder:
-				label = "PE Order"
-				value = peOrderVal
-				hint = "symbol length (3-7)"
-			case optPEDelay:
-				label = "PE Delay"
-				value = peDelayVal
-				hint = "sample lag"
-			case optComplexitySignalBasis:
-				label = "Signal basis"
-				bases := []string{"filtered", "envelope"}
-				if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
-					value = bases[m.complexitySignalBasis]
-				} else {
-					value = "filtered"
-				}
-				hint = "filtered or envelope"
-			case optComplexityMinSegmentSec:
-				label = "Min segment (s)"
-				value = fmt.Sprintf("%.2f", m.complexityMinSegmentSec)
-				if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSegmentSec) {
-					value = m.numberBuffer + "█"
-				}
-				hint = "skip short segments"
-			case optComplexityMinSamples:
-				label = "Min samples"
-				value = fmt.Sprintf("%d", m.complexityMinSamples)
-				if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSamples) {
-					value = m.numberBuffer + "█"
-				}
-				hint = "skip low-sample segments"
-			case optComplexityZscore:
-				label = "Z-score"
-				if m.complexityZscore {
-					value = "on"
-				} else {
-					value = "off"
-				}
-				hint = "normalize per-channel"
+		// Complexity
+		case optPEOrder:
+			label = "PE Order"
+			value = peOrderVal
+			hint = "symbol length (3-7)"
+		case optPEDelay:
+			label = "PE Delay"
+			value = peDelayVal
+			hint = "sample lag"
+		case optComplexitySignalBasis:
+			label = "Signal basis"
+			bases := []string{"filtered", "envelope"}
+			if m.complexitySignalBasis >= 0 && m.complexitySignalBasis < len(bases) {
+				value = bases[m.complexitySignalBasis]
+			} else {
+				value = "filtered"
+			}
+			hint = "filtered or envelope"
+		case optComplexityMinSegmentSec:
+			label = "Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.complexityMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "skip short segments"
+		case optComplexityMinSamples:
+			label = "Min samples"
+			value = fmt.Sprintf("%d", m.complexityMinSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optComplexityMinSamples) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "skip low-sample segments"
+		case optComplexityZscore:
+			label = "Z-score"
+			if m.complexityZscore {
+				value = "on"
+			} else {
+				value = "off"
+			}
+			hint = "normalize per-channel"
 
-			// Bursts
-			case optBurstThresholdMethod:
+		// Bursts
+		case optBurstThresholdMethod:
 			methods := []string{"percentile", "zscore", "mad"}
 			methodVal := "percentile"
 			if m.burstThresholdMethod >= 0 && m.burstThresholdMethod < len(methods) {
@@ -3153,7 +2800,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = erpBaselineVal
 			hint = "subtract baseline mean"
 		case optERPAllowNoBaseline:
-			label = "Allow missing baseline"
+			label = "Allow no baseline"
 			value = erpAllowNoBaselineVal
 			hint = "only used if baseline ON"
 		case optERPComponents:
@@ -3204,6 +2851,236 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Channel pairs"
 			value = asymPairsVal
 			hint = "e.g. F3:F4,C3:C4"
+		case optAsymmetryMinSegmentSec:
+			label = "  Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.asymmetryMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optAsymmetryMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum segment duration"
+		case optAsymmetryMinCyclesAtFmin:
+			label = "  Min cycles"
+			value = fmt.Sprintf("%.1f", m.asymmetryMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optAsymmetryMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "cycles at lowest freq"
+		case optAsymmetrySkipInvalidSegments:
+			label = "  Skip invalid"
+			value = m.boolToOnOff(m.asymmetrySkipInvalidSegments)
+			hint = "skip invalid segments"
+
+		// Ratios advanced options
+		case optRatiosMinSegmentSec:
+			label = "  Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.ratiosMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optRatiosMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum segment duration"
+		case optRatiosMinCyclesAtFmin:
+			label = "  Min cycles"
+			value = fmt.Sprintf("%.1f", m.ratiosMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optRatiosMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "cycles at lowest freq"
+		case optRatiosSkipInvalidSegments:
+			label = "  Skip invalid"
+			value = m.boolToOnOff(m.ratiosSkipInvalidSegments)
+			hint = "skip invalid segments"
+
+		// Spectral advanced options
+		case optSpectralPsdMethod:
+			label = "  PSD method"
+			methods := []string{"multitaper", "welch"}
+			value = methods[m.spectralPsdMethod]
+			hint = "multitaper or welch"
+		case optSpectralFmin:
+			label = "  Freq min"
+			value = fmt.Sprintf("%.1f Hz", m.spectralFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum frequency"
+		case optSpectralFmax:
+			label = "  Freq max"
+			value = fmt.Sprintf("%.1f Hz", m.spectralFmax)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralFmax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "maximum frequency"
+		case optSpectralMinSegmentSec:
+			label = "  Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.spectralMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum segment duration"
+		case optSpectralMinCyclesAtFmin:
+			label = "  Min cycles"
+			value = fmt.Sprintf("%.1f", m.spectralMinCyclesAtFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optSpectralMinCyclesAtFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "cycles at lowest freq"
+
+		// Quality group header
+		case optFeatGroupQuality:
+			label = "▸ Quality"
+			hint = "Space to toggle"
+			if m.featGroupQualityExpanded {
+				label = "▾ Quality"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optQualityPsdMethod:
+			label = "  PSD method"
+			methods := []string{"welch", "multitaper"}
+			value = methods[m.qualityPsdMethod]
+			hint = "welch or multitaper"
+		case optQualityFmin:
+			label = "  Freq min"
+			value = fmt.Sprintf("%.1f Hz", m.qualityFmin)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityFmin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum frequency"
+		case optQualityFmax:
+			label = "  Freq max"
+			value = fmt.Sprintf("%.1f Hz", m.qualityFmax)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityFmax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "maximum frequency"
+		case optQualityNFft:
+			label = "  N FFT"
+			value = fmt.Sprintf("%d", m.qualityNfft)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityNFft) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "FFT size"
+		case optQualityExcludeLineNoise:
+			label = "  Exclude line noise"
+			value = m.boolToOnOff(m.qualityExcludeLineNoise)
+			hint = "remove line noise bins"
+		case optQualityLineNoiseFreq:
+			label = "  Line noise freq"
+			value = fmt.Sprintf("%.0f Hz", m.qualityLineNoiseFreq)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseFreq) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "50 or 60 Hz"
+		case optQualityLineNoiseWidthHz:
+			label = "  Line noise width"
+			value = fmt.Sprintf("%.1f Hz", m.qualityLineNoiseWidthHz)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseWidthHz) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "exclusion bandwidth"
+		case optQualityLineNoiseHarmonics:
+			label = "  Line noise harmonics"
+			value = fmt.Sprintf("%d", m.qualityLineNoiseHarmonics)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseHarmonics) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "number of harmonics"
+		case optQualitySnrSignalBandMin:
+			label = "  SNR signal min"
+			value = fmt.Sprintf("%.1f Hz", m.qualitySnrSignalBandMin)
+			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrSignalBandMin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "signal band lower bound"
+		case optQualitySnrSignalBandMax:
+			label = "  SNR signal max"
+			value = fmt.Sprintf("%.1f Hz", m.qualitySnrSignalBandMax)
+			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrSignalBandMax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "signal band upper bound"
+		case optQualitySnrNoiseBandMin:
+			label = "  SNR noise min"
+			value = fmt.Sprintf("%.1f Hz", m.qualitySnrNoiseBandMin)
+			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrNoiseBandMin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "noise band lower bound"
+		case optQualitySnrNoiseBandMax:
+			label = "  SNR noise max"
+			value = fmt.Sprintf("%.1f Hz", m.qualitySnrNoiseBandMax)
+			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrNoiseBandMax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "noise band upper bound"
+		case optQualityMuscleBandMin:
+			label = "  Muscle band min"
+			value = fmt.Sprintf("%.1f Hz", m.qualityMuscleBandMin)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityMuscleBandMin) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "muscle artifact lower"
+		case optQualityMuscleBandMax:
+			label = "  Muscle band max"
+			value = fmt.Sprintf("%.1f Hz", m.qualityMuscleBandMax)
+			if m.editingNumber && m.isCurrentlyEditing(optQualityMuscleBandMax) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "muscle artifact upper"
+
+		// ERDS group header
+		case optFeatGroupERDS:
+			label = "▸ ERDS"
+			hint = "Space to toggle"
+			if m.featGroupERDSExpanded {
+				label = "▾ ERDS"
+			}
+			value, expandIndicator = "", ""
+			if isFocused {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Width(labelWidth)
+			} else {
+				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
+			}
+		case optERDSUseLogRatio:
+			label = "  Use log ratio"
+			value = m.boolToOnOff(m.erdsUseLogRatio)
+			hint = "dB (on) vs percent (off)"
+		case optERDSMinBaselinePower:
+			label = "  Min baseline power"
+			value = fmt.Sprintf("%.2e", m.erdsMinBaselinePower)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSMinBaselinePower) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "clamp baseline power"
+		case optERDSMinActivePower:
+			label = "  Min active power"
+			value = fmt.Sprintf("%.2e", m.erdsMinActivePower)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSMinActivePower) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "clamp active power"
+		case optERDSMinSegmentSec:
+			label = "  Min segment (s)"
+			value = fmt.Sprintf("%.2f", m.erdsMinSegmentSec)
+			if m.editingNumber && m.isCurrentlyEditing(optERDSMinSegmentSec) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "minimum segment duration"
+		case optERDSBands:
+			erdsBandsVal := m.erdsBandsSpec
+			if strings.TrimSpace(erdsBandsVal) == "" {
+				erdsBandsVal = "(default: alpha,beta)"
+			}
+			if m.editingText && m.editingTextField == textFieldERDSBands {
+				erdsBandsVal = m.textBuffer + "█"
+			}
+			label = "  Bands"
+			value = erdsBandsVal
+			hint = "e.g. alpha,beta"
 
 		// Generic / validation
 		case optMinEpochs:

@@ -386,7 +386,7 @@ def _compute_itpc_map_by_method(
                     "Pass a fold-specific train_mask or switch to analysis_mode='group_stats'."
                 )
             if logger is not None:
-                logger.warning(
+                logger.info(
                     "ITPC(method='fold_global') requested but ctx.train_mask is None; computing ITPC across all trials "
                     "(equivalent to method='global'; not CV-safe)."
                 )
@@ -823,6 +823,13 @@ def extract_phase_features(
     # Always derive mask from windows - never use np.ones() blindly
     if target_name and windows is not None:
         mask = windows.get_mask(target_name)
+        # windows.get_mask() may be built on a different time axis than tfr.times.
+        # If lengths mismatch, rebuild using explicit window ranges on the TFR time axis.
+        if mask is not None and getattr(mask, "shape", (0,))[0] != times.shape[0]:
+            mask = None
+        if mask is None or not np.any(mask):
+            mask = make_mask_for_times(windows, target_name, times)
+
         if mask is not None and np.any(mask):
             segment_masks = {target_name: mask}
         else:
@@ -854,8 +861,8 @@ def extract_phase_features(
 
     for segment_name in segments:
         segment_mask = segment_masks.get(segment_name)
-        if segment_mask is None:
-            segment_mask = make_mask_for_times(ctx.windows, segment_name, times)
+        if segment_mask is None or getattr(segment_mask, "shape", (0,))[0] != times.shape[0]:
+            segment_mask = make_mask_for_times(windows, segment_name, times)
             
         if not np.any(segment_mask):
             continue
@@ -863,7 +870,7 @@ def extract_phase_features(
         baseline_mask = None
         if baseline_correction == "subtract":
             try:
-                baseline_mask = make_mask_for_times(ctx.windows, "baseline", times)
+                baseline_mask = make_mask_for_times(windows, "baseline", times)
             except (KeyError, ValueError, AttributeError):
                 baseline_mask = None
             if baseline_mask is not None and not np.any(baseline_mask):
@@ -1333,7 +1340,7 @@ def extract_itpc_from_precomputed(
             else:
                 if itpc_method == "fold_global" and train_mask is None:
                     if logger is not None:
-                        logger.warning(
+                        logger.info(
                             "ITPC(method='fold_global') requested but precomputed.train_mask is None; computing baseline ITPC across all trials "
                             "(equivalent to method='global'; not CV-safe)."
                         )
@@ -1365,7 +1372,7 @@ def extract_itpc_from_precomputed(
                 if itpc_method == "fold_global":
                     if train_mask is None:
                         if logger is not None:
-                            logger.warning(
+                            logger.info(
                                 "ITPC(method='fold_global') requested but precomputed.train_mask is None; computing ITPC across all trials "
                                 "(equivalent to method='global'; not CV-safe)."
                             )

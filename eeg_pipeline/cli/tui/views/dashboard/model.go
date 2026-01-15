@@ -28,10 +28,14 @@ const (
 type StatsData struct {
 	TotalSubjects     int            `json:"total_subjects"`
 	BidsSubjects      int            `json:"bids_subjects"`
+	EegPrepSubjects   int            `json:"eeg_prep_subjects"`
+	FmriPrepSubjects  int            `json:"fmri_prep_subjects"`
 	EpochsSubjects    int            `json:"epochs_subjects"`
 	FeaturesSubjects  int            `json:"features_subjects"`
 	EpochsPct         float64        `json:"epochs_pct"`
 	FeaturesPct       float64        `json:"features_pct"`
+	EegPrepPct        float64        `json:"eeg_prep_pct"`
+	FmriPrepPct       float64        `json:"fmri_prep_pct"`
 	FeatureCategories map[string]int `json:"feature_categories"`
 	Task              string         `json:"task"`
 	DerivRoot         string         `json:"deriv_root"`
@@ -282,6 +286,8 @@ func (m Model) renderSubjectProgress() string {
 	}{
 		{"Total", totalSubjects, styles.Text},
 		{"BIDS", m.stats.BidsSubjects, styles.Accent},
+		{"EEG Prep", m.stats.EegPrepSubjects, styles.Secondary},
+		{"fMRI Prep", m.stats.FmriPrepSubjects, styles.Secondary},
 		{"Epochs", m.stats.EpochsSubjects, styles.Warning},
 		{"Features", m.stats.FeaturesSubjects, styles.Success},
 	}

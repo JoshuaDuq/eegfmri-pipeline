@@ -21,36 +21,7 @@ type Preset struct {
 	Icon        string
 }
 
-var FeaturePresets = []Preset{
-	{
-		Key:         "quick",
-		Name:        "Quick Run",
-		Shortcut:    "Q",
-		Description: "Power + Aperiodic + Complexity (fast)",
-		Icon:        "*",
-	},
-	{
-		Key:         "full",
-		Name:        "Full Analysis",
-		Shortcut:    "F",
-		Description: "All feature categories",
-		Icon:        "+",
-	},
-	{
-		Key:         "connectivity",
-		Name:        "Connectivity Focus",
-		Shortcut:    "C",
-		Description: "Power + Connectivity + PAC",
-		Icon:        "~",
-	},
-	{
-		Key:         "spectral",
-		Name:        "Spectral Focus",
-		Shortcut:    "S",
-		Description: "Power + Spectral + Aperiodic + Ratios",
-		Icon:        "^",
-	},
-}
+var FeaturePresets = []Preset{}
 
 var BehaviorPresets = []Preset{
 	{
