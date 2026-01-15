@@ -1353,7 +1353,7 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.itpcMethod = (m.itpcMethod + 1) % 4 // 0: global, 1: fold_global, 2: loo, 3: condition
 		m.useDefaultAdvanced = false
 	case optItpcConditionColumn:
-		if len(m.availableColumns) > 0 {
+		if len(m.discoveredColumns) > 0 {
 			m.expandedOption = expandedItpcConditionColumn
 			m.subCursor = 0
 		} else {
@@ -1423,6 +1423,12 @@ func (m *Model) toggleFeaturesAdvancedOption() {
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optPACRandomSeed:
+		m.startNumberEdit()
+		m.useDefaultAdvanced = false
+	case optPACComputeWaveformQC:
+		m.pacComputeWaveformQC = !m.pacComputeWaveformQC
+		m.useDefaultAdvanced = false
+	case optPACWaveformOffsetMs:
 		m.startNumberEdit()
 		m.useDefaultAdvanced = false
 	case optAperiodicFmin, optAperiodicFmax:
@@ -3544,6 +3550,8 @@ func (m *Model) commitFeaturesNumber(val float64) {
 		m.pacHarmonicToleranceHz = val
 	case optPACRandomSeed:
 		m.pacRandomSeed = int(val)
+	case optPACWaveformOffsetMs:
+		m.pacWaveformOffsetMs = val
 	case optPEDelay:
 		m.complexityPEDelay = int(val)
 	case optComplexityMinSegmentSec:

@@ -3472,7 +3472,7 @@ func (m Model) getExpandedListLength() int {
 	case expandedCorrelationsTargetColumn:
 		return len(m.availableColumns) + 1 // +1 for "(none)" option
 	case expandedItpcConditionColumn:
-		return len(m.availableColumns)
+		return len(m.discoveredColumns)
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return len(m.fmriDiscoveredColumns)
 	case expandedFmriCondAValue:
@@ -3534,7 +3534,7 @@ func (m Model) getExpandedListItems() []string {
 	case expandedCorrelationsTargetColumn:
 		return append([]string{"(none)"}, m.availableColumns...)
 	case expandedItpcConditionColumn:
-		return m.availableColumns
+		return m.discoveredColumns
 	case expandedFmriCondAColumn, expandedFmriCondBColumn:
 		return m.fmriDiscoveredColumns
 	case expandedFmriCondAValue:
@@ -4736,6 +4736,8 @@ const (
 	optPACMaxHarmonic
 	optPACHarmonicToleranceHz
 	optPACRandomSeed
+	optPACComputeWaveformQC
+	optPACWaveformOffsetMs
 	optAperiodicFmin
 	optAperiodicFmax
 	optAperiodicPeakZ
@@ -5437,7 +5439,7 @@ func (m Model) getFeaturesOptions() []optionType {
 		options = append(options, optFeatGroupPAC)
 		if m.featGroupPACExpanded {
 			options = append(options, optPACPhaseRange, optPACAmpRange, optPACMethod, optPACMinEpochs, optPACPairs,
-				optPACSource, optPACNormalize, optPACNSurrogates, optPACAllowHarmonicOverlap, optPACMaxHarmonic, optPACHarmonicToleranceHz, optPACRandomSeed)
+				optPACSource, optPACNormalize, optPACNSurrogates, optPACAllowHarmonicOverlap, optPACMaxHarmonic, optPACHarmonicToleranceHz, optPACRandomSeed, optPACComputeWaveformQC, optPACWaveformOffsetMs)
 		}
 	}
 	if m.isCategorySelected("aperiodic") {

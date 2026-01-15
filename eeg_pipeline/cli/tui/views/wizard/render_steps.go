@@ -1901,17 +1901,23 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
 		case optSpatialTransform:
-			label = "  Transform"
+			label = "Transform"
 			transforms := []string{"none", "CSD", "Laplacian"}
 			value = transforms[m.spatialTransform]
 			hint = "volume conduction reduction"
 		case optSpatialTransformLambda2:
-			label = "  Lambda2"
+			label = "Lambda2"
 			value = fmt.Sprintf("%.2e", m.spatialTransformLambda2)
+			if m.editingNumber && m.isCurrentlyEditing(optSpatialTransformLambda2) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "regularization parameter"
 		case optSpatialTransformStiffness:
-			label = "  Stiffness"
+			label = "Stiffness"
 			value = fmt.Sprintf("%.1f", m.spatialTransformStiffness)
+			if m.editingNumber && m.isCurrentlyEditing(optSpatialTransformStiffness) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "spline stiffness"
 		case optFeatGroupTFR:
 			label = "▸ Time-Frequency"
@@ -1926,28 +1932,46 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
 		case optTfrFreqMin:
-			label = "  Freq Min"
+			label = "Freq Min"
 			value = fmt.Sprintf("%.1f Hz", m.tfrFreqMin)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrFreqMin) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "min TFR frequency"
 		case optTfrFreqMax:
-			label = "  Freq Max"
+			label = "Freq Max"
 			value = fmt.Sprintf("%.1f Hz", m.tfrFreqMax)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrFreqMax) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "max TFR frequency"
 		case optTfrNFreqs:
-			label = "  N Frequencies"
+			label = "N Frequencies"
 			value = fmt.Sprintf("%d", m.tfrNFreqs)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrNFreqs) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "number of freq bins"
 		case optTfrMinCycles:
-			label = "  Min Cycles"
+			label = "Min Cycles"
 			value = fmt.Sprintf("%.1f", m.tfrMinCycles)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrMinCycles) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "wavelet cycles floor"
 		case optTfrNCyclesFactor:
-			label = "  Cycles Factor"
+			label = "Cycles Factor"
 			value = fmt.Sprintf("%.1f", m.tfrNCyclesFactor)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrNCyclesFactor) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "cycles per Hz"
 		case optTfrWorkers:
-			label = "  Workers"
+			label = "Workers"
 			value = fmt.Sprintf("%d", m.tfrWorkers)
+			if m.editingNumber && m.isCurrentlyEditing(optTfrWorkers) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "-1 = all cores"
 		case optFeatGroupStorage:
 			label = "▸ Storage"
@@ -2055,14 +2079,23 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optDirectedConnMvarOrder:
 			label = "MVAR Order"
 			value = fmt.Sprintf("%d", m.directedConnMvarOrder)
+			if m.editingNumber && m.isCurrentlyEditing(optDirectedConnMvarOrder) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "model order for DTF/PDC"
 		case optDirectedConnNFreqs:
 			label = "N Freqs"
 			value = fmt.Sprintf("%d", m.directedConnNFreqs)
+			if m.editingNumber && m.isCurrentlyEditing(optDirectedConnNFreqs) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "frequency bins"
 		case optDirectedConnMinSegSamples:
 			label = "Min Seg Samples"
 			value = fmt.Sprintf("%d", m.directedConnMinSegSamples)
+			if m.editingNumber && m.isCurrentlyEditing(optDirectedConnMinSegSamples) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "minimum samples per segment"
 
 		// Source Localization (LCMV, eLORETA)
@@ -2537,8 +2570,8 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			}
 			value = val
 			expandIndicatorHint := ""
-			if len(m.availableColumns) > 0 {
-				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.availableColumns))
+			if len(m.discoveredColumns) > 0 {
+				expandIndicatorHint = fmt.Sprintf(" · %d columns available", len(m.discoveredColumns))
 			}
 			hint = "Space to select" + expandIndicatorHint
 			if m.expandedOption == expandedItpcConditionColumn {
@@ -2612,6 +2645,9 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optPACNSurrogates:
 			label = "N Surrogates"
 			value = fmt.Sprintf("%d", m.pacNSurrogates)
+			if m.editingNumber && m.isCurrentlyEditing(optPACNSurrogates) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "0=none, >0 for z-scores"
 		case optPACAllowHarmonicOverlap:
 			label = "Allow Harmonics"
@@ -2620,10 +2656,16 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optPACMaxHarmonic:
 			label = "Max Harmonic"
 			value = fmt.Sprintf("%d", m.pacMaxHarmonic)
+			if m.editingNumber && m.isCurrentlyEditing(optPACMaxHarmonic) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "upper harmonic to check"
 		case optPACHarmonicToleranceHz:
 			label = "Harmonic Tol Hz"
 			value = fmt.Sprintf("%.1f", m.pacHarmonicToleranceHz)
+			if m.editingNumber && m.isCurrentlyEditing(optPACHarmonicToleranceHz) {
+				value = m.numberBuffer + "█"
+			}
 			hint = "tolerance for overlap check"
 		case optPACRandomSeed:
 			label = "Random Seed"
@@ -2632,6 +2674,17 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				value = m.numberBuffer + "█"
 			}
 			hint = "seed for surrogate testing"
+		case optPACComputeWaveformQC:
+			label = "Waveform QC"
+			value = m.boolToOnOff(m.pacComputeWaveformQC)
+			hint = "compute waveform quality"
+		case optPACWaveformOffsetMs:
+			label = "Waveform Offset"
+			value = fmt.Sprintf("%.1f ms", m.pacWaveformOffsetMs)
+			if m.editingNumber && m.isCurrentlyEditing(optPACWaveformOffsetMs) {
+				value = m.numberBuffer + "█"
+			}
+			hint = "offset in milliseconds"
 
 		// Aperiodic
 		case optAperiodicFmin:
@@ -2842,7 +2895,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 		case optSpectralRatioPairs:
 			label = "Ratio pairs"
 			value = spectralRatioPairsVal
-			hint = "e.g. theta:beta,alpha:beta"
+			hint = ""
 		case optAperiodicSubtractEvoked:
 			label = "Induced spectra"
 			value = m.boolToOnOff(m.aperiodicSubtractEvoked)
@@ -2852,73 +2905,73 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			value = asymPairsVal
 			hint = "e.g. F3:F4,C3:C4"
 		case optAsymmetryMinSegmentSec:
-			label = "  Min segment (s)"
+			label = "Min segment (s)"
 			value = fmt.Sprintf("%.2f", m.asymmetryMinSegmentSec)
 			if m.editingNumber && m.isCurrentlyEditing(optAsymmetryMinSegmentSec) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum segment duration"
 		case optAsymmetryMinCyclesAtFmin:
-			label = "  Min cycles"
+			label = "Min cycles"
 			value = fmt.Sprintf("%.1f", m.asymmetryMinCyclesAtFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optAsymmetryMinCyclesAtFmin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "cycles at lowest freq"
 		case optAsymmetrySkipInvalidSegments:
-			label = "  Skip invalid"
+			label = "Skip invalid"
 			value = m.boolToOnOff(m.asymmetrySkipInvalidSegments)
 			hint = "skip invalid segments"
 
 		// Ratios advanced options
 		case optRatiosMinSegmentSec:
-			label = "  Min segment (s)"
+			label = "Min segment (s)"
 			value = fmt.Sprintf("%.2f", m.ratiosMinSegmentSec)
 			if m.editingNumber && m.isCurrentlyEditing(optRatiosMinSegmentSec) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum segment duration"
 		case optRatiosMinCyclesAtFmin:
-			label = "  Min cycles"
+			label = "Min cycles"
 			value = fmt.Sprintf("%.1f", m.ratiosMinCyclesAtFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optRatiosMinCyclesAtFmin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "cycles at lowest freq"
 		case optRatiosSkipInvalidSegments:
-			label = "  Skip invalid"
+			label = "Skip invalid"
 			value = m.boolToOnOff(m.ratiosSkipInvalidSegments)
 			hint = "skip invalid segments"
 
 		// Spectral advanced options
 		case optSpectralPsdMethod:
-			label = "  PSD method"
+			label = "PSD method"
 			methods := []string{"multitaper", "welch"}
 			value = methods[m.spectralPsdMethod]
 			hint = "multitaper or welch"
 		case optSpectralFmin:
-			label = "  Freq min"
+			label = "Freq min"
 			value = fmt.Sprintf("%.1f Hz", m.spectralFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optSpectralFmin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum frequency"
 		case optSpectralFmax:
-			label = "  Freq max"
+			label = "Freq max"
 			value = fmt.Sprintf("%.1f Hz", m.spectralFmax)
 			if m.editingNumber && m.isCurrentlyEditing(optSpectralFmax) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "maximum frequency"
 		case optSpectralMinSegmentSec:
-			label = "  Min segment (s)"
+			label = "Min segment (s)"
 			value = fmt.Sprintf("%.2f", m.spectralMinSegmentSec)
 			if m.editingNumber && m.isCurrentlyEditing(optSpectralMinSegmentSec) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum segment duration"
 		case optSpectralMinCyclesAtFmin:
-			label = "  Min cycles"
+			label = "Min cycles"
 			value = fmt.Sprintf("%.1f", m.spectralMinCyclesAtFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optSpectralMinCyclesAtFmin) {
 				value = m.numberBuffer + "█"
@@ -2939,93 +2992,93 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
 		case optQualityPsdMethod:
-			label = "  PSD method"
+			label = "PSD method"
 			methods := []string{"welch", "multitaper"}
 			value = methods[m.qualityPsdMethod]
 			hint = "welch or multitaper"
 		case optQualityFmin:
-			label = "  Freq min"
+			label = "Freq min"
 			value = fmt.Sprintf("%.1f Hz", m.qualityFmin)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityFmin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "minimum frequency"
 		case optQualityFmax:
-			label = "  Freq max"
+			label = "Freq max"
 			value = fmt.Sprintf("%.1f Hz", m.qualityFmax)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityFmax) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "maximum frequency"
 		case optQualityNFft:
-			label = "  N FFT"
+			label = "N FFT"
 			value = fmt.Sprintf("%d", m.qualityNfft)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityNFft) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "FFT size"
 		case optQualityExcludeLineNoise:
-			label = "  Exclude line noise"
+			label = "Exclude line noise"
 			value = m.boolToOnOff(m.qualityExcludeLineNoise)
 			hint = "remove line noise bins"
 		case optQualityLineNoiseFreq:
-			label = "  Line noise freq"
+			label = "Line noise freq"
 			value = fmt.Sprintf("%.0f Hz", m.qualityLineNoiseFreq)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseFreq) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "50 or 60 Hz"
 		case optQualityLineNoiseWidthHz:
-			label = "  Line noise width"
+			label = "Line noise width"
 			value = fmt.Sprintf("%.1f Hz", m.qualityLineNoiseWidthHz)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseWidthHz) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "exclusion bandwidth"
 		case optQualityLineNoiseHarmonics:
-			label = "  Line noise harmonics"
+			label = "Line noise harmonics"
 			value = fmt.Sprintf("%d", m.qualityLineNoiseHarmonics)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityLineNoiseHarmonics) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "number of harmonics"
 		case optQualitySnrSignalBandMin:
-			label = "  SNR signal min"
+			label = "SNR signal min"
 			value = fmt.Sprintf("%.1f Hz", m.qualitySnrSignalBandMin)
 			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrSignalBandMin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "signal band lower bound"
 		case optQualitySnrSignalBandMax:
-			label = "  SNR signal max"
+			label = "SNR signal max"
 			value = fmt.Sprintf("%.1f Hz", m.qualitySnrSignalBandMax)
 			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrSignalBandMax) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "signal band upper bound"
 		case optQualitySnrNoiseBandMin:
-			label = "  SNR noise min"
+			label = "SNR noise min"
 			value = fmt.Sprintf("%.1f Hz", m.qualitySnrNoiseBandMin)
 			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrNoiseBandMin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "noise band lower bound"
 		case optQualitySnrNoiseBandMax:
-			label = "  SNR noise max"
+			label = "SNR noise max"
 			value = fmt.Sprintf("%.1f Hz", m.qualitySnrNoiseBandMax)
 			if m.editingNumber && m.isCurrentlyEditing(optQualitySnrNoiseBandMax) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "noise band upper bound"
 		case optQualityMuscleBandMin:
-			label = "  Muscle band min"
+			label = "Muscle band min"
 			value = fmt.Sprintf("%.1f Hz", m.qualityMuscleBandMin)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityMuscleBandMin) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "muscle artifact lower"
 		case optQualityMuscleBandMax:
-			label = "  Muscle band max"
+			label = "Muscle band max"
 			value = fmt.Sprintf("%.1f Hz", m.qualityMuscleBandMax)
 			if m.editingNumber && m.isCurrentlyEditing(optQualityMuscleBandMax) {
 				value = m.numberBuffer + "█"
@@ -3046,25 +3099,25 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 				labelStyle = lipgloss.NewStyle().Foreground(styles.Accent).Bold(true).Width(labelWidth)
 			}
 		case optERDSUseLogRatio:
-			label = "  Use log ratio"
+			label = "Use log ratio"
 			value = m.boolToOnOff(m.erdsUseLogRatio)
 			hint = "dB (on) vs percent (off)"
 		case optERDSMinBaselinePower:
-			label = "  Min baseline power"
+			label = "Min baseline power"
 			value = fmt.Sprintf("%.2e", m.erdsMinBaselinePower)
 			if m.editingNumber && m.isCurrentlyEditing(optERDSMinBaselinePower) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "clamp baseline power"
 		case optERDSMinActivePower:
-			label = "  Min active power"
+			label = "Min active power"
 			value = fmt.Sprintf("%.2e", m.erdsMinActivePower)
 			if m.editingNumber && m.isCurrentlyEditing(optERDSMinActivePower) {
 				value = m.numberBuffer + "█"
 			}
 			hint = "clamp active power"
 		case optERDSMinSegmentSec:
-			label = "  Min segment (s)"
+			label = "Min segment (s)"
 			value = fmt.Sprintf("%.2f", m.erdsMinSegmentSec)
 			if m.editingNumber && m.isCurrentlyEditing(optERDSMinSegmentSec) {
 				value = m.numberBuffer + "█"
@@ -3078,7 +3131,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			if m.editingText && m.editingTextField == textFieldERDSBands {
 				erdsBandsVal = m.textBuffer + "█"
 			}
-			label = "  Bands"
+			label = "Bands"
 			value = erdsBandsVal
 			hint = "e.g. alpha,beta"
 
@@ -4454,6 +4507,14 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	if strings.TrimSpace(icaLabelsVal) == "" {
 		icaLabelsVal = "(default)"
 	}
+	eogChannelsVal := m.prepEogChannels
+	if m.editingText && m.editingTextField == textFieldPrepEogChannels {
+		eogChannelsVal = m.textBuffer + "█"
+	}
+	conditionsVal := m.prepConditions
+	if m.editingText && m.editingTextField == textFieldPrepConditions {
+		conditionsVal = m.textBuffer + "█"
+	}
 	resampleVal := fmt.Sprintf("%d Hz", m.prepResample)
 	lFreqVal := fmt.Sprintf("%.1f Hz", m.prepLFreq)
 	hFreqVal := fmt.Sprintf("%.1f Hz", m.prepHFreq)
@@ -4468,6 +4529,10 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 	breaksMinLenVal := fmt.Sprintf("%d s", m.prepBreaksMinLength)
 	tStartPrevVal := fmt.Sprintf("%d s", m.prepTStartAfterPrevious)
 	tStopNextVal := fmt.Sprintf("%d s", m.prepTStopBeforeNext)
+	randomStateVal := fmt.Sprintf("%d", m.prepRandomState)
+	zaplineFlineVal := fmt.Sprintf("%.1f Hz", m.prepZaplineFline)
+	icaLFreqVal := fmt.Sprintf("%.1f Hz", m.prepICALFreq)
+	icaRejThreshVal := fmt.Sprintf("%.0f µV", m.prepICARejThresh)
 
 	var baselineVal string
 	if m.prepEpochsNoBaseline {
@@ -4520,6 +4585,14 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 			tStartPrevVal = buffer
 		case m.isCurrentlyEditing(optPrepTStopBeforeNext):
 			tStopNextVal = buffer
+		case m.isCurrentlyEditing(optPrepRandomState):
+			randomStateVal = buffer
+		case m.isCurrentlyEditing(optPrepZaplineFline):
+			zaplineFlineVal = buffer
+		case m.isCurrentlyEditing(optPrepICALFreq):
+			icaLFreqVal = buffer
+		case m.isCurrentlyEditing(optPrepICARejThresh):
+			icaRejThreshVal = buffer
 		}
 	}
 
@@ -4653,215 +4726,215 @@ func (m Model) renderPreprocessingAdvancedConfig() string {
 
 		// Stage toggles (indented under Stages group)
 		case optPrepStageBadChannels:
-			label = "  Bad Channels"
+			label = "Bad Channels"
 			value = m.boolToOnOff(m.prepStageSelected[0])
 			hint = "Automatically detect noisy channels"
 		case optPrepStageFiltering:
-			label = "  Filtering"
+			label = "Filtering"
 			value = m.boolToOnOff(m.prepStageSelected[1])
 			hint = "Apply frequency filters to data"
 		case optPrepStageICA:
-			label = "  ICA"
+			label = "ICA"
 			value = m.boolToOnOff(m.prepStageSelected[2])
 			hint = "Remove artifacts via ICA decomposition"
 		case optPrepStageEpoching:
-			label = "  Epoching"
+			label = "Epoching"
 			value = m.boolToOnOff(m.prepStageSelected[3])
 			hint = "Extract time-locked epochs from events"
 
 		// General settings (indented)
 		case optPrepMontage:
-			label = "  Montage"
+			label = "Montage"
 			value = montageVal
 			hint = "EEG electrode layout (e.g., easycap-M1)"
 		case optPrepChTypes:
-			label = "  Ch Types"
+			label = "Ch Types"
 			value = chTypesVal
 			hint = "Channel types to process (e.g., eeg)"
 		case optPrepEegReference:
-			label = "  Reference"
+			label = "Reference"
 			value = eegRefVal
 			hint = "Re-referencing scheme (e.g., average)"
 		case optPrepEogChannels:
-			label = "  EOG Chans"
-			value = m.prepEogChannels
+			label = "EOG Chans"
+			value = eogChannelsVal
 			if strings.TrimSpace(value) == "" {
 				value = "(none)"
 			}
 			hint = "Eye movement channels (e.g., Fp1,Fp2)"
 		case optPrepRandomState:
-			label = "  Random Seed"
-			value = fmt.Sprintf("%d", m.prepRandomState)
+			label = "Random Seed"
+			value = randomStateVal
 			hint = "Random seed for reproducible results"
 		case optPrepTaskIsRest:
-			label = "  Resting State"
+			label = "Resting State"
 			value = m.boolToOnOff(m.prepTaskIsRest)
 			hint = "Data is resting-state (no events)"
 		case optPrepNJobs:
-			label = "  N Jobs"
+			label = "N Jobs"
 			value = nJobsVal
 			hint = "Number of parallel processes to use"
 		case optPrepUsePyprep:
-			label = "  Use PyPREP"
+			label = "Use PyPREP"
 			value = m.boolToOnOff(m.prepUsePyprep)
 			hint = "Enable PyPREP for bad channel detection"
 		case optPrepUseIcalabel:
-			label = "  Use ICA-Label"
+			label = "Use ICA-Label"
 			value = m.boolToOnOff(m.prepUseIcalabel)
 			hint = "Auto-classify ICA components as brain/artifact"
 
 		// Filtering settings (indented)
 		case optPrepResample:
-			label = "  Resample"
+			label = "Resample"
 			value = resampleVal
 			hint = "Downsample to this sampling rate"
 		case optPrepLFreq:
-			label = "  High-Pass"
+			label = "High-Pass"
 			value = lFreqVal
 			hint = "High-pass filter cutoff frequency"
 		case optPrepHFreq:
-			label = "  Low-Pass"
+			label = "Low-Pass"
 			value = hFreqVal
 			hint = "Low-pass filter cutoff frequency"
 		case optPrepNotch:
-			label = "  Notch"
+			label = "Notch"
 			value = notchVal
 			hint = "Remove line noise at this frequency"
 		case optPrepLineFreq:
-			label = "  Line Freq"
+			label = "Line Freq"
 			value = lineFreqVal
 			hint = "Power line frequency (50 or 60 Hz)"
 		case optPrepZaplineFline:
-			label = "  Zapline"
-			value = fmt.Sprintf("%.1f Hz", m.prepZaplineFline)
+			label = "Zapline"
+			value = zaplineFlineVal
 			hint = "Zapline: remove power line harmonics"
 		case optPrepFindBreaks:
-			label = "  Find Breaks"
+			label = "Find Breaks"
 			value = m.boolToOnOff(m.prepFindBreaks)
 			hint = "Identify gaps in continuous recording"
 
 		// PyPREP settings (indented)
 		case optPrepRansac:
-			label = "  RANSAC"
+			label = "RANSAC"
 			value = m.boolToOnOff(m.prepRansac)
 			hint = "RANSAC: robust bad channel detection"
 		case optPrepRepeats:
-			label = "  Repeats"
+			label = "Repeats"
 			value = repeatsVal
 			hint = "Number of detection iterations to run"
 		case optPrepAverageReref:
-			label = "  Avg Reref"
+			label = "Avg Reref"
 			value = m.boolToOnOff(m.prepAverageReref)
 			hint = "Average reference before detection"
 		case optPrepFileExtension:
-			label = "  File Ext"
+			label = "File Ext"
 			value = fileExtVal
 			hint = "Raw data file extension (e.g., .vhdr)"
 		case optPrepConsiderPreviousBads:
-			label = "  Keep Bads"
+			label = "Keep Bads"
 			value = m.boolToOnOff(m.prepConsiderPreviousBads)
 			hint = "Keep channels marked bad in previous runs"
 		case optPrepOverwriteChansTsv:
-			label = "  Overwrite TSV"
+			label = "Overwrite TSV"
 			value = m.boolToOnOff(m.prepOverwriteChansTsv)
 			hint = "Update channels.tsv with detected bads"
 		case optPrepDeleteBreaks:
-			label = "  Del Breaks"
+			label = "Del Breaks"
 			value = m.boolToOnOff(m.prepDeleteBreaks)
 			hint = "Remove break periods from data"
 		case optPrepBreaksMinLength:
-			label = "  Break Len"
+			label = "Break Len"
 			value = breaksMinLenVal
 			hint = "Minimum duration to qualify as break"
 		case optPrepTStartAfterPrevious:
-			label = "  T Start"
+			label = "T Start"
 			value = tStartPrevVal
 			hint = "Seconds after previous event to include"
 		case optPrepTStopBeforeNext:
-			label = "  T Stop"
+			label = "T Stop"
 			value = tStopNextVal
 			hint = "Seconds before next event to include"
 		case optPrepRenameAnotDict:
-			label = "  Rename Anot"
+			label = "Rename Anot"
 			value = renameAnotDictVal
 			hint = "JSON: rename annotations (old:new)"
 		case optPrepCustomBadDict:
-			label = "  Custom Bads"
+			label = "Custom Bads"
 			value = customBadDictVal
 			hint = "JSON: custom bad channels per task/subject"
 
 		// ICA settings (indented)
 		case optPrepSpatialFilter:
 			spatialFilterVal := []string{"ica", "ssp"}[m.prepSpatialFilter]
-			label = "  Spatial Filter"
+			label = "Spatial Filter"
 			value = spatialFilterVal
 			hint = "Spatial filter: ICA or SSP"
 		case optPrepICAAlgorithm:
 			icaAlgVal := []string{"extended_infomax", "fastica", "infomax", "picard"}[m.prepICAAlgorithm]
-			label = "  Algorithm"
+			label = "Algorithm"
 			value = icaAlgVal
 			hint = "ICA decomposition algorithm"
 		case optPrepICAComp:
-			label = "  Components"
+			label = "Components"
 			value = icaCompVal
 			hint = "Components: number (int) or variance (0-1)"
 		case optPrepICALFreq:
-			label = "  ICA High-Pass"
-			value = fmt.Sprintf("%.1f Hz", m.prepICALFreq)
+			label = "ICA High-Pass"
+			value = icaLFreqVal
 			hint = "High-pass filter for ICA preprocessing"
 		case optPrepICARejThresh:
-			label = "  ICA Reject"
-			value = fmt.Sprintf("%.0f µV", m.prepICARejThresh)
+			label = "ICA Reject"
+			value = icaRejThreshVal
 			hint = "Peak-to-peak threshold for ICA epochs (µV)"
 		case optPrepProbThresh:
-			label = "  Prob Thresh"
+			label = "Prob Thresh"
 			value = probThreshVal
 			hint = "Minimum probability for IC label acceptance"
 		case optPrepKeepMnebidsBads:
-			label = "  Keep BIDS"
+			label = "Keep BIDS"
 			value = m.boolToOnOff(m.prepKeepMnebidsBads)
 			hint = "Keep ICs flagged as bad in MNE-BIDS"
 		case optIcaLabelsToKeep:
-			label = "  Labels Keep"
+			label = "Labels Keep"
 			value = icaLabelsVal
 			hint = "Comma-separated IC labels to keep (e.g., brain,other)"
 
 		// Epoching settings (indented)
 		case optPrepConditions:
-			condVal := m.prepConditions
+			condVal := conditionsVal
 			if strings.TrimSpace(condVal) == "" {
 				condVal = "(default)"
 			}
-			label = "  Conditions"
+			label = "Conditions"
 			value = condVal
 			hint = "Event types/triggers to epoch"
 		case optPrepEpochsTmin:
-			label = "  Tmin"
+			label = "Tmin"
 			value = tminVal
 			hint = "Epoch start time relative to event (s)"
 		case optPrepEpochsTmax:
-			label = "  Tmax"
+			label = "Tmax"
 			value = tmaxVal
 			hint = "Epoch end time relative to event (s)"
 		case optPrepEpochsNoBaseline:
-			label = "  No Baseline"
+			label = "No Baseline"
 			value = m.boolToOnOff(m.prepEpochsNoBaseline)
 			hint = "Disable baseline correction"
 		case optPrepEpochsBaseline:
-			label = "  Baseline"
+			label = "Baseline"
 			value = baselineVal
 			hint = "Baseline correction window (start, end) seconds"
 		case optPrepEpochsReject:
-			label = "  Reject (µV)"
+			label = "Reject (µV)"
 			value = rejectVal
 			hint = "Reject epochs exceeding this amplitude (µV)"
 		case optPrepRejectMethod:
 			rejectMethods := []string{"none", "autoreject_local", "autoreject_global"}
-			label = "  Reject Method"
+			label = "Reject Method"
 			value = rejectMethods[m.prepRejectMethod]
 			hint = "Algorithm: none, autoreject_local, autoreject_global"
 		case optPrepRunSourceEstimation:
-			label = "  Source Est"
+			label = "Source Est"
 			value = m.boolToOnOff(m.prepRunSourceEstimation)
 			hint = "Run source localization after preprocessing"
 		}
@@ -5221,145 +5294,145 @@ func (m Model) renderFmriAdvancedConfig() string {
 
 		// Runtime options (indented)
 		case optFmriEngine:
-			label = "  Engine"
+			label = "Engine"
 			value = engineVal
 			hint = "docker/apptainer"
 		case optFmriFmriprepImage:
-			label = "  Image"
+			label = "Image"
 			value = imageVal
 			hint = "Container image"
 
 		// Output options (indented)
 		case optFmriOutputSpaces:
-			label = "  Output Spaces"
+			label = "Output Spaces"
 			value = spacesVal
 			hint = "e.g., T1w MNI152..."
 		case optFmriIgnore:
-			label = "  Ignore"
+			label = "Ignore"
 			value = ignoreVal
 			hint = "fieldmaps, slicetiming"
 		case optFmriLevel:
-			label = "  Level"
+			label = "Level"
 			value = levelVal
 			hint = "full/resampling/minimal"
 		case optFmriCiftiOutput:
-			label = "  CIFTI Output"
+			label = "CIFTI Output"
 			value = ciftiVal
 			hint = "91k/170k grayordinates"
 		case optFmriTaskId:
-			label = "  Task ID"
+			label = "Task ID"
 			value = taskIdVal
 			hint = "Specific task only"
 
 		// Performance options (indented)
 		case optFmriNThreads:
-			label = "  N Threads"
+			label = "N Threads"
 			value = nthreadsVal
 			hint = "Max threads (0=auto)"
 		case optFmriOmpNThreads:
-			label = "  OMP Threads"
+			label = "OMP Threads"
 			value = ompNthreadsVal
 			hint = "Per process (0=auto)"
 		case optFmriMemMb:
-			label = "  Mem (MB)"
+			label = "Mem (MB)"
 			value = memVal
 			hint = "Memory limit"
 		case optFmriLowMem:
-			label = "  Low Memory"
+			label = "Low Memory"
 			value = m.boolToOnOff(m.fmriLowMem)
 			hint = "Reduce memory usage"
 
 		// Anatomical options (indented)
 		case optFmriSkipReconstruction:
-			label = "  Skip Recon-All"
+			label = "Skip Recon-All"
 			value = m.boolToOnOff(m.fmriSkipReconstruction)
 			hint = "No FreeSurfer"
 		case optFmriLongitudinal:
-			label = "  Longitudinal"
+			label = "Longitudinal"
 			value = m.boolToOnOff(m.fmriLongitudinal)
 			hint = "Unbiased template"
 		case optFmriSkullStripTemplate:
-			label = "  Skull Strip Tpl"
+			label = "Skull Strip Tpl"
 			value = skullStripTemplateVal
 			hint = "Brain extraction"
 		case optFmriSkullStripFixedSeed:
-			label = "  Fixed Seed"
+			label = "Fixed Seed"
 			value = m.boolToOnOff(m.fmriSkullStripFixedSeed)
 			hint = "Reproducible strip"
 
 		// BOLD options (indented)
 		case optFmriBold2T1wInit:
-			label = "  BOLD→T1w Init"
+			label = "BOLD→T1w Init"
 			value = bold2t1wInitVal
 			hint = "register/header"
 		case optFmriBold2T1wDof:
-			label = "  BOLD→T1w DOF"
+			label = "BOLD→T1w DOF"
 			value = bold2t1wDofVal
 			hint = "Degrees freedom"
 		case optFmriSliceTimeRef:
-			label = "  Slice Time Ref"
+			label = "Slice Time Ref"
 			value = sliceTimeRefVal
 			hint = "0=start, 0.5=mid, 1=end"
 		case optFmriDummyScans:
-			label = "  Dummy Scans"
+			label = "Dummy Scans"
 			value = dummyScansVal
 			hint = "Non-steady vols"
 
 		// QC options (indented)
 		case optFmriFdSpikeThreshold:
-			label = "  FD Threshold"
+			label = "FD Threshold"
 			value = fdSpikeVal
 			hint = "mm"
 		case optFmriDvarsSpikeThreshold:
-			label = "  DVARS Threshold"
+			label = "DVARS Threshold"
 			value = dvarsSpikeVal
 			hint = "Standardized"
 
 		// Denoising options (indented)
 		case optFmriUseAroma:
-			label = "  Use AROMA"
+			label = "Use AROMA"
 			value = m.boolToOnOff(m.fmriUseAroma)
 			hint = "ICA-AROMA"
 
 		// Surface options (indented)
 		case optFmriMedialSurfaceNan:
-			label = "  Medial NaN"
+			label = "Medial NaN"
 			value = m.boolToOnOff(m.fmriMedialSurfaceNan)
 			hint = "Fill medial wall"
 		case optFmriNoMsm:
-			label = "  No MSM"
+			label = "No MSM"
 			value = m.boolToOnOff(m.fmriNoMsm)
 			hint = "Disable MSM-Sulc"
 
 		// Multi-echo options (indented)
 		case optFmriMeOutputEchos:
-			label = "  Output Echos"
+			label = "Output Echos"
 			value = m.boolToOnOff(m.fmriMeOutputEchos)
 			hint = "Each echo separate"
 
 		// Reproducibility options (indented)
 		case optFmriRandomSeed:
-			label = "  Random Seed"
+			label = "Random Seed"
 			value = randomSeedVal
 			hint = "0=non-deterministic"
 
 		// Validation options (indented)
 		case optFmriSkipBidsValidation:
-			label = "  Skip Validation"
+			label = "Skip Validation"
 			value = m.boolToOnOff(m.fmriSkipBidsValidation)
 			hint = "Skip bids-validator"
 		case optFmriStopOnFirstCrash:
-			label = "  Stop on Crash"
+			label = "Stop on Crash"
 			value = m.boolToOnOff(m.fmriStopOnFirstCrash)
 			hint = "Abort on error"
 		case optFmriCleanWorkdir:
-			label = "  Clean Workdir"
+			label = "Clean Workdir"
 			value = m.boolToOnOff(m.fmriCleanWorkdir)
 			hint = "Remove on success"
 
 		// Advanced options (indented)
 		case optFmriExtraArgs:
-			label = "  Extra Args"
+			label = "Extra Args"
 			value = extraArgsVal
 			hint = "Raw CLI args"
 		}
