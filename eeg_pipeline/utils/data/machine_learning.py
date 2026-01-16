@@ -123,9 +123,9 @@ def load_ml_data(
     sub = f"sub-{subject}"
     feat_dir = deriv_root / sub / "eeg" / "features"
     
-    # Try new organized paths first
-    X_path = feat_dir / "power" / "features_power.tsv"
-    y_path = feat_dir / "behavior" / "target_vas_ratings.tsv"
+    # Path to parquet files (strictly parquet now)
+    X_path = feat_dir / "power" / "features_power.parquet"
+    y_path = feat_dir / "behavior" / "target_vas_ratings.parquet"
         
     manifest_path = _get_trial_alignment_manifest_path(deriv_root, subject)
 
@@ -137,8 +137,9 @@ def load_ml_data(
     manifest = _load_trial_alignment_manifest(manifest_path, logger)
     expected_n_trials = len(manifest)
 
-    X = read_tsv(X_path)
-    y_df = read_tsv(y_path)
+    from eeg_pipeline.infra.tsv import read_table
+    X = read_table(X_path)
+    y_df = read_table(y_path)
 
     if len(X) != expected_n_trials:
         raise ValueError(

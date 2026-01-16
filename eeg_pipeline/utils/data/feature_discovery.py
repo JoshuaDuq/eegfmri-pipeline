@@ -129,6 +129,8 @@ def _find_feature_file_path(features_dir: Path, key: str, filename: str) -> Path
     For source localization features, checks both fmri_informed/ and eeg_only/
     subdirectories to ensure files are found regardless of extraction mode.
     
+    Checks for both .parquet and .tsv extensions for backward compatibility.
+    
     Parameters
     ----------
     features_dir : Path

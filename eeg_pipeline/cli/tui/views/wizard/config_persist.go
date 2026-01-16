@@ -5,6 +5,77 @@ package wizard
 func (m Model) ExportConfig() map[string]interface{} {
 	cfg := make(map[string]interface{})
 
+	// UI State - Selections
+	cfg["modeIndex"] = m.modeIndex
+	cfg["computationSelected"] = mapToIntList(m.computationSelected)
+	cfg["categorySelected"] = mapToIntList(m.selected)
+	cfg["prepStageSelected"] = mapToIntList(m.prepStageSelected)
+	cfg["featureFileSelected"] = stringsMapToBoolMap(m.featureFileSelected)
+	cfg["plotSelected"] = mapToIntList(m.plotSelected)
+	cfg["featurePlotterSelected"] = stringsMapToBoolMap(m.featurePlotterSelected)
+	cfg["plotFormatSelected"] = stringsMapToBoolMap(m.plotFormatSelected)
+	cfg["connectivityMeasures"] = mapToIntList(m.connectivityMeasures)
+	cfg["directedConnMeasures"] = mapToIntList(m.directedConnMeasures)
+
+	// UI State - Group Expansion
+	cfg["featGroupConnectivityExpanded"] = m.featGroupConnectivityExpanded
+	cfg["featGroupPACExpanded"] = m.featGroupPACExpanded
+	cfg["featGroupAperiodicExpanded"] = m.featGroupAperiodicExpanded
+	cfg["featGroupComplexityExpanded"] = m.featGroupComplexityExpanded
+	cfg["featGroupBurstsExpanded"] = m.featGroupBurstsExpanded
+	cfg["featGroupPowerExpanded"] = m.featGroupPowerExpanded
+	cfg["featGroupSpectralExpanded"] = m.featGroupSpectralExpanded
+	cfg["featGroupERPExpanded"] = m.featGroupERPExpanded
+	cfg["featGroupRatiosExpanded"] = m.featGroupRatiosExpanded
+	cfg["featGroupAsymmetryExpanded"] = m.featGroupAsymmetryExpanded
+	cfg["featGroupQualityExpanded"] = m.featGroupQualityExpanded
+	cfg["featGroupERDSExpanded"] = m.featGroupERDSExpanded
+	cfg["featGroupStorageExpanded"] = m.featGroupStorageExpanded
+	cfg["featGroupExecutionExpanded"] = m.featGroupExecutionExpanded
+	cfg["featGroupValidationExpanded"] = m.featGroupValidationExpanded
+	cfg["featGroupDirectedConnExpanded"] = m.featGroupDirectedConnExpanded
+	cfg["featGroupSourceLocExpanded"] = m.featGroupSourceLocExpanded
+	cfg["featGroupSourceLocFmriExpanded"] = m.featGroupSourceLocFmriExpanded
+	cfg["featGroupSourceLocContrastExpanded"] = m.featGroupSourceLocContrastExpanded
+	cfg["featGroupSourceLocGLMExpanded"] = m.featGroupSourceLocGLMExpanded
+	cfg["featGroupTFRExpanded"] = m.featGroupTFRExpanded
+
+	// fMRI UI State
+	cfg["fmriGroupRuntimeExpanded"] = m.fmriGroupRuntimeExpanded
+	cfg["fmriGroupOutputExpanded"] = m.fmriGroupOutputExpanded
+	cfg["fmriGroupPerformanceExpanded"] = m.fmriGroupPerformanceExpanded
+	cfg["fmriGroupAnatomicalExpanded"] = m.fmriGroupAnatomicalExpanded
+	cfg["fmriGroupBoldExpanded"] = m.fmriGroupBoldExpanded
+	cfg["fmriGroupQcExpanded"] = m.fmriGroupQcExpanded
+	cfg["fmriGroupDenoisingExpanded"] = m.fmriGroupDenoisingExpanded
+	cfg["fmriGroupSurfaceExpanded"] = m.fmriGroupSurfaceExpanded
+	cfg["fmriGroupMultiechoExpanded"] = m.fmriGroupMultiechoExpanded
+	cfg["fmriGroupReproExpanded"] = m.fmriGroupReproExpanded
+	cfg["fmriGroupValidationExpanded"] = m.fmriGroupValidationExpanded
+	cfg["fmriGroupAdvancedExpanded"] = m.fmriGroupAdvancedExpanded
+
+	// Plotting UI State
+	cfg["plotGroupDefaultsExpanded"] = m.plotGroupDefaultsExpanded
+	cfg["plotGroupFontsExpanded"] = m.plotGroupFontsExpanded
+	cfg["plotGroupLayoutExpanded"] = m.plotGroupLayoutExpanded
+	cfg["plotGroupFigureSizesExpanded"] = m.plotGroupFigureSizesExpanded
+	cfg["plotGroupColorsExpanded"] = m.plotGroupColorsExpanded
+	cfg["plotGroupAlphaExpanded"] = m.plotGroupAlphaExpanded
+	cfg["plotGroupScatterExpanded"] = m.plotGroupScatterExpanded
+	cfg["plotGroupBarExpanded"] = m.plotGroupBarExpanded
+	cfg["plotGroupLineExpanded"] = m.plotGroupLineExpanded
+	cfg["plotGroupHistogramExpanded"] = m.plotGroupHistogramExpanded
+	cfg["plotGroupTopomapExpanded"] = m.plotGroupTopomapExpanded
+	cfg["plotGroupTFRExpanded"] = m.plotGroupTFRExpanded
+	cfg["plotGroupSizingExpanded"] = m.plotGroupSizingExpanded
+	cfg["plotGroupSelectionExpanded"] = m.plotGroupSelectionExpanded
+	cfg["plotGroupComparisonsExpanded"] = m.plotGroupComparisonsExpanded
+	cfg["plotGroupKDEExpanded"] = m.plotGroupKDEExpanded
+	cfg["plotGroupErrorbarExpanded"] = m.plotGroupErrorbarExpanded
+	cfg["plotGroupTextExpanded"] = m.plotGroupTextExpanded
+	cfg["plotGroupValidationExpanded"] = m.plotGroupValidationExpanded
+	cfg["plotGroupTFRMiscExpanded"] = m.plotGroupTFRMiscExpanded
+
 	// PAC/CFC configuration
 	cfg["pacPhaseMin"] = m.pacPhaseMin
 	cfg["pacPhaseMax"] = m.pacPhaseMax
@@ -17,6 +88,11 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["pacNormalize"] = m.pacNormalize
 	cfg["pacNSurrogates"] = m.pacNSurrogates
 	cfg["pacRandomSeed"] = m.pacRandomSeed
+	cfg["pacAllowHarmonicOvrlap"] = m.pacAllowHarmonicOvrlap
+	cfg["pacMaxHarmonic"] = m.pacMaxHarmonic
+	cfg["pacHarmonicToleranceHz"] = m.pacHarmonicToleranceHz
+	cfg["pacComputeWaveformQC"] = m.pacComputeWaveformQC
+	cfg["pacWaveformOffsetMs"] = m.pacWaveformOffsetMs
 
 	// Aperiodic configuration
 	cfg["aperiodicFmin"] = m.aperiodicFmin
@@ -27,6 +103,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["aperiodicMinSegmentSec"] = m.aperiodicMinSegmentSec
 	cfg["aperiodicModel"] = m.aperiodicModel
 	cfg["aperiodicPsdMethod"] = m.aperiodicPsdMethod
+	cfg["aperiodicSubtractEvoked"] = m.aperiodicSubtractEvoked
+	cfg["aperiodicPsdBandwidth"] = m.aperiodicPsdBandwidth
+	cfg["aperiodicMaxRms"] = m.aperiodicMaxRms
+	cfg["aperiodicExcludeLineNoise"] = m.aperiodicExcludeLineNoise
+	cfg["aperiodicLineNoiseFreq"] = m.aperiodicLineNoiseFreq
+	cfg["aperiodicLineNoiseWidthHz"] = m.aperiodicLineNoiseWidthHz
+	cfg["aperiodicLineNoiseHarmonics"] = m.aperiodicLineNoiseHarmonics
 
 	// Complexity configuration
 	cfg["complexityPEOrder"] = m.complexityPEOrder
@@ -41,6 +124,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["erpAllowNoBaseline"] = m.erpAllowNoBaseline
 	cfg["erpComponentsSpec"] = m.erpComponentsSpec
 	cfg["erpSmoothMs"] = m.erpSmoothMs
+	cfg["erpPeakProminenceUv"] = m.erpPeakProminenceUv
 	cfg["erpLowpassHz"] = m.erpLowpassHz
 
 	// Burst configuration
@@ -59,6 +143,13 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["spectralPsdMethod"] = m.spectralPsdMethod
 	cfg["spectralFmin"] = m.spectralFmin
 	cfg["spectralFmax"] = m.spectralFmax
+	cfg["spectralIncludeLogRatios"] = m.spectralIncludeLogRatios
+	cfg["spectralExcludeLineNoise"] = m.spectralExcludeLineNoise
+	cfg["spectralLineNoiseFreq"] = m.spectralLineNoiseFreq
+	cfg["spectralLineNoiseWidthHz"] = m.spectralLineNoiseWidthHz
+	cfg["spectralLineNoiseHarmonics"] = m.spectralLineNoiseHarmonics
+	cfg["spectralMinSegmentSec"] = m.spectralMinSegmentSec
+	cfg["spectralMinCyclesAtFmin"] = m.spectralMinCyclesAtFmin
 
 	// Connectivity configuration
 	cfg["connOutputLevel"] = m.connOutputLevel
@@ -69,12 +160,20 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["connAECMode"] = m.connAECMode
 	cfg["connGranularity"] = m.connGranularity
 	cfg["connMinEpochsPerGroup"] = m.connMinEpochsPerGroup
+	cfg["connMinCyclesPerBand"] = m.connMinCyclesPerBand
+	cfg["connWarnNoSpatialTransform"] = m.connWarnNoSpatialTransform
+	cfg["connPhaseEstimator"] = m.connPhaseEstimator
+	cfg["connMinSegmentSec"] = m.connMinSegmentSec
+	cfg["connAECOutput"] = m.connAECOutput
+	cfg["connForceWithinEpochML"] = m.connForceWithinEpochML
 
 	// ITPC configuration
 	cfg["itpcMethod"] = m.itpcMethod
 	cfg["itpcConditionColumn"] = m.itpcConditionColumn
 	cfg["itpcConditionValues"] = m.itpcConditionValues
 	cfg["itpcMinTrialsPerCondition"] = m.itpcMinTrialsPerCondition
+	cfg["itpcAllowUnsafeLoo"] = m.itpcAllowUnsafeLoo
+	cfg["itpcBaselineCorrection"] = m.itpcBaselineCorrection
 
 	// Source localization
 	cfg["sourceLocEnabled"] = m.sourceLocEnabled
@@ -84,22 +183,126 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["sourceLocParc"] = m.sourceLocParc
 	cfg["sourceLocReg"] = m.sourceLocReg
 	cfg["sourceLocSnr"] = m.sourceLocSnr
+	cfg["sourceLocLoose"] = m.sourceLocLoose
+	cfg["sourceLocDepth"] = m.sourceLocDepth
+	cfg["sourceLocConnMethod"] = m.sourceLocConnMethod
+	cfg["sourceLocSubject"] = m.sourceLocSubject
+	cfg["sourceLocTrans"] = m.sourceLocTrans
+	cfg["sourceLocBem"] = m.sourceLocBem
+	cfg["sourceLocMindistMm"] = m.sourceLocMindistMm
+	cfg["sourceLocFmriEnabled"] = m.sourceLocFmriEnabled
+	cfg["sourceLocFmriStatsMap"] = m.sourceLocFmriStatsMap
+	cfg["sourceLocFmriProvenance"] = m.sourceLocFmriProvenance
+	cfg["sourceLocFmriRequireProv"] = m.sourceLocFmriRequireProv
+	cfg["sourceLocFmriThreshold"] = m.sourceLocFmriThreshold
+	cfg["sourceLocFmriTail"] = m.sourceLocFmriTail
+	cfg["sourceLocFmriMinClusterVox"] = m.sourceLocFmriMinClusterVox
+	cfg["sourceLocFmriMaxClusters"] = m.sourceLocFmriMaxClusters
+	cfg["sourceLocFmriMaxVoxPerClus"] = m.sourceLocFmriMaxVoxPerClus
+	cfg["sourceLocFmriMaxTotalVox"] = m.sourceLocFmriMaxTotalVox
+	cfg["sourceLocFmriRandomSeed"] = m.sourceLocFmriRandomSeed
+	cfg["sourceLocCreateTrans"] = m.sourceLocCreateTrans
+	cfg["sourceLocAllowIdentityTrans"] = m.sourceLocAllowIdentityTrans
+	cfg["sourceLocCreateBemModel"] = m.sourceLocCreateBemModel
+	cfg["sourceLocCreateBemSolution"] = m.sourceLocCreateBemSolution
+
+	// fMRI contrast builder
+	cfg["sourceLocFmriContrastEnabled"] = m.sourceLocFmriContrastEnabled
+	cfg["sourceLocFmriContrastType"] = m.sourceLocFmriContrastType
+	cfg["sourceLocFmriCondAColumn"] = m.sourceLocFmriCondAColumn
+	cfg["sourceLocFmriCondAValue"] = m.sourceLocFmriCondAValue
+	cfg["sourceLocFmriCondBColumn"] = m.sourceLocFmriCondBColumn
+	cfg["sourceLocFmriCondBValue"] = m.sourceLocFmriCondBValue
+	cfg["sourceLocFmriContrastFormula"] = m.sourceLocFmriContrastFormula
+	cfg["sourceLocFmriContrastName"] = m.sourceLocFmriContrastName
+	cfg["sourceLocFmriRunsToInclude"] = m.sourceLocFmriRunsToInclude
+	cfg["sourceLocFmriAutoDetectRuns"] = m.sourceLocFmriAutoDetectRuns
+	cfg["sourceLocFmriHrfModel"] = m.sourceLocFmriHrfModel
+	cfg["sourceLocFmriDriftModel"] = m.sourceLocFmriDriftModel
+	cfg["sourceLocFmriHighPassHz"] = m.sourceLocFmriHighPassHz
+	cfg["sourceLocFmriLowPassHz"] = m.sourceLocFmriLowPassHz
+	cfg["sourceLocFmriClusterCorrection"] = m.sourceLocFmriClusterCorrection
+	cfg["sourceLocFmriClusterPThreshold"] = m.sourceLocFmriClusterPThreshold
+	cfg["sourceLocFmriOutputType"] = m.sourceLocFmriOutputType
+	cfg["sourceLocFmriResampleToFS"] = m.sourceLocFmriResampleToFS
+	cfg["sourceLocFmriWindowAName"] = m.sourceLocFmriWindowAName
+	cfg["sourceLocFmriWindowATmin"] = m.sourceLocFmriWindowATmin
+	cfg["sourceLocFmriWindowATmax"] = m.sourceLocFmriWindowATmax
+	cfg["sourceLocFmriWindowBName"] = m.sourceLocFmriWindowBName
+	cfg["sourceLocFmriWindowBTmin"] = m.sourceLocFmriWindowBTmin
+	cfg["sourceLocFmriWindowBTmax"] = m.sourceLocFmriWindowBTmax
 
 	// Aggregation/storage
 	cfg["aggregationMethod"] = m.aggregationMethod
 	cfg["minEpochsForFeatures"] = m.minEpochsForFeatures
 	cfg["saveSubjectLevelFeatures"] = m.saveSubjectLevelFeatures
+	cfg["failOnMissingWindows"] = m.failOnMissingWindows
+	cfg["failOnMissingNamedWindow"] = m.failOnMissingNamedWindow
 
 	// Spatial transform
 	cfg["spatialTransform"] = m.spatialTransform
 	cfg["spatialTransformLambda2"] = m.spatialTransformLambda2
+	cfg["spatialTransformStiffness"] = m.spatialTransformStiffness
 
 	// TFR parameters
 	cfg["tfrFreqMin"] = m.tfrFreqMin
 	cfg["tfrFreqMax"] = m.tfrFreqMax
 	cfg["tfrNFreqs"] = m.tfrNFreqs
 	cfg["tfrMinCycles"] = m.tfrMinCycles
+	cfg["tfrMaxCycles"] = m.tfrMaxCycles
+	cfg["tfrNCyclesFactor"] = m.tfrNCyclesFactor
 	cfg["tfrDecim"] = m.tfrDecim
+	cfg["tfrDecimPower"] = m.tfrDecimPower
+	cfg["tfrDecimPhase"] = m.tfrDecimPhase
+	cfg["tfrWorkers"] = m.tfrWorkers
+
+	// Quality features
+	cfg["qualityPsdMethod"] = m.qualityPsdMethod
+	cfg["qualityFmin"] = m.qualityFmin
+	cfg["qualityFmax"] = m.qualityFmax
+	cfg["qualityNfft"] = m.qualityNfft
+	cfg["qualityExcludeLineNoise"] = m.qualityExcludeLineNoise
+	cfg["qualityLineNoiseFreq"] = m.qualityLineNoiseFreq
+	cfg["qualityLineNoiseWidthHz"] = m.qualityLineNoiseWidthHz
+	cfg["qualityLineNoiseHarmonics"] = m.qualityLineNoiseHarmonics
+	cfg["qualitySnrSignalBandMin"] = m.qualitySnrSignalBandMin
+	cfg["qualitySnrSignalBandMax"] = m.qualitySnrSignalBandMax
+	cfg["qualitySnrNoiseBandMin"] = m.qualitySnrNoiseBandMin
+	cfg["qualitySnrNoiseBandMax"] = m.qualitySnrNoiseBandMax
+	cfg["qualityMuscleBandMin"] = m.qualityMuscleBandMin
+	cfg["qualityMuscleBandMax"] = m.qualityMuscleBandMax
+
+	// ERDS configuration
+	cfg["erdsUseLogRatio"] = m.erdsUseLogRatio
+	cfg["erdsMinBaselinePower"] = m.erdsMinBaselinePower
+	cfg["erdsMinActivePower"] = m.erdsMinActivePower
+	cfg["erdsMinSegmentSec"] = m.erdsMinSegmentSec
+	cfg["erdsBandsSpec"] = m.erdsBandsSpec
+
+	// Asymmetry & Ratios
+	cfg["asymmetryChannelPairsSpec"] = m.asymmetryChannelPairsSpec
+	cfg["asymmetryMinSegmentSec"] = m.asymmetryMinSegmentSec
+	cfg["asymmetryMinCyclesAtFmin"] = m.asymmetryMinCyclesAtFmin
+	cfg["asymmetrySkipInvalidSegments"] = m.asymmetrySkipInvalidSegments
+	cfg["ratiosMinSegmentSec"] = m.ratiosMinSegmentSec
+	cfg["ratiosMinCyclesAtFmin"] = m.ratiosMinCyclesAtFmin
+	cfg["ratiosSkipInvalidSegments"] = m.ratiosSkipInvalidSegments
+	cfg["ratioSource"] = m.ratioSource
+
+	// IAF
+	cfg["iafEnabled"] = m.iafEnabled
+	cfg["iafAlphaWidthHz"] = m.iafAlphaWidthHz
+	cfg["iafSearchRangeMin"] = m.iafSearchRangeMin
+	cfg["iafSearchRangeMax"] = m.iafSearchRangeMax
+	cfg["iafMinProminence"] = m.iafMinProminence
+	cfg["iafRoisSpec"] = m.iafRoisSpec
+
+	// Directed connectivity
+	cfg["directedConnEnabled"] = m.directedConnEnabled
+	cfg["directedConnOutputLevel"] = m.directedConnOutputLevel
+	cfg["directedConnMvarOrder"] = m.directedConnMvarOrder
+	cfg["directedConnNFreqs"] = m.directedConnNFreqs
+	cfg["directedConnMinSegSamples"] = m.directedConnMinSegSamples
 
 	// Behavior pipeline
 	cfg["correlationMethod"] = m.correlationMethod
@@ -110,28 +313,153 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["fdrAlpha"] = m.fdrAlpha
 	cfg["behaviorNJobs"] = m.behaviorNJobs
 	cfg["alsoSaveCsv"] = m.alsoSaveCsv
+	cfg["runAdjustmentColumn"] = m.runAdjustmentColumn
+	cfg["runAdjustmentEnabled"] = m.runAdjustmentEnabled
+	cfg["runAdjustmentIncludeInCorrelations"] = m.runAdjustmentIncludeInCorrelations
+	cfg["runAdjustmentMaxDummies"] = m.runAdjustmentMaxDummies
+	cfg["conditionCompareColumn"] = m.conditionCompareColumn
+	cfg["conditionCompareValues"] = m.conditionCompareValues
+	cfg["conditionCompareWindows"] = m.conditionCompareWindows
+	cfg["conditionFailFast"] = m.conditionFailFast
+	cfg["conditionEffectThreshold"] = m.conditionEffectThreshold
+	cfg["temporalConditionColumn"] = m.temporalConditionColumn
+	cfg["temporalConditionValues"] = m.temporalConditionValues
+	cfg["temporalSplitByCondition"] = m.temporalSplitByCondition
+	cfg["temporalIncludeROIAverages"] = m.temporalIncludeROIAverages
+	cfg["temporalIncludeTFGrid"] = m.temporalIncludeTFGrid
+	cfg["temporalFeaturePowerEnabled"] = m.temporalFeaturePowerEnabled
+	cfg["temporalFeatureITPCEnabled"] = m.temporalFeatureITPCEnabled
+	cfg["temporalFeatureERDSEnabled"] = m.temporalFeatureERDSEnabled
+	cfg["temporalITPCBaselineCorrection"] = m.temporalITPCBaselineCorrection
+	cfg["temporalITPCBaselineMin"] = m.temporalITPCBaselineMin
+	cfg["temporalITPCBaselineMax"] = m.temporalITPCBaselineMax
+	cfg["temporalERDSBaselineMin"] = m.temporalERDSBaselineMin
+	cfg["temporalERDSBaselineMax"] = m.temporalERDSBaselineMax
+	cfg["temporalERDSMethod"] = m.temporalERDSMethod
+	cfg["controlTemperature"] = m.controlTemperature
+	cfg["controlTrialOrder"] = m.controlTrialOrder
+	cfg["behaviorComputeChangeScores"] = m.behaviorComputeChangeScores
+	cfg["behaviorComputeBayesFactors"] = m.behaviorComputeBayesFactors
+	cfg["behaviorComputeLosoStability"] = m.behaviorComputeLosoStability
 
 	// Trial table
 	cfg["trialTableFormat"] = m.trialTableFormat
 	cfg["trialTableIncludeFeatures"] = m.trialTableIncludeFeatures
 	cfg["trialTableIncludeCovars"] = m.trialTableIncludeCovars
 	cfg["trialTableIncludeEvents"] = m.trialTableIncludeEvents
+	cfg["trialTableAddLagFeatures"] = m.trialTableAddLagFeatures
+	cfg["trialTableExtraEventCols"] = m.trialTableExtraEventCols
+	cfg["trialTableHighMissingFrac"] = m.trialTableHighMissingFrac
 
 	// Pain residual
 	cfg["painResidualEnabled"] = m.painResidualEnabled
 	cfg["painResidualMethod"] = m.painResidualMethod
 	cfg["painResidualPolyDegree"] = m.painResidualPolyDegree
+	cfg["painResidualSplineDfCandidates"] = m.painResidualSplineDfCandidates
+	cfg["painResidualModelCompareEnabled"] = m.painResidualModelCompareEnabled
+	cfg["painResidualModelComparePolyDegrees"] = m.painResidualModelComparePolyDegrees
+	cfg["painResidualBreakpointEnabled"] = m.painResidualBreakpointEnabled
+	cfg["painResidualBreakpointCandidates"] = m.painResidualBreakpointCandidates
+	cfg["painResidualBreakpointQlow"] = m.painResidualBreakpointQlow
+	cfg["painResidualBreakpointQhigh"] = m.painResidualBreakpointQhigh
+	cfg["painResidualCrossfitEnabled"] = m.painResidualCrossfitEnabled
+	cfg["painResidualCrossfitGroupColumn"] = m.painResidualCrossfitGroupColumn
+	cfg["painResidualCrossfitNSplits"] = m.painResidualCrossfitNSplits
+	cfg["painResidualCrossfitMethod"] = m.painResidualCrossfitMethod
+	cfg["painResidualCrossfitSplineKnots"] = m.painResidualCrossfitSplineKnots
 
 	// Regression
 	cfg["regressionOutcome"] = m.regressionOutcome
 	cfg["regressionIncludeTemperature"] = m.regressionIncludeTemperature
 	cfg["regressionTempControl"] = m.regressionTempControl
+	cfg["regressionTempSplineKnots"] = m.regressionTempSplineKnots
+	cfg["regressionTempSplineQlow"] = m.regressionTempSplineQlow
+	cfg["regressionTempSplineQhigh"] = m.regressionTempSplineQhigh
+	cfg["regressionIncludeTrialOrder"] = m.regressionIncludeTrialOrder
+	cfg["regressionIncludePrev"] = m.regressionIncludePrev
+	cfg["regressionIncludeRunBlock"] = m.regressionIncludeRunBlock
+	cfg["regressionIncludeInteraction"] = m.regressionIncludeInteraction
+	cfg["regressionStandardize"] = m.regressionStandardize
 	cfg["regressionPermutations"] = m.regressionPermutations
+	cfg["regressionMaxFeatures"] = m.regressionMaxFeatures
+
+	// Models
+	cfg["modelsIncludeTemperature"] = m.modelsIncludeTemperature
+	cfg["modelsTempControl"] = m.modelsTempControl
+	cfg["modelsTempSplineKnots"] = m.modelsTempSplineKnots
+	cfg["modelsTempSplineQlow"] = m.modelsTempSplineQlow
+	cfg["modelsTempSplineQhigh"] = m.modelsTempSplineQhigh
+	cfg["modelsIncludeTrialOrder"] = m.modelsIncludeTrialOrder
+	cfg["modelsIncludePrev"] = m.modelsIncludePrev
+	cfg["modelsIncludeRunBlock"] = m.modelsIncludeRunBlock
+	cfg["modelsIncludeInteraction"] = m.modelsIncludeInteraction
+	cfg["modelsStandardize"] = m.modelsStandardize
+	cfg["modelsMaxFeatures"] = m.modelsMaxFeatures
+	cfg["modelsOutcomeRating"] = m.modelsOutcomeRating
+	cfg["modelsOutcomePainResidual"] = m.modelsOutcomePainResidual
+	cfg["modelsOutcomeTemperature"] = m.modelsOutcomeTemperature
+	cfg["modelsOutcomePainBinary"] = m.modelsOutcomePainBinary
+	cfg["modelsFamilyOLS"] = m.modelsFamilyOLS
+	cfg["modelsFamilyRobust"] = m.modelsFamilyRobust
+	cfg["modelsFamilyQuantile"] = m.modelsFamilyQuantile
+	cfg["modelsFamilyLogit"] = m.modelsFamilyLogit
+	cfg["modelsBinaryOutcome"] = m.modelsBinaryOutcome
+
+	// Stability
+	cfg["stabilityMethod"] = m.stabilityMethod
+	cfg["stabilityOutcome"] = m.stabilityOutcome
+	cfg["stabilityGroupColumn"] = m.stabilityGroupColumn
+	cfg["stabilityPartialTemp"] = m.stabilityPartialTemp
+	cfg["stabilityMaxFeatures"] = m.stabilityMaxFeatures
+	cfg["stabilityAlpha"] = m.stabilityAlpha
+
+	// Consistency & influence
+	cfg["consistencyEnabled"] = m.consistencyEnabled
+	cfg["influenceOutcomeRating"] = m.influenceOutcomeRating
+	cfg["influenceOutcomePainResidual"] = m.influenceOutcomePainResidual
+	cfg["influenceOutcomeTemperature"] = m.influenceOutcomeTemperature
+	cfg["influenceMaxFeatures"] = m.influenceMaxFeatures
+	cfg["influenceIncludeTemperature"] = m.influenceIncludeTemperature
+	cfg["influenceTempControl"] = m.influenceTempControl
+	cfg["influenceTempSplineKnots"] = m.influenceTempSplineKnots
+	cfg["influenceTempSplineQlow"] = m.influenceTempSplineQlow
+	cfg["influenceTempSplineQhigh"] = m.influenceTempSplineQhigh
+	cfg["influenceTempSplineMinN"] = m.influenceTempSplineMinN
+	cfg["influenceIncludeTrialOrder"] = m.influenceIncludeTrialOrder
+	cfg["influenceIncludeRunBlock"] = m.influenceIncludeRunBlock
+	cfg["influenceIncludeInteraction"] = m.influenceIncludeInteraction
+	cfg["influenceStandardize"] = m.influenceStandardize
+	cfg["influenceCooksThreshold"] = m.influenceCooksThreshold
+	cfg["influenceLeverageThreshold"] = m.influenceLeverageThreshold
 
 	// Correlations
 	cfg["correlationsTargetRating"] = m.correlationsTargetRating
 	cfg["correlationsTargetTemperature"] = m.correlationsTargetTemperature
 	cfg["correlationsTargetPainResidual"] = m.correlationsTargetPainResidual
+	cfg["correlationsTargetColumn"] = m.correlationsTargetColumn
+	cfg["correlationsPreferPainResidual"] = m.correlationsPreferPainResidual
+	cfg["correlationsUseCrossfitResidual"] = m.correlationsUseCrossfitResidual
+	cfg["correlationsPrimaryUnit"] = m.correlationsPrimaryUnit
+	cfg["correlationsPermutationPrimary"] = m.correlationsPermutationPrimary
+
+	// Mixed Effects & Mediation
+	cfg["mixedEffectsType"] = m.mixedEffectsType
+	cfg["mixedMaxFeatures"] = m.mixedMaxFeatures
+	cfg["mediationMinEffect"] = m.mediationMinEffect
+	cfg["mediationBootstrap"] = m.mediationBootstrap
+	cfg["mediationMaxMediatorsEnabled"] = m.mediationMaxMediatorsEnabled
+	cfg["mediationMaxMediators"] = m.mediationMaxMediators
+	cfg["mediationPermutations"] = m.mediationPermutations
+	cfg["moderationMaxFeaturesEnabled"] = m.moderationMaxFeaturesEnabled
+	cfg["moderationMaxFeatures"] = m.moderationMaxFeatures
+	cfg["moderationPermutations"] = m.moderationPermutations
+
+	// Cluster tests
+	cfg["clusterThreshold"] = m.clusterThreshold
+	cfg["clusterMinSize"] = m.clusterMinSize
+	cfg["clusterTail"] = m.clusterTail
+	cfg["clusterConditionColumn"] = m.clusterConditionColumn
+	cfg["clusterConditionValues"] = m.clusterConditionValues
 
 	// Temporal
 	cfg["temporalResolutionMs"] = m.temporalResolutionMs
@@ -139,7 +467,7 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["temporalTimeMinMs"] = m.temporalTimeMinMs
 	cfg["temporalTimeMaxMs"] = m.temporalTimeMaxMs
 
-	// Preprocessing
+	// Preprocessing (EEG)
 	cfg["prepUsePyprep"] = m.prepUsePyprep
 	cfg["prepUseIcalabel"] = m.prepUseIcalabel
 	cfg["prepNJobs"] = m.prepNJobs
@@ -149,22 +477,264 @@ func (m Model) ExportConfig() map[string]interface{} {
 	cfg["prepHFreq"] = m.prepHFreq
 	cfg["prepNotch"] = m.prepNotch
 	cfg["prepLineFreq"] = m.prepLineFreq
-	cfg["prepEpochsTmin"] = m.prepEpochsTmin
-	cfg["prepEpochsTmax"] = m.prepEpochsTmax
-	cfg["prepEpochsReject"] = m.prepEpochsReject
+	cfg["prepChTypes"] = m.prepChTypes
+	cfg["prepEegReference"] = m.prepEegReference
+	cfg["prepEogChannels"] = m.prepEogChannels
+	cfg["prepRandomState"] = m.prepRandomState
+	cfg["prepTaskIsRest"] = m.prepTaskIsRest
+	cfg["prepZaplineFline"] = m.prepZaplineFline
+	cfg["prepFindBreaks"] = m.prepFindBreaks
+	cfg["prepRansac"] = m.prepRansac
+	cfg["prepRepeats"] = m.prepRepeats
+	cfg["prepAverageReref"] = m.prepAverageReref
+	cfg["prepFileExtension"] = m.prepFileExtension
+	cfg["prepConsiderPreviousBads"] = m.prepConsiderPreviousBads
+	cfg["prepOverwriteChansTsv"] = m.prepOverwriteChansTsv
+	cfg["prepDeleteBreaks"] = m.prepDeleteBreaks
+	cfg["prepBreaksMinLength"] = m.prepBreaksMinLength
+	cfg["prepTStartAfterPrevious"] = m.prepTStartAfterPrevious
+	cfg["prepTStopBeforeNext"] = m.prepTStopBeforeNext
+	cfg["prepSpatialFilter"] = m.prepSpatialFilter
 	cfg["prepICAAlgorithm"] = m.prepICAAlgorithm
 	cfg["prepICAComp"] = m.prepICAComp
+	cfg["prepICALFreq"] = m.prepICALFreq
+	cfg["prepICARejThresh"] = m.prepICARejThresh
 	cfg["prepProbThresh"] = m.prepProbThresh
+	cfg["prepKeepMnebidsBads"] = m.prepKeepMnebidsBads
+	cfg["prepConditions"] = m.prepConditions
+	cfg["prepEpochsTmin"] = m.prepEpochsTmin
+	cfg["prepEpochsTmax"] = m.prepEpochsTmax
+	cfg["prepEpochsBaselineStart"] = m.prepEpochsBaselineStart
+	cfg["prepEpochsBaselineEnd"] = m.prepEpochsBaselineEnd
+	cfg["prepEpochsNoBaseline"] = m.prepEpochsNoBaseline
+	cfg["prepEpochsReject"] = m.prepEpochsReject
+	cfg["prepRejectMethod"] = m.prepRejectMethod
+	cfg["prepRunSourceEstimation"] = m.prepRunSourceEstimation
 	cfg["icaLabelsToKeep"] = m.icaLabelsToKeep
+
+	// Preprocessing UI State (EEG)
+	cfg["prepGroupStagesExpanded"] = m.prepGroupStagesExpanded
+	cfg["prepGroupGeneralExpanded"] = m.prepGroupGeneralExpanded
+	cfg["prepGroupFilteringExpanded"] = m.prepGroupFilteringExpanded
+	cfg["prepGroupPyprepExpanded"] = m.prepGroupPyprepExpanded
+	cfg["prepGroupICAExpanded"] = m.prepGroupICAExpanded
+	cfg["prepGroupEpochingExpanded"] = m.prepGroupEpochingExpanded
+
+	// fMRI Preprocessing
+	cfg["fmriEngineIndex"] = m.fmriEngineIndex
+	cfg["fmriFmriprepImage"] = m.fmriFmriprepImage
+	cfg["fmriFmriprepOutputDir"] = m.fmriFmriprepOutputDir
+	cfg["fmriFmriprepWorkDir"] = m.fmriFmriprepWorkDir
+	cfg["fmriFreesurferLicenseFile"] = m.fmriFreesurferLicenseFile
+	cfg["fmriFreesurferSubjectsDir"] = m.fmriFreesurferSubjectsDir
+	cfg["fmriOutputSpacesSpec"] = m.fmriOutputSpacesSpec
+	cfg["fmriIgnoreSpec"] = m.fmriIgnoreSpec
+	cfg["fmriBidsFilterFile"] = m.fmriBidsFilterFile
+	cfg["fmriExtraArgs"] = m.fmriExtraArgs
+	cfg["fmriUseAroma"] = m.fmriUseAroma
+	cfg["fmriSkipBidsValidation"] = m.fmriSkipBidsValidation
+	cfg["fmriStopOnFirstCrash"] = m.fmriStopOnFirstCrash
+	cfg["fmriCleanWorkdir"] = m.fmriCleanWorkdir
+	cfg["fmriSkipReconstruction"] = m.fmriSkipReconstruction
+	cfg["fmriMemMb"] = m.fmriMemMb
+	cfg["fmriNThreads"] = m.fmriNThreads
+	cfg["fmriOmpNThreads"] = m.fmriOmpNThreads
+	cfg["fmriLowMem"] = m.fmriLowMem
+	cfg["fmriLongitudinal"] = m.fmriLongitudinal
+	cfg["fmriCiftiOutputIndex"] = m.fmriCiftiOutputIndex
+	cfg["fmriSkullStripTemplate"] = m.fmriSkullStripTemplate
+	cfg["fmriSkullStripFixedSeed"] = m.fmriSkullStripFixedSeed
+	cfg["fmriRandomSeed"] = m.fmriRandomSeed
+	cfg["fmriDummyScans"] = m.fmriDummyScans
+	cfg["fmriBold2T1wInitIndex"] = m.fmriBold2T1wInitIndex
+	cfg["fmriBold2T1wDof"] = m.fmriBold2T1wDof
+	cfg["fmriSliceTimeRef"] = m.fmriSliceTimeRef
+	cfg["fmriFdSpikeThreshold"] = m.fmriFdSpikeThreshold
+	cfg["fmriDvarsSpikeThreshold"] = m.fmriDvarsSpikeThreshold
+	cfg["fmriMeOutputEchos"] = m.fmriMeOutputEchos
+	cfg["fmriMedialSurfaceNan"] = m.fmriMedialSurfaceNan
+	cfg["fmriNoMsm"] = m.fmriNoMsm
+	cfg["fmriLevelIndex"] = m.fmriLevelIndex
+	cfg["fmriTaskId"] = m.fmriTaskId
 
 	// ML pipeline
 	cfg["mlNPerm"] = m.mlNPerm
 	cfg["innerSplits"] = m.innerSplits
 	cfg["outerJobs"] = m.outerJobs
 	cfg["skipTimeGen"] = m.skipTimeGen
+	cfg["mlScope"] = int(m.mlScope)
+	cfg["elasticNetAlphaGrid"] = m.elasticNetAlphaGrid
+	cfg["elasticNetL1RatioGrid"] = m.elasticNetL1RatioGrid
+	cfg["rfNEstimators"] = m.rfNEstimators
+	cfg["rfMaxDepthGrid"] = m.rfMaxDepthGrid
+
+	// Plotting Detailed Config
+	cfg["plotDpiIndex"] = m.plotDpiIndex
+	cfg["plotSavefigDpiIndex"] = m.plotSavefigDpiIndex
+	cfg["plotSharedColorbar"] = m.plotSharedColorbar
+	cfg["plotBboxInches"] = m.plotBboxInches
+	cfg["plotPadInches"] = m.plotPadInches
+	cfg["plotFontFamily"] = m.plotFontFamily
+	cfg["plotFontWeight"] = m.plotFontWeight
+	cfg["plotFontSizeSmall"] = m.plotFontSizeSmall
+	cfg["plotFontSizeMedium"] = m.plotFontSizeMedium
+	cfg["plotFontSizeLarge"] = m.plotFontSizeLarge
+	cfg["plotFontSizeTitle"] = m.plotFontSizeTitle
+	cfg["plotFontSizeAnnotation"] = m.plotFontSizeAnnotation
+	cfg["plotFontSizeLabel"] = m.plotFontSizeLabel
+	cfg["plotFontSizeYLabel"] = m.plotFontSizeYLabel
+	cfg["plotFontSizeSuptitle"] = m.plotFontSizeSuptitle
+	cfg["plotFontSizeFigureTitle"] = m.plotFontSizeFigureTitle
+	cfg["plotLayoutTightRectSpec"] = m.plotLayoutTightRectSpec
+	cfg["plotLayoutTightRectMicrostateSpec"] = m.plotLayoutTightRectMicrostateSpec
+	cfg["plotGridSpecWidthRatiosSpec"] = m.plotGridSpecWidthRatiosSpec
+	cfg["plotGridSpecHeightRatiosSpec"] = m.plotGridSpecHeightRatiosSpec
+	cfg["plotGridSpecHspace"] = m.plotGridSpecHspace
+	cfg["plotGridSpecWspace"] = m.plotGridSpecWspace
+	cfg["plotGridSpecLeft"] = m.plotGridSpecLeft
+	cfg["plotGridSpecRight"] = m.plotGridSpecRight
+	cfg["plotGridSpecTop"] = m.plotGridSpecTop
+	cfg["plotGridSpecBottom"] = m.plotGridSpecBottom
+	cfg["plotFigureSizeStandardSpec"] = m.plotFigureSizeStandardSpec
+	cfg["plotFigureSizeMediumSpec"] = m.plotFigureSizeMediumSpec
+	cfg["plotFigureSizeSmallSpec"] = m.plotFigureSizeSmallSpec
+	cfg["plotFigureSizeSquareSpec"] = m.plotFigureSizeSquareSpec
+	cfg["plotFigureSizeWideSpec"] = m.plotFigureSizeWideSpec
+	cfg["plotFigureSizeTFRSpec"] = m.plotFigureSizeTFRSpec
+	cfg["plotFigureSizeTopomapSpec"] = m.plotFigureSizeTopomapSpec
+	cfg["plotColorPain"] = m.plotColorPain
+	cfg["plotColorNonpain"] = m.plotColorNonpain
+	cfg["plotColorSignificant"] = m.plotColorSignificant
+	cfg["plotColorNonsignificant"] = m.plotColorNonsignificant
+	cfg["plotColorGray"] = m.plotColorGray
+	cfg["plotColorLightGray"] = m.plotColorLightGray
+	cfg["plotColorBlack"] = m.plotColorBlack
+	cfg["plotColorBlue"] = m.plotColorBlue
+	cfg["plotColorRed"] = m.plotColorRed
+	cfg["plotColorNetworkNode"] = m.plotColorNetworkNode
+	cfg["plotAlphaGrid"] = m.plotAlphaGrid
+	cfg["plotAlphaFill"] = m.plotAlphaFill
+	cfg["plotAlphaCI"] = m.plotAlphaCI
+	cfg["plotAlphaCILine"] = m.plotAlphaCILine
+	cfg["plotAlphaTextBox"] = m.plotAlphaTextBox
+	cfg["plotAlphaViolinBody"] = m.plotAlphaViolinBody
+	cfg["plotAlphaRidgeFill"] = m.plotAlphaRidgeFill
+	cfg["plotScatterMarkerSizeSmall"] = m.plotScatterMarkerSizeSmall
+	cfg["plotScatterMarkerSizeLarge"] = m.plotScatterMarkerSizeLarge
+	cfg["plotScatterMarkerSizeDefault"] = m.plotScatterMarkerSizeDefault
+	cfg["plotScatterAlpha"] = m.plotScatterAlpha
+	cfg["plotScatterEdgeColor"] = m.plotScatterEdgeColor
+	cfg["plotScatterEdgeWidth"] = m.plotScatterEdgeWidth
+	cfg["plotBarAlpha"] = m.plotBarAlpha
+	cfg["plotBarWidth"] = m.plotBarWidth
+	cfg["plotBarCapsize"] = m.plotBarCapsize
+	cfg["plotBarCapsizeLarge"] = m.plotBarCapsizeLarge
+	cfg["plotLineWidthThin"] = m.plotLineWidthThin
+	cfg["plotLineWidthStandard"] = m.plotLineWidthStandard
+	cfg["plotLineWidthThick"] = m.plotLineWidthThick
+	cfg["plotLineWidthBold"] = m.plotLineWidthBold
+	cfg["plotLineAlphaStandard"] = m.plotLineAlphaStandard
+	cfg["plotLineAlphaDim"] = m.plotLineAlphaDim
+	cfg["plotLineAlphaZeroLine"] = m.plotLineAlphaZeroLine
+	cfg["plotLineAlphaFitLine"] = m.plotLineAlphaFitLine
+	cfg["plotLineAlphaDiagonal"] = m.plotLineAlphaDiagonal
+	cfg["plotLineAlphaReference"] = m.plotLineAlphaReference
+	cfg["plotLineRegressionWidth"] = m.plotLineRegressionWidth
+	cfg["plotLineResidualWidth"] = m.plotLineResidualWidth
+	cfg["plotLineQQWidth"] = m.plotLineQQWidth
+	cfg["plotHistBins"] = m.plotHistBins
+	cfg["plotHistBinsBehavioral"] = m.plotHistBinsBehavioral
+	cfg["plotHistBinsResidual"] = m.plotHistBinsResidual
+	cfg["plotHistBinsTFR"] = m.plotHistBinsTFR
+	cfg["plotHistEdgeColor"] = m.plotHistEdgeColor
+	cfg["plotHistEdgeWidth"] = m.plotHistEdgeWidth
+	cfg["plotHistAlpha"] = m.plotHistAlpha
+	cfg["plotHistAlphaResidual"] = m.plotHistAlphaResidual
+	cfg["plotHistAlphaTFR"] = m.plotHistAlphaTFR
+	cfg["plotKdePoints"] = m.plotKdePoints
+	cfg["plotKdeColor"] = m.plotKdeColor
+	cfg["plotKdeLinewidth"] = m.plotKdeLinewidth
+	cfg["plotKdeAlpha"] = m.plotKdeAlpha
+	cfg["plotErrorbarMarkerSize"] = m.plotErrorbarMarkerSize
+	cfg["plotErrorbarCapsize"] = m.plotErrorbarCapsize
+	cfg["plotErrorbarCapsizeLarge"] = m.plotErrorbarCapsizeLarge
+	cfg["plotTextStatsX"] = m.plotTextStatsX
+	cfg["plotTextStatsY"] = m.plotTextStatsY
+	cfg["plotTextPvalueX"] = m.plotTextPvalueX
+	cfg["plotTextPvalueY"] = m.plotTextPvalueY
+	cfg["plotTextBootstrapX"] = m.plotTextBootstrapX
+	cfg["plotTextBootstrapY"] = m.plotTextBootstrapY
+	cfg["plotTextChannelAnnotationX"] = m.plotTextChannelAnnotationX
+	cfg["plotTextChannelAnnotationY"] = m.plotTextChannelAnnotationY
+	cfg["plotTextTitleY"] = m.plotTextTitleY
+	cfg["plotTextResidualQcTitleY"] = m.plotTextResidualQcTitleY
+	cfg["plotValidationMinBinsForCalibration"] = m.plotValidationMinBinsForCalibration
+	cfg["plotValidationMaxBinsForCalibration"] = m.plotValidationMaxBinsForCalibration
+	cfg["plotValidationSamplesPerBin"] = m.plotValidationSamplesPerBin
+	cfg["plotValidationMinRoisForFDR"] = m.plotValidationMinRoisForFDR
+	cfg["plotValidationMinPvaluesForFDR"] = m.plotValidationMinPvaluesForFDR
+	cfg["plotTfrDefaultBaselineWindowSpec"] = m.plotTfrDefaultBaselineWindowSpec
+	cfg["plotTopomapContours"] = m.plotTopomapContours
+	cfg["plotTopomapColormap"] = m.plotTopomapColormap
+	cfg["plotTopomapColorbarFraction"] = m.plotTopomapColorbarFraction
+	cfg["plotTopomapColorbarPad"] = m.plotTopomapColorbarPad
+	cfg["plotTopomapDiffAnnotation"] = m.plotTopomapDiffAnnotation
+	cfg["plotTopomapAnnotateDesc"] = m.plotTopomapAnnotateDesc
+	cfg["plotTopomapSigMaskMarker"] = m.plotTopomapSigMaskMarker
+	cfg["plotTopomapSigMaskMarkerFaceColor"] = m.plotTopomapSigMaskMarkerFaceColor
+	cfg["plotTopomapSigMaskMarkerEdgeColor"] = m.plotTopomapSigMaskMarkerEdgeColor
+	cfg["plotTopomapSigMaskLinewidth"] = m.plotTopomapSigMaskLinewidth
+	cfg["plotTopomapSigMaskMarkerSize"] = m.plotTopomapSigMaskMarkerSize
+	cfg["plotTFRLogBase"] = m.plotTFRLogBase
+	cfg["plotTFRPercentageMultiplier"] = m.plotTFRPercentageMultiplier
+	cfg["plotRoiWidthPerBand"] = m.plotRoiWidthPerBand
+	cfg["plotRoiWidthPerMetric"] = m.plotRoiWidthPerMetric
+	cfg["plotRoiHeightPerRoi"] = m.plotRoiHeightPerRoi
+	cfg["plotPowerWidthPerBand"] = m.plotPowerWidthPerBand
+	cfg["plotPowerHeightPerSegment"] = m.plotPowerHeightPerSegment
+	cfg["plotItpcWidthPerBin"] = m.plotItpcWidthPerBin
+	cfg["plotItpcHeightPerBand"] = m.plotItpcHeightPerBand
+	cfg["plotItpcWidthPerBandBox"] = m.plotItpcWidthPerBandBox
+	cfg["plotItpcHeightBox"] = m.plotItpcHeightBox
+	cfg["plotPacCmap"] = m.plotPacCmap
+	cfg["plotPacWidthPerRoi"] = m.plotPacWidthPerRoi
+	cfg["plotPacHeightBox"] = m.plotPacHeightBox
+	cfg["plotAperiodicWidthPerColumn"] = m.plotAperiodicWidthPerColumn
+	cfg["plotAperiodicHeightPerRow"] = m.plotAperiodicHeightPerRow
+	cfg["plotAperiodicNPerm"] = m.plotAperiodicNPerm
+	cfg["plotQualityWidthPerPlot"] = m.plotQualityWidthPerPlot
+	cfg["plotQualityHeightPerPlot"] = m.plotQualityHeightPerPlot
+	cfg["plotQualityDistributionNCols"] = m.plotQualityDistributionNCols
+	cfg["plotQualityDistributionMaxFeatures"] = m.plotQualityDistributionMaxFeatures
+	cfg["plotQualityOutlierZThreshold"] = m.plotQualityOutlierZThreshold
+	cfg["plotQualityOutlierMaxFeatures"] = m.plotQualityOutlierMaxFeatures
+	cfg["plotQualityOutlierMaxTrials"] = m.plotQualityOutlierMaxTrials
+	cfg["plotQualitySnrThresholdDb"] = m.plotQualitySnrThresholdDb
+	cfg["plotComplexityWidthPerMeasure"] = m.plotComplexityWidthPerMeasure
+	cfg["plotComplexityHeightPerSegment"] = m.plotComplexityHeightPerSegment
+	cfg["plotConnectivityWidthPerCircle"] = m.plotConnectivityWidthPerCircle
+	cfg["plotConnectivityWidthPerBand"] = m.plotConnectivityWidthPerBand
+	cfg["plotConnectivityHeightPerMeasure"] = m.plotConnectivityHeightPerMeasure
+	cfg["plotConnectivityCircleTopFraction"] = m.plotConnectivityCircleTopFraction
+	cfg["plotConnectivityCircleMinLines"] = m.plotConnectivityCircleMinLines
+	cfg["plotPacPairsSpec"] = m.plotPacPairsSpec
+	cfg["plotSpectralMetricsSpec"] = m.plotSpectralMetricsSpec
+	cfg["plotBurstsMetricsSpec"] = m.plotBurstsMetricsSpec
+	cfg["plotTemporalTimeBinsSpec"] = m.plotTemporalTimeBinsSpec
+	cfg["plotTemporalTimeLabelsSpec"] = m.plotTemporalTimeLabelsSpec
+	cfg["plotAsymmetryStatSpec"] = m.plotAsymmetryStatSpec
+	cfg["plotCompareWindows"] = m.plotCompareWindows
+	cfg["plotComparisonWindowsSpec"] = m.plotComparisonWindowsSpec
+	cfg["plotCompareColumns"] = m.plotCompareColumns
+	cfg["plotComparisonSegment"] = m.plotComparisonSegment
+	cfg["plotComparisonColumn"] = m.plotComparisonColumn
+	cfg["plotComparisonValuesSpec"] = m.plotComparisonValuesSpec
+	cfg["plotComparisonLabelsSpec"] = m.plotComparisonLabelsSpec
+	cfg["plotComparisonROIsSpec"] = m.plotComparisonROIsSpec
 
 	// System
 	cfg["systemNJobs"] = m.systemNJobs
+	cfg["systemStrictMode"] = m.systemStrictMode
 	cfg["loggingLevel"] = m.loggingLevel
 
 	return cfg
@@ -212,6 +782,95 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 		return def
 	}
 
+	// UI State - Selections
+	m.modeIndex = getInt("modeIndex", m.modeIndex)
+	if v, ok := cfg["computationSelected"]; ok {
+		m.computationSelected = listToMap(v)
+	}
+	if v, ok := cfg["categorySelected"]; ok {
+		m.selected = listToMap(v)
+	}
+	if v, ok := cfg["prepStageSelected"]; ok {
+		m.prepStageSelected = listToMap(v)
+	}
+	if v, ok := cfg["featureFileSelected"]; ok {
+		m.featureFileSelected = boolMapToStringsMap(v)
+	}
+	if v, ok := cfg["plotSelected"]; ok {
+		m.plotSelected = listToMap(v)
+	}
+	if v, ok := cfg["featurePlotterSelected"]; ok {
+		m.featurePlotterSelected = boolMapToStringsMap(v)
+	}
+	if v, ok := cfg["plotFormatSelected"]; ok {
+		m.plotFormatSelected = boolMapToStringsMap(v)
+	}
+	if v, ok := cfg["connectivityMeasures"]; ok {
+		m.connectivityMeasures = listToMap(v)
+	}
+	if v, ok := cfg["directedConnMeasures"]; ok {
+		m.directedConnMeasures = listToMap(v)
+	}
+
+	// UI State - Group Expansion
+	m.featGroupConnectivityExpanded = getBool("featGroupConnectivityExpanded", m.featGroupConnectivityExpanded)
+	m.featGroupPACExpanded = getBool("featGroupPACExpanded", m.featGroupPACExpanded)
+	m.featGroupAperiodicExpanded = getBool("featGroupAperiodicExpanded", m.featGroupAperiodicExpanded)
+	m.featGroupComplexityExpanded = getBool("featGroupComplexityExpanded", m.featGroupComplexityExpanded)
+	m.featGroupBurstsExpanded = getBool("featGroupBurstsExpanded", m.featGroupBurstsExpanded)
+	m.featGroupPowerExpanded = getBool("featGroupPowerExpanded", m.featGroupPowerExpanded)
+	m.featGroupSpectralExpanded = getBool("featGroupSpectralExpanded", m.featGroupSpectralExpanded)
+	m.featGroupERPExpanded = getBool("featGroupERPExpanded", m.featGroupERPExpanded)
+	m.featGroupRatiosExpanded = getBool("featGroupRatiosExpanded", m.featGroupRatiosExpanded)
+	m.featGroupAsymmetryExpanded = getBool("featGroupAsymmetryExpanded", m.featGroupAsymmetryExpanded)
+	m.featGroupQualityExpanded = getBool("featGroupQualityExpanded", m.featGroupQualityExpanded)
+	m.featGroupERDSExpanded = getBool("featGroupERDSExpanded", m.featGroupERDSExpanded)
+	m.featGroupStorageExpanded = getBool("featGroupStorageExpanded", m.featGroupStorageExpanded)
+	m.featGroupExecutionExpanded = getBool("featGroupExecutionExpanded", m.featGroupExecutionExpanded)
+	m.featGroupValidationExpanded = getBool("featGroupValidationExpanded", m.featGroupValidationExpanded)
+	m.featGroupDirectedConnExpanded = getBool("featGroupDirectedConnExpanded", m.featGroupDirectedConnExpanded)
+	m.featGroupSourceLocExpanded = getBool("featGroupSourceLocExpanded", m.featGroupSourceLocExpanded)
+	m.featGroupSourceLocFmriExpanded = getBool("featGroupSourceLocFmriExpanded", m.featGroupSourceLocFmriExpanded)
+	m.featGroupSourceLocContrastExpanded = getBool("featGroupSourceLocContrastExpanded", m.featGroupSourceLocContrastExpanded)
+	m.featGroupSourceLocGLMExpanded = getBool("featGroupSourceLocGLMExpanded", m.featGroupSourceLocGLMExpanded)
+	m.featGroupTFRExpanded = getBool("featGroupTFRExpanded", m.featGroupTFRExpanded)
+
+	// fMRI UI State
+	m.fmriGroupRuntimeExpanded = getBool("fmriGroupRuntimeExpanded", m.fmriGroupRuntimeExpanded)
+	m.fmriGroupOutputExpanded = getBool("fmriGroupOutputExpanded", m.fmriGroupOutputExpanded)
+	m.fmriGroupPerformanceExpanded = getBool("fmriGroupPerformanceExpanded", m.fmriGroupPerformanceExpanded)
+	m.fmriGroupAnatomicalExpanded = getBool("fmriGroupAnatomicalExpanded", m.fmriGroupAnatomicalExpanded)
+	m.fmriGroupBoldExpanded = getBool("fmriGroupBoldExpanded", m.fmriGroupBoldExpanded)
+	m.fmriGroupQcExpanded = getBool("fmriGroupQcExpanded", m.fmriGroupQcExpanded)
+	m.fmriGroupDenoisingExpanded = getBool("fmriGroupDenoisingExpanded", m.fmriGroupDenoisingExpanded)
+	m.fmriGroupSurfaceExpanded = getBool("fmriGroupSurfaceExpanded", m.fmriGroupSurfaceExpanded)
+	m.fmriGroupMultiechoExpanded = getBool("fmriGroupMultiechoExpanded", m.fmriGroupMultiechoExpanded)
+	m.fmriGroupReproExpanded = getBool("fmriGroupReproExpanded", m.fmriGroupReproExpanded)
+	m.fmriGroupValidationExpanded = getBool("fmriGroupValidationExpanded", m.fmriGroupValidationExpanded)
+	m.fmriGroupAdvancedExpanded = getBool("fmriGroupAdvancedExpanded", m.fmriGroupAdvancedExpanded)
+
+	// Plotting UI State
+	m.plotGroupDefaultsExpanded = getBool("plotGroupDefaultsExpanded", m.plotGroupDefaultsExpanded)
+	m.plotGroupFontsExpanded = getBool("plotGroupFontsExpanded", m.plotGroupFontsExpanded)
+	m.plotGroupLayoutExpanded = getBool("plotGroupLayoutExpanded", m.plotGroupLayoutExpanded)
+	m.plotGroupFigureSizesExpanded = getBool("plotGroupFigureSizesExpanded", m.plotGroupFigureSizesExpanded)
+	m.plotGroupColorsExpanded = getBool("plotGroupColorsExpanded", m.plotGroupColorsExpanded)
+	m.plotGroupAlphaExpanded = getBool("plotGroupAlphaExpanded", m.plotGroupAlphaExpanded)
+	m.plotGroupScatterExpanded = getBool("plotGroupScatterExpanded", m.plotGroupScatterExpanded)
+	m.plotGroupBarExpanded = getBool("plotGroupBarExpanded", m.plotGroupBarExpanded)
+	m.plotGroupLineExpanded = getBool("plotGroupLineExpanded", m.plotGroupLineExpanded)
+	m.plotGroupHistogramExpanded = getBool("plotGroupHistogramExpanded", m.plotGroupHistogramExpanded)
+	m.plotGroupTopomapExpanded = getBool("plotGroupTopomapExpanded", m.plotGroupTopomapExpanded)
+	m.plotGroupTFRExpanded = getBool("plotGroupTFRExpanded", m.plotGroupTFRExpanded)
+	m.plotGroupSizingExpanded = getBool("plotGroupSizingExpanded", m.plotGroupSizingExpanded)
+	m.plotGroupSelectionExpanded = getBool("plotGroupSelectionExpanded", m.plotGroupSelectionExpanded)
+	m.plotGroupComparisonsExpanded = getBool("plotGroupComparisonsExpanded", m.plotGroupComparisonsExpanded)
+	m.plotGroupKDEExpanded = getBool("plotGroupKDEExpanded", m.plotGroupKDEExpanded)
+	m.plotGroupErrorbarExpanded = getBool("plotGroupErrorbarExpanded", m.plotGroupErrorbarExpanded)
+	m.plotGroupTextExpanded = getBool("plotGroupTextExpanded", m.plotGroupTextExpanded)
+	m.plotGroupValidationExpanded = getBool("plotGroupValidationExpanded", m.plotGroupValidationExpanded)
+	m.plotGroupTFRMiscExpanded = getBool("plotGroupTFRMiscExpanded", m.plotGroupTFRMiscExpanded)
+
 	// PAC/CFC
 	m.pacPhaseMin = getFloat("pacPhaseMin", m.pacPhaseMin)
 	m.pacPhaseMax = getFloat("pacPhaseMax", m.pacPhaseMax)
@@ -224,6 +883,11 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.pacNormalize = getBool("pacNormalize", m.pacNormalize)
 	m.pacNSurrogates = getInt("pacNSurrogates", m.pacNSurrogates)
 	m.pacRandomSeed = getInt("pacRandomSeed", m.pacRandomSeed)
+	m.pacAllowHarmonicOvrlap = getBool("pacAllowHarmonicOvrlap", m.pacAllowHarmonicOvrlap)
+	m.pacMaxHarmonic = getInt("pacMaxHarmonic", m.pacMaxHarmonic)
+	m.pacHarmonicToleranceHz = getFloat("pacHarmonicToleranceHz", m.pacHarmonicToleranceHz)
+	m.pacComputeWaveformQC = getBool("pacComputeWaveformQC", m.pacComputeWaveformQC)
+	m.pacWaveformOffsetMs = getFloat("pacWaveformOffsetMs", m.pacWaveformOffsetMs)
 
 	// Aperiodic
 	m.aperiodicFmin = getFloat("aperiodicFmin", m.aperiodicFmin)
@@ -234,6 +898,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.aperiodicMinSegmentSec = getFloat("aperiodicMinSegmentSec", m.aperiodicMinSegmentSec)
 	m.aperiodicModel = getInt("aperiodicModel", m.aperiodicModel)
 	m.aperiodicPsdMethod = getInt("aperiodicPsdMethod", m.aperiodicPsdMethod)
+	m.aperiodicSubtractEvoked = getBool("aperiodicSubtractEvoked", m.aperiodicSubtractEvoked)
+	m.aperiodicPsdBandwidth = getFloat("aperiodicPsdBandwidth", m.aperiodicPsdBandwidth)
+	m.aperiodicMaxRms = getFloat("aperiodicMaxRms", m.aperiodicMaxRms)
+	m.aperiodicExcludeLineNoise = getBool("aperiodicExcludeLineNoise", m.aperiodicExcludeLineNoise)
+	m.aperiodicLineNoiseFreq = getFloat("aperiodicLineNoiseFreq", m.aperiodicLineNoiseFreq)
+	m.aperiodicLineNoiseWidthHz = getFloat("aperiodicLineNoiseWidthHz", m.aperiodicLineNoiseWidthHz)
+	m.aperiodicLineNoiseHarmonics = getInt("aperiodicLineNoiseHarmonics", m.aperiodicLineNoiseHarmonics)
 
 	// Complexity
 	m.complexityPEOrder = getInt("complexityPEOrder", m.complexityPEOrder)
@@ -248,6 +919,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.erpAllowNoBaseline = getBool("erpAllowNoBaseline", m.erpAllowNoBaseline)
 	m.erpComponentsSpec = getString("erpComponentsSpec", m.erpComponentsSpec)
 	m.erpSmoothMs = getFloat("erpSmoothMs", m.erpSmoothMs)
+	m.erpPeakProminenceUv = getFloat("erpPeakProminenceUv", m.erpPeakProminenceUv)
 	m.erpLowpassHz = getFloat("erpLowpassHz", m.erpLowpassHz)
 
 	// Burst
@@ -266,6 +938,13 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.spectralPsdMethod = getInt("spectralPsdMethod", m.spectralPsdMethod)
 	m.spectralFmin = getFloat("spectralFmin", m.spectralFmin)
 	m.spectralFmax = getFloat("spectralFmax", m.spectralFmax)
+	m.spectralIncludeLogRatios = getBool("spectralIncludeLogRatios", m.spectralIncludeLogRatios)
+	m.spectralExcludeLineNoise = getBool("spectralExcludeLineNoise", m.spectralExcludeLineNoise)
+	m.spectralLineNoiseFreq = getFloat("spectralLineNoiseFreq", m.spectralLineNoiseFreq)
+	m.spectralLineNoiseWidthHz = getFloat("spectralLineNoiseWidthHz", m.spectralLineNoiseWidthHz)
+	m.spectralLineNoiseHarmonics = getInt("spectralLineNoiseHarmonics", m.spectralLineNoiseHarmonics)
+	m.spectralMinSegmentSec = getFloat("spectralMinSegmentSec", m.spectralMinSegmentSec)
+	m.spectralMinCyclesAtFmin = getFloat("spectralMinCyclesAtFmin", m.spectralMinCyclesAtFmin)
 
 	// Connectivity
 	m.connOutputLevel = getInt("connOutputLevel", m.connOutputLevel)
@@ -276,12 +955,20 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.connAECMode = getInt("connAECMode", m.connAECMode)
 	m.connGranularity = getInt("connGranularity", m.connGranularity)
 	m.connMinEpochsPerGroup = getInt("connMinEpochsPerGroup", m.connMinEpochsPerGroup)
+	m.connMinCyclesPerBand = getFloat("connMinCyclesPerBand", m.connMinCyclesPerBand)
+	m.connWarnNoSpatialTransform = getBool("connWarnNoSpatialTransform", m.connWarnNoSpatialTransform)
+	m.connPhaseEstimator = getInt("connPhaseEstimator", m.connPhaseEstimator)
+	m.connMinSegmentSec = getFloat("connMinSegmentSec", m.connMinSegmentSec)
+	m.connAECOutput = getInt("connAECOutput", m.connAECOutput)
+	m.connForceWithinEpochML = getBool("connForceWithinEpochML", m.connForceWithinEpochML)
 
 	// ITPC
 	m.itpcMethod = getInt("itpcMethod", m.itpcMethod)
 	m.itpcConditionColumn = getString("itpcConditionColumn", m.itpcConditionColumn)
 	m.itpcConditionValues = getString("itpcConditionValues", m.itpcConditionValues)
 	m.itpcMinTrialsPerCondition = getInt("itpcMinTrialsPerCondition", m.itpcMinTrialsPerCondition)
+	m.itpcAllowUnsafeLoo = getBool("itpcAllowUnsafeLoo", m.itpcAllowUnsafeLoo)
+	m.itpcBaselineCorrection = getInt("itpcBaselineCorrection", m.itpcBaselineCorrection)
 
 	// Source localization
 	m.sourceLocEnabled = getBool("sourceLocEnabled", m.sourceLocEnabled)
@@ -291,22 +978,126 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.sourceLocParc = getInt("sourceLocParc", m.sourceLocParc)
 	m.sourceLocReg = getFloat("sourceLocReg", m.sourceLocReg)
 	m.sourceLocSnr = getFloat("sourceLocSnr", m.sourceLocSnr)
+	m.sourceLocLoose = getFloat("sourceLocLoose", m.sourceLocLoose)
+	m.sourceLocDepth = getFloat("sourceLocDepth", m.sourceLocDepth)
+	m.sourceLocConnMethod = getInt("sourceLocConnMethod", m.sourceLocConnMethod)
+	m.sourceLocSubject = getString("sourceLocSubject", m.sourceLocSubject)
+	m.sourceLocTrans = getString("sourceLocTrans", m.sourceLocTrans)
+	m.sourceLocBem = getString("sourceLocBem", m.sourceLocBem)
+	m.sourceLocMindistMm = getFloat("sourceLocMindistMm", m.sourceLocMindistMm)
+	m.sourceLocFmriEnabled = getBool("sourceLocFmriEnabled", m.sourceLocFmriEnabled)
+	m.sourceLocFmriStatsMap = getString("sourceLocFmriStatsMap", m.sourceLocFmriStatsMap)
+	m.sourceLocFmriProvenance = getInt("sourceLocFmriProvenance", m.sourceLocFmriProvenance)
+	m.sourceLocFmriRequireProv = getBool("sourceLocFmriRequireProv", m.sourceLocFmriRequireProv)
+	m.sourceLocFmriThreshold = getFloat("sourceLocFmriThreshold", m.sourceLocFmriThreshold)
+	m.sourceLocFmriTail = getInt("sourceLocFmriTail", m.sourceLocFmriTail)
+	m.sourceLocFmriMinClusterVox = getInt("sourceLocFmriMinClusterVox", m.sourceLocFmriMinClusterVox)
+	m.sourceLocFmriMaxClusters = getInt("sourceLocFmriMaxClusters", m.sourceLocFmriMaxClusters)
+	m.sourceLocFmriMaxVoxPerClus = getInt("sourceLocFmriMaxVoxPerClus", m.sourceLocFmriMaxVoxPerClus)
+	m.sourceLocFmriMaxTotalVox = getInt("sourceLocFmriMaxTotalVox", m.sourceLocFmriMaxTotalVox)
+	m.sourceLocFmriRandomSeed = getInt("sourceLocFmriRandomSeed", m.sourceLocFmriRandomSeed)
+	m.sourceLocCreateTrans = getBool("sourceLocCreateTrans", m.sourceLocCreateTrans)
+	m.sourceLocAllowIdentityTrans = getBool("sourceLocAllowIdentityTrans", m.sourceLocAllowIdentityTrans)
+	m.sourceLocCreateBemModel = getBool("sourceLocCreateBemModel", m.sourceLocCreateBemModel)
+	m.sourceLocCreateBemSolution = getBool("sourceLocCreateBemSolution", m.sourceLocCreateBemSolution)
+
+	// fMRI contrast builder
+	m.sourceLocFmriContrastEnabled = getBool("sourceLocFmriContrastEnabled", m.sourceLocFmriContrastEnabled)
+	m.sourceLocFmriContrastType = getInt("sourceLocFmriContrastType", m.sourceLocFmriContrastType)
+	m.sourceLocFmriCondAColumn = getString("sourceLocFmriCondAColumn", m.sourceLocFmriCondAColumn)
+	m.sourceLocFmriCondAValue = getString("sourceLocFmriCondAValue", m.sourceLocFmriCondAValue)
+	m.sourceLocFmriCondBColumn = getString("sourceLocFmriCondBColumn", m.sourceLocFmriCondBColumn)
+	m.sourceLocFmriCondBValue = getString("sourceLocFmriCondBValue", m.sourceLocFmriCondBValue)
+	m.sourceLocFmriContrastFormula = getString("sourceLocFmriContrastFormula", m.sourceLocFmriContrastFormula)
+	m.sourceLocFmriContrastName = getString("sourceLocFmriContrastName", m.sourceLocFmriContrastName)
+	m.sourceLocFmriRunsToInclude = getString("sourceLocFmriRunsToInclude", m.sourceLocFmriRunsToInclude)
+	m.sourceLocFmriAutoDetectRuns = getBool("sourceLocFmriAutoDetectRuns", m.sourceLocFmriAutoDetectRuns)
+	m.sourceLocFmriHrfModel = getInt("sourceLocFmriHrfModel", m.sourceLocFmriHrfModel)
+	m.sourceLocFmriDriftModel = getInt("sourceLocFmriDriftModel", m.sourceLocFmriDriftModel)
+	m.sourceLocFmriHighPassHz = getFloat("sourceLocFmriHighPassHz", m.sourceLocFmriHighPassHz)
+	m.sourceLocFmriLowPassHz = getFloat("sourceLocFmriLowPassHz", m.sourceLocFmriLowPassHz)
+	m.sourceLocFmriClusterCorrection = getBool("sourceLocFmriClusterCorrection", m.sourceLocFmriClusterCorrection)
+	m.sourceLocFmriClusterPThreshold = getFloat("sourceLocFmriClusterPThreshold", m.sourceLocFmriClusterPThreshold)
+	m.sourceLocFmriOutputType = getInt("sourceLocFmriOutputType", m.sourceLocFmriOutputType)
+	m.sourceLocFmriResampleToFS = getBool("sourceLocFmriResampleToFS", m.sourceLocFmriResampleToFS)
+	m.sourceLocFmriWindowAName = getString("sourceLocFmriWindowAName", m.sourceLocFmriWindowAName)
+	m.sourceLocFmriWindowATmin = getFloat("sourceLocFmriWindowATmin", m.sourceLocFmriWindowATmin)
+	m.sourceLocFmriWindowATmax = getFloat("sourceLocFmriWindowATmax", m.sourceLocFmriWindowATmax)
+	m.sourceLocFmriWindowBName = getString("sourceLocFmriWindowBName", m.sourceLocFmriWindowBName)
+	m.sourceLocFmriWindowBTmin = getFloat("sourceLocFmriWindowBTmin", m.sourceLocFmriWindowBTmin)
+	m.sourceLocFmriWindowBTmax = getFloat("sourceLocFmriWindowBTmax", m.sourceLocFmriWindowBTmax)
 
 	// Aggregation/storage
 	m.aggregationMethod = getInt("aggregationMethod", m.aggregationMethod)
 	m.minEpochsForFeatures = getInt("minEpochsForFeatures", m.minEpochsForFeatures)
 	m.saveSubjectLevelFeatures = getBool("saveSubjectLevelFeatures", m.saveSubjectLevelFeatures)
+	m.failOnMissingWindows = getBool("failOnMissingWindows", m.failOnMissingWindows)
+	m.failOnMissingNamedWindow = getBool("failOnMissingNamedWindow", m.failOnMissingNamedWindow)
 
 	// Spatial transform
 	m.spatialTransform = getInt("spatialTransform", m.spatialTransform)
 	m.spatialTransformLambda2 = getFloat("spatialTransformLambda2", m.spatialTransformLambda2)
+	m.spatialTransformStiffness = getFloat("spatialTransformStiffness", m.spatialTransformStiffness)
 
 	// TFR
 	m.tfrFreqMin = getFloat("tfrFreqMin", m.tfrFreqMin)
 	m.tfrFreqMax = getFloat("tfrFreqMax", m.tfrFreqMax)
 	m.tfrNFreqs = getInt("tfrNFreqs", m.tfrNFreqs)
 	m.tfrMinCycles = getFloat("tfrMinCycles", m.tfrMinCycles)
+	m.tfrMaxCycles = getFloat("tfrMaxCycles", m.tfrMaxCycles)
+	m.tfrNCyclesFactor = getFloat("tfrNCyclesFactor", m.tfrNCyclesFactor)
 	m.tfrDecim = getInt("tfrDecim", m.tfrDecim)
+	m.tfrDecimPower = getInt("tfrDecimPower", m.tfrDecimPower)
+	m.tfrDecimPhase = getInt("tfrDecimPhase", m.tfrDecimPhase)
+	m.tfrWorkers = getInt("tfrWorkers", m.tfrWorkers)
+
+	// Quality features
+	m.qualityPsdMethod = getInt("qualityPsdMethod", m.qualityPsdMethod)
+	m.qualityFmin = getFloat("qualityFmin", m.qualityFmin)
+	m.qualityFmax = getFloat("qualityFmax", m.qualityFmax)
+	m.qualityNfft = getInt("qualityNfft", m.qualityNfft)
+	m.qualityExcludeLineNoise = getBool("qualityExcludeLineNoise", m.qualityExcludeLineNoise)
+	m.qualityLineNoiseFreq = getFloat("qualityLineNoiseFreq", m.qualityLineNoiseFreq)
+	m.qualityLineNoiseWidthHz = getFloat("qualityLineNoiseWidthHz", m.qualityLineNoiseWidthHz)
+	m.qualityLineNoiseHarmonics = getInt("qualityLineNoiseHarmonics", m.qualityLineNoiseHarmonics)
+	m.qualitySnrSignalBandMin = getFloat("qualitySnrSignalBandMin", m.qualitySnrSignalBandMin)
+	m.qualitySnrSignalBandMax = getFloat("qualitySnrSignalBandMax", m.qualitySnrSignalBandMax)
+	m.qualitySnrNoiseBandMin = getFloat("qualitySnrNoiseBandMin", m.qualitySnrNoiseBandMin)
+	m.qualitySnrNoiseBandMax = getFloat("qualitySnrNoiseBandMax", m.qualitySnrNoiseBandMax)
+	m.qualityMuscleBandMin = getFloat("qualityMuscleBandMin", m.qualityMuscleBandMin)
+	m.qualityMuscleBandMax = getFloat("qualityMuscleBandMax", m.qualityMuscleBandMax)
+
+	// ERDS configuration
+	m.erdsUseLogRatio = getBool("erdsUseLogRatio", m.erdsUseLogRatio)
+	m.erdsMinBaselinePower = getFloat("erdsMinBaselinePower", m.erdsMinBaselinePower)
+	m.erdsMinActivePower = getFloat("erdsMinActivePower", m.erdsMinActivePower)
+	m.erdsMinSegmentSec = getFloat("erdsMinSegmentSec", m.erdsMinSegmentSec)
+	m.erdsBandsSpec = getString("erdsBandsSpec", m.erdsBandsSpec)
+
+	// Asymmetry & Ratios
+	m.asymmetryChannelPairsSpec = getString("asymmetryChannelPairsSpec", m.asymmetryChannelPairsSpec)
+	m.asymmetryMinSegmentSec = getFloat("asymmetryMinSegmentSec", m.asymmetryMinSegmentSec)
+	m.asymmetryMinCyclesAtFmin = getFloat("asymmetryMinCyclesAtFmin", m.asymmetryMinCyclesAtFmin)
+	m.asymmetrySkipInvalidSegments = getBool("asymmetrySkipInvalidSegments", m.asymmetrySkipInvalidSegments)
+	m.ratiosMinSegmentSec = getFloat("ratiosMinSegmentSec", m.ratiosMinSegmentSec)
+	m.ratiosMinCyclesAtFmin = getFloat("ratiosMinCyclesAtFmin", m.ratiosMinCyclesAtFmin)
+	m.ratiosSkipInvalidSegments = getBool("ratiosSkipInvalidSegments", m.ratiosSkipInvalidSegments)
+	m.ratioSource = getInt("ratioSource", m.ratioSource)
+
+	// IAF
+	m.iafEnabled = getBool("iafEnabled", m.iafEnabled)
+	m.iafAlphaWidthHz = getFloat("iafAlphaWidthHz", m.iafAlphaWidthHz)
+	m.iafSearchRangeMin = getFloat("iafSearchRangeMin", m.iafSearchRangeMin)
+	m.iafSearchRangeMax = getFloat("iafSearchRangeMax", m.iafSearchRangeMax)
+	m.iafMinProminence = getFloat("iafMinProminence", m.iafMinProminence)
+	m.iafRoisSpec = getString("iafRoisSpec", m.iafRoisSpec)
+
+	// Directed connectivity
+	m.directedConnEnabled = getBool("directedConnEnabled", m.directedConnEnabled)
+	m.directedConnOutputLevel = getInt("directedConnOutputLevel", m.directedConnOutputLevel)
+	m.directedConnMvarOrder = getInt("directedConnMvarOrder", m.directedConnMvarOrder)
+	m.directedConnNFreqs = getInt("directedConnNFreqs", m.directedConnNFreqs)
+	m.directedConnMinSegSamples = getInt("directedConnMinSegSamples", m.directedConnMinSegSamples)
 
 	// Behavior
 	m.correlationMethod = getString("correlationMethod", m.correlationMethod)
@@ -317,28 +1108,153 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.fdrAlpha = getFloat("fdrAlpha", m.fdrAlpha)
 	m.behaviorNJobs = getInt("behaviorNJobs", m.behaviorNJobs)
 	m.alsoSaveCsv = getBool("alsoSaveCsv", m.alsoSaveCsv)
+	m.runAdjustmentColumn = getString("runAdjustmentColumn", m.runAdjustmentColumn)
+	m.runAdjustmentEnabled = getBool("runAdjustmentEnabled", m.runAdjustmentEnabled)
+	m.runAdjustmentIncludeInCorrelations = getBool("runAdjustmentIncludeInCorrelations", m.runAdjustmentIncludeInCorrelations)
+	m.runAdjustmentMaxDummies = getInt("runAdjustmentMaxDummies", m.runAdjustmentMaxDummies)
+	m.conditionCompareColumn = getString("conditionCompareColumn", m.conditionCompareColumn)
+	m.conditionCompareValues = getString("conditionCompareValues", m.conditionCompareValues)
+	m.conditionCompareWindows = getString("conditionCompareWindows", m.conditionCompareWindows)
+	m.conditionFailFast = getBool("conditionFailFast", m.conditionFailFast)
+	m.conditionEffectThreshold = getFloat("conditionEffectThreshold", m.conditionEffectThreshold)
+	m.temporalConditionColumn = getString("temporalConditionColumn", m.temporalConditionColumn)
+	m.temporalConditionValues = getString("temporalConditionValues", m.temporalConditionValues)
+	m.temporalSplitByCondition = getBool("temporalSplitByCondition", m.temporalSplitByCondition)
+	m.temporalIncludeROIAverages = getBool("temporalIncludeROIAverages", m.temporalIncludeROIAverages)
+	m.temporalIncludeTFGrid = getBool("temporalIncludeTFGrid", m.temporalIncludeTFGrid)
+	m.temporalFeaturePowerEnabled = getBool("temporalFeaturePowerEnabled", m.temporalFeaturePowerEnabled)
+	m.temporalFeatureITPCEnabled = getBool("temporalFeatureITPCEnabled", m.temporalFeatureITPCEnabled)
+	m.temporalFeatureERDSEnabled = getBool("temporalFeatureERDSEnabled", m.temporalFeatureERDSEnabled)
+	m.temporalITPCBaselineCorrection = getBool("temporalITPCBaselineCorrection", m.temporalITPCBaselineCorrection)
+	m.temporalITPCBaselineMin = getFloat("temporalITPCBaselineMin", m.temporalITPCBaselineMin)
+	m.temporalITPCBaselineMax = getFloat("temporalITPCBaselineMax", m.temporalITPCBaselineMax)
+	m.temporalERDSBaselineMin = getFloat("temporalERDSBaselineMin", m.temporalERDSBaselineMin)
+	m.temporalERDSBaselineMax = getFloat("temporalERDSBaselineMax", m.temporalERDSBaselineMax)
+	m.temporalERDSMethod = getInt("temporalERDSMethod", m.temporalERDSMethod)
+	m.controlTemperature = getBool("controlTemperature", m.controlTemperature)
+	m.controlTrialOrder = getBool("controlTrialOrder", m.controlTrialOrder)
+	m.behaviorComputeChangeScores = getBool("behaviorComputeChangeScores", m.behaviorComputeChangeScores)
+	m.behaviorComputeBayesFactors = getBool("behaviorComputeBayesFactors", m.behaviorComputeBayesFactors)
+	m.behaviorComputeLosoStability = getBool("behaviorComputeLosoStability", m.behaviorComputeLosoStability)
 
 	// Trial table
 	m.trialTableFormat = getInt("trialTableFormat", m.trialTableFormat)
 	m.trialTableIncludeFeatures = getBool("trialTableIncludeFeatures", m.trialTableIncludeFeatures)
 	m.trialTableIncludeCovars = getBool("trialTableIncludeCovars", m.trialTableIncludeCovars)
 	m.trialTableIncludeEvents = getBool("trialTableIncludeEvents", m.trialTableIncludeEvents)
+	m.trialTableAddLagFeatures = getBool("trialTableAddLagFeatures", m.trialTableAddLagFeatures)
+	m.trialTableExtraEventCols = getString("trialTableExtraEventCols", m.trialTableExtraEventCols)
+	m.trialTableHighMissingFrac = getFloat("trialTableHighMissingFrac", m.trialTableHighMissingFrac)
 
 	// Pain residual
 	m.painResidualEnabled = getBool("painResidualEnabled", m.painResidualEnabled)
 	m.painResidualMethod = getInt("painResidualMethod", m.painResidualMethod)
 	m.painResidualPolyDegree = getInt("painResidualPolyDegree", m.painResidualPolyDegree)
+	m.painResidualSplineDfCandidates = getString("painResidualSplineDfCandidates", m.painResidualSplineDfCandidates)
+	m.painResidualModelCompareEnabled = getBool("painResidualModelCompareEnabled", m.painResidualModelCompareEnabled)
+	m.painResidualModelComparePolyDegrees = getString("painResidualModelComparePolyDegrees", m.painResidualModelComparePolyDegrees)
+	m.painResidualBreakpointEnabled = getBool("painResidualBreakpointEnabled", m.painResidualBreakpointEnabled)
+	m.painResidualBreakpointCandidates = getInt("painResidualBreakpointCandidates", m.painResidualBreakpointCandidates)
+	m.painResidualBreakpointQlow = getFloat("painResidualBreakpointQlow", m.painResidualBreakpointQlow)
+	m.painResidualBreakpointQhigh = getFloat("painResidualBreakpointQhigh", m.painResidualBreakpointQhigh)
+	m.painResidualCrossfitEnabled = getBool("painResidualCrossfitEnabled", m.painResidualCrossfitEnabled)
+	m.painResidualCrossfitGroupColumn = getString("painResidualCrossfitGroupColumn", m.painResidualCrossfitGroupColumn)
+	m.painResidualCrossfitNSplits = getInt("painResidualCrossfitNSplits", m.painResidualCrossfitNSplits)
+	m.painResidualCrossfitMethod = getInt("painResidualCrossfitMethod", m.painResidualCrossfitMethod)
+	m.painResidualCrossfitSplineKnots = getInt("painResidualCrossfitSplineKnots", m.painResidualCrossfitSplineKnots)
 
 	// Regression
 	m.regressionOutcome = getInt("regressionOutcome", m.regressionOutcome)
 	m.regressionIncludeTemperature = getBool("regressionIncludeTemperature", m.regressionIncludeTemperature)
 	m.regressionTempControl = getInt("regressionTempControl", m.regressionTempControl)
+	m.regressionTempSplineKnots = getInt("regressionTempSplineKnots", m.regressionTempSplineKnots)
+	m.regressionTempSplineQlow = getFloat("regressionTempSplineQlow", m.regressionTempSplineQlow)
+	m.regressionTempSplineQhigh = getFloat("regressionTempSplineQhigh", m.regressionTempSplineQhigh)
+	m.regressionIncludeTrialOrder = getBool("regressionIncludeTrialOrder", m.regressionIncludeTrialOrder)
+	m.regressionIncludePrev = getBool("regressionIncludePrev", m.regressionIncludePrev)
+	m.regressionIncludeRunBlock = getBool("regressionIncludeRunBlock", m.regressionIncludeRunBlock)
+	m.regressionIncludeInteraction = getBool("regressionIncludeInteraction", m.regressionIncludeInteraction)
+	m.regressionStandardize = getBool("regressionStandardize", m.regressionStandardize)
 	m.regressionPermutations = getInt("regressionPermutations", m.regressionPermutations)
+	m.regressionMaxFeatures = getInt("regressionMaxFeatures", m.regressionMaxFeatures)
+
+	// Models
+	m.modelsIncludeTemperature = getBool("modelsIncludeTemperature", m.modelsIncludeTemperature)
+	m.modelsTempControl = getInt("modelsTempControl", m.modelsTempControl)
+	m.modelsTempSplineKnots = getInt("modelsTempSplineKnots", m.modelsTempSplineKnots)
+	m.modelsTempSplineQlow = getFloat("modelsTempSplineQlow", m.modelsTempSplineQlow)
+	m.modelsTempSplineQhigh = getFloat("modelsTempSplineQhigh", m.modelsTempSplineQhigh)
+	m.modelsIncludeTrialOrder = getBool("modelsIncludeTrialOrder", m.modelsIncludeTrialOrder)
+	m.modelsIncludePrev = getBool("modelsIncludePrev", m.modelsIncludePrev)
+	m.modelsIncludeRunBlock = getBool("modelsIncludeRunBlock", m.modelsIncludeRunBlock)
+	m.modelsIncludeInteraction = getBool("modelsIncludeInteraction", m.modelsIncludeInteraction)
+	m.modelsStandardize = getBool("modelsStandardize", m.modelsStandardize)
+	m.modelsMaxFeatures = getInt("modelsMaxFeatures", m.modelsMaxFeatures)
+	m.modelsOutcomeRating = getBool("modelsOutcomeRating", m.modelsOutcomeRating)
+	m.modelsOutcomePainResidual = getBool("modelsOutcomePainResidual", m.modelsOutcomePainResidual)
+	m.modelsOutcomeTemperature = getBool("modelsOutcomeTemperature", m.modelsOutcomeTemperature)
+	m.modelsOutcomePainBinary = getBool("modelsOutcomePainBinary", m.modelsOutcomePainBinary)
+	m.modelsFamilyOLS = getBool("modelsFamilyOLS", m.modelsFamilyOLS)
+	m.modelsFamilyRobust = getBool("modelsFamilyRobust", m.modelsFamilyRobust)
+	m.modelsFamilyQuantile = getBool("modelsFamilyQuantile", m.modelsFamilyQuantile)
+	m.modelsFamilyLogit = getBool("modelsFamilyLogit", m.modelsFamilyLogit)
+	m.modelsBinaryOutcome = getInt("modelsBinaryOutcome", m.modelsBinaryOutcome)
+
+	// Stability
+	m.stabilityMethod = getInt("stabilityMethod", m.stabilityMethod)
+	m.stabilityOutcome = getInt("stabilityOutcome", m.stabilityOutcome)
+	m.stabilityGroupColumn = getInt("stabilityGroupColumn", m.stabilityGroupColumn)
+	m.stabilityPartialTemp = getBool("stabilityPartialTemp", m.stabilityPartialTemp)
+	m.stabilityMaxFeatures = getInt("stabilityMaxFeatures", m.stabilityMaxFeatures)
+	m.stabilityAlpha = getFloat("stabilityAlpha", m.stabilityAlpha)
+
+	// Consistency & influence
+	m.consistencyEnabled = getBool("consistencyEnabled", m.consistencyEnabled)
+	m.influenceOutcomeRating = getBool("influenceOutcomeRating", m.influenceOutcomeRating)
+	m.influenceOutcomePainResidual = getBool("influenceOutcomePainResidual", m.influenceOutcomePainResidual)
+	m.influenceOutcomeTemperature = getBool("influenceOutcomeTemperature", m.influenceOutcomeTemperature)
+	m.influenceMaxFeatures = getInt("influenceMaxFeatures", m.influenceMaxFeatures)
+	m.influenceIncludeTemperature = getBool("influenceIncludeTemperature", m.influenceIncludeTemperature)
+	m.influenceTempControl = getInt("influenceTempControl", m.influenceTempControl)
+	m.influenceTempSplineKnots = getInt("influenceTempSplineKnots", m.influenceTempSplineKnots)
+	m.influenceTempSplineQlow = getFloat("influenceTempSplineQlow", m.influenceTempSplineQlow)
+	m.influenceTempSplineQhigh = getFloat("influenceTempSplineQhigh", m.influenceTempSplineQhigh)
+	m.influenceTempSplineMinN = getInt("influenceTempSplineMinN", m.influenceTempSplineMinN)
+	m.influenceIncludeTrialOrder = getBool("influenceIncludeTrialOrder", m.influenceIncludeTrialOrder)
+	m.influenceIncludeRunBlock = getBool("influenceIncludeRunBlock", m.influenceIncludeRunBlock)
+	m.influenceIncludeInteraction = getBool("influenceIncludeInteraction", m.influenceIncludeInteraction)
+	m.influenceStandardize = getBool("influenceStandardize", m.influenceStandardize)
+	m.influenceCooksThreshold = getFloat("influenceCooksThreshold", m.influenceCooksThreshold)
+	m.influenceLeverageThreshold = getFloat("influenceLeverageThreshold", m.influenceLeverageThreshold)
 
 	// Correlations
 	m.correlationsTargetRating = getBool("correlationsTargetRating", m.correlationsTargetRating)
 	m.correlationsTargetTemperature = getBool("correlationsTargetTemperature", m.correlationsTargetTemperature)
 	m.correlationsTargetPainResidual = getBool("correlationsTargetPainResidual", m.correlationsTargetPainResidual)
+	m.correlationsTargetColumn = getString("correlationsTargetColumn", m.correlationsTargetColumn)
+	m.correlationsPreferPainResidual = getBool("correlationsPreferPainResidual", m.correlationsPreferPainResidual)
+	m.correlationsUseCrossfitResidual = getBool("correlationsUseCrossfitResidual", m.correlationsUseCrossfitResidual)
+	m.correlationsPrimaryUnit = getInt("correlationsPrimaryUnit", m.correlationsPrimaryUnit)
+	m.correlationsPermutationPrimary = getBool("correlationsPermutationPrimary", m.correlationsPermutationPrimary)
+
+	// Mixed Effects & Mediation
+	m.mixedEffectsType = getInt("mixedEffectsType", m.mixedEffectsType)
+	m.mixedMaxFeatures = getInt("mixedMaxFeatures", m.mixedMaxFeatures)
+	m.mediationMinEffect = getFloat("mediationMinEffect", m.mediationMinEffect)
+	m.mediationBootstrap = getInt("mediationBootstrap", m.mediationBootstrap)
+	m.mediationMaxMediatorsEnabled = getBool("mediationMaxMediatorsEnabled", m.mediationMaxMediatorsEnabled)
+	m.mediationMaxMediators = getInt("mediationMaxMediators", m.mediationMaxMediators)
+	m.mediationPermutations = getInt("mediationPermutations", m.mediationPermutations)
+	m.moderationMaxFeaturesEnabled = getBool("moderationMaxFeaturesEnabled", m.moderationMaxFeaturesEnabled)
+	m.moderationMaxFeatures = getInt("moderationMaxFeatures", m.moderationMaxFeatures)
+	m.moderationPermutations = getInt("moderationPermutations", m.moderationPermutations)
+
+	// Cluster tests
+	m.clusterThreshold = getFloat("clusterThreshold", m.clusterThreshold)
+	m.clusterMinSize = getInt("clusterMinSize", m.clusterMinSize)
+	m.clusterTail = getInt("clusterTail", m.clusterTail)
+	m.clusterConditionColumn = getString("clusterConditionColumn", m.clusterConditionColumn)
+	m.clusterConditionValues = getString("clusterConditionValues", m.clusterConditionValues)
 
 	// Temporal
 	m.temporalResolutionMs = getInt("temporalResolutionMs", m.temporalResolutionMs)
@@ -346,7 +1262,7 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.temporalTimeMinMs = getInt("temporalTimeMinMs", m.temporalTimeMinMs)
 	m.temporalTimeMaxMs = getInt("temporalTimeMaxMs", m.temporalTimeMaxMs)
 
-	// Preprocessing
+	// Preprocessing (EEG)
 	m.prepUsePyprep = getBool("prepUsePyprep", m.prepUsePyprep)
 	m.prepUseIcalabel = getBool("prepUseIcalabel", m.prepUseIcalabel)
 	m.prepNJobs = getInt("prepNJobs", m.prepNJobs)
@@ -356,21 +1272,321 @@ func (m *Model) ImportConfig(cfg map[string]interface{}) {
 	m.prepHFreq = getFloat("prepHFreq", m.prepHFreq)
 	m.prepNotch = getInt("prepNotch", m.prepNotch)
 	m.prepLineFreq = getInt("prepLineFreq", m.prepLineFreq)
-	m.prepEpochsTmin = getFloat("prepEpochsTmin", m.prepEpochsTmin)
-	m.prepEpochsTmax = getFloat("prepEpochsTmax", m.prepEpochsTmax)
-	m.prepEpochsReject = getFloat("prepEpochsReject", m.prepEpochsReject)
+	m.prepChTypes = getString("prepChTypes", m.prepChTypes)
+	m.prepEegReference = getString("prepEegReference", m.prepEegReference)
+	m.prepEogChannels = getString("prepEogChannels", m.prepEogChannels)
+	m.prepRandomState = getInt("prepRandomState", m.prepRandomState)
+	m.prepTaskIsRest = getBool("prepTaskIsRest", m.prepTaskIsRest)
+	m.prepZaplineFline = getFloat("prepZaplineFline", m.prepZaplineFline)
+	m.prepFindBreaks = getBool("prepFindBreaks", m.prepFindBreaks)
+	m.prepRansac = getBool("prepRansac", m.prepRansac)
+	m.prepRepeats = getInt("prepRepeats", m.prepRepeats)
+	m.prepAverageReref = getBool("prepAverageReref", m.prepAverageReref)
+	m.prepFileExtension = getString("prepFileExtension", m.prepFileExtension)
+	m.prepConsiderPreviousBads = getBool("prepConsiderPreviousBads", m.prepConsiderPreviousBads)
+	m.prepOverwriteChansTsv = getBool("prepOverwriteChansTsv", m.prepOverwriteChansTsv)
+	m.prepDeleteBreaks = getBool("prepDeleteBreaks", m.prepDeleteBreaks)
+	m.prepBreaksMinLength = getInt("prepBreaksMinLength", m.prepBreaksMinLength)
+	m.prepTStartAfterPrevious = getInt("prepTStartAfterPrevious", m.prepTStartAfterPrevious)
+	m.prepTStopBeforeNext = getInt("prepTStopBeforeNext", m.prepTStopBeforeNext)
+	m.prepSpatialFilter = getInt("prepSpatialFilter", m.prepSpatialFilter)
 	m.prepICAAlgorithm = getInt("prepICAAlgorithm", m.prepICAAlgorithm)
 	m.prepICAComp = getFloat("prepICAComp", m.prepICAComp)
+	m.prepICALFreq = getFloat("prepICALFreq", m.prepICALFreq)
+	m.prepICARejThresh = getFloat("prepICARejThresh", m.prepICARejThresh)
 	m.prepProbThresh = getFloat("prepProbThresh", m.prepProbThresh)
+	m.prepKeepMnebidsBads = getBool("prepKeepMnebidsBads", m.prepKeepMnebidsBads)
+	m.prepConditions = getString("prepConditions", m.prepConditions)
+	m.prepEpochsTmin = getFloat("prepEpochsTmin", m.prepEpochsTmin)
+	m.prepEpochsTmax = getFloat("prepEpochsTmax", m.prepEpochsTmax)
+	m.prepEpochsBaselineStart = getFloat("prepEpochsBaselineStart", m.prepEpochsBaselineStart)
+	m.prepEpochsBaselineEnd = getFloat("prepEpochsBaselineEnd", m.prepEpochsBaselineEnd)
+	m.prepEpochsNoBaseline = getBool("prepEpochsNoBaseline", m.prepEpochsNoBaseline)
+	m.prepEpochsReject = getFloat("prepEpochsReject", m.prepEpochsReject)
+	m.prepRejectMethod = getInt("prepRejectMethod", m.prepRejectMethod)
+	m.prepRunSourceEstimation = getBool("prepRunSourceEstimation", m.prepRunSourceEstimation)
 	m.icaLabelsToKeep = getString("icaLabelsToKeep", m.icaLabelsToKeep)
 
-	// ML
+	// Preprocessing UI State (EEG)
+	m.prepGroupStagesExpanded = getBool("prepGroupStagesExpanded", m.prepGroupStagesExpanded)
+	m.prepGroupGeneralExpanded = getBool("prepGroupGeneralExpanded", m.prepGroupGeneralExpanded)
+	m.prepGroupFilteringExpanded = getBool("prepGroupFilteringExpanded", m.prepGroupFilteringExpanded)
+	m.prepGroupPyprepExpanded = getBool("prepGroupPyprepExpanded", m.prepGroupPyprepExpanded)
+	m.prepGroupICAExpanded = getBool("prepGroupICAExpanded", m.prepGroupICAExpanded)
+	m.prepGroupEpochingExpanded = getBool("prepGroupEpochingExpanded", m.prepGroupEpochingExpanded)
+
+	// fMRI Preprocessing
+	m.fmriEngineIndex = getInt("fmriEngineIndex", m.fmriEngineIndex)
+	m.fmriFmriprepImage = getString("fmriFmriprepImage", m.fmriFmriprepImage)
+	m.fmriFmriprepOutputDir = getString("fmriFmriprepOutputDir", m.fmriFmriprepOutputDir)
+	m.fmriFmriprepWorkDir = getString("fmriFmriprepWorkDir", m.fmriFmriprepWorkDir)
+	m.fmriFreesurferLicenseFile = getString("fmriFreesurferLicenseFile", m.fmriFreesurferLicenseFile)
+	m.fmriFreesurferSubjectsDir = getString("fmriFreesurferSubjectsDir", m.fmriFreesurferSubjectsDir)
+	m.fmriOutputSpacesSpec = getString("fmriOutputSpacesSpec", m.fmriOutputSpacesSpec)
+	m.fmriIgnoreSpec = getString("fmriIgnoreSpec", m.fmriIgnoreSpec)
+	m.fmriBidsFilterFile = getString("fmriBidsFilterFile", m.fmriBidsFilterFile)
+	m.fmriExtraArgs = getString("fmriExtraArgs", m.fmriExtraArgs)
+	m.fmriUseAroma = getBool("fmriUseAroma", m.fmriUseAroma)
+	m.fmriSkipBidsValidation = getBool("fmriSkipBidsValidation", m.fmriSkipBidsValidation)
+	m.fmriStopOnFirstCrash = getBool("fmriStopOnFirstCrash", m.fmriStopOnFirstCrash)
+	m.fmriCleanWorkdir = getBool("fmriCleanWorkdir", m.fmriCleanWorkdir)
+	m.fmriSkipReconstruction = getBool("fmriSkipReconstruction", m.fmriSkipReconstruction)
+	m.fmriMemMb = getInt("fmriMemMb", m.fmriMemMb)
+	m.fmriNThreads = getInt("fmriNThreads", m.fmriNThreads)
+	m.fmriOmpNThreads = getInt("fmriOmpNThreads", m.fmriOmpNThreads)
+	m.fmriLowMem = getBool("fmriLowMem", m.fmriLowMem)
+	m.fmriLongitudinal = getBool("fmriLongitudinal", m.fmriLongitudinal)
+	m.fmriCiftiOutputIndex = getInt("fmriCiftiOutputIndex", m.fmriCiftiOutputIndex)
+	m.fmriSkullStripTemplate = getString("fmriSkullStripTemplate", m.fmriSkullStripTemplate)
+	m.fmriSkullStripFixedSeed = getBool("fmriSkullStripFixedSeed", m.fmriSkullStripFixedSeed)
+	m.fmriRandomSeed = getInt("fmriRandomSeed", m.fmriRandomSeed)
+	m.fmriDummyScans = getInt("fmriDummyScans", m.fmriDummyScans)
+	m.fmriBold2T1wInitIndex = getInt("fmriBold2T1wInitIndex", m.fmriBold2T1wInitIndex)
+	m.fmriBold2T1wDof = getInt("fmriBold2T1wDof", m.fmriBold2T1wDof)
+	m.fmriSliceTimeRef = getFloat("fmriSliceTimeRef", m.fmriSliceTimeRef)
+	m.fmriFdSpikeThreshold = getFloat("fmriFdSpikeThreshold", m.fmriFdSpikeThreshold)
+	m.fmriDvarsSpikeThreshold = getFloat("fmriDvarsSpikeThreshold", m.fmriDvarsSpikeThreshold)
+	m.fmriMeOutputEchos = getBool("fmriMeOutputEchos", m.fmriMeOutputEchos)
+	m.fmriMedialSurfaceNan = getBool("fmriMedialSurfaceNan", m.fmriMedialSurfaceNan)
+	m.fmriNoMsm = getBool("fmriNoMsm", m.fmriNoMsm)
+	m.fmriLevelIndex = getInt("fmriLevelIndex", m.fmriLevelIndex)
+	m.fmriTaskId = getString("fmriTaskId", m.fmriTaskId)
+
+	// ML pipeline
 	m.mlNPerm = getInt("mlNPerm", m.mlNPerm)
 	m.innerSplits = getInt("innerSplits", m.innerSplits)
 	m.outerJobs = getInt("outerJobs", m.outerJobs)
 	m.skipTimeGen = getBool("skipTimeGen", m.skipTimeGen)
+	m.mlScope = MLCVScope(getInt("mlScope", int(m.mlScope)))
+	m.elasticNetAlphaGrid = getString("elasticNetAlphaGrid", m.elasticNetAlphaGrid)
+	m.elasticNetL1RatioGrid = getString("elasticNetL1RatioGrid", m.elasticNetL1RatioGrid)
+	m.rfNEstimators = getInt("rfNEstimators", m.rfNEstimators)
+	m.rfMaxDepthGrid = getString("rfMaxDepthGrid", m.rfMaxDepthGrid)
+
+	// Plotting
+	m.plotDpiIndex = getInt("plotDpiIndex", m.plotDpiIndex)
+	m.plotSavefigDpiIndex = getInt("plotSavefigDpiIndex", m.plotSavefigDpiIndex)
+	m.plotSharedColorbar = getBool("plotSharedColorbar", m.plotSharedColorbar)
+	m.plotBboxInches = getString("plotBboxInches", m.plotBboxInches)
+	m.plotPadInches = getFloat("plotPadInches", m.plotPadInches)
+	m.plotFontFamily = getString("plotFontFamily", m.plotFontFamily)
+	m.plotFontWeight = getString("plotFontWeight", m.plotFontWeight)
+	m.plotFontSizeSmall = getInt("plotFontSizeSmall", m.plotFontSizeSmall)
+	m.plotFontSizeMedium = getInt("plotFontSizeMedium", m.plotFontSizeMedium)
+	m.plotFontSizeLarge = getInt("plotFontSizeLarge", m.plotFontSizeLarge)
+	m.plotFontSizeTitle = getInt("plotFontSizeTitle", m.plotFontSizeTitle)
+	m.plotFontSizeAnnotation = getInt("plotFontSizeAnnotation", m.plotFontSizeAnnotation)
+	m.plotFontSizeLabel = getInt("plotFontSizeLabel", m.plotFontSizeLabel)
+	m.plotFontSizeYLabel = getInt("plotFontSizeYLabel", m.plotFontSizeYLabel)
+	m.plotFontSizeSuptitle = getInt("plotFontSizeSuptitle", m.plotFontSizeSuptitle)
+	m.plotFontSizeFigureTitle = getInt("plotFontSizeFigureTitle", m.plotFontSizeFigureTitle)
+	m.plotLayoutTightRectSpec = getString("plotLayoutTightRectSpec", m.plotLayoutTightRectSpec)
+	m.plotLayoutTightRectMicrostateSpec = getString("plotLayoutTightRectMicrostateSpec", m.plotLayoutTightRectMicrostateSpec)
+	m.plotGridSpecWidthRatiosSpec = getString("plotGridSpecWidthRatiosSpec", m.plotGridSpecWidthRatiosSpec)
+	m.plotGridSpecHeightRatiosSpec = getString("plotGridSpecHeightRatiosSpec", m.plotGridSpecHeightRatiosSpec)
+	m.plotGridSpecHspace = getFloat("plotGridSpecHspace", m.plotGridSpecHspace)
+	m.plotGridSpecWspace = getFloat("plotGridSpecWspace", m.plotGridSpecWspace)
+	m.plotGridSpecLeft = getFloat("plotGridSpecLeft", m.plotGridSpecLeft)
+	m.plotGridSpecRight = getFloat("plotGridSpecRight", m.plotGridSpecRight)
+	m.plotGridSpecTop = getFloat("plotGridSpecTop", m.plotGridSpecTop)
+	m.plotGridSpecBottom = getFloat("plotGridSpecBottom", m.plotGridSpecBottom)
+	m.plotFigureSizeStandardSpec = getString("plotFigureSizeStandardSpec", m.plotFigureSizeStandardSpec)
+	m.plotFigureSizeMediumSpec = getString("plotFigureSizeMediumSpec", m.plotFigureSizeMediumSpec)
+	m.plotFigureSizeSmallSpec = getString("plotFigureSizeSmallSpec", m.plotFigureSizeSmallSpec)
+	m.plotFigureSizeSquareSpec = getString("plotFigureSizeSquareSpec", m.plotFigureSizeSquareSpec)
+	m.plotFigureSizeWideSpec = getString("plotFigureSizeWideSpec", m.plotFigureSizeWideSpec)
+	m.plotFigureSizeTFRSpec = getString("plotFigureSizeTFRSpec", m.plotFigureSizeTFRSpec)
+	m.plotFigureSizeTopomapSpec = getString("plotFigureSizeTopomapSpec", m.plotFigureSizeTopomapSpec)
+	m.plotColorPain = getString("plotColorPain", m.plotColorPain)
+	m.plotColorNonpain = getString("plotColorNonpain", m.plotColorNonpain)
+	m.plotColorSignificant = getString("plotColorSignificant", m.plotColorSignificant)
+	m.plotColorNonsignificant = getString("plotColorNonsignificant", m.plotColorNonsignificant)
+	m.plotColorGray = getString("plotColorGray", m.plotColorGray)
+	m.plotColorLightGray = getString("plotColorLightGray", m.plotColorLightGray)
+	m.plotColorBlack = getString("plotColorBlack", m.plotColorBlack)
+	m.plotColorBlue = getString("plotColorBlue", m.plotColorBlue)
+	m.plotColorRed = getString("plotColorRed", m.plotColorRed)
+	m.plotColorNetworkNode = getString("plotColorNetworkNode", m.plotColorNetworkNode)
+	m.plotAlphaGrid = getFloat("plotAlphaGrid", m.plotAlphaGrid)
+	m.plotAlphaFill = getFloat("plotAlphaFill", m.plotAlphaFill)
+	m.plotAlphaCI = getFloat("plotAlphaCI", m.plotAlphaCI)
+	m.plotAlphaCILine = getFloat("plotAlphaCILine", m.plotAlphaCILine)
+	m.plotAlphaTextBox = getFloat("plotAlphaTextBox", m.plotAlphaTextBox)
+	m.plotAlphaViolinBody = getFloat("plotAlphaViolinBody", m.plotAlphaViolinBody)
+	m.plotAlphaRidgeFill = getFloat("plotAlphaRidgeFill", m.plotAlphaRidgeFill)
+	m.plotScatterMarkerSizeSmall = getInt("plotScatterMarkerSizeSmall", m.plotScatterMarkerSizeSmall)
+	m.plotScatterMarkerSizeLarge = getInt("plotScatterMarkerSizeLarge", m.plotScatterMarkerSizeLarge)
+	m.plotScatterMarkerSizeDefault = getInt("plotScatterMarkerSizeDefault", m.plotScatterMarkerSizeDefault)
+	m.plotScatterAlpha = getFloat("plotScatterAlpha", m.plotScatterAlpha)
+	m.plotScatterEdgeColor = getString("plotScatterEdgeColor", m.plotScatterEdgeColor)
+	m.plotScatterEdgeWidth = getFloat("plotScatterEdgeWidth", m.plotScatterEdgeWidth)
+	m.plotBarAlpha = getFloat("plotBarAlpha", m.plotBarAlpha)
+	m.plotBarWidth = getFloat("plotBarWidth", m.plotBarWidth)
+	m.plotBarCapsize = getInt("plotBarCapsize", m.plotBarCapsize)
+	m.plotBarCapsizeLarge = getInt("plotBarCapsizeLarge", m.plotBarCapsizeLarge)
+	m.plotLineWidthThin = getFloat("plotLineWidthThin", m.plotLineWidthThin)
+	m.plotLineWidthStandard = getFloat("plotLineWidthStandard", m.plotLineWidthStandard)
+	m.plotLineWidthThick = getFloat("plotLineWidthThick", m.plotLineWidthThick)
+	m.plotLineWidthBold = getFloat("plotLineWidthBold", m.plotLineWidthBold)
+	m.plotLineAlphaStandard = getFloat("plotLineAlphaStandard", m.plotLineAlphaStandard)
+	m.plotLineAlphaDim = getFloat("plotLineAlphaDim", m.plotLineAlphaDim)
+	m.plotLineAlphaZeroLine = getFloat("plotLineAlphaZeroLine", m.plotLineAlphaZeroLine)
+	m.plotLineAlphaFitLine = getFloat("plotLineAlphaFitLine", m.plotLineAlphaFitLine)
+	m.plotLineAlphaDiagonal = getFloat("plotLineAlphaDiagonal", m.plotLineAlphaDiagonal)
+	m.plotLineAlphaReference = getFloat("plotLineAlphaReference", m.plotLineAlphaReference)
+	m.plotLineRegressionWidth = getFloat("plotLineRegressionWidth", m.plotLineRegressionWidth)
+	m.plotLineResidualWidth = getFloat("plotLineResidualWidth", m.plotLineResidualWidth)
+	m.plotLineQQWidth = getFloat("plotLineQQWidth", m.plotLineQQWidth)
+	m.plotHistBins = getInt("plotHistBins", m.plotHistBins)
+	m.plotHistBinsBehavioral = getInt("plotHistBinsBehavioral", m.plotHistBinsBehavioral)
+	m.plotHistBinsResidual = getInt("plotHistBinsResidual", m.plotHistBinsResidual)
+	m.plotHistBinsTFR = getInt("plotHistBinsTFR", m.plotHistBinsTFR)
+	m.plotHistEdgeColor = getString("plotHistEdgeColor", m.plotHistEdgeColor)
+	m.plotHistEdgeWidth = getFloat("plotHistEdgeWidth", m.plotHistEdgeWidth)
+	m.plotHistAlpha = getFloat("plotHistAlpha", m.plotHistAlpha)
+	m.plotHistAlphaResidual = getFloat("plotHistAlphaResidual", m.plotHistAlphaResidual)
+	m.plotHistAlphaTFR = getFloat("plotHistAlphaTFR", m.plotHistAlphaTFR)
+	m.plotKdePoints = getInt("plotKdePoints", m.plotKdePoints)
+	m.plotKdeColor = getString("plotKdeColor", m.plotKdeColor)
+	m.plotKdeLinewidth = getFloat("plotKdeLinewidth", m.plotKdeLinewidth)
+	m.plotKdeAlpha = getFloat("plotKdeAlpha", m.plotKdeAlpha)
+	m.plotErrorbarMarkerSize = getInt("plotErrorbarMarkerSize", m.plotErrorbarMarkerSize)
+	m.plotErrorbarCapsize = getInt("plotErrorbarCapsize", m.plotErrorbarCapsize)
+	m.plotErrorbarCapsizeLarge = getInt("plotErrorbarCapsizeLarge", m.plotErrorbarCapsizeLarge)
+	m.plotTextStatsX = getFloat("plotTextStatsX", m.plotTextStatsX)
+	m.plotTextStatsY = getFloat("plotTextStatsY", m.plotTextStatsY)
+	m.plotTextPvalueX = getFloat("plotTextPvalueX", m.plotTextPvalueX)
+	m.plotTextPvalueY = getFloat("plotTextPvalueY", m.plotTextPvalueY)
+	m.plotTextBootstrapX = getFloat("plotTextBootstrapX", m.plotTextBootstrapX)
+	m.plotTextBootstrapY = getFloat("plotTextBootstrapY", m.plotTextBootstrapY)
+	m.plotTextChannelAnnotationX = getFloat("plotTextChannelAnnotationX", m.plotTextChannelAnnotationX)
+	m.plotTextChannelAnnotationY = getFloat("plotTextChannelAnnotationY", m.plotTextChannelAnnotationY)
+	m.plotTextTitleY = getFloat("plotTextTitleY", m.plotTextTitleY)
+	m.plotTextResidualQcTitleY = getFloat("plotTextResidualQcTitleY", m.plotTextResidualQcTitleY)
+	m.plotValidationMinBinsForCalibration = getInt("plotValidationMinBinsForCalibration", m.plotValidationMinBinsForCalibration)
+	m.plotValidationMaxBinsForCalibration = getInt("plotValidationMaxBinsForCalibration", m.plotValidationMaxBinsForCalibration)
+	m.plotValidationSamplesPerBin = getInt("plotValidationSamplesPerBin", m.plotValidationSamplesPerBin)
+	m.plotValidationMinRoisForFDR = getInt("plotValidationMinRoisForFDR", m.plotValidationMinRoisForFDR)
+	m.plotValidationMinPvaluesForFDR = getInt("plotValidationMinPvaluesForFDR", m.plotValidationMinPvaluesForFDR)
+	m.plotTfrDefaultBaselineWindowSpec = getString("plotTfrDefaultBaselineWindowSpec", m.plotTfrDefaultBaselineWindowSpec)
+	m.plotTopomapContours = getInt("plotTopomapContours", m.plotTopomapContours)
+	m.plotTopomapColormap = getString("plotTopomapColormap", m.plotTopomapColormap)
+	m.plotTopomapColorbarFraction = getFloat("plotTopomapColorbarFraction", m.plotTopomapColorbarFraction)
+	m.plotTopomapColorbarPad = getFloat("plotTopomapColorbarPad", m.plotTopomapColorbarPad)
+	if v, ok := cfg["plotTopomapDiffAnnotation"].(bool); ok {
+		m.plotTopomapDiffAnnotation = &v
+	}
+	if v, ok := cfg["plotTopomapAnnotateDesc"].(bool); ok {
+		m.plotTopomapAnnotateDesc = &v
+	}
+	m.plotTopomapSigMaskMarker = getString("plotTopomapSigMaskMarker", m.plotTopomapSigMaskMarker)
+	m.plotTopomapSigMaskMarkerFaceColor = getString("plotTopomapSigMaskMarkerFaceColor", m.plotTopomapSigMaskMarkerFaceColor)
+	m.plotTopomapSigMaskMarkerEdgeColor = getString("plotTopomapSigMaskMarkerEdgeColor", m.plotTopomapSigMaskMarkerEdgeColor)
+	m.plotTopomapSigMaskLinewidth = getFloat("plotTopomapSigMaskLinewidth", m.plotTopomapSigMaskLinewidth)
+	m.plotTopomapSigMaskMarkerSize = getFloat("plotTopomapSigMaskMarkerSize", m.plotTopomapSigMaskMarkerSize)
+	m.plotTFRLogBase = getFloat("plotTFRLogBase", m.plotTFRLogBase)
+	m.plotTFRPercentageMultiplier = getFloat("plotTFRPercentageMultiplier", m.plotTFRPercentageMultiplier)
+	m.plotRoiWidthPerBand = getFloat("plotRoiWidthPerBand", m.plotRoiWidthPerBand)
+	m.plotRoiWidthPerMetric = getFloat("plotRoiWidthPerMetric", m.plotRoiWidthPerMetric)
+	m.plotRoiHeightPerRoi = getFloat("plotRoiHeightPerRoi", m.plotRoiHeightPerRoi)
+	m.plotPowerWidthPerBand = getFloat("plotPowerWidthPerBand", m.plotPowerWidthPerBand)
+	m.plotPowerHeightPerSegment = getFloat("plotPowerHeightPerSegment", m.plotPowerHeightPerSegment)
+	m.plotItpcWidthPerBin = getFloat("plotItpcWidthPerBin", m.plotItpcWidthPerBin)
+	m.plotItpcHeightPerBand = getFloat("plotItpcHeightPerBand", m.plotItpcHeightPerBand)
+	m.plotItpcWidthPerBandBox = getFloat("plotItpcWidthPerBandBox", m.plotItpcWidthPerBandBox)
+	m.plotItpcHeightBox = getFloat("plotItpcHeightBox", m.plotItpcHeightBox)
+	m.plotPacCmap = getString("plotPacCmap", m.plotPacCmap)
+	m.plotPacWidthPerRoi = getFloat("plotPacWidthPerRoi", m.plotPacWidthPerRoi)
+	m.plotPacHeightBox = getFloat("plotPacHeightBox", m.plotPacHeightBox)
+	m.plotAperiodicWidthPerColumn = getFloat("plotAperiodicWidthPerColumn", m.plotAperiodicWidthPerColumn)
+	m.plotAperiodicHeightPerRow = getFloat("plotAperiodicHeightPerRow", m.plotAperiodicHeightPerRow)
+	m.plotAperiodicNPerm = getInt("plotAperiodicNPerm", m.plotAperiodicNPerm)
+	m.plotQualityWidthPerPlot = getFloat("plotQualityWidthPerPlot", m.plotQualityWidthPerPlot)
+	m.plotQualityHeightPerPlot = getFloat("plotQualityHeightPerPlot", m.plotQualityHeightPerPlot)
+	m.plotQualityDistributionNCols = getInt("plotQualityDistributionNCols", m.plotQualityDistributionNCols)
+	m.plotQualityDistributionMaxFeatures = getInt("plotQualityDistributionMaxFeatures", m.plotQualityDistributionMaxFeatures)
+	m.plotQualityOutlierZThreshold = getFloat("plotQualityOutlierZThreshold", m.plotQualityOutlierZThreshold)
+	m.plotQualityOutlierMaxFeatures = getInt("plotQualityOutlierMaxFeatures", m.plotQualityOutlierMaxFeatures)
+	m.plotQualityOutlierMaxTrials = getInt("plotQualityOutlierMaxTrials", m.plotQualityOutlierMaxTrials)
+	m.plotQualitySnrThresholdDb = getFloat("plotQualitySnrThresholdDb", m.plotQualitySnrThresholdDb)
+	m.plotComplexityWidthPerMeasure = getFloat("plotComplexityWidthPerMeasure", m.plotComplexityWidthPerMeasure)
+	m.plotComplexityHeightPerSegment = getFloat("plotComplexityHeightPerSegment", m.plotComplexityHeightPerSegment)
+	m.plotConnectivityWidthPerCircle = getFloat("plotConnectivityWidthPerCircle", m.plotConnectivityWidthPerCircle)
+	m.plotConnectivityWidthPerBand = getFloat("plotConnectivityWidthPerBand", m.plotConnectivityWidthPerBand)
+	m.plotConnectivityHeightPerMeasure = getFloat("plotConnectivityHeightPerMeasure", m.plotConnectivityHeightPerMeasure)
+	m.plotConnectivityCircleTopFraction = getFloat("plotConnectivityCircleTopFraction", m.plotConnectivityCircleTopFraction)
+	m.plotConnectivityCircleMinLines = getInt("plotConnectivityCircleMinLines", m.plotConnectivityCircleMinLines)
+	m.plotPacPairsSpec = getString("plotPacPairsSpec", m.plotPacPairsSpec)
+	m.plotSpectralMetricsSpec = getString("plotSpectralMetricsSpec", m.plotSpectralMetricsSpec)
+	m.plotBurstsMetricsSpec = getString("plotBurstsMetricsSpec", m.plotBurstsMetricsSpec)
+	m.plotTemporalTimeBinsSpec = getString("plotTemporalTimeBinsSpec", m.plotTemporalTimeBinsSpec)
+	m.plotTemporalTimeLabelsSpec = getString("plotTemporalTimeLabelsSpec", m.plotTemporalTimeLabelsSpec)
+	m.plotAsymmetryStatSpec = getString("plotAsymmetryStatSpec", m.plotAsymmetryStatSpec)
+	if v, ok := cfg["plotCompareWindows"].(bool); ok {
+		m.plotCompareWindows = &v
+	}
+	m.plotComparisonWindowsSpec = getString("plotComparisonWindowsSpec", m.plotComparisonWindowsSpec)
+	if v, ok := cfg["plotCompareColumns"].(bool); ok {
+		m.plotCompareColumns = &v
+	}
+	m.plotComparisonSegment = getString("plotComparisonSegment", m.plotComparisonSegment)
+	m.plotComparisonColumn = getString("plotComparisonColumn", m.plotComparisonColumn)
+	m.plotComparisonValuesSpec = getString("plotComparisonValuesSpec", m.plotComparisonValuesSpec)
+	m.plotComparisonLabelsSpec = getString("plotComparisonLabelsSpec", m.plotComparisonLabelsSpec)
+	m.plotComparisonROIsSpec = getString("plotComparisonROIsSpec", m.plotComparisonROIsSpec)
 
 	// System
 	m.systemNJobs = getInt("systemNJobs", m.systemNJobs)
+	m.systemStrictMode = getBool("systemStrictMode", m.systemStrictMode)
 	m.loggingLevel = getInt("loggingLevel", m.loggingLevel)
+}
+
+// mapToIntList converts a map[int]bool to a slice of ints (only selected keys).
+func mapToIntList(m map[int]bool) []int {
+	list := make([]int, 0)
+	for k, v := range m {
+		if v {
+			list = append(list, k)
+		}
+	}
+	return list
+}
+
+// listToMap converts a slice of ints to a map[int]bool.
+func listToMap(v interface{}) map[int]bool {
+	m := make(map[int]bool)
+	if list, ok := v.([]interface{}); ok {
+		for _, item := range list {
+			if f, ok := item.(float64); ok {
+				m[int(f)] = true
+			} else if i, ok := item.(int); ok {
+				m[i] = true
+			}
+		}
+	}
+	return m
+}
+
+// stringsMapToBoolMap converts a map[string]bool to a slice of strings (only selected keys).
+func stringsMapToBoolMap(m map[string]bool) []string {
+	list := make([]string, 0)
+	for k, v := range m {
+		if v {
+			list = append(list, k)
+		}
+	}
+	return list
+}
+
+// boolMapToStringsMap converts a slice of strings to a map[string]bool.
+func boolMapToStringsMap(v interface{}) map[string]bool {
+	m := make(map[string]bool)
+	if list, ok := v.([]interface{}); ok {
+		for _, item := range list {
+			if s, ok := item.(string); ok {
+				m[s] = true
+			}
+		}
+	}
+	return m
 }

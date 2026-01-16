@@ -33,7 +33,7 @@ except ImportError:
     spectral_connectivity_epochs = None
 
 from eeg_pipeline.domain.features.naming import NamingSchema
-from eeg_pipeline.utils.config.loader import get_frequency_bands
+from eeg_pipeline.utils.config.loader import get_frequency_bands, get_nested_value
 from eeg_pipeline.utils.analysis.windowing import get_segment_masks
 from eeg_pipeline.utils.analysis.graph_metrics import (
     symmetrize_adjacency as _symmetrize_and_clip,
@@ -1865,7 +1865,12 @@ def extract_directed_connectivity_from_precomputed(
     if not bands_use:
         return pd.DataFrame(), []
     
-    directed_cfg = config.get("feature_engineering.directed_connectivity", {}) if hasattr(config, "get") else {}
+    if config is None:
+        directed_cfg = {}
+    elif hasattr(config, "get") and not isinstance(config, dict):
+        directed_cfg = config.get("feature_engineering.directedconnectivity", {}) or {}
+    else:
+        directed_cfg = get_nested_value(config, "feature_engineering.directedconnectivity", {}) or {}
     
     enable_psi = bool(directed_cfg.get("enable_psi", True))
     enable_dtf = bool(directed_cfg.get("enable_dtf", False))

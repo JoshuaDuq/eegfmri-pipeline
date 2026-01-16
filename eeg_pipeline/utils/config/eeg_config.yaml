@@ -464,7 +464,7 @@ behavior_analysis:
   # Canonical per-trial table export (single source of truth for subject-level stats/plots)
   trial_table:
     enabled: true
-    format: "tsv"   # "parquet" (recommended) or "tsv"
+    format: "parquet"   # "parquet" (default, recommended) or "tsv"
     include_features: true
     include_covariates: true
     include_events: true
@@ -711,19 +711,19 @@ behavior_analysis:
     edge: 15
   feature_registry:
     files:
-      power: "features_power.tsv"
-      connectivity: "features_connectivity.tsv"
-      aperiodic: "features_aperiodic.tsv"
-      erp: "features_erp.tsv"
-      bursts: "features_bursts.tsv"
-      itpc: "features_itpc.tsv"
-      pac: "features_pac_trials.tsv"
-      complexity: "features_complexity.tsv"
-      quality: "features_quality.tsv"
-      erds: "features_erds.tsv"
-      spectral: "features_spectral.tsv"
-      ratios: "features_ratios.tsv"
-      asymmetry: "features_asymmetry.tsv"
+      power: "features_power.parquet"
+      connectivity: "features_connectivity.parquet"
+      aperiodic: "features_aperiodic.parquet"
+      erp: "features_erp.parquet"
+      bursts: "features_bursts.parquet"
+      itpc: "features_itpc.parquet"
+      pac: "features_pac_trials.parquet"
+      complexity: "features_complexity.parquet"
+      quality: "features_quality.parquet"
+      erds: "features_erds.parquet"
+      spectral: "features_spectral.parquet"
+      ratios: "features_ratios.parquet"
+      asymmetry: "features_asymmetry.parquet"
     source_to_feature_type:
       power: "power"
       connectivity: "connectivity"

@@ -53,7 +53,7 @@ from eeg_pipeline.infra.paths import (
     deriv_features_path,
     ensure_dir,
 )
-from eeg_pipeline.infra.tsv import write_tsv
+from eeg_pipeline.infra.tsv import write_parquet, write_tsv
 from eeg_pipeline.pipelines.base import PipelineBase
 from eeg_pipeline.plotting.io.figures import setup_matplotlib
 from eeg_pipeline.types import PrecomputedData
@@ -337,21 +337,21 @@ def _save_merged_features(
 ) -> None:
     """Merge and save accumulated features from multiple time ranges."""
     feature_file_mapping = {
-        "power": ("features_power.tsv", ["power", "baseline"]),
-        "connectivity": ("features_connectivity.tsv", ["connectivity"]),
-        "directedconnectivity": ("features_directedconnectivity.tsv", ["directedconnectivity"]),
-        "sourcelocalization": ("features_sourcelocalization.tsv", ["sourcelocalization"]),
-        "aperiodic": ("features_aperiodic.tsv", ["aperiodic"]),
-        "erp": ("features_erp.tsv", ["erp"]),
-        "itpc": ("features_itpc.tsv", ["itpc"]),
-        "pac": ("features_pac.tsv", ["pac"]),
-        "complexity": ("features_complexity.tsv", ["complexity"]),
-        "bursts": ("features_bursts.tsv", ["bursts"]),
-        "spectral": ("features_spectral.tsv", ["spectral"]),
-        "erds": ("features_erds.tsv", ["erds"]),
-        "ratios": ("features_ratios.tsv", ["ratios"]),
-        "asymmetry": ("features_asymmetry.tsv", ["asymmetry"]),
-        "quality": ("features_quality.tsv", ["quality"]),
+        "power": ("features_power.parquet", ["power", "baseline"]),
+        "connectivity": ("features_connectivity.parquet", ["connectivity"]),
+        "directedconnectivity": ("features_directedconnectivity.parquet", ["directedconnectivity"]),
+        "sourcelocalization": ("features_sourcelocalization.parquet", ["sourcelocalization"]),
+        "aperiodic": ("features_aperiodic.parquet", ["aperiodic"]),
+        "erp": ("features_erp.parquet", ["erp"]),
+        "itpc": ("features_itpc.parquet", ["itpc"]),
+        "pac": ("features_pac.parquet", ["pac"]),
+        "complexity": ("features_complexity.parquet", ["complexity"]),
+        "bursts": ("features_bursts.parquet", ["bursts"]),
+        "spectral": ("features_spectral.parquet", ["spectral"]),
+        "erds": ("features_erds.parquet", ["erds"]),
+        "ratios": ("features_ratios.parquet", ["ratios"]),
+        "asymmetry": ("features_asymmetry.parquet", ["asymmetry"]),
+        "quality": ("features_quality.parquet", ["quality"]),
     }
 
     for filename, keys in feature_file_mapping.values():
@@ -364,10 +364,10 @@ def _save_merged_features(
             from eeg_pipeline.utils.data.feature_io import _get_folder_for_feature
             from eeg_pipeline.domain.features.naming import generate_manifest
 
-            base_name = filename.replace(".tsv", "")
+            base_name = filename.replace(".parquet", "")
             folder = _get_folder_for_feature(base_name, config)
             save_path = features_dir / folder / filename
-            write_tsv(merged_df, save_path)
+            write_parquet(merged_df, save_path)
             try:
                 subject_str = (
                     features_dir.parts[-3].replace("sub-", "")
@@ -376,7 +376,7 @@ def _save_merged_features(
                 )
                 metadata_dir = save_path.parent / "metadata"
                 ensure_dir(metadata_dir)
-                meta_path = metadata_dir / filename.replace(".tsv", ".json")
+                meta_path = metadata_dir / filename.replace(".parquet", ".json")
                 manifest = generate_manifest(
                     feature_columns=list(merged_df.columns),
                     config=config,
@@ -390,7 +390,7 @@ def _save_merged_features(
                 logger.warning(
                     "Failed to write merged feature metadata for %s: %s", save_path, exc
                 )
-            feature_name = filename.replace("features_", "").replace(".tsv", "")
+            feature_name = filename.replace("features_", "").replace(".parquet", "")
             logger.info(
                 "Saved merged %s features: %d columns",
                 feature_name,
@@ -768,9 +768,9 @@ class FeaturePipeline(PipelineBase):
             if accumulated_y is not None:
                 rating_columns = self.config.get("event_columns.rating", ["vas_rating"])
                 target_column_name = rating_columns[0] if rating_columns else "vas_rating"
-                write_tsv(
+                write_parquet(
                     accumulated_y.to_frame(name=target_column_name),
-                    features_dir / "behavior" / "target_vas_ratings.tsv",
+                    features_dir / "behavior" / "target_vas_ratings.parquet",
                 )
                 self.logger.info(f"Saved merged targets: {len(accumulated_y)} trials")
 

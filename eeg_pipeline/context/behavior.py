@@ -53,7 +53,7 @@ _FEATURE_FILE_TO_ATTR = {
     "temporal": "temporal_df",
 }
 
-_TARGETS_FILENAME = "target_vas_ratings.tsv"
+_TARGETS_FILENAME = "target_vas_ratings.parquet"
 _TRIAL_ALIGNMENT_MANIFEST = "trial_alignment.json"
 _MIN_VALID_SAMPLES_FOR_CORRELATION = 3
 _DEFAULT_TRIAL_ORDER_MAX_MISSING_FRACTION = 0.1
@@ -342,13 +342,14 @@ class BehaviorContext:
             self.logger.warning("Failed to load %s: %s", key, e)
 
     def _load_targets_from_file(self, features_dir: Path) -> None:
-        """Load targets from behavior/target_vas_ratings.tsv file."""
+        """Load targets from behavior/target_vas_ratings.parquet file."""
+        from eeg_pipeline.infra.tsv import read_table
+        
         targets_path = features_dir / "behavior" / _TARGETS_FILENAME
         if not targets_path.exists():
-            # (Legacy fallback removed)
             return
 
-        targets_df = read_tsv(targets_path)
+        targets_df = read_table(targets_path)
         if targets_df.shape[1] == 1:
             self.targets = pd.to_numeric(
                 targets_df.iloc[:, 0], errors="coerce"

@@ -424,7 +424,7 @@ def load_feature_dfs_for_subjects(
             continue
 
         try:
-            df = read_tsv(file_path)
+            df = read_table(file_path)
             if df.empty:
                 continue
             df.insert(0, "subject", subject)
@@ -749,7 +749,7 @@ def _save_aperiodic_qc(
             "band_coverage": {k: float(v) for k, v in band_coverage.items()} if band_coverage else {},
         }
         
-        write_tsv(df, save_path)
+        write_parquet(df, save_path)
         
         # Save metadata sidecar
         metadata_path = save_path.with_suffix(".json")
@@ -909,7 +909,7 @@ def save_all_features(
 
 
     if y is not None:
-        target_path = features_dir / "behavior" / "target_vas_ratings.tsv"
+        target_path = features_dir / "behavior" / "target_vas_ratings.parquet"
         rating_columns = (
             config.get("event_columns.rating", ["vas_rating"])
             if config is not None and hasattr(config, "get")
@@ -921,7 +921,7 @@ def save_all_features(
             target_path,
             target_column_name,
         )
-        write_tsv(y.to_frame(name=target_column_name), target_path)
+        write_parquet(y.to_frame(name=target_column_name), target_path)
 
     return direct_df
 

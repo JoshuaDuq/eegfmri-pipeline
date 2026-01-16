@@ -2220,7 +2220,7 @@ func (m Model) renderFeaturesAdvancedConfig() string {
 			label = "Mode"
 			modes := []string{"EEG-only (template)", "fMRI-informed"}
 			value = modes[m.sourceLocMode]
-			hint = "template or subject-specific (fMRI-informed requires fmri-prep)"
+			hint = "template or subject-specific (requires fmri-prep)"
 		case optSourceLocMethod:
 			label = "Method"
 			methods := []string{"LCMV", "eLORETA"}

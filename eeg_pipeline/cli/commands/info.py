@@ -257,22 +257,28 @@ def _handle_plotters_mode(output_json: bool) -> None:
 
 
 def _get_available_time_windows(features_dir: Path, config: Any) -> List[str]:
-    """Extract available time windows by scanning feature files in subfolders."""
+    """Extract available time windows by scanning window-specific feature files.
+    
+    Detects windows from filenames matching pattern:
+    features/{category}/features_{category}_{window}.{tsv,parquet}
+    """
     if not features_dir.exists():
         return []
 
     windows = set()
+    
     try:
-        # Match pattern: features/{category}/features_{category}_{window}.tsv
-        for fpath in features_dir.glob("*/features_*.tsv"):
-            category = fpath.parent.name
-            stem = fpath.stem
-            prefix = f"features_{category}_"
-            
-            if stem.startswith(prefix):
-                window = stem[len(prefix):]
-                if window:
-                    windows.add(window)
+        # Check window-specific files (both .tsv and .parquet) in all subdirectories
+        for ext in ["tsv", "parquet"]:
+            for fpath in features_dir.rglob(f"*/features_*.{ext}"):
+                category = fpath.parent.name
+                stem = fpath.stem
+                prefix = f"features_{category}_"
+                
+                if stem.startswith(prefix):
+                    window = stem[len(prefix):]
+                    if window:
+                        windows.add(window)
     except OSError:
         pass
 

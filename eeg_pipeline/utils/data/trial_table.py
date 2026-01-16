@@ -432,17 +432,17 @@ def save_trial_table(
     result: TrialTableBuildResult,
     out_path: Path,
     *,
-    format: str = "tsv",  # noqa: A002
+    format: str = "parquet",  # noqa: A002
 ) -> Path:
-    """Save trial table to file in specified format."""
+    """Save trial table to file in specified format (parquet preferred)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     format_normalized = str(format).strip().lower()
-    if format_normalized in {"tsv", "txt"}:
+    if format_normalized == "parquet":
+        from eeg_pipeline.infra.tsv import write_parquet
+        write_parquet(result.df, out_path)
+    elif format_normalized in {"tsv", "txt"}:
         from eeg_pipeline.infra.tsv import write_tsv
-
         write_tsv(result.df, out_path, index=False)
-    elif format_normalized == "parquet":
-        result.df.to_parquet(out_path, index=False)
     else:
         raise ValueError(f"Unsupported trial table format: {format}")
     return out_path
